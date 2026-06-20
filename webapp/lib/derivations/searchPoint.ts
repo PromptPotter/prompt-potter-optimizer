@@ -5,8 +5,9 @@
 // (origin floor ⊕ candidate delta, prompt stripped; JobSearchPoint.config_params).
 // No client re-merge: the server computes the effective config once and projects
 // it; this module only selects which searchpoint's resolved config to show. Pure
-// data → data. The sparse fork-delta seed lives in `candidateSearchPoint.ts`
-// (STEER), a different data class — never crossed with this one.
+// data → data. The STEER fork seed (`candidateSearchPoint.ts`) reads the same
+// `resolved_pipeline_params` but for a different purpose — an editable fork seed,
+// not a read-only view — so the two stay separate functions over one served field.
 
 import {
   liveL1InputCandidates,
@@ -47,7 +48,10 @@ function rowConfig(row: ResolvedRow | undefined | null, label: string): ObserveC
 }
 
 // Live: the latest-seeded (max idx) in-flight candidate of the running round.
-// Null between rounds and in L2/L3 phases (no l1 input candidates exist there).
+// The candidate buffer persists THROUGH L2/L3 (the backend resets it only at the
+// next `L1_GENERATE:enter`, view.py:374), so this stays non-null there. The one
+// null window is l1_generate-after-reset-before-first-candidate-started; the
+// OBSERVE view falls back to origin for that brief gap.
 export function liveObserveConfig(dash: DashboardSnapshot | null): ObserveConfig | null {
   const candidates = liveL1InputCandidates(dash);
   if (candidates.length === 0) return null;

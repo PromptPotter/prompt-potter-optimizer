@@ -52,9 +52,10 @@ def render_review_md(
 
     repairs_per_round = [_schema_repair_count(a) for a in audits]
     calls_per_round = [_optimizer_call_count(a) for a in audits]
+    halt = _halt_info(index, rounds)
     parts: list[str] = []
-    parts += _render_header(index, final, stats)
-    parts += _render_stats_block(stats, repairs_per_round, calls_per_round)
+    parts += _render_header(index, final, stats, halt)
+    parts += _render_stats_block(stats, repairs_per_round, calls_per_round, halt)
     parts += _render_behavior_summary(behavior_per_round)
     parts += ["## Rounds", ""]
 
@@ -146,15 +147,76 @@ def _compute_behavior_per_round(
 # --- rendering helpers ----------------------------------------------------
 
 
-def _render_header(index: dict[str, Any], final: dict[str, Any], stats: L1Stats) -> list[str]:
+def _halt_info(index: dict[str, Any], rounds: list[dict[str, Any]]) -> dict[str, str] | None:
+    """The cycle's terminal health story, or ``None`` when it ended cleanly.
+
+    Reads the cycle ``stop_reason`` + the round ``health`` (both already on disk).
+    An evidence-starvation abort — L2 reading the starved-node verdict and emitting
+    ``terminate_proposal`` → ``StopReason.ABORT`` (``escalation_abort``) — is otherwise
+    INVISIBLE in this surface: the conformance verdict reads "healthy" and ``l2_fires``
+    reads 0 (a terminate produces no l2-sourced round). Surface it so a starvation halt
+    can't be mistaken for a healthy short run.
+
+    Gated on the cycle's TERMINAL state, not any critical round in history: a
+    ``critical`` round that L2 then self-healed away (the cycle recovers and ends
+    healthy) must NOT show a halt banner. So fire only when the cycle aborted
+    (``escalation_abort``) OR the LAST graded round is itself ``critical`` (it halted
+    there — backend-unreachable, origin-gate, or natural end on a critical round).
+
+    Returns ``{tag, node, action, terminated}`` — ``tag`` the starvation/critical reason,
+    ``node`` the dead node (``dominant_node``), ``action`` the operator-facing
+    ``suggested_action``, ``terminated`` ``"yes"`` when L2 emitted ``terminate_proposal``
+    (``stop_reason == escalation_abort``), else ``""``."""
+    stop_reason = (index.get("stop_reason") or "").strip()
+    terminated = "yes" if stop_reason == "escalation_abort" else ""
+    last_health: dict[str, Any] | None = None
+    last_critical: dict[str, Any] | None = None
+    for r in rounds:
+        h = r.get("health")
+        if isinstance(h, dict):
+            last_health = h  # ends as the last GRADED round (probes carry None)
+            if h.get("grade") == "critical":
+                last_critical = h
+    ended_critical = last_health is not None and last_health.get("grade") == "critical"
+    if not ended_critical and not terminated:
+        return None
+    # The terminate-triggering round is the last completed (critical) round; reuse it
+    # to name the dead node (the ended-critical path uses the same round).
+    if last_critical is not None:
+        critical = last_critical
+        reasons = critical.get("reasons") or []
+        tag = (
+            "evidence_starved"
+            if "evidence_starved" in reasons
+            else (reasons[0] if reasons else "critical")
+        )
+        return {
+            "tag": str(tag),
+            "node": str(critical.get("dominant_node") or ""),
+            "action": str(critical.get("suggested_action") or "").strip(),
+            "terminated": terminated,
+        }
+    return {"tag": "terminate_proposal", "node": "", "action": "", "terminated": terminated}
+
+
+def _render_header(
+    index: dict[str, Any], final: dict[str, Any], stats: L1Stats, halt: dict[str, str] | None
+) -> list[str]:
     cycle_id = index.get("cycle_id") or "(unknown cycle)"
     mode = (final.get("mode") or "full").strip() or "full"
     parts: list[str] = [
         f"# Review — {cycle_id}",
         "",
-        f"_mode: **{mode}** · round-1 verdict: **{stats.round_1_verdict}**_",
+        f"_mode: **{mode}** · round-1 conformance: **{stats.round_1_verdict}**_",
         "",
     ]
+    if halt is not None:
+        where = f" — node `{halt['node']}`" if halt["node"] else ""
+        parts.append(f"> **HALTED — {halt['tag']}**{where}")
+        if halt["action"]:
+            parts.append(">")
+            parts.append(f"> {halt['action']}")
+        parts.append("")
     hashes = final.get("prompt_hashes") or {}
     if hashes:
         parts.append("**Prompt hashes**")
@@ -171,6 +233,7 @@ def _render_stats_block(
     stats: L1Stats,
     repairs_per_round: list[int],
     calls_per_round: list[int],
+    halt: dict[str, str] | None,
 ) -> list[str]:
     rounds_to_95 = "—" if stats.rounds_to_95 is None else str(stats.rounds_to_95)
     # L2 conformance "n/a" when L2 never fired (distinguishes from a vacuous 1.0).
@@ -186,6 +249,11 @@ def _render_stats_block(
         f"- stagnation_max: {stats.stagnation_max}",
         f"- l2_fires: {stats.l2_fires}",
     ]
+    # A terminate is an L2 fire that produces no l2-sourced round, so `l2_fires`
+    # alone reads 0 — name it explicitly so an L2 halt isn't invisible.
+    if halt is not None and halt["terminated"]:
+        node = f" ({halt['node']})" if halt["node"] else ""
+        lines.append(f"- l2_terminated: {halt['tag']}{node}")
     repairs_total = sum(repairs_per_round)
     calls_total = sum(calls_per_round)
     if calls_total:

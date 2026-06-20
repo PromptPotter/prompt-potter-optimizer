@@ -161,18 +161,17 @@ export interface LiveCandidate {
 // `current_round.nodes.l1_score.input.candidates[]` shape — the *input* half
 // of the live l1_score block (mirrors round_NNNN.json::candidate_scores for
 // the seed-able fields). Carries the candidate's evolved searchpoint:
-// `prompt_fields` (OptSearchPoint.prompt_field_dict() shape) + `pp_override`
-// (its pipeline_params delta). Read by `liveCandidateSearchPoint` so the steer
-// panel can seed from a still-in-flight candidate without the round file.
+// `prompt_fields` (OptSearchPoint.prompt_field_dict() shape) + the resolved
+// config below.
 export interface LiveInputCandidate {
   idx?: number;
   label?: string;
   changes_description?: string;
-  pp_override?: Record<string, unknown> | null;
   prompt_fields?: Record<string, unknown>;
   // Server-resolved, config-only effective params (`{node:{param:value}, steps}`),
   // prompt stripped. The in-flight peer of round_NNNN.json::candidate_scores[].
-  // resolved_pipeline_params — read by `liveObserveConfig` for the OBSERVE view.
+  // resolved_pipeline_params — read by `liveObserveConfig` (OBSERVE view) and
+  // `liveCandidateSearchPoint` (steer-fork seed from a still-in-flight candidate).
   resolved_pipeline_params?: Record<string, unknown> | null;
 }
 
@@ -239,8 +238,8 @@ export const liveCandidate = (
 ): LiveCandidate | null =>
   matchLiveCandidate(liveL1Candidates(dash), round, candidateId);
 
-// Input-candidate slot — the seed-able prompt_fields / pp_override half, for
-// steer-fork seeding from a still-in-flight candidate.
+// Input-candidate slot — the seed-able prompt_fields / resolved_pipeline_params
+// half, for steer-fork seeding from a still-in-flight candidate.
 export const liveInputCandidate = (
   dash: DashboardSnapshot | null,
   round: number | null,

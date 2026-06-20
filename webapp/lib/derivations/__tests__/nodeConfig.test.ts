@@ -156,6 +156,16 @@ describe("configRows (values mode)", () => {
   it("returns no rows without a schema", () => {
     expect(configRows(null, {}, "values")).toEqual([]);
   });
+
+  it("scopes rows to one node when `node` is given (OBSERVE drill-in vs whole-pipeline)", () => {
+    const multi = { web_search: schema.llm_only, llm_only: schema.llm_only };
+    expect(new Set(configRows(multi, {}, "values", "llm_only").map((r) => r.node))).toEqual(
+      new Set(["llm_only"]),
+    );
+    expect(new Set(configRows(multi, {}, "values").map((r) => r.node))).toEqual(
+      new Set(["web_search", "llm_only"]),
+    );
+  });
 });
 
 describe("seedOverlayFromRows (values emit)", () => {

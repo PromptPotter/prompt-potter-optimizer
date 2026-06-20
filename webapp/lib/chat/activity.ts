@@ -16,6 +16,8 @@
 // Items carry stable ids so the snapshot paint, the candidate start/scored, and
 // the per-sample running update all upsert to one row.
 
+import { displayFitness } from "@/lib/derivations";
+
 // One outbound SSE frame. Mirrors `domain/projection_envelope.py::ProjectionEnvelope`.
 // `payload` is the underlying record's `model_dump` (so a record's own nested
 // `payload` field is reached at `envelope.payload.payload`); for stream_snapshot
@@ -67,10 +69,11 @@ function pct0(v: number | undefined): string | undefined {
   return v == null ? undefined : `${(v * 100).toFixed(0)}%`;
 }
 
-// The displayed fitness: composite_fitness, falling back to accuracy (the
-// documented `composite_fitness || accuracy` convention) — formatted as a %.
+// The displayed fitness as a %, via the one canonical `displayFitness` rule
+// (composite_fitness, falling back to accuracy) so the chat thread can't drift
+// from the charts. `num` keeps the NaN guard on each input before the fallback.
 function fitPct(rec: Record<string, unknown>): string | undefined {
-  return pct0(num(rec.composite_fitness) ?? num(rec.accuracy));
+  return pct0(displayFitness(num(rec.composite_fitness), num(rec.accuracy)) ?? undefined);
 }
 
 // `{node}` or `{node}·r{round}` — the same label shape `LiveDisplay` prints.

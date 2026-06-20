@@ -6,11 +6,17 @@
 //
 // Source: `round_NNNN.json::candidate_scores[]`, where each entry carries
 // `prompt_fields` (OptSearchPoint.prompt_field_dict() shape) and
-// `pipeline_params_override` (the candidate's node-config delta over the
-// dataset overlay). Together they ARE the fork seed `{origin_prompt_fields,
-// pipeline_overlay}` an operator edits before confirming the fork — the
-// override delta layers back on top of the inherited dataset overlay at
-// fork bootstrap, keeping the dataset file immutable.
+// `resolved_pipeline_params` (the candidate's COMPLETE server-resolved
+// config, `{node:{param:value}, steps}`, prompt stripped — the same field the
+// OBSERVE view reads). Together they ARE the fork seed `{origin_prompt_fields,
+// pipeline_overlay}` an operator edits before confirming the fork. We seed from
+// the RESOLVED config, not the sparse delta: the fork bootstrap layers this
+// overlay onto the inherited dataset overlay (`entry.py`), so a sparse seed
+// silently reset every evolved-but-untouched param (model/provider/…) back to
+// the dataset floor. The resolved config carries each param's actual running
+// value, so the fork faithfully continues from the candidate — the dataset file
+// stays immutable. (`steps`, the top-level list `config_params` also carries, is
+// NOT a node config and is dropped so the per-node merge can't choke on it.)
 
 import {
   liveInputCandidate,
@@ -43,7 +49,21 @@ export function searchPoint(
 interface RawScoredCandidate {
   candidate_id?: string;
   prompt_fields?: Record<string, unknown>;
-  pipeline_params_override?: Record<string, unknown> | null;
+  resolved_pipeline_params?: Record<string, unknown> | null;
+}
+
+// The fork `pipeline_overlay` is per-node config only — keep object-valued node
+// entries, drop the top-level `steps` list (and any scalar) the resolved config
+// also carries. The fork bootstrap shallow-merges each node dict onto the
+// inherited overlay (`entry.py`); a list under a node key would break that spread.
+function nodeConfigs(
+  resolved: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [node, cfg] of Object.entries(resolved ?? {})) {
+    if (cfg && typeof cfg === "object" && !Array.isArray(cfg)) out[node] = cfg;
+  }
+  return out;
 }
 
 // Locate the candidate by id and project its evolved searchpoint. Returns
@@ -64,7 +84,7 @@ export function candidateSearchPoint(
       (c as RawScoredCandidate).candidate_id === candidateId,
   );
   if (!entry) return null;
-  return searchPoint(entry.prompt_fields, entry.pipeline_params_override);
+  return searchPoint(entry.prompt_fields, nodeConfigs(entry.resolved_pipeline_params));
 }
 
 // Live peer of `candidateSearchPoint`: for a candidate in the *in-flight*
@@ -73,6 +93,7 @@ export function candidateSearchPoint(
 // `candidate_started` (`_RoundBuffer.seed_candidate`), so it's available the
 // moment a candidate begins scoring — lets the steer panel fork from a
 // still-running candidate. Matches by the live candidate id `r{round}_{idx}`.
+// Reads the same complete `resolved_pipeline_params` as the round-file path.
 export function liveCandidateSearchPoint(
   dash: DashboardSnapshot | null,
   candidateId: string,
@@ -82,5 +103,5 @@ export function liveCandidateSearchPoint(
   if (liveRound == null) return null;
   const entry = liveInputCandidate(dash, liveRound, candidateId);
   if (!entry) return null;
-  return searchPoint(entry.prompt_fields, entry.pp_override);
+  return searchPoint(entry.prompt_fields, nodeConfigs(entry.resolved_pipeline_params));
 }

@@ -60,8 +60,8 @@ per-cycle signal.
 
 The conformant check set depends on `prompt_id`:
 
-- **`l1_generate`** — read `round_1_verdict` straight from the `review.md`
-  header; Python computes it from the four L1 behaviour checks.
+- **`l1_generate`** — read it from the `review.md` header (the
+  `round-1 conformance:` line); Python computes it from the four L1 behaviour checks.
 - **`l2_context`** — Python's `round_1_verdict` covers L1 only. Derive the
   L2 verdict from `l2_behavior_pass_rate` over the `l2_fires` rounds (a
   2-round conformance sweep fires L2 exactly once, so the rate is exact):

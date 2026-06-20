@@ -155,19 +155,26 @@ function SearchSpaceEditor({
 
 // values: concrete fork values. Rows are pure-derived from schema + seed overlay
 // (both stable for the life of a steer); an `edits` string-map overlays operator
-// changes, and the sparse overlay is emitted on every edit.
+// changes, and the sparse overlay is emitted on every edit. `node` scopes the rows
+// to one node (the OBSERVE-run drill-in shows the clicked node's config); omit for
+// the whole-pipeline seed (draft preview, steer fork). Symmetric with SearchSpaceEditor.
 function ValuesEditor({
   schema,
   seedOverlay,
+  node,
   readOnly = false,
   onChange,
 }: {
   schema: Record<string, NodeConfigParam[]> | null;
   seedOverlay: Record<string, unknown>;
+  node?: string;
   readOnly?: boolean;
   onChange?: (overlay: Record<string, Record<string, unknown>>) => void;
 }) {
-  const rows = useMemo(() => configRows(schema, seedOverlay, "values"), [schema, seedOverlay]);
+  const rows = useMemo(
+    () => configRows(schema, seedOverlay, "values", node),
+    [schema, seedOverlay, node],
+  );
   const [edits, setEdits] = useState<Record<string, string>>({});
 
   if (rows.length === 0) return <EmptyConfig />;
