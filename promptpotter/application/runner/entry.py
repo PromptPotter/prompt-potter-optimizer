@@ -41,6 +41,7 @@ from promptpotter.domain.results import CycleError, CycleResult
 from promptpotter.domain.run_records import CycleSeed, ForkSpec, LimitOverrides
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.infrastructure.llm import set_abort_check
 from promptpotter.infrastructure.llm.models import emit_error_record
 from promptpotter.infrastructure.runtime_flags import clear_run_control_flags
 from promptpotter.shared.clock import utcnow_iso
@@ -308,6 +309,10 @@ async def run_optimization(
                 skip_flag = runtime_dir / "skip.flag"
                 session.stop_check = (runtime_dir / "stop.flag").is_file
                 session.pause_check = (runtime_dir / "pause.flag").is_file
+                # Let a stop break a long rate-limit countdown mid-wait — the one
+                # blocking seam that otherwise ignores the stop channel. Same
+                # predicate, bound into the per-task ContextVar the wait polls.
+                set_abort_check(session.stop_check)
                 # Skip is one-shot: poll the flag, then the loop deletes it the
                 # instant it fires so exactly one searchpoint is cut.
                 session.skip_check = skip_flag.is_file

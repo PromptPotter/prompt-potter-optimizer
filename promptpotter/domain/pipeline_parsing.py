@@ -64,19 +64,27 @@ def _derive_node_kind(node: PipelineNode | None) -> str:
     """Pick a webapp render kind for one pipeline node.
 
     Priority order: cache role wins because a hit short-circuits the
-    pipeline; an LLM-bearing node (any observation mapping with
-    ``is_llm``) is the next-most-specific signal; everything else falls
-    back to the connector's ``wire_type`` (``tool`` / ``retriever``) and
-    ultimately to a plain ``tool`` dot. ``node_role`` of ``"ranker"`` or
-    ``"candidate_source"`` is intentionally NOT checked here — those roles
-    can be implemented as LLM calls (``llm_ranking``) or pure algos
-    (``fuzzy_matching``); ``is_llm`` is what discriminates.
+    pipeline; then the LLM signal — a node is an LLM call if it is the
+    ``llm_only`` single-LLM sentinel, declares a ``generation`` wire /
+    langfuse type (the backend's explicit LLM marker), OR carries an
+    ``is_llm`` observation mapping. A bare ``llm_only`` overlay carries
+    none of the latter two, so the sentinel name is load-bearing here.
+    Everything else falls back to the connector's ``wire_type``
+    (``tool`` / ``retriever``) and ultimately a plain ``tool`` dot.
+    ``node_role`` of ``"ranker"`` / ``"candidate_source"`` is intentionally
+    NOT checked — those roles can be LLM (``llm_ranking``) or pure algos
+    (``fuzzy_matching``); the three signals above are what discriminate.
     """
     if node is None:
         return "tool"
     if str(node.node_type) == "cache":
         return "cache"
-    if node.is_llm:
+    if (
+        node.name == "llm_only"
+        or node.is_llm
+        or node.wire_type == "generation"
+        or node.langfuse_type == "generation"
+    ):
         return "llm"
     if node.wire_type == "retriever":
         return "retriever"

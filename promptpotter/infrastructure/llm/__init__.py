@@ -56,6 +56,7 @@ from promptpotter.infrastructure.llm.rate_limit import (
     diagnose_rate_limit_scope,
     estimate_tokens,
     parse_retry_after,
+    set_abort_check,
     wait_with_countdown,
 )
 from promptpotter.infrastructure.llm.registry import ProviderSpec, get_llm_client
@@ -80,6 +81,7 @@ __all__ = [
     "parse_retry_after",
     "reset_current_round",
     "reset_cycle_ledger",
+    "set_abort_check",
     "set_current_round",
     "set_cycle_ledger",
     "try_parse_json",

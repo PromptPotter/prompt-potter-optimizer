@@ -12,7 +12,8 @@ import re
 import sys
 import time
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -25,6 +26,33 @@ MAX_429_ATTEMPTS: int = 5
 DEPR_RETRY_COOLDOWN_SEC: float = 1.0
 _YELLOW = "\033[93m"
 _RESET = "\033[0m"
+
+# Cooperative-abort predicate the countdown waits poll. Per-asyncio-task
+# (ContextVar) so concurrent cycles in one process — the API server runs each
+# run as its own task — never cross predicates, and a task that ends drops its
+# copy (no reset needed). Bound once at the runner seam to ``session.stop_check``
+# (reads ``.runtime/stop.flag``). ``None`` (the default — CLI/tests) leaves the
+# wait a plain sleep, broken only by a propagating ``KeyboardInterrupt``.
+_ABORT_CHECK: ContextVar[Callable[[], bool] | None] = ContextVar(
+    "rate_limit_abort_check", default=None
+)
+
+# 429 windows that a retry budget cannot wait out — a per-day / per-hour bucket
+# does not clear inside a multi-minute Retry-After. Blocking on these burns
+# wall-clock on a quota that needs a provider switch, not patience.
+_UNWAITABLE_SCOPES: frozenset[str] = frozenset({"TPD", "RPD", "TPH", "RPH", "daily", "hourly"})
+
+
+def set_abort_check(predicate: Callable[[], bool] | None) -> None:
+    """Bind the cooperative-abort predicate :func:`wait_with_countdown` polls.
+
+    Set at the runner seam to ``session.stop_check``. Because the operator's
+    stop button writes ``.runtime/stop.flag`` cross-process, this is what lets a
+    multi-minute rate-limit wait be broken even when an OS Ctrl+C never reaches
+    the loop (a hosting uvicorn swallows SIGINT into its own graceful shutdown).
+    """
+    _ABORT_CHECK.set(predicate)
+
 
 # Standard OpenAI/Groq rate-limit header keys.
 OPENAI_RPM_HEADER = "x-ratelimit-limit-requests"
@@ -139,20 +167,37 @@ def decide_429_wait(
     wait = parse_retry_after(headers)
     if wait is None or wait <= 0 or attempt >= max_attempts - 1:
         return None
-    return RateLimitWait(seconds=wait + 1.0, scope=diagnose_rate_limit_scope(headers, body))
+    scope = diagnose_rate_limit_scope(headers, body)
+    # A per-day/per-hour quota does not reset inside a retry budget — surface it
+    # as a fast 429 error (the operator's cue to switch provider) instead of a
+    # silent multi-minute countdown. Per-minute/second windows still wait.
+    if scope in _UNWAITABLE_SCOPES:
+        return None
+    return RateLimitWait(seconds=wait + 1.0, scope=scope)
 
 
 async def wait_with_countdown(total_sec: float, label: str) -> None:
-    """Sleep `total_sec` while emitting a yellow single-line countdown to stderr."""
+    """Sleep `total_sec` while emitting a yellow single-line countdown to stderr.
+
+    Cooperatively abortable: each 1 s tick polls the per-task abort predicate
+    (:func:`set_abort_check`); a requested stop raises ``asyncio.CancelledError``
+    so the surrounding loop unwinds through its existing interrupt path instead
+    of blocking out the full wait. This is why the operator's stop button — not
+    only an OS Ctrl+C — breaks the wait.
+    """
+    abort = _ABORT_CHECK.get()
     end = time.monotonic() + total_sec
     while True:
+        if abort is not None and abort():
+            sys.stderr.write(f"\r{_YELLOW}⚠ rate-limit ({label}): aborted.{' ' * 30}{_RESET}\n")
+            sys.stderr.flush()
+            raise asyncio.CancelledError(f"rate-limit wait aborted ({label})")
         remaining = max(0.0, end - time.monotonic())
         mins_total, secs = divmod(int(remaining + 0.5), 60)
         hours, mins = divmod(mins_total, 60)
         stamp = f"{hours:d}:{mins:02d}:{secs:02d}" if hours else f"{mins:02d}:{secs:02d}"
-        sys.stderr.write(
-            f"\r{_YELLOW}⚠ rate-limit ({label}): waiting {stamp}  (Ctrl+C to abort){_RESET}"
-        )
+        hint = "Ctrl+C / stop to abort" if abort is not None else "Ctrl+C to abort"
+        sys.stderr.write(f"\r{_YELLOW}⚠ rate-limit ({label}): waiting {stamp}  ({hint}){_RESET}")
         sys.stderr.flush()
         if remaining <= 0:
             break
@@ -372,5 +417,6 @@ __all__ = [
     "estimate_tokens",
     "parse_retry_after",
     "raise_if_request_too_large",
+    "set_abort_check",
     "wait_with_countdown",
 ]
