@@ -47,7 +47,7 @@ async def run_l1_critique(
     template = load_optimizer_prompt("l1_critique")
     prompt_vars = DispatchHub.fill_fixed(template, bundle)
 
-    result, prompt = await run_optimizer_node(
+    result, prompt, _ = await run_optimizer_node(
         template_name="l1_critique",
         prompt_vars=prompt_vars,
         context=LLMCallContext(

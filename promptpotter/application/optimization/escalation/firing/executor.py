@@ -351,7 +351,7 @@ async def _run_transition(
     ):
         template = load_optimizer_prompt(transition.template_name)
         prompt_vars = DispatchHub.fill_fixed(template, build_bundle(cycle))
-        raw, prompt = await run_optimizer_node(
+        raw, prompt, _ = await run_optimizer_node(
             template_name=transition.template_name,
             prompt_vars=prompt_vars,
             context=LLMCallContext(

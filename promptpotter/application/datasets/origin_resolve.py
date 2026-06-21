@@ -161,7 +161,7 @@ async def resolve_origin_turn(
             campaign_id=draft.draft_id,
             round_num=0,
         ):
-            raw, _prompt = await run_optimizer_node(
+            raw, _prompt, repair_attempts = await run_optimizer_node(
                 template_name="checkin",
                 prompt_vars={"consultation_instruction": consultation_instruction},
                 user_content=user_content,
@@ -175,13 +175,72 @@ async def resolve_origin_turn(
     )
 
     updated = _apply_findings(draft, raw)
+
+    # Degradation gate. The resolver LLM can return a structurally-valid but
+    # content-empty CheckinOutput (every field defaults ``""``), which
+    # ``_apply_findings`` silently no-ops on (``updated is draft``) — historically
+    # minting a thin origin while the only trace was a stdout warning. Grade the
+    # turn so a degraded/empty resolution is LOUD, not mute. ``critical`` (nothing
+    # usable produced) raises → the route's existing catch surfaces it as a 502 the
+    # webapp shows. ``degraded`` (e.g. a paid repair retry — the provider's first
+    # response was empty/truncated, ~2x cost+latency) rides the resolution block as
+    # ``degraded`` and the check-in panel renders it as a warning + re-run option.
+    degraded = _grade_resolution(
+        output=raw, applied=updated is not draft, repair_attempts=repair_attempts
+    )
+    if degraded is not None and degraded["grade"] == "critical":
+        raise RuntimeError(
+            "the check-in model returned an empty/degraded response — "
+            + "; ".join(degraded["reasons"])
+        )
+
     draft_registry.update(updated)
 
     block = resolution_block(updated)
     block["last_resolution"] = _resolution_wire(raw)
+    if degraded is not None:
+        block["degraded"] = degraded
     stores.tenant_datasets.write_draft_resolution(updated.draft_id, block)
 
     return OriginResolutionResult(resolution=block, draft=updated)
+
+
+def _grade_resolution(
+    *, output: CheckinOutput, applied: bool, repair_attempts: int
+) -> dict[str, Any] | None:
+    """Grade one resolver turn for degradation. ``None`` when healthy, else
+    ``{grade, reasons, repair_attempts}`` with ``grade ∈ {"degraded", "critical"}``.
+
+    Mirrors the ``healthy|degraded|critical`` vocabulary of
+    :class:`~promptpotter.domain.results_health.DegradationHealth` (which is
+    sample-results-shaped, so not reusable on a ``CheckinOutput``).
+
+    * **critical** — the turn produced nothing usable: no field applied, no
+      operator question asked, and an empty recap. This is the empty/truncated
+      provider response the apply loop silently dropped.
+    * **degraded** — the turn carried something but a full schema-repair retry was
+      paid (``repair_attempts > 0``): the provider's first response was
+      empty/truncated, so the cost doubled and the recovered output may be thin.
+      Surfaced even when the retry recovered, so the operator sees the ~2x hit.
+    """
+    asking = output.next_action.kind == "ask" and bool(output.next_action.questions)
+    if not applied and not asking and not output.recap.strip():
+        reasons = ["the check-in produced no usable setup, recap, or question"]
+        if repair_attempts > 0:
+            reasons.append(
+                "the retry after the empty/truncated first response also failed to recover"
+            )
+        return {"grade": "critical", "reasons": reasons, "repair_attempts": repair_attempts}
+    if repair_attempts > 0:
+        return {
+            "grade": "degraded",
+            "reasons": [
+                "the model's first response was empty or truncated and was retried "
+                "(~2x cost and latency); the resulting setup may be thin"
+            ],
+            "repair_attempts": repair_attempts,
+        }
+    return None
 
 
 def _apply_findings(draft: DraftCampaign, output: CheckinOutput) -> DraftCampaign:

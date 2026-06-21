@@ -110,7 +110,7 @@ async def l1_generate(
         else None
     )
     try:
-        generated, meta_prompt = await run_optimizer_node(
+        generated, meta_prompt, _ = await run_optimizer_node(
             template_name="l1_generate",
             prompt_vars=prompt_vars,
             temperature=creativity,

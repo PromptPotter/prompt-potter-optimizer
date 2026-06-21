@@ -240,6 +240,9 @@
 .chat-collision-cancel:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;border-radius:4px}
 /* Friendly error bubble for a rejected drop (unsupported / hardened / bad parse). */
 .chat-msg.chat-msg-error{border:1px solid var(--color-danger-border);color:var(--color-danger)}
+/* Non-fatal degradation notice (check-in model hiccuped + retried). Warn tone,
+   not danger — the draft still resolved, just thinly. */
+.chat-msg.chat-msg-warn{border:1px solid var(--color-warn-border);background:var(--color-warn-bg);color:var(--color-warn)}
 
 /* Unified ingest conversation — the shared thread + input row, rendered both
    inline on the chat tab (`--inline`) and inside the New campaign modal
@@ -263,6 +266,10 @@
 .ingest-pick-meta{flex-shrink:0;font-size:12px;color:var(--color-text-tertiary)}
 .ingest-ready{display:flex;flex-direction:column;gap:12px}
 .ingest-gaps{display:flex;flex-direction:column;gap:12px}
+/* Degraded check-in banner in the ready panel — the resolver turn hiccuped, so
+   the draft landed in review (not auto-minted) with a re-run affordance. */
+.ingest-degraded{display:flex;flex-direction:column;gap:8px;align-items:flex-start;border:1px solid var(--color-warn-border);background:var(--color-warn-bg);color:var(--color-warn);border-radius:8px;padding:10px 12px;font-size:13px;line-height:1.5}
+.ingest-degraded p{margin:0}
 .ingest-ready .chat-cta-btn{align-self:flex-start}
 /* Pipeline dependencies — the active pipeline's required inputs. An unfulfilled
    one draws the accent border (drop the missing input here); a fulfilled one

@@ -115,9 +115,11 @@
 .config-node-row{padding-bottom:8px;margin-bottom:2px;border-bottom:0.5px solid var(--color-border-tertiary)}
 .config-check{width:15px;height:15px;accent-color:var(--color-accent);cursor:pointer}
 /* Check-in agent working — a compact inline line (real resolve + demo sim). */
-.checkin-loading{display:flex;align-items:center;gap:8px;font-size:13px;line-height:1.5;color:var(--color-text-secondary);padding:8px 0}
+.checkin-loading{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:13px;line-height:1.5;color:var(--color-text-secondary);padding:8px 0}
 .checkin-loading-bot{font-size:20px;animation:checkin-bob 1s ease-in-out infinite}
 .checkin-loading-model{font-family:var(--font-mono);color:var(--color-accent)}
+/* Past the slow threshold the reassurance line wraps to its own row. */
+.checkin-loading-slow{flex-basis:100%;color:var(--color-text-tertiary);font-style:italic}
 @keyframes checkin-bob{50%{transform:translateY(-3px)}}
 @media (prefers-reduced-motion:reduce){.checkin-loading-bot{animation:none}}
 /* Sweep-Group-B: lift IngestPane inputs to the iOS-safe size on

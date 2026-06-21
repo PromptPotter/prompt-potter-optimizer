@@ -673,12 +673,23 @@ export interface OriginLastResolution {
   recap: string;
 }
 
+// Set only when the resolver turn degraded — the check-in model returned an
+// empty/truncated response that forced a paid repair retry, or produced nothing
+// usable. Stamped on the block by `resolve_origin_turn` (a `critical` turn raises
+// instead → 502). Drives the check-in panel's degradation warning + re-run.
+export interface OriginDegraded {
+  grade: "degraded" | "critical";
+  reasons: string[];
+  repair_attempts: number;
+}
+
 export interface OriginResolutionBlock {
   complete: boolean;
   provenance: Record<string, string>;
   values: Record<string, unknown>;
   gaps: OriginGap[];
   last_resolution?: OriginLastResolution;
+  degraded?: OriginDegraded;
 }
 
 export interface ResolveOriginResponse {

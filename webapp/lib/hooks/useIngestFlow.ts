@@ -17,6 +17,7 @@ import {
   type DraftPatch,
   type OriginEntry,
   type OriginLastResolution,
+  type OriginDegraded,
 } from "@/lib/api";
 import { originReadiness, plainLanguageRecap } from "@/lib/origin-readiness";
 import type { OnMinted } from "@/components/ingest/types";
@@ -26,6 +27,9 @@ export type ChatMsg =
   | { id: string; kind: "user-file"; name: string; rows: number | null }
   | { id: string; kind: "user"; text: string }
   | { id: string; kind: "ai"; text: string }
+  // A non-fatal degradation notice (the check-in model hiccuped + retried). Loud
+  // but not an error — the draft still resolved, just thinly.
+  | { id: string; kind: "warning"; text: string }
   | { id: string; kind: "error"; text: string };
 
 // Transient ingest-pipeline status, separate from the durable thread — it's
@@ -53,7 +57,14 @@ export type IngestPhase =
   // A draft ready to commit. When `originReadiness(draft).complete` the view
   // shows "Start campaign"; otherwise it surfaces the remaining gaps inline
   // (check-in panel + column mapping) until the last one closes.
-  | { stage: "ready"; draft: DraftCampaignWire; resolution: OriginLastResolution | null };
+  | {
+      stage: "ready";
+      draft: DraftCampaignWire;
+      resolution: OriginLastResolution | null;
+      // Non-null when the resolver turn that produced this draft degraded — the
+      // ready panel surfaces the warning + a "re-run check-in" affordance.
+      degraded: OriginDegraded | null;
+    };
 
 export interface IngestFlow {
   messages: ChatMsg[];
@@ -79,6 +90,8 @@ export interface IngestFlow {
   uploadCandidateLibrary: (file: File) => void;
   // Build that library from one of the dataset's own columns instead of a file.
   buildCandidateLibraryFromColumn: (column: string) => void;
+  // Re-run the check-in on the current ready draft (recovery after a degraded turn).
+  rerunCheckin: () => void;
   // Commit the ready draft + spawn the runner.
   startFromReady: () => void;
   // Collision choices.
@@ -109,6 +122,8 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
 
   const pushAi = (text: string) =>
     setMessages((m) => [...m, { id: uid(), kind: "ai", text }]);
+  const pushWarning = (text: string) =>
+    setMessages((m) => [...m, { id: uid(), kind: "warning", text }]);
 
   // Commit a server draft into the LIVE ready phase. Functional update so the
   // rendered draft is always the latest server response (overlapping patches —
@@ -131,24 +146,33 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     setPhase({ stage: "checkin", model: "the check-in model" });
     let resolved = draft;
     let resolution: OriginLastResolution | null = null;
+    let degraded: OriginDegraded | null = null;
     let recap = "";
     try {
       const r = await postResolveOrigin(draft.draft_id);
       resolved = r.draft;
       resolution = r.resolution.last_resolution ?? null;
+      degraded = r.resolution.degraded ?? null;
       recap = resolution?.recap || resolution?.assessment || plainLanguageRecap(resolved);
     } catch (e) {
       recap = plainLanguageRecap(resolved);
       pushError(e);
     }
+    // The resolver degraded (e.g. the model's first response was empty/truncated,
+    // forcing a 2×-cost repair retry). Surface it loudly — the old behavior left
+    // the operator watching a mute counter, then handed back a thin recap with no
+    // sign anything had gone wrong.
+    if (degraded) pushWarning(degraded.reasons.join(" · "));
     pushAi(recap);
     // Happy path: the check-in confirmed every gated field (columns + framing)
     // and asked nothing back — mint straight through, skipping the review
     // surface. The server gate stays authoritative (it also checks answer-space
     // and per-node model, which the client can't see from the wire), so a
     // rejected auto-mint falls through to the review panel below rather than
-    // dead-ending on the error.
+    // dead-ending on the error. A DEGRADED turn never auto-mints — a thin
+    // resolution must land in review so the operator re-runs or fixes it by hand.
     if (
+      !degraded &&
       resolution !== null &&
       resolution.next_action.questions.length === 0 &&
       originReadiness(resolved).complete
@@ -166,7 +190,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
         setMinting(false);
       }
     }
-    setPhase({ stage: "ready", draft: resolved, resolution });
+    setPhase({ stage: "ready", draft: resolved, resolution, degraded });
   };
 
   // After any draft-producing action (drop / pick). If the dataset already
@@ -273,7 +297,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
       return;
     }
     pushAi("Opened the origin — edit anything below, then Start.");
-    setPhase({ stage: "ready", draft, resolution: null });
+    setPhase({ stage: "ready", draft, resolution: null, degraded: null });
   };
 
   const submitContext = async () => {
@@ -329,6 +353,14 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     } catch (e) {
       pushError(e);
     }
+  };
+
+  // Recovery from a degraded turn: re-run the one check-in call on the current
+  // draft. Reuses `runCheckin` (which re-enters the `checkin` phase, then back to
+  // `ready` with the fresh resolution + degraded grade).
+  const rerunCheckin = () => {
+    if (phase.stage !== "ready" || busy) return;
+    void runCheckin(phase.draft);
   };
 
   const startFromReady = async () => {
@@ -398,6 +430,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     applyPatch: (patch) => void applyPatch(patch),
     uploadCandidateLibrary: (file) => void uploadCandidateLibrary(file),
     buildCandidateLibraryFromColumn: (column) => void buildCandidateLibraryFromColumn(column),
+    rerunCheckin,
     startFromReady: () => void startFromReady(),
     useExistingFromCollision,
     saveAsNew,

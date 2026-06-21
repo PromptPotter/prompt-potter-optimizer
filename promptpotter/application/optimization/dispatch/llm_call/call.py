@@ -434,8 +434,8 @@ async def run_optimizer_node(
     user_content: str | None = None,
     context: LLMCallContext | None = None,
     template: PromptTemplate | None = None,
-) -> tuple[Any, str]:
-    """Load prompt template, compile, call LLM → (parsed_result, prompt_text).
+) -> tuple[Any, str, int]:
+    """Load prompt template, compile, call LLM → (parsed_result, prompt_text, repair_attempts).
 
     Provider, model, and the default temperature come from the node's config in
     ``datasets/_optimizer/pipeline.json`` (resolved inside :func:`llm_call`).
@@ -447,6 +447,13 @@ async def run_optimizer_node(
     ``LLMResponse.parsed`` and is returned to the caller as the first
     element of the tuple. Callers that need a dict shape (the
     audit-trail) call ``.model_dump()`` themselves.
+
+    The third element is ``response.schema_repair_attempts`` — non-zero ⇒ the
+    provider's first response failed schema validation and a full repair
+    round-trip was paid (~2x cost + latency; see ``openai_compat.py``). The
+    loop sites record it via the ledger payload and discard the return value;
+    the non-ledger ``checkin`` resolver reads it live to surface a degraded
+    turn to the operator (``origin_resolve.py``).
 
     When *template* is provided, it overrides the load-from-name path (used
     by L1's ``l1_template_override`` channel — L2 can rewrite L1's prompt
@@ -485,4 +492,4 @@ async def run_optimizer_node(
         },
         **overrides,
     )
-    return extract_parsed_json(response), prompt
+    return extract_parsed_json(response), prompt, response.schema_repair_attempts

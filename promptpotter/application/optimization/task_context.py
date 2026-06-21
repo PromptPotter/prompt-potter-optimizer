@@ -51,7 +51,7 @@ async def decompose_prompt_fields(context_input: Any) -> dict[str, Any]:
         "fields that don't apply. Be concise and actionable."
     )
 
-    result, _ = await run_optimizer_node(
+    result, _, _ = await run_optimizer_node(
         template_name="checkin",
         prompt_vars={"consultation_instruction": consultation_instruction},
         user_content=user_content,

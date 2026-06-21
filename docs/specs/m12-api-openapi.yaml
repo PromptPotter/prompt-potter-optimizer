@@ -2340,6 +2340,20 @@ components:
             `{field, prompt, options}` — `field` names the checklist gap the
             answer resolves so the panel applies it as a confirmed patch), and
             `recap` (set only on a `ready` turn).
+        degraded:
+          type: object
+          required: [grade, reasons, repair_attempts]
+          additionalProperties: false
+          properties:
+            grade: { type: string, enum: [degraded, critical] }
+            reasons: { type: array, items: { type: string } }
+            repair_attempts: { type: integer }
+          description: |
+            Present only when the resolver turn degraded — the check-in model
+            returned an empty/truncated response that forced a paid repair retry
+            (`repair_attempts > 0`), or produced nothing usable. A `critical` turn
+            raises instead (502 `resolver_failed`); `degraded` rides here so the
+            check-in panel warns + offers a re-run rather than minting a thin origin.
 
     ResolveOriginResponse:
       type: object

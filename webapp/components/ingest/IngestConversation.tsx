@@ -50,12 +50,23 @@ function CheckinLoadingWindow({ model }: { model: string }) {
     const id = setInterval(() => setSecs((s) => s + 1), 1000);
     return () => clearInterval(id);
   }, []);
+  // The resolve is a single blocking call; a slow provider — or a 2×-cost repair
+  // retry firing under the hood — can run a minute-plus. Past a threshold, set
+  // expectations so the counter isn't a mute "is it stuck?": reassure the wait is
+  // normal and that a degraded turn gets reported, never silently swallowed.
+  const slow = secs >= 45;
   return (
     <p className="checkin-loading" role="status" aria-live="polite">
       <span className="checkin-loading-bot" aria-hidden="true">
         🤖
       </span>
       Check-in agent setting up · <span className="checkin-loading-model">{model}</span> · {secs}s
+      {slow ? (
+        <span className="checkin-loading-slow">
+          {" "}— the model is slow right now; this can take a couple of minutes. I’ll
+          flag it if the response comes back thin.
+        </span>
+      ) : null}
     </p>
   );
 }
@@ -119,6 +130,10 @@ export function IngestConversation({
             </div>
           ) : msg.kind === "ai" ? (
             <div key={msg.id} className="chat-msg ai">
+              {msg.text}
+            </div>
+          ) : msg.kind === "warning" ? (
+            <div key={msg.id} className="chat-msg ai chat-msg-warn" role="status">
               {msg.text}
             </div>
           ) : (
@@ -234,11 +249,28 @@ export function IngestConversation({
 // model drives the search, run bounds) collapse into an optional expander.
 function ReadyBlock({ flow }: { flow: IngestFlow }) {
   if (flow.phase.stage !== "ready") return null;
-  const { draft, resolution } = flow.phase;
+  const { draft, resolution, degraded } = flow.phase;
   const ready = originReadiness(draft).complete;
 
   return (
     <div className="chat-msg ai ingest-ready">
+      {degraded ? (
+        <div className="ingest-degraded" role="status">
+          <p>
+            The check-in came back degraded — {degraded.reasons.join(" · ")}. Re-run
+            it, or adjust the setup below by hand before starting.
+          </p>
+          <button
+            type="button"
+            className="chat-cta-btn secondary"
+            disabled={flow.busy}
+            onClick={flow.rerunCheckin}
+          >
+            {flow.busy ? "Re-running…" : "Re-run check-in"}
+          </button>
+        </div>
+      ) : null}
+
       {!ready ? (
         <div className="ingest-gaps">
           <OriginCheckinPanel draft={draft} lastResolution={resolution} onApply={flow.applyPatch} />
