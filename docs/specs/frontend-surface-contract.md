@@ -117,7 +117,7 @@ invariants:
     source, so a TERMS_VERSION bump re-prompts without a frontend redeploy.
 ```
 
-### Sidebar — chrome, dashboard/files
+### Sidebar — chrome, every view
 
 ```yaml
 surface: sidebar
@@ -126,7 +126,9 @@ controls:
     do: Toggle collapsed/expanded; label flips Collapse<->Expand.
     status: ok
   - id: new_campaign
-    do: Open the New campaign modal (see surface: new_campaign).
+    do: On the chat tab, reset the thread in place to its empty first-run state
+        (no modal). On any other tab, open the New campaign modal (see surface:
+        new_campaign).
     status: ok
   - id: campaign_list
     do: List campaigns under Active/Archived tabs.

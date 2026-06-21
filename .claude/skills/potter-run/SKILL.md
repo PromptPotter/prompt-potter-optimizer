@@ -31,7 +31,7 @@ Optional dataset **name** (a registered benchmark — `bbeh`, `aime_2025`, `gsm8
 python -m promptpotter new <file.csv> --set task_description='what the prompt does'
 ```
 
-Parse → apply `--set` → resolve origin → commit tenant dataset → mint → run — the exact `ingest_draft` → `resolve_origin_turn` → `commit_draft_to_dataset` → `prepare_fresh_cycle` chain the web flow drives. Omit `--set` to let the resolver propose the framing and ask for confirmation.
+Parse → mint a durable `checkin` campaign → apply `--set` → resolve origin → flip to `active` + run — the exact `ingest_draft` → `resolve_origin_turn` → `prepare_checkin_run` chain the web flow drives (the file folds onto the check-in path; `new <file>` runs the loop inline). Omit `--set` to let the resolver propose the framing and ask for confirmation.
 
 The seam lives in `promptpotter/application/datasets/` (`ingest.py`, `origin_resolve.py`, `origin_readiness.py`) + `application/jobs/{launcher,mint}.py`; web surfaces in `webapp/components/ingest/` (`IngestPane`, `IngestConversation`, `useIngestFlow`).
 
@@ -46,7 +46,7 @@ When the operator says their dataset is ready ("my data's there", "just set it u
    "simulated_checkin": {"by": "potter-run", "model": "<your model id>", "at": "<YYYY-MM-DD>"}
    ```
    It persists to the draft resolution block (`cache.json::simulated_checkin`). **Empty = the real `checkin` node resolved it; populated = Claude authored it.** Skipping this is a hard error — the metadata is what keeps the LLM-call-for-authorship trade honest and reproducible.
-4. **Gate, then mint.** `origin_readiness` must be `complete` (query + ground_truth + framing + answer-space all CONFIRMED). Then `POST /commands/mint-campaign-from-draft` → the origin lands as round 0 (C0) and appears in the frontend for the operator to review, modify, and Start.
+4. **Gate, then start.** `origin_readiness` must be `complete` (query + ground_truth + framing + answer-space all CONFIRMED). Then `POST /commands/start-checkin` (payload `{campaign_id}`) → the origin lands as round 0 (C0) and appears in the frontend for the operator to review, modify, and Start.
 
 Code: the marker is `DraftCampaign.simulated_checkin` (`application/datasets/draft_campaign.py`), threaded through the `edit-draft-campaign` patch (`presentation/api/routers/commands.py`) into `resolution_block` (`application/datasets/origin_readiness.py`).
 

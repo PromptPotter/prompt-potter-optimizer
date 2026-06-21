@@ -66,10 +66,9 @@ tags:
     description: Commands that register or sync external backends.
   - name: datasets
     description: |
-      Workspace-scoped dataset ingest. Not a Control-remote command — these
-      endpoints create or mutate a server-held `DraftCampaign` before any
-      ledger event is emitted; the eventual mint-from-draft IS a command
-      (`/commands/mint-campaign-from-draft`) declared above.
+      Workspace-scoped dataset ingest. These endpoints mint a durable `checkin`
+      campaign and mutate its server-held `DraftCampaign` before the loop runs;
+      the eventual Start IS a command (`/commands/start-checkin`) declared above.
 
 # v0 closed inbound command set — DRAFT for operator redline.
 #
@@ -1004,24 +1003,29 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '422': { $ref: '#/components/responses/PayloadInvalid' }
 
-  /commands/mint-campaign-from-draft:
+  /commands/start-checkin:
     post:
-      operationId: mintCampaignFromDraft
-      summary: Commit a `DraftCampaign` — write the Dataset files + `campaign.json`, then mint.
+      operationId: startCheckin
+      summary: Start a CHECKIN campaign — gate the origin, commit the Dataset, mint the run.
       description: |
-        Terminal verb in the draft lifecycle. Server:
-        1. Looks up the draft by `draft_id`, tenant-scoped.
-        2. Atomic-renames `projects/{tenant}/datasets/.drafts/{draft_id}/` to
-           `projects/{tenant}/datasets/{slug}/`.
-        3. Writes the four Dataset files (`cache.json`, `pipeline.json`,
-           `task_description.md`, `prompts/default.json`) per the slot table
-           in `docs/specs/roadmap.md § Commit path`.
-        4. Writes the sibling `campaign.json` (default-campaign config; not
-           part of the Dataset's `JobSearchPoint.content_hash(dataset)`).
-        5. Falls through to the existing mint-campaign path.
+        Terminal verb in the check-in lifecycle. The campaign already exists
+        durably (minted in the `checkin` lifecycle on the first ingest action —
+        `/datasets/ingest` or `/datasets/{name}/draft`); its working state lives
+        at `projects/{tenant}/campaigns/{campaign_id}/checkin/`. This verb flips
+        it to `active` and runs. Server:
+        1. Loads the campaign by `campaign_id`, asserts owned + still `checkin`,
+           rehydrates the draft from `checkin/draft.json`.
+        2. Runs the deterministic origin-readiness gate (incomplete → 422; the
+           campaign stays `checkin` so the operator resolves + retries).
+        3. Reserves the machine slot, then commits the origin: a fresh upload
+           writes `projects/{tenant}/datasets/{slug}/` (the four Dataset files
+           + sibling `campaign.json`) from the materialized bank; a draft derived
+           from an existing dataset persists only its candidate library.
+        4. Resolves the cycle plan, flips `checkin` → `active`, clears
+           `.runtime/checkin.flag`, and detaches the runner.
 
-        Workspace-scoped — no `Expected-Version` (no prior cycle to gate
-        against). `Idempotency-Key` prevents double-mint on retry.
+        Workspace-scoped — no `Expected-Version`. `Idempotency-Key` set by the
+        client; the durable campaign makes a retry safe.
       tags: [datasets]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1035,20 +1039,18 @@ paths:
                 - type: object
                   required: [kind, payload]
                   properties:
-                    kind: { const: mint-campaign-from-draft }
-                    payload: { $ref: '#/components/schemas/MintCampaignFromDraftPayload' }
+                    kind: { const: start-checkin }
+                    payload: { $ref: '#/components/schemas/StartCheckinPayload' }
       responses:
         '200':
           description: |
-            Canonical mint-campaign response — `campaign_id`, `cycle_id`,
-            `job_id`. Matches the shape returned by `/commands/mint-campaign`
-            once it commits asynchronously (this endpoint is synchronous
-            because the commit is a single atomic rename + mint, not an
-            event-stream-tracked runner spawn).
+            Canonical mint response — `campaign_id`, `cycle_id`, `job_id`.
+            Synchronous through the commit + runner spawn; background progress
+            then rides the canonical ledger + `dashboard.json` stream.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MintCampaignFromDraftResponse'
+                $ref: '#/components/schemas/StartCheckinResponse'
         '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
         '401':
           description: Unauthenticated (no `IdentityContext` resolved at the middleware).
@@ -1058,39 +1060,73 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '404':
           description: |
-            `draft_id` does not exist, or exists under a different
-            `IdentityContext.tenant_id`.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-        '409':
-          description: |
-            Slug now collides with an existing user-uploaded dataset (the
-            draft's slug edit raced another commit). `details.suggested_slug`
-            carries the smallest free `{slug}-{n}`.
+            `campaign_id` has no check-in working state (already Started, never a
+            check-in, or under a different `IdentityContext.tenant_id`).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '422':
           description: |
-            `payload_invalid` (malformed envelope), `origin_incomplete`, or
-            `pipeline_config_invalid`. `origin_incomplete` — the deterministic
-            origin-readiness checklist still has gaps (the column mapping
-            unset/unconfirmed, an empty `task_description`, or any config knob
-            still `proposed`); `details.gaps` lists each blocking field as
-            `{field, reason, hint}`. `pipeline_config_invalid` — the resolved
-            pipeline config can't produce a runnable cycle (a prompt-bearing
-            node's rendered prompt omits a required `{{template var}}`, or an
-            LLM node has no owned `model`); the message names the node + fix.
-            The draft is preserved; the operator resolves it (via
-            `resolve-origin` or `edit-draft-campaign`) and retries.
+            `payload_invalid` (malformed envelope), `origin_incomplete`,
+            `ingest_failed`, or `pipeline_config_invalid`. `origin_incomplete` —
+            the deterministic origin-readiness checklist still has gaps (the
+            column mapping unset/unconfirmed, an empty `task_description`, or any
+            config knob still `proposed`); `details.gaps` lists each blocking
+            field as `{field, reason, hint}`. `ingest_failed` — a confirmed
+            mapping hit a per-row data failure (a blank mapped cell) at
+            materialization. `pipeline_config_invalid` — the resolved pipeline
+            config can't produce a runnable cycle. The campaign stays `checkin`;
+            the operator resolves it (via `resolve-origin` or
+            `edit-draft-campaign`) and retries.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '503': { $ref: '#/components/responses/BackendUnreachable' }
+
+  /campaigns/{campaignId}/checkin:
+    get:
+      operationId: getCampaignCheckin
+      summary: Re-open a CHECKIN campaign — its draft wire + last resolver turn.
+      description: |
+        The sidebar opens a `checkin`-lifecycle campaign through here instead of
+        the dashboard (no `dashboard.json` exists pre-loop): the webapp rebuilds
+        the ingest "ready" panel from `draft` and shows the prior `resolution`
+        recap. Tenant-scoped — a cross-tenant id 404s. 404 when the campaign has
+        no check-in working state (already Started or never a check-in).
+      tags: [campaigns]
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The check-in campaign id (the draft's `draft_id`).
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 128
+      responses:
+        '200':
+          description: The rehydrated draft wire + the last resolver turn (or null).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [draft, resolution]
+                properties:
+                  draft: { $ref: '#/components/schemas/DraftCampaign' }
+                  resolution:
+                    description: |
+                      The last `resolve-origin` turn's output (assessment,
+                      findings, next_action, recap), or null when none ran.
+                    type: [object, 'null']
+                    additionalProperties: true
+        '404':
+          description: No check-in working state for this campaign (or cross-tenant).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
   /commands/replace-dataset:
     post:
@@ -1220,13 +1256,15 @@ paths:
       description: |
         Ingest path for the M13 chat-first user web (see
         `docs/specs/roadmap.md § Ingest`). Workspace-scoped,
-        identity-bound by `IdentityContext.tenant_id` — the resulting draft
-        (and on commit, the dataset directory) lands at
-        `projects/{tenant}/datasets/{slug}/`.
+        identity-bound by `IdentityContext.tenant_id`. Mints a durable `checkin`
+        campaign on this first action: the draft's `draft_id` IS the new
+        `campaign_id`, its working state lands at
+        `projects/{tenant}/campaigns/{campaign_id}/checkin/`, and on Start the
+        dataset directory is written at `projects/{tenant}/datasets/{slug}/`.
 
-        NOT a Control-remote command — no `CommandRecord` lands on a ledger;
-        the draft lives in the server's draft-campaign store until the operator
-        commits via the separate `/commands/mint-campaign-from-draft` verb.
+        The check-in campaign appears in the sidebar immediately and survives a
+        restart; nothing runs until the operator starts it via the separate
+        `/commands/start-checkin` verb.
         File type is detected from the filename extension: CSV, TSV, JSON,
         JSONL/NDJSON, or XLSX (first sheet). XLSX parsing is gated off when the
         server runs `HARDENED_MODE` (Office formats are a macro/zip-bomb vector).
@@ -1566,12 +1604,11 @@ components:
 
             * `version_conflict` — `expected_version` (client sent) +
               `actual_version` (runner observed).
-            * `slug_collision` (409 on `/datasets/ingest` and
-              `/commands/mint-campaign-from-draft`) — `suggested_slug`
-              carrying the smallest free `{slug}-{n}`, and `draft_id`
-              when collision detection runs against an existing draft.
+            * `slug_collision` (409 on `/datasets/ingest`) — `suggested_slug`
+              carrying the smallest free `{slug}-{n}`, and `slug` (the colliding
+              name) so the chat can offer "use existing / save as new".
             * `machine_busy` (409 on any launch command — `mint-campaign`,
-              `mint-campaign-from-draft`, `start-run`, `fork-cycle`) — the
+              `start-checkin`, `start-run`, `fork-cycle`) — the
               single sequential run slot is taken (the server admits
               `MACHINE_RUN_CAPACITY` campaigns at once, 1 today). Carries the
               holder presence record: `holder_user`, `campaign_id`, `cycle_id`,
@@ -1590,7 +1627,7 @@ components:
               header-agnostic — it no longer rejects on column names; column
               identity is resolved on the draft, gated at mint. `hardened_blocked`
               is an XLSX upload refused while the server runs `HARDENED_MODE`.)
-            * `origin_incomplete` (422 on `/commands/mint-campaign-from-draft`)
+            * `origin_incomplete` (422 on `/commands/start-checkin`)
               — `gaps`: a list of `{field, reason, hint}` objects naming each
               origin field that still blocks mint. `reason` ∈ `unset` |
               `proposed_unconfirmed`. The deterministic origin-readiness
@@ -1799,10 +1836,10 @@ components:
           description: |
             Dataset under `datasets/{dataset_name}/` to mint a campaign for.
             Campaign-from-origin (reuse a chosen prior origin) rides the DRAFT
-            path instead — `POST /origins/{origin_id}/draft` prefills a draft
-            with the origin's exact prompt fields, then `mint-campaign-from-draft`
-            seeds C0 (`campaign_origin` lineage). This verb mints the dataset's
-            own authored origin only.
+            path instead — `POST /origins/{origin_id}/draft` prefills a check-in
+            with the origin's exact prompt fields, then `start-checkin` seeds C0
+            (`campaign_origin` lineage). This verb mints the dataset's own
+            authored origin only.
 
     StartRunPayload:
       allOf:
@@ -2117,22 +2154,25 @@ components:
         - column_ground_truth
         - field_provenance
         - origin_prompt_fields
+        - readiness
         - created_at
         - updated_at
       additionalProperties: false
       description: |
-        Server-held canonical state for an in-progress dataset ingest. Mutated
+        Server-held canonical state for an in-progress check-in campaign. Mutated
         by both the chat surface and the parameter panel (both ride
-        `POST /commands/{kind}` once that verb lands) until the operator
-        commits via `/commands/mint-campaign-from-draft`. Identity scope rides
-        the existing tenant prefix; the draft never carries a per-record
-        `tenant_id` on the wire (see ADR-0002 no-drift gate #3).
+        `POST /commands/{kind}`) until the operator starts it via
+        `/commands/start-checkin`. The `draft_id` IS the owning `campaign_id`;
+        identity scope rides the tenant prefix, so the draft never carries a
+        per-record `tenant_id` on the wire (see ADR-0002 no-drift gate #3).
       properties:
         draft_id:
           type: string
           minLength: 8
-          maxLength: 64
-          description: Server-minted ULID; idempotent re-ingest of the same file returns the same draft.
+          maxLength: 128
+          description: |
+            The owning check-in `campaign_id` (the draft is re-keyed to it at
+            `create_checkin_campaign`). Mutation + Start verbs key on this value.
         slug:
           type: string
           minLength: 1
@@ -2272,6 +2312,55 @@ components:
               title: { type: string }
               hint: { type: string, description: 'How to fulfil it (operator-facing).' }
               fulfilled: { type: boolean }
+        readiness:
+          type: object
+          required: [complete, gaps]
+          additionalProperties: false
+          description: |
+            Server-authoritative mint-gate verdict — the full `origin_readiness`
+            checklist (columns, task framing, answer space, answer format, node
+            models), recomputed on every draft response. The UI gates Start on
+            this and renders `gaps`; the client never re-derives the gate. Same
+            shape the `422 origin_incomplete` error carries in `details.gaps`.
+          properties:
+            complete:
+              type: boolean
+              description: True iff no field still blocks mint.
+            gaps:
+              type: array
+              items:
+                type: object
+                required: [field, reason, hint]
+                additionalProperties: false
+                properties:
+                  field: { type: string }
+                  reason: { type: string, enum: [unset, proposed_unconfirmed] }
+                  hint: { type: string }
+              description: Each field still blocking mint, with an operator-facing hint.
+        pipeline_view:
+          type: [object, 'null']
+          additionalProperties: true
+          description: |
+            The draft's parsed pipeline render — the graph `view` (nodes + edges)
+            the ingest node editor draws. Boundary-added (the same parse
+            `GET /datasets/{name}/pipeline` runs for a committed dataset), but
+            computed from the draft so a pre-commit check-in — which has no
+            `datasets/{slug}/` dir to fetch — still renders its node editor instead
+            of hanging on "Loading node…". Null when the pipeline declares no view.
+        node_config_schema:
+          type: object
+          additionalProperties: true
+          description: |
+            Per-node operator-editable config surface (model / temperature /
+            thinking / max_tokens / provider, minus prompt fields), keyed by node
+            id. Boundary-added beside `pipeline_view`, same draft-derived parse.
+        node_output_schema:
+          type: object
+          additionalProperties: true
+          description: |
+            Per-node structured-output contract (read-only), keyed by node id;
+            null per node when it declares none. Boundary-added beside
+            `pipeline_view`.
         created_at:
           type: string
           format: date-time
@@ -2293,8 +2382,8 @@ components:
         draft_id:
           type: string
           minLength: 8
-          maxLength: 64
-          description: Server-minted draft id returned by `/datasets/ingest`.
+          maxLength: 128
+          description: The check-in `campaign_id` (the draft's `draft_id`), from `/datasets/ingest`.
 
     OriginResolution:
       type: object
@@ -2365,8 +2454,8 @@ components:
         draft_id:
           type: string
           minLength: 8
-          maxLength: 64
-          description: Server-minted ULID returned by `/datasets/ingest`.
+          maxLength: 128
+          description: The check-in `campaign_id` (the draft's `draft_id`), from `/datasets/ingest`.
         patch:
           type: object
           additionalProperties: false
@@ -2427,43 +2516,46 @@ components:
                 Replaces (not deep-merges) the draft's origin prompt — the editor
                 sends the full `PromptTemplate.prompt_field_dict()` object.
 
-    MintCampaignFromDraftPayload:
+    StartCheckinPayload:
       type: object
-      required: [draft_id]
+      required: [campaign_id]
       additionalProperties: false
       description: |
-        Terminal-verb payload — no field overrides accepted at commit time;
-        the draft is the canonical source of truth. Tenant-scoped; 404 on
-        cross-tenant `draft_id`.
+        Start-verb payload — no field overrides at Start; the durable check-in
+        draft is the canonical source of truth. Tenant-scoped; 404 on a
+        cross-tenant `campaign_id` (or one with no check-in working state).
       properties:
-        draft_id:
+        campaign_id:
           type: string
           minLength: 8
-          maxLength: 64
-          description: Server-minted ULID returned by `/datasets/ingest`.
+          maxLength: 128
+          description: |
+            The check-in campaign id (the draft's `draft_id` IS this id — re-keyed
+            at `create_checkin_campaign`), returned by `/datasets/ingest`.
 
-    MintCampaignFromDraftResponse:
+    StartCheckinResponse:
       type: object
       required: [campaign_id, cycle_id, job_id]
       additionalProperties: false
       description: |
-        Canonical mint-campaign response. Matches the eventual
-        `CommandAckRecord` payload for `/commands/mint-campaign` once that
-        verb's async ack lands, but returned synchronously here because the
-        commit is a single atomic rename + mint.
+        Canonical mint response, returned synchronously through the commit +
+        runner spawn. Background progress then rides the ledger + `dashboard.json`.
       properties:
         campaign_id:
           type: string
           minLength: 1
           maxLength: 128
           pattern: '^[a-z][a-z0-9_-]*$'
-          description: 'Newly-minted campaign id ({slug}__{rand6_hex}).'
+          description: 'The started campaign id ({slug}__{rand6_hex}).'
         cycle_id:
           type: string
           minLength: 1
           maxLength: 128
-          pattern: '^cycle_[0-9a-f_]+$'
-          description: 'Root cycle id, content-addressed on the Origin (`cycle_{target_hash[:12]}`).'
+          pattern: '^cycle_[0-9a-z_]+$'
+          description: |
+            Root cycle id. A check-in keeps its provisional `cycle_chk_{rand}` id
+            as the permanent root (option 2b — drift reads `root_content_hash`,
+            not the parsed id).
         job_id:
           type: string
           minLength: 1
