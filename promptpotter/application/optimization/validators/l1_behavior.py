@@ -97,7 +97,7 @@ CheckFn = Callable[[dict[str, Any], ValidatorContext], CheckResult]
 # --- helpers ---------------------------------------------------------------
 
 # Phrase-seed tokens: alphabetic-start, 3+ chars (distinct from the word-set
-# tokenizer in ``_text.py`` — this one excludes digits and underscore-first
+# tokenizer in ``l2_output.py`` — this one excludes digits and underscore-first
 # tokens because it seeds noun-phrase substring matches, not set overlap).
 _PHRASE_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z_\-]{2,}")
 

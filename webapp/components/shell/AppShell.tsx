@@ -13,7 +13,6 @@ import { applyChartDefaults } from "@/lib/theme";
 import { cx } from "@/lib/cx";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { Topbar, type Tab } from "@/components/shell/Topbar";
-import { StatusAssistant } from "@/components/status/StatusAssistant";
 import { DashboardTab } from "@/components/dashboard/layout/DashboardTab";
 import { SelectionProvider } from "@/lib/SelectionContext";
 import { LineageOverlayProvider } from "@/lib/lineage-overlay";
@@ -70,11 +69,10 @@ function AppShellInner() {
     cycles,
     selectCycle,
   } = useWorkspace();
-  // Replit-style sub-tabs (Chat / Dashboard / Verify) scoped to the
-  // currently-selected cycle. Files is reachable only via StatusAssistant's
-  // "Open files" link — not exposed on the topbar. Default = chat: that's
-  // where new cycles get conceived and where the conversational interface
-  // lives.
+  // Replit-style sub-tabs (Chat / Dashboard / Verify / Files) scoped to the
+  // currently-selected cycle. Default = chat: that's where new cycles get
+  // conceived and where the conversational interface lives. (The
+  // CriticalAlertBanner also jumps to Files on a failure state.)
   const [tab, setTab] = useState<Tab>("chat");
   const [newCampaignOpen, setNewCampaignOpen] = useState(false);
   // Bumped each time "New campaign" is hit while the chat tab is in view —
@@ -272,15 +270,6 @@ function AppShellInner() {
               : undefined
           }
         />
-        {cycleId && !showCheckin ? (
-          <StatusAssistant
-            status={bannerStatus}
-            statusText={bannerText}
-            statusHint={bannerHint}
-            termKey={dashState.termKey}
-            onOpenFiles={() => setTab("files")}
-          />
-        ) : null}
         {showCheckin && campaignId ? (
           <CheckinReopenPane
             campaignId={campaignId}

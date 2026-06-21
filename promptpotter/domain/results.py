@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
@@ -386,6 +386,9 @@ class WarningDict(TypedDict):
     stats: NotRequired[dict[str, Any]]
 
 
+HealthGrade = Literal["healthy", "degraded", "critical"]
+
+
 class DegradationHealth(BaseModel):
     """Backend-computed, context-aware degradation verdict for a round (origin
     included) — the single graded signal every surface renders (R-36).
@@ -400,7 +403,7 @@ class DegradationHealth(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    grade: str  # "healthy" | "degraded" | "critical"
+    grade: HealthGrade
     reasons: list[str] = Field(default_factory=list)
     samples: int
     structural_count: int

@@ -26,6 +26,6 @@ That's it.
 
 ## No Claude Code?
 
-Drive everything from the CLI: [`operations/cli-reference.md`](../operations/cli-reference.md). The skill is recommended because it handles dataset discovery, config selection, resume vs new, and error triage.
+Drive everything from the CLI — `new` / `resume` flags and state layout are in [`operations/persistence-and-state.md`](../operations/persistence-and-state.md#cli-flags--new-and-resume). The skill is recommended because it handles dataset discovery, config selection, resume vs new, and error triage.
 
 Next: [Reading the output](04-reading-the-output.md).

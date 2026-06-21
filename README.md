@@ -83,7 +83,7 @@ Compared head-to-head with DSPy (GEPA, MIPROv2, BootstrapFewShot), CAPO, and Pro
 
 | 🧠 Concepts | ⚙ Operations | 🔬 Research |
 |---|---|---|
-| [Three-layer loop](docs/concepts/the-loop.md) | [CLI reference](docs/operations/cli-reference.md) | [Benchmarks](docs/research/benchmarks.md) |
+| [Three-layer loop](docs/concepts/the-loop.md) | [Install & env](docs/manual/02-install.md) | [Benchmarks](docs/research/benchmarks.md) |
 | [State record](docs/concepts/state-record.md) | [Backend integration](docs/operations/backend-integration.md) | [Metrics (HC, SE, R₉₀)](docs/research/metrics.md) |
 | [Self-healing](docs/developer/self-healing-internals.md) | [Persistence, state, recovery](docs/operations/persistence-and-state.md) | [Related work](docs/research/related-work.md) |
 | [Scoring and memory](docs/concepts/scoring-and-memory.md) | [Observability](docs/operations/observability.md) | |

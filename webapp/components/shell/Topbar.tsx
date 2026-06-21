@@ -33,8 +33,7 @@ function ThemeToggle() {
 
 // Per-cycle sub-tabs (Replit-style): the sidebar carries the campaign
 // library; the topbar carries the views over the *currently-selected*
-// campaign. `files` is part of the type but not rendered here — the
-// StatusAssistant's "Open files" link is the sole entry point into FilesPane.
+// campaign — Chat, Dashboard, Verify, and the Files tree.
 export type Tab = "chat" | "dashboard" | "files" | "verify";
 
 interface Props {
@@ -49,6 +48,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "chat", label: "Chat" },
   { id: "dashboard", label: "Dashboard" },
   { id: "verify", label: "Verify" },
+  { id: "files", label: "Files" },
 ];
 
 export function Topbar({ tab, onTabChange, onMenuToggle }: Props) {

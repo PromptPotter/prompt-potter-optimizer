@@ -255,7 +255,15 @@ driven via `PROMPTPOTTER_AUTH=off` (`deps.py::resolve_identity` →
 `registered_or_default_identity`, the CLI's resolver) against the operator's
 real on-disk campaigns. Console clean (0 errors) across every tab; the connector
 rests at a terminal `unreachable` when the backend is down; frozen units show
-"UPDATED · Nh ago". No fixtures, no Docker, no spend.
+"UPDATED · Nh ago". No fixtures, no Docker, no spend. **Set `PROMPTPOTTER_ADMIN=1`
+alongside the auth flag when the campaigns under test target install benchmarks**
+(repo `datasets/{name}/` — any CLI `new <benchmark>` campaign): their
+`/datasets/{name}/preview` + `/measurement-series` resolve only for an identity
+holding `BENCHMARKS_READ_CAP`, which the production operator carries (pinned at
+the OIDC seam) but the bare auth-off identity does not — without it those two
+reads 404 and break the console-clean clause, a harness gap rather than a product
+defect (a real operator has the cap; regular tenants never own benchmark
+campaigns).
 
 Two states remain **un-exercised** (not contract gaps — just unreached here):
 - `warming` (origin running, `dashboard.json` not yet written) — needs a live

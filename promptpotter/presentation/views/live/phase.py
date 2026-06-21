@@ -1,7 +1,9 @@
-"""Round-summary renderers (``LiveDisplay.on_round_complete``). Pure: no I/O, no mutation."""
+"""Round-summary renderers (``LiveDisplay.on_round_complete``). Pure: no campaign
+I/O, no mutation (errors log, never abort the live readout)."""
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.presentation.views.display import (
@@ -17,6 +19,8 @@ from promptpotter.shared.errors import is_error_result
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.results import RoundResult
+
+logger = logging.getLogger(__name__)
 
 
 def fmt_elapsed(seconds: float) -> str:
@@ -162,7 +166,9 @@ def render_round_stats(
                     _node_line(f"Recall: top-1={recall_at_k(1):.0%} top-5={recall_at_k(5):.0%}")
                 )
     except Exception:
-        pass
+        # Resilient by design — a render glitch must not abort the live readout —
+        # but surface it (R-48 fail-loud), never swallow silently.
+        logger.warning("round-stats render block failed; lines dropped", exc_info=True)
 
     return "\n".join(lines)
 

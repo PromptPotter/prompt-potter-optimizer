@@ -28,43 +28,6 @@
 }
 .dash-spine-narrow:last-child{margin-bottom:0}
 
-/* Status assistant — Clippy-style floating chip pinned to the
-   bottom-right corner of the viewport, just above the Console pane.
-   Expanded form carries the contextual framing (dot + statusText +
-   statusHint) plus the operator's one jump into FilesPane and a manual
-   collapse affordance. After 10s of idle time it shrinks to a circular
-   button (see StatusAssistant.tsx). */
-.status-assistant{position:fixed;right:16px;bottom:56px;z-index:30;
-  display:inline-flex;align-items:center;gap:10px;
-  background:var(--color-background-primary);
-  border:0.5px solid var(--color-border-tertiary);
-  border-radius:var(--border-radius-md);
-  box-shadow:0 4px 14px rgba(0,0,0,0.14);
-  font-size:13px;
-  max-width:calc(100vw - 32px);
-  transition:box-shadow .15s ease,transform .15s ease}
-.status-assistant.expanded{padding:8px 10px 8px 14px;min-width:260px;max-width:420px}
-.status-assistant.expanded.live{background:var(--color-success-bg);color:var(--color-success);border-color:var(--color-success-border);box-shadow:0 4px 14px rgba(0,0,0,0.14),inset 3px 0 0 var(--color-success)}
-.status-assistant.expanded.stale{background:var(--color-warn-bg);color:var(--color-warn);border-color:var(--color-warn-border);box-shadow:0 4px 14px rgba(0,0,0,0.14),inset 3px 0 0 var(--color-warn)}
-.status-assistant.expanded.offline{background:var(--color-danger-bg);color:var(--color-danger);border-color:var(--color-danger-border);box-shadow:0 4px 14px rgba(0,0,0,0.14),inset 3px 0 0 var(--color-danger)}
-.status-assistant.collapsed{width:44px;height:44px;padding:0;border-radius:50%;justify-content:center;cursor:pointer}
-.status-assistant.collapsed:hover{transform:scale(1.06);box-shadow:0 6px 18px rgba(0,0,0,0.18)}
-.status-assistant.collapsed:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
-.status-assistant.collapsed.live{color:var(--color-success);border-color:var(--color-success-border)}
-.status-assistant.collapsed.stale{color:var(--color-warn);border-color:var(--color-warn-border)}
-.status-assistant.collapsed.offline{color:var(--color-danger);border-color:var(--color-danger-border)}
-.status-assistant.collapsed .status-dot{width:14px;height:14px}
-.status-assistant-text{display:inline-flex;align-items:baseline;gap:8px;min-width:0;flex:1;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.status-assistant-text strong{color:currentColor}
-.status-assistant-hint{color:var(--color-text-tertiary);font-weight:400;overflow:hidden;text-overflow:ellipsis;font-size:12px}
-.status-assistant-jump{font-family:inherit;font-size:12px;color:var(--color-text-secondary);background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:4px 10px;cursor:pointer;transition:color .15s,border-color .15s,background .15s;flex-shrink:0}
-.status-assistant-jump:hover{color:var(--color-accent);border-color:var(--color-accent);background:var(--color-background-hover)}
-.status-assistant-jump:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
-.status-assistant-close{background:transparent;border:0;color:currentColor;opacity:.6;font-size:18px;line-height:1;cursor:pointer;padding:2px 6px;border-radius:4px;flex-shrink:0}
-.status-assistant-close:hover{opacity:1;background:var(--color-background-hover)}
-.status-assistant-close:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
-
 /* CriticalAlertBanner — the loud, can't-miss failure surface. Sticky bar
    pinned under the Topbar on every tab, above all content. `critical` =
    blocking (server gone / crash) in danger tone + a weak blink; `warn` =
@@ -270,14 +233,6 @@
    narrow viewports without leaving the cells overlapping. */
 @container content (max-width:780px){
   .dash-hero .page-header{flex-direction:column;align-items:flex-start}
-}
-/* Mobile (≤640px): the floating StatusAssistant chip pulls to the edge and
-   its expanded form spans the width instead of a fixed 260px box. The chip
-   is position:fixed outside .content, so this is a viewport @media query,
-   not a container query. */
-@media (max-width:640px){
-  .status-assistant{right:12px}
-  .status-assistant.expanded{left:12px;right:12px;min-width:0;max-width:none}
 }
 
 .page-header{display:flex;align-items:center;margin-bottom:0;gap:20px;flex-wrap:wrap}

@@ -240,6 +240,20 @@ export function WorkflowCanvas({ pipeline }: Props) {
                   }}
                 >
                   {tip && <title>{tip}</title>}
+                  {/* Full-node hit target — the dot plus its label band, so a
+                      click anywhere on the node selects it (the 11px dot alone
+                      leaves the gap between dot and label dead). Mirrors the
+                      lineage node's transparent backing rect. Skipped for I/O
+                      nodes, which carry no selection handler. */}
+                  {!isIo && (
+                    <rect
+                      x={pos.cx - (DOT_R + 8)}
+                      y={pos.cy - (DOT_R + 8)}
+                      width={2 * (DOT_R + 8)}
+                      height={lDy + (sub ? 26 : 14) + (DOT_R + 8)}
+                      fill="transparent"
+                    />
+                  )}
                   <circle className={dotCls} cx={pos.cx} cy={pos.cy} r={DOT_R} />
                   <text
                     className="wf-dot-label"

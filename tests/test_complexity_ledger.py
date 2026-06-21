@@ -22,8 +22,10 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # check-in: ``infrastructure/store/checkin_draft_store.py`` + the two-transition
 # seam ``application/jobs/launcher/checkin.py`` — a real disk-backed campaign
 # authoring state that replaces the restart-wiped in-memory ``DraftCampaignRegistry``).
+# Subtraction since: ``modules`` 295→294 (inlined the single-use
+# ``validators/_text.py`` word-set helper into its lone consumer ``l2_output.py``).
 LEDGER_BASELINE = {
-    "modules": 295,
+    "modules": 294,
     "init_files": 55,
     "reexport_shims": 42,
     "config_leaf_fields": 32,

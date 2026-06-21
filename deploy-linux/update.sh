@@ -40,7 +40,7 @@ say "app: $INSTALL_DIR"
 sync "$INSTALL_DIR"
 # Install the exact pinned graph from uv.lock — same source of truth as CI.
 # uv is fetched to ~/.local/bin (outside .venv, so a sync never wipes it).
-command -v uv >/dev/null 2>&1 || python3 -m pip install --user -q uv
+command -v uv >/dev/null 2>&1 || { command -v "$HOME/.local/bin/uv" >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh; }
 ( cd "$INSTALL_DIR" && PATH="$HOME/.local/bin:$PATH" uv sync --frozen --extra all )
 [[ -d "$INSTALL_DIR/$WEBAPP_DIR" ]] && ( cd "$INSTALL_DIR/$WEBAPP_DIR" && npm install --silent && npm run build:deploy )
 sudo systemctl restart "$SERVICE_NAME"

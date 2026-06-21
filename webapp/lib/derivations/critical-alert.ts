@@ -1,14 +1,14 @@
 // Single source of truth for the loud, cross-tab critical-alert bar. The
-// dashboard already surfaced failures three quiet ways — an inline
-// RunErrorBanner (dashboard tab only), a floating chip that auto-hid after
-// 10 s, and an always-green phase tag — none of which an operator who has
-// alt-tabbed away would notice. This collapses the "something is wrong"
-// question to one boolean-ish verdict the top banner renders on every tab.
+// dashboard once surfaced failures quietly — an inline RunErrorBanner
+// (dashboard tab only) and an always-green phase tag — neither of which an
+// operator who has alt-tabbed away would notice. This collapses the
+// "something is wrong" question to one boolean-ish verdict the top banner
+// renders on every tab.
 //
-// Inputs are already-reconciled signals owned by AppShell (the same
-// `bannerStatus`/`bannerText`/`bannerHint` it feeds the StatusAssistant, plus
-// `dash` and the connection-aware `runPhaseResolved`) — no new state, no new
-// poll. Reader-side and pure, so it sits in the Vitest derivation scope.
+// Inputs are already-reconciled signals owned by AppShell (its
+// `bannerStatus`/`bannerText`/`bannerHint`, plus `dash` and the
+// connection-aware `runPhaseResolved`) — no new state, no new poll.
+// Reader-side and pure, so it sits in the Vitest derivation scope.
 
 import type { RoundSummary } from "@/lib/api/types";
 import type { DashboardSnapshot, StatusKind } from "@/lib/poll";
@@ -135,6 +135,6 @@ export function criticalAlert({
   }
   // `warming_up` (server reachable, no snapshot yet — e.g. a forked cycle whose
   // runner hasn't started) is NOT a lost connection, so it raises nothing here.
-  // The quiet StatusAssistant chip still surfaces "Origin running".
+  // The CyclePicker's run-phase label ("scoring origin") surfaces this benign state.
   return null;
 }

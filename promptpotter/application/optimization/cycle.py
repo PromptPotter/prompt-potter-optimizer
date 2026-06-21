@@ -206,7 +206,9 @@ def _inherit_sibling_runtime_failures(opt_sp: OptSearchPoint, session: Session) 
             exclude_cycle_id=session.state.cycle_id,
         )
     except Exception:
-        logger.debug("sibling runtime_failures inheritance skipped", exc_info=True)
+        # Surface, don't swallow: on failure L1 never sees configs sibling forks
+        # already proved to fail — a real optimization-quality regression, not noise.
+        logger.warning("sibling runtime_failures inheritance skipped", exc_info=True)
         return
     if failures:
         opt_sp.memory.wounds.runtime_failures.extend(failures)

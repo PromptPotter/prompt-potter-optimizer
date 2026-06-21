@@ -18,9 +18,8 @@ You've run a campaign. Pointers below for the next layer.
 
 | Page | Covers |
 |------|--------|
-| [CLI reference](../operations/cli-reference.md) | Every subcommand (`new`, `resume`, `compare`, `sweep`), flag, and env variable |
 | [Backend integration](../operations/backend-integration.md) | The contract a backend must implement |
-| [Persistence and state](../operations/persistence-and-state.md) | The `.promptpotter/` tree, resume, rewind, fork, scoring steer |
+| [Persistence and state](../operations/persistence-and-state.md) | The `.promptpotter/` tree, `new` / `resume` flags, resume, rewind, fork, scoring steer |
 | [Observability](../operations/observability.md) | Langfuse integration |
 
 ## Developer — implementation

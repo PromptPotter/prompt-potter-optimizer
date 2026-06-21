@@ -24,6 +24,9 @@ A **Session** is one `new` invocation; a campaign holds one. `resume` extends it
 - **`resume`** reads the pointer and picks up that cycle. No re-`new` needed.
 - **fork** mints a new cycle in the same session and retargets the pointer.
 - **`--session <id>`** overrides the pointer for one command.
+- **`--tenant <id>`** (default `"default"`) selects the partition under `projects/` for the command.
+
+Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [options]`. Loop-mint verbs: `new`, `resume`. Lifecycle verbs: `archive`, `delete`, `unarchive`, `reset`. Diagnostic verbs: `verify`, `compare`, `sweep`. Reads happen by opening the on-disk artifact tree — there is no read CLI.
 
 ## Layout
 
@@ -66,6 +69,8 @@ A **Session** is one `new` invocation; a campaign holds one. `resume` extends it
 | `.runtime/ledger.jsonl` | per cycle | Append-only fact stream. Escalation firings ride a `PhaseRecord(phase="escalation", event="rule_fired")` — no separate signals stream. |
 | `.runtime/streams/…_p_best.jsonl` | per cycle | Per-sample PoBB snapshots. |
 | `.runtime/cache/rounds\|candidates/` | per cycle | Per-node I/O (l1_generate/critique/score, l2/l3) + pre-scoring candidate checkpoint. |
+
+The most-recent run's live readout (per-sample HIT/MISS, round summaries, SP tables), ANSI-stripped, also mirrors to the repo-root gitignored **`.goldmine/latest.log`** — the headless tail when you're not watching `dashboard.json::current_round`.
 
 Material facts land on disk in human-readable form; reads happen by opening files (no read CLI). Entry points never write campaign artifacts directly — every write rides the per-cycle ledger through two projections (live telemetry + audit). The allowlist is a structural invariant that fails loud (an out-of-allowlist write shows up in the file tree); no standing test, see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md).
 
@@ -123,11 +128,44 @@ python -m promptpotter new --sweep-batch   # dispatches sweep-mode against the f
 
 **Reading results.** Side-by-side: `python -m promptpotter sweep rank` (groups by parent root, sorts by `round_1_top_lift`, reports `proxy_lift_corr` once ≥4 paired sweep/full branches share an `l1_generate_hash`). **Sweep is screening, not validation** — promote winners to a full `new` run. L1-surface only; pipeline/scoring changes are intentionally absent from the operator file shape. Forks run sequentially (the active pointer doesn't tolerate concurrent mints).
 
+## CLI flags — `new` and `resume`
+
+`new <name>` mints a fresh session+cycle from an authored `datasets/<name>/` and runs from round 0. `new <file>` (a CSV — `Path.is_file()`) parses the file into a durable check-in campaign, runs the AI origin check-in (the same `checkin` node the web ingest uses), auto-confirms high-confidence findings, and — once the readiness gate passes — flips the check-in to `active` and runs the loop inline. It reuses the exact orchestration behind web onboarding (`ingest_draft` → `resolve_origin_turn` → `prepare_checkin_run`); the only CLI↔web difference is the CLI runs inline while the web start-checkin detaches. If a gap survives the resolver, `new` prints the open fields + questions and exits non-zero — nothing is minted on a guessed default; confirm with `--set` and re-run. After a successful file run the committed slug is first-class to `new <slug>` / `resume`.
+
+| `new` flag | Purpose |
+|---|---|
+| `<name\|file>` (positional) | Dataset name under `./datasets/` (auto-loads its `campaign.json`) **or** a path to a raw CSV to ingest |
+| `--config` | Campaign config JSON — overrides the dataset's default `campaign.json` (name form) |
+| `--dataset-name` | Alternative to the positional name |
+| `--slug` | *(file form)* Dataset slug under `projects/{tenant}/datasets/` (default: derived from the filename) |
+| `--set FIELD=VALUE` | *(file form)* Confirm an origin field directly (operator-stated), repeatable. Fields: `task_description`, `column.query`, `column.ground_truth`, `connector`, `scoring_composite`, `max_rounds`. Applied before the resolver, so it seeds the rest |
+| `--backend-url` | Backend service URL |
+| `--backend-id` | Override backend id (auto-derived from `dataset_name` otherwise) |
+| `--task-file` / `--task-text` | *(name form)* Override `<dataset>/task_description.md` from a file or inline |
+| `--halt-at` / `--spend-budget` | Run-halt gates (both forms) |
+| `--diag` | Diagnostic mode — marks `index.json::final.mode` as `'diag'`; branches off a counted sibling on re-run |
+| `--excel-path` | Path to an Excel workbook to load alongside the dataset (name form) |
+| `--sweep-batch` | Sweep-batch config path (name form — see [Sweep batch](#sweep-batch--new---sweep-batch)) |
+
+The workflow flags `--from`, `--fork-on-divergence`, `--rewind`, `--rewind-reason` are covered under [Recovery](#recovery-resume-rewind-fork-sweep) above. The remaining `resume` flags:
+
+| `resume` flag | Purpose |
+|---|---|
+| `--no-check` | Rescore but skip the decision-replay halt |
+| `--diag` | Diagnostic mode (see `new --diag`); on a previously-completed diag cycle, branches off a counted sibling |
+
+### Interrupt handling
+
+- **First Ctrl+C** — finishes the in-flight backend call, saves all completed work, exits cleanly.
+- **Second Ctrl+C** — force-quits immediately.
+
+After an interrupted run, check for orphan processes (`tasklist | findstr python` on Windows; `ps aux | grep python` on Linux/Mac). An interrupt mid-round leaves ledger events but no closing `round:complete` — see **Interrupted rounds** under Rewind above for which `--from N` offsets are then admissible.
+
 ## Will a config change re-score? — the measurement cache
 
 The single most-asked operating question: *"I edited a connector tunable (model,
 temperature, a node param) — will the next run actually re-measure, or replay the old
-score?"* Three facts answer it; together they're why editing a file can feel inert.
+score?"* Three facts answer it; together they're why editing a file can feel inert. (`configure_and_apply_pipeline` applies `exclude_nodes` + `pipeline_overrides` and returns the `pipeline_params` that flow unchanged through both `new` and `resume`; a `None` result means the backend runs its full pipeline.)
 
 1. **The measurement key includes the connector config (model included).** Per-sample
    results pool in `archive/measurements/` keyed by `node_configs` — the effective

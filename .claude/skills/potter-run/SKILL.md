@@ -194,4 +194,4 @@ Open `campaigns/<campaign_id>/log.md` (campaign digest — status, every cycle +
 - `reference/benchmark-datasets.md` — readiness + cost model
 - `reference/optimization-layers.md` — L1/L2/L3 escalation
 - `reference/troubleshooting.md` — stop-reason recovery
-- `docs/concepts/the-loop.md`, `docs/developer/self-healing-internals.md`, `docs/operations/cli-reference.md`
+- `docs/concepts/the-loop.md`, `docs/developer/self-healing-internals.md`, `docs/operations/persistence-and-state.md`

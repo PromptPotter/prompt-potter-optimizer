@@ -19,15 +19,36 @@ signal.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
-from promptpotter.application.optimization.validators._text import word_set_jaccard
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.validators import LLMOutputValidator, ValidatorOutcome, run_validators
 
 DUPLICATE_INSERT_LINE_THRESHOLD = 3
 PARAPHRASE_REPEAT_JACCARD_THRESHOLD = 0.5
+
+_WORD_RE = re.compile(r"\w+")
+
+
+def _word_set(text: str, *, min_len: int = 3) -> set[str]:
+    """Lower-cased word tokens of ``text`` at least ``min_len`` chars long."""
+    return {w for w in _WORD_RE.findall(text.lower()) if len(w) >= min_len}
+
+
+def word_set_jaccard(a: str, b: str, *, min_len: int = 3) -> float:
+    """Jaccard overlap of the two strings' significant-word sets.
+
+    Returns ``0.0`` when either side has no qualifying words (an empty set has no
+    meaningful overlap), so callers can compare against a threshold without a
+    separate empty-guard.
+    """
+    wa = _word_set(a, min_len=min_len)
+    wb = _word_set(b, min_len=min_len)
+    if not wa or not wb:
+        return 0.0
+    return len(wa & wb) / len(wa | wb)
 
 
 def _attr_or_key(entry: Any, name: str) -> Any:

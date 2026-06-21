@@ -13,7 +13,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from promptpotter.config.settings import NO_RESULT
-from promptpotter.domain.results import DegradationHealth, RoundResult, WarningDict
+from promptpotter.domain.results import DegradationHealth, HealthGrade, RoundResult, WarningDict
 
 # Degradation-health thresholds (explicit — no hidden defaults). The verdict
 # distinguishes a structurally-broken pipeline (abort-worthy) from transient
@@ -195,6 +195,7 @@ def compute_degradation_health(
     rates = node_failure_rates or {}
     starved_node = evidence_starved_node(rates)
 
+    grade: HealthGrade
     reasons: list[str] = []
     # Backend-down outranks every other verdict: an unreachable backend isn't a
     # pipeline problem the optimizer can move, it's a halt-and-restart condition.
