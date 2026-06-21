@@ -176,6 +176,17 @@ function ValuesEditor({
     [schema, seedOverlay, node],
   );
   const [edits, setEdits] = useState<Record<string, string>>({});
+  // Render-phase guarded reset (webapp/CLAUDE.md § State reset on prop change):
+  // when the seed changes the prior edits no longer apply. The seed loads ASYNC
+  // in SteerForkPanel (useRoundFile) — `{}` first, then the candidate's resolved
+  // config — so an edit made before it lands must not keep masking the freshly
+  // seeded `r.value` below.
+  const sig = `${node ?? ""}|${JSON.stringify(seedOverlay)}`;
+  const [prevSig, setPrevSig] = useState(sig);
+  if (sig !== prevSig) {
+    setPrevSig(sig);
+    setEdits({});
+  }
 
   if (rows.length === 0) return <EmptyConfig />;
 

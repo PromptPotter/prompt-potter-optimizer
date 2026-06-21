@@ -246,6 +246,12 @@ class RoundResult(BaseModel):
     cumulative_accuracy: float = 0.0
     # --- raw payload ---
     prompt_fields: dict[str, Any]
+    # The elected winner's `memory.task_context` (TaskDecomposition.to_dict()), so
+    # `Cycle.absorb_round` adopts an L1 winner's task_context delta onto the cycle's
+    # working OSP. It rides its OWN field, not `prompt_fields`, precisely so it does
+    # NOT enter `render()`/the identity gate/the content hash — those stay symmetric.
+    # None when the winner carried no task-framing (default TaskDecomposition).
+    winner_task_context: dict[str, str] | None = None
     pipeline_params: dict[str, Any] | None = None
     # Prior round's accuracy (or campaign origin for round 0).
     origin_accuracy: float = 0.0

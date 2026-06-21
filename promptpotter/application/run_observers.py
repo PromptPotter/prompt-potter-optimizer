@@ -386,10 +386,15 @@ def build_run_observers(
     # The trace id is created at CampaignStart (during bootstrap, before this),
     # so it's already on the obs bridge — hand it to the dashboard as a set-once
     # identity stamp (like session_id), not a tracing-stream read (fan-out-only
-    # stays intact). None when Langfuse is disabled.
+    # stays intact). None when Langfuse is disabled. Keyed by `tracing_campaign_id`
+    # — the stable root-cycle key the trace was stored under (`CampaignStart`); a
+    # fork reassigns `cycle_id` but emits into the same root trace, so the live
+    # `cycle_id` would miss the lookup and drop the fork's deep link.
     obs = session.state.obs
     trace_url = (
-        langfuse_trace_url(obs.get_langfuse_trace_id(session.state.cycle_id)) if obs else None
+        langfuse_trace_url(obs.get_langfuse_trace_id(session.state.tracing_campaign_id))
+        if obs
+        else None
     )
     if fork is None:
         dashboard = build_campaign_emitter(

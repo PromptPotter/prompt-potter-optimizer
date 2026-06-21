@@ -8,45 +8,21 @@ extraction lives in ``domain/rendering.py``.)
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable
 from typing import Any
 
-from promptpotter.shared import sigmoid
-
-GSM8K_ANSWER_RE = re.compile(r"####\s*(-?[\d,]+\.?\d*)")
-"""Matches the GSM8K answer-field format ``#### N``. Shared with the
-dataset loader, which normalises raw ground truth to the same shape."""
-_NUMBER_RE = re.compile(r"-?\d[\d,]*\.?\d*")
-_BOXED_RE = re.compile(r"\\boxed\{([^{}]+)\}")
-_BOLD_RE = re.compile(r"\*\*([^*]+?)\*\*")
-
-
-def _extract_bold(text: str) -> str:
-    """Return the last ``**…**`` run, else *text* unchanged."""
-    if not text:
-        return ""
-    matches = _BOLD_RE.findall(text)
-    if matches:
-        last: str = matches[-1]
-        return last.strip()
-    return text
-
-
-def _extract_gsm8k_number(text: str) -> float | None:
-    """Extract GSM8K answer: ``#### N`` first, else the last number."""
-    m = GSM8K_ANSWER_RE.search(text)
-    if m:
-        return float(m.group(1).replace(",", ""))
-    matches = _NUMBER_RE.findall(text)
-    if matches:
-        return float(matches[-1].replace(",", ""))
-    return None
+from promptpotter.shared import (
+    BOXED_RE,
+    NUMBER_RE,
+    extract_gsm8k_number,
+    extract_last_bold,
+    sigmoid,
+)
 
 
 def _gsm8k_match(predicted: str, ground_truth: str) -> float:
-    gt = _extract_gsm8k_number(ground_truth or "")
-    pred = _extract_gsm8k_number(predicted or "")
+    gt = extract_gsm8k_number(ground_truth or "")
+    pred = extract_gsm8k_number(predicted or "")
     if gt is None or pred is None:
         return 0.0
     return 1.0 if gt == pred else 0.0
@@ -65,7 +41,7 @@ def _aime_match(predicted: str, ground_truth: str) -> float:
 
     text = predicted or ""
 
-    boxed = _BOXED_RE.findall(text)
+    boxed = BOXED_RE.findall(text)
     if boxed:
         raw = boxed[-1].strip()
         try:
@@ -74,7 +50,7 @@ def _aime_match(predicted: str, ground_truth: str) -> float:
         except (ValueError, OverflowError):
             pass
 
-    matches = _NUMBER_RE.findall(text)
+    matches = NUMBER_RE.findall(text)
     if not matches:
         return 0.0
     try:
@@ -86,8 +62,8 @@ def _aime_match(predicted: str, ground_truth: str) -> float:
 
 def _exact_match(predicted: str, ground_truth: str) -> float:
     """Exact match after bold-strip + lowercase. Markdown bold markers stripped both sides."""
-    p = _extract_bold(predicted or "").strip().lower()
-    g = _extract_bold(ground_truth or "").strip().lower()
+    p = extract_last_bold(predicted or "").strip().lower()
+    g = extract_last_bold(ground_truth or "").strip().lower()
     return 1.0 if p == g else 0.0
 
 
@@ -124,7 +100,8 @@ SCORING_FUNCTIONS: dict[str, Callable[..., Any]] = {
 # committed prompt. This is where extractability is DECIDED — the matcher reads a
 # label out of the raw model output — so the contract lives with the matcher, not
 # the backend (TermNorm's ``llm_only`` passes the raw answer straight through; it's
-# ``_extract_bold`` / ``_extract_*_number`` here that isolate the label). Fed to the
+# the ``shared`` extractors (``extract_last_bold`` / ``extract_gsm8k_number``) that
+# isolate the label). Fed to the
 # origin check-in resolver (``origin_resolve.build_origin_consultation``) so it
 # authors an ``answer_format`` the chosen scorer can actually read, and gated by
 # ``origin_readiness._check_commit_format``. Matchers that compare the raw text
@@ -160,7 +137,6 @@ def extraction_note_for_scoring(scoring: str) -> str:
 
 __all__ = [
     "EXTRACTION_NOTES",
-    "GSM8K_ANSWER_RE",
     "SCORING_FUNCTIONS",
     "extraction_note_for_scoring",
 ]

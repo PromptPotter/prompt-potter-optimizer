@@ -45,7 +45,6 @@ from promptpotter.application.scoring.formula import (
 from promptpotter.application.scoring.formula.matchers import (
     _aime_match,
     _exact_match,
-    _extract_gsm8k_number,
     _gsm8k_match,
 )
 from promptpotter.application.scoring.metrics import (
@@ -61,6 +60,7 @@ from promptpotter.domain.pipeline_schema import (
 )
 from promptpotter.domain.rendering import display_fitness
 from promptpotter.domain.sample import Sample
+from promptpotter.shared import extract_gsm8k_number
 
 # ===========================================================================
 # 1. Scorer matcher formulas — one parametrized family
@@ -78,10 +78,10 @@ from promptpotter.domain.sample import Sample
         (_aime_match, (r"First: \boxed{10}. Rechecking: \boxed{42}", "42"), 1.0),
         (_aime_match, (r"\boxed{undefined} The answer is 42", "42"), 1.0),
         (_aime_match, ("no numbers", "42"), 0.0),
-        # _extract_gsm8k_number: comma-stripped / #### preferred / none.
-        (_extract_gsm8k_number, ("#### 1,234",), 1234.0),
-        (_extract_gsm8k_number, ("I calculated 99 but #### 42",), 42.0),
-        (_extract_gsm8k_number, ("no numbers",), None),
+        # extract_gsm8k_number: comma-stripped / #### preferred / none.
+        (extract_gsm8k_number, ("#### 1,234",), 1234.0),
+        (extract_gsm8k_number, ("I calculated 99 but #### 42",), 42.0),
+        (extract_gsm8k_number, ("no numbers",), None),
         # _gsm8k_match: cross-format numeric equivalence / mismatch.
         (_gsm8k_match, ("42.0", "#### 42"), 1.0),
         (_gsm8k_match, ("#### 99", "#### 42"), 0.0),

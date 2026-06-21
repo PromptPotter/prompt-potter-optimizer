@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from promptpotter.application.views.ingress import (
     from_phase_event,
-    pick_round_winner,
     score_entry_from_dict,
 )
 from promptpotter.application.views.render import render_sweep_summary, to_markdown
@@ -77,7 +76,6 @@ __all__ = [
     "ViewContext",
     "WarningEntry",
     "from_phase_event",
-    "pick_round_winner",
     "render_sweep_summary",
     "score_entry_from_dict",
     "to_markdown",

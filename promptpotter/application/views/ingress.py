@@ -7,8 +7,8 @@ in-memory ledger fan-out — subscribers consume it directly (``to_text`` /
 attribute reads); Pydantic serializes it to its wire dict on persist + SSE, so
 no hand-rolled reconstruction is needed.
 
-Score-entry helpers (``pick_round_winner``, ``score_entry_from_dict``) are also
-consumed by ``application/output/writers.py`` for disk-derived ``log.md`` rendering.
+The ``score_entry_from_dict`` helper is also consumed by
+``application/output/writers.py`` for disk-derived ``log.md`` rendering.
 """
 
 from __future__ import annotations
@@ -45,16 +45,12 @@ from promptpotter.domain.opt_search_point import (
     flatten_sp_summary,
 )
 from promptpotter.domain.phases import PhaseEvent
-from promptpotter.domain.rendering import (
-    format_l1_critique_for_prompt,
-    round_winner_key,
-)
+from promptpotter.domain.rendering import format_l1_critique_for_prompt
 from promptpotter.domain.results import ScoredCandidate
 from promptpotter.shared import truncate
 
 __all__ = [
     "from_phase_event",
-    "pick_round_winner",
     "score_entry_from_dict",
 ]
 
@@ -220,11 +216,14 @@ def _l1_generate_exit(d: dict[str, Any], ctx: ViewContext) -> CandidatesGenerate
 def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
     score_entries = [score_entry_from_dict(s) for s in d.get("candidate_scores") or []]
 
-    winner = pick_round_winner(score_entries)
-    if winner is not None:
-        winner_label, winner_hits, winner_total = winner.label, winner.hits, winner.total
-    else:
-        winner_label, winner_hits, winner_total = "?", 0, 0
+    # The promoted winner is elected by `elect_round_winner` (paired-delta LCB);
+    # read its identity straight off the round result, never re-elect by a
+    # point-estimate here — that could name a different candidate than the one
+    # actually promoted (whose accuracy is `winner_accuracy`), so the verdict
+    # line / SCOREBOARD `*` would disagree with the dashboard.
+    winner_label = str(d.get("winner_label") or "?")
+    winner_hits = int(d.get("winner_hits", 0))
+    winner_total = int(d.get("winner_total", 0))
 
     w_acc = float(d["winner_accuracy"])
     improved = bool(d["improved"])
@@ -366,14 +365,6 @@ def from_phase_event(event: PhaseEvent, ctx: ViewContext) -> AnyView | None:
 
 
 # --- score-entry helpers (shared with application/output/writers disk render) ---
-
-
-def pick_round_winner(score_entries: list[ScoreEntry]) -> ScoreEntry | None:
-    """Round winner = max non-aborted ``ScoreEntry`` by ``round_winner_key`` — shared with ``l1_score`` so SCOREBOARD ``*`` matches IMPROVED line."""
-    non_aborted = [s for s in score_entries if not s.escalation_aborted]
-    if not non_aborted:
-        return None
-    return max(non_aborted, key=lambda s: round_winner_key(s.composite_fitness, s.accuracy))
 
 
 def score_entry_from_dict(s: dict[str, Any]) -> ScoreEntry:

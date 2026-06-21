@@ -276,6 +276,9 @@ async def l1_score(
             **best_osp.prompt_field_dict(),
             "lineage": best_osp.lineage.model_dump(),
         },
+        winner_task_context=(
+            best_osp.memory.task_context.to_dict() if best_osp.memory.task_context else None
+        ),
         pipeline_params=params_by_id.get(winner_id, pipeline_params)
         if winner_id
         else pipeline_params,

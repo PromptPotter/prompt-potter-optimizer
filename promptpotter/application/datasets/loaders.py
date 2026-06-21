@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.sample import Sample
+from promptpotter.shared import GSM8K_ANSWER_RE
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.hashing import HASH_TRUNCATE
 
@@ -173,10 +174,6 @@ def load_gsm8k(
             "The 'datasets' library is required for GSM8K. "
             'Install the benchmarks extras: pip install -e ".[benchmarks]"'
         ) from None
-
-    # Function-scoped: the matchers module pulls in the scoring package,
-    # which imports this module — a top-level import would be circular.
-    from promptpotter.application.scoring.formula.matchers import GSM8K_ANSWER_RE
 
     ds = load_dataset("openai/gsm8k", "main", split=split)
     samples: list[Sample] = []

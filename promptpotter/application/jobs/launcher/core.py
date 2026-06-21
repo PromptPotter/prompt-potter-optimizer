@@ -200,7 +200,10 @@ async def mint_campaign_command(
     # crashed preflight/init never wedges the machine at capacity.
     try:
         await _run_preflight(backend_type, backend_url)
-        spend_budget_usd = effective_spend_cap_usd(
+        # Daily-cap composition globs + reads every cycle ledger — offload so the
+        # scan never blocks the single event loop on the launch path.
+        spend_budget_usd = await asyncio.to_thread(
+            effective_spend_cap_usd,
             requested_cap_usd=spend_budget_usd,
             user=user,
             stores=stores,
@@ -485,7 +488,10 @@ async def start_run_command(
 
     try:
         await _run_preflight(backend_type, backend_url)
-        spend_budget_usd = effective_spend_cap_usd(
+        # Daily-cap composition globs + reads every cycle ledger — offload so the
+        # scan never blocks the single event loop on the launch path.
+        spend_budget_usd = await asyncio.to_thread(
+            effective_spend_cap_usd,
             requested_cap_usd=spend_budget_usd,
             user=user,
             stores=stores,

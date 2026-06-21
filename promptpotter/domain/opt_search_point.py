@@ -94,10 +94,16 @@ class PromptTemplate(SearchPoint):
         return {f: v for f in PROMPT_STRING_FIELDS if (v := getattr(self, f))}
 
     def prompt_field_dict(self) -> dict[str, Any]:
-        """``prompt_fields()`` plus ``few_shot_examples`` — the L1-roundtrip shape."""
+        """``prompt_fields()`` plus ``few_shot_examples`` + ``plan`` — the L1-roundtrip
+        shape. ``plan`` rides here (and restores via ``from_prompt_fields``) so a seed /
+        campaign-from-origin fork inherits the L3 strategic frame instead of starting at
+        ``plan=""``. ``plan`` is NOT in ``render()`` (it's injected via its own signal),
+        so carrying it leaves the render-identity gate + content hash untouched."""
         d: dict[str, Any] = dict(self.prompt_fields())
         if self.few_shot_examples:
             d["few_shot_examples"] = [ex.model_dump() for ex in self.few_shot_examples]
+        if self.plan:
+            d["plan"] = self.plan
         return d
 
     @classmethod

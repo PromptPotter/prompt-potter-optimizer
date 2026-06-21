@@ -37,7 +37,6 @@ from promptpotter.application.views import (
     LogMdView,
     RoundCompleteView,
     RoundDigestView,
-    pick_round_winner,
     score_entry_from_dict,
     to_markdown,
 )
@@ -172,8 +171,10 @@ def from_disk_round(
     """Reconstruct a ``RoundCompleteView`` from a persisted ``round_NNNN.json``."""
     score_entries = [score_entry_from_dict(s) for s in round_data.get("candidate_scores") or []]
 
-    winner = pick_round_winner(score_entries)
-    winner_label = winner.label if winner is not None else ""
+    # The round file already records the elected winner's identity (`label`, the
+    # `elect_round_winner` pick) alongside its hits/total/accuracy — read it
+    # directly, don't re-elect by point estimate (which can pick another row).
+    winner_label = str(round_data.get("label", "") or "")
 
     winner_acc = float(round_data.get("accuracy", 0.0))
     origin_acc = float(round_data.get("origin_accuracy", 0.0))

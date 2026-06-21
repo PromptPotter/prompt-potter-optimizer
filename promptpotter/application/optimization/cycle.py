@@ -24,7 +24,7 @@ from promptpotter.domain.results import (
     is_round_winner,
 )
 from promptpotter.domain.run_records import RebaseRequest, ResumeCheckpointRecord
-from promptpotter.domain.search_point import JobSearchPoint
+from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
@@ -438,6 +438,12 @@ class Cycle:
         self.rounds.append(rr)
         for f in PROMPT_STRING_FIELDS:
             setattr(self.opt_sp, f, rr.prompt_fields.get(f, ""))
+        # Adopt the elected winner's task_context too — an L1 child can win on a
+        # task_context override (its 3rd mutation slot), and without this the
+        # winning delta would evaporate next round (only the string fields above
+        # were carried). Absent ⇒ winner had no framing; leave the cycle's as-is.
+        if rr.winner_task_context is not None:
+            self.opt_sp.memory.task_context = TaskDecomposition.from_dict(rr.winner_task_context)
         assert tr.current_sp is not None
         _pp = (
             rr.pipeline_params if rr.pipeline_params is not None else tr.current_sp.pipeline_params

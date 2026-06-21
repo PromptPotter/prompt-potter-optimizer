@@ -17,6 +17,7 @@ from typing import Any
 
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.results import CritiqueReadout
+from promptpotter.shared import BOXED_RE, NUMBER_RE, extract_gsm8k_number, extract_last_bold
 from promptpotter.shared.errors import ErrorCategory, error_category, is_error_result
 
 # --------------------------------------------------------------------------- #
@@ -35,8 +36,10 @@ def display_fitness(composite_fitness: float | None, accuracy: float) -> float:
 
 
 def round_winner_key(composite_fitness: float | None, accuracy: float) -> tuple[float, float]:
-    """Composite-first, accuracy-tiebreak. Shared between live `l1_score` + post-hoc
-    `pick_round_winner` so the SCOREBOARD `*` and the in-round winner never drift apart.
+    """Composite-first, accuracy-tiebreak. The point-estimate ordering used by the
+    mask lens (`application/mask`) to re-project candidates under an alternative
+    criterion — NOT the round-winner election (that's `elect_round_winner`'s
+    paired-delta LCB; the view reads the elected winner off the round result).
     """
     return (display_fitness(composite_fitness, accuracy), accuracy)
 
@@ -266,39 +269,15 @@ def classify_result(result: Mapping[str, Any]) -> ResultClassification:
 
 
 # --------------------------------------------------------------------------- #
-# extract_display_answer (was scoring/formula/matchers)                        #
+# extract_display_answer — the display side of the scorer's label extraction.   #
+# Shares the answer-isolation primitives with the scorer (promptpotter.shared)  #
+# so the parsed answer shown matches the one scored; only the display-specific  #
+# string formatting lives here.                                                 #
 # --------------------------------------------------------------------------- #
-
-_DISPLAY_NUMBER_RE = re.compile(r"-?\d[\d,]*\.?\d*")
-_DISPLAY_BOXED_RE = re.compile(r"\\boxed\{([^{}]+)\}")
-_DISPLAY_BOLD_RE = re.compile(r"\*\*([^*]+?)\*\*")
-_DISPLAY_GSM8K_ANSWER_RE = re.compile(r"####\s*(-?[\d,]+\.?\d*)")
-
-
-def _display_extract_bold(text: str) -> str:
-    """Return the last ``**…**`` run, else *text* unchanged."""
-    if not text:
-        return ""
-    matches = _DISPLAY_BOLD_RE.findall(text)
-    if matches:
-        last: str = matches[-1]
-        return last.strip()
-    return text
-
-
-def _display_gsm8k_number(text: str) -> float | None:
-    """Extract GSM8K answer: ``#### N`` first, else the last number."""
-    m = _DISPLAY_GSM8K_ANSWER_RE.search(text)
-    if m:
-        return float(m.group(1).replace(",", ""))
-    matches = _DISPLAY_NUMBER_RE.findall(text)
-    if matches:
-        return float(matches[-1].replace(",", ""))
-    return None
 
 
 def _extract_gsm8k_display(text: str) -> str:
-    n = _display_gsm8k_number(text or "")
+    n = extract_gsm8k_number(text or "")
     if n is None:
         return (text or "").strip()
     return str(int(n)) if n.is_integer() else str(n)
@@ -307,11 +286,11 @@ def _extract_gsm8k_display(text: str) -> str:
 def _extract_boxed_display(text: str) -> str:
     if not text:
         return ""
-    boxed = _DISPLAY_BOXED_RE.findall(text)
+    boxed = BOXED_RE.findall(text)
     if boxed:
         last_boxed: str = boxed[-1]
         return last_boxed.strip()
-    nums = _DISPLAY_NUMBER_RE.findall(text)
+    nums = NUMBER_RE.findall(text)
     if nums:
         last_num: str = nums[-1]
         return last_num
@@ -319,7 +298,7 @@ def _extract_boxed_display(text: str) -> str:
 
 
 DISPLAY_EXTRACTORS: dict[str, Any] = {
-    "exact_match": _display_extract_bold,
+    "exact_match": extract_last_bold,
     "gsm8k_match": _extract_gsm8k_display,
     "aime_match": _extract_boxed_display,
 }

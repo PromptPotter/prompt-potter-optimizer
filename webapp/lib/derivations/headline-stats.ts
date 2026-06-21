@@ -15,7 +15,8 @@ import type { DashboardSnapshot } from "@/lib/poll";
 export interface HeadlineStats {
   // Current best composite/accuracy, finite or null.
   best: number | null;
-  // Origin accuracy behind C0, finite or null.
+  // Origin fitness (composite-or-accuracy, same basis as `best`) behind C0,
+  // finite or null.
   origin: number | null;
   // best − origin when both are present; null otherwise.
   delta: number | null;
@@ -46,9 +47,13 @@ export function displayFitness(
 }
 
 export function headlineStats(dash: DashboardSnapshot | null): HeadlineStats {
+  // `best` is the rolling-max composite (server-side, falls back to accuracy
+  // when no active formula). Origin must use the SAME composite-or-accuracy
+  // basis, else `delta` subtracts an accuracy from a composite — a fabricated
+  // number that ChatPane renders as the "pp/$" efficiency chip.
   const best = finite(dash?.best);
   const round0 = (dash?.rounds ?? []).find((r) => r.round === 0);
-  const origin = finite(round0?.accuracy);
+  const origin = round0 ? finite(displayFitness(round0.composite_fitness, round0.accuracy)) : null;
   const delta = best != null && origin != null ? best - origin : null;
   return { best, origin, delta };
 }
