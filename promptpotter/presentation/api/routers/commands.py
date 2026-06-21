@@ -47,14 +47,15 @@ from promptpotter.application.datasets.draft_campaign import OptimizationOverrid
 from promptpotter.application.datasets.origin_readiness import resolution_block
 from promptpotter.application.jobs import JobRegistry
 from promptpotter.application.jobs.launcher import (
-    LaunchError,
     OriginIncompleteError,
     draft_wire_with_locks,
-    mint_campaign_from_draft_command,
+    load_checkin_draft,
+    save_checkin_draft,
+    start_checkin_campaign,
 )
 from promptpotter.connectors import BackendUnreachableError
 from promptpotter.domain.origin_provenance import Provenance
-from promptpotter.presentation.api.deps import StoreDep, get_draft_registry
+from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.middleware import CommandAcceptedBody, CommandDispatcher
 from promptpotter.presentation.api.middleware.command_dispatcher import (
     CycleScopedKind,
@@ -227,10 +228,10 @@ class _EditDraftEnvelope(BaseModel):
     client_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class _MintFromDraftEnvelope(BaseModel):
+class _StartCheckinEnvelope(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    kind: str = Field(pattern=r"^mint-campaign-from-draft$")
+    kind: str = Field(pattern=r"^start-checkin$")
     payload: dict[str, Any] = Field(default_factory=dict)
     client_metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -252,9 +253,11 @@ class _ReplaceDatasetEnvelope(BaseModel):
 
 
 def _require_draft_id(payload: dict[str, Any]) -> str:
+    """The check-in draft id — which IS the owning ``campaign_id`` (re-keyed at
+    ``create_checkin_campaign``). Up to 128 chars like every other campaign id."""
     raw = payload.get("draft_id")
-    if not isinstance(raw, str) or not raw or len(raw) > 64 or len(raw) < 8:
-        raise PayloadInvalidError("payload.draft_id is required (8-64 chars).")
+    if not isinstance(raw, str) or not raw or len(raw) > 128 or len(raw) < 8:
+        raise PayloadInvalidError("payload.draft_id is required (8-128 chars).")
     return raw
 
 
@@ -272,7 +275,6 @@ async def edit_draft_campaign(
     response is a `DraftCampaign`, not a `CommandAcceptedBody`.
     """
     _ensure_idempotency_key(idempotency_key)
-    registry = get_draft_registry(request)
 
     raw_payload = envelope.payload
     draft_id = _require_draft_id(raw_payload)
@@ -281,7 +283,7 @@ async def edit_draft_campaign(
         raise PayloadInvalidError("payload.patch must be an object.")
     patch = _EditDraftPatch.model_validate(patch_raw)
 
-    draft = registry.get(draft_id, tenant_id=store.identity.tenant_id)
+    draft = load_checkin_draft(store, draft_id)
     if draft is None:
         raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
 
@@ -342,8 +344,8 @@ async def edit_draft_campaign(
         updated = updated.confirm_columns(
             query_col=patch.column_query, ground_truth_col=patch.column_ground_truth
         )
-    registry.update(updated)
-    store.tenant_datasets.write_draft_resolution(updated.draft_id, resolution_block(updated))
+    save_checkin_draft(store, updated)
+    store.checkin.write_resolution(updated.draft_id, resolution_block(updated))
     return draft_wire_with_locks(updated)
 
 
@@ -361,16 +363,15 @@ async def resolve_origin(
     deterministic checklist re-gates before the response.
     """
     _ensure_idempotency_key(idempotency_key)
-    registry = get_draft_registry(request)
     draft_id = _require_draft_id(envelope.payload)
-    draft = registry.get(draft_id, tenant_id=store.identity.tenant_id)
+    draft = load_checkin_draft(store, draft_id)
     if draft is None:
         raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
 
     from promptpotter.application.datasets.origin_resolve import resolve_origin_turn
 
     try:
-        result = await resolve_origin_turn(stores=store, draft=draft, draft_registry=registry)
+        result = await resolve_origin_turn(stores=store, draft=draft)
     except Exception as exc:  # external LLM boundary; surface a clean 502
         logger.exception("resolve-origin turn failed for draft %s", draft_id)
         raise ServiceUnavailableError(
@@ -380,23 +381,27 @@ async def resolve_origin(
     return {"resolution": result.resolution, "draft": draft_wire_with_locks(result.draft)}
 
 
-@commands_router.post("/mint-campaign-from-draft")
-async def mint_campaign_from_draft(
+@commands_router.post("/start-checkin")
+async def start_checkin(
     request: Request,
     store: StoreDep,
-    envelope: _MintFromDraftEnvelope,
+    envelope: _StartCheckinEnvelope,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> dict[str, Any]:
-    """Commit a draft + mint the campaign. Synchronous; returns ``{campaign_id, cycle_id, job_id}``.
+    """Flip a CHECKIN campaign to ``active`` + spawn the runner. Synchronous;
+    returns ``{campaign_id, cycle_id, job_id}``.
 
-    Per ``docs/specs/m12-api-openapi.yaml::mintCampaignFromDraft``.
+    Per ``docs/specs/m12-api-openapi.yaml::startCheckin``. The campaign already
+    exists durably (minted on the first ingest action); this gate-checks the
+    origin (incomplete → 422, stays ``checkin``), materializes the dataset, mints
+    the run cycle, and detaches the loop.
     """
     _ensure_idempotency_key(idempotency_key)
-    registry = get_draft_registry(request)
-    draft_id = _require_draft_id(envelope.payload)
-    draft = registry.get(draft_id, tenant_id=store.identity.tenant_id)
+    campaign_id = _require_string(envelope.payload, "campaign_id", max_len=128)
+
+    draft = load_checkin_draft(store, campaign_id)
     if draft is None:
-        raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
+        raise NotFoundError(f"check-in {campaign_id!r} not found.", code="command_target_not_found")
 
     job_registry: JobRegistry | None = getattr(request.app.state, "job_registry", None)
     if job_registry is None:
@@ -405,18 +410,17 @@ async def mint_campaign_from_draft(
         )
 
     try:
-        campaign_id, cycle_id, job = await mint_campaign_from_draft_command(
+        job = await start_checkin_campaign(
             stores=store,
-            draft=draft,
-            draft_registry=registry,
             job_registry=job_registry,
+            campaign_id=campaign_id,
         )
     except OriginIncompleteError:
         # The deterministic origin-readiness checklist still has gaps — the
-        # draft is preserved; the operator resolves them (edit-draft-campaign)
-        # and retries. The exception already carries code=origin_incomplete +
-        # details.gaps (it's a PotterError); persist the resolution then re-raise.
-        store.tenant_datasets.write_draft_resolution(draft.draft_id, resolution_block(draft))
+        # check-in is preserved (lifecycle stays ``checkin``); the operator
+        # resolves them (edit-draft-campaign) and retries. The exception already
+        # carries code=origin_incomplete + details.gaps; persist the resolution.
+        store.checkin.write_resolution(campaign_id, resolution_block(draft))
         raise
     except IngestError as exc:
         # A confirmed column mapping still hit a per-row data failure at
@@ -425,18 +429,15 @@ async def mint_campaign_from_draft(
             exc.message, code="ingest_failed", details={"reason": exc.reason}
         ) from exc
     except BackendUnreachableError as exc:
-        # Preflight ran before commit_draft → draft is preserved; the operator
-        # can fix the backend and retry without re-uploading. Augment the
-        # exception's own backend_type/url details with the draft id, then re-raise.
-        exc.details["draft_id"] = draft.draft_id
+        # Preflight ran before any irreversible write → the check-in is preserved;
+        # the operator can fix the backend and retry without re-authoring. Augment
+        # the exception's own backend_type/url details with the campaign id.
+        exc.details["campaign_id"] = campaign_id
         raise
-    except LaunchError as exc:
-        # Slug collision at commit — surface a free suggestion as a 409.
-        suggested = store.tenant_datasets.suggest_free_slug(draft.slug)
-        raise ConflictError(
-            str(exc), code="slug_collision", details={"suggested_slug": suggested}
-        ) from exc
-    return {"campaign_id": campaign_id, "cycle_id": cycle_id, "job_id": job.job_id}
+    # LaunchError (not-owned / not-in-check-in / rare slug-collision-at-Start) is a
+    # PayloadInvalidError → the central PotterError handler maps it to 422 with its
+    # own message; no per-case arm here.
+    return {"campaign_id": campaign_id, "cycle_id": job.cycle_id, "job_id": job.job_id}
 
 
 @commands_router.post("/replace-dataset")

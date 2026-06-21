@@ -137,7 +137,9 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
     };
   }, [authed, onAuthError]);
 
-  // Dataset overlay — refetches on every datasetName change.
+  // Dataset overlay — refetches on every datasetName change, from the committed
+  // dataset on disk. A pre-commit check-in has no dataset dir; it renders its
+  // pipeline straight off the draft wire via `StaticConnectorProvider` instead.
   useEffect(() => {
     if (!datasetName) return;
     let cancelled = false;
@@ -284,6 +286,23 @@ export function ConnectorProvider({
 }) {
   const view = useConnectorViewEngine(datasetName);
   return createElement(ConnectorContext.Provider, { value: view }, children);
+}
+
+// A connector context filled from a value the caller already holds — no fetch, no
+// health poll. The ingest "ready" panel uses it to seed the pipeline `view` +
+// node schemas straight off the draft wire (a pre-commit check-in has no committed
+// dataset dir to fetch). `fields` overlays the empty connector shape, so the caller
+// supplies only what it has (view + schemas + originPromptFields); the live-run
+// streams (backends, health, currentNodes) stay empty — setup needs none of them.
+export function StaticConnectorProvider({
+  fields,
+  children,
+}: {
+  fields: Partial<ConnectorView>;
+  children: ReactNode;
+}) {
+  const value = useMemo<ConnectorView>(() => ({ ...EMPTY, ...fields }), [fields]);
+  return createElement(ConnectorContext.Provider, { value }, children);
 }
 
 export function useConnector(): ConnectorView {

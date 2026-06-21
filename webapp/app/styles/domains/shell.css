@@ -10,8 +10,6 @@
 .skip-link{position:absolute;left:8px;top:-48px;z-index:1000;padding:8px 14px;background:var(--color-accent);color:var(--color-accent-contrast,#fff);border-radius:var(--border-radius-md);font-size:13px;text-decoration:none;transition:top .15s ease}
 .skip-link:focus{top:8px}
 .shell.sidebar-collapsed{--sidebar-width:36px}
-.shell.sidebar-hidden{--sidebar-width:0px}
-.shell.sidebar-hidden > .sidebar{display:none}
 .sidebar{width:var(--sidebar-width);flex-shrink:0;background:var(--color-background-primary);border-right:0.5px solid var(--color-border-tertiary);display:flex;flex-direction:column;padding:16px 0;overflow:hidden}
 .sidebar-toggle{position:absolute;top:8px;right:6px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;background:transparent;border:0;cursor:pointer;color:var(--color-text-tertiary);font-size:14px;font-family:inherit;border-radius:4px}
 .sidebar-toggle:hover{background:var(--color-background-hover);color:var(--color-text-primary)}

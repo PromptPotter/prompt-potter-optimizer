@@ -243,6 +243,165 @@ def auto_mint_session(
     return session_id, campaign_id, root_cycle
 
 
+def mint_checkin_skeleton(stores: Stores, *, slug: str) -> tuple[str, str, str]:
+    """Mint a real disk-backed campaign in the ``checkin`` lifecycle — transition (a).
+
+    The first ingest action lands here: write a provisional ``campaign.json``
+    (``lifecycle_status="checkin"``, empty ``root_content_hash`` / ``config`` — the
+    origin isn't authored yet), a skeleton cycle ``index.json``, a placeholder
+    session, and drop ``.runtime/checkin.flag`` so ``derive_run_phase`` reads the
+    cycle as ``CHECKIN``. No Session, no backend, no quota, no machine slot — a
+    check-in is resumable progress, not a run. **It does NOT claim the active
+    pointer**: the pointer is "the cycle the dashboard follows", and a not-yet-run
+    check-in following it would snap a following workspace off the chat mid-drop
+    (bouncing the operator out of the authoring flow). ``finalize_checkin_to_active``
+    claims the pointer when it flips this to ``active`` at Start. The draft
+    working-state + sample bank are written separately by the caller through
+    :class:`CheckinDraftStore`. Returns ``(session_id, campaign_id, cycle_id)``."""
+    from datetime import UTC, datetime
+
+    from promptpotter.application.runner.identity import mint_campaign_id, mint_checkin_cycle_id
+    from promptpotter.config.settings import APP_VERSION
+    from promptpotter.domain.campaign import Campaign
+
+    now = datetime.now(UTC).isoformat()
+    campaign_id = mint_campaign_id(slug)
+    cycle_id = mint_checkin_cycle_id()
+    session_id = mint_session_id()
+
+    stores.campaigns.create_campaign(
+        Campaign(
+            campaign_id=campaign_id,
+            dataset_name=slug,
+            created_at=now,
+            status="active",
+            root_cycle_id=cycle_id,
+            root_content_hash="",
+            backend_id="",
+            owner_user_id=str(stores.identity.user_id),
+            lifecycle_status="checkin",
+            lifecycle_changed_at=now,
+            config={},
+        )
+    )
+    stores.campaigns.create(
+        campaign_id,
+        cycle_id,
+        {
+            "parent_session_id": session_id,
+            "header": {
+                "tool": "promptpotter",
+                "version": APP_VERSION,
+                "dataset_name": slug,
+                "backend_id": "",
+            },
+        },
+    )
+    # Placeholder session row so re-open + the sidebar's session count resolve a real
+    # session between skeleton and Start; finalize overwrites it with the run state.
+    stores.sessions.create(session_id, {"phase": "checkin", "dataset_name": slug})
+
+    cycle_dir = stores.campaigns.cycle_dir(campaign_id, cycle_id)
+    (cycle_dir / ".runtime").mkdir(parents=True, exist_ok=True)
+    (cycle_dir / ".runtime" / "checkin.flag").write_text("", encoding="utf-8")
+
+    logger.info(
+        "Minted check-in campaign %s — session %s, cycle %s", campaign_id, session_id, cycle_id
+    )
+    return session_id, campaign_id, cycle_id
+
+
+def finalize_checkin_to_active(
+    session: Session,
+    campaign_config: Any,
+    *,
+    campaign_id: str,
+    cycle_id: str,
+    session_id: str,
+    cycle_plan: Any,
+    dataset_size: int,
+    experiment_id: str | None = None,
+) -> None:
+    """Flip a ``checkin`` campaign to ``active`` against its EXISTING ids — transition (b).
+
+    The deferred half of the mint: the origin is now resolved (``cycle_plan``), so
+    write the real ``config`` + ``root_content_hash`` onto the provisional
+    ``campaign.json`` and flip ``lifecycle_status`` ``checkin`` → ``active``,
+    overwrite the placeholder session with the full run state, fill the cycle index
+    header, pre-seed ``dashboard.json``, and clear ``.runtime/checkin.flag``. The
+    cycle id stays the provisional ``cycle_chk_*`` (option 2b — drift reads
+    ``root_content_hash``, not the parsed id). Unlike ``auto_mint_session`` this
+    mints nothing new; the caller binds the session + detaches the run."""
+    from datetime import UTC, datetime
+
+    from promptpotter.application.optimization.dispatch.llm_call import (
+        combined_optimizer_prompt_hash,
+    )
+
+    now = datetime.now(UTC).isoformat()
+    target_hash = cycle_plan.cycle_id.removeprefix("cycle_")
+    plan_origin_fields = cycle_plan.origin.prompt_field_dict()
+
+    state = new_session_state(
+        init_params={
+            "backend_url": session.backend_client.base_url,
+            "backend_id": session.backend_id,
+            "experiment_id": experiment_id,
+            "dataset_name": session.dataset_name,
+        },
+        campaign_config=campaign_config.model_dump(),
+        pipeline_params=cycle_plan.pipeline_params,
+        active_steps=list(cycle_plan.pipeline_params.get("steps", [])),
+    )
+    state["dataset_count"] = dataset_size
+    state["origin_prompt_fields"] = plan_origin_fields
+    session.store.sessions.create(session_id, state)
+
+    session.store.campaigns.update_campaign(
+        campaign_id,
+        {
+            "status": "active",
+            "root_content_hash": target_hash,
+            "optimizer_prompt_hash": combined_optimizer_prompt_hash(),
+            "backend_id": session.backend_id,
+            "lifecycle_status": "active",
+            "lifecycle_changed_at": now,
+            "config": campaign_config.model_dump(mode="json"),
+        },
+    )
+    session.store.campaigns.create(
+        campaign_id,
+        cycle_id,
+        {
+            "parent_session_id": session_id,
+            "header": _build_index_header(session, dataset_size),
+        },
+    )
+
+    session.session_id = session_id
+    session.campaign_id = campaign_id
+    session.state.cycle_id = cycle_id
+
+    # Claim the active pointer now (not at skeleton mint) — Start is when the cycle
+    # becomes the running one the dashboard follows. A following workspace snaps to
+    # it here, so the operator lands on the live run instead of being bounced
+    # mid-authoring (the skeleton deliberately left the pointer alone).
+    save_active_pointer(session.store.tenant_id, session_id, campaign_id, cycle_id)
+
+    cycle_dir = session.store.campaigns.cycle_dir(campaign_id, cycle_id)
+    (cycle_dir / ".runtime" / "checkin.flag").unlink(missing_ok=True)
+
+    from promptpotter.application.origin import build_campaign_emitter
+    from promptpotter.shared.errors import graceful
+
+    with graceful("Pre-seeding dashboard.json failed"):
+        build_campaign_emitter(session, campaign_config, origin_accuracy=0.0)
+
+    logger.info(
+        "Check-in campaign %s started — session %s, cycle %s", campaign_id, session_id, cycle_id
+    )
+
+
 def _open_cycle_ledger(session: Session, cycle_id: str) -> CycleEventLog | None:
     from promptpotter.domain.cycle_paths import CycleDir
     from promptpotter.infrastructure.ledger import CycleEventLog
@@ -258,5 +417,7 @@ __all__ = [
     "ScorerSetup",
     "Session",
     "auto_mint_session",
+    "finalize_checkin_to_active",
+    "mint_checkin_skeleton",
     "new_session_state",
 ]

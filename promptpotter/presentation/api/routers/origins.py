@@ -20,7 +20,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from promptpotter.application.config import load_campaign_config, resolve_pipeline_config_params
@@ -28,7 +28,7 @@ from promptpotter.application.datasets import resolve_dataset_items
 from promptpotter.application.datasets.csv_ingest import IngestError
 from promptpotter.application.datasets.ingest import draft_from_dataset
 from promptpotter.application.datasets.prompts import has_dataset_prompts
-from promptpotter.application.jobs.launcher import draft_wire_with_locks
+from promptpotter.application.jobs.launcher import draft_wire_with_locks, save_checkin_draft
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.runner import build_origin_cycle_id
 from promptpotter.domain.campaign import Campaign
@@ -36,7 +36,7 @@ from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.store import DatasetAccessError, Stores, readable_dataset_dir
 from promptpotter.infrastructure.store.dataset_access import list_readable_datasets
-from promptpotter.presentation.api.deps import StoreDep, get_draft_registry
+from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
 
 logger = logging.getLogger(__name__)
@@ -220,23 +220,21 @@ def _campaign_for_origin(store: Stores, origin_id: str) -> Campaign | None:
 
 
 @origins_router.post("/{origin_id}/draft")
-def draft_from_origin(origin_id: str, request: Request, store: StoreDep) -> dict[str, Any]:
-    """Open a chosen prior origin as a prefilled :class:`DraftCampaign` — the
-    picker's "Reuse an origin" path for a campaign-backed origin.
+def draft_from_origin(origin_id: str, store: StoreDep) -> dict[str, Any]:
+    """Open a chosen prior origin as a prefilled check-in campaign — the picker's
+    "Reuse an origin" path for a campaign-backed origin.
 
     Resolves the origin's EXACT prompt fields: a campaign that was itself minted
     from an origin carries those fields on its root-cycle seed, so reuse them
     verbatim; a normally-minted campaign has no seed and ``draft_from_dataset``
     already loaded the dataset's authored prompt. The draft is marked
-    ``reused_origin_id`` so committing it (``mint-campaign-from-draft``) seeds C0
-    via ``origin_override`` and stamps the ``campaign_origin`` lineage. Like
-    ``/datasets/{name}/draft`` this is NOT a Control-remote command — no
-    ``CommandRecord`` lands until the operator commits.
+    ``reused_origin_id`` so starting it (``/commands/start-checkin``) seeds C0
+    via ``origin_override`` and stamps the ``campaign_origin`` lineage. Nothing
+    runs until the operator starts the check-in.
     """
     match = _campaign_for_origin(store, origin_id)
     if match is None:
         raise NotFoundError(f"Origin '{origin_id}' not found", code="command_target_not_found")
-    registry = get_draft_registry(request)
     try:
         dataset_dir = readable_dataset_dir(store, match.dataset_name)
     except DatasetAccessError as exc:
@@ -244,7 +242,6 @@ def draft_from_origin(origin_id: str, request: Request, store: StoreDep) -> dict
     try:
         draft = draft_from_dataset(
             stores=store,
-            registry=registry,
             dataset_dir=dataset_dir,
             dataset_name=match.dataset_name,
         )
@@ -256,6 +253,5 @@ def draft_from_origin(origin_id: str, request: Request, store: StoreDep) -> dict
     changes: dict[str, Any] = {"reused_origin_id": origin_id}
     if seed is not None and seed.origin_prompt_fields:
         changes["origin_prompt_fields"] = dict(seed.origin_prompt_fields)
-    draft = draft.patch(**changes)
-    registry.update(draft)
+    draft = save_checkin_draft(store, draft.patch(**changes))
     return draft_wire_with_locks(draft)

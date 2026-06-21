@@ -47,9 +47,9 @@ ConnectorExecution = Literal["remote_http", "in_process"]
 VersionCheck = Callable[["httpx.AsyncClient", str], Awaitable[str | None]]
 
 # R2: reachability probe — called from the launcher's three command paths
-# (mint-campaign, mint-campaign-from-draft, start-run) before the applier
-# touches the backend. Raises :class:`BackendUnreachableError` when the
-# connector reports its backend is down.
+# (mint-campaign, start-checkin, start-run) before the applier touches the
+# backend. Raises :class:`BackendUnreachableError` when the connector reports
+# its backend is down.
 PreflightFn = Callable[[str], Awaitable[None]]
 
 

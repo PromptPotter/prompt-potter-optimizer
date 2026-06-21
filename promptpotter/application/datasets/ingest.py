@@ -1,11 +1,14 @@
-"""``ingest_draft`` — parse an uploaded blob into a registered ``DraftCampaign``.
+"""``ingest_draft`` — parse an uploaded blob into a durable check-in campaign.
 
 The single orchestration seam both ingest surfaces call: the web
 ``POST /datasets/ingest`` handler and the CLI ``new <file>`` branch. Keeping the
-parse → slug-validate → draft-create → cache-write sequence here (not inline in
+parse → slug-validate → draft-build → mint-check-in sequence here (not inline in
 the API handler) is what makes CLI/web parity real — neither surface owns the
-logic, both call this. The handler/CLI translate the raised errors to their own
-shape (HTTP status vs. stderr); the orchestration is identical.
+logic, both call this. The first ingest action mints a real disk-backed campaign
+in the ``checkin`` lifecycle (:func:`create_checkin_campaign`), so the returned
+draft's ``draft_id`` IS its ``campaign_id`` and the in-progress authoring survives
+a restart. The handler/CLI translate the raised errors to their own shape (HTTP
+status vs. stderr); the orchestration is identical.
 
 Spec: ``docs/specs/roadmap.md`` +
 ``docs/specs/roadmap.md § Ingest``.
@@ -29,9 +32,9 @@ from promptpotter.application.datasets.draft_campaign import (
     DEFAULT_SCORING_COMPOSITE,
     PREVIEW_ROWS,
     DraftCampaign,
-    DraftCampaignRegistry,
     OptimizationOverrides,
     default_slug_from_filename,
+    new_draft,
 )
 from promptpotter.application.datasets.loaders import resolve_dataset_items
 from promptpotter.application.datasets.origin_readiness import resolution_block
@@ -81,19 +84,22 @@ class SlugTakenError(Exception):
 def ingest_draft(
     *,
     stores: Stores,
-    registry: DraftCampaignRegistry,
     blob: bytes,
     filename: str,
     slug: str | None = None,
 ) -> DraftCampaign:
-    """Parse ``blob`` → register a ``DraftCampaign`` → persist its draft cache.
+    """Parse ``blob`` → build a draft → mint a durable check-in campaign.
 
     The format is detected from ``filename`` (CSV/TSV/JSON/JSONL/XLSX). Raises
     :class:`~promptpotter.application.datasets.csv_ingest.IngestError`
     (bad/empty/oversized/unsupported upload, or hardened-mode-blocked Excel),
-    :class:`ValueError` (bad slug), or :class:`SlugTakenError` (slug collision).
-    Byte-size capping is the wire boundary's concern — not enforced here.
+    :class:`ValueError` (bad slug), or :class:`SlugTakenError` (slug collision —
+    raised BEFORE the check-in campaign is minted, so a collision leaves no
+    orphan). Byte-size capping is the wire boundary's concern — not enforced here.
+    Returns the keyed draft (``draft_id`` == the new ``campaign_id``).
     """
+    from promptpotter.application.jobs.launcher import create_checkin_campaign
+
     table = read_tabular(blob, fmt=format_from_filename(filename or "upload.csv"))
     base_slug = (slug or default_slug_from_filename(filename or "upload")).lower()
     validate_dataset_name(base_slug)  # raises ValueError on a bad slug
@@ -101,7 +107,7 @@ def ingest_draft(
         raise SlugTakenError(base_slug, stores.tenant_datasets.suggest_free_slug(base_slug))
 
     preview = [dict(row) for row in table.rows[:PREVIEW_ROWS]]
-    draft = registry.create(
+    draft = new_draft(
         tenant_id=stores.identity.tenant_id,
         slug=base_slug,
         n_samples=len(table.rows),
@@ -110,38 +116,40 @@ def ingest_draft(
         source_file=filename or "",
         column_label_sets=_column_label_sets(list(table.headers), list(table.rows)),
     )
-    # Stash the raw rows + headers; materialization to Samples waits until the
-    # column mapping is confirmed (at mint). The resolution block lets an
-    # operator open cache.json and see what still blocks mint.
-    stores.tenant_datasets.write_draft_cache(
-        draft.draft_id,
-        list(table.rows),
+    # Mint the check-in campaign + stash the raw rows + headers under it;
+    # materialization to Samples waits until the column mapping is confirmed (at
+    # Start). The resolution block lets an operator open checkin/cache.json and
+    # see what still blocks mint.
+    campaign_id, _cycle_id, keyed = create_checkin_campaign(
+        stores,
+        draft=draft,
+        bank_items=list(table.rows),
         source_file=filename or "",
-        headers=list(table.headers),
+        headers=tuple(table.headers),
     )
-    stores.tenant_datasets.write_draft_resolution(draft.draft_id, resolution_block(draft))
-    return draft
+    stores.checkin.write_resolution(campaign_id, resolution_block(keyed))
+    return keyed
 
 
 def draft_from_dataset(
     *,
     stores: Stores,
-    registry: DraftCampaignRegistry,
     dataset_dir: Path,
     dataset_name: str,
 ) -> DraftCampaign:
     """Build a fully-confirmed :class:`DraftCampaign` straight from an authored
-    dataset's on-disk files — the server-side equivalent of uploading that
-    dataset as a CSV and confirming every field by hand.
+    dataset's on-disk files, then mint a check-in campaign from it.
 
     This is the direct path behind "open an existing dataset (demo / benchmark /
     owned tenant dataset) in the ingest panel": no browser-side CSV reconstruction,
     no ``/preview`` round-trip, no field-by-field prefill. The dataset's pipeline
-    node config rides through as ``pipeline_overlay``, so committing the draft
+    node config rides through as ``pipeline_overlay``, so starting the campaign
     **preserves the backend model/provider** (a fresh CSV upload would instead
-    fall back to connector defaults). The same ``ingest_draft`` → context check-in
-    → commit sequence runs from here on, so both surfaces share one commit path.
+    fall back to connector defaults). The same check-in → Start sequence runs from
+    here on, so both surfaces share one path. Returns the keyed draft.
     """
+    from promptpotter.application.jobs.launcher import create_checkin_campaign
+
     items = resolve_dataset_items(stores, dataset_name)
     rows: list[dict[str, str]] = [
         {"query": str(it["query"]), "ground_truth": str(it["ground_truth"])}
@@ -186,9 +194,9 @@ def draft_from_dataset(
     slug = dataset_name.lower()
 
     # headers ["query","ground_truth"] auto-confirm the column mapping in
-    # create(); the config knobs auto-confirm there too. We then state the
+    # new_draft(); the config knobs auto-confirm there too. We then state the
     # task framing + override the knob VALUES from the dataset's own config.
-    draft = registry.create(
+    draft = new_draft(
         tenant_id=stores.identity.tenant_id,
         slug=slug,
         n_samples=len(rows),
@@ -225,14 +233,14 @@ def draft_from_dataset(
         },
         provenance={"task_description": Provenance.CONFIRMED},
     )
-    registry.update(draft)
-    stores.tenant_datasets.write_draft_cache(
-        draft.draft_id,
-        rows,
+    _campaign_id, _cycle_id, keyed = create_checkin_campaign(
+        stores,
+        draft=draft,
+        bank_items=rows,
         source_file=f"dataset:{dataset_name}",
-        headers=["query", "ground_truth"],
+        headers=("query", "ground_truth"),
     )
-    return draft
+    return keyed
 
 
 __all__ = ["MAX_UPLOAD_BYTES", "SlugTakenError", "draft_from_dataset", "ingest_draft"]

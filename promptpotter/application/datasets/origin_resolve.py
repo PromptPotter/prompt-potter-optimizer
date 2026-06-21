@@ -30,10 +30,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from promptpotter.application.datasets.draft_campaign import (
-    DraftCampaign,
-    DraftCampaignRegistry,
-)
+from promptpotter.application.datasets.draft_campaign import DraftCampaign
 from promptpotter.application.datasets.origin_readiness import (
     field_values,
     origin_readiness,
@@ -134,8 +131,9 @@ def build_origin_consultation(draft: DraftCampaign) -> tuple[str, str]:
         "task_context — that decomposition seeds the campaign's starting prompt. "
         "Author 'answer_format' so the model emits an EXTRACTABLE answer: when an "
         "'answer_extraction_requirement' appears in the context, the format MUST "
-        "satisfy it verbatim; when a closed 'answer_space' is given, enumerate "
-        "every label so the model picks exactly one."
+        "satisfy it verbatim. A closed 'answer_space' (when present) is enumerated "
+        "into the prompt deterministically, so frame the task around the labels "
+        "rather than re-listing them."
     )
     return user_content, consultation_instruction
 
@@ -144,10 +142,12 @@ async def resolve_origin_turn(
     *,
     stores: Stores,
     draft: DraftCampaign,
-    draft_registry: DraftCampaignRegistry,
 ) -> OriginResolutionResult:
     """Run one resolver turn, apply findings, re-gate, persist. Returns the
-    resolution + post-apply draft."""
+    resolution + post-apply draft.
+
+    Persists the mutated draft + resolution block to the check-in store under the
+    draft's ``draft_id`` (which IS the owning ``campaign_id``)."""
     user_content, consultation_instruction = build_origin_consultation(draft)
 
     # Token/cost ride the tenant workspace ledger (no cycle exists pre-mint).
@@ -194,13 +194,13 @@ async def resolve_origin_turn(
             + "; ".join(degraded["reasons"])
         )
 
-    draft_registry.update(updated)
+    stores.checkin.write_draft(updated.draft_id, updated.to_disk())
 
     block = resolution_block(updated)
     block["last_resolution"] = _resolution_wire(raw)
     if degraded is not None:
         block["degraded"] = degraded
-    stores.tenant_datasets.write_draft_resolution(updated.draft_id, block)
+    stores.checkin.write_resolution(updated.draft_id, block)
 
     return OriginResolutionResult(resolution=block, draft=updated)
 
@@ -281,12 +281,12 @@ def _apply_findings(draft: DraftCampaign, output: CheckinOutput) -> DraftCampaig
         values["decomposed_task_context"] = decomposed
     if not values:
         return draft
-    # The resolver OWNS answer_format: it was handed the closed answer space (to
-    # enumerate every label) and the scorer's extraction requirement (to commit a
-    # readable answer), both in its raw context — so a correct format comes from the
-    # proposer, not a downstream overwrite. `origin_readiness._check_answer_space` +
-    # `_check_commit_format` are the static gates that nudge when a label is dropped
-    # or answer_format is left empty; the round-0 health grade is the empirical backstop.
+    # The resolver authors the answer_format PROSE (the scorer's extraction
+    # instruction — the bold/box it was handed in context); the closed answer-space
+    # ENUMERATION is appended deterministically downstream (`committed_prompt_fields`
+    # → `closed_answer_format`) because the LLM reliably drops labels from a many-way
+    # set. `_check_commit_format` nudges when the prose is left empty; the round-0
+    # health grade is the empirical backstop.
     return draft.apply_resolution(values=values, provenance=provenance)
 
 

@@ -11,6 +11,7 @@ import { STOP_REASON_LABELS } from "@/lib/api/types.generated";
 // of domain/phases.py::STOP_REASON_INFO (the single label source, no drift).
 
 const RUN_PHASE_LABEL: Record<string, string> = {
+  checkin: "Check-in",
   running: "Running",
   paused: "Paused",
   gate: "Origin gate",

@@ -1,11 +1,12 @@
 """Per-tenant user-uploaded dataset store — the M13 chat-first ingest target.
 
-User-uploaded Origins live at ``{tenant_root}/datasets/{slug}/``; in-flight
-ingests live at ``{tenant_root}/datasets/.drafts/{draft_id}/cache.json``.
-Commit = atomic rename of the draft dir to ``{slug}/`` plus the four
-Origin files (`cache.json`, `pipeline.json`, `task_description.md`,
-`prompts/default.json`) and the sibling `campaign.json` per
-``docs/specs/roadmap.md § Commit path``.
+User-uploaded Origins live at ``{tenant_root}/datasets/{slug}/``. Commit writes
+``{slug}/`` fresh (:meth:`write_committed_dataset`) from the materialized samples
++ the Origin files (`cache.json`, `pipeline.json`, `task_description.md`,
+`prompts/default.json`, `task_context.json`) and the sibling `campaign.json`. The
+pre-commit working state (the parsed sample bank + the draft) lives under the
+owning check-in campaign (``campaigns/{id}/checkin/``, :class:`CheckinDraftStore`),
+not here — this store only owns committed datasets.
 
 Built-in benchmark datasets (`aime_2025`, `bbeh`, `gsm8k`, …) stay under
 repo ``datasets/`` and are served by :class:`BackendStore`; this store
@@ -21,7 +22,6 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.domain.pipeline_schema import CANDIDATE_LIBRARY_FILE
 from promptpotter.infrastructure.store.base import (
     read_json_optional,
-    validate_path_component,
     write_json,
     write_text,
 )
@@ -30,9 +30,6 @@ from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
-
-
-_DRAFTS_SUBDIR = ".drafts"
 
 
 class TenantDatasetStore:
@@ -44,7 +41,7 @@ class TenantDatasetStore:
     # -- Path helpers ---------------------------------------------------------
 
     def datasets_root(self) -> Path:
-        """Tenant's ``datasets/`` dir — parent of every committed slug + the ``.drafts/`` sidetree."""
+        """Tenant's ``datasets/`` dir — parent of every committed slug."""
         return self._base_dir / "datasets"
 
     def dataset_dir(self, slug: str) -> Path:
@@ -52,15 +49,10 @@ class TenantDatasetStore:
         validate_dataset_name(slug)
         return self.datasets_root() / slug
 
-    def draft_dir(self, draft_id: str) -> Path:
-        """Resolve the in-flight draft staging dir."""
-        validate_path_component(draft_id)
-        return self.datasets_root() / _DRAFTS_SUBDIR / draft_id
-
     # -- Slug registry --------------------------------------------------------
 
     def list_slugs(self) -> list[str]:
-        """Sorted committed slugs (excludes ``.drafts/``). Each entry has a ``cache.json``."""
+        """Sorted committed slugs (excludes dotted sidetrees). Each entry has a ``cache.json``."""
         root = self.datasets_root()
         if not root.is_dir():
             return []
@@ -68,7 +60,7 @@ class TenantDatasetStore:
         for entry in sorted(root.iterdir()):
             if not entry.is_dir():
                 continue
-            if entry.name == _DRAFTS_SUBDIR or entry.name.startswith("."):
+            if entry.name.startswith("."):
                 continue
             if not (entry / "cache.json").is_file():
                 continue
@@ -129,61 +121,6 @@ class TenantDatasetStore:
             return None
         return path.read_text(encoding="utf-8")
 
-    # -- Draft staging --------------------------------------------------------
-
-    def write_draft_cache(
-        self,
-        draft_id: str,
-        items: Sequence[Sample | dict[str, Any]],
-        *,
-        source_file: str = "",
-        headers: Sequence[str] = (),
-    ) -> Path:
-        """Persist a draft's bank to ``.drafts/{draft_id}/cache.json``.
-
-        On ingest ``items`` are the raw header-keyed rows (the input/target
-        column mapping is not yet confirmed); ``headers`` records the column
-        order so the resolver / operator can pick. On commit the launcher
-        rewrites this file with materialized ``Sample`` rows once the mapping
-        is confirmed. A prior ``resolution`` block (provenance + gaps) is
-        preserved across a rewrite.
-        """
-        from promptpotter.domain.sample import Sample
-
-        path = self.draft_dir(draft_id) / "cache.json"
-        prior = read_json_optional(path) or {}
-        serialized = [item.model_dump() if isinstance(item, Sample) else item for item in items]
-        data: dict[str, Any] = {
-            "name": draft_id,
-            "created_at": utcnow_iso(),
-            "source_file": source_file,
-            "headers": list(headers),
-            "row_count": len(serialized),
-            "items": serialized,
-        }
-        if "resolution" in prior:
-            data["resolution"] = prior["resolution"]
-        write_json(path, data)
-        return path
-
-    def write_draft_resolution(self, draft_id: str, resolution: dict[str, Any]) -> None:
-        """Patch the draft cache's ``resolution`` block (per-field provenance + gaps).
-
-        Lets an operator (or the AI) open ``cache.json`` and see exactly what
-        blocks mint and why each resolved field was set — the AI-on-disk
-        commitment (origin-resolution gate #6). No-op when the draft is gone.
-        """
-        path = self.draft_dir(draft_id) / "cache.json"
-        data = read_json_optional(path)
-        if data is None:
-            return
-        data["resolution"] = resolution
-        write_json(path, data)
-
-    def load_draft_cache(self, draft_id: str) -> dict[str, Any] | None:
-        """Read a draft's parsed bank, or ``None`` if the draft is gone."""
-        return read_json_optional(self.draft_dir(draft_id) / "cache.json")
-
     # -- Commit ---------------------------------------------------------------
 
     def version_dataset(self, slug: str, versioned: str) -> Path:
@@ -224,39 +161,52 @@ class TenantDatasetStore:
             cc["dataset_name"] = new_name
             write_json(path, data)
 
-    def commit_draft(
+    def write_committed_dataset(
         self,
-        draft_id: str,
-        *,
         slug: str,
+        *,
+        samples: Sequence[Sample | dict[str, Any]],
+        source_file: str,
+        headers: Sequence[str],
         pipeline_json: dict[str, Any],
         campaign_json: dict[str, Any],
         task_description: str,
         prompt_default: dict[str, Any],
         task_context: dict[str, Any],
     ) -> Path:
-        """Atomic-rename ``.drafts/{draft_id}/`` to ``{slug}/`` + materialize the Origin files.
+        """Create ``datasets/{slug}/`` fresh and write the Origin files.
 
-        ``task_context.json`` is the run-start domain framing the check-in already
-        decomposed — written here so the run reads it instead of recomputing it via
-        a second LLM call. The candidate library is NOT written here: it rides the
-        one origin-write seam (:meth:`write_candidate_library`) the launcher calls
-        on every mint route, fresh-upload or reused-dataset alike.
+        The one commit mechanism for both entry points — the CLI ``new <file>``
+        commit and the durable check-in Start. The bank is delivered as
+        already-materialized ``Sample`` rows (the column mapping is confirmed by
+        now), so the pre-commit working dir (the campaign's ``checkin/`` dir) is the
+        caller's to clean up or keep as an audit breadcrumb — this writer never moves
+        it. ``task_context.json`` is the
+        run-start framing the check-in already decomposed (read at run-start instead
+        of a second LLM decomposition). The candidate library is NOT written here:
+        it rides the one origin-write seam (:meth:`write_candidate_library`).
 
-        On collision raises ``FileExistsError`` (caller maps to 409 with a
-        :meth:`suggest_free_slug` suggestion). On unknown draft raises
-        ``FileNotFoundError``.
+        On slug collision raises ``FileExistsError`` (caller maps to 409 with a
+        :meth:`suggest_free_slug` suggestion).
         """
-        src = self.draft_dir(draft_id)
-        if not src.is_dir():
-            raise FileNotFoundError(f"draft {draft_id!r} not found")
+        from promptpotter.domain.sample import Sample
+
         dst = self.dataset_dir(slug)
         if dst.exists():
             raise FileExistsError(slug)
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        # Atomic on the same filesystem; the .drafts/ sidetree lives under
-        # the same tenant root as {slug}/ so this never crosses devices.
-        src.rename(dst)
+        dst.mkdir(parents=True, exist_ok=True)
+        serialized = [s.model_dump() if isinstance(s, Sample) else s for s in samples]
+        write_json(
+            dst / "cache.json",
+            {
+                "name": slug,
+                "created_at": utcnow_iso(),
+                "source_file": source_file,
+                "headers": list(headers),
+                "row_count": len(serialized),
+                "items": serialized,
+            },
+        )
         write_json(dst / "pipeline.json", pipeline_json)
         write_json(dst / "campaign.json", campaign_json)
         write_text(dst / "task_description.md", task_description)

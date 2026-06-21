@@ -9,22 +9,20 @@ pipeline_overlay) materializes into the four content-hashed files on
 commit; the campaign-config subset (connector, scoring_composite,
 max_rounds) materializes into the sibling ``campaign.json``.
 
-Storage:
-  * In-memory: ``DraftCampaignRegistry``, keyed by ``(tenant_id, draft_id)``
-    — short-lived, restart-clears. Per ADR-0002 no-drift gate #3 the
-    ``tenant_id`` is the trust-boundary key; cross-tenant lookups by
-    bare ``draft_id`` return ``None`` even when the id collides.
-  * On-disk: the parsed sample bank lives at
-    ``projects/{tenant}/datasets/.drafts/{draft_id}/cache.json`` via
-    :class:`TenantDatasetStore`, so a multi-step ingest survives a
-    crash mid-conversation. The dataclass below carries only metadata —
-    the bank is loaded on demand.
+Storage: a draft is the working state of a campaign in the ``checkin``
+lifecycle. :class:`~promptpotter.infrastructure.store.CheckinDraftStore`
+persists the lossless dict (:meth:`DraftCampaign.to_disk`) at
+``campaigns/{campaign_id}/checkin/draft.json`` and the sample bank at
+``checkin/cache.json``. The draft's ``draft_id`` IS the owning ``campaign_id``
+(re-keyed at :func:`~promptpotter.application.jobs.launcher.create_checkin_campaign`),
+so a multi-step ingest survives a restart and is resumable like any other
+campaign — there is no in-memory registry. :func:`new_draft` builds the fresh
+draft the first ingest action mints a check-in campaign from.
 """
 
 from __future__ import annotations
 
 import copy
-import threading
 import uuid
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
@@ -86,6 +84,16 @@ def _default_optimization_overrides() -> dict[str, Any]:
     return OptimizationOverrides().model_dump(mode="json")
 
 
+def closed_answer_format(labels: tuple[str, ...]) -> str:
+    """The canonical enumeration appended to a closed-answer-space prompt: every
+    label, pipe-joined behind a pick-one directive, so the model can emit any one
+    and the answer-space gate passes deterministically. The label set is a
+    deterministic fact (the target column's distinct values), not the LLM's to
+    transcribe — it reliably drops labels from a many-way set. Single source for
+    this string (``committed_prompt_fields`` appends it)."""
+    return "Choose exactly one of these labels: " + " | ".join(labels)
+
+
 @dataclass(frozen=True, slots=True)
 class DraftCampaign:
     """Server-held canonical state for an in-progress ingest. Frozen — mutate via :meth:`patch`.
@@ -98,10 +106,10 @@ class DraftCampaign:
     one-form ingest UX — the operator fills both in one pass.
 
     **The ``slug`` freezes at commit.** Before commit it's a mutable, operator-
-    editable name; the moment :func:`~promptpotter.application.jobs.launcher.commit_draft_to_dataset`
-    writes ``datasets/{slug}/``, the slug becomes the dataset's filesystem
-    identity *and* the pin every campaign resolves through. The only sanctioned
-    post-commit identity change is the ``-vN`` suffix a *Replace* applies
+    editable name; the moment :func:`~promptpotter.application.jobs.launcher.materialize_and_write_origin`
+    (at check-in Start) writes ``datasets/{slug}/``, the slug becomes the dataset's
+    filesystem identity *and* the pin every campaign resolves through. The only
+    sanctioned post-commit identity change is the ``-vN`` suffix a *Replace* applies
     (``application/datasets/dataset_replace.py``).
     """
 
@@ -186,7 +194,7 @@ class DraftCampaign:
     candidate_library: tuple[str, ...] = ()
     # Set when this draft was opened by reusing a prior origin (the picker's
     # "Reuse an origin" path) — the chosen origin's content id. When non-empty,
-    # ``mint_campaign_from_draft_command`` passes ``origin_prompt_fields`` as the
+    # ``prepare_checkin_run`` passes ``origin_prompt_fields`` as the
     # ``origin_override`` seed, so C0 resolves via the ``seed`` branch and stamps
     # the ``campaign_origin`` lineage ("minted from a chosen prior origin"). Empty
     # for a fresh upload / plain dataset open (lineage stays ``origin``).
@@ -236,6 +244,77 @@ class DraftCampaign:
             "updated_at": self.updated_at,
         }
 
+    def to_disk(self) -> dict[str, Any]:
+        """Lossless serialization for the durable check-in store (``checkin/draft.json``).
+
+        Unlike :meth:`to_wire` (the lossy client projection), this carries EVERY
+        field the readiness gate runs over — provenance enums (→ str), the column
+        label sets, ``candidate_library``, ``decomposed_task_context`` — so
+        :meth:`from_disk` reconstructs the exact draft. ``draft_id`` / ``tenant_id``
+        are omitted: the campaign dir the check-in lives under IS the identity, so
+        they're re-injected from campaign context on load."""
+        return {
+            "slug": self.slug,
+            "n_samples": self.n_samples,
+            "sample_preview": [dict(row) for row in self.sample_preview],
+            "connector": self.connector,
+            "scoring_composite": self.scoring_composite,
+            "raw_task_description": self.raw_task_description,
+            "pipeline_overlay": dict(self.pipeline_overlay),
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "headers": list(self.headers),
+            "column_query": self.column_query,
+            "column_ground_truth": self.column_ground_truth,
+            "column_label_sets": {k: list(v) for k, v in self.column_label_sets.items()},
+            "field_provenance": {k: v.value for k, v in self.field_provenance.items()},
+            "source_file": self.source_file,
+            "origin_prompt_fields": dict(self.origin_prompt_fields),
+            "decomposed_task_context": dict(self.decomposed_task_context),
+            "simulated_checkin": dict(self.simulated_checkin),
+            "pipeline_steps": list(self.pipeline_steps),
+            "optimization_overrides": dict(self.optimization_overrides),
+            "candidate_library": list(self.candidate_library),
+            "reused_origin_id": self.reused_origin_id,
+        }
+
+    @classmethod
+    def from_disk(
+        cls, data: dict[str, Any], *, draft_id: str, tenant_id: TenantId
+    ) -> DraftCampaign:
+        """Reconstruct a draft from :meth:`to_disk` output + the campaign-context identity.
+
+        ``draft_id`` (= the owning ``campaign_id``) and ``tenant_id`` come from the
+        campaign dir the check-in lives under, not the JSON — the dir IS the identity."""
+        return cls(
+            draft_id=draft_id,
+            tenant_id=tenant_id,
+            slug=data["slug"],
+            n_samples=data["n_samples"],
+            sample_preview=tuple(dict(row) for row in data.get("sample_preview", [])),
+            connector=data["connector"],
+            scoring_composite=data["scoring_composite"],
+            raw_task_description=data.get("raw_task_description", ""),
+            pipeline_overlay=dict(data.get("pipeline_overlay", {})),
+            created_at=data["created_at"],
+            updated_at=data["updated_at"],
+            headers=tuple(data.get("headers", ())),
+            column_query=data.get("column_query", ""),
+            column_ground_truth=data.get("column_ground_truth", ""),
+            column_label_sets={k: tuple(v) for k, v in data.get("column_label_sets", {}).items()},
+            field_provenance={
+                k: Provenance(v) for k, v in data.get("field_provenance", {}).items()
+            },
+            source_file=data.get("source_file", ""),
+            origin_prompt_fields=dict(data.get("origin_prompt_fields", {})),
+            decomposed_task_context=dict(data.get("decomposed_task_context", {})),
+            simulated_checkin=dict(data.get("simulated_checkin", {})),
+            pipeline_steps=list(data.get("pipeline_steps", [])),
+            optimization_overrides=dict(data.get("optimization_overrides", {})),
+            candidate_library=tuple(data.get("candidate_library", ())),
+            reused_origin_id=data.get("reused_origin_id", ""),
+        )
+
     def answer_space(self) -> tuple[str, ...] | None:
         """The target column's closed label set, or ``None`` when the target is
         unresolved or open-ended.
@@ -252,16 +331,35 @@ class DraftCampaign:
     def committed_prompt_fields(self) -> dict[str, Any]:
         """The prompt fields this draft commits at mint — the one encoding of
         "the prompt this draft commits," shared by the prompt writer
-        (``launcher.commit_draft_to_dataset``) and the answer-space gate
+        (``launcher.materialize_and_write_origin``) and the answer-space gate
         (``origin_readiness._check_answer_space``) so they can't drift.
 
         The authored Layer-1 fields (``origin_prompt_fields``) win once present;
         otherwise we floor on ``instruction`` from the task description (a real
         ``PromptTemplate`` field — the prior ``task_description``/``instructions``
-        keys were not, so the committed prompt loaded empty)."""
-        if self.origin_prompt_fields:
-            return dict(self.origin_prompt_fields)
-        return {"instruction": self.raw_task_description}
+        keys were not, so the committed prompt loaded empty).
+
+        A closed answer space is enumerated here deterministically: the label set is
+        a fact (the target column's distinct values), not the LLM's to transcribe —
+        the resolver reliably drops labels from a many-way set, which left every
+        non-enumerated row unscoreable and the gate stuck. Code GUARANTEES the full
+        enumeration rides the committed ``answer_format``, so ``_check_answer_space``
+        is the safety that passes, not a tripwire. APPEND (never overwrite) so the
+        resolver's extraction instruction — the bold/box the scorer reads — survives;
+        skip when ``answer_format`` is still empty so the ``_check_commit_format``
+        nudge to author it isn't masked."""
+        fields = (
+            dict(self.origin_prompt_fields)
+            if self.origin_prompt_fields
+            else {"instruction": self.raw_task_description}
+        )
+        labels = self.answer_space()
+        fmt = str(fields.get("answer_format", "")).strip()
+        if labels and fmt:
+            enumeration = closed_answer_format(labels)
+            if enumeration not in fmt:
+                fields["answer_format"] = f"{fmt}\n{enumeration}"
+        return fields
 
     def patch(self, **changes: Any) -> DraftCampaign:
         """Return a copy with ``updated_at`` refreshed and any provided fields replaced."""
@@ -327,92 +425,53 @@ def merge_pipeline_overlay(draft: DraftCampaign, connector: Connector) -> dict[s
     return nodes
 
 
-@dataclass
-class DraftCampaignRegistry:
-    """Thread-safe in-memory registry keyed by ``(tenant_id, draft_id)``.
+def new_draft(
+    *,
+    tenant_id: TenantId,
+    slug: str,
+    n_samples: int,
+    sample_preview: list[dict[str, str]],
+    headers: list[str],
+    source_file: str = "",
+    column_label_sets: dict[str, tuple[str, ...]] | None = None,
+) -> DraftCampaign:
+    """Build a fresh draft — the working state a check-in campaign is minted from.
 
-    Lifecycle is per-process — restart wipes the table. The on-disk
-    ``.drafts/{draft_id}/cache.json`` survives, but a draft without its
-    in-memory metadata is treated as orphaned and discarded on a fresh
-    ingest with the same slug.
+    The first ingest action calls this, then
+    :func:`~promptpotter.application.jobs.launcher.create_checkin_campaign` re-keys
+    the draft's ``draft_id`` to the new ``campaign_id`` and persists it. The
+    transient ``draft_id`` minted here is never stored (``to_disk`` omits it).
+
+    The input/target column mapping is **not** silently assumed: it auto-confirms
+    only when a header is literally named ``query`` / ``ground_truth`` (the
+    unambiguous, deterministic case), and otherwise lands ``UNSET`` for the operator
+    to confirm. The config knobs seed from our template defaults and auto-confirm
+    (one sane default each, so the operator overrides rather than fills them);
+    ``raw_task_description`` is the one knob with no default framing, so it lands
+    ``UNSET`` — the operator (or the resolver, high-confidence) must state what the
+    prompt does.
     """
-
-    _by_id: dict[str, DraftCampaign] = field(default_factory=dict)
-    _lock: threading.Lock = field(default_factory=threading.Lock)
-
-    def create(
-        self,
-        *,
-        tenant_id: TenantId,
-        slug: str,
-        n_samples: int,
-        sample_preview: list[dict[str, str]],
-        headers: list[str],
-        source_file: str = "",
-        column_label_sets: dict[str, tuple[str, ...]] | None = None,
-    ) -> DraftCampaign:
-        """Mint a fresh draft and register it.
-
-        The input/target column mapping is **not** silently assumed: it
-        auto-confirms only when a header is literally named ``query`` /
-        ``ground_truth`` (the unambiguous, deterministic case), and otherwise
-        lands ``UNSET`` for the operator to confirm. The config knobs seed from
-        our template defaults and auto-confirm (one sane default each, so the
-        operator overrides rather than fills them); ``raw_task_description`` is the
-        one knob with no default framing, so it lands ``UNSET`` — the operator
-        (or the resolver, high-confidence) must state what the prompt does.
-        """
-        now = utcnow_iso()
-        column_query, column_ground_truth, provenance = _seed_provenance(headers)
-        draft = DraftCampaign(
-            draft_id=_mint_draft_id(),
-            tenant_id=tenant_id,
-            slug=slug,
-            n_samples=n_samples,
-            sample_preview=tuple(dict(row) for row in sample_preview[:PREVIEW_ROWS]),
-            connector=DEFAULT_CONNECTOR,
-            scoring_composite=DEFAULT_SCORING_COMPOSITE,
-            raw_task_description="",
-            pipeline_overlay={},
-            headers=tuple(headers),
-            column_query=column_query,
-            column_ground_truth=column_ground_truth,
-            column_label_sets=dict(column_label_sets or {}),
-            field_provenance=provenance,
-            created_at=now,
-            updated_at=now,
-            source_file=source_file,
-        )
-        with self._lock:
-            self._by_id[draft.draft_id] = draft
-        return draft
-
-    def get(self, draft_id: str, *, tenant_id: TenantId) -> DraftCampaign | None:
-        """Return the draft iff it exists *and* belongs to the supplied tenant.
-
-        Cross-tenant id collision returns ``None`` — existence-leak gate
-        per ADR-0001 (404 not 403 at the API layer).
-        """
-        with self._lock:
-            draft = self._by_id.get(draft_id)
-        if draft is None or draft.tenant_id != tenant_id:
-            return None
-        return draft
-
-    def update(self, draft: DraftCampaign) -> DraftCampaign:
-        """Overwrite the stored row with ``draft`` (same ``draft_id``)."""
-        with self._lock:
-            self._by_id[draft.draft_id] = draft
-        return draft
-
-    def discard(self, draft_id: str, *, tenant_id: TenantId) -> bool:
-        """Tenant-scoped removal. Returns ``True`` when a row was deleted."""
-        with self._lock:
-            existing = self._by_id.get(draft_id)
-            if existing is None or existing.tenant_id != tenant_id:
-                return False
-            del self._by_id[draft_id]
-            return True
+    now = utcnow_iso()
+    column_query, column_ground_truth, provenance = _seed_provenance(headers)
+    return DraftCampaign(
+        draft_id=_mint_draft_id(),
+        tenant_id=tenant_id,
+        slug=slug,
+        n_samples=n_samples,
+        sample_preview=tuple(dict(row) for row in sample_preview[:PREVIEW_ROWS]),
+        connector=DEFAULT_CONNECTOR,
+        scoring_composite=DEFAULT_SCORING_COMPOSITE,
+        raw_task_description="",
+        pipeline_overlay={},
+        headers=tuple(headers),
+        column_query=column_query,
+        column_ground_truth=column_ground_truth,
+        column_label_sets=dict(column_label_sets or {}),
+        field_provenance=provenance,
+        created_at=now,
+        updated_at=now,
+        source_file=source_file,
+    )
 
 
 def _seed_provenance(
@@ -497,9 +556,9 @@ __all__ = [
     "DEFAULT_SCORING_COMPOSITE",
     "PREVIEW_ROWS",
     "DraftCampaign",
-    "DraftCampaignRegistry",
     "OptimizationOverrides",
     "dataset_source_of",
     "default_slug_from_filename",
     "merge_pipeline_overlay",
+    "new_draft",
 ]

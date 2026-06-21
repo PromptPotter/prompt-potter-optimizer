@@ -409,6 +409,22 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
         raise SystemExit(
             "ERROR: no active campaign to resume. Run `python -m promptpotter new <dataset>` first."
         )
+
+    # A check-in campaign (origin still being authored — no committed dataset, no
+    # rounds) isn't resumable: there's nothing to run until it's Started. Guard
+    # cheaply before init_services so the operator gets a clear next step instead of
+    # a confusing dataset-not-found deep in the loop.
+    from promptpotter.infrastructure.store import build_stores
+
+    _campaign = build_stores(identity_from_args(args)).campaigns.load_campaign(ctx.campaign_id)
+    if _campaign is not None and _campaign.lifecycle_status == "checkin":
+        raise SystemExit(
+            f"ERROR: campaign '{ctx.campaign_id}' is still in check-in — its origin "
+            "isn't authored yet, so there's nothing to resume.\n"
+            "Finish + Start it in the webapp, or run "
+            "`python -m promptpotter new <file>` to author and run from the CLI."
+        )
+
     campaign_config = ctx.campaign_config
     session = await init_services_cli(**ctx.init_params, identity=identity_from_args(args))
 

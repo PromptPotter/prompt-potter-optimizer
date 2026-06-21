@@ -21,10 +21,13 @@ from __future__ import annotations
 from typing import Any
 
 from promptpotter import connectors
+from promptpotter.application.config import load_campaign_config
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
     merge_pipeline_overlay,
 )
+from promptpotter.application.datasets.origin_readiness import origin_readiness
+from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     CANDIDATE_LIBRARY,
     NodeSearchNarrowing,
@@ -157,23 +160,58 @@ def _dependency_fulfilled(dep: PipelineDependency, draft: DraftCampaign) -> bool
     return False
 
 
+def _draft_pipeline_render(draft: DraftCampaign) -> dict[str, Any]:
+    """The draft's parsed pipeline ``view`` + per-node config/output schema — the
+    node-editor render surface, computed straight from the draft.
+
+    A check-in has no committed ``datasets/{slug}/`` yet, so its pipeline can't be
+    read from disk; it is fully determined by the draft (``_build_origin_pipeline_json``
+    yields the byte-identical ``pipeline.json`` that Start commits). Riding the draft
+    wire means the ingest node editor renders directly from the draft — no
+    fetch-by-slug, no 404, no second pipeline endpoint. Mirrors
+    ``datasets.get_dataset_pipeline`` for the committed-dataset case: one render path,
+    two sources (draft pre-commit / dataset post-commit).
+    """
+    schema = parse_pipeline_response(_build_origin_pipeline_json(draft))
+    cfg = load_campaign_config(_build_default_campaign_json(draft)["campaign_config"])
+    schema = schema.narrow(cfg.optimizer_narrowing)
+    return {
+        "pipeline_view": schema.view.model_dump(by_alias=True) if schema.view is not None else None,
+        "node_config_schema": schema.node_config_schema(cfg.optimization.forbidden_axes_strict),
+        "node_output_schema": schema.node_output_schemas(),
+    }
+
+
 def draft_wire_with_locks(draft: DraftCampaign) -> dict[str, Any]:
-    """``DraftCampaign.to_wire()`` plus the connector-derived ``optimizer_locks``
-    and ``dependencies`` blocks.
+    """``DraftCampaign.to_wire()`` plus the connector-derived ``optimizer_locks``,
+    the parsed ``pipeline_view`` + node schemas, and the ``dependencies`` blocks.
 
     The single wire shape every draft-returning endpoint emits — keeps
     :meth:`DraftCampaign.to_wire` pure (no connector import) and adds the
-    connector-derived blocks once at the I/O boundary. ``dependencies`` carries
-    each required input + whether it's ``fulfilled``, so the ingest UI shows the
-    operator which input is missing and offers a drop in place.
+    connector-derived blocks once at the I/O boundary. The ``pipeline_view`` +
+    ``node_config_schema`` + ``node_output_schema`` block makes the draft fully
+    self-describing so the ingest node editor renders from it directly (no
+    fetch-by-slug for a dataset dir that doesn't exist pre-commit).
+    ``dependencies`` carries each required input + whether it's ``fulfilled``, so
+    the ingest UI shows the operator which input is missing and offers a drop in
+    place. ``readiness`` is the **server-authoritative** mint-gate verdict (the
+    full :func:`origin_readiness` checklist) recomputed on every draft response —
+    the UI gates Start on this, never on a partial client re-derivation that would
+    drift from the answer-space / answer-format / node-model checks.
     """
+    readiness = origin_readiness(draft)
     return {
         **draft.to_wire(),
         "optimizer_locks": derive_optimizer_locks(draft),
+        **_draft_pipeline_render(draft),
         "dependencies": [
             {**dep.model_dump(), "fulfilled": _dependency_fulfilled(dep, draft)}
             for dep in draft_pipeline_dependencies(draft)
         ],
+        "readiness": {
+            "complete": readiness.complete,
+            "gaps": [gap.to_wire() for gap in readiness.gaps],
+        },
     }
 
 

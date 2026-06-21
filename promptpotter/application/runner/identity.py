@@ -41,6 +41,18 @@ def mint_campaign_id(dataset_name: str) -> str:
     return f"{dataset_name or 'campaign'}__{secrets.token_hex(3)}"
 
 
+def mint_checkin_cycle_id() -> str:
+    """Provisional root cycle id for a check-in campaign — ``cycle_chk_{rand12_hex}``.
+
+    The origin isn't authored at first action, so there's no content hash to
+    address the root cycle by (the normal ``cycle_<hash>`` scheme). This stays the
+    permanent root id; drift detection reads ``campaign.json::root_content_hash``
+    (set at Start), not the parsed cycle id. The ``cycle_chk_`` prefix carries no
+    sibling separator, so ``sibling_kind`` reads it as ``root`` and ``root_cycle_id``
+    returns it whole."""
+    return f"cycle_chk_{secrets.token_hex(6)}"
+
+
 def build_origin_cycle_id(
     osp: OptSearchPoint,
     schema: PipelineSchema | None,
@@ -69,4 +81,5 @@ __all__ = [
     "content_hash_of",
     "cycle_config_identity",
     "mint_campaign_id",
+    "mint_checkin_cycle_id",
 ]

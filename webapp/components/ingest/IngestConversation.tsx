@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { DatasetIndexEntry, OriginEntry } from "@/lib/api";
 import type { IngestFlow } from "@/lib/hooks/useIngestFlow";
-import { originReadiness } from "@/lib/origin-readiness";
 import { cx } from "@/lib/cx";
 import { NumberField } from "@/components/forms/NumberField";
 import { SlugField } from "@/components/forms/SlugField";
@@ -250,7 +249,7 @@ export function IngestConversation({
 function ReadyBlock({ flow }: { flow: IngestFlow }) {
   if (flow.phase.stage !== "ready") return null;
   const { draft, resolution, degraded } = flow.phase;
-  const ready = originReadiness(draft).complete;
+  const { complete: ready, gaps } = draft.readiness;
 
   return (
     <div className="chat-msg ai ingest-ready">
@@ -274,6 +273,20 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
       {!ready ? (
         <div className="ingest-gaps">
           <OriginCheckinPanel draft={draft} lastResolution={resolution} onApply={flow.applyPatch} />
+          {/* The server gate's open fields, each with its operator-facing hint.
+              The resolver panel above only covers gaps it raised a question for
+              (answer_format / answer_space it can leave silently empty), so this
+              list is the honest "what still blocks Start" — resolved by editing
+              the prompt / mapping below until the gate clears. */}
+          {gaps.length > 0 ? (
+            <ul className="ingest-gap-list">
+              {gaps.map((g) => (
+                <li key={g.field} className="ingest-gap">
+                  {g.hint}
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       ) : null}
 

@@ -17,13 +17,18 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 
 # Captured 2026-06-19 after the unification-phase subtractions. Only ever edit a
 # number DOWNWARD (a deletion that earned it) — never up without a feature reason.
+# Deliberate feature raises since the 2026-06-19 capture: ``settings_const``
+# 15→16 (the consent-gate security feature) and ``modules`` 293→295 (the durable
+# check-in: ``infrastructure/store/checkin_draft_store.py`` + the two-transition
+# seam ``application/jobs/launcher/checkin.py`` — a real disk-backed campaign
+# authoring state that replaces the restart-wiped in-memory ``DraftCampaignRegistry``).
 LEDGER_BASELINE = {
-    "modules": 293,
+    "modules": 295,
     "init_files": 55,
     "reexport_shims": 42,
     "config_leaf_fields": 32,
     "settings_env": 24,
-    "settings_const": 15,
+    "settings_const": 16,
     "opt_search_point_fields": 27,
     "prompt_string_fields": 6,
     "injections": 22,

@@ -38,7 +38,12 @@ export function SessionSubtree({
   const root = session.root;
   const hasBranches = session.branches.length > 0;
   const selected = cid === campaignId && root.cycle_id === cycleId;
-  const active = cid === activeCampaignId && root.cycle_id === activeCycleId;
+  // A check-in isn't a run, so it never wears the active-pointer ●, even if a stale
+  // pointer still names it (it claimed the pointer under the old mint code before the
+  // claim moved to Start). The ● tracks the running/last-started cycle the dashboard
+  // follows; `selected` already shows what the operator is viewing.
+  const active =
+    cid === activeCampaignId && root.cycle_id === activeCycleId && root.run_phase !== "checkin";
   const live = root.run_phase === "running";
   // Terminal (stopped) cycles surface their stop-reason so a CLI-aborted campaign
   // reads as stale, not identical to the live one. Per-cycle (not the campaign

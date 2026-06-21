@@ -12,7 +12,11 @@ stashed on ``app.state.job_registry``; reads filter by ``user_id``.
 
 from promptpotter.application.jobs.launcher import (
     LaunchError,
+    create_checkin_campaign,
+    load_checkin_draft,
     mint_campaign_command,
+    save_checkin_draft,
+    start_checkin_campaign,
     start_run_command,
 )
 from promptpotter.application.jobs.mint import (
@@ -42,10 +46,14 @@ __all__ = [
     "MintedCycle",
     "QuotaExceededError",
     "check_launch_quotas",
+    "create_checkin_campaign",
     "default_jobs_dir",
     "effective_spend_cap_usd",
+    "load_checkin_draft",
     "mint_campaign_command",
     "prepare_fresh_cycle",
     "resolve_cycle_plan",
+    "save_checkin_draft",
+    "start_checkin_campaign",
     "start_run_command",
 ]

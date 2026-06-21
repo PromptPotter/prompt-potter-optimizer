@@ -11,7 +11,7 @@
 //   POST /datasets/{name}/draft                 (existing dataset → DraftCampaign)
 //   POST /commands/edit-draft-campaign          (sparse-patch)
 //   POST /commands/resolve-origin               (the one check-in call)
-//   POST /commands/mint-campaign-from-draft     (commit + spawn runner)
+//   POST /commands/start-checkin                (gate + commit + spawn runner)
 
 import { useEffect, useState } from "react";
 import {

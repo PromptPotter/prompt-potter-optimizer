@@ -36,11 +36,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger("promptpotter.presentation.cli")
 
 
-# --- File-ingest branch: `new <file>` parity with the web onboarding ----------
-# A raw file → resolved origin → committed tenant dataset, then the *same*
-# authored mint+run path below. The CLI owns no ingest/resolve/commit logic of
-# its own; every step is an application-layer call shared with the web
-# (`ingest_draft`, `resolve_origin_turn`, `commit_draft_to_dataset`).
+# --- File-ingest branch: `new <file>` folds onto the durable check-in path ----
+# A raw file → durable check-in campaign → resolved origin → flip to active + run
+# inline. The CLI owns no ingest/resolve/commit logic of its own; every step is an
+# application-layer call shared with the web (`ingest_draft`, `resolve_origin_turn`,
+# `prepare_checkin_run`). The ONLY CLI/web difference is run-invocation: the CLI
+# runs the loop inline with `LiveDisplay`; the web detaches via `JobRegistry`.
 # Spec: ``docs/specs/roadmap.md``.
 
 # Field id → ``DraftCampaign`` attribute a ``--set`` writes — the CLI parallel of
@@ -126,33 +127,27 @@ def _raise_incomplete(gaps: Any, last: Any) -> NoReturn:
     raise SystemExit("\n".join(lines))
 
 
-async def _ingest_to_dataset(args: argparse.Namespace) -> str:
-    """Parse the file → apply ``--set`` → resolve the origin → commit a tenant dataset.
+async def _ingest_checkin(args: argparse.Namespace) -> str:
+    """Parse the file → apply ``--set`` → resolve the origin → return the durable
+    check-in campaign id (gated).
 
-    Returns the committed slug; ``cmd_new`` then runs the authored mint+loop on it
-    (rich inline display). On a residual gap, prints the open fields + resolver
-    questions and exits non-zero — no silent default reaches mint."""
+    The check-in campaign is minted on the first action and persists: on a residual
+    gap, this prints the open fields + resolver questions and exits non-zero, but the
+    campaign survives so a later ``--set`` + ``resume`` can complete it — no silent
+    default reaches the run."""
     from promptpotter.application.datasets.csv_ingest import IngestError
-    from promptpotter.application.datasets.draft_campaign import DraftCampaignRegistry
     from promptpotter.application.datasets.ingest import SlugTakenError, ingest_draft
     from promptpotter.application.datasets.origin_readiness import origin_readiness
     from promptpotter.application.datasets.origin_resolve import resolve_origin_turn
-    from promptpotter.application.jobs.launcher import (
-        LaunchError,
-        OriginIncompleteError,
-        commit_draft_to_dataset,
-    )
-    from promptpotter.connectors import BackendUnreachableError
+    from promptpotter.application.jobs.launcher import save_checkin_draft
     from promptpotter.infrastructure.store import build_stores
 
     file_path = Path(args.dataset)
     stores = build_stores(identity_from_args(args))
-    registry = DraftCampaignRegistry()
 
     try:
         draft = ingest_draft(
             stores=stores,
-            registry=registry,
             blob=file_path.read_bytes(),
             filename=file_path.name,
             slug=args.slug,
@@ -166,11 +161,12 @@ async def _ingest_to_dataset(args: argparse.Namespace) -> str:
             f"ERROR: slug '{exc.slug}' already exists. Try --slug {exc.suggested}."
         ) from None
 
-    checkin_line("ingest", f"{draft.n_samples} rows → draft '{draft.slug}' ({draft.draft_id})")
+    campaign_id = draft.draft_id  # the check-in campaign id (draft re-keyed at mint)
+    checkin_line("ingest", f"{draft.n_samples} rows → check-in '{draft.slug}' ({campaign_id})")
 
     if args.sets:
         draft = _apply_sets(draft, args.sets)
-        registry.update(draft)
+        save_checkin_draft(stores, draft)
 
     last: Any = None
     if not origin_readiness(draft).complete:
@@ -179,29 +175,63 @@ async def _ingest_to_dataset(args: argparse.Namespace) -> str:
         # operator states the framing up front via --set, so the resolver only
         # reads the columns + authors the prompt. A residual gap surfaces below
         # with the --set instructions rather than spinning more LLM turns.
-        last = await resolve_origin_turn(stores=stores, draft=draft, draft_registry=registry)
+        last = await resolve_origin_turn(stores=stores, draft=draft)
         draft = last.draft
 
     readiness = origin_readiness(draft)
     if not readiness.complete:
         _raise_incomplete(readiness.gaps, last)
 
-    try:
-        slug = await commit_draft_to_dataset(
-            stores=stores, draft=draft, draft_registry=registry, backend_url=args.backend_url
-        )
-    except OriginIncompleteError as exc:
-        _raise_incomplete(exc.gaps, last)
-    except LaunchError as exc:
-        raise SystemExit(f"ERROR: {exc}") from None
-    except BackendUnreachableError:
-        raise SystemExit(
-            f"ERROR: backend unreachable at {args.backend_url}. Start the TermNorm "
-            "backend (TermNorm-excel\\backend-api\\start-server-py-LLMs.bat), then re-run."
-        ) from None
+    checkin_line("origin", f"complete — check-in '{draft.slug}' ready")
+    return campaign_id
 
-    checkin_line("origin", f"complete — committed dataset '{slug}'")
-    return slug
+
+async def _ingest_and_prepare_checkin(
+    args: argparse.Namespace,
+) -> tuple[Session, CampaignConfig, str, str]:
+    """File → durable check-in → flip to ``active`` + build the run session, inline.
+
+    The CLI tail of the check-in Start: shares :func:`prepare_checkin_run` with the
+    web detach path (the ONLY difference is run-invocation). Returns the same
+    4-tuple as :func:`_mint_fresh_session`, so ``cmd_new``'s common tail (backend
+    status, task check-in, loop) runs unchanged for both file + dataset-name inputs.
+
+    Backend reachability isn't preflighted here: a check-in is durable, so if the
+    backend is down the campaign is minted + flipped + left ready, and the common
+    tail's status check reports it — ``resume`` runs it once the backend is up."""
+    from promptpotter.application.jobs.launcher import load_checkin_draft, prepare_checkin_run
+    from promptpotter.infrastructure.store import build_stores
+
+    campaign_id = await _ingest_checkin(args)
+    stores = build_stores(identity_from_args(args))
+    campaign = stores.campaigns.load_campaign(campaign_id)
+    assert campaign is not None  # just minted
+    draft = load_checkin_draft(stores, campaign_id)
+    assert draft is not None  # just authored
+
+    async def make_session(dataset_name: str) -> Session:
+        return await init_services_cli(
+            backend_url=args.backend_url,
+            backend_id=args.backend_id,
+            experiment_id=args.experiment_id,
+            dataset_name=dataset_name,
+            identity=identity_from_args(args),
+        )
+
+    prepared = await prepare_checkin_run(
+        stores,
+        campaign_id=campaign_id,
+        cycle_id=campaign.root_cycle_id,
+        draft=draft,
+        make_session=make_session,
+    )
+    checkin_line("campaign", f"started check-in {campaign_id}")
+    return (
+        prepared.session,
+        prepared.campaign_config,
+        prepared.session.dataset_name or "?",
+        prepared.session_id,
+    )
 
 
 async def _checkin_task(
@@ -497,22 +527,22 @@ def _pipeline_detail(session: Session) -> str:
 async def cmd_new(args: argparse.Namespace) -> CommandResult:
     """Mint a fresh campaign and run the loop from round 0.
 
-    The positional is a dataset name *or* a raw file (CSV). A file is ingested →
-    its origin resolved → committed as a tenant dataset (``_ingest_to_dataset``),
-    then both inputs fall through to the same authored mint+loop below.
-    Pre-flight: campaign → backend → dataset → pipeline → task → origin.
+    The positional is a dataset name *or* a raw file (CSV). A file folds onto the
+    durable check-in path (``_ingest_and_prepare_checkin``): ingest → resolve origin
+    → flip the check-in campaign to ``active`` + build the session, all sharing
+    :func:`prepare_checkin_run` with the web. A dataset name mints fresh
+    (``_mint_fresh_session``). Both produce the same session bundle, so the tail
+    below (backend → dataset → pipeline → task → origin → loop) is one path.
     Live state: ``cycles/{cycle_id}/dashboard.json``; digest: ``campaigns/{campaign_id}/log.md``;
     final: ``cycles/{cycle_id}/index.json::final``. Stop with Ctrl+C."""
     from promptpotter.shared.spend import refresh_rates
 
     refresh_rates()
 
-    # File arg → fold the origin check-in in: resolve + commit a tenant dataset,
-    # then mint+run it on the same path as an authored dataset name.
     if (pos := getattr(args, "dataset", None)) and Path(pos).is_file():
-        args.dataset = await _ingest_to_dataset(args)
-
-    session, campaign_config, dataset_name, session_id = await _mint_fresh_session(args)
+        session, campaign_config, dataset_name, session_id = await _ingest_and_prepare_checkin(args)
+    else:
+        session, campaign_config, dataset_name, session_id = await _mint_fresh_session(args)
 
     status = await session.backend_client.check_status()
     if status.get("status") == "unreachable":
