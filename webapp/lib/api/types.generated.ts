@@ -23,6 +23,7 @@ export interface DegradationHealth {
   samples: number;
   structural_count: number;
   transient_count: number;
+  no_result_count: number;
   degraded_rate: number;
   consecutive_degraded_rounds: number;
   prior_clean_rounds: number;
@@ -185,11 +186,13 @@ export interface CycleListEntry {
   unit_kind: 'session' | 'divergent_resume' | 'user_fork' | 'auto_rebase';
   is_root: boolean;
   status: string;
-  /** The single run-state value (RunPhase) — running / paused / stopping / detached
-   * / terminal. Computed once by derive_run_phase from lifecycle + control
-   * flags + freshness; every picker dot and badge reads this, none re-derive
-   * it. 'terminal' pairs with `status` for the reason label. */
-  run_phase: 'running' | 'paused' | 'stopping' | 'detached' | 'terminal';
+  /** The single run-state value (RunPhase) — checkin (origin still being authored,
+   * pre-loop) / running / paused / stopping / detached / terminal. Computed
+   * once by derive_run_phase from lifecycle + control flags + freshness;
+   * every picker dot and badge reads this, none re-derive it. 'checkin' wins
+   * first (the campaign hasn't run); 'terminal' pairs with `status` for the
+   * reason label. */
+  run_phase: 'checkin' | 'running' | 'paused' | 'stopping' | 'detached' | 'terminal';
   best_accuracy: number | null;
   n_rounds: number;
   created_at: string;

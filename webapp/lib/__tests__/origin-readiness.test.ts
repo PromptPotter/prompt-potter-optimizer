@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DraftCampaignWire } from "../api";
-import {
-  originReadiness,
-  plainLanguageRecap,
-  questionOptions,
-  questionPatch,
-} from "../origin-readiness";
+import { plainLanguageRecap, questionOptions, questionPatch } from "../origin-readiness";
 
 function draft(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
   return {
@@ -45,66 +40,16 @@ function draft(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
     created_at: "2026-05-30T00:00:00Z",
     updated_at: "2026-05-30T00:00:00Z",
     optimizer_locks: { pipeline: ["llm_only"], forbidden_axes: ["model", "provider"], nodes: {} },
+    pipeline_view: null,
+    node_config_schema: {},
+    node_output_schema: {},
     dependencies: [],
+    // Server-authoritative mint-gate verdict (the gate lives in
+    // `origin_readiness.py`; the client reads this, never re-derives it).
+    readiness: { complete: false, gaps: [] },
     ...over,
   };
 }
-
-// A fully-resolved draft: columns confirmed + framing stated. Helper for the
-// "passes" cases so each test states only what it changes.
-function resolved(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
-  return draft({
-    column_query: "input",
-    column_ground_truth: "gt",
-    raw_task_description: "map names to codes",
-    field_provenance: {
-      "column.query": "confirmed",
-      "column.ground_truth": "confirmed",
-      task_description: "confirmed",
-    },
-    ...over,
-  });
-}
-
-describe("originReadiness", () => {
-  it("flags unset columns AND the unset task framing; config is not gated", () => {
-    const r = originReadiness(draft());
-    expect(r.complete).toBe(false);
-    // Config is not gated, so only the columns + task framing gap.
-    expect(new Set(r.gaps.map((g) => g.field))).toEqual(
-      new Set(["column.query", "column.ground_truth", "task_description"]),
-    );
-    const col = r.gaps.find((g) => g.field === "column.query");
-    expect(col?.hint).toContain("input, gt");
-  });
-
-  it("passes once columns are confirmed members AND the framing is stated", () => {
-    const r = originReadiness(resolved());
-    expect(r.complete).toBe(true);
-    expect(r.gaps).toHaveLength(0);
-  });
-
-  it("blocks on a proposed (low-confidence) framing until confirmed", () => {
-    const r = originReadiness(
-      resolved({
-        raw_task_description: "maybe map codes",
-        field_provenance: {
-          "column.query": "confirmed",
-          "column.ground_truth": "confirmed",
-          task_description: "proposed",
-        },
-      }),
-    );
-    const t = r.gaps.find((g) => g.field === "task_description");
-    expect(t?.reason).toBe("proposed_unconfirmed");
-  });
-
-  it("does not pass when a confirmed column is not a member of headers", () => {
-    const r = originReadiness(resolved({ column_query: "ghost" }));
-    expect(r.complete).toBe(false);
-    expect(r.gaps.map((g) => g.field)).toEqual(["column.query"]);
-  });
-});
 
 describe("questionPatch / questionOptions (resolver answer-back loop)", () => {
   it("maps each field id to its draft-patch key", () => {

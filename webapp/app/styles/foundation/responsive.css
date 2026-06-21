@@ -114,12 +114,10 @@
    Below --bp-md the 200px fixed-flex sidebar becomes an overlay drawer
    triggered by the topbar hamburger. The sidebar leaves the flex flow
    (position:fixed) so main reclaims the full width; the backdrop sits
-   between sidebar and main z-axis-wise and catches a tap to close.
-   Chat-mode keeps the existing `sidebar-hidden` behaviour — drawer
-   doesn't apply there. */
+   between sidebar and main z-axis-wise and catches a tap to close. */
 .sidebar-backdrop{display:none}
 @media (max-width:880px){
-  .shell:not(.chat-mode) > .sidebar{position:fixed;top:0;left:0;bottom:0;width:min(280px,86vw);max-width:280px;transform:translateX(-100%);transition:transform 220ms ease;z-index:200;box-shadow:0 0 24px rgba(0,0,0,0.4);padding-top:max(8px,var(--safe-top))}
+  .shell > .sidebar{position:fixed;top:0;left:0;bottom:0;width:min(280px,86vw);max-width:280px;transform:translateX(-100%);transition:transform 220ms ease;z-index:200;box-shadow:0 0 24px rgba(0,0,0,0.4);padding-top:max(8px,var(--safe-top))}
   .shell.sidebar-mobile-open > .sidebar{transform:translateX(0)}
   .sidebar-backdrop{display:block;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:199;opacity:0;pointer-events:none;transition:opacity 180ms ease}
   .shell.sidebar-mobile-open > .sidebar-backdrop{opacity:1;pointer-events:auto}
@@ -137,7 +135,7 @@
   .shell.sidebar-collapsed .sidebar > .unit-library{display:flex}
 }
 @media (max-width:880px) and (prefers-reduced-motion:reduce){
-  .shell:not(.chat-mode) > .sidebar,
+  .shell > .sidebar,
   .sidebar-backdrop{transition:none}
 }
 

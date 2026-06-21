@@ -5,9 +5,10 @@ import {
   IngestApiError,
   postDraftFromDataset,
   postDraftFromOrigin,
+  getCampaignCheckin,
   postEditDraftCampaign,
   postIngestDataset,
-  postMintCampaignFromDraft,
+  postStartCheckin,
   postBuildCandidateLibraryFromColumn,
   postReplaceDataset,
   postResolveOrigin,
@@ -18,7 +19,7 @@ import {
   type OriginEntry,
   type OriginLastResolution,
 } from "@/lib/api";
-import { originReadiness, plainLanguageRecap } from "@/lib/origin-readiness";
+import { plainLanguageRecap } from "@/lib/origin-readiness";
 import type { OnMinted } from "@/components/ingest/types";
 
 // One durable chat message; the conversation renders from a list of these.
@@ -50,7 +51,7 @@ export type IngestPhase =
       existingSlug: string;
       suggestedSlug: string;
     }
-  // A draft ready to commit. When `originReadiness(draft).complete` the view
+  // A draft ready to commit. When `draft.readiness.complete` the view
   // shows "Start campaign"; otherwise it surfaces the remaining gaps inline
   // (check-in panel + column mapping) until the last one closes.
   | { stage: "ready"; draft: DraftCampaignWire; resolution: OriginLastResolution | null };
@@ -71,6 +72,9 @@ export interface IngestFlow {
   // open it in the editable ready panel with NO check-in (the optimizer graph
   // enters at l1_generate, skipping checkin) — modify if wanted, then Start.
   openOrigin: (entry: OriginEntry) => void;
+  // Re-open a durable `checkin`-lifecycle campaign from the sidebar: load its
+  // draft + last resolver turn from disk straight into the editable ready panel.
+  reopenCheckin: (campaignId: string) => void;
   // The operator's one-message task description (awaiting-context → check-in).
   submitContext: () => void;
   // Inline patch in the ready state (column mapping / question answers).
@@ -151,11 +155,11 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     if (
       resolution !== null &&
       resolution.next_action.questions.length === 0 &&
-      originReadiness(resolved).complete
+      resolved.readiness.complete
     ) {
       setMinting(true);
       try {
-        const r = await postMintCampaignFromDraft(resolved.draft_id);
+        const r = await postStartCheckin(resolved.draft_id);
         pushAi("Setup confirmed — campaign started.");
         setPhase({ stage: "idle" });
         onMint({ campaignId: r.campaign_id, cycleId: r.cycle_id });
@@ -276,6 +280,39 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     setPhase({ stage: "ready", draft, resolution: null });
   };
 
+  // Re-open a durable check-in: load its draft + last resolver turn from disk. The
+  // campaign already exists (minted on the first ingest action) and survived
+  // whatever happened since — a restart, a closed tab — which is the whole point of
+  // making check-in durable. Finishing + Start flips it `checkin` → `active`.
+  //
+  // If the check-in agent never authored the origin prompt (minted on drop but
+  // abandoned before the resolver ran — `origin_prompt_fields` still empty), RESUME
+  // the authoring flow via `advance`: it runs the check-in so the agent proposes the
+  // whole prompt + answer_format, exactly as a fresh drop would (no context yet →
+  // ask for it first). Nothing is clobbered — the fields are blank. An already-
+  // authored draft instead lands straight in the editable ready panel: re-running
+  // the resolver would re-propose the L1 fields and overwrite the operator's edits.
+  const reopenCheckin = async (campaignId: string) => {
+    setMessages([]);
+    setPhase({ stage: "uploading" });
+    let res;
+    try {
+      res = await getCampaignCheckin(campaignId);
+    } catch (e) {
+      setPhase({ stage: "idle" });
+      pushError(e);
+      return;
+    }
+    const draft = res.draft;
+    if (Object.keys(draft.origin_prompt_fields ?? {}).length === 0) {
+      pushAi("Reopened your check-in — picking up where the setup left off.");
+      advance(draft);
+      return;
+    }
+    pushAi("Reopened your check-in — finish the setup below, then Start.");
+    setPhase({ stage: "ready", draft, resolution: res.resolution });
+  };
+
   const submitContext = async () => {
     if (phase.stage !== "awaiting-context") return;
     const text = inputText.trim();
@@ -332,10 +369,10 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
   };
 
   const startFromReady = async () => {
-    if (phase.stage !== "ready" || !originReadiness(phase.draft).complete) return;
+    if (phase.stage !== "ready" || !phase.draft.readiness.complete) return;
     setMinting(true);
     try {
-      const r = await postMintCampaignFromDraft(phase.draft.draft_id);
+      const r = await postStartCheckin(phase.draft.draft_id);
       pushAi("Campaign started.");
       setPhase({ stage: "idle" });
       onMint({ campaignId: r.campaign_id, cycleId: r.cycle_id });
@@ -394,6 +431,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     onDatasetFile: (file) => void ingestAndResolve(file),
     pickDataset,
     openOrigin: (entry) => void openOrigin(entry),
+    reopenCheckin: (campaignId) => void reopenCheckin(campaignId),
     submitContext: () => void submitContext(),
     applyPatch: (patch) => void applyPatch(patch),
     uploadCandidateLibrary: (file) => void uploadCandidateLibrary(file),

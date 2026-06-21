@@ -263,6 +263,10 @@
 .ingest-pick-meta{flex-shrink:0;font-size:12px;color:var(--color-text-tertiary)}
 .ingest-ready{display:flex;flex-direction:column;gap:12px}
 .ingest-gaps{display:flex;flex-direction:column;gap:12px}
+/* The server gate's open fields — what still blocks Start, one hint per line.
+   Accent-tinted so it reads as the actionable "fix these" list, not chat copy. */
+.ingest-gap-list{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
+.ingest-gap{padding:8px 10px;font-size:12px;line-height:1.45;color:var(--color-text-secondary);background:var(--color-background-tint,rgba(255,255,255,0.04));border-left:2px solid var(--color-accent);border-radius:4px}
 .ingest-ready .chat-cta-btn{align-self:flex-start}
 /* Pipeline dependencies — the active pipeline's required inputs. An unfulfilled
    one draws the accent border (drop the missing input here); a fulfilled one

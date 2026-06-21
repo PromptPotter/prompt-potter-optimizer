@@ -1,15 +1,11 @@
-// Client-side mirror of the server's `origin_readiness` checklist
-// (`promptpotter/application/datasets/origin_readiness.py`). The draft wire
-// carries the inputs the gate decides over — `field_provenance`,
-// `headers`, and the `column_query` / `column_ground_truth` values — but not
-// the gap list itself, so the panel re-derives it here to render the
-// required-first tier *before* the operator clicks Create. It is a faithful
-// projection of shipped wire fields, not new policy: a column is satisfied
-// iff its provenance is `confirmed` AND its value is a member of `headers`,
-// exactly as `_check_column` decides server-side. The `422 origin_incomplete`
-// gaps remain authoritative; this only drives the proactive UI.
+// Origin check-in client helpers: the resolver answer-back loop (`questionPatch`
+// / `questionOptions`) and the jargon-free `plainLanguageRecap`. The mint GATE
+// itself is server-owned: `origin_readiness.py` is the single checklist, and its
+// verdict rides every draft response as `draft.readiness` (the UI reads that, it
+// does NOT re-derive — the answer-space / answer-format / node-model checks can't
+// be mirrored faithfully in the client and a partial mirror only drifts).
 
-import type { DraftCampaignWire, DraftPatch, OriginGap, ProvenanceTag } from "./api";
+import type { DraftCampaignWire, DraftPatch } from "./api";
 
 // The dotted field-key namespace the server's `origin_readiness` checklist
 // keys `draft.field_provenance` by. Single source for every site that reads provenance
@@ -26,78 +22,6 @@ export const ORIGIN_KEY = {
   maxRounds: "max_rounds",
   backendNodeConfig: "backend.node_config",
 } as const;
-
-export interface OriginReadiness {
-  complete: boolean;
-  gaps: OriginGap[];
-}
-
-interface ColumnCheck {
-  fieldKey: string;
-  value: string;
-  label: string; // operator-facing role: "input" / "target"
-}
-
-function checkColumn(draft: DraftCampaignWire, check: ColumnCheck): OriginGap | null {
-  const provenance: ProvenanceTag = draft.field_provenance[check.fieldKey] ?? "unset";
-  if (provenance === "confirmed" && draft.headers.includes(check.value)) {
-    return null;
-  }
-  if (provenance === "proposed") {
-    return {
-      field: check.fieldKey,
-      reason: "proposed_unconfirmed",
-      hint: `Confirm the ${check.label} column (proposed ${JSON.stringify(check.value)}).`,
-    };
-  }
-  const headers = draft.headers.join(", ") || "<none>";
-  return {
-    field: check.fieldKey,
-    reason: "unset",
-    hint: `Pick which uploaded column is the ${check.label}. Available: ${headers}.`,
-  };
-}
-
-// `task_description` is the one non-column field that gates: it has no default
-// framing, so it stays open until the operator (or the resolver, high-confidence)
-// states it. Config (connector / scorer / round cap / optimizer LLM / node
-// overlay) is NOT gated — each carries a default the operator edits. Mirror of
-// `origin_readiness.py`.
-const TASK_DESCRIPTION = {
-  fieldKey: ORIGIN_KEY.taskDescription,
-  hint: "Describe what the prompt should do.",
-};
-
-function checkConfirmed(
-  draft: DraftCampaignWire,
-  field: { fieldKey: string; hint: string },
-): OriginGap | null {
-  const provenance: ProvenanceTag = draft.field_provenance[field.fieldKey] ?? "unset";
-  if (provenance === "confirmed") return null;
-  return {
-    field: field.fieldKey,
-    reason: provenance === "proposed" ? "proposed_unconfirmed" : "unset",
-    hint: field.hint,
-  };
-}
-
-// The gated set: the column mapping (header-membership-checked) plus the task
-// framing. Config is not gated. A faithful projection of the shipped wire
-// fields; the `422 origin_incomplete` gaps (incl. answer_space) remain
-// authoritative.
-export function originReadiness(draft: DraftCampaignWire): OriginReadiness {
-  const gaps: OriginGap[] = [];
-  for (const check of [
-    { fieldKey: ORIGIN_KEY.columnQuery, value: draft.column_query, label: "input" },
-    { fieldKey: ORIGIN_KEY.columnGroundTruth, value: draft.column_ground_truth, label: "target" },
-  ]) {
-    const gap = checkColumn(draft, check);
-    if (gap) gaps.push(gap);
-  }
-  const taskGap = checkConfirmed(draft, TASK_DESCRIPTION);
-  if (taskGap) gaps.push(taskGap);
-  return { complete: gaps.length === 0, gaps };
-}
 
 // Map a resolver question's checklist `field` id + the operator's answer onto
 // an `edit-draft-campaign` patch — the answer-back half of the resolver loop

@@ -37,6 +37,10 @@ interface Props {
   datasetStale: boolean;
   hardSamplesScope: HardSamplesScope;
   onHardSamplesScopeChange: (s: HardSamplesScope) => void;
+  // Bumped by the shell's "New campaign" button while this tab is in view —
+  // each change resets the thread to its empty first-run state (compose mode),
+  // suppressing the bound cycle's live feed until a fresh campaign is minted.
+  newCampaignTick: number;
   // Fired when the inline ingest flow mints a campaign — AppShell selects the
   // new cycle. The whole drop → context → check-in → Start path runs inline
   // here via the shared `IngestConversation`; nothing is handed off to a modal.
@@ -78,6 +82,7 @@ export function ChatPane({
   datasetStale,
   hardSamplesScope,
   onHardSamplesScopeChange,
+  newCampaignTick,
   onMinted,
 }: Props) {
   // Self-sourced live state + identity for the job bar + spend chips.
@@ -88,9 +93,30 @@ export function ChatPane({
   const [samplesOpen, setSamplesOpen] = useState(false);
   const toggleSamples = () => setSamplesOpen((v) => !v);
 
+  // Compose mode — entered by the shell's "New campaign" button (newCampaignTick).
+  // While composing, the bound cycle's live feed + job bar are suppressed so the
+  // thread shows its empty first-run state; minting a campaign clears it.
+  const [composing, setComposing] = useState(false);
+
   // The dataset-ingest conversation, run inline on the chat tab. Same state
   // machine + view the "New campaign" modal uses (one path, one check-in call).
-  const ingest = useIngestFlow({ onMint: (sel) => onMinted(sel) });
+  const ingest = useIngestFlow({
+    onMint: (sel) => {
+      setComposing(false);
+      onMinted(sel);
+    },
+  });
+
+  // Reset the thread to its empty first-run state on each "New campaign" hit.
+  // Render-phase guarded (webapp/CLAUDE.md "State reset on prop change") so the
+  // cleared thread commits with the same frame — `ingest.reset()` clears this
+  // component's own hook state, the same as setting local state here.
+  const [prevNewCampaignTick, setPrevNewCampaignTick] = useState(newCampaignTick);
+  if (newCampaignTick !== prevNewCampaignTick) {
+    setPrevNewCampaignTick(newCampaignTick);
+    setComposing(true);
+    ingest.reset();
+  }
 
   // The chat's curated layer over the cycle event stream (the webapp's first
   // SSE consumer) + the inline gate-decision merge surface. Both bind to the
@@ -179,7 +205,7 @@ export function ChatPane({
           (cycle picker + KPI chips + status/spend dropdown) folded in as its
           header row — not a separate strip stacked above it. */}
       <div className="wf-hero">
-      {cycleId ? (
+      {cycleId && !composing ? (
       <div className={`chat-job-bar${jobOpen ? " open" : ""}`}>
         <div className="chat-job-head">
           <svg className="grid" width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
@@ -277,7 +303,11 @@ export function ChatPane({
           <div className="chat-panel-header">
             <div className="chat-panel-title">New Chat</div>
           </div>
-          <IngestConversation flow={ingest} variant="inline" liveSegment={liveSegment} />
+          <IngestConversation
+            flow={ingest}
+            variant="inline"
+            liveSegment={composing ? undefined : liveSegment}
+          />
         </div>
 
         <div className="chat-settings">

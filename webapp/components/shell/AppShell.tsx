@@ -10,6 +10,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { useDatasetPreview } from "@/lib/hooks/useDatasetPreview";
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { applyChartDefaults } from "@/lib/theme";
+import { cx } from "@/lib/cx";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { Topbar, type Tab } from "@/components/shell/Topbar";
 import { StatusAssistant } from "@/components/status/StatusAssistant";
@@ -39,6 +40,10 @@ const VerifyPane = dynamic(() => import("@/components/verify/VerifyPane").then((
 const IngestPane = dynamic(() => import("@/components/ingest/IngestPane").then((m) => m.IngestPane), {
   ssr: false,
 });
+const CheckinReopenPane = dynamic(
+  () => import("@/components/ingest/CheckinReopenPane").then((m) => m.CheckinReopenPane),
+  { ssr: false, loading: () => <div className="content" aria-busy="true" /> },
+);
 
 export function AppShell() {
   // `campaignId` + `cycleId` are owned by WorkspaceProvider (the single
@@ -72,6 +77,10 @@ function AppShellInner() {
   // lives.
   const [tab, setTab] = useState<Tab>("chat");
   const [newCampaignOpen, setNewCampaignOpen] = useState(false);
+  // Bumped each time "New campaign" is hit while the chat tab is in view —
+  // ChatPane watches it and resets the thread to its empty first-run state
+  // (the inline entry point, distinct from the modal the other tabs open).
+  const [newCampaignTick, setNewCampaignTick] = useState(0);
   const [datasetTitle, setDatasetTitle] = useState<string | null>(null);
   const [cycleStartedAt, setCycleStartedAt] = useState<string | null>(null);
   // Hard-sample view scope — campaign = only the current campaign's cycles
@@ -178,6 +187,21 @@ function AppShellInner() {
       "Start a campaign: `python -m promptpotter new <dataset>` in another terminal.";
   }
 
+  // The selected cycle's run phase, read off the cycle list. A `checkin` campaign
+  // has no dashboard.json (it hasn't run), so rendering the dashboard/chat/verify
+  // panes over it would dead-end on "warming". Instead we show the re-open
+  // authoring surface — the honest affordance (frontend-surface-contract.md).
+  const selectedCheckin =
+    !!campaignId &&
+    cycles.some(
+      (c) =>
+        c.campaign_id === campaignId && c.cycle_id === cycleId && c.run_phase === "checkin",
+    );
+  // The check-in authoring surface lives on the CHAT tab — its home. Scoping the
+  // takeover here (rather than overriding every tab) keeps Dashboard/Verify and the
+  // "New campaign" button reachable, so a selected check-in never traps navigation.
+  const showCheckin = selectedCheckin && tab === "chat";
+
   return (
     <SelectionProvider cycleId={cycleId}>
     {/* The campaign lineage fetch + its mask/lens divergence overlay — owned once
@@ -186,7 +210,11 @@ function AppShellInner() {
     <LineageOverlayProvider campaignId={campaignId}>
     <ConnectorProvider datasetName={datasetName}>
     <div
-      className={`shell${tab === "chat" ? " chat-mode sidebar-hidden" : sidebarCollapsed ? " sidebar-collapsed" : ""}${sidebarMobileOpen ? " sidebar-mobile-open" : ""}`}
+      className={cx(
+        "shell",
+        sidebarCollapsed && "sidebar-collapsed",
+        sidebarMobileOpen && "sidebar-mobile-open",
+      )}
     >
       {/* First focusable element — lets keyboard users jump the sidebar +
           topbar straight to the main content. Off-screen until focused. */}
@@ -196,33 +224,39 @@ function AppShellInner() {
       <Sidebar
         onSelectCycle={(cmp, cyc) => {
           selectCycle(cmp, cyc);
-          setTab("dashboard");
+          // A check-in has no dashboard yet (it hasn't run) — open it on the chat
+          // tab, its authoring home; a started campaign opens on the dashboard.
+          const checkin = cycles.some(
+            (c) => c.campaign_id === cmp && c.cycle_id === cyc && c.run_phase === "checkin",
+          );
+          setTab(checkin ? "chat" : "dashboard");
         }}
         onNewCycle={() => {
-          // "New campaign" opens the menu directly — pick a dataset / reuse an
-          // origin / drop a file — over whatever tab is in view. It is its own
-          // self-contained flow (menu → context → ready → Start); do NOT also
-          // jump to the Chat tab — that detour buried the menu behind the chat
-          // page and read as "nothing happened".
-          setNewCampaignOpen(true);
+          // Two entry points, picked by the view in front of the operator. On the
+          // chat tab, "New campaign" resets the thread in place to its empty
+          // first-run state — no modal over the chat (that detour buried the menu
+          // and read as "nothing happened"). On any other tab — INCLUDING while a
+          // check-in owns the chat tab (its takeover replaces ChatPane, so the
+          // in-place reset has no consumer) — open the self-contained modal, which
+          // overlays everything and is the escape hatch out of the check-in.
+          if (tab === "chat" && !showCheckin) setNewCampaignTick((t) => t + 1);
+          else setNewCampaignOpen(true);
         }}
         collapsed={sidebarCollapsed}
         onToggleCollapse={toggleSidebar}
       />
       {/* Mobile drawer backdrop — only rendered on mobile via CSS. Tap
           dismisses the open drawer. */}
-      {tab !== "chat" ? (
-        <div
-          className="sidebar-backdrop"
-          aria-hidden="true"
-          onClick={() => setSidebarMobileOpen(false)}
-        />
-      ) : null}
+      <div
+        className="sidebar-backdrop"
+        aria-hidden="true"
+        onClick={() => setSidebarMobileOpen(false)}
+      />
       <main className="main" id="main-content" tabIndex={-1}>
         <Topbar
           tab={tab}
           onTabChange={setTab}
-          onMenuToggle={tab !== "chat" ? () => setSidebarMobileOpen((v) => !v) : undefined}
+          onMenuToggle={() => setSidebarMobileOpen((v) => !v)}
         />
         {/* Loud failure surface — sticky, full-width, on every tab. Renders
             null on a healthy run; not gated on cycleId so a server-down state
@@ -238,7 +272,7 @@ function AppShellInner() {
               : undefined
           }
         />
-        {cycleId ? (
+        {cycleId && !showCheckin ? (
           <StatusAssistant
             status={bannerStatus}
             statusText={bannerText}
@@ -247,7 +281,12 @@ function AppShellInner() {
             onOpenFiles={() => setTab("files")}
           />
         ) : null}
-        {tab === "chat" ? (
+        {showCheckin && campaignId ? (
+          <CheckinReopenPane
+            campaignId={campaignId}
+            onStarted={(sel) => selectCycle(sel.campaignId, sel.cycleId)}
+          />
+        ) : tab === "chat" ? (
           <ChatPane
             datasetTitle={datasetTitle}
             cycleStartedAt={cycleStartedAt}
@@ -260,6 +299,7 @@ function AppShellInner() {
             datasetStale={datasetStale}
             hardSamplesScope={hardSamplesScope}
             onHardSamplesScopeChange={setHardSamplesScope}
+            newCampaignTick={newCampaignTick}
             onMinted={(sel) => selectCycle(sel.campaignId, sel.cycleId)}
           />
         ) : tab === "dashboard" ? (
@@ -282,8 +322,8 @@ function AppShellInner() {
           open
           onClose={() => setNewCampaignOpen(false)}
           onMinted={(sel) => {
-            // The from-draft mint returns the new (campaign, cycle) — select it
-            // now rather than waiting on the 2 s workspace poll.
+            // start-checkin returns the (campaign, cycle) — select it now rather
+            // than waiting on the 2 s workspace poll.
             selectCycle(sel.campaignId, sel.cycleId);
           }}
         />

@@ -14,7 +14,8 @@
 
 import { API } from "./client";
 import type { UserSettings } from "./reads";
-import type { CommandAcceptedBody } from "./types";
+import type { CommandAcceptedBody, NodeConfigParam, NodeOutputSchema } from "./types";
+import type { PipelineView } from "@/components/workflow";
 
 // Account → Preferences write. A user-account mutation (not a campaign
 // command), so it PATCHes the auth router directly rather than `/commands`.
@@ -252,13 +253,13 @@ export async function postStartRun(
   return _postCommand("start-run", payload);
 }
 
-// M13 chat-first dataset ingest. `postIngestDataset` uploads a CSV +
-// returns the server-held `DraftCampaign`; `postEditDraftCampaign` sparse-
-// patches the draft (both the chat assistant tool-call and the panel
-// "Apply" button ride this); `postMintCampaignFromDraft` commits the
-// draft to disk + spawns the runner. Wire contract pinned in
-// `docs/specs/m12-api-openapi.yaml` (`POST /datasets/ingest`,
-// `POST /commands/edit-draft-campaign`, `POST /commands/mint-campaign-from-draft`).
+// M13 chat-first dataset ingest. `postIngestDataset` uploads a CSV + mints a
+// durable `checkin` campaign, returning its `DraftCampaign` (`draft_id` IS the
+// `campaign_id`); `postEditDraftCampaign` sparse-patches the draft (both the chat
+// assistant tool-call and the panel "Apply" button ride this); `postStartCheckin`
+// gates + commits + spawns the runner, flipping the check-in to `active`. Wire
+// contract pinned in `docs/specs/m12-api-openapi.yaml` (`POST /datasets/ingest`,
+// `POST /commands/edit-draft-campaign`, `POST /commands/start-checkin`).
 
 // One uploaded column header's provenance tag — mirrors the server's
 // `domain/origin_provenance.Provenance` StrEnum. `unset` = no value yet,
@@ -355,14 +356,28 @@ export interface DraftCampaignWire {
   updated_at: string;
   // Connector-derived backend-pipeline permission surface; see `OptimizerLocks`.
   optimizer_locks: OptimizerLocks;
+  // The draft's parsed pipeline render — graph `view` + per-node config/output
+  // schema, the SAME shape `GET /datasets/{name}/pipeline` serves for a committed
+  // dataset, but computed from the draft (a pre-commit check-in has no
+  // `datasets/{slug}/` dir). The ingest node editor renders from these directly,
+  // so it never fetches by slug (which would 404 and hang on "Loading node…").
+  pipeline_view: PipelineView | null;
+  node_config_schema: Record<string, NodeConfigParam[]>;
+  node_output_schema: Record<string, NodeOutputSchema | null>;
   // The active pipeline's required inputs + whether each is fulfilled. Drives the
   // "drop the missing input" affordance in the ready panel.
   dependencies: PipelineDependencyWire[];
+  // Server-authoritative mint-gate verdict, recomputed on every draft response
+  // (the full `origin_readiness` checklist — columns, task framing, answer
+  // space/format, node models). The UI gates Start on this and renders these
+  // gaps; the client never re-derives the gate (the omitted half — answer
+  // space/format/node-model — can't be mirrored faithfully and would drift).
+  readiness: { complete: boolean; gaps: OriginGap[] };
 }
 
 // One origin field still blocking mint, as returned by the server's
-// `origin_readiness` checklist (the `422 origin_incomplete` `details.gaps`
-// array, and re-derived client-side from the draft wire to drive the panel).
+// `origin_readiness` checklist — carried on the draft wire's `readiness.gaps`
+// and on the `422 origin_incomplete` `details.gaps` array.
 export interface OriginGap {
   field: string;
   reason: string;
@@ -528,8 +543,8 @@ export async function postBuildCandidateLibraryFromColumn(
 // flow: the server builds a fully-prefilled DraftCampaign straight from the
 // dataset's files — no browser-side CSV reconstruction, and the dataset's
 // pipeline node config (backend model/provider) is preserved through commit.
-// Like `postIngestDataset`, no campaign exists until the operator commits the
-// returned draft via `postMintCampaignFromDraft`.
+// Like `postIngestDataset`, this mints a durable `checkin` campaign; nothing runs
+// until the operator starts it via `postStartCheckin`.
 export async function postDraftFromDataset(name: string): Promise<DraftCampaignWire> {
   const r = await fetch(`${API}/datasets/${encodeURIComponent(name)}/draft`, {
     method: "POST",
@@ -544,7 +559,7 @@ export async function postDraftFromDataset(name: string): Promise<DraftCampaignW
 // minted from an origin, else the dataset's authored prompt) and marks it so
 // committing mints with `campaign_origin` lineage. Unlike `postDraftFromDataset`
 // (which opens the dataset's CURRENT committed config) this reproduces the chosen
-// origin's prompt verbatim. No campaign exists until `postMintCampaignFromDraft`.
+// origin's prompt verbatim. Mints a durable `checkin` campaign; run via `postStartCheckin`.
 export async function postDraftFromOrigin(originId: string): Promise<DraftCampaignWire> {
   const r = await fetch(`${API}/origins/${encodeURIComponent(originId)}/draft`, {
     method: "POST",
@@ -623,29 +638,51 @@ export async function postEditDraftCampaign(
   return (await r.json()) as DraftCampaignWire;
 }
 
-export interface MintFromDraftResponse {
+export interface StartCheckinResponse {
   campaign_id: string;
   cycle_id: string;
   job_id: string;
 }
 
-export async function postMintCampaignFromDraft(
-  draftId: string,
-): Promise<MintFromDraftResponse> {
-  const r = await fetch(`${API}/commands/mint-campaign-from-draft`, {
+// Start a durable check-in campaign: gate the origin, commit the dataset, mint +
+// spawn the run, flipping `checkin` → `active`. `campaignId` is the draft's
+// `draft_id` (which IS the campaign id). Same response shape the old
+// mint-campaign-from-draft returned. Wire: `POST /commands/start-checkin`.
+export async function postStartCheckin(
+  campaignId: string,
+): Promise<StartCheckinResponse> {
+  const r = await fetch(`${API}/commands/start-checkin`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "Idempotency-Key": _mintIdempotencyKey(),
     },
     body: JSON.stringify({
-      kind: "mint-campaign-from-draft",
-      payload: { draft_id: draftId },
+      kind: "start-checkin",
+      payload: { campaign_id: campaignId },
     }),
     cache: "no-store",
   });
   if (!r.ok) await _throwApiError(r);
-  return (await r.json()) as MintFromDraftResponse;
+  return (await r.json()) as StartCheckinResponse;
+}
+
+// Re-open a durable check-in campaign from the sidebar — its draft wire + the
+// last resolver turn. Wire: `GET /campaigns/{id}/checkin`.
+export interface CheckinReopenResponse {
+  draft: DraftCampaignWire;
+  resolution: OriginLastResolution | null;
+}
+
+export async function getCampaignCheckin(
+  campaignId: string,
+): Promise<CheckinReopenResponse> {
+  const r = await fetch(
+    `${API}/campaigns/${encodeURIComponent(campaignId)}/checkin`,
+    { cache: "no-store" },
+  );
+  if (!r.ok) await _throwApiError(r);
+  return (await r.json()) as CheckinReopenResponse;
 }
 
 // One operator-facing question on a `kind='ask'` turn. `field` names the

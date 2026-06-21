@@ -1,7 +1,7 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { DraftCampaignWire, DraftPatch } from "@/lib/api";
-import { ConnectorProvider, useConnector } from "@/lib/hooks/useConnector";
+import { StaticConnectorProvider, useConnector } from "@/lib/hooks/useConnector";
 import { useSelection } from "@/lib/SelectionContext";
 import { targetNodeIds } from "@/lib/terms";
 import { cx } from "@/lib/cx";
@@ -15,11 +15,13 @@ import { searchPoint } from "@/lib/derivations";
 // Chat components verbatim rather than maintaining a second renderer; the only
 // new piece is the `LLM only ↔ Research + Match` selector.
 //
-// Data rides `GET /datasets/{slug}/pipeline` via a nested `ConnectorProvider`
-// keyed to the draft's slug. For a reuse-origin that slug IS a committed dataset,
-// so the endpoint returns the full pipeline view + per-node config/output schema
-// (stable through setup — the file isn't rewritten until Start). The toggle
-// writes `draft.pipeline_steps`, which commit + `derive_optimizer_locks` read.
+// Data rides the draft wire — `draft.pipeline_view` + node schemas, fed into a
+// `StaticConnectorProvider` (no fetch). The draft is always a check-in here (fresh
+// upload OR reuse-origin), and a fresh upload has no committed `datasets/{slug}/`
+// yet — so the draft carries its own pipeline render (byte-identical to what Start
+// commits), which lets the node editor render before commit instead of hanging on
+// "Loading node…". The toggle writes `draft.pipeline_steps`, which commit +
+// `derive_optimizer_locks` read.
 
 const LLM_ONLY: string[] = ["llm_only"];
 
@@ -34,10 +36,29 @@ export function PipelineSetupSection({
   draft: DraftCampaignWire;
   onApply: (patch: DraftPatch) => void;
 }) {
+  // Seed the connector context from the draft's own render — memoized so the
+  // provider value stays stable across unrelated re-renders (the children pull
+  // `cv.view` / `cv.nodeConfigSchema` through `useConnector()` unchanged).
+  const fields = useMemo(
+    () => ({
+      connector: draft.connector,
+      view: draft.pipeline_view,
+      nodeConfigSchema: draft.node_config_schema,
+      nodeOutputSchema: draft.node_output_schema,
+      originPromptFields: draft.origin_prompt_fields,
+    }),
+    [
+      draft.connector,
+      draft.pipeline_view,
+      draft.node_config_schema,
+      draft.node_output_schema,
+      draft.origin_prompt_fields,
+    ],
+  );
   return (
-    <ConnectorProvider datasetName={draft.slug}>
+    <StaticConnectorProvider fields={fields}>
       <PipelineSetupInner draft={draft} onApply={onApply} />
-    </ConnectorProvider>
+    </StaticConnectorProvider>
   );
 }
 
