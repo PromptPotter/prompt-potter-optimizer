@@ -15,10 +15,14 @@ _SAFE_PATH_RE = re.compile(r"^[a-zA-Z0-9_\-\.]+$")
 
 def validate_path_component(name: str) -> str:
     """Validate that *name* is safe for use as a filesystem path component."""
-    if not name or not _SAFE_PATH_RE.match(name):
+    # An all-dots component (``.``/``..``/``...``) matches the dot-allowing regex
+    # but is a traversal segment — reject it so a user-supplied id/slug/filename
+    # can never climb out of the dir the caller rooted it under.
+    if not name or set(name) == {"."} or not _SAFE_PATH_RE.match(name):
         raise ValueError(
             f"Invalid path component: {name!r}. "
-            "Only alphanumerics, hyphens, underscores, and dots are allowed."
+            "Only alphanumerics, hyphens, underscores, and dots are allowed "
+            "(and not an all-dots traversal segment)."
         )
     return name
 

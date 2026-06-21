@@ -29,6 +29,21 @@ export async function patchUserSettings(settings: UserSettings): Promise<UserSet
   return (await r.json()) as UserSettings;
 }
 
+// Record consent to the current Terms — the provable artifact behind the
+// post-auth consent gate. Like user-settings, a per-user identity mutation on
+// the auth router, not a `/commands` verb. `version` is the live
+// `me.terms_version`; the server rejects a stale one (409) so the gate
+// re-renders against current text. The accepted timestamp is server-stamped.
+export async function acceptTerms(version: string): Promise<void> {
+  const r = await fetch(`${API}/auth/accept-terms`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ version }),
+    cache: "no-store",
+  });
+  if (!r.ok) throw new Error(`accept-terms failed (${r.status})`);
+}
+
 function _mintIdempotencyKey(): string {
   // crypto.randomUUID is in every browser Next.js 16 supports + Node 18+.
   return crypto.randomUUID();

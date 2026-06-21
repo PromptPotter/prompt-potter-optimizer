@@ -1,18 +1,20 @@
-"""``/auth/*`` — OIDC sign-in surface.
-
-Seven routes:
+"""``/auth/*`` — OIDC sign-in + per-user identity surface.
 
 * ``GET /auth/providers`` — list configured providers (drives the login page).
 * ``GET /auth/login/{provider}`` — issue a state token, redirect to the provider's consent screen.
 * ``GET /auth/callback/{provider}`` — verify the auth code, mint a server-side session, set the opaque cookie, redirect to ``/``.
 * ``POST /auth/logout`` — delete the session + clear the cookie.
-* ``GET /auth/me`` — current identity envelope (401 when no session).
+* ``GET /auth/me`` — current identity envelope + consent state (401 when no session).
+* ``GET|PATCH /auth/user-settings`` — read / write per-user preferences (Account → Preferences).
+* ``POST /auth/accept-terms`` — record the user's acceptance of the current Terms (the provable consent record).
 * ``GET /auth/quota-status`` — Security pane: live quota knobs + today's usage.
 * ``GET /auth/activity`` — Activity pane: time-bucketed spend / requests / tokens.
 
-The auth router intentionally does NOT use ``IdentityDep`` for the
-login / callback / providers / logout routes — those run pre-auth. Only
-``/auth/me`` uses the dep, and 401 is the expected pre-sign-in answer.
+The auth router is the Identity I/O kind (ADR-0002), not the ``/commands``
+highway — its per-user mutations (``user-settings``, ``accept-terms``) ride it
+directly. It intentionally does NOT use ``IdentityDep`` for the login / callback
+/ providers / logout routes — those run pre-auth. The identity-gated routes use
+the dep, and 401 is the expected pre-sign-in answer.
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ from promptpotter.application.jobs.spend import (
     start_of_utc_day,
     sum_user_spend,
 )
+from promptpotter.config.settings import TERMS_VERSION
 from promptpotter.infrastructure.identity.allowlist import check_allowlist
 from promptpotter.infrastructure.identity.bundle import IdentityBundle
 from promptpotter.infrastructure.identity.github import (
@@ -47,9 +50,15 @@ from promptpotter.infrastructure.identity.migration import maybe_claim_default
 from promptpotter.infrastructure.identity.user import derive_user_id
 from promptpotter.infrastructure.identity.verifier import IDTokenInvalidError
 from promptpotter.infrastructure.store.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.infrastructure.store.user_store import ConsentRecord
 from promptpotter.presentation.api.deps import IdentityDep, StoreDep
 from promptpotter.presentation.api.middleware import SESSION_COOKIE_NAME
-from promptpotter.shared.errors import NotFoundError, ServiceUnavailableError
+from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.errors import (
+    ConflictError,
+    NotFoundError,
+    ServiceUnavailableError,
+)
 from promptpotter.shared.identity import claim_email
 
 logger = logging.getLogger(__name__)
@@ -144,6 +153,12 @@ class MeResponse(BaseModel):
     provider: str | None
     connected_accounts: list[ConnectedAccount]
     available_providers: list[str]
+    # Consent gate inputs. ``terms_version`` is the live required version;
+    # ``terms_accepted_version`` is what this user last accepted (None = never).
+    # The webapp blocks the app while the two differ. The accepted timestamp
+    # stays server-side in user.json — the frontend needs only the version match.
+    terms_version: str
+    terms_accepted_version: str | None
 
 
 def _require_bundle(request: Request) -> IdentityBundle:
@@ -310,12 +325,13 @@ async def logout(request: Request) -> JSONResponse:
 
 
 @auth_router.get("/me", response_model=MeResponse)
-async def me(request: Request, identity: IdentityDep) -> MeResponse:
-    """Identity envelope + the data the account modal needs.
+async def me(request: Request, identity: IdentityDep, store: StoreDep) -> MeResponse:
+    """Identity envelope + the data the account modal + consent gate need.
 
     `connected_accounts` is a single-entry list at Stage 1 (one provider
     per session). `available_providers` is configured-minus-connected so
     the "+ Connect account" affordance only surfaces real targets.
+    `terms_*` drive the post-auth consent gate (read from `user.json`).
     """
     bundle = _require_bundle(request)
     claims = cast(dict[str, Any], identity.claims)
@@ -325,6 +341,11 @@ async def me(request: Request, identity: IdentityDep) -> MeResponse:
     connected = [ConnectedAccount(provider=provider, email=email)] if provider else []
     configured = set(bundle.config.configured)
     available = sorted(configured - {provider}) if provider else sorted(configured)
+    user = store.users.get_or_create(
+        user_id=str(identity.user_id),
+        tenant_id=str(identity.tenant_id),
+        email=email,
+    )
     return MeResponse(
         user_id=str(identity.user_id),
         tenant_id=str(identity.tenant_id),
@@ -334,6 +355,8 @@ async def me(request: Request, identity: IdentityDep) -> MeResponse:
         provider=provider,
         connected_accounts=connected,
         available_providers=available,
+        terms_version=TERMS_VERSION,
+        terms_accepted_version=user.terms_accepted.version if user.terms_accepted else None,
     )
 
 
@@ -422,6 +445,46 @@ def patch_user_settings(body: UserSettings, store: StoreDep) -> UserSettings:
     )
     store.users.save(user.model_copy(update={"demo_mode_enabled": body.demo_mode_enabled}))
     return UserSettings(demo_mode_enabled=body.demo_mode_enabled)
+
+
+class AcceptTermsBody(BaseModel):
+    """The version the client is accepting — must equal the live TERMS_VERSION."""
+
+    version: str
+
+
+class TermsConsent(BaseModel):
+    """Consent state echoed back after an accept (same fields the gate reads on
+    ``/me``). The accepted timestamp stays server-side in ``user.json``."""
+
+    terms_version: str
+    terms_accepted_version: str | None
+
+
+@auth_router.post("/accept-terms", response_model=TermsConsent)
+def accept_terms(body: AcceptTermsBody, store: StoreDep) -> TermsConsent:
+    """Record the current user's acceptance of the Terms — the provable consent
+    artifact the legal clauses depend on. A per-user identity mutation (like
+    user-settings), not a campaign command, so it rides the auth router rather
+    than the ``/commands`` highway. The accepted version must equal the live
+    ``TERMS_VERSION``; a stale version is rejected so the gate re-prompts against
+    current text. The timestamp is server-stamped — never trust the client clock
+    for a record that has to hold up.
+    """
+    if body.version != TERMS_VERSION:
+        raise ConflictError(
+            "Terms version is out of date — reload to accept the current terms.",
+            code="terms_version_stale",
+            details={"expected": TERMS_VERSION, "received": body.version},
+        )
+    user = store.users.get_or_create(
+        user_id=str(store.identity.user_id),
+        tenant_id=str(store.identity.tenant_id),
+        email=claim_email(store.identity),
+    )
+    record = ConsentRecord(version=TERMS_VERSION, accepted_at=utcnow_iso())
+    store.users.save(user.model_copy(update={"terms_accepted": record}))
+    return TermsConsent(terms_version=TERMS_VERSION, terms_accepted_version=TERMS_VERSION)
 
 
 @auth_router.get("/activity", response_model=ActivityResponse)

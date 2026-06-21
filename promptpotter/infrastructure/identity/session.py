@@ -97,7 +97,8 @@ class SessionStore:
         try:
             raw = read_json(path)
         except (OSError, JSONDecodeError):
-            logger.warning("session %s unreadable, deleting", session_id)
+            # Don't log the session id — it's the sole bearer credential.
+            logger.warning("unreadable session file, deleting")
             path.unlink(missing_ok=True)
             return None
         data = SessionData(

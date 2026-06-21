@@ -52,6 +52,11 @@ export interface MeResponse {
   provider: string | null;
   connected_accounts: ConnectedAccount[];
   available_providers: string[];
+  // Consent gate. `terms_version` is the live required version; the app blocks
+  // behind the consent gate while `terms_accepted_version` (what this user last
+  // accepted, null = never) differs from it.
+  terms_version: string;
+  terms_accepted_version: string | null;
 }
 export function fetchMe(signal?: AbortSignal): Promise<MeResponse> {
   return jget<MeResponse>(`${API}/auth/me`, signal);

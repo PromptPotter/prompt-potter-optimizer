@@ -92,6 +92,31 @@ controls:
     status: ok
 ```
 
+### Consent gate — blocking, post-auth
+
+```yaml
+surface: consent_gate   # components/onboarding/ConsentGate.tsx, mounted in app/page.tsx
+shows_when: status==='authed' AND me.terms_accepted_version !== me.terms_version
+controls:
+  - id: checkbox
+    do: Unticked on open (no pre-tick — GDPR/FADP affirmative consent). Gates the accept button.
+    status: ok
+  - id: accept
+    do: POST /api/v1/auth/accept-terms {version: me.terms_version} → server records the provable
+        record (version + stamped timestamp) in user.json → refresh() re-probes /me → gate clears.
+        Disabled until the box is ticked. A 409 (terms_version_stale) re-probes /me so the gate
+        re-renders against current text.
+    status: ok
+  - id: legal.{terms,privacy}
+    do: External links to the brand legal pages (the prose the checkbox refers to); must resolve 200.
+    status: ok
+invariants:
+  - anon NEVER sees this (read-only preview submits no data → no consent needed) — I4.
+  - NO dismiss: no ×, no backdrop-close, no ESC (a11y onClose is a no-op). Accept is the only exit.
+  - the required version is server-owned (me.terms_version), never hardcoded client-side — one
+    source, so a TERMS_VERSION bump re-prompts without a frontend redeploy.
+```
+
 ### Sidebar — chrome, dashboard/files
 
 ```yaml

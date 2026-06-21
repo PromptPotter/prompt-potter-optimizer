@@ -10,6 +10,14 @@ from pydantic_settings import BaseSettings
 
 APP_VERSION: str = "0.8.2"
 
+# Current legal-terms version the consent gate requires. Date-stamped: bumping it
+# (when the Terms / Privacy text on the marketing site materially changes)
+# re-prompts every user for fresh consent — the accepted version no longer
+# matches. The accepted version + a server-stamped timestamp are the provable
+# record persisted per-user in ``user.json`` (``User.terms_accepted``). Keep in
+# sync with the version stamped on the marketing site's /terms + /privacy.
+TERMS_VERSION: str = "2026-06-21"
+
 # Defaults for backend connection (not env-driven — override via CLI args)
 DEFAULT_BACKEND_URL = "http://127.0.0.1:8000"
 DEFAULT_BACKEND_ID = "local"
@@ -200,6 +208,7 @@ __all__ = [
     "POBB_DEFAULT_EPSILON",
     "PROMPT_STRING_FIELDS",
     "TASK_CONTEXT_OVERRIDES",
+    "TERMS_VERSION",
     "WELL_KNOWN_PARAM_TYPES",
     "Settings",
     "settings",

@@ -19,6 +19,23 @@ from promptpotter.infrastructure.store.base import (
 from promptpotter.shared.clock import utcnow_iso
 
 
+class ConsentRecord(BaseModel):
+    """Provable record that a user accepted a specific Terms version.
+
+    ``version`` is the accepted ``settings.TERMS_VERSION``; ``accepted_at`` is
+    server-stamped (never client-supplied — the record's legal weight depends on
+    a trustworthy clock). The consent gate re-prompts when ``version`` no longer
+    matches the live ``TERMS_VERSION``. This is the artifact the Terms'
+    indemnity / prohibition / security clauses lean on: which user accepted which
+    version, when.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    version: str
+    accepted_at: str
+
+
 class User(BaseModel):
     """Per-user quota record. Persisted as ``user.json`` under the tenant root.
 
@@ -31,6 +48,10 @@ class User(BaseModel):
     user_id: str
     tenant_id: str
     email: str | None = None
+    terms_accepted: ConsentRecord | None = Field(
+        default=None,
+        description="Provable Terms-acceptance record (version + server-stamped timestamp). None until the consent gate is cleared.",
+    )
     spend_budget_usd_daily: float | None = Field(
         default=None,
         description="Per-UTC-day cap composed with the per-cycle cap at mint time.",
@@ -77,4 +98,4 @@ class UserStore:
         return user
 
 
-__all__ = ["User", "UserStore"]
+__all__ = ["ConsentRecord", "User", "UserStore"]
