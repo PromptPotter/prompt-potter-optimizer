@@ -28,7 +28,10 @@ class Campaign(BaseModel):
     * ``lifecycle_status`` / ``lifecycle_changed_at`` / ``lifecycle_reason`` —
       *operator visibility intent*. ``"archived"`` hides from the default
       sidebar; ``"deleted"`` is soft — data stays on disk so measurements
-      still cache-hit for siblings.
+      still cache-hit for siblings. ``"checkin"`` is a campaign still authoring
+      its origin (minted on first ingest action, no loop yet) — it flips to
+      ``"active"`` at Start; ``root_content_hash`` / ``config`` are empty until
+      then.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -44,7 +47,7 @@ class Campaign(BaseModel):
     optimizer_prompt_hash: str = ""
     backend_id: str = ""
     owner_user_id: str = "default"
-    lifecycle_status: Literal["active", "archived", "deleted"] = "active"
+    lifecycle_status: Literal["active", "archived", "deleted", "checkin"] = "active"
     lifecycle_changed_at: str = ""
     lifecycle_reason: str = ""
     config: dict[str, Any] = Field(default_factory=dict)

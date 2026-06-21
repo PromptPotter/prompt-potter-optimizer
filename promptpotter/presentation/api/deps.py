@@ -8,7 +8,6 @@ from typing import Annotated, Any
 
 from fastapi import Depends, Request
 
-from promptpotter.application.datasets.draft_campaign import DraftCampaignRegistry
 from promptpotter.application.jobs import JobRegistry
 from promptpotter.config.settings import settings
 from promptpotter.domain.backend import BackendConnection
@@ -115,14 +114,6 @@ def warming_payload(campaign_id: str, cycle_id: str) -> dict[str, Any]:
     }
 
 
-def get_draft_registry(request: Request) -> DraftCampaignRegistry:
-    """Pull the draft-campaign registry off ``app.state``; missing is a programmer error."""
-    registry: DraftCampaignRegistry | None = getattr(request.app.state, "draft_campaigns", None)
-    if registry is None:
-        raise ServiceUnavailableError("draft-campaign registry not initialised")
-    return registry
-
-
 def get_job_registry(request: Request) -> JobRegistry:
     """Pull the process-wide :class:`JobRegistry` off ``app.state``.
 
@@ -146,7 +137,6 @@ __all__ = [
     "build_stores_from_identity",
     "get_backend_or_404",
     "get_cycle_dir_or_404",
-    "get_draft_registry",
     "get_job_registry",
     "read_text_or_404",
     "resolve_identity",

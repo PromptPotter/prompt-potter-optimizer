@@ -27,7 +27,11 @@ from promptpotter.application.intelligence.measurement_series import (
     campaign_measurement_series,
     cycle_measurement_series,
 )
-from promptpotter.application.jobs.launcher import draft_wire_with_locks
+from promptpotter.application.jobs.launcher import (
+    draft_wire_with_locks,
+    load_checkin_draft,
+    save_checkin_draft,
+)
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import NodeConfigParam, NodeOutputSchema
 from promptpotter.infrastructure.store import (
@@ -40,7 +44,7 @@ from promptpotter.infrastructure.store.archive_views import (
     measurement_series_for_samples,
 )
 from promptpotter.infrastructure.store.base import read_json
-from promptpotter.presentation.api.deps import StoreDep, get_cycle_dir_or_404, get_draft_registry
+from promptpotter.presentation.api.deps import StoreDep, get_cycle_dir_or_404
 from promptpotter.shared.errors import (
     BadRequestError,
     ConflictError,
@@ -139,24 +143,21 @@ async def ingest_dataset(
     ],
     slug: Annotated[str | None, Form(description="Optional slug override.")] = None,
 ) -> dict[str, Any]:
-    """Parse an uploaded tabular file (CSV/TSV/JSON/XLSX); return a server-held
-    :class:`DraftCampaign`.
+    """Parse an uploaded tabular file (CSV/TSV/JSON/XLSX); mint a durable check-in
+    campaign and return its :class:`DraftCampaign` (``draft_id`` == ``campaign_id``).
 
     Wire contract pinned in ``docs/specs/m12-api-openapi.yaml::POST /datasets/ingest``.
-    NOT a Control-remote command — no ``CommandRecord`` lands until the
-    operator commits via ``/commands/mint-campaign-from-draft``.
+    The check-in campaign appears in the sidebar immediately and survives a restart;
+    nothing runs until the operator starts it via ``/commands/start-checkin``.
     """
-    registry = get_draft_registry(request)
-
     blob = await _read_capped(request, file, MAX_UPLOAD_BYTES)
 
-    # Parse → register the draft → persist its cache. Shared with the CLI
-    # `ingest` verb (`application/datasets/ingest.py`) so both surfaces drive
+    # Parse → mint the check-in campaign → persist its bank. Shared with the CLI
+    # `new <file>` path (`application/datasets/ingest.py`) so both surfaces drive
     # the identical orchestration; the handler only maps errors to HTTP.
     try:
         draft = ingest_draft(
             stores=store,
-            registry=registry,
             blob=blob,
             filename=file.filename or "",
             slug=slug,
@@ -195,12 +196,11 @@ async def upload_candidate_library(
     unfulfilled ``candidate_source`` dependency. Returns the updated draft wire (its
     ``dependencies`` block now reports the dependency ``fulfilled``).
 
-    Like ``/datasets/ingest`` this is NOT a Control-remote command — it mutates the
-    in-flight draft only; nothing lands on a ledger until mint. Wire contract pinned
-    in ``docs/specs/m12-api-openapi.yaml::POST /datasets/draft/candidate-library``.
+    Mutates the in-flight check-in draft only; nothing runs until Start. Wire
+    contract pinned in ``docs/specs/m12-api-openapi.yaml::POST /datasets/draft/candidate-library``.
+    ``draft_id`` is the check-in campaign id.
     """
-    registry = get_draft_registry(request)
-    draft = registry.get(draft_id, tenant_id=store.identity.tenant_id)
+    draft = load_checkin_draft(store, draft_id)
     if draft is None:
         raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
 
@@ -217,7 +217,7 @@ async def upload_candidate_library(
             code="ingest_failed",
             details={"reason": "empty"},
         )
-    updated = registry.update(draft.patch(candidate_library=terms))
+    updated = save_checkin_draft(store, draft.patch(candidate_library=terms))
     return draft_wire_with_locks(updated)
 
 
@@ -231,57 +231,51 @@ class _BuildLibraryBody(BaseModel):
 
 
 @datasets_router.post("/draft/candidate-library/from-column")
-def build_candidate_library_from_column(
-    request: Request, store: StoreDep, body: _BuildLibraryBody
-) -> dict[str, Any]:
+def build_candidate_library_from_column(store: StoreDep, body: _BuildLibraryBody) -> dict[str, Any]:
     """Build a draft's candidate library from the distinct values of one of its own
     columns — the unified "build from dataset" path (no external file).
 
     When the targets already live in the data (the ground-truth/target column, the
     union of the dataset's category sheets), the library is derived rather than
     uploaded. Returns the updated draft wire (its `candidate_library` dependency now
-    `fulfilled`). NOT a Control-remote command. Wire contract pinned in
+    `fulfilled`). Mutates the check-in draft only. Wire contract pinned in
     `docs/specs/m12-api-openapi.yaml::POST /datasets/draft/candidate-library/from-column`.
+    `draft_id` is the check-in campaign id.
     """
-    registry = get_draft_registry(request)
-    draft = registry.get(body.draft_id, tenant_id=store.identity.tenant_id)
+    draft = load_checkin_draft(store, body.draft_id)
     if draft is None:
         raise NotFoundError(f"draft {body.draft_id!r} not found.", code="command_target_not_found")
     if body.column not in draft.headers:
         raise PayloadInvalidError(
             f"column {body.column!r} is not one of the dataset's columns {list(draft.headers)}."
         )
-    cache = store.tenant_datasets.load_draft_cache(body.draft_id)
-    if cache is None:
+    bank = store.checkin.load_bank(body.draft_id)
+    if bank is None:
         raise PayloadInvalidError("draft has no cached rows to build from.")
-    terms = candidate_library_from_rows(cache.get("items", []), body.column)
+    terms = candidate_library_from_rows(bank.get("items", []), body.column)
     if not terms:
         raise PayloadInvalidError(
             f"column {body.column!r} has no usable values.",
             code="ingest_failed",
             details={"reason": "empty"},
         )
-    updated = registry.update(draft.patch(candidate_library=terms))
+    updated = save_checkin_draft(store, draft.patch(candidate_library=terms))
     return draft_wire_with_locks(updated)
 
 
 @datasets_router.post("/{name}/draft")
-def draft_from_existing_dataset(name: str, request: Request, store: StoreDep) -> dict[str, Any]:
-    """Build a server-held :class:`DraftCampaign` from an authored dataset's files.
+def draft_from_existing_dataset(name: str, store: StoreDep) -> dict[str, Any]:
+    """Open an authored dataset's files as a durable check-in campaign.
 
     The direct path behind "open this dataset in the ingest panel" — a demo /
-    benchmark / owned Origin becomes a prefilled draft without a browser-side CSV
-    round-trip. Identity-gated through the same resolver as the other dataset
-    reads; like ``/datasets/ingest`` it is NOT a Control-remote command — no
-    ``CommandRecord`` lands until the operator commits via
-    ``/commands/mint-campaign-from-draft``.
+    benchmark / owned Origin becomes a prefilled check-in (``draft_id`` ==
+    ``campaign_id``) without a browser-side CSV round-trip. Identity-gated through
+    the same resolver as the other dataset reads; nothing runs until the operator
+    starts it via ``/commands/start-checkin``.
     """
-    registry = get_draft_registry(request)
     dataset_dir = _resolve_or_404(store, name)
     try:
-        draft = draft_from_dataset(
-            stores=store, registry=registry, dataset_dir=dataset_dir, dataset_name=name
-        )
+        draft = draft_from_dataset(stores=store, dataset_dir=dataset_dir, dataset_name=name)
     except IngestError as exc:
         raise PayloadInvalidError(
             exc.message, code="ingest_failed", details={"reason": exc.reason}

@@ -33,6 +33,13 @@ def is_stop_requested(runtime_dir: Path) -> bool:
     return (runtime_dir / "stop.flag").is_file()
 
 
+def is_checkin(runtime_dir: Path) -> bool:
+    """``.runtime/checkin.flag`` present — the campaign is still authoring its origin
+    (pre-loop), not running. Dropped at skeleton creation, cleared at Start when the
+    campaign flips ``checkin`` → ``active``."""
+    return (runtime_dir / "checkin.flag").is_file()
+
+
 def clear_run_control_flags(runtime_dir: Path) -> None:
     """Drop any consumed ``stop.flag`` / ``pause.flag`` / ``skip.flag`` left by a prior run.
 
@@ -77,6 +84,9 @@ def derive_run_phase(
     Composes lifecycle (``is_terminal`` — from ``index.json::finished_at``) with
     the control flags + a freshness fallback, in priority order:
 
+    0. checkin  — ``checkin.flag`` present (pre-loop origin authoring). Wins over
+       every other branch: a check-in cycle has no ``dashboard.json`` and no
+       ``finished_at``, so without this it would derive ``detached``.
     1. terminal — the cycle finished (a terminal record / ``finished_at`` exists).
     2. stopping — ``stop.flag`` present (terminal-intent wins over a pause).
     3. paused   — ``pause.flag`` present (reversible).
@@ -88,9 +98,11 @@ def derive_run_phase(
     ``dashboard.json::run_phase`` (declared by the runner) and overlays its own
     connection-freshness for ``detached``.
     """
+    runtime = cycle_dir / ".runtime"
+    if is_checkin(runtime):
+        return RunPhase.CHECKIN
     if is_terminal:
         return RunPhase.TERMINAL
-    runtime = cycle_dir / ".runtime"
     if is_stop_requested(runtime):
         return RunPhase.STOPPING
     if is_paused(runtime):
@@ -104,6 +116,7 @@ __all__ = [
     "RUN_FRESH_S",
     "clear_run_control_flags",
     "derive_run_phase",
+    "is_checkin",
     "is_paused",
     "is_stop_requested",
     "read_spend_cap",

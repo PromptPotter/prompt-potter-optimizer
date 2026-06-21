@@ -86,6 +86,11 @@ class RunPhase(enum.StrEnum):
     derivations that disagreed (a paused run read as running by one and not
     another).
 
+    - ``CHECKIN`` — the campaign is still authoring its origin (pre-loop); a
+      real disk-backed campaign in the ``checkin`` lifecycle, minted on the
+      first ingest action, resumable. Holds no machine slot. Derived from
+      ``.runtime/checkin.flag`` (dropped at skeleton creation, cleared at
+      Start when ``checkin`` flips to ``active``); precedes every other phase.
     - ``RUNNING`` — a process is attached and driving the active cycle.
     - ``PAUSED`` — operator paused; alive, holding at a round boundary.
       Reversible (``pause.flag`` / ``resume-cycle``).
@@ -102,6 +107,7 @@ class RunPhase(enum.StrEnum):
       :class:`StopReason` (rendered via :func:`stop_reason_label`).
     """
 
+    CHECKIN = "checkin"
     RUNNING = "running"
     PAUSED = "paused"
     GATE = "gate"

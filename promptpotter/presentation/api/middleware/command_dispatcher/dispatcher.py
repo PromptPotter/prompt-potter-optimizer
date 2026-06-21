@@ -615,8 +615,8 @@ class CommandDispatcher:
                 "job registry not initialised", code="job_registry_unavailable"
             )
         dataset_name = str(payload.get("dataset_name", ""))
-        # Campaign-from-origin rides the DRAFT path (mint-campaign-from-draft +
-        # the draft's reused_origin_id), not this workspace verb — so no
+        # Campaign-from-origin rides the check-in path (start-checkin + the
+        # draft's reused_origin_id), not this workspace verb — so no
         # origin_override here. Quota (429) / Launch (422) / BackendUnreachable
         # (503) are PotterErrors the central catch in _record_and_apply maps.
         await mint_campaign_command(

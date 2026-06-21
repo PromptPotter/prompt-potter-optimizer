@@ -43,6 +43,7 @@ from promptpotter.infrastructure.store.base import (
     write_json,
 )
 from promptpotter.infrastructure.store.campaign_store import CampaignStore
+from promptpotter.infrastructure.store.checkin_draft_store import CheckinDraftStore
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
     DatasetRef,
@@ -157,6 +158,7 @@ def walk_cycle_lineage(tenant_root: Path, campaign_id: str, cycle_id: str) -> li
 __all__ = [
     "BackendStore",
     "CampaignStore",
+    "CheckinDraftStore",
     "DatasetAccessError",
     "DatasetRef",
     "DiagnosticRunStore",

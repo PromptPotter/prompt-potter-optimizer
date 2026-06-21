@@ -32,11 +32,7 @@ from promptpotter.application.config import (
 from promptpotter.application.datasets import read_campaign_config_file
 from promptpotter.application.datasets.csv_ingest import Table, materialize_samples
 from promptpotter.application.datasets.dataset_replace import recover_pending_replacements
-from promptpotter.application.datasets.draft_campaign import (
-    DraftCampaign,
-    DraftCampaignRegistry,
-    dataset_source_of,
-)
+from promptpotter.application.datasets.draft_campaign import DraftCampaign
 from promptpotter.application.datasets.origin_readiness import FieldGap, origin_readiness
 from promptpotter.application.jobs.launcher.draft_build import (
     _build_default_campaign_json,
@@ -145,6 +141,38 @@ def _admit(reservation: ReserveResult) -> Job:
     )
 
 
+def build_cycle_config(
+    session: Session,
+    dataset_root: Path,
+    *,
+    pipeline_overlay: dict[str, Any] | None = None,
+) -> CampaignConfig:
+    """Load the campaign config for a launch, folding a reused-dataset overlay onto a
+    per-campaign snapshot — the shared prologue of every path that resolves a cycle.
+
+    Read the dataset's committed ``campaign.json`` + connector profile into a
+    ``CampaignConfig``; when the draft carried operator setup edits
+    (``pipeline_overlay``), split them (``split_overlay``) into ``pipeline_overrides``
+    (narrow the search space) + ``optimizer_narrowing`` (origin-floor values) on the
+    snapshot, leaving the shared dataset immutable. A fresh upload commits its edits
+    into its own ``pipeline.json``, so it passes no overlay. The ONE definition shared
+    by ``mint_campaign_command``, ``start_run_command``, and check-in
+    ``prepare_checkin_run`` — so the committed config can't drift between launch paths.
+    """
+    file_config = read_campaign_config_file(dataset_root / "campaign.json")
+    profile = session.store.backends.load_connector_profile(session.backend_id) or {}
+    campaign_config = load_campaign_config({**profile, **file_config})
+    if pipeline_overlay:
+        overrides, narrowing = split_overlay(pipeline_overlay)
+        campaign_config = campaign_config.model_copy(
+            update={
+                "pipeline_overrides": {**campaign_config.pipeline_overrides, **overrides},
+                "optimizer_narrowing": {**campaign_config.optimizer_narrowing, **narrowing},
+            }
+        )
+    return campaign_config
+
+
 async def mint_campaign_command(
     *,
     stores: Stores,
@@ -215,21 +243,11 @@ async def mint_campaign_command(
             identity=stores.identity,
         )
 
-        file_config = read_campaign_config_file(dataset_root / "campaign.json")
-        profile = session.store.backends.load_connector_profile(session.backend_id) or {}
-        campaign_config = load_campaign_config({**profile, **file_config})
-        # Reused-dataset setup edits land on the per-campaign snapshot (not the
-        # shared dataset): config blocks → pipeline_overrides, optimizer blocks →
-        # optimizer_narrowing, merged over the dataset's defaults (operator wins
-        # per node). prepare_fresh_cycle freezes this into the Campaign manifest.
-        if pipeline_overlay:
-            overrides, narrowing = split_overlay(pipeline_overlay)
-            campaign_config = campaign_config.model_copy(
-                update={
-                    "pipeline_overrides": {**campaign_config.pipeline_overrides, **overrides},
-                    "optimizer_narrowing": {**campaign_config.optimizer_narrowing, **narrowing},
-                }
-            )
+        # Reused-dataset setup edits ride the overlay onto a per-campaign snapshot;
+        # prepare_fresh_cycle freezes the result into the Campaign manifest.
+        campaign_config = build_cycle_config(
+            session, dataset_root, pipeline_overlay=pipeline_overlay
+        )
 
         train_data = session.samples or []
         # The one shared mint prologue — same seam CLI ``new`` runs (inline). See
@@ -274,80 +292,33 @@ async def mint_campaign_command(
     return campaign_id, cycle_id, job
 
 
-async def commit_draft_to_dataset(
-    *,
-    stores: Stores,
-    draft: DraftCampaign,
-    draft_registry: DraftCampaignRegistry,
-    backend_url: str = DEFAULT_BACKEND_URL,
-) -> str:
-    """Gate + commit a draft to an on-disk tenant dataset; return its slug.
+def materialize_and_write_origin(
+    stores: Stores, draft: DraftCampaign, *, bank_items: list[dict[str, Any]]
+) -> None:
+    """Materialize raw bank rows → Samples and write the committed dataset Origin
+    files + candidate library — the one commit body run at check-in Start (shared by
+    the CLI ``new <file>`` inline path and the web detach path via
+    :func:`prepare_checkin_run`).
 
-    Materializes the four Origin files (`cache.json`, `pipeline.json`,
-    `task_description.md`, `prompts/default.json`) and the sibling
-    `campaign.json` per ``docs/specs/roadmap.md § Commit path``.
-    Once this returns, ``projects/{tenant}/datasets/{slug}/`` is a first-class
-    dataset that ``mint_campaign_command`` (web, detached) or CLI ``new``
-    (inline) can mint + run identically. Shared by both entry points — the
-    commit logic lives here, not duplicated per surface.
-
-    Fresh-upload drafts only. A draft derived from an existing dataset
-    (``source_file = "dataset:{slug}"``) must mint against that canonical dataset,
-    never materialize a clone — :func:`mint_campaign_from_draft_command` routes
-    it past here; the guard below makes that contract crash-safe.
-    """
-    if dataset_source_of(draft.source_file) is not None:
-        raise LaunchError(
-            "commit_draft_to_dataset called on a derived-from-existing draft; "
-            "mint against the canonical dataset instead"
-        )
-
-    if stores.tenant_datasets.slug_exists(draft.slug):
-        raise LaunchError(
-            f"slug collision at commit: {draft.slug!r} already exists in this tenant's collection"
-        )
-
-    # Deterministic origin gate BEFORE anything irreversible. The resolver authored
-    # answer_format (enumerating the answer space); a dropped label surfaces here as
-    # an open gap rather than being silently back-filled.
-    _assert_origin_ready(draft)
-
-    # Preflight BEFORE commit_draft so a backend-down failure preserves the
-    # draft — the operator can fix the backend and retry without re-uploading.
-    await _run_preflight(draft.connector, backend_url)
-
-    # Materialize raw rows → Samples now that the column mapping is confirmed,
-    # overwriting the draft cache so commit_draft's rename yields a proper
-    # dataset cache.json. Materialization may surface a per-row data failure
-    # (e.g. a blank mapped cell) as IngestError — propagated to a 422.
-    cache = stores.tenant_datasets.load_draft_cache(draft.draft_id)
-    if cache is None:
-        raise LaunchError(f"draft {draft.draft_id!r} has no cached rows to materialize")
-    table = Table(headers=draft.headers, rows=tuple(cache.get("items", [])))
+    The pre-commit bank rows come from ``checkin/cache.json``; this turns them into
+    ``datasets/{slug}/``. The four origin projections come from the pure
+    :mod:`draft_build` helpers, so the committed shape can't drift between callers."""
+    table = Table(headers=draft.headers, rows=tuple(bank_items))
     samples = materialize_samples(
         table, query_col=draft.column_query, ground_truth_col=draft.column_ground_truth
     )
-    stores.tenant_datasets.write_draft_cache(
-        draft.draft_id, samples, source_file=draft.source_file, headers=draft.headers
-    )
-
-    pipeline_json = _build_origin_pipeline_json(draft)
-    campaign_json = _build_default_campaign_json(draft)
-    prompt_default = draft.committed_prompt_fields()
-    task_context = _build_task_context(draft)
-
-    stores.tenant_datasets.commit_draft(
-        draft.draft_id,
-        slug=draft.slug,
-        pipeline_json=pipeline_json,
-        campaign_json=campaign_json,
+    stores.tenant_datasets.write_committed_dataset(
+        draft.slug,
+        samples=samples,
+        source_file=draft.source_file,
+        headers=draft.headers,
+        pipeline_json=_build_origin_pipeline_json(draft),
+        campaign_json=_build_default_campaign_json(draft),
         task_description=draft.raw_task_description,
-        prompt_default=prompt_default,
-        task_context=task_context,
+        prompt_default=draft.committed_prompt_fields(),
+        task_context=_build_task_context(draft),
     )
     persist_origin_candidate_library(stores, draft.slug, draft)
-    draft_registry.discard(draft.draft_id, tenant_id=stores.identity.tenant_id)
-    return draft.slug
 
 
 def persist_origin_candidate_library(stores: Stores, slug: str, draft: DraftCampaign) -> None:
@@ -363,80 +334,6 @@ def persist_origin_candidate_library(stores: Stores, slug: str, draft: DraftCamp
     (nothing was dropped)."""
     if draft.candidate_library and stores.tenant_datasets.slug_exists(slug):
         stores.tenant_datasets.write_candidate_library(slug, draft.candidate_library)
-
-
-async def mint_campaign_from_draft_command(
-    *,
-    stores: Stores,
-    draft: DraftCampaign,
-    draft_registry: DraftCampaignRegistry,
-    job_registry: JobRegistry,
-    halt_at_accuracy: float | None = None,
-    spend_budget_usd: float | None = None,
-    backend_url: str = DEFAULT_BACKEND_URL,
-) -> tuple[str, str, Job]:
-    """Commit a draft to disk + mint a campaign + spawn the runner (detached).
-
-    The web ``/commands/mint-campaign-from-draft`` entry. Two paths, forked on
-    draft provenance:
-
-    * **Derived from an existing dataset** (demo / benchmark / owned tenant
-      dataset; ``source_file = "dataset:{slug}"``) — the dataset already exists on
-      disk, so commit nothing. Keep the origin-readiness gate + preflight, then
-      mint a campaign DIRECTLY against the canonical ``dataset_name``. No
-      ``commit_draft``, no ``{slug}-N`` clone, no slug uniquify — re-running just
-      adds a sibling campaign under the one dataset.
-    * **Fresh CSV upload** — commit via :func:`commit_draft_to_dataset` (one
-      tenant folder), then mint.
-
-    CLI ``new <file>`` shares the commit step but runs the loop inline; CLI
-    ``new <name>`` mints an existing dataset directly without ever drafting.
-    """
-    canonical = dataset_source_of(draft.source_file)
-    if canonical is not None:
-        # Existing dataset — gate, then mint against it; never materialize a clone.
-        _assert_origin_ready(draft)
-        await _run_preflight(draft.connector, backend_url)
-        # The derived path skips commit_draft_to_dataset (the dataset already
-        # exists), so persist a built/dropped candidate library through the SAME
-        # origin-write seam — otherwise a library the operator supplied on reopen
-        # would be lost. The run reads it from the resolved tenant-first config dir.
-        persist_origin_candidate_library(stores, canonical, draft)
-        # Discard ONLY after a successful mint — a failed mint (e.g. 409
-        # machine_busy) must leave the draft intact so the operator can retry
-        # without re-opening the origin (otherwise the retry 404s on a gone draft).
-        result = await mint_campaign_command(
-            stores=stores,
-            dataset_name=canonical,
-            job_registry=job_registry,
-            halt_at_accuracy=halt_at_accuracy,
-            spend_budget_usd=spend_budget_usd,
-            # Persist the reused-dataset draft's lock/allow + origin-floor edits on
-            # the per-campaign snapshot (the shared dataset stays immutable).
-            pipeline_overlay=draft.pipeline_overlay,
-            # A "reuse an origin" draft seeds C0 from the chosen origin's exact
-            # prompt fields (campaign_origin lineage) instead of the dataset's
-            # authored prompt; empty marker → plain dataset mint (origin lineage).
-            origin_override=draft.origin_prompt_fields if draft.reused_origin_id else None,
-            backend_url=backend_url,
-        )
-        draft_registry.discard(draft.draft_id, tenant_id=stores.identity.tenant_id)
-        return result
-
-    slug = await commit_draft_to_dataset(
-        stores=stores,
-        draft=draft,
-        draft_registry=draft_registry,
-        backend_url=backend_url,
-    )
-    return await mint_campaign_command(
-        stores=stores,
-        dataset_name=slug,
-        job_registry=job_registry,
-        halt_at_accuracy=halt_at_accuracy,
-        spend_budget_usd=spend_budget_usd,
-        backend_url=backend_url,
-    )
 
 
 async def start_run_command(
@@ -503,11 +400,7 @@ async def start_run_command(
             identity=stores.identity,
         )
 
-        file_config = read_campaign_config_file(
-            resolve_dataset_config_dir(stores, REPO_ROOT, dataset_name) / "campaign.json"
-        )
-        profile = session.store.backends.load_connector_profile(session.backend_id) or {}
-        campaign_config = load_campaign_config({**profile, **file_config})
+        campaign_config = build_cycle_config(session, dataset_root)
 
         train_data = session.samples or []
         configure_and_apply_pipeline(session, campaign_config, log=lambda *_a, **_k: None)
@@ -647,9 +540,9 @@ __all__ = [
     "LaunchError",
     "OriginIncompleteError",
     "QuotaExceededError",
-    "commit_draft_to_dataset",
+    "build_cycle_config",
+    "materialize_and_write_origin",
     "mint_campaign_command",
-    "mint_campaign_from_draft_command",
     "persist_origin_candidate_library",
     "start_run_command",
 ]

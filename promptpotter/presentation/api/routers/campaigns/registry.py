@@ -8,6 +8,7 @@ from fastapi import Query
 from pydantic import BaseModel, Field
 
 from promptpotter.application.config import MechanismConfig
+from promptpotter.application.jobs.launcher import draft_wire_with_locks, load_checkin_draft
 from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.paths import session_index
 from promptpotter.presentation.api.deps import StoreDep
@@ -171,7 +172,7 @@ async def get_mechanisms_schema() -> MechanismSchemaResponse:
     return MechanismSchemaResponse(groups=groups)
 
 
-_LIFECYCLE_FILTERS = ("active", "archived", "deleted", "all")
+_LIFECYCLE_FILTERS = ("active", "archived", "deleted", "checkin", "all")
 
 
 @campaigns_router.get("/campaigns", response_model=CampaignListResponse)
@@ -180,25 +181,31 @@ def list_campaigns(
     dataset: str | None = Query(default=None, description="Filter to one dataset"),
     lifecycle: str = Query(
         default="active",
-        description="Operator visibility filter — 'active' (default), 'archived', 'deleted', or 'all'",
+        description="Operator visibility filter — 'active' (default, includes "
+        "in-progress 'checkin' campaigns), 'archived', 'deleted', 'checkin', or 'all'",
     ),
 ) -> CampaignListResponse:
     """Every campaign on disk owned by the caller, newest first.
 
     Filters: optional ``?dataset=`` for one dataset, ``?lifecycle=`` for the
-    visibility intent (defaults to ``active``; ``archived`` and ``deleted``
-    drop out of the default surface). Cross-user campaigns are invisible —
-    the ``owner_user_id`` gate filters on ``store.identity.user_id``.
+    visibility intent (defaults to ``active``; ``archived`` and ``deleted`` drop
+    out of the default surface). The default ``active`` view ALSO surfaces
+    in-progress ``checkin`` campaigns (origin authoring is resumable progress, so
+    it belongs in the sidebar beside running work) — the only surface that unions
+    them, so origin/campaign-backed lists that ask the store for ``active``
+    directly stay free of the empty-hash check-ins. Cross-user campaigns are
+    invisible — the ``owner_user_id`` gate filters on ``store.identity.user_id``.
     """
     if lifecycle not in _LIFECYCLE_FILTERS:
         raise PayloadInvalidError(
             f"Invalid lifecycle filter: {lifecycle!r}. Expected one of {_LIFECYCLE_FILTERS}."
         )
-    campaigns = store.campaigns.list_campaigns(
-        dataset,
-        lifecycle=lifecycle,
-        owner_user_id=str(store.identity.user_id),
-    )
+    owner = str(store.identity.user_id)
+    campaigns = store.campaigns.list_campaigns(dataset, lifecycle=lifecycle, owner_user_id=owner)
+    if lifecycle == "active":
+        campaigns += store.campaigns.list_campaigns(
+            dataset, lifecycle="checkin", owner_user_id=owner
+        )
     campaigns.sort(key=lambda c: c.created_at, reverse=True)
     return CampaignListResponse(
         campaigns=[
@@ -207,6 +214,29 @@ def list_campaigns(
         ],
         total=len(campaigns),
     )
+
+
+@campaigns_router.get("/campaigns/{campaign_id}/checkin")
+def get_campaign_checkin(store: StoreDep, campaign_id: str) -> dict[str, Any]:
+    """Re-open a durable check-in campaign — its draft wire + last resolver turn.
+
+    The sidebar opens a ``checkin``-lifecycle campaign through here instead of the
+    dashboard (no ``dashboard.json`` exists pre-loop): the webapp rebuilds the
+    ingest "ready" panel from ``draft`` and shows the prior ``resolution`` recap.
+    Tenant-scoped (the check-in store is rooted at the tenant dir) — a cross-tenant
+    id 404s. 404 when this campaign has no check-in working state (already Started
+    or never a check-in). Wire contract pinned in
+    ``docs/specs/m12-api-openapi.yaml::GET /campaigns/{id}/checkin``.
+    """
+    draft = load_checkin_draft(store, campaign_id)
+    if draft is None:
+        raise NotFoundError(
+            f"No check-in working state for campaign {campaign_id}",
+            code="command_target_not_found",
+        )
+    bank = store.checkin.load_bank(campaign_id) or {}
+    resolution = (bank.get("resolution") or {}).get("last_resolution")
+    return {"draft": draft_wire_with_locks(draft), "resolution": resolution}
 
 
 @campaigns_router.get("/campaigns/{campaign_id}", response_model=CampaignDetailResponse)

@@ -20,6 +20,7 @@ from promptpotter.infrastructure.store.base import (
     write_json,
 )
 from promptpotter.infrastructure.store.campaign_store import CampaignStore
+from promptpotter.infrastructure.store.checkin_draft_store import CheckinDraftStore
 from promptpotter.infrastructure.store.diagnostic_run_store import DiagnosticRunStore
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
 from promptpotter.infrastructure.store.paths import (
@@ -115,6 +116,7 @@ class Stores:
     tenant_datasets: TenantDatasetStore
     sessions: SessionStore
     campaigns: CampaignStore
+    checkin: CheckinDraftStore
     sweeps: SweepStore
     archive: MeasurementArchive
     optimizer_calls: OptimizerCallCache
@@ -153,6 +155,7 @@ def build_stores(
         tenant_datasets=TenantDatasetStore(tenant_dir),
         sessions=SessionStore(tenant_dir),
         campaigns=CampaignStore(tenant_dir),
+        checkin=CheckinDraftStore(tenant_dir),
         sweeps=SweepStore(tenant_dir),
         archive=MeasurementArchive(tenant_dir),
         optimizer_calls=OptimizerCallCache(tenant_dir),
