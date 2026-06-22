@@ -47,12 +47,12 @@ untouched by Arc 1 (no new command, no new event, no new endpoint).
 
 One thread is an ordered list of typed **items**. Extend — do not duplicate — the existing
 durable message model: `ChatMsg` in `webapp/lib/hooks/useIngestFlow.ts`
-(`user-file | user | ai | error`, with the standing comment "the conversation renders from a
+(`user-file | user | ai | warning | error`, with the standing comment "the conversation renders from a
 list of these"). The thread carries three item families:
 
 | Family | Items | Source |
 |---|---|---|
-| **Message** | `user`, `user-file`, `ai`, `error` | operator input + assistant replies (existing `ChatMsg`) |
+| **Message** | `user`, `user-file`, `ai`, `warning`, `error` | operator input + assistant replies (existing `ChatMsg`) |
 | **Activity** | the **generic** agent vocabulary — `step` (running → done), `progress`, `warning`, `error`, `merge` — plus the **optimizer specialization** `candidate` / `round` | projected from the cycle event stream (§2) |
 | **Decision** | a labelled button group with a pending/acted state | raised by the copilot; fires an existing command (§4) |
 

@@ -390,8 +390,9 @@ HealthGrade = Literal["healthy", "degraded", "critical"]
 
 
 class DegradationHealth(BaseModel):
-    """Backend-computed, context-aware degradation verdict for a round (origin
-    included) — the single graded signal every surface renders (R-36).
+    """Context-aware degradation verdict for a round (origin included), computed
+    PP-side at round close (``domain/results_health.py``) from the backend's
+    per-sample warning stamps — the single graded signal every surface renders (R-36).
 
     ``grade`` distinguishes a structurally-broken pipeline (``critical``,
     abort-worthy) from transient backend noise (``degraded``, keep going) from a
@@ -444,7 +445,7 @@ class RoundSummary(BaseModel):
     # in measurement order (longest candidate sequence carries the full
     # series since PoBB truncates losers, not the queue mechanism itself).
     selection: list[int] = Field(default_factory=list)
-    # Backend-computed degradation verdict for this round (origin included).
+    # PP-computed (round-close) degradation verdict for this round (origin included).
     # ``None`` only when the round measured zero samples. Webapp/CLI render it;
     # never recompute (R-36).
     health: DegradationHealth | None = None

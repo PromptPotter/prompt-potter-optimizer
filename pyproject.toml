@@ -39,7 +39,6 @@ dependencies = [
 jupyter = [
     "jupyterlab>=4.0",  # why kept: notebook UI for `notebooks/optimization_campaign.ipynb`
     "ipython>=8.0",     # why kept: in-notebook HTML rendering (presentation/views/notebook_run.py)
-    "tqdm>=4.66",       # why kept: per-sample progress bar in notebook entry-point
 ]
 stats = [
     "scipy>=1.12.0",    # why kept: Rasch fit + statistical proportion test
@@ -61,7 +60,6 @@ anthropic = [
 all = [
     "jupyterlab>=4.0",
     "ipython>=8.0",
-    "tqdm>=4.66",
     "scipy>=1.12.0",
     "datasets>=2.14.0",
     "langfuse>=2.0.0",
@@ -137,7 +135,6 @@ module = [
     "openpyxl.*",
     "datasets.*",
     "scipy.*",
-    "tqdm.*",
     "IPython.*",
     "tests.*",
     # Pure transitive (0 first-party imports) — pulled in by the skipped sinks /

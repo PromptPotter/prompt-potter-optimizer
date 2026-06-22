@@ -44,20 +44,36 @@ def _mint_toolkit_batch_id() -> str:
     return "b" + _dt.now(UTC).strftime("%Y%m%dT%H%M%SZ") + secrets.token_hex(2)
 
 
+def _base_cycle_id(cycle_id: str) -> str:
+    """The campaign's base cycle for a (possibly sweep-forked) cycle id.
+
+    A sweep fork is ``{base}_sweep_{batch_id}_{hash}``. Forking a new sweep
+    off another sweep fork compounds the suffix every time, and the cycle dir
+    path grows until it trips the OS limit (``WinError 206`` on Windows, where
+    MAX_PATH is 260). That happens whenever a prior sweep was interrupted before
+    it restored the active pointer, leaving a fork active. A sweep must always
+    branch off the base optimization cycle, so strip any sweep suffix first.
+    """
+    return cycle_id.split("_sweep_", 1)[0]
+
+
 async def _fork_and_bind(
     args: argparse.Namespace,
     parent_ctx: SessionCtx,
+    parent_cycle_id: str,
     sweep_id: str,
     batch_id: str,
     variant: _Variant,
     campaign_config: CampaignConfig,
 ) -> tuple[Any, Session, str]:
-    """Mint an OPERATOR_SWEEP fork off ``parent_ctx.cycle_id``, init a
-    fresh session bound to it, return ``(fork_ctx, fork_session, fork_cycle_id)``.
+    """Mint an OPERATOR_SWEEP fork off ``parent_cycle_id``, init a fresh
+    session bound to it, return ``(fork_ctx, fork_session, fork_cycle_id)``.
 
-    Mirrors the per-fork setup in ``application/sweep.sweep_runner`` —
-    the active pointer is retargeted by ``_mint_fork`` and the caller
-    must restore it after the loop.
+    ``parent_cycle_id`` is the **base** cycle (see :func:`_base_cycle_id`), not
+    necessarily ``parent_ctx.cycle_id`` — the campaign/session ids still come
+    from ``parent_ctx``. Mirrors the per-fork setup in
+    ``application/sweep.sweep_runner`` — the active pointer is retargeted by
+    ``_mint_fork`` and the caller must restore it after the loop.
     """
     from promptpotter.application.bootstrap import init_services
     from promptpotter.application.config import configure_and_apply_pipeline
@@ -79,7 +95,7 @@ async def _fork_and_bind(
         parent_ctx.campaign_id,
         tenant_id,
         parent_ctx.session_id,
-        parent_ctx.cycle_id,
+        parent_cycle_id,
         0,
         fork_payload,
         sweep_batch_id=batch_id,
@@ -244,7 +260,10 @@ async def _run_panel_verb(
     ).mint_sweep_id()
     multi = len(variants) > 1 or (len(variants) == 1 and variants[0].path is not None)
     batch_id = _mint_toolkit_batch_id() if multi else None
-    parent_cycle_id = ctx.cycle_id
+    # Fork off the BASE cycle, never the active one — the active pointer may be a
+    # leftover sweep fork from an interrupted prior sweep, and forking off it
+    # compounds the cycle-id suffix past the OS path limit (see _base_cycle_id).
+    parent_cycle_id = _base_cycle_id(ctx.cycle_id)
 
     results: list[dict[str, Any]] = []
     out_paths: list[Path] = []
@@ -262,7 +281,7 @@ async def _run_panel_verb(
     for idx, variant in enumerate(variants):
         if multi:
             ctx_v, sess_v, fork_cycle_id = await _fork_and_bind(
-                args, ctx, sweep_id, batch_id or "", variant, campaign_config
+                args, ctx, parent_cycle_id, sweep_id, batch_id or "", variant, campaign_config
             )
             logger.info(
                 "Sweep %s [%d/%d] variant=%s → fork %s",

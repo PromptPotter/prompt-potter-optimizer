@@ -1,5 +1,5 @@
 """PoBBStreamView — appends per-sample Posterior-of-Being-Best snapshots
-to ``campaigns/{cycle_id}/.runtime/streams/round_NNNN_p_best.jsonl``.
+to each cycle's ``.runtime/streams/round_NNNN_p_best.jsonl``.
 
 Subscribed to the same ``CycleEventLog`` as the other projections. Filters on
 ``SnapshotRecord.event == "p_best_update"`` and writes one JSONL record per

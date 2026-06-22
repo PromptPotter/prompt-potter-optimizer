@@ -28,9 +28,12 @@ class PipelineData(TypedDict, total=False):
     total_time: float
     terminated_at: str
     step_timings: dict[str, Any]
-    # Per-LLM-node tokens: ``{node: {input, output, estimated}}``;
-    # ``estimated=True`` ⇒ counts came from chars/4 fallback, not provider usage.
-    step_tokens: dict[str, dict[str, int | bool]]
+    # Per-LLM-node tokens — mirror of ``StepTokenUsage`` (application/scoring/
+    # sample_measurement.py): ``{node: {input, output, estimated,
+    # [cost_usd, model, finish_reason, reasoning]}}``; ``estimated=True`` ⇒ counts
+    # came from chars/4 fallback, not provider usage; the bracketed keys are present
+    # only when the provider surfaced them.
+    step_tokens: dict[str, dict[str, Any]]
     llm_provider: str
     pipeline_params: dict[str, Any]
     diagnostics: dict[str, Any]

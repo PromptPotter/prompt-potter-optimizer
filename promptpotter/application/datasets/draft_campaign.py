@@ -1,4 +1,4 @@
-"""Server-held ``DraftCampaign`` + the in-memory registry that owns them.
+"""Server-held ``DraftCampaign`` — the mutable working state of a check-in-lifecycle campaign.
 
 Wire shape pinned in ``docs/specs/m12-api-openapi.yaml::DraftCampaign``;
 prose at ``docs/specs/roadmap.md § Draft-campaign object``.

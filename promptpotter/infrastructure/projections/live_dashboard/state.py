@@ -34,7 +34,7 @@ __all__ = [
 
 
 class BackfillLogEntry(BaseModel):
-    """One paired-PoBB backfill event appended by ``candidate_block.append_backfill``.
+    """One paired-PoBB backfill event appended by ``LiveDashboardView._append_backfill``.
 
     Names the round/candidate the backfill fired during, the sample the
     priors were caught up on, and which priors gained a measurement. The

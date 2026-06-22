@@ -11,18 +11,20 @@ Three dispatch shapes:
   unarchive). Target is a campaign; ``CommandRecord`` lands on the
   campaign's root cycle ledger. No ``Expected-Version``.
 
-- ``dispatch_cycle_command`` — cycle-scoped sanctioned-POST migrations
-  (fork-cycle, stop-cycle, delete-cycle, cleanup-empty-cycles). Target is
-  a specific cycle; ``CommandRecord`` lands on that cycle's ledger.
-  ``Expected-Version`` validated when present (v0 relaxation per the
-  ``ExpectedVersion`` parameter component note in
-  ``docs/specs/m12-api-openapi.yaml``).
+- ``dispatch_cycle_command`` — cycle-scoped sanctioned-POST commands (the
+  ``CycleScopedKind`` set: fork/stop/pause/resume-cycle, skip-searchpoint,
+  delete-cycle, cleanup-empty-cycles, origin-gate-decision,
+  change-spend-budget, start-run). Target is a specific cycle;
+  ``CommandRecord`` lands on that cycle's ledger. ``Expected-Version``
+  validated when present (v0 relaxation per the ``ExpectedVersion``
+  parameter component note in ``docs/specs/m12-api-openapi.yaml``).
 
-- ``dispatch_workspace_command`` — workspace-scoped backend commands
-  (register-backend, sync-backend-experiments). Target is the tenant
-  workspace, not any cycle; ``CommandRecord`` lands on the workspace
-  ledger at ``projects/{tenant}/.workspace/events.jsonl`` per the §0
-  Persistence sibling amendment. No ``Expected-Version``.
+- ``dispatch_workspace_command`` — workspace-scoped commands (the
+  ``WorkspaceBackendKind`` set: register-backend, sync-backend-experiments,
+  mint-campaign). Target is the tenant workspace, not any cycle;
+  ``CommandRecord`` lands on the workspace ledger at
+  ``projects/{tenant}/.workspace/events.jsonl`` per the §0 Persistence
+  sibling amendment. No ``Expected-Version``.
 
 Closed inbound set: ``docs/specs/m12-api-openapi.yaml``. Permanent contract:
 ``docs/adr/0001-m12-control-plane.md``.

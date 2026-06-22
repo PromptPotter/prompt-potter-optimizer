@@ -9,6 +9,7 @@ from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
     bind_session_identity,
     get_verbose,
+    identity_from_args,
     init_services_cli,
 )
 from promptpotter.presentation.cli.session import load_session
@@ -27,7 +28,10 @@ async def cmd_compare(args: argparse.Namespace) -> CommandResult:
     from promptpotter.application.scoring.formula import split_scoring_block
 
     ctx = load_session(args)
-    session = await init_services_cli(**ctx.init_params)
+    # Pass the resolved identity so session.store binds the same tenant as
+    # load_session's pointer + ctx.store; omitting it falls back to the
+    # anonymous `default` tenant and campaign reads miss (see sweep/_common.py).
+    session = await init_services_cli(**ctx.init_params, identity=identity_from_args(args))
     bind_session_identity(session, ctx)
 
     campaign_config = ctx.campaign_config

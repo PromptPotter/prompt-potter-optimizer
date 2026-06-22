@@ -123,15 +123,20 @@ _INFRA_KEYS: frozenset[str] = frozenset(
 
 
 class StepTokenUsage(TypedDict):
-    """Per-LLM-node ``step_tokens`` entry. ``cost_usd``/``model`` are forwarded
+    """Per-LLM-node ``step_tokens`` entry. The ``NotRequired`` keys are forwarded
     from the backend wire only when the provider surfaced them (TermNorm
-    ``record_step_tokens``); absent on estimated-fallback entries."""
+    ``record_step_tokens``); absent on estimated-fallback entries. ``finish_reason``
+    + ``reasoning`` are the raw response shape ``classify_result`` reads to tell a
+    truncation (route to infra, don't fast-eliminate at n=1) from a genuinely empty
+    response (fatal)."""
 
     input: int
     output: int
     estimated: bool
     cost_usd: NotRequired[float]
     model: NotRequired[str]
+    finish_reason: NotRequired[str]
+    reasoning: NotRequired[int]
 
 
 def _compute_step_tokens(
@@ -168,6 +173,16 @@ def _compute_step_tokens(
                 wire_model = entry.get("model")
                 if isinstance(wire_model, str):
                     seeded["model"] = wire_model
+                # Forward the raw response shape so ``classify_result`` can
+                # distinguish a truncation (``finish_reason=length``) from a
+                # genuinely empty response. Dropping these collapses every
+                # empty terminal onto the fatal ``empty_response`` arm.
+                fr = entry.get("finish_reason")
+                if isinstance(fr, str):
+                    seeded["finish_reason"] = fr
+                reasoning = entry.get("reasoning")
+                if isinstance(reasoning, (int, float)) and not isinstance(reasoning, bool):
+                    seeded["reasoning"] = int(reasoning)
                 out[node_name] = seeded
 
     for node in pipeline_schema.nodes:

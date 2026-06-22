@@ -98,7 +98,7 @@ Realistic candidates — production tier (not `:free`), priced ≤ ~$0.05 in / ~
 
 **Suggested A/B order** (operator-pick, but the path of least surprise): `gpt-oss-120b:nitro` → if signal too high, drop `reasoning_effort` to `none`; if speed degrades vs 20b → revert. Then `nemotron-3-nano` if 120b doesn't dominate. Models *not* queued and why: `mistralai/mistral-small-3.2-24b-instruct` (already tested 2026-05-11, unstable on OR); `meta-llama/llama-4-scout` ($0.08/$0.30, AIME ≤ Maverick's 0.048 likely); `qwen/qwen3-30b-a3b-instruct-2507` (already tested, verbose); `x-ai/grok-4.1-fast` ($0.20/$0.50, AIME 0.893 — out of band on price *and* too smart for headroom).
 
-**Per-row timing caveat observed during these tests.** The `[ N] XX.Ys` per-sample line in the PromptPotter CLI reports only the duration of the **successful** backend HTTP call, not cumulative wall-clock including retries. The tqdm ETA (`X.YYs/q`) is the honest aggregate. If you see tqdm's `s/q` rate >> the displayed per-row durations, retries are eating your wall-clock silently. Filed as a UX issue, not a correctness issue.
+**Per-row timing caveat observed during these tests.** The `[ N] XX.Ys` per-sample line in the PromptPotter CLI reports only the duration of the **successful** backend HTTP call, not cumulative wall-clock including retries — so summing the per-row lines understates true wall-clock whenever retries fire. Filed as a UX issue, not a correctness issue.
 
 **Operator-recalled origins (not re-measured this session):**
 - `mistralai/mistral-small-3.2-24b-instruct` — operator's prior favorite, "almost on par with gpt-oss-120b" on accuracy, but observed unstable on OpenRouter routing.

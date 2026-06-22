@@ -2741,7 +2741,6 @@ all = [
     { name = "langfuse" },
     { name = "mlflow" },
     { name = "scipy" },
-    { name = "tqdm" },
 ]
 anthropic = [
     { name = "anthropic" },
@@ -2760,7 +2759,6 @@ dev = [
 jupyter = [
     { name = "ipython" },
     { name = "jupyterlab" },
-    { name = "tqdm" },
 ]
 observability = [
     { name = "langfuse" },
@@ -2807,8 +2805,6 @@ requires-dist = [
     { name = "scipy", marker = "extra == 'stats'", specifier = ">=1.12.0" },
     { name = "sse-starlette", specifier = ">=2.4.1" },
     { name = "starlette", specifier = ">=1.0.1" },
-    { name = "tqdm", marker = "extra == 'all'", specifier = ">=4.66" },
-    { name = "tqdm", marker = "extra == 'jupyter'", specifier = ">=4.66" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.27.0" },
 ]
 provides-extras = ["jupyter", "stats", "benchmarks", "observability", "anthropic", "all", "dev"]

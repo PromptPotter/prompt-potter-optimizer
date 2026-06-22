@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.presentation.cli.commands._shared import (
     bind_session_identity,
+    identity_from_args,
     init_services_cli,
     log_startup_summary,
 )
@@ -118,10 +119,16 @@ async def _setup_sweep_cycle(
     args: argparse.Namespace,
     campaign_config: CampaignConfig,
 ) -> Any:
-    """Init services + resolve cycle for a sweep verb. Returns the bundle
-    (ctx, session, train_data, pipeline_params) shared by every verb."""
+    """Init services + resolve cycle for a sweep verb. Returns the tuple
+    ``(train_data, ctx, session)`` shared by every verb; ``train_data`` is
+    ``None`` when the backend is unreachable."""
     ctx = load_session(args)
-    session = await init_services_cli(**ctx.init_params)
+    # Bind the session store to the SAME identity load_session resolved for the
+    # active pointer + ctx.store. Omitting identity falls back to the anonymous
+    # `default` tenant, so `session.store` would look for the campaign in the
+    # wrong projects/{tenant}/ tree and `load_campaign` would miss it (manifest
+    # not found) for any registered-developer or --tenant run.
+    session = await init_services_cli(**ctx.init_params, identity=identity_from_args(args))
 
     status = await session.backend_client.check_status()
     if status.get("status") == "unreachable":

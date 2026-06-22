@@ -59,7 +59,7 @@ controls:
   - id: search.analytics
     do: Disabled until analytics ships; label states "coming soon".
     status: ok
-  - id: tabs.{chat,dashboard,verify}
+  - id: tabs.{chat,dashboard,verify,files}
     do: Switch the main pane. Selected tab is the only [selected] one.
     status: ok
   - id: theme.toggle

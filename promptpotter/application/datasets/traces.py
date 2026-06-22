@@ -1,7 +1,7 @@
 """Potter-trace dataset loader.
 
-Reads ``campaigns/{cycle_id}/rounds/trial_NNNN.json`` and emits one row
-per ``(trial_N → trial_N+1)`` transition: the potter-state context at
+Reads each cycle's ``rounds/round_NNNN.json`` and emits one row
+per ``(round_N → round_N+1)`` transition: the potter-state context at
 round N, the prompt change the potter actually made, and the accuracy
 delta that resulted. Rows conform to the dataset-row contract so they
 flow through ``load_dataset`` / ``build_dataset_run_data`` unchanged.

@@ -81,9 +81,11 @@ second, full alternative tree (uncomputable past the first divergence — the wh
 point); it finds where the record *departs*. What varies between masks is **only the
 verdict** (a strategy callable living where its math already is), never the fold. The
 realized run is `find_divergences` fed the *realizing* verdict (the self-consistency
-gate). `MaskSpec` is a **thin selector at the API edge** mapping a chosen criterion
-to its verdict — function + strategy, not a `project_mask` that switches internally,
-not a class hierarchy that re-buries the traversal per subclass.
+gate). The selector is a **thin function at the API edge** mapping a chosen criterion
+to its verdict — today `_resolve_verdict(lens)` in `routers/campaigns/lineage.py`
+(function + strategy, not a `project_mask` that switches internally, not a class
+hierarchy that re-buries the traversal per subclass). A named, persisted `MaskSpec`
+is the deferred write-side identity (decision #1), not a symbol that exists yet.
 
 Vocabulary: **record / mask / divergence point**; the partition is **invariant /
 divergent** (the divergent subtree renders dimmed — presentation, not a coined
@@ -167,13 +169,16 @@ the gateway / archive and is served; the webapp renders, never recomputes.
 ## The record (what's realized — never mutated)
 
 - The round winner is `round_winner_key(composite_fitness, accuracy)` =
-  **composite-first, accuracy-tiebreak** (`l1/score/winner.py:41`). The lineage
+  **composite-first, accuracy-tiebreak** (`domain/rendering.py:38`, re-exported via
+  `l1/score/winner.py`). The lineage
   spine + forks descend from these winners; `is_winner` marks them.
 - Stored per candidate (`round_NNNN.json::scoreboard`,
   `dashboard.json::rounds[].candidates[]`): `accuracy`, `composite_fitness`,
   `evaluators: dict[str,float]`, `is_winner`, plus the `matched_origin_*` fields
-  and per-sample results. The campaign `/lineage` response carries only
-  `accuracy / rank / is_winner` today (`presentation/api/routers/campaigns/lineage.py`).
+  and per-sample results. The campaign `/lineage` response carries per-candidate
+  `accuracy / rank / is_winner` plus the served mask values
+  `lens_value / sample_set_accuracy / sample_set_n`
+  (`presentation/api/routers/campaigns/lineage.py`).
 
 ## Milestone 1 — the foundation: the scoring-function mask + visual clues
 
@@ -248,8 +253,8 @@ nothing.
   (reads round files via a store, returns) — **not** an infrastructure
   ledger-projection (it calls into `application/scoring/`; infra can't, per [R-14]).
   It knows nothing about mask kinds.
-- **Verdicts are strategy callables, each in its home.** `MaskSpec` is the thin
-  API-edge value that selects one:
+- **Verdicts are strategy callables, each in its home.** `_resolve_verdict(lens)`
+  (the thin API-edge selector) maps the `lens` value to one:
   - **scoring** (M1) — "re-elected leader under the swapped formula ≠ `is_winner`?"
     Calls `value_with_mask_applied`. The **only** verdict with a value face.
   - **abort** *(built — the first migration, below)* — "did a *switched-off* PoBB

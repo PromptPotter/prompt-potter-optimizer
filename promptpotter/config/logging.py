@@ -25,20 +25,6 @@ class _CliFormatter(logging.Formatter):
         return line
 
 
-class _TqdmStreamHandler(logging.StreamHandler[TextIO]):
-    """Writes through ``tqdm.write`` so log lines don't trample an active progress bar."""
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            from tqdm.auto import tqdm
-
-            msg = self.format(record)
-            tqdm.write(msg, file=self.stream)
-            self.flush()
-        except Exception:
-            self.handleError(record)
-
-
 class _QuietPolls(logging.Filter):
     """Drop successful high-frequency webapp polls from ``uvicorn.access``.
 
@@ -80,9 +66,7 @@ def setup_logging(
     root = logging.getLogger()
     if root.handlers:
         return  # already configured (e.g. by pytest)
-    handler: logging.StreamHandler[TextIO] = (
-        _TqdmStreamHandler(sys.stderr) if style == "cli" else logging.StreamHandler(sys.stderr)
-    )
+    handler: logging.StreamHandler[TextIO] = logging.StreamHandler(sys.stderr)
     if style == "cli":
         handler.setFormatter(_CliFormatter())
     else:
