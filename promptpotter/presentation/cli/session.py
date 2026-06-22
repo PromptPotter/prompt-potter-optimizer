@@ -37,7 +37,14 @@ class SessionCtx:
 
     @property
     def campaign_config(self) -> CampaignConfig:
-        """Live ``datasets/{name}/campaign.json`` (edits picked up + drift-detected); frozen ``campaign.json::config`` fallback. Session-state copy never consulted (may carry stale schema fields)."""
+        """Live ``datasets/{name}/campaign.json`` (edits picked up + drift-detected) with the
+        per-campaign overlay (origin-floor values + param locks) re-applied from the frozen
+        ``campaign.json::config`` — that overlay lives only on the snapshot, so a live-file
+        rebuild would drop it. Frozen config is also the fallback when the dataset file is gone.
+        Session-state copy never consulted (may carry stale schema fields)."""
+        from promptpotter.application.config import (
+            apply_inherited_overlay,
+        )
         from promptpotter.application.config import (
             load_campaign_config as validate_campaign_config,
         )
@@ -50,11 +57,16 @@ class SessionCtx:
             ds_path = DEFAULT_DATASETS_ROOT / dataset_name / "campaign.json"
             if ds_path.is_file():
                 raw = read_campaign_config_file(ds_path)
-        if not raw and self.campaign_id:
-            campaign = self.store.campaigns.load_campaign(self.campaign_id)
-            if campaign is not None:
-                raw = campaign.config
-        return validate_campaign_config(raw)
+        campaign = (
+            self.store.campaigns.load_campaign(self.campaign_id) if self.campaign_id else None
+        )
+        if not raw and campaign is not None:
+            raw = campaign.config
+        config = validate_campaign_config(raw)
+        if campaign is not None:
+            seed = self.store.campaigns.read_cycle_seed(self.campaign_id, self.cycle_id)
+            config = apply_inherited_overlay(config, campaign.config, seed)
+        return config
 
     @property
     def task_context(self) -> dict[str, Any] | None:

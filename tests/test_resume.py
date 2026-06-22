@@ -269,3 +269,53 @@ def test_merge_into_cumulative_preserves_prior_on_untouched_samples() -> None:
     assert by_sid[19]["hit"] is False
     assert all(by_sid[i]["hit"] is True for i in range(10))
     assert _merge_into_cumulative(prior, []) == prior
+
+
+# Minimal valid OptimizationConfig — the two thresholds are required (no default).
+_OPT = {"improvement_threshold": 0.0, "degradation_threshold": 0.0}
+
+
+def _frozen_with_lock(node: str, open_keys: list[str]) -> dict:
+    """A frozen `Campaign.config` dict carrying one per-node param lock (the
+    operator's mint-time narrowing): `open_keys` are tunable, the rest held."""
+    return {
+        "optimization": _OPT,
+        "optimizer_narrowing": {node: {"param_keys": open_keys, "param_allowed_values": {}}},
+    }
+
+
+def test_resume_preserves_per_campaign_locks_dropped_by_dataset_rebuild() -> None:
+    """The lock-drop regression: resume rebuilds config from the live dataset file,
+    which never carries `optimizer_narrowing`, so per-param locks reopen. The
+    inherited-overlay re-merge must restore them from the frozen snapshot."""
+    from promptpotter.application.config import apply_inherited_overlay, load_campaign_config
+
+    # Config as rebuilt from the live dataset file: no narrowing (the bug surface).
+    live = load_campaign_config({"optimization": _OPT})
+    assert live.optimizer_narrowing == {}
+
+    restored = apply_inherited_overlay(live, _frozen_with_lock("llm", ["temperature"]), seed=None)
+    assert restored.optimizer_narrowing["llm"].param_keys == ["temperature"]
+
+
+def test_steered_fork_seed_narrowing_overrides_campaign_locks_per_node() -> None:
+    """A steered fork edits one node's locks; its seed `optimizer_narrowing`
+    overrides the campaign-wide narrowing for THAT node, leaving others inherited."""
+    from promptpotter.application.config import apply_inherited_overlay, load_campaign_config
+
+    frozen = {
+        "optimization": _OPT,
+        "optimizer_narrowing": {
+            "llm": {"param_keys": ["temperature"], "param_allowed_values": {}},
+            "retriever": {"param_keys": ["top_k"], "param_allowed_values": {}},
+        },
+    }
+    seed = CycleSeed(
+        optimizer_narrowing={"llm": {"param_keys": [], "param_allowed_values": {}}},
+        origin_source="fork_seed",
+    )
+    merged = apply_inherited_overlay(load_campaign_config({"optimization": _OPT}), frozen, seed)
+    # Edited node: the fork's empty-keys lock (everything held) wins.
+    assert merged.optimizer_narrowing["llm"].param_keys == []
+    # Untouched node: the campaign's mint-time narrowing is inherited unchanged.
+    assert merged.optimizer_narrowing["retriever"].param_keys == ["top_k"]

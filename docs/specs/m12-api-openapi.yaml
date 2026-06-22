@@ -1758,9 +1758,36 @@ components:
           type: object
           additionalProperties: true
           description: |
-            `nodes.*.config` overlay for this fork only, merged ON TOP of the
+            `nodes.*.config` value overlay for this fork only, merged ON TOP of the
             dataset overlay (seed > dataset > backend default). The dataset
             `pipeline.json` stays immutable — the steer never mutates the origin.
+            Param *locks* ride `optimizer_narrowing`, not this block.
+        optimizer_narrowing:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties: false
+            description: Per-node search-space narrowing (NodeSearchNarrowing).
+            properties:
+              param_keys:
+                type: array
+                nullable: true
+                items:
+                  type: string
+                description: |
+                  The tunable param subset (unlocked keys) the optimizer may mutate;
+                  `null` inherits the full declared set. Keys absent here are locked.
+              param_allowed_values:
+                type: object
+                additionalProperties:
+                  type: array
+                  items: {}
+                description: Per-param allowed-value subset (enum narrowing).
+          description: |
+            Per-fork search-space lock edits keyed by node name — overrides the
+            campaign's mint-time `optimizer_narrowing` for THIS cycle only (the
+            cycle-level peer of `CampaignConfig.optimizer_narrowing`). Absent
+            inherits the campaign-wide locks unchanged.
         limit_overrides:
           $ref: '#/components/schemas/LimitOverrides'
 

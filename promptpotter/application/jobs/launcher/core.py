@@ -26,6 +26,7 @@ from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.bootstrap.wiring import resolve_dataset_config_dir
 from promptpotter.application.config import (
     CampaignConfig,
+    apply_inherited_overlay,
     configure_and_apply_pipeline,
     load_campaign_config,
 )
@@ -400,7 +401,16 @@ async def start_run_command(
             identity=stores.identity,
         )
 
-        campaign_config = build_cycle_config(session, dataset_root)
+        # Resume/fork rebuild config from the LIVE dataset file (so declaration
+        # edits stay drift-detected), then re-apply the per-campaign overlay the
+        # dataset file never holds — origin-floor values + param locks — from the
+        # frozen `Campaign.config` snapshot. A steered-fork seed's lock edits
+        # override per node. Without this, locks silently reopen on every resume.
+        campaign_config = apply_inherited_overlay(
+            build_cycle_config(session, dataset_root),
+            campaign.config,
+            stores.campaigns.read_cycle_seed(campaign_id, cycle_id),
+        )
 
         train_data = session.samples or []
         configure_and_apply_pipeline(session, campaign_config, log=lambda *_a, **_k: None)

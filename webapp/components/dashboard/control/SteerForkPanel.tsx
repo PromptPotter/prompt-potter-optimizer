@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import {
   postForkCycle,
   postStopCycle,
+  type DraftPatch,
   type LimitOverrides,
   type OperatorForkOverride,
 } from "@/lib/api";
@@ -22,6 +23,7 @@ import {
 } from "@/lib/derivations";
 import type { SelectedCandidate } from "@/lib/types";
 import { NodeSurface } from "@/components/dashboard/pipeline/NodeSurface";
+import { NodeConfigEditor } from "./NodeConfigEditor";
 import { LimitReconcile } from "./LimitReconcile";
 
 // The one operator-steered fork flow (decision H): the operator has selected a
@@ -79,6 +81,17 @@ export function SteerForkPanel({
   // the loaded seed value as-is (handles the async round-file load too).
   const editedPrompt = useRef<Record<string, unknown> | null>(null);
   const editedOverlay = useRef<Record<string, Record<string, unknown>> | null>(null);
+  // Per-node search-space lock edits, keyed by node → NodeSearchNarrowing
+  // (`{param_keys, param_allowed_values}`). Each per-node lock editor emits the
+  // whole-overlay patch; we keep only its `optimizer` block. Rides
+  // `OperatorForkOverride.optimizer_narrowing` → the fork seed (cycle-level lock
+  // override of the campaign's mint-time narrowing). Empty = inherit unchanged.
+  const editedNarrowing = useRef<Record<string, unknown>>({});
+  const captureLocks = (nodeId: string, patch: DraftPatch) => {
+    const overlay = (patch.pipeline_overlay ?? {}) as Record<string, { optimizer?: unknown }>;
+    const opt = overlay[nodeId]?.optimizer;
+    if (opt) editedNarrowing.current = { ...editedNarrowing.current, [nodeId]: opt };
+  };
   // Seed with the pre-filled "remaining" defaults so confirming an untouched
   // reconcile dialog forks with the SHOWN ceilings — not a silent inherit of
   // the parent's full budget. `LimitReconcile.onChange` overwrites on edit.
@@ -97,6 +110,9 @@ export function SteerForkPanel({
       origin_prompt_fields: editedPrompt.current ?? seedPrompt,
       pipeline_overlay: editedOverlay.current ?? overlay,
       limit_overrides: limits.current,
+      ...(Object.keys(editedNarrowing.current).length > 0
+        ? { optimizer_narrowing: editedNarrowing.current }
+        : {}),
     };
     try {
       // The steer redirects the run — stop the live parent first so the
@@ -143,6 +159,30 @@ export function SteerForkPanel({
           editedOverlay.current = o;
         }}
       />
+
+      {/* Per-node search-space LOCK editor — which params the optimizer may move on
+          the fork. Seeded from `{}` so each row reflects the served (campaign-narrowed)
+          schema's tunability; edits ride `optimizer_narrowing` on the fork seed. The
+          model lock is the campaign-level knob (set at start), so it's not shown here. */}
+      {Object.keys(cv.nodeConfigSchema ?? {}).length > 0 ? (
+        <div className="steer-fork-locks">
+          <p className="steer-fork-sub">
+            Lock or unlock what the optimizer may tune on this fork — 🔒 holds a param at
+            its value, 🔓 lets the optimizer move it.
+          </p>
+          {Object.keys(cv.nodeConfigSchema ?? {}).map((nodeId) => (
+            <NodeConfigEditor
+              key={nodeId}
+              mode="search-space"
+              locksOnly
+              schema={cv.nodeConfigSchema}
+              node={nodeId}
+              seedOverlay={{}}
+              onApply={(patch) => captureLocks(nodeId, patch)}
+            />
+          ))}
+        </div>
+      ) : null}
 
       <LimitReconcile onChange={(l) => (limits.current = l)} />
 

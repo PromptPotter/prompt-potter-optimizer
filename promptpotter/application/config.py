@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from promptpotter.application.bootstrap.session import Session
+    from promptpotter.domain.run_records import CycleSeed
     from promptpotter.domain.sample import Sample
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,7 @@ __all__ = [
     "ExplorationConfig",
     "OptimizationConfig",
     "PreflightWarning",
+    "apply_inherited_overlay",
     "configure_and_apply_pipeline",
     "load_campaign_config",
     "resolve_pipeline_config_params",
@@ -321,6 +323,34 @@ def load_campaign_config(raw: dict[str, Any] | CampaignConfig) -> CampaignConfig
     if isinstance(raw, CampaignConfig):
         return raw
     return CampaignConfig.model_validate(raw)
+
+
+def apply_inherited_overlay(
+    config: CampaignConfig,
+    frozen_config: dict[str, Any],
+    seed: CycleSeed | None,
+) -> CampaignConfig:
+    """Re-apply the per-campaign overlay onto a config rebuilt from the live dataset.
+
+    Resume/fork rebuild ``config`` from the *live* dataset ``campaign.json`` so
+    declaration edits stay drift-detected — but that file never holds the
+    per-campaign ``pipeline_overrides`` (origin-floor values) or
+    ``optimizer_narrowing`` (param locks), which live only on the frozen
+    ``Campaign.config`` snapshot. Without this they silently revert to the dataset
+    defaults on every resume/fork (the lock-drop bug). A steered-fork *seed*'s
+    ``optimizer_narrowing`` overrides the campaign-wide narrowing per node — the
+    cycle-level lock edit. Idempotent when ``frozen_config`` already equals
+    ``config`` (dataset-file-gone fallback)."""
+    frozen = load_campaign_config(frozen_config)
+    narrowing = {**config.optimizer_narrowing, **frozen.optimizer_narrowing}
+    if seed is not None:
+        narrowing.update(seed.optimizer_narrowing)
+    return config.model_copy(
+        update={
+            "pipeline_overrides": {**config.pipeline_overrides, **frozen.pipeline_overrides},
+            "optimizer_narrowing": narrowing,
+        }
+    )
 
 
 @dataclass(frozen=True)

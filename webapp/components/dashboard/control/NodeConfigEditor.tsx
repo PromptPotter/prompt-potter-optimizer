@@ -19,6 +19,10 @@ import {
 //     fork is seeded with. Whole-pipeline. Emits the sparse overlay via `onChange`.
 // Both share one row renderer; only the enum row (allow/deny chips vs a single
 // <select>) and the lock/badge chrome differ. `readOnly` disables the inputs.
+// `locksOnly` (search-space only) renders JUST the lock affordances — the per-param
+// 🔒/🔓 + enum allow/deny chips + node master lock, no value inputs and no model
+// row. It's the steer-fork lock surface: values ride the separate values editor,
+// and the model lock stays the campaign-level knob set at start.
 export function NodeConfigEditor(props: {
   mode: ConfigMode;
   schema: Record<string, NodeConfigParam[]> | null;
@@ -26,6 +30,7 @@ export function NodeConfigEditor(props: {
   node?: string;
   lockModel?: boolean;
   readOnly?: boolean;
+  locksOnly?: boolean;
   onApply?: (patch: DraftPatch) => void;
   onChange?: (overlay: Record<string, Record<string, unknown>>) => void;
 }) {
@@ -53,6 +58,7 @@ function SearchSpaceEditor({
   node,
   lockModel: lockModelProp = false,
   readOnly = false,
+  locksOnly = false,
   onApply,
 }: {
   schema: Record<string, NodeConfigParam[]> | null;
@@ -60,6 +66,7 @@ function SearchSpaceEditor({
   node?: string;
   lockModel?: boolean;
   readOnly?: boolean;
+  locksOnly?: boolean;
   onApply?: (patch: DraftPatch) => void;
 }) {
   const nodeId = node ?? "";
@@ -121,18 +128,23 @@ function SearchSpaceEditor({
 
   return (
     <div className="config-editor">
-      {rows.map((r, i) => (
-        <ConfigRowView
-          key={r.key}
-          row={r}
-          mode="search-space"
-          readOnly={readOnly}
-          lockable={!singleNode}
-          onToggleLock={() => (r.kind === "model" ? toggleModelLock() : update(i, { locked: !r.locked }))}
-          onToggleChip={(level) => toggleChip(i, level)}
-          onValue={(v) => update(i, { value: v })}
-        />
-      ))}
+      {rows.map((r, i) =>
+        // locksOnly: the model lock is the campaign-level knob (set at start), not a
+        // per-fork param — drop its row so the steer surface shows only movable locks.
+        locksOnly && r.kind === "model" ? null : (
+          <ConfigRowView
+            key={r.key}
+            row={r}
+            mode="search-space"
+            readOnly={readOnly}
+            locksOnly={locksOnly}
+            lockable={!singleNode}
+            onToggleLock={() => (r.kind === "model" ? toggleModelLock() : update(i, { locked: !r.locked }))}
+            onToggleChip={(level) => toggleChip(i, level)}
+            onValue={(v) => update(i, { value: v })}
+          />
+        ),
+      )}
 
       {singleNode ? (
         <small className="config-hint">
@@ -244,6 +256,7 @@ function ConfigRowView({
   row,
   mode,
   readOnly,
+  locksOnly = false,
   lockable = true,
   onToggleLock,
   onToggleChip,
@@ -252,6 +265,7 @@ function ConfigRowView({
   row: ConfigRow;
   mode: ConfigMode;
   readOnly: boolean;
+  locksOnly?: boolean;
   lockable?: boolean;
   onToggleLock?: () => void;
   onToggleChip?: (level: string) => void;
@@ -259,6 +273,9 @@ function ConfigRowView({
 }) {
   const isSearch = mode === "search-space";
   const isModel = row.kind === "model";
+  // locksOnly: render the lock affordances (🔒/🔓 + enum allow/deny chips) but not
+  // the origin-value widgets — values are edited in the separate values editor.
+  const showValueWidget = !locksOnly;
   return (
     <div className="config-row">
       <span className="config-label">
@@ -281,7 +298,10 @@ function ConfigRowView({
         {isSearch && lockable ? (
           <LockButton locked={row.locked} readOnly={readOnly} onClick={onToggleLock!} />
         ) : null}
-        {isModel || (row.kind === "enum" && !isSearch) ? (
+        {/* locksOnly hides the value widgets; the enum chips below stay — they ARE a
+            lock affordance (allow / deny each value). */}
+        {showValueWidget || row.kind === "enum" ? (
+          isModel || (row.kind === "enum" && !isSearch) ? (
           <select
             className="config-input"
             value={row.value}
@@ -350,7 +370,8 @@ function ConfigRowView({
             aria-label={row.key}
             onChange={(e) => onValue(e.target.value)}
           />
-        )}
+          )
+        ) : null}
       </span>
     </div>
   );

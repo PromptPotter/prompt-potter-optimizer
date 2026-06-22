@@ -42,6 +42,7 @@
 .steer-fork-sub{font-size:12px;color:var(--color-text-tertiary);margin:0 0 2px}
 .steer-fork-note{font-size:12px;color:var(--color-text-secondary);background:var(--color-background-tint,rgba(0,0,0,0.04));border-radius:5px;padding:6px 8px;margin:0}
 .steer-fork-err{color:var(--color-status-error,#c53030);font-size:12px}
+.steer-fork-locks{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--color-border);padding-top:10px}
 .steer-fork-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px}
 .steer-fork-cancel{background:transparent;color:var(--color-text-secondary);border:1px solid var(--color-border);border-radius:6px;padding:6px 14px;font-size:13px;font-family:inherit;cursor:pointer}
 .steer-fork-confirm{background:var(--color-accent);color:var(--color-accent-contrast,#fff);border:0;border-radius:6px;padding:6px 14px;font-size:13px;font-family:inherit;cursor:pointer}

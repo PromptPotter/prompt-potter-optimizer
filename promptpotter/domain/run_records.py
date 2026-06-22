@@ -12,6 +12,7 @@ from typing import Annotated, Any, Literal, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.shared.clock import utcnow_iso
 
 __all__ = [
@@ -373,6 +374,14 @@ class CycleSeed(BaseModel):
 
     origin_prompt_fields: dict[str, Any] = Field(default_factory=dict)
     pipeline_overlay: dict[str, Any] = Field(default_factory=dict)
+    optimizer_narrowing: dict[str, NodeSearchNarrowing] = Field(
+        default_factory=dict,
+        description="Per-fork search-space lock edits (param-key subset + "
+        "allowed-values) — overrides the campaign's mint-time narrowing for this "
+        "cycle only, the cycle-level peer of the campaign-wide "
+        "`CampaignConfig.optimizer_narrowing`. Empty for an unedited fork or a "
+        "campaign-from-origin seed.",
+    )
     limit_overrides: LimitOverrides = Field(default_factory=LimitOverrides)
     origin_source: str = Field(
         description="C0 lineage provenance — 'fork_seed' | 'campaign_origin'.",
