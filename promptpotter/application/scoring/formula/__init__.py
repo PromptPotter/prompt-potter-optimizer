@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from promptpotter.application.scoring.formula.compiler import (
+    ScoringFormulaError,
     auto_scorer_id,
     compile_scorer,
     split_scoring_block,
@@ -25,6 +26,7 @@ def extract_item_label(c: Any) -> str:
 __all__ = [
     "DISPLAY_EXTRACTORS",
     "SCORING_FUNCTIONS",
+    "ScoringFormulaError",
     "auto_scorer_id",
     "compile_round_scorer",
     "compile_scorer",

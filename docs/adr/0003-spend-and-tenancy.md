@@ -159,7 +159,7 @@ The seam is where `IdentityContext` enters the process. Three entry points, two 
 - **Per-cycle aggregator.** One `Spend` dataclass per cycle, owned by `LiveStateView` (already exists — see `infrastructure/projections/live_state/`).
 - **Resolution.** `shared/spend.py` shipped as-is — three layers, stdlib only.
 - **Dashboard projection.** `dashboard.json::spend = {used_usd, budget_usd, by_kind, calls, unknown_calls}` — written by `LiveDashboardView._persist` (`infrastructure/projections/live_dashboard/view.py`). Bar, publication, and `log.md` all read this one number.
-- **Budget config + halt.** `OptimizationConfig.spend_budget_usd: float | None`. `StopReason.SPEND_BUDGET` (root `CLAUDE.md`: no back-compat). `_probe_cycle_spend` halts the **current cycle only** at round boundary; tenant-wide enforcement is M12 / `JobRegistry` work in [`0001-m12-control-plane.md`](0001-m12-control-plane.md).
+- **Budget config + halt.** `OptimizationConfig.spend_budget_usd: float | None`. `StopReason.SPEND_BUDGET` (root `CLAUDE.md`: no back-compat). `_probe_cycle_spend` halts the **current cycle only** at round boundary; the **per-user, cross-cycle** host-wallet gate is the **coupon** (see § Host coupon below), not a daily cap.
 - **Ledger event shape.** `TokenUsageRecord` stays cycle-scoped (already keyed on the ledger which is per-cycle). Identity is resolved at aggregation time by reading `Session.identity` — no `tenant_id` field on the event. The cycle dir's tenant prefix is the ground truth; the event doesn't need to duplicate it.
 
 #### 5. Rate cache is install-scoped, not tenant-scoped
@@ -169,6 +169,74 @@ The seam is where `IdentityContext` enters the process. Three entry points, two 
 #### 6. Migration — existing `projects/{tenant}/` directory
 
 On first upgrade: the on-disk layout is already `projects/{tenant}/` with `tenant_id = "default"` (CLI default has been `"default"` since the dir was introduced). **No migration step needed.** A startup check in `application/bootstrap/wiring.py` verifies the dir exists; if a non-`default` tenant dir is present (operator created one manually), it's used unchanged.
+
+### Host coupon + BYO keys — the per-user wallet gate (Lane A2)
+
+The shipped spend feature *measures* cost; it does not *bound a user against the host's
+wallet*. The beta runs every allowlisted user on one shared `.env` key — each one spends the
+operator's quota with no per-user ceiling. This section is the contract that closes that gap.
+Two concerns stay **clearly separated**:
+
+- **Wallet protection (host's money)** → the **coupon**. Meters host-key spend only.
+- **Abuse protection (shared single-process machine)** → concurrency + campaigns/day +
+  rate-limit (`application/jobs/quota.py`, `JobRegistry`). Key-source-agnostic; orthogonal;
+  unchanged.
+
+**Ledger gains a `key_source`.** `TokenUsageRecord` gains `key_source: "host" | "user"` so
+host-key spend sums **separately** from user-key spend — the one field that makes
+host-only metering and real provenance on `/auth/activity` possible. It is the *one* allowed
+exception to "identity from path, not per-record" (option E): `key_source` is not identity,
+it is which wallet paid, and the coupon math needs it on the record. Declared on
+`TokenUsagePayload` in [`../specs/m12-events-asyncapi.yaml`](../specs/m12-events-asyncapi.yaml).
+
+**The coupon (`grant.json`).** Per user at `projects/{tenant}/grant.json`:
+`{amount_usd, issued_at, expires_at}`. A **coupon/voucher** — a fixed size + an expiration
+date, issued per user (default on allowlist-add; operator-adjustable). Remaining is **derived
+from the ledger** (`amount_usd − host_key_spend_since(issued_at)`), never a decrementing
+counter — one source of truth, consistent with option A. Install-global defaults
+(`amount_usd`, validity window, `coupon_void_on_byo`) live in `config/settings.py`; the
+per-user instance lives in `grant.json`.
+
+**BYO keys (`api_keys.json`).** Per user at `projects/{tenant}/api_keys.json` — Fernet
+ciphertext (`SECRETS_FERNET_KEY`, no plaintext fallback) + a plaintext `providers_set` index;
+the key is never echoed / logged / traced.
+
+**Resolution order — the one choke point.** `resolve_api_key(identity, provider, stores) →
+ResolvedKey{key, source}`, the identity-aware wrapper over the identity-free
+`get_llm_client(provider, *, api_key=None)`:
+
+1. **User has own key for this provider** → use it. `source = user`. **No coupon check** —
+   their money, the host gate does not apply (this is what "BYO lifts the host coupon" means).
+2. **Else coupon alive** (remaining > 0 and not expired) → host key. `source = host`. Metered
+   to the coupon.
+3. **Else** → `HostAllowanceExhaustedError` → **422 `host_allowance_exhausted`**, guiding the
+   user to add their own key. (Distinct from **422 `no_api_key`** = auth-off / no user key
+   *and* no host key configured at all.)
+
+Step 1 short-circuits **per provider** — a user with a key for provider X still burns the
+coupon on provider Y unless the coupon is voided.
+
+**Coupon-void-on-BYO (the host's choice).** On `PUT /auth/api-keys/{provider}`: if
+`settings.coupon_void_on_byo` is set, the user's `grant.json::expires_at` is set to now (the
+remaining coupon dies the moment they go self-serve); otherwise it persists as spendable free
+credit. Entirely the host's policy.
+
+**D1 — the coupon is the single host-wallet gate.** Shipping the coupon *and* keeping the
+daily-cap path (`effective_spend_cap_usd` / `User.spend_budget_usd_daily`) would be two
+mechanisms guarding one concern — the "no redundant mechanism" rule (root `CLAUDE.md`). The
+daily-cap path is **deleted**; coupon-remaining is the host ceiling. (Tracked in
+[`../specs/code-debt-cleanup.md`](../specs/code-debt-cleanup.md).)
+
+**D2 — live, not a mint-time snapshot.** The per-cycle `BudgetGate`
+(`application/runner/termination.py`) reads coupon-remaining (re-summed from the host-key
+ledger every tick) instead of the daily-cap snapshot — closing the "launch-snapshot only"
+liveness gap. New `StopReason.HOST_ALLOWANCE`.
+
+The `/auth/api-keys` + `/auth/coupon` verbs ride the **auth router** (account-scoped siblings
+of the shipped `/auth/{quota-status,user-settings}`), **not** the control-plane
+`m12-api-openapi.yaml` — whose scope is the closed `/commands/*` set. Only the event-surface
+change (`key_source` on `TokenUsagePayload`) is asyncapi-declared. Build direction + status:
+[`../specs/roadmap.md`](../specs/roadmap.md) § Host coupon + BYO per-user API keys.
 
 ### §0 amendment?
 

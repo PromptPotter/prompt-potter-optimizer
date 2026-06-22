@@ -115,7 +115,7 @@ export interface DashboardSnapshot {
   // (zero-candidate round, L2 framing soft-reject, injection truncation),
   // projected from the canonical ``RoundWarningRecord``. Sole writer:
   // ``LiveDashboardView._handle_round_warning``. Rolling + capped; surfaced
-  // by ``RunWarningsBanner`` below the crash banner.
+  // by ``RunErrorBanner``'s warnings block, below the crash alert.
   recent_loop_warnings?: {
     ts: string;
     kind: string;

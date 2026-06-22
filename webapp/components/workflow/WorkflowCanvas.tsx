@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   CANVAS_W,
   CANVAS_H,
@@ -11,7 +11,6 @@ import {
 import { TERMS } from "@/lib/terms";
 import { cx } from "@/lib/cx";
 import { getCss } from "@/lib/theme";
-import { availableRounds } from "@/lib/derivations";
 import { useSelection } from "@/lib/SelectionContext";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { CopyButton } from "@/components/ui";
@@ -45,24 +44,10 @@ export function WorkflowCanvas({ pipeline }: Props) {
   const canvasH = CANVAS_H;
   const activeId = phaseToNodeId(dash?.state);
   // Node selection rides the shared SelectionContext so the Now lane can
-  // swap the 3-col row for OptimizerNodeDetail when a node is picked.
-  // The round picker in the toolbar writes `selection.round` — the same
-  // viewed-round state the lineage tree, fitness chart, RoundTabsStrip,
-  // RoundSamplesView, and OptimizerNodeDetail all read.
-  const {
-    node: selected,
-    setSelectionForNode: setSelected,
-    round: selectedRound,
-    setSelectionForRound,
-  } = useSelection();
-  // Single round-axis truth, shared with RoundTabsStrip — `live` is already
-  // gated on `isLive`, so a stopped run drops the "(live)" option. The
-  // picker lists rounds newest-first, so reverse the ascending `completed`.
-  const axis = useMemo(() => availableRounds(dash, isLive), [dash, isLive]);
-  const liveRound = axis.live;
-  const completedRounds = useMemo(() => [...axis.completed].reverse(), [axis.completed]);
-  const liveActive = liveRound != null;
-  const showPicker = completedRounds.length > 0 || liveActive;
+  // swap the 3-col row for OptimizerNodeDetail when a node is picked. The
+  // viewed-round axis is owned by RoundTabsStrip (same tab) — the canvas
+  // reads node selection only.
+  const { node: selected, setSelectionForNode: setSelected } = useSelection();
   // Bumped by the MutationObserver below on `data-theme` flips; drives the
   // `colors` memo so SVG strokes/labels re-derive from the new CSS vars.
   const [themeTick, setThemeTick] = useState(0);
@@ -125,28 +110,6 @@ export function WorkflowCanvas({ pipeline }: Props) {
         <span style={{ color: isLive ? colors.ok : colors.txt }}>
           ● {isLive ? "live" : dash ? "idle" : "pending"}
         </span>
-        {showPicker && (
-          <label className="workflow-round-pick">
-            round
-            <select
-              value={selectedRound ?? ""}
-              onChange={(e) =>
-                setSelectionForRound(
-                  e.target.value === "" ? null : Number(e.target.value),
-                )
-              }
-              aria-label="Choose round to inspect"
-              title="Switch the viewed round — drives the optimizer node detail, lineage, fitness, and samples"
-            >
-              {liveActive && <option value="">{liveRound} (live)</option>}
-              {completedRounds.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
         <CopyButton
           data={dash?.current_round ?? view}
           title="Copy the optimizer round as JSON"

@@ -468,6 +468,14 @@ components:
         cost_usd:
           type: [number, 'null']
           minimum: 0
+        key_source:
+          type: [string, 'null']
+          enum: [host, user, null]
+          description: >-
+            Which wallet paid for this call — `host` (host-provided shared key,
+            metered against the user's coupon) or `user` (the user's own BYO key,
+            outside the coupon gate). Lets host-key spend sum separately from
+            user-key spend. See ADR-0003 § Host coupon. Null on pre-coupon records.
         round:
           type: [integer, 'null']
           minimum: 0

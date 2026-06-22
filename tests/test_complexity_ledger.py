@@ -26,9 +26,11 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # ``validators/_text.py`` word-set helper into its lone consumer ``l2_output.py``);
 # then ``modules`` 294→293 / ``init_files`` 55→54 / ``reexport_shims`` 42→41 (the
 # de-obfuscation pass collapsed the single-module ``escalation/firing/`` package
-# into one ``escalation/firing.py`` module, dropping its re-export ``__init__``).
+# into one ``escalation/firing.py`` module, dropping its re-export ``__init__``);
+# then ``modules`` 293→292 (inlined the single-consumer ``optimization/transitions.py``
+# — ``TransitionResult`` + ``LayerStrategy`` — into its lone reader ``escalation/firing.py``).
 LEDGER_BASELINE = {
-    "modules": 293,
+    "modules": 292,
     "init_files": 54,
     "reexport_shims": 41,
     "config_leaf_fields": 32,

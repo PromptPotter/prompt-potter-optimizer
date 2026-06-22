@@ -228,7 +228,9 @@ def _mint_fork(
             payload=payload,
             projects_root=projects_root,
         )
-        campaign_store.save_diag_fork(campaign_id, parent_cycle_id, new_cycle_id, forked_at=now)
+        campaign_store.write_fresh_sibling(
+            campaign_id, parent_cycle_id, new_cycle_id, "diag", forked_at=now
+        )
     elif payload.trigger is ForkTrigger.OPERATOR_STEERED:
         if fork_from_round != 0:
             raise ValueError(
@@ -249,7 +251,14 @@ def _mint_fork(
             payload=payload,
             projects_root=projects_root,
         )
-        campaign_store.save_operator_fork(campaign_id, parent_cycle_id, new_cycle_id, forked_at=now)
+        # Clean-offshoot fork from the lineage/control panel (endorse or steered):
+        # fresh sibling index (no parent-round copy, round numbering restarts at 1);
+        # the origin re-scores from the selected/edited searchpoint at bootstrap. The
+        # ForkSpec provenance lands on index.json::fork via the single fork-block
+        # writer below.
+        campaign_store.write_fresh_sibling(
+            campaign_id, parent_cycle_id, new_cycle_id, "fork", forked_at=now
+        )
         # The steered seed (edited searchpoint + reconciled limits) rides its own
         # read-once home; the ledger FORK_CUT still carries it as SoT.
         if payload.seed is not None:
@@ -283,10 +292,11 @@ def _mint_fork(
             source_file=sweep_source_file,
             projects_root=projects_root,
         )
-        campaign_store.save_sweep_fork(
+        campaign_store.write_fresh_sibling(
             campaign_id,
             parent_cycle_id,
             new_cycle_id,
+            "sweep",
             sweep_batch_id=sweep_batch_id,
             forked_at=now,
         )

@@ -707,7 +707,7 @@ class CampaignStore:
     # Fork-sibling ``index.json`` writers — rebase / diag / sweep
     # ------------------------------------------------------------------
 
-    def _write_fresh_sibling(
+    def write_fresh_sibling(
         self,
         campaign_id: str,
         parent_cycle_id: str,
@@ -717,9 +717,10 @@ class CampaignStore:
         forked_at: str,
         **blob_kwargs: Any,
     ) -> Path:
-        """Read parent index → fresh sibling blob → write child index. The shared
-        body behind the diag / operator / sweep fork writers (numbering restarts at
-        round 1; no parent-round inheritance — that's ``save_rebase_fork``'s job)."""
+        """Read parent index → fresh sibling blob → write child index. The single
+        writer for the diag / operator-steered / sweep fork triggers (``kind`` ∈
+        ``{"diag", "fork", "sweep"}``; numbering restarts at round 1, no
+        parent-round inheritance — that's ``save_rebase_fork``'s job)."""
         parent_index = read_json_optional(self._index_path(campaign_id, parent_cycle_id)) or {}
         blob = fresh_sibling_index_blob(
             parent_index, parent_cycle_id, kind, forked_at, **blob_kwargs
@@ -727,18 +728,6 @@ class CampaignStore:
         path = self._index_path(campaign_id, new_cycle_id)
         write_json(path, blob)
         return path
-
-    def save_diag_fork(
-        self,
-        campaign_id: str,
-        parent_cycle_id: str,
-        new_cycle_id: str,
-        *,
-        forked_at: str,
-    ) -> Path:
-        return self._write_fresh_sibling(
-            campaign_id, parent_cycle_id, new_cycle_id, "diag", forked_at=forked_at
-        )
 
     def save_rebase_fork(
         self,
@@ -789,45 +778,6 @@ class CampaignStore:
         path = self._index_path(campaign_id, new_cycle_id)
         write_json(path, index)
         return path
-
-    def save_operator_fork(
-        self,
-        campaign_id: str,
-        parent_cycle_id: str,
-        new_cycle_id: str,
-        *,
-        forked_at: str,
-    ) -> Path:
-        """Clean-offshoot fork from the lineage/control panel (endorse or steered).
-
-        Fresh sibling index (no parent-round copy, numbering restarts at round
-        1); the origin re-scores from the selected/edited searchpoint at
-        bootstrap. The ``ForkSpec`` provenance (trigger + from_round +
-        from_candidate_id) lands on ``index.json::fork`` via the single
-        fork-block writer in ``_mint_fork``; the steered seed rides
-        ``.overrides/seed.json`` (its own read-once home).
-        """
-        return self._write_fresh_sibling(
-            campaign_id, parent_cycle_id, new_cycle_id, "fork", forked_at=forked_at
-        )
-
-    def save_sweep_fork(
-        self,
-        campaign_id: str,
-        parent_cycle_id: str,
-        new_cycle_id: str,
-        *,
-        sweep_batch_id: str,
-        forked_at: str,
-    ) -> Path:
-        return self._write_fresh_sibling(
-            campaign_id,
-            parent_cycle_id,
-            new_cycle_id,
-            "sweep",
-            forked_at=forked_at,
-            sweep_batch_id=sweep_batch_id,
-        )
 
     def copy_parent_rounds_and_candidates(
         self,

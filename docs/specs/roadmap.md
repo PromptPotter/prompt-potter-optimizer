@@ -7,7 +7,7 @@
 ## Hard ordering (violate → rebuild)
 
 - **state-sync P3 (`GET /api/v1/sessions/active/live-state`) before any new webapp data panel** — chat state-queries, composite-fitness scatter, cross-user panel. Anything on `dashboard.json` polling is rewritten at the cutover; substrate-free rollups are exempt. *(P3 itself shipped — this guards new panels built on the old seam.)*
-- **BYO per-user API keys — overdue, not a future gate.** The beta serves allowlisted users on one shared `.env` key today; every user spends the operator's quota. Present liability → Lane A2.
+- **Host coupon + BYO per-user API keys — overdue, not a future gate.** The beta serves allowlisted users on one shared `.env` key today; every user spends the operator's quota with no per-user ceiling. The fix: a per-user **coupon** (host-key spend up to a fixed size + expiry), then **BYO keys** to continue on their own money. Present liability → Lane A2.
 - **HTTP-edge abuse protection scales with the allowlist.** Cloudflare edge + allowlist + per-user `JobRegistry` quotas bound the public surface now; app-level rate-limiting (C6) is due the moment the allowlist is removed.
 
 Historical (satisfied): spend shipped before composite/state-sync; identity Stage 0 + 2nd connector shipped; control plane + identity Stage 1 shipped → the chat write-path is unblocked, not gated. Any new endpoint is multi-tenant by default.
@@ -24,7 +24,7 @@ Sequenced into lanes by dependency, not milestone number. **Front priority = Lan
 
 | # | Item | Status |
 |---|---|---|
-| A2 | BYO per-user API keys | pending — **overdue** (see § BYO keys); token HQ at `/auth/{quota-status,activity}` already shipped |
+| A2 | Host coupon + BYO per-user API keys | pending — **overdue** (see § Host coupon + BYO); token HQ at `/auth/{quota-status,activity}` already shipped |
 
 ### Lane B — foundations (closed)
 
@@ -86,11 +86,14 @@ Four nouns map to OIDC: Install=`iss`, User=`sub` (`user_id=f"{iss}:{sub}"`, SCI
 - **Round-1 verdict (conformance-anchored):** 0 ✗ → healthy · 1 ✗ → degraded · ≥2 ✗ → broken; behavior checks are pure `(round_dict, ctx) → CheckResult`. (Model/provider locking is not a behavior check — it's the single `forbidden_axes_strict` bit at the schema surface + the `validate_overrides` backstop.) The Track-7 L2 self-diagnosis rule turns a missing `evidence_grounding` citation into an L2 `task_context` nudge.
 - Sweep results: `archive/sweeps/{l1_meta_prompt_hash}/{dataset}/{verb}_{ts}.json`; `sweep rank` keys `(l1_generate_hash, rounds_to_95 asc, behavior_pass_rate desc)`. Live mechanism = `/potter-l1-meta-campaign`.
 
-### BYO per-user API keys — spec-only (Lane A2)
-- **Resolution order:** per-tenant key → `.env` global (auth-off/unset) → clean `MissingApiKeyError` (422 `no_api_key`). An authed user with no key and no global must never silently bill the host.
-- **Single choke point:** `get_llm_client(provider, *, api_key=None)` (registry stays identity-free); `application/config.py::create_llm_client` + `origin_resolve.py::resolve_origin_turn` resolve via `resolve_api_key(identity, provider, stores)`.
-- **Store:** `TenantApiKeyStore` at `projects/{tenant}/api_keys.json` — Fernet ciphertext (`SECRETS_FERNET_KEY`, no plaintext fallback) + a plaintext `providers_set` index; the key is never echoed/logged/traced.
-- **Verbs (openapi-first):** `PUT/DELETE /auth/api-keys/{provider}` (204), `GET /auth/api-keys` (`providers_set` only); `GET /llm-providers` gains `key_source: user|shared|none`. BYO does not lift quotas.
+### Host coupon + BYO per-user API keys — spec-only (Lane A2)
+Full contract: [`ADR-0003`](../adr/0003-spend-and-tenancy.md) § Host coupon. The host runs users on its own keys up to a **coupon** (fixed USD size + expiry, per user); past it, a user uploads their **own** key and continues on their own money. Two separated concerns: the **coupon** protects the host wallet; concurrency/rate-limit (`jobs/quota.py`) protects the machine — untouched.
+- **Coupon (`grant.json`):** per user at `projects/{tenant}/grant.json` = `{amount_usd, issued_at, expires_at}`; remaining is **derived from the host-key ledger**, not a counter. Install defaults (size, validity window, `coupon_void_on_byo`) in `config/settings.py`.
+- **Ledger:** `TokenUsageRecord` gains `key_source: host|user` so host-key spend sums separately (declared on `TokenUsagePayload` in the asyncapi).
+- **Resolution order (one choke point):** (1) user has own key for provider → use it, **no coupon check** (their money); (2) else coupon alive → host key, metered to coupon; (3) else → `HostAllowanceExhaustedError` (**422 `host_allowance_exhausted`**, "add your own key"). Step 1 short-circuits per provider. The separate **422 `no_api_key`** = no user key *and* no host key configured. `get_llm_client(provider, *, api_key=None)` stays identity-free; `resolve_api_key(identity, provider, stores)` is the wrapper called from `application/config.py::create_llm_client` + `origin_resolve.py::resolve_origin_turn`.
+- **BYO store:** `TenantApiKeyStore` at `projects/{tenant}/api_keys.json` — Fernet ciphertext (`SECRETS_FERNET_KEY`, no plaintext fallback) + plaintext `providers_set` index; key never echoed/logged/traced. On `PUT`, `coupon_void_on_byo` decides whether the remaining coupon dies or persists — host's choice.
+- **Gate is live:** the per-cycle `BudgetGate` reads coupon-remaining (re-summed every tick), new `StopReason.HOST_ALLOWANCE` — closes the "launch-snapshot only" gap. **D1:** the coupon replaces the daily-cap path (`effective_spend_cap_usd`/`spend_budget_usd_daily` deleted — one wallet gate, not two).
+- **Verbs (auth router):** ride the **auth router** as siblings of the shipped `/auth/{quota-status,user-settings,activity}` (account-scoped, NOT control-plane `/commands/*` — so NOT in `m12-api-openapi.yaml`, whose scope is the closed command set): `PUT/DELETE /auth/api-keys/{provider}` (204), `GET /auth/api-keys` (`providers_set` only), `GET /auth/coupon` (remaining + expiry); `GET /llm-providers` gains `key_source: user|host|none`. Only the event-surface change (`key_source` on `TokenUsagePayload`) is openapi/asyncapi-declared. **BYO lifts the host coupon; the abuse guards still apply.**
 
 ### Operator-steered fork — SHIPPED
 Rides the existing `fork-cycle` command (no new verb); payload extended to `{from_searchpoint, pipeline_overlay, origin_prompt_fields, limit_overrides, steered_by}`. `fork-cycle` **mints then launches** (minting alone left web forks idle). The override seed is written to the fork's own cycle dir (`.overrides/seed.json`, read once at the runner seam via `CycleOverrideMixin`); origin resolves fork-seed-first; no dataset-origin mutation. `max_rounds` is an absolute target (the fork's counter continues from the parent), reconciled consumed-vs-remaining in the dialog.

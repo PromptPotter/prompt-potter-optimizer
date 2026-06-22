@@ -4,15 +4,17 @@ V1 contract:
 * L2 writes `task_context` + `action` + optional `axis_targeted` / `l1_layout` / `l1_overrides`.
 * L3 writes `plan` (required) + optional `note` (sticky L3→L2; wholesale-replaced on each L3 fire).
 
-`LayerStrategy` spec lives in `optimization/transitions.py`; the L2/L3 instances + their
-parse/apply/enter/exit are the module-level constants `L2` and `L3` below.
+`TransitionResult` (one fire's output) + `LayerStrategy` (static per-layer spec) are
+defined below; the L2/L3 instances + their parse/apply/enter/exit are the module-level
+constants `L2` and `L3`.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.application.optimization.dispatch.hub import (
     DispatchHub,
@@ -23,19 +25,29 @@ from promptpotter.application.optimization.dispatch.llm_call import (
     load_optimizer_prompt,
     run_optimizer_node,
 )
-from promptpotter.application.optimization.dispatch.schemas import L2ContextOutput, L3PlanOutput
+from promptpotter.application.optimization.dispatch.schemas import (
+    ForkProposal,
+    L2ContextOutput,
+    L3PlanOutput,
+    OptimizerAction,
+    TerminateProposal,
+)
 from promptpotter.application.optimization.escalation.state import NextAction
 from promptpotter.application.optimization.resume_and_fork import (
     ResumeCheckpointKind,
     record_decision,
 )
-from promptpotter.application.optimization.transitions import LayerStrategy, TransitionResult
 from promptpotter.application.optimization.validators.l2_output import run_l2_output_validators
 from promptpotter.application.optimization.validators.l3_output import run_l3_output_validators
 from promptpotter.domain.l1_layout import L1Layout, coerce_l1_layout, validate_l1_layout
-from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.opt_search_point import (
+    L1SituationalExample,
+    L1SupplementalRule,
+    OptSearchPoint,
+)
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent, StopLoop, StopReason, emit_phase
 from promptpotter.domain.run_records import ForkSpec, ForkTrigger, RebaseRequest
+from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.infrastructure.llm.models import emit_round_warning
 from promptpotter.infrastructure.tracing import LayerApplied, observed_node
@@ -48,6 +60,70 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Transition types — one L2/L3 fire's output + the static per-layer spec this
+# module fills. Provider/model/temperature are sourced from the layer's
+# optimizer node config (``datasets/_optimizer/pipeline.json``) inside
+# ``llm_call``, not held here.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class TransitionResult:
+    """L2/L3 transition result.
+
+    L2 writes ``task_context``/``l1_layout``/``l1_overrides`` + ``action``
+    (``normal_round`` default | ``probe_round`` for warned-query re-run on
+    the same OSP). L3 writes ``plan``, optional ``l3_note`` (sticky until
+    next L3 fire). Both layers may emit ``fork_proposal`` — the
+    ``_run_transition`` post-apply hook stashes it on ``cycle.rebase_request``
+    and raises ``StopLoop(StopReason.REBASED)``; ``runner.entry`` resolves
+    the request post-finalize into an automatic ``_mint_fork`` +
+    observer rebuild + loop re-entry on the new fork. ``axis_targeted``
+    is required prose when ``action='probe_round'``.
+    """
+
+    opt_search_point: OptSearchPoint
+    task_context: TaskDecomposition | None = None
+    l3_note: str = ""
+    action: OptimizerAction = "normal_round"
+    axis_targeted: str = ""
+    l1_layout: L1Layout | None = None
+    # ``None`` ⇒ keep current; any list (incl. ``[]``) ⇒ full-replace.
+    l1_supplemental_rules: list[L1SupplementalRule] | None = None
+    l1_situational_examples: list[L1SituationalExample] | None = None
+    l2_guard_breaches: list[ValidatorOutcome] = field(default_factory=list)
+    l3_guard_breaches: list[ValidatorOutcome] = field(default_factory=list)
+    fork_proposal: ForkProposal | None = None
+    terminate_proposal: TerminateProposal | None = None
+    debug_prompt: str = ""
+    debug_response: dict[str, Any] | None = None
+
+
+# Per-layer callable slots carried on ``LayerStrategy``.
+ParseFn = Callable[[Any, OptSearchPoint, str], TransitionResult]
+ApplyFn = Callable[["Cycle", TransitionResult, int], None]
+PayloadFn = Callable[["Cycle"], dict[str, Any]]
+ExitFn = Callable[["Cycle", TransitionResult], dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class LayerStrategy:
+    """Static per-layer spec for one escalation layer (L2 or L3).
+
+    Pure data read by ``_run_transition``; the ``L2``/``L3`` instances and
+    their parse/apply/enter/exit callables are the module-level constants below.
+    """
+
+    layer_id: Literal["L2", "L3"]
+    template_name: str
+    phase: CampaignPhase
+    parse: ParseFn
+    apply: ApplyFn
+    enter_payload_fn: PayloadFn
+    exit_payload_fn: ExitFn
 
 
 # ---------------------------------------------------------------------------

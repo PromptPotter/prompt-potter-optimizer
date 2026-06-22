@@ -423,12 +423,20 @@ class CommandDispatcher:
         if kind == "change-spend-budget":
             max_usd = payload_extras.get("max_usd")
             max_tokens = payload_extras.get("max_tokens")
-            usd_val = float(max_usd) if isinstance(max_usd, int | float) else None
-            tok_val = (
-                int(max_tokens)
-                if isinstance(max_tokens, int) and not isinstance(max_tokens, bool)
-                else None
-            )
+            # An ABSENT ceiling means "leave it untouched"; a PRESENT-but-non-numeric
+            # one is a typo, not a no-op. Reject it loud — silently coercing it to
+            # None would drop that ceiling while the other one applies, so the
+            # operator believes both landed when only one did.
+            if max_usd is not None and (
+                not isinstance(max_usd, int | float) or isinstance(max_usd, bool)
+            ):
+                raise PayloadInvalidError("change-spend-budget max_usd must be a number.")
+            if max_tokens is not None and (
+                not isinstance(max_tokens, int) or isinstance(max_tokens, bool)
+            ):
+                raise PayloadInvalidError("change-spend-budget max_tokens must be an integer.")
+            usd_val = float(max_usd) if max_usd is not None else None
+            tok_val = int(max_tokens) if max_tokens is not None else None
             if (usd_val is None or usd_val < 0) and (tok_val is None or tok_val < 0):
                 raise PayloadInvalidError(
                     "change-spend-budget requires a non-negative max_usd and/or max_tokens."

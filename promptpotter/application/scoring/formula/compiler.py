@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import ast
 import hashlib
-import logging
 import math
 from collections.abc import Callable
 from types import SimpleNamespace
@@ -17,7 +16,17 @@ from typing import Any
 from promptpotter.application.scoring.formula.matchers import SCORING_FUNCTIONS
 from promptpotter.domain.scoring import DEFAULT_SCORER_ID, ScoringSpec
 
-logger = logging.getLogger(__name__)
+
+class ScoringFormulaError(Exception):
+    """A scoring formula raised or returned a non-numeric value while scoring a sample.
+
+    Deterministic: the same formula runs on every sample, so this fires identically
+    across the round — it is a formula↔trace contract bug (a name the trace doesn't
+    carry, a matcher rejecting an input shape, a non-numeric result), never one odd
+    sample. It MUST halt loud: the prior behaviour swallowed it to ``0.0``, which is
+    indistinguishable from a genuinely wrong answer and silently zeroed an entire
+    campaign's fitness (the exact trap ``compile_scorer`` already guards at compile)."""
+
 
 _SAFE_BUILTINS = {
     "__builtins__": {
@@ -135,12 +144,23 @@ def compile_scorer(formula: str | None) -> Callable[[dict[str, Any]], float]:
 
     def _scorer(result: dict[str, Any]) -> float:
         ns = _build_namespace(result)
+        query = str(result.get("query", "?"))[:80]
         try:
             raw = eval(code, _SAFE_BUILTINS, ns)
+        except Exception as exc:
+            raise ScoringFormulaError(
+                f"Scoring formula {formula!r} raised on query {query!r}: "
+                f"{type(exc).__name__}: {exc}. The formula references something the "
+                "trace doesn't carry (or a matcher rejected the input) — fix the "
+                "formula or the pipeline output, don't score it as a wrong answer."
+            ) from exc
+        try:
             return max(0.0, min(1.0, float(raw)))
-        except Exception:
-            logger.warning("Scoring formula error on query %s", result.get("query", "?")[:60])
-            return 0.0
+        except (TypeError, ValueError) as exc:
+            raise ScoringFormulaError(
+                f"Scoring formula {formula!r} returned non-numeric {raw!r} on query "
+                f"{query!r} — it must evaluate to a number."
+            ) from exc
 
     return _scorer
 
@@ -167,4 +187,10 @@ def split_scoring_block(
     return ScoringSpec(None, None, DEFAULT_SCORER_ID)
 
 
-__all__ = ["auto_scorer_id", "compile_scorer", "split_scoring_block", "validate_ast"]
+__all__ = [
+    "ScoringFormulaError",
+    "auto_scorer_id",
+    "compile_scorer",
+    "split_scoring_block",
+    "validate_ast",
+]

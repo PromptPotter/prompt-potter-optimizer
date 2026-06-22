@@ -38,6 +38,7 @@ from promptpotter.application.mask import (
 from promptpotter.application.optimization.pobb.elimination import terminal_ranking
 from promptpotter.application.scoring.evaluators import all_evaluators, materialize_round_values
 from promptpotter.application.scoring.formula import (
+    ScoringFormulaError,
     compile_scorer,
     extract_display_answer,
     extract_item_label,
@@ -146,6 +147,20 @@ def test_compile_scorer_rejects_attribute_and_unsafe_syntax(formula: str) -> Non
     """Restricted-eval is bypassable; the AST allowlist is the real boundary."""
     with pytest.raises((ValueError, SyntaxError)):
         compile_scorer(formula)
+
+
+def test_scorer_raises_loud_on_formula_trace_mismatch() -> None:
+    """Silent-harm: a formula referencing a field the trace lacks, or returning a
+    non-numeric, MUST halt — the prior swallow-to-0.0 zeroed a whole campaign's
+    fitness indistinguishably from genuinely-wrong answers."""
+    # ``missing_field`` is not in the per-sample namespace → NameError under eval.
+    missing = compile_scorer("missing_field + hit")
+    with pytest.raises(ScoringFormulaError):
+        missing(_result_min("a", "a"))
+    # A formula that evaluates to a non-numeric must also fail loud, not score 0.
+    non_numeric = compile_scorer("ground_truth")
+    with pytest.raises(ScoringFormulaError):
+        non_numeric(_result_min("a", "not-a-number"))
 
 
 def test_compile_scorer_accepts_known_formulas() -> None:

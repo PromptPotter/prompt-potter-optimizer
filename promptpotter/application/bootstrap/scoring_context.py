@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -51,27 +50,31 @@ def bootstrap_cycle(
     resume_from_round_override: int | None = None,
 ) -> tuple[str | None, int]:
     """Resolve cycle (step 3 of bootstrap) → ``(cycle_id, resumed_from_round)``.
-    Opens, optionally rewinds, reports next L1 round. Drift handling in ``resume_with_divergence_check``."""
+    Opens, optionally rewinds, reports next L1 round. Drift handling in ``resume_with_divergence_check``.
+
+    A genuinely-absent cycle is the ``existing is None`` branch (``store.load``
+    returns ``None`` for a missing index) → a fresh start at round 1. A
+    *present-but-broken* state — a corrupt index (``JSONDecodeError``), a disk
+    fault (``OSError``), a malformed round summary (``KeyError`` in
+    ``next_resume_round``), or an invalid ``--from N`` rewind — is NOT caught: it
+    propagates and halts loud. Swallowing it would silently discard the prior
+    rounds and re-spend the campaign from scratch under a fresh anonymous cycle."""
     from promptpotter.application.runner import cycle_config_identity
 
     if not session.backend_id:
         return None, 1
-    try:
-        store = session.store.campaigns
-        campaign_id = session.campaign_id
-        resolved = cycle_id_override or cycle_config_identity(origin_jsp, dataset)
-        if resume_from_round_override is not None:
-            store.rewind_to_round(campaign_id, resolved, resume_from_round_override)
-        existing = store.load(campaign_id, resolved)
-        if existing is not None:
-            # Diag forks re-measure against their own JSP; refresh on drift from inherited value.
-            if existing.get("origin_accuracy") != origin_accuracy:
-                store.update(campaign_id, resolved, {"origin_accuracy": origin_accuracy})
-            return resolved, next_resume_round(existing.get("rounds", []))
-        return resolved, 1
-    except (OSError, json.JSONDecodeError, KeyError):
-        logger.warning("Cycle resume setup failed — running fresh", exc_info=True)
-        return None, 1
+    store = session.store.campaigns
+    campaign_id = session.campaign_id
+    resolved = cycle_id_override or cycle_config_identity(origin_jsp, dataset)
+    if resume_from_round_override is not None:
+        store.rewind_to_round(campaign_id, resolved, resume_from_round_override)
+    existing = store.load(campaign_id, resolved)
+    if existing is not None:
+        # Diag forks re-measure against their own JSP; refresh on drift from inherited value.
+        if existing.get("origin_accuracy") != origin_accuracy:
+            store.update(campaign_id, resolved, {"origin_accuracy": origin_accuracy})
+        return resolved, next_resume_round(existing.get("rounds", []))
+    return resolved, 1
 
 
 def populate_session_scoring(
