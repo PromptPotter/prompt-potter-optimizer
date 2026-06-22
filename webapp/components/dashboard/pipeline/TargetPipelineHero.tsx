@@ -159,6 +159,22 @@ function SingleNodeChip({
   );
 }
 
+// No pipeline view loaded yet — the `/datasets/{name}/pipeline` fetch is in flight,
+// failed, or no dataset is bound. NOT a real node: we must not fabricate a single
+// "LLM" chip here (it would misrepresent a failed/loading fetch — or a real 5-node
+// pipeline — as a genuine single-LLM pipeline). Neutral, non-clickable, no model value.
+function PipelinePlaceholder() {
+  return (
+    <div className="wf-hero-node" aria-label="Pipeline unavailable" aria-busy="true">
+      <div className="head">
+        <div className="ico">{LLM_ICON}</div>
+        <div className="lbl">Pipeline</div>
+      </div>
+      <div className="val">—</div>
+    </div>
+  );
+}
+
 // Multi-node strip: dots + outside labels + ribbon edges. Wrapped in the
 // same glassmorphic `.wf-hero-node.llm` frame the single-LLM case uses,
 // just wider, so 1-node and N-node datasets share one visual surface.
@@ -276,7 +292,6 @@ export function TargetPipelineHero({ samplesOpen, onToggle }: Props) {
   const cv = useConnector();
   const { dash } = useDashboard();
   const interior = cv.view ? interiorNodes(cv.view) : [];
-  const isSingle = interior.length <= 1;
   // The running searchpoint's resolved model when live; static origin otherwise.
   const liveModelFor = liveModelResolver(
     cv.isLive ? liveObserveConfig(dash) : null,
@@ -301,16 +316,22 @@ export function TargetPipelineHero({ samplesOpen, onToggle }: Props) {
       <div className="wf-hero-arrow">
         <ConnectorInspector view={cv} />
       </div>
-      {isSingle ? (
+      {cv.view == null || interior.length === 0 ? (
+        // View not loaded (fetch in flight / failed / no dataset), or a degenerate
+        // empty pipeline — honest placeholder, never a fabricated node.
+        <PipelinePlaceholder />
+      ) : interior.length === 1 ? (
+        // A genuine single-node pipeline (first-class since the is_single_node
+        // refactor) — render its REAL node, not a synthesized "LLM" stand-in.
         <SingleNodeChip
-          node={interior[0] ?? { id: "llm", label: "LLM", kind: "llm" }}
+          node={interior[0]}
           liveModelFor={liveModelFor}
           phase={cv.phase}
           isLive={cv.isLive}
         />
       ) : (
         <MultiNodeStrip
-          view={cv.view!}
+          view={cv.view}
           connector={cv.connector}
           liveModelFor={liveModelFor}
           phase={cv.phase}

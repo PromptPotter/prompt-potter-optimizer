@@ -499,23 +499,27 @@ def _rerun_would_repeat_token_budget_failure(
     """
     from promptpotter.application.optimization.pobb.elimination import classify_result
 
+    # The terminal LLM node (llm_only single-node, llm_ranking multi-node) is
+    # read from the cached result itself, so the infra-code / token lookups key
+    # on the SAME node classify_result stamped — no literal "llm_only" coupling.
+    node = ((cached_result.get("pipeline_data") or {}).get("terminated_at")) or "llm_only"
     cl = classify_result(cached_result)
     budget_exhausted = (
-        "llm_only:reasoning_budget_exhausted" in cl.infra_codes
-        or "llm_only:output_truncated" in cl.infra_codes
+        f"{node}:reasoning_budget_exhausted" in cl.infra_codes
+        or f"{node}:output_truncated" in cl.infra_codes
     )
     if not budget_exhausted:
         return False
 
     cached_step = ((cached_result.get("pipeline_data") or {}).get("step_tokens") or {}).get(
-        "llm_only"
+        node
     ) or {}
     cached_completion = int(cached_step.get("output", 0))
     if cached_completion <= 0:
         # No reliable cap signal — be conservative and let the rerun happen.
         return False
 
-    rerun_max_tokens = ((rerun_pipeline_params or {}).get("llm_only") or {}).get("max_tokens")
+    rerun_max_tokens = ((rerun_pipeline_params or {}).get(node) or {}).get("max_tokens")
     if rerun_max_tokens is None:
         # No explicit override in the rerun — runs at backend default which
         # could be larger or smaller than the cached cap. Conservative: don't

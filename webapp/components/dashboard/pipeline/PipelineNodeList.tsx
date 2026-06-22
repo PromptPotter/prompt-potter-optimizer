@@ -17,7 +17,12 @@ export function PipelineNodeList() {
   const { node: selected, setSelectionForNode } = useSelection();
   const nodes = (cv.view?.nodes ?? []).filter((n) => n.kind !== "io");
   const schema = cv.nodeConfigSchema;
-  if (nodes.length === 0) return null;
+  // Single-node pipeline (TermNorm `llm_only`): the lone node is already shown by
+  // TargetPipelineHero's SingleNodeChip, and the per-node `→`-chain + optimizer-lock
+  // badge this list exists for are multi-node mechanics. Showing it for one node is
+  // a redundant row carrying a lock that makes no sense on a single node (the
+  // optimizer must be free to tune it) — so hide the whole list at ≤1 node.
+  if (nodes.length <= 1) return null;
   return (
     <ol className="pipeline-node-list" aria-label="Pipeline nodes">
       {nodes.map((n, i) => {

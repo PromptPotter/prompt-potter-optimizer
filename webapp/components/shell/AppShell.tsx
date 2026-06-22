@@ -63,6 +63,7 @@ function AppShellInner() {
   const {
     campaignId,
     cycleId,
+    datasetName,
     activeError,
     cyclesError,
     cyclesLoaded,
@@ -94,14 +95,13 @@ function AppShellInner() {
   // borrow). A campaign switch shows the prior data marked stale until the
   // new fetch lands — never blanks.
   const {
-    datasetName,
     items: datasetItems,
     measuredCount: datasetMeasuredCount,
     unmeasuredCount: datasetUnmeasuredCount,
     splitTest: datasetSplitTest,
     archivePerSample,
     isStale: datasetStale,
-  } = useDatasetPreview(campaignId, cycleId, hardSamplesScope);
+  } = useDatasetPreview(campaignId, cycleId, datasetName, hardSamplesScope);
   // Sidebar collapse — user-driven, persistent across reloads. Default
   // expanded; once the user collapses it, that sticks until they toggle
   // again. Tab switches never touch this state — that's the whole point

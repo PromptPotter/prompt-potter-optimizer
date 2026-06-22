@@ -330,20 +330,6 @@ export function fetchDashboardConditional(
   );
 }
 
-export async function fetchActiveDatasetName(
-  campaignId: string,
-  cycleId: string,
-  signal?: AbortSignal,
-): Promise<string | null> {
-  const file = await fetchCycleFile(campaignId, cycleId, "cycle", "index.json", signal);
-  if (!file.content) return null;
-  const parsed = JSON.parse(file.content) as {
-    dataset_name?: string;
-    header?: { dataset_name?: string };
-  };
-  return parsed.header?.dataset_name ?? parsed.dataset_name ?? null;
-}
-
 // `lifecycle` mirrors the server's `?lifecycle=` filter — defaults to
 // "active" server-side; pass "archived" to surface the archived set
 // (deleted stays out of the default UI). "all" returns every status.

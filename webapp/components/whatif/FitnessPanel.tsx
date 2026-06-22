@@ -28,6 +28,8 @@ import { useFitnessBars } from "./useFitnessBars";
 import { SampleSetControl } from "./SampleSetControl";
 import { measuredUniverse } from "@/lib/sample-set";
 import { useLineageOverlay, divergenceRoundsFor } from "@/lib/lineage-overlay";
+import { useConnector } from "@/lib/hooks/useConnector";
+import { targetNodeIds } from "@/lib/terms";
 
 export function FitnessPanel() {
   // Self-sourced: live snapshot from the cycle stream, (campaignId, cycleId)
@@ -66,6 +68,14 @@ export function FitnessPanel() {
     setFitnessState({ weights: { ...weights, [name]: w } });
 
   const meta = WHATIF_INLINE_META;
+
+  // Pipeline shape from the connector view. A single-node (llm_only) pipeline has
+  // no candidate_source / ranker / cache node, so the node-type-bound evaluators
+  // (source_recall / candidate_recall / cache_hit_rate) can never apply — they must
+  // not surface as live tiles before the first round lands. Mirrors
+  // PipelineSchema.is_single_node (targetNodeIds drops the io ports).
+  const cv = useConnector();
+  const singleNode = targetNodeIds(cv.view).length <= 1;
 
   // ── 1. In-flight candidates from the live dashboard. Memoized on `dash`
   // so identity is stable across polls (and across no-op 304 ticks): the
@@ -176,7 +186,10 @@ export function FitnessPanel() {
       ? meta.map<Row>((m) => ({
           displayName: m.name,
           registryName: m.name,
-          applicable: true,
+          // Shape-agnostic evaluators (node_type == null) always apply; a
+          // node-type-bound one applies pre-staging only if the pipeline could
+          // carry that node — never on a single-node llm_only run.
+          applicable: m.node_type == null || !singleNode,
           description: m.description,
           direction: m.direction,
         }))
@@ -188,7 +201,7 @@ export function FitnessPanel() {
       return 2;
     };
     return built.slice().sort((a, b) => bucketOf(a) - bucketOf(b));
-  }, [meta, realApplicable, inActive, selected, isPrestaging]);
+  }, [meta, realApplicable, inActive, selected, isPrestaging, singleNode]);
 
   // Render-phase seed: when the cycle binds applicable evaluators for the
   // first time (or the cycle changes), seed `selected` from the formula's

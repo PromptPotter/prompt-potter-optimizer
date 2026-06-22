@@ -1,11 +1,13 @@
 """Result classification — three-bucket (advisory / infra / fatal) verdict.
 
-classify_result(result) → three-bucket classification:
-  llm_only:content_empty + length + reasoning>0 → infra:reasoning_budget_exhausted
-  llm_only:content_empty + length + reasoning=0 → infra:output_truncated
-  llm_only:content_empty + stop                 → fatal:empty_response
-  *:content_filtered                            → fatal (passthrough)
-  *:<kind=structural>                           → fatal (source-stamped)
+classify_result(result) → three-bucket classification (``<t>`` = the result's
+terminal LLM node — ``llm_only`` single-node, ``llm_ranking`` multi-node — read
+from ``pipeline_data.terminated_at``, never a literal node name):
+  <t>:content_empty + length + reasoning>0 → infra:reasoning_budget_exhausted
+  <t>:content_empty + length + reasoning=0 → infra:output_truncated
+  <t>:content_empty + stop                 → fatal:empty_response
+  *:content_filtered                       → fatal (passthrough)
+  *:<kind=structural>                      → fatal (source-stamped)
 
 The last rule reads the backend's **source-stamped** ``WarningKind`` (TermNorm owns
 the structural/transient verdict; ``domain.results.WarningDict.kind``): a warning the

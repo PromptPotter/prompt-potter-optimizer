@@ -129,8 +129,9 @@ class ResultClassification:
     def dominant_fatal(self) -> str | None:
         """Pick a fatal code for one-sighting fast-elimination.
 
-        Reads from ``fatal_codes`` only — infra-driven deprecation (e.g.
-        ``llm_only:output_truncated``) must NOT trigger fast-path elimination.
+        Reads from ``fatal_codes`` only — infra-driven deprecation (e.g. a
+        terminal-LLM ``<node>:output_truncated``) must NOT trigger fast-path
+        elimination.
         """
         return next(iter(sorted(self.fatal_codes)), None)
 
@@ -178,8 +179,7 @@ def _collect_advisories(result: Mapping[str, Any]) -> set[str]:
     if not advisories and is_error_result(result):
         advisories.add(f"{pd.get('terminated_at', 'unknown')}:error")
     if _is_refusal(result):
-        terminated_at = pd.get("terminated_at") or "llm_only"
-        advisories.add(f"{terminated_at}:model_refusal")
+        advisories.add(f"{_terminal_node(result)}:model_refusal")
     return advisories
 
 
@@ -199,10 +199,22 @@ def _structural_advisory_keys(result: Mapping[str, Any]) -> set[str]:
     return keys
 
 
-def _llm_only_shape(result: Mapping[str, Any]) -> tuple[str | None, int]:
-    """(finish_reason, reasoning_tokens) from step_tokens.llm_only; (None, 0) if missing."""
+def _terminal_node(result: Mapping[str, Any]) -> str:
+    """The node this result terminated at — the terminal LLM node whose answer is
+    the prediction (``llm_only`` for a single-node pipeline, ``llm_ranking`` for
+    the multi-node default). Read from the result's own ``pipeline_data`` rather
+    than a literal node name, so truncation / empty-response classification keys on
+    *this* result's terminal node and fires for a multi-node terminal LLM too.
+    Falls back to ``llm_only`` when unstamped (the single-node default shape)."""
     pd = result.get("pipeline_data") or {}
-    st = (pd.get("step_tokens") or {}).get("llm_only") or {}
+    return pd.get("terminated_at") or "llm_only"
+
+
+def _terminal_llm_shape(result: Mapping[str, Any]) -> tuple[str | None, int]:
+    """(finish_reason, reasoning_tokens) from the terminal LLM node's step_tokens;
+    (None, 0) if missing."""
+    pd = result.get("pipeline_data") or {}
+    st = (pd.get("step_tokens") or {}).get(_terminal_node(result)) or {}
     fr = st.get("finish_reason")
     reasoning = int(st.get("reasoning") or 0)
     return (fr, reasoning)
@@ -229,14 +241,15 @@ def classify_result(result: Mapping[str, Any]) -> ResultClassification:
     infra: set[str] = set()
     fatals: set[str] = set()
 
-    if "llm_only:content_empty" in advisories:
-        finish_reason, reasoning_tokens = _llm_only_shape(result)
+    node = _terminal_node(result)
+    if f"{node}:content_empty" in advisories:
+        finish_reason, reasoning_tokens = _terminal_llm_shape(result)
         if finish_reason == "length" and reasoning_tokens > 0:
-            infra.add("llm_only:reasoning_budget_exhausted")
+            infra.add(f"{node}:reasoning_budget_exhausted")
         elif finish_reason == "length":
-            infra.add("llm_only:output_truncated")
+            infra.add(f"{node}:output_truncated")
         else:
-            fatals.add("llm_only:empty_response")
+            fatals.add(f"{node}:empty_response")
 
     for adv in advisories:
         if adv.endswith(":content_filtered"):

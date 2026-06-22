@@ -247,9 +247,9 @@ def compute_mean_retrieval_shortfall(
 
 
 def compute_pipeline_compactness(*, schema: PipelineSchema, **_: Any) -> float:
-    n = len(schema.active_steps)
-    if n <= 1:
+    if schema.is_single_node:
         return 1.0
+    n = len(schema.active_steps)
     worst = 12  # node-count yardstick, same intentionally-fixed rationale as the budgets above
     return max(0.0, 1.0 - (n - 1) / (worst - 1))
 

@@ -282,6 +282,16 @@ class PipelineSchema(BaseModel):
         return tuple(n.name for n in self.nodes)
 
     @property
+    def is_single_node(self) -> bool:
+        """A bare one-node scoring pipeline (TermNorm ``llm_only``) — the model
+        answers each query directly, with no retrieval / web search / ranking
+        stage. The first-class predicate that replaces scattered
+        ``len(active_steps) <= 1`` arithmetic and literal ``"llm_only"`` checks:
+        the acute case for the lock invariant (locking the only node leaves the
+        optimizer nothing to tune) and the redundant-node-row UI guard."""
+        return len(self.nodes) == 1
+
+    @property
     def observation_keys(self) -> frozenset[str]:
         """``pipeline_data`` keys written by all nodes' observation mappings."""
         return self._observation_keys

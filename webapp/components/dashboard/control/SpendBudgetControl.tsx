@@ -36,6 +36,22 @@ export function SpendBudgetControl({
   const [tokDraft, setTokDraft] = useState<string>(
     currentBudgetTokens != null ? String(currentBudgetTokens) : "",
   );
+  // Re-seed the edit buffers whenever the committed cap changes — render-phase
+  // guarded reset (webapp/CLAUDE.md "State reset on prop change"), the same recipe
+  // as useAppliableField. Without it the buffers keep their first-mount value: this
+  // control lives in ChatPane's persistent (un-keyed) job dropdown, so a soft unit
+  // switch never remounts it, and `apply()` (posting to the now-updated workspace ids)
+  // would write the prior cycle's cap onto the newly-viewed one.
+  const [prevUsd, setPrevUsd] = useState(currentBudgetUsd);
+  if (currentBudgetUsd !== prevUsd) {
+    setPrevUsd(currentBudgetUsd);
+    setUsdDraft(currentBudgetUsd != null ? String(currentBudgetUsd) : "");
+  }
+  const [prevTok, setPrevTok] = useState(currentBudgetTokens);
+  if (currentBudgetTokens !== prevTok) {
+    setPrevTok(currentBudgetTokens);
+    setTokDraft(currentBudgetTokens != null ? String(currentBudgetTokens) : "");
+  }
   const [pending, setPending] = useState(false);
   const [confirmingHalt, setConfirmingHalt] = useState(false);
   const [note, setNote] = useState<string | null>(null);

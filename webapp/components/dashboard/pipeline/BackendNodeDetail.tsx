@@ -12,6 +12,7 @@ import {
 } from "@/lib/derivations";
 import { candidateLabel } from "@/lib/candidate-label";
 import { useSelection } from "@/lib/SelectionContext";
+import { useWorkspace } from "@/lib/workspace";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useRoundFile } from "@/lib/hooks/useRoundFile";
@@ -80,8 +81,12 @@ export function BackendNodeDetail({ draft, onClose, onPromptApply }: Props) {
   const node = cv.view?.nodes.find((n) => n.id === selectedId && n.kind !== "io") ?? null;
 
   const liveCfg = liveObserveConfig(dash);
-  const campaignId = dash?.campaign_id ?? null;
-  const cycleId = dash?.cycle_id ?? null;
+  // Unit ids from the synchronous workspace, NOT from `dash` (which hard-nulls on a
+  // soft unit switch and stays null during `warming_up`) — otherwise the round-0 /
+  // historical observe-config fetches below starve and the panel blanks even though
+  // the round files exist on disk. `liveObserveConfig(dash)` above stays on `dash`:
+  // that's live-snapshot data, correctly sourced.
+  const { campaignId, cycleId } = useWorkspace();
 
   // Historical target: the operator's selected candidate (round ≥1) if any, else
   // the last completed round's winner. The run-observe branch reads its round file.
@@ -181,10 +186,15 @@ export function BackendNodeDetail({ draft, onClose, onPromptApply }: Props) {
           ? "live"
           : "origin";
   const state: ObserveState = pref && avail[pref] ? pref : avail[auto] ? auto : "origin";
+  // Origin's resolved config is born at round 0; until that file lands it is genuinely
+  // unknown. Don't present the empty config as the resolved origin program (that's the
+  // retired `{}` origin-fake, searchPoint.ts) — when running and round 0 hasn't been
+  // written, label it as resolving so the blank reads "not yet resolved", not "no params".
+  const originResolving = isLive && originCfg == null;
   const fallbackOrigin: ObserveConfig = {
     promptFields: cv.originPromptFields ?? {},
     config: {},
-    label: isLive ? "origin — running" : "origin",
+    label: originResolving ? "origin — resolving (round 0)" : "origin",
   };
   const cfg =
     (state === "live" ? liveCfg : state === "historical" ? histCfg : originCfg) ?? fallbackOrigin;

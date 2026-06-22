@@ -11,7 +11,6 @@
 
 import { useEffect, useState } from "react";
 import {
-  fetchActiveDatasetName,
   fetchDatasetPreview,
   fetchMeasurementSeries,
   type DatasetItem,
@@ -27,7 +26,6 @@ interface ScopeSlice {
 }
 
 export interface DatasetPreviewState extends ScopeSlice {
-  datasetName: string | null;
   splitTest: number | null;
   isStale: boolean;
   // Honest failure signal — set when the dataset-scope fetch (the spine)
@@ -39,7 +37,6 @@ export interface DatasetPreviewState extends ScopeSlice {
 interface Loaded {
   // Unit stamp the slices were fetched for; null until the first load lands.
   key: string | null;
-  datasetName: string | null;
   splitTest: number | null;
   campaign: ScopeSlice;
   dataset: ScopeSlice;
@@ -54,7 +51,6 @@ const EMPTY_SLICE: ScopeSlice = {
 };
 
 const EMPTY: DatasetPreviewState = {
-  datasetName: null,
   splitTest: null,
   items: [],
   measuredCount: 0,
@@ -95,6 +91,7 @@ function sliceFrom(
 export function useDatasetPreview(
   campaignId: string | null,
   cycleId: string | null,
+  datasetName: string | null,
   scope: HardSamplesScope,
 ): DatasetPreviewState {
   // \x1f (unit separator) can't collide with id characters.
@@ -102,7 +99,6 @@ export function useDatasetPreview(
 
   const [loaded, setLoaded] = useState<Loaded>({
     key: null,
-    datasetName: null,
     splitTest: null,
     campaign: EMPTY_SLICE,
     dataset: EMPTY_SLICE,
@@ -110,24 +106,12 @@ export function useDatasetPreview(
   });
 
   useEffect(() => {
-    if (!unitKey || !campaignId || !cycleId) return;
+    if (!unitKey || !campaignId || !cycleId || !datasetName) return;
+    const name = datasetName;
     let cancelled = false;
     const ac = new AbortController();
     (async () => {
       try {
-        const name = await fetchActiveDatasetName(campaignId, cycleId, ac.signal);
-        if (cancelled) return;
-        if (!name) {
-          setLoaded({
-            key: unitKey,
-            datasetName: null,
-            splitTest: null,
-            campaign: EMPTY_SLICE,
-            dataset: EMPTY_SLICE,
-            error: null,
-          });
-          return;
-        }
         // Both scopes load together. The dataset preview is the spine — a real
         // failure throws into the catch below (honest `error`). The campaign
         // slice + both series are floored to null: a fresh campaign legitimately
@@ -147,7 +131,6 @@ export function useDatasetPreview(
         if (cancelled) return;
         setLoaded({
           key: unitKey,
-          datasetName: name,
           splitTest: dsPreview.split_test,
           dataset: sliceFrom(dsPreview.items, dsSeries?.items),
           campaign: cmpPreview
@@ -159,7 +142,6 @@ export function useDatasetPreview(
         if (cancelled || ac.signal.aborted) return;
         setLoaded({
           key: unitKey,
-          datasetName: null,
           splitTest: null,
           campaign: EMPTY_SLICE,
           dataset: EMPTY_SLICE,
@@ -171,7 +153,7 @@ export function useDatasetPreview(
       cancelled = true;
       ac.abort();
     };
-  }, [unitKey, campaignId, cycleId]);
+  }, [unitKey, campaignId, cycleId, datasetName]);
 
   if (!unitKey) return EMPTY;
   // First load for this session — show a loading affordance, not blank chrome.
@@ -184,7 +166,6 @@ export function useDatasetPreview(
   const fresh = loaded.key === unitKey;
   const slice = scope === "campaign" ? loaded.campaign : loaded.dataset;
   return {
-    datasetName: loaded.datasetName,
     splitTest: loaded.splitTest,
     ...slice,
     isStale: !fresh,

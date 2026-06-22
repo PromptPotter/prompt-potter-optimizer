@@ -18,7 +18,7 @@ export interface RoundSummaryCandidate {
 
 /** Backend-computed, context-aware degradation verdict for a round (origin */
 export interface DegradationHealth {
-  grade: string;
+  grade: 'healthy' | 'degraded' | 'critical';
   reasons: string[];
   samples: number;
   structural_count: number;

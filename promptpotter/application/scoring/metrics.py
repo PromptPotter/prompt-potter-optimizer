@@ -170,7 +170,10 @@ def _diag_ranker(
         scores = []
         for c in candidates[:2]:
             if isinstance(c, dict):
-                raw = c["score"] if "score" in c else c.get("similarity", 0.0)
+                # final_ranking items carry one canonical score key,
+                # `relevance_score` (single- and multi-node alike); `similarity`
+                # is the legacy fuzzy-tuple-dict fallback.
+                raw = c.get("relevance_score", c.get("similarity", 0.0))
                 scores.append(float(raw if raw is not None else 0.0))
             elif isinstance(c, (list, tuple)) and len(c) >= 2:
                 scores.append(float(c[1]))

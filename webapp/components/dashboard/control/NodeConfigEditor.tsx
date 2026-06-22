@@ -76,6 +76,14 @@ function SearchSpaceEditor({
 
   if (rows.length === 0) return <EmptyConfig />;
 
+  // A single-node pipeline (one node in the served config schema) is UNLOCKABLE:
+  // locking its lone node would leave the optimizer with nothing to tune. Mirrors
+  // PipelineSchema.is_single_node. The lock is an OPTIMIZER-search-space concept,
+  // independent of this connector node — so for a single node the lock affordance
+  // is suppressed entirely (master + per-param); the operator still sets origin
+  // values and narrows allowed enum values.
+  const singleNode = schema != null && Object.keys(schema).length <= 1;
+
   const persist = (next: ConfigRow[], nextLock: boolean) => {
     if (!onApply) return;
     onApply(nodeOverlayPatch(seedOverlay, nextLock, nodeId, next));
@@ -113,42 +121,55 @@ function SearchSpaceEditor({
 
   return (
     <div className="config-editor">
-      {movable.length > 0 ? (
-        <div className="config-row config-node-row">
-          <span className="config-label">Optimizer</span>
-          <button
-            type="button"
-            className={cx("config-lock", nodeLocked && "is-locked")}
-            onClick={toggleNodeLock}
-            disabled={readOnly}
-            aria-pressed={nodeLocked}
-            title={
-              nodeLocked
-                ? "This node is origin-locked — the optimizer keeps it fixed. Click to let it tune the params below."
-                : "The optimizer may tune the unlocked params below. Click to lock the whole node at origin."
-            }
-          >
-            {nodeLocked ? "🔒 Node locked" : "🔓 Node open"}
-          </button>
-        </div>
-      ) : null}
-
       {rows.map((r, i) => (
         <ConfigRowView
           key={r.key}
           row={r}
           mode="search-space"
           readOnly={readOnly}
+          lockable={!singleNode}
           onToggleLock={() => (r.kind === "model" ? toggleModelLock() : update(i, { locked: !r.locked }))}
           onToggleChip={(level) => toggleChip(i, level)}
           onValue={(v) => update(i, { value: v })}
         />
       ))}
 
-      <small className="config-hint">
-        🔒 = origin-locked (the optimizer keeps it fixed) · 🔓 = the optimizer may tune it · filled
-        chip = allowed value · dashed = locked out · “origin” = the starting value.
-      </small>
+      {singleNode ? (
+        <small className="config-hint">
+          Single-node pipeline — the optimizer tunes this node freely; with nothing
+          else to balance it against, there is no per-param lock to set.
+        </small>
+      ) : (
+        <>
+          {/* The whole-node tuning control sits BELOW the params it governs, not as a
+              header over them — locking is an optimizer-search-space lever on this
+              node, not a label on the connector pipeline. */}
+          {movable.length > 0 ? (
+            <div className="config-row config-node-row">
+              <span className="config-label">Tuning</span>
+              <button
+                type="button"
+                className={cx("config-lock", nodeLocked && "is-locked")}
+                onClick={toggleNodeLock}
+                disabled={readOnly}
+                aria-pressed={nodeLocked}
+                title={
+                  nodeLocked
+                    ? "Every param on this node is held at its origin value — the optimizer changes nothing here. Click to let it tune the params above."
+                    : "The optimizer may tune the unlocked params above. Click to hold the whole node at origin."
+                }
+              >
+                {nodeLocked ? "🔒 Params locked" : "🔓 Params open"}
+              </button>
+            </div>
+          ) : null}
+          <small className="config-hint">
+            🔒 = held at origin (the optimizer keeps it fixed) · 🔓 = the optimizer may
+            tune it · filled chip = allowed value · dashed = locked out · “origin” = the
+            starting value.
+          </small>
+        </>
+      )}
     </div>
   );
 }
@@ -223,6 +244,7 @@ function ConfigRowView({
   row,
   mode,
   readOnly,
+  lockable = true,
   onToggleLock,
   onToggleChip,
   onValue,
@@ -230,6 +252,7 @@ function ConfigRowView({
   row: ConfigRow;
   mode: ConfigMode;
   readOnly: boolean;
+  lockable?: boolean;
   onToggleLock?: () => void;
   onToggleChip?: (level: string) => void;
   onValue: (v: string) => void;
@@ -255,7 +278,7 @@ function ConfigRowView({
         ) : null}
       </span>
       <span className={cx("config-value", isModel && "config-model")}>
-        {isSearch ? (
+        {isSearch && lockable ? (
           <LockButton locked={row.locked} readOnly={readOnly} onClick={onToggleLock!} />
         ) : null}
         {isModel || (row.kind === "enum" && !isSearch) ? (
