@@ -139,16 +139,11 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     OPENROUTER_API_KEY: str = ""
 
-    # Per-provider tier caps (rolling 60s window). Left as None → no throttle.
-    # Example: Groq free tier is 5 req/min + 8000 tokens/min for gpt-oss-120b.
-    GROQ_RPM: int | None = None
-    GROQ_TPM: int | None = None
-    OPENAI_RPM: int | None = None
-    OPENAI_TPM: int | None = None
-    ANTHROPIC_RPM: int | None = None
-    ANTHROPIC_TPM: int | None = None
-    OPENROUTER_RPM: int | None = None
-    OPENROUTER_TPM: int | None = None
+    # Per-provider tier caps (rolling 60s window), keyed by provider → [rpm, tpm].
+    # Omit a provider, or use null for a slot → no client-side throttle (the limiter
+    # then self-tunes from response headers). Example (Groq free tier, 5 req/min +
+    # 8000 tokens/min for gpt-oss-120b): RATE_LIMITS='{"groq": [5, 8000]}'
+    RATE_LIMITS: dict[str, list[int | None]] = {}
 
     # Wire-level auth for backend connectors. Sent as
     # ``Authorization: Bearer <TERMNORM_TOKEN>`` on every BackendClient

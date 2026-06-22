@@ -31,7 +31,6 @@ Closed inbound set: ``docs/specs/m12-api-openapi.yaml``. Permanent contract:
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
@@ -55,7 +54,7 @@ from promptpotter.infrastructure.store import (
     Stores,
     read_active_pointer,
 )
-from promptpotter.infrastructure.store.base import write_json
+from promptpotter.infrastructure.store.base import read_json_tolerant, write_json
 from promptpotter.infrastructure.store.paths import root_cycle_id
 from promptpotter.presentation.api.middleware.command_dispatcher.helpers import (
     _DeleteCycleRejectedError,
@@ -593,13 +592,9 @@ class CommandDispatcher:
         runtime_dir.mkdir(parents=True, exist_ok=True)
         cap_path = runtime_dir / "spend_cap.json"
         caps: dict[str, float | int] = {}
-        if cap_path.is_file():
-            try:
-                existing = json.loads(cap_path.read_text(encoding="utf-8"))
-                if isinstance(existing, dict):
-                    caps.update(existing)
-            except json.JSONDecodeError:
-                pass  # malformed file → start clean; the new caps below win
+        existing = read_json_tolerant(cap_path, {})  # missing/malformed → start clean
+        if isinstance(existing, dict):
+            caps.update(existing)
         if max_usd is not None:
             caps["max_usd"] = max_usd
         if max_tokens is not None:

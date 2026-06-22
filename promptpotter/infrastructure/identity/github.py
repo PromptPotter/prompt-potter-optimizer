@@ -90,20 +90,17 @@ class GitHubProviderClient:
                 )
 
             email = user.get("email") if isinstance(user.get("email"), str) else None
-            email_verified = email is not None
             if email is None:
                 email_response = await client.get(GITHUB_EMAIL_URL, headers=auth_headers)
                 if email_response.status_code == 200:
                     primary = _select_primary_verified_email(email_response.json())
                     if primary is not None:
                         email = primary
-                        email_verified = True
 
         return ProviderIdentity(
             issuer=GITHUB_ISSUER,
             subject=str(user_id),
             email=email,
-            email_verified=email_verified,
             provider="github",
         )
 

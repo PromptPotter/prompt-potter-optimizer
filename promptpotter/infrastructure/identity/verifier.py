@@ -30,7 +30,6 @@ class VerifiedIDToken:
     issuer: str
     subject: str
     email: str | None
-    email_verified: bool
     claims: dict[str, Any]
 
 
@@ -105,13 +104,11 @@ async def verify_id_token(
 
     email_raw = payload.get("email")
     email = str(email_raw) if isinstance(email_raw, str) else None
-    email_verified = bool(payload.get("email_verified"))
 
     return VerifiedIDToken(
         issuer=iss,
         subject=sub,
         email=email,
-        email_verified=email_verified,
         claims=payload,
     )
 

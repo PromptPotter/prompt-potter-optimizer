@@ -23,8 +23,6 @@ class ProviderSpec:
 
     display_name: str  # e.g. "Groq" — used in error messages + logs
     api_key_attr: str  # settings field holding the API key
-    rpm_attr: str  # settings field for rolling RPM cap
-    tpm_attr: str  # settings field for rolling TPM cap
     base_url: str | None = None  # None ⇒ SDK default (OpenAI)
     max_retries: int = 5
     timeout: float | None = None
@@ -34,8 +32,6 @@ _OPENAI_COMPAT_SPECS: dict[str, ProviderSpec] = {
     "groq": ProviderSpec(
         "Groq",
         "GROQ_API_KEY",
-        "GROQ_RPM",
-        "GROQ_TPM",
         base_url="https://api.groq.com/openai/v1",
         max_retries=3,
         timeout=60.0,
@@ -43,37 +39,36 @@ _OPENAI_COMPAT_SPECS: dict[str, ProviderSpec] = {
     "openai": ProviderSpec(
         "OpenAI",
         "OPENAI_API_KEY",
-        "OPENAI_RPM",
-        "OPENAI_TPM",
     ),
     "openrouter": ProviderSpec(
         "OpenRouter",
         "OPENROUTER_API_KEY",
-        "OPENROUTER_RPM",
-        "OPENROUTER_TPM",
         base_url="https://openrouter.ai/api/v1",
     ),
 }
 
 
-def _make_openai_compat(spec: ProviderSpec) -> OpenAICompatibleClient:
+def _rate_caps(provider: str) -> tuple[int | None, int | None]:
+    """The (rpm, tpm) caps for *provider* from ``settings.RATE_LIMITS`` (both None if unset)."""
+    caps = settings.RATE_LIMITS.get(provider) or []
+    return (caps[0] if len(caps) > 0 else None, caps[1] if len(caps) > 1 else None)
+
+
+def _make_openai_compat(provider: str, spec: ProviderSpec) -> OpenAICompatibleClient:
+    rpm, tpm = _rate_caps(provider)
     return OpenAICompatibleClient(
         api_key=getattr(settings, spec.api_key_attr),
         base_url=spec.base_url,
         max_retries=spec.max_retries,
         timeout=spec.timeout,
         provider_name=spec.display_name,
-        rate_limiter=build_rate_limiter(
-            getattr(settings, spec.rpm_attr),
-            getattr(settings, spec.tpm_attr),
-        ),
+        rate_limiter=build_rate_limiter(rpm, tpm),
     )
 
 
 def _make_anthropic_client() -> AnthropicClient:
-    return AnthropicClient(
-        rate_limiter=build_rate_limiter(settings.ANTHROPIC_RPM, settings.ANTHROPIC_TPM),
-    )
+    rpm, tpm = _rate_caps("anthropic")
+    return AnthropicClient(rate_limiter=build_rate_limiter(rpm, tpm))
 
 
 def _make_mock_client() -> LLMClientBase:
@@ -88,7 +83,7 @@ def _make_mock_client() -> LLMClientBase:
 
 _PROVIDER_FACTORIES: dict[str, Callable[[], LLMClientBase]] = {
     **{
-        name: functools.partial(_make_openai_compat, spec)
+        name: functools.partial(_make_openai_compat, name, spec)
         for name, spec in _OPENAI_COMPAT_SPECS.items()
     },
     "anthropic": _make_anthropic_client,

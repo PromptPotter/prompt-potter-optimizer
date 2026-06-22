@@ -10,7 +10,6 @@ in-process method — the live dashboard composes scoring data this projection w
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from pathlib import Path
@@ -19,7 +18,7 @@ from typing import Any
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import LLMCallRecord, PhaseRecord, RoundWarningRecord
 from promptpotter.infrastructure.projections.base import DerivedView
-from promptpotter.infrastructure.store.base import write_json
+from promptpotter.infrastructure.store.base import read_json_tolerant, write_json
 
 logger = logging.getLogger(__name__)
 
@@ -47,13 +46,7 @@ def load_round_audits(cycle_dir: Path, rounds: list[dict[str, Any]]) -> list[dic
     for round_data in rounds:
         round_num = int(round_data.get("round") or 0)
         path = rd / f"round_{round_num:04d}.json"
-        if path.is_file():
-            try:
-                out.append(json.loads(path.read_text(encoding="utf-8")))
-                continue
-            except (OSError, json.JSONDecodeError) as exc:
-                logger.debug("audit load failed: %s — %s", path.name, exc)
-        out.append(None)
+        out.append(read_json_tolerant(path))
     return out
 
 
@@ -93,11 +86,7 @@ def read_most_recent_round_nodes(rounds_dir: Path) -> dict[str, dict[str, Any]]:
     if not candidates:
         return {}
     round_num, path = max(candidates, key=lambda c: c[0])
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("read_most_recent_round_nodes: failed to read %s: %s", path.name, exc)
-        return {}
+    payload = read_json_tolerant(path, {})
     out: dict[str, dict[str, Any]] = {}
     for key, block in (payload.get("nodes") or {}).items():
         if key == "l1_score":
@@ -232,17 +221,10 @@ class AuditTrailView(DerivedView):
         self.rounds_dir.mkdir(parents=True, exist_ok=True)
         path = self.rounds_dir / f"round_{self._current_round:04d}.json"
 
-        existing_nodes: dict[str, Any] = {}
-        existing_started_at = self._started_at
-        existing_warnings: list[dict[str, Any]] = []
-        if path.exists():
-            try:
-                prior = json.loads(path.read_text(encoding="utf-8"))
-                existing_nodes = dict(prior.get("nodes") or {})
-                existing_started_at = prior.get("started_at") or existing_started_at
-                existing_warnings = list(prior.get("warnings") or [])
-            except (OSError, json.JSONDecodeError):
-                pass
+        prior = read_json_tolerant(path, {})
+        existing_nodes = dict(prior.get("nodes") or {})
+        existing_started_at = prior.get("started_at") or self._started_at
+        existing_warnings = list(prior.get("warnings") or [])
 
         nodes_ordered: dict[str, Any] = {}
         # Reading order: L1 generate/critique → scoring → escalation layers.

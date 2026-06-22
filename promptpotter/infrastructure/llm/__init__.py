@@ -11,8 +11,8 @@ Provider selection is always explicit — caller passes
 ``config.provider`` (``datasets/_optimizer/pipeline.json``) inside ``llm_call``.
 There is no auto-detection or env-var fallback.
 
-Client-side tier throttling (RPM + TPM) is opt-in via ``*_RPM`` / ``*_TPM``
-settings — see :mod:`.rate_limit`.
+Client-side tier throttling (RPM + TPM) is opt-in via the ``RATE_LIMITS``
+setting (``{provider: [rpm, tpm]}``) — see :mod:`.rate_limit`.
 
 CONCEPT MAP (re-exported surface, by module):
 * **registry** — :func:`get_llm_client` (the explicit provider seam) +

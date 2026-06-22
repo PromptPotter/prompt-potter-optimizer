@@ -8,7 +8,6 @@ parent's max_rounds + patience scalars."""
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import traceback
 from dataclasses import dataclass
@@ -46,6 +45,7 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.llm import set_abort_check
 from promptpotter.infrastructure.llm.models import emit_error_record
 from promptpotter.infrastructure.runtime_flags import clear_run_control_flags
+from promptpotter.infrastructure.store.base import read_json_tolerant
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ResumeDivergenceError
 
@@ -100,17 +100,8 @@ def _build_budget_gate(
     cap_path = cycle_dir / ".runtime" / "spend_cap.json"
 
     def _saved_caps() -> dict[str, Any]:
-        if cap_path.is_file():
-            try:
-                data = json.loads(cap_path.read_text(encoding="utf-8"))
-                if isinstance(data, dict):
-                    return data
-            except Exception:
-                logger.warning(
-                    "spend_cap.json at %s unreadable; falling back to starting caps",
-                    cap_path,
-                )
-        return {}
+        data = read_json_tolerant(cap_path, {})
+        return data if isinstance(data, dict) else {}
 
     def _usd_cap() -> float | None:
         value = _saved_caps().get("max_usd")

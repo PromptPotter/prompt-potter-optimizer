@@ -35,6 +35,7 @@ from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.store import DatasetAccessError, Stores, readable_dataset_dir
+from promptpotter.infrastructure.store.base import read_json
 from promptpotter.infrastructure.store.dataset_access import list_readable_datasets
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
@@ -126,9 +127,9 @@ def _dataset_origin_id(store: Stores, dataset_dir: Path, dataset_name: str) -> s
     overwritten by ``to_job_search_point`` with the schema's active_steps, so only the
     per-node config (model included) drives the config-aware hash."""
     try:
-        raw = json.loads((dataset_dir / "pipeline.json").read_text(encoding="utf-8"))
+        raw = read_json(dataset_dir / "pipeline.json")
         schema = parse_pipeline_response(raw)
-        craw = json.loads((dataset_dir / "campaign.json").read_text(encoding="utf-8"))
+        craw = read_json(dataset_dir / "campaign.json")
         cfg = load_campaign_config(craw.get("campaign_config", craw))
         exclude = set(cfg.exclude_nodes)
         active = [n for n in schema.active_steps if n not in exclude]

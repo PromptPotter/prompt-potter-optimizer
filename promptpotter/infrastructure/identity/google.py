@@ -35,7 +35,6 @@ class ProviderIdentity:
     issuer: str
     subject: str
     email: str | None
-    email_verified: bool
     provider: str
 
 
@@ -112,7 +111,6 @@ class GoogleProviderClient:
             issuer=verified.issuer,
             subject=verified.subject,
             email=verified.email,
-            email_verified=verified.email_verified,
             provider="google",
         )
 
