@@ -286,6 +286,9 @@ async def _drive_optimization(
 ) -> CycleResult:
     """One pass through the loop. Caller handles divergence menu + re-invoke."""
     from promptpotter.application.runner import (
+        RunMode,
+    )
+    from promptpotter.application.runner import (
         run_optimization as _orch_run_optimization,
     )
 
@@ -302,12 +305,13 @@ async def _drive_optimization(
         observers=observers,
         experiment_id=ctx.state["experiment_id"],
         task_context=ctx.task_context,
-        resume_from_round_override=getattr(args, "resume_from_round", None),
-        no_divergence_check=getattr(args, "no_divergence_check", False),
-        fork_on_divergence=fork_on_divergence,
-        sweep=False,
-        diag=getattr(args, "diag", False),
-        halt_at_accuracy=getattr(args, "halt_at_accuracy", None),
+        mode=RunMode(
+            resume_from_round_override=getattr(args, "resume_from_round", None),
+            no_divergence_check=getattr(args, "no_divergence_check", False),
+            fork_on_divergence=fork_on_divergence,
+            diag=getattr(args, "diag", False),
+            halt_at_accuracy=getattr(args, "halt_at_accuracy", None),
+        ),
         # CLI ``--spend-budget`` overrides ``OptimizationConfig.spend_budget_usd``;
         # falls back to the config value when no flag is given.
         spend_budget_usd=getattr(args, "spend_budget_usd", None)

@@ -99,6 +99,9 @@ async def run_sweep_batch(
     from promptpotter.application.bootstrap import init_services
     from promptpotter.application.config import configure_and_apply_pipeline
     from promptpotter.application.runner import (
+        RunMode,
+    )
+    from promptpotter.application.runner import (
         run_optimization as _orch_run_optimization,
     )
     from promptpotter.infrastructure.identity import registered_or_default_identity
@@ -199,7 +202,7 @@ async def run_sweep_batch(
                 observers=observers,
                 experiment_id=fork_ctx.state["experiment_id"],
                 task_context=fork_ctx.task_context,
-                sweep=True,
+                mode=RunMode(sweep=True),
                 fork_payload=fork_payload,
             )
         finally:

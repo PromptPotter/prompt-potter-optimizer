@@ -31,6 +31,7 @@ from promptpotter.application.optimization.validators.l1_behavior import (
     CheckResult,
     ValidatorContext,
 )
+from promptpotter.domain.search_point import TaskDecomposition
 
 __all__ = [
     "L2_CHECK_REGISTRY",
@@ -116,19 +117,14 @@ def _check_task_context_not_verbatim(
     if not isinstance(proposed, dict) or not proposed:
         return CheckResult("l2_task_context_not_verbatim", True, "no task_context proposed")
     prior_raw = ctx.opt_search_point.get("task_context") if ctx.opt_search_point else None
-    prior = prior_raw if isinstance(prior_raw, dict) else {}
-    for key, value in proposed.items():
-        if not isinstance(value, str) or not value.strip():
-            continue
-        if str(prior.get(key) or "").strip() != value.strip():
-            return CheckResult(
-                "l2_task_context_not_verbatim", True, f"field {key!r} carries a real delta"
-            )
-    return CheckResult(
-        "l2_task_context_not_verbatim",
-        False,
-        f"all {len(proposed)} proposed task_context field(s) repeat the prior framing",
-    )
+    prior = TaskDecomposition.from_dict(prior_raw if isinstance(prior_raw, dict) else {})
+    if prior.merge_changes_nothing(proposed):
+        return CheckResult(
+            "l2_task_context_not_verbatim",
+            False,
+            f"all {len(proposed)} proposed task_context field(s) repeat the prior framing",
+        )
+    return CheckResult("l2_task_context_not_verbatim", True, "proposal carries a real delta")
 
 
 def _check_targets_l1_surface(round_dict: dict[str, Any], ctx: ValidatorContext) -> CheckResult:

@@ -471,6 +471,9 @@ async def _run_loop(
 ) -> CommandResult:
     """Build observers, drive the optimization loop."""
     from promptpotter.application.runner import (
+        RunMode,
+    )
+    from promptpotter.application.runner import (
         run_optimization as _orch_run_optimization,
     )
 
@@ -488,12 +491,11 @@ async def _run_loop(
         observers=observers,
         experiment_id=ctx.state["experiment_id"],
         task_context=ctx.task_context,
-        resume_from_round_override=None,
-        no_divergence_check=False,
-        fork_on_divergence=False,
-        sweep=getattr(args, "sweep", False),
-        diag=getattr(args, "diag", False),
-        halt_at_accuracy=getattr(args, "halt_at_accuracy", None),
+        mode=RunMode(
+            sweep=getattr(args, "sweep", False),
+            diag=getattr(args, "diag", False),
+            halt_at_accuracy=getattr(args, "halt_at_accuracy", None),
+        ),
         # CLI ``--spend-budget`` overrides ``OptimizationConfig.spend_budget_usd``;
         # falls back to the config value when no flag is given.
         spend_budget_usd=getattr(args, "spend_budget_usd", None)

@@ -193,6 +193,17 @@ class TaskDecomposition:
         base.update(overrides)
         return self.from_dict(base)
 
+    def merge_changes_nothing(self, overrides: dict[str, Any]) -> bool:
+        """True iff merging ``overrides`` leaves the framing unchanged.
+
+        The canonical "did the proposed task_context actually move?" predicate —
+        a no-op merge means the LLM repeated the prior framing. Used both live
+        (``escalation/firing/executor.py`` deciding ``task_context_applied``) and
+        offline (``validators/l2_behavior.py`` scoring conformance), so the
+        verbatim-repeat verdict comes from one place rather than a re-derived loop.
+        """
+        return self.merge(overrides).to_dict() == self.to_dict()
+
     def items(self) -> list[tuple[str, str]]:
         return [(f.name, getattr(self, f.name)) for f in fields(self)]
 

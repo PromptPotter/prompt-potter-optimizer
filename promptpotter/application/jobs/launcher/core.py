@@ -48,7 +48,7 @@ from promptpotter.application.jobs.quota import (
 )
 from promptpotter.application.jobs.registry import Job, JobRegistry, JobStatus, ReserveResult
 from promptpotter.application.optimization.task_context import load_or_build_task_context
-from promptpotter.application.runner.entry import run_optimization
+from promptpotter.application.runner.entry import RunMode, run_optimization
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.search_point import TaskDecomposition
@@ -478,7 +478,7 @@ async def _run_in_background(
             observers=observers,
             experiment_id=session.experiment_id,
             task_context=task_context,
-            halt_at_accuracy=halt_at_accuracy,
+            mode=RunMode(halt_at_accuracy=halt_at_accuracy),
             spend_budget_usd=spend_budget_usd,
         )
         stop_reason = result.stop_reason

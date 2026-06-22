@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import traceback
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -40,6 +41,7 @@ from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import CycleError, CycleResult
 from promptpotter.domain.run_records import CycleSeed, ForkSpec, LimitOverrides
 from promptpotter.domain.sample import Sample
+from promptpotter.domain.scoring import ScoringSpec
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.llm import set_abort_check
 from promptpotter.infrastructure.llm.models import emit_error_record
@@ -54,6 +56,25 @@ logger = logging.getLogger(__name__)
 # we exit with the last cycle's stop_reason and let the operator
 # re-invoke ``resume`` if they want to keep going.
 MAX_AUTO_REBASES = 10
+
+
+@dataclass(frozen=True)
+class RunMode:
+    """The launch-shape flags that select a run's behaviour, grouped so the
+    runner seam and its callers pass one value instead of six loose booleans.
+
+    Everything else ``run_optimization`` takes is run *content* (dataset,
+    config, session, observers, origin, task_context) — these are the *mode*
+    knobs the CLI/API flags map onto: divergence handling, fork-on-divergence,
+    sweep vs full, diagnostic mode, the accuracy halt, and a resume offset.
+    """
+
+    no_divergence_check: bool = False
+    fork_on_divergence: bool = False
+    sweep: bool = False
+    diag: bool = False
+    halt_at_accuracy: float | None = None
+    resume_from_round_override: int | None = None
 
 
 def _build_budget_gate(
@@ -156,28 +177,32 @@ def _read_cycle_seed(session: Session) -> CycleSeed | None:
     return session.store.campaigns.read_cycle_seed(session.campaign_id, session.state.cycle_id)
 
 
-async def run_optimization(
+@dataclass(frozen=True)
+class _PreparedRun:
+    """Resolved run inputs from :func:`_prepare_run` — the straight-line prep
+    (seed reconciliation + C0 origin + scoring/task_context resolution) done
+    once before the rebase loop. ``campaign_config`` / ``spend_budget_usd`` are
+    re-emitted because a cycle seed may reconcile new run limits onto them."""
+
+    origin: CampaignOrigin
+    campaign_config: CampaignConfig
+    spend_budget_usd: float | None
+    scoring_spec: ScoringSpec
+    task_context: TaskDecomposition
+
+
+async def _prepare_run(
     dataset: list[Sample],
     campaign_config: CampaignConfig,
     *,
     session: Session,
     observers: RunObservers,
-    origin: CampaignOrigin | None = None,
-    experiment_id: str | None = None,
-    task_context: TaskDecomposition | dict[str, Any] | None = None,
-    langfuse_session_id: str | None = None,
-    resume_from_round_override: int | None = None,
-    no_divergence_check: bool = False,
-    fork_on_divergence: bool = False,
-    sweep: bool = False,
-    diag: bool = False,
-    fork_payload: ForkSpec | None = None,
-    halt_at_accuracy: float | None = None,
-    spend_budget_usd: float | None = None,
-) -> CycleResult:
-    """End-to-end optimization. *observers* MUST be pre-built (ledger bound before origin).
-    *origin* omitted ⇒ scored as phase 0 (CLI); supplied ⇒ reused (notebook path)."""
-    started_at = utcnow_iso()
+    origin: CampaignOrigin | None,
+    task_context: TaskDecomposition | dict[str, Any] | None,
+    spend_budget_usd: float | None,
+) -> _PreparedRun:
+    """Resolve seed overlay + run limits, establish C0, and normalize scoring +
+    task_context — the once-per-launch prep ahead of the rebase loop."""
     cb = observers.callbacks
 
     # A fresh launch supersedes any prior run-control intent: drop a consumed
@@ -230,14 +255,92 @@ async def run_optimization(
         if observers.display is not None and hasattr(observers.display, "set_origin"):
             observers.display.set_origin(origin.origin_acc)
 
-    scoring_spec = split_scoring_block(campaign_config.scoring)
-
     if isinstance(task_context, TaskDecomposition):
         resolved_task_context = task_context
     elif isinstance(task_context, dict):
         resolved_task_context = TaskDecomposition.from_dict(task_context)
     else:
         resolved_task_context = TaskDecomposition()
+
+    return _PreparedRun(
+        origin=origin,
+        campaign_config=campaign_config,
+        spend_budget_usd=spend_budget_usd,
+        scoring_spec=split_scoring_block(campaign_config.scoring),
+        task_context=resolved_task_context,
+    )
+
+
+def _build_cycle_result(
+    cycle: Cycle | None,
+    origin: CampaignOrigin,
+    session: Session,
+    *,
+    stop_reason: StopReason,
+    cycle_error: CycleError | None,
+    started_at: str,
+    finished_at: str,
+) -> CycleResult:
+    """Assemble the terminal :class:`CycleResult`. ``cycle is None`` is the
+    init-crash fallback (cycle_id was minted upstream so the run still finalizes);
+    the cycle-derived fields then read their empty defaults.
+
+    Both ``winner_*`` read from ``best_sp`` (the BEST round's frozen point) so the
+    prompt fields and pipeline_params describe the SAME round — ``cycle.opt_sp`` is
+    overwritten each round by absorb_round, so reading prompts off it would pair the
+    best params with the last round's text."""
+    best_sp = cycle.tracking.best_sp if cycle is not None else None
+    return CycleResult(
+        rounds=cycle.rounds if cycle is not None else [],
+        n_rounds=len(cycle.rounds) if cycle is not None else 0,
+        best_accuracy=cycle.tracking.best_accuracy if cycle is not None else 0.0,
+        best_round=cycle.tracking.best_round if cycle is not None else 0,
+        origin_accuracy=origin.origin_acc,
+        winner_prompt_fields=(best_sp.prompt_fields or {}) if best_sp else {},
+        winner_pipeline_params=best_sp.pipeline_params if best_sp else None,
+        stop_reason=stop_reason,
+        started_at=started_at,
+        finished_at=finished_at,
+        cycle_id=session.state.cycle_id,
+        session_id=session.session_id or None,
+        resumed_from_round=session.state.resumed_from_round,
+        error=cycle_error,
+    )
+
+
+async def run_optimization(
+    dataset: list[Sample],
+    campaign_config: CampaignConfig,
+    *,
+    session: Session,
+    observers: RunObservers,
+    origin: CampaignOrigin | None = None,
+    experiment_id: str | None = None,
+    task_context: TaskDecomposition | dict[str, Any] | None = None,
+    langfuse_session_id: str | None = None,
+    mode: RunMode | None = None,
+    fork_payload: ForkSpec | None = None,
+    spend_budget_usd: float | None = None,
+) -> CycleResult:
+    """End-to-end optimization. *observers* MUST be pre-built (ledger bound before origin).
+    *origin* omitted ⇒ scored as phase 0 (CLI); supplied ⇒ reused (notebook path)."""
+    mode = mode or RunMode()
+    started_at = utcnow_iso()
+    prep = await _prepare_run(
+        dataset,
+        campaign_config,
+        session=session,
+        observers=observers,
+        origin=origin,
+        task_context=task_context,
+        spend_budget_usd=spend_budget_usd,
+    )
+    origin = prep.origin
+    campaign_config = prep.campaign_config
+    spend_budget_usd = prep.spend_budget_usd
+    scoring_spec = prep.scoring_spec
+    resolved_task_context = prep.task_context
+    cb = observers.callbacks
 
     rebase_count = 0
     while True:
@@ -255,11 +358,11 @@ async def run_optimization(
                 scoring_formula=scoring_spec.per_sample,
                 scoring_round_formula=scoring_spec.per_round,
                 scorer_id=scoring_spec.scorer_id,
-                no_divergence_check=no_divergence_check,
-                fork_on_divergence=fork_on_divergence,
+                no_divergence_check=mode.no_divergence_check,
+                fork_on_divergence=mode.fork_on_divergence,
                 langfuse_session_id=langfuse_session_id,
                 cycle_id=session.state.cycle_id or None,
-                resume_from_round_override=resume_from_round_override,
+                resume_from_round_override=mode.resume_from_round_override,
                 experiment_id=experiment_id or "",
                 session=session,
                 started_at=started_at,
@@ -330,9 +433,9 @@ async def run_optimization(
                 campaign_config,
                 session,
                 cb,
-                sweep=sweep,
-                diag=diag,
-                halt_at_accuracy=halt_at_accuracy,
+                sweep=mode.sweep,
+                diag=mode.diag,
+                halt_at_accuracy=mode.halt_at_accuracy,
                 budget_gate=_build_budget_gate(
                     observers,
                     cycle_dir_for_probe,
@@ -370,46 +473,16 @@ async def run_optimization(
             cycle_error = CycleError(kind=kind, message=message, traceback=tb)
 
         finished_at = utcnow_iso()
-        # Init-crash fallback: cycle_id was minted upstream, so mark_finished can still stamp final with traceback.
-        if cycle is not None:
-            best_sp = cycle.tracking.best_sp
-            cycle_result = CycleResult(
-                rounds=cycle.rounds,
-                n_rounds=len(cycle.rounds),
-                best_accuracy=cycle.tracking.best_accuracy,
-                best_round=cycle.tracking.best_round,
-                origin_accuracy=origin.origin_acc,
-                # Both read from best_sp (the BEST round's frozen point) so prompt fields and
-                # pipeline_params describe the SAME round. cycle.opt_sp is overwritten each round by
-                # absorb_round, so reading prompts off it pairs the best params with the last round's text.
-                winner_prompt_fields=(best_sp.prompt_fields or {}) if best_sp else {},
-                winner_pipeline_params=best_sp.pipeline_params if best_sp else None,
-                stop_reason=stop_reason,
-                started_at=started_at,
-                finished_at=finished_at,
-                cycle_id=session.state.cycle_id,
-                session_id=session.session_id or None,
-                resumed_from_round=session.state.resumed_from_round,
-                error=cycle_error,
-            )
-        else:
-            cycle_result = CycleResult(
-                rounds=[],
-                n_rounds=0,
-                best_accuracy=0.0,
-                best_round=0,
-                origin_accuracy=origin.origin_acc,
-                winner_prompt_fields={},
-                winner_pipeline_params=None,
-                stop_reason=stop_reason,
-                started_at=started_at,
-                finished_at=finished_at,
-                cycle_id=session.state.cycle_id,
-                session_id=session.session_id or None,
-                resumed_from_round=session.state.resumed_from_round,
-                error=cycle_error,
-            )
-        langfuse_trace_id = _finalize_run(session, observers, cycle_result, sweep=sweep)
+        cycle_result = _build_cycle_result(
+            cycle,
+            origin,
+            session,
+            stop_reason=stop_reason,
+            cycle_error=cycle_error,
+            started_at=started_at,
+            finished_at=finished_at,
+        )
+        langfuse_trace_id = _finalize_run(session, observers, cycle_result, sweep=mode.sweep)
         if langfuse_trace_id is not None:
             cycle_result = cycle_result.model_copy(update={"langfuse_trace_id": langfuse_trace_id})
 
@@ -583,4 +656,4 @@ def _finalize_run(
     return langfuse_trace_id
 
 
-__all__ = ["run_optimization"]
+__all__ = ["RunMode", "run_optimization"]

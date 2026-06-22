@@ -65,10 +65,8 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, prompt: str) -> Tran
 
     new_task_context = None
     proposed_tc = raw.task_context if raw.task_context else None
-    if proposed_tc:
-        merged = opt_sp.memory.task_context.merge(proposed_tc)
-        if merged.to_dict() != opt_sp.memory.task_context.to_dict():
-            new_task_context = merged
+    if proposed_tc and not opt_sp.memory.task_context.merge_changes_nothing(proposed_tc):
+        new_task_context = opt_sp.memory.task_context.merge(proposed_tc)
 
     proposed_layout = coerce_l1_layout(raw.l1_layout)
     layout_outcomes: list[ValidatorOutcome] = []

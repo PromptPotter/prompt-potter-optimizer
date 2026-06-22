@@ -158,6 +158,9 @@ async def _run_sweep_optimize(
     override (managed by the caller via :func:`optimizer_prompt_override`).
     Returns ``(cycle_result, observers)``."""
     from promptpotter.application.runner import (
+        RunMode,
+    )
+    from promptpotter.application.runner import (
         run_optimization as _orch_run_optimization,
     )
 
@@ -172,12 +175,10 @@ async def _run_sweep_optimize(
         observers=observers,
         experiment_id=ctx.state["experiment_id"],
         task_context=ctx.task_context,
-        resume_from_round_override=getattr(args, "resume_from_round", None),
-        no_divergence_check=False,
-        fork_on_divergence=False,
-        sweep=False,
-        diag=False,
-        halt_at_accuracy=halt_at_accuracy,
+        mode=RunMode(
+            resume_from_round_override=getattr(args, "resume_from_round", None),
+            halt_at_accuracy=halt_at_accuracy,
+        ),
         spend_budget_usd=spend_budget_usd,
     )
     ctx.state["best_accuracy"] = cycle_result.best_accuracy

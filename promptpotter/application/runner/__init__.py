@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from promptpotter.application.runner.entry import run_optimization
+from promptpotter.application.runner.entry import RunMode, run_optimization
 from promptpotter.application.runner.identity import (
     build_origin_cycle_id,
     content_hash_of,
@@ -11,6 +11,7 @@ from promptpotter.application.runner.identity import (
 )
 
 __all__ = [
+    "RunMode",
     "build_origin_cycle_id",
     "content_hash_of",
     "cycle_config_identity",
