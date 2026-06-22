@@ -53,17 +53,6 @@ logger = logging.getLogger(__name__)
 HARD_CAP: int = 100  # runaway-loop guard for max_rounds=None + non-converging L2/L3
 
 
-async def _force_l2(
-    cycle: Cycle,
-    config: CampaignConfig,
-    session: Session,
-    round_num: int,
-    cb: RunCallbacks,
-) -> None:
-    """Force L2 (bypass stall counter) — diag-mode bridge to round-2 peek."""
-    await escalate_or_stop(cycle, config, session, round_num, cb)
-
-
 async def run_round_loop(
     cycle: Cycle,
     dataset: list[Sample],
@@ -225,8 +214,8 @@ async def run_round_loop(
                 return StopReason.SWEEP_COMPLETE, None
 
             if diag and clean_rounds >= 1:
-                # Force L2 on R1 evidence; peek R2 with L2 overrides.
-                await _force_l2(cycle, config, session, round_num - 1, cb)
+                # Force L2 (bypass stall counter) on R1 evidence; peek R2 with L2 overrides.
+                await escalate_or_stop(cycle, config, session, round_num - 1, cb)
                 await run_sweep_generation_only(
                     cycle, session, cb, round_num, label="diag_gen_only"
                 )

@@ -20,9 +20,7 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
     InjectionKind,
     signal,
 )
-from promptpotter.domain.rendering import (
-    format_l1_critique_for_prompt as format_l1_critique_for_prompt,
-)
+from promptpotter.domain.rendering import format_l1_critique_for_prompt
 from promptpotter.domain.search_point import PARAM_SCOPE_KEYS
 from promptpotter.infrastructure.llm.models import emit_round_warning
 

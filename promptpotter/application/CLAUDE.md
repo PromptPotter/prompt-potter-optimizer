@@ -28,7 +28,6 @@ intelligence; intelligence does not depend on either.
 - `runner/` — master orchestrator; the optimize-loop entry point (`identity`, `round`, `sweep`, `loop`, `entry`).
 - `config.py` — `CampaignConfig` model + LLM factory.
 - `origin.py` — campaign origin scoring + dataset loading. `resolve_origin_opt_search_point` resolves the origin OSP by priority **seed → experiment prompts → dataset prompts → empty**: a `CycleSeed`'s `.overrides/seed.json::origin_prompt_fields` *is* the origin (operator-steered fork or campaign-from-origin; lineage stamped from `seed.origin_source`).
-- `review.py` — per-cycle markdown renderer (post-cycle log).
 - `datasets/` — `loaders.py` (dataset loaders + registry + `build_dataset_run_data`), `prompts.py` (per-dataset prompt store + node overlay), `traces.py` (potter-trace loader).
 - `run_observers.py` — `RunCallbacks` typed event constructor over `CycleEventLog.append`.
 

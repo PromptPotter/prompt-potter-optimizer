@@ -23,11 +23,14 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # seam ``application/jobs/launcher/checkin.py`` — a real disk-backed campaign
 # authoring state that replaces the restart-wiped in-memory ``DraftCampaignRegistry``).
 # Subtraction since: ``modules`` 295→294 (inlined the single-use
-# ``validators/_text.py`` word-set helper into its lone consumer ``l2_output.py``).
+# ``validators/_text.py`` word-set helper into its lone consumer ``l2_output.py``);
+# then ``modules`` 294→293 / ``init_files`` 55→54 / ``reexport_shims`` 42→41 (the
+# de-obfuscation pass collapsed the single-module ``escalation/firing/`` package
+# into one ``escalation/firing.py`` module, dropping its re-export ``__init__``).
 LEDGER_BASELINE = {
-    "modules": 294,
-    "init_files": 55,
-    "reexport_shims": 42,
+    "modules": 293,
+    "init_files": 54,
+    "reexport_shims": 41,
     "config_leaf_fields": 32,
     "settings_env": 24,
     "settings_const": 16,

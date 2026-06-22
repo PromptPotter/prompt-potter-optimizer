@@ -38,7 +38,7 @@ One injection is L2-only: `l1_signal_catalogue` — the menu of names L2 may put
 
 All fields are optional. Missing fields leave the corresponding OSP state untouched. The primary lever is `task_context` — broadcast to L1, L1_CRITIQUE, L2, L3 next round. `terminate_proposal` is the HITL exit: on evidence-starvation L2 emits it with an operator-actionable reason (the dead node + what to fix) and the cycle halts (`StopReason.ABORT`); the operator fixes the backend and resumes. Both control outputs are gated by their `OptimizationConfig` capability bit — see [`../../promptpotter/application/optimization/CLAUDE.md` § L2/L3 layer-control channel](../../promptpotter/application/optimization/CLAUDE.md).
 
-`_parse_l2` (`escalation/firing/executor.py`) constructs a `TransitionResult`:
+`_parse_l2` (`escalation/firing.py`) constructs a `TransitionResult`:
 
 - `task_context`: dict of refined framing fields, merged onto `opt_sp.task_context` via `TaskDecomposition.merge`. A non-empty proposal that produces zero delta is flagged as `l2_task_context_verbatim_repeat` → L3 heal trigger.
 - `action`: `"normal_round"` (default) or `"probe_round"`. Probe re-runs only the warned-query subset under the same OSP next round.
@@ -83,8 +83,8 @@ The single decision recorded per L2 fire is `PROBE_ROUND_COMMITMENT` — outcome
 
 ## File-line anchors
 
-- L2 trigger gate: `promptpotter/application/optimization/escalation/firing/executor.py::escalate_l2`
-- `_parse_l2`, `_apply_l2`, `escalate_l2`: `escalation/firing/executor.py` (trigger gates in `escalation/decide.py`)
+- L2 trigger gate: `promptpotter/application/optimization/escalation/firing.py::escalate_l2`
+- `_parse_l2`, `_apply_l2`, `escalate_l2`: `escalation/firing.py` (trigger gates in `escalation/decide.py`)
 - `TransitionResult`: `promptpotter/application/optimization/transitions.py`
 - L2 prompt template: `datasets/_optimizer/pipeline.json::resolved_prompts['l2_context/1']`
 - OSP mutation surface: `promptpotter/domain/opt_search_point.py` — `task_context`, `l1_layout`, `l1_overrides`, `l2_guard_breaches`

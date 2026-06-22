@@ -28,7 +28,7 @@ from promptpotter.application.intelligence.hard_sample_sorter import (
     build_hard_samples_artifact,
     build_hard_samples_artifact_from_observations,
 )
-from promptpotter.application.review import render_review_md
+from promptpotter.application.output.review import render_review_md
 from promptpotter.application.views import (
     DigestStatusView,
     FinalWinnerView,

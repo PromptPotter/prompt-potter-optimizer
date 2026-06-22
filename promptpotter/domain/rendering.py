@@ -45,7 +45,7 @@ def round_winner_key(composite_fitness: float | None, accuracy: float) -> tuple[
 
 
 # --------------------------------------------------------------------------- #
-# format_l1_critique_for_prompt (was dispatch/hub/injections/layer_state)      #
+# format_l1_critique_for_prompt                                                #
 # --------------------------------------------------------------------------- #
 
 

@@ -51,9 +51,6 @@ from promptpotter.application.optimization.dispatch.hub.facade import (
     build_bundle,
     validate_template,
 )
-from promptpotter.application.optimization.dispatch.hub.injections.layer_state import (
-    format_l1_critique_for_prompt,
-)
 from promptpotter.application.optimization.dispatch.hub.injections.registry import INJECTIONS
 
 __all__ = [
@@ -65,6 +62,5 @@ __all__ = [
     "InjectionRenderError",
     "RoundDigest",
     "build_bundle",
-    "format_l1_critique_for_prompt",
     "validate_template",
 ]

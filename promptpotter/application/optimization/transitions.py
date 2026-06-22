@@ -2,7 +2,7 @@
 
 ``TransitionResult`` = one L2/L3 fire's output; ``LayerStrategy`` = static
 per-layer spec (template, phase, the four parse/apply/enter/exit callables)
-that ``escalation.firing.executor`` reads. Provider/model/temperature are
+that ``escalation.firing`` reads. Provider/model/temperature are
 sourced from the layer's optimizer node config
 (``datasets/_optimizer/pipeline.json``) inside ``llm_call``, not held here.
 """
@@ -81,7 +81,7 @@ class LayerStrategy:
     """Static per-layer spec for one escalation layer (L2 or L3).
 
     Pure data read by ``executor._run_transition``; the ``L2``/``L3`` instances
-    and their parse/apply/enter/exit callables live in ``escalation/firing/executor.py``.
+    and their parse/apply/enter/exit callables live in ``escalation/firing.py``.
     """
 
     layer_id: Literal["L2", "L3"]

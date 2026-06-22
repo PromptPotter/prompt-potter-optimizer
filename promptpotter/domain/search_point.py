@@ -198,7 +198,7 @@ class TaskDecomposition:
 
         The canonical "did the proposed task_context actually move?" predicate —
         a no-op merge means the LLM repeated the prior framing. Used both live
-        (``escalation/firing/executor.py`` deciding ``task_context_applied``) and
+        (``escalation/firing.py`` deciding ``task_context_applied``) and
         offline (``validators/l2_behavior.py`` scoring conformance), so the
         verbatim-repeat verdict comes from one place rather than a re-derived loop.
         """

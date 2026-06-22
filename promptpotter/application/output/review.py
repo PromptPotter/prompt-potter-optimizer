@@ -393,9 +393,7 @@ def _fmt_evidence_cell(raw: object) -> str:
 
 
 def _render_critique(round_data: dict[str, Any]) -> list[str]:
-    from promptpotter.application.optimization.dispatch.hub import (
-        format_l1_critique_for_prompt,
-    )
+    from promptpotter.domain.rendering import format_l1_critique_for_prompt
 
     critique = format_l1_critique_for_prompt(round_data.get("critique")).strip()
     if not critique:
