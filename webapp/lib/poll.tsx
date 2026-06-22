@@ -48,6 +48,10 @@ export interface DashboardSnapshot {
   // Terminal reason (raw StopReason value) once run_phase==="terminal".
   stop_reason?: string;
   round?: number;
+  // Current candidate being scored, "C3.2/4" form (candidate_label + count).
+  // Set during scoring; stale between rounds, so surface it only while the
+  // active node is l1_score (see `activeNodeId`).
+  candidate?: string;
   query?: string;
   best?: number;
   total_queries_scored?: number;
@@ -78,6 +82,19 @@ export interface DashboardSnapshot {
   // table pulses the row whose ``sample_id`` matches; ``null`` between
   // samples (no row pulses).
   current_sample_id?: number | null;
+  // The optimizer LLM call in flight, or null between calls. `node` names the
+  // live optimizer node (l1_generate | l1_critique | l2_context | l3_plan |
+  // checkin) directly — the authoritative "which node is active" signal that
+  // `activeNodeId` reads first. Set on LLMCallStartRecord, cleared on the
+  // paired LLMCallRecord by call_id.
+  in_flight?: {
+    call_id: string;
+    node: string;
+    model?: string | null;
+    round?: number | null;
+    candidate_idx?: number | null;
+    started_at_ms: number;
+  } | null;
   // The adaptive queue mechanism's expected sample order under the
   // active objective — descending expected information gain
   // (``model``) or decision-verdict mutual information (``decision``),

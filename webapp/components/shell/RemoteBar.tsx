@@ -6,6 +6,7 @@ import { runPhaseLabel } from "@/lib/run-phase";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
 import { RunControlButton } from "@/components/dashboard/control/RunControlButton";
+import { activeNodeId } from "@/components/workflow";
 
 // The global remote control — a bottom-fixed hovering pill, rendered as shell
 // chrome on every tab while a cycle is live. It consolidates the run controls
@@ -49,6 +50,14 @@ export function RemoteBar() {
     cycles.find((c) => c.campaign_id === campaignId && c.cycle_id === cycleId)?.human_intervened,
   );
   const spend = dash?.spend;
+  // The candidate currently being scored ("C3.2"). `dash.candidate` is "C3.2/4"
+  // and goes stale between rounds, so surface it only while the active node is
+  // the scorer — that's the window where it's the live position. This is the
+  // finer "where am I" the remote was missing: round AND candidate.
+  const scoringCand =
+    activeNodeId(dash?.in_flight?.node ?? null, dash?.state) === "l1_score"
+      ? String(dash?.candidate || "").split("/")[0]
+      : "";
 
   const act = async (which: "skip", fn: () => Promise<unknown>) => {
     setPending(which);
@@ -82,7 +91,14 @@ export function RemoteBar() {
         <span className="remote-btn-label">Skip</span>
       </button>
       <span className="remote-status" aria-live="off">
-        {dashRound != null ? <span className="remote-round">R{dashRound}</span> : null}
+        {/* The candidate label ("C2.3") already encodes the round (the 2), so
+            show it INSTEAD of "R{n}" while scoring — round only when there's no
+            candidate (between rounds / generating). */}
+        {scoringCand ? (
+          <span className="remote-cand">{scoringCand}</span>
+        ) : dashRound != null ? (
+          <span className="remote-round">R{dashRound}</span>
+        ) : null}
         {spend ? (
           <span className="remote-spend">
             ${spend.total_used_usd.toFixed(2)}

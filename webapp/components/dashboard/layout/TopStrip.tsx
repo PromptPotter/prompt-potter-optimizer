@@ -5,6 +5,7 @@ import { cx } from "@/lib/cx";
 import { type DashboardSnapshot } from "@/lib/poll";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { runPhaseLabel } from "@/lib/run-phase";
+import { activeNodeId } from "@/components/workflow";
 import { headlineStats, fitnessTrend } from "@/lib/derivations";
 import { fmtSecs, fmtPct0 } from "@/lib/format";
 
@@ -81,6 +82,13 @@ export const TopStrip = memo(function TopStrip() {
   const lastQuery = dash?.last_query_elapsed_s ?? null;
   const phase = runPhaseLabel(runPhase ?? dash?.run_phase, dash?.stop_reason);
   const round = dashRound != null ? `R${dashRound}` : "—";
+  // Current candidate being scored ("C3.2"), shown beside the round while the
+  // active node is the scorer — the finer position than the round alone.
+  // `dash.candidate` is "C3.2/4" and stale between rounds; gate on scoring.
+  const scoringCand =
+    activeNodeId(dash?.in_flight?.node ?? null, dash?.state) === "l1_score"
+      ? String(dash?.candidate || "").split("/")[0]
+      : "";
   const qm = parseProgress((dash as { query?: string } | null)?.query);
   const qPct = qm && qm.tot ? Math.min(100, Math.round((qm.cur / qm.tot) * 100)) : 0;
   const qpsTxt = qps != null ? `${qps.toFixed(qps < 10 ? 2 : 1)} q/s` : null;
@@ -108,7 +116,13 @@ export const TopStrip = memo(function TopStrip() {
       <span className="topstrip-sep" aria-hidden="true" />
       <span className="topstrip-phase">
         <span className={cx("phase-tag", phaseErr && "is-error", phaseWarn && "is-warn")} title={phaseTip}>{phase}</span>
-        <span className="topstrip-round">{round}</span>
+        {/* Candidate ("C2.3") already encodes the round, so show it instead of
+            "R{n}" while scoring; round otherwise. */}
+        {scoringCand ? (
+          <span className="topstrip-cand">{scoringCand}</span>
+        ) : (
+          <span className="topstrip-round">{round}</span>
+        )}
       </span>
       <span className="topstrip-sep" aria-hidden="true" />
       <span className="topstrip-prog">

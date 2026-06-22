@@ -77,9 +77,13 @@ async def score_population(
     sample_order_timelines: dict[str, list[SampleOrderStep]] = {}
 
     async def _pobb_backfill(sp: JobSearchPoint, samples: list[Sample]) -> list[QueryMeasurement]:
-        """Score *sp* on *samples* for PoBB paired-comparison fill-in. `candidate_idx=-1` is the
-        backfill sentinel — the display layer prefixes the row so the operator sees the LLM spend.
-        `degradation_checks=None` blocks recursive PoBB on backfill measurements.
+        """Score *sp* on *samples* for PoBB paired-comparison fill-in. *sp* is a
+        PRIOR searchpoint, not a foreground candidate — so this fires **no**
+        per-sample display callbacks (``on_sample_scored=None``). The backfill's
+        own surface is the dedicated ``on_pobb_backfill`` event the candidate
+        loop emits (`candidate.py`); its spend rides the token ledger. Wiring the
+        foreground candidate callbacks here would mint a bogus ``C{round}.0`` row.
+        ``degradation_checks=None`` blocks recursive PoBB on backfill.
         """
         best_full_results, _best_full_scores, _signal = await score_search_point(
             sp,
@@ -87,12 +91,11 @@ async def score_population(
             cycle.session,
             label="pobb_backfill",
             degradation_checks=None,
-            candidate_idx=-1,
             n_total_candidates=0,
             axes=cycle.axes,
             l1_diversity=0.0,
-            on_sample_scored=partial(callbacks.on_sample_scored, -1, 0),
-            on_sample_starting=partial(callbacks.on_sample_started, -1, 0),
+            on_sample_scored=None,
+            on_sample_starting=None,
         )
         return best_full_results
 

@@ -6,7 +6,7 @@ import {
   DOT_R,
   EDGES,
   LAYOUT,
-  phaseToNodeId,
+  activeNodeId,
 } from "./layout";
 import { TERMS } from "@/lib/terms";
 import { cx } from "@/lib/cx";
@@ -42,7 +42,7 @@ export function WorkflowCanvas({ pipeline }: Props) {
   const edges = EDGES;
   const canvasW = CANVAS_W;
   const canvasH = CANVAS_H;
-  const activeId = phaseToNodeId(dash?.state);
+  const activeId = activeNodeId(dash?.in_flight?.node ?? null, dash?.state);
   // Node selection rides the shared SelectionContext so the Now lane can
   // swap the 3-col row for OptimizerNodeDetail when a node is picked. The
   // viewed-round axis is owned by RoundTabsStrip (same tab) — the canvas
@@ -96,6 +96,12 @@ export function WorkflowCanvas({ pipeline }: Props) {
     view.nodes.map((n) => [n.id, n.label]),
   );
 
+  // The active node's human label — the accessible, color-independent echo of
+  // the pulse. The SVG is aria-hidden, so this toolbar text (in an aria-live
+  // region) is the channel that announces *which* node is live; it also makes
+  // the signal legible at a glance and under prefers-reduced-motion (no pulse).
+  const activeLabel = isLive && activeId ? nodeLabel[activeId] : null;
+
   const markerColors: Record<string, string> = {
     arrh: colors.txt,
     "arrh-loop": colors.ok,
@@ -107,8 +113,8 @@ export function WorkflowCanvas({ pipeline }: Props) {
     <div className={cx("workflow-card", isLive && "running")}>
       <div className="workflow-toolbar">
         <span style={{ flex: 1 }}>Optimizer</span>
-        <span style={{ color: isLive ? colors.ok : colors.txt }}>
-          ● {isLive ? "live" : dash ? "idle" : "pending"}
+        <span style={{ color: isLive ? colors.ok : colors.txt }} aria-live="polite">
+          ● {isLive ? (activeLabel ? `live · ${activeLabel}` : "live") : dash ? "idle" : "pending"}
         </span>
         <CopyButton
           data={dash?.current_round ?? view}

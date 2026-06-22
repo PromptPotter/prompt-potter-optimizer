@@ -12,7 +12,7 @@
 //   the produced search point leaves the right edge as a labelled arrow —
 //   there is no output dot.
 // `checkin` is the merged check-in + origin node — the origin-scoring phase
-// highlights it (see phaseToNodeId).
+// highlights it (see activeNodeId).
 //
 // Edge endpoints sit at the dot edge (DOT_R from each centre), not the
 // centre, so the stroke never overlaps the dot or its glow.
@@ -85,16 +85,22 @@ export const EDGES: Record<string, EdgeGeometry> = {
                                 label: "plan", labelXY: [244, 100] },
 };
 
-// dash.state → workflow node id
-export function phaseToNodeId(state: string | null | undefined): string | null {
-  if (!state) return null;
-  const s = String(state).toLowerCase();
-  // Origin scoring folds into the merged checkin node.
-  if (s === "origin") return "checkin";
-  if (s === "l1_generate") return "l1_generate";
-  if (s === "l1_critique") return "l1_critique";
-  if (s === "l2_refining") return "l2_context";
-  if (s === "l3_replanning") return "l3_plan";
+// The single authoritative "which optimizer node is live right now" id — the
+// one signal every surface (canvas pulse, RemoteBar, TopStrip, node detail)
+// reads. The in-flight optimizer LLM call names its node directly
+// (`l1_generate` / `l1_critique` / `l2_context` / `l3_plan` / `checkin`), so
+// every LLM-call node lights up reliably — including critique and the L2/L3
+// escalation nodes that the old `dash.state` enum never reached (no writer ever
+// emitted `state="l1_critique"`). Scoring fires no optimizer LLM call, so the
+// scoring states map to `l1_score`; the pre-scoring origin state → `checkin`.
+export function activeNodeId(
+  inFlightNode: string | null | undefined,
+  state: string | null | undefined,
+): string | null {
+  if (inFlightNode) return inFlightNode;
+  const s = state ? String(state).toLowerCase() : "";
   if (s === "scoring" || s === "between_samples" || s === "between_candidates") return "l1_score";
+  // Origin scoring folds into the merged checkin node (pre-scoring window only).
+  if (s === "origin") return "checkin";
   return null;
 }

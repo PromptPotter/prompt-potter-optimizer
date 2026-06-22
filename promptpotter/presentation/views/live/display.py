@@ -310,12 +310,8 @@ class LiveDisplay(DerivedView):
     def on_sample_scored(
         self, cand_idx: int, result: dict[str, Any], sample_idx: int, n_samples: int
     ) -> None:
-        # cand_idx < 0 = paired-PoBB backfill sentinel; distinct prefix, no counter bump.
-        if cand_idx < 0:
-            prefix = "  ↻ bf "
-        else:
-            self.sample_counter += 1
-            prefix = f"  [{self.sample_counter:>3d}] "
+        self.sample_counter += 1
+        prefix = f"  [{self.sample_counter:>3d}] "
         self._write(
             fmt_query_result(
                 result,

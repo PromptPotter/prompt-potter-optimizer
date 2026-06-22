@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -231,7 +232,12 @@ async def mint_campaign_command(
     # Everything below holds a slot — release it on any pre-launch failure so a
     # crashed preflight/init never wedges the machine at capacity.
     try:
+        # Pre-202 phase timing — the synchronous bootstrap is what the operator
+        # waits on (round-0 scoring is already backgrounded). One INFO line per
+        # phase so the dominant cost is visible on disk, not guessed at.
+        _t0 = time.perf_counter()
         await _run_preflight(backend_type, backend_url)
+        _t_preflight = time.perf_counter()
         # Daily-cap composition globs + reads every cycle ledger — offload so the
         # scan never blocks the single event loop on the launch path.
         spend_budget_usd = await asyncio.to_thread(
@@ -240,11 +246,20 @@ async def mint_campaign_command(
             user=user,
             stores=stores,
         )
+        _t_spendcap = time.perf_counter()
 
         session = await init_services(
             backend_url=backend_url,
             dataset_name=dataset_name,
             identity=stores.identity,
+        )
+        _t_init = time.perf_counter()
+        logger.info(
+            "mint-timing[%s]: preflight=%.2fs spend_cap=%.2fs init_services=%.2fs",
+            dataset_name,
+            _t_preflight - _t0,
+            _t_spendcap - _t_preflight,
+            _t_init - _t_spendcap,
         )
 
         # Reused-dataset setup edits ride the overlay onto a per-campaign snapshot;
@@ -266,7 +281,14 @@ async def mint_campaign_command(
         # commit from the check-in's decomposition) — or decompose a benchmark's
         # ``task_description.md`` once on first sight. No second LLM call once the
         # file exists; the web mint path previously ran with EMPTY framing.
+        _t_framing0 = time.perf_counter()
         task_context = await load_or_build_task_context(session.dataset_config_dir)
+        logger.info(
+            "mint-timing[%s]: task_context=%.2fs (total pre-202=%.2fs)",
+            dataset_name,
+            time.perf_counter() - _t_framing0,
+            time.perf_counter() - _t0,
+        )
     except BaseException:
         job_registry.mark_finished(job.job_id, status="failed", stop_reason="launch_aborted")
         raise
@@ -388,7 +410,11 @@ async def start_run_command(
     )
 
     try:
+        # Pre-202 phase timing — same instrumentation as ``mint_campaign_command``;
+        # this seam shares the preflight + spend-cap + init prologue.
+        _t0 = time.perf_counter()
         await _run_preflight(backend_type, backend_url)
+        _t_preflight = time.perf_counter()
         # Daily-cap composition globs + reads every cycle ledger — offload so the
         # scan never blocks the single event loop on the launch path.
         spend_budget_usd = await asyncio.to_thread(
@@ -397,11 +423,20 @@ async def start_run_command(
             user=user,
             stores=stores,
         )
+        _t_spendcap = time.perf_counter()
 
         session = await init_services(
             backend_url=backend_url,
             dataset_name=dataset_name,
             identity=stores.identity,
+        )
+        _t_init = time.perf_counter()
+        logger.info(
+            "start-timing[%s]: preflight=%.2fs spend_cap=%.2fs init_services=%.2fs",
+            dataset_name,
+            _t_preflight - _t0,
+            _t_spendcap - _t_preflight,
+            _t_init - _t_spendcap,
         )
 
         # Resume/fork rebuild config from the LIVE dataset file (so declaration
@@ -417,7 +452,14 @@ async def start_run_command(
 
         train_data = session.samples or []
         configure_and_apply_pipeline(session, campaign_config, log=lambda *_a, **_k: None)
+        _t_framing0 = time.perf_counter()
         task_context = await load_or_build_task_context(session.dataset_config_dir)
+        logger.info(
+            "start-timing[%s]: task_context=%.2fs (total pre-202=%.2fs)",
+            dataset_name,
+            time.perf_counter() - _t_framing0,
+            time.perf_counter() - _t0,
+        )
         # Bind the session to the EXISTING campaign/cycle before launch. Without
         # this `_ensure_session_minted` (guards on an empty session_id) would mint
         # a fresh random campaign + root cycle and steal the active pointer —

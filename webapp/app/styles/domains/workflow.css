@@ -27,8 +27,8 @@
 .wf-dot{fill:var(--color-accent);stroke:var(--color-accent);stroke-width:1;filter:drop-shadow(0 0 5px var(--color-accent-glow));transition:transform .15s,filter .15s,fill .15s}
 .wf-node:hover .wf-dot{transform-box:fill-box;transform-origin:center;transform:scale(1.12)}
 .wf-dot.selected{filter:drop-shadow(0 0 9px var(--color-accent-glow)) drop-shadow(0 0 14px var(--color-accent-glow))}
-.wf-dot.active{fill:var(--color-success);stroke:var(--color-success);filter:drop-shadow(0 0 7px rgba(var(--color-success-rgb),0.55));animation:pulse-active 1.6s ease-in-out infinite}
-@keyframes pulse-active{0%,100%{filter:drop-shadow(0 0 6px rgba(var(--color-success-rgb),0.40))}50%{filter:drop-shadow(0 0 12px rgba(var(--color-success-rgb),0.70))}}
+.wf-dot.active{fill:var(--color-success);stroke:var(--color-success);filter:drop-shadow(0 0 8px rgba(var(--color-success-rgb),0.70));animation:pulse-active 1.6s ease-in-out infinite}
+@keyframes pulse-active{0%,100%{filter:drop-shadow(0 0 7px rgba(var(--color-success-rgb),0.52))}50%{filter:drop-shadow(0 0 14px rgba(var(--color-success-rgb),0.85))}}
 .wf-dot.dim{opacity:.45}
 .wf-dot.kind-io{fill:var(--color-background-secondary);stroke:var(--color-border-tertiary);stroke-width:1.5;filter:none}
 .wf-dot.kind-measurement{fill:var(--color-text-tertiary);stroke:var(--color-text-tertiary);filter:drop-shadow(0 0 3px rgba(var(--color-accent-rgb),0.25))}

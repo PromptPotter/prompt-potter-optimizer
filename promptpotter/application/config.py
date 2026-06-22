@@ -64,11 +64,11 @@ class SelectionMechanisms(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     per_round_resubset: bool = Field(
-        True,
+        False,
         description=(
             "Re-pick the most-informative scoring subset every round from the "
-            "train bank (adaptive Rasch selection). Off → the subset is the "
-            "campaign-start selection (deterministic bank prefix), reused "
+            "train bank (adaptive Rasch selection). Off (default) → the subset is "
+            "the campaign-start selection (deterministic bank prefix), reused "
             "unchanged for the whole campaign so every round scores the same samples."
         ),
     )

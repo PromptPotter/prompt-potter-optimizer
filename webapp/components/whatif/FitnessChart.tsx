@@ -16,6 +16,7 @@ declare module "chart.js" {
   interface PluginOptionsByType<TType extends ChartType> {
     sampleCount?: { counts: (number | null)[] };
     divergenceLine?: { index: number | null };
+    inFlightPulse?: { index: number | null };
   }
 }
 
@@ -84,8 +85,82 @@ const divergenceLinePlugin: Plugin<"bar", { index: number | null }> = {
   },
 };
 
+// The in-flight candidate's bar pulses a green glow around its outline while it
+// is still accumulating samples — the same success-green glow the optimizer
+// canvas casts around the active node, here hugging the bar's box (no
+// background fill, just the glow around the box). Bars are canvas-drawn (not
+// DOM), so a CSS animation can't reach them: this plugin strokes the glow in
+// `afterDatasetsDraw` (on top of the bars) and drives its own redraw via
+// requestAnimationFrame. The loop runs ONLY while `index` is a real bar (a
+// candidate is scoring) and cancels itself the moment scoring ends or the chart
+// is destroyed — no standing animation against `animation:false`.
+const PULSE_PERIOD_MS = 1600;
+const pulseRaf = new WeakMap<object, number>();
+const inFlightPulsePlugin: Plugin<"bar", { index: number | null }> = {
+  id: "inFlightPulse",
+  afterDatasetsDraw(chart, _args, opts) {
+    const idx = opts?.index;
+    const cancel = () => {
+      const raf = pulseRaf.get(chart);
+      if (raf != null) {
+        cancelAnimationFrame(raf);
+        pulseRaf.delete(chart);
+      }
+    };
+    if (idx == null || idx < 0) {
+      cancel();
+      return;
+    }
+    const { ctx } = chart;
+    if (!ctx) return;
+    // Bounding box of the candidate's bar group (all visible series at idx).
+    let left = Infinity;
+    let right = -Infinity;
+    let top = Infinity;
+    let base = -Infinity;
+    chart.data.datasets.forEach((_ds, di) => {
+      const el = chart.getDatasetMeta(di).data[idx] as
+        | { getProps?: (p: string[], final: boolean) => Record<string, number> }
+        | undefined;
+      const p = el?.getProps?.(["x", "y", "base", "width"], true);
+      if (!p || [p.x, p.y, p.base, p.width].some((v) => typeof v !== "number")) return;
+      left = Math.min(left, p.x - p.width / 2);
+      right = Math.max(right, p.x + p.width / 2);
+      top = Math.min(top, p.y);
+      base = Math.max(base, p.base);
+    });
+    if ([left, right, top, base].some((v) => !Number.isFinite(v))) {
+      cancel();
+      return;
+    }
+    const t = 0.5 + 0.5 * Math.sin((Date.now() / PULSE_PERIOD_MS) * Math.PI * 2);
+    const glow = getCss("--color-success") || "#1a8265";
+    ctx.save();
+    ctx.strokeStyle = glow;
+    ctx.globalAlpha = 0.55 + 0.4 * t;
+    ctx.lineWidth = 1.5;
+    ctx.shadowColor = glow;
+    ctx.shadowBlur = 7 + 9 * t;
+    ctx.strokeRect(left - 1.5, top - 1.5, right - left + 3, base - top + 3);
+    ctx.restore();
+    // Drive the next frame — chart.draw() re-enters this hook, so the loop
+    // self-sustains while a bar is in flight (rAF caps it to the refresh rate).
+    pulseRaf.set(
+      chart,
+      requestAnimationFrame(() => {
+        if (chart.ctx) chart.draw();
+      }),
+    );
+  },
+  beforeDestroy(chart) {
+    const raf = pulseRaf.get(chart);
+    if (raf != null) cancelAnimationFrame(raf);
+    pulseRaf.delete(chart);
+  },
+};
+
 // Stable identity — passing a fresh array each render churns the chart.
-const CHART_PLUGINS = [sampleCountPlugin, divergenceLinePlugin];
+const CHART_PLUGINS = [sampleCountPlugin, divergenceLinePlugin, inFlightPulsePlugin];
 
 // Above this real-bar count, x-axis labels rotate 60° so they stop
 // overlapping their neighbours. Picked empirically against the 240px
@@ -132,6 +207,9 @@ interface Props {
   // the red vertical divider is drawn at its left edge. null = no mask / no
   // divergence (no divider).
   divergenceBoundary: number | null;
+  // Bar index of the candidate currently accumulating samples — it pulses
+  // ("blinking") while live. null = nothing scoring (no pulse).
+  inFlightIndex: number | null;
 }
 
 export const FitnessChart = memo(function FitnessChart({
@@ -141,6 +219,7 @@ export const FitnessChart = memo(function FitnessChart({
   selectedKey,
   onSelect,
   divergenceBoundary,
+  inFlightIndex,
 }: Props) {
   // Subscribe to theme so a flip re-runs this component and the data/options
   // memos below pick up the new getCss() values.
@@ -333,9 +412,10 @@ export const FitnessChart = memo(function FitnessChart({
       },
       sampleCount: { counts: bars.map((b) => b.nSamples) },
       divergenceLine: { index: divergenceBoundary },
+      inFlightPulse: { index: inFlightIndex },
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [themeVersion, accRaw, compRaw, whatifRaw, verifyRaw, rotate, bars, selectedKey, onSelect, divergenceBoundary]);
+  }), [themeVersion, accRaw, compRaw, whatifRaw, verifyRaw, rotate, bars, selectedKey, onSelect, divergenceBoundary, inFlightIndex]);
 
   return (
     <div className="fitness-chart-frame">

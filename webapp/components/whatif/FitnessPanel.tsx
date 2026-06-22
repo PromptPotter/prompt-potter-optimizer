@@ -30,11 +30,12 @@ import { measuredUniverse } from "@/lib/sample-set";
 import { useLineageOverlay, divergenceRoundsFor } from "@/lib/lineage-overlay";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { targetNodeIds } from "@/lib/terms";
+import { activeNodeId } from "@/components/workflow";
 
 export function FitnessPanel() {
   // Self-sourced: live snapshot from the cycle stream, (campaignId, cycleId)
   // from the workspace. `cycleId` scopes the one-shot evaluator-seed.
-  const { dash } = useDashboard();
+  const { dash, isLive } = useDashboard();
   const { campaignId, cycleId } = useWorkspace();
   // Shared candidate selection — driving any of {fitness bar, lineage stub}
   // sets this context slot; the other surface(s) re-render highlighted.
@@ -287,6 +288,19 @@ export function FitnessPanel() {
     return idx >= 0 ? idx : null;
   }, [overlay, cycleId, bars]);
 
+  // The bar of the candidate currently accumulating samples — it blinks while
+  // live. The scoring candidate is `dash.candidate` ("C2.3/4"); gate on the
+  // active node being the scorer + a live connection so a frozen/closed cycle
+  // never pulses, and a between-rounds stale `candidate` doesn't either.
+  const inFlightIndex = useMemo(() => {
+    if (!isLive) return null;
+    if (activeNodeId(dash?.in_flight?.node ?? null, dash?.state) !== "l1_score") return null;
+    const lbl = String(dash?.candidate || "").split("/")[0];
+    if (!lbl) return null;
+    const idx = bars.findIndex((b) => b.label === lbl);
+    return idx >= 0 ? idx : null;
+  }, [isLive, dash?.in_flight, dash?.state, dash?.candidate, bars]);
+
   return (
     <CardFrame
       className={`fitness-card${showWhatIf ? " whatif-open" : ""}`}
@@ -351,6 +365,7 @@ export function FitnessPanel() {
             showComposite={showComposite}
             showWhatIf={showWhatIf}
             divergenceBoundary={divergenceBoundary}
+            inFlightIndex={inFlightIndex}
             selectedKey={
               selectedCandidate
                 ? bars.find(

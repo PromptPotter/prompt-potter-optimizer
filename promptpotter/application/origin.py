@@ -65,12 +65,11 @@ async def rescore_origin(
     yields a real same-subset floor; samples it already measured replay from cache for
     free, so the cost is one measurement per *new* hard sample the incumbent hasn't seen.
 
-    ``candidate_idx=-1`` is the backfill sentinel (the display layer prefixes the row so
-    the operator sees the origin's spend); ``degradation_checks=None`` blocks the floor
-    from aborting itself.
+    This re-scores a PRIOR searchpoint (the incumbent), not a foreground candidate,
+    so it fires **no** per-sample display callbacks — wiring them would mint a bogus
+    ``C{round}.0`` row. Its spend rides the token ledger; ``degradation_checks=None``
+    blocks the floor from aborting itself.
     """
-    from functools import partial
-
     from promptpotter.application.scoring.metrics import compute_composite_fitness
     from promptpotter.application.scoring.search_point_scorer import score_search_point
 
@@ -84,12 +83,11 @@ async def rescore_origin(
         session,
         label="origin_baseline",
         degradation_checks=None,
-        candidate_idx=-1,
         n_total_candidates=0,
         axes=cycle.axes,
         l1_diversity=0.0,
-        on_sample_scored=partial(callbacks.on_sample_scored, -1, 0),
-        on_sample_starting=partial(callbacks.on_sample_started, -1, 0),
+        on_sample_scored=None,
+        on_sample_starting=None,
         force_fresh=force_fresh,
     )
     accuracy = tr.current_accuracy

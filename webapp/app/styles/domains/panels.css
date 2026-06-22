@@ -17,6 +17,9 @@ h1{font-size:26px;font-weight:600;line-height:1.2}
 .topstrip-spark .area{fill:var(--color-accent-glow);stroke:none}
 .topstrip-phase,.topstrip-prog,.topstrip-last{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--color-text-secondary)}
 .topstrip-round{font-weight:600;color:var(--color-text-primary)}
+/* Current candidate being scored ("C3.2"), beside the round — the finer
+   position marker, shown only while scoring (see TopStrip). */
+.topstrip-cand{font-weight:600;color:var(--color-success)}
 .topstrip-qps{color:var(--color-text-tertiary)}
 .topstrip-counter-val{font-size:13px;color:var(--color-text-primary);font-family:var(--font-mono);font-weight:500}
 .topstrip-trace{font-size:11px;color:var(--color-accent);text-decoration:none;font-weight:600}

@@ -50,6 +50,10 @@
 /* Concise status — round + spend, tabular so it doesn't jitter as it ticks. */
 .remote-status{display:inline-flex;align-items:center;gap:8px;font-variant-numeric:tabular-nums;color:var(--color-text-tertiary)}
 .remote-round{font-weight:600;color:var(--color-text-secondary,inherit)}
+/* Current candidate being scored ("C3.2") — the finer position marker beside
+   the round, so the remote tells you which individual the loop is on, not just
+   which round. Shown only while scoring (see RemoteBar). */
+.remote-cand{font-weight:600;color:var(--color-success)}
 
 /* Babysat tag — this cycle was human-steered (a skip), no longer purely
    reproducible. Icon + word, never colour alone. */

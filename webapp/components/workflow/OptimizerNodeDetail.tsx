@@ -8,7 +8,7 @@ import { useRoundSource } from "@/lib/hooks/useRoundSource";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
 import { useEffectiveRound } from "@/lib/hooks/useEffectiveRound";
-import { phaseToNodeId } from "./layout";
+import { activeNodeId } from "./layout";
 import { fmtSecs } from "@/lib/format";
 import { CopyButton } from "@/components/ui";
 import type { NodeBlock } from "@/lib/types";
@@ -113,7 +113,7 @@ export function OptimizerNodeDetail({ id, pipeline, onClose }: Props) {
     ? `${usage.prompt_tokens ?? "—"}p / ${usage.completion_tokens ?? "—"}c / ${usage.total_tokens ?? "—"}t`
     : "";
 
-  const livePhaseNode = phaseToNodeId(dash?.state ?? null);
+  const livePhaseNode = activeNodeId(dash?.in_flight?.node ?? null, dash?.state ?? null);
   const isLiveNow = isLive && livePhaseNode === id;
   const statusLine = isLiveNow
     ? `live · round ${liveRound ?? "—"}`

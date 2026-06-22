@@ -71,6 +71,41 @@ Activity and decision items are **rendered, never authored by the client** — t
 projects them from the stream and from copilot turns. Message items are the only ones the
 operator and assistant write. This is the structural line that keeps the thread honest.
 
+## 1a. Liveness — the Focus chain (the *now*, complementing the stream)
+
+The activity stream (§1) is the **history**: an append-only log of what the run *did*. A
+running task also needs the orthogonal answer — *what is it doing right **now***? That is the
+**Focus chain**: at any instant the run has a path from coarse to fine, and a good "something
+is running" surface shows every level at once. The names are deliberately generic so the
+template carries to any project, no pre-knowledge required:
+
+| Level | Answers | PromptPotter meaning | Backing field |
+|---|---|---|---|
+| **Live** | Is it alive? | the heartbeat / pulse | `run_phase` + poll freshness (`isLive`) |
+| **Stage** | What part of the work? | Check-in / Generating / Scoring / Refining / Replanning | `dashboard.json::state` |
+| **Step** | Which operation right now? | the active optimizer node | `activeNodeId(in_flight.node, state)` |
+| **Item** | Which unit right now? | the candidate being scored (`C3.2`) | `dashboard.json::candidate` |
+| **Progress** | How far through the item? | samples `24/40`, rate | `dashboard.json::query` |
+
+**One canonical "active" signal, read everywhere.** The Step level resolves through a single
+function — `activeNodeId` (`webapp/components/workflow/layout.ts`) — that every surface reads
+(the optimizer-canvas pulse, the RemoteBar, the TopStrip, the node detail). It reads the
+**in-flight LLM call's node** first (`dashboard.json::in_flight.node`, which names the live node
+directly for `l1_generate` / `l1_critique` / `l2_context` / `l3_plan` / `checkin`), falling back
+to the scoring states → `l1_score` only because scoring fires no optimizer LLM call. This
+replaced a lossy `state`-enum mapping that could never light the critique node (no writer ever
+emitted `state="l1_critique"`) and blanked the escalation nodes — the bug class where the
+canvas looked dead while the run was busy. The rule: **derive "what's active" once, from the
+authoritative on-disk signal; never re-infer it per surface.**
+
+**Item / Step are the optimizer specialization of the generic levels.** Exactly as §1 frames
+`candidate` / `round` as the optimizer-specific layer on the generic activity vocabulary, the
+Focus chain's `Step` (= optimizer node) and `Item` (= candidate `C{round}.{idx}`) are what a
+reusing team re-points at their own units of work; `Live` / `Stage` / `Progress` are generic
+and kept. The accessibility invariant (§2) holds here too — the active Step pairs the green
+pulse with a **text label** (the canvas toolbar's `live · {node}` in an `aria-live` region), so
+"which node is live" reads without relying on color alone.
+
 ## 2. Activity rendering — the `ProjectionEnvelope → ActivityItem` translator
 
 The backend activity highway **already exists** and needs no change for v1. Every frame on
