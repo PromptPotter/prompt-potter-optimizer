@@ -296,8 +296,8 @@ async def _drive_optimization(
     observers = _build_observers(args, session, campaign_config, train_data, pre_origin_acc)
     ctx.save_phase("optimizing")
 
-    # Control-local hooks (stop.flag / pause.flag) are bound centrally in
-    # run_optimization (the single runner seam) so CLI + API launches match.
+    # Control-local hooks (pause.flag) are bound centrally in run_optimization
+    # (the single runner seam) so CLI + API launches match.
     cycle_result = await _orch_run_optimization(
         train_data,
         campaign_config,

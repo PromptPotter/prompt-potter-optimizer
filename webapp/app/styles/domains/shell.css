@@ -90,10 +90,9 @@
 .unit-library-meta{font-size:11px;color:var(--color-text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .unit-library-live{color:var(--color-status-success,#16a34a);margin-left:4px;font-size:8px;vertical-align:middle}
 /* Terminal run-state on a non-running unit row — distinguishes a stopped/aborted
-   campaign from the live one (CLI↔webapp parity). Reason word carries the meaning;
-   an interrupted/aborted run is danger-tinted so it reads as stale, not done. */
+   campaign from the live one (CLI↔webapp parity). The reason word carries the
+   meaning; a terminal run's status reads as stale, not done. */
 .unit-library-status{text-transform:uppercase;letter-spacing:.04em;color:var(--color-text-tertiary)}
-.unit-library-status[data-interrupted="true"]{color:var(--color-danger,#b03d3d)}
 /* Unit-kind badge on a non-root unit row (fork / diag / sweep). Small,
    uppercase, low-contrast — a qualifier, not a focal point. The root unit
    gets no badge. */

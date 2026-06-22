@@ -30,8 +30,8 @@ _RESET = "\033[0m"
 # Cooperative-abort predicate the countdown waits poll. Per-asyncio-task
 # (ContextVar) so concurrent cycles in one process — the API server runs each
 # run as its own task — never cross predicates, and a task that ends drops its
-# copy (no reset needed). Bound once at the runner seam to ``session.stop_check``
-# (reads ``.runtime/stop.flag``). ``None`` (the default — CLI/tests) leaves the
+# copy (no reset needed). Bound once at the runner seam to ``session.pause_check``
+# (reads ``.runtime/pause.flag``). ``None`` (the default — CLI/tests) leaves the
 # wait a plain sleep, broken only by a propagating ``KeyboardInterrupt``.
 _ABORT_CHECK: ContextVar[Callable[[], bool] | None] = ContextVar(
     "rate_limit_abort_check", default=None
@@ -46,8 +46,8 @@ _UNWAITABLE_SCOPES: frozenset[str] = frozenset({"TPD", "RPD", "TPH", "RPH", "dai
 def set_abort_check(predicate: Callable[[], bool] | None) -> None:
     """Bind the cooperative-abort predicate :func:`wait_with_countdown` polls.
 
-    Set at the runner seam to ``session.stop_check``. Because the operator's
-    stop button writes ``.runtime/stop.flag`` cross-process, this is what lets a
+    Set at the runner seam to ``session.pause_check``. Because the operator's
+    pause button writes ``.runtime/pause.flag`` cross-process, this is what lets a
     multi-minute rate-limit wait be broken even when an OS Ctrl+C never reaches
     the loop (a hosting uvicorn swallows SIGINT into its own graceful shutdown).
     """
@@ -180,9 +180,9 @@ async def wait_with_countdown(total_sec: float, label: str) -> None:
     """Sleep `total_sec` while emitting a yellow single-line countdown to stderr.
 
     Cooperatively abortable: each 1 s tick polls the per-task abort predicate
-    (:func:`set_abort_check`); a requested stop raises ``asyncio.CancelledError``
+    (:func:`set_abort_check`); a requested pause raises ``asyncio.CancelledError``
     so the surrounding loop unwinds through its existing interrupt path instead
-    of blocking out the full wait. This is why the operator's stop button — not
+    of blocking out the full wait. This is why the operator's pause button — not
     only an OS Ctrl+C — breaks the wait.
     """
     abort = _ABORT_CHECK.get()

@@ -243,7 +243,7 @@ campaign's root-cycle ledger. (2) **Display** — ledger subscribers (`LiveDispl
 `LiveDashboardView`, `AuditTrailView`); read-only, never write
 campaign artifacts. **Run-state is owned state, not a freshness
 guess.** The runner *declares* its control phase — `running` /
-`paused` / `stopping`, plus `terminal` at finalize — onto the ledger
+`paused`, plus `terminal` at finalize — onto the ledger
 as a `control` `PhaseRecord`, and `LiveDashboardView` projects it to
 `dashboard.json::run_phase` (the `RunPhase` vocabulary,
 `domain/phases.py`). Every surface reads that one value; the only
@@ -254,11 +254,20 @@ the control flags and consults `dashboard.json` freshness *only* to
 split `running` from `detached`. The terminal reason maps onto its
 display label + outcome class exactly once, through the single
 `STOP_REASON_INFO` table (which in turn drives `index.json::status`,
-`JobStatus`, and the webapp label). (3) **Control-local** —
-`stop_check` on
+`JobStatus`, and the webapp label). **Pause is the single
+operator-interrupt — there is no separate "stop".** A pause exits the
+worker cleanly at the next checkpoint but leaves the cycle
+**non-terminal and resumable** (no `finished_at`); "resume" is the
+`start-run`/`resume` launcher relaunching from the last completed round,
+not an in-place unpause. So "the loop stopped" never means "the work is
+done": only a user-specified target threshold (e.g. 90%) is an autonomous
+*completion*; `max_rounds` / budget caps are configured-limit halts the
+operator reviews and may bump+resume. A truly authoritative "done" is a
+human mark — a verb deliberately not built yet; "discard" is
+archive/delete, a separate axis. (3) **Control-local** — `pause_check` on
 `Session`; signals the loop to exit, writes nothing. The webapp's
-"Stop run" button rides this kind by writing a `.runtime/stop.flag`
-file the running loop polls via `stop_check`; the API route writing
+"Pause run" button rides this kind by writing a `.runtime/pause.flag`
+file the running loop polls via `pause_check`; the API route writing
 the flag is an explicitly-sanctioned mutation listed in
 `promptpotter/presentation/CLAUDE.md`. (4) **Control-remote** —
 HTTP-ingressed mutations authored by signed-in operators or
@@ -376,7 +385,7 @@ projections written by sole-writer subscribers under the single-writer
 invariant (pinned above). Operator hand-edits to these files are not
 the input channel; the next ledger event overwrites them. Operator
 input flows through the **Control** kinds only: Control-local
-(`.runtime/stop.flag`, polled by `stop_check`) and Control-remote
+(`.runtime/pause.flag`, polled by `pause_check`) and Control-remote
 (HTTP → `CommandRecord` on the ledger → runner subscriber → `CommandAckRecord`).
 The early "folder-UI" workflow of just opening files was — and remains —
 a read-out workflow; writes have always landed via the running loop.

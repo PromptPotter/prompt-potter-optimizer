@@ -16,7 +16,7 @@ export interface RoundSummaryCandidate {
   partial_reason: string;
 }
 
-/** Backend-computed, context-aware degradation verdict for a round (origin */
+/** Context-aware degradation verdict for a round (origin included), computed */
 export interface DegradationHealth {
   grade: 'healthy' | 'degraded' | 'critical';
   reasons: string[];
@@ -187,12 +187,12 @@ export interface CycleListEntry {
   is_root: boolean;
   status: string;
   /** The single run-state value (RunPhase) — checkin (origin still being authored,
-   * pre-loop) / running / paused / stopping / detached / terminal. Computed
-   * once by derive_run_phase from lifecycle + control flags + freshness;
-   * every picker dot and badge reads this, none re-derive it. 'checkin' wins
-   * first (the campaign hasn't run); 'terminal' pairs with `status` for the
-   * reason label. */
-  run_phase: 'checkin' | 'running' | 'paused' | 'stopping' | 'detached' | 'terminal';
+   * pre-loop) / running / paused / detached / terminal. Computed once by
+   * derive_run_phase from lifecycle + control flags + freshness; every picker
+   * dot and badge reads this, none re-derive it. 'checkin' wins first (the
+   * campaign hasn't run); 'terminal' pairs with `status` for the reason
+   * label. */
+  run_phase: 'checkin' | 'running' | 'paused' | 'detached' | 'terminal';
   best_accuracy: number | null;
   n_rounds: number;
   created_at: string;
@@ -395,7 +395,7 @@ export const STOP_REASON_LABELS: Record<string, string> = {
   'diag_complete': 'Diagnostic complete',
   'l3_patience_exhausted': 'Converged (L3 patience)',
   'rebased_to_fork': 'Rebased to fork',
-  'interrupted': 'Interrupted',
+  'paused': 'Paused',
   'escalation_abort': 'Escalation abort',
   'spend_budget': 'Spend budget reached',
   'token_budget': 'Token budget reached',

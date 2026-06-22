@@ -16,8 +16,8 @@ brings up a new connector whose ``pipeline.json`` or backend code is still buggy
 One decision channel, every surface: the decision arrives as
 ``.runtime/gate_decision.json`` (written by the ``origin-gate-decision`` command
 applier — webapp modal, notebook, or any remote surface) or, on an attached TTY,
-typed at the CLI prompt. The runner polls that file (mirroring ``pause_gate``);
-``stop_check`` (Ctrl+C / ``stop.flag``) always wins.
+typed at the CLI prompt. The runner polls that file; a pause (the pause button or
+Ctrl+C, ``.runtime/pause.flag``) always wins and exits the gate resumable.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ import sys
 import threading
 from typing import TYPE_CHECKING, Literal
 
-from promptpotter.application.run_phase_control import declare_run_phase
+from promptpotter.application.run_phase_control import declare_run_phase, pause_requested
 from promptpotter.application.runner.round import emit_origin_round
 from promptpotter.application.runner.termination import OriginGateMode, origin_gate_tripped
 from promptpotter.domain.phases import RunPhase, StopReason
@@ -55,7 +55,7 @@ _DECISION_FILE = "gate_decision.json"
 _DECISIONS = ("rescore", "proceed", "abort")
 
 GateDecision = Literal["rescore", "proceed", "abort"]
-_GateOutcome = Literal["rescore", "proceed", "abort", "stop"]
+_GateOutcome = Literal["rescore", "proceed", "abort", "pause"]
 
 
 async def run_origin_gate(
@@ -70,7 +70,7 @@ async def run_origin_gate(
 
     Returns ``None`` to proceed into L1 (operator chose ``proceed``, or a
     ``rescore`` produced a now-healthy origin) or a ``StopReason`` to halt
-    (``ORIGIN_GATE`` on ``abort``, ``INTERRUPTED`` if a stop was requested while
+    (``ORIGIN_GATE`` on ``abort``, ``PAUSED`` if a pause was requested while
     waiting). Re-entrant: a ``rescore`` re-scores the origin force-fresh, re-emits
     round 0, and loops — a still-unhealthy verdict waits again, a healthy one
     proceeds. The caller invokes this only after ``origin_gate_tripped`` already
@@ -98,9 +98,9 @@ async def run_origin_gate(
         declare_run_phase(session, RunPhase.GATE)
 
         outcome = await _await_gate_decision(session, stdin_q)
-        if outcome == "stop":
-            declare_run_phase(session, RunPhase.STOPPING)
-            return StopReason.INTERRUPTED
+        if outcome == "pause":
+            declare_run_phase(session, RunPhase.PAUSED)
+            return StopReason.PAUSED
         if outcome == "abort":
             logger.warning("Origin gate: abort — ending cycle (origin_gate).")
             return StopReason.ORIGIN_GATE
@@ -133,13 +133,13 @@ async def run_origin_gate(
 async def _await_gate_decision(
     session: Session, stdin_q: queue.Queue[GateDecision] | None
 ) -> _GateOutcome:
-    """Block until a decision lands on the flag file or stdin. ``stop_check``
-    always wins. A stale decision from a prior gate entry is cleared first."""
+    """Block until a decision lands on the flag file or stdin. A pause always
+    wins. A stale decision from a prior gate entry is cleared first."""
     decision_path = _decision_path(session)
     decision_path.unlink(missing_ok=True)
     while True:
-        if session.stop_check is not None and session.stop_check():
-            return "stop"
+        if pause_requested(session):
+            return "pause"
         from_file = _read_decision_file(decision_path)
         if from_file is not None:
             decision_path.unlink(missing_ok=True)

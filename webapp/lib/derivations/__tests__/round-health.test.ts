@@ -3,7 +3,10 @@ import { degradedRoundNotices } from "../round-health";
 import type { DashboardSnapshot } from "@/lib/poll";
 import type { DegradationHealth } from "@/lib/api/types";
 
-function health(grade: string, over: Partial<DegradationHealth> = {}): DegradationHealth {
+function health(
+  grade: DegradationHealth["grade"],
+  over: Partial<DegradationHealth> = {},
+): DegradationHealth {
   return {
     grade,
     reasons: grade === "degraded" ? ["degraded"] : [],

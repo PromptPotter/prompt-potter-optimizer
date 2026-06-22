@@ -45,12 +45,12 @@ export function SessionSubtree({
   const active =
     cid === activeCampaignId && root.cycle_id === activeCycleId && root.run_phase !== "checkin";
   const live = root.run_phase === "running";
-  // Terminal (stopped) cycles surface their stop-reason so a CLI-aborted campaign
-  // reads as stale, not identical to the live one. Per-cycle (not the campaign
-  // rollup) so multi-session campaigns stay correct.
+  // Terminal cycles surface their stop-reason (crashed / max-rounds / target-hit
+  // …) so a finished campaign reads as such, not identical to the live one. A
+  // paused cycle is non-terminal, so it shows no terminal label. Per-cycle (not
+  // the campaign rollup) so multi-session campaigns stay correct.
   const statusLabel =
     !live && root.run_phase === "terminal" ? runPhaseLabel(root.run_phase, root.status) : null;
-  const interrupted = root.status === "interrupted";
 
   // Branch-kind chips (only on the row that owns the fork-tree twist).
   const counts = { fork: 0, sweep: 0, diag: 0 };
@@ -104,12 +104,7 @@ export function SessionSubtree({
             <span className="unit-library-meta">
               {statusLabel && (
                 <>
-                  <span
-                    className="unit-library-status"
-                    data-interrupted={interrupted || undefined}
-                  >
-                    {statusLabel}
-                  </span>
+                  <span className="unit-library-status">{statusLabel}</span>
                   {" · "}
                 </>
               )}

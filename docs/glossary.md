@@ -333,8 +333,10 @@ The persisted world is a four-entity containment hierarchy
 - **Projection** — a `DerivedView` subclass that subscribes to the
   ledger and writes its own artifact (dashboard.json, audit cache,
   PoBB stream). `infrastructure/projections/`.
-- **stop.flag** — `.runtime/stop.flag` under a cycle dir. The webapp's
-  "Stop run" writes this; `session.stop_check` polls it. The only
+- **pause.flag** — `.runtime/pause.flag` under a cycle dir. The webapp's
+  "Pause run" writes this; `session.pause_check` polls it. The single
+  operator-interrupt flag (no separate `stop.flag`): the worker exits
+  cleanly at the next checkpoint and the cycle stays resumable. The only
   sanctioned Control-local mutation surface.
 
 ## Domain framing words (rule of thumb)

@@ -89,17 +89,17 @@ class Session:
 
     source: str = ""
 
-    stop_check: Callable[[], bool] | None = None
-    # `pause_check` follows the same shape: returns True while the operator
-    # has requested a pause (`.runtime/pause.flag` present). The round loop
-    # blocks at round boundaries until the flag clears. `stop_check` always
-    # wins — stop-during-pause exits the wait loop cleanly.
+    # `pause_check` returns True while the operator has requested a pause
+    # (`.runtime/pause.flag` present — the single operator-interrupt flag). The
+    # loop checkpoints poll it and, when set, declare PAUSED and exit cleanly:
+    # the worker ends, the cycle stays resumable. Bound at the runner seam and
+    # also fed to `set_abort_check` so a pause breaks a long rate-limit wait.
     pause_check: Callable[[], bool] | None = None
     # `skip_check` returns True while a one-shot `.runtime/skip.flag` is present
-    # (operator early-abort of the searchpoint scoring now). Unlike stop/pause it
-    # does NOT end or hold the cycle — the per-sample checkpoint accepts the
-    # partial and continues. `skip_consume` removes the flag the instant it fires
-    # so exactly one searchpoint is cut, not the whole round.
+    # (operator early-abort of the searchpoint scoring now). Unlike pause it
+    # does NOT end the cycle — the per-sample checkpoint accepts the partial and
+    # continues. `skip_consume` removes the flag the instant it fires so exactly
+    # one searchpoint is cut, not the whole round.
     skip_check: Callable[[], bool] | None = None
     skip_consume: Callable[[], None] | None = None
 

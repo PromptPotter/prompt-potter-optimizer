@@ -197,10 +197,10 @@ async def _prepare_run(
     cb = observers.callbacks
 
     # A fresh launch supersedes any prior run-control intent: drop a consumed
-    # stop/pause flag left on this cycle's `.runtime/` by an earlier stopped run,
-    # else a stale stop.flag kills this very resume on its first poll (a stopped
+    # pause flag left on this cycle's `.runtime/` by an earlier paused run, else
+    # a stale pause.flag pauses this very resume on its first poll (a paused
     # cycle could never be resumed). Once, here at the seam every launch funnels
-    # through — before the stop_check hook binds in the rebase loop below.
+    # through — before the pause_check hook binds in the rebase loop below.
     if session.state.cycle_id:
         clear_run_control_flags(
             session.store.campaigns.cycle_dir(session.campaign_id, session.state.cycle_id)
@@ -398,22 +398,21 @@ async def run_optimization(
                 if session.state.cycle_id
                 else Path()
             )
-            # Control-local hooks (pause/stop) bind HERE — the single runner
-            # seam every launch path funnels through — not at the entry points.
-            # The CLI used to set these in new.py/resume.py, which left the API
-            # launcher's runs (mint / start-run) unable to pause or stop: the
-            # flags were written but never polled. Binding per rebase/fork
-            # iteration also tracks a fork's own cycle dir (the entry-point
-            # version bound once and went stale across forks).
+            # Control-local hooks (pause) bind HERE — the single runner seam
+            # every launch path funnels through — not at the entry points. The
+            # CLI used to set these in new.py/resume.py, which left the API
+            # launcher's runs (mint / start-run) unable to pause: the flag was
+            # written but never polled. Binding per rebase/fork iteration also
+            # tracks a fork's own cycle dir (the entry-point version bound once
+            # and went stale across forks).
             if session.state.cycle_id:
                 runtime_dir = cycle_dir_for_probe / ".runtime"
                 skip_flag = runtime_dir / "skip.flag"
-                session.stop_check = (runtime_dir / "stop.flag").is_file
                 session.pause_check = (runtime_dir / "pause.flag").is_file
-                # Let a stop break a long rate-limit countdown mid-wait — the one
-                # blocking seam that otherwise ignores the stop channel. Same
+                # Let a pause break a long rate-limit countdown mid-wait — the one
+                # blocking seam that otherwise ignores the pause channel. Same
                 # predicate, bound into the per-task ContextVar the wait polls.
-                set_abort_check(session.stop_check)
+                set_abort_check(session.pause_check)
                 # Skip is one-shot: poll the flag, then the loop deletes it the
                 # instant it fires so exactly one searchpoint is cut.
                 session.skip_check = skip_flag.is_file
@@ -442,8 +441,8 @@ async def run_optimization(
                 if isinstance(exc, KeyboardInterrupt)
                 else "programmatic cancellation"
             )
-            logger.warning("Optimization interrupted before round loop entered (%s).", cause)
-            stop_reason = StopReason.INTERRUPTED
+            logger.warning("Optimization paused before round loop entered (%s).", cause)
+            stop_reason = StopReason.PAUSED
             cycle_error = None
         except ResumeDivergenceError as exc:
             # Operator-recoverable; fix is ``--fork-on-divergence``.
@@ -564,16 +563,22 @@ def _finalize_run(
     no tracing bridge is active) so the caller can stamp it onto the returned ``CycleResult``.
     """
     stop_reason = cycle_result.stop_reason
-    is_interrupted = stop_reason == StopReason.INTERRUPTED
+    is_paused = stop_reason == StopReason.PAUSED
     is_crashed = stop_reason == StopReason.CRASHED
     is_render_error = stop_reason == StopReason.RENDER_ERROR
     is_optimizer_timeout = stop_reason == StopReason.OPTIMIZER_TIMEOUT
     # All four reasons leave the round partial. Render-error stashes a traceback like crash does;
-    # optimizer-timeout is graceful (cause is in the log).
-    halted_mid_round = is_interrupted or is_crashed or is_render_error or is_optimizer_timeout
+    # optimizer-timeout is graceful (cause is in the log); a pause exits mid-round but the cycle
+    # stays non-terminal and resumable.
+    halted_mid_round = is_paused or is_crashed or is_render_error or is_optimizer_timeout
     has_traceback = is_crashed or is_render_error
     emitter = observers.dashboard
-    if session.state.cycle_id:
+    # A pause is an operator interrupt that exits the worker but leaves the cycle ACTIVE and
+    # resumable — NOT terminal. Skip every terminal-marking write (mark_finished /
+    # mark_campaign_finished / mark_stopped) so index.json keeps no `finished_at` and
+    # derive_run_phase keeps reading the PAUSED the loop already declared off `pause.flag`.
+    # The partial round is still drained (below) so the operator sees where it paused.
+    if session.state.cycle_id and not is_paused:
         # Active round at teardown — surfaces on `interrupted_round` so the operator sees which
         # round is partial without diffing the on-disk tree (works for crash too; traceback is the
         # discriminator).
@@ -629,7 +634,7 @@ def _finalize_run(
     # for both Ctrl+C and uncaught-exception teardowns. The operator-facing
     # ``dashboard.json::error`` block is owned by ``_handle_error_record`` (sole
     # writer) and was already populated at the ``emit_error_record`` site.
-    if emitter is not None:
+    if emitter is not None and not is_paused:
         emitter.mark_stopped(str(stop_reason or ""))
     observers.audit._halted_mid_round = halted_mid_round
     observers.drain_all()

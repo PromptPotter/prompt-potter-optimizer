@@ -125,16 +125,6 @@ export async function postCleanupEmpty(
   });
 }
 
-export async function postStopCycle(
-  campaignId: string,
-  cycleId: string,
-): Promise<CommandAcceptedBody> {
-  return _postCommand("stop-cycle", {
-    campaign_id: campaignId,
-    cycle_id: cycleId,
-  });
-}
-
 // Campaign lifecycle — soft-marks `lifecycle_status` on the campaign
 // manifest. Measurements survive (cross-campaign cache-hits keep working).
 // Deletion is never physical at this site; `try_delete_stub_cycle` stays
@@ -164,23 +154,18 @@ export async function postDeleteCampaign(
   return _postCommand("delete-campaign", payload);
 }
 
-// Pause / resume a running cycle. Pause writes `.runtime/pause.flag`; the
-// loop's `pause_check` blocks at the next round boundary while it's present.
-// Resume removes the flag; the wait-loop exits on its next tick. Both
-// idempotent. Cycle-scoped per `m12-api-openapi.yaml::pauseCycle/resumeCycle`.
-// Pause-state is read back from `GET /api/v1/sessions/active/live-state::is_paused`.
+// Pause a running cycle — the single operator-interrupt verb. Writes
+// `.runtime/pause.flag`; the loop's `pause_check` sees it at the next checkpoint,
+// the worker exits cleanly, and the cycle stays resumable (non-terminal). There
+// is no separate "stop" / "resume-cycle": resuming is `postStartRun(…, "resume")`
+// relaunching from the last completed round. Idempotent. Cycle-scoped per
+// `m12-api-openapi.yaml::pauseCycle`. Pause-state reads back from
+// `GET /api/v1/sessions/active/live-state::is_paused`.
 export async function postPauseCycle(
   campaignId: string,
   cycleId: string,
 ): Promise<CommandAcceptedBody> {
   return _postCommand("pause-cycle", { campaign_id: campaignId, cycle_id: cycleId });
-}
-
-export async function postResumeCycle(
-  campaignId: string,
-  cycleId: string,
-): Promise<CommandAcceptedBody> {
-  return _postCommand("resume-cycle", { campaign_id: campaignId, cycle_id: cycleId });
 }
 
 // Operator early-abort of the searchpoint scoring right now: writes a one-shot

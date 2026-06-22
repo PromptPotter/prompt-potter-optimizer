@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { fetchCycleFile, type HardSamplesScope } from "@/lib/api";
-import { postStopCycle } from "@/lib/api/mutations";
+import { postPauseCycle } from "@/lib/api/mutations";
 import { CycleStreamProvider } from "@/lib/poll";
 import { ConnectorProvider } from "@/lib/hooks/useConnector";
 import { useDashboard } from "@/lib/hooks/useDashboard";
@@ -264,9 +264,9 @@ function AppShellInner() {
           bannerText={bannerText}
           bannerHint={bannerHint}
           onOpenFiles={() => setTab("files")}
-          onStopCampaign={
+          onPauseCampaign={
             campaignId && cycleId
-              ? () => void postStopCycle(campaignId, cycleId)
+              ? () => void postPauseCycle(campaignId, cycleId)
               : undefined
           }
         />

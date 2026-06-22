@@ -73,12 +73,15 @@ tags:
 # v0 closed inbound command set — DRAFT for operator redline.
 #
 # Sources of this draft:
-#   - 6 sanctioned POSTs migrated off active.py / backends.py (fork, stop,
+#   - sanctioned POSTs migrated off active.py / backends.py (fork,
 #     delete, cleanup-empty, register-backend, sync-backend-experiments).
 #   - 2 CLI verbs hoisted into the wire surface (mint-campaign = `new`,
 #     start-run = `resume` / launcher per ADR-0001 control plane).
-#   - 5 M12-new commands (pause, step, rewind-to-round, change-spend-budget,
-#     change-pipeline-param) — plan-listed v0 candidates.
+#   - M12-new commands (pause, step, rewind-to-round, change-spend-budget,
+#     change-pipeline-param) — plan-listed v0 candidates. `pause-cycle` is the
+#     single operator-interrupt verb: the worker exits cleanly, the cycle stays
+#     resumable, and `start-run`/`resume` relaunches it (there is no `stop-cycle`
+#     or in-place `resume-cycle`).
 #
 # Each operation:
 #   - is `POST /commands/{kebab-kind}` — one literal path per kind, one
@@ -97,7 +100,13 @@ paths:
   /commands/pause-cycle:
     post:
       operationId: pauseCycle
-      summary: Set the pause flag on a running cycle.
+      summary: Pause a running cycle — the single operator-interrupt verb.
+      description: |
+        Writes `.runtime/pause.flag`. The runner sees it at the next checkpoint,
+        the worker exits cleanly, and the cycle stays **resumable** (non-terminal,
+        no `finished_at`). There is no separate `stop-cycle`; resuming is the
+        `start-run`/`resume` launcher relaunching from the last completed round
+        (the worker is gone, so there is no in-place `resume-cycle`). Idempotent.
       tags: [cycle-control]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -114,33 +123,6 @@ paths:
                   properties:
                     kind: { const: pause-cycle }
                     payload: { $ref: '#/components/schemas/PauseCyclePayload' }
-      responses:
-        '202': { $ref: '#/components/responses/CommandAccepted' }
-        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
-        '403': { $ref: '#/components/responses/CapabilityDenied' }
-        '409': { $ref: '#/components/responses/VersionConflict' }
-        '422': { $ref: '#/components/responses/PayloadInvalid' }
-
-  /commands/resume-cycle:
-    post:
-      operationId: resumeCycle
-      summary: Clear the pause flag on a paused cycle.
-      tags: [cycle-control]
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/ExpectedVersion'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              allOf:
-                - $ref: '#/components/schemas/CommandEnvelope'
-                - type: object
-                  required: [kind, payload]
-                  properties:
-                    kind: { const: resume-cycle }
-                    payload: { $ref: '#/components/schemas/ResumeCyclePayload' }
       responses:
         '202': { $ref: '#/components/responses/CommandAccepted' }
         '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
@@ -177,36 +159,6 @@ paths:
                   properties:
                     kind: { const: origin-gate-decision }
                     payload: { $ref: '#/components/schemas/OriginGateDecisionPayload' }
-      responses:
-        '202': { $ref: '#/components/responses/CommandAccepted' }
-        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
-        '403': { $ref: '#/components/responses/CapabilityDenied' }
-        '409': { $ref: '#/components/responses/VersionConflict' }
-        '422': { $ref: '#/components/responses/PayloadInvalid' }
-
-  /commands/stop-cycle:
-    post:
-      operationId: stopCycle
-      summary: Write `.runtime/stop.flag`; the runner exits cleanly at the next checkpoint.
-      description: |
-        Migrated from `POST /api/v1/campaigns/{c}/cycles/{cy}/stop`
-        (active.py:198). Single-shot, idempotent — a second issue is a no-op.
-      tags: [cycle-control]
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/ExpectedVersion'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              allOf:
-                - $ref: '#/components/schemas/CommandEnvelope'
-                - type: object
-                  required: [kind, payload]
-                  properties:
-                    kind: { const: stop-cycle }
-                    payload: { $ref: '#/components/schemas/StopCyclePayload' }
       responses:
         '202': { $ref: '#/components/responses/CommandAccepted' }
         '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
@@ -1500,7 +1452,7 @@ components:
           description: |
             The command kind. MUST be one of the kinds declared in this
             file's `paths` keys (the closed set). Examples once Profile B
-            lands: `pause-cycle`, `resume-cycle`, `fork-cycle`,
+            lands: `pause-cycle`, `fork-cycle`,
             `change-spend-budget`. See `docs/adr/0001-m12-control-plane.md`
             Profile B table.
           minLength: 1
@@ -1663,9 +1615,6 @@ components:
     PauseCyclePayload:
       $ref: '#/components/schemas/CycleRef'
 
-    ResumeCyclePayload:
-      $ref: '#/components/schemas/CycleRef'
-
     OriginGateDecisionPayload:
       allOf:
         - $ref: '#/components/schemas/CycleRef'
@@ -1680,9 +1629,6 @@ components:
                 `rescore` re-scores the origin force-fresh and re-evaluates the
                 gate; `proceed` overrides the gate into L1; `abort` ends the
                 cycle with `StopReason.ORIGIN_GATE`.
-
-    StopCyclePayload:
-      $ref: '#/components/schemas/CycleRef'
 
     SkipSearchpointPayload:
       $ref: '#/components/schemas/CycleRef'

@@ -3,8 +3,8 @@
 
 Pause cooperation: at each iteration top the loop polls ``session.pause_check``
 (``.runtime/pause.flag`` per cycle dir, written by the ``pause-cycle`` command
-applier) and blocks until the flag clears. ``session.stop_check`` always wins —
-stop-during-pause exits cleanly via ``StopReason.INTERRUPTED``.
+applier). When set it declares ``PAUSED`` and exits cleanly via
+``StopReason.PAUSED`` — the worker ends and the cycle stays resumable.
 
 Budget cooperation: ``budget_gate`` (see ``runner/termination.py``) re-reads its
 USD + token caps every clean round, so the ``change-spend-budget`` command can
@@ -22,7 +22,7 @@ from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.dispatch.hub import InjectionRenderError
 from promptpotter.application.optimization.l1 import execute_round
 from promptpotter.application.run_observers import RunCallbacks
-from promptpotter.application.run_phase_control import pause_gate
+from promptpotter.application.run_phase_control import declare_run_phase, pause_requested
 from promptpotter.application.runner.origin_gate import run_origin_gate
 from promptpotter.application.runner.round import (
     close_round,
@@ -38,6 +38,7 @@ from promptpotter.application.runner.termination import (
 )
 from promptpotter.domain.phases import (
     CampaignPhase,
+    RunPhase,
     StopLoop,
     StopReason,
     emit_phase,
@@ -110,13 +111,15 @@ async def run_round_loop(
                         return gate_stop, None
 
         while clean_rounds < max_rounds and round_num < HARD_CAP:
-            # Pause cooperation: block at the round boundary while the operator
-            # has the pause flag set. The per-sample loop (run_query_loop) holds
-            # the same gate, so a mid-round pause lands within one sample; this
-            # boundary gate covers the single-LLM-call phases (generate / L2 /
-            # L3) that have no inner loop. Stop always wins.
-            if await pause_gate(session):
-                return StopReason.INTERRUPTED, None
+            # Pause cooperation: exit cleanly at the round boundary when the
+            # operator set the pause flag. The per-sample loop (run_query_loop)
+            # checks the same predicate, so a mid-round pause lands within one
+            # sample; this boundary check covers the single-LLM-call phases
+            # (generate / L2 / L3) that have no inner loop. The cycle stays
+            # resumable — `_finalize_run` skips terminal marking on PAUSED.
+            if pause_requested(session):
+                declare_run_phase(session, RunPhase.PAUSED)
+                return StopReason.PAUSED, None
 
             is_probe = cycle.probe_next_round
             if is_probe:
@@ -226,14 +229,15 @@ async def run_round_loop(
     except StopLoop as sl:
         return sl.reason, None
     except (KeyboardInterrupt, asyncio.CancelledError) as exc:
-        # Distinguish Ctrl+C from programmatic cancellation; same outcome, operator wants to know which fired.
+        # Ctrl+C / cancellation is an operator pause: the worker exits but the
+        # cycle stays resumable. Distinguish the cause for the operator's benefit.
         cause = (
             "user-initiated"
             if isinstance(exc, KeyboardInterrupt)
             else ("programmatic cancellation")
         )
-        logger.warning("Optimization interrupted at round %d (%s).", round_num, cause)
-        return StopReason.INTERRUPTED, None
+        logger.warning("Optimization paused at round %d (%s).", round_num, cause)
+        return StopReason.PAUSED, None
     except InjectionRenderError as exc:
         # Renderer raised (code drift) — distinct from CRASHED so the operator can pinpoint a broken renderer.
         tb = traceback.format_exc()

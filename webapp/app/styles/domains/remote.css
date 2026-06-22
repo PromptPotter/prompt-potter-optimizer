@@ -27,10 +27,9 @@
 .remote-dot{width:8px;height:8px;border-radius:50%;background:var(--color-text-tertiary)}
 .remote-phase-running .remote-dot{background:var(--color-success)}
 .remote-phase-paused .remote-dot{background:var(--color-warn)}
-.remote-phase-stopping .remote-dot{background:var(--color-danger)}
 .remote-phase-gate .remote-dot{background:var(--color-accent)}
 
-/* Skip / Stop — bordered pills matching the .run-ctl register (state by icon
+/* Skip — bordered pill matching the .run-ctl register (state by icon
    colour, quiet border that lifts to accent on hover). */
 .remote-btn{
   display:inline-flex;align-items:center;gap:5px;
@@ -46,7 +45,6 @@
 .remote-btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
 .remote-btn:disabled{opacity:.45;cursor:not-allowed}
 .remote-skip{color:var(--color-warn)}
-.remote-stop{color:var(--color-danger)}
 .remote-btn-label{font-weight:600}
 
 /* Concise status — round + spend, tabular so it doesn't jitter as it ticks. */

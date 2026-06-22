@@ -144,13 +144,13 @@ Each profile is a named, stable conformance level. Newer profiles compose with o
 | Pre-M12 route | Command kind v0 |
 |---|---|
 | `POST /campaigns/{c}/cycles/{cy}/forks` | `fork-cycle` |
-| `POST /campaigns/{c}/cycles/{cy}/stop` | `stop-cycle` |
+| `POST /campaigns/{c}/cycles/{cy}/stop` | `pause-cycle` (folded — pause is the single operator-interrupt; no `stop-cycle`) |
 | `DELETE /campaigns/{c}/cycles/{cy}` | `delete-cycle` |
 | `POST /campaigns/{c}/cycles/{cy}/cleanup-empty` | `cleanup-empty-cycles` |
 | `POST /backends` | `register-backend` |
 | `POST /backends/{id}/sync` | `sync-backend-experiments` |
 
-**Closed inbound set draft (23 commands).** The full enumeration lives in `docs/specs/m12-api-openapi.yaml` and is the single source of truth for the inbound surface; the ADR keeps only the migration table above + the category map below. Categories (= OpenAPI `tags`): cycle-control (pause / resume / stop / step / rewind), cycle-lifecycle (fork / delete / cleanup-empty / archive / mint-campaign / start-run), budget (spend / halt / sample), pipeline-params (change-pipeline-param / reset-pipeline-overlay), scoring (change-scoring-composite), operator-feedback (mark / unmark hard-sample / annotate-round / endorse-candidate), backends (register / sync-experiments). All v0 — operator-redline cycle precedes any handler.
+**Closed inbound set draft (23 commands).** The full enumeration lives in `docs/specs/m12-api-openapi.yaml` and is the single source of truth for the inbound surface; the ADR keeps only the migration table above + the category map below. Categories (= OpenAPI `tags`): cycle-control (pause / step / rewind — `pause-cycle` is the single operator-interrupt, no separate stop/resume-cycle), cycle-lifecycle (fork / delete / cleanup-empty / archive / mint-campaign / start-run), budget (spend / halt / sample), pipeline-params (change-pipeline-param / reset-pipeline-overlay), scoring (change-scoring-composite), operator-feedback (mark / unmark hard-sample / annotate-round / endorse-candidate), backends (register / sync-experiments). All v0 — operator-redline cycle precedes any handler.
 
 First end-to-end command: **`pause-cycle`**. On certification, the dispatcher + runner contracts promote to `docs/developer/command-dispatch.md`; boxes 1–10, 17 flip.
 

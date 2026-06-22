@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
 
 import httpx
 
-from promptpotter.application.run_phase_control import declare_run_phase
+from promptpotter.application.run_phase_control import declare_run_phase, pause_requested
 from promptpotter.application.scoring.metrics import find_rank
 from promptpotter.config.settings import NO_RESULT
 from promptpotter.domain.phases import RunPhase
@@ -568,9 +568,9 @@ async def execute_stale_data_protocol(
     result = cached_result
 
     for step in protocol_steps:
-        if session.stop_check and session.stop_check():
-            declare_run_phase(session, RunPhase.STOPPING)
-            return {**result, "cached": result.get("cached", False)}, "interrupted"
+        if pause_requested(session):
+            declare_run_phase(session, RunPhase.PAUSED)
+            return {**result, "cached": result.get("cached", False)}, "paused"
         if step == "rerun":
             historical = axes.sample_index.degradation_count(sample.id) if axes else 0
             effective_count = historical + 1

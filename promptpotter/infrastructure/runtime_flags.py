@@ -1,17 +1,17 @@
 """Readers for the per-cycle Control-local flags + the single run-phase derivation.
 
-``pause.flag`` / ``stop.flag`` / ``spend_cap.json`` are the cooperative files
-the command dispatcher writes and the runner polls (ADR-0001 § Control-local).
-This is the single read surface for them.
+``pause.flag`` / ``spend_cap.json`` are the cooperative files the command
+dispatcher writes and the runner polls (ADR-0001 § Control-local). This is the
+single read surface for them.
 
 :func:`derive_run_phase` is the *one* place run-state is computed for the cycle
 list and any non-live reader — there is no second "is it running?" derivation.
 It composes lifecycle (terminal, from ``index.json::finished_at``) with the
 control flags and a freshness fallback. Freshness (``is_running``) is no longer
-the *definition* of running — the runner declares ``running`` / ``paused`` /
-``stopping`` onto the ledger and the dashboard projection writes them — it
-survives only as the signal that splits ``running`` from ``detached`` (an active
-cycle whose producer vanished without a terminal record).
+the *definition* of running — the runner declares ``running`` / ``paused`` onto
+the ledger and the dashboard projection writes them — it survives only as the
+signal that splits ``running`` from ``detached`` (an active cycle whose producer
+vanished without a terminal record).
 """
 
 from __future__ import annotations
@@ -24,13 +24,10 @@ from promptpotter.infrastructure.store.base import read_json_tolerant
 
 
 def is_paused(runtime_dir: Path) -> bool:
-    """``.runtime/pause.flag`` present — the loop holds at the next round boundary."""
+    """``.runtime/pause.flag`` present — the operator paused; the loop exits
+    cleanly at the next checkpoint and the cycle stays resumable (non-terminal).
+    The single operator-interrupt flag (no separate ``stop.flag``)."""
     return (runtime_dir / "pause.flag").is_file()
-
-
-def is_stop_requested(runtime_dir: Path) -> bool:
-    """``.runtime/stop.flag`` present — the loop exits cleanly at the next check."""
-    return (runtime_dir / "stop.flag").is_file()
 
 
 def is_checkin(runtime_dir: Path) -> bool:
@@ -41,14 +38,13 @@ def is_checkin(runtime_dir: Path) -> bool:
 
 
 def clear_run_control_flags(runtime_dir: Path) -> None:
-    """Drop any consumed ``stop.flag`` / ``pause.flag`` / ``skip.flag`` left by a prior run.
+    """Drop any consumed ``pause.flag`` / ``skip.flag`` left by a prior run.
 
     A fresh launch through the runner seam IS the operator's intent to run, so it
     supersedes prior run-control intent. The flags are one-shot requests, not
     persistent state — once the loop that they targeted has exited they are stale,
-    and a stale ``stop.flag`` would otherwise kill the very next resume on its first
-    poll (a stopped cycle could never be resumed). Idempotent."""
-    (runtime_dir / "stop.flag").unlink(missing_ok=True)
+    and a stale ``pause.flag`` would otherwise pause the very next resume on its
+    first poll (a paused cycle could never be resumed). Idempotent."""
     (runtime_dir / "pause.flag").unlink(missing_ok=True)
     (runtime_dir / "skip.flag").unlink(missing_ok=True)
 
@@ -88,10 +84,9 @@ def derive_run_phase(
        every other branch: a check-in cycle has no ``dashboard.json`` and no
        ``finished_at``, so without this it would derive ``detached``.
     1. terminal — the cycle finished (a terminal record / ``finished_at`` exists).
-    2. stopping — ``stop.flag`` present (terminal-intent wins over a pause).
-    3. paused   — ``pause.flag`` present (reversible).
-    4. running  — producer fresh.
-    5. detached — active but the producer stopped writing (died without a
+    2. paused   — ``pause.flag`` present (operator interrupt; resumable).
+    3. running  — producer fresh.
+    4. detached — active but the producer stopped writing (died without a
        terminal record). The only branch that consults freshness.
 
     The live single-cycle view does *not* call this — it reads
@@ -103,8 +98,6 @@ def derive_run_phase(
         return RunPhase.CHECKIN
     if is_terminal:
         return RunPhase.TERMINAL
-    if is_stop_requested(runtime):
-        return RunPhase.STOPPING
     if is_paused(runtime):
         return RunPhase.PAUSED
     if _producer_fresh(cycle_dir / "dashboard.json", fresh_s=fresh_s):
@@ -118,6 +111,5 @@ __all__ = [
     "derive_run_phase",
     "is_checkin",
     "is_paused",
-    "is_stop_requested",
     "read_spend_cap",
 ]

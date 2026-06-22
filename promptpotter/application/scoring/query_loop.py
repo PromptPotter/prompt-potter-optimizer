@@ -16,7 +16,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
-from promptpotter.application.run_phase_control import declare_run_phase, pause_gate
+from promptpotter.application.run_phase_control import declare_run_phase, pause_requested
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.sample_measurement import (
     _error_result,
@@ -353,11 +353,11 @@ async def run_query_loop(
                 break
             sample = by_id[sid]
             # Operator skip checkpoint — checked first so a one-shot skip never
-            # falls through to the sticky stop path. Cut the remaining samples of
+            # falls through to the sticky pause path. Cut the remaining samples of
             # THIS searchpoint, consume the flag (so only this one is cut), and
             # return a partial; the gateway accepts it as a normal partial score
-            # and the cycle continues to the next candidate. Not a stop: no
-            # STOPPING phase, no cycle unwind.
+            # and the cycle continues to the next candidate. Not a pause: no
+            # PAUSED phase, no cycle exit.
             if session.skip_check and session.skip_check():
                 if session.skip_consume:
                     session.skip_consume()
@@ -367,15 +367,14 @@ async def run_query_loop(
                     len(dataset),
                 )
                 return QueryLoopResult(state.results, completed=False, stop_reason="skip")
-            # Mid-searchpoint pause/stop checkpoint. Sits between samples — every
+            # Mid-searchpoint pause checkpoint. Sits between samples — every
             # already-scored result is on disk (persist_fresh ran per fresh
-            # sample), so pausing here finishes the current sample then blocks,
-            # and a stop aborts with the accumulated datapoints saved. A pause
-            # resumes into the remaining samples; a stop (incl. one requested
-            # during the pause) falls through to the graceful return below.
-            if await pause_gate(session) or (session.stop_check and session.stop_check()):
-                logger.debug("Graceful stop after query %d/%d.", len(state.results), len(dataset))
-                declare_run_phase(session, RunPhase.STOPPING)
+            # sample), so pausing here exits cleanly after the current sample with
+            # the accumulated datapoints saved. The cycle stays resumable and
+            # `resume` continues into the remaining samples.
+            if pause_requested(session):
+                logger.debug("Pause after query %d/%d.", len(state.results), len(dataset))
+                declare_run_phase(session, RunPhase.PAUSED)
                 return QueryLoopResult(state.results, completed=False, stop_reason="graceful")
 
             if on_sample_starting is not None:

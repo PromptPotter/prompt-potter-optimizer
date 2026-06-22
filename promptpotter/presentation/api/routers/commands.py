@@ -11,16 +11,17 @@ Wired kinds, by scope:
 * Workspace-scoped lifecycle (no ``Expected-Version``, inline-applied):
   ``archive-campaign``, ``delete-campaign``, ``unarchive-campaign``.
 * Cycle-scoped sanctioned-POST migrations (``Expected-Version`` validated
-  when present, inline-applied): ``fork-cycle``, ``stop-cycle``,
+  when present, inline-applied): ``fork-cycle``,
   ``delete-cycle``, ``cleanup-empty-cycles``.
 * Workspace-backend (no ``Expected-Version``, inline-applied;
   ``CommandRecord`` lands on the workspace ledger at
   ``projects/{tenant}/.workspace/events.jsonl``): ``register-backend``,
   ``sync-backend-experiments``.
 * Runtime-cooperative cycle commands, writing to the target cycle's
-  ``.runtime/`` and re-read at the round boundary: ``pause-cycle`` +
-  ``resume-cycle`` (``pause.flag``, polled by ``Session.pause_check`` —
-  ``stop.flag`` overrides), ``change-spend-budget``
+  ``.runtime/`` and re-read at the next checkpoint: ``pause-cycle``
+  (``pause.flag``, the single operator-interrupt flag polled by
+  ``Session.pause_check`` — the worker exits cleanly and resumes via the
+  ``start-run``/``resume`` launcher), ``change-spend-budget``
   (``spend_cap.json`` ``{max_usd, max_tokens}``, re-read by the round
   loop's ``BudgetGate``).
 * Launcher (workspace-scoped): ``mint-campaign`` mints a fresh
@@ -80,12 +81,10 @@ _LIFECYCLE_KINDS: frozenset[str] = frozenset(
 _CYCLE_SCOPED_KINDS: frozenset[str] = frozenset(
     {
         "fork-cycle",
-        "stop-cycle",
         "skip-searchpoint",
         "delete-cycle",
         "cleanup-empty-cycles",
         "pause-cycle",
-        "resume-cycle",
         "origin-gate-decision",
         "change-spend-budget",
         "start-run",

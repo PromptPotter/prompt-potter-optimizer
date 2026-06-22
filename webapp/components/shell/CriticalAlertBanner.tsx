@@ -18,10 +18,10 @@ interface Props {
   bannerText: string;
   bannerHint?: string;
   onOpenFiles: () => void;
-  // Invoked by the one-click "Stop campaign" button the banner shows when the
-  // verdict is structurally-degraded (`alert.action === "stop"`). The run never
-  // auto-stops — this is the operator pulling the trigger.
-  onStopCampaign?: () => void;
+  // Invoked by the one-click "Pause campaign" button the banner shows when the
+  // verdict is structurally-degraded (`alert.action === "pause"`). The run never
+  // auto-pauses — this is the operator pulling the trigger.
+  onPauseCampaign?: () => void;
 }
 
 export function CriticalAlertBanner({
@@ -29,7 +29,7 @@ export function CriticalAlertBanner({
   bannerText,
   bannerHint,
   onOpenFiles,
-  onStopCampaign,
+  onPauseCampaign,
 }: Props) {
   // Live snapshot + connection-aware run phase, self-sourced from the cycle
   // stream (the banner shows on every tab, so it owns its own read).
@@ -71,14 +71,14 @@ export function CriticalAlertBanner({
         <strong className="critical-alert-title">{alert.title}</strong>
         {alert.detail ? <span className="critical-alert-detail">{alert.detail}</span> : null}
       </span>
-      {alert.action === "stop" && onStopCampaign ? (
+      {alert.action === "pause" && onPauseCampaign ? (
         <button
           type="button"
           className="critical-alert-jump critical-alert-stop"
-          onClick={onStopCampaign}
-          aria-label="Stop the campaign"
+          onClick={onPauseCampaign}
+          aria-label="Pause the campaign"
         >
-          Stop campaign
+          Pause campaign
         </button>
       ) : null}
       <button

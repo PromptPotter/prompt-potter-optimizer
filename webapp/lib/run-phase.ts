@@ -15,7 +15,6 @@ const RUN_PHASE_LABEL: Record<string, string> = {
   running: "Running",
   paused: "Paused",
   gate: "Origin gate",
-  stopping: "Stopping",
   detached: "Detached",
 };
 
@@ -51,11 +50,11 @@ export function phasePauseLabel(state: string | null | undefined): string {
 }
 
 // The connection-aware run phase for the *live single-cycle* view. The backend
-// declares running/paused/stopping/terminal into dashboard.json; only `running`
+// declares running/paused/terminal into dashboard.json; only `running`
 // is ambiguous to a viewer whose poll has gone quiet — a fresh producer is
 // running, a silent one is `detached` (the same value the cycle-list's
-// derive_run_phase emits). paused/stopping/terminal are declared truths the
-// connection can't override. Computed once in poll.tsx; surfaces read the result.
+// derive_run_phase emits). paused/terminal are declared truths the connection
+// can't override. Computed once in poll.tsx; surfaces read the result.
 export function resolveRunPhase(
   runPhase: string | null | undefined,
   connectionLive: boolean,

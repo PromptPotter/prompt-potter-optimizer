@@ -156,7 +156,7 @@ describe("criticalAlert", () => {
     },
   });
 
-  it("flags a structurally-critical latest round as critical with a stop action", () => {
+  it("flags a structurally-critical latest round as critical with a pause action", () => {
     const dash = {
       rounds: [roundWithGrade(0, "critical", "entity_profiling failing on 60% — abort")],
     } as unknown as DashboardSnapshot;
@@ -164,7 +164,7 @@ describe("criticalAlert", () => {
       severity: "critical",
       title: "Degraded origin — pipeline may be structurally broken",
       detail: "entity_profiling failing on 60% — abort",
-      action: "stop",
+      action: "pause",
     });
   });
 

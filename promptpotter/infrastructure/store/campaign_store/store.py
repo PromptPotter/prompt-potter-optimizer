@@ -10,7 +10,7 @@ the top of the class; the no-subscriber pure ledger scan lives in its own
 ``.overrides/`` holds **declared-at-mint, read-once-at-bootstrap** data: the
 cycle seed (chosen origin prompt + pipeline overlay + limit overrides), written
 for an operator-steered fork OR a campaign-from-origin root mint. Contrast
-``.runtime/`` (``stop.flag`` / ``pause.flag`` / ``spend_cap.json``) — those are
+``.runtime/`` (``pause.flag`` / ``skip.flag`` / ``spend_cap.json``) — those are
 **mutated-during-run, polled-every-tick** by the round loop (read via
 ``infrastructure/runtime_flags.py``). The directory name encodes the read
 cadence; conflating the two invites cache-staleness bugs.

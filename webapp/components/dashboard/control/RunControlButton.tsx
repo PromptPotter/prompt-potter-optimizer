@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { postPauseCycle, postResumeCycle, postStartRun, IngestApiError } from "@/lib/api";
+import { postPauseCycle, postStartRun, IngestApiError } from "@/lib/api";
 import { bumpRevalidation } from "@/lib/revalidate";
 import { phasePauseLabel } from "@/lib/run-phase";
 import { useDashboard } from "@/lib/hooks/useDashboard";
@@ -91,7 +91,9 @@ export function RunControlButton() {
       setPausing(true);
       return act(() => postPauseCycle(campaignId, cycleId));
     }
-    if (phase === "paused") return act(() => postResumeCycle(campaignId, cycleId));
+    // A paused cycle's worker has exited — resume relaunches it from the last
+    // completed round (the same start-run path as a cold start), not an in-place
+    // unpause. Both "paused" and "stopped" therefore take the same branch.
     return act(() => postStartRun(campaignId, cycleId, "resume"));
   };
 

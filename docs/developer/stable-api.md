@@ -190,7 +190,7 @@ Operator-visible files inside `campaigns/{cycle_id}/`. Webapp + downstream tooli
 | `.runtime/cache/rounds/round_NNNN.json` | `AuditTrailView.flush` | Per-round audit cache (writer-buffered until round close). |
 | `.runtime/cache/candidates/round_NNNN.json` | `CampaignStore.save_round_candidates` | Mid-round candidates checkpoint (deleted after L1 score on escalation). |
 | `.runtime/streams/round_NNNN_p_best.jsonl` | `PoBBStreamView._handle_snapshot` | Per-sample P(best) trajectory. |
-| `.runtime/stop.flag` | `api/middleware/command_dispatcher.py` (`POST /commands/{kind}`, kind=`stop-cycle`) | Operator stop signal; consumed by `session.stop_check`. |
+| `.runtime/pause.flag` | `api/middleware/command_dispatcher.py` (`POST /commands/{kind}`, kind=`pause-cycle`) | Single operator-interrupt signal; consumed by `session.pause_check`. Worker exits clean, cycle stays resumable (no separate `stop.flag`). |
 | `.runtime/archived/resumed_at_<ts>/` | `CampaignStore.rewind_to_round` | Rewound rounds + candidates moved here on `--from N`. |
 
 Sibling cycles (forks, diag, sweeps) live flat under `cycles/` alongside the root. Each carries its own per-cycle artifacts, including its own `dashboard.json` (a fork's is seeded from its parent at the cut). `.runtime/` shapes may change between minor versions — the public `rounds/round_NNNN.json` tree + `index.json` + `log.md` are the contract for any tool reading per-cycle results.

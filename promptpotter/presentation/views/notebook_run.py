@@ -104,11 +104,11 @@ def render_completion(
     dataset_name: str | None = None,
     campaign_id: str | None = None,
 ) -> str:
-    """Render the closing summary box (interrupted vs complete) + pipeline overrides."""
-    interrupted = result.stop_reason == "interrupted"
+    """Render the closing summary box (paused vs complete) + pipeline overrides."""
+    paused = result.stop_reason == "paused"
     title = (
-        f"{YELLOW}{BOLD}INTERRUPTED{RESET} — stopped by user"
-        if interrupted
+        f"{YELLOW}{BOLD}PAUSED{RESET} — resumable (re-run resume to continue)"
+        if paused
         else f"{GREEN}{BOLD}OPTIMIZATION COMPLETE{RESET}"
     )
 
@@ -117,7 +117,7 @@ def render_completion(
         f"Best         {best_round['accuracy']:.1%} (round {best_round['round']})",
         f"Stop reason  {result.stop_reason}",
     ]
-    if interrupted:
+    if paused:
         fields.append("Resume: re-run this cell -- rounds auto-restore")
     if dataset_name:
         fields.append(f"Dataset      {dataset_name}")
@@ -250,10 +250,7 @@ async def run_optimization_notebook(
     )
 
     if result is None or not result.rounds:
-        print(
-            f"\n{YELLOW}{BOLD}[INTERRUPTED]{RESET} Feedback cycle "
-            f"stopped before any rounds completed."
-        )
+        print(f"\n{YELLOW}{BOLD}[PAUSED]{RESET} Feedback cycle ended before any rounds completed.")
         print("  Resume: re-run this cell to restart.")
         return result
 
@@ -269,10 +266,10 @@ async def run_optimization_notebook(
     )
     _try_display_html(render_completion_html(result))
 
-    if result.stop_reason == "interrupted":
+    if result.stop_reason == "paused":
         print(
-            f"  {YELLOW}{BOLD}[INTERRUPTED]{RESET} after {result.n_rounds} rounds — "
-            "artifacts saved. Caller decides whether to continue downstream phases."
+            f"  {YELLOW}{BOLD}[PAUSED]{RESET} after {result.n_rounds} rounds — "
+            "artifacts saved, cycle resumable. Caller decides whether to continue."
         )
 
     return result

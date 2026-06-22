@@ -39,8 +39,11 @@ class StopReason(enum.StrEnum):
     """Feedback cycle termination reasons.
 
     Operator-recoverable halts (no traceback, plain ``resume`` fixes):
-    - ``INTERRUPTED`` — Ctrl+C / asyncio.CancelledError. Split from CRASHED
-      so the operator can tell "I hit Ctrl+C" from "swallowed traceback".
+    - ``PAUSED`` — operator paused (the pause button or Ctrl+C /
+      asyncio.CancelledError). The worker exits cleanly but the cycle is
+      **non-terminal and resumable**: ``_finalize_run`` skips every terminal
+      write, so ``resume`` continues from the last completed round. The one
+      operator-interrupt reason — there is no separate "stop".
     - ``DIVERGED`` — resume detected recorded-vs-current decision mismatch
       under changed policy; one-flag rerun.
     - ``RENDER_ERROR`` — an injection renderer raised (usually code drift on
@@ -58,7 +61,7 @@ class StopReason(enum.StrEnum):
 
     PERFECT = "perfect_score"
     MAX_ROUNDS = "max_rounds"
-    INTERRUPTED = "interrupted"
+    PAUSED = "paused"
     CRASHED = "crashed"
     DIVERGED = "diverged"
     ABORT = "escalation_abort"
@@ -92,13 +95,14 @@ class RunPhase(enum.StrEnum):
       ``.runtime/checkin.flag`` (dropped at skeleton creation, cleared at
       Start when ``checkin`` flips to ``active``); precedes every other phase.
     - ``RUNNING`` — a process is attached and driving the active cycle.
-    - ``PAUSED`` — operator paused; alive, holding at a round boundary.
-      Reversible (``pause.flag`` / ``resume-cycle``).
+    - ``PAUSED`` — operator paused (the pause button or Ctrl+C); the worker
+      exits cleanly at the next checkpoint but the cycle stays **active and
+      resumable** (no ``finished_at``). Derived off ``.runtime/pause.flag``;
+      the play action relaunches via ``start-run``/``resume``. The single
+      operator-interrupt phase — there is no separate "stopping".
     - ``GATE`` — alive, holding at the round-0 origin gate awaiting an
       operator decision (rescore / proceed / abort) because the origin
       verdict was not ``healthy``. Reversible (``origin-gate-decision``).
-    - ``STOPPING`` — operator requested stop; alive, exits at the next
-      boundary (``stop.flag`` / ``stop-cycle``). Terminal-intent.
     - ``DETACHED`` — active lifecycle but no live producer (CLI exited or
       ``kill -9`` left no terminal record). The *only* phase that still uses
       the freshness heuristic; never written into ``dashboard.json`` (a dead
@@ -111,13 +115,12 @@ class RunPhase(enum.StrEnum):
     RUNNING = "running"
     PAUSED = "paused"
     GATE = "gate"
-    STOPPING = "stopping"
     DETACHED = "detached"
     TERMINAL = "terminal"
 
 
 class StopOutcome(enum.StrEnum):
-    """How a terminal cycle ended — the one classification of :class:`StopReason`.
+    """How a cycle ended — the one classification of :class:`StopReason`.
 
     Every terminal surface (index status display, ``JobStatus``, the webapp
     label) derives from this single table instead of re-encoding the reason
@@ -125,14 +128,19 @@ class StopOutcome(enum.StrEnum):
 
     - ``SUCCESS`` — ran to a natural conclusion (perfect score, target hit,
       round cap, sweep/diag complete, converged).
-    - ``HALTED`` — operator-initiated stop (Ctrl+C, spend cap, escalation abort).
+    - ``HALTED`` — a budget / policy halt the operator must act on to continue
+      (spend cap, escalation abort, origin gate, backend unreachable).
     - ``FAILED`` — abnormal termination needing operator action (crash, render
       error, resume divergence, optimizer timeout).
+    - ``PAUSED`` — operator paused; the **only non-terminal** outcome. The
+      worker exited but the cycle keeps no ``finished_at`` and resumes from the
+      last completed round.
     """
 
     SUCCESS = "success"
     HALTED = "halted"
     FAILED = "failed"
+    PAUSED = "paused"
 
 
 class StopReasonInfo(NamedTuple):
@@ -154,7 +162,7 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
     StopReason.DIAG_COMPLETE: StopReasonInfo("Diagnostic complete", StopOutcome.SUCCESS),
     StopReason.L3_PATIENCE: StopReasonInfo("Converged (L3 patience)", StopOutcome.SUCCESS),
     StopReason.REBASED: StopReasonInfo("Rebased to fork", StopOutcome.SUCCESS),
-    StopReason.INTERRUPTED: StopReasonInfo("Interrupted", StopOutcome.HALTED),
+    StopReason.PAUSED: StopReasonInfo("Paused", StopOutcome.PAUSED),
     StopReason.ABORT: StopReasonInfo("Escalation abort", StopOutcome.HALTED),
     StopReason.SPEND_BUDGET: StopReasonInfo("Spend budget reached", StopOutcome.HALTED),
     StopReason.TOKEN_BUDGET: StopReasonInfo("Token budget reached", StopOutcome.HALTED),

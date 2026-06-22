@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { postSkipSearchpoint, postStopCycle, IngestApiError } from "@/lib/api";
+import { postSkipSearchpoint, IngestApiError } from "@/lib/api";
 import { bumpRevalidation } from "@/lib/revalidate";
 import { runPhaseLabel } from "@/lib/run-phase";
 import { useDashboard } from "@/lib/hooks/useDashboard";
@@ -9,21 +9,17 @@ import { RunControlButton } from "@/components/dashboard/control/RunControlButto
 
 // The global remote control — a bottom-fixed hovering pill, rendered as shell
 // chrome on every tab while a cycle is live. It consolidates the run controls
-// that were scattered (play/pause was buried in the Chat-tab heat-map; stop sat
-// on the alert banner): one strip with run-phase, play/pause (the reused
-// RunControlButton), Stop, Skip, and concise round/spend status, plus the
-// babysat tag once the operator has intervened.
+// that were scattered (play/pause was buried in the Chat-tab heat-map): one
+// strip with run-phase, play/pause (the reused RunControlButton), Skip, and
+// concise round/spend status, plus the babysat tag once the operator has
+// intervened. Pause is the single interrupt verb — there is no separate Stop;
+// pausing exits the worker cleanly and the play button resumes from the last
+// completed round.
 //
 // `Skip` (skip-searchpoint) is the one net-new control: it cuts the remaining
 // samples of the searchpoint scoring now, accepts the partial, and the cycle
 // continues — and marks the cycle human_intervened. Enabled only while running
 // (skipping only means something mid-scoring).
-
-const STOP_ICON = (
-  <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true">
-    <rect x="3.5" y="3.5" width="9" height="9" rx="1.5" />
-  </svg>
-);
 
 const SKIP_ICON = (
   <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true">
@@ -36,19 +32,15 @@ export function RemoteBar() {
   // Identity from the workspace; live state from the per-cycle dashboard stream.
   const { campaignId, cycleId, cycles } = useWorkspace();
   const { dash, dashRound, runPhaseResolved } = useDashboard();
-  const [pending, setPending] = useState<"stop" | "skip" | null>(null);
+  const [pending, setPending] = useState<"skip" | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   if (!campaignId || !cycleId) return null;
 
   const runPhase = runPhaseResolved;
   // Present only while the cycle is alive — running / paused (so you can resume)
-  // / origin gate / stopping. Hidden when terminal, detached, or no run yet.
-  const active =
-    runPhase === "running" ||
-    runPhase === "paused" ||
-    runPhase === "gate" ||
-    runPhase === "stopping";
+  // / origin gate. Hidden when terminal, detached, or no run yet.
+  const active = runPhase === "running" || runPhase === "paused" || runPhase === "gate";
   if (!active) return null;
 
   // Babysat marker for the in-view cycle — the canonical flag rides the cycle
@@ -58,7 +50,7 @@ export function RemoteBar() {
   );
   const spend = dash?.spend;
 
-  const act = async (which: "stop" | "skip", fn: () => Promise<unknown>) => {
+  const act = async (which: "skip", fn: () => Promise<unknown>) => {
     setPending(which);
     setErr(null);
     try {
@@ -88,17 +80,6 @@ export function RemoteBar() {
       >
         {SKIP_ICON}
         <span className="remote-btn-label">Skip</span>
-      </button>
-      <button
-        type="button"
-        className="remote-btn remote-stop"
-        onClick={() => void act("stop", () => postStopCycle(campaignId, cycleId))}
-        disabled={pending !== null}
-        aria-label="Stop the campaign"
-        title="Stop the cycle cleanly at the next checkpoint"
-      >
-        {STOP_ICON}
-        <span className="remote-btn-label">Stop</span>
       </button>
       <span className="remote-status" aria-live="off">
         {dashRound != null ? <span className="remote-round">R{dashRound}</span> : null}

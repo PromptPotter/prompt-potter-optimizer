@@ -12,7 +12,7 @@ Three dispatch shapes:
   campaign's root cycle ledger. No ``Expected-Version``.
 
 - ``dispatch_cycle_command`` — cycle-scoped sanctioned-POST commands (the
-  ``CycleScopedKind`` set: fork/stop/pause/resume-cycle, skip-searchpoint,
+  ``CycleScopedKind`` set: fork-cycle, pause-cycle, skip-searchpoint,
   delete-cycle, cleanup-empty-cycles, origin-gate-decision,
   change-spend-budget, start-run). Target is a specific cycle;
   ``CommandRecord`` lands on that cycle's ledger. ``Expected-Version``
@@ -88,12 +88,10 @@ _LIFECYCLE_STATUS: dict[LifecycleKind, str] = {
 
 CycleScopedKind = Literal[
     "fork-cycle",
-    "stop-cycle",
     "skip-searchpoint",
     "delete-cycle",
     "cleanup-empty-cycles",
     "pause-cycle",
-    "resume-cycle",
     "origin-gate-decision",
     "change-spend-budget",
     "start-run",
@@ -404,16 +402,12 @@ class CommandDispatcher:
                 )
 
             return _apply_fork
-        if kind == "stop-cycle":
-            return lambda: self._apply_stop_cycle(campaign_id, cycle_id)
         if kind == "skip-searchpoint":
             return lambda: self._apply_skip_searchpoint(campaign_id, cycle_id)
         if kind == "cleanup-empty-cycles":
             return lambda: self._apply_cleanup_empty(campaign_id, cycle_id)
         if kind == "pause-cycle":
             return lambda: self._apply_pause_cycle(campaign_id, cycle_id)
-        if kind == "resume-cycle":
-            return lambda: self._apply_resume_cycle(campaign_id, cycle_id)
         if kind == "origin-gate-decision":
             decision = str(payload_extras.get("decision", ""))
             if decision not in ("rescore", "proceed", "abort"):
@@ -524,15 +518,6 @@ class CommandDispatcher:
             ) from exc
         self._store.backends.update(backend)
 
-    def _apply_stop_cycle(self, campaign_id: str, cycle_id: str) -> None:
-        """Write ``.runtime/stop.flag``; ``Session.stop_check`` polls at the
-        next checkpoint and exits cleanly. Idempotent."""
-        cycle_dir = self._store.campaigns.cycle_dir(campaign_id, cycle_id)
-        runtime_dir = cycle_dir / ".runtime"
-        runtime_dir.mkdir(parents=True, exist_ok=True)
-        flag = runtime_dir / "stop.flag"
-        flag.write_text(f"requested_at={utcnow_iso()}\n", encoding="utf-8")
-
     def _apply_skip_searchpoint(self, campaign_id: str, cycle_id: str) -> None:
         """Write a one-shot ``.runtime/skip.flag``; ``Session.skip_check`` polls it at
         the next per-sample checkpoint, accepts the partial searchpoint, consumes the
@@ -548,21 +533,17 @@ class CommandDispatcher:
         )
 
     def _apply_pause_cycle(self, campaign_id: str, cycle_id: str) -> None:
-        """Write ``.runtime/pause.flag``; ``Session.pause_check`` polls at
-        each round boundary and blocks while present. ``stop.flag`` overrides
-        during a pause (operator-requested exit always wins). Idempotent."""
+        """Write ``.runtime/pause.flag`` — the single operator-interrupt flag.
+        ``Session.pause_check`` polls it at the next checkpoint; the worker then
+        exits cleanly and the cycle stays resumable (``_finalize_run`` skips
+        terminal marking on ``StopReason.PAUSED``). Resuming is the ``start-run``
+        / ``resume`` launcher relaunching from the last completed round — not an
+        in-place flag delete, since the worker is gone. Idempotent."""
         cycle_dir = self._store.campaigns.cycle_dir(campaign_id, cycle_id)
         runtime_dir = cycle_dir / ".runtime"
         runtime_dir.mkdir(parents=True, exist_ok=True)
         flag = runtime_dir / "pause.flag"
         flag.write_text(f"requested_at={utcnow_iso()}\n", encoding="utf-8")
-
-    def _apply_resume_cycle(self, campaign_id: str, cycle_id: str) -> None:
-        """Remove ``.runtime/pause.flag``; the round loop's pause wait-loop
-        exits on the next 2 s tick. Idempotent (missing flag is a no-op)."""
-        cycle_dir = self._store.campaigns.cycle_dir(campaign_id, cycle_id)
-        flag = cycle_dir / ".runtime" / "pause.flag"
-        flag.unlink(missing_ok=True)
 
     def _apply_origin_gate_decision(self, campaign_id: str, cycle_id: str, decision: str) -> None:
         """Write ``.runtime/gate_decision.json`` (``{decision}``); the runner's

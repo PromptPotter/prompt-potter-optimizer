@@ -40,11 +40,11 @@ export interface DashboardSnapshot {
   // plus the terminal "stopped". Lifted to `phase` for transient gating.
   state?: string;
   // The single run-state value (RunPhase), declared by the runner and projected
-  // by LiveDashboardView: running | paused | stopping | terminal. The webapp
+  // by LiveDashboardView: running | paused | gate | terminal. The webapp
   // reads this — it does NOT re-derive "running" from `state` freshness. The
   // server-side cycle list adds "detached"; the live view composes that as
   // run_phase==="running" + connection offline (see `isLive`).
-  run_phase?: "running" | "paused" | "gate" | "stopping" | "terminal";
+  run_phase?: "running" | "paused" | "gate" | "terminal";
   // Terminal reason (raw StopReason value) once run_phase==="terminal".
   stop_reason?: string;
   round?: number;
@@ -278,9 +278,9 @@ export interface CycleStreamState {
   // silently-dead producer ("detached") keeps run_phase "running" on disk but
   // its poll goes stale → isLive false. The single gate for every transient
   // indicator (blinking rows, pulsing nodes, the round-strip "live" pill, the
-  // Stop affordance). Computed once here; consumers never re-derive it.
+  // Pause affordance). Computed once here; consumers never re-derive it.
   isLive: boolean;
-  // The connection-aware RunPhase for display (running/paused/stopping/detached/
+  // The connection-aware RunPhase for display (running/paused/detached/
   // terminal). Same value the cycle list's derive_run_phase emits: the runner's
   // declared `run_phase`, but a `running` cycle whose poll has gone quiet reads
   // `detached`. Surfaces show this, not raw `dash.run_phase`, so a silently-dead

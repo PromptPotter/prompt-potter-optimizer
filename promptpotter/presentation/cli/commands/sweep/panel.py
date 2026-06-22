@@ -155,12 +155,12 @@ def _variant_to_result(
 
     rounds = list(cycle_result.rounds or [])
     spend_usd_raw = observers.dashboard.spend_total_used_usd
-    # ``StopReason.INTERRUPTED`` (Ctrl+C / asyncio cancel) lands the cycle
-    # without a fair round-1 reading: either no rounds at all or a partial
-    # panel cut mid-candidate. Rendering it as r1=0.000 / $0.0000 falsely
+    # ``StopReason.PAUSED`` (the pause button / Ctrl+C / asyncio cancel) lands
+    # the cycle without a fair round-1 reading: either no rounds at all or a
+    # partial panel cut mid-candidate. Rendering it as r1=0.000 / $0.0000 falsely
     # ranks the variant as a loser and hides the partial spend. Mark both
     # as None so the print loop shows ``incomplete``.
-    interrupted = cycle_result.stop_reason == "interrupted"
+    interrupted = cycle_result.stop_reason == "paused"
     cost_usd: float | None = None if interrupted else spend_usd_raw
     if not rounds:
         return build_sweep_result(

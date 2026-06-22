@@ -131,7 +131,7 @@ class DashboardError(BaseModel):
     when the runner exits via ``CRASHED`` / ``RENDER_ERROR`` / ``DIVERGED``.
     ``message`` is the operator-actionable text; ``kind`` is the exception
     class name; ``stop_reason`` echoes the ledger ``StopReason``. Absent on
-    normal stops (interrupted / completed)."""
+    normal stops (paused / completed)."""
 
     model_config = ConfigDict(extra="forbid")
 

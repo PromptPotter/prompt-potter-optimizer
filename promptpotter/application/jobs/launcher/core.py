@@ -66,6 +66,9 @@ _JOB_STATUS_BY_OUTCOME: dict[StopOutcome, JobStatus] = {
     StopOutcome.SUCCESS: "completed",
     StopOutcome.HALTED: "stopped",
     StopOutcome.FAILED: "failed",
+    # A pause exits the worker but the cycle stays resumable — the job's process
+    # is "stopped" (a fresh start-run mints a new job to continue).
+    StopOutcome.PAUSED: "stopped",
 }
 
 

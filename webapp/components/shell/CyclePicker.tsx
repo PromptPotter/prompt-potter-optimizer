@@ -20,7 +20,7 @@ import { fmtPct0 } from "@/lib/format";
 // one passes BOTH ids back.
 
 function optionText(c: CycleListEntry): string {
-  // run_phase while live (running/paused/stopping/detached); the precise terminal
+  // run_phase while live (running/paused/detached); the precise terminal
   // reason (from `status`) once finished — one label, via the single helper.
   // `✎ babysat` flags a human-intervened (operator-skipped) cycle — a native
   // <option> can't host a badge, so it rides the label text.

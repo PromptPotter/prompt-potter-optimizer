@@ -167,7 +167,7 @@ When a decision is warranted, the copilot emits a **decision item** (a labelled 
 group). Each button is a thin trigger for a command **already in the closed
 `/commands/{kind}` set** (`promptpotter/presentation/api/routers/commands.py`;
 [`m12-api-openapi.yaml`](m12-api-openapi.yaml)) — e.g. `origin-gate-decision`,
-`pause-cycle`/`resume-cycle`, `start-run`, `change-spend-budget`, `endorse-candidate`. **No
+`pause-cycle`, `start-run`, `change-spend-budget`, `endorse-candidate`. **No
 command is added.** The first wirings are the surfaces that already pause the loop for an
 operator call: the **origin gate** and the **round-1 halt-and-decide** verdict.
 

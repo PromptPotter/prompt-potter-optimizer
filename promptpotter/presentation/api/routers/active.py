@@ -133,9 +133,9 @@ class CycleListEntry(BaseModel):
     # ("unreadable" for a malformed index). The display label + outcome derive
     # from the one STOP_REASON_INFO table; do not re-map per surface.
     status: str
-    run_phase: Literal["checkin", "running", "paused", "stopping", "detached", "terminal"] = Field(
+    run_phase: Literal["checkin", "running", "paused", "detached", "terminal"] = Field(
         default="detached",
-        description="The single run-state value (RunPhase) — checkin (origin still being authored, pre-loop) / running / paused / stopping / detached / terminal. Computed once by derive_run_phase from lifecycle + control flags + freshness; every picker dot and badge reads this, none re-derive it. 'checkin' wins first (the campaign hasn't run); 'terminal' pairs with `status` for the reason label.",
+        description="The single run-state value (RunPhase) — checkin (origin still being authored, pre-loop) / running / paused / detached / terminal. Computed once by derive_run_phase from lifecycle + control flags + freshness; every picker dot and badge reads this, none re-derive it. 'checkin' wins first (the campaign hasn't run); 'terminal' pairs with `status` for the reason label.",
     )
     best_accuracy: float | None = None
     n_rounds: int = 0

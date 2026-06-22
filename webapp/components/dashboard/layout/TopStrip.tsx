@@ -86,10 +86,10 @@ export const TopStrip = memo(function TopStrip() {
   const qpsTxt = qps != null ? `${qps.toFixed(qps < 10 ? 2 : 1)} q/s` : null;
   const phaseTip = TERMS[`phase_${phase.toLowerCase()}`] ?? "";
   // The tag is success-green by default; recolour it when the phase contradicts
-  // that — a crash terminal reads danger, a detached/stopping run reads warn.
+  // that — a crash terminal reads danger, a detached run reads warn.
   // A clean terminal (target hit / max rounds, no error record) stays green.
   const phaseErr = dash?.run_phase === "terminal" && !!dash?.error;
-  const phaseWarn = runPhase === "detached" || runPhase === "stopping";
+  const phaseWarn = runPhase === "detached";
 
   return (
     <div className="topstrip">

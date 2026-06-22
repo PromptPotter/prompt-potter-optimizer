@@ -228,7 +228,7 @@ async def run_sweep_batch(
             break
 
         if fork_result.n_rounds == 0:
-            stopped_by_operator = fork_result.stop_reason == StopReason.INTERRUPTED
+            stopped_by_operator = fork_result.stop_reason == StopReason.PAUSED
             status_by_source[path.name] = "interrupted" if stopped_by_operator else "cleaned"
             logger.info(
                 "Sweep fork %s never ran a round (payload=%s, stop_reason=%s); cleaned up",
@@ -242,8 +242,8 @@ async def run_sweep_batch(
             continue
 
         new_cycle_ids.append(new_cycle_id)
-        if fork_result.stop_reason == StopReason.INTERRUPTED:
-            # _run_round_loop catches Ctrl+C and returns INTERRUPTED — halt the batch.
+        if fork_result.stop_reason == StopReason.PAUSED:
+            # _run_round_loop catches a pause / Ctrl+C and returns PAUSED — halt the batch.
             status_by_source[path.name] = "interrupted"
             logger.warning(
                 "Sweep fork %d/%d interrupted: %s (payload=%s) — halting "

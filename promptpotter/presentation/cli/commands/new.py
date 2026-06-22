@@ -481,9 +481,9 @@ async def _run_loop(
     observers = _build_observers(args, session, campaign_config, train_data, pre_origin_acc)
     ctx.save_phase("optimizing")
 
-    # Control-local hooks (stop.flag / pause.flag under .runtime/) are bound
-    # centrally in run_optimization (the single runner seam) so CLI and API
-    # launches behave identically — no per-entry-point wiring here.
+    # Control-local hooks (pause.flag under .runtime/) are bound centrally in
+    # run_optimization (the single runner seam) so CLI and API launches behave
+    # identically — no per-entry-point wiring here.
     cycle_result = await _orch_run_optimization(
         train_data,
         campaign_config,

@@ -91,7 +91,7 @@ Three workflows over one fork primitive (conceptual picture: [`../concepts/campa
 
 Use when the active cycle went somewhere you don't want (a bad L3 replan, or you edited config and want to re-explore from a round). `cycle_id` stays; you roll history back inside it. Rounds after N are moved into `.runtime/archived/resumed_at_<ts>/` (not deleted), state is restored from round N, and the run resumes at N+1. The measurement archive is preserved — per-sample results replay without backend calls.
 
-**Interrupted rounds.** Ctrl+C mid-round leaves ledger events but no `round:complete`; the public `rounds/round_NNNN.json` stays absent and `index.json` records `status: "interrupted"`. `--from M` is admissible only if round `M` has a closing event — so after an interrupt mid-round-1, `--from 1` refuses and `--from 0` resumes cleanly.
+**Partial rounds.** Ctrl+C (a resumable pause, `StopReason.PAUSED`) mid-round leaves ledger events but no `round:complete`; the public `rounds/round_NNNN.json` stays absent (the audit cache carries the partial with `"interrupted": true`) and the cycle stays non-terminal and resumable — no `finished_at`. `--from M` is admissible only if round `M` has a closing event — so after a pause mid-round-1, `--from 1` refuses and `--from 0` resumes cleanly. A plain `resume` (no `--from`) continues from the last completed round.
 
 ### Fork — `resume --fork-on-divergence`
 
@@ -159,7 +159,7 @@ The workflow flags `--from`, `--fork-on-divergence`, `--rewind`, `--rewind-reaso
 - **First Ctrl+C** — finishes the in-flight backend call, saves all completed work, exits cleanly.
 - **Second Ctrl+C** — force-quits immediately.
 
-After an interrupted run, check for orphan processes (`tasklist | findstr python` on Windows; `ps aux | grep python` on Linux/Mac). An interrupt mid-round leaves ledger events but no closing `round:complete` — see **Interrupted rounds** under Rewind above for which `--from N` offsets are then admissible.
+After an interrupted run, check for orphan processes (`tasklist | findstr python` on Windows; `ps aux | grep python` on Linux/Mac). An interrupt mid-round leaves ledger events but no closing `round:complete` — see **Partial rounds** under Rewind above for which `--from N` offsets are then admissible.
 
 ## Will a config change re-score? — the measurement cache
 

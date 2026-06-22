@@ -23,7 +23,7 @@ class Campaign(BaseModel):
     Two orthogonal status surfaces:
 
     * ``status`` / ``finished_at`` — *session run state* (``"active"`` while a
-      session is running, ``"finished"`` / ``"interrupted"`` after teardown).
+      session is running, ``"finished"`` / ``"paused"`` after teardown).
       Set by the runner.
     * ``lifecycle_status`` / ``lifecycle_changed_at`` / ``lifecycle_reason`` —
       *operator visibility intent*. ``"archived"`` hides from the default

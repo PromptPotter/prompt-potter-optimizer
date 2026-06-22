@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import {
   postForkCycle,
-  postStopCycle,
+  postPauseCycle,
   type DraftPatch,
   type LimitOverrides,
   type OperatorForkOverride,
@@ -115,9 +115,9 @@ export function SteerForkPanel({
         : {}),
     };
     try {
-      // The steer redirects the run — stop the live parent first so the
-      // operator's next resume picks up the fork without racing the loop.
-      if (isLive) await postStopCycle(campaignId, cycleId);
+      // The steer redirects the run — pause the live parent first (the worker
+      // exits cleanly) so the fork launch doesn't race the parent's loop.
+      if (isLive) await postPauseCycle(campaignId, cycleId);
       await postForkCycle(campaignId, cycleId, candidate.round, candidate.candidate_id, {
         seed: forkSeed,
         steeredBy,

@@ -20,10 +20,10 @@ export interface CriticalAlert {
   severity: "critical" | "warn";
   title: string;
   detail?: string;
-  // When set, the banner offers a one-click operator action. `"stop"` = the
+  // When set, the banner offers a one-click operator action. `"pause"` = the
   // run is alive but its measurement is structurally broken — surface a
-  // "Stop campaign" button (the run never auto-stops; the operator decides).
-  action?: "stop";
+  // "Pause campaign" button (the run never auto-pauses; the operator decides).
+  action?: "pause";
 }
 
 interface Args {
@@ -130,7 +130,7 @@ export function criticalAlert({
           ? "Degraded origin — pipeline may be structurally broken"
           : `Round ${latest.round} degraded — pipeline may be structurally broken`,
       detail: latest.health.suggested_action ?? undefined,
-      action: "stop",
+      action: "pause",
     };
   }
   // `warming_up` (server reachable, no snapshot yet — e.g. a forked cycle whose
