@@ -44,15 +44,21 @@ __all__ = ["ForkInfo", "RunCallbacks", "RunObservers", "build_run_observers"]
 
 
 # Keys in ``PhaseEvent.data`` that carry live runtime references the JSON
-# serializer can't walk: ``env`` (the ``Session`` — BackendStore +
-# LangfuseLogger) and ``state`` (the live ``Cycle``, which reaches the same
-# handles via its ledger + scoring wiring). View derivation in
-# ``RunCallbacks.on_phase`` consumes them before they're stripped, and the two
+# serializer can't walk, or reconstructable bulk no reader consumes off disk:
+# ``env`` (the ``Session`` — BackendStore + LangfuseLogger) and ``state`` (the
+# live ``Cycle``, which reaches the same handles via its ledger + scoring
+# wiring); and ``dataset`` (the full resolved sample list — 400 query/
+# ground_truth pairs the INIT enter/exit records would otherwise embed twice,
+# ~870 KB each). View derivation in ``RunCallbacks.on_phase`` consumes them
+# before they're stripped (``_init_enter`` reads ``env``/``config``/``dataset``,
+# keeping only ``dataset_size=len(dataset)`` on the typed view), and the two
 # ledger subscribers that read origin state at INIT:exit (LiveDashboardView,
-# LiveDisplay) now take it off ``payload['view']`` instead — so nothing reads
-# these off the persisted/streamed record. Without stripping ``state`` the SSE
-# projection's ``model_dump(mode="json")`` raises on the BackendStore.
-_DATA_KEYS_RUNTIME_ONLY = frozenset({"env", "state"})
+# LiveDisplay) take it off ``payload['view']`` instead — so nothing reads these
+# off the persisted/streamed record. The dataset's canonical home is
+# ``datasets/{slug}/`` + the langfuse mirror; the ledger needs no copy. Without
+# stripping ``state`` the SSE projection's ``model_dump(mode="json")`` raises on
+# the BackendStore.
+_DATA_KEYS_RUNTIME_ONLY = frozenset({"env", "state", "dataset"})
 
 
 @dataclass
@@ -101,14 +107,22 @@ class RunCallbacks:
 
     def on_round_complete(self, round_result: Any, l1_stall_count: int) -> None:
         # ``event="display"`` keeps ``EscalationFSM.fold`` reading only the lean ``event="complete"`` audit emit.
+        # The full ``RoundResult`` rides ``live_round_result`` (in-memory-only) for
+        # the live subscribers; disk persists only the three scalars the SSE→webapp
+        # chat reads — the fat arrays are already in round_NNNN.json + dashboard.json.
         self._phase_ctx.l1_stall_count = l1_stall_count
         self._emit(
             PhaseRecord(
                 phase="round",
                 event="display",
                 round=round_result.round,
+                live_round_result=round_result,
                 payload={
-                    "round_result": round_result,
+                    "round_result": {
+                        "round": round_result.round,
+                        "accuracy": float(round_result.accuracy),
+                        "composite_fitness": float(round_result.composite_fitness),
+                    },
                     "l1_stall_count": l1_stall_count,
                     "phase_ctx": asdict(self._phase_ctx),
                 },

@@ -30,9 +30,12 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # then ``modules`` 293→292 (inlined the single-consumer ``optimization/transitions.py``
 # — ``TransitionResult`` + ``LayerStrategy`` — into its lone reader ``escalation/firing.py``);
 # then ``settings_env`` 24→17 (collapsed the 8 per-provider ``*_RPM``/``*_TPM`` fields
-# into one ``RATE_LIMITS`` provider→[rpm,tpm] map — the BYO/coupon prerequisite).
+# into one ``RATE_LIMITS`` provider→[rpm,tpm] map — the BYO/coupon prerequisite);
+# then ``modules`` 292→293 (the storage-hover feature
+# ``presentation/api/routers/campaigns/storage.py`` — the per-campaign on-disk
+# size endpoint behind the sidebar hover card).
 LEDGER_BASELINE = {
-    "modules": 292,
+    "modules": 293,
     "init_files": 54,
     "reexport_shims": 41,
     "config_leaf_fields": 32,

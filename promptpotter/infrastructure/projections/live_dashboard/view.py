@@ -348,7 +348,9 @@ class LiveDashboardView(DerivedView):
 
         if record.phase == "round" and record.event == "display":
             payload = record.payload or {}
-            round_result = payload.get("round_result")
+            # Full RoundResult rides the in-memory-only field (the persisted
+            # payload['round_result'] is the lean 3-scalar form for the SSE tail).
+            round_result = record.live_round_result
             l1_stall = int(payload.get("l1_stall_count") or 0)
             if round_result is not None:
                 self._absorb_round_complete(round_result.cumulative_accuracy, l1_stall)

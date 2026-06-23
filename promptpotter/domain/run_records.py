@@ -98,6 +98,15 @@ class PhaseRecord(BaseModel):
     event: str
     round: int | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
+    # In-memory-only carrier for the live ``RoundResult`` on ``round:display``
+    # records. ``exclude=True`` keeps it off the persisted/streamed JSON — the
+    # disk copy keeps only the lean ``payload['round_result']`` scalars (round,
+    # accuracy, composite_fitness) the SSE→webapp chat reads. The fat per-sample
+    # / per-candidate arrays already live in ``round_NNNN.json`` +
+    # ``dashboard.json::rounds[]``; the ledger needs no third copy. Live
+    # subscribers (LiveDashboardView, LiveDisplay) read this field; no disk
+    # re-reader does. ``None`` on every record but ``round:display``.
+    live_round_result: Any = Field(default=None, exclude=True, repr=False)
     timestamp: str = Field(default_factory=utcnow_iso)
 
 

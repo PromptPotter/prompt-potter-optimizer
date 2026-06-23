@@ -143,7 +143,9 @@ class LiveDisplay(DerivedView):
     def _handle_phase(self, record: PhaseRecord) -> None:
         payload = record.payload or {}
         if record.phase == "round" and record.event == "display":
-            round_result = payload.get("round_result")
+            # Full RoundResult rides the in-memory-only field; the persisted
+            # payload['round_result'] is the lean 3-scalar form for the SSE tail.
+            round_result = record.live_round_result
             if round_result is not None:
                 # Re-sync phase ctx so composite_fitness reads listener-side anchors.
                 ctx = payload.get("phase_ctx")
