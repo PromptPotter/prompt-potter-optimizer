@@ -36,7 +36,7 @@ state-sync P1–P4 shipped 2026-05-30 (per-cycle `dashboard.json`, `GET /api/v1/
 |---|---|---|
 | C1 | **Chat-first front door** — one thread: ingest/check-in → curated activity stream → inline decision buttons (existing verbs). | **Arc 1 shipped** (curated activity + SSE consumer + in-thread loop control, origin gate folded in); Arc 2 (conversation endpoint) deferred — [`chat-foundation.md`](chat-foundation.md) |
 | C2 | Composite fitness P2–P4 (P1 = spend, done) — data rollup anytime; **scatter panel after P3** | pending (see § Connectors + L4) |
-| C3 | L4 closure — inner-cycle dispatch + the L4 campaign + `proxy_lift_corr ≥ 0.6` re-validation (connector registered) | pending (see § Connectors + L4) |
+| C3 | L4 closure — inner-cycle dispatch + the L4 campaign + `proxy_lift_corr ≥ 0.6` re-validation (connector registered) | pending — design decided [`l4-outer-loop.md`](l4-outer-loop.md) |
 | C4 | Cross-user measurement panel (after P3) | pending (see § Ingest + chat-first web) |
 | C5 | MCP server mode · user-editable `pipeline.json` in UI | pending |
 | C6 | Public-service hardening (Docker, metrics, rate-limit, billing) — `/health` shipped; **pull rate-limit/metrics forward if the beta opens past the allowlist** | pending |
@@ -76,7 +76,7 @@ Four nouns map to OIDC: Install=`iss`, User=`sub` (`user_id=f"{iss}:{sub}"`, SCI
 
 ### Connectors + L4 inner-cycle execution — partially shipped (boundary + TermNorm + self-connector + control plane + composite-P1 done; L4 run + composite P2–P4 + competitor numbers open)
 - **Connector contract:** `Connector` dataclass (`connectors/protocol.py`), 3 hooks `wire_adapter`/`session_factory`/`extract_experiment`; `backend_type` read from `pipeline.json`, never hardcoded.
-- **Execution mode (the L4 self-recursion seam):** `Connector.execution = remote_http (default) | in_process`; `BackendClient.run_query` dispatches on the *declared mode*, never the connector name. The `promptpotter` connector declares `in_process` → raises a pointed `NotImplementedError` until Lane C3. C3's open choice: localhost `POST /inner/matches` vs in-process dispatch to `runner.run_optimization` under `.runtime/inner/`. Concept: [`optimizer-of-the-optimizer`](../concepts/optimizer-of-the-optimizer.md).
+- **Execution mode (the L4 self-recursion seam):** `Connector.execution = remote_http (default) | in_process`; `BackendClient.run_query` dispatches on the *declared mode*, never the connector name. The `promptpotter` connector declares `in_process` → raises a pointed `NotImplementedError` until Lane C3. **C3 design decided — [`l4-outer-loop.md`](l4-outer-loop.md):** in-process dispatch to `runner.run_optimization` (own asyncio task, isolated stores under `.runtime/inner/`); the same seam also yields an in-process `llm_only` connector (no TermNorm server for the basic case); specialized outer meta-prompt set; enriched outer fitness (normalized AUC-lift, panel mean−λ·std, PoBB-decisive, grade-A). Concept: [`optimizer-of-the-optimizer`](../concepts/optimizer-of-the-optimizer.md).
 - **Composite fitness phases:** P1 surface (done) · P2 per-candidate rollup + scatter · P3 `compile_post_aggregate_fitness(formula)` + `campaign.json::scoring_post_aggregate` · P4 Pareto-PoBB (stretch).
 - **Prompt-injection Phase 2:** `TrustedText`/`UntrustedText` renderer types + L1/critique injection-echo validators + a repeat-detection circuit breaker.
 

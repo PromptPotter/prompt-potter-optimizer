@@ -48,20 +48,17 @@ loads + validates normally, then `run_query` raises a pointed
 transport error against a backend that isn't there).
 
 What remains is the **inner-cycle run itself** — consuming the wire payload,
-running the inner cycle, producing the three proxy metrics. That is Lane C3
-(`docs/specs/roadmap.md` § Track 1.5). Two design options for *how*
-`in_process` executes, to settle when C3 lands:
-
-- **Localhost endpoint.** Add `POST /inner/matches` to the FastAPI app
-  (`promptpotter.main:app`). Cleanest boundary; generalizes to a worker/job in
-  the hosted multi-tenant world (aligns with per-user quotas); requires uvicorn
-  running alongside.
-- **In-process dispatch.** `run_query`'s `in_process` arm dispatches to
-  `runner.run_optimization` with isolated stores under `.runtime/inner/`.
-  Faster, no extra process; keeps everything in one runtime.
-
-The `execution` enum is the extension point — a future hosted `service` /
-`worker` mode is a new value, dispatched on uniformly, with no core-loop edit.
+running the inner cycle, producing the three proxy metrics. That is Lane C3,
+**decided in** [`../../docs/specs/l4-outer-loop.md`](../../docs/specs/l4-outer-loop.md):
+`run_query`'s `in_process` arm dispatches to a connector-supplied
+`in_process_run`, which calls `runner.run_optimization` in its **own asyncio
+task** (the three per-task ContextVars — `_CYCLE_LEDGER`, `_CURRENT_ROUND`,
+`_ABORT_CHECK` — isolate per task, not per call) under **isolated stores at
+`.runtime/inner/`** (no active-pointer / capacity-1 collision). One process,
+no networking. The same seam yields a second connector — in-process `llm_only`
+(no TermNorm server for the basic case). The localhost-endpoint option is
+retained only as the future hosted/multi-tenant worker mode: a new `execution`
+value, dispatched on uniformly, with no core-loop edit.
 
 ## Conventions
 

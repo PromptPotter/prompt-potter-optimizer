@@ -52,8 +52,8 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 L4 (PromptPotter optimizing its own meta-prompts) lives at the **intersection** of three docs — they form a coherent triple, read them together:
 
 1. [`concepts/optimizer-of-the-optimizer.md`](concepts/optimizer-of-the-optimizer.md) — why, the three composable proxies, cost realism.
-2. [`specs/roadmap.md`](specs/roadmap.md) § Connectors + L4 — the design, including the two inner-cycle execution options (localhost endpoint vs in-process dispatch).
-3. [`../promptpotter/connectors/CLAUDE.md`](../promptpotter/connectors/CLAUDE.md) — what the connector boundary taught us; the second connector's noop session lessons; the open execution path.
+2. [`specs/l4-outer-loop.md`](specs/l4-outer-loop.md) — the decided C3 design: in-process recursion, the shared `in_process`/`llm_only` seam, specialized outer prompts, enriched outer fitness. (Roadmap § Connectors + L4 carries the lane status.)
+3. [`../promptpotter/connectors/CLAUDE.md`](../promptpotter/connectors/CLAUDE.md) — what the connector boundary taught us; the second connector's noop session lessons; the resolved execution seam.
 
 The dataset side: [`../datasets/CLAUDE.md`](../datasets/CLAUDE.md) § L4 — `promptpotter-self`.
 

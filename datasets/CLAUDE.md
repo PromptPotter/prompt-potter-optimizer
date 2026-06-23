@@ -49,7 +49,7 @@ Optional:
 
 L4 is **not** a 4th `LayerStrategy` inside `promptpotter/application/optimization/`. It is the same PromptPotter applied to itself via the `promptpotter` connector (`../promptpotter/connectors/promptpotter.py`). Conceptually L2 / L3 / L4 are the same family — each mutates a slower-changing surface of the level below (L2 → `task_context`; L3 → `plan`; L4 → meta-prompt templates) — but structurally L4 is a recursion, not a new layer driver.
 
-**Status:** architectural skeleton + dataset landed; inner-cycle execution path (localhost endpoint vs in-process dispatch) is the open follow-up — see [`../promptpotter/connectors/CLAUDE.md`](../promptpotter/connectors/CLAUDE.md) § Inner-cycle execution and [`../docs/specs/roadmap.md#track-15--promptpotter-as-connector`](../docs/specs/roadmap.md).
+**Status:** architectural skeleton + dataset landed; inner-cycle execution (Lane C3) is decided — **in-process recursion** under `.runtime/inner/` — and specced in [`../docs/specs/l4-outer-loop.md`](../docs/specs/l4-outer-loop.md). The 4 nodes here are the inner meta-prompts the outer loop mutates; the outer optimizer uses a separate specialized meta-prompt set (a planned `_optimizer_meta/`, per the spec), not the standard `_optimizer/` loop.
 
 Concept doc: [`../docs/concepts/optimizer-of-the-optimizer.md`](../docs/concepts/optimizer-of-the-optimizer.md).
 

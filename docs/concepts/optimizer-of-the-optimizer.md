@@ -86,10 +86,14 @@ change the outer cycle.
 ## Status
 
 The connector and dataset architecture are landed; inner-cycle execution
-(turning a wire payload into an actual inner campaign run) is the follow-up
-deliverable. Until then, the demo dataset loads, validates, and renders on
-the outer dashboard, but `new` raises a clear `NotImplementedError` at
-the first inner match request. See
-`promptpotter/connectors/CLAUDE.md` § Inner-cycle execution for the two
-design options under consideration (localhost endpoint vs in-process
-dispatch).
+(turning a wire payload into an actual inner campaign run) is Lane C3.
+Until it lands, the demo dataset loads, validates, and renders on the outer
+dashboard, but `new` raises a clear `NotImplementedError` at the first inner
+match request. The C3 design is decided in
+[`../specs/l4-outer-loop.md`](../specs/l4-outer-loop.md): **in-process
+recursion** (each inner cycle in its own asyncio task under `.runtime/inner/`,
+no second server), a **specialized outer meta-prompt set**, an **enriched
+outer fitness** (normalized headroom lift + area-under-lift-vs-budget +
+panel mean−λ·std, PoBB-decisive, on grade-A measurements), and a shared
+`in_process` seam that also yields an in-process `llm_only` connector
+(no TermNorm server needed for the basic case).
