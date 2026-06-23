@@ -25,7 +25,6 @@ from promptpotter.application.scoring.formula import compile_round_scorer, extra
 from promptpotter.domain.pipeline_schema import NodeType
 from promptpotter.domain.scoring import RoundScorer
 from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
-from promptpotter.shared.statistics import paired_diff_posterior
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import (
@@ -45,7 +44,6 @@ __all__ = [
     "find_rank",
     "has_pipeline_warnings",
     "matched_origin_stats",
-    "paired_delta_lcb",
     "paired_fitness",
     "value_with_mask_applied",
 ]
@@ -251,10 +249,12 @@ def compute_composite_fitness(
     - ``l1_diversity`` is the round-level fraction of valid (non-no-op,
       non-duplicate) L1 variants; defaults to 1.0 for non-L1 calls.
 
-    The composite_fitness is **recorded, not gating**: ``select_fittest``
-    compares candidates on ``accuracy`` (the user's per-sample scoring
-    function). Composite is displayed and persisted so operators can see
-    whether a win came with hidden costs.
+    The composite_fitness is **recorded, not gating**: the round-winner
+    election compares candidates on difficulty-adjusted ability (``theta`` from
+    the joint Rasch fit, ``elect_round_winner``), which stays comparable when
+    each candidate is scored on a different signal-chased subset. ``accuracy``
+    and ``composite_fitness`` are subset-relative display numbers, persisted so
+    operators can see whether a win came with hidden costs.
     """
     base = _compute_accuracy(results)
     evaluator_values = materialize_round_values(pipeline_schema, results, opt_sp=opt_sp)
@@ -330,9 +330,11 @@ def matched_origin_stats(
 
 
 # ---------------------------------------------------------------------------
-# Round-winner election — the paired-fitness ranking shared by the live scorer
-# (``l1_score``) and the resume divergence replayer. ONE rule, two callers: a
-# resumed run can never re-elect a different winner under an unchanged scorer.
+# Round-winner election — difficulty-adjusted ability (θ) ranking shared by the
+# live scorer (``l1_score``) and the resume divergence replayer. ONE rule, two
+# callers: a resumed run can never re-elect a different winner under an unchanged
+# scorer. ``paired_fitness`` remains the origin-overlap guard + the recorded
+# p_value diagnostic in ``l1_score``; the *ranking* is θ, not its mean.
 # ---------------------------------------------------------------------------
 
 
@@ -358,37 +360,39 @@ def paired_fitness(
     return cand_fit, origin_fit
 
 
-def paired_delta_lcb(
-    candidate_results: list[QueryMeasurement],
-    origin_results: list[QueryMeasurement],
-) -> tuple[float, float]:
-    """One-sigma lower-confidence bound of the candidate's per-sample fitness lift over the
-    matched origin — the same paired posterior PoBB elimination runs. Returns ``(mean, lcb)``
-    with ``lcb = mean - se``: an under-probed candidate has a wide posterior (large ``se``), so
-    at equal mean it ranks below a fully-probed one — a lucky 6-sample run can't outrank a
-    full-20 candidate on a thin subset mean.
-    """
-    cand_fit, origin_fit = paired_fitness(candidate_results, origin_results)
-    if not cand_fit:
-        return 0.0, 0.0
-    mean_d, se_d, _ = paired_diff_posterior(cand_fit, origin_fit)
-    return mean_d, mean_d - se_d
-
-
 def elect_round_winner(
     candidate_ids: list[str],
     results_by_id: Mapping[str, list[QueryMeasurement]],
     origin_results: list[QueryMeasurement],
     coverage_floor: int,
 ) -> str:
-    """Elect the round winner: rank candidates by paired-fitness LCB vs the matched origin
-    (origin paired by ``sample_id``), tie-broken toward higher coverage. Origin is the floor at
-    rank ``(0.0, 0)`` — only a candidate confidently above origin (``lcb > 0``) with at least
+    """Elect the round winner: rank candidates by difficulty-adjusted ability lift over the
+    origin, tie-broken toward higher coverage. A single joint Rasch fit over every candidate
+    **and** the origin (``candidate_abilities``) puts all arms on one ability scale; the rank
+    key is ``(θ_cand − θ_origin) − θ_se`` — the LCB shrink so an under-probed candidate (wide
+    θ posterior) can't outrank a fully-probed one at equal ability. Origin is the floor at rank
+    ``(0.0, 0)`` — only a candidate confidently above origin (lift LCB > 0) with at least
     ``coverage_floor`` measured samples can win. Returns ``""`` when none clears the floor.
 
-    A candidate with no samples in common with origin (empty pairing) cannot win — it would
-    otherwise "beat" a phantom 0.0 floor on samples the incumbent never ran.
+    This is the cross-candidate comparison that drifts under per-round resubset: with each
+    candidate on a different signal-chased subset, raw subset accuracy is difficulty-blind, so
+    the candidate handed the easier samples wins on paper. θ is subset-invariant and crowns the
+    genuinely abler candidate. ``paired_fitness`` stays the origin-overlap guard — a candidate
+    with no samples in common with origin cannot win, else it would "beat" a phantom 0.0 floor
+    on samples the incumbent never ran. Pure + deterministic in its inputs, so the resume
+    replayer re-elects the same winner under an unchanged scorer.
     """
+    from promptpotter.application.intelligence.exploration import (
+        ORIGIN_ABILITY_ID,
+        candidate_abilities,
+    )
+
+    abilities = candidate_abilities(
+        {cid: list(results_by_id.get(cid) or []) for cid in candidate_ids},
+        origin_results,
+    )
+    theta_origin = abilities.theta.get(ORIGIN_ABILITY_ID, 0.0)
+
     best_rank: tuple[float, int] = (0.0, 0)
     winner_id = ""
     for cid in candidate_ids:
@@ -399,8 +403,11 @@ def elect_round_winner(
         cand_fit, _ = paired_fitness(cand_results, origin_results)
         if not cand_fit:
             continue
-        _, lcb = paired_delta_lcb(cand_results, origin_results)
-        rank = (lcb, base["total"])
+        theta_c = abilities.theta.get(cid)
+        if theta_c is None:
+            continue
+        lift_lcb = (theta_c - theta_origin) - abilities.theta_se.get(cid, 0.0)
+        rank = (lift_lcb, base["total"])
         if rank > best_rank:
             best_rank = rank
             winner_id = cid

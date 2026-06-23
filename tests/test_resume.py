@@ -60,20 +60,21 @@ def test_rescore_results_accumulates_and_projects_active() -> None:
 
 
 def test_round_winner_replay_uses_rescored_origin() -> None:
-    """Uniform rescaling preserves the recorded winner. The replay re-elects via the canonical
-    paired-LCB rule (shared with the live scorer) against the RESCORED origin: c1's +0.5 lift over
-    six paired samples confidently clears the floor, c2's negative lift does not — so the replay
-    re-derives c1 and flags no divergence, while the stale ``current_best_accuracy_at_record`` (and
-    the old raw-mean threshold) are never consulted."""
+    """Rescoring preserves the recorded winner. The replay re-elects via the canonical θ-ability
+    rule (shared with the live scorer) against the RESCORED origin: c1 clears the samples the origin
+    misses → a confident difficulty-adjusted ability lift, c2 does not — so the replay re-derives c1
+    and flags no divergence, while the stale ``current_best_accuracy_at_record`` is never consulted.
+    The silent harm guarded: a resumed run that re-elects a *different* winner forks the lineage off
+    the recorded path with no error."""
 
-    def _s(sid: int, fitness: float) -> dict:
-        return {**_r(fitness), "sample_id": sid}
+    def _m(sid: int, hit: bool) -> dict:
+        return {**_r(1.0 if hit else 0.0), "sample_id": sid, "hit": hit}
 
     round_data = {
         "round": 0,
         "all_candidate_results": {
-            "c1": [_s(i, 0.9) for i in range(6)],
-            "c2": [_s(i, 0.1) for i in range(6)],
+            "c1": [_m(i, i < 5) for i in range(6)],  # 5/6 — clears the hard tail
+            "c2": [_m(i, i < 1) for i in range(6)],  # 1/6 — below the origin
         },
         "decisions": [
             {
@@ -88,7 +89,8 @@ def test_round_winner_replay_uses_rescored_origin() -> None:
             }
         ],
     }
-    assert replay_decisions(round_data, origin_results=[_s(i, 0.4) for i in range(6)]) is None
+    # Origin hits only the two easiest samples → c1's wins on the rest are real lift, c2's are not.
+    assert replay_decisions(round_data, origin_results=[_m(i, i < 2) for i in range(6)]) is None
 
 
 def test_elimination_cut_replay_flags_divergence_when_scores_flip() -> None:

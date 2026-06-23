@@ -3,6 +3,8 @@
 > **Status:** design — resolves the open Lane-C3 decisions (`roadmap.md` § Connectors + L4). Forward-looking; the code lands in C3. Once shipped, the past-tense facts move to `docs/concepts/optimizer-of-the-optimizer.md`.
 >
 > **Scope:** CLI / headless only — no webapp surface yet (that's a later lane). The outer loop is a normal `python -m promptpotter new promptpotter-self` invocation.
+>
+> **Prerequisite:** [`fitness-comparability.md`](fitness-comparability.md) — the outer fitness here reads inner-campaign improvement over samples; that signal must be subset-invariant (θ-based) first, or the outer loop inherits the per-candidate drift distortion. Build comparability before this.
 
 ## Why
 
@@ -56,7 +58,7 @@ The three landed proxies stay the raw signals (`datasets/promptpotter-self/campa
 - **Area-under-lift-vs-budget** — rewards a config that climbs fast then plateaus over one that crawls; captures the trajectory finesse a two-endpoint delta discards. **Data-shape gap (must resolve):** per-round spend is *not* materialized — `index.json` carries no spend; `dashboard.json::spend` is a single cycle-total. Per-round (hence cumulative-by-round) spend IS reconstructible from the cycle ledger: `TokenUsageRecord` carries a `round` field in `.runtime/ledger.jsonl`. **Decision:** the fitness reads the ledger to build cumulative-spend-by-round for the AUC; a per-round spend rollup on the dashboard projection is the durable follow-up (not required for C3).
 - **Panel aggregation** — `mean lift − λ·std` across the inner-task panel (the four `gsm8k-small/seed-*`). Rewards generalization, penalizes a config that wins one seed and loses another — the same anti-mono-bias principle as the measurement provenance grade.
 - **PoBB-decisive promotion** — reuse `pobb/elevation.py::elevate_to_decisive` at the **outer** level: keep topping up inner campaigns (one more inner run) until the *ranking* of meta-prompt configs is statistically decisive, not just the point score. This is the finesse the budget cap otherwise throws away — confidence, not a single noisy number.
-- **Grade-A inner measurements only** — the proxies are computed from inner trajectories built on deliberate, grade-A measurements (the provenance grade, `domain/measurement_provenance.py`), never connector noise. The outer loop inherits the inner's clean-measurement guarantee.
+- **Subset-invariant, grade-A inner signal** — the proxies measure the inner loop's **θ-based** improvement (per [`fitness-comparability.md`](fitness-comparability.md)), not raw accuracy on a drifting subset, so `best − origin` is comparable across inner tasks; and they read deliberate, grade-A measurements (the provenance grade, `domain/measurement_provenance.py`), never connector noise. The outer loop inherits the inner's comparable, clean-measurement guarantee — which is why comparability is a prerequisite.
 
 Implementation maps to the roadmap composite-fitness phases: **P2** (per-candidate rollup + scatter) and **P3** (`compile_post_aggregate_fitness(formula)` + `campaign.json::scoring_post_aggregate`). The normalized-AUC / panel-aggregate / variance-penalty terms are the post-aggregate formula; the three proxies remain the per-sample primitives. A pure `outer_fitness` module computes them from a finished inner cycle's `index.json` (`origin_accuracy`, `best_accuracy`, `rounds[].accuracy`, `n_rounds`, `final`) plus the ledger-reconstructed spend.
 

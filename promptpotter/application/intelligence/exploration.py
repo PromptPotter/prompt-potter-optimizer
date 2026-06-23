@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -13,11 +14,18 @@ from promptpotter.shared.errors import is_error_result
 if TYPE_CHECKING:
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.sample import Sample
+    from promptpotter.domain.scoring import QueryMeasurement
+
+# Sentinel candidate id the origin rides under inside a joint ability fit, so the
+# election can read its θ on the same scale as the real candidates.
+ORIGIN_ABILITY_ID = "__origin__"
 
 __all__ = [
+    "ORIGIN_ABILITY_ID",
     "Observation",
     "RaschPosterior",
     "build_observations",
+    "candidate_abilities",
     "fit_rasch",
     "select_round_subset",
 ]
@@ -220,6 +228,33 @@ def build_observations(rounds: list[RoundResult]) -> list[Observation]:
                     Observation(candidate_id=cid, sample_id=int(sid), hit=bool(r.get("hit")))
                 )
     return obs
+
+
+def candidate_abilities(
+    results_by_id: Mapping[str, list[QueryMeasurement]],
+    origin_results: list[QueryMeasurement],
+) -> RaschPosterior:
+    """Joint 1PL Rasch fit over the round's candidates **and** the origin.
+
+    The origin is folded in as a pseudo-candidate under ``ORIGIN_ABILITY_ID`` so every
+    arm lands on one shared ability scale (``mean(theta) == 0`` anchor, common ``delta``).
+    ``theta[cid]`` is then each candidate's *difficulty-adjusted* ability — the
+    subset-invariant comparison the cross-candidate round-winner election needs when the
+    online picker scored each candidate on a different, signal-chased subset. Raw subset
+    accuracy is difficulty-blind and drifts across those subsets; θ does not.
+    """
+    obs: list[Observation] = []
+    pools: list[tuple[str, list[QueryMeasurement]]] = [
+        (cid, list(results)) for cid, results in results_by_id.items()
+    ]
+    pools.append((ORIGIN_ABILITY_ID, list(origin_results)))
+    for cid, results in pools:
+        for r in results:
+            sid = r.get("sample_id")
+            if sid is None or is_error_result(r):
+                continue
+            obs.append(Observation(candidate_id=cid, sample_id=int(sid), hit=bool(r.get("hit"))))
+    return fit_rasch(obs)
 
 
 def select_round_subset(

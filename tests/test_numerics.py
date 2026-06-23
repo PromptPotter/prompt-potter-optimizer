@@ -602,6 +602,41 @@ def test_select_round_subset_cold_starts_to_prefix_and_warms_to_informative() ->
     assert picked_ids == {0, 1, 2}
 
 
+def test_round_winner_elects_by_ability_not_subset_accuracy() -> None:
+    """Per-round-resubset drift guard. Two candidates measured on DIFFERENT subsets:
+    the high-accuracy one only saw easy samples; the lower-accuracy one cleared HARD
+    samples the origin always misses. Raw subset accuracy would crown the easy candidate;
+    difficulty-adjusted ability (θ) — the gating metric — must crown the abler one.
+
+    Silent harm: under per-round resubset the wrong winner is promoted with no error —
+    the run completes, the dashboard looks fine, the lineage decays toward whoever drew
+    the gentlest samples. The election ranks on a joint Rasch θ fit, so it does not.
+    """
+    from promptpotter.application.scoring.metrics import elect_round_winner
+
+    def res(hit: bool, sid: int) -> dict:
+        return {"sample_id": sid, "hit": hit, "fitness": 1.0 if hit else 0.0}
+
+    # Origin spans all 40: easy {0..19} hit, hard {20..39} missed → the difficulty gradient.
+    origin = [res(i < 20, i) for i in range(40)]
+    # Easy candidate: 16/20 on easy samples the origin also hits → accuracy 0.80, modest lift.
+    weak_on_easy = [res(i < 16, i) for i in range(20)]
+    # Able candidate: 14/20 on HARD samples the origin always misses → accuracy 0.70, bigger lift.
+    able_on_hard = [res(i < 34, i) for i in range(20, 40)]
+    results_by_id = {"weak_on_easy": weak_on_easy, "able_on_hard": able_on_hard}
+
+    # Raw subset accuracy crowns the easy candidate (0.80 > 0.70)...
+    assert sum(r["hit"] for r in weak_on_easy) / 20 > sum(r["hit"] for r in able_on_hard) / 20
+    # ...but the θ-gated election crowns the abler one — it cleared items the origin never did,
+    # which is stronger evidence of ability than more wins on items everyone already passes.
+    assert (
+        elect_round_winner(
+            ["weak_on_easy", "able_on_hard"], results_by_id, origin, coverage_floor=4
+        )
+        == "able_on_hard"
+    )
+
+
 # ===========================================================================
 # 5. Measurement rerun short-circuit + refusal classification
 # ===========================================================================

@@ -31,7 +31,9 @@ Two-tier decision records: **replayable** (which candidate won, parameters that 
 
 ## Composite — recorded, not gating
 
-Round-winner selection compares candidates on per-sample accuracy; the **composite** (per-round accuracy + health + latency + recall + verbosity) displays alongside so a win that came with hidden costs surfaces in the leaderboard. Hot-swap via `campaigns/{campaign_id}/cycles/{cycle_id}/scoring_steer.json`.
+Round-winner selection compares candidates on difficulty-adjusted ability (θ from a joint Rasch fit — subset-invariant, so candidates scored on different adaptive subsets stay comparable); **accuracy** and the **composite** (per-round accuracy + health + latency + recall + verbosity) display alongside as subset-relative numbers so a win that came with hidden costs surfaces in the leaderboard. Hot-swap via `campaigns/{campaign_id}/cycles/{cycle_id}/scoring_steer.json`.
+
+θ is the standard IRT/CAT fix: a small statistical model that **structurally** removes the per-round sample-set drift — when the adaptive picker hands each candidate a different subset, raw accuracy is no longer comparable, but ability is. Today it's 1PL (difficulty only); a richer **2PL** variant adds per-sample signal-to-noise (discrimination), giving more power once enough data is collected, and graduates per-dataset only when it beats 1PL out-of-sample. Rationale: [`../specs/fitness-comparability.md`](../specs/fitness-comparability.md).
 
 ## Pointers
 
