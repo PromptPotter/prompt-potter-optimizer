@@ -45,6 +45,16 @@ export function fmtCompact(v: number): string {
   return v.toLocaleString();
 }
 
+// On-disk size — "0 B" / "12.4 KB" / "3.1 MB" / "1.20 GB". A missing / non-finite
+// value renders "—", never "NaN B".
+export function fmtBytes(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  if (n < 1024) return `${Math.max(0, Math.round(n))} B`;
+  if (n < 1_048_576) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1_073_741_824) return `${(n / 1_048_576).toFixed(1)} MB`;
+  return `${(n / 1_073_741_824).toFixed(2)} GB`;
+}
+
 // Token count — "920 tok" / "12k tok" / "3.4M tok".
 export function fmtTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M tok`;

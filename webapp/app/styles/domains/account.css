@@ -122,3 +122,16 @@
 .account-modal-auth{flex-direction:column;max-width:380px;width:100%;height:min(720px,92vh);min-height:0}
 .account-pane-body-auth{gap:14px;padding:22px 24px 18px;flex:1 1 auto}
 
+/* Storage pane — workspace-wide per-campaign on-disk rollup, fattest first. */
+.wstorage-total{font-size:20px;font-weight:600;color:var(--color-text-primary);font-variant-numeric:tabular-nums}
+.wstorage-note{margin:6px 0 14px;font-size:12px;line-height:1.5;max-width:52ch}
+.wstorage-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:11px}
+.wstorage-item{display:flex;flex-direction:column;gap:5px}
+.wstorage-item-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.wstorage-name{font-size:13px;color:var(--color-text-primary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wstorage-tag{margin-left:7px;font-size:10px;text-transform:uppercase;letter-spacing:0.05em;padding:1px 6px;border-radius:999px;background:var(--color-background-hover);color:var(--color-text-tertiary);border:0.5px solid var(--color-border-tertiary)}
+.wstorage-tag.deleted{color:#e74c3c}
+.wstorage-bytes{font-size:13px;font-weight:600;color:var(--color-text-primary);font-variant-numeric:tabular-nums;white-space:nowrap}
+.wstorage-bar{height:5px;border-radius:3px;background:var(--color-background-secondary);overflow:hidden}
+.wstorage-bar-fill{height:100%;border-radius:3px;background:var(--color-accent)}
+

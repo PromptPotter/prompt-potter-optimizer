@@ -39,7 +39,7 @@ import {
   type LifecycleFilter,
 } from "./api";
 import { usePoll } from "./hooks/usePoll";
-import { useRevalidation } from "./revalidate";
+import { bumpRevalidation, useRevalidation } from "./revalidate";
 import { useAuthGate } from "./auth-context";
 
 export interface WorkspaceState {
@@ -55,6 +55,11 @@ export interface WorkspaceState {
   following: boolean; // (campaignId, cycleId) track the active pointer
   cycles: CycleListEntry[];
   cyclesLoaded: boolean; // first /cycles poll has resolved (success or fail)
+  // True once the campaign list on hand reflects the CURRENT lifecycleFilter.
+  // Flips false the instant the filter changes (Active⇄Archived) until the
+  // refetch for the new filter lands — so the sidebar shows `loading…` instead
+  // of the prior tab's stale list.
+  campaignsLoaded: boolean;
   cyclesError: string | null;
   // Campaign manifests (GET /campaigns) — polled in the same tick as
   // /cycles. Carries the operator-editable `label`; surfaces resolve a
@@ -123,6 +128,11 @@ export function WorkspaceProvider({
   const [activeCampaignId, setActiveCampaignId] = useState<string | null>(null);
   const [cycles, setCycles] = useState<CycleListEntry[]>([]);
   const [campaigns, setCampaigns] = useState<CampaignSummary[]>([]);
+  // Which lifecycle filter the current `campaigns` reflect — null until the
+  // first fetch lands. `campaignsLoaded` is this matching the live filter.
+  const [campaignsFilter, setCampaignsFilter] = useState<LifecycleFilter | null>(
+    null,
+  );
   const [cyclesLoaded, setCyclesLoaded] = useState(false);
   const [cyclesError, setCyclesError] = useState<string | null>(null);
   const [activeError, setActiveError] = useState<string | null>(null);
@@ -236,6 +246,7 @@ export function WorkspaceProvider({
       }
       if (campaignsRes.status === "fulfilled") {
         setCampaigns(campaignsRes.value.campaigns);
+        setCampaignsFilter(lifecycleFilter);
       }
       setCyclesLoaded(true);
     },
@@ -307,6 +318,13 @@ export function WorkspaceProvider({
     setPinned(null);
   }, []);
 
+  // Switching tabs re-queries `/campaigns?lifecycle=` — bump revalidation so the
+  // registry loop re-ticks at once instead of waiting out its 10 s interval.
+  const selectLifecycle = useCallback((f: LifecycleFilter) => {
+    setLifecycleFilter(f);
+    bumpRevalidation();
+  }, []);
+
   const value: WorkspaceState = {
     sessionId,
     activeCycleId,
@@ -317,11 +335,12 @@ export function WorkspaceProvider({
     following,
     cycles,
     cyclesLoaded,
+    campaignsLoaded: campaignsFilter === lifecycleFilter,
     cyclesError,
     campaigns,
     activeError,
     lifecycleFilter,
-    setLifecycleFilter,
+    setLifecycleFilter: selectLifecycle,
     selectCycle,
     followActive,
   };

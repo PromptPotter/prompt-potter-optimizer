@@ -47,6 +47,7 @@ export function Sidebar({ onSelectCycle, onNewCycle, collapsed, onToggleCollapse
     campaigns,
     cycles,
     cyclesLoaded,
+    campaignsLoaded,
     activeCycleId,
     activeCampaignId,
     lifecycleFilter,
@@ -132,7 +133,10 @@ export function Sidebar({ onSelectCycle, onNewCycle, collapsed, onToggleCollapse
     [setCollapsedNodes],
   );
 
-  const loaded = cyclesLoaded;
+  // Wait for BOTH the cycle list and the campaign list for the CURRENT
+  // lifecycle tab — so switching to Archived shows `loading…`, not the
+  // Active tab's stale rows, until the archived list arrives.
+  const loaded = cyclesLoaded && campaignsLoaded;
 
   return (
     <nav className="sidebar" aria-label="Primary">

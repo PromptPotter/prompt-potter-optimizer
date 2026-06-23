@@ -8,6 +8,7 @@ import { AccountProfileTab } from "./AccountProfileTab";
 import { AccountSecurityTab } from "./AccountSecurityTab";
 import { AccountActivityTab } from "./AccountActivityTab";
 import { AccountPreferencesTab } from "./AccountPreferencesTab";
+import { WorkspaceStoragePanel } from "./WorkspaceStoragePanel";
 import { useFetch } from "@/lib/hooks/useFetch";
 import { useDialogA11y } from "@/lib/hooks/useDialogA11y";
 import { fetchMe } from "@/lib/api";
@@ -17,12 +18,13 @@ interface Props {
   onClose: () => void;
 }
 
-type AccountTab = "profile" | "security" | "activity" | "preferences" | "about";
+type AccountTab = "profile" | "security" | "activity" | "storage" | "preferences" | "about";
 
 const TAB_TITLES: Record<AccountTab, string> = {
   profile: "Profile details",
   security: "Security",
   activity: "Activity",
+  storage: "Storage",
   preferences: "Preferences",
   about: "About this unit",
 };
@@ -85,6 +87,15 @@ export function AccountModal({ open, onClose }: Props) {
             <li>
               <button
                 type="button"
+                className={`account-nav-item${tab === "storage" ? " active" : ""}`}
+                onClick={() => setTab("storage")}
+              >
+                Storage
+              </button>
+            </li>
+            <li>
+              <button
+                type="button"
                 className={`account-nav-item${tab === "preferences" ? " active" : ""}`}
                 onClick={() => setTab("preferences")}
               >
@@ -122,6 +133,7 @@ export function AccountModal({ open, onClose }: Props) {
             {me && tab === "profile" ? <AccountProfileTab me={me} /> : null}
             {me && tab === "security" ? <AccountSecurityTab me={me} /> : null}
             {open && tab === "activity" ? <AccountActivityTab /> : null}
+            {open && tab === "storage" ? <WorkspaceStoragePanel /> : null}
             {open && tab === "preferences" ? <AccountPreferencesTab /> : null}
             {open && tab === "about" ? <AboutUnit /> : null}
           </div>

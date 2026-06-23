@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { FileTree } from "./FileTree";
 import { FileViewer } from "./FileViewer";
+import { StorageCakes } from "./StorageCakes";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
 import { useCycleStream, type DashboardSnapshot } from "@/lib/poll";
 
@@ -32,7 +33,8 @@ export function FilesPane({ campaignId, cycleId }: Props) {
   // the rest of the file tree, not the one watching the live drill.
   const { dash } = useCycleStream();
   return (
-    <div className="content" id="content-files" style={{ height: "100%" }}>
+    <div className="content files-content" id="content-files">
+      <StorageCakes />
       <div className="files-pane">
         <div className="tree-pane" role="navigation" aria-label="Files">
           <FileTree

@@ -351,6 +351,71 @@ export function fetchCycles(signal?: AbortSignal): Promise<CyclesResponse> {
   return jget<CyclesResponse>(`${API}/cycles`, signal);
 }
 
+// The six MECE leaves every storage surface shares — they sum to the on-disk total.
+// Top-level axis is Connector / Loop / Dataset; Loop = state + trace + history + reports.
+export interface StorageLeaves {
+  dataset_bytes: number; // langfuse ground-truth mirror (input-data copy)
+  connector_bytes: number; // backend: node-I/O cache + per-sample round arrays
+  state_bytes: number; // loop resume point: round state + overrides
+  trace_bytes: number; // loop telemetry: streams, prompts, langfuse loop trace
+  history_bytes: number; // loop event spine: ledger.jsonl
+  reports_bytes: number; // readable output: manifest + reports + hard_samples
+}
+
+// Per-campaign on-disk size — the figures the sidebar hover card shows.
+// Wire shape: `GET /campaigns/{id}/storage`.
+export interface CampaignStorageResponse extends StorageLeaves {
+  campaign_id: string;
+  on_disk_bytes: number;
+}
+export function fetchCampaignStorage(
+  campaignId: string,
+  signal?: AbortSignal,
+): Promise<CampaignStorageResponse> {
+  return jget<CampaignStorageResponse>(
+    `${API}/campaigns/${encodeURIComponent(campaignId)}/storage`,
+    signal,
+  );
+}
+
+// Workspace-wide rollup — per-campaign on-disk slices, fattest first, plus the shared
+// caches and a residual `other` slice so total == the tenant's real footprint.
+// Wire shape: `GET /workspace/storage`.
+export interface WorkspaceStorageEntry extends StorageLeaves {
+  campaign_id: string;
+  dataset_name: string;
+  lifecycle_status: string;
+  on_disk_bytes: number;
+}
+export interface WorkspaceStorageResponse {
+  total_bytes: number;
+  shared_cache_bytes: number; // measurements/ + optimizer_calls/ — reused, survive delete
+  other_bytes: number; // sessions, workspace ledger, dataset/backend stores
+  campaigns: WorkspaceStorageEntry[];
+}
+export function fetchWorkspaceStorage(
+  signal?: AbortSignal,
+): Promise<WorkspaceStorageResponse> {
+  return jget<WorkspaceStorageResponse>(`${API}/workspace/storage`, signal);
+}
+
+// Per-dataset on-disk leaf breakdown — the Files-view "cake" (one pie per dataset,
+// sliced by the six MECE leaves, summing to total = on disk).
+// Wire shape: `GET /workspace/storage-by-dataset`.
+export interface DatasetStorageEntry extends StorageLeaves {
+  dataset_name: string;
+  total_bytes: number;
+}
+export interface DatasetStorageResponse {
+  total_bytes: number;
+  datasets: DatasetStorageEntry[];
+}
+export function fetchStorageByDataset(
+  signal?: AbortSignal,
+): Promise<DatasetStorageResponse> {
+  return jget<DatasetStorageResponse>(`${API}/workspace/storage-by-dataset`, signal);
+}
+
 // Campaign manifest detail — adds `config` (frozen CampaignConfig snapshot) +
 // the session forest to the summary. The MechanismsPanel reads the active
 // toggle states off `config.optimization.mechanisms`.

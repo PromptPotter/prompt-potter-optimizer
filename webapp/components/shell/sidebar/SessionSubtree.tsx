@@ -1,5 +1,8 @@
 "use client";
-import type { CampaignSummary } from "@/lib/api";
+import { useCallback, useState } from "react";
+import { postUnarchiveCampaign, type CampaignSummary } from "@/lib/api";
+import { bumpRevalidation } from "@/lib/revalidate";
+import { cx } from "@/lib/cx";
 import { campaignOriginHash } from "@/lib/ids";
 import { campaignDisplayName, unitDisplayName } from "@/lib/names";
 import { fmtPct0 } from "@/lib/format";
@@ -7,6 +10,7 @@ import { runPhaseLabel } from "@/lib/run-phase";
 import { buildUnitTree, type SessionGroup } from "./grouping";
 import { UnitBranchRows } from "./UnitBranchRows";
 import { CampaignMenu } from "./CampaignMenu";
+import { CampaignSizeHover } from "./CampaignSizeHover";
 
 // One session row + (when expanded) its fork-tree. Rendered either AS the
 // campaign row (single-session campaign) or as a child session row
@@ -38,6 +42,20 @@ export function SessionSubtree({
   const root = session.root;
   const hasBranches = session.branches.length > 0;
   const selected = cid === campaignId && root.cycle_id === cycleId;
+  // Archived campaigns live in the archive/ recycle bin — inert to browse (their
+  // detail routes 404 until restored). So an archived campaign row's primary
+  // action is RESTORE, not open: clicking it moves the tree back to campaigns/.
+  const archived = isCampaignRow && campaign.lifecycle_status === "archived";
+  const [restoring, setRestoring] = useState(false);
+  const runRestore = useCallback(async () => {
+    setRestoring(true);
+    try {
+      await postUnarchiveCampaign(cid);
+      bumpRevalidation();
+    } finally {
+      setRestoring(false);
+    }
+  }, [cid]);
   // A check-in isn't a run, so it never wears the active-pointer ●, even if a stale
   // pointer still names it (it claimed the pointer under the old mint code before the
   // claim moved to Start). The ● tracks the running/last-started cycle the dashboard
@@ -65,10 +83,9 @@ export function SessionSubtree({
 
   const label = isCampaignRow ? campaignDisplayName(campaign) : unitDisplayName(root);
 
-  return (
-    <>
-      <div className={`unit-library-family${selected ? " selected" : ""}`}>
-        <button
+  const familyRow = (
+    <div className={cx("unit-library-family", selected && "selected", archived && "archived")}>
+      <button
           type="button"
           className="unit-library-twist"
           onClick={onToggle}
@@ -82,9 +99,10 @@ export function SessionSubtree({
         <button
           type="button"
           className="unit-library-item"
-          onClick={() => onSelectCycle(cid, root.cycle_id)}
+          onClick={() => (archived ? void runRestore() : onSelectCycle(cid, root.cycle_id))}
           aria-current={selected ? "true" : undefined}
-          title={isCampaignRow ? cid : root.cycle_id}
+          title={archived ? "Archived — click to restore" : isCampaignRow ? cid : root.cycle_id}
+          disabled={restoring}
         >
           <span className="unit-library-mark">{active ? "●" : ""}</span>
           <span className="unit-library-row">
@@ -102,13 +120,21 @@ export function SessionSubtree({
               )}
             </span>
             <span className="unit-library-meta">
-              {statusLabel && (
+              {archived ? (
+                <span className="unit-library-status">
+                  {restoring ? "Restoring…" : "Archived · restore"}
+                </span>
+              ) : (
                 <>
-                  <span className="unit-library-status">{statusLabel}</span>
-                  {" · "}
+                  {statusLabel && (
+                    <>
+                      <span className="unit-library-status">{statusLabel}</span>
+                      {" · "}
+                    </>
+                  )}
+                  {fmtPct0(session.bestAccuracy)}
                 </>
               )}
-              {fmtPct0(session.bestAccuracy)}
             </span>
           </span>
         </button>
@@ -133,7 +159,16 @@ export function SessionSubtree({
           </span>
         )}
         {isCampaignRow && <CampaignMenu campaign={campaign} />}
-      </div>
+    </div>
+  );
+
+  return (
+    <>
+      {isCampaignRow ? (
+        <CampaignSizeHover campaignId={cid}>{familyRow}</CampaignSizeHover>
+      ) : (
+        familyRow
+      )}
       {open && hasBranches && (
         <ul className="unit-library-children">
           <UnitBranchRows

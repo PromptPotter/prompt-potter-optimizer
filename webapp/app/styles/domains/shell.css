@@ -123,10 +123,22 @@
 .unit-library-family > .unit-library-item:hover{background:transparent;color:var(--color-text-primary)}
 .unit-library-family.selected{background:var(--color-background-tint-active)}
 .unit-library-family.selected .unit-library-item.selected{background:transparent}
+/* Archived rows live in the recycle bin — muted, and their primary click restores
+   (the detail routes 404 until restored). The status cell reads "Archived · restore". */
+.unit-library-family.archived > .unit-library-item{opacity:0.6;font-style:italic}
+.unit-library-family.archived > .unit-library-item:hover{opacity:1}
 .unit-library-twist{flex:0 0 18px;background:transparent;border:0;color:var(--color-text-secondary);cursor:pointer;font-size:9px;padding:0;line-height:1;display:flex;align-items:center;justify-content:center;border-radius:4px}
 .unit-library-twist:hover:not(:disabled){background:var(--color-background-hover);color:var(--color-text-primary)}
 .unit-library-twist:disabled{cursor:default;visibility:hidden}
 .unit-library-children{list-style:none;margin:2px 0 4px 14px;padding:0;border-left:1px solid var(--color-border-tertiary)}
+/* Campaign on-disk size hover card. position:fixed (set inline from the row
+   rect) escapes sidebar overflow clipping. */
+.csize-wrap{display:block}
+.csize-card{z-index:50;pointer-events:none;display:grid;grid-template-columns:auto auto;align-items:baseline;column-gap:14px;row-gap:4px;background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.28);padding:8px 12px;min-width:96px}
+.csize-label{justify-self:start;font-size:10px;letter-spacing:0.04em;text-transform:uppercase;color:var(--color-text-tertiary)}
+.csize-val{justify-self:end;font-size:13px;font-weight:700;color:var(--color-text-primary);font-variant-numeric:tabular-nums}
+.csize-label[data-indent]{padding-left:12px;text-transform:none;letter-spacing:0.02em}
+.csize-note{grid-column:1 / -1;margin-top:2px;font-size:9px;letter-spacing:0.02em;color:var(--color-text-tertiary);opacity:0.8}
 .unit-library-child{padding-left:10px;font-size:12px}
 /* Live badge in the breadcrumb — passive indicator that the dashboard
    poll is seeing fresh writes. dashState.status === "live" drives it. */

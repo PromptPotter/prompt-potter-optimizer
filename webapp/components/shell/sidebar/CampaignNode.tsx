@@ -5,6 +5,7 @@ import { fmtPct0 } from "@/lib/format";
 import { sessKey, type CampaignGroup } from "./grouping";
 import { SessionSubtree } from "./SessionSubtree";
 import { CampaignMenu } from "./CampaignMenu";
+import { CampaignSizeHover } from "./CampaignSizeHover";
 
 // One campaign in the flat list. A single-session campaign collapses: the
 // campaign row IS that session and opens it directly (its twist, if any,
@@ -58,7 +59,8 @@ export function CampaignNode({
   const containsActive = cid === activeCampaignId;
   return (
     <>
-      <div className={`unit-library-family${containsViewed ? " selected" : ""}`}>
+      <CampaignSizeHover campaignId={cid}>
+        <div className={`unit-library-family${containsViewed ? " selected" : ""}`}>
         <button
           type="button"
           className="unit-library-twist"
@@ -91,7 +93,8 @@ export function CampaignNode({
           </span>
         </button>
         <CampaignMenu campaign={group.campaign} />
-      </div>
+        </div>
+      </CampaignSizeHover>
       {cmpOpen && (
         <ul className="unit-library-children">
           {group.sessions.map((session) => {

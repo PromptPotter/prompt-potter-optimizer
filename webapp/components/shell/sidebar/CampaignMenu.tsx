@@ -11,11 +11,11 @@ import { Modal, type ModalAction } from "@/components/shell/Modal";
 import { Popover } from "@/components/ui";
 
 // Per-campaign three-dots menu. Surfaces the lifecycle commands wired in
-// `mutations.ts`: archive / unarchive (soft-mark, reversible) and delete
-// (soft-mark, hidden from default surface — measurements survive
-// cross-campaign cache-hits per ADR-0002 §0.5; nothing on disk is removed).
-// Delete asks for confirmation; archive / unarchive fire immediately.
-// Dropdown open/close + click-outside/ESC come from the Popover primitive.
+// `mutations.ts`: archive / unarchive (MOVE the tree into / out of the archive/
+// recycle bin, reversible) and delete (DESTRUCTIVE — removes the campaign tree,
+// no recovery; the cross-campaign measurement cache survives per ADR-0002 §0.5
+// so siblings still cache-hit). Delete asks for confirmation; archive / unarchive
+// fire immediately. Dropdown open/close + click-outside/ESC come from the Popover.
 
 interface Props {
   campaign: CampaignSummary;
@@ -132,9 +132,9 @@ export function CampaignMenu({ campaign }: Props) {
       <Modal
         open={confirmDelete}
         title="Delete this campaign?"
-        message={`This soft-marks "${
+        message={`This permanently removes "${
           campaign.label || campaign.campaign_id
-        }" as deleted and drops it from the default sidebar. Measurements survive on disk — cross-campaign cache-hits keep working — and the campaign is reachable by id from the file tree. This is not a physical delete.`}
+        }" — its cycles, rounds, and telemetry — from disk. There is no recovery. The shared measurement cache survives, so other campaigns still cache-hit. (To archive instead of delete, use Archive — it moves the campaign to the recycle bin, restorable later.)`}
         actions={deleteActions}
         onClose={() => setConfirmDelete(false)}
       />
