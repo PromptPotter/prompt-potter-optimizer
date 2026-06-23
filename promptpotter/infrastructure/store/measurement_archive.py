@@ -20,6 +20,7 @@ from promptpotter.config.settings import (
     LOCK_TIMEOUT,
     MEASUREMENTS_SCHEMA_VERSION,
 )
+from promptpotter.domain.measurement_provenance import entry_grade, meets_grade
 from promptpotter.domain.sample import Measurement
 from promptpotter.infrastructure.store.base import (
     read_json,
@@ -140,6 +141,7 @@ class MeasurementArchive:
             "node_configs": data.get("node_configs"),
             "pipeline_params": data.get("pipeline_params"),
             "source": data.get("source", ""),
+            "provenance": data.get("provenance"),
             "connector_type": data.get("connector_type", DEFAULT_CONNECTOR_TYPE),
             "created_at": data["created_at"],
         }
@@ -385,11 +387,15 @@ class MeasurementArchive:
         *,
         dataset_name: str | None = None,
         include_unknown: bool = False,
+        min_grade: str | None = None,
     ) -> dict[str, dict[str, Any]]:
         """Per-sample cache from prior runs sharing *node_configs*. Exact match → reuse all
         non-error; partial → prefix-trusted nodes only. `is_fatal` prevents a deprecated archive
         row shadowing a saved valid retry. *dataset_name* scopes reuse (same sample_id across
-        datasets is a different problem).
+        datasets is a different problem). *min_grade* (`A`/`B`/`C`) drops runs whose provenance
+        grade is below the floor — a clean-substrate read (e.g. the loop-improvement experiment)
+        passes `A` to reuse only deliberately-explored measurements; the default `None` keeps
+        every run, so ordinary scoring caching is unchanged.
 
         Operating consequence (the answer to "will changing a connector tunable re-score?"):
         `node_configs` carries each node's effective config INCLUDING `model`, so a change at
@@ -409,6 +415,8 @@ class MeasurementArchive:
             dataset_name=dataset_name,
             include_unknown=include_unknown,
         ):
+            if min_grade is not None and not meets_grade(entry_grade(entry), min_grade):
+                continue
             detail = self.load_by_id(backend_id, entry["run_id"])
             if not detail:
                 continue

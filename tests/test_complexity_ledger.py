@@ -33,9 +33,13 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # into one ``RATE_LIMITS`` provider→[rpm,tpm] map — the BYO/coupon prerequisite);
 # then ``modules`` 292→293 (the storage-hover feature
 # ``presentation/api/routers/campaigns/storage.py`` — the per-campaign on-disk
-# size endpoint behind the sidebar hover card).
+# size endpoint behind the sidebar hover card);
+# then ``modules`` 293→294 (the measurement provenance grade
+# ``domain/measurement_provenance.py`` — the deliberate-vs-incidental quality grade
+# that de-biases the AxisIndex digest + gates clean-substrate reuse, the foundation
+# the loop-improvement experiment and a future L4 ingest build on).
 LEDGER_BASELINE = {
-    "modules": 293,
+    "modules": 294,
     "init_files": 54,
     "reexport_shims": 41,
     "config_leaf_fields": 32,

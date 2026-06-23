@@ -12,11 +12,14 @@ them out with the loud-breakage shape/contract bulk.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pydantic
 import pytest
 
+from promptpotter.domain.measurement_provenance import grade_run
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import JobSearchPoint
@@ -83,6 +86,87 @@ def _seed_run(archive: MeasurementArchive, *, run_id: str, dataset_name: str, hi
             "dataset_name": dataset_name,
         },
     )
+
+
+@dataclass
+class _StubNode:
+    name: str
+    is_llm: bool
+
+
+@dataclass
+class _StubSchema:
+    nodes: list[_StubNode]
+
+
+def test_provenance_grade_separates_deliberate_from_connector() -> None:
+    """The grade that gates the cross-cycle digest must not invert: a deliberate
+    LLM-path run grades A (kept), an incidental connector short-circuit grades C
+    (dropped). An inversion silently feeds the optimizer connector-retrieval noise
+    instead of its real explored datapoints — no error, just a biased digest."""
+    schema = _StubSchema([_StubNode("token_matching", False), _StubNode("llm_only", True)])
+    llm_batch = [{"pipeline_data": {"terminated_at": "llm_only"}}]
+    connector_batch = [{"pipeline_data": {"terminated_at": "token_matching"}}]
+    assert grade_run("optimization_loop", llm_batch, schema).grade == "A"
+    assert grade_run("origin", llm_batch, schema).grade == "A"
+    assert grade_run("", connector_batch, schema).grade == "C"
+    # one signal but not both → middling, never confused with a clean A
+    assert grade_run("origin", connector_batch, schema).grade == "B"
+    assert grade_run("", llm_batch, schema).grade == "B"
+
+
+def _seed_graded(
+    archive: MeasurementArchive, *, run_id: str, grade: str, terminated_at: str
+) -> None:
+    """Save one run carrying a provenance grade and a single dataset-tagged sample."""
+    provenance: dict[str, Any] = {"grade": grade, "deliberate_source": grade != "C"}
+    archive.save(
+        "bk",
+        run_id,
+        {
+            "run_id": run_id,
+            "name": run_id,
+            "content_hash": f"hash_{run_id}",
+            "prompt_fields_id": "pf_x",
+            "item_count": 1,
+            "scores": {"accuracy": 1.0, "total": 1},
+            "node_configs": [("llm_only", {"model": "X"})],
+            "pipeline_params": {"llm_only": {"model": "X"}},
+            "provenance": provenance,
+            "created_at": "2026-05-19T00:00:00Z",
+            "measurements": [
+                {
+                    "sample_id": 7,
+                    "query": f"q_{run_id}",
+                    "ground_truth": "g",
+                    "predicted": "p",
+                    "hit": True,
+                    "fitness": 1.0,
+                    "pipeline_data": {"terminated_at": terminated_at},
+                }
+            ],
+            "dataset_name": "aime",
+        },
+    )
+
+
+def test_reusable_results_min_grade_drops_connector_runs(tmp_path: Path) -> None:
+    """``min_grade`` lets a clean-substrate read reuse only deliberately-explored
+    measurements: a grade-C connector run is excluded, so its stale sample is not
+    silently served as if it were a real evaluation. The default (no floor) keeps
+    every run, so ordinary scoring caching is unchanged."""
+    archive = MeasurementArchive(tmp_path)
+    _seed_graded(archive, run_id="clean", grade="A", terminated_at="llm_only")
+    _seed_graded(archive, run_id="connector", grade="C", terminated_at="token_matching")
+    node_configs = [("llm_only", {"model": "X"})]
+
+    everything = archive.load_reusable_results("bk", node_configs, dataset_name="aime")
+    assert set(everything) == {"q_clean", "q_connector"}
+
+    clean_only = archive.load_reusable_results(
+        "bk", node_configs, dataset_name="aime", min_grade="A"
+    )
+    assert set(clean_only) == {"q_clean"}
 
 
 def test_hit_cache_respects_dataset(tmp_path: Path) -> None:

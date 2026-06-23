@@ -390,8 +390,12 @@ def build_dataset_run_data(
 ) -> dict[str, Any]:
     """Measurement-batch dict ready for ``Stores.archive.save()``.
     ``dataset_name`` is required (keyword-only); ``None`` permitted only for forensic writes."""
+    from promptpotter.domain.measurement_provenance import grade_run
+
     rendered_prompt = search_point.render()
     sp_h = search_point.sp_hash(pipeline_schema)
+    measurements = list(results)
+    provenance = grade_run(source, measurements, pipeline_schema)
     data: dict[str, Any] = {
         "run_id": run_id,
         "name": name,
@@ -404,8 +408,9 @@ def build_dataset_run_data(
         "item_count": scores["total"],
         "scores": scores,
         "source": source,
+        "provenance": provenance.as_dict(),
         "created_at": utcnow_iso(),
-        "measurements": list(results),
+        "measurements": measurements,
     }
     if pipeline_schema and search_point.pipeline_params:
         data["node_configs"] = pipeline_schema.node_configs(search_point.pipeline_params)

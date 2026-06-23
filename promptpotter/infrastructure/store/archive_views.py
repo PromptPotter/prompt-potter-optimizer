@@ -180,14 +180,17 @@ def reusable_results(
     *,
     dataset_name: str | None = None,
     include_unknown: bool = False,
+    min_grade: str | None = None,
 ) -> dict[str, dict[str, Any]]:
-    """Per-sample cache reuse from prior runs sharing *node_configs*; *dataset_name* scopes the slice."""
+    """Per-sample cache reuse from prior runs sharing *node_configs*; *dataset_name* scopes the slice.
+    *min_grade* drops runs below that provenance grade (clean-substrate reads); default keeps all."""
     return stores.archive.load_reusable_results(
         backend_id,
         node_configs,
         is_fatal=is_fatal,
         dataset_name=dataset_name,
         include_unknown=include_unknown,
+        min_grade=min_grade,
     )
 
 

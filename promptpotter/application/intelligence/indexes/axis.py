@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.scoring.formula import rescore_results
+from promptpotter.domain.measurement_provenance import entry_grade
 from promptpotter.domain.scoring import Scorer
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 from promptpotter.infrastructure.store import archive_views
@@ -347,9 +348,14 @@ class AxisIndex:
             added += 1
 
         # Track touched axes to invalidate exactly those impact-cache slots.
+        # Grade-C runs (incidental connector-retrieval short-circuits) are dropped
+        # here so the cross-cycle digest the L1/L2/L3 prompts read reflects the
+        # deliberately-explored datapoints, not whichever connector replayed most.
         touched_axes: set[str] = set()
         all_entries: list[dict[str, Any]] = []
         for entry in archive_views.list_runs(store, backend_id, dataset_name=dataset_name):
+            if entry_grade(entry) == "C":
+                continue
             all_entries.append(entry)
             run_id = entry.get("run_id", "")
             if not run_id or run_id in self._axis_seen_runs:
