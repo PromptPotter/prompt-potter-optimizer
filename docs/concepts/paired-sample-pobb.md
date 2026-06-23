@@ -69,14 +69,15 @@ upcoming sample order before each candidate is evaluated.**
 `PoBBCheck` no longer holds `priors: dict[cid → list[float]]`. It holds:
 
 ```python
-priors_by_sample: dict[str, dict[str, float]]   # cid → sample_id → fitness
-prior_sps:        dict[str, JobSearchPoint]      # cid → the SP that produced those scores
+priors_by_sample: dict[str, dict[str, bool]]    # cid → sample_id → hit
+prior_sps:        dict[str, JobSearchPoint]      # cid → the SP that produced those outcomes
 ```
 
 `register_completed(results, candidate_id, sp)` ingests full
-`QueryMeasurement`s (which already carry `sample_id` and `fitness`),
-builds the sample-keyed map, and remembers the prior's `JobSearchPoint`
-so its measurements can be extended later.
+`QueryMeasurement`s (which carry `sample_id` and `hit`), builds the
+sample-keyed **hit** map (the θ fit is over binary outcomes; error/deprecated
+samples are excluded), and remembers the prior's `JobSearchPoint` so its
+measurements can be extended later.
 
 ### 2. Reactive per-sample backfill
 
@@ -109,11 +110,11 @@ measurements:
 * Run fresh on the leader's prompt for genuinely new pairs, land in
   `archive/measurements/`, and become reusable for every future round.
 
-### 3. Paired comparison in `check()`
+### 3. θ comparison in `check()`
 
 `PoBBCheck.check()` reads the candidate's sample IDs straight off
-`results`, then for each prior builds a paired vector by mapping each
-candidate sample ID to that prior's stored fitness:
+`results`, then for each prior builds a paired **hit** vector by mapping each
+candidate sample ID to that prior's stored hit:
 
 ```python
 paired_priors[cid] = [prior_map[sid] for sid in candidate_samples]
@@ -122,8 +123,15 @@ paired_priors[cid] = [prior_map[sid] for sid in candidate_samples]
 Priors that don't cover every sample the candidate has measured are
 excluded (this only happens when backfill was skipped or failed —
 otherwise every prior is guaranteed to cover the candidate's IDs).
-The seeded Monte Carlo runs on these paired vectors. Same sample set
-on both arms, statistical validity restored.
+Then `metrics.py::elimination_p_best` runs **one joint 1PL Rasch fit** over the
+candidate + every paired prior and returns `p_best = min over priors of
+P(θ_cand > θ_prior)` — the closed-form `Φ(Δθ / √(se_c²+se_p²))`, no Monte Carlo.
+This is the **same difficulty-adjusted ability θ the round-winner election ranks
+by** (`elect_round_winner`): mid-round elimination and end-round election now
+judge "better" by one metric, so they can't disagree. The pairing still earns
+its keep — backfill guarantees the priors have outcomes on the candidate's
+*contested* (hard) samples, which is exactly where the θ comparison gets its
+discriminating information.
 
 ### 4. Lucky-prefix is self-correcting
 
@@ -197,8 +205,8 @@ snapshot under `data`:
     "candidate_sample_ids": ["9", "12", "13", "6", "14", "8"],
     "prior_histories": {
       "R1_winner": {
-        "9": 0.0, "12": 0.0, "13": 1.0,
-        "6":  1.0, "14": 0.0, "8":  0.0
+        "9": false, "12": false, "13": true,
+        "6":  true, "14": false, "8":  false
       }
     }
   }
@@ -206,7 +214,7 @@ snapshot under `data`:
 ```
 
 `candidate_sample_ids` is the ordered list of samples the candidate had
-measured at decision time. `prior_histories[cid]` is each prior's fitness
+measured at decision time. `prior_histories[cid]` is each prior's **hits**
 restricted to exactly those samples (after backfill).
 
 This makes the divergence replayer self-contained:
@@ -215,21 +223,22 @@ This makes the divergence replayer self-contained:
 # resume_and_fork/replayers.py::_pobb_replay_snapshot
 candidate_sample_ids = data["candidate_sample_ids"]
 prior_histories      = data["prior_histories"]
-cur_by_sample        = {r["sample_id"]: r["fitness"] for r in rescored_results}
-current = [cur_by_sample[sid] for sid in candidate_sample_ids]
-paired_priors = {
+cur_by_sample        = {r["sample_id"]: r["hit"] for r in rescored_results}
+candidate_hits = [cur_by_sample[sid] for sid in candidate_sample_ids]
+paired_prior_hits = {
     cid: [hist[sid] for sid in candidate_sample_ids]
     for cid, hist in prior_histories.items()
 }
-# … same seeded MC as the live check …
+p_best, _ = elimination_p_best(candidate_hits, paired_prior_hits)  # same closed-form θ rule
 ```
 
 No cross-round "find R1_winner in prior rounds" logic, no backfill
-during replay. The decision record is the entire input. When the active
-scorer differs from the recorded one, the candidate side gets rescored
-(by `resume.py::_rescore`); the prior side stays at the recorded fitness
-(approximate but correct enough — a scorer change that materially shifts
-priors will surface as divergence via the candidate side).
+during replay. The decision record is the entire input, and the θ rule is
+closed-form + deterministic (`fit_rasch` is pure, no MC seed) so replay is
+bit-for-bit when no scorer change moved the candidate's hits. When the active
+scorer differs, the candidate side gets rescored (by `resume.py::_rescore`); the
+prior side stays at the recorded hits (a scorer change that materially shifts
+priors surfaces as divergence via the candidate side).
 
 ## Code map
 
@@ -241,7 +250,8 @@ priors will surface as divergence via the candidate side).
 | `promptpotter/application/optimization/l1/score/candidate.py::score_one_candidate` | Builds `_backfill_for_sample(sample_id)` closure and passes it as `on_sample_pre_check` — reactive per-sample backfill, no upfront wall |
 | `promptpotter/application/scoring/query_loop.py::run_query_loop` | Per-step `next_sample(scored_outcomes)` + fires `on_sample_pre_check(sample.id)` after each sample lands, before degradation checks read prior coverage |
 | `promptpotter/application/optimization/l1/population.py::pobb_decision_data` | Embeds `candidate_sample_ids` + `prior_histories` into the decision record |
-| `promptpotter/application/optimization/resume_and_fork/replayers.py::_pobb_replay_snapshot` | Reads paired snapshot from `data`; no cross-round resolver |
+| `promptpotter/application/scoring/metrics.py::elimination_p_best` | Joint Rasch fit over candidate + paired priors → `p_best = min P(θ_cand > θ_prior)`; the one rule shared by live `check()` and replay |
+| `promptpotter/application/optimization/resume_and_fork/replayers.py::_pobb_replay_snapshot` | Re-fits θ from recorded hits via `elimination_p_best`; no cross-round resolver, no MC |
 
 ## Sample-selection: online adaptive queue mechanism
 
@@ -306,11 +316,12 @@ hit/miss outcome — the dominance is structural, not evidential. Seed is
 the origin (R1) or the prior round's winner (R2+); the seed's coverage
 across the candidate's budget is guaranteed by the backfill above.
 
-The second gate is the existing Bayesian posterior — `p_best < ε` on the
-paired vectors. The two gates are complementary: dominance is SPRT's
-deterministic corner (probability of catching up = 0); the posterior gate
-is sequential evidence accumulation against an ε threshold. Dominance
-fires first because "mathematically impossible" beats "probably won't."
+The second gate is the θ-ability posterior — `p_best < ε`, where `p_best =
+min over priors of P(θ_cand > θ_prior)` from the joint Rasch fit. The two gates
+are complementary: dominance is SPRT's deterministic corner (probability of
+catching up = 0); the θ gate is difficulty-adjusted evidence accumulation against
+an ε threshold. Dominance fires first because "mathematically impossible" beats
+"probably won't."
 
 The `predictable_tail_*` δ-aware ε scaling that lived here previously
 was a heuristic version of this — loosen ε when the remaining samples are

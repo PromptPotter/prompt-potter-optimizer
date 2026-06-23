@@ -102,7 +102,6 @@ async def score_population(
     elim_check = build_elimination_check(
         pobb_config,
         n_samples=len(dataset),
-        round_num=round_num,
         backfill_fn=_pobb_backfill,
     )
 

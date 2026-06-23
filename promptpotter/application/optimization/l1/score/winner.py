@@ -40,6 +40,11 @@ if TYPE_CHECKING:
     from promptpotter.application.run_observers import RunCallbacks
     from promptpotter.domain.sample import Sample
 
+# Floor on the logistic slope p(1−p) when recalibrating the accuracy-space
+# ``improvement_threshold`` into θ-logits (``delta_ok``). Caps how large the logit
+# threshold grows near the accuracy extremes (p→0 or 1), where p(1−p)→0 would blow it up.
+_GATE_SLOPE_FLOOR = 0.05
+
 
 def is_leader_eligible(cs: ScoredCandidate) -> bool:
     """Eligibility for round-leader election. Disqualifies (a) escalation-aborted-without-PoBB
@@ -240,13 +245,42 @@ async def l1_score(
             else:
                 p_value = 0.0 if mean_d > 0 else 1.0
 
-    delta_ok = best_acc > best_matched_origin_acc + improvement_threshold
+    # ``delta_ok`` gates on the winner's difficulty-adjusted ability lift over the matched
+    # origin — a pairwise joint Rasch fit (winner + origin folded in as ``ORIGIN_ABILITY_ID``)
+    # on the same subset-invariant θ scale the election ranks by, not raw subset accuracy. The
+    # accuracy-space ``improvement_threshold`` is recalibrated to θ-logits per round by local
+    # linearization at the matched-origin operating point (σ' = p(1−p)), so the knob keeps
+    # meaning "min accuracy delta" while the comparison happens in θ. Under the default
+    # (``per_round_resubset`` OFF) winner and origin share samples, so this tracks the old
+    # accuracy gate to first order; it diverges — correctly — only once subsets drift per
+    # candidate, the exact case where subset accuracy is no longer comparable.
+    delta_ok = False
+    if winner_id:
+        from promptpotter.application.intelligence.exploration import (
+            ORIGIN_ABILITY_ID,
+            candidate_abilities,
+        )
+
+        gate_fit = candidate_abilities(
+            {winner_id: best_results},
+            list(cast("list[QueryMeasurement]", origin.results)),
+        )
+        theta_lift = gate_fit.theta.get(winner_id, 0.0) - gate_fit.theta.get(ORIGIN_ABILITY_ID, 0.0)
+        slope = max(best_matched_origin_acc * (1.0 - best_matched_origin_acc), _GATE_SLOPE_FLOOR)
+        delta_ok = theta_lift > improvement_threshold / slope
     n_min = pobb_config.n_min
     n_ok = base["total"] >= n_min
     # Anchor the promotion verdict to the FROZEN round-0 origin (C0), not just the current
     # incumbent's matched floor. The incumbent re-anchors to whatever won last round, so each
     # promotion lowers the bar; requiring the winner to also clear C0 stops the lineage from
     # decaying below where it started while still stamping `improved=True`.
+    #
+    # ``c0_ok`` stays in ACCURACY space, deliberately: it's a cross-round floor against the
+    # frozen round-0 origin, and θ is only comparable *within* one joint fit (its own
+    # ``mean(θ)==0`` anchor). A θ floor across rounds needs the stable δ bank that slice 2 of
+    # ``docs/specs/fitness-comparability.md`` lands; until then round-0 θ and this round's θ sit
+    # on different anchors. Sound today because ``per_round_resubset`` is OFF (fixed subset ⇒
+    # accuracy comparable across rounds); it graduates to θ with the δ bank.
     c0_floor = cycle.tracking.origin_accuracy
     c0_ok = best_acc >= c0_floor
     improved = delta_ok and n_ok and c0_ok

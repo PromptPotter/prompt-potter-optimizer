@@ -139,62 +139,15 @@ def posterior_best_probabilities(
 # --- Paired-difference posterior — cand-vs-prior on shared sample set ---
 
 
-def paired_better_probabilities(
-    candidate_scores: list[float],
-    paired_priors: dict[str, list[float]],
-    n_samples: int = 1000,
-    rng: np.random.Generator | None = None,
-) -> dict[str, float]:
-    """Per-prior posterior probability that ``candidate > prior`` on shared samples.
-
-    For each prior ``p`` we compute paired differences ``d_i = c_i − p_i``
-    over the shared sample set, fit a Normal posterior on the mean
-    difference, and Monte-Carlo P(mean_d > 0). All priors must have the
-    same length as ``candidate_scores`` — caller is responsible for the
-    paired alignment (``PoBBCheck.check`` does this via
-    ``priors_by_sample``).
-
-    Returns ``{prior_id: P(cand > prior_id)}``. The caller derives
-    ``p_best = min(values())`` — the most pessimistic per-prior comparison
-    is an upper bound on ``P(cand is best of all)`` and the right
-    elimination criterion. Empty input returns an empty dict.
-
-    Args:
-        candidate_scores: candidate's per-sample fitness on the shared set.
-        paired_priors: prior_id → paired fitness list (same length as
-            ``candidate_scores``).
-        n_samples: Monte Carlo draws per prior; MC error ≈ ``√(p(1−p)/N)``.
-        rng: optional pre-seeded numpy Generator for reproducible draws.
-    """
-    if not paired_priors:
-        return {}
-    n_cand = len(candidate_scores)
-    gen = rng if rng is not None else np.random.default_rng()
-    out: dict[str, float] = {}
-    for prior_id, prior_scores in paired_priors.items():
-        if len(prior_scores) != n_cand:
-            raise ValueError(
-                f"paired_better_probabilities: prior {prior_id!r} has "
-                f"{len(prior_scores)} scores; candidate has {n_cand}"
-            )
-        diffs = [c - p for c, p in zip(candidate_scores, prior_scores, strict=True)]
-        mean_d, se_d = _normal_posterior(diffs)
-        z = gen.standard_normal(n_samples)
-        draws = mean_d + se_d * z
-        out[prior_id] = float((draws > 0.0).mean())
-    return out
-
-
 def paired_diff_posterior(
     candidate_scores: list[float],
     prior_scores: list[float],
 ) -> tuple[float, float, int]:
     """Closed-form paired-difference posterior summary; for telemetry.
 
-    Returns ``(mean_d, se_d, n_paired)``. Mirrors the math of
-    ``paired_better_probabilities`` without the MC draw, so the round
-    audit record can carry the per-prior diff posterior without rolling
-    fresh randomness.
+    Returns ``(mean_d, se_d, n_paired)`` — the per-prior diff posterior the round
+    audit record (and the ``l1_score`` p_value diagnostic) carries, computed on
+    the candidate-vs-prior paired fitness differences over a shared sample set.
     """
     n = len(candidate_scores)
     if len(prior_scores) != n:
@@ -208,7 +161,6 @@ def paired_diff_posterior(
 
 __all__ = [
     "min_detectable_effect",
-    "paired_better_probabilities",
     "paired_diff_posterior",
     "posterior_best_probabilities",
     "proportion_test",

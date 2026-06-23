@@ -40,6 +40,7 @@ __all__ = [
     "compute_composite_fitness",
     "count_degraded_samples",
     "elect_round_winner",
+    "elimination_p_best",
     "extract_sample_diagnostics",
     "find_rank",
     "has_pipeline_warnings",
@@ -412,6 +413,52 @@ def elect_round_winner(
             best_rank = rank
             winner_id = cid
     return winner_id
+
+
+def elimination_p_best(
+    candidate_hits: list[bool],
+    paired_prior_hits: Mapping[str, list[bool]],
+) -> tuple[float, dict[str, float]]:
+    """``P(candidate is the round's best)`` for PoBB mid-round elimination, on
+    difficulty-adjusted ability θ — the SAME quality metric the round-winner election ranks by,
+    so elimination and election never disagree on what "better" means (the boundary collapse).
+
+    One joint Rasch fit over the candidate (``__cand__``) and every paired prior, all aligned to
+    the candidate's shared sample set (sample = position in the aligned lists, so the priors are
+    compared on exactly the candidate's samples — the pairing the caller already enforces). Per
+    prior the closed-form ``P(θ_cand > θ_prior) = Φ(Δθ / √(se_c² + se_p²))``; ``p_best = min`` over
+    priors — the same "bounded above by the hardest prior" criterion the paired-fitness rule used.
+
+    Returns ``(p_best, {prior_id: P(cand > prior)})``; empty priors → ``(1.0, {})`` (no prior to
+    lose to). Deterministic — ``fit_rasch`` is pure and the comparison is closed-form (no Monte
+    Carlo) — so the resume divergence replayer re-derives the elimination cut bit-for-bit.
+    """
+    if not paired_prior_hits:
+        return 1.0, {}
+
+    import math
+
+    from scipy.stats import norm
+
+    from promptpotter.application.intelligence.exploration import Observation, fit_rasch
+
+    obs = [Observation("__cand__", i, h) for i, h in enumerate(candidate_hits)]
+    for pid, hits in paired_prior_hits.items():
+        obs.extend(Observation(pid, i, h) for i, h in enumerate(hits))
+    post = fit_rasch(obs)
+    theta_c = post.theta.get("__cand__", 0.0)
+    se_c = post.theta_se.get("__cand__", 0.0)
+
+    per_prior: dict[str, float] = {}
+    for pid in paired_prior_hits:
+        theta_p = post.theta.get(pid, 0.0)
+        se_p = post.theta_se.get(pid, 0.0)
+        denom = math.sqrt(se_c * se_c + se_p * se_p)
+        if denom > 1e-12:
+            per_prior[pid] = float(norm.cdf((theta_c - theta_p) / denom))
+        else:
+            per_prior[pid] = 1.0 if theta_c > theta_p else 0.0
+    return min(per_prior.values()), per_prior
 
 
 def value_with_mask_applied(

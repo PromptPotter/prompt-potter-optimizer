@@ -12,14 +12,12 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
-from promptpotter.application.optimization.pobb.seeding import pobb_rng
 from promptpotter.application.optimization.resume_and_fork.decisions import (
     RESUME_CHECKPOINT_GATING,
     GatingMode,
     ResumeCheckpointKind,
 )
-from promptpotter.application.scoring.metrics import elect_round_winner
-from promptpotter.shared.statistics import paired_better_probabilities
+from promptpotter.application.scoring.metrics import elect_round_winner, elimination_p_best
 
 if TYPE_CHECKING:
     from promptpotter.domain.scoring import QueryMeasurement
@@ -130,85 +128,68 @@ def _replay_round_winner(
 def _pobb_replay_snapshot(
     ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
 ) -> tuple[str, dict[str, float]] | None:
-    """Build (candidate_id, posterior snapshot) for paired PoBB replay.
+    """Build (candidate_id, θ-ability snapshot) for PoBB replay.
 
-    Both arms map ``data.candidate_sample_ids`` to per-sample fitness; identical
-    sample sets + seeded MC ⇒ bit-for-bit match with record-time when no scorer
-    change occurred. ``None`` ⇒ record predates paired snapshots or rescored
-    measurements aren't available.
+    Re-fits the joint Rasch over the recorded per-prior HITS + the candidate's
+    rescored hits on ``data.candidate_sample_ids`` and recomputes ``p_best`` via
+    ``elimination_p_best`` — the same closed-form, MC-free rule the live
+    ``PoBBCheck.check`` ran, so replay is bit-for-bit when no scorer change moved
+    the candidate's hits. ``None`` ⇒ rescored measurements aren't available.
     """
     candidate_id = str(inputs_ref.get("candidate_id", ""))
     candidate_sample_ids = [str(s) for s in (data.get("candidate_sample_ids") or [])]
-    prior_histories: dict[str, dict[str, float]] = data.get("prior_histories") or {}
+    prior_histories: dict[str, dict[str, bool]] = data.get("prior_histories") or {}
     if not candidate_sample_ids or not prior_histories:
         return None
 
     all_results: dict[str, list[dict[str, Any]]] = ctx.round_data.get("all_candidate_results") or {}
     cur_results = all_results.get(candidate_id) or []
     cur_by_sample = {
-        str(r.get("sample_id")): float(r.get("fitness", 0.0))
+        str(r.get("sample_id")): bool(r.get("hit"))
         for r in cur_results
         if r.get("sample_id") is not None
     }
-    current = [cur_by_sample.get(sid, 0.0) for sid in candidate_sample_ids]
     if not all(sid in cur_by_sample for sid in candidate_sample_ids):
         return None
+    candidate_hits = [cur_by_sample[sid] for sid in candidate_sample_ids]
 
-    paired_priors: dict[str, list[float]] = {}
+    paired_prior_hits: dict[str, list[bool]] = {}
     for cid, hist in prior_histories.items():
         if all(sid in hist for sid in candidate_sample_ids):
-            paired_priors[cid] = [float(hist[sid]) for sid in candidate_sample_ids]
-    if not paired_priors:
+            paired_prior_hits[cid] = [bool(hist[sid]) for sid in candidate_sample_ids]
+    if not paired_prior_hits:
         return None
 
-    round_num = int(inputs_ref.get("round_num", ctx.round_data.get("round", 0)))
-    rng = pobb_rng(round_num, candidate_id, list(paired_priors.keys()), len(current))
-    p_better = paired_better_probabilities(current, paired_priors, rng=rng)
+    p_best, per_prior = elimination_p_best(candidate_hits, paired_prior_hits)
     # Mirror PoBBCheck.check shape: per-prior P(cand > prior) + ``cid → min``
     # so replayers read ``snapshot[candidate_id]`` exactly like the live path.
-    snapshot: dict[str, float] = {**p_better, candidate_id: min(p_better.values())}
+    snapshot: dict[str, float] = {**per_prior, candidate_id: p_best}
     return candidate_id, snapshot
-
-
-# 3× the MC standard error (≈0.7% per `posterior_best_probabilities`) — within
-# this band, a P(best) shift between record and replay is MC noise rather
-# than real scorer drift, so trust the recorded outcome.
-_POBB_REPLAY_TOLERANCE = 0.03
 
 
 def _replay_elimination_cut(
     ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
 ) -> bool:
-    """PoBB gate under rescored paired scores; tolerant of MC noise."""
+    """PoBB ε-gate re-derived on θ ability under the current scorer (deterministic)."""
     snap = _pobb_replay_snapshot(ctx, inputs_ref, data)
     if snap is None:
         return False
     candidate_id, snapshot = snap
-    fresh = float(snapshot[candidate_id])
-    eps = float(inputs_ref["epsilon"])
-    recorded = inputs_ref.get("recorded_p_best")
-    if recorded is not None and abs(fresh - float(recorded)) < _POBB_REPLAY_TOLERANCE:
-        return float(recorded) < eps
-    return fresh < eps
+    return float(snapshot[candidate_id]) < float(inputs_ref["epsilon"])
 
 
 def _replay_leader_lock_in(
     ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
 ) -> bool:
-    """PoBB leader-lock under rescored paired scores; tolerant of MC noise."""
+    """PoBB leader-lock re-derived on θ ability under the current scorer (deterministic)."""
     if int(inputs_ref["queries_scored"]) < int(inputs_ref["lock_in_n_min"]):
         return False
     snap = _pobb_replay_snapshot(ctx, inputs_ref, data)
     if snap is None:
         return False
     candidate_id, snapshot = snap
-    # Paired PoBB: ``cid → min`` is the lock-in metric; no separate leader guard.
-    fresh = float(snapshot[candidate_id])
-    threshold = float(inputs_ref["lock_in"])
-    recorded = inputs_ref.get("recorded_p_best")
-    if recorded is not None and abs(fresh - float(recorded)) < _POBB_REPLAY_TOLERANCE:
-        return float(recorded) >= threshold
-    return fresh >= threshold
+    # ``cid → min`` is the lock-in metric; no separate leader guard.
+    return float(snapshot[candidate_id]) >= float(inputs_ref["lock_in"])
 
 
 def _derive_stall_count(

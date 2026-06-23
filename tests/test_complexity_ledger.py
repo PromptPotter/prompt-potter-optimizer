@@ -37,9 +37,13 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # then ``modules`` 293→294 (the measurement provenance grade
 # ``domain/measurement_provenance.py`` — the deliberate-vs-incidental quality grade
 # that de-biases the AxisIndex digest + gates clean-substrate reuse, the foundation
-# the loop-improvement experiment and a future L4 ingest build on).
+# the loop-improvement experiment and a future L4 ingest build on);
+# then ``modules`` 294→293 (PoBB mid-round elimination moved to difficulty-adjusted
+# θ ability — the same metric the round-winner election ranks by — which retired the
+# Monte-Carlo ``paired_better_probabilities`` + the ``pobb/seeding.py`` MC-seed module,
+# both replaced by the closed-form, deterministic ``metrics.py::elimination_p_best``).
 LEDGER_BASELINE = {
-    "modules": 294,
+    "modules": 293,
     "init_files": 54,
     "reexport_shims": 41,
     "config_leaf_fields": 32,

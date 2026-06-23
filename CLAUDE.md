@@ -56,6 +56,13 @@ When a fix would compensate for something an upstream layer should already have 
 4. **Finish line.** The ledger baseline in the ratchet test *is* the target. When a deletion lowers it, lower the baseline to lock the win. When no dimension can fall further without losing a load-bearing concept, the unification phase is **done** — stop.
 </surface-ledger>
 
+<reach-the-operator>
+**The AI blind spot this guards against:** an AI declares a task *done* the moment the engine logic is correct and the tests are green — it stops reasoning at the layer it edited and leaves the operator-facing half (does the webapp *show* this? can the operator *see, understand, and steer* it?) as a silent "later". Engine-correct is not product-complete. This project is whitelabeled and user-facing; **the webapp surface is the most-forgotten half precisely because it sits one layer past where the change was made.** Two rules:
+
+1. **Parity is part of done.** When you change what the engine *decides* (a gate, a metric, a state), you owe the operator a legible surface for it in the same breath — or, if it can't land now, you **write it down as planned** (spec + memory) rather than leaving it unstated. "Done" includes: can the human who relies on this *see* it, and is it *user-friendly*? If not, the work is half-built. Hold UX as a first-class axis, not a footnote.
+2. **Teach, don't dump — and never force jargon.** A new internal value (a θ, a new statistic, a new mode) reaches the operator *taught*: a plain-language explainer, riding an **existing** surfacing channel (the lens/formula seam, not a new toggle), and **operator-selectable** so it is never forced on someone who doesn't speak that vocabulary. The engine may *decide* on the expert metric; the human *reads* the metric they chose. Teach from **one corpus** that serves the operator and the next AI reader alike — don't fork the prose.
+</reach-the-operator>
+
 - **Never `git commit` or `git push` unless the operator says so** (a commit ask is not a push ask).
 
 ## Commands

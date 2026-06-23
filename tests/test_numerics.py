@@ -1224,9 +1224,13 @@ def test_high_signal_collapses_to_clear_winner():
 
 
 def _measurements(scores: list[float], sample_ids: list[int] | None = None) -> list[dict]:
-    """Minimal QueryMeasurement-shaped dicts for PoBB paired tests."""
+    """Minimal QueryMeasurement-shaped dicts for PoBB tests. ``hit`` (what the θ
+    elimination fit reads) is derived from the per-sample fitness (>0.5 == hit)."""
     ids = sample_ids if sample_ids is not None else list(range(len(scores)))
-    return [{"sample_id": sid, "fitness": float(s)} for sid, s in zip(ids, scores, strict=True)]
+    return [
+        {"sample_id": sid, "fitness": float(s), "hit": s > 0.5}
+        for sid, s in zip(ids, scores, strict=True)
+    ]
 
 
 _DUMMY_SP = SimpleNamespace()
@@ -1331,8 +1335,8 @@ async def test_paired_pobb_breaks_lucky_prefix_leader_trap():
         backfill_calls.append(tuple(s.id for s in samples))
         # Leader misses 4/5 hard samples; only #13 is hit. Mirrors origin's
         # behavior on the same samples in the real cycle.
-        truth = {9: 0.0, 12: 0.0, 13: 1.0, 14: 0.0, 8: 0.0}
-        return [{"sample_id": s.id, "fitness": truth[s.id]} for s in samples]
+        truth = {9: False, 12: False, 13: True, 14: False, 8: False}
+        return [{"sample_id": s.id, "hit": truth[s.id]} for s in samples]
 
     check_paired = PoBBCheck(
         PoBBConfig(n_min=4, epsilon=0.05), n_samples=20, backfill_fn=_stub_backfill

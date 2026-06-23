@@ -20,22 +20,24 @@ Both the per-step queue mechanism and the round-subset selector (`select_round_s
 
 Individuals are evaluated sequentially on **Q**, with the adaptive queue mechanism choosing each candidate's next sample per measurement. The first candidate runs to completion, establishing a reference. Each subsequent candidate is measured query by query; once `n_min` (default 4) is reached, after every query we recompute each candidate's **Posterior-of-Being-Best** probability and stop the current candidate when its P(best) drops below ε (default 0.05).
 
-A pure-arithmetic **dominance gate** fires before the Bayesian posterior: if `cand_hits + (budget − queries_scored) < seed_total_hits`, the candidate can't catch the seed prior even by hitting every remaining sample. Eliminate immediately. This is SPRT's deterministic corner (probability of catching up = 0) — stronger than the posterior gate, so it's checked first.
+A pure-arithmetic **dominance gate** fires before the ability posterior: if `cand_hits + (budget − queries_scored) < seed_total_hits`, the candidate can't catch the seed prior even by hitting every remaining sample. Eliminate immediately. This is SPRT's deterministic corner (probability of catching up = 0) — stronger than the posterior gate, so it's checked first.
 
-Mechanics:
+Mechanics — P(best) is computed on **difficulty-adjusted ability θ**, the same metric the round-winner election ranks by (so mid-round elimination and end-round election never disagree on what "better" means):
 
-1. For each candidate (priors + current) maintain a Normal posterior on its mean accuracy via CLT on observed scores: `mean = sample mean`, `variance = s² / n`. Variance floored at `1/(4n)` (Beta-Binomial worst case) to prevent over-confidence on small-*n* binary scores.
-2. Each query, draw `n_samples` (default 1000) joint samples from per-candidate Normals (independent per candidate given its data).
-3. For each candidate *c*, count the fraction of joint draws where *c*'s accuracy is argmax — that's `P(c is best)`.
-4. Stop candidate *c* when `P(c is best) < ε`.
+1. Build the candidate's paired comparison set: each prior is backfilled onto the candidate's exact samples, so every arm has a hit on the same (hard-first) sample IDs (priors that can't be caught up are excluded, never zero-filled).
+2. One joint 1PL Rasch fit over the candidate + every paired prior yields each arm's ability `θ` and its Laplace `se` on a shared difficulty scale.
+3. For each prior, `P(θ_cand > θ_prior) = Φ(Δθ / √(se_c² + se_p²))` — closed-form, no Monte Carlo. `p_best = min` over priors (bounded above by the hardest prior).
+4. Stop the candidate when `p_best < ε`.
 
-Code: `promptpotter/shared/statistics.py::posterior_best_probabilities()` and `pobb_should_stop()`, driven by `application/optimization/pobb/elimination/checks.py::PoBBCheck`.
+Because the comparison is difficulty-adjusted, it stays valid when the adaptive picker hands each candidate a *different* subset — raw hit-rate would crown whoever drew the easy samples, θ does not.
+
+Code: `application/scoring/metrics.py::elimination_p_best` (the shared θ rule, used by live `check()` and the resume replayer), driven by `application/optimization/pobb/elimination/checks.py::PoBBCheck`. The Normal-CLT joint posterior (`shared/statistics.py::posterior_best_probabilities`) now serves only the **cross-cycle** `pobb/elevation.py::elevate_to_decisive` compare.
 
 ## Two regimes
 
 **Both manifest** over a campaign. PoBB is at-least-as-good-as Wilcoxon in every regime and strictly better in early high-signal where over-investment costs the most.
 
-- **Early — high-signal.** LLM-generated prompts differ a lot; some clearly dominate. Within-candidate variance low, between-candidate gaps large. Normal posterior tightens fast; argmax becomes lopsided within 3–5 queries. Example: candidates at 0.8 vs 0.4 accuracy, both variance 0.05 → `P(loser is best)` < 0.05 by query 4–5. Wilcoxon needs ≥ 8 queries at α=0.2 because it's variance-agnostic.
+- **Early — high-signal.** LLM-generated prompts differ a lot; some clearly dominate. Between-candidate ability gaps large. The θ posteriors separate fast; `P(cand > prior)` becomes lopsided within 3–5 queries. Example: candidates at 0.8 vs 0.4 hit-rate → `P(loser > leader)` < 0.05 by query 4–5. Wilcoxon needs ≥ 8 queries at α=0.2 because it's variance-agnostic.
 - **Late — low-signal.** L2/L3 escalation has narrowed the population. True gaps ≤ 0.02. No test can confidently abort; both methods run to budget cap. Round winner selected by point-estimate accuracy at cap.
 
 PoBB beats LUCB-style pairwise tests by sampling the joint posterior over **all** candidates and asking the actually-relevant question. Population-aware; ~60 LOC vs LUCB's ~120.
@@ -43,7 +45,7 @@ PoBB beats LUCB-style pairwise tests by sampling the joint posterior over **all*
 ## Tunable knobs
 
 - `OptimizationConfig.pobb_epsilon` (default `0.05`) — smaller = more conservative.
-- `OptimizationConfig.elimination_n_min` (default `4`) — floor on query count before PoBB fires. Below this, Normal-CLT posterior isn't meaningful.
+- `OptimizationConfig.elimination_n_min` (default `4`) — floor on query count before PoBB fires. Below this, the candidate's θ posterior is too under-determined to act on.
 
 ## Open questions
 
@@ -51,7 +53,7 @@ Deferred until empirical data informs the design.
 
 1. **Tie-breaking at budget cap.** When the round cap is reached and top 2–3 candidates have similar P(best) (e.g. each between 0.25 and 0.45), no test declares a clean winner. Ship pick-by-point-estimate; design a cap-extension policy after observing how often this fires.
 2. **ε default.** `0.05` is an educated initial pick. First BBEH run will tell whether too conservative (PoBB barely fires) or too aggressive (round winners swap round-over-round).
-3. **Normal-CLT edge cases.** The CLT approximation holds well for `n ≥ 4` paired observations on continuous scores. On pure binary hits the Normal is rough at small *n*; the variance floor `1/(4n)` is the mitigation.
+3. **Small-*n* θ edge cases.** With few observations the Laplace `se` on θ is wide, so `p_best` sits near 0.5 and the gate stays conservative (won't eliminate) until evidence accumulates — the EB hyperprior on the ability variance is what keeps the small-*n* fit from collapsing.
 
 ## References
 

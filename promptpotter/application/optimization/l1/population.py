@@ -170,14 +170,14 @@ def pobb_decision_data(
     candidate_score: dict[str, Any],
     *,
     candidate_sample_ids: list[str] | None = None,
-    prior_histories: dict[str, dict[str, float]] | None = None,
+    prior_histories: dict[str, dict[str, bool]] | None = None,
 ) -> dict[str, Any]:
     """Archival data for PoBB elimination + leader-lock decisions.
 
-    ``candidate_sample_ids`` + ``prior_histories`` = paired-PoBB snapshot
-    at decision time; replay reconstructs paired vectors without crawling
-    prior rounds. ``paired_breakdown`` per-prior comparison feeds round
-    audit + live PoBB stream so the operator can spot one sticky prior.
+    ``candidate_sample_ids`` + ``prior_histories`` (per-prior per-sample HITS) =
+    the θ-PoBB snapshot at decision time; replay re-fits θ from exactly these
+    hits without crawling prior rounds. ``paired_breakdown`` per-prior comparison
+    feeds round audit + live PoBB stream so the operator can spot one sticky prior.
     """
     return {
         "p_best": float(candidate_score.get("p_best", 0.0)),
