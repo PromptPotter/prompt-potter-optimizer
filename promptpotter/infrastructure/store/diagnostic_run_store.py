@@ -2,7 +2,7 @@
 
 A diagnostic run is one operator-triggered re-evaluation of a single campaign
 candidate against more samples than the cycle's PoBB budget allowed. The
-per-sample measurements land in the cross-cycle ``archive/measurements/`` via
+per-sample measurements land in the cross-cycle ``measurements/`` via
 the existing scoring gateway; this store owns the workspace-scope verdict
 sidecars at ``archive/diagnostic_runs/{ts}_{config_hash[:12]}.json``.
 

@@ -26,6 +26,7 @@ from promptpotter.presentation.api.routers.campaigns import (
     ledger,
     lineage,
     registry,
+    storage,
 )
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 
@@ -37,4 +38,5 @@ __all__ = [
     "ledger",
     "lineage",
     "registry",
+    "storage",
 ]

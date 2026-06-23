@@ -29,7 +29,7 @@ def build_archive_observations(
     dataset_name: str | None,
     include_unknown: bool = False,
 ) -> list[Observation]:
-    """Walk archive measurements → ``Observation(content_hash[:12], sample_id, hit)`` triples.
+    """Walk the measurement store → ``Observation(content_hash[:12], sample_id, hit)`` triples.
 
     ``dataset_name=None`` is admin/forensic only — prevents cross-dataset ``sample_id`` pollution.
     """

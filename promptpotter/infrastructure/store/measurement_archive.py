@@ -80,9 +80,18 @@ def _entry_matches_dataset(
 
 
 class MeasurementArchive:
-    """File I/O for the archive. Tenant-global (`archive/measurements/` regardless of backend_id —
-    content-addressed via `PipelineSchema.node_configs()` avoids cross-backend collisions).
-    `backend_id` is preserved on public methods for call-site stability but ignored for paths.
+    """File I/O for the measurement store — the DB core, NOT the recycle bin.
+
+    Tenant-global, self-contained under `measurements/` (regardless of backend_id —
+    content-addressed via `PipelineSchema.node_configs()` avoids cross-backend
+    collisions): run-detail files `measurements/{run_id}.json`, the index
+    `measurements/measurements_index.json`, and the alias groups
+    `measurements/prompt_aliases.json` all live together. It sits beside
+    `campaigns/` and `archive/` (the recycle bin), never inside `archive/` — it is
+    a cross-campaign cache, not trash. Run files are reached by explicit `run_id`
+    (`load_by_id`) or via the index (`list_all`); nothing globs the dir, so the
+    index + alias files share it safely. `backend_id` is preserved on public
+    methods for call-site stability but ignored for paths.
     """
 
     def __init__(self, base_dir: Path):
@@ -90,11 +99,19 @@ class MeasurementArchive:
 
     # -- path helpers ---------------------------------------------------------
 
+    def _store_dir(self) -> Path:
+        return self._base_dir / "measurements"
+
     def _runs_dir(self, _backend_id: str) -> Path:
-        return self._base_dir / "archive" / "measurements"
+        return self._store_dir()
 
     def _index_path(self, _backend_id: str) -> Path:
-        return self._base_dir / "archive" / "measurements_index.json"
+        return self._store_dir() / "measurements_index.json"
+
+    def dataset_snapshot_path(self, backend_id: str, dataset_name: str) -> Path:
+        """Path of the per-(backend, dataset) hard-samples snapshot — the store owns
+        its own layout, so the writer never reconstructs `measurements/…` inline."""
+        return self._store_dir() / f"hard_samples_{backend_id}_{dataset_name}.json"
 
     # -- complete runs --------------------------------------------------------
 
@@ -421,7 +438,7 @@ class MeasurementArchive:
     # -- prompt alias groups ---------------------------------------------------
 
     def _alias_path(self, _backend_id: str) -> Path:
-        return self._base_dir / "archive" / "prompt_aliases.json"
+        return self._store_dir() / "prompt_aliases.json"
 
     def register_alias(self, backend_id: str, *hashes: str) -> None:
         """Link rendered_prompt_hashes as semantically equivalent; new hashes merge into any group

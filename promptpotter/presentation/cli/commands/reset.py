@@ -1,7 +1,8 @@
-"""``reset`` — drop campaigns + sessions; preserve ``archive/`` (measurements + optimizer-call cache).
+"""``reset`` — drop campaigns + sessions; preserve ``measurements/`` (the DB core)
+and ``archive/`` (the recycle bin + optimizer-call/sweep caches).
 
 Operator escape hatch for "obsoleted by code change". Per-cycle artifacts are
-cheap to regenerate; the archive cost real LLM spend and survives reset.
+cheap to regenerate; the measurement store cost real LLM spend and survives reset.
 Anything unnamed at the tenant top level defaults to *preserve* — a reset
 never reaches a path it can't explain."""
 
@@ -26,13 +27,15 @@ logger = logging.getLogger("promptpotter.presentation.cli.reset")
 __all__ = ["cmd_reset"]
 
 
-# Top-level names ``reset`` removes; everything else (notably ``archive/``) is preserved by default.
+# Top-level names ``reset`` removes; everything else is preserved by default.
 # Each tenant's active-session pointer lives at ``{tenant}/.workspace/active_session.json``
 # and is cleared in lockstep with the campaigns/ + sessions/ trees it points into.
 _DROP_NAMES = ("campaigns", "sessions")
 
 # Preserved names — listed separately so the confirm prompt can name what survives.
-_PRESERVE_NAMES = ("archive",)
+# ``measurements/`` is the expensive DB core (real LLM spend); ``archive/`` is the
+# recycle bin of archived campaigns plus the optimizer-call / sweep caches.
+_PRESERVE_NAMES = ("measurements", "archive")
 
 
 def _classify(tenant_dir: Path) -> tuple[list[Path], list[Path], list[Path]]:
@@ -201,7 +204,7 @@ async def cmd_reset(args: argparse.Namespace) -> CommandResult:
         data={"tenants": [str(td) for td in tenant_dirs], "dropped": dropped},
         human=(
             f"reset: dropped {len(dropped)} path(s).\n"
-            "preserved: archive/ (measurements + optimizer_calls + sweeps).\n"
+            "preserved: measurements/ (DB core) + archive/ (recycle bin + optimizer_calls + sweeps).\n"
             "next: `python -m promptpotter optimize --config datasets/<name>/campaign.json`."
         ),
     )

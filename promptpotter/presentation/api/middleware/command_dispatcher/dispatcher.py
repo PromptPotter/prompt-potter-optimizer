@@ -80,11 +80,6 @@ __all__ = ["CommandAcceptedBody", "CommandDispatcher"]
 
 
 LifecycleKind = Literal["archive-campaign", "delete-campaign", "unarchive-campaign"]
-_LIFECYCLE_STATUS: dict[LifecycleKind, str] = {
-    "archive-campaign": "archived",
-    "delete-campaign": "deleted",
-    "unarchive-campaign": "active",
-}
 
 CycleScopedKind = Literal[
     "fork-cycle",
@@ -134,27 +129,34 @@ class CommandDispatcher:
         reason: str,
         idempotency_key: str,
         client_metadata: dict[str, Any] | None = None,
+        keep_results: bool = False,
     ) -> CommandAcceptedBody:
         """Workspace-scoped inline-apply dispatch for campaign lifecycle commands.
 
-        Owner-gated by ``Stores.identity``; cross-user reads return 404, not
-        403 (existence-leak gate)."""
-        campaign = self._load_owned_campaign(campaign_id)
-        root_dir = self._store.campaigns.cycle_dir(campaign_id, campaign.root_cycle_id)
-        if not (root_dir / "index.json").is_file():
-            raise NotFoundError(
-                f"Root cycle dir missing for campaign {campaign_id}",
-                code="command_target_not_found",
+        The ``CommandRecord`` lands on the WORKSPACE ledger
+        (``projects/{tenant}/.workspace/events.jsonl``), not the campaign's own —
+        ``archive`` MOVES that tree into the recycle bin and ``delete`` REMOVES it,
+        so the campaign's own ledger can't be the audit home. Owner-gated by
+        ``Stores.identity`` (cross-user reads 404, not 403); archiving or deleting
+        the active-session campaign is refused (409) before anything is recorded."""
+        self._load_owned_campaign(campaign_id)
+        if kind in ("archive-campaign", "delete-campaign"):
+            _, active_campaign, _ = read_active_pointer(
+                self._store.tenant_id, projects_root=self._store.projects_root
             )
+            if active_campaign == campaign_id:
+                raise ConflictError(
+                    f"refusing to {kind} {campaign_id}: active campaign — switch first"
+                )
 
-        ledger = CycleEventLog.open(CycleDir(root_dir))
+        ledger = CycleEventLog.open_workspace(WorkspaceDir(self._store.base_dir))
         return await self._record_and_apply(
             ledger=ledger,
             kind=kind,
-            payload={"campaign_id": campaign_id, "reason": reason},
+            payload={"campaign_id": campaign_id, "reason": reason, "keep_results": keep_results},
             idempotency_key=idempotency_key,
             client_metadata=client_metadata,
-            applier=lambda: self._apply_lifecycle(kind, campaign_id, reason),
+            applier=lambda: self._apply_lifecycle(kind, campaign_id, reason, keep_results),
         )
 
     # ------------------------------------------------------------------
@@ -458,13 +460,19 @@ class CommandDispatcher:
             f"no applier wired for cycle-scoped kind {kind!r}"
         )
 
-    def _apply_lifecycle(self, kind: LifecycleKind, campaign_id: str, reason: str) -> None:
-        self._store.campaigns.mark_campaign_lifecycle(
-            campaign_id,
-            lifecycle_status=_LIFECYCLE_STATUS[kind],
-            lifecycle_changed_at=utcnow_iso(),
-            lifecycle_reason=reason,
-        )
+    def _apply_lifecycle(
+        self, kind: LifecycleKind, campaign_id: str, reason: str, keep_results: bool
+    ) -> None:
+        changed_at = utcnow_iso()
+        campaigns = self._store.campaigns
+        if kind == "archive-campaign":
+            campaigns.archive_campaign(campaign_id, changed_at=changed_at, reason=reason)
+        elif kind == "unarchive-campaign":
+            campaigns.unarchive_campaign(campaign_id, changed_at=changed_at, reason=reason)
+        else:  # delete-campaign — destructive (keepsake spared only with keep_results)
+            campaigns.delete_campaign(
+                campaign_id, keep_results=keep_results, changed_at=changed_at, reason=reason
+            )
 
     def _apply_register_backend(self, payload: dict[str, Any]) -> None:
         """Mint a ``BackendConnection`` from the request payload and persist

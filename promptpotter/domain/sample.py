@@ -2,7 +2,7 @@
 
 ``Sample`` is data-side peer to SearchPoint: cross-campaign ``id``, inputs, and
 accumulating metadata (``escalation_count``, ``run_ids``). Per-sample aggregate
-stats live in ``SampleIndex``, measurements in ``archive/measurements/`` —
+stats live in ``SampleIndex``, measurements in ``measurements/`` —
 read via ``SampleIndex`` / ``MeasurementArchive`` directly, never duplicated on
 the model. Mutable because ``run_ids`` accumulates over the campaign lifecycle.
 

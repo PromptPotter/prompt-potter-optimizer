@@ -396,13 +396,16 @@ paths:
   /commands/archive-campaign:
     post:
       operationId: archiveCampaign
-      summary: Soft-mark a campaign as ``archived`` (hides from default sidebar; data retained).
+      summary: Archive a campaign — MOVE its tree into the ``archive/`` recycle bin (restorable).
       description: |
         Campaign-scoped lifecycle transition. Campaign-scoped means
         workspace-level — no `Expected-Version` (the target is a campaign,
-        not a specific cycle's ledger tail). The `CommandRecord` lands on
-        the campaign's root cycle ledger; `mark_campaign_lifecycle` is the
-        inline-apply. Shape pinned in
+        not a specific cycle's ledger tail). Physically MOVES the campaign
+        tree to `projects/{tenant}/archive/{campaign_id}/`; `unarchive`
+        moves it back. The `CommandRecord` lands on the WORKSPACE ledger
+        (`projects/{tenant}/.workspace/events.jsonl`) — the campaign's own
+        ledger moves with the tree, so it can't be the audit home. Archiving
+        the active-session campaign is refused (409). Shape pinned in
         `docs/operations/persistence-and-state.md` § Beta hosting state.
       tags: [cycle-lifecycle]
       parameters:
@@ -429,13 +432,17 @@ paths:
   /commands/delete-campaign:
     post:
       operationId: deleteCampaign
-      summary: Soft-mark a campaign as ``deleted`` (hidden + filtered out; data retained for cache hits).
+      summary: Destructively remove a campaign (no recovery); ``keep_results`` spares the keepsake.
       description: |
-        Soft-delete — the campaign drops out of the default sidebar AND the
-        ``?lifecycle=archived`` view. Measurements survive per ADR-0002 §0.5
-        so sibling campaigns on the same declaration still cache-hit.
-        Reversible via ``unarchive-campaign`` (which flips back to
-        ``"active"`` regardless of whether it was archived or deleted).
+        Destructive — NOT reversible. Removes the campaign tree outright; with
+        ``payload.keep_results=true`` it instead strips the heavy resume / audit /
+        mirror tiers and spares the keepsake (manifest + reports + the shallow
+        ``langfuse/{traces,observations,scores}`` loop trace), flagging the
+        manifest ``deleted``. The cross-campaign measurement cache
+        (``measurements/``) is NEVER touched per ADR-0002 §0.5, so siblings on the
+        same declaration still cache-hit. The ``CommandRecord`` lands on the
+        WORKSPACE ledger — the campaign's own ledger is going away. Deleting the
+        active-session campaign is refused (409).
       tags: [cycle-lifecycle]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1954,6 +1961,17 @@ components:
                 Optional operator-supplied reason for the lifecycle
                 transition. Stored on ``campaign.json::lifecycle_reason``;
                 empty string is the unset form.
+            keep_results:
+              type: boolean
+              default: false
+              description: |
+                ``delete-campaign`` only (ignored by archive / unarchive).
+                When ``true`` the destructive delete spares the keepsake tier
+                (manifest + reports + the shallow ``langfuse/{traces,observations,
+                scores}`` loop trace) and drops only the heavy resume / audit /
+                mirror tiers. When ``false`` (default) the whole campaign tree is
+                removed. The cross-campaign measurement cache is never touched
+                either way.
 
     ArchiveCyclePayload:
       allOf:

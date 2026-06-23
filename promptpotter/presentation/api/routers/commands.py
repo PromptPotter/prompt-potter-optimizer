@@ -514,12 +514,15 @@ async def post_command(
     if kind in _LIFECYCLE_KINDS:
         reason = _optional_string(payload, "reason", max_len=512)
         lifecycle_kind: LifecycleKind = kind  # type: ignore[assignment]
+        # `keep_results` only meaningful for delete-campaign; harmless on the others.
+        keep_results = bool(payload.get("keep_results", False))
         return await dispatcher.dispatch_lifecycle(
             kind=lifecycle_kind,
             campaign_id=campaign_id,
             reason=reason,
             idempotency_key=idemp,
             client_metadata=envelope.client_metadata,
+            keep_results=keep_results,
         )
 
     # Cycle-scoped — fork / stop / delete / cleanup-empty / pause / resume /

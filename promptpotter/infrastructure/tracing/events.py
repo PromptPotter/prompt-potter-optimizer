@@ -4,7 +4,7 @@ Two families:
 - :class:`OptimizationEvent` — Topology A: one Langfuse trace per campaign,
   rounds + nodes nest underneath. Emitted inline by the loop.
 - :class:`MeasurementEvent` — Topology B: one trace per query, linked to
-  dataset items. Emitted by the backfill replayer over ``archive/measurements/``.
+  dataset items. Emitted by the backfill replayer over ``measurements/``.
 
 Each event is self-contained; sinks own the id mappings.
 """
@@ -217,7 +217,7 @@ OptimizationEvent = Union[
 ]
 
 
-# --- Measurement (Topology B, replayed from archive/measurements/) ---
+# --- Measurement (Topology B, replayed from measurements/) ---
 
 
 @dataclass(frozen=True, slots=True)

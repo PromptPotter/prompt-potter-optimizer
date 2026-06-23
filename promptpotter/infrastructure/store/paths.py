@@ -76,6 +76,14 @@ def campaign_root_dir_for(tenant_root: Path, campaign_id: str) -> Path:
     return tenant_root / "campaigns" / validate_path_component(campaign_id)
 
 
+def archive_root_dir_for(tenant_root: Path, campaign_id: str) -> Path:
+    """Recycle-bin home for an archived campaign — ``archive/{campaign_id}/``. The
+    ``archive`` verb MOVES the campaign tree here; ``unarchive`` moves it back to
+    ``campaigns/``. Recoverability is its only feature; it sits beside the
+    measurement store (``measurements/``, the DB core), which is NOT trash."""
+    return tenant_root / "archive" / validate_path_component(campaign_id)
+
+
 def cycle_dir_for(tenant_root: Path, campaign_id: str, cycle_id: str) -> Path:
     """Per-cycle dir ``campaigns/{campaign_id}/cycles/{cycle_id}``; flat — sibling kind in ``index.json``, not the path."""
     validate_path_component(campaign_id)
@@ -99,6 +107,7 @@ __all__ = [
     "DEFAULT_DATASETS_ROOT",
     "DEFAULT_PROJECTS_ROOT",
     "REPO_ROOT",
+    "archive_root_dir_for",
     "campaign_root_dir_for",
     "cycle_dir_for",
     "root_cycle_id",

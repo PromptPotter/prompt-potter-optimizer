@@ -327,7 +327,7 @@ class CycleResult(BaseModel):
 class DiagnosticRunRecord(BaseModel):
     """One on-demand candidate verification → webapp Verify tab.
 
-    Per-sample data lands in `archive/measurements/`; this record carries the
+    Per-sample data lands in `measurements/`; this record carries the
     workspace-scope verdict (did the source-campaign composite hold).
     """
 

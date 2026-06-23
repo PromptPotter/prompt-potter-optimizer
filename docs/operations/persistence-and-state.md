@@ -50,11 +50,12 @@ Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [o
           streams/round_NNNN_p_best.jsonl   # PoBB telemetry (sparkline in log.md)
           cache/rounds|candidates/     # per-round node I/O + pre-scoring checkpoint
           archived/resumed_at_{ts}/    # mid-cycle rewind sweepup (--from)
-    archive/                            # measurement archive — cross-cycle/session/tenant, peer of campaigns/
-      measurements/{run_id}.json  measurements.json  prompt_aliases.json
+    measurements/                       # measurement store (DB core) — cross-cycle/session/tenant, peer of campaigns/
+      {run_id}.json  measurements_index.json  prompt_aliases.json
+    archive/{campaign_id}/              # recycle bin — `archive` MOVES a campaign tree here; `unarchive` moves it back
 ```
 
-**Why this shape.** Telemetry is *temporal* — each cycle owns its `dashboard.json`, so `tail cycles/{cycle_id}/dashboard.json` follows exactly the cycle you're watching (a fork seeds from its parent, then diverges). Audit is *structural* — frozen records keyed by the cycle that produced them. Cycles sit flat because a fork tree keyed by `parent_cycle_id` scales where nested fork-of-fork directories don't. The measurement archive is a cross-cycle peer of `campaigns/`, so a fresh `new` on an unchanged declaration cache-hits every origin sample (zero LLM calls, byte-identical origin score) yet still gets its own `campaign_id` and trajectory. The `langfuse/` mirror is observability only — resume/rewind read solely from `rounds/round_NNNN.json`.
+**Why this shape.** Telemetry is *temporal* — each cycle owns its `dashboard.json`, so `tail cycles/{cycle_id}/dashboard.json` follows exactly the cycle you're watching (a fork seeds from its parent, then diverges). Audit is *structural* — frozen records keyed by the cycle that produced them. Cycles sit flat because a fork tree keyed by `parent_cycle_id` scales where nested fork-of-fork directories don't. The measurement store (`measurements/`, formerly mis-homed under `archive/`) is a cross-cycle peer of `campaigns/`, so a fresh `new` on an unchanged declaration cache-hits every origin sample (zero LLM calls, byte-identical origin score) yet still gets its own `campaign_id` and trajectory. `archive/` is now the **recycle bin** (archived campaign trees), a distinct concept from the measurement store. The `langfuse/` mirror is observability only — resume/rewind read solely from `rounds/round_NNNN.json`.
 
 ## File reference
 
@@ -168,7 +169,7 @@ temperature, a node param) — will the next run actually re-measure, or replay 
 score?"* Three facts answer it; together they're why editing a file can feel inert. (`configure_and_apply_pipeline` applies `exclude_nodes` + `pipeline_overrides` and returns the `pipeline_params` that flow unchanged through both `new` and `resume`; a `None` result means the backend runs its full pipeline.)
 
 1. **The measurement key includes the connector config (model included).** Per-sample
-   results pool in `archive/measurements/` keyed by `node_configs` — the effective
+   results pool in `measurements/` keyed by `node_configs` — the effective
    per-node config derived from the overlay-merged `session.pipeline_params`
    (`application/scoring/search_point_scorer.py` → `infrastructure/store/measurement_archive.py::load_reusable_results`).
    On a config change at node *N*, the prefix match breaks at *N*: **every sample whose
@@ -250,7 +251,7 @@ Single-operator (auth-off) and hosted-beta (OIDC) share the same on-disk shape. 
 
 Hand-edit to lift/lower caps; checked on every `mint-campaign` and `start-run`. The effective per-cycle spend cap is `min(requested, daily_cap - daily_spent)`.
 
-**Campaign ownership + lifecycle (`campaign.json`).** Each manifest carries `owner_user_id` (cross-user reads return **404, not 403** — existence leakage is itself a violation) and `lifecycle_status: active | archived | deleted` (+ `_changed_at`, `_reason`). **Campaigns are never physically removed** — only marked; their measurements stay cross-campaign and still cache-hit for siblings. `deleted` is hidden from the default UI — recover by id from the file tree.
+**Campaign ownership + lifecycle (`campaign.json`).** Each manifest carries `owner_user_id` (cross-user reads return **404, not 403** — existence leakage is itself a violation) and `lifecycle_status: active | archived | deleted` (+ `_changed_at`, `_reason`). The verbs are physical, not soft flags: **`archive`** MOVES the campaign tree into the `archive/{campaign_id}/` recycle bin (restorable by `unarchive`, which moves it back); **`delete`** is destructive (no recovery) — it removes the tree outright, or with `--keep-results` strips the heavy tiers and spares the keepsake (manifest + reports + the shallow langfuse loop trace — the Reports leaf + loop trace of the storage taxonomy, see [`storage-architecture.md`](../specs/storage-architecture.md)), flagging the manifest `deleted`. Archiving or deleting the **active** campaign is refused (switch first). The cross-campaign measurement store (`measurements/`) is never touched, so siblings still cache-hit. Destructive/move ops audit to the workspace ledger (`.workspace/events.jsonl`), since the campaign's own ledger goes with the tree.
 
 ```bash
 python -m promptpotter archive   <campaign_id> [--reason TEXT]

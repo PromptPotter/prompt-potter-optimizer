@@ -8,7 +8,7 @@
   *properties* (``root_content_hash`` + ``optimizer_prompt_hash``) for drift
   detection on resume, not to derive the id.
 
-Dataset-scoped ``archive/measurements/`` pools evidence across campaigns on
+Dataset-scoped ``measurements/`` pools evidence across campaigns on
 the same declaration, so two fresh ``new`` calls on an unchanged declaration
 share origin scores (every sample cache-hits) but have different ``campaign_id``s."""
 

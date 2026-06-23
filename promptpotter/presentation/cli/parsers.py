@@ -434,8 +434,8 @@ def _add_reset_args(p_reset: argparse.ArgumentParser) -> None:
     """Tenant scope + safety flags for ``reset``.
 
     Drops ``campaigns/`` + ``sessions/`` + ``active_session.json`` under the
-    selected tenant; ``archive/`` (measurements + optimizer_calls + sweeps)
-    is preserved. ``--dry-run`` is the recommended first step.
+    selected tenant; ``measurements/`` (the DB core) + ``archive/`` (recycle bin +
+    optimizer_calls + sweeps) are preserved. ``--dry-run`` is the recommended first step.
     """
     scope = p_reset.add_mutually_exclusive_group()
     scope.add_argument(
@@ -552,10 +552,10 @@ def build_parser() -> argparse.ArgumentParser:
         sub.add_parser(
             "reset",
             help="Drop campaigns/ + sessions/ + active_session.json for the "
-            "selected tenant; preserve archive/ (measurements + optimizer_calls "
-            "+ sweeps). The escape hatch for cycles obsoleted by code changes "
-            "— per-sample measurements survive so the next `new` hits cache "
-            "immediately.",
+            "selected tenant; preserve measurements/ (DB core) + archive/ "
+            "(recycle bin + optimizer_calls + sweeps). The escape hatch for cycles "
+            "obsoleted by code changes — per-sample measurements survive so the "
+            "next `new` hits cache immediately.",
         )
     )
 
@@ -572,10 +572,15 @@ def build_parser() -> argparse.ArgumentParser:
     for verb, summary in (
         (
             "archive",
-            "Mark a campaign 'archived' — hides from the default sidebar; data stays on disk.",
+            "Move a campaign into the archive/ recycle bin — hides from the default sidebar, "
+            "restorable by unarchive.",
         ),
-        ("delete", "Soft-mark a campaign 'deleted' — measurements still cache-hit for siblings."),
-        ("unarchive", "Restore a campaign to 'active' — reverses archive or delete."),
+        (
+            "delete",
+            "Destructively remove a campaign (no recovery); --keep-results spares the keepsake. "
+            "Measurements still cache-hit for siblings.",
+        ),
+        ("unarchive", "Restore a campaign from the archive/ recycle bin to 'active'."),
     ):
         p = sub.add_parser(verb, help=summary)
         p.add_argument("campaign_id", help="Target campaign id ({dataset}__{rand6_hex})")
@@ -584,6 +589,14 @@ def build_parser() -> argparse.ArgumentParser:
                 "--reason",
                 default="",
                 help="Optional operator-supplied reason for the transition.",
+            )
+        if verb == "delete":
+            p.add_argument(
+                "--keep-results",
+                dest="keep_results",
+                action="store_true",
+                help="Spare the keepsake tier (manifest + reports + the shallow langfuse loop "
+                "trace); drop only the heavy resume/audit/mirror tiers.",
             )
 
     return parser

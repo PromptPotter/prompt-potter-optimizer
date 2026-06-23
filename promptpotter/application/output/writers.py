@@ -94,7 +94,7 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict[str, An
       ``cycle.rounds`` only.
     - ``campaigns/{campaign_id}/hard_samples.json`` — **campaign** scope:
       the cycle's rounds folded with the campaign's archive observations.
-    - ``archive/measurements/hard_samples_{backend}_{dataset}.json`` —
+    - ``measurements/hard_samples_{backend}_{dataset}.json`` —
       **dataset** scope: the archive snapshot for this backend + dataset.
 
     Returns the artifact selected for inline log.md rendering: the
@@ -142,12 +142,7 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict[str, An
     # Dataset-scope snapshot is per-(backend, dataset) — cross-dataset
     # pooling would corrupt Rasch + PoBB queue mechanism (sample_id collides).
     dataset_tag = session.dataset_name or "unknown"
-    tenant_path = (
-        session.store.base_dir
-        / "archive"
-        / "measurements"
-        / f"hard_samples_{session.backend_id}_{dataset_tag}.json"
-    )
+    tenant_path = session.store.archive.dataset_snapshot_path(session.backend_id, dataset_tag)
     with graceful("dataset hard_samples snapshot write failed"):
         archive_artifact = build_archive_hard_samples_artifact(
             session.store,

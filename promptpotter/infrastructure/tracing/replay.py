@@ -1,4 +1,4 @@
-"""Replay ``archive/measurements/`` entries into the Langfuse sink.
+"""Replay ``measurements/`` entries into the Langfuse sink.
 
 Emits ``QueryScoreStart``/``QueryNodeSpan``/``QueryScoreEnd`` into an
 ``ObservabilityBridge``; the sink owns every Langfuse SDK call.
@@ -48,7 +48,7 @@ def classify_run_origin(source: str = "") -> str:
 
 @dataclass(frozen=True)
 class LangfuseObservation:
-    """A pipeline node extracted from ``archive/measurements/`` ready to emit."""
+    """A pipeline node extracted from ``measurements/`` ready to emit."""
 
     name: str
     as_type: str

@@ -49,14 +49,14 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_max_round_complete,
 )
 from promptpotter.infrastructure.store.paths import (
+    archive_root_dir_for,
     campaign_root_dir_for,
-    cycle_dir_for,
     root_cycle_id,
     session_index,
     sibling_kind,
 )
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import BadRequestError, NotFoundError
+from promptpotter.shared.errors import BadRequestError, ConflictError, NotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +139,35 @@ def _rmtree_robust(path: Path) -> None:
             time.sleep(0.1 * (attempt + 1))
 
 
+# Heavy per-cycle subtrees dropped by ``delete --keep-results`` (Resume + Audit
+# tiers): the resume state, the audit cache + ledger + PoBB streams, the read-once
+# cycle seed, and the rendered optimizer prompts. The Mirror tier
+# (``langfuse/datasets/``) is dropped sibling-selectively below so the keepsake
+# ``langfuse/{traces,observations,scores}`` loop trace survives.
+_HEAVY_CYCLE_SUBDIRS = ("rounds", ".runtime", ".overrides", "prompts")
+
+
+def _strip_to_keepsake(campaign_dir: Path) -> None:
+    """Remove the heavy tiers in place, sparing the keepsake (``campaign.json`` +
+    reports + per-cycle ``index.json`` / ``dashboard.json`` / ``log.md`` /
+    ``review.md`` + the shallow ``langfuse/{traces,observations,scores}`` trace)."""
+    cycles_dir = campaign_dir / "cycles"
+    if cycles_dir.is_dir():
+        for cdir in cycles_dir.iterdir():
+            if not cdir.is_dir():
+                continue
+            for sub in _HEAVY_CYCLE_SUBDIRS:
+                target = cdir / sub
+                if target.exists():
+                    _rmtree_robust(target)
+            mirror = cdir / "langfuse" / "datasets"
+            if mirror.exists():
+                _rmtree_robust(mirror)
+    sweeps = campaign_dir / "sweeps"
+    if sweeps.exists():
+        _rmtree_robust(sweeps)
+
+
 def _unit_kind(sibling_kind: str, fork_trigger: str | None) -> str:
     """Sidebar unit kind ∈ {``session``, ``divergent_resume``, ``user_fork``, ``auto_rebase``}."""
     if sibling_kind == "root":
@@ -165,11 +194,28 @@ class CampaignStore:
     # Path resolution + cross-cutting reads
     # ------------------------------------------------------------------
 
+    def _campaign_dir(self, campaign_id: str) -> Path:
+        """Resolve a campaign tree wherever it actually lives. Active campaigns sit
+        under ``campaigns/``; the ``archive`` verb MOVES the tree into the
+        ``archive/`` recycle bin. The active location wins if both somehow exist; a
+        fresh write defaults to ``campaigns/``. The free path builders
+        (``cycle_dir_for`` etc.) used by the live API/projection routes stay
+        ``campaigns/``-only — so an archived campaign is listable + manageable
+        through this store but inert to browse until ``unarchive``d, which is the
+        recycle-bin semantic."""
+        active = campaign_root_dir_for(self._base_dir, campaign_id)
+        if active.exists():
+            return active
+        archived = archive_root_dir_for(self._base_dir, campaign_id)
+        if archived.exists():
+            return archived
+        return active
+
     def campaign_root_dir(self, campaign_id: str) -> Path:
-        return campaign_root_dir_for(self._base_dir, campaign_id)
+        return self._campaign_dir(campaign_id)
 
     def cycle_dir(self, campaign_id: str, cycle_id: str) -> Path:
-        return cycle_dir_for(self._base_dir, campaign_id, cycle_id)
+        return self._campaign_dir(campaign_id) / "cycles" / validate_path_component(cycle_id)
 
     def _manifest_path(self, campaign_id: str) -> Path:
         return self.campaign_root_dir(campaign_id) / "campaign.json"
@@ -192,11 +238,18 @@ class CampaignStore:
             return None
         return Campaign.model_validate(data)
 
+    def _campaign_parents(self) -> list[Path]:
+        """The two dirs a campaign tree can live under: ``campaigns/`` (active) and
+        the ``archive/`` recycle bin. The ``*/cycles/*`` + ``*/campaign.json`` filters
+        below skip ``archive/``'s non-campaign cache neighbours (optimizer_calls/, …)."""
+        return [self._base_dir / "campaigns", self._base_dir / "archive"]
+
     def _index_files(self) -> list[Path]:
-        campaigns_dir = self._base_dir / "campaigns"
-        if not campaigns_dir.exists():
-            return []
-        return sorted(campaigns_dir.glob("*/cycles/*/index.json"))
+        out: list[Path] = []
+        for parent in self._campaign_parents():
+            if parent.exists():
+                out.extend(parent.glob("*/cycles/*/index.json"))
+        return sorted(out)
 
     @staticmethod
     def _ids_from_index_path(index_path: Path) -> tuple[str, str]:
@@ -260,15 +313,16 @@ class CampaignStore:
                 write_json(index_path, data)
 
     def list_campaign_ids(self) -> list[str]:
-        """Every campaign id on disk (dir with ``campaign.json``), sorted."""
-        campaigns_dir = self._base_dir / "campaigns"
-        if not campaigns_dir.exists():
-            return []
-        return sorted(
-            p.name
-            for p in campaigns_dir.iterdir()
-            if p.is_dir() and (p / "campaign.json").is_file()
-        )
+        """Every campaign id on disk (dir with ``campaign.json``), sorted — active
+        under ``campaigns/`` plus archived under the ``archive/`` recycle bin."""
+        ids: set[str] = set()
+        for parent in self._campaign_parents():
+            if not parent.is_dir():
+                continue
+            for p in parent.iterdir():
+                if p.is_dir() and (p / "campaign.json").is_file():
+                    ids.add(p.name)
+        return sorted(ids)
 
     def list_campaigns(
         self,
@@ -307,30 +361,76 @@ class CampaignStore:
             return
         self.update_campaign(campaign_id, {"status": status, "finished_at": finished_at})
 
-    def mark_campaign_lifecycle(
-        self,
-        campaign_id: str,
-        *,
-        lifecycle_status: str,
-        lifecycle_changed_at: str,
-        lifecycle_reason: str = "",
-    ) -> None:
-        """Soft-mark a campaign as ``archived`` / ``deleted`` / ``active``.
+    def _is_active_campaign(self, campaign_id: str) -> bool:
+        """Whether *campaign_id* is the tenant's active-session campaign — the live
+        lens / running run. Archiving or deleting it would strand the pointer + its
+        open ``.runtime/`` handles, so the move + destructive verbs refuse it."""
+        ptr = read_json_optional(self._base_dir / ".workspace" / "active_session.json")
+        return isinstance(ptr, dict) and ptr.get("campaign_id") == campaign_id
 
-        Never physically removes data — measurements survive so siblings
-        still cache-hit per ADR-0002 §0.5. ``unarchive`` flips back to
-        ``"active"``.
-        """
+    def _lifecycle_updates(self, status: str, changed_at: str, reason: str) -> dict[str, str]:
+        return {
+            "lifecycle_status": status,
+            "lifecycle_changed_at": changed_at,
+            "lifecycle_reason": reason,
+        }
+
+    def archive_campaign(self, campaign_id: str, *, changed_at: str, reason: str = "") -> bool:
+        """Flag the manifest ``archived`` then MOVE the tree into the ``archive/``
+        recycle bin. Returns ``False`` if the campaign isn't found; raises
+        ``ConflictError`` if it's the active campaign. ``unarchive_campaign``
+        reverses it. Measurements (``measurements/``) are untouched."""
         if self.load_campaign(campaign_id) is None:
-            return
-        self.update_campaign(
-            campaign_id,
-            {
-                "lifecycle_status": lifecycle_status,
-                "lifecycle_changed_at": lifecycle_changed_at,
-                "lifecycle_reason": lifecycle_reason,
-            },
-        )
+            return False
+        if self._is_active_campaign(campaign_id):
+            raise ConflictError(
+                f"refusing to archive {campaign_id}: active campaign — switch first"
+            )
+        self.update_campaign(campaign_id, self._lifecycle_updates("archived", changed_at, reason))
+        src = campaign_root_dir_for(self._base_dir, campaign_id)
+        dst = archive_root_dir_for(self._base_dir, campaign_id)
+        if src.exists() and not dst.exists():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dst))
+        return True
+
+    def unarchive_campaign(self, campaign_id: str, *, changed_at: str, reason: str = "") -> bool:
+        """MOVE the tree back from the ``archive/`` recycle bin to ``campaigns/`` and
+        flag the manifest ``active``. Returns ``False`` if not found."""
+        src = archive_root_dir_for(self._base_dir, campaign_id)
+        dst = campaign_root_dir_for(self._base_dir, campaign_id)
+        if src.exists() and not dst.exists():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dst))
+        if self.load_campaign(campaign_id) is None:
+            return False
+        self.update_campaign(campaign_id, self._lifecycle_updates("active", changed_at, reason))
+        return True
+
+    def delete_campaign(
+        self, campaign_id: str, *, keep_results: bool, changed_at: str, reason: str = ""
+    ) -> bool:
+        """Destructive — no recovery. ``keep_results=False`` removes the whole tree;
+        ``True`` strips the heavy tiers (Resume + Audit + Mirror) in place and flags
+        the manifest ``deleted``, sparing only the keepsake (manifest + reports + the
+        shallow langfuse loop trace). The cross-campaign measurement cache
+        (``measurements/``) is NEVER touched — it belongs to no single campaign, so a
+        re-run on the same ``(dataset × config)`` reproduces the identical key.
+        Returns ``False`` if the campaign isn't found; raises ``ConflictError`` if
+        it's the active campaign."""
+        campaign_dir = self._campaign_dir(campaign_id)
+        if not (campaign_dir / "campaign.json").is_file():
+            return False
+        if self._is_active_campaign(campaign_id):
+            raise ConflictError(f"refusing to delete {campaign_id}: active campaign — switch first")
+        if keep_results:
+            self.update_campaign(
+                campaign_id, self._lifecycle_updates("deleted", changed_at, reason)
+            )
+            _strip_to_keepsake(campaign_dir)
+        else:
+            _rmtree_robust(campaign_dir)
+        return True
 
     def list_sessions(self, campaign_id: str) -> list[str]:
         """Session-root cycle ids in the campaign tree, ordered by ``session_index``."""
