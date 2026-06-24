@@ -124,15 +124,17 @@ def _apply_limit_overrides(
     spend_budget_usd: float | None,
     limits: LimitOverrides,
 ) -> tuple[CampaignConfig, float | None]:
-    """Snapshot the fork's effective run limits: parent frozen config with the
-    operator's reconciled overrides applied (absolute values; an absent knob
-    inherits the parent). A new-cycle snapshot only — the parent config is never
-    mutated. Reassigning the returned config at the runner seam propagates the
-    limits to every reader (loop ``max_rounds`` / patience, L1 ``pobb_epsilon``,
-    the ``INIT.enter`` display event). The reconciled ``spend_budget_usd`` also
-    becomes the spend-cap probe's initial ceiling (``change-spend-budget`` can
-    still move it at runtime)."""
-    opt_updates = {
+    """Snapshot the fork's effective `OptimizationConfig`: parent frozen config
+    with the operator's reconciled overrides applied (absolute values; an absent
+    knob inherits the parent). A new-cycle snapshot only — the parent config is
+    never mutated. Reassigning the returned config at the runner seam propagates
+    to every reader (loop ``max_rounds`` / patience, L1 ``pobb_epsilon``, the
+    per-round subset selection, the ``INIT.enter`` display event). The reconciled
+    ``spend_budget_usd`` also becomes the spend-cap probe's initial ceiling
+    (``change-spend-budget`` can still move it at runtime). Selection-policy
+    overrides (``per_round_resubset`` / ``online_reorder``) ride the nested
+    ``mechanisms.selection`` so a fork can A/B a behaviour knob in isolation."""
+    opt_updates: dict[str, Any] = {
         k: v
         for k, v in {
             "max_rounds": limits.max_rounds,
@@ -145,8 +147,21 @@ def _apply_limit_overrides(
         }.items()
         if v is not None
     }
-    if not opt_updates:
+    sel_updates = {
+        k: v
+        for k, v in {
+            "per_round_resubset": limits.per_round_resubset,
+            "online_reorder": limits.online_reorder,
+        }.items()
+        if v is not None
+    }
+    if not opt_updates and not sel_updates:
         return config, spend_budget_usd
+    if sel_updates:
+        mech = config.optimization.mechanisms
+        opt_updates["mechanisms"] = mech.model_copy(
+            update={"selection": mech.selection.model_copy(update=sel_updates)}
+        )
     new_config = config.model_copy(
         update={"optimization": config.optimization.model_copy(update=opt_updates)}
     )

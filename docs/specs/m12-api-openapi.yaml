@@ -1748,12 +1748,17 @@ components:
       type: object
       additionalProperties: false
       description: |
-        Run-limit knobs the fork-time reconcile dialog re-sets. Every field
-        optional — absent inherits the parent's value. Values are ABSOLUTE for
-        the fork (the dialog defaults `max_rounds`/`spend_budget_usd` to the
-        parent's remaining, e.g. "3 of 6 rounds left", then the operator confirms
-        the fork's own absolute ceiling). Applied to the fork's `OptimizationConfig`
-        snapshot at bootstrap — never mutates the parent's frozen config.
+        The fork's `OptimizationConfig` delta. Every field optional — absent
+        inherits the parent's value; applied to the fork's snapshot at bootstrap,
+        never mutates the parent's frozen config. Two kinds of knob ride here:
+        (1) run limits (`max_rounds`/`spend_budget_usd`/`token_budget`/patiences/
+        `pobb_epsilon`) — ABSOLUTE values the reconcile dialog re-sets (defaults to
+        the parent's remaining, e.g. "3 of 6 rounds left"); (2) selection-policy
+        toggles (`per_round_resubset`/`online_reorder`) → the nested
+        `mechanisms.selection`, so a fork-at-offset-0 can A/B a behaviour knob in
+        isolation without touching the global default or the parent cycle. (Schema
+        name kept for on-disk seed-compat; it is the whole OptimizationConfig
+        override set, not only run limits.)
       properties:
         max_rounds:
           type: integer
@@ -1789,6 +1794,19 @@ components:
           minimum: 0
           maximum: 1
           description: Per-candidate P(best) elimination threshold.
+        per_round_resubset:
+          type: boolean
+          nullable: true
+          description: |
+            Re-pick the most-informative scoring subset every round (adaptive
+            Rasch selection) for this fork. `null` inherits the parent. Safe to
+            A/B now that every cross-round comparator measures on one fixed θ ruler.
+        online_reorder:
+          type: boolean
+          nullable: true
+          description: |
+            Re-rank unscored samples after every measurement (online adaptive
+            queue) for this fork. `null` inherits the parent.
 
     DeleteCyclePayload:
       $ref: '#/components/schemas/CycleRef'
