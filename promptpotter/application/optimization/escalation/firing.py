@@ -214,6 +214,7 @@ def _apply_l2(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
     cycle.escalation.record_l2_fired(
         best_accuracy=cycle.tracking.best_accuracy,
         best_composite_fitness=cycle.tracking.best_composite_fitness,
+        best_theta=cycle.tracking.best_theta,
     )
     # Don't clobber prior axis when LLM omits it — stale axis beats empty for the next probe-outcome render.
     if result.axis_targeted:
@@ -254,6 +255,7 @@ def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
         "l2_stall_count": cycle.escalation.l2_stall_count,
         "l2_best_accuracy_at_entry": cycle.escalation.l2_best_accuracy_at_entry,
         "l2_best_composite_fitness_at_entry": cycle.escalation.l2_best_composite_fitness_at_entry,
+        "l2_best_theta_at_entry": cycle.escalation.l2_best_theta_at_entry,
         "param_changes_count": len(result.opt_search_point.memory.l1_overrides),
         "task_context_changed": result.task_context is not None,
         "l1_layout_changed": result.l1_layout is not None,
@@ -328,6 +330,7 @@ def _apply_l3(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
     cycle.escalation.record_l3_fired(
         best_accuracy=cycle.tracking.best_accuracy,
         best_composite_fitness=cycle.tracking.best_composite_fitness,
+        best_theta=cycle.tracking.best_theta,
     )
 
 
@@ -346,6 +349,7 @@ def _l3_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
         "l3_stall_count": cycle.escalation.l3_stall_count,
         "l3_best_accuracy_at_entry": cycle.escalation.l3_best_accuracy_at_entry,
         "l3_best_composite_fitness_at_entry": cycle.escalation.l3_best_composite_fitness_at_entry,
+        "l3_best_theta_at_entry": cycle.escalation.l3_best_theta_at_entry,
         "new_plan_preview": str(result.opt_search_point.plan)[:120],
         "changes_description": result.opt_search_point.lineage.changes_description or "",
     }
@@ -537,6 +541,8 @@ def _trigger_payload(
         "stall_count": getattr(esc, f"{layer}_stall_count"),
         "best_composite_fitness_at_entry": getattr(esc, f"{layer}_best_composite_fitness_at_entry"),
         "best_composite_fitness_this_round": cycle.tracking.best_composite_fitness,
+        "best_theta_at_entry": getattr(esc, f"{layer}_best_theta_at_entry"),
+        "best_theta_this_round": cycle.tracking.best_theta,
     }
     if track_accuracy:
         data["best_accuracy"] = cycle.tracking.best_accuracy
@@ -560,6 +566,7 @@ async def escalate_l2(
 
     event = esc.observe_l2_escalation(
         current_composite_fitness=cycle.tracking.best_composite_fitness,
+        current_theta=cycle.tracking.best_theta,
         l2_patience=opt.l2_patience,
         l3_patience=opt.l3_patience,
     )

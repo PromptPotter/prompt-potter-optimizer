@@ -186,6 +186,83 @@ def _load_archive_observations(session: Session) -> list[Observation]:
     )
 
 
+def _calibrate_delta_ruler(
+    session: Session, origin_results: list[dict[str, Any]] | None
+) -> tuple[dict[int, float] | None, float | None]:
+    """Calibrate the per-cycle FIXED difficulty ruler δ + read the origin's θ on it.
+
+    The cross-round comparability anchor (slice 2 of fitness-comparability). Every
+    later θ readout in this cycle (round winners for ``c0_ok``, the stall ladder) is
+    measured against this one fixed δ via ``fit_theta_given_delta`` — so they compare
+    on a shared scale instead of each round's own re-anchored fit. Calibrated once
+    here from the **grade-A** archive (the operator's pick: cleanest reference, same
+    de-biasing the AxisIndex digest applies) plus the origin's own per-sample outcomes
+    (so the origin's samples are always on the ruler). The origin rides under
+    ``ORIGIN_ABILITY_ID``, so the calibration fit yields θ_C0 directly. Cold start —
+    fewer than ``DELTA_RULER_MIN_SAMPLES`` calibrated samples (a fresh dataset's first
+    cycle) — returns ``(None, None)`` and the gates fall back to subset-relative
+    accuracy (sound while ``per_round_resubset`` is OFF).
+    """
+    from promptpotter.application.intelligence.exploration import (
+        DELTA_RULER_MIN_SAMPLES,
+        ORIGIN_ABILITY_ID,
+        Observation,
+        fit_rasch,
+    )
+    from promptpotter.application.intelligence.hard_sample_archive import (
+        build_archive_observations,
+    )
+    from promptpotter.shared.errors import is_error_result
+
+    obs = build_archive_observations(
+        session.store,
+        session.backend_id,
+        dataset_name=session.dataset_name,
+        min_grade="A",
+    )
+    for r in origin_results or []:
+        sid = r.get("sample_id")
+        if sid is None or is_error_result(r):
+            continue
+        obs.append(Observation(ORIGIN_ABILITY_ID, int(sid), bool(r.get("hit"))))
+    if not obs:
+        return None, None
+    ruler = fit_rasch(obs)
+    if len(ruler.delta) < DELTA_RULER_MIN_SAMPLES:
+        return None, None
+    return ruler.delta, ruler.theta.get(ORIGIN_ABILITY_ID)
+
+
+_FRONTIER_ABILITY_ID = "_frontier"
+
+
+def _cumulative_theta(
+    results: list[dict[str, Any]], delta_scale: dict[int, float] | None
+) -> float | None:
+    """Ability θ of the cumulative frontier ``results`` on the fixed ruler ``delta_scale``.
+
+    The θ-space peer of the cumulative composite — what the stall ladder compares
+    round-over-round. One virtual candidate (the frontier) fit against the fixed δ, so
+    successive rounds land on one scale even once per-round subsets drift. ``None`` when
+    the ruler is cold (no delta_scale) or no banked sample overlaps the frontier."""
+    if delta_scale is None:
+        return None
+    from promptpotter.application.intelligence.exploration import (
+        Observation,
+        fit_theta_given_delta,
+    )
+    from promptpotter.shared.errors import is_error_result
+
+    obs = [
+        Observation(_FRONTIER_ABILITY_ID, int(sid), bool(r.get("hit")))
+        for r in results
+        if (sid := r.get("sample_id")) is not None and not is_error_result(r)
+    ]
+    fit = fit_theta_given_delta(obs, delta_scale)
+    row = fit.get(_FRONTIER_ABILITY_ID)
+    return row[0] if row is not None else None
+
+
 def _inherit_sibling_runtime_failures(opt_sp: OptSearchPoint, session: Session) -> None:
     """Pull RuntimeFailures from sibling forks of this cycle's root so L1 sees configs
     prior siblings already proved to fail (``_r_runtime_failures`` filters by pipeline match)."""
@@ -234,6 +311,18 @@ class CycleRoundState:
     origin_accuracy: float = 0.0
     origin_composite_fitness: float = 0.0
     origin_per_sample_results: list[dict[str, Any]] = field(default_factory=list)
+    # The frozen C0 origin's ability θ on the cycle's fixed δ ruler (slice 2) —
+    # the θ-space peer of ``origin_accuracy``, the cross-round floor ``c0_ok``
+    # compares each round's winner against. None when the ruler is cold-started
+    # (thin grade-A archive); ``c0_ok`` then falls back to ``origin_accuracy``.
+    origin_theta: float | None = None
+    # Running-max ability θ of the cumulative frontier on the fixed ruler — the
+    # θ-space peer of ``best_composite_fitness``, the comparator the L2/L3 stall
+    # ladder reads (slice 2). Seeded from ``origin_theta``, re-maxed each round
+    # in ``absorb_round``. None for a cold-started cycle → the ladder falls back
+    # to ``best_composite_fitness``. Like c0_ok, a near-no-op while the scoring
+    # set is fixed (per_round_resubset OFF) — θ and accuracy then move together.
+    best_theta: float | None = None
 
 
 @dataclass
@@ -267,6 +356,11 @@ class Cycle:
     pending_decisions: list[ResumeCheckpointRecord] = field(default_factory=list)
     last_rasch_posterior: Any = None
     archive_observations: list[Observation] = field(default_factory=list)
+    # The cycle's FIXED δ ruler (sample_id → difficulty), calibrated once at start
+    # from the grade-A archive + origin (slice 2). Held constant for the cycle so
+    # every cross-round θ readout (``c0_ok`` now; the stall ladder next) lands on one
+    # scale via ``fit_theta_given_delta``. None = cold start → gates use accuracy.
+    delta_scale: dict[int, float] | None = None
     # Stashed by L2/L3 rebase emission; runner.entry resolves it post-finalize
     # into _mint_fork + observer rebuild + loop re-entry on the new fork.
     rebase_request: RebaseRequest | None = None
@@ -302,6 +396,7 @@ class Cycle:
         )
         _assert_overlay_preserved(sp, session.pipeline_params)
         _inherit_sibling_runtime_failures(opt_sp, session)
+        delta_scale, origin_theta = _calibrate_delta_ruler(session, origin_results)
         return cls(
             session=session,
             config=config,
@@ -316,9 +411,12 @@ class Cycle:
                 origin_accuracy=origin_accuracy,
                 origin_composite_fitness=composite_fitness,
                 origin_per_sample_results=list(origin_results or []),
+                origin_theta=origin_theta,
+                best_theta=origin_theta,
             ),
             opt_sp=opt_sp,
             archive_observations=_load_archive_observations(session),
+            delta_scale=delta_scale,
         )
 
     def replay_priors(self, priors: list[dict[str, Any]]) -> None:
@@ -399,6 +497,12 @@ class Cycle:
                 tr.best_sp = best_osp.to_job_search_point(
                     base_pipeline_params=(rr.pipeline_params or last_pp), schema=schema
                 )
+            # best_theta is a running max over the same cumulative frontier as
+            # best_composite — re-maxed here so a resumed cycle reconstructs exactly
+            # what fresh absorb_round held (seeded from origin_theta by Cycle.start).
+            cum_theta = _cumulative_theta(acc_cum, self.delta_scale)
+            if cum_theta is not None and (tr.best_theta is None or cum_theta > tr.best_theta):
+                tr.best_theta = cum_theta
         tr.current_results = acc_cum
         if schema is not None:
             cum = compute_composite_fitness(
@@ -470,6 +574,9 @@ class Cycle:
             tr.best_accuracy = tr.current_accuracy
             tr.best_round = round_num
             tr.best_sp = tr.current_sp
+        cur_theta = _cumulative_theta(tr.current_results, self.delta_scale)
+        if cur_theta is not None and (tr.best_theta is None or cur_theta > tr.best_theta):
+            tr.best_theta = cur_theta
 
         rr.cumulative_accuracy = tr.current_accuracy
 

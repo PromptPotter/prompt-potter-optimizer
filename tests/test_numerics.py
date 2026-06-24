@@ -24,6 +24,7 @@ import pytest
 from promptpotter.application.intelligence.exploration import (
     Observation,
     fit_rasch,
+    fit_theta_given_delta,
     select_round_subset,
 )
 from promptpotter.application.mask import (
@@ -573,6 +574,46 @@ def test_rasch_handles_sparse_matrix() -> None:
     assert set(posterior.delta) == {1, 2, 3}
     assert all(se > 0 for se in posterior.theta_se.values())
     assert all(se > 0 for se in posterior.delta_se.values())
+
+
+def test_fit_theta_given_delta_is_subset_invariant_unlike_accuracy() -> None:
+    # The cross-round comparability guard (slice 2). A FIXED difficulty ruler δ;
+    # two candidates measured on DISJOINT subsets whose raw accuracies INVERT their
+    # true ability — the able one saw only HARD samples (low accuracy), the weak one
+    # only EASY samples (high accuracy). θ-given-δ must recover the true ordering
+    # (able > weak) where accuracy gets it backwards, and be ~subset-invariant.
+    rng = np.random.default_rng(7)
+    ruler = {1: -2.0, 2: -2.0, 3: -2.0, 4: 2.0, 5: 2.0, 6: 2.0}  # easy 1-3, hard 4-6
+    easy, hard = [1, 2, 3], [4, 5, 6]
+
+    def measure(cid: str, theta: float, sids: list[int], n: int = 200) -> list[Observation]:
+        obs: list[Observation] = []
+        for sid in sids:
+            p = 1.0 / (1.0 + np.exp(-(theta - ruler[sid])))
+            obs.extend(Observation(cid, sid, bool(rng.random() < p)) for _ in range(n))
+        return obs
+
+    able = measure("able", 1.5, hard)  # high ability, hard subset → low accuracy
+    weak = measure("weak", -0.5, easy)  # low ability, easy subset → high accuracy
+    able_acc = sum(o.hit for o in able) / len(able)
+    weak_acc = sum(o.hit for o in weak) / len(weak)
+    assert weak_acc > able_acc  # raw accuracy INVERTS the true ability
+
+    fit = fit_theta_given_delta(able + weak, ruler)
+    assert fit["able"][0] > fit["weak"][0]  # θ recovers the true ordering
+    assert abs(fit["able"][0] - 1.5) < 0.5  # within the noise floor at n=200/pair
+    assert abs(fit["weak"][0] - (-0.5)) < 0.5
+    assert all(se > 0 for _, se in fit.values())
+
+    # Subset-invariance: the SAME θ measured on easy vs hard → ~same estimate (the
+    # property accuracy lacks — easy accuracy ≫ hard accuracy for the same ability).
+    same_easy = fit_theta_given_delta(measure("x", 0.8, easy), ruler)["x"][0]
+    same_hard = fit_theta_given_delta(measure("x", 0.8, hard), ruler)["x"][0]
+    assert abs(same_easy - same_hard) < 0.5
+
+    # Observations on samples absent from the ruler are skipped; a candidate with
+    # none is omitted (the caller's cold-start signal).
+    assert fit_theta_given_delta([Observation("ghost", 99, True)], ruler) == {}
 
 
 def test_select_round_subset_cold_starts_to_prefix_and_warms_to_informative() -> None:

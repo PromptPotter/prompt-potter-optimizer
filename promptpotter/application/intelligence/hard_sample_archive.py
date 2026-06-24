@@ -8,6 +8,7 @@ from promptpotter.application.intelligence.exploration import Observation
 from promptpotter.application.intelligence.hard_sample_sorter import (
     build_hard_samples_artifact_from_observations,
 )
+from promptpotter.domain.measurement_provenance import entry_grade, meets_grade
 from promptpotter.infrastructure.store import archive_views
 from promptpotter.shared.errors import is_error_result
 
@@ -28,15 +29,24 @@ def build_archive_observations(
     *,
     dataset_name: str | None,
     include_unknown: bool = False,
+    min_grade: str | None = None,
 ) -> list[Observation]:
     """Walk the measurement store → ``Observation(content_hash[:12], sample_id, hit)`` triples.
 
     ``dataset_name=None`` is admin/forensic only — prevents cross-dataset ``sample_id`` pollution.
+
+    ``min_grade`` (``"A"``/``"B"``/``"C"``) filters to runs at least that provenance
+    grade — the same de-biasing the AxisIndex digest applies. The δ-ruler calibration
+    (slice 2 of fitness-comparability) passes ``"A"`` so the fixed difficulty scale is
+    built only from deliberate, full-LLM-path measurements, not connector noise. ``None``
+    (default) keeps every grade — the hard-samples display path's prior behavior.
     """
     obs: list[Observation] = []
     for entry in archive_views.list_runs(
         stores, backend_id, dataset_name=dataset_name, include_unknown=include_unknown
     ):
+        if min_grade is not None and not meets_grade(entry_grade(entry), min_grade):
+            continue
         content_hash = (entry.get("content_hash") or "").strip()
         if not content_hash:
             continue

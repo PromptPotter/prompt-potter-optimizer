@@ -287,14 +287,36 @@ async def l1_score(
     # promotion lowers the bar; requiring the winner to also clear C0 stops the lineage from
     # decaying below where it started while still stamping `improved=True`.
     #
-    # ``c0_ok`` stays in ACCURACY space, deliberately: it's a cross-round floor against the
-    # frozen round-0 origin, and θ is only comparable *within* one joint fit (its own
-    # ``mean(θ)==0`` anchor). A θ floor across rounds needs the stable δ bank that slice 2 of
-    # ``docs/specs/fitness-comparability.md`` lands; until then round-0 θ and this round's θ sit
-    # on different anchors. Sound today because ``per_round_resubset`` is OFF (fixed subset ⇒
-    # accuracy comparable across rounds); it graduates to θ with the δ bank.
+    # Slice 2 (fitness-comparability): ``c0_ok`` now compares in θ on the cycle's FIXED δ ruler
+    # — the origin's frozen θ (``cycle.tracking.origin_theta``) vs the winner's θ measured
+    # against that same ruler (``fit_theta_given_delta`` → one shared scale). That holds up once
+    # per-round subsets drift, where raw accuracy stops being cross-round comparable. It falls
+    # back to the frozen-origin ACCURACY floor when the ruler is cold-started (thin grade-A
+    # archive) or the winner ran no banked sample — sound while ``per_round_resubset`` is OFF.
     c0_floor = cycle.tracking.origin_accuracy
-    c0_ok = best_acc >= c0_floor
+    origin_theta = cycle.tracking.origin_theta
+    winner_theta: float | None = None
+    if winner_id and cycle.delta_scale is not None and origin_theta is not None:
+        from promptpotter.application.intelligence.exploration import (
+            Observation,
+            fit_theta_given_delta,
+        )
+        from promptpotter.shared.errors import is_error_result
+
+        winner_obs = [
+            Observation(winner_id, int(sid), bool(r.get("hit")))
+            for r in best_results
+            if (sid := r.get("sample_id")) is not None and not is_error_result(r)
+        ]
+        fit = fit_theta_given_delta(winner_obs, cycle.delta_scale)
+        if winner_id in fit:
+            winner_theta = fit[winner_id][0]
+    if winner_theta is not None and origin_theta is not None:
+        c0_ok = winner_theta >= origin_theta
+        c0_desc = f"θ={winner_theta:.3f} < origin_c0_θ={origin_theta:.3f}"
+    else:
+        c0_ok = best_acc >= c0_floor
+        c0_desc = f"acc={best_acc:.3f} < origin_c0={c0_floor:.3f}"
     improved = delta_ok and n_ok and c0_ok
     improved_reason: str | None = None
     if delta_ok and not improved:
@@ -302,7 +324,7 @@ async def l1_score(
         if not n_ok:
             reasons.append(f"n={base['total']} < elimination_n_min={n_min}")
         if not c0_ok:
-            reasons.append(f"acc={best_acc:.3f} < origin_c0={c0_floor:.3f}")
+            reasons.append(c0_desc)
         improved_reason = "; ".join(reasons)
     round_result = RoundResult(
         round=round_num,

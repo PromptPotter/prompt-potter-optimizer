@@ -21,14 +21,23 @@ if TYPE_CHECKING:
 ORIGIN_ABILITY_ID = "__origin__"
 
 __all__ = [
+    "DELTA_RULER_MIN_SAMPLES",
     "ORIGIN_ABILITY_ID",
     "Observation",
     "RaschPosterior",
     "build_observations",
     "candidate_abilities",
     "fit_rasch",
+    "fit_theta_given_delta",
     "select_round_subset",
 ]
+
+# A fixed-δ ruler is only trustworthy once it spans at least this many calibrated
+# samples. Below it the cross-round θ gates (c0_ok, the L2/L3 stall ladder,
+# elevate_to_decisive) fall back to the subset-relative accuracy/composite they
+# used pre-slice-2 — sound while ``per_round_resubset`` is OFF (fixed subset ⇒
+# accuracy comparable across rounds). See docs/specs/fitness-comparability.md §2.
+DELTA_RULER_MIN_SAMPLES = 8
 
 
 class Observation(NamedTuple):
@@ -213,6 +222,57 @@ def fit_rasch(
         sigma_delta=sigma_delta,
         mu_delta=mu_delta,
     )
+
+
+def fit_theta_given_delta(
+    observations: list[Observation],
+    delta: Mapping[int, float],
+    *,
+    sigma_theta: float = _INIT_SIGMA_THETA,
+    max_iter: int = 50,
+    tol: float = 1e-4,
+) -> dict[str, tuple[float, float]]:
+    """Estimate each candidate's ability θ at a **fixed** difficulty ruler ``delta``.
+
+    The cross-round comparability primitive. ``fit_rasch`` re-estimates δ *and*
+    re-anchors ``mean(θ) == 0`` on every call, so its θ scale drifts between fits —
+    round-N θ and round-0 θ sit on different rulers, which is why c0_ok / the stall
+    ladder / elevate_to_decisive can't compare θ across rounds today. Holding δ fixed
+    at the calibrated bank values pins the ruler: every θ this returns lands on the
+    one shared scale, so cross-round/cross-cycle θ comparison is valid.
+
+    With δ fixed the candidates **decouple** — each θ_c is an independent 1-D logistic
+    MAP (prior ``N(0, σ_θ²)``, σ_θ = the ruler's population spread) over that
+    candidate's observations on banked samples. Observations on samples absent from
+    the ruler are skipped (they can't be placed on it). Returns
+    ``{candidate_id: (theta, theta_se)}``; a candidate with no banked observation is
+    omitted — the caller reads that as cold-start and falls back.
+    """
+    by_c: dict[str, list[tuple[float, bool]]] = {}
+    for o in observations:
+        d = delta.get(o.sample_id)
+        if d is None:
+            continue
+        by_c.setdefault(o.candidate_id, []).append((d, o.hit))
+
+    out: dict[str, tuple[float, float]] = {}
+    inv_var = 1.0 / (sigma_theta * sigma_theta)
+    for cid, rows in by_c.items():
+        d_arr = np.fromiter((d for d, _ in rows), dtype=np.float64)
+        h_arr = np.fromiter((1.0 if hit else 0.0 for _, hit in rows), dtype=np.float64)
+        theta = 0.0
+        for _ in range(max_iter):
+            p = 1.0 / (1.0 + np.exp(-np.clip(theta - d_arr, -50, 50)))
+            grad = float(np.sum(h_arr - p)) - inv_var * theta
+            info = float(np.sum(p * (1.0 - p))) + inv_var
+            step = grad / max(info, 1e-9)
+            theta += step
+            if abs(step) < tol:
+                break
+        p = 1.0 / (1.0 + np.exp(-np.clip(theta - d_arr, -50, 50)))
+        info = float(np.sum(p * (1.0 - p))) + inv_var
+        out[cid] = (theta, float(1.0 / np.sqrt(max(info, 1e-9))))
+    return out
 
 
 def build_observations(rounds: list[RoundResult]) -> list[Observation]:

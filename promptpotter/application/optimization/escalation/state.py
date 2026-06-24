@@ -54,10 +54,12 @@ class EscalationFSM:
         "_l1_stall_count",
         "_l2_best_accuracy_at_entry",
         "_l2_best_composite_fitness_at_entry",
+        "_l2_best_theta_at_entry",
         "_l2_round",
         "_l2_stall_count",
         "_l3_best_accuracy_at_entry",
         "_l3_best_composite_fitness_at_entry",
+        "_l3_best_theta_at_entry",
         "_l3_round",
         "_l3_stall_count",
     )
@@ -68,10 +70,12 @@ class EscalationFSM:
         self._l2_stall_count = 0
         self._l2_best_accuracy_at_entry = 0.0
         self._l2_best_composite_fitness_at_entry = 0.0
+        self._l2_best_theta_at_entry: float | None = None
         self._l3_round = 0
         self._l3_stall_count = 0
         self._l3_best_accuracy_at_entry = 0.0
         self._l3_best_composite_fitness_at_entry = 0.0
+        self._l3_best_theta_at_entry: float | None = None
 
     # ---- Read-only access (telemetry, decision payloads, prompt vars) ----
 
@@ -96,6 +100,10 @@ class EscalationFSM:
         return self._l2_best_composite_fitness_at_entry
 
     @property
+    def l2_best_theta_at_entry(self) -> float | None:
+        return self._l2_best_theta_at_entry
+
+    @property
     def l3_round(self) -> int:
         return self._l3_round
 
@@ -110,6 +118,28 @@ class EscalationFSM:
     @property
     def l3_best_composite_fitness_at_entry(self) -> float:
         return self._l3_best_composite_fitness_at_entry
+
+    @property
+    def l3_best_theta_at_entry(self) -> float | None:
+        return self._l3_best_theta_at_entry
+
+    # ---- Improvement comparator: difficulty-adjusted θ when the ruler is live ----
+
+    @staticmethod
+    def _improved(
+        current_comp: float,
+        entry_comp: float,
+        current_theta: float | None,
+        entry_theta: float | None,
+    ) -> bool:
+        """Did the cycle's best advance since a layer fired? Prefers difficulty-adjusted
+        ability θ when the per-cycle ruler is live (both θ present), else composite. θ
+        stays cross-round comparable once per-round subsets drift, where composite (a raw
+        rate over whichever samples ran) does not. The ruler is fixed per cycle, so the
+        choice never flips mid-cycle — θ is present every round or none (R: slice 2)."""
+        if current_theta is not None and entry_theta is not None:
+            return current_theta > entry_theta
+        return current_comp > entry_comp
 
     # ---- Observations: the only mutation surface ----
 
@@ -145,21 +175,32 @@ class EscalationFSM:
         self,
         *,
         current_composite_fitness: float,
+        current_theta: float | None = None,
         l2_patience: int | None,
         l3_patience: int | None,
     ) -> EscalationEvent:
         """L2 escalation requested. First-invocation grace: stall only advances after a layer has
-        fired at least once (entry composite is the comparator).
+        fired at least once (the entry θ/composite is the comparator).
         """
         if self._l2_round > 0:
-            l2_improved = current_composite_fitness > self._l2_best_composite_fitness_at_entry
+            l2_improved = self._improved(
+                current_composite_fitness,
+                self._l2_best_composite_fitness_at_entry,
+                current_theta,
+                self._l2_best_theta_at_entry,
+            )
             self._l2_stall_count = 0 if l2_improved else self._l2_stall_count + 1
 
         if l2_patience is None or self._l2_stall_count < l2_patience:
             return EscalationEvent(next_action=NextAction.FIRE_L2)
 
         if self._l3_round > 0:
-            l3_improved = current_composite_fitness > self._l3_best_composite_fitness_at_entry
+            l3_improved = self._improved(
+                current_composite_fitness,
+                self._l3_best_composite_fitness_at_entry,
+                current_theta,
+                self._l3_best_theta_at_entry,
+            )
             self._l3_stall_count = 0 if l3_improved else self._l3_stall_count + 1
 
         if l3_patience is None or self._l3_stall_count < l3_patience:
@@ -169,23 +210,38 @@ class EscalationFSM:
 
     # ---- Post-fire bookkeepers ----
 
-    def record_l2_fired(self, *, best_accuracy: float, best_composite_fitness: float) -> None:
+    def record_l2_fired(
+        self,
+        *,
+        best_accuracy: float,
+        best_composite_fitness: float,
+        best_theta: float | None = None,
+    ) -> None:
         """L2 LLM completed. Bumps L2 round, captures entry origin; resets L1 stall."""
         self._l1_stall_count = 0
         self._l2_round += 1
         self._l2_best_accuracy_at_entry = best_accuracy
         self._l2_best_composite_fitness_at_entry = best_composite_fitness
+        self._l2_best_theta_at_entry = best_theta
 
-    def record_l3_fired(self, *, best_accuracy: float, best_composite_fitness: float) -> None:
+    def record_l3_fired(
+        self,
+        *,
+        best_accuracy: float,
+        best_composite_fitness: float,
+        best_theta: float | None = None,
+    ) -> None:
         """L3 fired. Bump L3, reset L1 stall + the L2 counter (new plan invalidates L2's progress)."""
         self._l1_stall_count = 0
         self._l3_round += 1
         self._l3_best_accuracy_at_entry = best_accuracy
         self._l3_best_composite_fitness_at_entry = best_composite_fitness
+        self._l3_best_theta_at_entry = best_theta
         self._l2_round = 0
         self._l2_stall_count = 0
         self._l2_best_accuracy_at_entry = best_accuracy
         self._l2_best_composite_fitness_at_entry = best_composite_fitness
+        self._l2_best_theta_at_entry = best_theta
 
     # Reducer: round-complete → L1 stall; l2_context.exit → l2 state; l3_plan.exit → l3 state + l2 reset.
     # Live mutators above are the in-memory cache; from_ledger rebuilds on resume.
@@ -211,20 +267,26 @@ class EscalationFSM:
             self._l2_best_composite_fitness_at_entry = float(
                 escalation_state["l2_best_composite_fitness_at_entry"]
             )
+            l2_theta = escalation_state.get("l2_best_theta_at_entry")
+            self._l2_best_theta_at_entry = None if l2_theta is None else float(l2_theta)
         elif record.phase == "l3_plan" and record.event == "exit":
             escalation_state = record.payload["data"]
             best_acc = float(escalation_state["l3_best_accuracy_at_entry"])
             best_comp = float(escalation_state["l3_best_composite_fitness_at_entry"])
+            l3_theta = escalation_state.get("l3_best_theta_at_entry")
+            best_theta = None if l3_theta is None else float(l3_theta)
             self._l1_stall_count = 0
             self._l3_round = int(escalation_state["l3_round"])
             self._l3_stall_count = int(escalation_state["l3_stall_count"])
             self._l3_best_accuracy_at_entry = best_acc
             self._l3_best_composite_fitness_at_entry = best_comp
+            self._l3_best_theta_at_entry = best_theta
             # New plan invalidates L2's progress — wipe.
             self._l2_round = 0
             self._l2_stall_count = 0
             self._l2_best_accuracy_at_entry = best_acc
             self._l2_best_composite_fitness_at_entry = best_comp
+            self._l2_best_theta_at_entry = best_theta
 
     @classmethod
     def from_ledger(cls, ledger: CycleEventLog | None) -> EscalationFSM:
