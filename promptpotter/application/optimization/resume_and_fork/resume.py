@@ -111,6 +111,7 @@ def resume_with_divergence_check(
                 t,
                 prior_rounds=prior[:i],
                 origin_results=origin_results_rescored,
+                delta_scale=cycle.delta_scale,
             )
             if div is None:
                 continue

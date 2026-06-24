@@ -211,33 +211,34 @@ COUPLINGS: tuple[Coupling, ...] = (
             "comparator to already be θ-space."
         ),
         consequence=(
-            "The divergence stall replayer (_derive_stall_count) and the c0_ok "
-            "cold-start floor are still accuracy-space (deferred-with-the-flip), so "
-            "with resubset ON they compare raw accuracy across drifting subsets — "
-            "wrong L2/L3 stall fired/not-fired and a wrong C0 floor. Flip only with "
-            "the θ-exact replay that lands alongside this knob."
+            "The stall replayer (_derive_stall_count) is now θ-exact, but the c0_ok "
+            "cold-start floor is still accuracy-space, so with resubset ON it compares "
+            "raw accuracy across drifting subsets — a wrong C0 floor. Flip only once "
+            "c0_ok cold-start also moves to flat-ruler θ."
         ),
         severity="collision",
         predicate=lambda c: bool(_sel(c).per_round_resubset),
     ),
     Coupling(
-        name="pobb_fires_before_ruler_warms",
+        name="theta_two_scales_pobb_vs_ruler",
         knobs=("optimization.elimination_n_min", "const.DELTA_RULER_MIN_SAMPLES"),
         estimand=Estimand.ABILITY,
         relation=(
-            "PoBB starts eliminating at elimination_n_min samples; the δ difficulty "
-            "ruler stays FLAT (θ == logit accuracy, not difficulty-adjusted) until "
-            "DELTA_RULER_MIN_SAMPLES samples are banked."
+            "Two θ producers on two scales. PoBB elimination + round-winner election "
+            "fit their OWN joint Rasch per call (fit_rasch re-anchors mean θ=0 every "
+            "call → a self-anchored, per-call scale; gated by elimination_n_min). "
+            "c0_ok + the L2/L3 stall ladder + cross-cycle elevate read the FIXED bank "
+            "ruler via fit_theta_given_delta (one cross-round scale; gated by "
+            "DELTA_RULER_MIN_SAMPLES). PoBB never reads the fixed ruler."
         ),
         consequence=(
-            "Eliminations between elimination_n_min and the ruler floor compare raw "
-            "accuracy, not difficulty-adjusted ability — a candidate that drew easier "
-            "samples can survive (or a harder-sampled one be cut) before θ is "
-            "meaningful. Raise elimination_n_min to ≥ DELTA_RULER_MIN_SAMPLES to "
-            "eliminate only on a warm ruler."
+            "Both θ's are difficulty-adjusted, but a candidate's PoBB θ and its c0_ok θ "
+            "sit on different scales and are NOT directly comparable. Permanent until "
+            "PoBB + election move onto the bank ruler (fitness-comparability slice 2, "
+            "the 'one ruler' step) — then this collapses to a single θ scale."
         ),
         severity="info",
-        predicate=lambda c: c.optimization.elimination_n_min < DELTA_RULER_MIN_SAMPLES,
+        predicate=lambda c: False,
     ),
     Coupling(
         name="lock_in_floor_below_elimination",
