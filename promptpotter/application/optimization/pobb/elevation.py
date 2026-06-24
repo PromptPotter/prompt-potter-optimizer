@@ -1,12 +1,22 @@
-"""Cross-cycle PoBB comparison with adaptive top-up.
+"""Cross-cycle PoBB comparison on Rasch ability θ with adaptive top-up.
 
 ``elevate_to_decisive(arms, session, dataset, ...)`` — given a group of named
-configs, score each from ``MeasurementArchive``, run PoBB, and top up
-under-measured arms via ``score_search_point`` until the joint posterior is
+configs, estimate each arm's difficulty-adjusted ability θ from
+``MeasurementArchive`` against the dataset-stable δ bank, run PoBB on θ, and top
+up under-resolved arms via ``score_search_point`` until the joint posterior is
 decisive (``max P(best) >= 1 - epsilon``) or the topup budget is exhausted.
 
-Engine: ``shared.statistics.posterior_best_probabilities``. Top-up rule:
-``n_min_per_arm`` floor first, then the arm with largest posterior SE.
+θ on the **fixed** δ bank is cross-cycle comparable where raw subset accuracy is
+not (fitness-comparability slice 2): two cycles' winners measured on different
+sample subsets rank by ability, not by who drew the easier samples. The bank is
+the per-dataset grade-A δ ruler, persisted under ``measurements/delta_bank_*``
+(``_resolve_delta_bank``); below the cold-start floor it degrades to a **flat
+ruler** (δ≡0 ⇒ θ == logit accuracy) so there is one code path, not two.
+
+Engine: ``shared.statistics.posterior_best_from_normals`` over the θ posteriors.
+Top-up rule: ``n_min_per_arm`` banked-observation floor first, then the arm with
+the widest θ posterior — measuring the banked sample whose difficulty sits
+nearest that arm's θ (peak Fisher information, p≈½), not a random sample.
 
 ``discover_compare_arms`` resolves the input arms — either from explicit
 cycle ids or by walking the active family — and is the natural front-end
@@ -17,17 +27,23 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
+from promptpotter.application.intelligence.exploration import (
+    DELTA_RULER_MIN_SAMPLES,
+    Observation,
+    fit_rasch,
+    fit_theta_given_delta,
+)
+from promptpotter.application.intelligence.hard_sample_archive import build_archive_observations
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.config.settings import POBB_DEFAULT_EPSILON
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.infrastructure.store import archive_views, root_cycle_id
-from promptpotter.shared.statistics import posterior_best_probabilities
+from promptpotter.shared.statistics import posterior_best_from_normals
 
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
@@ -128,36 +144,83 @@ def discover_compare_arms(
     return CompareArmsResult(arms=arms, cycle_ids=cycle_ids)
 
 
+_COLD_ARM_THETA_SE = 2.0  # diffuse θ posterior for an arm with no banked observation
+
+
 @dataclass(frozen=True)
 class ElevationResult:
     decision: Literal["decisive", "exhausted", "aborted"]
     best_arm: str
     p_best: dict[str, float]
-    score_histories: dict[str, list[float]]
+    arm_theta: dict[str, float]
+    arm_theta_se: dict[str, float]
+    arm_n: dict[str, int]
     topups_per_arm: dict[str, int]
     note: str
 
 
-def _load_arm_history(
+def _resolve_delta_bank(session: Session) -> dict[int, float] | None:
+    """The dataset-stable δ ruler θ is compared on — load the persisted bank, else
+    calibrate it once from the grade-A archive and persist it.
+
+    ``None`` (cold start) when the dataset is unscoped or the grade-A corpus is
+    below ``DELTA_RULER_MIN_SAMPLES`` — the caller then pins a flat ruler so the
+    comparison degrades to logit-accuracy on one path. Pinning to the *persisted*
+    bank (not a fresh fit every call) is what makes the scale stable across
+    cycles; the bank is also the clean corpus L4 later ingests. Incremental
+    anchor-refresh as the archive grows is the durable follow-up — for now a
+    refresh means deleting the file (the next compare recalibrates).
+    """
+    dataset = session.dataset_name
+    if dataset is None:
+        return None
+    stores, backend_id = session.store, session.backend_id
+    banked = stores.archive.load_delta_bank(backend_id, dataset)
+    if banked is not None:
+        return {int(k): float(v) for k, v in banked["delta"].items()}
+
+    obs = build_archive_observations(stores, backend_id, dataset_name=dataset, min_grade="A")
+    if not obs:
+        return None
+    ruler = fit_rasch(obs)
+    if len(ruler.delta) < DELTA_RULER_MIN_SAMPLES:
+        return None
+    stores.archive.save_delta_bank(
+        backend_id,
+        dataset,
+        {
+            "dataset_name": dataset,
+            "backend_id": backend_id,
+            "min_grade": "A",
+            "n_candidates": len(ruler.theta),
+            "n_samples": len(ruler.delta),
+            "delta": {str(sid): round(d, 6) for sid, d in ruler.delta.items()},
+        },
+    )
+    logger.info("elevate: calibrated δ bank for %s (%d samples)", dataset, len(ruler.delta))
+    return ruler.delta
+
+
+def _load_arm_hits(
     jsp: JobSearchPoint,
     stores: Stores,
     backend_id: str,
     pipeline_schema: PipelineSchema,
     *,
     dataset_name: str | None,
-) -> tuple[list[float], set[int]]:
-    """Pull every archived ``(sample_id, score)`` for *jsp* across cycles.
+) -> dict[int, bool]:
+    """Pull every archived ``(sample_id, hit)`` for *jsp* across cycles → ``{sid: hit}``.
 
-    Identity is exact-prefix node-config match plus ``dataset_name`` scope
-    — the same JSP measured against differently-shaped scoring sets in
-    two cycles of the same dataset contributes both, but a cross-dataset
-    sibling with identical node-configs is excluded (different sample
-    population, same integer ids). Dedup by ``sample_id`` — same sample
-    × same JSP × same dataset is deterministic.
+    Identity is exact-prefix node-config match plus ``dataset_name`` scope — the
+    same JSP measured in two cycles of the same dataset contributes both, but a
+    cross-dataset sibling with identical node-configs is excluded (different
+    sample population, same integer ids). Dedup by ``sample_id`` (first wins) —
+    same sample × same JSP × same dataset is deterministic. Hits, not fitness:
+    θ is fit on per-sample outcomes against the δ ruler.
     """
     chain = pipeline_schema.node_configs(jsp.pipeline_params or {})
     chain_len = len(chain)
-    seen: dict[int, float] = {}
+    seen: dict[int, bool] = {}
     for entry, match_len in archive_views.find_by_prefix(
         stores, backend_id, chain, dataset_name=dataset_name
     ):
@@ -168,45 +231,74 @@ def _load_arm_history(
             continue
         for item in detail.get("measurements", []):
             sid = item.get("sample_id")
-            fitness = item.get("fitness")
-            if sid is None or fitness is None or item.get("predicted") == "ERROR":
+            if sid is None or item.get("predicted") == "ERROR":
                 continue
-            seen.setdefault(int(sid), float(fitness))
-    return list(seen.values()), set(seen.keys())
+            seen.setdefault(int(sid), bool(item.get("hit")))
+    return seen
 
 
-def _arm_se(scores: list[float]) -> float:
-    n = len(scores)
-    if n == 0:
-        return 1.0
-    if n == 1:
-        return 0.5
-    arr = np.asarray(scores, dtype=np.float64)
-    return float(math.sqrt(arr.var(ddof=1) / n))
+def _fit_arm_thetas(
+    arm_hits: dict[str, dict[int, bool]], delta: dict[int, float]
+) -> dict[str, tuple[float, float]]:
+    """θ + θ_se per arm on the fixed ruler ``delta``; an arm with no banked
+    observation gets a diffuse posterior so it never spuriously wins and is
+    floored into top-up first."""
+    obs = [
+        Observation(name, sid, hit) for name, hits in arm_hits.items() for sid, hit in hits.items()
+    ]
+    fit = fit_theta_given_delta(obs, delta)
+    return {name: fit.get(name, (0.0, _COLD_ARM_THETA_SE)) for name in arm_hits}
 
 
-def _pick_arm_to_topup(histories: dict[str, list[float]], n_min: int) -> str:
-    under = [a for a, h in histories.items() if len(h) < n_min]
-    if under:
-        return min(under, key=lambda a: len(histories[a]))
-    return max(histories, key=lambda a: _arm_se(histories[a]))
+def _banked_n(arm_hits: dict[int, bool], bank_sids: set[int]) -> int:
+    return len(arm_hits.keys() & bank_sids)
+
+
+def _pick_topup(
+    thetas: dict[str, tuple[float, float]],
+    arm_hits: dict[str, dict[int, bool]],
+    attempted: dict[str, set[int]],
+    delta: dict[int, float],
+    scorable: set[int],
+    n_min: int,
+    rng: np.random.Generator,
+) -> tuple[str, int] | None:
+    """Choose ``(arm, sample_id)`` to measure next, or ``None`` when no arm has an
+    unmeasured banked sample left. Floor first (least-resolved arm under ``n_min``
+    banked obs), then the widest-θ arm; the sample is the one whose difficulty sits
+    nearest that arm's θ — peak Fisher information on θ (a flat ruler ties, broken
+    randomly, recovering uniform top-up for the cold case)."""
+    bank_sids = set(delta)
+    pools = {a: scorable - arm_hits[a].keys() - attempted[a] for a in arm_hits}
+    eligible = {a: p for a, p in pools.items() if p}
+    if not eligible:
+        return None
+    banked_n = {a: _banked_n(arm_hits[a], bank_sids) for a in eligible}
+    under = [a for a in eligible if banked_n[a] < n_min]
+    arm = (
+        min(under, key=lambda a: banked_n[a])
+        if under
+        else max(eligible, key=lambda a: thetas[a][1])
+    )
+    theta = thetas[arm][0]
+    sid = min(eligible[arm], key=lambda s: (abs(delta[s] - theta), rng.random()))
+    return arm, sid
 
 
 def _format_note(
     decision: str,
     best: str,
     p_best: dict[str, float],
-    histories: dict[str, list[float]],
+    thetas: dict[str, tuple[float, float]],
+    arm_n: dict[str, int],
     topups: dict[str, int],
 ) -> str:
     parts = []
-    for a in histories:
-        h = histories[a]
-        n = len(h)
-        mean = sum(h) / n if n else 0.0
+    for a in thetas:
+        theta, se = thetas[a]
         marker = "*" if a == best else " "
         parts.append(
-            f"{marker}{a}: n={n} +{topups[a]}tu mean={mean:.3f} P={p_best.get(a, 0.0):.2f}"
+            f"{marker}{a}: n={arm_n[a]} +{topups[a]}tu θ={theta:+.2f}±{se:.2f} P={p_best.get(a, 0.0):.2f}"
         )
     return f"{decision} winner={best} | " + " | ".join(parts)
 
@@ -222,16 +314,19 @@ async def elevate_to_decisive(
     rng: np.random.Generator | None = None,
     stream: bool = False,
 ) -> ElevationResult:
-    """PoBB-compare *arms* with adaptive top-up.
+    """PoBB-compare *arms* on Rasch ability θ with adaptive top-up.
 
-    Top-up rule: any arm under ``n_min_per_arm`` floor first, then the arm
-    with largest posterior SE. Each top-up measures one previously-unseen
-    sample on the chosen arm via ``score_search_point``; new measurements
-    land in the archive (cache-aware, archive-aware) and grow that arm's
-    history. Loop until ``max P(best) >= 1 - epsilon`` (decisive) or
-    ``sum(topups) >= max_topups`` (exhausted). ``max_topups < 0`` removes
-    the cap — the loop runs until decisive or ``KeyboardInterrupt`` /
-    ``CancelledError`` aborts it. ``stream=True`` prints one line per topup.
+    θ is fit per arm against the dataset-stable δ bank (``_resolve_delta_bank``;
+    flat ruler ⇒ logit accuracy on cold start), making cycles measured on
+    different subsets comparable. Top-up rule: any arm under ``n_min_per_arm``
+    banked observations floors first, then the widest-θ arm; the chosen sample is
+    the banked one nearest that arm's θ (peak Fisher information). Each top-up
+    measures it via ``score_search_point``; new measurements land in the archive
+    (cache-aware) and sharpen that arm's θ. Loop until ``max P(best) >= 1 -
+    epsilon`` (decisive) or ``sum(topups) >= max_topups`` (exhausted).
+    ``max_topups < 0`` removes the cap — the loop runs until decisive or
+    ``KeyboardInterrupt`` / ``CancelledError`` aborts it. ``stream=True`` logs one
+    line per topup.
     """
     if not arms:
         raise ValueError("elevate_to_decisive requires at least one arm")
@@ -244,119 +339,111 @@ async def elevate_to_decisive(
     stores = session.store
     backend_id = session.backend_id
 
-    histories: dict[str, list[float]] = {}
-    measured: dict[str, set[int]] = {}
-    for name, jsp in arms.items():
-        h, sids = _load_arm_history(
-            jsp, stores, backend_id, schema, dataset_name=session.dataset_name
-        )
-        histories[name] = h
-        measured[name] = sids
+    delta = _resolve_delta_bank(session)
+    if delta is None:
+        # Cold start: a flat ruler over every dataset sample ⇒ θ == logit accuracy,
+        # so the comparison degrades to subset-relative accuracy on one code path.
+        delta = {s.id: 0.0 for s in dataset}
+    bank_sids = set(delta)
+    by_id = {s.id: s for s in dataset}
+    scorable = bank_sids & by_id.keys()
+
+    arm_hits: dict[str, dict[int, bool]] = {
+        name: _load_arm_hits(jsp, stores, backend_id, schema, dataset_name=session.dataset_name)
+        for name, jsp in arms.items()
+    }
+    attempted: dict[str, set[int]] = {name: set() for name in arms}
     topups = dict.fromkeys(arms, 0)
+
+    def _arm_n() -> dict[str, int]:
+        return {a: _banked_n(arm_hits[a], bank_sids) for a in arms}
 
     if len(arms) == 1:
         only = next(iter(arms))
+        thetas = _fit_arm_thetas(arm_hits, delta)
         return ElevationResult(
             decision="decisive",
             best_arm=only,
             p_best={only: 1.0},
-            score_histories=histories,
+            arm_theta={only: thetas[only][0]},
+            arm_theta_se={only: thetas[only][1]},
+            arm_n={only: _banked_n(arm_hits[only], bank_sids)},
             topups_per_arm=topups,
-            note=f"single arm {only} (n={len(histories[only])})",
+            note=f"single arm {only} (n={_banked_n(arm_hits[only], bank_sids)})",
+        )
+
+    def _result(
+        decision: str, best: str, p_best: dict[str, float], extra: str = ""
+    ) -> ElevationResult:
+        thetas = _fit_arm_thetas(arm_hits, delta)
+        arm_n = _arm_n()
+        return ElevationResult(
+            decision=decision,  # type: ignore[arg-type]
+            best_arm=best,
+            p_best=p_best,
+            arm_theta={a: thetas[a][0] for a in arms},
+            arm_theta_se={a: thetas[a][1] for a in arms},
+            arm_n=arm_n,
+            topups_per_arm=topups,
+            note=_format_note(decision, best, p_best, thetas, arm_n, topups) + extra,
         )
 
     while True:
-        p_best = posterior_best_probabilities(histories, rng=rng)
+        thetas = _fit_arm_thetas(arm_hits, delta)
+        p_best = posterior_best_from_normals(thetas, rng=rng)
         best = max(p_best, key=lambda k: p_best[k])
         if p_best[best] >= 1.0 - epsilon:
-            return ElevationResult(
-                decision="decisive",
-                best_arm=best,
-                p_best=p_best,
-                score_histories=histories,
-                topups_per_arm=topups,
-                note=_format_note("decisive", best, p_best, histories, topups),
-            )
+            return _result("decisive", best, p_best)
         if max_topups >= 0 and sum(topups.values()) >= max_topups:
-            return ElevationResult(
-                decision="exhausted",
-                best_arm=best,
-                p_best=p_best,
-                score_histories=histories,
-                topups_per_arm=topups,
-                note=_format_note("exhausted", best, p_best, histories, topups),
-            )
+            return _result("exhausted", best, p_best)
 
-        chosen = _pick_arm_to_topup(histories, n_min_per_arm)
-        unmeasured = [s for s in dataset if s.id not in measured[chosen]]
-        if not unmeasured:
-            others = [
-                a for a in arms if a != chosen and any(s.id not in measured[a] for s in dataset)
-            ]
-            if not others:
-                return ElevationResult(
-                    decision="exhausted",
-                    best_arm=best,
-                    p_best=p_best,
-                    score_histories=histories,
-                    topups_per_arm=topups,
-                    note=_format_note("exhausted", best, p_best, histories, topups)
-                    + " (dataset coverage)",
-                )
-            chosen = others[0]
-            unmeasured = [s for s in dataset if s.id not in measured[chosen]]
-
-        sample = unmeasured[int(rng.integers(0, len(unmeasured)))]
-        logger.info("elevate: arm=%s topup sample_id=%d", chosen, sample.id)
+        pick = _pick_topup(thetas, arm_hits, attempted, delta, scorable, n_min_per_arm, rng)
+        if pick is None:
+            return _result("exhausted", best, p_best, extra=" (bank coverage)")
+        arm, sid = pick
+        attempted[arm].add(sid)
+        logger.info("elevate: arm=%s topup sample_id=%d", arm, sid)
 
         try:
             # ``on_sample_scored=None`` is deliberate, not an omission — the
             # ``elevate_to_decisive`` flow is driven by ``promptpotter compare``
             # (a one-shot CLI verb outside the optimize loop). Its operator
-            # signal is the per-topup ``stream`` line below (line 317+) plus
-            # the ``logger.info("elevate: arm=… topup sample_id=…")`` line
-            # above. The required-keyword guardrail on ``score_search_point``
-            # forces this site to declare its intent explicitly so the
-            # silence is documented, not accidental.
+            # signal is the per-topup ``stream`` line below plus the
+            # ``logger.info("elevate: arm=… topup sample_id=…")`` line above.
+            # The required-keyword guardrail on ``score_search_point`` forces
+            # this site to declare its intent explicitly so the silence is
+            # documented, not accidental.
             results, _scores, _esc = await score_search_point(
-                arms[chosen],
-                [sample],
+                arms[arm],
+                [by_id[sid]],
                 session,
                 label="elevate",
                 on_sample_scored=None,
                 on_sample_starting=None,
             )
         except (KeyboardInterrupt, asyncio.CancelledError):
-            return ElevationResult(
-                decision="aborted",
-                best_arm=best,
-                p_best=p_best,
-                score_histories=histories,
-                topups_per_arm=topups,
-                note=_format_note("aborted", best, p_best, histories, topups),
-            )
-        measured[chosen].add(sample.id)
-        if results and (new_fitness := results[0].get("fitness")) is not None:
-            histories[chosen].append(float(new_fitness))
-            topups[chosen] += 1
+            return _result("aborted", best, p_best)
+        if results and results[0].get("hit") is not None and results[0].get("predicted") != "ERROR":
+            arm_hits[arm][sid] = bool(results[0].get("hit"))
+            topups[arm] += 1
             if stream:
-                # Recompute p_best for the streamed line so the operator sees
-                # the leaderboard converge in real time. Cheap (Monte-Carlo
-                # over a few thousand draws), runs once per topup.
-                cur_p = posterior_best_probabilities(histories, rng=rng)
+                # Recompute θ + p_best for the streamed line so the operator sees
+                # the leaderboard converge in real time. Cheap, once per topup.
+                cur_thetas = _fit_arm_thetas(arm_hits, delta)
+                cur_p = posterior_best_from_normals(cur_thetas, rng=rng)
                 cur_best = max(cur_p, key=lambda k: cur_p[k])
                 logger.debug(
-                    "[topup #%d] arm=%s n=%d fitness=%.3f P_best=%.2f (%s)",
+                    "[topup #%d] arm=%s n=%d θ=%+.2f P_best=%.2f (%s)",
                     sum(topups.values()),
-                    chosen,
-                    len(histories[chosen]),
-                    float(new_fitness),
+                    arm,
+                    _banked_n(arm_hits[arm], bank_sids),
+                    cur_thetas[arm][0],
                     cur_p[cur_best],
                     cur_best,
                 )
         else:
             logger.warning(
-                "elevate: arm=%s sample_id=%d returned no score; counted toward measured set",
-                chosen,
-                sample.id,
+                "elevate: arm=%s sample_id=%d returned no score; skipped (attempted, not banked)",
+                arm,
+                sid,
             )

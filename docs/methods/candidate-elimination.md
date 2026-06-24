@@ -31,7 +31,7 @@ Mechanics — P(best) is computed on **difficulty-adjusted ability θ**, the sam
 
 Because the comparison is difficulty-adjusted, it stays valid when the adaptive picker hands each candidate a *different* subset — raw hit-rate would crown whoever drew the easy samples, θ does not.
 
-Code: `application/scoring/metrics.py::elimination_p_best` (the shared θ rule, used by live `check()` and the resume replayer), driven by `application/optimization/pobb/elimination/checks.py::PoBBCheck`. The Normal-CLT joint posterior (`shared/statistics.py::posterior_best_probabilities`) now serves only the **cross-cycle** `pobb/elevation.py::elevate_to_decisive` compare.
+Code: `application/scoring/metrics.py::elimination_p_best` (the shared θ rule, used by live `check()` and the resume replayer), driven by `application/optimization/pobb/elimination/checks.py::PoBBCheck`. The **cross-cycle** `pobb/elevation.py::elevate_to_decisive` compare is also θ-now — it ranks arms with `shared/statistics.py::posterior_best_from_normals` (MC argmax over the fixed-ruler θ posteriors).
 
 ## Two regimes
 

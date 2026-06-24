@@ -73,10 +73,9 @@ async def cmd_compare(args: argparse.Namespace) -> CommandResult:
             "best_arm": result.best_arm,
             "p_best": result.p_best,
             "topups_per_arm": result.topups_per_arm,
-            "score_histories_n": {k: len(v) for k, v in result.score_histories.items()},
-            "score_means": {
-                k: (sum(v) / len(v) if v else 0.0) for k, v in result.score_histories.items()
-            },
+            "arm_theta": result.arm_theta,
+            "arm_theta_se": result.arm_theta_se,
+            "arm_n": result.arm_n,
         },
         human=result.note,
     )

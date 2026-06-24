@@ -853,7 +853,7 @@ from promptpotter.domain.l1_layout import L1Layout, validate_l1_layout  # noqa: 
 from promptpotter.domain.opt_search_point import OptSearchPoint  # noqa: E402
 from promptpotter.domain.results import CandidateProposal, ScoredCandidate  # noqa: E402
 from promptpotter.domain.search_point import TaskDecomposition  # noqa: E402
-from promptpotter.shared.statistics import posterior_best_probabilities  # noqa: E402
+from promptpotter.shared.statistics import posterior_best_from_normals  # noqa: E402
 
 # ===========================================================================
 # 6. L1 invariant detectors
@@ -1245,22 +1245,18 @@ def test_layout_hard_failures(layout, expected_validator_id):
 # ===========================================================================
 
 
-def test_posterior_best_probabilities_sums_to_one():
+def test_posterior_best_from_normals_sums_to_one():
     rng = np.random.default_rng(42)
-    histories = {
-        "a": [0.6, 0.7, 0.8, 0.6, 0.7],
-        "b": [0.5, 0.5, 0.5, 0.5, 0.5],
-        "c": [0.4, 0.3, 0.5, 0.3, 0.4],
-    }
-    probs = posterior_best_probabilities(histories, rng=rng)
+    normals = {"a": (0.7, 0.05), "b": (0.5, 0.05), "c": (0.4, 0.05)}
+    probs = posterior_best_from_normals(normals, rng=rng)
     assert set(probs) == {"a", "b", "c"}
     assert abs(sum(probs.values()) - 1.0) < 1e-9
 
 
 def test_high_signal_collapses_to_clear_winner():
     rng = np.random.default_rng(0)
-    histories = {"winner": [1.0] * 8, "loser": [0.0] * 8}
-    probs = posterior_best_probabilities(histories, n_samples=2000, rng=rng)
+    normals = {"winner": (1.0, 0.01), "loser": (0.0, 0.01)}
+    probs = posterior_best_from_normals(normals, n_samples=2000, rng=rng)
     assert probs["winner"] >= 0.99
     assert probs["loser"] <= 0.01
 
