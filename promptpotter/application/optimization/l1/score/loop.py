@@ -102,6 +102,7 @@ async def score_population(
     elim_check = build_elimination_check(
         pobb_config,
         n_samples=len(dataset),
+        delta_scale=cycle.delta_scale or {},
         backfill_fn=_pobb_backfill,
     )
 

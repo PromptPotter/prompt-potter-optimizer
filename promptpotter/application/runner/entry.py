@@ -606,7 +606,7 @@ def _finalize_run(
             "origin_composite_fitness": (rounds[0].matched_origin_composite if rounds else 0.0),
             "mode": "sweep" if sweep else "full",
             # The winner artifact, serialized for the disk readers: log.md's FinalWinnerView
-            # (writers.py) and compare/elevate (pobb/elevation.py) both fetch these from `final`.
+            # (writers.py) fetches these from `final`.
             "winner_prompt_fields": cycle_result.winner_prompt_fields,
             "winner_pipeline_params": cycle_result.winner_pipeline_params,
         }

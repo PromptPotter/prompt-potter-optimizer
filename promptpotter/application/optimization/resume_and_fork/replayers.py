@@ -9,7 +9,7 @@ catches any ``REPLAYED`` kind without a registered replayer.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 from promptpotter.application.optimization.resume_and_fork.decisions import (
@@ -27,6 +27,7 @@ __all__ = [
     "Divergence",
     "ReplayContext",
     "Replayer",
+    "replay_all_divergences",
     "replay_decisions",
 ]
 
@@ -64,19 +65,10 @@ class ReplayContext(NamedTuple):
 Replayer = Callable[[ReplayContext, dict[str, Any], dict[str, Any]], Any]
 
 
-def replay_decisions(
-    round_data: dict[str, Any],
-    prior_rounds: list[dict[str, Any]] | None = None,
-    origin_results: list[dict[str, Any]] | None = None,
-    delta_scale: dict[int, float] | None = None,
-) -> Divergence | None:
-    """Walk ``round_data['decisions']`` in order; return the first mismatch."""
-    ctx = ReplayContext(
-        round_data=round_data,
-        prior_rounds=list(prior_rounds or []),
-        origin_results=list(origin_results or []),
-        delta_scale=delta_scale,
-    )
+def _iter_divergences(ctx: ReplayContext) -> Iterator[Divergence]:
+    """Yield every recorded decision in ``ctx.round_data`` whose replayer re-derives a
+    different outcome under the active scorer/engine — in record order."""
+    round_data = ctx.round_data
     for rec in round_data.get("decisions") or []:
         try:
             kind = ResumeCheckpointKind(rec.get("kind", ""))
@@ -92,7 +84,7 @@ def replay_decisions(
         except Exception:
             # Non-divergence on replayer crash, but surface — silent skip hides scorer drift.
             logger.warning(
-                "replayer for decision kind %r crashed during resume divergence "
+                "replayer for decision kind %r crashed during divergence "
                 "check; treating as non-divergence",
                 kind,
                 exc_info=True,
@@ -100,14 +92,50 @@ def replay_decisions(
             continue
         recorded = rec.get("outcome")
         if current != recorded:
-            return Divergence(
+            yield Divergence(
                 round_num=int(round_data.get("round", -1)),
                 kind=kind,
                 recorded_outcome=recorded,
                 current_outcome=current,
                 inputs_ref=dict(rec.get("inputs_ref") or {}),
             )
-    return None
+
+
+def _replay_context(
+    round_data: dict[str, Any],
+    prior_rounds: list[dict[str, Any]] | None,
+    origin_results: list[dict[str, Any]] | None,
+    delta_scale: dict[int, float] | None,
+) -> ReplayContext:
+    return ReplayContext(
+        round_data=round_data,
+        prior_rounds=list(prior_rounds or []),
+        origin_results=list(origin_results or []),
+        delta_scale=delta_scale,
+    )
+
+
+def replay_decisions(
+    round_data: dict[str, Any],
+    prior_rounds: list[dict[str, Any]] | None = None,
+    origin_results: list[dict[str, Any]] | None = None,
+    delta_scale: dict[int, float] | None = None,
+) -> Divergence | None:
+    """Walk ``round_data['decisions']`` in order; return the FIRST mismatch (resume's halt seam)."""
+    ctx = _replay_context(round_data, prior_rounds, origin_results, delta_scale)
+    return next(_iter_divergences(ctx), None)
+
+
+def replay_all_divergences(
+    round_data: dict[str, Any],
+    prior_rounds: list[dict[str, Any]] | None = None,
+    origin_results: list[dict[str, Any]] | None = None,
+    delta_scale: dict[int, float] | None = None,
+) -> list[Divergence]:
+    """Every decision in this round that re-derives differently — the A/B engine's per-round
+    diff (collect-all, where ``replay_decisions`` short-circuits at the first)."""
+    ctx = _replay_context(round_data, prior_rounds, origin_results, delta_scale)
+    return list(_iter_divergences(ctx))
 
 
 def _mean_score(results: list[dict[str, Any]]) -> float:
@@ -134,6 +162,7 @@ def _replay_round_winner(
         cast("dict[str, list[QueryMeasurement]]", all_results),
         cast("list[QueryMeasurement]", ctx.origin_results),
         coverage_floor,
+        ctx.delta_scale or {},
     )
     return winner_id
 
@@ -143,10 +172,10 @@ def _pobb_replay_snapshot(
 ) -> tuple[str, dict[str, float]] | None:
     """Build (candidate_id, θ-ability snapshot) for PoBB replay.
 
-    Re-fits the joint Rasch over the recorded per-prior HITS + the candidate's
-    rescored hits on ``data.candidate_sample_ids`` and recomputes ``p_best`` via
-    ``elimination_p_best`` — the same closed-form, MC-free rule the live
-    ``PoBBCheck.check`` ran, so replay is bit-for-bit when no scorer change moved
+    Re-fits θ on the cycle's fixed δ ruler (``ctx.delta_scale``) over the recorded
+    per-prior HITS + the candidate's rescored hits on ``data.candidate_sample_ids`` and
+    recomputes ``p_best`` via ``elimination_p_best`` — the same closed-form, MC-free rule
+    the live ``PoBBCheck.check`` ran, so replay is bit-for-bit when no scorer change moved
     the candidate's hits. ``None`` ⇒ rescored measurements aren't available.
     """
     candidate_id = str(inputs_ref.get("candidate_id", ""))
@@ -173,7 +202,12 @@ def _pobb_replay_snapshot(
     if not paired_prior_hits:
         return None
 
-    p_best, per_prior = elimination_p_best(candidate_hits, paired_prior_hits)
+    p_best, per_prior = elimination_p_best(
+        candidate_hits,
+        paired_prior_hits,
+        [int(s) for s in candidate_sample_ids],
+        ctx.delta_scale or {},
+    )
     # Mirror PoBBCheck.check shape: per-prior P(cand > prior) + ``cid → min``
     # so replayers read ``snapshot[candidate_id]`` exactly like the live path.
     snapshot: dict[str, float] = {**per_prior, candidate_id: p_best}

@@ -1,4 +1,4 @@
-"""Argparse schema for ``new`` / ``resume`` / ``sweep`` / ``compare`` / ``reset``.
+"""Argparse schema for ``new`` / ``resume`` / ``sweep`` / ``reset`` / ``verify``.
 
 Imported by ``campaign_runner.main()``. Help text is verbose by design — this
 is the operator-facing surface.
@@ -22,7 +22,6 @@ from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
     DEFAULT_EXPERIMENT_ID,
-    POBB_DEFAULT_EPSILON,
 )
 
 
@@ -458,46 +457,8 @@ def _add_reset_args(p_reset: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_compare_args(p_cmp: argparse.ArgumentParser) -> None:
-    """Cycle list + statistical-confidence knobs for ``compare``."""
-    p_cmp.add_argument(
-        "cycle_ids",
-        nargs="*",
-        help="cycle ids to compare (each contributes one arm). "
-        "Omit (or pass --all) to auto-discover every cycle in the active "
-        "family with a final winner.",
-    )
-    p_cmp.add_argument(
-        "--all",
-        action="store_true",
-        dest="all_family",
-        help="Auto-discover every cycle in the active family with a final winner. "
-        "Implied when no positional cycle_ids are given.",
-    )
-    p_cmp.add_argument(
-        "--epsilon",
-        type=float,
-        default=POBB_DEFAULT_EPSILON,
-        help="Statistical-confidence threshold for elimination (default 0.05)",
-    )
-    p_cmp.add_argument(
-        "--max-topups",
-        type=int,
-        default=16,
-        dest="max_topups",
-        help="Upper bound on extra LLM calls (default 16; -1 = unbounded, Ctrl+C to stop).",
-    )
-    p_cmp.add_argument(
-        "--n-min-per-arm",
-        type=int,
-        default=4,
-        dest="n_min_per_arm",
-        help="Sample floor before SE-driven selection kicks in (default 4)",
-    )
-
-
 def build_parser() -> argparse.ArgumentParser:
-    """Argparse schema for ``new`` / ``resume`` / ``sweep`` / ``compare`` / ``reset`` / ``verify``.
+    """Argparse schema for ``new`` / ``resume`` / ``sweep`` / ``reset`` / ``verify``.
 
     Bare ``python -m promptpotter`` (no subcommand) defaults to ``resume`` —
     the most common operator action gets the shortest invocation.
@@ -530,14 +491,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_resume_args(p_resume)
 
-    _add_compare_args(
-        sub.add_parser(
-            "compare",
-            help="Compare cycle winners across the family by statistical confidence "
-            "with adaptive top-up. Each cycle's index.json::final.winner_pipeline_params "
-            "is one arm; under-measured arms get one extra score per round until a "
-            "decisive winner emerges or the top-up budget is exhausted.",
-        )
+    sub.add_parser(
+        "ab",
+        help="Deterministic A/B replay of the active cycle: re-derive every recorded "
+        "decision (winner / eliminations / L2-L3 triggers) under the CURRENT engine + "
+        "scorer over the recorded measurements, and report where they flip. Zero LLM "
+        "calls — run a cycle under one engine/scorer, then `ab` under another to diff.",
     )
     _add_sweep_args(
         sub.add_parser(

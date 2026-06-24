@@ -187,8 +187,8 @@ def _load_archive_observations(session: Session) -> list[Observation]:
 
 
 def _calibrate_delta_ruler(
-    session: Session, origin_results: list[dict[str, Any]] | None
-) -> tuple[dict[int, float] | None, float | None]:
+    session: Session, origin_results: list[dict[str, Any]] | None, n_min: int
+) -> tuple[dict[int, float], float | None]:
     """Calibrate the per-cycle FIXED difficulty ruler δ + read the origin's θ on it.
 
     The cross-round comparability anchor (slice 2 of fitness-comparability). Every
@@ -199,38 +199,44 @@ def _calibrate_delta_ruler(
     de-biasing the AxisIndex digest applies) plus the origin's own per-sample outcomes
     (so the origin's samples are always on the ruler). The origin rides under
     ``ORIGIN_ABILITY_ID``, so the calibration fit yields θ_C0 directly. Cold start —
-    fewer than ``DELTA_RULER_MIN_SAMPLES`` calibrated samples (a fresh dataset's first
-    cycle) — returns ``(None, None)`` and the gates fall back to subset-relative
-    accuracy (sound while ``per_round_resubset`` is OFF).
+    fewer than ``n_min`` calibrated samples (a fresh dataset's first cycle) — returns a
+    **FLAT ruler** ``{}`` (δ≡0) and the origin's θ on it (logit-accuracy), so the gates
+    still compare in θ (one ruler, θ always) rather than a separate accuracy floor.
+    ``n_min`` is ``optimization.elimination_n_min`` — the single min-samples floor that
+    also gates when PoBB acts on a candidate's θ; difficulty and ability become trustworthy
+    at the same evidence threshold (no separate ruler-only constant).
     """
     from promptpotter.application.intelligence.exploration import (
-        DELTA_RULER_MIN_SAMPLES,
         ORIGIN_ABILITY_ID,
         Observation,
         fit_rasch,
+        fit_theta_given_delta,
     )
     from promptpotter.application.intelligence.hard_sample_archive import (
         build_archive_observations,
     )
     from promptpotter.shared.errors import is_error_result
 
-    obs = build_archive_observations(
+    archive_obs = build_archive_observations(
         session.store,
         session.backend_id,
         dataset_name=session.dataset_name,
         min_grade="A",
     )
-    for r in origin_results or []:
-        sid = r.get("sample_id")
-        if sid is None or is_error_result(r):
-            continue
-        obs.append(Observation(ORIGIN_ABILITY_ID, int(sid), bool(r.get("hit"))))
+    origin_obs = [
+        Observation(ORIGIN_ABILITY_ID, int(sid), bool(r.get("hit")))
+        for r in origin_results or []
+        if (sid := r.get("sample_id")) is not None and not is_error_result(r)
+    ]
+    obs = archive_obs + origin_obs
     if not obs:
-        return None, None
+        return {}, None
     ruler = fit_rasch(obs)
-    if len(ruler.delta) < DELTA_RULER_MIN_SAMPLES:
-        return None, None
-    return ruler.delta, ruler.theta.get(ORIGIN_ABILITY_ID)
+    if len(ruler.delta) >= n_min:
+        return ruler.delta, ruler.theta.get(ORIGIN_ABILITY_ID)
+    # Cold: too few banked samples to trust a fitted δ → flat ruler; origin θ = logit-accuracy.
+    origin_row = fit_theta_given_delta(origin_obs, {}).get(ORIGIN_ABILITY_ID)
+    return {}, (origin_row[0] if origin_row is not None else None)
 
 
 _FRONTIER_ABILITY_ID = "_frontier"
@@ -242,11 +248,9 @@ def _cumulative_theta(
     """Ability θ of the cumulative frontier ``results`` on the fixed ruler ``delta_scale``.
 
     The θ-space peer of the cumulative composite — what the stall ladder compares
-    round-over-round. One virtual candidate (the frontier) fit against the fixed δ, so
-    successive rounds land on one scale even once per-round subsets drift. ``None`` when
-    the ruler is cold (no delta_scale) or no banked sample overlaps the frontier."""
-    if delta_scale is None:
-        return None
+    round-over-round. One virtual candidate (the frontier) fit against the fixed δ (flat
+    where the ruler is cold), so successive rounds land on one scale even once per-round
+    subsets drift. ``None`` only when no non-error result remains to fit."""
     from promptpotter.application.intelligence.exploration import (
         Observation,
         fit_theta_given_delta,
@@ -258,7 +262,7 @@ def _cumulative_theta(
         for r in results
         if (sid := r.get("sample_id")) is not None and not is_error_result(r)
     ]
-    fit = fit_theta_given_delta(obs, delta_scale)
+    fit = fit_theta_given_delta(obs, delta_scale or {})
     row = fit.get(_FRONTIER_ABILITY_ID)
     return row[0] if row is not None else None
 
@@ -396,7 +400,9 @@ class Cycle:
         )
         _assert_overlay_preserved(sp, session.pipeline_params)
         _inherit_sibling_runtime_failures(opt_sp, session)
-        delta_scale, origin_theta = _calibrate_delta_ruler(session, origin_results)
+        delta_scale, origin_theta = _calibrate_delta_ruler(
+            session, origin_results, config.optimization.elimination_n_min
+        )
         return cls(
             session=session,
             config=config,

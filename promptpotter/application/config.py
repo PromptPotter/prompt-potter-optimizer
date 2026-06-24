@@ -64,12 +64,15 @@ class SelectionMechanisms(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     per_round_resubset: bool = Field(
-        False,
+        True,
         description=(
             "Re-pick the most-informative scoring subset every round from the "
-            "train bank (adaptive Rasch selection). Off (default) → the subset is "
-            "the campaign-start selection (deterministic bank prefix), reused "
-            "unchanged for the whole campaign so every round scores the same samples."
+            "train bank (adaptive Rasch selection). On (default) — safe because "
+            "every cross-round comparator (election, PoBB, c0_ok, the stall ladder) "
+            "now measures on one fixed θ ruler, so a shifting per-round subset stays "
+            "comparable. Off → the subset is the campaign-start selection "
+            "(deterministic bank prefix), reused unchanged for the whole campaign so "
+            "every round scores the same samples."
         ),
     )
     online_reorder: bool = Field(
@@ -447,7 +450,7 @@ def _check_config_couplings(config: CampaignConfig) -> list[PreflightWarning]:
     return [
         PreflightWarning(
             code=f"config_coupling.{c.name}",
-            title=f"knob collision [{c.severity}]: {', '.join(c.knobs)}",
+            title=f"config coupling [{c.severity}]: {', '.join(c.knobs)}",
             detail=f"{c.relation} {c.consequence}",
         )
         for c in check_couplings(config)

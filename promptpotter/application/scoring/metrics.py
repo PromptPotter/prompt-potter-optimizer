@@ -367,19 +367,21 @@ def elect_round_winner(
     results_by_id: Mapping[str, list[QueryMeasurement]],
     origin_results: list[QueryMeasurement],
     coverage_floor: int,
+    delta_scale: Mapping[int, float],
 ) -> tuple[str, RaschPosterior]:
     """Elect the round winner: rank candidates by difficulty-adjusted ability lift over the
-    origin, tie-broken toward higher coverage. A single joint Rasch fit over every candidate
-    **and** the origin (``candidate_abilities``) puts all arms on one ability scale; the rank
+    origin, tie-broken toward higher coverage. Every candidate **and** the origin gets θ on
+    the cycle's **fixed δ ruler** ``delta_scale`` (``candidate_abilities`` → ``fit_theta_given_delta``,
+    flat where the ruler is cold), so all arms share one cross-round-comparable scale; the rank
     key is ``(θ_cand − θ_origin) − θ_se`` — the LCB shrink so an under-probed candidate (wide
     θ posterior) can't outrank a fully-probed one at equal ability. Origin is the floor at rank
     ``(0.0, 0)`` — only a candidate confidently above origin (lift LCB > 0) with at least
     ``coverage_floor`` measured samples can win. Returns ``("", abilities)`` when none clears
     the floor.
 
-    Returns ``(winner_id, abilities)`` — the joint ``RaschPosterior`` rides out so the caller
-    stamps each candidate's θ onto its display row from the SAME fit the decision was made on
-    (no second fit), letting the operator see *why* a lower-accuracy candidate won.
+    Returns ``(winner_id, abilities)`` — the fixed-ruler ``RaschPosterior`` rides out so the
+    caller stamps each candidate's θ onto its display row from the SAME fit the decision was
+    made on (no second fit), letting the operator see *why* a lower-accuracy candidate won.
 
     This is the cross-candidate comparison that drifts under per-round resubset: with each
     candidate on a different signal-chased subset, raw subset accuracy is difficulty-blind, so
@@ -397,6 +399,7 @@ def elect_round_winner(
     abilities = candidate_abilities(
         {cid: list(results_by_id.get(cid) or []) for cid in candidate_ids},
         origin_results,
+        delta_scale,
     )
     theta_origin = abilities.theta.get(ORIGIN_ABILITY_ID, 0.0)
 
@@ -424,20 +427,24 @@ def elect_round_winner(
 def elimination_p_best(
     candidate_hits: list[bool],
     paired_prior_hits: Mapping[str, list[bool]],
+    candidate_sample_ids: Sequence[int],
+    delta_scale: Mapping[int, float],
 ) -> tuple[float, dict[str, float]]:
     """``P(candidate is the round's best)`` for PoBB mid-round elimination, on
     difficulty-adjusted ability θ — the SAME quality metric the round-winner election ranks by,
     so elimination and election never disagree on what "better" means (the boundary collapse).
 
-    One joint Rasch fit over the candidate (``__cand__``) and every paired prior, all aligned to
-    the candidate's shared sample set (sample = position in the aligned lists, so the priors are
-    compared on exactly the candidate's samples — the pairing the caller already enforces). Per
-    prior the closed-form ``P(θ_cand > θ_prior) = Φ(Δθ / √(se_c² + se_p²))``; ``p_best = min`` over
-    priors — the same "bounded above by the hardest prior" criterion the paired-fitness rule used.
+    Candidate and each prior get θ **independently on the cycle's fixed δ ruler**
+    (``fit_theta_given_delta`` keyed by the candidate's real ``sample_id``s — the priors are
+    already aligned to exactly those samples by the caller), flat (δ=0) where the ruler is cold.
+    The ruler is the one the round-winner election reads, so elimination and election share a
+    single scale instead of PoBB's old per-call joint fit. Per prior the closed-form
+    ``P(θ_cand > θ_prior) = Φ(Δθ / √(se_c² + se_p²))``; ``p_best = min`` over priors — the same
+    "bounded above by the hardest prior" criterion the paired-fitness rule used.
 
     Returns ``(p_best, {prior_id: P(cand > prior)})``; empty priors → ``(1.0, {})`` (no prior to
-    lose to). Deterministic — ``fit_rasch`` is pure and the comparison is closed-form (no Monte
-    Carlo) — so the resume divergence replayer re-derives the elimination cut bit-for-bit.
+    lose to). Deterministic + closed-form (no Monte Carlo) — so the resume divergence replayer
+    re-derives the elimination cut bit-for-bit.
     """
     if not paired_prior_hits:
         return 1.0, {}
@@ -446,19 +453,18 @@ def elimination_p_best(
 
     from scipy.stats import norm
 
-    from promptpotter.application.intelligence.exploration import Observation, fit_rasch
+    from promptpotter.application.intelligence.exploration import Observation, fit_theta_given_delta
 
-    obs = [Observation("__cand__", i, h) for i, h in enumerate(candidate_hits)]
-    for pid, hits in paired_prior_hits.items():
-        obs.extend(Observation(pid, i, h) for i, h in enumerate(hits))
-    post = fit_rasch(obs)
-    theta_c = post.theta.get("__cand__", 0.0)
-    se_c = post.theta_se.get("__cand__", 0.0)
+    sids = [int(s) for s in candidate_sample_ids]
+    cand_obs = [
+        Observation("__cand__", sid, h) for sid, h in zip(sids, candidate_hits, strict=True)
+    ]
+    theta_c, se_c = fit_theta_given_delta(cand_obs, delta_scale).get("__cand__", (0.0, 0.0))
 
     per_prior: dict[str, float] = {}
-    for pid in paired_prior_hits:
-        theta_p = post.theta.get(pid, 0.0)
-        se_p = post.theta_se.get(pid, 0.0)
+    for pid, hits in paired_prior_hits.items():
+        prior_obs = [Observation(pid, sid, h) for sid, h in zip(sids, hits, strict=True)]
+        theta_p, se_p = fit_theta_given_delta(prior_obs, delta_scale).get(pid, (0.0, 0.0))
         denom = math.sqrt(se_c * se_c + se_p * se_p)
         if denom > 1e-12:
             per_prior[pid] = float(norm.cdf((theta_c - theta_p) / denom))

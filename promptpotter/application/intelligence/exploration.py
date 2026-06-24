@@ -21,7 +21,6 @@ if TYPE_CHECKING:
 ORIGIN_ABILITY_ID = "__origin__"
 
 __all__ = [
-    "DELTA_RULER_MIN_SAMPLES",
     "ORIGIN_ABILITY_ID",
     "Observation",
     "RaschPosterior",
@@ -31,13 +30,6 @@ __all__ = [
     "fit_theta_given_delta",
     "select_round_subset",
 ]
-
-# A fixed-δ ruler is only trustworthy once it spans at least this many calibrated
-# samples. Below it the cross-round θ gates (c0_ok, the L2/L3 stall ladder,
-# elevate_to_decisive) fall back to the subset-relative accuracy/composite they
-# used pre-slice-2 — sound while ``per_round_resubset`` is OFF (fixed subset ⇒
-# accuracy comparable across rounds). See docs/specs/fitness-comparability.md §2.
-DELTA_RULER_MIN_SAMPLES = 8
 
 
 class Observation(NamedTuple):
@@ -236,24 +228,23 @@ def fit_theta_given_delta(
 
     The cross-round comparability primitive. ``fit_rasch`` re-estimates δ *and*
     re-anchors ``mean(θ) == 0`` on every call, so its θ scale drifts between fits —
-    round-N θ and round-0 θ sit on different rulers, which is why c0_ok / the stall
-    ladder / elevate_to_decisive can't compare θ across rounds today. Holding δ fixed
-    at the calibrated bank values pins the ruler: every θ this returns lands on the
-    one shared scale, so cross-round/cross-cycle θ comparison is valid.
+    round-N θ and round-0 θ sit on different rulers, which is why the round-winner
+    election / c0_ok / the stall ladder couldn't compare θ across rounds on it. Holding
+    δ fixed at the calibrated ruler pins the scale: every θ this returns lands on the
+    one shared scale, so cross-round θ comparison is valid.
 
     With δ fixed the candidates **decouple** — each θ_c is an independent 1-D logistic
     MAP (prior ``N(0, σ_θ²)``, σ_θ = the ruler's population spread) over that
-    candidate's observations on banked samples. Observations on samples absent from
-    the ruler are skipped (they can't be placed on it). Returns
-    ``{candidate_id: (theta, theta_se)}``; a candidate with no banked observation is
-    omitted — the caller reads that as cold-start and falls back.
+    candidate's observations. A sample absent from the ruler is placed at **δ=0** — a
+    FLAT ruler where it is cold, so θ degenerates to logit-accuracy there rather than the
+    observation being dropped. This is the "one ruler, θ always, flat where cold" contract
+    (fitness-comparability slice 2): an empty ruler ``{}`` ⇒ every θ is plain logit-accuracy.
+    Returns ``{candidate_id: (theta, theta_se)}``; only a candidate with *no* observation at
+    all is omitted.
     """
     by_c: dict[str, list[tuple[float, bool]]] = {}
     for o in observations:
-        d = delta.get(o.sample_id)
-        if d is None:
-            continue
-        by_c.setdefault(o.candidate_id, []).append((d, o.hit))
+        by_c.setdefault(o.candidate_id, []).append((delta.get(o.sample_id, 0.0), o.hit))
 
     out: dict[str, tuple[float, float]] = {}
     inv_var = 1.0 / (sigma_theta * sigma_theta)
@@ -293,15 +284,17 @@ def build_observations(rounds: list[RoundResult]) -> list[Observation]:
 def candidate_abilities(
     results_by_id: Mapping[str, list[QueryMeasurement]],
     origin_results: list[QueryMeasurement],
+    delta_scale: Mapping[int, float],
 ) -> RaschPosterior:
-    """Joint 1PL Rasch fit over the round's candidates **and** the origin.
+    """Each arm's ability θ on the **fixed** difficulty ruler ``delta_scale`` (the cycle's
+    δ bank), via ``fit_theta_given_delta``.
 
-    The origin is folded in as a pseudo-candidate under ``ORIGIN_ABILITY_ID`` so every
-    arm lands on one shared ability scale (``mean(theta) == 0`` anchor, common ``delta``).
-    ``theta[cid]`` is then each candidate's *difficulty-adjusted* ability — the
-    subset-invariant comparison the cross-candidate round-winner election needs when the
-    online picker scored each candidate on a different, signal-chased subset. Raw subset
-    accuracy is difficulty-blind and drifts across those subsets; θ does not.
+    The origin is folded in as a pseudo-candidate under ``ORIGIN_ABILITY_ID`` so it shares
+    the arms' scale. Holding δ fixed at the bank — rather than a per-call joint ``fit_rasch``
+    that re-anchors ``mean(θ)==0`` every call — is what makes θ **cross-round/cross-subset
+    comparable**: the election, the c0_ok floor, the stall ladder and PoBB all read the one
+    ruler. Samples absent from the ruler are flat (δ=0); raw subset accuracy is
+    difficulty-blind and drifts across subsets, θ does not.
     """
     obs: list[Observation] = []
     pools: list[tuple[str, list[QueryMeasurement]]] = [
@@ -314,7 +307,13 @@ def candidate_abilities(
             if sid is None or is_error_result(r):
                 continue
             obs.append(Observation(candidate_id=cid, sample_id=int(sid), hit=bool(r.get("hit"))))
-    return fit_rasch(obs)
+    fit = fit_theta_given_delta(obs, delta_scale)
+    return RaschPosterior(
+        theta={cid: t for cid, (t, _) in fit.items()},
+        theta_se={cid: se for cid, (_, se) in fit.items()},
+        delta={int(sid): float(d) for sid, d in delta_scale.items()},
+        delta_se={},
+    )
 
 
 def select_round_subset(

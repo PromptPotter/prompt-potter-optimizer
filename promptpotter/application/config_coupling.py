@@ -45,7 +45,6 @@ from typing import Any
 from pydantic import BaseModel
 
 from promptpotter.application.config import CampaignConfig, OptimizationConfig
-from promptpotter.application.intelligence.exploration import DELTA_RULER_MIN_SAMPLES
 from promptpotter.config.settings import POBB_DEFAULT_EPSILON
 
 __all__ = [
@@ -125,7 +124,9 @@ _KNOB_ESTIMANDS: dict[str, frozenset[Estimand]] = {
     "optimization.l2_patience": frozenset({Estimand.ESCALATION}),
     "optimization.l3_patience": frozenset({Estimand.ESCALATION}),
     "optimization.degradation_threshold": frozenset({Estimand.STOPPING}),
-    "optimization.elimination_n_min": frozenset({Estimand.STOPPING, Estimand.ABILITY}),
+    "optimization.elimination_n_min": frozenset(
+        {Estimand.STOPPING, Estimand.ABILITY, Estimand.DIFFICULTY}
+    ),
     "optimization.pobb_epsilon": frozenset({Estimand.STOPPING}),
     "optimization.pobb_lock_in": frozenset({Estimand.STOPPING}),
     "optimization.pobb_lock_in_n_min": frozenset({Estimand.STOPPING}),
@@ -152,11 +153,9 @@ _KNOB_ESTIMANDS: dict[str, frozenset[Estimand]] = {
 # leaves, but knobs in the statistical sense: they bound the estimators. Surfaced
 # in the map so a statistician sees the floors that gate when θ becomes meaningful.
 _CONST_ESTIMANDS: dict[str, frozenset[Estimand]] = {
-    "const.DELTA_RULER_MIN_SAMPLES": frozenset({Estimand.DIFFICULTY, Estimand.ABILITY}),
     "const.POBB_DEFAULT_EPSILON": frozenset({Estimand.STOPPING}),
 }
 _CONST_VALUES: dict[str, Any] = {
-    "const.DELTA_RULER_MIN_SAMPLES": DELTA_RULER_MIN_SAMPLES,
     "const.POBB_DEFAULT_EPSILON": POBB_DEFAULT_EPSILON,
 }
 
@@ -201,44 +200,28 @@ class Coupling:
 
 COUPLINGS: tuple[Coupling, ...] = (
     Coupling(
-        name="resubset_requires_theta_replayers",
-        knobs=("optimization.mechanisms.selection.per_round_resubset",),
+        name="resubset_subset_relative_on_thin_bank",
+        knobs=(
+            "optimization.mechanisms.selection.per_round_resubset",
+            "optimization.elimination_n_min",
+        ),
         estimand=Estimand.SELECTION,
         relation=(
-            "per_round_resubset=ON re-picks the scored subset per candidate, so "
-            "accuracy/composite become subset-relative and only difficulty-adjusted "
-            "ability θ can compare across them — which requires every CROSS-ROUND "
-            "comparator to already be θ-space."
+            "per_round_resubset=ON re-picks the scored subset per candidate. Every "
+            "cross-round comparator now reads ONE fixed δ ruler in θ — the stall "
+            "replayer, c0_ok, the round-winner election and PoBB elimination all via "
+            "fit_theta_given_delta on cycle.delta_scale — so the accuracy-space collision "
+            "is resolved. Residual: a sample absent from the δ bank is flat (δ=0)."
         ),
         consequence=(
-            "The stall replayer (_derive_stall_count) is now θ-exact, but the c0_ok "
-            "cold-start floor is still accuracy-space, so with resubset ON it compares "
-            "raw accuracy across drifting subsets — a wrong C0 floor. Flip only once "
-            "c0_ok cold-start also moves to flat-ruler θ."
-        ),
-        severity="collision",
-        predicate=lambda c: bool(_sel(c).per_round_resubset),
-    ),
-    Coupling(
-        name="theta_two_scales_pobb_vs_ruler",
-        knobs=("optimization.elimination_n_min", "const.DELTA_RULER_MIN_SAMPLES"),
-        estimand=Estimand.ABILITY,
-        relation=(
-            "Two θ producers on two scales. PoBB elimination + round-winner election "
-            "fit their OWN joint Rasch per call (fit_rasch re-anchors mean θ=0 every "
-            "call → a self-anchored, per-call scale; gated by elimination_n_min). "
-            "c0_ok + the L2/L3 stall ladder + cross-cycle elevate read the FIXED bank "
-            "ruler via fit_theta_given_delta (one cross-round scale; gated by "
-            "DELTA_RULER_MIN_SAMPLES). PoBB never reads the fixed ruler."
-        ),
-        consequence=(
-            "Both θ's are difficulty-adjusted, but a candidate's PoBB θ and its c0_ok θ "
-            "sit on different scales and are NOT directly comparable. Permanent until "
-            "PoBB + election move onto the bank ruler (fitness-comparability slice 2, "
-            "the 'one ruler' step) — then this collapses to a single θ scale."
+            "Resubset is comparability-coherent; flipping the default ON is the operator's "
+            "deliberate step (fork-compare to validate). The one residual: while the bank "
+            "is thin (< elimination_n_min grade-A samples), unbanked samples score "
+            "flat, so heavy per-candidate drift on a cold bank is only partially "
+            "difficulty-adjusted — it warms toward full adjustment as the archive grows."
         ),
         severity="info",
-        predicate=lambda c: False,
+        predicate=lambda c: bool(_sel(c).per_round_resubset),
     ),
     Coupling(
         name="lock_in_floor_below_elimination",

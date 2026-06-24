@@ -229,12 +229,13 @@ paired_prior_hits = {
     cid: [hist[sid] for sid in candidate_sample_ids]
     for cid, hist in prior_histories.items()
 }
-p_best, _ = elimination_p_best(candidate_hits, paired_prior_hits)  # same closed-form θ rule
+# θ on the cycle's fixed δ ruler — keyed by the candidate's real sample_ids, same closed-form rule
+p_best, _ = elimination_p_best(candidate_hits, paired_prior_hits, candidate_sample_ids, delta_scale)
 ```
 
 No cross-round "find R1_winner in prior rounds" logic, no backfill
 during replay. The decision record is the entire input, and the θ rule is
-closed-form + deterministic (`fit_rasch` is pure, no MC seed) so replay is
+closed-form + deterministic (the θ fit is pure, no MC seed) so replay is
 bit-for-bit when no scorer change moved the candidate's hits. When the active
 scorer differs, the candidate side gets rescored (by `resume.py::_rescore`); the
 prior side stays at the recorded hits (a scorer change that materially shifts
@@ -317,7 +318,7 @@ the origin (R1) or the prior round's winner (R2+); the seed's coverage
 across the candidate's budget is guaranteed by the backfill above.
 
 The second gate is the θ-ability posterior — `p_best < ε`, where `p_best =
-min over priors of P(θ_cand > θ_prior)` from the joint Rasch fit. The two gates
+min over priors of P(θ_cand > θ_prior)` on the cycle's fixed δ ruler. The two gates
 are complementary: dominance is SPRT's deterministic corner (probability of
 catching up = 0); the θ gate is difficulty-adjusted evidence accumulation against
 an ε threshold. Dominance fires first because "mathematically impossible" beats

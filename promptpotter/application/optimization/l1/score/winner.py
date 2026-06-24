@@ -198,8 +198,9 @@ async def l1_score(
         all_candidate_results,
         list(cast("list[QueryMeasurement]", origin.results)),
         coverage_floor,
+        cycle.delta_scale or {},
     )
-    # Stamp each electable candidate's difficulty-adjusted ability θ from the SAME joint Rasch
+    # Stamp each electable candidate's difficulty-adjusted ability θ from the SAME fixed-ruler
     # fit the election just ran (no second fit) — the subset-invariant metric the winner was
     # elected on, so the dashboard can show *why* a lower-accuracy candidate won. Left ``None``
     # for candidates outside the election fit (eliminated / under the coverage floor).
@@ -258,8 +259,8 @@ async def l1_score(
                 p_value = 0.0 if mean_d > 0 else 1.0
 
     # ``delta_ok`` gates on the winner's difficulty-adjusted ability lift over the matched
-    # origin — a pairwise joint Rasch fit (winner + origin folded in as ``ORIGIN_ABILITY_ID``)
-    # on the same subset-invariant θ scale the election ranks by, not raw subset accuracy. The
+    # origin — winner + origin (folded in as ``ORIGIN_ABILITY_ID``) on the cycle's FIXED δ ruler,
+    # the same subset-invariant θ scale the election ranks by, not raw subset accuracy. The
     # accuracy-space ``improvement_threshold`` is recalibrated to θ-logits per round by local
     # linearization at the matched-origin operating point (σ' = p(1−p)), so the knob keeps
     # meaning "min accuracy delta" while the comparison happens in θ. Under the default
@@ -276,6 +277,7 @@ async def l1_score(
         gate_fit = candidate_abilities(
             {winner_id: best_results},
             list(cast("list[QueryMeasurement]", origin.results)),
+            cycle.delta_scale or {},
         )
         theta_lift = gate_fit.theta.get(winner_id, 0.0) - gate_fit.theta.get(ORIGIN_ABILITY_ID, 0.0)
         slope = max(best_matched_origin_acc * (1.0 - best_matched_origin_acc), _GATE_SLOPE_FLOOR)
@@ -287,16 +289,15 @@ async def l1_score(
     # promotion lowers the bar; requiring the winner to also clear C0 stops the lineage from
     # decaying below where it started while still stamping `improved=True`.
     #
-    # Slice 2 (fitness-comparability): ``c0_ok`` now compares in θ on the cycle's FIXED δ ruler
-    # — the origin's frozen θ (``cycle.tracking.origin_theta``) vs the winner's θ measured
-    # against that same ruler (``fit_theta_given_delta`` → one shared scale). That holds up once
-    # per-round subsets drift, where raw accuracy stops being cross-round comparable. It falls
-    # back to the frozen-origin ACCURACY floor when the ruler is cold-started (thin grade-A
-    # archive) or the winner ran no banked sample — sound while ``per_round_resubset`` is OFF.
-    c0_floor = cycle.tracking.origin_accuracy
+    # Slice 2 (fitness-comparability): ``c0_ok`` compares in θ on the cycle's FIXED δ ruler —
+    # the origin's frozen θ (``cycle.tracking.origin_theta``) vs the winner's θ on that same
+    # ruler (``fit_theta_given_delta`` → one shared scale). The ruler is flat (δ≡0) where cold,
+    # so θ degenerates to logit-accuracy there: ALWAYS θ, never a separate accuracy branch
+    # (one ruler, θ always). Holds up once per-round subsets drift, where raw accuracy stops
+    # being cross-round comparable.
     origin_theta = cycle.tracking.origin_theta
     winner_theta: float | None = None
-    if winner_id and cycle.delta_scale is not None and origin_theta is not None:
+    if winner_id:
         from promptpotter.application.intelligence.exploration import (
             Observation,
             fit_theta_given_delta,
@@ -308,15 +309,17 @@ async def l1_score(
             for r in best_results
             if (sid := r.get("sample_id")) is not None and not is_error_result(r)
         ]
-        fit = fit_theta_given_delta(winner_obs, cycle.delta_scale)
+        fit = fit_theta_given_delta(winner_obs, cycle.delta_scale or {})
         if winner_id in fit:
             winner_theta = fit[winner_id][0]
     if winner_theta is not None and origin_theta is not None:
         c0_ok = winner_theta >= origin_theta
         c0_desc = f"θ={winner_theta:.3f} < origin_c0_θ={origin_theta:.3f}"
     else:
-        c0_ok = best_acc >= c0_floor
-        c0_desc = f"acc={best_acc:.3f} < origin_c0={c0_floor:.3f}"
+        # No winner / no measured obs / no origin θ (degenerate empty origin) — nothing to
+        # floor against, so c0_ok can't block (delta_ok already gates a real winner).
+        c0_ok = True
+        c0_desc = ""
     improved = delta_ok and n_ok and c0_ok
     improved_reason: str | None = None
     if delta_ok and not improved:

@@ -611,9 +611,11 @@ def test_fit_theta_given_delta_is_subset_invariant_unlike_accuracy() -> None:
     same_hard = fit_theta_given_delta(measure("x", 0.8, hard), ruler)["x"][0]
     assert abs(same_easy - same_hard) < 0.5
 
-    # Observations on samples absent from the ruler are skipped; a candidate with
-    # none is omitted (the caller's cold-start signal).
-    assert fit_theta_given_delta([Observation("ghost", 99, True)], ruler) == {}
+    # A sample absent from the ruler is placed at δ=0 (a FLAT ruler where it is cold), so the
+    # candidate is scored on the flat ruler — never omitted (one ruler, θ always; cold ⇒ θ is
+    # plain logit-accuracy). A single hit on flat δ ⇒ θ > 0 under the N(0,σ²) prior.
+    ghost = fit_theta_given_delta([Observation("ghost", 99, True)], ruler)
+    assert "ghost" in ghost and ghost["ghost"][0] > 0.0
 
 
 def test_select_round_subset_cold_starts_to_prefix_and_warms_to_informative() -> None:
@@ -651,14 +653,16 @@ def test_round_winner_elects_by_ability_not_subset_accuracy() -> None:
 
     Silent harm: under per-round resubset the wrong winner is promoted with no error —
     the run completes, the dashboard looks fine, the lineage decays toward whoever drew
-    the gentlest samples. The election ranks on a joint Rasch θ fit, so it does not.
+    the gentlest samples. The election ranks θ on the cycle's fixed δ ruler, so it does not.
     """
     from promptpotter.application.scoring.metrics import elect_round_winner
 
     def res(hit: bool, sid: int) -> dict:
         return {"sample_id": sid, "hit": hit, "fitness": 1.0 if hit else 0.0}
 
-    # Origin spans all 40: easy {0..19} hit, hard {20..39} missed → the difficulty gradient.
+    # Fixed δ ruler: easy {0..19} low difficulty, hard {20..39} high — the bank the election reads.
+    ruler = {i: (-1.5 if i < 20 else 1.5) for i in range(40)}
+    # Origin spans all 40: easy {0..19} hit, hard {20..39} missed.
     origin = [res(i < 20, i) for i in range(40)]
     # Easy candidate: 16/20 on easy samples the origin also hits → accuracy 0.80, modest lift.
     weak_on_easy = [res(i < 16, i) for i in range(20)]
@@ -668,10 +672,10 @@ def test_round_winner_elects_by_ability_not_subset_accuracy() -> None:
 
     # Raw subset accuracy crowns the easy candidate (0.80 > 0.70)...
     assert sum(r["hit"] for r in weak_on_easy) / 20 > sum(r["hit"] for r in able_on_hard) / 20
-    # ...but the θ-gated election crowns the abler one — it cleared items the origin never did,
-    # which is stronger evidence of ability than more wins on items everyone already passes.
+    # ...but the θ-gated election crowns the abler one — it cleared HARD items (high δ), stronger
+    # evidence of ability than more wins on easy items (low δ) everyone already passes.
     winner_id, abilities = elect_round_winner(
-        ["weak_on_easy", "able_on_hard"], results_by_id, origin, coverage_floor=4
+        ["weak_on_easy", "able_on_hard"], results_by_id, origin, 4, ruler
     )
     assert winner_id == "able_on_hard"
     # The fit rides out so the caller stamps θ from the same election fit (no second fit):
@@ -853,7 +857,6 @@ from promptpotter.domain.l1_layout import L1Layout, validate_l1_layout  # noqa: 
 from promptpotter.domain.opt_search_point import OptSearchPoint  # noqa: E402
 from promptpotter.domain.results import CandidateProposal, ScoredCandidate  # noqa: E402
 from promptpotter.domain.search_point import TaskDecomposition  # noqa: E402
-from promptpotter.shared.statistics import posterior_best_from_normals  # noqa: E402
 
 # ===========================================================================
 # 6. L1 invariant detectors
@@ -1176,7 +1179,7 @@ def test_fatal_degradation_runtime_failure_escalates_to_operator():
             dataset=[{}, {}],
             effective_pipeline_params={"entity_profiling": {"max_tokens": None}},
             round_num=1,
-            elim_check=PoBBCheck(PoBBConfig(), n_samples=2),
+            elim_check=PoBBCheck(PoBBConfig(), n_samples=2, delta_scale={}),
             candidate_id="C1",
             candidate_label="C1",
             priors_at_test=[],
@@ -1245,22 +1248,6 @@ def test_layout_hard_failures(layout, expected_validator_id):
 # ===========================================================================
 
 
-def test_posterior_best_from_normals_sums_to_one():
-    rng = np.random.default_rng(42)
-    normals = {"a": (0.7, 0.05), "b": (0.5, 0.05), "c": (0.4, 0.05)}
-    probs = posterior_best_from_normals(normals, rng=rng)
-    assert set(probs) == {"a", "b", "c"}
-    assert abs(sum(probs.values()) - 1.0) < 1e-9
-
-
-def test_high_signal_collapses_to_clear_winner():
-    rng = np.random.default_rng(0)
-    normals = {"winner": (1.0, 0.01), "loser": (0.0, 0.01)}
-    probs = posterior_best_from_normals(normals, n_samples=2000, rng=rng)
-    assert probs["winner"] >= 0.99
-    assert probs["loser"] <= 0.01
-
-
 def _measurements(scores: list[float], sample_ids: list[int] | None = None) -> list[dict]:
     """Minimal QueryMeasurement-shaped dicts for PoBB tests. ``hit`` (what the θ
     elimination fit reads) is derived from the per-sample fitness (>0.5 == hit)."""
@@ -1276,7 +1263,7 @@ _DUMMY_SP = SimpleNamespace()
 
 def test_pobb_check_gates_elimination_on_posterior():
     """PoBB.check() fires when the paired-difference posterior clears the ε gate."""
-    check_sep = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_samples=20)
+    check_sep = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_samples=20, delta_scale={})
     check_sep.register_completed(_measurements([1.0] * 20), candidate_id="winner", sp=_DUMMY_SP)
     check_sep.set_current("loser")
     sig = check_sep.check(_measurements([0.0] * 5), candidate_idx=1, n_total_candidates=2)
@@ -1291,7 +1278,7 @@ def test_pobb_check_gates_elimination_on_posterior():
 
 def test_pobb_dominance_aborts_when_catch_up_impossible():
     """Arithmetic abort: cand_max_hits < seed_hits ⇒ eliminate before the posterior runs."""
-    check = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_samples=20)
+    check = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_samples=20, delta_scale={})
     seed_scores = [1.0] * 10 + [0.0] * 10
     check.register_completed(
         _measurements(seed_scores, sample_ids=list(range(20))), candidate_id="origin", sp=_DUMMY_SP
@@ -1319,6 +1306,7 @@ def test_pobb_locks_in_dominant_leader():
     check = PoBBCheck(
         PoBBConfig(n_min=4, epsilon=0.05, lock_in=0.95, lock_in_n_min=8, leader_lock_in=True),
         n_samples=20,
+        delta_scale={},
     )
     check.register_completed(_measurements([0.0] * 20), candidate_id="weak_prior", sp=_DUMMY_SP)
     check.set_current("strong_current")
@@ -1347,7 +1335,7 @@ async def test_paired_pobb_breaks_lucky_prefix_leader_trap():
     candidate_samples = [9, 12, 13, 14, 8]  # disjoint from leader; AIME's hard sorter order.
 
     # --- Branch (a): no backfill_fn ⇒ incomplete prior is excluded, no elimination.
-    check_no_backfill = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_samples=20)
+    check_no_backfill = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_samples=20, delta_scale={})
     check_no_backfill.register_completed(
         _measurements([1.0] * 8, sample_ids=leader_samples),
         candidate_id="R1_lucky_winner",
@@ -1377,7 +1365,7 @@ async def test_paired_pobb_breaks_lucky_prefix_leader_trap():
         return [{"sample_id": s.id, "hit": truth[s.id]} for s in samples]
 
     check_paired = PoBBCheck(
-        PoBBConfig(n_min=4, epsilon=0.05), n_samples=20, backfill_fn=_stub_backfill
+        PoBBConfig(n_min=4, epsilon=0.05), n_samples=20, delta_scale={}, backfill_fn=_stub_backfill
     )
     check_paired.register_completed(
         _measurements([1.0] * 8, sample_ids=leader_samples),

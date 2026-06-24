@@ -52,6 +52,16 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # the "deferred-with-the-flip" knob interactions out of spec prose into one
 # machine-checked registry, read by the preflight gate, the diagnostic, and the
 # webapp config-map panel. A feature — operator-requested collision visibility).
+# then ``modules`` 295→293 (deleted the dead cross-cycle compare subsystem — the
+# unused ``compare`` CLI verb + ``pobb/elevation.py`` (elevate_to_decisive /
+# discover_compare_arms / the persisted δ-bank) + ``posterior_best_from_normals``.
+# Reachable only via the never-used ``compare`` verb — no live-loop caller — and
+# superseded by the deterministic A/B replay engine).
+# then ``modules`` 293→295 (the deterministic A/B replay engine that replaces it:
+# ``resume_and_fork/ab_replay.py`` re-derives a recorded cycle's decisions under the
+# current engine/scorer over the recorded measurements + the ``ab`` CLI verb. A feature
+# — the real, deterministic engine/scorer A/B; net-neutral on module count vs the deleted
+# subsystem but −640 lines and a sharper concept).
 LEDGER_BASELINE = {
     "modules": 295,
     "init_files": 54,

@@ -93,34 +93,6 @@ def _normal_posterior(scores: list[float]) -> tuple[float, float]:
     return (mean, max(se, se_floor))
 
 
-def posterior_best_from_normals(
-    normals: dict[str, tuple[float, float]],
-    n_samples: int = 1000,
-    rng: np.random.Generator | None = None,
-) -> dict[str, float]:
-    """P(each candidate is best) given a Normal posterior ``(mean, se)`` per candidate.
-
-    The MC argmax engine: ``n_samples`` joint draws from the independent
-    per-candidate Normals, counting the argmax fraction. The estimand is the
-    caller's — ``elevate_to_decisive`` feeds it the fixed-ruler θ posteriors
-    (``(theta, theta_se)`` per arm); only the posterior summary is needed.
-    ``n_samples`` default 1000 → MC error √(p(1-p)/N) ≈ 0.7% at p=0.05. Empty
-    input → empty dict; probabilities sum to 1.0 ± MC error.
-    """
-    if not normals:
-        return {}
-    cand_ids = list(normals)
-    means = np.fromiter((normals[c][0] for c in cand_ids), dtype=np.float64, count=len(cand_ids))
-    ses = np.fromiter((normals[c][1] for c in cand_ids), dtype=np.float64, count=len(cand_ids))
-
-    gen = rng if rng is not None else np.random.default_rng()
-    z = gen.standard_normal((n_samples, len(cand_ids)))
-    draws = means[None, :] + ses[None, :] * z
-    counts = np.bincount(draws.argmax(axis=1), minlength=len(cand_ids))
-    probs = counts / float(n_samples)
-    return {cid: float(probs[i]) for i, cid in enumerate(cand_ids)}
-
-
 # --- Paired-difference posterior — cand-vs-prior on shared sample set ---
 
 
@@ -147,7 +119,6 @@ def paired_diff_posterior(
 __all__ = [
     "min_detectable_effect",
     "paired_diff_posterior",
-    "posterior_best_from_normals",
     "proportion_test",
     "wilson_ci",
 ]

@@ -20,8 +20,8 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 
 from promptpotter.presentation.cli.commands import (
+    cmd_ab,
     cmd_archive,
-    cmd_compare,
     cmd_delete,
     cmd_new,
     cmd_reset,
@@ -39,7 +39,7 @@ __all__ = ["_DIVERGENCE_HINT", "main", "set_verbose"]
 COMMANDS = {
     "new": cmd_new,
     "resume": cmd_resume,
-    "compare": cmd_compare,
+    "ab": cmd_ab,
     "sweep": cmd_sweep,
     "reset": cmd_reset,
     "verify": cmd_verify,
@@ -73,7 +73,7 @@ def main() -> None:
                 "  promptpotter resume          continue the active campaign\n"
                 "  promptpotter verify          re-score a candidate on more samples\n"
                 "  promptpotter sweep           cheap A/B of optimizer meta-prompt edits\n"
-                "  promptpotter compare         compare cycle winners across the family\n\n"
+                "  promptpotter ab              re-derive the active cycle's decisions under the current engine\n\n"
                 "Run `promptpotter <verb> --help` for per-verb options.\n"
                 "Docs: https://github.com/runfish5/prompt-potter-optimizer"
             )

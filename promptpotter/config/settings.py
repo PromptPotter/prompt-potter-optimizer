@@ -104,7 +104,7 @@ OPTIMIZER_PROMPT_WARN_CHARS: int = 8_000
 # PoBB elimination — default posterior-of-being-best threshold ε. A
 # candidate stops when its P(best) drops below ε. The runtime value is
 # ``CampaignConfig.pobb_epsilon``; this is the single default every entry
-# point (the config Field, PoBBConfig, elevate_to_decisive, the CLI)
+# point (the config Field, PoBBConfig, the CLI)
 # references so the number can't drift. 0.15 = abort a candidate once its
 # P(reaching par with the current best) falls below 15% — empirically the
 # most aggressive threshold before false-cuts of true winners climb (≈2% at

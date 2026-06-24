@@ -31,7 +31,7 @@ Mechanics — P(best) is computed on **difficulty-adjusted ability θ**, the sam
 
 Because the comparison is difficulty-adjusted, it stays valid when the adaptive picker hands each candidate a *different* subset — raw hit-rate would crown whoever drew the easy samples, θ does not.
 
-Code: `application/scoring/metrics.py::elimination_p_best` (the shared θ rule, used by live `check()` and the resume replayer), driven by `application/optimization/pobb/elimination/checks.py::PoBBCheck`. The **cross-cycle** `pobb/elevation.py::elevate_to_decisive` compare is also θ-now — it ranks arms with `shared/statistics.py::posterior_best_from_normals` (MC argmax over the fixed-ruler θ posteriors).
+Code: `application/scoring/metrics.py::elimination_p_best` (the shared θ rule on the cycle's fixed δ ruler, used by live `check()` and the resume replayer), driven by `application/optimization/pobb/elimination/checks.py::PoBBCheck`. Cross-cycle/engine comparison is the deterministic A/B replay engine (`resume_and_fork/ab_replay.py`, the `ab` verb) — it re-derives recorded decisions under the current engine, no new measurements.
 
 ## Two regimes
 
@@ -45,7 +45,7 @@ PoBB beats LUCB-style pairwise tests by sampling the joint posterior over **all*
 ## Tunable knobs
 
 - `OptimizationConfig.pobb_epsilon` (default `0.05`) — smaller = more conservative.
-- `OptimizationConfig.elimination_n_min` (default `4`) — floor on query count before PoBB fires. Below this, the candidate's θ posterior is too under-determined to act on.
+- `OptimizationConfig.elimination_n_min` (default `6`) — the single min-samples floor. It gates PoBB (below this a candidate's θ posterior is too under-determined to act on) **and** the difficulty-ruler warmth: the per-cycle δ ruler stays flat (δ≡0 ⇒ θ = logit-accuracy) until at least this many grade-A samples are banked. Difficulty and ability become trustworthy at the same evidence threshold — one knob, no separate ruler-only constant.
 
 ## Open questions
 

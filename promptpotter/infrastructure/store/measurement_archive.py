@@ -114,22 +114,6 @@ class MeasurementArchive:
         its own layout, so the writer never reconstructs `measurements/…` inline."""
         return self._store_dir() / f"hard_samples_{backend_id}_{dataset_name}.json"
 
-    def delta_bank_path(self, backend_id: str, dataset_name: str) -> Path:
-        """Path of the per-(backend, dataset) δ bank — the dataset-stable difficulty
-        ruler `elevate_to_decisive` pins cross-cycle θ to (fitness-comparability slice 2).
-        Store-owned layout, beside the hard-samples snapshot it accretes alongside."""
-        return self._store_dir() / f"delta_bank_{backend_id}_{dataset_name}.json"
-
-    def save_delta_bank(self, backend_id: str, dataset_name: str, data: dict[str, Any]) -> Path:
-        """Persist the calibrated δ bank (human-readable; the clean corpus L4 later ingests)."""
-        path = self.delta_bank_path(backend_id, dataset_name)
-        write_json(path, data)
-        return path
-
-    def load_delta_bank(self, backend_id: str, dataset_name: str) -> dict[str, Any] | None:
-        """Load the persisted δ bank, or `None` when it has never been calibrated."""
-        return read_json_optional(self.delta_bank_path(backend_id, dataset_name))
-
     # -- complete runs --------------------------------------------------------
 
     def save(

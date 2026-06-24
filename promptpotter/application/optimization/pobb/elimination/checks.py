@@ -157,8 +157,12 @@ class PoBBCheck:
         config: PoBBConfig,
         *,
         n_samples: int,
+        delta_scale: dict[int, float],
         backfill_fn: BackfillFn | None = None,
     ) -> None:
+        # The cycle's FIXED δ ruler — the SAME scale the round-winner election reads, so
+        # elimination θ and election θ agree (flat where the ruler is cold). Empty ⇒ flat.
+        self.delta_scale = dict(delta_scale)
         self.n_min = config.n_min
         self.epsilon = config.epsilon
         self.lock_in = config.lock_in
@@ -284,6 +288,7 @@ class PoBBCheck:
         if not fit_results:
             return None
         candidate_samples = [str(r.get("sample_id", "")) for r in fit_results]
+        candidate_sample_ids = [int(r.get("sample_id", 0)) for r in fit_results]
         candidate_hits = [bool(r.get("hit")) for r in fit_results]
 
         # Deterministic dominance: abort if cand_max_final_hits < seed_total_hits.
@@ -307,7 +312,9 @@ class PoBBCheck:
         cid = self._current_id or "__current__"
         # P(best) = difficulty-adjusted θ ability, bounded above by min over priors of
         # P(θ_cand > θ_prior_i) — the same metric the round-winner election ranks by.
-        p_best_current, p_better = elimination_p_best(candidate_hits, paired_priors)
+        p_best_current, p_better = elimination_p_best(
+            candidate_hits, paired_priors, candidate_sample_ids, self.delta_scale
+        )
         hardest_prior_id = min(p_better, key=lambda k: p_better[k])
 
         paired_breakdown: dict[str, dict[str, float]] = {
@@ -431,6 +438,7 @@ def build_elimination_check(
     config: PoBBConfig,
     *,
     n_samples: int,
+    delta_scale: dict[int, float],
     backfill_fn: BackfillFn | None,
 ) -> PoBBCheck:
     """Build the round's leader-elimination check. Today: paired-sample PoBB.
@@ -448,6 +456,7 @@ def build_elimination_check(
     return PoBBCheck(
         config,
         n_samples=n_samples,
+        delta_scale=delta_scale,
         backfill_fn=backfill_fn,
     )
 

@@ -39,6 +39,10 @@ parallel mint paths.
 
 from __future__ import annotations
 
+from promptpotter.application.optimization.resume_and_fork.ab_replay import (
+    AbReport,
+    ab_replay_cycle,
+)
 from promptpotter.application.optimization.resume_and_fork.decisions import (
     RESUME_CHECKPOINT_GATING,
     GatingMode,
@@ -56,6 +60,7 @@ from promptpotter.application.optimization.resume_and_fork.replayers import (
     Divergence,
     ReplayContext,
     Replayer,
+    replay_all_divergences,
     replay_decisions,
 )
 from promptpotter.application.optimization.resume_and_fork.resume import (
@@ -65,6 +70,7 @@ from promptpotter.application.optimization.resume_and_fork.resume import (
 __all__ = [
     "REPLAYERS",
     "RESUME_CHECKPOINT_GATING",
+    "AbReport",
     "Divergence",
     "ForkResult",
     "GatingMode",
@@ -73,8 +79,10 @@ __all__ = [
     "ResumeCheckpointKind",
     "ResumeCheckpointRecord",
     "_mint_fork",
+    "ab_replay_cycle",
     "mint_operator_fork",
     "record_decision",
+    "replay_all_divergences",
     "replay_decisions",
     "resume_with_divergence_check",
 ]
