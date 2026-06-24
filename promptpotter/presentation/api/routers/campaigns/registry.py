@@ -7,7 +7,15 @@ from typing import Any
 from fastapi import Query
 from pydantic import BaseModel, Field
 
-from promptpotter.application.config import MechanismConfig
+from promptpotter.application.config import CampaignConfig, MechanismConfig
+from promptpotter.application.config_coupling import (
+    COUPLINGS,
+    Estimand,
+    check_couplings,
+    estimand_doc,
+    knob_label,
+    resolve_knob_states,
+)
 from promptpotter.application.jobs.launcher import draft_wire_with_locks, load_checkin_draft
 from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.paths import session_index
@@ -265,3 +273,120 @@ def get_campaign(store: StoreDep, campaign_id: str) -> CampaignDetailResponse:
         config=campaign.config,
         sessions=sessions,
     )
+
+
+class ConfigKnob(BaseModel):
+    path: str = Field(
+        description="Dotted CampaignConfig path (or const.<NAME> for a hardcoded floor)"
+    )
+    label: str = Field(description="Short display name (prefix-stripped)")
+    value: Any = Field(description="Effective value in this campaign's frozen config")
+    source: str = Field(
+        description="Where the value came from: default | campaign (operator-set) | required | constant"
+    )
+    estimands: list[str] = Field(description="Statistical estimand(s) this knob moves")
+
+
+class ConfigEstimandGroup(BaseModel):
+    key: str = Field(description="Estimand key (selection, difficulty, ability, …)")
+    label: str = Field(description="Human-readable estimand name")
+    doc: str = Field(description="Plain-language one-liner of what this estimand is")
+    knobs: list[ConfigKnob] = Field(description="Knobs that move this estimand, in declared order")
+
+
+class ConfigCoupling(BaseModel):
+    name: str = Field(description="Coupling id")
+    knobs: list[str] = Field(description="Dotted knob paths the coupling relates")
+    labels: list[str] = Field(description="Short display names for those knobs")
+    estimand: str = Field(description="The shared estimand the knobs co-determine")
+    relation: str = Field(description="The relationship rule, plain language")
+    consequence: str = Field(description="What goes wrong when the combination is violated")
+    severity: str = Field(
+        description="collision (soundness) | inert (wasted knob) | info (relationship)"
+    )
+    active: bool = Field(
+        description="True when this campaign's config is in the violating combination"
+    )
+
+
+class ConfigMapResponse(BaseModel):
+    """The config-map for one campaign: every knob grouped by the statistical
+    estimand it moves (with effective value + source layer), plus every declared
+    coupling flagged active/inactive against this campaign's frozen config.
+
+    Server-authored from the single ``application.config_coupling`` registry — the
+    same source the CLI ``config_map`` diagnostic and the pre-run preflight warning
+    read, so the webapp panel never disagrees with the engine on which knobs collide.
+    """
+
+    groups: list[ConfigEstimandGroup] = Field(description="Estimand groups, in declared order")
+    couplings: list[ConfigCoupling] = Field(description="Declared couplings, active ones flagged")
+    active_count: int = Field(description="Number of couplings currently active (violating)")
+
+
+_ESTIMAND_ORDER: tuple[Estimand, ...] = (
+    Estimand.SELECTION,
+    Estimand.DIFFICULTY,
+    Estimand.ABILITY,
+    Estimand.GATE,
+    Estimand.STOPPING,
+    Estimand.ESCALATION,
+    Estimand.SEARCH,
+    Estimand.SPEND,
+    Estimand.DISPLAY,
+)
+
+
+@campaigns_router.get("/campaigns/{campaign_id}/config-map", response_model=ConfigMapResponse)
+def get_campaign_config_map(store: StoreDep, campaign_id: str) -> ConfigMapResponse:
+    """The knob coupling/provenance map for one campaign — what moves which
+    statistical estimand, what overwrites what, and which knobs currently collide.
+
+    Read-only: resolves the frozen ``CampaignConfig`` snapshot against the declared
+    ``config_coupling`` registry. 404 on cross-user reads.
+    """
+    campaign = store.campaigns.load_campaign(campaign_id)
+    if campaign is None or campaign.owner_user_id != str(store.identity.user_id):
+        raise NotFoundError(f"Campaign not found: {campaign_id}")
+    config = CampaignConfig.model_validate(campaign.config)
+
+    states = resolve_knob_states(config)
+    knob_models = {
+        s.path: ConfigKnob(
+            path=s.path,
+            label=knob_label(s.path),
+            value=s.value,
+            source=s.source,
+            estimands=[e.value for e in s.estimands],
+        )
+        for s in states
+    }
+    groups: list[ConfigEstimandGroup] = []
+    for estimand in _ESTIMAND_ORDER:
+        knobs = [knob_models[s.path] for s in states if estimand in s.estimands]
+        if not knobs:
+            continue
+        groups.append(
+            ConfigEstimandGroup(
+                key=estimand.value,
+                label=estimand.value.replace("_", " ").title(),
+                doc=estimand_doc(estimand),
+                knobs=knobs,
+            )
+        )
+
+    active = {c.name for c in check_couplings(config)}
+    couplings = [
+        ConfigCoupling(
+            name=c.name,
+            knobs=list(c.knobs),
+            labels=[knob_label(k) for k in c.knobs],
+            estimand=c.estimand.value,
+            relation=c.relation,
+            consequence=c.consequence,
+            severity=c.severity,
+            active=c.name in active,
+        )
+        for c in COUPLINGS
+    ]
+    return ConfigMapResponse(groups=groups, couplings=couplings, active_count=len(active))

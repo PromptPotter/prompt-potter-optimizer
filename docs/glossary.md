@@ -239,6 +239,21 @@ The persisted world is a four-entity containment hierarchy
 - **specific objectivity** — the Rasch property that makes θ comparable
   across candidates measured on *different* subsets. The reason θ gates
   instead of subset accuracy. Same spec.
+- **estimand (config sense)** — the statistical quantity an optimization
+  knob *moves*: the scored subset, the difficulty ruler δ, the ability θ,
+  the gate, the stopping rule, … The axis the config map groups knobs by;
+  knobs sharing an estimand are the ones that can collide.
+  `application/config_coupling.py::Estimand`.
+- **config coupling / config map** — the declared registry of which knob
+  moves which estimand and which knobs *clash* (a combination that makes a
+  shared estimand ill-defined or a tuned knob inert). One source of truth
+  (`application/config_coupling.py`), read by the pre-run preflight warning,
+  the `python -m promptpotter.diagnostics.config_map` table, and the webapp
+  Config-map panel. Answers "what overwrites what" (provenance: effective
+  value + source layer per knob) and "what clashes with what" (the active
+  couplings). Where the "deferred-with-the-flip" interactions in
+  [`specs/fitness-comparability.md`](specs/fitness-comparability.md) became
+  machine-checked.
 - **Adaptive queue mechanism** — the live per-step sample selector
   inside the PoBB loop. Maintains a Gaussian posterior on the
   candidate's latent ability `θ_c` and re-picks every measurement

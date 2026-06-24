@@ -46,8 +46,14 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # ``CampaignConfig.headline_metric`` (which fitness number headlines the text
 # surfaces: accuracy/composite/θ). DISPLAY config, not a behavior knob; the gate
 # stays θ. A feature, justified, so the baseline rises (per the surface-ledger rule).
+# then ``modules`` 293→295 (the config coupling/provenance map — the SoT
+# ``application/config_coupling.py`` declaring which knob moves which statistical
+# estimand + which knobs collide, and its CLI ``diagnostics/config_map.py``. Lifts
+# the "deferred-with-the-flip" knob interactions out of spec prose into one
+# machine-checked registry, read by the preflight gate, the diagnostic, and the
+# webapp config-map panel. A feature — operator-requested collision visibility).
 LEDGER_BASELINE = {
-    "modules": 293,
+    "modules": 295,
     "init_files": 54,
     "reexport_shims": 41,
     "config_leaf_fields": 33,

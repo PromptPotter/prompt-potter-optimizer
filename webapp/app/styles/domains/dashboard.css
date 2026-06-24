@@ -252,3 +252,29 @@
 .mech-row-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
 .mech-row-label{font-size:13px;font-weight:500;color:var(--color-text-primary)}
 .mech-row-desc{margin:4px 0 0;font-size:12px;line-height:1.5;color:var(--color-text-secondary)}
+
+/* Config map — couplings (what clashes) + knob provenance grouped by estimand.
+   Active clashes carry a severity badge (colour + word, never colour alone);
+   the source layer is a badge too (campaign/required/constant) or a muted
+   "default" so what the operator changed reads at a glance. */
+.cmap{display:flex;flex-direction:column;gap:12px}
+.cmap-summary{margin:0 0 10px;font-size:12px;line-height:1.6;color:var(--color-text-secondary)}
+.cmap-summary[data-collision="true"]{color:var(--color-text-primary)}
+.cmap-clear{margin:0;font-size:12px;color:var(--color-text-tertiary)}
+.cmap-couplings{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.cmap-coupling{border-top:0.5px solid var(--color-border-tertiary);padding-top:10px}
+.cmap-coupling:first-child{border-top:0;padding-top:0}
+.cmap-coupling[data-active="true"]{padding-left:8px;border-left:2px solid var(--color-border-secondary)}
+.cmap-coupling-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.cmap-coupling-knobs{font-size:12px;font-weight:600;font-family:var(--font-mono);color:var(--color-text-primary)}
+.cmap-coupling-relation{margin:4px 0 0;font-size:12px;line-height:1.55;color:var(--color-text-secondary)}
+.cmap-coupling-consequence{margin:4px 0 0;font-size:12px;line-height:1.55;color:var(--color-text-primary)}
+.cmap-estimands{display:flex;flex-direction:column;gap:14px}
+.cmap-estimand-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.cmap-estimand-name{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--color-text-primary)}
+.cmap-estimand-doc{font-size:11px;line-height:1.5;color:var(--color-text-tertiary)}
+.cmap-knobs{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.cmap-knob{display:flex;align-items:baseline;gap:10px;font-size:12px}
+.cmap-knob-label{flex:1 1 auto;font-family:var(--font-mono);color:var(--color-text-secondary);overflow-wrap:anywhere}
+.cmap-knob-value{font-family:var(--font-mono);font-weight:600;color:var(--color-text-primary)}
+.cmap-knob-source-default{font-size:11px;color:var(--color-text-tertiary)}

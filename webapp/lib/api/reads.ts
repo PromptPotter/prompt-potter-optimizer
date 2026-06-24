@@ -461,6 +461,52 @@ export function fetchMechanismsSchema(
   return jget<MechanismSchemaResponse>(`${API}/campaigns/mechanisms-schema`, signal);
 }
 
+// Config map — every optimization knob grouped by the statistical estimand it
+// moves (with effective value + the layer that value came from), plus the
+// declared couplings between knobs flagged active when this campaign's config
+// sits in their violating combination. Answers "what overwrites what" and "what
+// clashes with what". Server-authored from the one `config_coupling` registry —
+// the same source the CLI `config_map` diagnostic + the pre-run preflight warning
+// read, so the panel never disagrees with the engine. Wire: `GET
+// /campaigns/{id}/config-map`.
+export interface ConfigKnob {
+  path: string;
+  label: string;
+  value: unknown;
+  source: string; // default | campaign | required | constant
+  estimands: string[];
+}
+export interface ConfigEstimandGroup {
+  key: string;
+  label: string;
+  doc: string;
+  knobs: ConfigKnob[];
+}
+export interface ConfigCoupling {
+  name: string;
+  knobs: string[];
+  labels: string[];
+  estimand: string;
+  relation: string;
+  consequence: string;
+  severity: string; // collision | inert | info
+  active: boolean;
+}
+export interface ConfigMapResponse {
+  groups: ConfigEstimandGroup[];
+  couplings: ConfigCoupling[];
+  active_count: number;
+}
+export function fetchConfigMap(
+  campaignId: string,
+  signal?: AbortSignal,
+): Promise<ConfigMapResponse> {
+  return jget<ConfigMapResponse>(
+    `${API}/campaigns/${encodeURIComponent(campaignId)}/config-map`,
+    signal,
+  );
+}
+
 // Conditional, like the dashboard poll: the unmasked request honors
 // `If-Modified-Since` → 304 so revalidation on the dashboard change-signal is
 // cheap during quiescent stretches. A masked request (lens/samples set) always

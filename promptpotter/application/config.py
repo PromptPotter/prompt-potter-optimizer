@@ -435,6 +435,25 @@ def _check_optimizer_below_target(target_models: tuple[str, ...]) -> PreflightWa
     )
 
 
+def _check_config_couplings(config: CampaignConfig) -> list[PreflightWarning]:
+    """Knob-collision warnings — config combinations where one knob makes another
+    statistical quantity ill-defined or inert. The declared map lives in
+    ``config_coupling`` (the single source of truth, also read by the
+    ``config_map`` diagnostic + the webapp config-map endpoint); this is its
+    pre-run CLI leg. Imported lazily to keep the statistical-constant imports off
+    ``config``'s module-load path."""
+    from promptpotter.application.config_coupling import check_couplings
+
+    return [
+        PreflightWarning(
+            code=f"config_coupling.{c.name}",
+            title=f"knob collision [{c.severity}]: {', '.join(c.knobs)}",
+            detail=f"{c.relation} {c.consequence}",
+        )
+        for c in check_couplings(config)
+    ]
+
+
 def run_preflight_checks(
     config: CampaignConfig,
     dataset: list[Sample],
@@ -449,6 +468,7 @@ def run_preflight_checks(
         warnings.append(w)
     if (w := _check_optimizer_below_target(target_models)) is not None:
         warnings.append(w)
+    warnings.extend(_check_config_couplings(config))
     return warnings
 
 

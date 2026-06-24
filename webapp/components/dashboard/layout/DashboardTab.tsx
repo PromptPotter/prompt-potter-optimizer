@@ -11,6 +11,7 @@ import { NowTriad } from "./NowTriad";
 import { Lane } from "./Lane";
 import { LiveStateCard } from "@/components/dashboard/scoring/LiveStateCard";
 import { MechanismsPanel } from "@/components/dashboard/control/MechanismsPanel";
+import { ConfigMapPanel } from "@/components/dashboard/control/ConfigMapPanel";
 
 // The Dashboard tab's arrangement, owned here rather than inline in the shell:
 // AppShell stays a thin tab-router + provider stack. Every section reads its
@@ -66,6 +67,16 @@ export function DashboardTab() {
       >
         <DashSpine>
           <MechanismsPanel />
+        </DashSpine>
+      </Lane>
+      <Lane
+        id="config-map"
+        title="Config map"
+        subtitle="What each knob moves, what overwrites what, and which knobs clash"
+        defaultOpen={false}
+      >
+        <DashSpine>
+          <ConfigMapPanel />
         </DashSpine>
       </Lane>
     </div>
