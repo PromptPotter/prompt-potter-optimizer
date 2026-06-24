@@ -54,6 +54,17 @@ class ExplorationConfig(BaseModel):
             "cross-cycle evidence."
         ),
     )
+    enable_2pl_graduation: bool = Field(
+        True,
+        description=(
+            "Allow the per-cycle difficulty ruler to graduate from 1PL (difficulty "
+            "δ only) to 2PL (per-sample discrimination aₛ too) when a data-rich, "
+            "genuinely-discriminating dataset wins held-out cross-validation. The "
+            "switch is gated — cold/non-discriminating datasets stay 1PL — so this "
+            "only ever changes the ruler where 2PL provably fits better out-of-sample; "
+            "it can never regress a dataset. Off → always 1PL (the slice-2 behaviour)."
+        ),
+    )
 
 
 class SelectionMechanisms(BaseModel):

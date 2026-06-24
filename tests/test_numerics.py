@@ -24,7 +24,9 @@ import pytest
 from promptpotter.application.intelligence.exploration import (
     Observation,
     fit_rasch,
+    fit_rasch_2pl,
     fit_theta_given_delta,
+    graduate_ruler_model,
     select_round_subset,
 )
 from promptpotter.application.mask import (
@@ -616,6 +618,79 @@ def test_fit_theta_given_delta_is_subset_invariant_unlike_accuracy() -> None:
     # plain logit-accuracy). A single hit on flat δ ⇒ θ > 0 under the N(0,σ²) prior.
     ghost = fit_theta_given_delta([Observation("ghost", 99, True)], ruler)
     assert "ghost" in ghost and ghost["ghost"][0] > 0.0
+
+
+def _synth_2pl(
+    theta: np.ndarray,
+    delta: np.ndarray,
+    disc: np.ndarray,
+    *,
+    n_per_pair: int,
+    seed: int,
+) -> list[Observation]:
+    """Responses from a true 2PL model: p = σ(aₛ·(θ_c − δₛ))."""
+    rng = np.random.default_rng(seed)
+    obs: list[Observation] = []
+    for i, th in enumerate(theta):
+        for s, (d, a) in enumerate(zip(delta, disc, strict=True)):
+            p = 1.0 / (1.0 + np.exp(-a * (th - d)))
+            obs.extend(Observation(f"c{i}", s, bool(rng.random() < p)) for _ in range(n_per_pair))
+    return obs
+
+
+def test_2pl_recovers_discrimination_and_seam_is_invisible_when_flat() -> None:
+    """The 2PL estimator + the one-ruler seam. Silent harm: if ``fit_theta_given_delta``
+    read a ``(δ, a)`` ruler differently from a bare-δ ruler when a≡1, every θ would shift
+    the moment a dataset graduated — a wrong winner with no error. And if 2PL couldn't
+    recover discrimination, signal-chasing/weighting would key on noise."""
+    # Seam invariance: a (δ, 1.0) ruler must give bit-identical θ to a bare-δ ruler.
+    obs = [Observation("c1", s, hit=(s % 2 == 0)) for s in range(8)] + [
+        Observation("c2", s, hit=(s % 3 == 0)) for s in range(8)
+    ]
+    bare = {s: 0.2 * s - 1.0 for s in range(8)}
+    tupled = {s: (0.2 * s - 1.0, 1.0) for s in range(8)}
+    fb, ft = fit_theta_given_delta(obs, bare), fit_theta_given_delta(obs, tupled)
+    assert all(abs(fb[c][0] - ft[c][0]) < 1e-9 for c in fb)
+
+    # 2PL recovers the discrimination STRUCTURE: alternating high (a=2.5) / low (a=0.4)
+    # signal samples → the fit separates them (high aₛ ≫ low aₛ), the rank that matters.
+    theta = np.linspace(-2.5, 2.5, 20)
+    delta = np.linspace(-2.0, 2.0, 12)
+    disc = np.array([2.5 if s % 2 == 0 else 0.4 for s in range(12)])
+    post = fit_rasch_2pl(_synth_2pl(theta, delta, disc, n_per_pair=8, seed=1))
+    high = float(np.median([post.discrimination[s] for s in range(0, 12, 2)]))
+    low = float(np.median([post.discrimination[s] for s in range(1, 12, 2)]))
+    assert high > low * 2.0  # high-signal samples discriminate far harder than noisy ones
+    assert all(se > 0 for se in post.discrimination_se.values())
+
+
+def test_graduation_gate_stays_1pl_until_2pl_wins_holdout() -> None:
+    """The per-dataset graduation gate. Silent harm: graduating a dataset whose samples
+    don't actually discriminate would fit aₛ to noise → an overfit ruler → wrong θ → wrong
+    winner, with no error. The held-out CV gate must refuse 2PL unless it provably wins."""
+    theta = np.linspace(-2.5, 2.5, 20)
+    delta = np.linspace(-2.0, 2.0, 12)
+
+    # (a) Genuinely discriminating data → graduates to 2PL.
+    disc_varied = np.array([2.5 if s % 2 == 0 else 0.4 for s in range(12)])
+    data_2pl = _synth_2pl(theta, delta, disc_varied, n_per_pair=8, seed=2)
+    model_g, post_g = graduate_ruler_model(data_2pl, enable=True)
+    assert model_g == "2PL"
+    assert post_g.discrimination  # the chosen ruler carries discrimination
+
+    # (b) Flat-discrimination data (true a≡1) → stays 1PL: 2PL can't win held-out.
+    data_1pl = _synth_2pl(theta, delta, np.ones(12), n_per_pair=8, seed=3)
+    model_flat, post_flat = graduate_ruler_model(data_1pl, enable=True)
+    assert model_flat == "1PL"
+    assert not post_flat.discrimination
+
+    # (c) The operator switch forces 1PL even on discriminating data (hysteresis floor=off).
+    model_off, _ = graduate_ruler_model(data_2pl, enable=False)
+    assert model_off == "1PL"
+
+    # (d) Too-sparse data can never graduate (no held-out evidence).
+    sparse = [Observation("a", 1, True), Observation("a", 2, False), Observation("b", 1, False)]
+    assert graduate_ruler_model(sparse, enable=True)[0] == "1PL"
 
 
 def test_select_round_subset_cold_starts_to_prefix_and_warms_to_informative() -> None:

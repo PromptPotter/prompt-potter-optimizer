@@ -231,10 +231,15 @@ The persisted world is a four-entity containment hierarchy
 - **difficulty (δ_s)** — a sample's hardness on the same logit scale; the
   hard-samples leaderboard. Same fit, the other axis. `RaschPosterior.delta`.
 - **1PL / Rasch** — the one-parameter logistic IRT model
-  `P(hit) = σ(θ_c − δ_s)` (difficulty only). The model **in use today**.
+  `P(hit) = σ(θ_c − δ_s)` (difficulty only). The default model; every cold or
+  non-discriminating dataset stays here.
 - **2PL** — adds a per-sample **discrimination** `a_s` (signal-to-noise:
-  how sharply a sample separates able from unable candidates). A
-  *future* per-dataset graduation, gated on cross-validated held-out fit —
+  how sharply a sample separates able from unable candidates):
+  `P(hit) = σ(a_s·(θ_c − δ_s))`. The difficulty ruler **graduates** 1PL→2PL
+  per-dataset (`graduate_ruler_model`) only where a data-rich dataset wins
+  held-out cross-validation — so it never regresses a dataset. The richer
+  `(δ, a)` value rides inside the one ruler, so the switch is invisible above
+  `fit_theta_given_delta`. Operator knob `enable_2pl_graduation`. Shipped —
   slice 3 of [`specs/fitness-comparability.md`](specs/fitness-comparability.md).
 - **specific objectivity** — the Rasch property that makes θ comparable
   across candidates measured on *different* subsets. The reason θ gates

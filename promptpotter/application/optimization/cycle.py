@@ -29,7 +29,7 @@ from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.config import CampaignConfig
-    from promptpotter.application.intelligence.exploration import Observation
+    from promptpotter.application.intelligence.exploration import Observation, RulerEntry
     from promptpotter.application.intelligence.indexes import AxisIndex
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
@@ -187,13 +187,17 @@ def _load_archive_observations(session: Session) -> list[Observation]:
 
 
 def _calibrate_delta_ruler(
-    session: Session, origin_results: list[dict[str, Any]] | None, n_min: int
-) -> tuple[dict[int, float], float | None]:
-    """Calibrate the per-cycle FIXED difficulty ruler δ + read the origin's θ on it.
+    session: Session,
+    origin_results: list[dict[str, Any]] | None,
+    n_min: int,
+    *,
+    enable_2pl: bool,
+) -> tuple[dict[int, RulerEntry], float | None]:
+    """Calibrate the per-cycle FIXED difficulty ruler + read the origin's θ on it.
 
     The cross-round comparability anchor (slice 2 of fitness-comparability). Every
     later θ readout in this cycle (round winners for ``c0_ok``, the stall ladder) is
-    measured against this one fixed δ via ``fit_theta_given_delta`` — so they compare
+    measured against this one fixed ruler via ``fit_theta_given_delta`` — so they compare
     on a shared scale instead of each round's own re-anchored fit. Calibrated once
     here from the **grade-A** archive (the operator's pick: cleanest reference, same
     de-biasing the AxisIndex digest applies) plus the origin's own per-sample outcomes
@@ -205,12 +209,18 @@ def _calibrate_delta_ruler(
     ``n_min`` is ``optimization.elimination_n_min`` — the single min-samples floor that
     also gates when PoBB acts on a candidate's θ; difficulty and ability become trustworthy
     at the same evidence threshold (no separate ruler-only constant).
+
+    The model is chosen by ``graduate_ruler_model`` (slice 3): the bank uses 1PL until a
+    data-rich, genuinely-discriminating dataset wins held-out cross-validation, then the
+    ruler carries per-sample discrimination ``(δ, a)``. Gated by ``enable_2pl``
+    (``optimization.exploration.enable_2pl_graduation``). The switch is invisible above the
+    seam — ``ruler()`` folds δ + a into the one mapping every θ consumer already reads.
     """
     from promptpotter.application.intelligence.exploration import (
         ORIGIN_ABILITY_ID,
         Observation,
-        fit_rasch,
         fit_theta_given_delta,
+        graduate_ruler_model,
     )
     from promptpotter.application.intelligence.hard_sample_archive import (
         build_archive_observations,
@@ -231,10 +241,12 @@ def _calibrate_delta_ruler(
     obs = archive_obs + origin_obs
     if not obs:
         return {}, None
-    ruler = fit_rasch(obs)
-    if len(ruler.delta) >= n_min:
-        return ruler.delta, ruler.theta.get(ORIGIN_ABILITY_ID)
-    # Cold: too few banked samples to trust a fitted δ → flat ruler; origin θ = logit-accuracy.
+    model, post = graduate_ruler_model(obs, enable=enable_2pl)
+    if len(post.delta) >= n_min:
+        if model == "2PL":
+            logger.info("δ ruler graduated to 2PL (%d samples discrimination-fit)", len(post.delta))
+        return post.ruler(), post.theta.get(ORIGIN_ABILITY_ID)
+    # Cold: too few banked samples to trust a fitted ruler → flat ruler; origin θ = logit-accuracy.
     origin_row = fit_theta_given_delta(origin_obs, {}).get(ORIGIN_ABILITY_ID)
     return {}, (origin_row[0] if origin_row is not None else None)
 
@@ -243,7 +255,7 @@ _FRONTIER_ABILITY_ID = "_frontier"
 
 
 def _cumulative_theta(
-    results: list[dict[str, Any]], delta_scale: dict[int, float] | None
+    results: list[dict[str, Any]], delta_scale: dict[int, RulerEntry] | None
 ) -> float | None:
     """Ability θ of the cumulative frontier ``results`` on the fixed ruler ``delta_scale``.
 
@@ -364,7 +376,7 @@ class Cycle:
     # from the grade-A archive + origin (slice 2). Held constant for the cycle so
     # every cross-round θ readout (``c0_ok`` now; the stall ladder next) lands on one
     # scale via ``fit_theta_given_delta``. None = cold start → gates use accuracy.
-    delta_scale: dict[int, float] | None = None
+    delta_scale: dict[int, RulerEntry] | None = None
     # Stashed by L2/L3 rebase emission; runner.entry resolves it post-finalize
     # into _mint_fork + observer rebuild + loop re-entry on the new fork.
     rebase_request: RebaseRequest | None = None
@@ -401,7 +413,10 @@ class Cycle:
         _assert_overlay_preserved(sp, session.pipeline_params)
         _inherit_sibling_runtime_failures(opt_sp, session)
         delta_scale, origin_theta = _calibrate_delta_ruler(
-            session, origin_results, config.optimization.elimination_n_min
+            session,
+            origin_results,
+            config.optimization.elimination_n_min,
+            enable_2pl=config.optimization.exploration.enable_2pl_graduation,
         )
         return cls(
             session=session,

@@ -66,11 +66,15 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # (`connectors/llm_only.py`) — a single direct LLM call on the shared `in_process`
 # execution seam, so the basic case runs with no TermNorm server (l4-outer-loop
 # § Feature A). A feature, justified, so the baseline rises.
+# then ``config_leaf_fields`` 33->34: a deliberate new operator knob --
+# ``ExplorationConfig.enable_2pl_graduation`` (let the difficulty ruler graduate
+# 1PL->2PL where a data-rich dataset wins held-out CV; fitness-comparability slice 3).
+# A feature, justified, so the baseline rises (per the surface-ledger rule).
 LEDGER_BASELINE = {
     "modules": 296,
     "init_files": 54,
     "reexport_shims": 41,
-    "config_leaf_fields": 33,
+    "config_leaf_fields": 34,
     "settings_env": 17,
     "settings_const": 16,
     "opt_search_point_fields": 27,

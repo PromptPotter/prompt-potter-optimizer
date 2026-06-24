@@ -20,6 +20,7 @@ from promptpotter.application.optimization.resume_and_fork.decisions import (
 from promptpotter.application.scoring.metrics import elect_round_winner, elimination_p_best
 
 if TYPE_CHECKING:
+    from promptpotter.application.intelligence.exploration import RulerEntry
     from promptpotter.domain.scoring import QueryMeasurement
 
 __all__ = [
@@ -59,7 +60,7 @@ class ReplayContext(NamedTuple):
     round_data: dict[str, Any]
     prior_rounds: list[dict[str, Any]]
     origin_results: list[dict[str, Any]]
-    delta_scale: dict[int, float] | None
+    delta_scale: dict[int, RulerEntry] | None
 
 
 Replayer = Callable[[ReplayContext, dict[str, Any], dict[str, Any]], Any]
@@ -105,7 +106,7 @@ def _replay_context(
     round_data: dict[str, Any],
     prior_rounds: list[dict[str, Any]] | None,
     origin_results: list[dict[str, Any]] | None,
-    delta_scale: dict[int, float] | None,
+    delta_scale: dict[int, RulerEntry] | None,
 ) -> ReplayContext:
     return ReplayContext(
         round_data=round_data,
@@ -119,7 +120,7 @@ def replay_decisions(
     round_data: dict[str, Any],
     prior_rounds: list[dict[str, Any]] | None = None,
     origin_results: list[dict[str, Any]] | None = None,
-    delta_scale: dict[int, float] | None = None,
+    delta_scale: dict[int, RulerEntry] | None = None,
 ) -> Divergence | None:
     """Walk ``round_data['decisions']`` in order; return the FIRST mismatch (resume's halt seam)."""
     ctx = _replay_context(round_data, prior_rounds, origin_results, delta_scale)
@@ -130,7 +131,7 @@ def replay_all_divergences(
     round_data: dict[str, Any],
     prior_rounds: list[dict[str, Any]] | None = None,
     origin_results: list[dict[str, Any]] | None = None,
-    delta_scale: dict[int, float] | None = None,
+    delta_scale: dict[int, RulerEntry] | None = None,
 ) -> list[Divergence]:
     """Every decision in this round that re-derives differently — the A/B engine's per-round
     diff (collect-all, where ``replay_decisions`` short-circuits at the first)."""
@@ -256,7 +257,7 @@ def _composite_by_round(sorted_trials: list[dict[str, Any]], this_round: int) ->
 
 
 def _frontier_theta_by_round(
-    sorted_trials: list[dict[str, Any]], this_round: int, delta_scale: dict[int, float]
+    sorted_trials: list[dict[str, Any]], this_round: int, delta_scale: dict[int, RulerEntry]
 ) -> dict[int, float]:
     """Per-round cumulative-frontier ability θ on the FIXED ruler — the θ-space peer of the
     live ``cycle.tracking.best_theta`` accumulation (``cycle.py::_cumulative_theta`` over the
@@ -322,7 +323,7 @@ def _derive_stall_count(
     prior_rounds: list[dict[str, Any]],
     entry_round: int,
     this_round: int,
-    delta_scale: dict[int, float] | None,
+    delta_scale: dict[int, RulerEntry] | None,
 ) -> int:
     """Reconstruct stall_count at end of this_round on the same comparator the live
     ``EscalationFSM`` used: difficulty-adjusted ability θ on the fixed ruler when it is warm,

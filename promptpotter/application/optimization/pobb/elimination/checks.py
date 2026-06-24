@@ -20,6 +20,7 @@ from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
     from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.intelligence.exploration import RulerEntry
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement
     from promptpotter.domain.search_point import JobSearchPoint
@@ -157,7 +158,7 @@ class PoBBCheck:
         config: PoBBConfig,
         *,
         n_samples: int,
-        delta_scale: dict[int, float],
+        delta_scale: dict[int, RulerEntry],
         backfill_fn: BackfillFn | None = None,
     ) -> None:
         # The cycle's FIXED δ ruler — the SAME scale the round-winner election reads, so
@@ -438,7 +439,7 @@ def build_elimination_check(
     config: PoBBConfig,
     *,
     n_samples: int,
-    delta_scale: dict[int, float],
+    delta_scale: dict[int, RulerEntry],
     backfill_fn: BackfillFn | None,
 ) -> PoBBCheck:
     """Build the round's leader-elimination check. Today: paired-sample PoBB.

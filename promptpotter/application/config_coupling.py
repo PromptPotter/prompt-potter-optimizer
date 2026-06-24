@@ -78,6 +78,7 @@ class Estimand(StrEnum):
 
     SELECTION = "selection"
     DIFFICULTY = "difficulty"
+    DISCRIMINATION = "discrimination"
     ABILITY = "ability"
     GATE = "gate"
     STOPPING = "stopping"
@@ -90,6 +91,7 @@ class Estimand(StrEnum):
 _ESTIMAND_DOC: dict[Estimand, str] = {
     Estimand.SELECTION: "Which samples get scored each round — the subset the fitness is measured over.",
     Estimand.DIFFICULTY: "The per-sample difficulty ruler δ (1PL Rasch) used to difficulty-adjust scores.",
+    Estimand.DISCRIMINATION: "The per-sample discrimination aₛ (2PL) — how sharply a sample separates able from unable candidates; only estimated where a data-rich dataset graduates.",
     Estimand.ABILITY: "The candidate ability θ — difficulty-adjusted skill, the metric the gate compares.",
     Estimand.GATE: "The round-promotion / improvement gate — what counts as 'better' and is kept.",
     Estimand.STOPPING: "The early-abort / elimination rules that stop measuring a candidate before budget.",
@@ -137,6 +139,9 @@ _KNOB_ESTIMANDS: dict[str, frozenset[Estimand]] = {
     "optimization.rebase_capability": frozenset({Estimand.ESCALATION}),
     "optimization.terminate_capability": frozenset({Estimand.ESCALATION}),
     "optimization.exploration.seed_heatmap_from_archive": frozenset({Estimand.DIFFICULTY}),
+    "optimization.exploration.enable_2pl_graduation": frozenset(
+        {Estimand.DISCRIMINATION, Estimand.DIFFICULTY, Estimand.ABILITY}
+    ),
     "optimization.mechanisms.selection.per_round_resubset": frozenset(
         {Estimand.SELECTION, Estimand.GATE}
     ),
@@ -319,6 +324,28 @@ COUPLINGS: tuple[Coupling, ...] = (
         ),
         severity="info",
         predicate=lambda c: bool(_sel(c).per_round_resubset) and c.headline_metric != "ability",
+    ),
+    Coupling(
+        name="graduation_self_gated_on_holdout",
+        knobs=(
+            "optimization.exploration.enable_2pl_graduation",
+            "optimization.elimination_n_min",
+        ),
+        estimand=Estimand.DISCRIMINATION,
+        relation=(
+            "enable_2pl_graduation lets the difficulty ruler add per-sample "
+            "discrimination aₛ (2PL), but only where a data-rich dataset wins held-out "
+            "cross-validation; the same elimination_n_min floor that warms δ gates when "
+            "the bank is rich enough to fit aₛ at all."
+        ),
+        consequence=(
+            "Self-gated, not a collision: a cold or non-discriminating dataset stays "
+            "1PL automatically, and the held-out gate means 2PL can never regress a "
+            "dataset. Shown so the operator sees the ruler may carry discrimination "
+            "once the bank is rich. Turn OFF to pin 1PL everywhere."
+        ),
+        severity="info",
+        predicate=lambda c: False,
     ),
     Coupling(
         name="selection_basis_pair",

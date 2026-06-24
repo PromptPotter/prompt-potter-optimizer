@@ -20,14 +20,28 @@ if TYPE_CHECKING:
 # election can read its θ on the same scale as the real candidates.
 ORIGIN_ABILITY_ID = "__origin__"
 
+# A difficulty-ruler entry is either a bare δ (1PL — discrimination ≡ 1) or a
+# ``(δ, a)`` pair (2PL — per-sample discrimination ``a``). The richer 2PL value
+# rides *inside* the same ruler mapping so every θ consumer reads one ``Ruler``
+# and the 1PL→2PL switch is invisible above ``fit_theta_given_delta`` (the seam):
+# a plain float stays 1PL, a tuple carries discrimination, an absent sample is
+# flat (δ=0, a=1). This is the "one ruler, θ always, flat where cold" contract,
+# generalized to 2PL (fitness-comparability slice 3).
+RulerEntry = float | tuple[float, float]
+Ruler = Mapping[int, RulerEntry]
+
 __all__ = [
     "ORIGIN_ABILITY_ID",
     "Observation",
     "RaschPosterior",
+    "Ruler",
+    "RulerEntry",
     "build_observations",
     "candidate_abilities",
     "fit_rasch",
+    "fit_rasch_2pl",
     "fit_theta_given_delta",
+    "graduate_ruler_model",
     "select_round_subset",
 ]
 
@@ -38,6 +52,13 @@ class Observation(NamedTuple):
     candidate_id: str
     sample_id: int
     hit: bool
+
+
+def _ruler_entry(value: RulerEntry) -> tuple[float, float]:
+    """Split a ruler entry into ``(δ, a)``; a bare float is 1PL (a≡1)."""
+    if isinstance(value, tuple):
+        return float(value[0]), float(value[1])
+    return float(value), 1.0
 
 
 # Broad EB starting priors — first inner MAP fit is barely regularized.
@@ -65,6 +86,19 @@ class RaschPosterior:
     sigma_theta: float = _INIT_SIGMA_THETA
     sigma_delta: float = _INIT_SIGMA_DELTA
     mu_delta: float = 0.0
+    # 2PL only: per-sample discrimination aᵢ (signal-to-noise). Empty under 1PL
+    # (a≡1 implicitly). ``ruler()`` folds it back into the one ``Ruler`` the seam reads.
+    discrimination: dict[int, float] = field(default_factory=dict)
+    discrimination_se: dict[int, float] = field(default_factory=dict)
+
+    def ruler(self) -> dict[int, RulerEntry]:
+        """The fixed difficulty ruler this fit defines, as the one mapping the θ
+        seam reads: ``{sid: δ}`` under 1PL, ``{sid: (δ, a)}`` where discrimination
+        was estimated (2PL). Folds δ + a back into a single per-sample value."""
+        return {
+            sid: ((d, self.discrimination[sid]) if sid in self.discrimination else d)
+            for sid, d in self.delta.items()
+        }
 
 
 def _map_fit(
@@ -218,7 +252,7 @@ def fit_rasch(
 
 def fit_theta_given_delta(
     observations: list[Observation],
-    delta: Mapping[int, float],
+    delta: Ruler,
     *,
     sigma_theta: float = _INIT_SIGMA_THETA,
     max_iter: int = 50,
@@ -235,35 +269,265 @@ def fit_theta_given_delta(
 
     With δ fixed the candidates **decouple** — each θ_c is an independent 1-D logistic
     MAP (prior ``N(0, σ_θ²)``, σ_θ = the ruler's population spread) over that
-    candidate's observations. A sample absent from the ruler is placed at **δ=0** — a
-    FLAT ruler where it is cold, so θ degenerates to logit-accuracy there rather than the
-    observation being dropped. This is the "one ruler, θ always, flat where cold" contract
-    (fitness-comparability slice 2): an empty ruler ``{}`` ⇒ every θ is plain logit-accuracy.
-    Returns ``{candidate_id: (theta, theta_se)}``; only a candidate with *no* observation at
-    all is omitted.
+    candidate's observations: ``p = σ(aₛ·(θ − δₛ))``. A ruler entry is either a bare δ
+    (1PL, ``aₛ ≡ 1``) or a ``(δ, a)`` pair (2PL — the high-signal sample weights its
+    residual harder, the noisy one is discounted). A sample absent from the ruler is
+    placed at **δ=0, a=1** — a FLAT ruler where it is cold, so θ degenerates to
+    logit-accuracy there rather than the observation being dropped. This is the
+    "one ruler, θ always, flat where cold" contract (fitness-comparability slices 2–3):
+    an empty ruler ``{}`` ⇒ every θ is plain logit-accuracy. Returns
+    ``{candidate_id: (theta, theta_se)}``; only a candidate with *no* observation is omitted.
     """
-    by_c: dict[str, list[tuple[float, bool]]] = {}
+    by_c: dict[str, list[tuple[float, float, bool]]] = {}
     for o in observations:
-        by_c.setdefault(o.candidate_id, []).append((delta.get(o.sample_id, 0.0), o.hit))
+        d, a = _ruler_entry(delta.get(o.sample_id, 0.0))
+        by_c.setdefault(o.candidate_id, []).append((d, a, o.hit))
 
     out: dict[str, tuple[float, float]] = {}
     inv_var = 1.0 / (sigma_theta * sigma_theta)
     for cid, rows in by_c.items():
-        d_arr = np.fromiter((d for d, _ in rows), dtype=np.float64)
-        h_arr = np.fromiter((1.0 if hit else 0.0 for _, hit in rows), dtype=np.float64)
+        d_arr = np.fromiter((d for d, _, _ in rows), dtype=np.float64)
+        a_arr = np.fromiter((a for _, a, _ in rows), dtype=np.float64)
+        h_arr = np.fromiter((1.0 if hit else 0.0 for _, _, hit in rows), dtype=np.float64)
         theta = 0.0
         for _ in range(max_iter):
-            p = 1.0 / (1.0 + np.exp(-np.clip(theta - d_arr, -50, 50)))
-            grad = float(np.sum(h_arr - p)) - inv_var * theta
-            info = float(np.sum(p * (1.0 - p))) + inv_var
+            p = 1.0 / (1.0 + np.exp(-np.clip(a_arr * (theta - d_arr), -50, 50)))
+            grad = float(np.sum(a_arr * (h_arr - p))) - inv_var * theta
+            info = float(np.sum(a_arr * a_arr * p * (1.0 - p))) + inv_var
             step = grad / max(info, 1e-9)
             theta += step
             if abs(step) < tol:
                 break
-        p = 1.0 / (1.0 + np.exp(-np.clip(theta - d_arr, -50, 50)))
-        info = float(np.sum(p * (1.0 - p))) + inv_var
+        p = 1.0 / (1.0 + np.exp(-np.clip(a_arr * (theta - d_arr), -50, 50)))
+        info = float(np.sum(a_arr * a_arr * p * (1.0 - p))) + inv_var
         out[cid] = (theta, float(1.0 / np.sqrt(max(info, 1e-9))))
     return out
+
+
+# Prior on log-discrimination (2PL): log(aₛ) ~ N(0, σ_a²) shrinks aₛ → 1, so the
+# 2PL collapses to 1PL absent evidence and the scale (a vs θ/δ spread) is identified.
+_SIGMA_LOG_A = 0.5
+# Clip log(a) so a stays in ≈[0.05, 20] — guards a runaway sample with separable hits.
+_LOG_A_CLIP = 3.0
+
+
+def fit_rasch_2pl(
+    observations: list[Observation],
+    *,
+    max_iter: int = 100,
+    tol: float = 1e-4,
+) -> RaschPosterior:
+    """Hierarchical **2PL** fit — like ``fit_rasch`` but with a per-sample discrimination
+    ``aₛ`` (``p = σ(aₛ·(θ_c − δₛ))``). 1PL says only *how hard* a sample is; 2PL also says
+    *how much it tells you* — ``aₛ`` is the sample's signal-to-noise, so selection and the
+    gate can weight high-discrimination samples harder and discount noisy ones.
+
+    Warm-started from the 1PL fit (θ, δ, and its EB hyperparameters) with ``log aₛ = 0``,
+    then alternating-Newton MAP over θ, δ, and ``log aₛ`` (the log keeps a > 0). Priors:
+    ``θ ~ N(0, σ_θ²)``, ``δ ~ N(μ_δ, σ_δ²)`` (both from the 1PL EB fit, held fixed here),
+    ``log a ~ N(0, σ_a²)`` (``_SIGMA_LOG_A``) — the log-a prior shrinks toward a=1 and pins
+    the a-vs-θ scale degeneracy. ``mean(θ)==0`` anchored each step. Not gated on its own:
+    ``graduate_ruler_model`` decides per-dataset whether this model is adopted.
+    """
+    if not observations:
+        return RaschPosterior(theta={}, theta_se={}, delta={}, delta_se={})
+
+    base = fit_rasch(observations)
+    candidate_ids = sorted({o.candidate_id for o in observations})
+    sample_ids = sorted({o.sample_id for o in observations})
+    c_idx = {cid: i for i, cid in enumerate(candidate_ids)}
+    s_idx = {sid: j for j, sid in enumerate(sample_ids)}
+    n_c, n_s = len(candidate_ids), len(sample_ids)
+
+    rows = np.fromiter((c_idx[o.candidate_id] for o in observations), dtype=np.int64)
+    cols = np.fromiter((s_idx[o.sample_id] for o in observations), dtype=np.int64)
+    hits = np.fromiter((1.0 if o.hit else 0.0 for o in observations), dtype=np.float64)
+
+    theta = np.array([base.theta[cid] for cid in candidate_ids], dtype=np.float64)
+    delta = np.array([base.delta[sid] for sid in sample_ids], dtype=np.float64)
+    log_a = np.zeros(n_s)
+    inv_var_theta = 1.0 / (base.sigma_theta * base.sigma_theta)
+    inv_var_delta = 1.0 / (base.sigma_delta * base.sigma_delta)
+    inv_var_a = 1.0 / (_SIGMA_LOG_A * _SIGMA_LOG_A)
+    mu_delta = base.mu_delta
+
+    converged = False
+    iteration = 0
+    for it in range(1, max_iter + 1):
+        iteration = it
+        old_theta, old_delta, old_log_a = theta.copy(), delta.copy(), log_a.copy()
+        a = np.exp(log_a)
+
+        # θ step — ∂η/∂θ = aₛ.
+        p = 1.0 / (1.0 + np.exp(-np.clip(a[cols] * (theta[rows] - delta[cols]), -50, 50)))
+        grad_t = (
+            np.bincount(rows, weights=a[cols] * (hits - p), minlength=n_c) - inv_var_theta * theta
+        )
+        info_t = (
+            np.bincount(rows, weights=a[cols] ** 2 * p * (1 - p), minlength=n_c) + inv_var_theta
+        )
+        theta = theta + grad_t / np.maximum(info_t, 1e-9)
+
+        # δ step — ∂η/∂δ = −aₛ.
+        p = 1.0 / (1.0 + np.exp(-np.clip(a[cols] * (theta[rows] - delta[cols]), -50, 50)))
+        grad_d = -np.bincount(cols, weights=a[cols] * (hits - p), minlength=n_s) - inv_var_delta * (
+            delta - mu_delta
+        )
+        info_d = (
+            np.bincount(cols, weights=a[cols] ** 2 * p * (1 - p), minlength=n_s) + inv_var_delta
+        )
+        delta = delta + grad_d / np.maximum(info_d, 1e-9)
+
+        # log-a step — η = aₛ(θ−δ), ∂η/∂log a = η; Gauss-Newton info ≈ Σ w·η².
+        eta = a[cols] * (theta[rows] - delta[cols])
+        p = 1.0 / (1.0 + np.exp(-np.clip(eta, -50, 50)))
+        grad_la = np.bincount(cols, weights=(hits - p) * eta, minlength=n_s) - inv_var_a * log_a
+        info_la = np.bincount(cols, weights=p * (1 - p) * eta * eta, minlength=n_s) + inv_var_a
+        log_a = np.clip(log_a + grad_la / np.maximum(info_la, 1e-9), -_LOG_A_CLIP, _LOG_A_CLIP)
+
+        shift = float(theta.mean())
+        theta -= shift
+        delta -= shift
+
+        if (
+            max(
+                float(np.max(np.abs(theta - old_theta))) if n_c else 0.0,
+                float(np.max(np.abs(delta - old_delta))) if n_s else 0.0,
+                float(np.max(np.abs(log_a - old_log_a))) if n_s else 0.0,
+            )
+            < tol
+        ):
+            converged = True
+            break
+
+    a = np.exp(log_a)
+    eta = a[cols] * (theta[rows] - delta[cols])
+    p = 1.0 / (1.0 + np.exp(-np.clip(eta, -50, 50)))
+    w = p * (1.0 - p)
+    info_t = np.bincount(rows, weights=a[cols] ** 2 * w, minlength=n_c) + inv_var_theta
+    info_d = np.bincount(cols, weights=a[cols] ** 2 * w, minlength=n_s) + inv_var_delta
+    info_la = np.bincount(cols, weights=w * eta * eta, minlength=n_s) + inv_var_a
+    se_theta = 1.0 / np.sqrt(np.maximum(info_t, 1e-9))
+    se_delta = 1.0 / np.sqrt(np.maximum(info_d, 1e-9))
+    se_log_a = 1.0 / np.sqrt(np.maximum(info_la, 1e-9))
+    se_a = a * se_log_a  # delta method: a = exp(log a)
+
+    return RaschPosterior(
+        theta=dict(zip(candidate_ids, theta.tolist(), strict=True)),
+        theta_se=dict(zip(candidate_ids, se_theta.tolist(), strict=True)),
+        delta=dict(zip(sample_ids, delta.tolist(), strict=True)),
+        delta_se=dict(zip(sample_ids, se_delta.tolist(), strict=True)),
+        n_obs_per_candidate=base.n_obs_per_candidate,
+        n_obs_per_sample=base.n_obs_per_sample,
+        n_iterations=iteration,
+        converged=converged,
+        sigma_theta=base.sigma_theta,
+        sigma_delta=base.sigma_delta,
+        mu_delta=mu_delta,
+        discrimination=dict(zip(sample_ids, a.tolist(), strict=True)),
+        discrimination_se=dict(zip(sample_ids, se_a.tolist(), strict=True)),
+    )
+
+
+def _logp(hit: bool, theta: float, delta: float, a: float) -> float:
+    """Log-likelihood of one held-out response under ``p = σ(a·(θ−δ))``."""
+    p = 1.0 / (1.0 + np.exp(-float(np.clip(a * (theta - delta), -50, 50))))
+    p = min(max(p, 1e-9), 1.0 - 1e-9)
+    return float(np.log(p if hit else 1.0 - p))
+
+
+def _full_loglik(observations: list[Observation], post: RaschPosterior) -> float:
+    """In-sample log-likelihood of a fit over all its observations (for the BIC pre-check)."""
+    return sum(
+        _logp(
+            o.hit,
+            post.theta.get(o.candidate_id, 0.0),
+            post.delta.get(o.sample_id, 0.0),
+            post.discrimination.get(o.sample_id, 1.0),
+        )
+        for o in observations
+    )
+
+
+def _cv_loglik(observations: list[Observation], n_folds: int) -> tuple[float, float] | None:
+    """Cross-validated held-out total log-likelihood ``(ll_1pl, ll_2pl)``.
+
+    Deterministic stride folds (no RNG). For each held-out fold both models are
+    refit on the rest and scored on the fold — but only on responses whose
+    candidate *and* sample were seen in training (an unseen one has no estimate).
+    ``None`` when too sparse to evaluate either model. This is the primary
+    graduation test: held-out fit can't reward 2PL for overfitting in-sample.
+    """
+    n = len(observations)
+    if n < n_folds * 4:
+        return None
+    folds = [observations[i::n_folds] for i in range(n_folds)]
+    ll_1, ll_2, n_eval = 0.0, 0.0, 0
+    for k in range(n_folds):
+        test = folds[k]
+        train = [o for j, f in enumerate(folds) if j != k for o in f]
+        if not test or not train:
+            continue
+        f1 = fit_rasch(train)
+        f2 = fit_rasch_2pl(train)
+        for o in test:
+            if o.candidate_id not in f1.theta or o.sample_id not in f1.delta:
+                continue
+            ll_1 += _logp(o.hit, f1.theta[o.candidate_id], f1.delta[o.sample_id], 1.0)
+            ll_2 += _logp(
+                o.hit,
+                f2.theta.get(o.candidate_id, 0.0),
+                f2.delta.get(o.sample_id, 0.0),
+                f2.discrimination.get(o.sample_id, 1.0),
+            )
+            n_eval += 1
+    if n_eval == 0:
+        return None
+    return ll_1, ll_2
+
+
+def graduate_ruler_model(
+    observations: list[Observation],
+    *,
+    enable: bool = True,
+    margin: float = 0.01,
+    n_folds: int = 5,
+) -> tuple[str, RaschPosterior]:
+    """Decide per-dataset whether the difficulty bank uses 1PL or 2PL, and return
+    ``(model_name, posterior)`` — the chosen fit, whose ``ruler()`` the cycle reads.
+
+    1PL fixes sample-set drift now with the data we have; **2PL adds power once enough
+    data is collected**, adopted only where it provably wins. Two gates (spec slice 3):
+
+    1. **Cheap BIC pre-check** on the full fit — 2PL spends ``n_s`` extra discrimination
+       parameters, so it must clear ``2·Δloglik > n_s·ln(N)`` before the costlier CV runs.
+    2. **Cross-validated held-out log-likelihood** (the primary test) — 2PL must beat 1PL
+       on out-of-sample (sample, hit) pairs by a per-response ``margin`` (hysteresis: the
+       margin + re-evaluation only at calibration refresh stop round-to-round flip-flop;
+       and held-out scoring means 2PL can never *regress* a dataset).
+
+    ``enable=False`` (or too-sparse data) ⇒ always 1PL. The discrimination SE is carried
+    on the returned posterior so selection/teaching can read how well ``aₛ`` is pinned.
+    """
+    base = fit_rasch(observations)
+    if not enable or len(base.delta) < 2:
+        return "1PL", base
+
+    full_2pl = fit_rasch_2pl(observations)
+    n_obs, n_s = len(observations), len(full_2pl.delta)
+    bic_gain = 2.0 * (_full_loglik(observations, full_2pl) - _full_loglik(observations, base))
+    if bic_gain <= n_s * float(np.log(max(n_obs, 2))):
+        return "1PL", base  # extra discrimination params don't pay for themselves
+
+    cv = _cv_loglik(observations, n_folds)
+    if cv is None:
+        return "1PL", base
+    ll_1, ll_2 = cv
+    # Per-response held-out gain must clear the hysteresis margin.
+    n_eval_proxy = max(n_obs // n_folds, 1)
+    if (ll_2 - ll_1) > margin * n_eval_proxy:
+        return "2PL", full_2pl
+    return "1PL", base
 
 
 def build_observations(rounds: list[RoundResult]) -> list[Observation]:
@@ -284,7 +548,7 @@ def build_observations(rounds: list[RoundResult]) -> list[Observation]:
 def candidate_abilities(
     results_by_id: Mapping[str, list[QueryMeasurement]],
     origin_results: list[QueryMeasurement],
-    delta_scale: Mapping[int, float],
+    delta_scale: Ruler,
 ) -> RaschPosterior:
     """Each arm's ability θ on the **fixed** difficulty ruler ``delta_scale`` (the cycle's
     δ bank), via ``fit_theta_given_delta``.
@@ -308,11 +572,13 @@ def candidate_abilities(
                 continue
             obs.append(Observation(candidate_id=cid, sample_id=int(sid), hit=bool(r.get("hit"))))
     fit = fit_theta_given_delta(obs, delta_scale)
+    split = {int(sid): _ruler_entry(v) for sid, v in delta_scale.items()}
     return RaschPosterior(
         theta={cid: t for cid, (t, _) in fit.items()},
         theta_se={cid: se for cid, (_, se) in fit.items()},
-        delta={int(sid): float(d) for sid, d in delta_scale.items()},
+        delta={sid: d for sid, (d, _) in split.items()},
         delta_se={},
+        discrimination={sid: a for sid, (_, a) in split.items() if a != 1.0},
     )
 
 

@@ -27,7 +27,7 @@ from promptpotter.domain.scoring import RoundScorer
 from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
 
 if TYPE_CHECKING:
-    from promptpotter.application.intelligence.exploration import RaschPosterior
+    from promptpotter.application.intelligence.exploration import RaschPosterior, Ruler
     from promptpotter.domain.pipeline_schema import (
         PipelineNode,
         PipelineSchema,
@@ -367,7 +367,7 @@ def elect_round_winner(
     results_by_id: Mapping[str, list[QueryMeasurement]],
     origin_results: list[QueryMeasurement],
     coverage_floor: int,
-    delta_scale: Mapping[int, float],
+    delta_scale: Ruler,
 ) -> tuple[str, RaschPosterior]:
     """Elect the round winner: rank candidates by difficulty-adjusted ability lift over the
     origin, tie-broken toward higher coverage. Every candidate **and** the origin gets θ on
@@ -428,7 +428,7 @@ def elimination_p_best(
     candidate_hits: list[bool],
     paired_prior_hits: Mapping[str, list[bool]],
     candidate_sample_ids: Sequence[int],
-    delta_scale: Mapping[int, float],
+    delta_scale: Ruler,
 ) -> tuple[float, dict[str, float]]:
     """``P(candidate is the round's best)`` for PoBB mid-round elimination, on
     difficulty-adjusted ability θ — the SAME quality metric the round-winner election ranks by,

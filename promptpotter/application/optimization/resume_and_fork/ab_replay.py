@@ -99,10 +99,14 @@ def ab_replay_cycle(
     cycle_id: str,
     session: Session,
     n_min: int,
+    *,
+    enable_2pl: bool,
 ) -> AbReport:
     """Re-derive every recorded decision of *cycle_id* under the session's active engine +
     scorer; return all divergences. Deterministic, no LLM calls. ``n_min`` is the campaign's
-    ``optimization.elimination_n_min`` — the ruler-warmth floor (see ``_calibrate_delta_ruler``)."""
+    ``optimization.elimination_n_min`` — the ruler-warmth floor (see ``_calibrate_delta_ruler``);
+    ``enable_2pl`` is ``optimization.exploration.enable_2pl_graduation`` — the same 1PL/2PL
+    calibration gate the live cycle ran, so the reconstructed ruler matches its model."""
     # Lazy import: cycle.py is a sibling in this layer and pulls the whole loop; importing it
     # at module load would risk an import cycle through resume_and_fork/__init__.
     from promptpotter.application.optimization.cycle import _calibrate_delta_ruler
@@ -132,7 +136,7 @@ def ab_replay_cycle(
     origin_frontier = _merge_frontier(rounds)
     # Round 0 = the origin scored; its results calibrate the ruler, exactly as Cycle.start did.
     origin_results = rounds[0].get("results") or [] if rounds else []
-    delta_scale, _ = _calibrate_delta_ruler(session, origin_results, n_min)
+    delta_scale, _ = _calibrate_delta_ruler(session, origin_results, n_min, enable_2pl=enable_2pl)
 
     divergences: list[Divergence] = []
     for i, t in enumerate(rounds):
