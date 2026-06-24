@@ -144,6 +144,13 @@ class ScoredCandidate(BaseModel):
     matched_origin_accuracy: float = 0.0
     matched_origin_hits: int = 0
     matched_origin_composite: float = 0.0
+    # Difficulty-adjusted Rasch ability (+ Laplace SE) on the round's joint-fit scale — the
+    # subset-invariant metric the winner election ranks by (`elect_round_winner`), stamped from
+    # that single fit. Distinct from subset-relative `accuracy`: it discounts for *which* samples
+    # this candidate saw, so it explains a lower-accuracy winner. `None` for candidates outside
+    # the election fit (eliminated / under the coverage floor).
+    theta: float | None = None
+    theta_se: float | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -365,6 +372,10 @@ class RoundSummaryCandidate(BaseModel):
     evaluators: dict[str, float] = Field(default_factory=dict)
     changes_description: str = ""
     partial_reason: str = ""  # "" | "pobb" | "skip" — see ScoredCandidate.partial_reason
+    # Difficulty-adjusted Rasch ability + SE (`ScoredCandidate.theta`) — the metric the winner
+    # was elected on, so the chart can explain a lower-accuracy winner. `None` outside the fit.
+    theta: float | None = None
+    theta_se: float | None = None
 
 
 class WarningDict(TypedDict):

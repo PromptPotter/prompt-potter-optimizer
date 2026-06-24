@@ -117,12 +117,13 @@ def _replay_round_winner(
     all_results: dict[str, list[dict[str, Any]]] = ctx.round_data.get("all_candidate_results") or {}
     candidate_ids = [str(c) for c in (inputs_ref.get("candidate_ids") or [])]
     coverage_floor = int(inputs_ref.get("coverage_floor", 0))
-    return elect_round_winner(
+    winner_id, _ = elect_round_winner(
         candidate_ids,
         cast("dict[str, list[QueryMeasurement]]", all_results),
         cast("list[QueryMeasurement]", ctx.origin_results),
         coverage_floor,
     )
+    return winner_id
 
 
 def _pobb_replay_snapshot(

@@ -14,6 +14,8 @@ export interface RoundSummaryCandidate {
   evaluators: Record<string, number>;
   changes_description: string;
   partial_reason: string;
+  theta: number | null;
+  theta_se: number | null;
 }
 
 /** Context-aware degradation verdict for a round (origin included), computed */
@@ -315,6 +317,13 @@ export interface CampaignLineageCandidate {
   rank: number | null;
   /** True for the round's elected winner */
   is_winner: boolean;
+  /** Difficulty-adjusted Rasch ability the winner was elected on
+   * (`elect_round_winner`) — the subset-invariant metric that explains a
+   * lower-accuracy winner. Null for candidates outside the round's election
+   * fit. */
+  theta: number | null;
+  /** Laplace SE on `theta` (for a CI on the ability). */
+  theta_se: number | null;
   /** This candidate's fitness under the request's `score:` lens formula, recomputed
    * from its stored evaluator namespace via the single scoring operation (the
    * same one the mask divergence rides). Null without a `score:` lens, or

@@ -57,6 +57,15 @@ class CampaignLineageCandidate(BaseModel):
     accuracy: float | None = Field(default=None, description="Per-candidate accuracy")
     rank: int | None = Field(default=None, description="Final rank within the round")
     is_winner: bool = Field(default=False, description="True for the round's elected winner")
+    theta: float | None = Field(
+        default=None,
+        description="Difficulty-adjusted Rasch ability the winner was elected on (`elect_round_winner`) "
+        "— the subset-invariant metric that explains a lower-accuracy winner. Null for candidates "
+        "outside the round's election fit.",
+    )
+    theta_se: float | None = Field(
+        default=None, description="Laplace SE on `theta` (for a CI on the ability)."
+    )
     lens_value: float | None = Field(
         default=None,
         description="This candidate's fitness under the request's `score:` lens formula, "
@@ -170,10 +179,12 @@ def _to_lineage_candidate(
     is_winner: bool,
     evaluators: Any,
     criterion: RoundScorer | None,
+    theta: Any = None,
+    theta_se: Any = None,
 ) -> CampaignLineageCandidate:
     """Build one lineage row — the shared construction behind the completed-round
     and in-flight mappers. ``rank`` rides ``pos`` (the webapp re-derives the
-    ``C{r}.{n}`` label from position); ``accuracy`` is float-coerced or ``None``."""
+    ``C{r}.{n}`` label from position); ``accuracy``/``theta`` are float-coerced or ``None``."""
     return CampaignLineageCandidate(
         candidate_id=candidate_id,
         label=label,
@@ -181,6 +192,8 @@ def _to_lineage_candidate(
         rank=pos,
         is_winner=is_winner,
         lens_value=_lens_value(evaluators, criterion),
+        theta=float(theta) if isinstance(theta, int | float) else None,
+        theta_se=float(theta_se) if isinstance(theta_se, int | float) else None,
     )
 
 
@@ -198,6 +211,8 @@ def _summary_candidates(
             is_winner=bool(c.get("is_winner", False)),
             evaluators=c.get("evaluators"),
             criterion=criterion,
+            theta=c.get("theta"),
+            theta_se=c.get("theta_se"),
         )
         for pos, c in enumerate(cands, start=1)
         if isinstance(c, dict)

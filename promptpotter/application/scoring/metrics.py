@@ -27,6 +27,7 @@ from promptpotter.domain.scoring import RoundScorer
 from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
 
 if TYPE_CHECKING:
+    from promptpotter.application.intelligence.exploration import RaschPosterior
     from promptpotter.domain.pipeline_schema import (
         PipelineNode,
         PipelineSchema,
@@ -366,14 +367,19 @@ def elect_round_winner(
     results_by_id: Mapping[str, list[QueryMeasurement]],
     origin_results: list[QueryMeasurement],
     coverage_floor: int,
-) -> str:
+) -> tuple[str, RaschPosterior]:
     """Elect the round winner: rank candidates by difficulty-adjusted ability lift over the
     origin, tie-broken toward higher coverage. A single joint Rasch fit over every candidate
     **and** the origin (``candidate_abilities``) puts all arms on one ability scale; the rank
     key is ``(θ_cand − θ_origin) − θ_se`` — the LCB shrink so an under-probed candidate (wide
     θ posterior) can't outrank a fully-probed one at equal ability. Origin is the floor at rank
     ``(0.0, 0)`` — only a candidate confidently above origin (lift LCB > 0) with at least
-    ``coverage_floor`` measured samples can win. Returns ``""`` when none clears the floor.
+    ``coverage_floor`` measured samples can win. Returns ``("", abilities)`` when none clears
+    the floor.
+
+    Returns ``(winner_id, abilities)`` — the joint ``RaschPosterior`` rides out so the caller
+    stamps each candidate's θ onto its display row from the SAME fit the decision was made on
+    (no second fit), letting the operator see *why* a lower-accuracy candidate won.
 
     This is the cross-candidate comparison that drifts under per-round resubset: with each
     candidate on a different signal-chased subset, raw subset accuracy is difficulty-blind, so
@@ -412,7 +418,7 @@ def elect_round_winner(
         if rank > best_rank:
             best_rank = rank
             winner_id = cid
-    return winner_id
+    return winner_id, abilities
 
 
 def elimination_p_best(

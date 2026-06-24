@@ -629,12 +629,13 @@ def test_round_winner_elects_by_ability_not_subset_accuracy() -> None:
     assert sum(r["hit"] for r in weak_on_easy) / 20 > sum(r["hit"] for r in able_on_hard) / 20
     # ...but the θ-gated election crowns the abler one — it cleared items the origin never did,
     # which is stronger evidence of ability than more wins on items everyone already passes.
-    assert (
-        elect_round_winner(
-            ["weak_on_easy", "able_on_hard"], results_by_id, origin, coverage_floor=4
-        )
-        == "able_on_hard"
+    winner_id, abilities = elect_round_winner(
+        ["weak_on_easy", "able_on_hard"], results_by_id, origin, coverage_floor=4
     )
+    assert winner_id == "able_on_hard"
+    # The fit rides out so the caller stamps θ from the same election fit (no second fit):
+    # the abler candidate's θ outranks the easy one's despite the lower raw accuracy.
+    assert abilities.theta["able_on_hard"] > abilities.theta["weak_on_easy"]
 
 
 # ===========================================================================

@@ -70,6 +70,8 @@ def build_round_summary(rr: RoundResult) -> RoundSummary:
                 evaluators=dict(c.evaluators),
                 changes_description=c.changes_description,
                 partial_reason=c.partial_reason,
+                theta=c.theta,
+                theta_se=c.theta_se,
             )
         )
     selection = _measurement_order(rr.all_candidate_results or {})

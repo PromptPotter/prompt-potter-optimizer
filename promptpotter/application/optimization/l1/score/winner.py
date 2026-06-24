@@ -193,12 +193,24 @@ async def l1_score(
 
     # ``coverage_floor`` is persisted so the replayer applies the same electability floor — without
     # it a resumed run could elect a thin candidate the live path rejected, manufacturing divergence.
-    winner_id = elect_round_winner(
+    winner_id, abilities = elect_round_winner(
         electable,
         all_candidate_results,
         list(cast("list[QueryMeasurement]", origin.results)),
         coverage_floor,
     )
+    # Stamp each electable candidate's difficulty-adjusted ability θ from the SAME joint Rasch
+    # fit the election just ran (no second fit) — the subset-invariant metric the winner was
+    # elected on, so the dashboard can show *why* a lower-accuracy candidate won. Left ``None``
+    # for candidates outside the election fit (eliminated / under the coverage floor).
+    for cid in electable:
+        theta_c = abilities.theta.get(cid)
+        if theta_c is None:
+            continue
+        cs_idx = cs_by_id[cid]
+        candidate_scores[cs_idx] = candidate_scores[cs_idx].model_copy(
+            update={"theta": theta_c, "theta_se": abilities.theta_se.get(cid, 0.0)}
+        )
     record_decision(
         decisions,
         ResumeCheckpointKind.ROUND_WINNER,
