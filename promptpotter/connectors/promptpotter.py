@@ -156,12 +156,33 @@ def _extract_experiment(
     return queries, []
 
 
+async def _in_process_run(query: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Run an inner PromptPotter cycle and return its three proxy metrics — the L4
+    arm of the shared ``in_process`` seam.
+
+    The inner-cycle runner is l4-outer-loop slice 2: it must call
+    ``runner.run_optimization`` in its **own asyncio task** (so the per-task
+    ContextVars — ``_CYCLE_LEDGER`` / ``_CURRENT_ROUND`` / ``_ABORT_CHECK`` —
+    don't clobber the outer's) under a store sandbox rooted at *this* cycle's
+    ``.runtime/inner/`` (re-entrant, so L5+ nests by construction). Until that
+    lands, the arm raises a pointed error — the seam itself is wired (the sibling
+    ``llm_only`` connector exercises it), only this runner is pending.
+    """
+    raise NotImplementedError(
+        "promptpotter in-process inner-cycle runner is l4-outer-loop slice 2 "
+        "(docs/specs/l4-outer-loop.md § Implementation order). The in_process seam "
+        "is wired — the llm_only connector runs on it — only the inner-cycle "
+        f"runner is pending. (query={query!r}, nodes={sorted(payload.get('meta_prompt_overrides', {}))})"
+    )
+
+
 CONNECTOR = Connector(
     name="promptpotter",
     execution="in_process",
     wire_adapter=promptpotter_wire_adapter,
     session_factory=PromptPotterSession,
     extract_experiment=_extract_experiment,
+    in_process_run=_in_process_run,
 )
 
 

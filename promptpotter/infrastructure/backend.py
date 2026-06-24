@@ -20,7 +20,7 @@ from promptpotter.infrastructure.llm import (
 QUERY_TIMEOUT: float = 120.0  # HTTP timeout for /matches endpoint
 
 if TYPE_CHECKING:
-    from promptpotter.connectors.protocol import ConnectorExecution
+    from promptpotter.connectors.protocol import ConnectorExecution, InProcessRun
     from promptpotter.domain.connector import SessionProtocol, WireAdapter
     from promptpotter.infrastructure.store import Stores
 
@@ -84,6 +84,7 @@ class BackendClient:
         wire_adapter: WireAdapter,
         session: SessionProtocol,
         execution: ConnectorExecution = "remote_http",
+        in_process_run: InProcessRun | None = None,
         timeout: float = 30.0,
         auth_token: str | None = None,
     ):
@@ -95,6 +96,8 @@ class BackendClient:
         # this — not the connector name — so a new backend's transport is a
         # declared capability, not a core-loop branch.
         self._execution: ConnectorExecution = execution
+        # The non-HTTP execution arm, supplied by an ``in_process`` connector.
+        self._in_process_run: InProcessRun | None = in_process_run
         self._auth_token = auth_token or ""
         self._http: httpx.AsyncClient | None = None
 
@@ -198,17 +201,17 @@ class BackendClient:
         """POST /matches. 400+session-in-detail → one-shot session recover + retry. *on_warning*
         fires on each retry (transport/429/5xx) for ledger telemetry — retry behaviour itself unchanged.
         """
-        if self._execution != "remote_http":
-            # Declared-mode dispatch: a non-HTTP connector (today only
-            # ``promptpotter``/L4, ``execution="in_process"``) has no
-            # ``/matches`` endpoint. Fail with a pointed message instead of a
-            # confusing transport error. Wiring the inner-cycle run is Lane C3.
-            raise NotImplementedError(
-                f"connector execution mode {self._execution!r} has no inner-cycle "
-                "dispatch yet — L4 self-recursion is Lane C3 "
-                "(docs/specs/roadmap.md § Track 1.5)"
-            )
         payload = self._wire_adapter(query, pipeline_params)
+
+        if self._execution != "remote_http":
+            # Declared-mode dispatch: a non-HTTP connector runs in this process
+            # via its own arm (``llm_only`` → one LLM call; ``promptpotter`` →
+            # an inner cycle). The connector owns *how* it runs; the registry
+            # guarantees the arm is present whenever the mode is ``in_process``.
+            assert self._in_process_run is not None, (
+                f"execution={self._execution!r} but no in_process_run wired"
+            )
+            return await self._in_process_run(query, payload)
 
         client = self._get_http()
 

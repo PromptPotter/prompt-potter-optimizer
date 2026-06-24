@@ -34,12 +34,19 @@ if TYPE_CHECKING:
 # How a connector's backend runs, so the loop dispatches on a *declared*
 # capability instead of branching on the connector name. ``remote_http`` posts
 # to a live ``/matches`` endpoint (TermNorm + any external backend);
-# ``in_process`` runs an inner PromptPotter cycle (L4 self-recursion) with no
-# HTTP transport. The inner-cycle execution path itself is Lane C3 (see
-# ``docs/specs/roadmap.md`` § Track 1.5) — until it lands,
-# ``run_query`` raises on an ``in_process`` connector. A future hosted/worker
+# ``in_process`` runs the query in this process with no HTTP transport — either an
+# in-process ``llm_only`` (a single direct LLM call, no backend server) or an inner
+# PromptPotter cycle (L4 self-recursion). ``BackendClient.run_query`` dispatches an
+# ``in_process`` connector to its ``in_process_run`` hook. A future hosted/worker
 # execution mode extends this enum without touching the loop.
 ConnectorExecution = Literal["remote_http", "in_process"]
+
+# The in-process execution arm: ``(query, payload) -> resp`` where ``payload`` is
+# the connector's ``wire_adapter`` output and ``resp`` is the same ``{"data": {…}}``
+# shape ``measure_sample`` parses from an HTTP ``/matches`` body (so the scorer
+# reads an in-process result identically to a remote one). Required on (and only
+# on) an ``in_process`` connector — the registry guard enforces the pairing.
+InProcessRun = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
 
 # Bootstrap calls a connector's version_check once at session init with the
 # BackendClient's live httpx client + base_url; the return is the backend's
@@ -97,10 +104,15 @@ class Connector:
     execution: ConnectorExecution = "remote_http"
     """How this connector's backend runs — the dispatch capability the loop
     reads instead of branching on ``name``. ``remote_http`` (default) posts to
-    a live ``/matches`` endpoint; ``in_process`` runs an inner cycle (L4). The
-    ``in_process`` execution path is Lane C3 and not yet wired — ``BackendClient.run_query``
-    raises a pointed ``NotImplementedError`` for it rather than failing as a
-    confusing transport error against a backend that isn't there."""
+    a live ``/matches`` endpoint; ``in_process`` runs in this process via
+    ``in_process_run`` (no HTTP). ``BackendClient.run_query`` dispatches on this."""
+
+    in_process_run: InProcessRun | None = None
+    """The in-process execution arm — ``async (query, payload) -> {"data": {…}}``.
+    Required iff ``execution == "in_process"`` (the registry guard enforces the
+    pairing); ``None`` for a ``remote_http`` connector. ``llm_only`` makes a single
+    direct LLM call; ``promptpotter`` runs an inner cycle (L4). ``BackendClient``
+    holds this and calls it from ``run_query`` when the mode is non-HTTP."""
 
     expected_revision: str | None = None
     """Backend revision (git SHA, semver, …) this PromptPotter rev expects.
@@ -170,6 +182,7 @@ __all__ = [
     "BackendUnreachableError",
     "Connector",
     "ConnectorExecution",
+    "InProcessRun",
     "PreflightFn",
     "SessionProtocol",
     "VersionCheck",

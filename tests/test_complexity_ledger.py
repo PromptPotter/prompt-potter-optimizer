@@ -62,8 +62,12 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # current engine/scorer over the recorded measurements + the ``ab`` CLI verb. A feature
 # — the real, deterministic engine/scorer A/B; net-neutral on module count vs the deleted
 # subsystem but −640 lines and a sharper concept).
+# then ``modules`` 295->296: the in-process ``llm_only`` connector
+# (`connectors/llm_only.py`) — a single direct LLM call on the shared `in_process`
+# execution seam, so the basic case runs with no TermNorm server (l4-outer-loop
+# § Feature A). A feature, justified, so the baseline rises.
 LEDGER_BASELINE = {
-    "modules": 295,
+    "modules": 296,
     "init_files": 54,
     "reexport_shims": 41,
     "config_leaf_fields": 33,

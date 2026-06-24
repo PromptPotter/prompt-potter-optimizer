@@ -329,6 +329,7 @@ async def init_services(
         wire_adapter=connector.wire_adapter,
         session=connector.session_factory(),
         execution=connector.execution,
+        in_process_run=connector.in_process_run,
         auth_token=settings.TERMNORM_TOKEN or None,
     )
     status(f"Backend: {backend_url}")

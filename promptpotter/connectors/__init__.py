@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import typing
 
+from promptpotter.connectors.llm_only import CONNECTOR as _LLM_ONLY
 from promptpotter.connectors.promptpotter import CONNECTOR as _PROMPTPOTTER
 from promptpotter.connectors.protocol import (
     BackendUnreachableError,
@@ -22,6 +23,7 @@ __all__ = ["CONNECTORS", "BackendUnreachableError", "Connector", "get"]
 CONNECTORS: dict[str, Connector] = {
     "termnorm": _TERMNORM,
     "promptpotter": _PROMPTPOTTER,
+    "llm_only": _LLM_ONLY,
 }
 
 
@@ -40,6 +42,13 @@ for _key, _c in CONNECTORS.items():
     if _c.execution not in _valid_execution:
         raise RuntimeError(
             f"CONNECTORS[{_key!r}]: execution {_c.execution!r} not in {_valid_execution}."
+        )
+    # An in_process connector MUST supply the dispatch arm run_query calls (and a
+    # remote_http one must not — the field only makes sense paired with the mode).
+    if (_c.execution == "in_process") != callable(_c.in_process_run):
+        raise RuntimeError(
+            f"CONNECTORS[{_key!r}]: execution={_c.execution!r} requires "
+            f"in_process_run {'set' if _c.execution == 'in_process' else 'unset'}."
         )
 del _valid_execution, _key, _c, _hook
 

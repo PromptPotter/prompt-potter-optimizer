@@ -13,7 +13,8 @@ nodes.{name}.config`, never in the backend's repo.
 | Name | File | Wire shape | Session | Use |
 |---|---|---|---|---|
 | `termnorm` | `termnorm.py` | `{query, steps, node_config}` posted to `/matches` | `POST /sessions` handshake with terms array | TermNorm production backend |
-| `promptpotter` | `promptpotter.py` | `{query, meta_prompt_overrides}` (in-process inner cycle) | Noop (no remote service) | Optimizer-of-the-optimizer (M12) |
+| `llm_only` | `llm_only.py` | `{query, node_config}` → in-process LLM call (`in_process_run`) | Noop (no remote service) | Basic single-LLM case, no backend server (l4-outer-loop § Feature A) |
+| `promptpotter` | `promptpotter.py` | `{query, meta_prompt_overrides}` → in-process inner cycle (`in_process_run`, slice 2 pending) | Noop (no remote service) | Optimizer-of-the-optimizer (L4) |
 
 ## What the second connector taught the boundary
 
@@ -39,26 +40,30 @@ modification. Three observations the next connector should heed:
 
 A connector declares **how its backend runs** via `Connector.execution`
 (`ConnectorExecution`): `remote_http` (default — posts to a live `/matches`)
-or `in_process` (runs an inner PromptPotter cycle, L4). `BackendClient.run_query`
+or `in_process` (runs in this process, no HTTP). `BackendClient.run_query`
 **dispatches on this declared mode, never on the connector name** — so a new
 backend's transport is a capability it declares, not a branch in the core loop.
-`promptpotter` declares `execution="in_process"`; an `in_process` connector
-loads + validates normally, then `run_query` raises a pointed
-`NotImplementedError` on the first match request (instead of a confusing
-transport error against a backend that isn't there).
 
-What remains is the **inner-cycle run itself** — consuming the wire payload,
-running the inner cycle, producing the three proxy metrics. That is Lane C3,
-**decided in** [`../../docs/specs/l4-outer-loop.md`](../../docs/specs/l4-outer-loop.md):
-`run_query`'s `in_process` arm dispatches to a connector-supplied
-`in_process_run`, which calls `runner.run_optimization` in its **own asyncio
-task** (the three per-task ContextVars — `_CYCLE_LEDGER`, `_CURRENT_ROUND`,
-`_ABORT_CHECK` — isolate per task, not per call) under **isolated stores at
-`.runtime/inner/`** (no active-pointer / capacity-1 collision). One process,
-no networking. The same seam yields a second connector — in-process `llm_only`
-(no TermNorm server for the basic case). The localhost-endpoint option is
-retained only as the future hosted/multi-tenant worker mode: a new `execution`
-value, dispatched on uniformly, with no core-loop edit.
+**The `in_process` arm is wired (SHIPPED).** `run_query` calls the
+connector-supplied `Connector.in_process_run(query, payload) -> {"data": {…}}` —
+the same shape the scorer parses from an HTTP `/matches` body. The registry guard
+(`__init__.py`) enforces the pairing: an `in_process` connector MUST supply
+`in_process_run`, a `remote_http` one MUST NOT. Two connectors ride the one seam:
+
+- **`llm_only` (SHIPPED, Feature A)** — `in_process_run` makes one direct LLM call
+  (`get_llm_client(provider).chat(...)` on the rendered prompt) and projects the
+  answer onto the terminal ranking key. No TermNorm server for the basic case.
+- **`promptpotter` (Feature B, slice 2 pending)** — `in_process_run` will run a
+  full inner cycle. Its arm currently raises a pointed `NotImplementedError`
+  (relocated from `backend.py` to the connector's own arm — the connector owns
+  *how* it runs). **Decided in** [`../../docs/specs/l4-outer-loop.md`](../../docs/specs/l4-outer-loop.md):
+  it calls `runner.run_optimization` in its **own asyncio task** (the three
+  per-task ContextVars — `_CYCLE_LEDGER`, `_CURRENT_ROUND`, `_ABORT_CHECK` —
+  isolate per task, not per call) under **isolated stores at `.runtime/inner/`**
+  (no active-pointer / capacity-1 collision), built **re-entrant** so L5+ nests by
+  construction. One process, no networking. The localhost-endpoint option is
+  retained only as the future hosted/multi-tenant worker mode: a new `execution`
+  value, dispatched on uniformly, with no core-loop edit.
 
 ## Conventions
 
