@@ -21,6 +21,13 @@
 .fitness-legend .dot.accuracy{background:rgba(var(--color-accent-rgb),0.95)}
 .fitness-legend .dot.composite{background:rgba(var(--color-accent-rgb),0.55)}
 .fitness-legend .dot.whatif{background:var(--color-accent-strong)}
+/* Ability θ teach card — content inside the shared Popover panel (AbilityInfo). */
+.ability-help{max-width:280px;font-size:12px;line-height:1.5;color:var(--color-text-secondary)}
+.ability-help h4{margin:0 0 6px;font-size:12px;color:var(--color-text-primary)}
+.ability-help p{margin:0 0 8px}
+.ability-help p:last-child{margin-bottom:0}
+.ability-help strong{color:var(--color-text-primary)}
+.ability-help-calib{padding-top:6px;border-top:0.5px solid var(--color-border-tertiary);color:var(--color-text-tertiary)}
 /* What-If opens to the RIGHT of the chart (side-by-side) inside the
    fitness card. .fitness-chart-wrap groups the legend + chart so the
    legend stays positioned above the bars (matching the Composite-only

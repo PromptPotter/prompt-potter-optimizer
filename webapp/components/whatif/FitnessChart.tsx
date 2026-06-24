@@ -188,6 +188,11 @@ export interface BarSlot {
   candidateId?: string;
   round?: number;
   isWinner?: boolean;
+  // Difficulty-adjusted Rasch ability (logit scale) the winner is elected on — shown in the
+  // tooltip, NOT as a bar (θ is logits, the y-axis is the 0–1 accuracy scale). Null when no
+  // election fit (in-flight / eliminated). This is what explains a lower-accuracy winner.
+  theta?: number | null;
+  thetaSe?: number | null;
   // Workspace-verify overlay — `accuracy` is the workspace accuracy
   // (mean hit rate) over every archive measurement for this candidate's
   // config; `workspaceN` is the total sample count behind it (typically
@@ -401,12 +406,25 @@ export const FitnessChart = memo(function FitnessChart({
           footer: (items) => {
             const idx = items[0]?.dataIndex;
             if (idx == null) return "";
+            const lines: string[] = [];
             const n = bars[idx]?.nSamples;
-            if (n == null) return "";
-            const exp = bars[idx]?.nExpected;
-            return exp != null && exp !== n
-              ? `${n} of ${exp} samples scored`
-              : `${n} sample${n === 1 ? "" : "s"} scored`;
+            if (n != null) {
+              const exp = bars[idx]?.nExpected;
+              lines.push(
+                exp != null && exp !== n
+                  ? `${n} of ${exp} samples scored`
+                  : `${n} sample${n === 1 ? "" : "s"} scored`,
+              );
+            }
+            // Difficulty-adjusted ability — the metric the winner is elected on, so a
+            // shorter (lower-accuracy) winner bar reads as "won on harder samples".
+            const theta = bars[idx]?.theta;
+            if (typeof theta === "number") {
+              const se = bars[idx]?.thetaSe;
+              const tail = typeof se === "number" ? ` ± ${se.toFixed(2)}` : "";
+              lines.push(`ability θ ${theta.toFixed(2)}${tail} (elected on θ, not accuracy)`);
+            }
+            return lines.join("\n");
           },
         },
       },

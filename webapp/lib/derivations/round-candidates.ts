@@ -86,6 +86,8 @@ export function roundCandidates(dash: DashboardSnapshot | null): CandidateRow[] 
         label: candidateLabel(r.round, i),
         accuracy: c.accuracy,
         composite: c.composite_fitness,
+        theta: c.theta,
+        theta_se: c.theta_se,
         evaluators: c.evaluators,
         is_winner: c.is_winner,
         n_samples: c.scored_samples,
@@ -118,6 +120,9 @@ export function roundCandidates(dash: DashboardSnapshot | null): CandidateRow[] 
         label: candidateLabel(liveRound, i),
         accuracy,
         composite,
+        // θ is an end-of-round election fit; the in-flight round has none yet.
+        theta: null,
+        theta_se: null,
         evaluators,
         is_winner: false,
         n_samples: c.samples?.length ?? null,

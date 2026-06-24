@@ -19,6 +19,8 @@ function row(source: CandidateRow["source"]): CandidateRow {
     label: "C1.1",
     accuracy: null,
     composite: null,
+    theta: null,
+    theta_se: null,
     evaluators: {},
     is_winner: false,
     n_samples: null,

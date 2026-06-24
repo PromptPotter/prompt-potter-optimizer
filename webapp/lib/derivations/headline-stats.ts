@@ -11,6 +11,55 @@
 
 import type { RoundSummary } from "@/lib/api/types";
 import type { DashboardSnapshot } from "@/lib/poll";
+import { fmtPct0 } from "@/lib/format";
+
+// Which fitness number headlines a per-candidate text surface. DISPLAY only —
+// the engine always GATES on difficulty-adjusted ability θ; this just picks what
+// the operator reads (θ is jargon, so it is never the forced default). Seeded
+// from the served `dash.headline_metric` (CampaignConfig.headline_metric),
+// client-overridable. `composite` is served only on the active cycle; settled
+// forks carry accuracy only, so they fall back to it (same as `displayFitness`).
+export type HeadlineMetric = "accuracy" | "composite" | "ability";
+
+// The toggle's options, in display order, each with the teaching tooltip that
+// keeps θ from reading as an unexplained jargon number (the `AbilityInfo`
+// popover carries the long form).
+export const HEADLINE_METRICS: { id: HeadlineMetric; chip: string; title: string }[] = [
+  {
+    id: "accuracy",
+    chip: "Acc",
+    title: "Raw accuracy — correctness rate over the candidate's measured subset (subset-relative).",
+  },
+  {
+    id: "composite",
+    chip: "Comp",
+    title:
+      "Composite fitness under the active scoring formula. Served on the active cycle; settled forks (accuracy only) fall back to accuracy.",
+  },
+  {
+    id: "ability",
+    chip: "θ",
+    title:
+      "Difficulty-adjusted ability θ — the metric the winner is actually elected on. A logit (not a %): comparable within a round; cross-round comparison waits on the stable δ bank.",
+  },
+];
+
+export function headlineMetricLabel(m: HeadlineMetric): string {
+  return m === "ability" ? "ability θ" : m === "composite" ? "composite" : "accuracy";
+}
+
+// Format one candidate's headline number for the selected metric: a percent for
+// accuracy/composite, a 2-dp logit for θ (`θ 0.41`). `null` → "—" either way.
+export function fmtHeadlineValue(
+  metric: HeadlineMetric,
+  pct: number | null,
+  theta: number | null,
+): string {
+  if (metric === "ability") {
+    return typeof theta === "number" && Number.isFinite(theta) ? `θ ${theta.toFixed(2)}` : "—";
+  }
+  return fmtPct0(pct);
+}
 
 export interface HeadlineStats {
   // Current best composite/accuracy, finite or null.

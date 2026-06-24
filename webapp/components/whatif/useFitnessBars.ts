@@ -65,6 +65,10 @@ export function useFitnessBars(
           accuracy: sliced.accuracy,
           composite: null,
           whatif: null,
+          // θ is a per-round election-fit aggregate — can't be re-sliced per sample,
+          // so it's suppressed in slice mode just like composite / what-if.
+          theta: null,
+          thetaSe: null,
           started: sliced.n > 0,
           nSamples: sliced.n,
           // Surface the chosen-set size as the budget so the chart's per-bar
@@ -96,6 +100,8 @@ export function useFitnessBars(
         accuracy: row.accuracy,
         composite,
         whatif,
+        theta: row.theta,
+        thetaSe: row.theta_se,
         started,
         nSamples: row.n_samples,
         nExpected: row.n_expected,

@@ -46,6 +46,7 @@ _FIELD_SCOPES: dict[tuple[str, ...], Literal["policy", "data"]] = {
     ("pipeline_overrides",): "data",
     ("optimizer_narrowing",): "data",
     ("scoring",): "data",
+    ("headline_metric",): "policy",  # display-only — picks which number is shown, never the data
     ("dataset_split",): "policy",  # display-only metadata — no data fork
     # OptimizationConfig
     ("optimization", "max_rounds"): "policy",

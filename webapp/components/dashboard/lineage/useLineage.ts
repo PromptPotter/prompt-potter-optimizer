@@ -18,7 +18,12 @@ import { useCallback, useMemo, useState } from "react";
 import { postCleanupEmpty } from "@/lib/api";
 import type { CampaignLineageCycle } from "@/lib/api";
 import { candidateLabel, liveCandidateId } from "@/lib/candidate-label";
-import { displayFitness, groupByRound, roundCandidates } from "@/lib/derivations";
+import {
+  displayFitness,
+  groupByRound,
+  roundCandidates,
+  type HeadlineMetric,
+} from "@/lib/derivations";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { rootCycleId, sessionIndexOf } from "@/lib/ids";
 import { bumpRevalidation } from "@/lib/revalidate";
@@ -92,10 +97,14 @@ export interface Lineage {
   detailByCycle: DetailByCycle;
   // Per-candidate fitness, keyed `{cycleId}::{candidateId}` — the live value
   // overlay painted onto nodes. NOT part of the geometry (so a value tick never
-  // re-lays-out the tree). Active cycle's values come from the live dashboard
-  // (displayFitness = composite ?? accuracy, parity with the bars); other cycles
-  // from the settled /lineage. `undefined` for a node with no value yet.
+  // re-lays-out the tree). Carries the percent metric the operator selected
+  // (accuracy, or composite on the active cycle); θ rides `thetaByKey`. Active
+  // cycle's values come from the live dashboard; other cycles from the settled
+  // /lineage (accuracy only). `undefined` for a node with no value yet.
   valueByKey: ReadonlyMap<string, number | null>;
+  // Same-key overlay of difficulty-adjusted ability θ — painted into node tooltips so a
+  // θ-elected winner shown below a higher-accuracy sibling is explainable in place.
+  thetaByKey: ReadonlyMap<string, number | null>;
   expanded: ReadonlySet<string>;
   // In-place expand/collapse toggle for one cycle's lane (pure view state —
   // never changes the dashboard's selected cycle).
@@ -103,6 +112,13 @@ export interface Lineage {
   // Natural px width of the widest forest — fed to the card so it sizes to the
   // tree (the viewport's overflow hides this width from CSS).
   naturalWidth: number;
+  // Operator-selected headline metric for the lineage node values, seeded from
+  // the served campaign default (`headlineMetricDefault`) and client-overridable
+  // via `setHeadlineMetric`. θ never forced — defaults to accuracy unless the
+  // campaign config says otherwise. The gate stays θ regardless of this choice.
+  headlineMetric: HeadlineMetric;
+  headlineMetricDefault: HeadlineMetric;
+  setHeadlineMetric: (m: HeadlineMetric) => void;
   multiSession: boolean;
   totalDescendants: number;
   // Empty-state facts for the in-view cycle.
@@ -136,6 +152,14 @@ export function useLineage({
     () => (cycleId && dash ? roundCandidates(dash) : []),
     [cycleId, dash],
   );
+
+  // Which fitness number the operator reads on the lineage nodes. Seeded from the
+  // served campaign default (CampaignConfig.headline_metric → dash.headline_metric);
+  // a manual pick overrides for the session. The gate is always θ — this is pure
+  // display, so θ ("ability") is offered but never the forced default.
+  const headlineMetricDefault: HeadlineMetric = dash?.headline_metric ?? "accuracy";
+  const [metricOverride, setMetricOverride] = useState<HeadlineMetric | null>(null);
+  const headlineMetric = metricOverride ?? headlineMetricDefault;
 
   // Independent per-cycle expand state — one unified tree where every cycle
   // opens its intra-cycle candidate cladogram in place, any number at once.
@@ -195,10 +219,13 @@ export function useLineage({
   );
   const detailByCycle: DetailByCycle = useMemo(() => new Map(detailEntries), [detailEntries]);
 
-  // Per-candidate value overlay, keyed `{cycleId}::{candidateId}`. Settled values
-  // for every cycle from /lineage, then the active cycle OVERRIDDEN with the live
-  // bars' source (displayFitness). Deliberately NOT content-stabilized: it updates
-  // every poll, but only the painted node text consumes it — the geometry doesn't.
+  // Per-candidate percent-metric overlay, keyed `{cycleId}::{candidateId}`. Settled
+  // cycles serve accuracy only (no composite), so they paint accuracy for both the
+  // accuracy and composite selections; the active cycle paints composite only when
+  // `composite` is selected (else raw accuracy). θ is a separate overlay
+  // (`thetaByKey`) since it is a logit, not a percent. Deliberately NOT
+  // content-stabilized: it updates every poll, but only painted node text reads it.
+  const usesComposite = headlineMetric === "composite";
   const valueByKey = useMemo<ReadonlyMap<string, number | null>>(() => {
     const m = new Map<string, number | null>();
     for (const c of data?.cycles ?? []) {
@@ -211,8 +238,31 @@ export function useLineage({
     }
     if (cycleId && dash) {
       for (const row of liveRows) {
-        m.set(`${cycleId}::${row.candidate_id}`, displayFitness(row.composite, row.accuracy));
+        m.set(
+          `${cycleId}::${row.candidate_id}`,
+          usesComposite ? displayFitness(row.composite, row.accuracy) : row.accuracy,
+        );
       }
+    }
+    return m;
+  }, [data, cycleId, dash, liveRows, usesComposite]);
+
+  // Parallel overlay carrying each candidate's difficulty-adjusted ability θ, same key shape
+  // as `valueByKey`. Painted into the node tooltip so a θ-elected winner shown below a
+  // higher-accuracy sibling is explainable on the node itself. `null` where there's no
+  // election fit (in-flight / eliminated).
+  const thetaByKey = useMemo<ReadonlyMap<string, number | null>>(() => {
+    const m = new Map<string, number | null>();
+    for (const c of data?.cycles ?? []) {
+      for (const r of c.rounds) {
+        r.candidates.forEach((cand, i) => {
+          const id = cand.candidate_id || liveCandidateId(r.round, i);
+          m.set(`${c.cycle_id}::${id}`, cand.theta);
+        });
+      }
+    }
+    if (cycleId && dash) {
+      for (const row of liveRows) m.set(`${cycleId}::${row.candidate_id}`, row.theta);
     }
     return m;
   }, [data, cycleId, dash, liveRows]);
@@ -298,6 +348,10 @@ export function useLineage({
     forests,
     detailByCycle,
     valueByKey,
+    thetaByKey,
+    headlineMetric,
+    headlineMetricDefault,
+    setHeadlineMetric: setMetricOverride,
     expanded,
     onLaneActivate,
     naturalWidth,

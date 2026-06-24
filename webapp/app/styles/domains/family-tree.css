@@ -119,6 +119,10 @@
 .lineage-lens-label{font-size:11px;color:var(--color-text-tertiary);text-transform:none;letter-spacing:0}
 .lineage-lens-select{background:transparent;border:1px solid var(--color-border);border-radius:4px;color:var(--color-text-secondary);cursor:pointer;font:inherit;font-size:11px;padding:1px 4px}
 .lineage-lens-select:disabled{opacity:0.6;cursor:default}
+/* Headline-metric selector (Acc / Comp / θ) — reuses the shared `.fitness-chip`
+   styling for the three toggle buttons; this only lays out the group + label. */
+.lineage-metric{display:inline-flex;align-items:center;gap:3px}
+.lineage-metric-label{font-size:11px;color:var(--color-text-tertiary);text-transform:none;letter-spacing:0;margin-right:1px}
 /* Red "mask active" tag in the card title — signals the lineage is showing a
    counterfactual projection, not the realized record. */
 .lineage-title{display:inline-flex;align-items:center;gap:8px}

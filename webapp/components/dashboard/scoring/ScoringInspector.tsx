@@ -54,14 +54,16 @@ export function ScoringInspector({ selected, onClose }: Props) {
   // CandidateRow carries the `source` tag, so `samplesForRow` routes live vs
   // historical the same way RoundSamplesView does (no merge, no second reader).
   const { byRound } = useRoundCandidates();
-  const samples = useMemo(() => {
-    if (!selected) return [];
-    const row: CandidateRow | undefined = (byRound.get(selected.round) ?? []).find(
+  const row = useMemo<CandidateRow | undefined>(() => {
+    if (!selected) return undefined;
+    return (byRound.get(selected.round) ?? []).find(
       (c) => c.candidate_id === selected.candidate_id,
     );
+  }, [selected, byRound]);
+  const samples = useMemo(() => {
     if (!row) return [];
     return samplesForRow(row, dash, doc);
-  }, [selected, byRound, dash, doc]);
+  }, [row, dash, doc]);
 
   const tally = useMemo(() => {
     const hits = samples.reduce((n, s) => n + (s.status === "HIT" ? 1 : 0), 0);
@@ -93,6 +95,18 @@ export function ScoringInspector({ selected, onClose }: Props) {
           <span className="inspector-key">accuracy</span>
           <span className="inspector-val">{fmtPct1(selected.accuracy)}</span>
         </div>
+        {typeof row?.theta === "number" && (
+          <div className="inspector-row">
+            <span className="inspector-key">ability θ</span>
+            <span
+              className="inspector-val"
+              title="Difficulty-adjusted Rasch ability — the metric the round winner is elected on. Clearing harder samples is worth more than more wins on easy ones, so a higher θ can beat a higher accuracy."
+            >
+              {row.theta.toFixed(2)}
+              {typeof row.theta_se === "number" ? ` ± ${row.theta_se.toFixed(2)}` : ""}
+            </span>
+          </div>
+        )}
         {data && typeof data.composite === "number" && (
           <div className="inspector-row">
             <span className="inspector-key">composite</span>

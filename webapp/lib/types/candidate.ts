@@ -28,6 +28,12 @@ export interface CandidateRow {
   label: string;
   accuracy: number | null;
   composite: number | null;
+  // Difficulty-adjusted Rasch ability (logit scale) + its SE — the subset-invariant
+  // metric the round winner is actually elected on. Explains a lower-accuracy winner:
+  // it cleared harder samples. `null` for the in-flight round (no election fit yet) and
+  // for candidates outside the round's election fit (eliminated / under the coverage floor).
+  theta: number | null;
+  theta_se: number | null;
   evaluators: Record<string, number>;
   is_winner: boolean;
   // Samples scored so far for this candidate; null when unknown.

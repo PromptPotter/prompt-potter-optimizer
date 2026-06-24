@@ -54,6 +54,10 @@ export interface DashboardSnapshot {
   candidate?: string;
   query?: string;
   best?: number;
+  // Campaign default for which fitness number headlines the operator's text
+  // surfaces (CampaignConfig.headline_metric). Seeds the lineage metric toggle;
+  // the gate is always θ regardless. Absent on old files → "accuracy".
+  headline_metric?: "accuracy" | "composite" | "ability";
   total_queries_scored?: number;
   last_query_elapsed_s?: number;
   wallclock_serialized_at?: string;

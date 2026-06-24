@@ -42,11 +42,15 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # θ ability — the same metric the round-winner election ranks by — which retired the
 # Monte-Carlo ``paired_better_probabilities`` + the ``pobb/seeding.py`` MC-seed module,
 # both replaced by the closed-form, deterministic ``metrics.py::elimination_p_best``).
+# ``config_leaf_fields`` 32→33: a deliberate new operator knob —
+# ``CampaignConfig.headline_metric`` (which fitness number headlines the text
+# surfaces: accuracy/composite/θ). DISPLAY config, not a behavior knob; the gate
+# stays θ. A feature, justified, so the baseline rises (per the surface-ledger rule).
 LEDGER_BASELINE = {
     "modules": 293,
     "init_files": 54,
     "reexport_shims": 41,
-    "config_leaf_fields": 32,
+    "config_leaf_fields": 33,
     "settings_env": 17,
     "settings_const": 16,
     "opt_search_point_fields": 27,

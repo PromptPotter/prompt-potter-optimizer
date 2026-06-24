@@ -473,6 +473,9 @@ class LiveDashboardView(DerivedView):
             opt = config.optimization
             self.patience_max = opt.l1_patience
             s.patience = f"0/{self.patience_max}"
+            # Campaign default for the operator's headline-metric toggle (display
+            # config; the gate stays θ). Re-emitted by a fork at its own INIT.
+            s.headline_metric = config.headline_metric
             # Static run-limit surface — the operator-facing source for the
             # fork reconcile dialog ("3 of 6 rounds left"). `patience` above is
             # the live stall counter ("N/max"); this is the declared ceilings.

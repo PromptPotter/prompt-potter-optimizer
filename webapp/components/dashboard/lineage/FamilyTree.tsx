@@ -10,6 +10,8 @@ import { CleanupConfirmModal } from "./CleanupConfirmModal";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
 import { useLineage } from "./useLineage";
 import { useLineageOverlay } from "@/lib/lineage-overlay";
+import { HEADLINE_METRICS } from "@/lib/derivations";
+import { cx } from "@/lib/cx";
 
 // The lineage card — presentational. All data, expand state, and the cleanup
 // mutation live in useLineage; this renders the card chrome, the fixed-height
@@ -24,6 +26,10 @@ export const FamilyTree = memo(function FamilyTree() {
     forests,
     detailByCycle,
     valueByKey,
+    thetaByKey,
+    headlineMetric,
+    headlineMetricDefault,
+    setHeadlineMetric,
     expanded,
     onLaneActivate,
     naturalWidth,
@@ -91,6 +97,31 @@ export const FamilyTree = memo(function FamilyTree() {
               </optgroup>
             </select>
           </label>
+          {/* Headline-metric selector — which fitness number the lineage nodes
+              show. The engine always GATES on θ; this is pure display, seeded from
+              the campaign default (CampaignConfig.headline_metric) so θ is offered
+              but never forced. θ is the axis that explains a lower-accuracy winner. */}
+          <span
+            className="lineage-metric"
+            role="group"
+            aria-label="Headline metric for lineage node values"
+          >
+            <span className="lineage-metric-label">Metric</span>
+            {HEADLINE_METRICS.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                className={cx("fitness-chip", headlineMetric === m.id && "on")}
+                aria-pressed={headlineMetric === m.id}
+                title={
+                  m.id === headlineMetricDefault ? `${m.title} (campaign default)` : m.title
+                }
+                onClick={() => setHeadlineMetric(m.id)}
+              >
+                {m.chip}
+              </button>
+            ))}
+          </span>
           <span className="badge">
             {totalDescendants} {totalDescendants === 1 ? "descendant" : "descendants"}
           </span>
@@ -129,6 +160,8 @@ export const FamilyTree = memo(function FamilyTree() {
                 cycleId={cycleId}
                 detailByCycle={detailByCycle}
                 valueByKey={valueByKey}
+                thetaByKey={thetaByKey}
+                metric={headlineMetric}
                 expanded={expanded}
                 onLaneActivate={onLaneActivate}
                 onSelectCycle={onSelectCycle}

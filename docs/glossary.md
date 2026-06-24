@@ -220,6 +220,25 @@ The persisted world is a four-entity containment hierarchy
   term — NEVER call this "query ranking."
 - **Rasch sort** — two-axis ordering of (sample-difficulty rank,
   candidate-ability rank). `application/intelligence/hard_sample_sorter.py`.
+- **ability (θ_c)** — a candidate's *difficulty-adjusted* quality on a
+  latent logit scale: clearing a hard sample is worth more than clearing
+  an easy one. The metric the round winner is elected on and PoBB
+  eliminates on — **subset-invariant**, so two candidates scored on
+  different sample sets still compare fairly (unlike raw accuracy).
+  `application/intelligence/exploration.py::fit_rasch` → `RaschPosterior.theta`;
+  consumers in `scoring/metrics.py` (`elect_round_winner` / `elimination_p_best`).
+  Operator-facing: [`methods/exploration-exploitation.md`](methods/exploration-exploitation.md).
+- **difficulty (δ_s)** — a sample's hardness on the same logit scale; the
+  hard-samples leaderboard. Same fit, the other axis. `RaschPosterior.delta`.
+- **1PL / Rasch** — the one-parameter logistic IRT model
+  `P(hit) = σ(θ_c − δ_s)` (difficulty only). The model **in use today**.
+- **2PL** — adds a per-sample **discrimination** `a_s` (signal-to-noise:
+  how sharply a sample separates able from unable candidates). A
+  *future* per-dataset graduation, gated on cross-validated held-out fit —
+  slice 3 of [`specs/fitness-comparability.md`](specs/fitness-comparability.md).
+- **specific objectivity** — the Rasch property that makes θ comparable
+  across candidates measured on *different* subsets. The reason θ gates
+  instead of subset accuracy. Same spec.
 - **Adaptive queue mechanism** — the live per-step sample selector
   inside the PoBB loop. Maintains a Gaussian posterior on the
   candidate's latent ability `θ_c` and re-picks every measurement

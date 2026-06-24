@@ -309,6 +309,16 @@ class CampaignConfig(BaseModel):
         "`PipelineSchema.narrow` at pipeline setup.",
     )
     scoring: str | dict[str, str] | None = Field(None)
+    headline_metric: Literal["accuracy", "composite", "ability"] = Field(
+        "accuracy",
+        description="Which fitness number headlines the operator's text surfaces "
+        "(lineage node value, Best tile, sidebar) by default. DISPLAY config, not "
+        "search state — the gate is always difficulty-adjusted ability θ; this only "
+        "picks the number the human READS, client-overridable per session. `ability` "
+        "shows θ (a logit, jargon) — defaults to `accuracy` so θ is never forced on "
+        "an operator who didn't ask for it. Rides the `composite_fitness_formula` "
+        "serve path to `dashboard.json::headline_metric`; never on `OptSearchPoint`.",
+    )
     dataset_split: DatasetSplit | None = Field(
         None,
         description="Canonical train/test fold sizes for the dashboard footer. "

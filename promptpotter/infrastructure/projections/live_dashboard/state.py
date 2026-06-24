@@ -237,6 +237,11 @@ class LiveDashboardState(BaseModel):
     best: float = 0.0
     current_acc: float = 0.0
     composite_fitness_formula: str | None = None
+    # Campaign default for which fitness number headlines the operator's text
+    # surfaces (CampaignConfig.headline_metric). DISPLAY config — the gate is
+    # always θ; this only seeds the webapp's client-overridable headline toggle.
+    # Stamped at INIT:exit beside run_limits, so a fork carries its own default.
+    headline_metric: str = "accuracy"
 
     degraded_count: int = 0
     error_count: int = 0

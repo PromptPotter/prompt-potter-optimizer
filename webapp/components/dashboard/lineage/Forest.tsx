@@ -1,6 +1,11 @@
 "use client";
 import { memo, useMemo } from "react";
 import { fmtPct0 } from "@/lib/format";
+import {
+  fmtHeadlineValue,
+  headlineMetricLabel,
+  type HeadlineMetric,
+} from "@/lib/derivations";
 import { cx } from "@/lib/cx";
 import { shortFamilyTail } from "@/lib/ids";
 import { useSelection } from "@/lib/SelectionContext";
@@ -30,6 +35,8 @@ import {
 const CandidateNode = memo(function CandidateNode({
   n,
   accuracy,
+  theta,
+  metric,
   selected,
   onPick,
   dimmed,
@@ -37,10 +44,15 @@ const CandidateNode = memo(function CandidateNode({
   divergence,
 }: {
   n: RoundNodePos;
-  // The live fitness value painted on this node (the `valueByKey` overlay) —
-  // separate from geometry so a value tick re-renders only this text, not the
-  // memoized layout.
+  // The live percent-metric value painted on this node (the `valueByKey` overlay)
+  // — separate from geometry so a value tick re-renders only this text, not the
+  // memoized layout. Used as the node value for the accuracy/composite metrics.
   accuracy: number | null;
+  // Difficulty-adjusted ability — the value painted when `metric === "ability"`,
+  // and always shown in the tooltip (the metric the winner is elected on).
+  theta: number | null;
+  // Which fitness number the operator selected for the node value.
+  metric: HeadlineMetric;
   selected: boolean;
   onPick: (n: RoundNodePos) => void;
   // Mask overlay (served): `dimmed` = in the counterfactual subtree past a
@@ -63,7 +75,7 @@ const CandidateNode = memo(function CandidateNode({
       role="button"
       tabIndex={0}
       aria-pressed={selected}
-      aria-label={`Round ${n.round} candidate ${n.candidateLabel}, accuracy ${fmtPct0(accuracy)}${n.isWinner ? ", round winner" : ""}${divergence ? ", divergence point under the lens" : ""}${alt ? ", would be elected under the scoring lens" : ""}${dimmed ? ", counterfactual under the scoring lens" : ""}`}
+      aria-label={`Round ${n.round} candidate ${n.candidateLabel}, ${headlineMetricLabel(metric)} ${fmtHeadlineValue(metric, accuracy, theta)}${n.isWinner ? ", round winner" : ""}${divergence ? ", divergence point under the lens" : ""}${alt ? ", would be elected under the scoring lens" : ""}${dimmed ? ", counterfactual under the scoring lens" : ""}`}
       onClick={() => onPick(n)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -73,6 +85,15 @@ const CandidateNode = memo(function CandidateNode({
       }}
       style={{ cursor: "pointer" }}
     >
+      <title>
+        {n.candidateLabel} · {fmtHeadlineValue(metric, accuracy, theta)}
+        {metric !== "ability" && typeof theta === "number"
+          ? ` · ability θ ${theta.toFixed(2)}`
+          : ""}
+        {n.isWinner
+          ? "\nround winner — elected on difficulty-adjusted ability θ, not raw accuracy"
+          : ""}
+      </title>
       {/* The alternative candidate is marked by its own branch line glowing red
           (`.mask-alt .lineage-stub`) — no glyph. */}
       <line
@@ -87,7 +108,7 @@ const CandidateNode = memo(function CandidateNode({
         y={n.y + 3}
         className={cx("lineage-label", n.isWinner && "winner", selected && "selected")}
       >
-        {n.candidateLabel} {fmtPct0(accuracy)}
+        {n.candidateLabel} {fmtHeadlineValue(metric, accuracy, theta)}
       </text>
       {/* Invisible click target: the candidate's own slot — its stub plus the one
           column-width its label occupies before the next round's node. */}
@@ -105,6 +126,8 @@ export function Forest({
   cycleId,
   detailByCycle,
   valueByKey,
+  thetaByKey,
+  metric,
   expanded,
   onLaneActivate,
   onSelectCycle,
@@ -114,9 +137,16 @@ export function Forest({
   campaignId: string;
   cycleId: string | null;
   detailByCycle: DetailByCycle;
-  // Live per-candidate fitness, keyed `{cycleId}::{candidateId}` — painted onto
-  // nodes outside the geometry memo so a value tick costs only a text re-render.
+  // Live per-candidate percent metric (accuracy/composite), keyed
+  // `{cycleId}::{candidateId}` — painted onto nodes outside the geometry memo so a
+  // value tick costs only a text re-render.
   valueByKey: ReadonlyMap<string, number | null>;
+  // Same-key overlay of difficulty-adjusted ability θ — the node value when
+  // `metric === "ability"`, and always shown in node tooltips so a θ-elected winner
+  // below a higher-accuracy sibling is explainable in place.
+  thetaByKey: ReadonlyMap<string, number | null>;
+  // Operator-selected headline metric for the node values (accuracy/composite/θ).
+  metric: HeadlineMetric;
   expanded: ReadonlySet<string>;
   // A lane clicked away from a searchpoint node — toggles that cycle's lane
   // between its expanded candidate cladogram and the compact summary row, in
@@ -140,6 +170,9 @@ export function Forest({
   // updates each poll without re-flowing the tree.
   const valOf = (n: RoundNodePos): number | null =>
     valueByKey.get(`${n.cycleId}::${n.candidateId}`) ?? null;
+  // Difficulty-adjusted ability for the node tooltip — what the winner was elected on.
+  const thetaOf = (n: RoundNodePos): number | null =>
+    thetaByKey.get(`${n.cycleId}::${n.candidateId}`) ?? null;
   // Layout is pure + the inputs are content-stabilized upstream, so this memo
   // re-runs only on a real shape change (new round / candidate / winner flip /
   // lane toggle), never on a bare 2 s poll.
@@ -350,7 +383,7 @@ export function Forest({
                     className="family-cladogram-roundlabel"
                     textAnchor="middle"
                   >
-                    R{n.round} {fmtPct0(valOf(n))}
+                    R{n.round} {fmtHeadlineValue(metric, valOf(n), thetaOf(n))}
                   </text>
                   {rowLabelText && (
                     <text x={n.x + 8} y={n.y + 3} className="family-cladogram-cyclelabel">
@@ -362,7 +395,10 @@ export function Forest({
                     </text>
                   )}
                   <title>
-                    {n.cycleId} · R{n.round} · {fmtPct0(valOf(n))}
+                    {n.cycleId} · R{n.round} · {fmtHeadlineValue(metric, valOf(n), thetaOf(n))}
+                    {metric !== "ability" && typeof thetaOf(n) === "number"
+                      ? ` · ability θ ${thetaOf(n)!.toFixed(2)}`
+                      : ""}
                     {n.candidateLabel ? `\n${n.candidateLabel}` : ""}
                     {isDivergence ? "\ndivergence under the scoring lens" : ""}
                     {isDivergent ? "\ncounterfactual under the scoring lens" : ""}
@@ -381,6 +417,8 @@ export function Forest({
                   key={`c-${n.cycleId}-${n.round}-${n.candidateId}`}
                   n={n}
                   accuracy={valOf(n)}
+                  theta={thetaOf(n)}
+                  metric={metric}
                   selected={
                     n.cycleId === cycleId &&
                     candidate != null &&
