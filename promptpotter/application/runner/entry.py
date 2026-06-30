@@ -33,6 +33,7 @@ from promptpotter.application.run_observers import (
     RunObservers,
     build_run_observers,
 )
+from promptpotter.application.runner.inner_recursion import publish_inner_spawn_context
 from promptpotter.application.runner.loop import run_round_loop
 from promptpotter.application.runner.termination import BudgetGate
 from promptpotter.application.scoring.formula import split_scoring_block
@@ -332,6 +333,12 @@ async def run_optimization(
     *origin* omitted ⇒ scored as phase 0 (CLI); supplied ⇒ reused (notebook path)."""
     mode = mode or RunMode()
     started_at = utcnow_iso()
+    # Publish this cycle as the spawn context for any L4 recursion: a child that
+    # uses the ``promptpotter`` connector reads it to root its sandbox at THIS
+    # cycle's ``.runtime/inner/`` + find the inner benchmark. Unconditional (the
+    # runner can't know a child will recurse) + re-entrant (each level publishes
+    # its own); a no-op until the cycle_id is set.
+    publish_inner_spawn_context(session)
     prep = await _prepare_run(
         dataset,
         campaign_config,

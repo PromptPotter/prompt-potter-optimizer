@@ -14,7 +14,7 @@ nodes.{name}.config`, never in the backend's repo.
 |---|---|---|---|---|
 | `termnorm` | `termnorm.py` | `{query, steps, node_config}` posted to `/matches` | `POST /sessions` handshake with terms array | TermNorm production backend |
 | `llm_only` | `llm_only.py` | `{query, node_config}` → in-process LLM call (`in_process_run`) | Noop (no remote service) | Basic single-LLM case, no backend server (l4-outer-loop § Feature A) |
-| `promptpotter` | `promptpotter.py` | `{query, meta_prompt_overrides}` → in-process inner cycle (`in_process_run`, slice 2 pending) | Noop (no remote service) | Optimizer-of-the-optimizer (L4) |
+| `promptpotter` | `promptpotter.py` | `{query, meta_prompt_overrides}` → in-process inner cycle (`in_process_run` → `runner/inner_recursion.py`) | Noop (no remote service) | Optimizer-of-the-optimizer (L4) |
 
 ## What the second connector taught the boundary
 
@@ -53,17 +53,26 @@ the same shape the scorer parses from an HTTP `/matches` body. The registry guar
 - **`llm_only` (SHIPPED, Feature A)** — `in_process_run` makes one direct LLM call
   (`get_llm_client(provider).chat(...)` on the rendered prompt) and projects the
   answer onto the terminal ranking key. No TermNorm server for the basic case.
-- **`promptpotter` (Feature B, slice 2 pending)** — `in_process_run` will run a
-  full inner cycle. Its arm currently raises a pointed `NotImplementedError`
-  (relocated from `backend.py` to the connector's own arm — the connector owns
-  *how* it runs). **Decided in** [`../../docs/specs/l4-outer-loop.md`](../../docs/specs/l4-outer-loop.md):
-  it calls `runner.run_optimization` in its **own asyncio task** (the three
-  per-task ContextVars — `_CYCLE_LEDGER`, `_CURRENT_ROUND`, `_ABORT_CHECK` —
-  isolate per task, not per call) under **isolated stores at `.runtime/inner/`**
-  (no active-pointer / capacity-1 collision), built **re-entrant** so L5+ nests by
-  construction. One process, no networking. The localhost-endpoint option is
-  retained only as the future hosted/multi-tenant worker mode: a new `execution`
-  value, dispatched on uniformly, with no core-loop edit.
+- **`promptpotter` (Feature B, SHIPPED)** — `in_process_run` is a thin delegate to
+  `application/runner/inner_recursion.py::run_inner_cycle` (running a whole inner
+  campaign is heavy orchestration — it belongs in `application/runner`, not the
+  connector). That runner calls `run_optimization` in its **own `asyncio.Task`**
+  (the three per-task ContextVars — `_CYCLE_LEDGER`, `_CURRENT_ROUND`,
+  `_ABORT_CHECK` — isolate per task, not per call) under **sandboxed stores in a
+  flat per-cycle registry `<workspace>/.inner/<spawn_cycle_id>/`**
+  (`init_services(store=…)`; no active-pointer / capacity-1 collision). It is
+  named by (owned by) the spawning cycle but kept **flat, not physically nested** —
+  physical nesting (`…/.runtime/inner/…/.runtime/inner/…`) blows past Windows'
+  260-char `MAX_PATH` at depth 1; a flat registry stays shallow at every depth, so
+  the **re-entrant** invariant holds (task spawns at every level → L5+ nests). The
+  spawning cycle publishes its context via `publish_inner_spawn_context` (runner
+  seam, every cycle) so this context-free hook can find where to sandbox + which
+  inner benchmark to run; the outer L1's meta-prompt mutations apply to the inner
+  `_optimizer/` prompts through a per-run override ContextVar
+  (`set_optimizer_prompt_overrides`, set inside the inner task). One process, no
+  networking. The localhost-endpoint option is retained only as the future
+  hosted/multi-tenant worker mode: a new `execution` value, dispatched on
+  uniformly, with no core-loop edit.
 
 ## Conventions
 

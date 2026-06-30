@@ -101,6 +101,13 @@ class Connector:
     extract_experiment: Callable[[dict[str, Any]], tuple[list[dict[str, Any]], list[str]]]
     """Backend experiment data → ``(queries, index_terms)``."""
 
+    experiment_file: str = ""
+    """Filename of an on-disk experiment doc in the dataset's config dir, read +
+    passed to :attr:`extract_experiment` when the dataset ships no CSV/loader
+    samples. The in-process ``promptpotter`` connector sets ``inner_tasks.json`` —
+    its outer "samples" ARE the inner tasks declared there, not a sample table.
+    Empty (default) = samples come from the loader registry / tenant upload only."""
+
     execution: ConnectorExecution = "remote_http"
     """How this connector's backend runs — the dispatch capability the loop
     reads instead of branching on ``name``. ``remote_http`` (default) posts to

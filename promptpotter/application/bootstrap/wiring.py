@@ -139,18 +139,28 @@ async def _resolve_pipeline_schema(
     client: BackendClient,
     dataset_config_dir: Path | None,
     status: Callable[[str], None],
+    *,
+    in_process: bool = False,
 ) -> PipelineSchema | None:
     """Backend ``GET /pipeline`` is authoritative for runtime defaults; local
     ``{dataset_config_dir}/pipeline.json`` is the operator overlay. Merged
     here before parsing — backend underneath, dataset on top. Backend
-    unreachable → local file alone (offline mode)."""
+    unreachable → local file alone (offline mode).
+
+    ``in_process`` connectors (``llm_only`` / ``promptpotter``) have NO remote
+    backend, so the local ``pipeline.json`` IS the whole schema — skip the fetch
+    entirely (otherwise it would hit ``backend_url`` and merge an unrelated
+    backend's nodes, e.g. TermNorm's, under the dataset overlay)."""
     backend_resp: dict[str, Any] | None = None
-    try:
-        backend_resp = await client.fetch_pipeline()
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        raise
-    except Exception as exc:
-        logger.info("Could not fetch pipeline schema from backend: %s", exc)
+    if in_process:
+        pass  # no remote backend — local pipeline.json is authoritative
+    else:
+        try:
+            backend_resp = await client.fetch_pipeline()
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            raise
+        except Exception as exc:
+            logger.info("Could not fetch pipeline schema from backend: %s", exc)
 
     local_raw: dict[str, Any] | None = None
     if dataset_config_dir is not None:
@@ -191,7 +201,11 @@ def _read_backend_type(dataset_config_dir: Path | None, dataset_name: str | None
 
 
 def _load_dataset_into_session(
-    session: Session, dataset_name: str, status: Callable[[str], None]
+    session: Session,
+    dataset_name: str,
+    status: Callable[[str], None],
+    *,
+    connector: connectors.Connector | None = None,
 ) -> None:
     """Populate session.samples + index_terms.
 
@@ -199,8 +213,16 @@ def _load_dataset_into_session(
     repo benchmark (``datasets/{name}/``) → ``DATASET_LOADERS`` registry
     one-shot download into the benchmark tree. Tenant uploads never
     cross-contaminate the install-global benchmark slot.
+
+    A connector that declares an :attr:`~Connector.experiment_file` (the
+    in-process ``promptpotter`` L4 dataset, whose outer "samples" ARE the inner
+    tasks in ``inner_tasks.json``) loads through ``extract_experiment`` when no
+    CSV/loader samples exist — so the same ``new <dataset>`` path serves it.
     """
     items = resolve_dataset_items(session.store, dataset_name, status=status)
+    if not items and connector is not None and connector.experiment_file:
+        _load_experiment_file_into_session(session, connector, status)
+        return
     if not items:
         status(f"Dataset '{dataset_name}' not available")
         raise ValueError(
@@ -225,6 +247,29 @@ def _load_dataset_into_session(
             f"(term index now {len(session.index_terms)})"
         )
     status(f"Dataset: {dataset_name} ({len(items)} samples)")
+
+
+def _load_experiment_file_into_session(
+    session: Session,
+    connector: connectors.Connector,
+    status: Callable[[str], None],
+) -> None:
+    """Load samples from the connector's on-disk experiment doc (L4: the inner
+    tasks in ``inner_tasks.json``) via ``extract_experiment`` — the same seam the
+    experiment-sync path uses, but reading the dataset dir instead of a backend."""
+    config_dir = session.dataset_config_dir
+    exp_path = (config_dir / connector.experiment_file) if config_dir else None
+    data = read_json_optional(exp_path) if exp_path else None
+    if not data:
+        status(f"Experiment file '{connector.experiment_file}' missing or empty")
+        raise ValueError(
+            f"Connector {connector.name!r} expects {connector.experiment_file!r} in the "
+            f"dataset config dir ({config_dir}), but it is missing or empty."
+        )
+    queries, index_terms = connector.extract_experiment(data)
+    session.samples = samples_from_dicts(queries)
+    session.index_terms = index_terms
+    status(f"Experiment: {connector.experiment_file} ({len(queries)} tasks)")
 
 
 async def _sync_and_extract_experiment(
@@ -295,6 +340,7 @@ async def init_services(
     dataset_name: str | None = None,
     on_status: Callable[[str], None] | None = None,
     identity: IdentityContext | None = None,
+    store: Stores | None = None,
 ) -> Session:
     """Init store, client, pipeline schema, scoring data — step 1 of bootstrap.
 
@@ -302,7 +348,14 @@ async def init_services(
     declaring ``backend_type``. Returns a wired ``Session`` (no scoring yet).
     ``identity`` defaults to the Stage-0 single-operator :func:`default_identity`.
     Active-session pointers are per-tenant on disk, so two operators on the
-    same machine cannot collide."""
+    same machine cannot collide.
+
+    ``store`` injects a pre-built :class:`Stores` instead of rooting one under
+    ``project_root/.promptpotter``: the L4 inner-cycle runner passes a sandboxed
+    store rooted at the spawning cycle's ``.runtime/inner/`` so an inner campaign's
+    state never touches the outer's active pointer. ``project_root`` still resolves
+    repo-benchmark dataset dirs (``datasets/{name}/``), so the sandbox reads the
+    inner dataset from the repo while writing campaign state into the sandbox."""
 
     def status(msg: str) -> None:
         if on_status:
@@ -315,9 +368,10 @@ async def init_services(
             Path(__file__).resolve().parent.parent.parent.parent
         )  # wiring → bootstrap → application → promptpotter → repo_root
 
-    store = build_stores(
-        resolved_identity, projects_root=project_root / ".promptpotter" / "projects"
-    )
+    if store is None:
+        store = build_stores(
+            resolved_identity, projects_root=project_root / ".promptpotter" / "projects"
+        )
 
     dataset_config_dir = (
         resolve_dataset_config_dir(store, project_root, dataset_name) if dataset_name else None
@@ -334,7 +388,9 @@ async def init_services(
     )
     status(f"Backend: {backend_url}")
 
-    pipeline_schema = await _resolve_pipeline_schema(client, dataset_config_dir, status)
+    pipeline_schema = await _resolve_pipeline_schema(
+        client, dataset_config_dir, status, in_process=connector.execution == "in_process"
+    )
     await _verify_connector_revision(client, connector)
 
     # One physical endpoint = one BackendConnection. With no explicit
@@ -380,7 +436,7 @@ async def init_services(
     )
 
     if dataset_name:
-        _load_dataset_into_session(session, dataset_name, status)
+        _load_dataset_into_session(session, dataset_name, status, connector=connector)
     else:
         await _sync_and_extract_experiment(session, backend_url, experiment_id, status)
     return session

@@ -12,6 +12,7 @@ the local manifest registry.
 
 from __future__ import annotations
 
+import contextvars
 import functools
 import hashlib
 import json
@@ -31,9 +32,30 @@ __all__ = [
     "get_optimizer_schema",
     "list_optimizer_prompts",
     "load_optimizer_prompt",
+    "set_optimizer_prompt_overrides",
 ]
 
 OPTIMIZER_PIPELINE_PATH = REPO_ROOT / "datasets" / "_optimizer" / "pipeline.json"
+
+# Per-run override of the optimizer meta-prompts, keyed by optimizer node
+# (`l1_generate` / `l1_critique` / `l2_context` / `l3_plan`) → a partial
+# `PromptTemplate`-field dict. The L4 inner-cycle runner sets this (inside the
+# inner asyncio task, so it can't leak to the outer optimizer) so the OUTER L1's
+# meta-prompt mutations actually shape the inner cycle's optimizer prompts. A
+# ContextVar — not a global — so each inner task at any recursion depth carries
+# its own overrides. Default `None` = no override (every normal cycle).
+_OPTIMIZER_PROMPT_OVERRIDES: contextvars.ContextVar[dict[str, dict[str, Any]] | None] = (
+    contextvars.ContextVar("optimizer_prompt_overrides", default=None)
+)
+
+
+def set_optimizer_prompt_overrides(overrides: dict[str, dict[str, Any]] | None) -> None:
+    """Bind per-run optimizer-prompt-field overrides for this task's context.
+
+    Keyed by optimizer node; each value is a partial `PromptTemplate`-field map
+    merged onto the loaded prompt by :func:`load_optimizer_prompt`. The L4 inner
+    runner is the sole caller (`runner/inner_recursion.py`)."""
+    _OPTIMIZER_PROMPT_OVERRIDES.set(overrides or None)
 
 
 @functools.lru_cache(maxsize=1)
@@ -190,8 +212,28 @@ def load_optimizer_prompt(name: str) -> PromptTemplate:
 
     lf_prompt = _try_langfuse(name)
     template = lf_prompt or _load_local(name)
+    template = _apply_prompt_override(name, template)
     validate_template(name, template)
     return template
+
+
+def _apply_prompt_override(name: str, template: PromptTemplate) -> PromptTemplate:
+    """Merge any per-run override fields (L4 inner cycle) onto *template*.
+
+    The outer L1 mutates the six decomposition fields per inner node; only keys
+    that are real ``PromptTemplate`` fields are merged (the model is ``extra``-
+    strict). No override bound → the template passes through unchanged. The
+    merged result still runs through ``validate_template``, so an override that
+    drops a mandatory injection slot fails loud (and the inner cycle's round loop
+    catches it — a bad mutation scores poorly, it doesn't break the run)."""
+    overrides = _OPTIMIZER_PROMPT_OVERRIDES.get()
+    if not overrides:
+        return template
+    node_override = overrides.get(name)
+    if not isinstance(node_override, dict) or not node_override:
+        return template
+    fields = {k: v for k, v in node_override.items() if k in PromptTemplate.model_fields}
+    return template.model_copy(update=fields) if fields else template
 
 
 def list_optimizer_prompts() -> list[str]:

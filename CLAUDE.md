@@ -113,6 +113,10 @@ Before adding any new concept (class, projection, injection, prompt, field, dict
 - **New LLM call or backend match → wrap with `observed_node()`.** Unwrapped LLM calls are an automatic block.
 - **Names: distinct + self-describing.** Grep for collisions; a name that could mean three things gets renamed now — naming is cheap.
 
+## Current focus — finishing L4 (agent-driven)
+
+The project is in its **closing phase: ship a distributable `promptpotter-self`** (the optimizer optimizing its own meta-prompts). The L4 recursion itself is SHIPPED + live-validated; the remaining work is the **living finish-line plan** in [`docs/specs/l4-outer-loop.md`](docs/specs/l4-outer-loop.md) § Finish line (headroom inner benchmark `justlogic`, specialized `_optimizer_meta/` outer prompts — the gating slice, inner-spend rollup, bounded cheap default config). **The AI agent owns L4 end-to-end and drives it autonomously** — refine the plan, build the slices, commit small green arcs. Escalate to the operator ONLY for genuine actions: real multi-campaign spend approval, a provider/account change, or a compaction handoff. Do **not** open new features until the operator is satisfied the config is distributable.
+
 ## Pointers
 
 - **Architecture:** [`docs/architecture.md`](docs/architecture.md) §0/§0.5 — backbone primitives, five I/O kinds, the central loop + L1/L2/L3 escalation + L4-is-recursion, searchpoints, scoring, identity, token/cost ledger. **Extend primitives in place** — the wrong shape is meant to be hard to express, not policed by a test.

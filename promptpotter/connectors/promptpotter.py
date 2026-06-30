@@ -11,17 +11,14 @@ five-hook contract, three composable inner-cycle proxies
 (``first_round_delta`` / ``after_N_rounds_delta`` / ``rounds_to_N``), inner
 isolation under ``.runtime/inner/``, cost-realism warning.
 
-**This module is the architectural skeleton.** The five hooks are wired to
-the protocol; ``promptpotter_wire_adapter`` shapes the inner-cycle payload;
-``PromptPotterSession`` is the in-process noop session. The connector declares
-``execution="in_process"`` — the capability the loop dispatches on. The piece
-that actually runs an inner cycle (consuming the wire payload and producing
-result dicts with the three proxy metrics) is Lane C3
-(``docs/specs/roadmap.md`` § Track 1.5). Until it lands, an outer
-cycle pointed at this connector loads + validates fine, then ``BackendClient.run_query``
-raises a pointed ``NotImplementedError`` on the first inner match request —
-keyed on the declared ``in_process`` mode, not a confusing transport error
-against a backend that isn't there.
+The five hooks are wired to the protocol; ``promptpotter_wire_adapter`` shapes
+the inner-cycle payload; ``PromptPotterSession`` is the in-process noop session.
+The connector declares ``execution="in_process"`` — the capability the loop
+dispatches on. ``_in_process_run`` delegates to the inner-cycle runner in
+``application/runner/inner_recursion.py`` (the recursion is heavy orchestration;
+the connector stays a thin adapter), which mints + runs a sandboxed inner campaign
+in its own asyncio task and returns the three proxy metrics. Decided in
+``docs/specs/l4-outer-loop.md`` § 2 (in-process recursion, re-entrant isolation).
 
 Exports the ``CONNECTOR`` binding consumed by
 :data:`promptpotter.connectors.CONNECTORS`.
@@ -160,20 +157,18 @@ async def _in_process_run(query: str, payload: dict[str, Any]) -> dict[str, Any]
     """Run an inner PromptPotter cycle and return its three proxy metrics — the L4
     arm of the shared ``in_process`` seam.
 
-    The inner-cycle runner is l4-outer-loop slice 2: it must call
-    ``runner.run_optimization`` in its **own asyncio task** (so the per-task
-    ContextVars — ``_CYCLE_LEDGER`` / ``_CURRENT_ROUND`` / ``_ABORT_CHECK`` —
-    don't clobber the outer's) under a store sandbox rooted at *this* cycle's
-    ``.runtime/inner/`` (re-entrant, so L5+ nests by construction). Until that
-    lands, the arm raises a pointed error — the seam itself is wired (the sibling
-    ``llm_only`` connector exercises it), only this runner is pending.
-    """
-    raise NotImplementedError(
-        "promptpotter in-process inner-cycle runner is l4-outer-loop slice 2 "
-        "(docs/specs/l4-outer-loop.md § Implementation order). The in_process seam "
-        "is wired — the llm_only connector runs on it — only the inner-cycle "
-        f"runner is pending. (query={query!r}, nodes={sorted(payload.get('meta_prompt_overrides', {}))})"
-    )
+    Thin delegate: the recursion is heavy orchestration, so it lives in
+    ``application/runner/inner_recursion.py`` (the connector stays a thin adapter).
+    That runner calls ``run_optimization`` in its **own asyncio task** (so the
+    per-task ContextVars — ``_CYCLE_LEDGER`` / ``_CURRENT_ROUND`` / ``_ABORT_CHECK``
+    — don't clobber the outer's) under a store sandbox rooted at *this* cycle's
+    ``.runtime/inner/`` (re-entrant, so L5+ nests by construction). The spawning
+    cycle's context is published by the runner seam (``publish_inner_spawn_context``)
+    so this context-free hook can find where to sandbox + which inner benchmark to
+    run."""
+    from promptpotter.application.runner.inner_recursion import run_inner_cycle
+
+    return await run_inner_cycle(query, payload)
 
 
 CONNECTOR = Connector(
@@ -183,6 +178,9 @@ CONNECTOR = Connector(
     session_factory=PromptPotterSession,
     extract_experiment=_extract_experiment,
     in_process_run=_in_process_run,
+    # The outer "samples" are the inner tasks — read from this file in the dataset
+    # config dir and fed through ``extract_experiment`` at bootstrap (no CSV table).
+    experiment_file="inner_tasks.json",
 )
 
 

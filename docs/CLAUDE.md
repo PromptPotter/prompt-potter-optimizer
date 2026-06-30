@@ -47,13 +47,13 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 | How do I manage the sign-in allowlist / host securely? | [`operations/secure-hosting.md`](operations/secure-hosting.md) + [`adr/0004-operator-admin-channels.md`](adr/0004-operator-admin-channels.md) |
 | How do I freeze a buggy cycle as a test fixture? | [`developer/cycle-fixtures.md`](developer/cycle-fixtures.md) (`tests/fixtures/cycles/`) |
 
-## L4 — the recursion case
+## L4 — the recursion case (project's closing focus)
 
-L4 (PromptPotter optimizing its own meta-prompts) lives at the **intersection** of three docs — they form a coherent triple, read them together:
+L4 (PromptPotter optimizing its own meta-prompts) **recursion is SHIPPED & live-validated**; the project is now finishing it into a **distributable `promptpotter-self`**. An AI agent driving L4 reads **(2) first** — it is the living finish-line plan + the SoT.
 
-1. [`concepts/optimizer-of-the-optimizer.md`](concepts/optimizer-of-the-optimizer.md) — why, the three composable proxies, cost realism.
-2. [`specs/l4-outer-loop.md`](specs/l4-outer-loop.md) — the decided C3 design: in-process recursion, the shared `in_process`/`llm_only` seam, specialized outer prompts, enriched outer fitness. (Roadmap § Connectors + L4 carries the lane status.)
-3. [`../promptpotter/connectors/CLAUDE.md`](../promptpotter/connectors/CLAUDE.md) — what the connector boundary taught us; the second connector's noop session lessons; the resolved execution seam.
+1. [`concepts/optimizer-of-the-optimizer.md`](concepts/optimizer-of-the-optimizer.md) — why, the three composable proxies, cost realism (status note points back to the plan).
+2. **[`specs/l4-outer-loop.md`](specs/l4-outer-loop.md) — the living finish-line plan: § Finish line (distributable goal), § Live-run learnings (MAX_PATH flat `.inner/` registry, gsm8k→`justlogic` headroom, slice-3-is-gating), the slice order, the named seams.** Read first.
+3. [`../promptpotter/connectors/CLAUDE.md`](../promptpotter/connectors/CLAUDE.md) — the connector boundary + the shipped `in_process` seam + the flat sandbox registry.
 
 The dataset side: [`../datasets/CLAUDE.md`](../datasets/CLAUDE.md) § L4 — `promptpotter-self`.
 

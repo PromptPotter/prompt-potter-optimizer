@@ -70,8 +70,13 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # ``ExplorationConfig.enable_2pl_graduation`` (let the difficulty ruler graduate
 # 1PL->2PL where a data-rich dataset wins held-out CV; fitness-comparability slice 3).
 # A feature, justified, so the baseline rises (per the surface-ledger rule).
+# then ``modules`` 296->297: the L4 inner-cycle runner
+# (`application/runner/inner_recursion.py`) — mints + runs a sandboxed inner
+# PromptPotter campaign in its own asyncio task under the spawning cycle's
+# `.runtime/inner/`, returning the three proxy metrics (l4-outer-loop slice 2,
+# the actual L4 recursion). A feature, justified, so the baseline rises.
 LEDGER_BASELINE = {
-    "modules": 296,
+    "modules": 297,
     "init_files": 54,
     "reexport_shims": 41,
     "config_leaf_fields": 34,
