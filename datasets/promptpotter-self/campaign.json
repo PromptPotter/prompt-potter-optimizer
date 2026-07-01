@@ -14,7 +14,8 @@
       "degradation_threshold": 0.4,
       "l2_patience": 2,
       "l3_patience": 1,
-      "elimination_n_min": 6
+      "elimination_n_min": 6,
+      "spend_budget_usd": 1.0
     }
   }
 }

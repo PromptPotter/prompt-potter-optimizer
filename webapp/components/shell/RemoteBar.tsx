@@ -50,6 +50,13 @@ export function RemoteBar() {
     cycles.find((c) => c.campaign_id === campaignId && c.cycle_id === cycleId)?.human_intervened,
   );
   const spend = dash?.spend;
+  // The armed USD ceiling comes from run_limits — the single authoritative
+  // budget source (same field ChatPane's readSpend reads), never the retired
+  // spend.budget_usd, so the remote pill and the job-bar can't disagree.
+  const budgetUsd =
+    typeof dash?.run_limits?.spend_budget_usd === "number"
+      ? dash.run_limits.spend_budget_usd
+      : null;
   // The candidate currently being scored ("C3.2"). `dash.candidate` is "C3.2/4"
   // and goes stale between rounds, so surface it only while the active node is
   // the scorer — that's the window where it's the live position. This is the
@@ -102,7 +109,7 @@ export function RemoteBar() {
         {spend ? (
           <span className="remote-spend">
             ${spend.total_used_usd.toFixed(2)}
-            {spend.budget_usd != null ? ` / $${spend.budget_usd.toFixed(2)}` : ""}
+            {budgetUsd != null ? ` / $${budgetUsd.toFixed(2)}` : ""}
           </span>
         ) : null}
         {spend && spend.backend.unpriced_tokens + spend.loop.unpriced_tokens > 0 ? (

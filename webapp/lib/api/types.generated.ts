@@ -81,7 +81,6 @@ export interface SpendRollup {
   backend: SpendBucket;
   loop: SpendBucket;
   total_used_usd: number;
-  budget_usd: number | null;
 }
 
 export interface DatasetItem {

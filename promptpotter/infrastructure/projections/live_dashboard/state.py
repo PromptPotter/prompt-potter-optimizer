@@ -70,14 +70,18 @@ class SpendBucket(BaseModel):
 
 
 class SpendRollup(BaseModel):
-    """``state.spend`` — two-bucket spend rollup + total."""
+    """``state.spend`` — two-bucket spend rollup + total.
+
+    Carries spend only; the armed USD ceiling lives in ``run_limits.spend_budget_usd``
+    (the single authoritative budget source every surface reads). There is no
+    ``budget_usd`` here — it was a always-null duplicate that let the RemoteBar and
+    the chat job-bar disagree."""
 
     model_config = ConfigDict(extra="forbid")
 
     backend: SpendBucket = Field(default_factory=SpendBucket)
     loop: SpendBucket = Field(default_factory=SpendBucket)
     total_used_usd: float = 0.0
-    budget_usd: float | None = None
 
     @property
     def total_tokens_used(self) -> int:

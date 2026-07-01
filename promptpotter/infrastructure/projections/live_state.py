@@ -43,7 +43,6 @@ def empty_spend() -> dict[str, Any]:
         "backend": empty_bucket(),
         "loop": empty_bucket(),
         "total_used_usd": 0.0,
-        "budget_usd": None,
     }
 
 
@@ -71,6 +70,11 @@ def backfill_spend_rates(spend: dict[str, Any]) -> dict[str, Any]:
         sum(float(b.get("used_usd") or 0.0) for b in spend.values() if isinstance(b, dict)),
         6,
     )
+    # Drop the retired ``budget_usd`` key so an older on-disk dashboard (which
+    # carried it) still parses under SpendRollup's ``extra="forbid"``. The budget
+    # is owned by ``run_limits.spend_budget_usd`` now — this is the one load-time
+    # boundary that normalizes it away.
+    spend.pop("budget_usd", None)
     return spend
 
 
