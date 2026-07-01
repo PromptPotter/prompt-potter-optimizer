@@ -220,6 +220,7 @@ def _calibrate_delta_ruler(
         ORIGIN_ABILITY_ID,
         Observation,
         fit_theta_given_delta,
+        graded_response,
         graduate_ruler_model,
     )
     from promptpotter.application.intelligence.hard_sample_archive import (
@@ -234,7 +235,7 @@ def _calibrate_delta_ruler(
         min_grade="A",
     )
     origin_obs = [
-        Observation(ORIGIN_ABILITY_ID, int(sid), bool(r.get("hit")))
+        Observation(ORIGIN_ABILITY_ID, int(sid), graded_response(r))
         for r in origin_results or []
         if (sid := r.get("sample_id")) is not None and not is_error_result(r)
     ]
@@ -266,11 +267,12 @@ def _cumulative_theta(
     from promptpotter.application.intelligence.exploration import (
         Observation,
         fit_theta_given_delta,
+        graded_response,
     )
     from promptpotter.shared.errors import is_error_result
 
     obs = [
-        Observation(_FRONTIER_ABILITY_ID, int(sid), bool(r.get("hit")))
+        Observation(_FRONTIER_ABILITY_ID, int(sid), graded_response(r))
         for r in results
         if (sid := r.get("sample_id")) is not None and not is_error_result(r)
     ]

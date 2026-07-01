@@ -457,13 +457,13 @@ def elimination_p_best(
 
     sids = [int(s) for s in candidate_sample_ids]
     cand_obs = [
-        Observation("__cand__", sid, h) for sid, h in zip(sids, candidate_hits, strict=True)
+        Observation("__cand__", sid, float(h)) for sid, h in zip(sids, candidate_hits, strict=True)
     ]
     theta_c, se_c = fit_theta_given_delta(cand_obs, delta_scale).get("__cand__", (0.0, 0.0))
 
     per_prior: dict[str, float] = {}
     for pid, hits in paired_prior_hits.items():
-        prior_obs = [Observation(pid, sid, h) for sid, h in zip(sids, hits, strict=True)]
+        prior_obs = [Observation(pid, sid, float(h)) for sid, h in zip(sids, hits, strict=True)]
         theta_p, se_p = fit_theta_given_delta(prior_obs, delta_scale).get(pid, (0.0, 0.0))
         denom = math.sqrt(se_c * se_c + se_p * se_p)
         if denom > 1e-12:

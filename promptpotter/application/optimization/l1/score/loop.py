@@ -15,6 +15,7 @@ from promptpotter.application.intelligence.exploration import (
     Observation,
     RaschPosterior,
     fit_rasch,
+    graded_response,
 )
 from promptpotter.application.optimization.l1.score.candidate import score_one_candidate
 from promptpotter.application.optimization.l1.score.signal_effect import CandidateOutcome
@@ -134,7 +135,7 @@ async def score_population(
                 Observation(
                     candidate_id=cid,
                     sample_id=int(r["sample_id"]),
-                    hit=bool(r.get("hit")),
+                    response=graded_response(r),
                 )
                 for r in valid
             )
@@ -235,8 +236,10 @@ async def score_population(
             _idx: int = idx,
             _steps: list[SampleOrderStep] = order_steps,
         ) -> int | None:
+            # The online picker folds BINARY step outcomes (sample SELECTION heuristic — a
+            # separate mechanism from winner election); coerce to the graded field type.
             extra = [
-                Observation(candidate_id=_cid, sample_id=sid, hit=hit)
+                Observation(candidate_id=_cid, sample_id=sid, response=float(hit))
                 for sid, hit in scored_outcomes.items()
             ]
             d_map, d_se_map, p_var, s_mu, s_var = _fit_queue_mechanism(extra)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.intelligence.exploration import Observation
+from promptpotter.application.intelligence.exploration import Observation, graded_response
 from promptpotter.application.intelligence.hard_sample_sorter import (
     build_hard_samples_artifact_from_observations,
 )
@@ -31,7 +31,7 @@ def build_archive_observations(
     include_unknown: bool = False,
     min_grade: str | None = None,
 ) -> list[Observation]:
-    """Walk the measurement store → ``Observation(content_hash[:12], sample_id, hit)`` triples.
+    """Walk the measurement store → ``Observation(content_hash[:12], sample_id, response)`` triples.
 
     ``dataset_name=None`` is admin/forensic only — prevents cross-dataset ``sample_id`` pollution.
 
@@ -67,7 +67,7 @@ def build_archive_observations(
                 Observation(
                     candidate_id=candidate_id,
                     sample_id=int(sid),
-                    hit=bool(item.get("hit")),
+                    response=graded_response(item),
                 )
             )
     return obs

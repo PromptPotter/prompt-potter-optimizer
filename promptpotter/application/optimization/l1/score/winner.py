@@ -301,11 +301,12 @@ async def l1_score(
         from promptpotter.application.intelligence.exploration import (
             Observation,
             fit_theta_given_delta,
+            graded_response,
         )
         from promptpotter.shared.errors import is_error_result
 
         winner_obs = [
-            Observation(winner_id, int(sid), bool(r.get("hit")))
+            Observation(winner_id, int(sid), graded_response(r))
             for r in best_results
             if (sid := r.get("sample_id")) is not None and not is_error_result(r)
         ]

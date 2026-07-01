@@ -442,12 +442,15 @@ async def prepare_scoring_context(
 
     campaign_rounds: list[dict[str, Any]] = []
     origin_results: list[Any] = []
-    if not (
-        campaign_config is not None
-        and svc is not None
-        and dataset
-        and resolved_origin.render().strip()
-    ):
+    # The origin is scoreable when there is a runnable program — non-empty rendered prose
+    # OR a pipeline that defines node config. An L4 outer origin renders empty (its
+    # meta-prompts inject via the `_optimizer_meta` override channel, not the OSP prose);
+    # its program lives entirely in ``pipeline_params``. Gating on prose alone skipped the
+    # origin pass for L4, leaving round 0 with zero results → no baseline for the election.
+    has_program = bool(resolved_origin.render().strip()) or any(
+        isinstance(v, dict) and v for v in (pipeline_params or {}).values()
+    )
+    if not (campaign_config is not None and svc is not None and dataset and has_program):
         return resolved_origin, dataset, campaign_rounds, origin_results
 
     from promptpotter.application.scoring.formula import split_scoring_block

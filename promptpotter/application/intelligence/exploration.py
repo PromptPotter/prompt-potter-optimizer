@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import numpy as np
 
@@ -41,17 +41,32 @@ __all__ = [
     "fit_rasch",
     "fit_rasch_2pl",
     "fit_theta_given_delta",
+    "graded_response",
     "graduate_ruler_model",
     "select_round_subset",
 ]
 
 
 class Observation(NamedTuple):
-    """One ``(candidate, sample, hit)`` triple."""
+    """One ``(candidate, sample, response)`` triple. ``response`` is the sample's
+    **graded** per-sample fitness ∈ [0,1] — the same continuous score accuracy
+    (mean fitness) and ``paired_fitness`` read, NOT a binarized ``hit``. The
+    logistic MAP maximizes cross-entropy ``Σ y·log p + (1−y)·log(1−p)`` (valid for
+    any y ∈ [0,1]), so a binary dataset (y ∈ {0,1}) is bit-identical to the old
+    ``hit`` path while a continuous-fitness backend (reciprocal-rank matching, the
+    L4 outer proxy) keeps its gradient instead of collapsing to all-miss θ."""
 
     candidate_id: str
     sample_id: int
-    hit: bool
+    response: float
+
+
+def graded_response(result: Mapping[str, Any]) -> float:
+    """The per-sample graded response for a result dict — its ``fitness`` clamped to
+    [0,1] (the logistic likelihood needs y ∈ [0,1]). One reader so every θ/δ fit
+    sees the same graded signal the composite does; supersedes the old
+    ``bool(result.get("hit"))`` binarization at every ``Observation`` build site."""
+    return min(max(float(result.get("fitness", 0.0) or 0.0), 0.0), 1.0)
 
 
 def _ruler_entry(value: RulerEntry) -> tuple[float, float]:
@@ -192,7 +207,7 @@ def fit_rasch(
 
     rows = np.fromiter((c_idx[o.candidate_id] for o in observations), dtype=np.int64)
     cols = np.fromiter((s_idx[o.sample_id] for o in observations), dtype=np.int64)
-    hits = np.fromiter((1.0 if o.hit else 0.0 for o in observations), dtype=np.float64)
+    hits = np.fromiter((o.response for o in observations), dtype=np.float64)
 
     sigma_theta, sigma_delta, mu_delta = _INIT_SIGMA_THETA, _INIT_SIGMA_DELTA, 0.0
     theta = delta = se_theta = se_delta = np.empty(0)
@@ -278,17 +293,17 @@ def fit_theta_given_delta(
     an empty ruler ``{}`` ⇒ every θ is plain logit-accuracy. Returns
     ``{candidate_id: (theta, theta_se)}``; only a candidate with *no* observation is omitted.
     """
-    by_c: dict[str, list[tuple[float, float, bool]]] = {}
+    by_c: dict[str, list[tuple[float, float, float]]] = {}
     for o in observations:
         d, a = _ruler_entry(delta.get(o.sample_id, 0.0))
-        by_c.setdefault(o.candidate_id, []).append((d, a, o.hit))
+        by_c.setdefault(o.candidate_id, []).append((d, a, o.response))
 
     out: dict[str, tuple[float, float]] = {}
     inv_var = 1.0 / (sigma_theta * sigma_theta)
     for cid, rows in by_c.items():
         d_arr = np.fromiter((d for d, _, _ in rows), dtype=np.float64)
         a_arr = np.fromiter((a for _, a, _ in rows), dtype=np.float64)
-        h_arr = np.fromiter((1.0 if hit else 0.0 for _, _, hit in rows), dtype=np.float64)
+        h_arr = np.fromiter((y for _, _, y in rows), dtype=np.float64)
         theta = 0.0
         for _ in range(max_iter):
             p = 1.0 / (1.0 + np.exp(-np.clip(a_arr * (theta - d_arr), -50, 50)))
@@ -341,7 +356,7 @@ def fit_rasch_2pl(
 
     rows = np.fromiter((c_idx[o.candidate_id] for o in observations), dtype=np.int64)
     cols = np.fromiter((s_idx[o.sample_id] for o in observations), dtype=np.int64)
-    hits = np.fromiter((1.0 if o.hit else 0.0 for o in observations), dtype=np.float64)
+    hits = np.fromiter((o.response for o in observations), dtype=np.float64)
 
     theta = np.array([base.theta[cid] for cid in candidate_ids], dtype=np.float64)
     delta = np.array([base.delta[sid] for sid in sample_ids], dtype=np.float64)
@@ -429,18 +444,20 @@ def fit_rasch_2pl(
     )
 
 
-def _logp(hit: bool, theta: float, delta: float, a: float) -> float:
-    """Log-likelihood of one held-out response under ``p = σ(a·(θ−δ))``."""
+def _logp(y: float, theta: float, delta: float, a: float) -> float:
+    """Cross-entropy log-likelihood of one held-out graded response ``y ∈ [0,1]``
+    under ``p = σ(a·(θ−δ))``: ``y·log p + (1−y)·log(1−p)`` (reduces to the binary
+    branch when ``y ∈ {0,1}``)."""
     p = 1.0 / (1.0 + np.exp(-float(np.clip(a * (theta - delta), -50, 50))))
     p = min(max(p, 1e-9), 1.0 - 1e-9)
-    return float(np.log(p if hit else 1.0 - p))
+    return float(y * np.log(p) + (1.0 - y) * np.log(1.0 - p))
 
 
 def _full_loglik(observations: list[Observation], post: RaschPosterior) -> float:
     """In-sample log-likelihood of a fit over all its observations (for the BIC pre-check)."""
     return sum(
         _logp(
-            o.hit,
+            o.response,
             post.theta.get(o.candidate_id, 0.0),
             post.delta.get(o.sample_id, 0.0),
             post.discrimination.get(o.sample_id, 1.0),
@@ -473,9 +490,9 @@ def _cv_loglik(observations: list[Observation], n_folds: int) -> tuple[float, fl
         for o in test:
             if o.candidate_id not in f1.theta or o.sample_id not in f1.delta:
                 continue
-            ll_1 += _logp(o.hit, f1.theta[o.candidate_id], f1.delta[o.sample_id], 1.0)
+            ll_1 += _logp(o.response, f1.theta[o.candidate_id], f1.delta[o.sample_id], 1.0)
             ll_2 += _logp(
-                o.hit,
+                o.response,
                 f2.theta.get(o.candidate_id, 0.0),
                 f2.delta.get(o.sample_id, 0.0),
                 f2.discrimination.get(o.sample_id, 1.0),
@@ -531,7 +548,7 @@ def graduate_ruler_model(
 
 
 def build_observations(rounds: list[RoundResult]) -> list[Observation]:
-    """Flatten ``cycle.rounds`` into ``(candidate, sample, hit)`` triples; skip errors."""
+    """Flatten ``cycle.rounds`` into ``(candidate, sample, response)`` triples; skip errors."""
     obs: list[Observation] = []
     for rr in rounds:
         for cid, results in rr.all_candidate_results.items():
@@ -540,7 +557,7 @@ def build_observations(rounds: list[RoundResult]) -> list[Observation]:
                 if sid is None or is_error_result(r):
                     continue
                 obs.append(
-                    Observation(candidate_id=cid, sample_id=int(sid), hit=bool(r.get("hit")))
+                    Observation(candidate_id=cid, sample_id=int(sid), response=graded_response(r))
                 )
     return obs
 
@@ -570,7 +587,9 @@ def candidate_abilities(
             sid = r.get("sample_id")
             if sid is None or is_error_result(r):
                 continue
-            obs.append(Observation(candidate_id=cid, sample_id=int(sid), hit=bool(r.get("hit"))))
+            obs.append(
+                Observation(candidate_id=cid, sample_id=int(sid), response=graded_response(r))
+            )
     fit = fit_theta_given_delta(obs, delta_scale)
     split = {int(sid): _ruler_entry(v) for sid, v in delta_scale.items()}
     return RaschPosterior(

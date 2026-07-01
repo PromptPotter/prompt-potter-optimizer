@@ -269,6 +269,7 @@ def _frontier_theta_by_round(
     from promptpotter.application.intelligence.exploration import (
         Observation,
         fit_theta_given_delta,
+        graded_response,
     )
     from promptpotter.shared.errors import is_error_result
 
@@ -284,7 +285,7 @@ def _frontier_theta_by_round(
             if sid is not None:
                 frontier[sid] = res
         obs = [
-            Observation(_FRONTIER_ID, int(sid), bool(res.get("hit")))
+            Observation(_FRONTIER_ID, int(sid), graded_response(res))
             for res in frontier.values()
             if (sid := res.get("sample_id")) is not None and not is_error_result(res)
         ]

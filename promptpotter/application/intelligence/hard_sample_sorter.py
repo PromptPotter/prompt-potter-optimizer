@@ -26,25 +26,23 @@ ARTIFACT_SCHEMA_VERSION = 3
 
 
 def _candidate_hit_rates(observations: list[Observation]) -> dict[str, float]:
-    """Mean hit rate per candidate; θ_c tie-breaker."""
+    """Mean graded response per candidate; θ_c tie-breaker (= hit rate on binary data)."""
     totals: dict[str, int] = {}
-    hits: dict[str, int] = {}
+    resp: dict[str, float] = {}
     for o in observations:
         totals[o.candidate_id] = totals.get(o.candidate_id, 0) + 1
-        if o.hit:
-            hits[o.candidate_id] = hits.get(o.candidate_id, 0) + 1
-    return {cid: hits.get(cid, 0) / n for cid, n in totals.items() if n > 0}
+        resp[o.candidate_id] = resp.get(o.candidate_id, 0.0) + o.response
+    return {cid: resp.get(cid, 0.0) / n for cid, n in totals.items() if n > 0}
 
 
 def _sample_miss_rates(observations: list[Observation]) -> dict[int, float]:
-    """Mean miss rate per sample; δ_s tie-breaker."""
+    """Mean graded miss (1 − response) per sample; δ_s tie-breaker (= miss rate on binary data)."""
     totals: dict[int, int] = {}
-    misses: dict[int, int] = {}
+    misses: dict[int, float] = {}
     for o in observations:
         totals[o.sample_id] = totals.get(o.sample_id, 0) + 1
-        if not o.hit:
-            misses[o.sample_id] = misses.get(o.sample_id, 0) + 1
-    return {sid: misses.get(sid, 0) / n for sid, n in totals.items() if n > 0}
+        misses[o.sample_id] = misses.get(o.sample_id, 0.0) + (1.0 - o.response)
+    return {sid: misses.get(sid, 0.0) / n for sid, n in totals.items() if n > 0}
 
 
 def _pick_score_under_prior(
@@ -184,7 +182,7 @@ def build_hard_samples_artifact_from_observations(
     samp_set = set(sample_order)
 
     cells = [
-        {"c": o.candidate_id, "s": int(o.sample_id), "hit": bool(o.hit)}
+        {"c": o.candidate_id, "s": int(o.sample_id), "hit": o.response >= 1.0}
         for o in observations
         if o.candidate_id in cand_set and o.sample_id in samp_set
     ]

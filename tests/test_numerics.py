@@ -529,7 +529,9 @@ def _synth_observations(
         for sid, d in delta_true.items():
             p = 1.0 / (1.0 + np.exp(-(t - d)))
             for _ in range(n_per_pair):
-                obs.append(Observation(candidate_id=cid, sample_id=sid, hit=bool(rng.random() < p)))
+                obs.append(
+                    Observation(candidate_id=cid, sample_id=sid, response=float(rng.random() < p))
+                )
     return obs
 
 
@@ -592,13 +594,13 @@ def test_fit_theta_given_delta_is_subset_invariant_unlike_accuracy() -> None:
         obs: list[Observation] = []
         for sid in sids:
             p = 1.0 / (1.0 + np.exp(-(theta - ruler[sid])))
-            obs.extend(Observation(cid, sid, bool(rng.random() < p)) for _ in range(n))
+            obs.extend(Observation(cid, sid, float(rng.random() < p)) for _ in range(n))
         return obs
 
     able = measure("able", 1.5, hard)  # high ability, hard subset → low accuracy
     weak = measure("weak", -0.5, easy)  # low ability, easy subset → high accuracy
-    able_acc = sum(o.hit for o in able) / len(able)
-    weak_acc = sum(o.hit for o in weak) / len(weak)
+    able_acc = sum(o.response for o in able) / len(able)
+    weak_acc = sum(o.response for o in weak) / len(weak)
     assert weak_acc > able_acc  # raw accuracy INVERTS the true ability
 
     fit = fit_theta_given_delta(able + weak, ruler)
@@ -644,8 +646,8 @@ def test_2pl_recovers_discrimination_and_seam_is_invisible_when_flat() -> None:
     the moment a dataset graduated — a wrong winner with no error. And if 2PL couldn't
     recover discrimination, signal-chasing/weighting would key on noise."""
     # Seam invariance: a (δ, 1.0) ruler must give bit-identical θ to a bare-δ ruler.
-    obs = [Observation("c1", s, hit=(s % 2 == 0)) for s in range(8)] + [
-        Observation("c2", s, hit=(s % 3 == 0)) for s in range(8)
+    obs = [Observation("c1", s, float(s % 2 == 0)) for s in range(8)] + [
+        Observation("c2", s, float(s % 3 == 0)) for s in range(8)
     ]
     bare = {s: 0.2 * s - 1.0 for s in range(8)}
     tupled = {s: (0.2 * s - 1.0, 1.0) for s in range(8)}
@@ -2087,11 +2089,11 @@ def test_pick_score_artifact_ranks_contested_above_settled() -> None:
 
     obs = [
         # Sample 1: settled-easy (all HIT); sample 2: split (contestable).
-        *[Observation(candidate_id=c, sample_id=1, hit=True) for c in "abcd"],
-        Observation(candidate_id="a", sample_id=2, hit=True),
-        Observation(candidate_id="b", sample_id=2, hit=False),
-        Observation(candidate_id="c", sample_id=2, hit=True),
-        Observation(candidate_id="d", sample_id=2, hit=False),
+        *[Observation(candidate_id=c, sample_id=1, response=1.0) for c in "abcd"],
+        Observation(candidate_id="a", sample_id=2, response=1.0),
+        Observation(candidate_id="b", sample_id=2, response=0.0),
+        Observation(candidate_id="c", sample_id=2, response=1.0),
+        Observation(candidate_id="d", sample_id=2, response=0.0),
     ]
     artifact = build_hard_samples_artifact_from_observations(obs)
     assert artifact["schema_version"] == ARTIFACT_SCHEMA_VERSION == 3
