@@ -228,7 +228,7 @@ class L2L3Memory(BaseModel):
         default_factory=default_l1_layout,
         description=(
             "L2-authored ordered list of injection slots that "
-            "``DispatchHub.fill_l1`` walks to compose the L1 meta-prompt. "
+            "``DispatchHub.fill`` walks to compose the L1 meta-prompt. "
             "L2's primary lever for changing what evidence L1 sees."
         ),
     )

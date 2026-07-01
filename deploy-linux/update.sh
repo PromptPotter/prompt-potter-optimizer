@@ -42,6 +42,12 @@ sync "$INSTALL_DIR"
 # uv is fetched to ~/.local/bin (outside .venv, so a sync never wipes it).
 command -v uv >/dev/null 2>&1 || { command -v "$HOME/.local/bin/uv" >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh; }
 ( cd "$INSTALL_DIR" && PATH="$HOME/.local/bin:$PATH" uv sync --frozen --extra all )
+# A dep rebuild relabels new .venv files user_home_t; re-apply the persisted
+# bin_t rule (set by install-service.sh) so systemd can still exec them under
+# SELinux enforcing — otherwise the service silently 203/EXEC crash-loops.
+if command -v getenforce >/dev/null 2>&1 && [[ "$(getenforce)" == "Enforcing" ]]; then
+  sudo restorecon -RF "$INSTALL_DIR/.venv/bin"
+fi
 [[ -d "$INSTALL_DIR/$WEBAPP_DIR" ]] && ( cd "$INSTALL_DIR/$WEBAPP_DIR" && npm install --silent && npm run build:deploy )
 sudo systemctl restart "$SERVICE_NAME"
 

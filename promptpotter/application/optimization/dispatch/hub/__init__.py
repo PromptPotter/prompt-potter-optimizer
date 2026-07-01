@@ -3,12 +3,12 @@
 This package participates in **dispatch** as the single info-ingress to
 prompts. Owns the injection registry (:data:`INJECTIONS`), the
 :class:`InjectionKind` classification, the typed
-:class:`InjectionBundle` per-call state, and the two rendering paths:
+:class:`InjectionBundle` per-call state, and the one rendering path:
 
-* :meth:`DispatchHub.fill_l1` — resolves L2-authored ``opt_sp.memory.l1_layout``
-  for L1_GENERATE.
-* :meth:`DispatchHub.fill_fixed` — walks a fixed template's body for
-  L1_CRITIQUE / L2 / L3 and produces a ``{name → rendered}`` dict.
+* :meth:`DispatchHub.fill` — fills a node's layout (``NODE_LAYOUTS[node]`` floor,
+  or L2-authored ``opt_sp.memory.l1_layout`` for ``l1_generate``) and resolves any
+  injection tokens left in non-layout prose → ``(filled_template, injection_vars)``.
+  One path for every optimizer node.
 
 To add an input to any prompt, add an injection in :mod:`injections`.
 Anything else is drift. Every renderer is layer-agnostic — same render

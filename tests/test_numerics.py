@@ -1000,7 +1000,11 @@ from promptpotter.domain.escalation_signals import (  # noqa: E402
     EscalationTarget,
     NurseOwner,
 )
-from promptpotter.domain.l1_layout import L1Layout, validate_l1_layout  # noqa: E402
+from promptpotter.domain.l1_layout import (  # noqa: E402
+    NODE_LAYOUTS,
+    L1Layout,
+    validate_l1_layout,
+)
 from promptpotter.domain.opt_search_point import OptSearchPoint  # noqa: E402
 from promptpotter.domain.results import CandidateProposal, ScoredCandidate  # noqa: E402
 from promptpotter.domain.search_point import TaskDecomposition  # noqa: E402
@@ -1385,7 +1389,7 @@ def test_run_l3_output_validators_aggregates():
     ],
 )
 def test_layout_hard_failures(layout, expected_validator_id):
-    result = validate_l1_layout(layout)
+    result = validate_l1_layout(layout, spec=NODE_LAYOUTS["l1_generate"])
     assert result.is_valid is False
     assert expected_validator_id in {o.validator_id for o in result.outcomes}
 

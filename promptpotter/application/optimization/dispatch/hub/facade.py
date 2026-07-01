@@ -1,8 +1,9 @@
 """`DispatchHub` façade + ``build_bundle`` + load-time template validation.
 
 * `build_bundle` — snapshot live ``Cycle`` state into a frozen ``InjectionBundle``.
-* `fill_l1` — resolve L2-authored `opt_sp.memory.l1_layout` for L1_GENERATE, return modified PromptTemplate.
-* `fill_fixed` — walk a fixed template body (L1_CRITIQUE / L2 / L3) → `{name: rendered}` dict.
+* `fill` — fill a node's layout (`NODE_LAYOUTS[node]` floor, or L2-authored for `l1_generate`)
+  and resolve any injection tokens left in non-layout prose → `(filled_template, injection_vars)`.
+  One path for every optimizer node (was two: `fill_l1` for L1 + `fill_fixed` for the rest).
 
 `validate_template` raises at load time on typos so they don't silently render to empty.
 
@@ -134,13 +135,27 @@ class DispatchHub:
         return text
 
     @staticmethod
-    def fill_l1(
+    def fill(
         template: PromptTemplate,
         layout: L1Layout,
         bundle: InjectionBundle,
-    ) -> PromptTemplate:
-        """Append layout-driven content to L1's per-slot text. Slots outside L1_LAYOUT_SLOTS pass through;
-        remaining ``{{var}}`` are caller extras."""
+    ) -> tuple[PromptTemplate, dict[str, str]]:
+        """Fill a node's layout + resolve any injection tokens left in non-layout slots.
+
+        Two rendering channels, one call — every optimizer node routes through here:
+
+        1. **Layout slots** (``L1_LAYOUT_SLOTS``): append the ``layout``-driven injection
+           content to each slot's static text (empty static ⇒ the joined content *is*
+           the slot). This is the searchable information-flow axis.
+        2. **Non-layout slots** (``instruction`` / ``answer_format`` — prose that embeds
+           ``{{token}}``s like ``rebase_capability``): scan the filled body and render any
+           remaining ``INJECTIONS`` token into a kwargs dict for ``compile_prompt``. Tokens
+           not in ``INJECTIONS`` (caller extras like ``n_variants``; a backend's own
+           ``{{query}}`` echoed inside ``rendered_prompt``) are left for the caller / backend.
+
+        Returns ``(filled_template, injection_vars)``; the caller merges its own extras
+        onto ``injection_vars`` and passes both to ``run_optimizer_node``.
+        """
         rendered = {name: DispatchHub.render(name, bundle) for name in layout.all_placeholders()}
 
         update: dict[str, str] = {}
@@ -152,15 +167,13 @@ class DispatchHub:
                 update[slot] = (static + "\n\n" + joined) if static else joined
             else:
                 update[slot] = static
-        return template.model_copy(update=update)
+        filled = template.model_copy(update=update)
 
-    @staticmethod
-    def fill_fixed(template: PromptTemplate, bundle: InjectionBundle) -> dict[str, str]:
-        """Resolve every ``{{name}}`` via INJECTIONS → kwargs for ``compile_prompt(**hub, **extras)``.
-        Names not in INJECTIONS skipped (caller fills as extras)."""
-        text = template.render()
-        expected = set(_PLACEHOLDER_RE.findall(text))
-        return {name: DispatchHub.render(name, bundle) for name in expected if name in INJECTIONS}
+        remaining = set(_PLACEHOLDER_RE.findall(filled.render()))
+        injection_vars = {
+            name: DispatchHub.render(name, bundle) for name in remaining if name in INJECTIONS
+        }
+        return filled, injection_vars
 
 
 def build_bundle(

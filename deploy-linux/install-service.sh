@@ -22,6 +22,19 @@ die()  { printf '\033[1;31mxx \033[0m %s\n' "$*" >&2; exit 1; }
 [[ -d "$INSTALL_DIR/.venv" ]] || die "no .venv at $INSTALL_DIR — run bootstrap.sh first"
 [[ -f "$INSTALL_DIR/.env" ]]  || die "no .env at $INSTALL_DIR — run bootstrap.sh first"
 
+# --- SELinux: let systemd exec the venv (Fedora/RHEL enforcing) ----------
+# A venv under $HOME is labeled user_home_t; a confined service domain can't
+# execute it, so systemd fails EXEC with 203/"Permission denied" (silent
+# crash-loop). Persist a bin_t label on .venv/bin and apply it. update.sh
+# re-applies it after each dep rebuild. No-op where SELinux is off/absent.
+if command -v getenforce >/dev/null 2>&1 && [[ "$(getenforce)" == "Enforcing" ]]; then
+    say "SELinux enforcing — labeling $INSTALL_DIR/.venv/bin bin_t"
+    command -v semanage >/dev/null 2>&1 || sudo dnf install -y policycoreutils-python-utils
+    sudo semanage fcontext -a -t bin_t "$INSTALL_DIR/.venv/bin(/.*)?" 2>/dev/null \
+        || sudo semanage fcontext -m -t bin_t "$INSTALL_DIR/.venv/bin(/.*)?"
+    sudo restorecon -RF "$INSTALL_DIR/.venv/bin"
+fi
+
 UNIT_FILE=/etc/systemd/system/$SERVICE_NAME.service
 say "writing $UNIT_FILE (user=$RUN_USER, bind=$BIND_HOST:$BIND_PORT)"
 

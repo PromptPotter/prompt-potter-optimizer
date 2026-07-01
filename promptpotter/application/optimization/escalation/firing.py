@@ -39,7 +39,12 @@ from promptpotter.application.optimization.resume_and_fork import (
 )
 from promptpotter.application.optimization.validators.l2_output import run_l2_output_validators
 from promptpotter.application.optimization.validators.l3_output import run_l3_output_validators
-from promptpotter.domain.l1_layout import L1Layout, coerce_l1_layout, validate_l1_layout
+from promptpotter.domain.l1_layout import (
+    NODE_LAYOUTS,
+    L1Layout,
+    coerce_l1_layout,
+    validate_l1_layout,
+)
 from promptpotter.domain.opt_search_point import (
     L1SituationalExample,
     L1SupplementalRule,
@@ -148,7 +153,11 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, prompt: str) -> Tran
     layout_outcomes: list[ValidatorOutcome] = []
     accepted_layout: L1Layout | None = None
     if proposed_layout is not None:
-        layout_result = validate_l1_layout(proposed_layout, prior_layout=opt_sp.memory.l1_layout)
+        layout_result = validate_l1_layout(
+            proposed_layout,
+            spec=NODE_LAYOUTS["l1_generate"],
+            prior_layout=opt_sp.memory.l1_layout,
+        )
         layout_outcomes = list(layout_result.outcomes)
         if layout_result.is_valid:
             accepted_layout = proposed_layout
@@ -388,7 +397,9 @@ def apply_fork_payload_to_osp(opt_sp: OptSearchPoint, payload: ForkSpec) -> None
                 "Expect a dict whose keys are L1 layout slots and values are lists of "
                 "placeholder names."
             )
-        result = validate_l1_layout(layout, prior_layout=opt_sp.memory.l1_layout)
+        result = validate_l1_layout(
+            layout, spec=NODE_LAYOUTS["l1_generate"], prior_layout=opt_sp.memory.l1_layout
+        )
         if not result.is_valid:
             ids = sorted({o.validator_id for o in result.outcomes})
             raise ValueError(f"Fork payload l1_layout failed hard validators: {ids}")
@@ -427,11 +438,15 @@ async def _run_transition(
         campaign_id=tracing_campaign_id,
         round_num=round_num,
     ):
-        template = load_optimizer_prompt(transition.template_name)
-        prompt_vars = DispatchHub.fill_fixed(template, build_bundle(cycle))
+        template, prompt_vars = DispatchHub.fill(
+            load_optimizer_prompt(transition.template_name),
+            NODE_LAYOUTS[transition.template_name].floor,
+            build_bundle(cycle),
+        )
         raw, prompt, _ = await run_optimizer_node(
             template_name=transition.template_name,
             prompt_vars=prompt_vars,
+            template=template,
             context=LLMCallContext(
                 ledger=cycle.session.state.ledger,
                 round_num=round_num,

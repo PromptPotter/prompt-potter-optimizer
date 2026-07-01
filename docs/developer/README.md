@@ -37,14 +37,14 @@ persona → task_intent → problem_description → instruction
 
 ### Per-layer composition
 
-| Layer | Composition path | What L2 controls |
-|-------|------------------|------------------|
-| L1 generate | `fill_l1(template, opt_sp.l1_layout, bundle)` — appends injections to slots | the layout (per-slot injection lists) |
-| L1 critique | `fill_fixed(template, bundle)` — resolves `{{name}}` placeholders | (none — internal) |
-| L2 context | `fill_fixed(template, bundle)` | (none) |
-| L3 plan | `fill_fixed(template, bundle)` | (none) |
+| Layer | Composition path | Layout source |
+|-------|------------------|---------------|
+| L1 generate | `fill(template, opt_sp.l1_layout, bundle)` | L2's live `opt_sp.l1_layout` |
+| L1 critique | `fill(template, NODE_LAYOUTS["l1_critique"].floor, bundle)` | node floor (L4-editable, slice 6) |
+| L2 context | `fill(template, NODE_LAYOUTS["l2_context"].floor, bundle)` | node floor |
+| L3 plan | `fill(template, NODE_LAYOUTS["l3_plan"].floor, bundle)` | node floor |
 
-L1 generate is the only layer with an L2-mutable layout; the rest run on fixed templates whose placeholders are all in `INJECTIONS`. Same hub, same registry, same `InjectionBundle` for every call.
+Every node fills through the one `fill` path from its `NodeLayoutSpec` (`domain/l1_layout.py::NODE_LAYOUTS`); `l1_generate` is the only layer whose layout is *also* L2-mutable in-campaign. Same hub, same registry, same `InjectionBundle` for every call.
 
 ### Field channels between layers
 
@@ -52,7 +52,7 @@ L1 generate is the only layer with an L2-mutable layout; the rest run on fixed t
 |-------|--------|-----------|----------|
 | `RoundResult.critique` | L1 critique | L2, L3 (`critique` injection via `cycle.latest_round.critique`) | per round (lives on the round audit, not OSP) |
 | `OSP.memory.task_context` | L2 (refines via merge) | L1, L1 critique, L2, L3 (`task_context` injection — broadcast) | persistent, accumulative; inherits through `mutate()` |
-| `OSP.memory.l1_layout` | L2 | L1 generate (`fill_l1`) | persistent (on `L2L3Memory`, copied on adopt) |
+| `OSP.memory.l1_layout` | L2 | L1 generate (`fill`) | persistent (on `L2L3Memory`, copied on adopt) |
 | `OSP.plan` | L3 | every prompt (`plan` injection in all 4 templates) | persistent — never cleared |
 | `OSP.memory.wounds.l3_note` | L3 | L2 (`l3_to_l2_note` injection — L2 template only) | persistent until L3 next fires |
 | `OSP.memory.wounds.l2_guard_breaches` | L2 parser + layout validator | L3 (`l2_guard_breaches` injection) | persistent until L3 fires |

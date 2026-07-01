@@ -57,6 +57,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.infrastructure.store.base import read_json_optional
 
 if TYPE_CHECKING:
@@ -303,8 +304,12 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
     ``{"data": {…}}`` shape ``measure_sample`` parses from an HTTP body — so the
     outer scorer reads an inner result identically to a remote one.
 
-    Any inner failure degrades to a zero-improvement result (the outer candidate
-    scores poorly) rather than propagating up and killing the outer cycle."""
+    A TOOLING failure (``StopOutcome.FAILED`` — inner timeout/crash/diverge/render
+    error, however it surfaced) RAISES, so ``measure_sample`` excludes it as one
+    error row (missing data, not a real proxy) instead of scoring a false floor
+    that mimics a bad mutation. A completed inner run that merely failed to improve
+    returns normally with poor proxies (measured, so a bad mutation is penalised).
+    One excluded sample cannot kill the outer cycle."""
     ctx = _INNER_SPAWN.get()
     if ctx is None:
         raise RuntimeError(
@@ -315,29 +320,30 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
     overrides = payload.get("meta_prompt_overrides") or {}
 
     start = time.monotonic()
-    inner_spend: CycleSpend | None = None
-    try:
-        # Fresh task = its own ContextVar copies (ledger / round / abort / prompt
-        # overrides). create_task copies the current context at creation; the
-        # inner run re-binds its copies, leaving the outer's untouched.
-        result = await asyncio.create_task(_run_inner_campaign(ctx, spec, overrides))
-        inner_spend = result.spend
-        proxies = _compute_proxies(result, spec.target)
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        raise
-    except Exception:
-        # A crashed inner cycle is the WORST outcome (a meta-prompt that broke the inner run),
-        # scored strictly below any completed run: floor deltas at -1.0 (→ 0 under the
-        # recentred outer formula) and use the SAME "never reached" sentinel a completed-but-
-        # -unimproved run uses (spec.n_rounds + 1), not a magic 99 — so the rounds term stays
-        # on one scale. Degrade rather than propagate: one broken meta-prompt must not kill the
-        # whole outer cycle.
-        logger.exception("inner cycle for %s failed; scoring as worst-case", query)
-        proxies = {
-            "first_round_delta": -1.0,
-            "after_N_rounds_delta": -1.0,
-            "rounds_to_N": spec.n_rounds + 1,
-        }
+    # Fresh task = its own ContextVar copies (ledger / round / abort / prompt
+    # overrides). create_task copies the current context at creation; the
+    # inner run re-binds its copies, leaving the outer's untouched.
+    #
+    # A TOOLING failure (the inner optimizer timed out, crashed, diverged, or hit
+    # a render error) is NOT evidence the outer meta-prompt mutation was bad — it
+    # is missing data. Scoring it as a real proxy (the old -1.0 floor) is
+    # indistinguishable from a genuinely-regressing mutation and silently corrupts
+    # the outer signal. So we RAISE on a FAILED outcome, whether it surfaced as a
+    # returned ``stop_reason`` (e.g. OPTIMIZER_TIMEOUT — the runner returns it, it
+    # does not raise) or as an exception. ``measure_sample``'s own catch-all turns
+    # that raise into one EXCLUDED error row (out of hits/accuracy/rescore/θ), so
+    # the candidate is scored on its surviving samples and one broken inner cycle
+    # still cannot kill the outer cycle. A completed inner run that merely failed
+    # to improve is a SUCCESS outcome (MAX_ROUNDS) with poor proxies — measured,
+    # not excluded — so a bad mutation is still penalised.
+    result = await asyncio.create_task(_run_inner_campaign(ctx, spec, overrides))
+    if stop_reason_outcome(result.stop_reason) is StopOutcome.FAILED:
+        raise RuntimeError(
+            f"inner cycle for {query} failed as tooling (stop_reason="
+            f"{result.stop_reason}); excluding this outer sample, not scoring it"
+        )
+    inner_spend: CycleSpend | None = result.spend
+    proxies = _compute_proxies(result, spec.target)
     elapsed = time.monotonic() - start
 
     data: dict[str, Any] = {

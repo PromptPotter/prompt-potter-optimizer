@@ -15,6 +15,7 @@ own.
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -130,6 +131,19 @@ def prepare_fresh_cycle(
     plan = resolve_cycle_plan(
         session, campaign_config, dataset, origin_override=origin_override, log=log
     )
+    # A fresh mint of a content-addressed cycle_id means "restart THIS exact origin".
+    # Its off-registry inner proxy sandbox (``<workspace>/.inner/<cycle_id>``, written
+    # only by an L4 recursion) is therefore a PRIOR run's leftover — a stale,
+    # tenant-pooled measurement archive that would warm this run's inner δ-ruler from
+    # foreign campaigns and un-attribute its proxy signal. Sweep it so every fresh
+    # outer run starts isolated. Resume/fork reach the sandbox by other paths (they
+    # never call this prologue), so their live trees are untouched; capacity-1 minting
+    # keeps a concurrent same-origin run from racing this. For a non-L4 mint (or an
+    # inner-campaign mint, whose sandbox root sits one level deeper) the path is
+    # absent, so this is a no-op.
+    inner_sandbox = session.store.projects_root.parent / ".inner" / plan.cycle_id
+    if inner_sandbox.exists():
+        shutil.rmtree(inner_sandbox, ignore_errors=True)
     session_id, campaign_id, cycle_id = auto_mint_session(
         session,
         campaign_config,

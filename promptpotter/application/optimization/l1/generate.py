@@ -90,16 +90,12 @@ async def l1_generate(
     tracing_campaign_id = cycle.session.state.tracing_campaign_id
 
     bundle = build_bundle(cycle)
-    template = DispatchHub.fill_l1(
+    # L2-authored layout rides the OSP; `fill` also resolves the `instruction`-slot
+    # injections (`l1_supplemental_rules` / `l1_situational_examples`) into `injection_vars`.
+    template, injection_vars = DispatchHub.fill(
         load_optimizer_prompt("l1_generate"), opt_sp.memory.l1_layout, bundle
     )
-    # `instruction` slot isn't in L1_LAYOUT_SLOTS so fill_l1 skips it — we substitute its two
-    # injection placeholders via compile_prompt kwargs here.
-    prompt_vars: dict[str, str] = {
-        "n_variants": str(n_variants),
-        "l1_supplemental_rules": DispatchHub.render("l1_supplemental_rules", bundle),
-        "l1_situational_examples": DispatchHub.render("l1_situational_examples", bundle),
-    }
+    prompt_vars: dict[str, str] = {"n_variants": str(n_variants), **injection_vars}
 
     output_schema = (
         build_l1_output_schema(

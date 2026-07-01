@@ -2,7 +2,7 @@
 
 L2 fires when L1 has stalled (per `l1_patience`), reads cycle state, and writes any subset of OSP fields to steer the next round. Concept role: [`../concepts/the-loop.md § L2 in detail`](../concepts/the-loop.md).
 
-L2 is one entry in the unified dispatch hub — same `LayerStrategy` shape as L3, same `fill_fixed` path, same `Bundle` per-call state. The hub is what stops L2 from accumulating its own renderers, its own surface object, its own escape hatches. See [`l1-generate-surface.md`](l1-generate-surface.md) for the registry it shares.
+L2 is one entry in the unified dispatch hub — same `LayerStrategy` shape as L3, same `fill` path (from its `NODE_LAYOUTS["l2_context"].floor`), same `Bundle` per-call state. The hub is what stops L2 from accumulating its own renderers, its own surface object, its own escape hatches. See [`l1-generate-surface.md`](l1-generate-surface.md) for the registry it shares.
 
 ## Trigger
 
@@ -17,7 +17,7 @@ Trigger gate: `escalation.escalate_l2`; the decision is recorded as `ResumeCheck
 
 ## Inputs — via the hub
 
-L2's prompt template (`l2_context/1` in `datasets/_optimizer/pipeline.json`) carries `{{plan}}`, `{{l3_to_l2_note}}`, `{{diagnostics}}`, `{{validation_failures}}`, `{{runtime_failures}}`, `{{critique}}`, `{{l1_overrides}}`, `{{task_context}}`, `{{l1_signal_catalogue}}`. `LayerStrategy.build_prompt_vars` calls `DispatchHub.fill_fixed(template, bundle)` to resolve all of them in one pass. No L2-only surface object exists — L2 is just one consumer of the global `INJECTIONS` registry. L2 does not see `l2_guard_breaches` / `l3_guard_breaches` — when those appear, Wound 4 fires L3 immediately, so by L2's next fire L3 has already replanned and L2 reads the new `plan`.
+L2's injection set (`plan`, `l3_to_l2_note`, `rendered_prompt`, `diagnostics`, `evidence_health`, `guard_breaches`, `axis_memory`, `archive_top_runs`, `rare_hit_samples`, `critique`, `l1_overrides`, `task_context`, `l1_signal_catalogue`, `l1_supplemental_rules`, `l1_situational_examples`) lives in `NODE_LAYOUTS["l2_context"].floor` (`domain/l1_layout.py`), not as `{{tokens}}` in the template — its `l2_context/1` `problem_description` body is now empty. `DispatchHub.fill(template, floor, bundle)` fills them in one pass. No L2-only surface object exists — L2 is just one consumer of the global `INJECTIONS` registry. L2 does not see `l2_guard_breaches` / `l3_guard_breaches` — when those appear, Wound 4 fires L3 immediately, so by L2's next fire L3 has already replanned and L2 reads the new `plan`.
 
 One injection is L2-only: `l1_signal_catalogue` — the menu of names L2 may put in `l1_layout`. Absent from `L1_POSSIBLE` so L2 cannot accidentally inject its own catalogue into L1.
 
@@ -53,7 +53,7 @@ Two channels, both via OSP fields the dispatch hub reads:
 | Channel | OSP field | L1 effect |
 |---------|-----------|-----------|
 | Framing | `task_context` | The `task_context` injection renders the structured framing dict. Default layout puts it in `task_intent` — front of mind for the LLM. Persistent across L2 fires; merges accumulate. |
-| Layout | `l1_layout` | `DispatchHub.fill_l1` walks the layout and appends each named injection's rendering to its slot. Mutating the layout reshapes which injections L1 sees and where. |
+| Layout | `l1_layout` | `DispatchHub.fill` walks the layout and appends each named injection's rendering to its slot. Mutating the layout reshapes which injections L1 sees and where. |
 
 L2 cannot edit L1's static template text and cannot toggle `answer_format` — those are code contracts. Anything L2 wants L1 to see must already be a registered injection (from `L1_POSSIBLE`).
 
