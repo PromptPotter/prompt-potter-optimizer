@@ -11,6 +11,13 @@ import { buildUnitTree, type SessionGroup } from "./grouping";
 import { UnitBranchRows } from "./UnitBranchRows";
 import { CampaignMenu } from "./CampaignMenu";
 import { CampaignSizeHover } from "./CampaignSizeHover";
+import { InnerCampaignRows } from "./InnerCampaignRows";
+
+// The self-optimizer dataset. An L4 outer cycle on this dataset spawns a fan-out
+// of real inner campaigns (one per candidate×seed) under a `.inner/` sandbox; the
+// sidebar lets the operator drill into them. Kept as one shared constant so the
+// breadcrumb + this row agree on what "L4" means.
+export const L4_DATASET = "promptpotter-self";
 
 // One session row + (when expanded) its fork-tree. Rendered either AS the
 // campaign row (single-session campaign) or as a child session row
@@ -41,6 +48,12 @@ export function SessionSubtree({
   const cid = campaign.campaign_id;
   const root = session.root;
   const hasBranches = session.branches.length > 0;
+  // L4: this campaign optimizes the meta-prompts, so its root cycle spawned a
+  // fan-out of inner campaigns. Show them as a separate disclosure (the fork
+  // twist above is a different axis; most L4 cycles have no forks). Only on the
+  // campaign row (the root cycle that owns the `.inner/` sandbox).
+  const isL4 = isCampaignRow && campaign.dataset_name === L4_DATASET;
+  const [innerOpen, setInnerOpen] = useState(false);
   const selected = cid === campaignId && root.cycle_id === cycleId;
   // Archived campaigns live in the archive/ recycle bin — inert to browse (their
   // detail routes 404 until restored). So an archived campaign row's primary
@@ -179,6 +192,40 @@ export function SessionSubtree({
             activeCycleId={activeCycleId}
             onSelectCycle={onSelectCycle}
           />
+        </ul>
+      )}
+      {isL4 && (
+        <ul className="unit-library-children">
+          <li>
+            <div className="unit-library-family inner-disclosure">
+              <button
+                type="button"
+                className="unit-library-twist"
+                onClick={() => setInnerOpen((o) => !o)}
+                aria-label={innerOpen ? "Collapse inner loops" : "Expand inner loops"}
+                aria-expanded={innerOpen}
+                tabIndex={-1}
+              >
+                {innerOpen ? "▼" : "▶"}
+              </button>
+              <button
+                type="button"
+                className="unit-library-item"
+                onClick={() => setInnerOpen((o) => !o)}
+                title="Inner campaigns this L4 cycle ran (one per candidate)"
+              >
+                <span className="unit-library-mark" />
+                <span className="unit-library-row">
+                  <span className="unit-library-name">inner loops</span>
+                </span>
+              </button>
+            </div>
+            {innerOpen && (
+              <ul className="unit-library-children inner-library">
+                <InnerCampaignRows outerCampaignId={cid} outerCycleId={root.cycle_id} />
+              </ul>
+            )}
+          </li>
         </ul>
       )}
     </>

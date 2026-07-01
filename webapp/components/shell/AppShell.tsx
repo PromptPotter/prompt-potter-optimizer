@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import dynamic from "next/dynamic";
 import { fetchCycleFile, type HardSamplesScope } from "@/lib/api";
 import { postPauseCycle } from "@/lib/api/mutations";
@@ -12,6 +12,7 @@ import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { applyChartDefaults } from "@/lib/theme";
 import { cx } from "@/lib/cx";
 import { Sidebar } from "@/components/shell/Sidebar";
+import { SidebarResizer } from "@/components/shell/SidebarResizer";
 import { Topbar, type Tab } from "@/components/shell/Topbar";
 import { DashboardTab } from "@/components/dashboard/layout/DashboardTab";
 import { SelectionProvider } from "@/lib/SelectionContext";
@@ -44,13 +45,22 @@ const CheckinReopenPane = dynamic(
   { ssr: false, loading: () => <div className="content" aria-busy="true" /> },
 );
 
+// Sidebar resize bounds. Default matches the CSS base (.shell{--sidebar-width}).
+const SIDEBAR_DEFAULT = 200;
+const SIDEBAR_MIN = 160;
+const SIDEBAR_MAX = 480;
+
 export function AppShell() {
   // `campaignId` + `cycleId` are owned by WorkspaceProvider (the single
   // workspace-identity source of truth) — this only forwards them into the
   // dashboard's per-cycle data stream.
-  const { campaignId, cycleId } = useWorkspace();
+  const { campaignId, cycleId, innerFocus } = useWorkspace();
+  // The outer `(campaignId, cycleId)` is the viewed unit for the chat pane +
+  // selection; only the dashboard stream re-roots when an inner loop is focused
+  // (see CycleStreamProvider's `inner` prop). Chat/dataset panels keep the outer
+  // ids, so the conversation stays on the outer thread.
   return (
-    <CycleStreamProvider campaignId={campaignId} cycleId={cycleId}>
+    <CycleStreamProvider campaignId={campaignId} cycleId={cycleId} inner={innerFocus}>
       <AppShellInner />
     </CycleStreamProvider>
   );
@@ -114,6 +124,21 @@ function AppShellInner() {
   const toggleSidebar = useCallback(
     () => setSidebarCollapsed((prev) => !prev),
     [setSidebarCollapsed],
+  );
+  // Sidebar width — operator-adjustable via the drag handle, persistent.
+  // Default matches the CSS base (200px); clamped to [SIDEBAR_MIN, SIDEBAR_MAX].
+  // Applied as an inline --sidebar-width only while expanded, so the collapsed
+  // rail's 36px class rule still wins.
+  const [sidebarWidth, setSidebarWidth] = useLocalStorage<number>(
+    "promptpotter.sidebar.width",
+    SIDEBAR_DEFAULT,
+    {
+      serialize: String,
+      deserialize: (raw) => {
+        const n = parseInt(raw, 10);
+        return Number.isFinite(n) ? n : SIDEBAR_DEFAULT;
+      },
+    },
   );
   // Mobile-only drawer state. Below --bp-md the sidebar is hidden by
   // default and the topbar shows a hamburger; tapping the hamburger
@@ -213,6 +238,11 @@ function AppShellInner() {
         sidebarCollapsed && "sidebar-collapsed",
         sidebarMobileOpen && "sidebar-mobile-open",
       )}
+      style={
+        sidebarCollapsed
+          ? undefined
+          : ({ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties)
+      }
     >
       {/* First focusable element — lets keyboard users jump the sidebar +
           topbar straight to the main content. Off-screen until focused. */}
@@ -243,6 +273,14 @@ function AppShellInner() {
         collapsed={sidebarCollapsed}
         onToggleCollapse={toggleSidebar}
       />
+      {!sidebarCollapsed && (
+        <SidebarResizer
+          width={sidebarWidth}
+          setWidth={setSidebarWidth}
+          min={SIDEBAR_MIN}
+          max={SIDEBAR_MAX}
+        />
+      )}
       {/* Mobile drawer backdrop — only rendered on mobile via CSS. Tap
           dismisses the open drawer. */}
       <div

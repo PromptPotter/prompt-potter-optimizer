@@ -330,6 +330,47 @@ export function fetchDashboardConditional(
   );
 }
 
+// L4 inner-cycle reads. When an outer `promptpotter-self` cycle optimizes its
+// own meta-prompts, each candidate runs as a real inner campaign under a flat
+// off-registry sandbox. These two reads bridge that sandbox into the read API,
+// keyed on the VIEWED outer `(campaignId, cycleId)`:
+//  - `fetchInnerCycles` lists the inner campaigns (same picker shape as
+//    `/cycles`); its `active_*` carry the inner sandbox's live pointer. A non-L4
+//    outer cycle returns an empty `cycles` list (never 404) — the signal to show
+//    no expand affordance.
+//  - `fetchInnerDashboardConditional` serves one inner cycle's `dashboard.json`
+//    with the same 304 / warming semantics as the outer dashboard poll, so the
+//    whole dashboard tree re-roots to an inner loop with no per-chart change.
+export function fetchInnerCycles(
+  outerCampaignId: string,
+  outerCycleId: string,
+  signal?: AbortSignal,
+): Promise<CyclesResponse> {
+  return jget<CyclesResponse>(
+    `${API}/campaigns/${encodeURIComponent(outerCampaignId)}` +
+      `/cycles/${encodeURIComponent(outerCycleId)}/inner-cycles`,
+    signal,
+  );
+}
+
+export function fetchInnerDashboardConditional(
+  outerCampaignId: string,
+  outerCycleId: string,
+  innerCampaignId: string,
+  innerCycleId: string,
+  ifModifiedSince?: string | null,
+  signal?: AbortSignal,
+): Promise<Conditional<Record<string, unknown>>> {
+  return jgetConditional<Record<string, unknown>>(
+    `${API}/campaigns/${encodeURIComponent(outerCampaignId)}` +
+      `/cycles/${encodeURIComponent(outerCycleId)}` +
+      `/inner/${encodeURIComponent(innerCampaignId)}` +
+      `/cycles/${encodeURIComponent(innerCycleId)}/dashboard`,
+    ifModifiedSince,
+    signal,
+  );
+}
+
 // `lifecycle` mirrors the server's `?lifecycle=` filter — defaults to
 // "active" server-side; pass "archived" to surface the archived set
 // (deleted stays out of the default UI). "all" returns every status.

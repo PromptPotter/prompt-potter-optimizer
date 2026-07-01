@@ -33,8 +33,8 @@ interface Props {
 // Nth). Each session is itself a tree: a root + its forks / diag / sweeps.
 //
 // So the nesting is: campaign → session → fork-tree. Campaigns render in
-// one flat, recency-sorted list (a dataset-filter chip-bar at the top
-// narrows it). The single-session campaign — by far the common case —
+// one flat, recency-sorted list; the header's filter popover
+// (lifecycle + dataset) narrows it. The single-session campaign — the common case —
 // collapses: the campaign row IS that session and opens it directly. The
 // session tier appears only when a campaign has 2+ sessions.
 
@@ -83,7 +83,7 @@ export function Sidebar({ onSelectCycle, onNewCycle, collapsed, onToggleCollapse
     [campaigns, cycles],
   );
 
-  // Distinct dataset names, for the filter chip-bar.
+  // Distinct dataset names, for the filter popover's dataset picker.
   const datasetNames = useMemo(() => {
     const s = new Set<string>();
     for (const g of allGroups) s.add(g.campaign.dataset_name || "(unknown)");

@@ -4,6 +4,7 @@ import type { AuthStatus } from "@/lib/auth-context";
 import type { LifecycleFilter } from "@/lib/api";
 import type { CampaignGroup } from "./sidebar/grouping";
 import { CampaignTreePane } from "./CampaignTreePane";
+import { SidebarFilterPopover } from "./sidebar/SidebarFilterPopover";
 
 interface Props {
   status: AuthStatus;
@@ -23,10 +24,11 @@ interface Props {
   onSelectCycle: (campaignId: string, cycleId: string) => void;
 }
 
-// The campaign library body — lifecycle tabs, dataset filter, the auth/loading
-// resting states, and the campaign forest. Extracted from Sidebar, which stays
-// the shell wrapper (toggle, brand, footer) and owns the workspace + auth state
-// + collapse + dataset-filter handlers this renders.
+// The campaign-library body — the header + filter button, the auth/loading
+// resting states, and the campaign forest. The lifecycle + dataset filters
+// live behind the header's filter popover (SidebarFilterPopover) so the body
+// stays a clean forest; when a non-default filter is set, one summary line
+// keeps that fact visible with a one-click clear.
 export function SidebarContent({
   status,
   loaded,
@@ -44,38 +46,40 @@ export function SidebarContent({
   activeCycleId,
   onSelectCycle,
 }: Props) {
+  const filtered = lifecycleFilter === "archived" || datasetFilter != null;
+  const clearFilters = () => {
+    setLifecycleFilter("active");
+    setDatasetFilter(null);
+  };
+
   return (
     <div className="unit-library">
       <div className="unit-library-head">
         <span>Campaigns</span>
-      </div>
-      <div className="unit-library-tabs" role="tablist" aria-label="Campaign lifecycle">
-        <button
-          type="button"
-          role="tab"
-          className={`unit-library-tab${lifecycleFilter === "active" ? " active" : ""}`}
-          onClick={() => setLifecycleFilter("active")}
-          aria-selected={lifecycleFilter === "active"}
-        >
-          Active
-        </button>
-        <button
-          type="button"
-          role="tab"
-          className={`unit-library-tab${lifecycleFilter === "archived" ? " active" : ""}`}
-          onClick={() => setLifecycleFilter("archived")}
-          aria-selected={lifecycleFilter === "archived"}
-          title="Show archived campaigns. Deleted campaigns are hidden — read them by id from the file tree."
-        >
-          Archived
-        </button>
-      </div>
-      {datasetNames.length > 1 && (
-        <DatasetFilterBar
-          datasets={datasetNames}
-          selected={datasetFilter}
-          onSelect={setDatasetFilter}
+        <SidebarFilterPopover
+          lifecycleFilter={lifecycleFilter}
+          setLifecycleFilter={setLifecycleFilter}
+          datasetNames={datasetNames}
+          datasetFilter={datasetFilter}
+          setDatasetFilter={setDatasetFilter}
         />
+      </div>
+      {filtered && (
+        <div className="unit-library-active-filter">
+          <span className="unit-library-active-filter-text">
+            {lifecycleFilter === "archived" && <span>Archived</span>}
+            {datasetFilter != null && <span>{datasetFilter}</span>}
+          </span>
+          <button
+            type="button"
+            className="unit-library-active-filter-clear"
+            onClick={clearFilters}
+            title="Clear filters"
+            aria-label="Clear filters"
+          >
+            ✕
+          </button>
+        </div>
       )}
       {status !== "authed" ? (
         status === "loading" ? (
@@ -122,40 +126,6 @@ export function SidebarContent({
           onSelectCycle={onSelectCycle}
         />
       )}
-    </div>
-  );
-}
-
-// Dataset filter chip-bar — narrows the flat campaign list to one dataset.
-function DatasetFilterBar({
-  datasets,
-  selected,
-  onSelect,
-}: {
-  datasets: string[];
-  selected: string | null;
-  onSelect: (d: string | null) => void;
-}) {
-  return (
-    <div className="unit-library-filter" role="group" aria-label="Filter by dataset">
-      <button
-        type="button"
-        className={`unit-library-filter-chip${selected == null ? " active" : ""}`}
-        onClick={() => onSelect(null)}
-      >
-        All
-      </button>
-      {datasets.map((d) => (
-        <button
-          key={d}
-          type="button"
-          className={`unit-library-filter-chip${selected === d ? " active" : ""}`}
-          onClick={() => onSelect(selected === d ? null : d)}
-          title={d}
-        >
-          {d}
-        </button>
-      ))}
     </div>
   );
 }

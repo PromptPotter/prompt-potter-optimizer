@@ -125,13 +125,23 @@ controls:
   - id: collapse
     do: Toggle collapsed/expanded; label flips Collapse<->Expand.
     status: ok
+  - id: resize
+    do: Drag the right-edge handle (or ←/→ when focused) to set sidebar width;
+        clamped [160,480], persisted, default 200. Hidden when collapsed or in
+        the mobile drawer.
+    status: ok
+  - id: filter
+    do: Header sliders button opens a popover with the Active/Archived segment +
+        a type-to-filter dataset picker; a dot marks a non-default filter and a
+        summary line in the body clears it. Dataset picker shown only with 2+ datasets.
+    status: ok
   - id: new_campaign
     do: On the chat tab, reset the thread in place to its empty first-run state
         (no modal). On any other tab, open the New campaign modal (see surface:
         new_campaign).
     status: ok
   - id: campaign_list
-    do: List campaigns under Active/Archived tabs.
+    do: List campaigns (Active/Archived + dataset narrow both via the filter popover).
         anon: "Sign in to see your campaigns." (SignInPrompt).
         auth_empty: "No campaigns yet — start one."
     status: ok   # B2: anon → SignInPrompt; workspace poll gated on authed.

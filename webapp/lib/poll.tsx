@@ -13,7 +13,8 @@ import {
   type ReactNode,
 } from "react";
 import { liveCandidateId } from "@/lib/candidate-label";
-import { fetchDashboardConditional } from "./api";
+import { fetchDashboardConditional, fetchInnerDashboardConditional } from "./api";
+import type { InnerFocus } from "./workspace";
 import { useAuthGate } from "./auth-context";
 import { resolveRunPhase } from "./run-phase";
 import { ageTextSeconds } from "./format";
@@ -412,6 +413,7 @@ export function useCycleStream(): CycleStreamState {
 function useCycleStreamSource(
   campaignId: string | null,
   cycleId: string | null,
+  inner: InnerFocus | null,
   intervalMs: number,
 ): CycleStreamState {
   const [state, setState] = useState<CycleStreamState>(INITIAL_STATE);
@@ -433,18 +435,29 @@ function useCycleStreamSource(
   // switch so a stale value from the prior unit can't suppress the
   // first real fetch of the new unit.
   const lastModifiedRef = useRef<string | null>(null);
+  // The focused inner loop, or null for the outer cycle. Held in a ref so the
+  // tick reads it without re-subscribing; set in the same unit-key guard below.
+  const innerRef = useRef<InnerFocus | null>(null);
 
   // Change-detect on the COMPOSITE unit identity (campaign + cycle). A
   // cycle_id is unique only within its campaign — switching to another
   // campaign whose root unit shares this cycle_id must still reset the
-  // stream, or the prior campaign's dashboard lingers forever.
+  // stream, or the prior campaign's dashboard lingers forever. An inner focus
+  // keys on the INNER ids (the dashboard the stream will fetch + the stamp it
+  // must match), so outer→inner and inner→inner switches hard-reset too.
   const unitKeyRef = useRef<string | null>(null);
-  const unitKey =
-    campaignId && cycleId ? `${campaignId} ${cycleId}` : null;
+  const unitKey = inner
+    ? `${inner.innerCampaignId} ${inner.innerCycleId}`
+    : campaignId && cycleId
+      ? `${campaignId} ${cycleId}`
+      : null;
   if (unitKeyRef.current !== unitKey) {
     unitKeyRef.current = unitKey;
-    cycleRef.current = cycleId;
-    campaignRef.current = campaignId;
+    innerRef.current = inner;
+    // The EXPECTED stamp ids: the inner cycle's own ids when focused (its
+    // dashboard.json self-stamps them), else the outer unit.
+    cycleRef.current = inner ? inner.innerCycleId : cycleId;
+    campaignRef.current = inner ? inner.innerCampaignId : campaignId;
     stampMismatchRef.current = 0;
     lastModifiedRef.current = null;
     // Identity changed — hard-reset every cycle-scoped field so the prior
@@ -475,17 +488,24 @@ function useCycleStreamSource(
   const tick = async (signal: AbortSignal) => {
     const id = cycleRef.current;
     const cmp = campaignRef.current;
+    const focus = innerRef.current;
     if (!id || !cmp) return;
     try {
-      // dashboard.json is per-session — it lives in the session's root
-      // cycle dir, shared by that session's forks. The server resolves
-      // the session-family root from the viewed cycle id.
-      const resp = await fetchDashboardConditional(
-        cmp,
-        id,
-        lastModifiedRef.current,
-        signal,
-      );
+      // dashboard.json is per-cycle. For an inner focus, resolve it against the
+      // outer cycle's `.inner/` sandbox (the inner route carries both outer +
+      // inner ids); otherwise the ordinary per-cycle route. Either way `cmp`/`id`
+      // are the stamp ids the payload must self-report (inner ids when focused),
+      // so the identity guard below is unchanged.
+      const resp = focus
+        ? await fetchInnerDashboardConditional(
+            focus.outerCampaignId,
+            focus.outerCycleId,
+            focus.innerCampaignId,
+            focus.innerCycleId,
+            lastModifiedRef.current,
+            signal,
+          )
+        : await fetchDashboardConditional(cmp, id, lastModifiedRef.current, signal);
       if (signal.aborted) return;
       if (resp.lastModified) lastModifiedRef.current = resp.lastModified;
 
@@ -611,7 +631,7 @@ function useCycleStreamSource(
   const effectiveInterval = state.status === "offline" ? RECONNECT_INTERVAL_MS : intervalMs;
   usePoll(tick, {
     intervalMs: effectiveInterval,
-    enabled: !!campaignId && !!cycleId && authed,
+    enabled: (!!inner || (!!campaignId && !!cycleId)) && authed,
     revalidateOn: revalCount,
   });
 
@@ -621,15 +641,18 @@ function useCycleStreamSource(
 export function CycleStreamProvider({
   campaignId,
   cycleId,
+  inner = null,
   intervalMs = 2000,
   children,
 }: {
   campaignId: string | null;
   cycleId: string | null;
+  // When set, the stream re-roots to this inner loop's dashboard (L4 follow).
+  inner?: InnerFocus | null;
   intervalMs?: number;
   children: ReactNode;
 }) {
-  const state = useCycleStreamSource(campaignId, cycleId, intervalMs);
+  const state = useCycleStreamSource(campaignId, cycleId, inner, intervalMs);
   return (
     <CycleStreamContext.Provider value={state}>{children}</CycleStreamContext.Provider>
   );

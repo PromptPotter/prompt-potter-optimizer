@@ -60,6 +60,8 @@ export const CyclePicker = memo(function CyclePicker({
     following,
     selectCycle,
     followActive,
+    innerFocus,
+    clearInner,
   } = useWorkspace();
   const { status } = useAuth();
 
@@ -150,7 +152,7 @@ export const CyclePicker = memo(function CyclePicker({
           );
         })}
       </select>
-      {!following && (
+      {!following && !innerFocus && (
         <button
           type="button"
           className="follow-active-btn"
@@ -159,6 +161,24 @@ export const CyclePicker = memo(function CyclePicker({
         >
           ↪ Follow active
         </button>
+      )}
+      {innerFocus && (
+        <span className="inner-breadcrumb">
+          <span className="inner-breadcrumb-sep" aria-hidden="true">
+            ⤷
+          </span>
+          <span className="inner-breadcrumb-label" title={innerFocus.innerCampaignId}>
+            inner: {innerFocus.innerCampaignId}
+          </span>
+          <button
+            type="button"
+            className="follow-active-btn"
+            onClick={clearInner}
+            title="Viewing an inner loop's dashboard. Click to return to the outer cycle."
+          >
+            ↑ Back to outer
+          </button>
+        </span>
       )}
       <LiveBadge />
     </span>

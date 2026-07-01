@@ -75,11 +75,27 @@ export interface WorkspaceState {
   // ambiguous across campaigns.
   selectCycle: (campaignId: string, cycleId: string) => void;
   followActive: () => void; // un-pin → snap back to the active pointer
+  // L4 inner-loop focus. When an operator drills into one inner campaign of a
+  // running `promptpotter-self` outer cycle, `innerFocus` names it; the DASHBOARD
+  // stream re-roots to that inner cycle's telemetry while the outer stays pinned
+  // as the viewed unit (so the chat pane + selection remain on the outer thread —
+  // inner loops carry run-telemetry, not an operator conversation). The single
+  // re-rootable "focused unit"; null = the dashboard shows the outer cycle.
+  innerFocus: InnerFocus | null;
+  selectInner: (focus: InnerFocus) => void;
+  clearInner: () => void; // back to the outer cycle (keeps the outer pinned)
 }
 
 interface UnitPin {
   campaignId: string;
   cycleId: string;
+}
+
+export interface InnerFocus {
+  outerCampaignId: string;
+  outerCycleId: string;
+  innerCampaignId: string;
+  innerCycleId: string;
 }
 
 const WorkspaceContext = createContext<WorkspaceState | null>(null);
@@ -104,6 +120,24 @@ function urlPin(): UnitPin | null {
   return campaignId && cycleId ? { campaignId, cycleId } : null;
 }
 
+// The inner-loop deep link — `&inner_campaign=&inner_cycle=` alongside the outer
+// `?campaign=&cycle=` pin. Its outer ids come from the pin (an inner focus is
+// only valid against a pinned outer cycle).
+function urlInner(pin: UnitPin | null): InnerFocus | null {
+  if (!pin || typeof window === "undefined") return null;
+  const p = new URLSearchParams(window.location.search);
+  const innerCampaignId = p.get("inner_campaign");
+  const innerCycleId = p.get("inner_cycle");
+  return innerCampaignId && innerCycleId
+    ? {
+        outerCampaignId: pin.campaignId,
+        outerCycleId: pin.cycleId,
+        innerCampaignId,
+        innerCycleId,
+      }
+    : null;
+}
+
 export function WorkspaceProvider({
   // Registry-list cadence (`/cycles` + `/campaigns`) — the passive floor for
   // rarely-changing data. The active-pointer poll runs faster (below).
@@ -119,6 +153,11 @@ export function WorkspaceProvider({
 }) {
   const [pinned, setPinned] = useState<UnitPin | null>(null);
   const [following, setFollowing] = useState(true);
+  // L4 inner-loop focus (null = viewing the outer cycle). Cleared whenever the
+  // viewed OUTER unit changes (pick another cycle, follow the active pointer, or
+  // the pointer auto-snaps to a fresh CLI mint) — an inner focus is only
+  // meaningful against the outer cycle that spawned it.
+  const [innerFocus, setInnerFocus] = useState<InnerFocus | null>(null);
   // The `?campaign=&cycle=` deep-link is read in a mount effect rather than
   // a useState initializer so the static-export HTML and the first client
   // render agree (no hydration mismatch).
@@ -165,6 +204,8 @@ export function WorkspaceProvider({
     if (deepLink) {
       setPinned(deepLink);
       setFollowing(false);
+      const inner = urlInner(deepLink);
+      if (inner) setInnerFocus(inner);
     }
     setInitialized(true);
   }, []);
@@ -217,6 +258,7 @@ export function WorkspaceProvider({
         if (prevPointer !== null && prevPointer !== nextPointer) {
           setFollowing(true);
           setPinned(null);
+          setInnerFocus(null); // a fresh outer mint invalidates any inner focus
         }
         prevActivePointerRef.current = nextPointer;
       }
@@ -291,9 +333,14 @@ export function WorkspaceProvider({
     const params = new URLSearchParams(window.location.search);
     const wantCampaign = following ? null : (pinned?.campaignId ?? null);
     const wantCycle = following ? null : (pinned?.cycleId ?? null);
+    // Inner params ride only while an inner loop is focused (which implies pinned).
+    const wantInnerCampaign = innerFocus?.innerCampaignId ?? null;
+    const wantInnerCycle = innerFocus?.innerCycleId ?? null;
     if (
       params.get("campaign") === wantCampaign &&
-      params.get("cycle") === wantCycle
+      params.get("cycle") === wantCycle &&
+      params.get("inner_campaign") === wantInnerCampaign &&
+      params.get("inner_cycle") === wantInnerCycle
     ) {
       return;
     }
@@ -304,18 +351,40 @@ export function WorkspaceProvider({
       params.delete("campaign");
       params.delete("cycle");
     }
+    if (wantInnerCampaign && wantInnerCycle) {
+      params.set("inner_campaign", wantInnerCampaign);
+      params.set("inner_cycle", wantInnerCycle);
+    } else {
+      params.delete("inner_campaign");
+      params.delete("inner_cycle");
+    }
     const qs = params.toString();
     window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
-  }, [initialized, following, pinned]);
+  }, [initialized, following, pinned, innerFocus]);
 
   const selectCycle = useCallback((cid: string, cyid: string) => {
     setFollowing(false);
     setPinned({ campaignId: cid, cycleId: cyid });
+    setInnerFocus(null);
   }, []);
 
   const followActive = useCallback(() => {
     setFollowing(true);
     setPinned(null);
+    setInnerFocus(null);
+  }, []);
+
+  // Drill into one inner loop of a running L4 outer cycle: pin the outer as the
+  // viewed unit (chat + selection stay on it) and re-root the dashboard to the
+  // inner cycle. Picking an inner unit is an explicit pin, like selectCycle.
+  const selectInner = useCallback((focus: InnerFocus) => {
+    setFollowing(false);
+    setPinned({ campaignId: focus.outerCampaignId, cycleId: focus.outerCycleId });
+    setInnerFocus(focus);
+  }, []);
+
+  const clearInner = useCallback(() => {
+    setInnerFocus(null);
   }, []);
 
   // Switching tabs re-queries `/campaigns?lifecycle=` — bump revalidation so the
@@ -343,6 +412,9 @@ export function WorkspaceProvider({
     setLifecycleFilter: selectLifecycle,
     selectCycle,
     followActive,
+    innerFocus,
+    selectInner,
+    clearInner,
   };
   return (
     <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>
