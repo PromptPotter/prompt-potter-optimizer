@@ -19,6 +19,7 @@ __all__ = [
     "CandidateProposal",
     "CritiqueReadout",
     "CycleResult",
+    "CycleSpend",
     "DegradationContext",
     "DegradationHealth",
     "DiagnosticRunRecord",
@@ -308,6 +309,20 @@ class CycleError(BaseModel):
     traceback: str | None = None
 
 
+class CycleSpend(BaseModel):
+    """Terminal token/USD totals for a finished cycle — the summed cost across
+    the backend + optimizer-loop buckets.
+
+    Read from the run's **in-memory** dashboard state at finalize, so a consumer
+    (notably the L4 outer loop rolling an inner campaign's spend up onto its own
+    backend-cost channel) gets the true total without racing the debounced
+    ``dashboard.json`` projection file."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+
+
 class CycleResult(BaseModel):
     """Final result of the feedback cycling process."""
 
@@ -325,6 +340,9 @@ class CycleResult(BaseModel):
     cycle_id: str | None = None
     session_id: str | None = None
     resumed_from_round: int = 1
+    # This cycle's total spend, captured from the live dashboard state at
+    # finalize. ``None`` only on an init-crash before any observer wired up.
+    spend: CycleSpend | None = None
     # Set when ``stop_reason`` ∈ ``{CRASHED, RENDER_ERROR, DIVERGED}``;
     # ``None`` on clean completions. The runner's ``except`` sites populate
     # this in lockstep with the ``emit_error_record`` ledger append.

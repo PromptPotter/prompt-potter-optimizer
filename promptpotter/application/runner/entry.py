@@ -38,7 +38,7 @@ from promptpotter.application.runner.loop import run_round_loop
 from promptpotter.application.runner.termination import BudgetGate
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.domain.phases import StopReason
-from promptpotter.domain.results import CycleError, CycleResult
+from promptpotter.domain.results import CycleError, CycleResult, CycleSpend
 from promptpotter.domain.run_records import CycleSeed, ForkSpec, LimitOverrides
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import ScoringSpec
@@ -278,6 +278,22 @@ async def _prepare_run(
     )
 
 
+def _cycle_spend(observers: RunObservers) -> CycleSpend:
+    """This cycle's total spend, read from the live dashboard state in memory.
+
+    The token/USD records mutate ``dashboard.state.spend`` throughout the run, so
+    at finalize (before ``drain_all``) the in-memory rollup is complete and
+    authoritative — no need to re-read the debounced ``dashboard.json``. Summed
+    across the backend + optimizer-loop buckets; the L4 outer loop rolls an inner
+    campaign's total up onto its own backend-cost channel from this."""
+    sp = observers.dashboard.state.spend
+    return CycleSpend(
+        input_tokens=sp.backend.input_tokens + sp.loop.input_tokens,
+        output_tokens=sp.backend.output_tokens + sp.loop.output_tokens,
+        cost_usd=sp.total_used_usd,
+    )
+
+
 def _build_cycle_result(
     cycle: Cycle | None,
     origin: CampaignOrigin,
@@ -287,6 +303,7 @@ def _build_cycle_result(
     cycle_error: CycleError | None,
     started_at: str,
     finished_at: str,
+    spend: CycleSpend | None,
 ) -> CycleResult:
     """Assemble the terminal :class:`CycleResult`. ``cycle is None`` is the
     init-crash fallback (cycle_id was minted upstream so the run still finalizes);
@@ -311,6 +328,7 @@ def _build_cycle_result(
         cycle_id=session.state.cycle_id,
         session_id=session.session_id or None,
         resumed_from_round=session.state.resumed_from_round,
+        spend=spend,
         error=cycle_error,
     )
 
@@ -507,6 +525,7 @@ async def run_optimization(
             cycle_error=cycle_error,
             started_at=started_at,
             finished_at=finished_at,
+            spend=_cycle_spend(observers),
         )
         langfuse_trace_id = _finalize_run(session, observers, cycle_result, sweep=mode.sweep)
         if langfuse_trace_id is not None:
