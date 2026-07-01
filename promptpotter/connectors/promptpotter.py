@@ -136,6 +136,16 @@ def _extract_experiment(
             ...
           ]
         }
+
+    **There is no label to match in L4.** The "sample" is an inner campaign
+    whose fitness is the proxy composite (``campaign.json::scoring``), not a
+    correct answer. So ``ground_truth`` is the inner-result TOKEN the runner
+    emits (``inner:{query}``, ``runner/inner_recursion.py::run_inner_cycle``),
+    NOT the target score — then a sample is a HIT iff its inner cycle produced a
+    result, and the outer optimizer stops reading every sample as a label-miss
+    ("node fails 100% — reduce parsing errors"), which is false evidence for a
+    proxy-scored sample. ``target_score`` stays in ``inner_tasks.json`` for the
+    runner (proxy ``rounds_to_N``); it is not a matchable ground truth here.
     """
     tasks = experiment_data.get("tasks", [])
     queries: list[dict[str, Any]] = []
@@ -146,7 +156,7 @@ def _extract_experiment(
         queries.append(
             {
                 "query": tid,
-                "ground_truth": str(t.get("target_score", 0.0)),
+                "ground_truth": f"inner:{tid}",
                 "n_inner_rounds": int(t.get("n_inner_rounds", 3)),
             }
         )

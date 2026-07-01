@@ -36,9 +36,12 @@ and which inner benchmark to run. The outer L1's meta-prompt mutations ride
 the outer.
 
 The process-global rate limiter is shared: inner spend competes with the outer
-for TPM/RPM (flagged, not blocked). Inner LLM cost is tracked in the sandbox
-ledger, not yet rolled up onto the outer dashboard — a known slice-2 gap (the
-outer-fitness spend AUC, ``docs/specs/l4-outer-loop.md`` § 4, is the durable home).
+for TPM/RPM (flagged, not blocked). Inner LLM cost (optimizer + backend) is
+tracked in the sandbox ledger AND rolled up onto the OUTER dashboard: each inner
+cycle's total spend is returned as this outer sample's ``step_tokens``
+(:func:`_read_inner_spend`), so it fans onto the outer ledger through the existing
+backend-cost channel (``sample_measurement``) — the inner cost IS the outer
+sample's backend cost, so "spend is the headline" holds at the outer level.
 """
 
 from __future__ import annotations
@@ -186,8 +189,8 @@ async def _run_inner_campaign(
     ctx: InnerSpawnContext,
     spec: _InnerTaskSpec,
     meta_prompt_overrides: dict[str, dict[str, Any]],
-) -> CycleResult:
-    """Mint + run one sandboxed inner campaign; return its terminal ``CycleResult``.
+) -> tuple[CycleResult, dict[str, Any]]:
+    """Mint + run one sandboxed inner campaign; return ``(CycleResult, spend)``.
 
     Runs in a FRESH task (the caller spawns it) so the per-task ContextVars are
     isolated from the outer cycle. Sets the per-run optimizer-prompt override
@@ -255,7 +258,7 @@ async def _run_inner_campaign(
         resumed_from_round=None,
         origin_accuracy=0.0,
     )
-    return await run_optimization(
+    result = await run_optimization(
         train_data,
         campaign_config,
         session=session,
@@ -265,6 +268,30 @@ async def _run_inner_campaign(
         mode=RunMode(),
         spend_budget_usd=campaign_config.optimization.spend_budget_usd,
     )
+    return result, _read_inner_spend(session)
+
+
+def _read_inner_spend(session: Session) -> dict[str, Any]:
+    """The inner cycle's total spend (tokens + USD), read from its dashboard.
+
+    The inner campaign wrote its own ``dashboard.json::spend`` (optimizer + backend
+    buckets) in the sandbox. We fold the two buckets into a single
+    ``step_tokens`` entry so the OUTER cycle's spend rolls up through the existing
+    backend-cost channel (:func:`sample_measurement._compute_step_tokens` →
+    ``emit_token_usage(kind="backend")``) — the inner cost IS this outer sample's
+    backend cost. No new mechanism, no double-count (each inner cycle is one fresh,
+    uncached outer-sample backend call). Empty when the dashboard isn't found."""
+    cid, cyid = session.campaign_id, session.state.cycle_id
+    if not cid or not cyid:
+        return {}
+    dash = read_json_optional(session.store.campaigns.cycle_dir(cid, cyid) / "dashboard.json") or {}
+    spend = dash.get("spend") or {}
+    buckets = (spend.get("backend") or {}, spend.get("loop") or {})
+    return {
+        "input": sum(int(b.get("input_tokens", 0) or 0) for b in buckets),
+        "output": sum(int(b.get("output_tokens", 0) or 0) for b in buckets),
+        "cost_usd": float(spend.get("total_used_usd", 0.0) or 0.0),
+    }
 
 
 async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -288,11 +315,12 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
     overrides = payload.get("meta_prompt_overrides") or {}
 
     start = time.monotonic()
+    inner_spend: dict[str, Any] = {}
     try:
         # Fresh task = its own ContextVar copies (ledger / round / abort / prompt
         # overrides). create_task copies the current context at creation; the
         # inner run re-binds its copies, leaving the outer's untouched.
-        result = await asyncio.create_task(_run_inner_campaign(ctx, spec, overrides))
+        result, inner_spend = await asyncio.create_task(_run_inner_campaign(ctx, spec, overrides))
         proxies = _compute_proxies(result, spec.target)
     except (KeyboardInterrupt, asyncio.CancelledError):
         raise
@@ -301,15 +329,26 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
         proxies = {"first_round_delta": 0.0, "after_N_rounds_delta": 0.0, "rounds_to_N": 99}
     elapsed = time.monotonic() - start
 
-    return {
-        "data": {
-            INNER_RESULT_KEY: [f"inner:{query}"],
-            **proxies,
-            "terminated_at": "l1_critique",
-            "total_time": elapsed,
-            "step_timings": {"l1_critique": elapsed},
-        }
+    data: dict[str, Any] = {
+        # Terminal-ranker head = the inner-result token. The connector's
+        # `_extract_experiment` sets each sample's `ground_truth` to this SAME
+        # `inner:{query}` token, so a sample is a HIT iff its inner cycle
+        # produced a result (there is no label to match in L4 — fitness is the
+        # proxy composite). Keep the two formats in sync.
+        INNER_RESULT_KEY: [f"inner:{query}"],
+        **proxies,
+        "terminated_at": "l1_critique",
+        "total_time": elapsed,
+        "step_timings": {"l1_critique": elapsed},
     }
+    # Roll the inner campaign's total spend up onto the OUTER dashboard via the
+    # existing backend-cost channel: the inner cost IS this outer sample's backend
+    # cost. Keyed by the terminal node so it fans onto one TokenUsageRecord.
+    if inner_spend and (inner_spend.get("input") or inner_spend.get("cost_usd")):
+        data["step_tokens"] = {
+            "l1_critique": {**inner_spend, "model": f"inner:{spec.inner_dataset}"}
+        }
+    return {"data": data}
 
 
 __all__ = [
