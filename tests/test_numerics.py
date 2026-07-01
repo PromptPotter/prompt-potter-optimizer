@@ -1394,6 +1394,37 @@ def test_layout_hard_failures(layout, expected_validator_id):
     assert expected_validator_id in {o.validator_id for o in result.outcomes}
 
 
+def test_resolve_node_layout_l4_edit_and_guard_rail():
+    """Slice 6 Arc 3: the outer L4 layout edit rides the per-node override channel —
+    a valid edit merges onto the floor; a mandatory-dropping edit rolls back (guard rail)."""
+    from promptpotter.application.optimization.dispatch.llm_call import (
+        resolve_node_layout,
+        set_optimizer_prompt_overrides,
+    )
+
+    floor = NODE_LAYOUTS["l1_critique"].floor
+    try:
+        # No override bound → the floor, untouched.
+        set_optimizer_prompt_overrides(None)
+        assert resolve_node_layout("l1_critique") == floor
+
+        # Valid edit (keeps mandatory `diagnostics`, all names in `possible`) → merges.
+        set_optimizer_prompt_overrides(
+            {"l1_critique": {"layout": {"problem_description": ["diagnostics", "axis_memory"]}}}
+        )
+        applied = resolve_node_layout("l1_critique")
+        assert applied.problem_description == ["diagnostics", "axis_memory"]
+        assert applied != floor
+
+        # Guard rail: dropping the mandatory `diagnostics` rolls back to the floor.
+        set_optimizer_prompt_overrides(
+            {"l1_critique": {"layout": {"problem_description": ["axis_memory"]}}}
+        )
+        assert resolve_node_layout("l1_critique") == floor
+    finally:
+        set_optimizer_prompt_overrides(None)
+
+
 # ===========================================================================
 # 10. PoBB posterior gate + leader eligibility
 # ===========================================================================

@@ -11,10 +11,10 @@ from promptpotter.application.optimization.dispatch.hub import (
 )
 from promptpotter.application.optimization.dispatch.llm_call import (
     LLMCallContext,
+    resolve_node_layout,
     run_optimizer_node,
 )
 from promptpotter.application.optimization.dispatch.schemas import L1CritiqueOutput
-from promptpotter.domain.l1_layout import NODE_LAYOUTS
 from promptpotter.domain.results import CritiqueReadout
 
 if TYPE_CHECKING:
@@ -46,7 +46,7 @@ async def run_l1_critique(
     from promptpotter.application.optimization.dispatch.llm_call import load_optimizer_prompt
 
     template, prompt_vars = DispatchHub.fill(
-        load_optimizer_prompt("l1_critique"), NODE_LAYOUTS["l1_critique"].floor, bundle
+        load_optimizer_prompt("l1_critique"), resolve_node_layout("l1_critique"), bundle
     )
 
     result, prompt, _ = await run_optimizer_node(

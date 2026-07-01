@@ -19,6 +19,12 @@ import json
 import logging
 from typing import Any
 
+from promptpotter.domain.l1_layout import (
+    L1_LAYOUT_SLOTS,
+    NODE_LAYOUTS,
+    L1Layout,
+    validate_l1_layout,
+)
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.infrastructure.store.paths import REPO_ROOT
@@ -33,6 +39,7 @@ __all__ = [
     "list_optimizer_prompts",
     "load_optimizer_prompt",
     "load_optimizer_set_overrides",
+    "resolve_node_layout",
     "set_optimizer_prompt_overrides",
 ]
 
@@ -270,6 +277,46 @@ def _apply_prompt_override(name: str, template: PromptTemplate) -> PromptTemplat
         return template
     fields = {k: v for k, v in node_override.items() if k in PromptTemplate.model_fields}
     return template.model_copy(update=fields) if fields else template
+
+
+def resolve_node_layout(node: str) -> L1Layout:
+    """The effective per-node injection layout for *node* — its floor ± the outer
+    L4 cycle's per-node ``layout`` edit.
+
+    The layout edit rides the SAME per-node override channel as the prose edits
+    (:func:`set_optimizer_prompt_overrides` → ``overrides[node]["layout"] = {slot:
+    [name, ...]}``) — the outer L1 emits it alongside a prose edit; the inner runner
+    binds it inside the inner task. It is a PARTIAL per-slot replacement: a slot the
+    edit names replaces the floor's list, a slot it omits keeps the floor. The merged
+    layout is validated against the node's :data:`NODE_LAYOUTS` spec — a dropped-
+    mandatory / unknown-placeholder / dup edit is the GUARD RAIL: it rolls back to the
+    floor, so the inner cycle runs on the good default and the bad edit scores as
+    no-improvement rather than starving the node. No override bound (every normal,
+    non-L4 cycle) → the floor unchanged (``_apply_prompt_override``'s peer for the
+    structural, not-a-``PromptTemplate``-field, half of a per-node edit)."""
+    spec = NODE_LAYOUTS[node]
+    overrides = _OPTIMIZER_PROMPT_OVERRIDES.get() or {}
+    node_override = overrides.get(node)
+    raw = node_override.get("layout") if isinstance(node_override, dict) else None
+    if not isinstance(raw, dict) or not raw:
+        return spec.floor
+    update: dict[str, list[str]] = {}
+    for slot in L1_LAYOUT_SLOTS:
+        vals = raw.get(slot)
+        if isinstance(vals, list) and all(isinstance(v, str) for v in vals):
+            update[slot] = list(vals)
+    if not update:
+        return spec.floor
+    merged = spec.floor.model_copy(update=update)
+    result = validate_l1_layout(merged, spec=spec)
+    if not result.is_valid:
+        logger.warning(
+            "L4 layout edit for %r rolled back to floor (guard rail): %s",
+            node,
+            [o.validator_id for o in result.outcomes],
+        )
+        return spec.floor
+    return merged
 
 
 def list_optimizer_prompts() -> list[str]:

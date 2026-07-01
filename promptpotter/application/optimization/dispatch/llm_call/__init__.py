@@ -30,6 +30,7 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     load_optimizer_set_overrides,
     optimizer_model,
     optimizer_node_config,
+    resolve_node_layout,
     set_optimizer_prompt_overrides,
 )
 
@@ -44,6 +45,7 @@ __all__ = [
     "load_optimizer_set_overrides",
     "optimizer_model",
     "optimizer_node_config",
+    "resolve_node_layout",
     "run_optimizer_node",
     "set_optimizer_prompt_overrides",
 ]

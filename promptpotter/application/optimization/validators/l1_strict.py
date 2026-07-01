@@ -18,6 +18,7 @@ Three concerns, all validation-shaped:
 from __future__ import annotations
 
 import copy
+import json
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -26,6 +27,7 @@ from promptpotter.application.config import missing_template_vars
 from promptpotter.application.optimization.dispatch.schemas import L1GenerateOutput
 from promptpotter.config.settings import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVERRIDES
 from promptpotter.domain.escalation_signals import ValidationFailure
+from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, NODE_LAYOUTS
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import SCHEMA_OWNED_FIELDS, PipelineSchema
 from promptpotter.domain.results import CandidateProposal
@@ -144,6 +146,25 @@ def build_l1_output_schema(
                 param_props[param] = {"type": declared_type}
             else:
                 param_props[param] = {}
+        # L4's information-flow lever (slice 6): for an optimizer node the outer
+        # cycle may edit not only prose but WHICH signals reach it. Graft a `layout`
+        # param — a per-slot list of injection names — riding the SAME per-node
+        # override object as the prose edits. Only `editor == "l4"` nodes (the fill
+        # sites route through `resolve_node_layout`); `l1_generate` (L2-edited
+        # in-campaign) is excluded so the schema never offers an unwired edit. Enum =
+        # the node's legal add/excise vocabulary (`possible`). Inert for every normal
+        # campaign — its backend nodes are absent from NODE_LAYOUTS.
+        layout_spec = NODE_LAYOUTS.get(node_name)
+        if layout_spec is not None and layout_spec.editor == "l4":
+            allowed = sorted(layout_spec.possible)
+            param_props["layout"] = {
+                "type": "object",
+                "properties": {
+                    slot: {"type": "array", "items": {"type": "string", "enum": allowed}}
+                    for slot in L1_LAYOUT_SLOTS
+                },
+                "additionalProperties": False,
+            }
         if not param_props:
             continue
         pp_properties[node_name] = {
@@ -474,9 +495,11 @@ def detect_invariants(
         )
         child_tc = child.memory.task_context.to_dict()
         tc_delta = tuple(sorted((k, v) for k, v in child_tc.items() if v != parent_tc.get(k)))
+        # json canon (not tuple-of-items) so a nested value — e.g. a slice-6 `layout`
+        # dict riding alongside the prose edits — stays hashable for the `seen` sig.
         no_canon = tuple(
             sorted(
-                (n, tuple(sorted(p.items())))
+                (n, json.dumps(p, sort_keys=True))
                 for n, p in (cp.pipeline_params_override or {}).items()
                 if p
             )

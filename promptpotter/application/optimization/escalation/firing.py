@@ -23,6 +23,7 @@ from promptpotter.application.optimization.dispatch.hub import (
 from promptpotter.application.optimization.dispatch.llm_call import (
     LLMCallContext,
     load_optimizer_prompt,
+    resolve_node_layout,
     run_optimizer_node,
 )
 from promptpotter.application.optimization.dispatch.schemas import (
@@ -440,7 +441,7 @@ async def _run_transition(
     ):
         template, prompt_vars = DispatchHub.fill(
             load_optimizer_prompt(transition.template_name),
-            NODE_LAYOUTS[transition.template_name].floor,
+            resolve_node_layout(transition.template_name),
             build_bundle(cycle),
         )
         raw, prompt, _ = await run_optimizer_node(
