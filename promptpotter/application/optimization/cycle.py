@@ -602,6 +602,7 @@ class Cycle:
             tr.best_theta = cur_theta
 
         rr.cumulative_accuracy = tr.current_accuracy
+        rr.cumulative_theta = cur_theta
 
         return build_round_payload(rr, round_num, self.opt_sp)
 

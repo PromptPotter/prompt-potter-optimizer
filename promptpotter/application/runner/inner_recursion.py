@@ -165,21 +165,40 @@ def _resolve_inner_task(ctx: InnerSpawnContext, query: str) -> _InnerTaskSpec:
 
 
 def _compute_proxies(result: CycleResult, target: float) -> dict[str, Any]:
-    """The three proxy metrics from a finished inner cycle (θ-based accuracies).
+    """The three proxy metrics from a finished inner cycle, on **subset-invariant
+    ability**.
 
     ``first_round_delta`` = round-1 gain over origin; ``after_N_rounds_delta`` =
     best-round gain over origin; ``rounds_to_N`` = rounds to first reach *target*
     (0 if the origin already meets it, ``n_rounds + 1`` as the "didn't make it"
     sentinel just past the budget). Deltas may be negative (regression); the outer
-    formula clamps the composite to [0, 1]."""
-    origin = result.origin_accuracy
+    formula clamps the composite to [0, 1].
+
+    Each round is measured as θ-implied accuracy on the cycle's fixed δ ruler, not
+    raw hit-rate, so a lucky thin per-round subset (``per_round_resubset``) cannot
+    inflate the meta-fitness the outer L4 cycle optimizes against — the honest inner
+    lift, not resubset noise. Falls back to raw accuracy per-value only where the
+    ruler is cold (ability is None); ``round_level``/``origin_level`` pick ability
+    when present."""
     rounds = result.rounds
-    first = (rounds[0].accuracy - origin) if rounds else 0.0
-    after_n = result.best_accuracy - origin
+    abilities = result.round_abilities
+
+    def _round_level(i: int) -> float:
+        if i < len(abilities) and abilities[i] is not None:
+            return abilities[i]  # type: ignore[return-value]
+        return rounds[i].accuracy
+
+    origin = result.origin_ability if result.origin_ability is not None else result.origin_accuracy
+    best = result.best_ability if result.best_ability is not None else result.best_accuracy
+    first = (_round_level(0) - origin) if rounds else 0.0
+    after_n = best - origin
     if origin >= target:
         rounds_to_n = 0
     else:
-        rounds_to_n = next((r.round for r in rounds if r.accuracy >= target), len(rounds) + 1)
+        rounds_to_n = next(
+            (r.round for i, r in enumerate(rounds) if _round_level(i) >= target),
+            len(rounds) + 1,
+        )
     return {
         "first_round_delta": round(first, 6),
         "after_N_rounds_delta": round(after_n, 6),

@@ -252,6 +252,10 @@ class RoundResult(BaseModel):
     matched_origin_composite: float = 0.0
     # Per-sample best-so-far accuracy across rounds; dashboard renders "current best" without walking priors.
     cumulative_accuracy: float = 0.0
+    # θ-peer of `cumulative_accuracy`: ability of the cumulative frontier on the cycle's
+    # fixed δ ruler (subset-invariant). None when the ruler is cold. Feeds the L4 outer
+    # proxy so a drifting per-round subset can't inflate the meta-fitness signal.
+    cumulative_theta: float | None = None
     # --- raw payload ---
     prompt_fields: dict[str, Any]
     # The elected winner's `memory.task_context` (TaskDecomposition.to_dict()), so
@@ -331,6 +335,14 @@ class CycleResult(BaseModel):
     best_accuracy: float
     best_round: int
     origin_accuracy: float
+    # θ-implied accuracy on the cycle's fixed δ ruler (subset-invariant peers of the
+    # raw accuracies above). `origin_ability`/`best_ability` are scalars; `round_abilities`
+    # parallels `rounds`. All None/empty when the ruler is cold (thin grade-A archive) —
+    # the L4 proxy then falls back to raw accuracy. These exist so a drifting per-round
+    # subset can't inflate the meta-fitness signal an outer cycle optimizes against.
+    origin_ability: float | None = None
+    best_ability: float | None = None
+    round_abilities: list[float | None] = Field(default_factory=list)
     winner_prompt_fields: dict[str, Any]
     winner_pipeline_params: dict[str, Any] | None = None
     stop_reason: str

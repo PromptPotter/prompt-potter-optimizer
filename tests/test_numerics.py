@@ -27,6 +27,7 @@ from promptpotter.application.intelligence.exploration import (
     fit_rasch_2pl,
     fit_theta_given_delta,
     graduate_ruler_model,
+    ruler_expected_accuracy,
     select_round_subset,
 )
 from promptpotter.application.mask import (
@@ -620,6 +621,26 @@ def test_fit_theta_given_delta_is_subset_invariant_unlike_accuracy() -> None:
     # plain logit-accuracy). A single hit on flat δ ⇒ θ > 0 under the N(0,σ²) prior.
     ghost = fit_theta_given_delta([Observation("ghost", 99, True)], ruler)
     assert "ghost" in ghost and ghost["ghost"][0] > 0.0
+
+
+def test_ruler_expected_accuracy_refuses_subset_inflation() -> None:
+    # RP-2 (L4 proxy honesty). The outer meta-fitness reads inner improvement as
+    # θ-implied accuracy on the cycle's FIXED ruler, not the winner's raw hit-rate, so a
+    # lucky thin resubset (`per_round_resubset`) cannot inflate the signal an outer cycle
+    # optimizes against. The silent harm without this: a 5/6 easy-slice reads 0.83 and
+    # feeds the outer a phantom +0.33 lift while the honest full-panel ability is 0.5.
+    ruler = {1: -2.0, 2: -2.0, 3: -2.0, 4: 2.0, 5: 2.0, 6: 2.0}  # easy 1-3, hard 4-6
+    full = ruler_expected_accuracy(0.0, ruler)
+    assert full is not None
+    # Symmetric ruler about δ=0 ⇒ ability 0 projects to EXACTLY 0.5 — regardless of which
+    # subset a round scored — whereas raw accuracy on the easy 1-3 subset reads ~0.88.
+    assert abs(full - 0.5) < 1e-9
+    # Monotone in ability: a genuinely stronger candidate always projects higher.
+    lo, hi = ruler_expected_accuracy(-1.5, ruler), ruler_expected_accuracy(1.5, ruler)
+    assert lo is not None and hi is not None and hi > full > lo
+    # Cold ruler / absent ability → None so the proxy falls back to raw accuracy.
+    assert ruler_expected_accuracy(0.0, {}) is None
+    assert ruler_expected_accuracy(None, ruler) is None
 
 
 def _synth_2pl(

@@ -314,12 +314,25 @@ def _build_cycle_result(
     overwritten each round by absorb_round, so reading prompts off it would pair the
     best params with the last round's text."""
     best_sp = cycle.tracking.best_sp if cycle is not None else None
+    # θ-implied accuracies on the cycle's fixed ruler — the subset-invariant peers of the
+    # raw accuracies, so an outer L4 cycle scores inner improvement on ability, not on a
+    # drifting per-round subset (returns None where the ruler is cold → raw fallback).
+    from promptpotter.application.intelligence.exploration import ruler_expected_accuracy
+
+    ds = cycle.delta_scale if cycle is not None else None
+    tr = cycle.tracking if cycle is not None else None
     return CycleResult(
         rounds=cycle.rounds if cycle is not None else [],
         n_rounds=len(cycle.rounds) if cycle is not None else 0,
         best_accuracy=cycle.tracking.best_accuracy if cycle is not None else 0.0,
         best_round=cycle.tracking.best_round if cycle is not None else 0,
         origin_accuracy=origin.origin_acc,
+        origin_ability=ruler_expected_accuracy(tr.origin_theta, ds) if tr else None,
+        best_ability=ruler_expected_accuracy(tr.best_theta, ds) if tr else None,
+        round_abilities=[
+            ruler_expected_accuracy(rr.cumulative_theta, ds)
+            for rr in (cycle.rounds if cycle is not None else [])
+        ],
         winner_prompt_fields=(best_sp.prompt_fields or {}) if best_sp else {},
         winner_pipeline_params=best_sp.pipeline_params if best_sp else None,
         stop_reason=stop_reason,

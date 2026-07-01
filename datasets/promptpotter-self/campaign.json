@@ -2,6 +2,7 @@
   "campaign_config": {
     "dataset_name": "promptpotter-self",
     "scoring": "0.4 * first_round_delta + 0.4 * after_N_rounds_delta + 0.2 * (1.0 / max(rounds_to_N, 1))",
+    "headline_metric": "ability",
     "sp_budget_ttest": 2,
     "exclude_nodes": [],
     "pipeline_overrides": {},

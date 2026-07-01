@@ -43,6 +43,7 @@ __all__ = [
     "fit_theta_given_delta",
     "graded_response",
     "graduate_ruler_model",
+    "ruler_expected_accuracy",
     "select_round_subset",
 ]
 
@@ -74,6 +75,20 @@ def _ruler_entry(value: RulerEntry) -> tuple[float, float]:
     if isinstance(value, tuple):
         return float(value[0]), float(value[1])
     return float(value), 1.0
+
+
+def ruler_expected_accuracy(theta: float | None, delta_scale: Ruler | None) -> float | None:
+    """Expected score of ability ``theta`` over the fixed difficulty ruler — the
+    θ-implied accuracy on the ruler's one reference sample set. Subset-invariant
+    (always the whole ruler, never a round's drifting probe subset), so it is the
+    honest peer of a round's raw accuracy under ``per_round_resubset``: a lucky
+    thin subset can inflate raw accuracy, but ability re-projected onto the fixed
+    ruler cannot. ``None`` when the ability or ruler is absent (cold start) →
+    callers fall back to raw accuracy."""
+    if theta is None or not delta_scale:
+        return None
+    etas = np.array([a * (theta - d) for d, a in (_ruler_entry(v) for v in delta_scale.values())])
+    return float(np.mean(1.0 / (1.0 + np.exp(-np.clip(etas, -50, 50)))))
 
 
 # Broad EB starting priors — first inner MAP fit is barely regularized.
