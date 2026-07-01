@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -38,6 +38,8 @@ __all__ = [
     "RulerEntry",
     "build_observations",
     "candidate_abilities",
+    "candidate_lcb_ability",
+    "discovered_level_trajectory",
     "fit_rasch",
     "fit_rasch_2pl",
     "fit_theta_given_delta",
@@ -89,6 +91,70 @@ def ruler_expected_accuracy(theta: float | None, delta_scale: Ruler | None) -> f
         return None
     etas = np.array([a * (theta - d) for d, a in (_ruler_entry(v) for v in delta_scale.values())])
     return float(np.mean(1.0 / (1.0 + np.exp(-np.clip(etas, -50, 50)))))
+
+
+def candidate_lcb_ability(
+    theta: float | None, theta_se: float | None, delta_scale: Ruler | None
+) -> float | None:
+    """A candidate's **lower-confidence** ability on the fixed ruler: project ``θ − θ_se``
+    (a one-SE pessimistic θ) through :func:`ruler_expected_accuracy`.
+
+    The winner's-curse guard for the L4 *discovery* signal (below). Reading the best
+    candidate a meta-prompt's inner search *found* — not just the one it *crowned* —
+    recovers the sub-crowning-threshold signal the conservative θ-LCB election throws
+    away at a small inner sample budget. But a naïve max over candidates' point θ would
+    reward *variance* (the max of noisy estimates is upward-biased), so each candidate's
+    optimistic point θ is first discounted by its own SE. ``None`` when θ / SE / ruler is
+    absent — the caller then either skips the candidate (ability space) or reads its
+    accuracy Wilson-LB instead (raw space)."""
+    if theta is None or theta_se is None:
+        return None
+    return ruler_expected_accuracy(theta - theta_se, delta_scale)
+
+
+def discovered_level_trajectory(
+    origin_theta: float | None,
+    origin_accuracy: float,
+    rounds: Sequence[Sequence[tuple[float | None, float | None, float]]],
+    delta_scale: Ruler | None,
+) -> tuple[float, list[float]]:
+    """Origin level + per-round **cumulative best-discovered** conservative level — the
+    honest, single-scale signal an outer L4 cycle scores inner search quality by.
+
+    Each inner candidate is ``(θ, θ_se, accuracy_ci_lo)``. The whole trajectory is
+    computed in ONE space so no delta ever subtracts across scales (the mixed-space bug):
+
+    - **Ability space** — used when the origin's θ projects onto the ruler
+      (``ruler_expected_accuracy(origin_theta, ·)`` is not None, i.e. the ruler is warm
+      *and* the origin was fit). Each candidate's level is its :func:`candidate_lcb_ability`;
+      a candidate with no θ is **skipped** (never mixed in as raw accuracy).
+    - **Raw space** — cold ruler or unfit origin θ. Each candidate's level is its
+      accuracy Wilson lower bound (``accuracy_ci_lo``), the raw-space peer of the θ-LCB.
+
+    ``running`` is the cumulative max of discovered levels — the best the inner search has
+    found *through* round i, noise-discounted. It is **not** floored at the origin: a round
+    whose search only surfaced worse-than-origin candidates yields a level *below* origin, so
+    ``first_round_delta`` / ``after_N_rounds_delta`` stay negative on a regressing meta-prompt
+    (the gradient the outer optimizer needs to *avoid* bad mutations). A round that discovered
+    nothing measurable carries the prior running value (or the origin level, neutral, before
+    any discovery). Returns ``(origin_level, per_round_levels)``."""
+    origin_ability = ruler_expected_accuracy(origin_theta, delta_scale)
+    ability_space = origin_ability is not None
+    origin_level = origin_ability if ability_space else origin_accuracy
+    assert origin_level is not None  # ability_space ⇒ not None; else origin_accuracy (float)
+    running: float | None = None
+    out: list[float] = []
+    for cands in rounds:
+        round_best: float | None = None
+        for theta, theta_se, ci_lo in cands:
+            lvl = candidate_lcb_ability(theta, theta_se, delta_scale) if ability_space else ci_lo
+            if lvl is None:
+                continue
+            round_best = lvl if round_best is None else max(round_best, lvl)
+        if round_best is not None:
+            running = round_best if running is None else max(running, round_best)
+        out.append(running if running is not None else origin_level)
+    return origin_level, out
 
 
 # Broad EB starting priors — first inner MAP fit is barely regularized.

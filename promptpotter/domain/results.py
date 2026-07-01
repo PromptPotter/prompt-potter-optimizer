@@ -335,14 +335,18 @@ class CycleResult(BaseModel):
     best_accuracy: float
     best_round: int
     origin_accuracy: float
-    # θ-implied accuracy on the cycle's fixed δ ruler (subset-invariant peers of the
-    # raw accuracies above). `origin_ability`/`best_ability` are scalars; `round_abilities`
-    # parallels `rounds`. All None/empty when the ruler is cold (thin grade-A archive) —
-    # the L4 proxy then falls back to raw accuracy. These exist so a drifting per-round
-    # subset can't inflate the meta-fitness signal an outer cycle optimizes against.
-    origin_ability: float | None = None
-    best_ability: float | None = None
-    round_abilities: list[float | None] = Field(default_factory=list)
+    # The L4 outer proxy's honest, single-scale inner-search signal (built by
+    # `exploration.discovered_level_trajectory` at finalize). `origin_level` is the origin's
+    # level and `round_discovered_levels` the cumulative best-DISCOVERED conservative level
+    # per round — both in ONE space (θ-implied ability when the ruler is warm, else raw
+    # accuracy), so no proxy delta ever subtracts across scales. "Discovered" (best candidate
+    # the inner search found, θ-LCB-discounted), not "crowned" (best candidate the inner
+    # election deployed): at a small inner sample budget the conservative election rarely
+    # crowns, so reading the crowned frontier gave the outer ~zero signal. Levels are NOT
+    # floored at origin — a regressing meta-prompt yields a level below origin so the outer
+    # keeps a gradient to avoid it. Empty for an init-crash / no rounds.
+    origin_level: float = 0.0
+    round_discovered_levels: list[float] = Field(default_factory=list)
     winner_prompt_fields: dict[str, Any]
     winner_pipeline_params: dict[str, Any] | None = None
     stop_reason: str

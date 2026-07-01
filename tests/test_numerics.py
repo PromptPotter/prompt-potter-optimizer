@@ -23,6 +23,8 @@ import pytest
 
 from promptpotter.application.intelligence.exploration import (
     Observation,
+    candidate_lcb_ability,
+    discovered_level_trajectory,
     fit_rasch,
     fit_rasch_2pl,
     fit_theta_given_delta,
@@ -641,6 +643,53 @@ def test_ruler_expected_accuracy_refuses_subset_inflation() -> None:
     # Cold ruler / absent ability → None so the proxy falls back to raw accuracy.
     assert ruler_expected_accuracy(0.0, {}) is None
     assert ruler_expected_accuracy(None, ruler) is None
+
+
+def test_discovered_level_trajectory_is_honest_single_scale() -> None:
+    # The L4 outer proxy's inner-search signal. Every branch here is a SILENT wrong-number
+    # class: a completed inner run reports a plausible number and the outer optimizes on it,
+    # so a mis-built level is invisible — the run looks fine and the meta-fitness is wrong.
+    ruler = {1: -1.0, 2: 0.0, 3: 1.0}
+    origin_theta = 0.0
+    origin_ability = ruler_expected_accuracy(origin_theta, ruler)
+    assert origin_ability is not None
+
+    # Winner's-curse guard: a high-θ but high-SE candidate is discounted below its point θ,
+    # so a meta-prompt that makes the inner search FLAIL (high variance) can't win on luck.
+    lcb = candidate_lcb_ability(1.0, 0.8, ruler)
+    point = ruler_expected_accuracy(1.0, ruler)
+    assert lcb is not None and point is not None and lcb < point
+    assert candidate_lcb_ability(None, 0.2, ruler) is None  # no θ → no level
+    assert candidate_lcb_ability(1.0, None, ruler) is None  # no SE → no level
+
+    # F4 — discovery, not crowning: a round with a strong low-SE candidate lifts the level
+    # ABOVE origin even though the function never sees (needs) a crowned-winner flag.
+    o_lvl, levels = discovered_level_trajectory(
+        origin_theta, 0.44, [[(0.0, 0.2, 0.5), (1.2, 0.2, 0.6)]], ruler
+    )
+    assert abs(o_lvl - origin_ability) < 1e-9 and levels[0] > o_lvl
+
+    # F1 — single scale: on a WARM ruler a candidate with no θ is SKIPPED, never folded in as
+    # its raw ci_lo (a different scale). With only θ-less candidates the round discovers
+    # nothing → carries the origin level (neutral), it does NOT read the 0.99 ci_lo.
+    o2, lv2 = discovered_level_trajectory(origin_theta, 0.44, [[(None, None, 0.99)]], ruler)
+    assert lv2 == [o2]
+
+    # F5 — regression preserved: a round whose only candidates are worse-than-origin yields a
+    # level BELOW origin (a negative delta the outer steers away from), NOT floored at origin.
+    o3, lv3 = discovered_level_trajectory(origin_theta, 0.44, [[(-2.0, 0.2, 0.1)]], ruler)
+    assert lv3[0] < o3
+
+    # Cumulative / monotone: a strong round then a weak round keeps the best DISCOVERED so far.
+    _, lv4 = discovered_level_trajectory(
+        origin_theta, 0.44, [[(1.2, 0.2, 0.6)], [(-2.0, 0.2, 0.1)]], ruler
+    )
+    assert lv4[1] == lv4[0] > origin_ability
+
+    # Cold ruler ⇒ raw space end-to-end: origin level is raw accuracy, candidate levels read
+    # the accuracy Wilson-LB — same single-scale discipline, no θ/raw mixing.
+    o5, lv5 = discovered_level_trajectory(None, 0.44, [[(None, None, 0.30)]], {})
+    assert abs(o5 - 0.44) < 1e-9 and abs(lv5[0] - 0.30) < 1e-9
 
 
 def _synth_2pl(

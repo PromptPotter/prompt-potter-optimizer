@@ -165,39 +165,27 @@ def _resolve_inner_task(ctx: InnerSpawnContext, query: str) -> _InnerTaskSpec:
 
 
 def _compute_proxies(result: CycleResult, target: float) -> dict[str, Any]:
-    """The three proxy metrics from a finished inner cycle, on **subset-invariant
-    ability**.
+    """The three proxy metrics from a finished inner cycle.
 
-    ``first_round_delta`` = round-1 gain over origin; ``after_N_rounds_delta`` =
-    best-round gain over origin; ``rounds_to_N`` = rounds to first reach *target*
-    (0 if the origin already meets it, ``n_rounds + 1`` as the "didn't make it"
-    sentinel just past the budget). Deltas may be negative (regression); the outer
-    formula clamps the composite to [0, 1].
+    ``first_round_delta`` = round-1 discovered lift over origin; ``after_N_rounds_delta`` =
+    best discovered lift over origin (across all rounds); ``rounds_to_N`` = rounds to first
+    reach *target* (0 if the origin already meets it, ``n_rounds + 1`` as the "didn't make
+    it" sentinel just past the budget). Deltas may be negative on a regressing meta-prompt.
 
-    Each round is measured as θ-implied accuracy on the cycle's fixed δ ruler, not
-    raw hit-rate, so a lucky thin per-round subset (``per_round_resubset``) cannot
-    inflate the meta-fitness the outer L4 cycle optimizes against — the honest inner
-    lift, not resubset noise. Falls back to raw accuracy per-value only where the
-    ruler is cold (ability is None); ``round_level``/``origin_level`` pick ability
-    when present."""
-    rounds = result.rounds
-    abilities = result.round_abilities
-
-    def _round_level(i: int) -> float:
-        if i < len(abilities) and abilities[i] is not None:
-            return abilities[i]  # type: ignore[return-value]
-        return rounds[i].accuracy
-
-    origin = result.origin_ability if result.origin_ability is not None else result.origin_accuracy
-    best = result.best_ability if result.best_ability is not None else result.best_accuracy
-    first = (_round_level(0) - origin) if rounds else 0.0
-    after_n = best - origin
+    The heavy lifting is upstream in ``discovered_level_trajectory`` (single-scale, θ-LCB
+    over discovered candidates): here we just difference its ``origin_level`` /
+    ``round_discovered_levels`` — no mixed-space subtraction, no crowned-frontier blindness.
+    Levels are cumulative, so the last level is the best; ``max`` is defensive."""
+    origin = result.origin_level
+    levels = result.round_discovered_levels
+    first = (levels[0] - origin) if levels else 0.0
+    after_n = (max(levels) - origin) if levels else 0.0
     if origin >= target:
         rounds_to_n = 0
     else:
         rounds_to_n = next(
-            (r.round for i, r in enumerate(rounds) if _round_level(i) >= target),
-            len(rounds) + 1,
+            (i + 1 for i, lvl in enumerate(levels) if lvl >= target),
+            len(levels) + 1,
         )
     return {
         "first_round_delta": round(first, 6),
@@ -265,17 +253,20 @@ async def _run_inner_campaign(
     campaign_config = load_campaign_config({**profile, **file_config})
     # Cap inner rounds at the task's budget — the proxy metrics are defined over
     # exactly this many rounds, and it bounds the (geometric) recursion cost.
-    # Also reconcile the per-round eval budget to the reduced inner bank: the inner
-    # campaign draws exactly ``train_data`` (n_samples), but inherits the inner
-    # dataset's full-split ``sp_budget_ttest`` — leaving it above the bank fires the
-    # ``sp_budget_exceeds_dataset`` preflight on every inner bootstrap (noise that
-    # obscures real inner signal) with no behavioural gain. The proxy is defined
-    # over exactly this bank, so the budget belongs at the bank size.
+    # Score every candidate on the WHOLE inner bank (``sp_budget_ttest = len(train_data)``),
+    # not a thinner per-round subset: the outer proxy reads each candidate's θ-LCB, whose
+    # width is set by how many samples that candidate was scored on, so a bank drawn but not
+    # fully scored just widens the LCB and starves the outer signal (the inner draw and the
+    # inner measurement must be the same size — anything less is wasted samples). The inner
+    # spend cap is lifted to fit a full-bank × N-round run so this doesn't merely trip the
+    # ``spend_budget`` stop early; it stays well inside the outer campaign's own $ cap. A None
+    # (unlimited) inner budget is BOUNDED here — an inner cycle must never run open-ended.
+    inner_spend_cap = max(campaign_config.optimization.spend_budget_usd or 0.05, 0.05)
     campaign_config = campaign_config.model_copy(
         update={
-            "sp_budget_ttest": min(campaign_config.sp_budget_ttest, len(train_data)),
+            "sp_budget_ttest": len(train_data),
             "optimization": campaign_config.optimization.model_copy(
-                update={"max_rounds": spec.n_rounds}
+                update={"max_rounds": spec.n_rounds, "spend_budget_usd": inner_spend_cap}
             ),
         }
     )
@@ -335,8 +326,18 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
     except (KeyboardInterrupt, asyncio.CancelledError):
         raise
     except Exception:
-        logger.exception("inner cycle for %s failed; scoring as zero-improvement", query)
-        proxies = {"first_round_delta": 0.0, "after_N_rounds_delta": 0.0, "rounds_to_N": 99}
+        # A crashed inner cycle is the WORST outcome (a meta-prompt that broke the inner run),
+        # scored strictly below any completed run: floor deltas at -1.0 (→ 0 under the
+        # recentred outer formula) and use the SAME "never reached" sentinel a completed-but-
+        # -unimproved run uses (spec.n_rounds + 1), not a magic 99 — so the rounds term stays
+        # on one scale. Degrade rather than propagate: one broken meta-prompt must not kill the
+        # whole outer cycle.
+        logger.exception("inner cycle for %s failed; scoring as worst-case", query)
+        proxies = {
+            "first_round_delta": -1.0,
+            "after_N_rounds_delta": -1.0,
+            "rounds_to_N": spec.n_rounds + 1,
+        }
     elapsed = time.monotonic() - start
 
     data: dict[str, Any] = {
