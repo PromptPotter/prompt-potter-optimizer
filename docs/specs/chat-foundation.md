@@ -1,11 +1,9 @@
 # Chat foundation — the first-class front door
 
 > **Living contract.** The canonical design for the chat tab as PromptPotter's front door +
-> agent-activity stream. **Arc 1 (curated activity + loop control) ships today**; the forward
-> part is the *imprint* — a generic agent-activity taxonomy (§1) that future tool-use
-> populates without reshaping. Roadmap **C1** ("Chat write-path") and the roadmap's *Ingest +
-> chat-first web* note defer their detail here. Status lines below are truth for what ships;
-> full prose history is in `git log`.
+> agent-activity stream. The forward part is the *imprint* — a generic agent-activity taxonomy
+> (§1) that future tool-use populates without reshaping. Roadmap **C1** ("Chat write-path")
+> and the roadmap's *Ingest + chat-first web* note carry the milestone framing.
 >
 > Read [`../architecture.md`](../architecture.md) §0 (five I/O kinds) first.
 
@@ -33,15 +31,13 @@ This codebase is **chat-experience-first, and meant to be reused.** The chat cor
 model + the generic activity translator + transport) is structured so another team can keep it
 and delete the PromptPotter-specific panes (§6) — what's left is a generic agent chat.
 
-**Status:** **Arc 1 shipped — curated activity + loop control (frontend-only).** The
-`chat` tab (`webapp/components/chat/ChatPane.tsx`) now renders one ordered thread: the
+The `chat` tab (`webapp/components/chat/ChatPane.tsx`) renders one ordered thread: the
 ingest/check-in segment, then a `LiveSegment` that projects a *curated* slice of the live
 cycle event stream (the webapp's first SSE consumer) and raises inline decision buttons
-that fire existing `/commands/{kind}` verbs. The origin gate moved into this thread (the
-global `OriginGateModal` was deleted), and the standalone job-bar strip folded into the
-pipeline hero (one anchor). **Deferred — Arc 2:** the conversational endpoint (§4a) + the
-genuine assistant tool-use behind the "Soon" toggles (§7). The §0 schema-first gate is
-untouched by Arc 1 (no new command, no new event, no new endpoint).
+that fire existing `/commands/{kind}` verbs. The origin gate lives in this thread (no separate
+modal); the job-bar folds into the pipeline hero (one anchor). The still-open half is the
+conversational endpoint (§4a) + the genuine assistant tool-use behind the "Soon" toggles (§7);
+the §0 schema-first gate is untouched by it (no new command, no new event, no new endpoint).
 
 ## 1. The unified thread model (the imprint)
 
@@ -92,11 +88,8 @@ function — `activeNodeId` (`webapp/components/workflow/layout.ts`) — that ev
 (the optimizer-canvas pulse, the RemoteBar, the TopStrip, the node detail). It reads the
 **in-flight LLM call's node** first (`dashboard.json::in_flight.node`, which names the live node
 directly for `l1_generate` / `l1_critique` / `l2_context` / `l3_plan` / `checkin`), falling back
-to the scoring states → `l1_score` only because scoring fires no optimizer LLM call. This
-replaced a lossy `state`-enum mapping that could never light the critique node (no writer ever
-emitted `state="l1_critique"`) and blanked the escalation nodes — the bug class where the
-canvas looked dead while the run was busy. The rule: **derive "what's active" once, from the
-authoritative on-disk signal; never re-infer it per surface.**
+to the scoring states → `l1_score` only because scoring fires no optimizer LLM call. The rule:
+**derive "what's active" once, from the authoritative on-disk signal; never re-infer it per surface.**
 
 **Item / Step are the optimizer specialization of the generic levels.** Exactly as §1 frames
 `candidate` / `round` as the optimizer-specific layer on the generic activity vocabulary, the
@@ -146,7 +139,7 @@ imprint already has the slot. Only a *richer per-tool field set* (beyond what `l
 State pairs an icon **and** a label (HIT/MISS, running/done) — never color alone — per the
 frontend accessibility invariant.
 
-**As shipped (Arc 1), the feed is curated, not the firehose** (`webapp/lib/chat/activity.ts`):
+**The feed is curated, not the firehose** (`webapp/lib/chat/activity.ts`):
 the high-signal kinds above become items; the per-sample `sample_scored` torrent collapses
 into a single replaced **progress chip**; `sample_order_preview` / `pobb_backfill` /
 `llm_call_progress` heartbeats / `token_usage` map to `null`; `command_ack` surfaces as a small
@@ -160,9 +153,7 @@ The chat is the webapp's **first SSE consumer** (all other liveness is the 2s `d
 poll, `webapp/lib/poll.tsx`). Critically, the stream is **cross-process**: the endpoint tails
 the cycle's on-disk ledger (`.runtime/ledger.jsonl`) rather than an in-memory fan-out, so the
 chat sees a campaign no matter which process runs it (the API server, the CLI, a spawned
-runner). This was the migration that made the chat work at all — an in-memory stream only
-existed in the runner's process, so a webapp chat against a CLI-launched run was always blank.
-Codepath: `event_stream/tail.py::CycleLedgerTail` → `events.py::stream_cycle_events`.
+runner). Codepath: `event_stream/tail.py::CycleLedgerTail` → `events.py::stream_cycle_events`.
 
 - **Stream:** subscribe to `GET /campaigns/{campaign_id}/cycles/{cycle_id}/events:subscribe`
   (contract in [`m12-events-asyncapi.yaml`](m12-events-asyncapi.yaml) + the certified
@@ -264,20 +255,9 @@ endpoint (§4a), declared in `m12-api-openapi.yaml` first.
 - Backend (TermNorm) tool activity surfaces in v1 only at the granularity the existing
   `snapshot` / `token_usage` records carry; a dedicated "web search" step is future work.
 
-**Drift this spec records (reconcile, don't silently fix):**
-- The roadmap calls this work **C1**; `code-debt-cleanup.md`'s "intentional UI placeholders"
-  table already points its chat rows at **C1** (the stale "M13+" tag was dropped). The
-  `adr/0001` historical "M13 chat-first user web" naming stays as constitutional record.
-- `mask-projection.md` requires the `/lineage?lens=` read endpoint declared in
-  `m12-api-openapi.yaml`, but the openapi declares no read endpoints though mask M1 is marked
-  shipped — a contract gap to resolve when the chat read-surface is declared.
-- `Expected-Version` is optional in v0 of `m12-api-openapi.yaml` pending the client
-  consuming SSE sequence numbers. Once the chat consumes the SSE tail (§3), it threads
-  `sequence` into command `Expected-Version` — the condition to flip it back to required.
-
 ## 8. Build order + acceptance
 
-**Arc 1 — curated activity + loop control (shipped, frontend-only):**
+**Arc 1 — curated activity + loop control:**
 1. **Translator** (`ProjectionEnvelope → ActivityItem`, `lib/chat/activity.ts`), curated 1:1
    against `LiveDisplay` handlers — every `kind` maps to an item or an explicit `null`.
 2. **SSE client** (`lib/chat/useCycleEvents.ts`), snapshot-then-tail, reconnect; first consumer.

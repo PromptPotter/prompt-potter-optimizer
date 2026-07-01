@@ -267,11 +267,7 @@ class L2L3Memory(BaseModel):
     @field_validator("task_context", mode="before")
     @classmethod
     def _coerce_task_context(cls, v: Any) -> TaskDecomposition:
-        if isinstance(v, TaskDecomposition):
-            return v
-        if isinstance(v, dict):
-            return TaskDecomposition.from_dict(v)
-        return TaskDecomposition()
+        return TaskDecomposition.coerce(v)
 
 
 class OptSearchPoint(PromptTemplate):

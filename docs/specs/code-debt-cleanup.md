@@ -13,10 +13,10 @@ decisions → [`../architecture.md`](../architecture.md).
 **Entry format** (one line, enough to pick up cold): `file:symbol — why it's debt
 — action — blocker`. New debt goes under **Ready** (no blocker) or **Blocked**
 (name the blocker). Don't open a new dated section — the chronological sweep-log
-shape was the old bloat source; readiness buckets replaced it (2026-06-19).
+shape was the old bloat source; readiness buckets replaced it.
 
 > **Verify before trusting an entry.** This doc decays — claims drift as the code
-> moves under them. A 2026-06-19 audit found several long-standing entries were
+> moves under them. Audits have found long-standing entries that were
 > stale or outright wrong (a "dead" field that mlflow reads; an "always-False
 > return slot" that's a live signal). Re-confirm call sites before acting; if an
 > entry is wrong, fix or drop it as part of the work.
@@ -25,7 +25,7 @@ shape was the old bloat source; readiness buckets replaced it (2026-06-19).
 
 - **JSON-read sweep** — route hand-rolled `json.loads(path.read_text())` through the existing `read_json` / `read_json_tolerant` (`store/base.py`); drops redundant `.exists()` guards + try/except. The clean-win sites (full guard+try/except collapse) shipped this pass: `dispatcher.py`, `runner/entry.py`, `audit_trail.py` (×3), `origins.py` (×2). **Remaining = partial sites only** — each keeps a custom except arm, so the win is just the guard: `launcher/core.py:530` (raises `LaunchError`), `campaign_store/store.py:690` (returns a reason tuple), `event_stream/tail.py:97` (custom warming-up fallback). `shared/spend.py:95,157` is held separately — `shared/` importing `infrastructure/store/base` is a layer-direction question. Boundary-guard sites (`identity/allowlist.py`, `identity/provider_config.py`, `datasets/authored.py`, `csv_ingest.py`) are intentionally kept (`:104`). **Adopt-in-new-code for the coupon/BYO build:** the new `grant.json` / `api_keys.json` stores MUST ride `read_json_optional`/`write_json` (the `UserStore` template) from day one — don't add two more hand-rolled readers.
 
-<!-- Verified subtractive candidates from the 2026-06-21 simplification audit (3 hand-verified Explore passes after the StatusAssistant excision in 8a87164b). High confidence; each removes a named concept. -->
+<!-- Verified subtractive candidates (hand-verified; each removes a named concept). -->
 - `presentation/cli/commands/verify.py:125` `cmd_verify` (189 lines) — CLI command carrying application-layer logic (composite-fitness / archive-dedup / rescore, ~`:253-281`), violating `presentation/CLAUDE.md` ("no business logic in CLI commands"). Move the bootstrap→score→aggregate→record block behind an `application/` verify use-case; keep the CLI a thin arg-parse + format shell. Med-high confidence; one call site, no duplication. NOTE: this *adds* an application module — a layering fix, not a ledger-down subtraction (the surface-ledger "additive-but-safe" trap); land it as a feature-justified commit, not under a "refactor" label.
 
 **Verify-behavior (poll revalidation — NOT a clean substitution):**
@@ -68,17 +68,16 @@ shape was the old bloat source; readiness buckets replaced it (2026-06-19).
 
 ## Considered, not debt — don't re-open
 
-- **`search_point_scorer.py::score_search_point` 3rd return slot** — not an "always-False" bool; it's a live `EscalationSignal | None` consumed by `l1/score/candidate.py` (drives candidate elimination). (Was a stale debt claim; verified 2026-06-19.)
-- **`measurement_archive.py::register_alias(*hashes)`** — the variadic isn't dead; the sole caller passes both hashes and the function needs ≥2. (Stale claim; verified 2026-06-19.)
-- **`QueryNodeSpan.usage_details` (via `langfuse_sink`)** — read and forwarded to the Langfuse cloud observation. Not dead. (Stale claim; verified 2026-06-19.)
+- **`search_point_scorer.py::score_search_point` 3rd return slot** — not an "always-False" bool; it's a live `EscalationSignal | None` consumed by `l1/score/candidate.py` (drives candidate elimination). (Was a stale debt claim.)
+- **`measurement_archive.py::register_alias(*hashes)`** — the variadic isn't dead; the sole caller passes both hashes and the function needs ≥2. (Stale claim.)
+- **`QueryNodeSpan.usage_details` (via `langfuse_sink`)** — read and forwarded to the Langfuse cloud observation. Not dead. (Stale claim.)
 - **`webapp` `hit_rate` cell + `headline-stats.ts::fitnessTrend`** — fold already-served values (per-dot `hit` booleans; cumulative max over served `composite_fitness`); neither reimplements a scorer, so serving them would add wire coupling for identical behaviour (not R-36).
-- **`presentation/views/live/phase.py` recall@k recompute** — the round-stats block recomputes top-1/top-5 recall via `find_rank`/`get_ranked_items` (terminal live readout only; `round_analysis._rank_analysis` owns the equivalent buckets app-side). Serving recall on `RoundResult` would add wire coupling for display-only behaviour — same call as the `hit_rate` entry above, so NOT a forced R-36 fix. The bare `except: pass` that wrapped it WAS the real smell and was fixed (now logs at warning, 2026-06-21).
+- **`presentation/views/live/phase.py` recall@k recompute** — the round-stats block recomputes top-1/top-5 recall via `find_rank`/`get_ranked_items` (terminal live readout only; `round_analysis._rank_analysis` owns the equivalent buckets app-side). Serving recall on `RoundResult` would add wire coupling for display-only behaviour — same call as the `hit_rate` entry above, so NOT a forced R-36 fix. The bare `except: pass` that wrapped it WAS the real smell and was fixed (now logs at warning).
 - **`RunCallbacks` ↔ `emit_*`** — two writer APIs by design; the "which do I use" rule is in [`../developer/adding-a-surface.md`](../developer/adding-a-surface.md) §1.
 - **`from_disk_round` / `from_disk_log`** — not a roundtrip shim; foreign fork-siblings + historical cycles have no live ledger, so on-disk `round_NNNN.json` is the only source.
 - **`measurement_archive.py` `.get(…, default)` at `save()`** — looks dead (the production writer always sets the keys) but `save()` has direct test-fixture callers with partial dicts; live boundary guards.
-- **`writers.py` `_load_p_best_trajectory` / `_fork_summary_from_index` / `_load_sibling_indices`, `axis.py::_collect`** — single-caller, but the caller is in the SAME file in every case; intra-file `_private` decomposition is not inter-file indirection. (Verified 2026-06-19.)
-- **Leader-lock-in mechanism** (`leader_lock_in` / `pobb_lock_in` / `pobb_lock_in_n_min` knobs + `PoBBConfig.lock_in` + the `LEADER_LOCKED` `EscalationTarget`/`CandidateOutcome` + the `abort:lock_in_off` lineage-overlay lens) — the config knobs default off and no committed campaign sets them, so it LOOKS like a dead mechanism, but the `LEADER_LOCKED` path is structurally LIVE: a domain escalation target, a candidate outcome, the mask/lineage-overlay `abort:lock_in_off` what-if lens (`FamilyTree.tsx` "No lock-in"), and exercised by `tests/test_numerics.py`. Deleting it removes a shipped analysis feature, not dead code. Investigated + KEPT 2026-06-19. (The unreachable significance-gate beside it WAS deleted — it had no live surface.)
-- **Check-in "ready" ≠ "mintable" for prompt template-vars** — `origin_readiness(draft)` gates columns/framing/answer-space but not whether the committed prompt carries each node's required `{{template vars}}`; that check lives only at mint (`config.py::configure_and_apply_pipeline`, `pipeline_config_invalid` 422). Surfacing it earlier (at the resolve turn) needs the live `GET /pipeline` schema threaded into the deliberately-I/O-free resolve path (`origin_readiness` is pure-over-draft; `resolve_origin_turn`/`POST /resolve-origin` carry no backend client + the draft no base_url). **Operator decided 2026-06-22: keep the 422 backstop, don't add pre-mint backend I/O.** It's non-destructive (draft preserved, retry) and names the exact missing vars + fix; a bad origin never runs. Revisit only if check-in UX timing becomes a felt pain.
+- **`writers.py` `_load_p_best_trajectory` / `_fork_summary_from_index` / `_load_sibling_indices`, `axis.py::_collect`** — single-caller, but the caller is in the SAME file in every case; intra-file `_private` decomposition is not inter-file indirection.- **Leader-lock-in mechanism** (`leader_lock_in` / `pobb_lock_in` / `pobb_lock_in_n_min` knobs + `PoBBConfig.lock_in` + the `LEADER_LOCKED` `EscalationTarget`/`CandidateOutcome` + the `abort:lock_in_off` lineage-overlay lens) — the config knobs default off and no committed campaign sets them, so it LOOKS like a dead mechanism, but the `LEADER_LOCKED` path is structurally LIVE: a domain escalation target, a candidate outcome, the mask/lineage-overlay `abort:lock_in_off` what-if lens (`FamilyTree.tsx` "No lock-in"), and exercised by `tests/test_numerics.py`. Deleting it removes a shipped analysis feature, not dead code. Investigated + KEPT. (The unreachable significance-gate beside it WAS deleted — it had no live surface.)
+- **Check-in "ready" ≠ "mintable" for prompt template-vars** — `origin_readiness(draft)` gates columns/framing/answer-space but not whether the committed prompt carries each node's required `{{template vars}}`; that check lives only at mint (`config.py::configure_and_apply_pipeline`, `pipeline_config_invalid` 422). Surfacing it earlier (at the resolve turn) needs the live `GET /pipeline` schema threaded into the deliberately-I/O-free resolve path (`origin_readiness` is pure-over-draft; `resolve_origin_turn`/`POST /resolve-origin` carry no backend client + the draft no base_url). **Operator decided: keep the 422 backstop, don't add pre-mint backend I/O.** It's non-destructive (draft preserved, retry) and names the exact missing vars + fix; a bad origin never runs. Revisit only if check-in UX timing becomes a felt pain.
 - **MLflow + Langfuse sinks** — the observability-nexus *core capability*: PromptPotter drops into a team's EXISTING local MLflow / cloud Langfuse instance (flip a flag / add `.env` creds). Off-by-default ≠ dead. See `docs/architecture.md` §0.5 Tracing. Do not propose for deletion.
 
 ## Audit guidance — what to hunt for
@@ -129,9 +128,4 @@ non-functional controls" sweep.
 M-milestone references on operator surfaces" grep gate); other operator surfaces
 must not leak milestone numbers.
 
-## History
-
-All prior tiers + the pre-public-release polish arc (Tiers 0–6 + polish A–E +
-audits 1–3) closed by 2026-05-25; the chronological per-sweep "holds" sections
-(2026-06-11 … 06-17) were folded into the readiness buckets above on 2026-06-19.
-Recover any pruned detail via `git log`.
+Closed items are not tracked here — `git log` is the history layer.

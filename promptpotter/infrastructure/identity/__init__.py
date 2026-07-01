@@ -42,7 +42,6 @@ from promptpotter.infrastructure.identity.session import (
     SessionData,
     SessionStore,
 )
-from promptpotter.infrastructure.identity.user import derive_user_id
 
 __all__ = [
     "AllowlistDecision",
@@ -59,7 +58,6 @@ __all__ = [
     "build_identity_bundle",
     "check_allowlist",
     "default_identity_paths",
-    "derive_user_id",
     "list_emails",
     "load_provider_config",
     "maybe_claim_default",

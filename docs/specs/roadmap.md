@@ -10,7 +10,7 @@
 - **Host coupon + BYO per-user API keys — overdue, not a future gate.** The beta serves allowlisted users on one shared `.env` key today; every user spends the operator's quota with no per-user ceiling. The fix: a per-user **coupon** (host-key spend up to a fixed size + expiry), then **BYO keys** to continue on their own money. Present liability → Lane A2.
 - **HTTP-edge abuse protection scales with the allowlist.** Cloudflare edge + allowlist + per-user `JobRegistry` quotas bound the public surface now; app-level rate-limiting (C6) is due the moment the allowlist is removed.
 
-Historical (satisfied): spend shipped before composite/state-sync; identity Stage 0 + 2nd connector shipped; control plane + identity Stage 1 shipped → the chat write-path is unblocked, not gated. Any new endpoint is multi-tenant by default.
+Any new endpoint is multi-tenant by default.
 
 ## Lane 0 — daily hygiene
 
@@ -25,10 +25,6 @@ Sequenced into lanes by dependency, not milestone number. **Front priority = Lan
 | # | Item | Status |
 |---|---|---|
 | A2 | Host coupon + BYO per-user API keys | pending — **overdue** (see § Host coupon + BYO); token HQ at `/auth/{quota-status,activity}` already shipped |
-
-### Lane B — foundations (closed)
-
-state-sync P1–P4 shipped 2026-05-30 (per-cycle `dashboard.json`, `GET /api/v1/sessions/active/live-state`, sidecar delete). See § State-sync.
 
 ### Lane C — product differentiator + capability (after A)
 
@@ -61,7 +57,7 @@ state-sync P1–P4 shipped 2026-05-30 (per-cycle `dashboard.json`, `GET /api/v1/
 
 Terse landing for the per-milestone specs that were consolidated here. Status is truth; full original prose is in `git log`.
 
-### Origin-resolution check-in — SHIPPED 2026-05-30
+### Origin-resolution check-in
 LLM proposer + deterministic readiness gate resolve a messy CSV into a complete origin (no hidden defaults, no literal-column requirement); `high`-confidence fields auto-promote `proposed→confirmed` before mint. Non-derivable kernels: reuses the `checkin/2` node (no separate `origin_resolve` node/model); **deliberately off the operator surface** — `reasoning_floor/ceiling` (backend-node-only) and `model_locked` (= `forbidden_axes_strict`, a dev policy). Concept: root `CLAUDE.md` § Origin & check-in; mechanics in `git log`.
 
 ### Ingest + chat-first web — partially shipped (Ingest Slice 1 done; chat Arc 1 done — activity + control)
@@ -95,10 +91,10 @@ Full contract: [`ADR-0003`](../adr/0003-spend-and-tenancy.md) § Host coupon. Th
 - **Gate is live:** the per-cycle `BudgetGate` reads coupon-remaining (re-summed every tick), new `StopReason.HOST_ALLOWANCE` — closes the "launch-snapshot only" gap. **D1:** the coupon replaces the daily-cap path (`effective_spend_cap_usd`/`spend_budget_usd_daily` deleted — one wallet gate, not two).
 - **Verbs (auth router):** ride the **auth router** as siblings of the shipped `/auth/{quota-status,user-settings,activity}` (account-scoped, NOT control-plane `/commands/*` — so NOT in `m12-api-openapi.yaml`, whose scope is the closed command set): `PUT/DELETE /auth/api-keys/{provider}` (204), `GET /auth/api-keys` (`providers_set` only), `GET /auth/coupon` (remaining + expiry); `GET /llm-providers` gains `key_source: user|host|none`. Only the event-surface change (`key_source` on `TokenUsagePayload`) is openapi/asyncapi-declared. **BYO lifts the host coupon; the abuse guards still apply.**
 
-### Operator-steered fork — SHIPPED
+### Operator-steered fork
 Rides the existing `fork-cycle` command (no new verb); payload extended to `{from_searchpoint, pipeline_overlay, origin_prompt_fields, limit_overrides, steered_by}`. `limit_overrides` is the fork's whole `OptimizationConfig` delta — run limits **plus** the `mechanisms.selection` policy toggles (`per_round_resubset` / `online_reorder`), so a fork-at-offset-0 can A/B a behaviour knob in isolation (the "behaviour-knob change → sibling cycle" workflow) without touching the global default. `fork-cycle` **mints then launches** (minting alone left web forks idle). The override seed is written to the fork's own cycle dir (`.overrides/seed.json`, read once at the runner seam via `CycleOverrideMixin`); origin resolves fork-seed-first; no dataset-origin mutation. `max_rounds` is an absolute target (the fork's counter continues from the parent), reconciled consumed-vs-remaining in the dialog.
 
-### State-sync — SHIPPED 2026-05-30
+### State-sync
 Collapsed 5 state surfaces → 2: `active_session.json` (ground truth for what's running: `{tenant_id, session_id, cycle_id}`, sole writers mint/fork/sweep_restore via `save_active_pointer`) + per-cycle `dashboard.json` (live read-out, ≤0.25s debounce + synchronous round-boundary flush). **Teardown-only design was rejected — do not re-propose** (it reverses the folder-UI §0 commitment). Directory name IS the cycle id (`index.json::campaign_id` removed). Run-state is owned: the runner declares `running/paused/stopping/terminal` as a `control` `PhaseRecord` → `dashboard.json::run_phase` (`RunPhase`, `domain/phases.py`), read off the 2s poll via `derive_run_phase`; the old `/runstate` probe is gone.
 
 ### Run admission + concurrent serving — partially shipped (capacity-1 admission seam) / spec-only (N>1)
@@ -122,11 +118,9 @@ Hard-Sample Sorter Phase 2/3 (Phase 1 `build_hard_samples_artifact` shipped) · 
 - **Export / copy from dashboard** — one-click "copy" on the optimizer box (winning prompt + state); first slice of broader export.
 - **Origin check-in plain-language recap** — folded into the origin check-in flow; pending review.
 
-## Already shipped
+## Identity — live forward gap (non-derivable)
 
-Verified against code; `git log` + ADRs hold the detail. Engine (verdict-resolution P1 `c714bffd`, `rounds_to_95` exit gate) · spend / composite-P1 (`emit_token_usage`, `TokenUsageRecord`) · identity Stage 1 (OIDC Google+GitHub, allowlist, per-user quotas) · control-plane highway (`CommandDispatcher` + `routers/commands.py` + SSE) · connector boundary + 2nd connector (`termnorm` + `promptpotter`, config-driven `backend_type`) · origin check-in + Ingest Slice 1 · webapp read-only surface served at root. ADRs: [0001](../adr/0001-m12-control-plane.md) · [0002](../adr/0002-identity-foundation.md) · [0003](../adr/0003-spend-and-tenancy.md).
-
-**Live forward gap (non-derivable):** identity is **Stage 0.5** — OIDC wire is live but RLS / SCIM tenant isolation is **not yet enforced**.
+Identity is **Stage 0.5** — the OIDC wire is live but RLS / SCIM tenant isolation is **not yet enforced**.
 
 ## Non-functional requirements
 

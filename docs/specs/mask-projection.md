@@ -1,13 +1,9 @@
 # Mask — a criterion projected over the lineage
 
-**Status:** M1 (read-side) shipped — the scoring + abort verdicts on `GET /lineage`;
-write-side (fork-from-divergence) deferred. Roadmap: **Lane C8** ([`roadmap.md`](roadmap.md)
-§ Lineage mask). Build bottom-up (concrete → general), one `feat(mask)` commit at
-arc close. (A frontend-first attempt at the order-mask collision signal —
-`pick_margin` + a `COLLISION_MARGIN_EPS` threshold owned in `SampleTrajectory.tsx`
-— was dropped: the divergence boundary is projection logic and must be
-backend-owned ([R-36]); the order mask is rebuilt here backend-first, see the
-Migration section + Future.)
+The read-side (scoring + abort verdicts on `GET /lineage`) is live; the write-side
+(fork-from-divergence) is deferred — roadmap **Lane C8** ([`roadmap.md`](roadmap.md)
+§ Lineage mask). The divergence boundary is projection logic and must be backend-owned
+([R-36]); the order mask is built backend-first.
 
 ## What a mask is (the framing)
 
@@ -92,7 +88,7 @@ divergent** (the divergent subtree renders dimmed — presentation, not a coined
 term). Scoring authority is backend ([R-36], [R-12]) — a mask's math lives behind
 the gateway / archive and is served; the webapp renders, never recomputes.
 
-## Design decisions (resolved 2026-06-10 — deliberate, don't relitigate)
+## Design decisions
 
 1. **`MaskSpec` is a thin API-edge selector + `find_divergences(record, verdict)` is
    the real function — neither persisted nor addressable until a reader exists.** The
@@ -104,9 +100,8 @@ the gateway / archive and is served; the webapp renders, never recomputes.
    which mask). M1 is Display-only: the criterion rides the request,
    computed-then-discarded; persisting it now is a sidecar with no reader ([R-09] /
    pre-flight gate), and no-backcompat ([R-07]) makes the later promotion *additive*,
-   not a rebuild — so there is nothing to pre-build for. (Revised 2026-06-10 after a
-   second-opinion review caught the over-build; the *function* is first-class, the
-   *entity* waits for its consumer.)
+   not a rebuild — so there is nothing to pre-build for. The *function* is first-class,
+   the *entity* waits for its consumer.
 2. **A mask is a *verdict over the record*, not a discrete data-kind.** The
    divergent subtree derives from the invariant / divergent partition; the **value
    face is scoring-specific** (only the scoring verdict re-values nodes — `value_with_mask_applied`
@@ -281,7 +276,7 @@ nothing.
   round scorer stays fail-loud (broken formula = real bug); only this read-side seam
   treats a missing name as honest absence.
 
-### The evaluator namespace — row-derivable vs. snapshot (resolved 2026-06-10)
+### The evaluator namespace — row-derivable vs. snapshot
 
 The namespace a mask scores over is **not** simply the stored `evaluators` snapshot.
 `Evaluator.from_rows` partitions the registry:
@@ -303,8 +298,7 @@ The namespace a mask scores over is **not** simply the stored `evaluators` snaps
 
 This is the **structural** reason there is no backfill: a newer row-derivable
 evaluator is never "missing" from an old record — it's recomputed from rows that were
-always on disk. (The one-off `backfill_output_compactness.py` that rewrote stored
-round files / `dashboard.json` is **deleted** — it violated *Record unchanged* below.)
+always on disk. No tool rewrites stored round files / `dashboard.json` (*Record unchanged*, below).
 
 ## First migration — the abort mask (a second verdict, same fold)
 
@@ -360,14 +354,12 @@ measured sibling cycle via the existing policy-scope config + branch-from-origin
     can replay. Evaluator/sample-set/constraint masks fork on existing rails (they
     re-select a *candidate*, which the seam already supports); only the order mask
     needs the substrate change.
-  - *Prior art.* This shape was solved once: `events.jsonl` as a write-ahead fork
-    substrate (`3c73dbb3`, Apr 15) — one append-only stream, forks as **pointers**
-    into the shared log (common prefix stored once), addressing grammar
-    `cycle:round:write_point[:i[:j]]`; and a decision-replay layer (`2597ff8d` /
-    `d4c99b49`, Apr 20) that replayed each recorded decision and forked at the
-    **first mismatch** (gated on `inputs_ref` + `outcome`). The difference that
-    matters: those branches were all real (every fork re-ran), so nothing
-    counterfactual was ever stored — the same honesty the mask must keep.
+  - *Prior art.* This shape has a proven form: an append-only fork substrate with
+    forks as **pointers** into the shared log (common prefix stored once, addressing
+    grammar `cycle:round:write_point[:i[:j]]`) + a decision-replay layer that forks at
+    the **first mismatch** (gated on `inputs_ref` + `outcome`). Those branches are all
+    real (every fork re-runs), so nothing counterfactual is stored — the same honesty
+    the mask must keep.
 - **MCTS over the lineage** — backprop reuses the re-evaluation face; UCB
   re-selection reuses the divergence machinery ([roadmap far-horizon]).
 
@@ -383,8 +375,8 @@ measured sibling cycle via the existing policy-scope config + branch-from-origin
   scoring path ([R-12] holds). `value_with_mask_applied` reuses the scoring kernels, doesn't add
   a gateway.
 - **Future write = Control-remote** (fork-from-mask) — schema-first when it lands.
-- **New seams → conventions** (not tests — the structural suite was cut, see
-  [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md); each fails loud):
+- **New seams → conventions** (fail-loud invariants, not a standing test — see
+  [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)):
   "re-evaluation math only in `value_with_mask_applied`"; "`find_divergences` is the only
   divergence fold"; "no mask state is persisted" (it's a pure function — decision #1).
 

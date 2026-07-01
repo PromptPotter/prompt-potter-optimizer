@@ -117,7 +117,7 @@ def _check_task_context_not_verbatim(
     if not isinstance(proposed, dict) or not proposed:
         return CheckResult("l2_task_context_not_verbatim", True, "no task_context proposed")
     prior_raw = ctx.opt_search_point.get("task_context") if ctx.opt_search_point else None
-    prior = TaskDecomposition.from_dict(prior_raw if isinstance(prior_raw, dict) else {})
+    prior = TaskDecomposition.coerce(prior_raw)
     if prior.merge_changes_nothing(proposed):
         return CheckResult(
             "l2_task_context_not_verbatim",

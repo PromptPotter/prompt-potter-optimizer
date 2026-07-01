@@ -188,6 +188,18 @@ class TaskDecomposition:
                 coerced[k] = str(v)
         return cls(**coerced)
 
+    @classmethod
+    def coerce(cls, v: TaskDecomposition | dict[str, Any] | None) -> TaskDecomposition:
+        """Normalize a typed | dict | None value into a ``TaskDecomposition``.
+
+        The single "already typed ⇒ passthrough, else build from dict/None" contract,
+        shared by the OSP field validator, the runner seam, and the L2 verbatim check —
+        so those callers can't drift on how a raw task_context is admitted.
+        """
+        if isinstance(v, TaskDecomposition):
+            return v
+        return cls.from_dict(v)
+
     def merge(self, overrides: dict[str, Any]) -> TaskDecomposition:
         base = self.to_dict()
         base.update(overrides)

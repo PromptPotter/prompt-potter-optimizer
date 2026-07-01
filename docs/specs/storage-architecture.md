@@ -1,12 +1,11 @@
 # Storage architecture — store-once, recycle-bin archive, lean writers
 
-> **Status:** IMPLEMENTED (arcs 1–4). The writer-slim, the `measurements/` relocation,
-> the `archive/` recycle-bin physical move, the destructive `delete` + `--keep-results`,
-> and the one-vocabulary MECE hover/cake/rollup (Connector / Loop / Dataset, Loop → State /
-> Trace / History / Reports; rollup accounts for 100% of tenant disk) have landed. Arc 5 (legacy ledger-slim
-> migration) ships as a standalone idempotent dry-run-default sweep, run on demand
-> (~277 MiB reclaimable across the current legacy ledgers). The current-state
-> operations reference is
+> Store-once, the `measurements/` relocation, the `archive/` recycle-bin, the destructive
+> `delete` + `--keep-results`, and the one-vocabulary MECE hover/cake/rollup (Connector / Loop /
+> Dataset, Loop → State / Trace / History / Reports; rollup accounts for 100% of tenant disk)
+> are the design in force. Arc 5 (legacy ledger-slim migration) ships as a standalone
+> idempotent dry-run-default sweep, run on demand (~277 MiB reclaimable across the current
+> legacy ledgers). Current-state operations reference:
 > [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md).
 
 ## Why

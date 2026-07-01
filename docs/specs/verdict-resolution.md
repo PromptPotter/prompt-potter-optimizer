@@ -1,6 +1,6 @@
 # Verdict-Resolution Adaptive Queue Mechanism
 
-**Status:** Documents the **live** mechanism. Phase 1 shipped (`c714bffd`) — ranking unified on `decision_information_gain`; the blended `explore_weight · model_information_gain` term removed. Phase 2 (origin-relative observation weighting) deferred — sketched below. Supersedes `bayesian-sample-picker.md`.
+Documents the **live** mechanism: ranking is unified on `decision_information_gain`. Phase 2 (origin-relative observation weighting) is deferred — sketched below.
 
 ---
 
@@ -93,4 +93,3 @@ Today every archive observation contributes equally to a sample's population pro
 - Population profile fit: `promptpotter/application/intelligence/exploration.py::fit_rasch`
 - Observation: `promptpotter/application/intelligence/exploration.py:26-31`
 - Persisted ranking writer: `promptpotter/application/intelligence/hard_sample_sorter.py::build_hard_samples_artifact_from_observations`
-- Superseded: `bayesian-sample-picker.md`

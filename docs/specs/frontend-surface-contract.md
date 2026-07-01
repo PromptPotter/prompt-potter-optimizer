@@ -83,7 +83,7 @@ controls:
   - id: no_google_fallback
     do: No-Google-account path → "Open a GitHub issue to request beta access" (→ BRAND.supportUrl,
         the repo issues; whitelabel-overridable). No editable field that discards input.
-    status: ok   # B4: email field + LinkedIn-Continue removed; GitHub-issue CTA; dead CSS pruned.
+    status: ok
   - id: legal.{privacy,terms,imprint}
     do: External links to brand legal pages; must resolve 200.
     status: ok
@@ -144,13 +144,13 @@ controls:
     do: List campaigns (Active/Archived + dataset narrow both via the filter popover).
         anon: "Sign in to see your campaigns." (SignInPrompt).
         auth_empty: "No campaigns yet — start one."
-    status: ok   # B2: anon → SignInPrompt; workspace poll gated on authed.
+    status: ok
   - id: support
     do: Always-live link to help. Visible in every auth state.
-    status: ok   # B2: <a href={BRAND.supportUrl}> → repo issues (NEXT_PUBLIC_SUPPORT_URL-overridable).
+    status: ok   # supportUrl overridable via NEXT_PUBLIC_SUPPORT_URL
   - id: logout
     do: Call the logout endpoint, clear session, return to /login. Rendered ONLY when authed (I4).
-    status: ok   # B2: <button> → postLogout()+redirect; rendered only when status==='authed'.
+    status: ok
 ```
 
 ### Chat surface
@@ -164,7 +164,7 @@ controls:
   - id: preview.connector
     do: Resolve to a terminal chip state. No resolved backend (anon / no dataset) → "idle" +
         "no backend selected" (nothing is being probed). Resolved + probed → reachable / unreachable.
-    status: ok   # B3: ConnectorInspector shows "idle" when connector==null; "probing…" only while a real probe is in flight.
+    status: ok   # idle when connector==null; "probing…" only during a real probe
   - id: preview.node.llm
     do: Expand to model & params; "declares no configurable params" when none.
     status: ok
@@ -177,7 +177,7 @@ controls:
   - id: settings.{extended_thinking,web_search,code_execution}
     do: Coming-soon features — render as a disabled ui/Switch (role=switch, aria-disabled,
         aria-label "… (coming soon)") + a muted "Soon" pill. Legibly unavailable, not faux-operable.
-    status: ok   # B4: extracted ui/Switch (locked variant); "Soon" pills.
+    status: ok
   - id: demo_thread
     do: Static scripted conversation shown in anon to illustrate the product. Clearly non-live.
     status: ok
@@ -221,7 +221,7 @@ controls:
         loading: spinner while status resolves.
         empty: "No runs yet."
         error (authed): "Couldn't load diagnostic runs — retry shortly." (never raw).
-    status: ok   # B1: gated on useAuth().status; SignInPrompt; raw-401 string removed.
+    status: ok
 ```
 
 ### Files surface
@@ -250,7 +250,7 @@ controls:
         anon: "Sign in to start a campaign." + Sign-in CTA (→/login).
         loading: "Loading your collection…"
         error (authed): "Couldn't load your collection — retry shortly." (never raw).
-    status: ok   # B1: gated; needsAuth LoadState; raw-401 string removed.
+    status: ok
   - id: close
     do: Close, restore focus, ESC + backdrop.
     status: ok
@@ -283,9 +283,6 @@ Two states remain **un-exercised** (not contract gaps — just unreached here):
   (`dev/oidc-local/`), where it was driven end-to-end and the dashboard mounts
   clean.
 
-The B0–B7 hardening campaign that drove the surface to this contract (anon
-fires only the `auth/me` probe; full keyboard/a11y; one I5 leak in `FitnessPanel`
-fixed) is shipped. Post-alpha parallel work surfaces in real use against these
-same invariants: deep live-data edge cases, multi-campaign + Archived,
-offline/stale, the L2/L3-terminal loading bug, whitelabel theme variants, and the
-OIDC round-trip above.
+Still to validate against these invariants in real use: deep live-data edge cases,
+multi-campaign + Archived, offline/stale, the L2/L3-terminal loading state, whitelabel
+theme variants, and the OIDC round-trip above.
