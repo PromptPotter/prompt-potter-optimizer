@@ -79,6 +79,8 @@ def build_round_summary(rr: RoundResult) -> RoundSummary:
         round=rr.round,
         accuracy=float(rr.accuracy),
         composite_fitness=float(rr.composite_fitness),
+        cumulative_accuracy=float(rr.cumulative_accuracy),
+        cumulative_theta=rr.cumulative_theta,
         candidates=candidates,
         selection=selection,
         health=rr.health,

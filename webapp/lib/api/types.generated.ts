@@ -42,6 +42,8 @@ export interface RoundSummary {
   round: number;
   accuracy: number;
   composite_fitness: number;
+  cumulative_accuracy: number;
+  cumulative_theta: number | null;
   candidates: RoundSummaryCandidate[];
   selection: number[];
   health: DegradationHealth | null;
@@ -346,6 +348,12 @@ export interface CampaignLineageRound {
   label: string;
   /** Round-level accuracy (winner) */
   accuracy: number | null;
+  /** The adopted lineage rescored over EVERY sample probed so far — the cross-
+   * round-comparable frontier (matches the trend chart). The webapp paints
+   * the WINNER node with this so the lineage spine reads as honest progress,
+   * not the per-round subset swing; sibling alternatives keep their own
+   * subset `accuracy`. */
+  cumulative_accuracy: number | null;
   /** All candidates scored this round, sorted by rank */
   candidates: CampaignLineageCandidate[];
 }

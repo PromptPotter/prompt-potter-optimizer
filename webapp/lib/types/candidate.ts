@@ -36,6 +36,11 @@ export interface CandidateRow {
   theta_se: number | null;
   evaluators: Record<string, number>;
   is_winner: boolean;
+  // The round's cumulative frontier accuracy (the adopted lineage rescored over every
+  // sample probed so far) — set ONLY on the winner, `null` otherwise. The lineage paints
+  // the winner (spine) node with this so it reads as honest cross-round progress instead
+  // of the per-round subset swing; the trend chart plots the same series.
+  cumulative_accuracy: number | null;
   // Samples scored so far for this candidate; null when unknown.
   n_samples: number | null;
   // Total sample budget for this candidate; null when not yet announced

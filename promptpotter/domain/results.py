@@ -476,8 +476,9 @@ class DegradationHealth(BaseModel):
 class RoundSummary(BaseModel):
     """Display row for `dashboard.json::rounds[]` — webapp's completed-round source.
 
-    Top-level `accuracy`/`composite_fitness` mirror the winner so trend/sparkline
-    don't scan `candidates`. In-flight round rides `current_round`.
+    Top-level `accuracy`/`composite_fitness` mirror the winner's subset score;
+    `cumulative_accuracy`/`cumulative_theta` are the cross-round-comparable frontier
+    the trend/sparkline plot. In-flight round rides `current_round`.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -485,6 +486,17 @@ class RoundSummary(BaseModel):
     round: int
     accuracy: float
     composite_fitness: float
+    # The honest, cross-round-comparable frontier: the incumbent lineage rescored over
+    # EVERY sample probed so far (full growing pool), not this round's hard-first subset.
+    # `accuracy`/`composite_fitness` above are subset-relative — under `per_round_resubset`
+    # they swing round-to-round on a fresh 6–16 sample draw, which reads as a false
+    # "great start → decay". The trend/sparkline plot THIS series so progress is honest;
+    # the per-round subset number stays on `candidates[]` (badged with its sample count).
+    # Mirrors `RoundResult.cumulative_accuracy` / `.cumulative_theta`.
+    cumulative_accuracy: float = 0.0
+    # θ-peer of `cumulative_accuracy` — ability of the cumulative frontier on the cycle's
+    # fixed δ ruler (subset-invariant). None when the ruler is cold (thin inner-budget banks).
+    cumulative_theta: float | None = None
     candidates: list[RoundSummaryCandidate] = Field(default_factory=list)
     # Per-round selection from the adaptive queue mechanism — sample ids
     # in measurement order (longest candidate sequence carries the full

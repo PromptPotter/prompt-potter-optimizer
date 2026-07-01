@@ -90,6 +90,9 @@ export function roundCandidates(dash: DashboardSnapshot | null): CandidateRow[] 
         theta_se: c.theta_se,
         evaluators: c.evaluators,
         is_winner: c.is_winner,
+        // Winner carries the round's cumulative frontier (the spine value the lineage
+        // paints); losers keep their own subset accuracy (null here).
+        cumulative_accuracy: c.is_winner ? r.cumulative_accuracy : null,
         n_samples: c.scored_samples,
         n_expected: c.expected_samples,
         source: "history",
@@ -125,6 +128,8 @@ export function roundCandidates(dash: DashboardSnapshot | null): CandidateRow[] 
         theta_se: null,
         evaluators,
         is_winner: false,
+        // In-flight round hasn't closed — no cumulative frontier yet.
+        cumulative_accuracy: null,
         n_samples: c.samples?.length ?? null,
         n_expected: null,
         source: "inflight",

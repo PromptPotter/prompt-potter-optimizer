@@ -70,10 +70,13 @@ async def execute_round(
     # like-for-like.
     if cycle.probe_next_round:
         scoring_set = scoring_pool
-    elif not opt.mechanisms.selection.per_round_resubset:
-        # Frozen selection: ignore accumulating observations, so every round
-        # gets the deterministic campaign-start subset (bank prefix) — one fixed
-        # sample basis for the whole campaign.
+    elif not opt.mechanisms.selection.per_round_resubset or not cycle.delta_scale:
+        # Frozen selection: ignore accumulating observations, so every round gets the
+        # deterministic campaign-start subset (bank prefix) — one fixed sample basis.
+        # Two triggers: resubset is OFF, OR the δ ruler is still COLD (empty) — a
+        # per-round subset would then be difficulty-blind and cross-round-incomparable,
+        # and freezing concentrates measurements so the ruler warms + locks fastest
+        # (`Cycle._maybe_warm_ruler`). Once warm, the branch below thaws to adaptive.
         scoring_set = select_round_subset(scoring_pool, [], config.sp_budget_ttest)
     else:
         # Archive obs are dataset-scoped + abort-residue-free → cross-cycle evidence.
@@ -174,7 +177,12 @@ async def execute_round(
     )
 
     critique_text = ""
-    if round_result.results and not skip_critique:
+    # A zero-candidate round (l1_generate returned [] — empty/parse-failed provider
+    # response) leaves ``round_result.results`` holding the ORIGIN's rows, so without the
+    # ``candidates`` guard critique would fire a meta LLM call to critique nothing. Skip it:
+    # the empty generation is already recorded as a ``ValidationFailure`` wound that routes
+    # L2 to heal l1_generate — that is the right next move, not another critique.
+    if candidates and round_result.results and not skip_critique:
         # Critique is round-over-round feedback — survive a malformed response.
         with graceful("L1 critique failed; continuing without round-over-round feedback"):
             async with observed_node(

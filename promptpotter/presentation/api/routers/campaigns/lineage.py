@@ -92,6 +92,13 @@ class CampaignLineageRound(BaseModel):
     round: int = Field(description="Round number within the cycle (1-indexed)")
     label: str = Field(default="", description="Round label — winner's L1 description")
     accuracy: float | None = Field(default=None, description="Round-level accuracy (winner)")
+    cumulative_accuracy: float | None = Field(
+        default=None,
+        description="The adopted lineage rescored over EVERY sample probed so far — the "
+        "cross-round-comparable frontier (matches the trend chart). The webapp paints the "
+        "WINNER node with this so the lineage spine reads as honest progress, not the per-round "
+        "subset swing; sibling alternatives keep their own subset `accuracy`.",
+    )
     candidates: list[CampaignLineageCandidate] = Field(
         description="All candidates scored this round, sorted by rank"
     )
@@ -253,11 +260,13 @@ def _rounds_from_dashboard(
                 (c for c in raw_cands if isinstance(c, dict) and c.get("is_winner")), None
             )
             acc = r.get("accuracy")
+            cum = r.get("cumulative_accuracy")
             out.append(
                 CampaignLineageRound(
                     round=rn,
                     label=str(winner.get("changes_description") or "") if winner else "",
                     accuracy=float(acc) if isinstance(acc, int | float) else None,
+                    cumulative_accuracy=float(cum) if isinstance(cum, int | float) else None,
                     candidates=_summary_candidates(raw_cands, criterion),
                 )
             )

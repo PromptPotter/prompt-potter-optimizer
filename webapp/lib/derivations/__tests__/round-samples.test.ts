@@ -23,6 +23,7 @@ function row(source: CandidateRow["source"]): CandidateRow {
     theta_se: null,
     evaluators: {},
     is_winner: false,
+    cumulative_accuracy: null,
     n_samples: null,
     n_expected: null,
     source,

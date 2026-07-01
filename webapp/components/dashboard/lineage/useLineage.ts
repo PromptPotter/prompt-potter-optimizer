@@ -228,20 +228,28 @@ export function useLineage({
   const usesComposite = headlineMetric === "composite";
   const valueByKey = useMemo<ReadonlyMap<string, number | null>>(() => {
     const m = new Map<string, number | null>();
+    // The WINNER (lineage spine) paints the round's cumulative frontier — the
+    // cross-round-comparable series the trend plots — so the spine reads as honest
+    // progress, not the per-round subset swing. Losers keep their own subset score.
+    // Only for the accuracy view; the composite expert lens is left as chosen.
     for (const c of data?.cycles ?? []) {
       for (const r of c.rounds) {
         r.candidates.forEach((cand, i) => {
           const id = cand.candidate_id || liveCandidateId(r.round, i);
-          m.set(`${c.cycle_id}::${id}`, cand.accuracy);
+          const frontier =
+            cand.is_winner && typeof r.cumulative_accuracy === "number"
+              ? r.cumulative_accuracy
+              : cand.accuracy;
+          m.set(`${c.cycle_id}::${id}`, frontier);
         });
       }
     }
     if (cycleId && dash) {
       for (const row of liveRows) {
-        m.set(
-          `${cycleId}::${row.candidate_id}`,
-          usesComposite ? displayFitness(row.composite, row.accuracy) : row.accuracy,
-        );
+        const value = usesComposite
+          ? displayFitness(row.composite, row.accuracy)
+          : (row.is_winner ? row.cumulative_accuracy : null) ?? row.accuracy;
+        m.set(`${cycleId}::${row.candidate_id}`, value);
       }
     }
     return m;

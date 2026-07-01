@@ -115,13 +115,22 @@ export interface FitnessTrend {
 }
 
 // One definition of the campaign trend behind the TopStrip sparkline and the
-// TrendChart best-line, so they can't drift on the `displayFitness` rule
-// or the running-best fold. Takes `rounds` so callers memo on `dash?.rounds`.
+// TrendChart best-line, so they can't drift on the source rule or the
+// running-best fold. Takes `rounds` so callers memo on `dash?.rounds`.
+//
+// Plots `cumulative_accuracy` — the incumbent lineage rescored over EVERY sample
+// probed so far — NOT the per-round `accuracy`/`composite_fitness`. Those are
+// subset-relative: under `per_round_resubset` each round scores a fresh 6–16
+// hard-first sample draw, so the same prompt swings ±0.2–0.3 and reads as a
+// false "great start → decay". The cumulative frontier is the honest,
+// cross-round-comparable progress line (it matches the Best/current tiles, which
+// already settle to cumulative). The per-round subset number stays visible on the
+// candidate rows, badged with its sample count.
 export function fitnessTrend(
   rounds: readonly RoundSummary[] | undefined,
 ): FitnessTrend {
   const points = (rounds ?? [])
-    .map((r) => ({ round: r.round, composite: displayFitness(r.composite_fitness, r.accuracy) }))
+    .map((r) => ({ round: r.round, composite: r.cumulative_accuracy }))
     .sort((a, b) => a.round - b.round);
   const best: number[] = [];
   let runningBest = 0;

@@ -80,10 +80,13 @@ class SelectionMechanisms(BaseModel):
             "Re-pick the most-informative scoring subset every round from the "
             "train bank (adaptive Rasch selection). On (default) — safe because "
             "every cross-round comparator (election, PoBB, c0_ok, the stall ladder) "
-            "now measures on one fixed θ ruler, so a shifting per-round subset stays "
-            "comparable. Off → the subset is the campaign-start selection "
-            "(deterministic bank prefix), reused unchanged for the whole campaign so "
-            "every round scores the same samples."
+            "measures on one fixed θ ruler, so a shifting per-round subset stays "
+            "comparable — but it is warm-gated: while the δ ruler is still cold (a "
+            "fresh dataset's early rounds) the subset stays FROZEN to the campaign-start "
+            "selection, so those rounds are comparable AND concentrate measurements to "
+            "warm the ruler fastest; it thaws to adaptive once the ruler locks. Off → "
+            "the campaign-start selection (deterministic bank prefix) for every round, "
+            "the whole campaign."
         ),
     )
     online_reorder: bool = Field(

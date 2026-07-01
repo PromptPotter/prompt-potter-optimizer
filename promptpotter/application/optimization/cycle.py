@@ -192,14 +192,16 @@ def _calibrate_delta_ruler(
     n_min: int,
     *,
     enable_2pl: bool,
+    extra_obs: list[Observation] | None = None,
 ) -> tuple[dict[int, RulerEntry], float | None]:
     """Calibrate the per-cycle FIXED difficulty ruler + read the origin's θ on it.
 
     The cross-round comparability anchor (slice 2 of fitness-comparability). Every
     later θ readout in this cycle (round winners for ``c0_ok``, the stall ladder) is
     measured against this one fixed ruler via ``fit_theta_given_delta`` — so they compare
-    on a shared scale instead of each round's own re-anchored fit. Calibrated once
-    here from the **grade-A** archive (the operator's pick: cleanest reference, same
+    on a shared scale instead of each round's own re-anchored fit. Calibrated at cycle
+    start (and, on a cold start, re-attempted per round until it warms + LOCKS —
+    ``Cycle._maybe_warm_ruler``) from the **grade-A** archive (the operator's pick: cleanest reference, same
     de-biasing the AxisIndex digest applies) plus the origin's own per-sample outcomes
     (so the origin's samples are always on the ruler). The origin rides under
     ``ORIGIN_ABILITY_ID``, so the calibration fit yields θ_C0 directly. Cold start —
@@ -239,7 +241,11 @@ def _calibrate_delta_ruler(
         for r in origin_results or []
         if (sid := r.get("sample_id")) is not None and not is_error_result(r)
     ]
-    obs = archive_obs + origin_obs
+    # ``extra_obs`` carries the in-cycle round observations on a cold-start re-warm
+    # (``Cycle._maybe_warm_ruler``): a fresh dataset has no grade-A archive, so the
+    # ruler stays flat until enough banked samples accumulate — which they do fast
+    # once the cold rounds freeze onto one subset.
+    obs = archive_obs + origin_obs + list(extra_obs or [])
     if not obs:
         return {}, None
     model, post = graduate_ruler_model(obs, enable=enable_2pl)
@@ -374,10 +380,11 @@ class Cycle:
     pending_decisions: list[ResumeCheckpointRecord] = field(default_factory=list)
     last_rasch_posterior: Any = None
     archive_observations: list[Observation] = field(default_factory=list)
-    # The cycle's FIXED δ ruler (sample_id → difficulty), calibrated once at start
-    # from the grade-A archive + origin (slice 2). Held constant for the cycle so
-    # every cross-round θ readout (``c0_ok`` now; the stall ladder next) lands on one
-    # scale via ``fit_theta_given_delta``. None = cold start → gates use accuracy.
+    # The cycle's δ ruler (sample_id → difficulty), from the grade-A archive + origin
+    # (slice 2). Calibrated at start; a cold start (empty) re-warms from round data and
+    # LOCKS on the first warm fit (``_maybe_warm_ruler``), then held constant — so every
+    # cross-round θ readout (``c0_ok``, the stall ladder) lands on one scale via
+    # ``fit_theta_given_delta``. Empty {} = still cold → gates degenerate to θ==logit-accuracy.
     delta_scale: dict[int, RulerEntry] | None = None
     # Stashed by L2/L3 rebase emission; runner.entry resolves it post-finalize
     # into _mint_fork + observer rebuild + loop re-entry on the new fork.
@@ -540,6 +547,31 @@ class Cycle:
             tr.current_accuracy = last_rr.accuracy
             tr.current_composite_fitness = last_rr.composite_fitness
 
+    def _maybe_warm_ruler(self) -> None:
+        """Warm the δ ruler from a cold start, then LOCK it. While ``delta_scale`` is
+        still flat (a fresh dataset with no grade-A archive), re-attempt calibration
+        from the round observations accumulated so far; the first fit that clears the
+        ``elimination_n_min`` warmth floor is adopted and never re-fit — so warm rounds
+        all compare on one shared ruler (comparability preserved), while the cold rounds
+        that preceded it already compared on the frozen subset's raw accuracy. Repeat/
+        reference-backed campaigns start warm at ``Cycle.start`` and skip this entirely;
+        L4 inner cycles stay thin, never clear the floor, and stay frozen — all correct.
+        """
+        from promptpotter.application.intelligence.exploration import build_observations
+
+        if self.delta_scale:
+            return
+        delta_scale, origin_theta = _calibrate_delta_ruler(
+            self.session,
+            self.tracking.origin_per_sample_results,
+            self.config.optimization.elimination_n_min,
+            enable_2pl=self.config.optimization.exploration.enable_2pl_graduation,
+            extra_obs=build_observations(self.rounds),
+        )
+        if delta_scale:  # warmed — lock the ruler + re-read origin θ on it
+            self.delta_scale = delta_scale
+            self.tracking.origin_theta = origin_theta
+
     def absorb_round(
         self,
         rr: RoundResult,
@@ -565,6 +597,7 @@ class Cycle:
                 self.opt_sp.memory.wounds.runtime_failures.append(rf)
 
         self.rounds.append(rr)
+        self._maybe_warm_ruler()
         for f in PROMPT_STRING_FIELDS:
             setattr(self.opt_sp, f, rr.prompt_fields.get(f, ""))
         # Adopt the elected winner's task_context too — an L1 child can win on a
