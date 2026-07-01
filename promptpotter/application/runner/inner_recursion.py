@@ -58,7 +58,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
-from promptpotter.infrastructure.store.base import read_json_optional
+from promptpotter.infrastructure.store.io import read_json_optional
 
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session

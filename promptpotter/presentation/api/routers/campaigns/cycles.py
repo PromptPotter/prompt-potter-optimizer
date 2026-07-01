@@ -19,7 +19,7 @@ from promptpotter.infrastructure.store import (
     cycle_dir_for,
     read_active_pointer,
 )
-from promptpotter.infrastructure.store.base import read_json_tolerant, validate_path_component
+from promptpotter.infrastructure.store.io import read_json_tolerant, validate_path_component
 from promptpotter.infrastructure.store.paths import sibling_kind
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.presentation.api.deps import StoreDep, warming_payload

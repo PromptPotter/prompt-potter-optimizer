@@ -22,7 +22,7 @@ from promptpotter.application.optimization.dispatch.llm_call import (
 from promptpotter.application.optimization.dispatch.llm_call import prompts as _opt_prompts
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.domain.sample import Sample
-from promptpotter.infrastructure.store.base import read_json, read_json_optional, write_json
+from promptpotter.infrastructure.store.io import read_json, read_json_optional, write_json
 from promptpotter.shared.clock import utcnow_iso
 
 logger = logging.getLogger(__name__)

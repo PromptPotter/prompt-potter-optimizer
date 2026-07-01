@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.opt_search_point import PromptTemplate
-from promptpotter.infrastructure.store.base import read_json, read_json_optional
+from promptpotter.infrastructure.store.io import read_json, read_json_optional
 
 
 def load_dataset_node_overlay(dataset_dir: Path) -> dict[str, dict[str, Any]]:

@@ -16,7 +16,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from promptpotter.domain.results import DiagnosticRunRecord
-from promptpotter.infrastructure.store.base import read_json_optional, write_json
+from promptpotter.infrastructure.store.io import read_json_optional, write_json
 
 
 def _ts_filename_part(ts: str) -> str:

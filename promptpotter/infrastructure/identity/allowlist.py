@@ -21,7 +21,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from promptpotter.infrastructure.store.base import append_jsonl, write_json
+from promptpotter.infrastructure.store.io import append_jsonl, write_json
 from promptpotter.shared.clock import utcnow_iso
 
 logger = logging.getLogger(__name__)

@@ -16,7 +16,7 @@ from typing import Any
 from promptpotter.application.optimization.dispatch.llm_call import run_optimizer_node
 from promptpotter.application.optimization.dispatch.schemas import CheckinOutput
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.infrastructure.store.base import (
+from promptpotter.infrastructure.store.io import (
     read_json_optional,
     read_text_optional,
     write_json,

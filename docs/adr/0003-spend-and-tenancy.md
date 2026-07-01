@@ -252,7 +252,7 @@ Every claim names a file. A stale path here fails loud as a broken link — veri
 | `TenantId` / `UserId` / `Issuer` / `SafeName` newtypes + `safe_name` (shipped) | `promptpotter/domain/identity.py` |
 | `Session.identity` field (shipped) | `promptpotter/application/bootstrap/session.py` |
 | `build_stores(identity, …)` rooting (shipped) | `promptpotter/infrastructure/store/stores.py` |
-| Path-component validator | `promptpotter/infrastructure/store/base.py` |
+| Path-component validator | `promptpotter/infrastructure/store/io.py` |
 | CLI seam (shipped) | `promptpotter/presentation/cli/commands/_shared.py` |
 | API seam (shipped) | `promptpotter/presentation/api/deps.py` |
 | Background job inheritance | `promptpotter/application/sweep/sweep_runner.py` |

@@ -27,7 +27,7 @@ from promptpotter.application.optimization.l1.score.winner import is_leader_elig
 from promptpotter.application.scoring.evaluators import materialize_row_derivable
 from promptpotter.domain.results import ScoredCandidate
 from promptpotter.infrastructure.store import cycle_dir_for
-from promptpotter.infrastructure.store.base import read_json_optional
+from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.infrastructure.store.stores import Stores
 
 

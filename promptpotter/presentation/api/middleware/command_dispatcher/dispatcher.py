@@ -56,7 +56,7 @@ from promptpotter.infrastructure.store import (
     Stores,
     read_active_pointer,
 )
-from promptpotter.infrastructure.store.base import read_json_tolerant, write_json
+from promptpotter.infrastructure.store.io import read_json_tolerant, write_json
 from promptpotter.infrastructure.store.paths import root_cycle_id
 from promptpotter.presentation.api.middleware.command_dispatcher.helpers import (
     _DeleteCycleRejectedError,

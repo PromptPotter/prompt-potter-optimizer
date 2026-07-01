@@ -24,6 +24,8 @@ from promptpotter.shared.errors import error_category, is_error_result
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.intelligence.indexes import AxisIndex
+    from promptpotter.application.scoring.query_loop import QueryLoopResult
+    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
 
@@ -106,6 +108,136 @@ def _split_off_deprecated_samples(
     return kept, deprecated
 
 
+def _resolve_prior_cache(
+    search_point: JobSearchPoint,
+    dataset: list[Sample],
+    session: Session,
+    *,
+    pipeline_schema: PipelineSchema,
+    force_fresh: bool,
+    label: str,
+) -> tuple[dict[str, QueryMeasurement], dict[str, QueryMeasurement], set[str]]:
+    """Load-side cache resolution: the reusable-archive lookup, the deprecated-row
+    split, and the cache-vs-fresh preamble log. Returns
+    ``(kept_cache, deprecated_rows, dataset_queries)``. ``force_fresh`` skips reuse.
+    """
+    store = session.store
+    backend_id = session.backend_id
+    cached_sample_results: dict[str, QueryMeasurement] = {}
+    if store and backend_id and not force_fresh:
+        from promptpotter.application.optimization.pobb.elimination import is_deprecated
+
+        node_configs = pipeline_schema.node_configs(search_point.pipeline_params or {})
+        cached_sample_results = cast(
+            "dict[str, QueryMeasurement]",
+            archive_views.reusable_results(
+                store,
+                backend_id,
+                node_configs,
+                is_fatal=is_deprecated,
+                dataset_name=session.dataset_name,
+            ),
+        )
+
+    cached_sample_results, deprecated_samples = _split_off_deprecated_samples(cached_sample_results)
+    if deprecated_samples:
+        logger.info(
+            "Evicted %d deprecated prior result(s) (fatal warnings); will remeasure.",
+            len(deprecated_samples),
+        )
+
+    dataset_queries = {s.query for s in dataset}
+    # Preamble: when the JSP-keyed archive already covers some/all of this dataset's
+    # queries, announce the split so the operator sees inline whether the upcoming
+    # per-sample lines are cache replays vs fresh. Suppressed when no priors match.
+    cached_in_dataset = sum(
+        1 for q in cached_sample_results if q in dataset_queries and q not in deprecated_samples
+    )
+    if cached_in_dataset:
+        total = len(dataset)
+        logger.debug(
+            "%s cache: %d/%d already measured for this JSP — will replay %d, measure %d fresh.",
+            label,
+            cached_in_dataset,
+            total,
+            cached_in_dataset,
+            total - cached_in_dataset,
+        )
+    return cached_sample_results, deprecated_samples, dataset_queries
+
+
+def _resolve_partial_escalation(
+    batch: QueryLoopResult,
+    *,
+    results: list[QueryMeasurement],
+    escalation_signal: EscalationSignal | None,
+    candidate_idx: int,
+    n_total_candidates: int,
+) -> EscalationSignal | None:
+    """Resolve the escalation signal for a non-completed, non-escalated batch.
+
+    Raises ``KeyboardInterrupt`` to unwind a graceful/force stop (the raise must
+    still propagate uncaught out of the gateway). Branch order is load-bearing.
+    """
+    if not batch.completed and not escalation_signal:
+        if batch.stop_reason == "skip":
+            # Operator early-abort of THIS searchpoint. The partial is already on
+            # disk; accept it as a normal partial score (escalation_signal stays
+            # None) and fall through to compute fitness over what was scored —
+            # identical in shape to a PoBB early-abort. The round continues to the
+            # next candidate; the cycle is NOT unwound.
+            pass
+        elif batch.stop_reason in {"graceful", "force"}:
+            # Graceful/force stop — partial state is already on disk via
+            # per-fresh-sample persist; just unwind.
+            raise KeyboardInterrupt()
+        else:
+            # Per-candidate scoring-error abort (consecutive 5xx, client 4xx,
+            # pipeline ERROR). Synthesize a candidate-scoped escalation so the
+            # caller can attach a RuntimeFailure and continue with the next
+            # candidate — never kill the round.
+            return _build_scoring_error_signal(
+                results=results,
+                stop_reason=batch.stop_reason or "",
+                candidate_idx=candidate_idx,
+                n_total_candidates=n_total_candidates,
+            )
+    return escalation_signal
+
+
+def _emit_dataset_run(
+    session: Session,
+    *,
+    run_id: str,
+    content_hash: str,
+    search_point: JobSearchPoint,
+    pipeline_schema: PipelineSchema,
+    scores: dict[str, Any],
+) -> None:
+    """Emit the ``DatasetRun`` observability trace for a completed score (best-effort)."""
+    store = session.store
+    backend_id = session.backend_id
+    if not (store and backend_id):
+        return
+    from promptpotter.infrastructure.tracing import DatasetRun, ObservabilityBridge
+    from promptpotter.shared.errors import graceful
+
+    with graceful("DatasetRun emit failed"):
+        obs = session.state.obs or ObservabilityBridge.file_only(store.base_dir)
+        obs.emit(
+            DatasetRun(
+                campaign_id="",
+                round_num=-1,
+                run_id=run_id,
+                content_hash=content_hash,
+                prompt_fields_id=search_point.sp_hash(pipeline_schema),
+                accuracy=scores["accuracy"],
+                hits=scores["hits"],
+                total=scores["total"],
+            )
+        )
+
+
 async def score_search_point(
     search_point: JobSearchPoint,
     dataset: list[Sample],
@@ -161,50 +293,15 @@ async def score_search_point(
     safe_label = label.lower().replace(" ", "_")
     run_id = f"{safe_label}_{content_hash[:8]}"
 
-    cached_sample_results: dict[str, QueryMeasurement] = {}
-    if store and backend_id and not force_fresh:
-        from promptpotter.application.optimization.pobb.elimination import is_deprecated
-
-        node_configs = pipeline_schema.node_configs(search_point.pipeline_params or {})
-        cached_sample_results = cast(
-            "dict[str, QueryMeasurement]",
-            archive_views.reusable_results(
-                store,
-                backend_id,
-                node_configs,
-                is_fatal=is_deprecated,
-                dataset_name=session.dataset_name,
-            ),
-        )
-
-    cached_sample_results, deprecated_samples = _split_off_deprecated_samples(cached_sample_results)
-    if deprecated_samples:
-        logger.info(
-            "Evicted %d deprecated prior result(s) (fatal warnings); will remeasure.",
-            len(deprecated_samples),
-        )
-
-    display_name = f"{session.experiment_id}_{safe_label}" if session.experiment_id else safe_label
-    dataset_queries = {s.query for s in dataset}
-
-    # Preamble: when the JSP-keyed archive already covers some/all of this
-    # dataset's queries, announce the split so the operator sees inline
-    # whether the upcoming per-sample lines are cache replays vs fresh
-    # measurements. Suppressed when no priors match the current dataset.
-    cached_in_dataset = sum(
-        1 for q in cached_sample_results if q in dataset_queries and q not in deprecated_samples
+    cached_sample_results, deprecated_samples, dataset_queries = _resolve_prior_cache(
+        search_point,
+        dataset,
+        session,
+        pipeline_schema=pipeline_schema,
+        force_fresh=force_fresh,
+        label=label,
     )
-    if cached_in_dataset:
-        total = len(dataset)
-        fresh = total - cached_in_dataset
-        logger.debug(
-            "%s cache: %d/%d already measured for this JSP — will replay %d, measure %d fresh.",
-            label,
-            cached_in_dataset,
-            total,
-            cached_in_dataset,
-            fresh,
-        )
+    display_name = f"{session.experiment_id}_{safe_label}" if session.experiment_id else safe_label
 
     def _merged_view(results: list[QueryMeasurement]) -> list[QueryMeasurement]:
         return merge_with_unprocessed_priors(
@@ -286,31 +383,13 @@ async def score_search_point(
         on_sample_pre_check=on_sample_pre_check,
     )
     results = batch.results
-    escalation_signal = batch.escalation_signal
-
-    if not batch.completed and not escalation_signal:
-        if batch.stop_reason == "skip":
-            # Operator early-abort of THIS searchpoint. The partial is already on
-            # disk; accept it as a normal partial score (escalation_signal stays
-            # None) and fall through to compute fitness over what was scored —
-            # identical in shape to a PoBB early-abort. The round continues to the
-            # next candidate; the cycle is NOT unwound.
-            pass
-        elif batch.stop_reason in {"graceful", "force"}:
-            # Graceful/force stop — partial state is already on disk via
-            # per-fresh-sample persist; just unwind.
-            raise KeyboardInterrupt()
-        else:
-            # Per-candidate scoring-error abort (consecutive 5xx, client 4xx,
-            # pipeline ERROR). Synthesize a candidate-scoped escalation so the
-            # caller can attach a RuntimeFailure and continue with the
-            # next candidate — never kill the round.
-            escalation_signal = _build_scoring_error_signal(
-                results=results,
-                stop_reason=batch.stop_reason or "",
-                candidate_idx=candidate_idx,
-                n_total_candidates=n_total_candidates,
-            )
+    escalation_signal = _resolve_partial_escalation(
+        batch,
+        results=results,
+        escalation_signal=batch.escalation_signal,
+        candidate_idx=candidate_idx,
+        n_total_candidates=n_total_candidates,
+    )
 
     scores = compute_composite_fitness(
         results,
@@ -325,23 +404,13 @@ async def score_search_point(
         scores["partial_reason"] = "skip"
 
     _save_run(results, scores)
-    if store and backend_id:
-        from promptpotter.infrastructure.tracing import DatasetRun, ObservabilityBridge
-        from promptpotter.shared.errors import graceful
-
-        with graceful("DatasetRun emit failed"):
-            obs = session.state.obs or ObservabilityBridge.file_only(store.base_dir)
-            obs.emit(
-                DatasetRun(
-                    campaign_id="",
-                    round_num=-1,
-                    run_id=run_id,
-                    content_hash=content_hash,
-                    prompt_fields_id=search_point.sp_hash(pipeline_schema),
-                    accuracy=scores["accuracy"],
-                    hits=scores["hits"],
-                    total=scores["total"],
-                )
-            )
+    _emit_dataset_run(
+        session,
+        run_id=run_id,
+        content_hash=content_hash,
+        search_point=search_point,
+        pipeline_schema=pipeline_schema,
+        scores=scores,
+    )
 
     return results, scores, escalation_signal

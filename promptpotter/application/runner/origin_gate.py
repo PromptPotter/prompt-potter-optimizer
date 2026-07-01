@@ -33,7 +33,7 @@ from promptpotter.application.run_phase_control import declare_run_phase, pause_
 from promptpotter.application.runner.round import emit_origin_round
 from promptpotter.application.runner.termination import OriginGateMode, origin_gate_tripped
 from promptpotter.domain.phases import RunPhase, StopReason
-from promptpotter.infrastructure.store.base import read_json_tolerant
+from promptpotter.infrastructure.store.io import read_json_tolerant
 
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session

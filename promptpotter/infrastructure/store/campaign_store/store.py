@@ -39,14 +39,14 @@ from promptpotter.config.settings import DEFAULT_CONNECTOR_TYPE
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.run_records import CycleSeed
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
-from promptpotter.infrastructure.store.base import (
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    scan_ledger_max_round_complete,
+)
+from promptpotter.infrastructure.store.io import (
     read_json,
     read_json_optional,
     validate_path_component,
     write_json,
-)
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    scan_ledger_max_round_complete,
 )
 from promptpotter.infrastructure.store.paths import (
     archive_root_dir_for,

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from promptpotter.infrastructure.store import cycle_dir_for
-from promptpotter.infrastructure.store.base import (
+from promptpotter.infrastructure.store.io import (
     append_jsonl,
     read_json_optional,
     write_json,

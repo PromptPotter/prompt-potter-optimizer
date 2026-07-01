@@ -35,8 +35,8 @@ from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.store import DatasetAccessError, Stores, readable_dataset_dir
-from promptpotter.infrastructure.store.base import read_json
 from promptpotter.infrastructure.store.dataset_access import list_readable_datasets
+from promptpotter.infrastructure.store.io import read_json
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
 

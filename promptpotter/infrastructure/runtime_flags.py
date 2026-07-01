@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 
 from promptpotter.domain.phases import RunPhase
-from promptpotter.infrastructure.store.base import read_json_tolerant
+from promptpotter.infrastructure.store.io import read_json_tolerant
 
 
 def is_paused(runtime_dir: Path) -> bool:

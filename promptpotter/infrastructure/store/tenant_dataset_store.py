@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.pipeline_schema import CANDIDATE_LIBRARY_FILE
-from promptpotter.infrastructure.store.base import (
+from promptpotter.infrastructure.store.io import (
     read_json_optional,
     write_json,
     write_text,

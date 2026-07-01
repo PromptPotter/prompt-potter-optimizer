@@ -90,7 +90,7 @@ the sole source of tenant scope, with `Stores.tenant_id` a derived
 no-drift gate #4 — never an independent field). Composite over focused
 leaf stores (`BackendStore`, `CampaignStore` (`store/campaign_store/`),
 `DatasetRunStore`, `PlanStore`, `SessionStore`). Shared I/O in
-`store/base.py`. Path helpers in `store/paths.py`; the
+`store/io.py`. Path helpers in `store/paths.py`; the
 `CycleDir` / `WorkspaceDir` write-target newtypes in
 `domain/cycle_paths.py` — projections and stores accept these newtypes,
 not raw `str`/`Path`. `archive/` is cross-cycle/session/tenant;

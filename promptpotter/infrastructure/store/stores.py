@@ -15,13 +15,13 @@ from typing import Any
 
 from promptpotter.domain.identity import TenantId
 from promptpotter.infrastructure.store.backend_store import BackendStore
-from promptpotter.infrastructure.store.base import (
-    read_json_optional,
-    write_json,
-)
 from promptpotter.infrastructure.store.campaign_store import CampaignStore
 from promptpotter.infrastructure.store.checkin_draft_store import CheckinDraftStore
 from promptpotter.infrastructure.store.diagnostic_run_store import DiagnosticRunStore
+from promptpotter.infrastructure.store.io import (
+    read_json_optional,
+    write_json,
+)
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
 from promptpotter.infrastructure.store.paths import (
     DEFAULT_DATASETS_ROOT,

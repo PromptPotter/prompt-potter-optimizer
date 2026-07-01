@@ -176,7 +176,7 @@ def _mint_fork(
         if surviving_rounds is None:
             # L2_REBASE / L3_REBASE / OPERATOR_REWIND: lift rounds 0..fork_from_round-1
             # from the parent index.json.
-            from promptpotter.infrastructure.store.base import read_json_optional
+            from promptpotter.infrastructure.store.io import read_json_optional
 
             parent_index = (
                 read_json_optional(campaign_store._index_path(campaign_id, parent_cycle_id)) or {}

@@ -23,7 +23,7 @@ from json import JSONDecodeError
 from pathlib import Path
 from typing import Literal
 
-from promptpotter.infrastructure.store.base import read_json, write_json
+from promptpotter.infrastructure.store.io import read_json, write_json
 from promptpotter.infrastructure.store.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.shared.clock import utcnow_iso
 

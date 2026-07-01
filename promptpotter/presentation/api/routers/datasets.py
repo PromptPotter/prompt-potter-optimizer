@@ -43,7 +43,7 @@ from promptpotter.infrastructure.store import (
 from promptpotter.infrastructure.store.archive_views import (
     measurement_series_for_samples,
 )
-from promptpotter.infrastructure.store.base import read_json
+from promptpotter.infrastructure.store.io import read_json
 from promptpotter.presentation.api.deps import StoreDep, get_cycle_dir_or_404
 from promptpotter.shared.errors import (
     BadRequestError,

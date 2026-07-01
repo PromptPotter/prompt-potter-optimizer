@@ -19,7 +19,7 @@ import re
 from pathlib import Path
 from typing import Literal
 
-from promptpotter.infrastructure.store.base import validate_path_component
+from promptpotter.infrastructure.store.io import validate_path_component
 
 # The install root (parent of ``datasets/`` + ``.promptpotter/``). The ONE
 # anchor — every other module imports this instead of recomputing its own

@@ -11,7 +11,7 @@ from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import ResumeCheckpointKind, ResumeCheckpointRecord
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store import Stores, campaign_root_dir_for, cycle_dir_for
-from promptpotter.infrastructure.store.base import read_json
+from promptpotter.infrastructure.store.io import read_json
 from promptpotter.presentation.api.deps import StoreDep, get_cycle_dir_or_404, read_text_or_404
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import NotFoundError

@@ -22,7 +22,7 @@ from promptpotter.config.settings import (
 )
 from promptpotter.domain.measurement_provenance import entry_grade, meets_grade
 from promptpotter.domain.sample import Measurement
-from promptpotter.infrastructure.store.base import (
+from promptpotter.infrastructure.store.io import (
     read_json,
     read_json_optional,
     write_json,

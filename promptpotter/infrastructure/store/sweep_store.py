@@ -11,7 +11,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from promptpotter.infrastructure.store.base import (
+from promptpotter.infrastructure.store.io import (
     read_json,
     read_json_optional,
     write_json,

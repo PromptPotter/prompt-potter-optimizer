@@ -37,11 +37,6 @@ from pathlib import Path
 from promptpotter.domain.identity import TenantId
 from promptpotter.infrastructure.store import archive_views
 from promptpotter.infrastructure.store.backend_store import BackendStore
-from promptpotter.infrastructure.store.base import (
-    read_json_tolerant,
-    validate_path_component,
-    write_json,
-)
 from promptpotter.infrastructure.store.campaign_store import CampaignStore
 from promptpotter.infrastructure.store.checkin_draft_store import CheckinDraftStore
 from promptpotter.infrastructure.store.dataset_access import (
@@ -51,6 +46,11 @@ from promptpotter.infrastructure.store.dataset_access import (
     readable_dataset_dir,
 )
 from promptpotter.infrastructure.store.diagnostic_run_store import DiagnosticRunStore
+from promptpotter.infrastructure.store.io import (
+    read_json_tolerant,
+    validate_path_component,
+    write_json,
+)
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
 from promptpotter.infrastructure.store.paths import (
     DEFAULT_PROJECTS_ROOT,

@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from json import JSONDecodeError
 from pathlib import Path
 
-from promptpotter.infrastructure.store.base import read_json, write_json
+from promptpotter.infrastructure.store.io import read_json, write_json
 
 logger = logging.getLogger(__name__)
 

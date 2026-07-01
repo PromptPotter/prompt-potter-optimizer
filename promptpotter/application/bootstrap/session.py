@@ -16,7 +16,7 @@ from promptpotter.infrastructure.store import (
     mint_session_id,
     save_active_pointer,
 )
-from promptpotter.infrastructure.store.base import validate_path_component
+from promptpotter.infrastructure.store.io import validate_path_component
 from promptpotter.shared.identity import IdentityContext, default_identity
 
 if TYPE_CHECKING:

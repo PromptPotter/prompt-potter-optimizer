@@ -12,7 +12,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from promptpotter.infrastructure.store.base import (
+from promptpotter.infrastructure.store.io import (
     read_json_optional,
     write_json,
 )

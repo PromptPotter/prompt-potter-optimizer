@@ -18,7 +18,7 @@ from typing import Any
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import LLMCallRecord, PhaseRecord, RoundWarningRecord
 from promptpotter.infrastructure.projections.base import DerivedView
-from promptpotter.infrastructure.store.base import read_json_tolerant, write_json
+from promptpotter.infrastructure.store.io import read_json_tolerant, write_json
 
 logger = logging.getLogger(__name__)
 

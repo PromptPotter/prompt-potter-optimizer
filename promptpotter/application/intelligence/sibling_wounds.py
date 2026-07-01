@@ -7,7 +7,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.escalation_signals import RuntimeFailure
-from promptpotter.infrastructure.store.base import read_json_tolerant
+from promptpotter.infrastructure.store.io import read_json_tolerant
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store import Stores

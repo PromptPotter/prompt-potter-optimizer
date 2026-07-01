@@ -46,7 +46,7 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.llm import set_abort_check
 from promptpotter.infrastructure.llm.models import emit_error_record
 from promptpotter.infrastructure.runtime_flags import clear_run_control_flags
-from promptpotter.infrastructure.store.base import read_json_tolerant
+from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ResumeDivergenceError
 

@@ -42,7 +42,7 @@ from promptpotter.application.views import (
 )
 from promptpotter.domain.rendering import format_l1_critique_for_prompt
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
-from promptpotter.infrastructure.store.base import read_json_tolerant, write_json, write_text
+from promptpotter.infrastructure.store.io import read_json_tolerant, write_json, write_text
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:

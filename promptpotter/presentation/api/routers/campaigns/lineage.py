@@ -35,7 +35,7 @@ from promptpotter.domain.run_records import (
 from promptpotter.domain.scoring import RoundScorer
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store import cycle_dir_for
-from promptpotter.infrastructure.store.base import read_json_optional
+from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.infrastructure.store.paths import sibling_kind
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._conditional import (

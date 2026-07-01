@@ -18,7 +18,7 @@ from typing import Any
 from promptpotter.config.settings import DATASET_NAME
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.infrastructure.store import Stores, archive_views
-from promptpotter.infrastructure.store.base import read_json_optional, write_json
+from promptpotter.infrastructure.store.io import read_json_optional, write_json
 from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 from promptpotter.infrastructure.tracing.events import (
     QueryNodeSpan,

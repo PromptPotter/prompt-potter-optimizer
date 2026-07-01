@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from promptpotter.infrastructure.store.base import read_json_tolerant
+from promptpotter.infrastructure.store.io import read_json_tolerant
 
 
 def _max_round_on_disk(rounds_dir: Path) -> int:

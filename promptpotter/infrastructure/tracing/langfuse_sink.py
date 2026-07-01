@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.infrastructure.store import cycle_dir_for
-from promptpotter.infrastructure.store.base import read_json_optional, write_json
+from promptpotter.infrastructure.store.io import read_json_optional, write_json
 from promptpotter.infrastructure.tracing.events import (
     CampaignEnd,
     CampaignStart,

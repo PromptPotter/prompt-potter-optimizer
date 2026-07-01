@@ -24,7 +24,7 @@ from json import JSONDecodeError
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from promptpotter.infrastructure.store.base import read_json, write_json
+from promptpotter.infrastructure.store.io import read_json, write_json
 from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:

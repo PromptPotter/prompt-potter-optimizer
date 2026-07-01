@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from promptpotter.application.bootstrap.session import Session
+    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.run_records import CycleSeed
     from promptpotter.domain.sample import Sample
 
@@ -559,20 +560,15 @@ def missing_template_vars(rendered: str, declared: list[str]) -> list[str]:
     ]
 
 
-def configure_and_apply_pipeline(
-    session: Session,
-    campaign_config: CampaignConfig,
+def _resolve_active_schema(
+    pipeline_schema: PipelineSchema | None,
+    experiment_extract: dict[str, Any],
     *,
-    log: Callable[[str], None] = logger.info,
-) -> dict[str, Any]:
-    """Build pipeline identity, apply filtered schema + overrides onto *session*."""
-    from promptpotter.application.datasets import has_dataset_prompts, load_node_prompt
+    exclude: list[str],
+    narrowing: dict[str, NodeSearchNarrowing],
+) -> tuple[list[str], PipelineSchema | None]:
+    """Resolve the active node list + the exclude-filtered, campaign-narrowed schema."""
     from promptpotter.infrastructure.backend import extract_pipeline_config
-
-    pipeline_schema = session.pipeline_schema
-    experiment_extract: dict[str, Any] = session.experiment_extract
-    exclude = list(campaign_config.exclude_nodes)
-    overrides = campaign_config.pipeline_overrides
 
     if pipeline_schema:
         all_names = list(pipeline_schema.active_steps)
@@ -590,8 +586,119 @@ def configure_and_apply_pipeline(
     # Campaign search-space narrowing — the per-node param-lock + allowed-values
     # subset, peer to exclude (above) and forbidden_axes_strict. The dataset
     # declares the max; the campaign snapshot may only narrow it.
-    if filtered and campaign_config.optimizer_narrowing:
-        filtered = filtered.narrow(campaign_config.optimizer_narrowing)
+    if filtered and narrowing:
+        filtered = filtered.narrow(narrowing)
+    return active, filtered
+
+
+def _apply_starting_prompts(
+    pipeline_params: dict[str, Any],
+    *,
+    filtered: PipelineSchema,
+    active: list[str],
+    dataset_dir: Path,
+    dataset_name: str,
+    log: Callable[[str], None],
+) -> None:
+    """Load each prompt-bearing node's starting prompt onto the wire payload.
+
+    Fails loud (``PayloadInvalidError``) when a rendered prompt omits a
+    ``{{var}}`` the node declares; warns when the dataset ships prompts but no
+    active node can carry one. Assumes the caller checked ``has_dataset_prompts``.
+    """
+    from promptpotter.application.datasets import load_node_prompt
+
+    prompt_nodes = [n for n in filtered.prompt_node_names() if n in active]
+    if not prompt_nodes:
+        # The dataset ships starting prompts but no active node declares
+        # `prompt_info` — so the rendered prompt has nowhere to land and is
+        # dropped before the wire. Silent here = every backend call runs with
+        # an empty system prompt (the bug that made an ingested dataset score
+        # 0% on email-replies). Fail loud: a generation node must advertise
+        # `prompt_info` in GET /pipeline (or the dataset overlay).
+        logger.warning(
+            "configure_pipeline: dataset %r has starting prompts but NO "
+            "prompt-bearing node in the active pipeline %s — the prompt will "
+            "NOT reach the backend. A generation node must declare `prompt_info`.",
+            dataset_name,
+            active,
+        )
+    prompt_info_by_node = {n.name: n.prompt_info for n in filtered.nodes}
+    for pnode in prompt_nodes:
+        template = load_node_prompt(dataset_dir, pnode, "default")
+        rendered = template.render()
+        # A prompt-bearing node declares the `{{vars}}` the backend injects by
+        # literal substitution (query / research / output-schema). If the rendered
+        # prompt omits one, that injection silently no-ops and the model never sees
+        # it — the bug that made entity_profiling emit term-not-JSON → NO_RESULT.
+        # Fail loud at setup, before a single degraded backend call. Exclude the
+        # six-field decomposition names (PROMPT_STRING_FIELDS): some nodes (e.g. the
+        # promptpotter-self L4 connector) declare THOSE as template_variables, but
+        # `render()` ASSEMBLES them — they are never `{{substituted}}`.
+        pinfo = prompt_info_by_node.get(pnode)
+        declared = pinfo.template_variables if pinfo else []
+        missing = missing_template_vars(rendered, declared)
+        if missing:
+            raise PayloadInvalidError(
+                f"Dataset {dataset_name!r} prompt for node {pnode!r} is missing required "
+                f"template variables {missing} — the backend injects these by literal "
+                f"{{{{name}}}} substitution, so without them the query / research / output "
+                f"schema never reach the model. Add the placeholders to "
+                f"datasets/{dataset_name}/prompts/[{pnode}|default].json "
+                f"(node declares: {declared}).",
+                code="pipeline_config_invalid",
+            )
+        # Starting prompt lands on the sparse wire payload, on top of the merged
+        # config above — never on `current_config`.
+        pipeline_params.setdefault(pnode, {})["prompt"] = rendered
+        log(f"Starting prompt: {dataset_name}/prompts/[{pnode}|default].json → {pnode}")
+
+
+def _validate_model_ownership(
+    pipeline_params: dict[str, Any],
+    *,
+    filtered: PipelineSchema | None,
+    active: list[str],
+    dataset_name: str,
+) -> None:
+    """LOUD invariant: every active LLM node must carry an owned ``model``.
+
+    The dataset OWNS its task model, sourced from its own `nodes.{node}.config`
+    overlay. A missing model is a setup bug, surfaced loudly here: the prior
+    silent fall-through let the backend's hidden GET /pipeline default decide
+    (TermNorm ships groq/120b), so a fresh drop ran the wrong model unnoticed.
+    In-process meta-prompt nodes (L4) are not `is_llm` and are exempt — their
+    model is the install-global optimizer config.
+    """
+    if filtered is None:
+        return
+    for name in active:
+        node_obj = filtered.get_node(name)
+        if node_obj and node_obj.is_llm and not pipeline_params.get(name, {}).get("model"):
+            raise PayloadInvalidError(
+                f"dataset {dataset_name!r}: LLM node {name!r} has no owned model. "
+                f"Declare it in the dataset's pipeline.json::nodes.{name}.config.model "
+                f"— the dataset owns its task model, never the backend default.",
+                code="pipeline_config_invalid",
+            )
+
+
+def configure_and_apply_pipeline(
+    session: Session,
+    campaign_config: CampaignConfig,
+    *,
+    log: Callable[[str], None] = logger.info,
+) -> dict[str, Any]:
+    """Build pipeline identity, apply filtered schema + overrides onto *session*."""
+    from promptpotter.application.datasets import has_dataset_prompts
+
+    exclude = list(campaign_config.exclude_nodes)
+    active, filtered = _resolve_active_schema(
+        session.pipeline_schema,
+        session.experiment_extract,
+        exclude=exclude,
+        narrowing=campaign_config.optimizer_narrowing,
+    )
 
     dataset_name = campaign_config.dataset_name or session.dataset_name or ""
     dataset_dir = session.dataset_config_dir
@@ -602,80 +709,31 @@ def configure_and_apply_pipeline(
     # This is where the connector `model`/config enters BOTH the measurement identity
     # (`content_hash`/`node_configs` over `session.pipeline_params`) AND the origin cycle id
     # (`build_origin_cycle_id` hashes these merged params). Starting prompts land on top below.
-    pipeline_params = resolve_pipeline_config_params(active, overrides, dataset_dir)
+    pipeline_params = resolve_pipeline_config_params(
+        active, campaign_config.pipeline_overrides, dataset_dir
+    )
 
     # Starting prompts from `{dataset_dir}/prompts/[<node>|default].json`, per prompt-bearing node.
     if dataset_dir is not None and filtered and has_dataset_prompts(dataset_dir):
-        prompt_nodes = [n for n in filtered.prompt_node_names() if n in active]
-        if not prompt_nodes:
-            # The dataset ships starting prompts but no active node declares
-            # `prompt_info` — so the rendered prompt has nowhere to land and is
-            # dropped before the wire. Silent here = every backend call runs with
-            # an empty system prompt (the bug that made an ingested dataset score
-            # 0% on email-replies). Fail loud: a generation node must advertise
-            # `prompt_info` in GET /pipeline (or the dataset overlay).
-            logger.warning(
-                "configure_pipeline: dataset %r has starting prompts but NO "
-                "prompt-bearing node in the active pipeline %s — the prompt will "
-                "NOT reach the backend. A generation node must declare `prompt_info`.",
-                dataset_name,
-                active,
-            )
-        prompt_info_by_node = {n.name: n.prompt_info for n in filtered.nodes}
-        for pnode in prompt_nodes:
-            template = load_node_prompt(dataset_dir, pnode, "default")
-            rendered = template.render()
-            # A prompt-bearing node declares the `{{vars}}` the backend injects by
-            # literal substitution (query / research / output-schema). If the rendered
-            # prompt omits one, that injection silently no-ops and the model never sees
-            # it — the bug that made entity_profiling emit term-not-JSON → NO_RESULT.
-            # Fail loud at setup, before a single degraded backend call. Exclude the
-            # six-field decomposition names (PROMPT_STRING_FIELDS): some nodes (e.g. the
-            # promptpotter-self L4 connector) declare THOSE as template_variables, but
-            # `render()` ASSEMBLES them — they are never `{{substituted}}`.
-            pinfo = prompt_info_by_node.get(pnode)
-            declared = pinfo.template_variables if pinfo else []
-            missing = missing_template_vars(rendered, declared)
-            if missing:
-                raise PayloadInvalidError(
-                    f"Dataset {dataset_name!r} prompt for node {pnode!r} is missing required "
-                    f"template variables {missing} — the backend injects these by literal "
-                    f"{{{{name}}}} substitution, so without them the query / research / output "
-                    f"schema never reach the model. Add the placeholders to "
-                    f"datasets/{dataset_name}/prompts/[{pnode}|default].json "
-                    f"(node declares: {declared}).",
-                    code="pipeline_config_invalid",
-                )
-            # Starting prompt lands on the sparse wire payload, on top of the merged
-            # config above — never on `current_config`.
-            pipeline_params.setdefault(pnode, {})["prompt"] = rendered
-            log(f"Starting prompt: {dataset_name}/prompts/[{pnode}|default].json → {pnode}")
+        _apply_starting_prompts(
+            pipeline_params,
+            filtered=filtered,
+            active=active,
+            dataset_dir=dataset_dir,
+            dataset_name=dataset_name,
+            log=log,
+        )
 
-    # The dataset OWNS its task model — every LLM node's resolved config must carry
-    # an explicit `model`, sourced from the dataset's own `nodes.{node}.config`
-    # overlay. A missing model is a setup bug, surfaced loudly here: the prior
-    # silent fall-through let the backend's hidden GET /pipeline default decide
-    # (TermNorm ships groq/120b), so a fresh drop ran the wrong model unnoticed.
-    # In-process meta-prompt nodes (L4) are not `is_llm` and are exempt — their
-    # model is the install-global optimizer config.
-    if filtered is not None:
-        for name in active:
-            node_obj = filtered.get_node(name)
-            if node_obj and node_obj.is_llm and not pipeline_params.get(name, {}).get("model"):
-                raise PayloadInvalidError(
-                    f"dataset {dataset_name!r}: LLM node {name!r} has no owned model. "
-                    f"Declare it in the dataset's pipeline.json::nodes.{name}.config.model "
-                    f"— the dataset owns its task model, never the backend default.",
-                    code="pipeline_config_invalid",
-                )
+    _validate_model_ownership(
+        pipeline_params, filtered=filtered, active=active, dataset_name=dataset_name
+    )
 
     if filtered is not None:
         session.pipeline_schema = filtered
     session.pipeline_params = pipeline_params
 
-    excluded_nodes = list(exclude) if exclude else []
     nodes_str = ", ".join(active)
-    excl_str = f"  Excluded: {', '.join(excluded_nodes)}" if excluded_nodes else ""
+    excl_str = f"  Excluded: {', '.join(exclude)}" if exclude else ""
     log(f"Active nodes: {nodes_str}{excl_str}")
 
     return pipeline_params
