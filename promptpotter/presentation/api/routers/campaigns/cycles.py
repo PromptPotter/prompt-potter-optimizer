@@ -7,16 +7,23 @@ fork's chart shows the fork's trajectory, not the session root's.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from promptpotter.infrastructure.store import cycle_dir_for
-from promptpotter.infrastructure.store.base import read_json_tolerant
+from promptpotter.infrastructure.store import (
+    build_stores,
+    cycle_dir_for,
+    read_active_pointer,
+)
+from promptpotter.infrastructure.store.base import read_json_tolerant, validate_path_component
 from promptpotter.infrastructure.store.paths import sibling_kind
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.presentation.api.deps import StoreDep, warming_payload
+from promptpotter.presentation.api.routers.active import CycleListEntry, CyclesResponse
 from promptpotter.presentation.api.routers.campaigns._conditional import (
     client_seen_at_or_after,
     http_date,
@@ -154,24 +161,18 @@ def get_round(store: StoreDep, campaign_id: str, cycle_id: str, round_num: int) 
     return round_data
 
 
-@campaigns_router.get("/campaigns/{campaign_id}/cycles/{cycle_id}/dashboard")
-def get_cycle_dashboard(
-    request: Request, store: StoreDep, campaign_id: str, cycle_id: str
+def serve_dashboard_response(
+    request: Request, base_dir: Path, campaign_id: str, cycle_id: str
 ) -> Response:
-    """Live telemetry for the viewed cycle — ``cycles/{cycle_id}/dashboard.json``.
+    """304 / warming / atomic ``dashboard.json`` read under any tenant ``base_dir``.
 
-    ``dashboard.json`` is per-cycle: every cycle (root, fork, sweep, diag)
-    owns its own live file, stamped with its own ``cycle_id``. The route
-    serves the file for the cycle passed in — no session-root collapse.
-
-    Honors ``If-Modified-Since`` and returns ``304 Not Modified`` when the
-    on-disk mtime hasn't advanced — keeps the 2 s webapp poll cheap during
-    quiescent stretches. When ``dashboard.json`` does not yet exist (fresh
-    campaign before origin has flushed its first snapshot), returns a
-    ``warming_up`` payload at 200 instead of 404 so the webapp can render a
-    "campaign initialising" placeholder rather than appear offline.
+    The single dashboard-serving path: the outer per-cycle route passes the
+    caller's ``store.base_dir``; the inner-cycle route passes a sandbox store's
+    ``base_dir`` (``.inner/<outer_cycle_id>/<tenant>``). One implementation, two
+    roots — so the 304 / warming-fallback / atomic-read semantics can't drift
+    between the outer and inner dashboards.
     """
-    cycle_path = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
+    cycle_path = cycle_dir_for(base_dir, campaign_id, cycle_id)
     path = cycle_path / "dashboard.json"
     present = path.is_file()
 
@@ -201,3 +202,104 @@ def get_cycle_dashboard(
         if present:
             body["reason"] = "dashboard_unreadable"
     return JSONResponse(body, headers=headers)
+
+
+@campaigns_router.get("/campaigns/{campaign_id}/cycles/{cycle_id}/dashboard")
+def get_cycle_dashboard(
+    request: Request, store: StoreDep, campaign_id: str, cycle_id: str
+) -> Response:
+    """Live telemetry for the viewed cycle — ``cycles/{cycle_id}/dashboard.json``.
+
+    ``dashboard.json`` is per-cycle: every cycle (root, fork, sweep, diag)
+    owns its own live file, stamped with its own ``cycle_id``. The route
+    serves the file for the cycle passed in — no session-root collapse.
+
+    Honors ``If-Modified-Since`` and returns ``304 Not Modified`` when the
+    on-disk mtime hasn't advanced — keeps the 2 s webapp poll cheap during
+    quiescent stretches. When ``dashboard.json`` does not yet exist (fresh
+    campaign before origin has flushed its first snapshot), returns a
+    ``warming_up`` payload at 200 instead of 404 so the webapp can render a
+    "campaign initialising" placeholder rather than appear offline.
+    """
+    return serve_dashboard_response(request, store.base_dir, campaign_id, cycle_id)
+
+
+def _inner_sandbox_store(store: Stores, outer_cycle_id: str) -> Stores | None:
+    """A ``Stores`` rooted at the outer cycle's inner sandbox, or ``None``.
+
+    L4 (``promptpotter-self``) runs each candidate as a real inner campaign under
+    a flat, off-registry sandbox ``<workspace>/.inner/<outer_cycle_id>`` (keyed on
+    the outer cycle id alone — see ``inner_recursion.publish_inner_spawn_context``).
+    That sandbox is structurally a normal projects tree, so pointing
+    ``build_stores`` at it lets every existing read work verbatim. Returns
+    ``None`` when the viewed cycle spawned no inner campaigns (non-L4, or the
+    loop hasn't recursed yet) — the caller degrades to an empty list / 404, never
+    an error.
+    """
+    validate_path_component(outer_cycle_id)
+    sandbox_root = store.projects_root.parent / ".inner" / outer_cycle_id
+    if not (sandbox_root / store.tenant_id).is_dir():
+        return None
+    return build_stores(store.identity, projects_root=sandbox_root)
+
+
+@campaigns_router.get(
+    "/campaigns/{campaign_id}/cycles/{cycle_id}/inner-cycles",
+    response_model=CyclesResponse,
+    tags=["Cycles"],
+)
+def get_inner_cycles(store: StoreDep, campaign_id: str, cycle_id: str) -> CyclesResponse:
+    """Inner campaigns spawned by an L4 outer cycle — the fan-out this cycle ran.
+
+    Keyed on the **viewed** outer ``cycle_id`` (the webapp can browse a past,
+    non-active outer cycle), not the active pointer. Reuses the same webapp-picker
+    shape as ``GET /cycles`` (one ``CycleListEntry`` per inner cycle); the
+    ``active_campaign_id`` / ``active_cycle_id`` fields carry the **inner**
+    sandbox's live pointer, so the sidebar can mark the inner loop running right
+    now. A non-L4 cycle (no ``.inner/`` sandbox) returns an empty list — that
+    absence is what tells the webapp to show no expand affordance.
+    """
+    inner = _inner_sandbox_store(store, cycle_id)
+    if inner is None:
+        return CyclesResponse(
+            tenant_id=store.tenant_id,
+            active_campaign_id=None,
+            active_cycle_id=None,
+            cycles=[],
+        )
+    _, live_cmp, live_cid = read_active_pointer(store.tenant_id, projects_root=inner.projects_root)
+    entries = inner.campaigns.enumerate_cycles()
+    return CyclesResponse(
+        tenant_id=store.tenant_id,
+        active_campaign_id=live_cmp or None,
+        active_cycle_id=live_cid or None,
+        cycles=[CycleListEntry(**e) for e in entries],
+    )
+
+
+@campaigns_router.get(
+    "/campaigns/{campaign_id}/cycles/{cycle_id}"
+    "/inner/{inner_campaign_id}/cycles/{inner_cycle_id}/dashboard",
+    tags=["Cycles"],
+)
+def get_inner_dashboard(
+    request: Request,
+    store: StoreDep,
+    campaign_id: str,
+    cycle_id: str,
+    inner_campaign_id: str,
+    inner_cycle_id: str,
+) -> Response:
+    """Live telemetry for one inner cycle — the inner loop's own ``dashboard.json``.
+
+    Resolves against the outer cycle's inner sandbox and reuses
+    :func:`serve_dashboard_response`, so the inner dashboard carries the identical
+    304 / warming / atomic-read semantics as the outer route. The inner
+    ``dashboard.json`` self-stamps its own inner ``campaign_id`` / ``cycle_id``,
+    so the webapp's payload-identity guard passes unchanged. 404 when the outer
+    cycle has no inner sandbox.
+    """
+    inner = _inner_sandbox_store(store, cycle_id)
+    if inner is None:
+        raise NotFoundError(f"No inner sandbox for cycle '{cycle_id}'")
+    return serve_dashboard_response(request, inner.base_dir, inner_campaign_id, inner_cycle_id)
