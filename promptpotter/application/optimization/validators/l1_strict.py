@@ -44,7 +44,6 @@ __all__ = [
     "L1YieldStats",
     "build_l1_output_schema",
     "detect_invariants",
-    "filter_pipeline_params_override",
     "validate_overrides",
 ]
 
@@ -242,8 +241,29 @@ def validate_overrides(
         if not isinstance(node_params, dict):
             continue
         node = pipeline_schema.get_node(node_name)
-        node_allowed = node.param_allowed_values if node else {}
-        node_types = node.param_types if node else {}
+        if node is None:
+            # Hallucinated node: L1 named a node absent from the active schema. The
+            # JSON-schema node-name enum is advisory (``build_l1_output_schema`` emits
+            # ``strict=False``, so a weakly-conformant provider slips a phantom key past
+            # ``additionalProperties: false``). The phantom edit is stripped from the wire
+            # downstream (``_merge_pipeline_params`` drops nodes outside ``active_steps``),
+            # so recording it here ROUTES the signal without changing what runs — and it is
+            # NON-FATAL (the reason-aware synthetic-0 gate in ``l1/score/candidate.py`` lets
+            # the candidate's real edits score). It flows through the existing channel:
+            # ``l1_wounds`` (next-round self-correction) + the ``validation_failure_rate``
+            # evaluator (L4 meta-analyses hallucination-rate as a meta-prompt quality axis).
+            # This is the node-name twin of ``validate_l1_layout``'s unknown-placeholder wound.
+            failures.append(
+                ValidationFailure(
+                    axis=node_name,
+                    value=node_name,
+                    allowed=sorted(pipeline_schema.active_steps),
+                    reason="hallucinated_node",
+                )
+            )
+            continue
+        node_allowed = node.param_allowed_values
+        node_types = node.param_types
         for param, value in node_params.items():
             if param in SCHEMA_OWNED_FIELDS or (
                 forbidden_axes_strict and param in PARAM_FORBIDDEN_KEYS
@@ -425,30 +445,6 @@ L1_PROMPT_PLACEHOLDERS_INTACT: LLMOutputValidator = LLMOutputValidator(
     id="l1_prompt_placeholders_intact",
     check=_check_l1_prompt_placeholders_intact,
 )
-
-
-def filter_pipeline_params_override(
-    pipeline_params_override: dict[str, dict[str, Any]],
-    pipeline_schema: PipelineSchema | None,
-) -> dict[str, dict[str, Any]]:
-    """Drop entries for node names not in the active pipeline schema.
-
-    The JSON schema built by :func:`build_l1_output_schema` already
-    constrains node-name keys to the active schema's nodes, so this is
-    belt-and-braces — provider strict mode is off by default and a
-    weakly-conformant LLM can still emit a hallucinated node. Without
-    this filter the variant lands at the parse stage as a no-op (the
-    hallucinated node isn't a real wire target).
-    """
-    if not pipeline_schema:
-        return dict(pipeline_params_override)
-    filtered: dict[str, dict[str, Any]] = {}
-    for node_name, params in pipeline_params_override.items():
-        if pipeline_schema.has_node(node_name):
-            filtered[node_name] = params
-        else:
-            logger.warning("l1_generate: dropping hallucinated node %r", node_name)
-    return filtered
 
 
 @dataclass(frozen=True)

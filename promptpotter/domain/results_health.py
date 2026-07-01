@@ -155,10 +155,15 @@ def compute_degradation_health(
     no_result_count: int = 0,
     node_failure_rates: dict[str, float] | None = None,
     node_warnings: dict[str, list[str]] | None = None,
+    is_origin: bool = False,
 ) -> DegradationHealth | None:
     """Grade a round's degradation health from its winner's per-sample outcomes
     plus the cycle's track record. Returns ``None`` when nothing was measured
-    (``total <= 0``) — genuinely no verdict, not a fabricated clean one.
+    (``total <= 0``) — genuinely no verdict, not a fabricated clean one — EXCEPT
+    the origin: a round-0 result only exists once scoring was attempted (the
+    ``has_program`` gate), so a ``total == 0`` origin measured *nothing* where it
+    was expected to, which is a broken floor (``critical`` / ``origin_unmeasured``),
+    not an abstention — candidates would otherwise be elected against no baseline.
 
     Precedence (first match wins), thresholds = the module constants:
       * **critical** — the backend was unreachable for ≥
@@ -179,6 +184,26 @@ def compute_degradation_health(
     (R-48). L2 reads this verdict, then self-heals or emits ``terminate_proposal`` —
     the stop authority stays with the intelligent tier, never this deterministic grade."""
     if total <= 0:
+        if is_origin:
+            return DegradationHealth(
+                grade="critical",
+                reasons=["origin_unmeasured"],
+                samples=0,
+                structural_count=0,
+                transient_count=0,
+                no_result_count=0,
+                degraded_rate=0.0,
+                consecutive_degraded_rounds=0,
+                prior_clean_rounds=prior_clean_rounds,
+                ci_lo=0.0,
+                ci_hi=1.0,
+                suggested_action=(
+                    "the origin scored zero samples — no baseline was measured, so "
+                    "candidates would be elected against nothing. The pipeline/connector "
+                    "produced no result rows for the origin (a crash or empty return, not "
+                    "a wrong answer). Fix the pipeline so the origin scores, then rescore."
+                ),
+            )
         return None
     from promptpotter.shared.statistics import wilson_ci
 
@@ -375,6 +400,7 @@ def compute_round_health(
     total: int,
     results: list[dict[str, Any]],
     prior_healths: Sequence[DegradationHealth | None],
+    is_origin: bool = False,
 ) -> DegradationHealth | None:
     """Stamp a closed round's degradation verdict — the SINGLE computation site
     (the app-layer round close). Every surface reads ``RoundResult.health``; none
@@ -456,4 +482,5 @@ def compute_round_health(
         no_result_count=no_result,
         node_failure_rates=node_failure_rates,
         node_warnings=node_warnings,
+        is_origin=is_origin,
     )

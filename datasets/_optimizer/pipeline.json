@@ -31,7 +31,7 @@
     "l1_critique": {
       "type": "agent",
       "config": {
-        "temperature": 0.0,
+        "temperature": 0.3,
         "output_format": "json",
         "positive_threshold": 0.7,
         "schema_family": "l1_critique",
@@ -39,7 +39,7 @@
         "prompt_family": "l1_critique",
         "prompt_version": 1,
         "reasoning_effort": "medium",
-        "max_tokens": 8000,
+        "max_tokens": 2000,
         "provider": "openrouter",
         "model": "openai/gpt-oss-120b"
       }
@@ -84,7 +84,7 @@
     "checkin": {
       "type": "llm/meta",
       "config": {
-        "temperature": 0.0,
+        "temperature": 0.3,
         "output_format": "json",
         "prompt_family": "checkin",
         "prompt_version": 2,

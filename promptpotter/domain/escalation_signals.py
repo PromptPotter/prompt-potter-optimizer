@@ -127,7 +127,10 @@ class ValidationFailure(BaseModel):
             "``RuntimeFailure.observed_config`` row), "
             "``l1_provider_empty_response`` / ``meta_prompt_parse_failure`` "
             "/ ``meta_prompt_unexpected_type`` (generator-side failure), "
-            "``no_op_variant`` / ``duplicate_variant`` (invariant-detect)."
+            "``no_op_variant`` / ``duplicate_variant`` (invariant-detect), "
+            "``hallucinated_node`` (named a node absent from the schema — "
+            "NON-fatal: the phantom edit is stripped, the candidate still scores; "
+            "routed as signal, not a synthetic-0)."
         ),
     )
 

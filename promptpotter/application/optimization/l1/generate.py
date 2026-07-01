@@ -17,7 +17,6 @@ from promptpotter.application.optimization.dispatch.schemas import (
 )
 from promptpotter.application.optimization.validators.l1_strict import (
     build_l1_output_schema,
-    filter_pipeline_params_override,
 )
 from promptpotter.domain.escalation_signals import ValidationFailure
 from promptpotter.domain.opt_search_point import EvidenceGrounding
@@ -204,13 +203,14 @@ async def l1_generate(
 
     population: list[CandidateProposal] = []
     for v in variants_list[:n_variants]:
-        # Three slots, three readers — schema split (B1) prevents conflation. Runtime filter is
-        # belt-and-braces: drops node names absent from the active schema if provider strict is off.
+        # Three slots, three readers — schema split (B1) prevents conflation. A node name
+        # absent from the active schema (hallucinated) is NOT pre-filtered here: it flows to
+        # the one validation producer (``validate_overrides`` via ``parse_population``), which
+        # records it as a non-fatal ``hallucinated_node`` wound (routed to l1_wounds +
+        # validation_failure_rate), and ``_merge_pipeline_params`` strips it from the wire.
         prompt_changes = dict(v.prompt_fields_override or {})
         tc_changes = dict(v.task_context_override or {})
-        pipeline_params_override = filter_pipeline_params_override(
-            v.pipeline_params_override or {}, pipeline_schema
-        )
+        pipeline_params_override = v.pipeline_params_override or {}
         # Override validation is deferred to parse_population — one producer of truth.
         evidence = _parse_evidence_grounding(v.evidence_grounding)
         child = opt_sp.mutate(

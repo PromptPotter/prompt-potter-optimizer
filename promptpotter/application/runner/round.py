@@ -263,6 +263,7 @@ async def close_round(
             total=round_result.total,
             results=round_result.results,
             prior_healths=assemble_prior_healths(cycle.origin_health, cycle.rounds, round_num),
+            is_origin=round_num == 0,
         )
         if round_num == 0:
             cycle.origin_health = round_result.health

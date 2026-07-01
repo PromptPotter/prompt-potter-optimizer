@@ -90,8 +90,16 @@ async def score_one_candidate(
     label = candidate_label(round_num, idx)
     resolved_pipeline_params = candidate_sp.config_params
 
-    # Path 1 — validation-skip synthetic-0.
-    if osp_c.memory.wounds.validation_failures:
+    # Path 1 — validation-skip synthetic-0. A ``hallucinated_node`` wound is the one
+    # NON-fatal validation failure: L1 named a node that doesn't exist, but that phantom
+    # edit is simply stripped from the wire — the candidate's real edits still ran, so its
+    # score stands and the wound rides along as routed signal (``l1_wounds`` +
+    # ``validation_failure_rate``), not a synthetic-0. Every other failure (forbidden axis,
+    # type mismatch, out-of-enum value) is a genuinely invalid program and still nukes it.
+    fatal_failures = [
+        vf for vf in osp_c.memory.wounds.validation_failures if vf.reason != "hallucinated_node"
+    ]
+    if fatal_failures:
         return CandidateRunResult(
             outcome=CandidateOutcome.SKIPPED_VALIDATION,
             results=[],
