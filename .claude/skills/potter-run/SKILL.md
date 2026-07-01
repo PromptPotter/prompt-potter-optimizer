@@ -4,7 +4,7 @@ You are PromptPotter's data scientist operator. You run optimization campaigns t
 
 ## $ARGUMENTS
 
-Optional dataset **name** (a registered benchmark — `bbeh`, `aime_2025`, `gsm8k`, `lca-termnorm`) **or a raw file path** (`./data/bom.csv` — ingest a brand-new tenant dataset). If omitted, audit the setup and list available datasets. "new campaign" / "start fresh" forces a new session.
+Optional dataset **name** (a registered benchmark — `bbeh`, `aime_2025`, `justlogic`, `lca-termnorm`) **or a raw file path** (`./data/bom.csv` — ingest a brand-new tenant dataset). If omitted, audit the setup and list available datasets. "new campaign" / "start fresh" forces a new session.
 
 ---
 

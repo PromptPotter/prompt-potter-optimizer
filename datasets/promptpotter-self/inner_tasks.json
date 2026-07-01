@@ -1,5 +1,5 @@
 {
-  "description": "Inner-benchmark tasks consumed by the PromptPotter connector's extract_experiment hook. Each task is one inner-cycle invocation; the outer L1's score for a candidate is composited (per campaign.json::scoring) over the three proxy metrics produced per task: first_round_delta, after_N_rounds_delta, rounds_to_N. Inner benchmark = justlogic depth-6/7 (~0.44 origin, clear headroom; gsm8k retired — its origin aces target). Target 0.60 (not 0.80) so rounds_to_N varies rather than saturating at the unreached sentinel — the paper ceiling on this stratum is ~0.81.",
+  "description": "Inner-benchmark tasks consumed by the PromptPotter connector's extract_experiment hook. Each task is one inner-cycle invocation; the outer L1's score for a candidate is composited (per campaign.json::scoring) over the three proxy metrics produced per task: first_round_delta, after_N_rounds_delta, rounds_to_N. Inner benchmark = justlogic depth-6/7 (~0.44 origin, clear headroom; gsm8k retired — its origin aces target). Target 0.60 (not 0.80) so rounds_to_N varies rather than saturating at the unreached sentinel — the paper ceiling on this stratum is ~0.81. PANEL SIZE = 8 seeds: the θ-LCB winner election needs >= elimination_n_min (6) covered samples to crown, and offline replay of a real round showed 2 tasks -> no winner, 6 -> winner, 8 -> stable; 8 gives a 2-failure margin so one flaky inner tail doesn't drop effective n below the floor and waste the run (l4-outer-loop.md Live-run learnings, bug-5 C).",
   "inner_benchmark": "justlogic",
   "inner_benchmark_config": {
     "dataset_path": "datasets/justlogic",
@@ -19,6 +19,42 @@
       "target_score": 0.60,
       "n_inner_rounds": 2,
       "inner_dataset_seed": 1
+    },
+    {
+      "id": "justlogic-d67/seed-2",
+      "target_score": 0.60,
+      "n_inner_rounds": 2,
+      "inner_dataset_seed": 2
+    },
+    {
+      "id": "justlogic-d67/seed-3",
+      "target_score": 0.60,
+      "n_inner_rounds": 2,
+      "inner_dataset_seed": 3
+    },
+    {
+      "id": "justlogic-d67/seed-4",
+      "target_score": 0.60,
+      "n_inner_rounds": 2,
+      "inner_dataset_seed": 4
+    },
+    {
+      "id": "justlogic-d67/seed-5",
+      "target_score": 0.60,
+      "n_inner_rounds": 2,
+      "inner_dataset_seed": 5
+    },
+    {
+      "id": "justlogic-d67/seed-6",
+      "target_score": 0.60,
+      "n_inner_rounds": 2,
+      "inner_dataset_seed": 6
+    },
+    {
+      "id": "justlogic-d67/seed-7",
+      "target_score": 0.60,
+      "n_inner_rounds": 2,
+      "inner_dataset_seed": 7
     }
   ]
 }

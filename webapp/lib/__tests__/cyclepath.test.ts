@@ -13,20 +13,20 @@ import {
 // is URL glue + the `?descend=` wire param, so lock the round-trip, the malformed
 // guard, and the root/leaf/descend derivations here.
 describe("CyclePath", () => {
-  const outer = { campaignId: "gsm8k__ab12cd", cycleId: "cycle_9f3a1b" };
+  const outer = { campaignId: "justlogic__ab12cd", cycleId: "cycle_9f3a1b" };
   const inner = { campaignId: "justlogic__ff00aa", cycleId: "cycle_1122ab_s3" };
   const depth1: CyclePath = [outer];
   const depth2: CyclePath = [outer, inner];
 
   it("round-trips a top-level (1-hop) path", () => {
     const s = encodeCyclePath(depth1);
-    expect(s).toBe("gsm8k__ab12cd::cycle_9f3a1b");
+    expect(s).toBe("justlogic__ab12cd::cycle_9f3a1b");
     expect(decodeCyclePath(s)).toEqual(depth1);
   });
 
   it("round-trips a deep (2-hop) path", () => {
     const s = encodeCyclePath(depth2);
-    expect(s).toBe("gsm8k__ab12cd::cycle_9f3a1b~justlogic__ff00aa::cycle_1122ab_s3");
+    expect(s).toBe("justlogic__ab12cd::cycle_9f3a1b~justlogic__ff00aa::cycle_1122ab_s3");
     expect(decodeCyclePath(s)).toEqual(depth2);
   });
 

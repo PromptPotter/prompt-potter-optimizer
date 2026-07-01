@@ -15,7 +15,7 @@ This diagnostic prints, from the one declared registry (``application.config_cou
 Run it::
 
     python -m promptpotter.diagnostics.config_map                 # static registry (defaults)
-    python -m promptpotter.diagnostics.config_map gsm8k-small     # a dataset's campaign.json
+    python -m promptpotter.diagnostics.config_map justlogic       # a dataset's campaign.json
     python -m promptpotter.diagnostics.config_map path/to/campaign.json
 
 The same registry drives the pre-run preflight warning and the webapp config-map

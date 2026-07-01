@@ -49,7 +49,7 @@ def promptpotter_wire_adapter(
     """Outbound payload describing an inner PromptPotter cycle to run.
 
     ``query`` is the inner-benchmark task identifier (e.g.
-    ``"gsm8k-small/sample-0"``). ``pipeline_params`` carries the outer L1's
+    ``"justlogic-d67/seed-0"``). ``pipeline_params`` carries the outer L1's
     mutation surface — a nested dict keyed by inner-meta-prompt node:
 
     ```
@@ -132,7 +132,7 @@ def _extract_experiment(
 
         {
           "tasks": [
-            {"id": "gsm8k-small/sample-0", "target_score": 0.80, "n_inner_rounds": 3},
+            {"id": "justlogic-d67/seed-0", "target_score": 0.60, "n_inner_rounds": 2},
             ...
           ]
         }

@@ -140,14 +140,14 @@ class _InnerTaskSpec:
 
 
 def _resolve_inner_task(ctx: InnerSpawnContext, query: str) -> _InnerTaskSpec:
-    """Map an outer query (``"gsm8k-small/seed-0"``) to its inner-campaign spec.
+    """Map an outer query (``"justlogic-d67/seed-0"``) to its inner-campaign spec.
 
     Reads the spawning dataset's ``inner_tasks.json`` — top-level
     ``inner_benchmark`` + ``inner_benchmark_config`` (the inner dataset + sample
     count + round cap + target), overlaid by the matching ``tasks[]`` entry
     (per-task seed / round cap / target)."""
     cfg = read_json_optional(ctx.dataset_config_dir / "inner_tasks.json") or {}
-    bench = str(cfg.get("inner_benchmark") or "gsm8k")
+    bench = str(cfg.get("inner_benchmark") or "justlogic")
     bench_cfg = cfg.get("inner_benchmark_config") or {}
     n_samples = int(bench_cfg.get("n_samples_per_inner_round", 10))
     n_rounds = int(bench_cfg.get("max_inner_rounds", 3))
@@ -246,11 +246,18 @@ async def _run_inner_campaign(
     campaign_config = load_campaign_config({**profile, **file_config})
     # Cap inner rounds at the task's budget — the proxy metrics are defined over
     # exactly this many rounds, and it bounds the (geometric) recursion cost.
+    # Also reconcile the per-round eval budget to the reduced inner bank: the inner
+    # campaign draws exactly ``train_data`` (n_samples), but inherits the inner
+    # dataset's full-split ``sp_budget_ttest`` — leaving it above the bank fires the
+    # ``sp_budget_exceeds_dataset`` preflight on every inner bootstrap (noise that
+    # obscures real inner signal) with no behavioural gain. The proxy is defined
+    # over exactly this bank, so the budget belongs at the bank size.
     campaign_config = campaign_config.model_copy(
         update={
+            "sp_budget_ttest": min(campaign_config.sp_budget_ttest, len(train_data)),
             "optimization": campaign_config.optimization.model_copy(
                 update={"max_rounds": spec.n_rounds}
-            )
+            ),
         }
     )
 
