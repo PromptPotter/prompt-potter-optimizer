@@ -165,6 +165,20 @@ class OptimizationConfig(BaseModel):
     n_variants: int = Field(5, description="Candidates per round")
     improvement_threshold: float = Field(..., description="Min accuracy delta")
 
+    optimizer_set: str = Field(
+        "",
+        description=(
+            "Which optimizer meta-prompt set this cycle uses. Empty (default) → the "
+            "standard `datasets/_optimizer/` task-tuning loop. `meta` → the L4 outer "
+            "set `datasets/_optimizer_meta/prompts.json`, whose L1 emits per-node "
+            "edits to the INNER optimizer's meta-prompts (`pipeline_params_override`) "
+            "instead of tuning its own template. Applied per-cycle at the runner seam "
+            "through the same per-node override channel the inner runner uses, so an "
+            "outer (meta) cycle and the inner (default) cycles it spawns stay isolated "
+            "by task. See docs/specs/l4-outer-loop.md § 3."
+        ),
+    )
+
     l2_patience: int | None = Field(2)
     l3_patience: int | None = Field(1)
     degradation_threshold: float = Field(...)

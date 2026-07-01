@@ -1,36 +1,24 @@
 {
-  "description": "Inner-benchmark tasks consumed by the PromptPotter connector's extract_experiment hook. Each task is one inner-cycle invocation; the outer L1's score for a candidate is composited (per campaign.json::scoring) over the three proxy metrics produced per task: first_round_delta, after_N_rounds_delta, rounds_to_N.",
-  "inner_benchmark": "gsm8k",
+  "description": "Inner-benchmark tasks consumed by the PromptPotter connector's extract_experiment hook. Each task is one inner-cycle invocation; the outer L1's score for a candidate is composited (per campaign.json::scoring) over the three proxy metrics produced per task: first_round_delta, after_N_rounds_delta, rounds_to_N. Inner benchmark = justlogic depth-6/7 (~0.44 origin, clear headroom; gsm8k retired — its origin aces target). Target 0.60 (not 0.80) so rounds_to_N varies rather than saturating at the unreached sentinel — the paper ceiling on this stratum is ~0.81.",
+  "inner_benchmark": "justlogic",
   "inner_benchmark_config": {
-    "dataset_path": "datasets/gsm8k",
-    "n_samples_per_inner_round": 10,
-    "max_inner_rounds": 3,
-    "target_score": 0.80
+    "dataset_path": "datasets/justlogic",
+    "n_samples_per_inner_round": 16,
+    "max_inner_rounds": 2,
+    "target_score": 0.60
   },
   "tasks": [
     {
-      "id": "gsm8k-small/seed-0",
-      "target_score": 0.80,
-      "n_inner_rounds": 3,
+      "id": "justlogic-d67/seed-0",
+      "target_score": 0.60,
+      "n_inner_rounds": 2,
       "inner_dataset_seed": 0
     },
     {
-      "id": "gsm8k-small/seed-1",
-      "target_score": 0.80,
-      "n_inner_rounds": 3,
+      "id": "justlogic-d67/seed-1",
+      "target_score": 0.60,
+      "n_inner_rounds": 2,
       "inner_dataset_seed": 1
-    },
-    {
-      "id": "gsm8k-small/seed-2",
-      "target_score": 0.80,
-      "n_inner_rounds": 3,
-      "inner_dataset_seed": 2
-    },
-    {
-      "id": "gsm8k-small/seed-3",
-      "target_score": 0.80,
-      "n_inner_rounds": 3,
-      "inner_dataset_seed": 3
     }
   ]
 }

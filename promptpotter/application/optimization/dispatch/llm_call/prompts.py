@@ -32,30 +32,66 @@ __all__ = [
     "get_optimizer_schema",
     "list_optimizer_prompts",
     "load_optimizer_prompt",
+    "load_optimizer_set_overrides",
     "set_optimizer_prompt_overrides",
 ]
 
 OPTIMIZER_PIPELINE_PATH = REPO_ROOT / "datasets" / "_optimizer" / "pipeline.json"
 
-# Per-run override of the optimizer meta-prompts, keyed by optimizer node
+# Per-cycle override of the optimizer meta-prompts, keyed by optimizer node
 # (`l1_generate` / `l1_critique` / `l2_context` / `l3_plan`) → a partial
-# `PromptTemplate`-field dict. The L4 inner-cycle runner sets this (inside the
-# inner asyncio task, so it can't leak to the outer optimizer) so the OUTER L1's
-# meta-prompt mutations actually shape the inner cycle's optimizer prompts. A
-# ContextVar — not a global — so each inner task at any recursion depth carries
-# its own overrides. Default `None` = no override (every normal cycle).
+# `PromptTemplate`-field dict, merged onto the loaded prompt by
+# `_apply_prompt_override`. ONE channel, two callers — both task-isolated:
+#   1. the OUTER L4 cycle binds its specialized meta-prompt SET here
+#      (`load_optimizer_set_overrides`, from `OptimizationConfig.optimizer_set`,
+#      set at the runner seam) so it reasons about editing an inner optimizer; and
+#   2. the L4 inner-cycle runner binds the OUTER's per-node MUTATIONS here (inside
+#      the inner asyncio task) so those mutations shape the inner cycle's prompts.
+# Because each inner cycle runs in its own task, an outer (meta) binding and the
+# inner (mutation) binding never collide — the inner task overwrites its copy. A
+# ContextVar — not a global — so every level at any recursion depth carries its
+# own. Default `None` = no override (every normal, non-L4 cycle).
 _OPTIMIZER_PROMPT_OVERRIDES: contextvars.ContextVar[dict[str, dict[str, Any]] | None] = (
     contextvars.ContextVar("optimizer_prompt_overrides", default=None)
 )
 
 
 def set_optimizer_prompt_overrides(overrides: dict[str, dict[str, Any]] | None) -> None:
-    """Bind per-run optimizer-prompt-field overrides for this task's context.
+    """Bind per-cycle optimizer-prompt-field overrides for this task's context.
 
     Keyed by optimizer node; each value is a partial `PromptTemplate`-field map
-    merged onto the loaded prompt by :func:`load_optimizer_prompt`. The L4 inner
-    runner is the sole caller (`runner/inner_recursion.py`)."""
+    merged onto the loaded prompt by :func:`load_optimizer_prompt`. Two callers,
+    both task-isolated: the runner seam binds the outer L4 cycle's meta-prompt set
+    (:func:`load_optimizer_set_overrides`); the inner runner
+    (`runner/inner_recursion.py`) binds the outer's per-node mutations."""
     _OPTIMIZER_PROMPT_OVERRIDES.set(overrides or None)
+
+
+def load_optimizer_set_overrides(opt_set: str) -> dict[str, dict[str, Any]]:
+    """Load a named optimizer prompt-set's per-node field overrides.
+
+    The L4 outer cycle selects a specialized meta-prompt set via
+    ``OptimizationConfig.optimizer_set`` (e.g. ``"meta"`` →
+    ``datasets/_optimizer_meta/prompts.json``). The file is a flat
+    ``{node: {field: text}}`` map of only the fields that set rewrites; it rides
+    the SAME per-node override channel as the inner-cycle mutations
+    (:func:`set_optimizer_prompt_overrides` → :func:`_apply_prompt_override`), so
+    every injection slot the set does not name (the ``pipeline_param_catalogue``
+    in ``problem_description``, the evidence panels, …) stays intact from
+    ``datasets/_optimizer/``. Empty ``opt_set`` or a missing file → ``{}``.
+
+    Non-dict top-level entries (e.g. a ``_doc`` note) are dropped — only real
+    per-node field maps are returned."""
+    if not opt_set:
+        return {}
+    path = REPO_ROOT / "datasets" / f"_optimizer_{opt_set}" / "prompts.json"
+    if not path.exists():
+        logger.warning(
+            "optimizer_set %r: no prompts at %s — falling back to the default set", opt_set, path
+        )
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return {k: v for k, v in data.items() if isinstance(v, dict)}
 
 
 @functools.lru_cache(maxsize=1)

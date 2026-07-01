@@ -75,11 +75,16 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # PromptPotter campaign in its own asyncio task under the spawning cycle's
 # `.runtime/inner/`, returning the three proxy metrics (l4-outer-loop slice 2,
 # the actual L4 recursion). A feature, justified, so the baseline rises.
+# then ``config_leaf_fields`` 34->35: a deliberate new operator knob --
+# ``OptimizationConfig.optimizer_set`` (selects the optimizer meta-prompt set per
+# cycle: default ``_optimizer/`` vs the L4 outer ``_optimizer_meta/`` whose L1
+# emits per-node inner-meta-prompt edits; l4-outer-loop slice 3b, the gating
+# slice). A feature, justified, so the baseline rises.
 LEDGER_BASELINE = {
     "modules": 297,
     "init_files": 54,
     "reexport_shims": 41,
-    "config_leaf_fields": 34,
+    "config_leaf_fields": 35,
     "settings_env": 17,
     "settings_const": 16,
     "opt_search_point_fields": 27,

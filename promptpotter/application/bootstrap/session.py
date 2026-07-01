@@ -225,7 +225,13 @@ def auto_mint_session(
     session.campaign_id = campaign_id
     session.state.cycle_id = root_cycle
 
-    save_active_pointer(session.store.tenant_id, session_id, campaign_id, root_cycle)
+    save_active_pointer(
+        session.store.tenant_id,
+        session_id,
+        campaign_id,
+        root_cycle,
+        projects_root=session.store.projects_root,
+    )
 
     # Pre-seed dashboard.json so the webapp doesn't 404 in the mint→loop-start window.
     from promptpotter.application.origin import build_campaign_emitter
@@ -386,7 +392,18 @@ def finalize_checkin_to_active(
     # becomes the running one the dashboard follows. A following workspace snaps to
     # it here, so the operator lands on the live run instead of being bounced
     # mid-authoring (the skeleton deliberately left the pointer alone).
-    save_active_pointer(session.store.tenant_id, session_id, campaign_id, cycle_id)
+    # projects_root threads the store's own root so a sandboxed inner cycle (L4)
+    # stamps its OWN workspace pointer, never the outer tenant's — otherwise the
+    # inner mint clobbers the outer's active_session.json and the webapp (which
+    # reads the default root) follows a pointer to a campaign that lives under
+    # `.inner/…` and 404s.
+    save_active_pointer(
+        session.store.tenant_id,
+        session_id,
+        campaign_id,
+        cycle_id,
+        projects_root=session.store.projects_root,
+    )
 
     cycle_dir = session.store.campaigns.cycle_dir(campaign_id, cycle_id)
     (cycle_dir / ".runtime" / "checkin.flag").unlink(missing_ok=True)

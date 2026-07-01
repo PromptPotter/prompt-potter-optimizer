@@ -1,8 +1,24 @@
 # Task: evolve PromptPotter's own meta-prompts
 
-Goal: outer cycle mutates inner cycle's L1 / L1_CRITIQUE / L2 / L3
-meta-prompt template fields (6 per node × 4 nodes = 24 fields) so inner
-cycles converge faster / further on GSM8K-small as proxy benchmark.
+Goal: the outer cycle mutates the **inner** cycle's L1 / L1_CRITIQUE / L2 / L3
+meta-prompt template fields (6 per node × 4 nodes = 24 fields) so inner cycles
+converge **faster and further** on the proxy benchmark.
+
+## What the inner cycle is solving (so you mutate toward the right behaviour)
+
+The inner benchmark is **justlogic, depth-6/7 deductive reasoning** (NOT
+arithmetic). Each inner sample is a set of premises plus a candidate conclusion;
+the inner model must answer **TRUE / FALSE / Uncertain** — TRUE/FALSE when the
+premises strictly determine the conclusion, `Uncertain` only when they are
+genuinely indeterminate. Origin ≈ 0.44, target 0.60, paper ceiling ≈ 0.81.
+
+The dominant failure mode is **hedge bias**: the inner model over-uses
+`Uncertain` to avoid committing. So the inner meta-prompts that win are the ones
+that make the inner L1 generate candidates which **break the hedge** — commit to
+TRUE/FALSE under strict entailment, scaffold premise-by-premise checking, and
+reserve `Uncertain` for real indeterminacy. Mutate the inner meta-prompt fields
+to push the inner loop toward discovering that discipline; do not hard-code the
+answer — make the inner *optimizer* better at finding it.
 
 ## Fitness
 
@@ -10,7 +26,7 @@ Composite formula in ``campaign.json::scoring`` — three proxies:
 
 - ``first_round_delta`` — inner-round-1 score minus inner origin (cheap signal)
 - ``after_N_rounds_delta`` — inner-round-N score minus origin (workhorse)
-- ``rounds_to_N`` — rounds to hit ``inner_tasks.json::target_score``, capped at ``max_inner_rounds``
+- ``rounds_to_N`` — rounds to hit ``inner_tasks.json::target_score`` (0.60), capped at ``max_inner_rounds``
 
 Better = higher delta after N AND/OR fewer rounds to target.
 
@@ -30,16 +46,18 @@ Better = higher delta after N AND/OR fewer rounds to target.
   - bool / categorical slot → doubles state space
   - free-prose slot (``instruction``, ``thinking_style``, ...) →
     explodes it → more signal AND more noise per round
-- TermNorm-side analogy: structured-output schema slots tend to be both
-  highest-leverage AND easiest-to-break (cf. ``entity_profile`` JSON
-  schema there). Expect similar shape on this surface
+- The ``answer_format`` field is highest-leverage AND easiest-to-break: the
+  inner scorer reads the last ``**TRUE**`` / ``**FALSE**`` / ``**Uncertain**``
+  bold span, so a mutation that drops or garbles that contract makes the inner
+  cycle score zero. Expect the same shape as a structured-output schema slot.
 - Corollary: L2 / L3 shouldn't read early variance on a high-dim slot
   as "axis unstable, avoid" — that's the slot doing what high-dim
   slots do
 
 ## Proxy realism
 
-GSM8K-small (``n_samples_per_inner_round: 10``, ``max_inner_rounds: 3``)
-keeps each outer "sample" at order-of-minutes rather than -hours. Trade-off
-is signal quality — bump sample count before publication runs. See
-``docs/specs/m12-multi-connector.md`` § Track 1.5 (Cost realism).
+The committed inner config (``inner_tasks.json``: ``n_samples_per_inner_round:
+8``, ``max_inner_rounds: 2``, two seeds) keeps each outer "sample" at
+order-of-minutes. Trade-off is signal quality — bump sample count + rounds before
+publication runs. Cost shape + the finish-line plan:
+``docs/specs/l4-outer-loop.md`` § Finish line.

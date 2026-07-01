@@ -2,13 +2,14 @@
   "campaign_config": {
     "dataset_name": "promptpotter-self",
     "scoring": "0.4 * first_round_delta + 0.4 * after_N_rounds_delta + 0.2 * (1.0 / max(rounds_to_N, 1))",
-    "sp_budget_ttest": 4,
+    "sp_budget_ttest": 2,
     "exclude_nodes": [],
     "pipeline_overrides": {},
     "optimization": {
+      "optimizer_set": "meta",
       "l1_patience": 2,
-      "max_rounds": 5,
-      "n_variants": 3,
+      "max_rounds": 1,
+      "n_variants": 2,
       "improvement_threshold": 0.02,
       "degradation_threshold": 0.4,
       "l2_patience": 2,

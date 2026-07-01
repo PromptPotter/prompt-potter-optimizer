@@ -339,6 +339,20 @@ async def run_optimization(
     # runner can't know a child will recurse) + re-entrant (each level publishes
     # its own); a no-op until the cycle_id is set.
     publish_inner_spawn_context(session)
+    # Select this cycle's optimizer meta-prompt set (L4: outer = `meta`, inner =
+    # default). Bound through the same per-node override channel the inner runner
+    # uses — task-isolated, so an outer (meta) binding and the inner (mutation)
+    # bindings of the cycles it spawns never collide. Empty set → no-op (every
+    # normal cycle), and must NOT clear an inner runner's already-bound mutations.
+    if campaign_config.optimization.optimizer_set:
+        from promptpotter.application.optimization.dispatch.llm_call import (
+            load_optimizer_set_overrides,
+            set_optimizer_prompt_overrides,
+        )
+
+        set_optimizer_prompt_overrides(
+            load_optimizer_set_overrides(campaign_config.optimization.optimizer_set)
+        )
     prep = await _prepare_run(
         dataset,
         campaign_config,
