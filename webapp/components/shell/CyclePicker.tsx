@@ -4,7 +4,14 @@ import { useWorkspace } from "@/lib/workspace";
 import { useAuth } from "@/lib/auth-context";
 import { useCycleStream } from "@/lib/poll";
 import type { CycleListEntry } from "@/lib/api";
-import { rootCycleId, sessionIndexOf, campaignOriginHash, unitKey, UNIT_SEP } from "@/lib/ids";
+import {
+  rootCycleId,
+  sessionIndexOf,
+  campaignOriginHash,
+  pathLeaf,
+  unitKey,
+  UNIT_SEP,
+} from "@/lib/ids";
 import { unitDisplayName } from "@/lib/names";
 import { runPhaseLabel } from "@/lib/run-phase";
 import { fmtPct0 } from "@/lib/format";
@@ -60,12 +67,16 @@ export const CyclePicker = memo(function CyclePicker({
     following,
     selectCycle,
     followActive,
-    innerFocus,
-    clearInner,
+    viewedPath,
+    backToOuter,
   } = useWorkspace();
   const { status } = useAuth();
 
   const standalone = variant === "standalone";
+  // Depth > 1 ⇒ viewing an inner descendant (an L4 inner loop). The picker's
+  // select still binds to the ROOT hop (campaignId/cycleId); the breadcrumb
+  // shows the leaf.
+  const innerLeaf = viewedPath && viewedPath.length > 1 ? pathLeaf(viewedPath) : null;
 
   // Group + sort lives in a useMemo keyed on `cycles` so the O(N log N) work
   // only fires when the workspace poll actually mutates the list.
@@ -152,7 +163,7 @@ export const CyclePicker = memo(function CyclePicker({
           );
         })}
       </select>
-      {!following && !innerFocus && (
+      {!following && !innerLeaf && (
         <button
           type="button"
           className="follow-active-btn"
@@ -162,18 +173,18 @@ export const CyclePicker = memo(function CyclePicker({
           ↪ Follow active
         </button>
       )}
-      {innerFocus && (
+      {innerLeaf && (
         <span className="inner-breadcrumb">
           <span className="inner-breadcrumb-sep" aria-hidden="true">
             ⤷
           </span>
-          <span className="inner-breadcrumb-label" title={innerFocus.innerCampaignId}>
-            inner: {innerFocus.innerCampaignId}
+          <span className="inner-breadcrumb-label" title={innerLeaf.campaignId}>
+            inner: {innerLeaf.campaignId}
           </span>
           <button
             type="button"
             className="follow-active-btn"
-            onClick={clearInner}
+            onClick={backToOuter}
             title="Viewing an inner loop's dashboard. Click to return to the outer cycle."
           >
             ↑ Back to outer

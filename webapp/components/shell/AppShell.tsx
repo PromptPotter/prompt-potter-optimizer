@@ -54,13 +54,13 @@ export function AppShell() {
   // `campaignId` + `cycleId` are owned by WorkspaceProvider (the single
   // workspace-identity source of truth) — this only forwards them into the
   // dashboard's per-cycle data stream.
-  const { campaignId, cycleId, innerFocus } = useWorkspace();
-  // The outer `(campaignId, cycleId)` is the viewed unit for the chat pane +
-  // selection; only the dashboard stream re-roots when an inner loop is focused
-  // (see CycleStreamProvider's `inner` prop). Chat/dataset panels keep the outer
-  // ids, so the conversation stays on the outer thread.
+  const { viewedPath } = useWorkspace();
+  // The dashboard stream re-roots to the viewed path's LEAF hop (an inner loop
+  // when descended). Chat/dataset panels bind to the ROOT hop instead (the
+  // `campaignId`/`cycleId` exports), so the conversation stays on the outer
+  // thread while the dashboard follows an inner cycle.
   return (
-    <CycleStreamProvider campaignId={campaignId} cycleId={cycleId} inner={innerFocus}>
+    <CycleStreamProvider path={viewedPath}>
       <AppShellInner />
     </CycleStreamProvider>
   );
@@ -252,12 +252,14 @@ function AppShellInner() {
       <Sidebar
         onSelectCycle={(cmp, cyc) => {
           selectCycle(cmp, cyc);
-          // A check-in has no dashboard yet (it hasn't run) — open it on the chat
-          // tab, its authoring home; a started campaign opens on the dashboard.
+          // The tab is the operator's axis — selecting a unit must NOT hijack it
+          // (picking a campaign while reading the Chat stays on Chat). The one
+          // exception is a check-in: it has no dashboard.json, so Dashboard/Verify
+          // would dead-end — send it to Chat, its authoring home.
           const checkin = cycles.some(
             (c) => c.campaign_id === cmp && c.cycle_id === cyc && c.run_phase === "checkin",
           );
-          setTab(checkin ? "chat" : "dashboard");
+          if (checkin) setTab("chat");
         }}
         onNewCycle={() => {
           // Two entry points, picked by the view in front of the operator. On the

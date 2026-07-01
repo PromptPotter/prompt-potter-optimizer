@@ -1,6 +1,7 @@
 // Read endpoints — thin GET wrappers over the FastAPI surface.
 
 import { API, jget, jgetConditional, type Conditional } from "./client";
+import { encodeDescend, pathRoot, type CyclePath } from "../ids";
 import type {
   ActiveSessionResponse,
   CampaignLineageResponse,
@@ -311,36 +312,34 @@ export function fetchMeasurementSeries(
   );
 }
 
-// Conditional variant for the 2 s poll. Pass the prior response's
-// `Last-Modified` header as `ifModifiedSince`; on unchanged mtime the
-// server returns 304 and the poll loop short-circuits before parsing /
-// re-rendering. The fresh-campaign warming_up payload arrives here as a
-// 200 with `{warming_up: true, ...}` (the route never 404s).
-export function fetchDashboardConditional(
-  campaignId: string,
-  cycleId: string,
+// Conditional dashboard fetch for the 2 s poll, addressed by a CYCLE PATH.
+// The path's ROOT hop is the top-level cycle; deeper hops (an L4 inner loop, or
+// L5+) ride the `?descend=` query, which the server walks into each hop's
+// `.inner/<previous cycle id>` sandbox. At depth 1 the URL is byte-identical to
+// a plain per-cycle read — so `If-Modified-Since`/304 behavior is unchanged.
+// Pass the prior response's `Last-Modified` as `ifModifiedSince`; the
+// fresh-campaign warming_up payload arrives as a 200 `{warming_up: true, ...}`.
+export function fetchDashboardByPath(
+  path: CyclePath,
   ifModifiedSince?: string | null,
   signal?: AbortSignal,
 ): Promise<Conditional<Record<string, unknown>>> {
+  const root = pathRoot(path);
+  const descend = encodeDescend(path);
+  const q = descend ? `?descend=${encodeURIComponent(descend)}` : "";
   return jgetConditional<Record<string, unknown>>(
-    `${API}/campaigns/${encodeURIComponent(campaignId)}` +
-      `/cycles/${encodeURIComponent(cycleId)}/dashboard`,
+    `${API}/campaigns/${encodeURIComponent(root.campaignId)}` +
+      `/cycles/${encodeURIComponent(root.cycleId)}/dashboard${q}`,
     ifModifiedSince,
     signal,
   );
 }
 
-// L4 inner-cycle reads. When an outer `promptpotter-self` cycle optimizes its
-// own meta-prompts, each candidate runs as a real inner campaign under a flat
-// off-registry sandbox. These two reads bridge that sandbox into the read API,
-// keyed on the VIEWED outer `(campaignId, cycleId)`:
-//  - `fetchInnerCycles` lists the inner campaigns (same picker shape as
-//    `/cycles`); its `active_*` carry the inner sandbox's live pointer. A non-L4
-//    outer cycle returns an empty `cycles` list (never 404) — the signal to show
-//    no expand affordance.
-//  - `fetchInnerDashboardConditional` serves one inner cycle's `dashboard.json`
-//    with the same 304 / warming semantics as the outer dashboard poll, so the
-//    whole dashboard tree re-roots to an inner loop with no per-chart change.
+// Lists the inner campaigns an L4 `promptpotter-self` outer cycle spawned (each
+// candidate runs as a real inner campaign under a flat off-registry sandbox).
+// Same picker shape as `/cycles`; its `active_*` carry the inner sandbox's live
+// pointer. A non-L4 outer cycle returns an empty `cycles` list (never 404) — the
+// signal to show no expand affordance. Keyed on the VIEWED outer cycle.
 export function fetchInnerCycles(
   outerCampaignId: string,
   outerCycleId: string,
@@ -349,24 +348,6 @@ export function fetchInnerCycles(
   return jget<CyclesResponse>(
     `${API}/campaigns/${encodeURIComponent(outerCampaignId)}` +
       `/cycles/${encodeURIComponent(outerCycleId)}/inner-cycles`,
-    signal,
-  );
-}
-
-export function fetchInnerDashboardConditional(
-  outerCampaignId: string,
-  outerCycleId: string,
-  innerCampaignId: string,
-  innerCycleId: string,
-  ifModifiedSince?: string | null,
-  signal?: AbortSignal,
-): Promise<Conditional<Record<string, unknown>>> {
-  return jgetConditional<Record<string, unknown>>(
-    `${API}/campaigns/${encodeURIComponent(outerCampaignId)}` +
-      `/cycles/${encodeURIComponent(outerCycleId)}` +
-      `/inner/${encodeURIComponent(innerCampaignId)}` +
-      `/cycles/${encodeURIComponent(innerCycleId)}/dashboard`,
-    ifModifiedSince,
     signal,
   );
 }

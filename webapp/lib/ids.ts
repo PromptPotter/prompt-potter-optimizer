@@ -46,3 +46,72 @@ export const UNIT_SEP = "::";
 export function unitKey(campaignId: string, cycleId: string): string {
   return `${campaignId}${UNIT_SEP}${cycleId}`;
 }
+
+// A cycle PATH — the single address for any cycle the webapp can view, inner or
+// outer. An inner cycle (an L4 `promptpotter-self` fan-out campaign) is a normal
+// cycle whose files live in a sandbox rooted at its parent, so it is addressed by
+// the chain of `(campaign, cycle)` hops from the top-level root down to the leaf:
+//   top-level  → [{c, cy}]
+//   inner      → [{outerC, outerCy}, {innerC, innerCy}]
+//   L5+        → deeper still (the engine's `.inner/<cycle_id>` sandbox is
+//                re-entrant — this mirrors it, "never a depth-1 assumption").
+// The dashboard reads the LEAF hop; chat/selection/dataset read the ROOT hop.
+export interface CycleHop {
+  campaignId: string;
+  cycleId: string;
+}
+// Non-empty by construction — every real address has at least the root hop.
+export type CyclePath = CycleHop[];
+
+// Hops are joined by `HOP_SEP`; each hop's ids by `UNIT_SEP`. Neither separator
+// can occur inside an id (ids are `_SAFE_PATH_RE = ^[a-zA-Z0-9_.-]+$` on the
+// Python side, `validate_path_component`), so encode/decode round-trips exactly.
+const HOP_SEP = "~";
+const ID_RE = /^[a-zA-Z0-9_.-]+$/;
+
+export function encodeCyclePath(path: CyclePath): string {
+  return path.map((h) => unitKey(h.campaignId, h.cycleId)).join(HOP_SEP);
+}
+
+// Parse an encoded path back to hops, validating every component; null on any
+// malformed input so callers fall back to a safe default rather than crash.
+export function decodeCyclePath(s: string): CyclePath | null {
+  if (!s) return null;
+  const hops: CyclePath = [];
+  for (const seg of s.split(HOP_SEP)) {
+    const i = seg.indexOf(UNIT_SEP);
+    if (i < 0) return null;
+    const campaignId = seg.slice(0, i);
+    const cycleId = seg.slice(i + UNIT_SEP.length);
+    if (!ID_RE.test(campaignId) || !ID_RE.test(cycleId)) return null;
+    hops.push({ campaignId, cycleId });
+  }
+  return hops.length ? hops : null;
+}
+
+// The root hop — what chat, selection, dataset, and files bind to (the top-level
+// cycle that owns the operator conversation).
+export function pathRoot(path: CyclePath): CycleHop {
+  return path[0];
+}
+
+// The leaf hop — what the dashboard stream re-roots to (the inner cycle when
+// drilled in, else the root).
+export function pathLeaf(path: CyclePath): CycleHop {
+  return path[path.length - 1];
+}
+
+// The hops BELOW the root, HOP_SEP-joined — the `?descend=` query the dashboard
+// route walks into `.inner/<previous cycle id>`. Empty string at depth 1, so a
+// top-level request stays byte-identical to a plain per-cycle fetch.
+export function encodeDescend(path: CyclePath): string {
+  return encodeCyclePath(path.slice(1));
+}
+
+export function samePath(a: CyclePath | null, b: CyclePath | null): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  return a.every(
+    (h, i) => h.campaignId === b[i].campaignId && h.cycleId === b[i].cycleId,
+  );
+}

@@ -13,8 +13,8 @@ import {
   type ReactNode,
 } from "react";
 import { liveCandidateId } from "@/lib/candidate-label";
-import { fetchDashboardConditional, fetchInnerDashboardConditional } from "./api";
-import type { InnerFocus } from "./workspace";
+import { fetchDashboardByPath } from "./api";
+import { encodeCyclePath, pathLeaf, type CyclePath } from "./ids";
 import { useAuthGate } from "./auth-context";
 import { resolveRunPhase } from "./run-phase";
 import { ageTextSeconds } from "./format";
@@ -405,15 +405,14 @@ export function useCycleStream(): CycleStreamState {
   return v;
 }
 
-// Internal hook backing the provider. Polls dashboard.json every
-// `intervalMs` and resets on cycleId change via the prev-prop pattern so the
-// prior cycle's snapshot can't linger during the new fetch. `campaignId` is
-// needed because a `cycle_id` is unique only within its campaign — every
-// per-cycle fetch carries both.
+// Internal hook backing the provider. Polls the viewed cycle's dashboard.json
+// every `intervalMs` and resets on any change to the viewed PATH via the
+// prev-prop pattern so the prior cycle's snapshot can't linger during the new
+// fetch. The path is the single address: its root hop is the top-level cycle,
+// deeper hops an L4 inner descendant. The stream re-roots to the LEAF hop's
+// dashboard (the file it fetches + the identity stamp it must match).
 function useCycleStreamSource(
-  campaignId: string | null,
-  cycleId: string | null,
-  inner: InnerFocus | null,
+  path: CyclePath | null,
   intervalMs: number,
 ): CycleStreamState {
   const [state, setState] = useState<CycleStreamState>(INITIAL_STATE);
@@ -435,29 +434,25 @@ function useCycleStreamSource(
   // switch so a stale value from the prior unit can't suppress the
   // first real fetch of the new unit.
   const lastModifiedRef = useRef<string | null>(null);
-  // The focused inner loop, or null for the outer cycle. Held in a ref so the
-  // tick reads it without re-subscribing; set in the same unit-key guard below.
-  const innerRef = useRef<InnerFocus | null>(null);
+  // The viewed path, held in a ref so the tick reads it without re-subscribing;
+  // set in the same unit-key guard below.
+  const pathRef = useRef<CyclePath | null>(null);
 
-  // Change-detect on the COMPOSITE unit identity (campaign + cycle). A
-  // cycle_id is unique only within its campaign — switching to another
-  // campaign whose root unit shares this cycle_id must still reset the
-  // stream, or the prior campaign's dashboard lingers forever. An inner focus
-  // keys on the INNER ids (the dashboard the stream will fetch + the stamp it
-  // must match), so outer→inner and inner→inner switches hard-reset too.
+  // Change-detect on the whole viewed PATH. A cycle_id is unique only within
+  // its campaign, and an inner descendant only within its parent's sandbox, so
+  // the full encoded path IS the identity — any hop change (outer→outer,
+  // outer→inner, inner→inner) hard-resets the stream, or a prior cycle's
+  // dashboard lingers forever.
   const unitKeyRef = useRef<string | null>(null);
-  const unitKey = inner
-    ? `${inner.innerCampaignId} ${inner.innerCycleId}`
-    : campaignId && cycleId
-      ? `${campaignId} ${cycleId}`
-      : null;
+  const unitKey = path ? encodeCyclePath(path) : null;
   if (unitKeyRef.current !== unitKey) {
     unitKeyRef.current = unitKey;
-    innerRef.current = inner;
-    // The EXPECTED stamp ids: the inner cycle's own ids when focused (its
-    // dashboard.json self-stamps them), else the outer unit.
-    cycleRef.current = inner ? inner.innerCycleId : cycleId;
-    campaignRef.current = inner ? inner.innerCampaignId : campaignId;
+    pathRef.current = path;
+    // The EXPECTED stamp ids: the LEAF hop's own ids (its dashboard.json
+    // self-stamps them — inner ids when descended, else the root).
+    const leaf = path ? pathLeaf(path) : null;
+    cycleRef.current = leaf?.cycleId ?? null;
+    campaignRef.current = leaf?.campaignId ?? null;
     stampMismatchRef.current = 0;
     lastModifiedRef.current = null;
     // Identity changed — hard-reset every cycle-scoped field so the prior
@@ -470,7 +465,7 @@ function useCycleStreamSource(
   // No active campaign — the static prompt. The poll itself is gated off
   // via `enabled` on the usePoll call below.
   useEffect(() => {
-    if (!cycleId || !campaignId) {
+    if (!path) {
       setState({
         ...INITIAL_STATE,
         statusText: "No active campaign",
@@ -478,7 +473,7 @@ function useCycleStreamSource(
           "Start a campaign: `python -m promptpotter new <dataset>` in another terminal.",
       });
     }
-  }, [campaignId, cycleId]);
+  }, [path]);
 
   // The poll tick. `usePoll` owns the interval, the hidden-tab pause, and
   // the per-tick AbortController; this fetches dashboard.json (via
@@ -488,24 +483,14 @@ function useCycleStreamSource(
   const tick = async (signal: AbortSignal) => {
     const id = cycleRef.current;
     const cmp = campaignRef.current;
-    const focus = innerRef.current;
-    if (!id || !cmp) return;
+    const p = pathRef.current;
+    if (!id || !cmp || !p) return;
     try {
-      // dashboard.json is per-cycle. For an inner focus, resolve it against the
-      // outer cycle's `.inner/` sandbox (the inner route carries both outer +
-      // inner ids); otherwise the ordinary per-cycle route. Either way `cmp`/`id`
-      // are the stamp ids the payload must self-report (inner ids when focused),
-      // so the identity guard below is unchanged.
-      const resp = focus
-        ? await fetchInnerDashboardConditional(
-            focus.outerCampaignId,
-            focus.outerCycleId,
-            focus.innerCampaignId,
-            focus.innerCycleId,
-            lastModifiedRef.current,
-            signal,
-          )
-        : await fetchDashboardConditional(cmp, id, lastModifiedRef.current, signal);
+      // One fetch for any depth: `fetchDashboardByPath` hits the root cycle's
+      // dashboard route, riding `?descend=` for inner descendants. `cmp`/`id` are
+      // the LEAF stamp ids the payload must self-report (inner ids when
+      // descended), so the identity guard below is depth-agnostic.
+      const resp = await fetchDashboardByPath(p, lastModifiedRef.current, signal);
       if (signal.aborted) return;
       if (resp.lastModified) lastModifiedRef.current = resp.lastModified;
 
@@ -631,7 +616,7 @@ function useCycleStreamSource(
   const effectiveInterval = state.status === "offline" ? RECONNECT_INTERVAL_MS : intervalMs;
   usePoll(tick, {
     intervalMs: effectiveInterval,
-    enabled: (!!inner || (!!campaignId && !!cycleId)) && authed,
+    enabled: !!path && authed,
     revalidateOn: revalCount,
   });
 
@@ -639,20 +624,17 @@ function useCycleStreamSource(
 }
 
 export function CycleStreamProvider({
-  campaignId,
-  cycleId,
-  inner = null,
+  path,
   intervalMs = 2000,
   children,
 }: {
-  campaignId: string | null;
-  cycleId: string | null;
-  // When set, the stream re-roots to this inner loop's dashboard (L4 follow).
-  inner?: InnerFocus | null;
+  // The single viewed-cycle address (root → leaf hops). The stream re-roots to
+  // the leaf hop's dashboard; an inner descendant is just a deeper path.
+  path: CyclePath | null;
   intervalMs?: number;
   children: ReactNode;
 }) {
-  const state = useCycleStreamSource(campaignId, cycleId, inner, intervalMs);
+  const state = useCycleStreamSource(path, intervalMs);
   return (
     <CycleStreamContext.Provider value={state}>{children}</CycleStreamContext.Provider>
   );

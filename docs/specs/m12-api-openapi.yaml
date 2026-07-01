@@ -71,11 +71,12 @@ tags:
       the eventual Start IS a command (`/commands/start-checkin`) declared above.
   - name: cycles
     description: |
-      Read-only per-cycle reads. NOTE: most read GETs (`/cycles`, the per-cycle
-      `/dashboard`) predate this file and are not yet declared here — this file
-      began as the closed *command* set. The two L4 inner-cycle reads below are
-      declared per the "declare new GETs before the handler" rule; the pre-existing
-      read drift is tracked separately, not resolved here.
+      Read-only per-cycle reads. NOTE: some read GETs (e.g. `/cycles`) predate
+      this file and are not yet declared here — this file began as the closed
+      *command* set. The per-cycle `/dashboard` (with its `descend` inner-descent
+      query) and `/inner-cycles` reads below are declared per the "declare new
+      GETs before the handler" rule; the remaining pre-existing read drift is
+      tracked separately, not resolved here.
 
 # v0 closed inbound command set — DRAFT for operator redline.
 #
@@ -1094,6 +1095,64 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
 
+  /campaigns/{campaignId}/cycles/{cycleId}/dashboard:
+    get:
+      operationId: getCycleDashboard
+      summary: Live telemetry for a viewed cycle — `dashboard.json` (root or any inner descendant).
+      description: |
+        The single dashboard-serving route. `dashboard.json` is per-cycle: every
+        cycle owns its own live file, self-stamped with its own `campaign_id` /
+        `cycle_id`. The path ids address the top-level (root) cycle; the optional
+        `descend` query walks into the L4 `.inner/<previous cycle id>` sandbox one
+        `campaign::cycle` hop at a time, so ONE route reads a top-level cycle, an
+        inner cycle, or an L5+ descendant — the recursion-native address that
+        retired the separate inner-dashboard route. Absent/empty `descend` is a
+        plain per-cycle read (byte-identical to the pre-existing route). Same 304 /
+        warming-fallback / atomic-read semantics at any depth (one server-side
+        implementation, `serve_dashboard_response`). The leaf `dashboard.json`
+        self-stamps its own ids, so the webapp's payload-identity guard is unchanged.
+      tags: [cycles]
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The top-level (root) campaign id.
+          schema: { type: string, minLength: 8, maxLength: 128 }
+        - name: cycleId
+          in: path
+          required: true
+          description: The top-level (root) cycle id — the key of any `.inner/` sandbox below it.
+          schema: { type: string, minLength: 8, maxLength: 128 }
+        - name: descend
+          in: query
+          required: false
+          description: |
+            `~`-joined `campaign::cycle` hops BELOW the root, each re-rooting into
+            `.inner/<previous cycle id>`. Absent/empty = the top-level cycle. Every
+            component is validated against the id charset before any filesystem touch.
+          schema: { type: string }
+        - name: If-Modified-Since
+          in: header
+          required: false
+          description: Standard conditional-GET validator; the route 304s on an unadvanced mtime.
+          schema: { type: string }
+      responses:
+        '200':
+          description: The leaf cycle's `dashboard.json` (or a `warming_up` placeholder).
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '304':
+          description: The leaf `dashboard.json` mtime has not advanced since `If-Modified-Since`.
+        '404':
+          description: A `descend` hop names an inner sandbox that does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
   /campaigns/{campaignId}/cycles/{cycleId}/inner-cycles:
     get:
       operationId: getInnerCycles
@@ -1129,61 +1188,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CyclesResponse'
-
-  /campaigns/{campaignId}/cycles/{cycleId}/inner/{innerCampaignId}/cycles/{innerCycleId}/dashboard:
-    get:
-      operationId: getInnerDashboard
-      summary: Live telemetry for one inner cycle of an L4 outer cycle.
-      description: |
-        The inner loop's own `dashboard.json`, resolved against the outer cycle's
-        `.inner/<outer_cycle_id>` sandbox. Same 304 / warming-fallback / atomic-read
-        semantics as the outer per-cycle dashboard route (one shared server-side
-        implementation). The inner `dashboard.json` self-stamps its own inner
-        `campaign_id` / `cycle_id`, so the webapp's payload-identity guard passes
-        unchanged. 404 when the outer cycle has no inner sandbox.
-      tags: [cycles]
-      parameters:
-        - name: campaignId
-          in: path
-          required: true
-          description: The outer campaign id (carried for route symmetry).
-          schema: { type: string, minLength: 8, maxLength: 128 }
-        - name: cycleId
-          in: path
-          required: true
-          description: The outer cycle id — the key of the `.inner/` sandbox.
-          schema: { type: string, minLength: 8, maxLength: 128 }
-        - name: innerCampaignId
-          in: path
-          required: true
-          description: The inner campaign id within the sandbox.
-          schema: { type: string, minLength: 8, maxLength: 128 }
-        - name: innerCycleId
-          in: path
-          required: true
-          description: The inner cycle id within the inner campaign.
-          schema: { type: string, minLength: 8, maxLength: 128 }
-        - name: If-Modified-Since
-          in: header
-          required: false
-          description: Standard conditional-GET validator; the route 304s on an unadvanced mtime.
-          schema: { type: string }
-      responses:
-        '200':
-          description: The inner cycle's `dashboard.json` (or a `warming_up` placeholder).
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: true
-        '304':
-          description: The inner `dashboard.json` mtime has not advanced since `If-Modified-Since`.
-        '404':
-          description: The outer cycle has no inner sandbox (non-L4).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
 
   /commands/replace-dataset:
     post:

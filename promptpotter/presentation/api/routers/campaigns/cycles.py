@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import Request, Response
+from fastapi import Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -29,7 +29,7 @@ from promptpotter.presentation.api.routers.campaigns._conditional import (
     http_date,
 )
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
-from promptpotter.shared.errors import NotFoundError
+from promptpotter.shared.errors import BadRequestError, NotFoundError
 
 
 class CycleSummary(BaseModel):
@@ -191,8 +191,8 @@ def serve_dashboard_response(
     # ``run_phase`` rides dashboard.json itself (declared by the runner, projected
     # by LiveDashboardView) — the webapp reads it straight off the 2 s poll, so a
     # paused run reads "paused" with no separate /runstate round-trip. The spend
-    # cap rides ``dashboard.json::spend.budget_usd`` already; the deleted
-    # /runstate endpoint's ``spend_cap_usd`` was unused.
+    # cap rides ``dashboard.json::run_limits.spend_budget_usd`` (the single
+    # authoritative budget source); the deleted /runstate ``spend_cap_usd`` was unused.
     body = read_json_tolerant(path) if present else None
     if body is None:
         # Missing OR corrupt (half-written / truncated): degrade to the warming
@@ -206,13 +206,21 @@ def serve_dashboard_response(
 
 @campaigns_router.get("/campaigns/{campaign_id}/cycles/{cycle_id}/dashboard")
 def get_cycle_dashboard(
-    request: Request, store: StoreDep, campaign_id: str, cycle_id: str
+    request: Request,
+    store: StoreDep,
+    campaign_id: str,
+    cycle_id: str,
+    descend: str | None = Query(None),
 ) -> Response:
-    """Live telemetry for the viewed cycle — ``cycles/{cycle_id}/dashboard.json``.
+    """Live telemetry for the viewed cycle — its own ``dashboard.json``.
 
-    ``dashboard.json`` is per-cycle: every cycle (root, fork, sweep, diag)
-    owns its own live file, stamped with its own ``cycle_id``. The route
-    serves the file for the cycle passed in — no session-root collapse.
+    ``dashboard.json`` is per-cycle: every cycle (root, fork, sweep, diag, or an
+    L4 inner descendant) owns its own live file, stamped with its own
+    ``cycle_id``. The path ids address the top-level (root) cycle; the optional
+    ``descend`` query walks into the ``.inner/<previous cycle id>`` sandbox one
+    ``campaign::cycle`` hop at a time, so ONE route serves a top-level cycle, an
+    inner cycle, or an L5+ descendant (:func:`resolve_cycle_path`). Absent/empty
+    ``descend`` is a plain per-cycle read — no session-root collapse.
 
     Honors ``If-Modified-Since`` and returns ``304 Not Modified`` when the
     on-disk mtime hasn't advanced — keeps the 2 s webapp poll cheap during
@@ -221,7 +229,10 @@ def get_cycle_dashboard(
     ``warming_up`` payload at 200 instead of 404 so the webapp can render a
     "campaign initialising" placeholder rather than appear offline.
     """
-    return serve_dashboard_response(request, store.base_dir, campaign_id, cycle_id)
+    stores, leaf_cmp, leaf_cyc = resolve_cycle_path(
+        store, [(campaign_id, cycle_id), *_decode_descend(descend)]
+    )
+    return serve_dashboard_response(request, stores.base_dir, leaf_cmp, leaf_cyc)
 
 
 def _inner_sandbox_store(store: Stores, outer_cycle_id: str) -> Stores | None:
@@ -241,6 +252,53 @@ def _inner_sandbox_store(store: Stores, outer_cycle_id: str) -> Stores | None:
     if not (sandbox_root / store.tenant_id).is_dir():
         return None
     return build_stores(store.identity, projects_root=sandbox_root)
+
+
+def _decode_descend(descend: str | None) -> list[tuple[str, str]]:
+    """Parse the ``?descend=`` tail into ``(campaign, cycle)`` hops below the root.
+
+    Mirrors the webapp's ``encodeDescend`` (``webapp/lib/ids.ts``): ``~``-joined
+    ``campaign::cycle`` hops, empty/absent → no descent. Component-char validation
+    is :func:`resolve_cycle_path`'s job; here we only reject a structurally
+    malformed hop (missing ``::``) as a 400 rather than let it 500 downstream.
+    """
+    if not descend:
+        return []
+    hops: list[tuple[str, str]] = []
+    for seg in descend.split("~"):
+        cmp, sep, cyc = seg.partition("::")
+        if not sep or not cmp or not cyc:
+            raise BadRequestError(f"Malformed descend hop: {seg!r}")
+        hops.append((cmp, cyc))
+    return hops
+
+
+def resolve_cycle_path(store: Stores, path: list[tuple[str, str]]) -> tuple[Stores, str, str]:
+    """Resolve a cycle PATH (root → leaf hops) to ``(Stores, campaign, cycle)``.
+
+    The single walk that makes an inner cycle addressable exactly like a
+    top-level one: hop 0 is a cycle in the caller's own tree; each later hop lives
+    in the previous hop's ``.inner/<previous cycle id>`` sandbox, so
+    :func:`_inner_sandbox_store` IS the recursive step. Re-entrant by construction
+    (L5+ nests the same way). Every component is char-validated before any
+    filesystem touch (400 on bad chars); a missing sandbox is a 404.
+    """
+    if not path:
+        raise BadRequestError("empty cycle path")
+    cur = store
+    for i, (cmp, cyc) in enumerate(path):
+        try:
+            validate_path_component(cmp)
+            validate_path_component(cyc)
+        except ValueError as exc:
+            raise BadRequestError(str(exc)) from exc
+        if i == 0:
+            continue
+        nxt = _inner_sandbox_store(cur, path[i - 1][1])
+        if nxt is None:
+            raise NotFoundError(f"No inner sandbox for cycle '{path[i - 1][1]}'")
+        cur = nxt
+    return cur, path[-1][0], path[-1][1]
 
 
 @campaigns_router.get(
@@ -275,31 +333,3 @@ def get_inner_cycles(store: StoreDep, campaign_id: str, cycle_id: str) -> Cycles
         active_cycle_id=live_cid or None,
         cycles=[CycleListEntry(**e) for e in entries],
     )
-
-
-@campaigns_router.get(
-    "/campaigns/{campaign_id}/cycles/{cycle_id}"
-    "/inner/{inner_campaign_id}/cycles/{inner_cycle_id}/dashboard",
-    tags=["Cycles"],
-)
-def get_inner_dashboard(
-    request: Request,
-    store: StoreDep,
-    campaign_id: str,
-    cycle_id: str,
-    inner_campaign_id: str,
-    inner_cycle_id: str,
-) -> Response:
-    """Live telemetry for one inner cycle — the inner loop's own ``dashboard.json``.
-
-    Resolves against the outer cycle's inner sandbox and reuses
-    :func:`serve_dashboard_response`, so the inner dashboard carries the identical
-    304 / warming / atomic-read semantics as the outer route. The inner
-    ``dashboard.json`` self-stamps its own inner ``campaign_id`` / ``cycle_id``,
-    so the webapp's payload-identity guard passes unchanged. 404 when the outer
-    cycle has no inner sandbox.
-    """
-    inner = _inner_sandbox_store(store, cycle_id)
-    if inner is None:
-        raise NotFoundError(f"No inner sandbox for cycle '{cycle_id}'")
-    return serve_dashboard_response(request, inner.base_dir, inner_campaign_id, inner_cycle_id)

@@ -7,19 +7,20 @@
 // cadences are deliberate: the active pointer is staleness-critical (a CLI mint
 // must yank the viewed unit over promptly), the registry list is not.
 //
-// Workspace identity is four-level: dataset → campaign → unit, with the
-// operator's active pointer the lens into them. A `cycle_id` is unique
-// ONLY within its campaign — re-running `new` on one dataset yields many
-// campaigns whose root unit shares the same `cycle_id`. So a unit's
-// identity is the PAIR `(campaignId, cycleId)`; selection, lookup, and
-// every per-cycle fetch carry both. Resolving by `cycle_id` alone picks
-// an arbitrary campaign and breaks navigation.
+// "What am I looking at?" has ONE answer: `viewedPath`, a `CyclePath` (see
+// `lib/ids.ts`) — the chain of `(campaign, cycle)` hops from the top-level root
+// down to the leaf. A top-level cycle is a 1-hop path; an L4 inner loop is a
+// 2-hop path (outer → inner); L5+ nests deeper. The DASHBOARD stream re-roots to
+// the LEAF hop; chat, selection, dataset, and files bind to the ROOT hop (the
+// `campaignId`/`cycleId` exports) — so the conversation stays on the outer thread
+// while the dashboard follows an inner loop, with no separate state axis.
 //
-// `following` is the explicit follow-vs-pin state. While following,
-// `(campaignId, cycleId)` track the server's active pointer in lockstep.
-// Picking a unit pins it (`following=false`); `followActive()` resumes.
-// The URL `?campaign=&cycle=` params are written ONLY while pinned and
-// stripped while following.
+// `following` is the explicit follow-vs-pin state. While following, the viewed
+// path tracks the server's active pointer (always a top-level 1-hop cycle —
+// inner runs are sandboxed and never rewrite the global pointer). Picking a unit
+// pins an explicit `pinnedPath` (`following=false`); `followActive()` resumes.
+// The URL `?path=` param is written ONLY while pinned and stripped while
+// following.
 
 import {
   createContext,
@@ -38,6 +39,12 @@ import {
   type CycleListEntry,
   type LifecycleFilter,
 } from "./api";
+import {
+  decodeCyclePath,
+  encodeCyclePath,
+  pathRoot,
+  type CyclePath,
+} from "./ids";
 import { usePoll } from "./hooks/usePoll";
 import { bumpRevalidation, useRevalidation } from "./revalidate";
 import { useAuthGate } from "./auth-context";
@@ -46,13 +53,17 @@ export interface WorkspaceState {
   sessionId: string | null;
   activeCycleId: string | null; // server pointer (active_session.json)
   activeCampaignId: string | null; // campaign of the server pointer
-  cycleId: string | null; // the unit being VIEWED
-  // The campaign + dataset the viewed unit belongs to. A unit is the pair
-  // `(campaignId, cycleId)` — campaignId is authoritative, never derived
-  // from a `cycle_id`-only lookup. Null until the pointer / pin resolves.
+  // The viewed cycle address — the single "what am I looking at". Null until the
+  // pointer / pin resolves. Its root hop is the top-level cycle; a deeper leaf is
+  // an L4 inner descendant.
+  viewedPath: CyclePath | null;
+  cycleId: string | null; // the ROOT hop's cycle (chat/selection/dataset anchor)
+  // The campaign the root hop belongs to — authoritative, never derived from a
+  // bare `cycle_id` (a cycle_id is unique only within its campaign). Null until
+  // the pointer / pin resolves.
   campaignId: string | null;
   datasetName: string | null;
-  following: boolean; // (campaignId, cycleId) track the active pointer
+  following: boolean; // the viewed path tracks the active pointer
   cycles: CycleListEntry[];
   cyclesLoaded: boolean; // first /cycles poll has resolved (success or fail)
   // True once the campaign list on hand reflects the CURRENT lifecycleFilter.
@@ -71,31 +82,16 @@ export interface WorkspaceState {
   // Persisted nowhere; resets per visit (matches dataset filter behaviour).
   lifecycleFilter: LifecycleFilter;
   setLifecycleFilter: (f: LifecycleFilter) => void;
-  // User pin → following=false. Both ids required: a cycle_id alone is
-  // ambiguous across campaigns.
+  // Pin an explicit cycle address → following=false. The general verb; a hop
+  // can be top-level or an inner descendant.
+  selectCyclePath: (path: CyclePath) => void;
+  // Convenience: pin a top-level (1-hop) cycle. Both ids required — a cycle_id
+  // alone is ambiguous across campaigns.
   selectCycle: (campaignId: string, cycleId: string) => void;
+  // Drop back to the top-level (root) cycle from an inner descendant, keeping it
+  // pinned. No-op at depth 1.
+  backToOuter: () => void;
   followActive: () => void; // un-pin → snap back to the active pointer
-  // L4 inner-loop focus. When an operator drills into one inner campaign of a
-  // running `promptpotter-self` outer cycle, `innerFocus` names it; the DASHBOARD
-  // stream re-roots to that inner cycle's telemetry while the outer stays pinned
-  // as the viewed unit (so the chat pane + selection remain on the outer thread —
-  // inner loops carry run-telemetry, not an operator conversation). The single
-  // re-rootable "focused unit"; null = the dashboard shows the outer cycle.
-  innerFocus: InnerFocus | null;
-  selectInner: (focus: InnerFocus) => void;
-  clearInner: () => void; // back to the outer cycle (keeps the outer pinned)
-}
-
-interface UnitPin {
-  campaignId: string;
-  cycleId: string;
-}
-
-export interface InnerFocus {
-  outerCampaignId: string;
-  outerCycleId: string;
-  innerCampaignId: string;
-  innerCycleId: string;
 }
 
 const WorkspaceContext = createContext<WorkspaceState | null>(null);
@@ -112,30 +108,11 @@ export function useWorkspace(): WorkspaceState {
 // RECONNECT_INTERVAL_MS so both polls retry a downed server on the same 5 s beat.
 const RECONNECT_INTERVAL_MS = 5000;
 
-function urlPin(): UnitPin | null {
+// The `?path=` deep-link — one encoded CyclePath (see ids.ts). Malformed → null.
+function urlPath(): CyclePath | null {
   if (typeof window === "undefined") return null;
-  const p = new URLSearchParams(window.location.search);
-  const campaignId = p.get("campaign");
-  const cycleId = p.get("cycle");
-  return campaignId && cycleId ? { campaignId, cycleId } : null;
-}
-
-// The inner-loop deep link — `&inner_campaign=&inner_cycle=` alongside the outer
-// `?campaign=&cycle=` pin. Its outer ids come from the pin (an inner focus is
-// only valid against a pinned outer cycle).
-function urlInner(pin: UnitPin | null): InnerFocus | null {
-  if (!pin || typeof window === "undefined") return null;
-  const p = new URLSearchParams(window.location.search);
-  const innerCampaignId = p.get("inner_campaign");
-  const innerCycleId = p.get("inner_cycle");
-  return innerCampaignId && innerCycleId
-    ? {
-        outerCampaignId: pin.campaignId,
-        outerCycleId: pin.cycleId,
-        innerCampaignId,
-        innerCycleId,
-      }
-    : null;
+  const raw = new URLSearchParams(window.location.search).get("path");
+  return raw ? decodeCyclePath(raw) : null;
 }
 
 export function WorkspaceProvider({
@@ -151,16 +128,14 @@ export function WorkspaceProvider({
   pointerIntervalMs?: number;
   children: ReactNode;
 }) {
-  const [pinned, setPinned] = useState<UnitPin | null>(null);
+  // The explicit pin — the viewed path while not following (null while
+  // following). Both the top-level and inner-descendant selections live here as
+  // one address; there is no separate inner-focus axis.
+  const [pinnedPath, setPinnedPath] = useState<CyclePath | null>(null);
   const [following, setFollowing] = useState(true);
-  // L4 inner-loop focus (null = viewing the outer cycle). Cleared whenever the
-  // viewed OUTER unit changes (pick another cycle, follow the active pointer, or
-  // the pointer auto-snaps to a fresh CLI mint) — an inner focus is only
-  // meaningful against the outer cycle that spawned it.
-  const [innerFocus, setInnerFocus] = useState<InnerFocus | null>(null);
-  // The `?campaign=&cycle=` deep-link is read in a mount effect rather than
-  // a useState initializer so the static-export HTML and the first client
-  // render agree (no hydration mismatch).
+  // The `?path=` deep-link is read in a mount effect rather than a useState
+  // initializer so the static-export HTML and the first client render agree (no
+  // hydration mismatch).
   const [initialized, setInitialized] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [activeCycleId, setActiveCycleId] = useState<string | null>(null);
@@ -192,7 +167,7 @@ export function WorkspaceProvider({
   // callback without re-render churn.
   const prevActivePointerRef = useRef<string | null>(null);
 
-  // Mount: honour a `?campaign=&cycle=` deep-link as an explicit pin.
+  // Mount: honour a `?path=` deep-link as an explicit pin.
   // The synchronous setState here is load-bearing, not an oversight — the
   // deep-link is read in a mount effect (not a useState initializer) so
   // the static-export HTML and the first client render agree, then
@@ -200,12 +175,10 @@ export function WorkspaceProvider({
   // is the one place set-state-in-effect is deliberately waived.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    const deepLink = urlPin();
+    const deepLink = urlPath();
     if (deepLink) {
-      setPinned(deepLink);
+      setPinnedPath(deepLink);
       setFollowing(false);
-      const inner = urlInner(deepLink);
-      if (inner) setInnerFocus(inner);
     }
     setInitialized(true);
   }, []);
@@ -257,8 +230,7 @@ export function WorkspaceProvider({
         const prevPointer = prevActivePointerRef.current;
         if (prevPointer !== null && prevPointer !== nextPointer) {
           setFollowing(true);
-          setPinned(null);
-          setInnerFocus(null); // a fresh outer mint invalidates any inner focus
+          setPinnedPath(null); // a fresh outer mint invalidates any pin
         }
         prevActivePointerRef.current = nextPointer;
       }
@@ -311,13 +283,21 @@ export function WorkspaceProvider({
     revalidateOn: reval,
   });
 
-  // The viewed unit: the server pointer while following, else the pin.
-  // campaignId is authoritative on both sides — never inferred from a
-  // bare cycle_id.
-  const cycleId = following ? activeCycleId : (pinned?.cycleId ?? null);
-  const campaignId = following ? activeCampaignId : (pinned?.campaignId ?? null);
+  // The viewed path: the server pointer (a top-level 1-hop cycle) while
+  // following, else the explicit pin.
+  const viewedPath: CyclePath | null = following
+    ? activeCampaignId && activeCycleId
+      ? [{ campaignId: activeCampaignId, cycleId: activeCycleId }]
+      : null
+    : pinnedPath;
 
-  // Dataset of the viewed unit: the cycle-list row matched on BOTH ids.
+  // The root hop — what chat / selection / dataset / files bind to. campaignId
+  // is authoritative on both sides — never inferred from a bare cycle_id.
+  const rootHop = viewedPath ? pathRoot(viewedPath) : null;
+  const campaignId = rootHop?.campaignId ?? null;
+  const cycleId = rootHop?.cycleId ?? null;
+
+  // Dataset of the root hop: the cycle-list row matched on BOTH ids.
   const cycleEntry =
     cycleId && campaignId
       ? (cycles.find(
@@ -326,65 +306,40 @@ export function WorkspaceProvider({
       : null;
   const datasetName = cycleEntry?.dataset_name ?? null;
 
-  // URL contract: `?campaign=X&cycle=Y` present ⇔ pinned to that unit.
+  // URL contract: `?path=<encoded CyclePath>` present ⇔ pinned to that address.
   // Written only while pinned, stripped while following.
   useEffect(() => {
     if (!initialized || typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
-    const wantCampaign = following ? null : (pinned?.campaignId ?? null);
-    const wantCycle = following ? null : (pinned?.cycleId ?? null);
-    // Inner params ride only while an inner loop is focused (which implies pinned).
-    const wantInnerCampaign = innerFocus?.innerCampaignId ?? null;
-    const wantInnerCycle = innerFocus?.innerCycleId ?? null;
-    if (
-      params.get("campaign") === wantCampaign &&
-      params.get("cycle") === wantCycle &&
-      params.get("inner_campaign") === wantInnerCampaign &&
-      params.get("inner_cycle") === wantInnerCycle
-    ) {
-      return;
-    }
-    if (wantCampaign && wantCycle) {
-      params.set("campaign", wantCampaign);
-      params.set("cycle", wantCycle);
-    } else {
-      params.delete("campaign");
-      params.delete("cycle");
-    }
-    if (wantInnerCampaign && wantInnerCycle) {
-      params.set("inner_campaign", wantInnerCampaign);
-      params.set("inner_cycle", wantInnerCycle);
-    } else {
-      params.delete("inner_campaign");
-      params.delete("inner_cycle");
-    }
+    const want = following || !pinnedPath ? null : encodeCyclePath(pinnedPath);
+    if (params.get("path") === want) return;
+    if (want) params.set("path", want);
+    else params.delete("path");
     const qs = params.toString();
     window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
-  }, [initialized, following, pinned, innerFocus]);
+  }, [initialized, following, pinnedPath]);
 
-  const selectCycle = useCallback((cid: string, cyid: string) => {
+  const selectCyclePath = useCallback((path: CyclePath) => {
     setFollowing(false);
-    setPinned({ campaignId: cid, cycleId: cyid });
-    setInnerFocus(null);
+    setPinnedPath(path);
+  }, []);
+
+  const selectCycle = useCallback(
+    (cid: string, cyid: string) =>
+      selectCyclePath([{ campaignId: cid, cycleId: cyid }]),
+    [selectCyclePath],
+  );
+
+  // Drop back to the top-level cycle from an inner descendant, keeping it
+  // pinned. No-op at depth 1 (and while following — a follow view is always a
+  // 1-hop pointer, so there is nothing to pop).
+  const backToOuter = useCallback(() => {
+    setPinnedPath((prev) => (prev && prev.length > 1 ? [prev[0]] : prev));
   }, []);
 
   const followActive = useCallback(() => {
     setFollowing(true);
-    setPinned(null);
-    setInnerFocus(null);
-  }, []);
-
-  // Drill into one inner loop of a running L4 outer cycle: pin the outer as the
-  // viewed unit (chat + selection stay on it) and re-root the dashboard to the
-  // inner cycle. Picking an inner unit is an explicit pin, like selectCycle.
-  const selectInner = useCallback((focus: InnerFocus) => {
-    setFollowing(false);
-    setPinned({ campaignId: focus.outerCampaignId, cycleId: focus.outerCycleId });
-    setInnerFocus(focus);
-  }, []);
-
-  const clearInner = useCallback(() => {
-    setInnerFocus(null);
+    setPinnedPath(null);
   }, []);
 
   // Switching tabs re-queries `/campaigns?lifecycle=` — bump revalidation so the
@@ -398,6 +353,7 @@ export function WorkspaceProvider({
     sessionId,
     activeCycleId,
     activeCampaignId,
+    viewedPath,
     cycleId,
     campaignId,
     datasetName,
@@ -410,11 +366,10 @@ export function WorkspaceProvider({
     activeError,
     lifecycleFilter,
     setLifecycleFilter: selectLifecycle,
+    selectCyclePath,
     selectCycle,
+    backToOuter,
     followActive,
-    innerFocus,
-    selectInner,
-    clearInner,
   };
   return (
     <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>

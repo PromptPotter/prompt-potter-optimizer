@@ -2,12 +2,14 @@
 // The inner-loop fan-out of one L4 (`promptpotter-self`) outer cycle, rendered
 // as sidebar rows nested under the outer campaign. Self-fetches via
 // useInnerCycles (only mounted while the outer row's inner disclosure is open)
-// and reads the workspace's inner focus + `selectInner` directly, so the change
-// stays local to the sidebar. Selecting a row re-roots the DASHBOARD to that
-// inner cycle (the outer stays the viewed unit — chat pane unaffected).
+// and reads the workspace's `viewedPath` + `selectCyclePath` directly, so the
+// change stays local to the sidebar. Selecting a row pins the 2-hop path
+// [outer, inner]: the dashboard re-roots to that inner cycle while chat and
+// selection stay on the outer (root) thread.
 
 import { useInnerCycles } from "@/lib/hooks/useInnerCycles";
 import { useWorkspace } from "@/lib/workspace";
+import { pathLeaf } from "@/lib/ids";
 import { fmtPct0 } from "@/lib/format";
 import { runPhaseLabel } from "@/lib/run-phase";
 import { cx } from "@/lib/cx";
@@ -19,12 +21,16 @@ export function InnerCampaignRows({
   outerCampaignId: string;
   outerCycleId: string;
 }) {
-  const { innerFocus, selectInner } = useWorkspace();
+  const { viewedPath, selectCyclePath } = useWorkspace();
   const { inner, activeInnerCampaignId, activeInnerCycleId, loaded } = useInnerCycles(
     outerCampaignId,
     outerCycleId,
     true,
   );
+  // The viewed leaf when descended into an inner loop (depth > 1); marks the
+  // selected row. Depth 1 = viewing the outer, no inner row selected.
+  const viewedLeaf =
+    viewedPath && viewedPath.length > 1 ? pathLeaf(viewedPath) : null;
 
   // Emits <li> rows only — the caller owns the wrapping <ul> so the disclosure
   // nests cleanly under the outer campaign row.
@@ -41,8 +47,8 @@ export function InnerCampaignRows({
         const isLive =
           c.campaign_id === activeInnerCampaignId && c.cycle_id === activeInnerCycleId;
         const selected =
-          innerFocus?.innerCampaignId === c.campaign_id &&
-          innerFocus?.innerCycleId === c.cycle_id;
+          viewedLeaf?.campaignId === c.campaign_id &&
+          viewedLeaf?.cycleId === c.cycle_id;
         const statusLabel =
           !isLive && c.run_phase === "terminal"
             ? runPhaseLabel(c.run_phase, c.status)
@@ -55,12 +61,10 @@ export function InnerCampaignRows({
                 type="button"
                 className="unit-library-item"
                 onClick={() =>
-                  selectInner({
-                    outerCampaignId,
-                    outerCycleId,
-                    innerCampaignId: c.campaign_id,
-                    innerCycleId: c.cycle_id,
-                  })
+                  selectCyclePath([
+                    { campaignId: outerCampaignId, cycleId: outerCycleId },
+                    { campaignId: c.campaign_id, cycleId: c.cycle_id },
+                  ])
                 }
                 aria-current={selected ? "true" : undefined}
                 title={`inner: ${c.campaign_id} · ${c.cycle_id}`}

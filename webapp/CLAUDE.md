@@ -67,11 +67,15 @@ Two on-disk surfaces back the dashboard. Read from the right one:
 
 If you find yourself adding a "merge in-flight with historical" or "fall back to round-file when dashboard hasn't written X yet" branch, you're re-introducing the stitch pattern the unification spec (`docs/specs/webapp-display-source-unification.md`) collapsed. Pick one source per data class.
 
+## Viewed identity — one address (CyclePath)
+
+"What am I looking at?" has ONE answer: `viewedPath`, a **`CyclePath`** (`lib/ids.ts`) — the chain of `(campaign, cycle)` hops from the top-level root to the leaf. A top-level cycle is a 1-hop path; an L4 inner loop is a 2-hop path `[outer, inner]`; L5+ nests deeper (this mirrors the engine's re-entrant `.inner/<cycle_id>` sandbox). `lib/workspace.tsx` owns it: state is `pinnedPath` + `following`; `viewedPath` is derived (`following ? [active 1-hop] : pinnedPath`). The **dashboard stream re-roots to the LEAF hop**; chat/selection/dataset/files bind to the **ROOT hop** (the `campaignId`/`cycleId` exports) — so an inner-loop dashboard never moves the conversation off the outer thread. There is no separate inner-focus axis; drilling in = `selectCyclePath([outer, inner])`, backing out = `backToOuter()`. Deep-link is one `?path=` param (encoded CyclePath; malformed → falls back to following). Don't reintroduce a second identity variable or a per-surface "unit" — every surface derives from `viewedPath`.
+
 ## Polling shape
 
-- `GET /api/campaigns/{id}/cycles/{cid}/dashboard` supports `If-Modified-Since` → `304 Not Modified`. Client (`lib/poll.tsx`, `lastModifiedRef` at line 329) tracks the latest `Last-Modified` per `unitKey` and skips `setState` on 304.
+- `GET /api/campaigns/{id}/cycles/{cid}/dashboard` supports `If-Modified-Since` → `304 Not Modified`. Client (`lib/poll.tsx`, `lastModifiedRef`) tracks the latest `Last-Modified` per `unitKey` (the encoded `CyclePath`) and skips `setState` on 304. One fetch (`fetchDashboardByPath`) serves any depth: an inner descendant rides a `?descend=<hops>` query the server walks into each hop's `.inner/` sandbox; at depth 1 the URL is byte-identical to a plain per-cycle read, so 304 semantics are unchanged.
 - When `dashboard.json` does not yet exist (fresh campaign before origin completes), the route returns `{ warming_up: true, campaign_id, cycle_id, phase_hint: "origin" }` with HTTP 200 and `Last-Modified` from the session dir mtime. Client recognises `warming_up === true` and renders a friendly placeholder ("Origin running") rather than treating the cycle as offline.
-- `unitKey` change resets `lastModifiedRef` in the render-phase guard at `poll.tsx:343`. Required — without it, switching campaigns leaves stale `If-Modified-Since` on the wire.
+- `unitKey` change (any hop of the path) resets `lastModifiedRef` in the render-phase guard. Required — without it, switching campaigns (or drilling into/out of an inner loop) leaves stale `If-Modified-Since` on the wire.
 
 ## State reset on prop change
 
