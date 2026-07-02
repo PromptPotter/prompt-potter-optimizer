@@ -680,6 +680,19 @@ def test_discovered_level_trajectory_is_honest_single_scale() -> None:
     o3, lv3 = discovered_level_trajectory(origin_theta, 0.44, [[(-2.0, 0.2, 0.1)]], ruler)
     assert lv3[0] < o3
 
+    # Thin-inner-budget signal survival (the identical-θ degeneracy fix). At production-scale
+    # θ_se≈0.6 a REAL inner lift (θ=0.4) is SMALLER than a full SE, so the old full-θ_se haircut
+    # projected θ−0.6=−0.2 BELOW origin → discovered level floored at origin → outer delta 0 →
+    # degenerate outer θ (p_best all 0.5). The residual fractional discount must keep a below-SE
+    # lift ABOVE origin so a genuine signal survives to be pooled (the guard is the outer
+    # election, not this thin per-inner-campaign proxy). SILENT: the outer optimizes a floored 0.
+    assert ruler_expected_accuracy(0.4 - 0.6, ruler) < origin_ability  # what a FULL SE floored to
+    _, lv6 = discovered_level_trajectory(origin_theta, 0.44, [[(0.4, 0.6, 0.5)]], ruler)
+    assert lv6[0] > origin_ability  # fix: the below-SE lift now clears origin
+    below_point = candidate_lcb_ability(0.4, 0.6, ruler)
+    point_04 = ruler_expected_accuracy(0.4, ruler)
+    assert below_point is not None and point_04 is not None and below_point < point_04
+
     # Cumulative / monotone: a strong round then a weak round keeps the best DISCOVERED so far.
     _, lv4 = discovered_level_trajectory(
         origin_theta, 0.44, [[(1.2, 0.2, 0.6)], [(-2.0, 0.2, 0.1)]], ruler
@@ -1907,6 +1920,29 @@ def test_unscoreable_origin_grades_critical_and_trips_the_origin_gate():
     assert hw is not None
     assert hw.no_result_count == 0
     assert "unscoreable" not in hw.reasons
+
+
+def test_unmeasured_origin_grades_critical_but_a_non_origin_round_abstains():
+    """The L4 failure mode: round-0 scoring produced ZERO rows (``total==0``) — a crash
+    or empty connector return, not a wrong answer. The OLD ``has_program`` sniff silently
+    skipped scoring the L4 outer origin (empty prose, empty node configs), landing
+    ``total=0``; if that graded ``healthy``/abstained, candidates would be elected against
+    NO baseline — the silent, irreversible harm. Only the ORIGIN's ``total=0`` is critical
+    (halt-and-decide); a non-origin round that measured nothing genuinely abstains (``None``),
+    never a fabricated clean verdict."""
+    from promptpotter.application.runner.termination import origin_gate_tripped
+    from promptpotter.domain.phases import StopReason
+    from promptpotter.domain.results_health import compute_round_health
+
+    ho = compute_round_health(hits=0, total=0, results=[], prior_healths=[], is_origin=True)
+    assert ho is not None
+    assert ho.grade == "critical"
+    assert ho.reasons == ["origin_unmeasured"]
+    # Halts even in the least-strict armed mode — the baseline-less election never begins.
+    assert origin_gate_tripped(ho, "critical_only") == StopReason.ORIGIN_GATE
+
+    # A non-origin round that measured nothing abstains — not a fabricated ``healthy``.
+    assert compute_round_health(hits=0, total=0, results=[], prior_healths=[]) is None
 
 
 @pytest.mark.parametrize(

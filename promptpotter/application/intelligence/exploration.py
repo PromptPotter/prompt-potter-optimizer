@@ -93,23 +93,38 @@ def ruler_expected_accuracy(theta: float | None, delta_scale: Ruler | None) -> f
     return float(np.mean(1.0 / (1.0 + np.exp(-np.clip(etas, -50, 50)))))
 
 
+# Residual per-candidate winner's-curse discount on the L4 *discovery* proxy. A FULL θ_se
+# haircut per inner candidate asks "is each candidate individually 1-SE above origin?" — too
+# strict at the thin inner budget (24 samples ⇒ θ_se ≈ 0.55–0.64, LARGER than a real
+# meta-prompt lift ≈ 0.05–0.45), so every genuine inner improvement floored to ~0 and the
+# outer θ went degenerate (p_best a 3-way tie at 0.5). The load-bearing winner's-curse guard
+# is the OUTER θ-LCB election, which pools the whole panel (√panel lower effective SE);
+# re-subtracting a full SE here double-counts it (discount-then-pool destroys what
+# pool-then-discount keeps). So keep only a light residual fraction (~1/√8, the outer panel
+# size): enough to penalize a wildly-uncertain inner candidate, small enough to let a real
+# below-SE lift survive to be pooled. This constant is the single knob if a validation run
+# over/under-corrects.
+_DISCOVERY_SE_DISCOUNT = 0.25
+
+
 def candidate_lcb_ability(
     theta: float | None, theta_se: float | None, delta_scale: Ruler | None
 ) -> float | None:
-    """A candidate's **lower-confidence** ability on the fixed ruler: project ``θ − θ_se``
-    (a one-SE pessimistic θ) through :func:`ruler_expected_accuracy`.
+    """A candidate's lightly-discounted ability on the fixed ruler: project
+    ``θ − _DISCOVERY_SE_DISCOUNT · θ_se`` through :func:`ruler_expected_accuracy`.
 
-    The winner's-curse guard for the L4 *discovery* signal (below). Reading the best
-    candidate a meta-prompt's inner search *found* — not just the one it *crowned* —
-    recovers the sub-crowning-threshold signal the conservative θ-LCB election throws
-    away at a small inner sample budget. But a naïve max over candidates' point θ would
-    reward *variance* (the max of noisy estimates is upward-biased), so each candidate's
-    optimistic point θ is first discounted by its own SE. ``None`` when θ / SE / ruler is
-    absent — the caller then either skips the candidate (ability space) or reads its
+    Reads the best candidate a meta-prompt's inner search *found* — not just the one it
+    *crowned* — to recover the sub-crowning-threshold signal the conservative θ-LCB election
+    throws away at a small inner sample budget. A naïve max over candidates' point θ rewards
+    *variance* (the max of noisy estimates is upward-biased), so each candidate's point θ is
+    discounted by a *fraction* of its SE — a residual guard only; the primary winner's-curse
+    guard is the outer pooled θ-LCB election (see :data:`_DISCOVERY_SE_DISCOUNT` for why the
+    full-SE haircut here was double-counting and floored the signal). ``None`` when θ / SE /
+    ruler is absent — the caller then either skips the candidate (ability space) or reads its
     accuracy Wilson-LB instead (raw space)."""
     if theta is None or theta_se is None:
         return None
-    return ruler_expected_accuracy(theta - theta_se, delta_scale)
+    return ruler_expected_accuracy(theta - _DISCOVERY_SE_DISCOUNT * theta_se, delta_scale)
 
 
 def discovered_level_trajectory(
