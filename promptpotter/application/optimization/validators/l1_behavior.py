@@ -85,7 +85,7 @@ class ValidatorContext:
     # Axes the round-start AxisIndex flagged as ``peaked``. Used by
     # ``evidence_grounding_present`` to reject variants that cite
     # ``axis_memory`` to justify mutating a peaked axis without naming a
-    # rebut (sibling_yield>0 this round, or exploration_budget=wide).
+    # rebut (the critique naming that axis, or exploration_budget=wide).
     # Populated by ``review.py`` from each round dict's
     # ``axis_memory_peaked`` field, stashed by ``persist_round``.
     peaked_axes: frozenset[str] = field(default_factory=frozenset)
@@ -296,7 +296,9 @@ def run_all_checks(round_dict: dict[str, Any], ctx: ValidatorContext) -> list[Ch
 
 
 _REBUT_SIGNALS: tuple[str, ...] = (
-    "sibling_yield",
+    "priority_fix",
+    "suggested_axes",
+    "critique names",
     "exploration_budget=wide",
     "exploration_budget = wide",
     "wide exploration",
@@ -314,7 +316,7 @@ def _cited_peaked_axis(
     ``pipeline_params_override`` (e.g. ``llm_only.temperature`` matches
     ``temperature`` keyed under ``llm_only``). The validator only fires
     when ``field_name == "axis_memory"`` — citations grounded in other
-    panels (sibling_yield, parent_panel, etc.) are independent evidence
+    panels (critique, task_context, etc.) are independent evidence
     and not rejected by this rule.
     """
     if not ctx.peaked_axes or field_name != "axis_memory":
@@ -338,9 +340,10 @@ def _cited_peaked_axis(
 
 def _has_peaked_rebut(variant: dict[str, Any], citation: str, ctx: ValidatorContext) -> bool:
     """True iff the variant's citation/changes_description cites a real
-    rebut for the peaked-axis guard: a sibling_yield row this round, or
-    an explicit wide-exploration budget. Permissive substring match —
-    the prompt instructs L1 to name the rebut verbatim.
+    rebut for the peaked-axis guard: the critique naming the axis
+    (priority_fix / suggested_axes), or an explicit wide-exploration
+    budget. Permissive substring match — the prompt instructs L1 to name
+    the rebut verbatim.
     """
     if ctx.exploration_budget == "wide":
         return True

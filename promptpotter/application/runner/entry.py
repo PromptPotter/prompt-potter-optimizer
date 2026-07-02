@@ -13,7 +13,7 @@ import traceback
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.bootstrap import init_optimization_loop
 from promptpotter.application.bootstrap.session import Session
@@ -49,6 +49,9 @@ from promptpotter.infrastructure.runtime_flags import clear_run_control_flags
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ResumeDivergenceError
+
+if TYPE_CHECKING:
+    from promptpotter.domain.scoring import QueryMeasurement
 
 logger = logging.getLogger(__name__)
 
@@ -314,13 +317,23 @@ def _build_cycle_result(
     # the ruler is warm, else raw accuracy) so no proxy delta subtracts across scales, and
     # read off candidates the inner search *found* rather than the frontier it *crowned*.
     from promptpotter.application.intelligence.exploration import discovered_level_trajectory
+    from promptpotter.application.scoring.metrics import _compute_accuracy
+    from promptpotter.shared.statistics import wilson_ci
 
     cycle_rounds = cycle.rounds if cycle is not None else []
     ds = cycle.delta_scale if cycle is not None else None
     tr = cycle.tracking if cycle is not None else None
+    # Origin's OWN Wilson lower bound, computed with the SAME hits/total definition
+    # (deprecated-excluded) that each candidate's ci_lo uses — so raw-space deltas
+    # subtract like-for-like. Init-crash fallback: no per-sample results ⇒ point acc.
+    if tr is not None and tr.origin_per_sample_results:
+        base = _compute_accuracy(cast("list[QueryMeasurement]", tr.origin_per_sample_results))
+        origin_ci_lo = wilson_ci(base["hits"], base["total"])[0]
+    else:
+        origin_ci_lo = origin.origin_acc
     origin_level, round_levels = discovered_level_trajectory(
         tr.origin_theta if tr else None,
-        origin.origin_acc,
+        origin_ci_lo,
         [[(c.theta, c.theta_se, c.ci_lo) for c in rr.candidate_scores] for rr in cycle_rounds],
         ds,
     )

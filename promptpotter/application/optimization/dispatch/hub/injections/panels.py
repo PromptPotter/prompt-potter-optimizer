@@ -7,6 +7,7 @@ via `AxisIndex` (rankings, top runs, rare hits, intractable clusters). Uniform
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from promptpotter.application.optimization.dispatch.hub.bundle import (
@@ -14,6 +15,10 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
     NEAR_MISS_RENDER_CAP,
     NODE_FAILURE_RENDER_CAP,
     SAMPLE_RENDER_CAP,
+    TRANSCRIPT_PREDICTED_CAP,
+    TRANSCRIPT_QUERY_CAP,
+    TRANSCRIPT_REASONING_CAP,
+    TRANSCRIPT_RENDER_CAP,
     InjectionBundle,
     InjectionKind,
     fence_untrusted,
@@ -33,7 +38,7 @@ from promptpotter.domain.results_health import EVIDENCE_STARVED_RATE
 def _r_escalation_panel(b: InjectionBundle) -> str:
     """The exploration-budget signal l1_generate's supplemental rules cite. Widens
     TIGHT→NORMAL→WIDE with L1 stall depth; WIDE is what legitimizes a stall_exploration
-    citation and mutating a PEAKED axis without a sibling_yield rebut."""
+    citation and mutating a PEAKED axis without a critique-names-the-axis rebut."""
     cs = b.cycle_slice
     budget = cs.exploration_budget
     guidance = {
@@ -296,6 +301,63 @@ def _r_axis_memory(b: InjectionBundle) -> str:
 def _query_stem(row: dict[str, Any], n: int = 70) -> str:
     q = (row.get("query") or "").replace("\n", " ").strip()
     return q[:n]
+
+
+def _head_at_line(text: str, cap: int) -> str:
+    """Head-keep *text* to ``cap`` chars, cutting at the last line boundary so a
+    premise is never sliced mid-sentence; a single over-cap line hard-slices.
+    Blank lines collapse to single newlines — the render façade truncates on
+    ``\\n\\n`` section boundaries, and quoted content must never mint one."""
+    text = re.sub(r"\n\s*\n+", "\n", text.strip())
+    if len(text) <= cap:
+        return text
+    head = text[:cap]
+    nl = head.rfind("\n")
+    if nl > 0:
+        head = head[:nl]
+    return head + "\n[…truncated]"
+
+
+@signal(
+    "sample_transcripts",
+    kind=InjectionKind.MEASUREMENT,
+    description=(
+        "Complete failing samples: full query + the task model's own reasoning + "
+        "predicted vs GT — the raw evidence the critique's failure_highlights quote from."
+    ),
+    char_cap=6000,
+)
+def _r_sample_transcripts(b: InjectionBundle) -> str:
+    """The distiller's raw source: up to ``TRANSCRIPT_RENDER_CAP`` current misses shown
+    COMPLETE — full query text, the model's reasoning trace (when the backend captured
+    one), and predicted vs ground truth. Everything downstream reads the critique's
+    compression of this, so this is the one place the full failure must be visible.
+
+    Each transcript is its own fenced ``\\n\\n`` section, so the façade's section-aware
+    truncation drops a whole trailing transcript — never mid-premise, never a severed fence.
+    """
+    rows = b.trajectory_misses
+    if not rows:
+        return ""
+    shown = rows[:TRANSCRIPT_RENDER_CAP]
+    header = (
+        f"SAMPLE TRANSCRIPTS ({len(shown)}/{len(rows)} current misses shown complete — "
+        "quote the broken reasoning step, not just the label):"
+    )
+    sections = [header]
+    for r in shown:
+        sid = r.get("sample_id")
+        parts = [
+            f"[#{sid}] QUERY:\n{_head_at_line(str(r.get('query') or ''), TRANSCRIPT_QUERY_CAP)}"
+        ]
+        trace = (r.get("pipeline_data") or {}).get("reasoning_trace") or ""
+        if trace:
+            parts.append(f"MODEL REASONING:\n{_head_at_line(str(trace), TRANSCRIPT_REASONING_CAP)}")
+        predicted = _head_at_line(str(r.get("predicted") or ""), TRANSCRIPT_PREDICTED_CAP)
+        gt = str(r.get("ground_truth") or "")[:60]
+        parts.append(f"PREDICTED: {predicted}\nGROUND TRUTH: {gt}")
+        sections.append(fence_untrusted("\n".join(parts)))
+    return "\n\n".join(sections)
 
 
 @signal(

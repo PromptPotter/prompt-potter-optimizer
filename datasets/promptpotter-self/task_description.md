@@ -12,13 +12,14 @@ the inner model must answer **TRUE / FALSE / Uncertain** — TRUE/FALSE when the
 premises strictly determine the conclusion, `Uncertain` only when they are
 genuinely indeterminate. Origin ≈ 0.44, target 0.60, paper ceiling ≈ 0.81.
 
-The dominant failure mode is **hedge bias**: the inner model over-uses
-`Uncertain` to avoid committing. So the inner meta-prompts that win are the ones
-that make the inner L1 generate candidates which **break the hedge** — commit to
-TRUE/FALSE under strict entailment, scaffold premise-by-premise checking, and
-reserve `Uncertain` for real indeterminacy. Mutate the inner meta-prompt fields
-to push the inner loop toward discovering that discipline; do not hard-code the
-answer — make the inner *optimizer* better at finding it.
+Do NOT assume a failure mode — read one from the evidence. The critique and
+sample transcripts show what the inner loop actually did (which candidates it
+generated, what its critique diagnosed, where its rounds stalled); each outer
+candidate must name the observed inner deficiency it attacks. Note the label
+space is three-way and ground-truth labels include genuine `Uncertain` cases —
+an edit that suppresses one answer class trades one error class for another.
+Mutate the inner meta-prompt fields to make the inner *optimizer* better at
+finding the discipline; do not hard-code task answers into it.
 
 ## Fitness
 
@@ -57,7 +58,7 @@ Better = higher delta after N AND/OR fewer rounds to target.
 ## Proxy realism
 
 The committed inner config (``inner_tasks.json``: ``n_samples_per_inner_round:
-8``, ``max_inner_rounds: 2``, two seeds) keeps each outer "sample" at
+24``, ``max_inner_rounds: 2``, eight seeds) keeps each outer "sample" at
 order-of-minutes. Trade-off is signal quality — bump sample count + rounds before
 publication runs. Cost shape + the finish-line plan:
 ``docs/specs/l4-outer-loop.md`` § Finish line.

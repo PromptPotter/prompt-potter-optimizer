@@ -28,6 +28,12 @@ if TYPE_CHECKING:
 AXES_ENUM_PREVIEW = 4
 NEAR_MISS_RENDER_CAP = 2
 SAMPLE_RENDER_CAP = 2
+# Complete failing samples the `sample_transcripts` panel shows the distiller —
+# full premises + the model's own reasoning, per-field head-capped below.
+TRANSCRIPT_RENDER_CAP = 2
+TRANSCRIPT_QUERY_CAP = 2200
+TRANSCRIPT_REASONING_CAP = 1200
+TRANSCRIPT_PREDICTED_CAP = 200
 FAILURE_WARNING_PREVIEW = 1
 # Worst-N nodes the evidence_health panel lists — enough to show a dead enricher
 # plus a couple of collateral nodes, never a full pipeline dump.
@@ -186,6 +192,10 @@ __all__ = [
     "RUNTIME_FAILURE_RECENCY_WINDOW",
     "SAMPLE_RENDER_CAP",
     "TASK_CONTEXT_VALUE_CAP",
+    "TRANSCRIPT_PREDICTED_CAP",
+    "TRANSCRIPT_QUERY_CAP",
+    "TRANSCRIPT_REASONING_CAP",
+    "TRANSCRIPT_RENDER_CAP",
     "CycleSlice",
     "InjectionBundle",
     "InjectionKind",

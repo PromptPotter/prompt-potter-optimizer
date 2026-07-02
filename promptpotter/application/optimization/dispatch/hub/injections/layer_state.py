@@ -133,7 +133,9 @@ def _r_task_context(b: InjectionBundle) -> str:
     "critique",
     kind=InjectionKind.TRACE,
     description="Compact view of the most recent L1_CRITIQUE LLM output dict.",
-    char_cap=800,
+    # Sized for failure_highlights <=3x320c + priority_fix 200c + axes — the
+    # distiller's whole output quota; an 800 cap silently re-truncated it.
+    char_cap=2000,
 )
 def _r_critique(b: InjectionBundle) -> str:
     """Compact view of the most recent L1_CRITIQUE output dict."""

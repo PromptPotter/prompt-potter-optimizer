@@ -216,6 +216,11 @@ class OpenAICompatibleClient(LLMClientBase):
         completion_tokens = (usage.completion_tokens if usage else 0) + first_completion
         return LLMResponse(
             content=content,
+            reasoning=(
+                (getattr(response.choices[0].message, "reasoning", None) or "")
+                if response.choices
+                else ""
+            ),
             model=response.model,
             usage={
                 "prompt_tokens": prompt_tokens,

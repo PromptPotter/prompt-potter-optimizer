@@ -129,7 +129,7 @@ def candidate_lcb_ability(
 
 def discovered_level_trajectory(
     origin_theta: float | None,
-    origin_accuracy: float,
+    origin_ci_lo: float,
     rounds: Sequence[Sequence[tuple[float | None, float | None, float]]],
     delta_scale: Ruler | None,
 ) -> tuple[float, list[float]]:
@@ -137,14 +137,20 @@ def discovered_level_trajectory(
     honest, single-scale signal an outer L4 cycle scores inner search quality by.
 
     Each inner candidate is ``(θ, θ_se, accuracy_ci_lo)``. The whole trajectory is
-    computed in ONE space so no delta ever subtracts across scales (the mixed-space bug):
+    computed in ONE space so **origin and candidates are measured on the same estimator**
+    — no delta ever subtracts across scales (the mixed-space bug that floored the signal):
 
-    - **Ability space** — used when the origin's θ projects onto the ruler
-      (``ruler_expected_accuracy(origin_theta, ·)`` is not None, i.e. the ruler is warm
-      *and* the origin was fit). Each candidate's level is its :func:`candidate_lcb_ability`;
-      a candidate with no θ is **skipped** (never mixed in as raw accuracy).
-    - **Raw space** — cold ruler or unfit origin θ. Each candidate's level is its
-      accuracy Wilson lower bound (``accuracy_ci_lo``), the raw-space peer of the θ-LCB.
+    - **Ability space** — used only when the origin's θ projects onto the ruler AND
+      *every* scored candidate across all rounds carries θ. Origin level is
+      ``ruler_expected_accuracy(origin_theta, ·)``; each candidate's is its
+      :func:`candidate_lcb_ability`. Requiring full candidate-θ coverage is what makes
+      the ``lvl is None`` line below a pure type-guard, never a data-dropping skip: a
+      single θ-less candidate demotes the whole trajectory to raw space instead of being
+      silently collapsed to the origin level.
+    - **Raw space** — cold/unfit origin θ *or* any θ-less candidate. Origin level is its
+      OWN accuracy Wilson lower bound (``origin_ci_lo``, passed in), and each candidate's
+      is its ``accuracy_ci_lo`` — both the same raw-space Wilson-LB estimator, so a
+      candidate that merely matches origin accuracy scores ~0, not ~−(LB width).
 
     ``running`` is the cumulative max of discovered levels — the best the inner search has
     found *through* round i, noise-discounted. It is **not** floored at the origin: a round
@@ -154,9 +160,13 @@ def discovered_level_trajectory(
     nothing measurable carries the prior running value (or the origin level, neutral, before
     any discovery). Returns ``(origin_level, per_round_levels)``."""
     origin_ability = ruler_expected_accuracy(origin_theta, delta_scale)
-    ability_space = origin_ability is not None
-    origin_level = origin_ability if ability_space else origin_accuracy
-    assert origin_level is not None  # ability_space ⇒ not None; else origin_accuracy (float)
+    ability_space = origin_ability is not None and all(
+        theta is not None and theta_se is not None
+        for cands in rounds
+        for theta, theta_se, _ in cands
+    )
+    origin_level = origin_ability if ability_space else origin_ci_lo
+    assert origin_level is not None  # ability_space ⇒ not None; else origin_ci_lo (float)
     running: float | None = None
     out: list[float] = []
     for cands in rounds:
@@ -164,7 +174,7 @@ def discovered_level_trajectory(
         for theta, theta_se, ci_lo in cands:
             lvl = candidate_lcb_ability(theta, theta_se, delta_scale) if ability_space else ci_lo
             if lvl is None:
-                continue
+                continue  # unreachable under ability_space's full-θ invariant — type-guard only
             round_best = lvl if round_best is None else max(round_best, lvl)
         if round_best is not None:
             running = round_best if running is None else max(running, round_best)

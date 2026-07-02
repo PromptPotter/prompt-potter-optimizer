@@ -205,7 +205,10 @@ class L1CritiqueOutput(BaseModel):
     failure_highlights: Annotated[list[str], BeforeValidator(_truncate(3))] = Field(
         default_factory=list,
         max_length=3,
-        description="≤3 short failure-line excerpts. Each item ≤140 chars (downstream truncates).",
+        description=(
+            "≤3 failure diagnoses quoting the decisive transcript evidence — claim, "
+            "broken reasoning step, predicted vs GT. Each item ≤320 chars (downstream truncates)."
+        ),
     )
 
 

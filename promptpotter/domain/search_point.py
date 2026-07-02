@@ -128,7 +128,7 @@ class TaskDecomposition:
     - ``data_characteristics`` — concrete properties of the sample
       pool L1 should account for (length, modality, distribution
       skew, known bias). Evidence-anchored — cites observations from
-      `parent_panel` / `sibling_yield`, not speculation.
+      the critique / diagnostics panels, not speculation.
     - ``optimization_goals`` — what we're optimising for, in
       operator vocabulary (accuracy vs latency vs compactness). Maps
       conceptually to the composite-fitness formula but is not its

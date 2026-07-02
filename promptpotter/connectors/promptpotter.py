@@ -37,6 +37,35 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# Reserved per-node config key carrying the inner-baseline fingerprint. Part of
+# measurement identity (rides node_configs / the origin cycle id), NEVER a wire
+# tunable — the adapter strips it before building ``meta_prompt_overrides``.
+INNER_BASELINE_KEY = "inner_baseline"
+
+
+def _identity_config() -> dict[str, dict[str, Any]]:
+    """The inner optimizer's effective-revision fingerprint, as identity config.
+
+    The backend this connector runs IS the inner optimizer, so a measurement's
+    identity must change whenever the inner baseline does: the shared meta-prompt
+    text (``datasets/_optimizer/pipeline.json``), the per-node information-flow
+    layouts, and the engine version. Otherwise an outer origin scored under an old
+    baseline is silently reused against candidates run under the new one — a
+    stale-vs-fresh comparison that fabricates (or masks) outer signal.
+    """
+    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+        OPTIMIZER_PIPELINE_PATH,
+    )
+    from promptpotter.config.settings import APP_VERSION
+    from promptpotter.domain.l1_layout import NODE_LAYOUTS
+    from promptpotter.domain.pipeline_schema import stable_hash
+
+    baseline_text = OPTIMIZER_PIPELINE_PATH.read_text(encoding="utf-8")
+    layouts = {name: spec.model_dump(mode="json") for name, spec in sorted(NODE_LAYOUTS.items())}
+    fingerprint = stable_hash([baseline_text, layouts, APP_VERSION])[:12]
+    return {"l1_generate": {INNER_BASELINE_KEY: fingerprint}}
+
+
 # ---------------------------------------------------------------------------
 # Wire payload shape
 # ---------------------------------------------------------------------------
@@ -73,7 +102,11 @@ def promptpotter_wire_adapter(
     meta_prompt_overrides: dict[str, dict[str, Any]] = {}
     for k, v in _pp.items():
         if isinstance(v, dict):
-            meta_prompt_overrides[k] = v
+            # The inner-baseline fingerprint is identity config, not an override —
+            # the inner loop must never see it as a template field.
+            stripped = {fk: fv for fk, fv in v.items() if fk != INNER_BASELINE_KEY}
+            if stripped:
+                meta_prompt_overrides[k] = stripped
         else:
             logger.debug(
                 "promptpotter_wire_adapter: dropping non-dict pipeline_param %r=%r",
@@ -191,6 +224,7 @@ CONNECTOR = Connector(
     # The outer "samples" are the inner tasks — read from this file in the dataset
     # config dir and fed through ``extract_experiment`` at bootstrap (no CSV table).
     experiment_file="inner_tasks.json",
+    identity_config=_identity_config,
 )
 
 

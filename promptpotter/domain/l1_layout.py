@@ -45,6 +45,7 @@ L1_POSSIBLE: frozenset[str] = frozenset(
         "intractable_samples",
         "archive_top_runs",
         "rare_hit_samples",
+        "sample_transcripts",
     }
 )
 
@@ -151,15 +152,19 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
             ],
         ),
     ),
-    # The distiller — the one node where a raw `diagnostics` dump is justified
-    # (everything downstream reads its compression, so it must read the raw source); hence
-    # `diagnostics` is its sole mandatory. Optional search space adds the cross-run panels.
+    # The distiller — the one node where a raw dump is justified (everything downstream
+    # reads its compression, so it must read the raw source); hence `diagnostics` is its
+    # sole mandatory. `sample_transcripts` carries the COMPLETE failing samples (full
+    # query + the model's own reasoning) — `diagnostics` alone shows truncated stems,
+    # which starved the critique into unverifiable steers. Optional search space adds
+    # the cross-run panels.
     "l1_critique": NodeLayoutSpec(
         editor="l4",
         possible=frozenset(
             {
                 "evidence_health",
                 "diagnostics",
+                "sample_transcripts",
                 "l1_wounds",
                 "rare_hit_samples",
                 "axis_memory",
@@ -172,6 +177,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
             problem_description=[
                 "evidence_health",
                 "diagnostics",
+                "sample_transcripts",
                 "l1_wounds",
                 "rare_hit_samples",
             ],

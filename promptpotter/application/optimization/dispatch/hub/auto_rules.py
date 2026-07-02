@@ -24,8 +24,8 @@ from __future__ import annotations
 AUTO_RULES: dict[str, str] = {
     "peaked_axis": (
         "PEAKED axes (the parent's current value IS the measured peak): "
-        "do NOT mutate without quoting a sibling_yield row with mean_delta>0 "
-        "on the same axis OR escalation_panel.exploration_budget=wide."
+        "do NOT mutate without quoting the critique naming that axis "
+        "(priority_fix or suggested_axes) OR escalation_panel.exploration_budget=wide."
     ),
     "runtime_failure": (
         "RUNTIME FAILURES are owner-tagged above. owner=l1 is YOURS to FIX: propose a "
@@ -38,7 +38,7 @@ AUTO_RULES: dict[str, str] = {
     "continuous_envelope": (
         "Continuous-axis envelope: for numeric knobs (max_tokens, temperature, "
         "top_p, reasoning_effort), stay within ±50% of the parent value unless "
-        "sibling_yield, runtime_failures, or exploration_budget=wide justifies "
+        "the critique, runtime_failures, or exploration_budget=wide justifies "
         "a larger jump."
     ),
     "chain_bind": (
@@ -78,7 +78,7 @@ BUILTIN_EXAMPLES: dict[str, dict[str, str]] = {
     "peaked_axis": {
         "parent_excerpt": (
             "axis_rankings: llm_only.temperature (effect=0.245, PEAKED — do not "
-            "mutate without sibling_yield>0 or exploration_budget=wide rebut)"
+            "mutate unless the critique names this axis or exploration_budget=wide rebut)"
         ),
         "rejected": (
             "pipeline_params_override={llm_only:{temperature:0.5}}, "

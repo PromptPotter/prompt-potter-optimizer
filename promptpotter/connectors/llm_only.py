@@ -126,6 +126,9 @@ async def llm_only_in_process_run(query: str, payload: dict[str, Any]) -> dict[s
     data: dict[str, Any] = {
         # The terminal ranking the scorer reads: the answer is the (single) candidate.
         LLM_ONLY_RESULT_KEY: [answer],
+        # Same head-cap as TermNorm's reasoning_trace_cap — the PP<->TermNorm
+        # envelope stays shape-identical on both execution arms.
+        "reasoning_trace": (resp.reasoning or "")[:4000],
         "terminated_at": LLM_ONLY_NODE,
         "llm_provider": provider,
         "total_time": duration_s,

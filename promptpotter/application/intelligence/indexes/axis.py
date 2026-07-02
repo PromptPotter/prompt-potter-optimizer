@@ -54,7 +54,8 @@ def _fmt_axis_rankings(
         base = f"{a.axis} (effect={a.effect_size:.3f}, {a.classification}"
         if a.axis in peaked:
             base += (
-                ", PEAKED — do not mutate without sibling_yield>0 or exploration_budget=wide rebut"
+                ", PEAKED — do not mutate unless the critique names this axis "
+                "or exploration_budget=wide rebut"
             )
         base += ")"
         parts.append(base)

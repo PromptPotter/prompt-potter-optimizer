@@ -136,6 +136,18 @@ class Connector:
     is down. ``None`` opts the connector out (in-process backends like
     ``promptpotter`` have nothing to probe)."""
 
+    identity_config: Callable[[], dict[str, dict[str, Any]]] | None = None
+    """Per-node config entries that are part of MEASUREMENT IDENTITY but not
+    wire tunables — folded into ``resolve_pipeline_config_params`` so the
+    origin cycle id and the archive's node-config reuse key change whenever
+    the backend's effective revision does. The canonical user is the
+    in-process ``promptpotter`` connector: its backend IS the inner optimizer
+    (meta-prompt baseline + layouts + engine), so without this a baseline edit
+    silently reuses stale measurements recorded under the old behavior. The
+    connector's ``wire_adapter`` must strip these reserved keys from the
+    outbound payload. ``None`` = the backend's revision is not part of
+    identity (remote backends use the advisory ``version_check`` instead)."""
+
     default_pipeline: tuple[str, ...] = ()
     """First-tenant default pipeline step list — the launcher's chat-first
     ingest seeds ``pipeline.json::pipelines.default`` from this when a draft

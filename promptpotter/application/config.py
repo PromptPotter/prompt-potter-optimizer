@@ -555,7 +555,33 @@ def resolve_pipeline_config_params(
                 key,
                 value,
             )
+    # Connector identity contribution — LAST, never overridable: per-node entries a
+    # connector declares as part of measurement identity (Connector.identity_config,
+    # e.g. the promptpotter connector's inner-baseline fingerprint). Resolved from
+    # the dataset dir's own backend_type so this stays pure-over-disk and both
+    # callers (live setup + prospective-origin id) agree by construction.
+    if dataset_dir is not None:
+        for node, cfg in _connector_identity_config(dataset_dir).items():
+            if node in active:
+                pipeline_params.setdefault(node, {}).update(cfg)
     return pipeline_params
+
+
+def _connector_identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
+    """The dataset's connector ``identity_config`` contribution, or ``{}``.
+
+    Reads ``backend_type`` from the dataset's ``pipeline.json`` (tolerant — a
+    dataset dir without one contributes nothing) and asks the registered
+    connector. Import is local to keep ``config.py`` free of a module-level
+    connectors dependency."""
+    from promptpotter.connectors import CONNECTORS
+    from promptpotter.infrastructure.store.io import read_json_tolerant
+
+    raw = read_json_tolerant(dataset_dir / "pipeline.json")
+    connector = CONNECTORS.get(str((raw or {}).get("backend_type") or ""))
+    if connector is None or connector.identity_config is None:
+        return {}
+    return connector.identity_config()
 
 
 def missing_template_vars(rendered: str, declared: list[str]) -> list[str]:

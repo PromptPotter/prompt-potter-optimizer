@@ -86,6 +86,10 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # futility gate — cut a candidate once it's improbable to clear the round's
 # adoption bar seed+improvement_threshold, so a tie doesn't ride the full panel;
 # the probabilistic sibling of deterministic_dominance). A feature, justified.
+# injections 22→23: ``sample_transcripts`` — complete failing samples (full query
+# + the model's reasoning trace) on the distiller's floor. The prior surface
+# showed no LLM tier one complete failure (2 mid-word-truncated stems), which
+# starved the critique into unverifiable steers. A feature, justified.
 LEDGER_BASELINE = {
     "modules": 297,
     "init_files": 54,
@@ -95,7 +99,7 @@ LEDGER_BASELINE = {
     "settings_const": 16,
     "opt_search_point_fields": 27,
     "prompt_string_fields": 6,
-    "injections": 22,
+    "injections": 23,
     "escalation_rules": 6,
     "claude_md": 7,
 }

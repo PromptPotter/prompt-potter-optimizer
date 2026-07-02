@@ -110,6 +110,8 @@ __all__ = [
 ]
 
 # Wire-response keys always kept on pipeline_data, regardless of pipeline schema.
+# ``reasoning_trace`` = the task model's chain-of-thought (head-capped at the
+# backend); the critique tier reads it to diagnose WHERE a deduction broke.
 _INFRA_KEYS: frozenset[str] = frozenset(
     {
         "step_timings",
@@ -118,6 +120,7 @@ _INFRA_KEYS: frozenset[str] = frozenset(
         "total_time",
         "pipeline_params",
         "diagnostics",
+        "reasoning_trace",
     }
 )
 

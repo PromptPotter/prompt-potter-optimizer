@@ -117,27 +117,19 @@ class PromptTemplate(SearchPoint):
 
 
 # Panel names an L1 variant may cite in ``EvidenceGrounding.field`` to justify a mutation.
-# This is NOT the INJECTIONS slot set — grepping one of these as a ``{{slot}}`` dead-ends for two
-# of the three kinds below. Grouped so a reader knows which kind a name is without a second hop:
-#   • injection-backed — citation names a DispatchHub injection slot of the same name, rendered by
-#     ``application/optimization/dispatch/hub/injections/`` (``@signal`` decorator).
-#   • L1-surface panels — assembled into L1's prompt by the l1_generate path, NOT the INJECTIONS
-#     registry; their fields are documented in the L1 evidence-base contract
-#     (``application/optimization/CLAUDE.md``). No same-named ``_r_*`` renderer exists by design.
+# Every name except the sentinel is a DispatchHub injection slot of the same name, rendered by
+# ``application/optimization/dispatch/hub/injections/`` (``@signal`` decorator) — a citable
+# panel MUST be renderable into L1's prompt, or the contract invites fabricated citations.
 #   • stall_exploration — not a panel: the escape-hatch sentinel, valid only when
 #     ``escalation_panel.exploration_budget`` ∈ {normal, wide} (enforced in ``validators/l1_behavior.py``).
 EVIDENCE_GROUNDING_FIELDS: frozenset[str] = frozenset(
     {
-        # injection-backed (same-named DispatchHub slot)
         "axis_memory",
         "task_context",
         "plan",
         "critique",
         "archive_top_runs",
         "rare_hit_samples",
-        # L1-surface panels (l1_generate path, not INJECTIONS) — see optimization/CLAUDE.md
-        "parent_panel",
-        "sibling_yield",
         "escalation_panel",
         # escape-hatch sentinel (gated on escalation_panel.exploration_budget)
         "stall_exploration",

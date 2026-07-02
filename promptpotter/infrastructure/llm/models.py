@@ -35,6 +35,14 @@ class LLMResponse(BaseModel):
     """Standardized response from LLM providers."""
 
     content: str = Field(..., description="Response content")
+    reasoning: str = Field(
+        "",
+        description=(
+            "Chain-of-thought from reasoning models (message.reasoning on the "
+            "OpenAI-compat wire); empty for non-reasoning models. Consumed by the "
+            "llm_only connector as the per-sample reasoning_trace."
+        ),
+    )
     model: str = Field(..., description="Model used")
     usage: dict[str, int] = Field(
         default_factory=dict,

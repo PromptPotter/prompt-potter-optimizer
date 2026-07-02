@@ -30,8 +30,8 @@ input actually carry the signals it claims to consult?
   inheritance path is broken — investigate `sibling_wounds.py` and
   `_rf_matches_current_config` (the latter may be dropping
   cross-model failures intentionally).
-- `sibling_yield` / `parent_panel` / `escalation_panel` — round-N>1
-  signals; empty in round 1 by design.
+- `critique` / `escalation_panel` — round-N>1 signals; empty in
+  round 1 by design.
 
 ## B. Re-proposal of known-failing configs
 
@@ -51,17 +51,17 @@ pair appear in `opt_sp.wounds.runtime_failures[*].observed_config`?
 ## C. PEAKED-axis mutations without justification
 
 The HARD BLOCKS section of `l1_generate/1` says: if `axis_memory` marks
-an axis as PEAKED, do NOT mutate it unless `sibling_yield` shows
-positive `mean_delta` on that same axis this cycle, OR
+an axis as PEAKED, do NOT mutate it unless the critique names that axis
+(`priority_fix` or `suggested_axes`), OR
 `escalation_panel.exploration_budget == wide`.
 
 This is **not** enforced by a validator today. Manual check:
 
 - Read the rendered `AXIS MEMORY` block from the L1 input. Note axes
-  marked `PEAKED — do not mutate without sibling_yield>0 ...`.
+  marked `PEAKED — do not mutate unless the critique names this axis ...`.
 - For each candidate whose `target_axis` is a PEAKED axis: read its
-  `evidence_grounding.citation` — does it reference a `sibling_yield`
-  row with `mean_delta > 0` or `escalation_panel.exploration_budget =
+  `evidence_grounding.citation` — does it quote the critique naming
+  that axis, or `escalation_panel.exploration_budget =
   wide`? If neither, flag as **`peaked_axis_violation`** in the
   analysis report and recommend adding a code-level validator
   (follow-up PR).
@@ -77,7 +77,7 @@ Not enforced by validator. Manual check:
   parent's value (visible in the L1 input's `CURRENT PROMPT` block or
   the round-display table's `Parent` column).
 - If the proposed value is outside ±50% of parent and the candidate's
-  evidence_grounding doesn't cite sibling_yield / runtime_failures /
+  evidence_grounding doesn't cite the critique / runtime_failures /
   exploration_budget=wide, flag as **`envelope_violation`**.
 
 ## E. PARAM-FIELD axes are LAST RESORT
@@ -124,8 +124,8 @@ quote from the named `field`, not a hallucination.
 
 - `field=axis_memory` + citation `"llm_only.max_tokens (effect=0.242, ...)"`
   ⇒ verify the axis_memory block in the L1 input contains this row.
-- `field=sibling_yield` ⇒ verify a sibling_yield row exists for the
-  named axis.
+- `field=critique` ⇒ verify the quoted highlight / priority_fix
+  appears in the rendered critique block.
 - `field=stall_exploration` ⇒ valid only when
   `escalation_panel.exploration_budget ∈ {normal, wide}` — verify.
 
@@ -164,7 +164,7 @@ top of your analysis reply, before any narrative interpretation:
 
 ```
 L1 violations on round N (cycle <id>):
-  ✗ peaked_axis_violation (C1.1: target_axis=llm_only.max_tokens, axis marked PEAKED, no sibling_yield rebut)
+  ✗ peaked_axis_violation (C1.1: target_axis=llm_only.max_tokens, axis marked PEAKED, no critique rebut)
   ✗ envelope_violation (C1.1: proposed max_tokens=1800 from parent 16384 = -89%, no justification)
   ✗ unjustified_param_mutation (C1.1: critique didn't name max_tokens, runtime_failures empty)
   ✓ schema_compliance (no forbidden-axis or type-mismatch issues)

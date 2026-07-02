@@ -13,16 +13,15 @@ The cycle has hardcoded stop conditions (e.g. `max_rounds`). On top of those, **
 The parent searchpoint was selected for measured reasons. `l1_generate` mutates a pipeline-configuration field only with cause:
 
 - stall-driven escalation,
-- sibling-yield evidence on the chosen axis, or
+- critique / axis-memory evidence on the chosen axis, or
 - a refined `task_context` framing from L2.
 
 No data justifying a choice ⇒ do not gamble. Random exploration is reserved for explicit stall.
 
-`l1_generate`'s evidence base lives on its surface:
+`l1_generate`'s evidence base lives on its surface — every citable panel is a same-named DispatchHub injection (no phantom panels; a citable name that never renders invites fabricated citations):
 
-- `parent_panel` — parent composite + per-sample tally + delta to beat.
-- `sibling_yield` — prior round per-axis yield: `axis | n_tried | n_beat_parent | mean_delta`.
-- `escalation_panel` — `stall_rounds`, `last_winner_axis`, `params_unlocked`, `exploration_budget ∈ {tight, normal, wide}`.
+- `critique` — the distiller's compression of the round's failures: `priority_fix` + `failure_highlights` (quoting SAMPLE TRANSCRIPTS) + `suggested_axes`.
+- `escalation_panel` — stall depth + `exploration_budget ∈ {tight, normal, wide}`.
 - `axis_memory` — cross-round AxisIndex digest (`cycle.axes.digest()`); per-axis effect_size vs noise floor.
 
 If a panel field speaks against a mutation, `l1_generate` does not propose it.

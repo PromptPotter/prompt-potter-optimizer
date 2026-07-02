@@ -494,11 +494,17 @@ class LiveDisplay(DerivedView):
         formula_short = self._phase_ctx.get("composite_fitness_formula_short")
         formula_full = self._phase_ctx.get("composite_fitness_formula")
         if formula_short or formula_full:
+            # Compare against the MATCHED origin (origin re-scored on this round's
+            # own subset) — always populated by the winner election (round 0 = full
+            # origin). Under per_round_resubset the round-0 origin composite is a
+            # different subset, so comparing against it reads draw difficulty as
+            # candidate lift; a legitimately 0.0 matched origin is a real floor, not
+            # an absent one, so there is no cross-subset fallback to slip through.
             for line in render_composite_fitness_block(
                 round_result.composite_fitness,
                 dict(round_result.evaluators),
                 formula_short or formula_full,
-                origin=self._phase_ctx.get("origin_composite_fitness"),
+                origin=round_result.matched_origin_composite,
                 use_short_names=bool(formula_short),
             ):
                 self._write(_node_line(line))
