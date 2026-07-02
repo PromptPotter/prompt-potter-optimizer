@@ -17,6 +17,7 @@ from typing import Any
 import httpx
 
 from promptpotter.connectors.protocol import BackendUnreachableError, Connector
+from promptpotter.domain.opt_search_point import RESERVED_PIPELINE_PARAM_KEYS
 from promptpotter.domain.pipeline_schema import NodeType
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ def termnorm_wire_adapter(
 
     wire_overrides: dict[str, dict[str, Any]] = {}
     for k, v in _pp.items():
-        if k == "steps":
+        if k in RESERVED_PIPELINE_PARAM_KEYS:
             continue
         if isinstance(v, dict):
             wire_overrides[k] = v

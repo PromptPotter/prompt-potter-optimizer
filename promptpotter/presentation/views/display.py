@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.domain.opt_search_point import node_config_items
 from promptpotter.domain.rendering import display_fitness
 
 if TYPE_CHECKING:
@@ -356,9 +357,7 @@ def render_pipeline_overrides(
         return ""
 
     node_entries: list[tuple[str, dict[str, Any]]] = []
-    for key, val in pipeline_params.items():
-        if key == "steps" or not isinstance(val, dict):
-            continue
+    for key, val in node_config_items(pipeline_params):
         tunable: dict[str, Any] = {}
         if pipeline_schema:
             node = pipeline_schema.get_node(key)

@@ -14,7 +14,7 @@ from promptpotter.application.optimization.escalation.state import EscalationFSM
 from promptpotter.application.optimization.pobb.elimination import extract_warning_types
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
-from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.opt_search_point import OptSearchPoint, node_config_items
 from promptpotter.domain.results import (
     CritiqueReadout,
     DegradationHealth,
@@ -163,9 +163,7 @@ def _assert_overlay_preserved(
     flips on overlay edits and the wire adapter forwards the overlay. ``Cycle.start``
     must pass ``session.pipeline_params`` (the merged overlay), not a sparse schema view."""
     sp_pp = sp.pipeline_params or {}
-    for node, cfg in (session_pipeline_params or {}).items():
-        if node == "steps" or not isinstance(cfg, dict):
-            continue
+    for node, cfg in node_config_items(session_pipeline_params):
         missing = set(cfg) - set(sp_pp.get(node, {}))
         assert not missing, (
             f"overlay keys stripped from {node}: {sorted(missing)} — "

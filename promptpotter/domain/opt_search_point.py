@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import uuid
+from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -354,6 +355,27 @@ class OptSearchPoint(PromptTemplate):
         return OptSearchPoint(**data)
 
 
+# --- pipeline_params shape (one declared source) ---
+
+RESERVED_PIPELINE_PARAM_KEYS: frozenset[str] = frozenset({"steps"})
+"""Keys in ``pipeline_params`` that are NOT node-config dicts. ``steps`` is the
+wire scaffold (the active-node list every connector's outbound payload reads);
+everything else is a ``{node: {param: value}}`` config block. The single source
+of truth for the "is this a node config or reserved?" question — read this or
+``node_config_items`` instead of re-deriving ``k == "steps" and isinstance(...)``
+at each site."""
+
+
+def node_config_items(pp: dict[str, Any] | None) -> Iterator[tuple[str, dict[str, Any]]]:
+    """Yield ``(node_name, config)`` for each node-config block in *pp*, skipping
+    the reserved wire keys (``steps``) and any non-dict value. The canonical walk
+    over the tunable surface of a ``pipeline_params`` dict."""
+    for k, v in (pp or {}).items():
+        if k in RESERVED_PIPELINE_PARAM_KEYS or not isinstance(v, dict):
+            continue
+        yield k, v
+
+
 # --- Diff helpers (views) ---
 
 
@@ -366,9 +388,7 @@ def _fmt_pp_val(v: object) -> str:
 def flatten_sp_summary(pp: dict[str, Any] | None) -> dict[str, str]:
     """``{node: {param: value}}`` → ``{node.param: value}`` display dict."""
     flat: dict[str, str] = {}
-    for k, v in (pp or {}).items():
-        if k == "steps" or not isinstance(v, dict):
-            continue
+    for k, v in node_config_items(pp):
         for sub_k, sub_v in v.items():
             flat[f"{k}.{sub_k}"] = _fmt_pp_val(sub_v)
     return flat

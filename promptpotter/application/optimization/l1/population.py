@@ -15,7 +15,7 @@ from promptpotter.application.optimization.validators.l1_strict import (
     L1_SCHEMA_COMPLIANCE,
 )
 from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
-from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.opt_search_point import OptSearchPoint, node_config_items
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import (
     CandidateProposal,
@@ -50,8 +50,8 @@ def _merge_pipeline_params(
             merged[k] = v
     if schema:
         _active = set(schema.active_steps)
-        for k in list(merged):
-            if k != "steps" and isinstance(merged[k], dict) and k not in _active:
+        for k, _cfg in list(node_config_items(merged)):
+            if k not in _active:
                 logger.warning("Dropping LLM override for excluded node %r", k)
                 del merged[k]
     return merged

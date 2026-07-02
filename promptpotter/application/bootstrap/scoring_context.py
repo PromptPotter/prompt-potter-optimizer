@@ -11,7 +11,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bootstrap.session import Session
-from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.opt_search_point import OptSearchPoint, node_config_items
 from promptpotter.infrastructure.store import archive_views
 
 if TYPE_CHECKING:
@@ -121,9 +121,7 @@ async def _emit_preflight_and_init_session(
     from promptpotter.domain.phases import CampaignPhase, emit_phase
 
     target_models = tuple(
-        str(v["model"])
-        for v in session.pipeline_params.values()
-        if isinstance(v, dict) and v.get("model")
+        str(v["model"]) for _, v in node_config_items(session.pipeline_params) if v.get("model")
     )
     preflight_warnings = run_preflight_checks(config, dataset, target_models)
     for w in preflight_warnings:

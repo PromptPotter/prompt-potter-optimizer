@@ -31,6 +31,7 @@ from typing import Any
 import httpx
 
 from promptpotter.connectors.protocol import Connector
+from promptpotter.domain.opt_search_point import RESERVED_PIPELINE_PARAM_KEYS
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ def llm_only_wire_adapter(
     payload: dict[str, Any] = {"query": query}
     node_config: dict[str, dict[str, Any]] = {}
     for k, v in (pipeline_params or {}).items():
-        if k == "steps":
+        if k in RESERVED_PIPELINE_PARAM_KEYS:
             continue
         if isinstance(v, dict):
             node_config[k] = v

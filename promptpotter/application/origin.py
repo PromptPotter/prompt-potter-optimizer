@@ -442,15 +442,16 @@ async def prepare_scoring_context(
 
     campaign_rounds: list[dict[str, Any]] = []
     origin_results: list[Any] = []
-    # The origin is scoreable when there is a runnable program — non-empty rendered prose
-    # OR a pipeline that defines node config. An L4 outer origin renders empty (its
-    # meta-prompts inject via the `_optimizer_meta` override channel, not the OSP prose);
-    # its program lives entirely in ``pipeline_params``. Gating on prose alone skipped the
-    # origin pass for L4, leaving round 0 with zero results → no baseline for the election.
-    has_program = bool(resolved_origin.render().strip()) or any(
-        isinstance(v, dict) and v for v in (pipeline_params or {}).values()
-    )
-    if not (campaign_config is not None and svc is not None and dataset and has_program):
+    # Score the origin whenever there is a live run to score it in (session + config +
+    # dataset). We deliberately do NOT sniff the searchpoint shape to guess "is there a
+    # program here?" — that guess (non-empty prose OR a dict-valued pipeline_param)
+    # silently skipped the L4 outer origin, whose prose is empty and whose node configs
+    # are empty because its program IS the inner recursion the connector runs. A silent
+    # skip is indistinguishable downstream from a crash (round 0 lands total=0). An origin
+    # that genuinely cannot be scored is caught LOUD by the round-0 origin gate (total=0 →
+    # critical → halt-and-decide), never hidden here. The remaining guard is the
+    # no-session notebook/test path, which has nothing to score.
+    if not (campaign_config is not None and svc is not None and dataset):
         return resolved_origin, dataset, campaign_rounds, origin_results
 
     from promptpotter.application.scoring.formula import split_scoring_block
