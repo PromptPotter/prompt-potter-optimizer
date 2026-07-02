@@ -19,7 +19,6 @@ import { postCleanupEmpty } from "@/lib/api";
 import type { CampaignLineageCycle } from "@/lib/api";
 import { candidateLabel, liveCandidateId } from "@/lib/candidate-label";
 import {
-  displayFitness,
   groupByRound,
   roundCandidates,
   type HeadlineMetric,
@@ -219,35 +218,38 @@ export function useLineage({
   );
   const detailByCycle: DetailByCycle = useMemo(() => new Map(detailEntries), [detailEntries]);
 
-  // Per-candidate percent-metric overlay, keyed `{cycleId}::{candidateId}`. Settled
-  // cycles serve accuracy only (no composite), so they paint accuracy for both the
-  // accuracy and composite selections; the active cycle paints composite only when
-  // `composite` is selected (else raw accuracy). θ is a separate overlay
-  // (`thetaByKey`) since it is a logit, not a percent. Deliberately NOT
-  // content-stabilized: it updates every poll, but only painted node text reads it.
+  // Per-candidate percent-metric overlay, keyed `{cycleId}::{candidateId}`.
+  // `/lineage` serves `composite_fitness` per candidate (verbatim from the
+  // dashboard round summary), so settled/sibling cycles honor the composite
+  // selection on the SAME basis as the active cycle — one tree, one basis,
+  // nothing recomputed client-side. θ is a separate overlay (`thetaByKey`)
+  // since it is a logit, not a percent. Deliberately NOT content-stabilized:
+  // it updates every poll, but only painted node text reads it.
   const usesComposite = headlineMetric === "composite";
   const valueByKey = useMemo<ReadonlyMap<string, number | null>>(() => {
     const m = new Map<string, number | null>();
-    // The WINNER (lineage spine) paints the round's cumulative frontier — the
-    // cross-round-comparable series the trend plots — so the spine reads as honest
-    // progress, not the per-round subset swing. Losers keep their own subset score.
-    // Only for the accuracy view; the composite expert lens is left as chosen.
+    // Accuracy view: the WINNER (lineage spine) paints the round's cumulative
+    // frontier — the cross-round-comparable series the trend plots — so the spine
+    // reads as honest progress, not the per-round subset swing. Losers keep their
+    // own subset score. Composite view: the served value as chosen (`?? accuracy`
+    // only tolerates rows minted before the field was served).
     for (const c of data?.cycles ?? []) {
       for (const r of c.rounds) {
         r.candidates.forEach((cand, i) => {
           const id = cand.candidate_id || liveCandidateId(r.round, i);
-          const frontier =
-            cand.is_winner && typeof r.cumulative_accuracy === "number"
+          const value = usesComposite
+            ? cand.composite_fitness ?? cand.accuracy
+            : cand.is_winner && typeof r.cumulative_accuracy === "number"
               ? r.cumulative_accuracy
               : cand.accuracy;
-          m.set(`${c.cycle_id}::${id}`, frontier);
+          m.set(`${c.cycle_id}::${id}`, value);
         });
       }
     }
     if (cycleId && dash) {
       for (const row of liveRows) {
         const value = usesComposite
-          ? displayFitness(row.composite, row.accuracy)
+          ? row.composite ?? row.accuracy
           : (row.is_winner ? row.cumulative_accuracy : null) ?? row.accuracy;
         m.set(`${cycleId}::${row.candidate_id}`, value);
       }

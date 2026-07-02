@@ -314,6 +314,11 @@ export interface CampaignLineageCandidate {
   label: string;
   /** Per-candidate accuracy */
   accuracy: number | null;
+  /** The candidate's fitness under the run's active formula (equals accuracy when
+   * no formula was active) — served verbatim from the dashboard round summary
+   * so the lineage tree can honor the composite headline selection on
+   * settled/sibling cycles too, never recomputed client-side. */
+  composite_fitness: number | null;
   /** Final rank within the round */
   rank: number | null;
   /** True for the round's elected winner */

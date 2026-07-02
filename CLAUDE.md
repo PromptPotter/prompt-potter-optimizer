@@ -23,8 +23,8 @@ The line: **origin is the complete start specification; check-in is the resolver
 
 A candidate's fitness is not one fixed number — it depends on the scoring formula you measure it under, so always ask "under which formula?". Two values appear in the data:
 
-- `composite_fitness` — the score under the formula the run actually used (the **active** formula).
-- `accuracy` — the plain correctness rate, independent of any formula. When no active formula is set, fitness falls back to this; that is all `composite_fitness || accuracy` means.
+- `composite_fitness` — the score under the formula the run actually used (the **active** formula). Served already resolved: with no active formula it **equals** `accuracy` (the default per-round formula is plain accuracy), so readers take it verbatim — the composite-or-accuracy rule has one owner, `domain/rendering.py::display_fitness`.
+- `accuracy` — the plain correctness rate, independent of any formula.
 
 A fitness number is also relative to **which samples it was measured over**: a round may score only a measured subset rather than the whole dataset, so comparing two numbers means checking the **mode** — `measured` (the samples that round actually ran) versus `all` (the full dataset) — alongside the formula.
 

@@ -1,4 +1,3 @@
-import { displayFitness } from "@/lib/derivations";
 import { type BarSlot } from "./FitnessChart";
 
 // 1-based rank of each line by value descending; lines with a null value
@@ -50,7 +49,9 @@ export function FitnessRankSummary({
   const lines = bars.map((b) => ({
     key: b.key,
     label: b.label,
-    actual: displayFitness(b.composite, b.accuracy),
+    // Server-resolved fitness; `?? accuracy` only covers in-flight bars whose
+    // composite hasn't been served yet.
+    actual: b.composite ?? b.accuracy,
     whatif: b.whatif,
   }));
   const rankActual = ranks(lines.map((l) => ({ key: l.key, v: l.actual })));

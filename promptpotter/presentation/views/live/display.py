@@ -11,6 +11,7 @@ from promptpotter.application.views import AnyView, InitExitView
 from promptpotter.config.settings import OPTIMIZER_PROMPT_WARN_CHARS
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
+from promptpotter.domain.rendering import round_winner_key
 from promptpotter.domain.results import candidate_label
 from promptpotter.domain.run_records import (
     LLMCallProgressRecord,
@@ -101,6 +102,10 @@ class LiveDisplay(DerivedView):
         self.initial_len = len(self.campaign_rounds)
         self.sample_counter = 0
         self._phase_ctx: dict[str, Any] = {}  # wired by RunCallbacks; shared with phase-view
+        # Live round-leader tracker, ordered by the shared `round_winner_key`
+        # (composite-first, accuracy tie-break) so ★ can't contradict the display
+        # ranking; `_round_best_acc` is kept alongside for the Δ-from-leader line.
+        self._round_best_key: tuple[float, float] | None = None
         self._round_best_acc: float | None = None
         self._round_best_label: str | None = None
         self._round_started_at: float | None = None
@@ -264,6 +269,7 @@ class LiveDisplay(DerivedView):
             self._write(rendered)
         apply_phase(self._core, event, view)
         if event.phase == CampaignPhase.L1_GENERATE and event.event == "enter":
+            self._round_best_key = None
             self._round_best_acc = None
             self._round_best_label = None
             self._round_started_at = time.monotonic()
@@ -413,14 +419,30 @@ class LiveDisplay(DerivedView):
         # Skip invalid + degradation-aborted candidates — partial accuracy can inflate above origin.
         if summary.status != "invalid" and not scores.get("degradation_context"):
             acc = scores.get("accuracy")
+            comp = scores.get("composite_fitness")
             if isinstance(acc, int | float):
-                self._write(self._fmt_round_leader(label, float(acc), origin_acc))
+                self._write(
+                    self._fmt_round_leader(
+                        label,
+                        float(acc),
+                        origin_acc,
+                        float(comp) if isinstance(comp, int | float) else None,
+                    )
+                )
 
-    def _fmt_round_leader(self, label: str, acc: float, origin_acc: float) -> str:
-        """Scoreboard one-liner; ``★ leader`` only when round-best strictly beats origin."""
+    def _fmt_round_leader(
+        self, label: str, acc: float, origin_acc: float, composite: float | None
+    ) -> str:
+        """Scoreboard one-liner; leader ordered by the shared ``round_winner_key``
+        (composite-first) so the live ★ can't contradict the display ranking under an
+        active formula. Point-estimate only — the true election (θ-LCB,
+        ``elect_round_winner``) prints at round close. ``★ leader`` only when
+        round-best strictly beats origin."""
         delta_origin = acc - origin_acc
-        new_round_max = self._round_best_acc is None or acc > self._round_best_acc
+        key = round_winner_key(composite, acc)
+        new_round_max = self._round_best_key is None or key > self._round_best_key
         if new_round_max:
+            self._round_best_key = key
             self._round_best_acc = acc
             self._round_best_label = label
             if delta_origin > 0:

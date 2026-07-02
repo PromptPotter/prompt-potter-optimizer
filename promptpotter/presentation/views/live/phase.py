@@ -6,6 +6,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.domain.rendering import round_winner_key
+from promptpotter.domain.results import is_round_winner
 from promptpotter.presentation.views.display import (
     BOLD,
     GREEN,
@@ -90,7 +92,21 @@ def render_round_stats(
     total = round_result.total
     deprecated = round_result.deprecated
     if total == 0 and round_result.candidate_scores:
-        best = max(round_result.candidate_scores, key=lambda s: s.accuracy)
+        # Stand-in when the round-level rollup is empty: the ELECTED winner's row
+        # (the label the round adopted), falling back to the shared composite-first
+        # display ordering — never a private accuracy-argmax that can star a
+        # candidate the engine didn't elect.
+        best = next(
+            (
+                s
+                for s in round_result.candidate_scores
+                if is_round_winner(s.changes_description, round_result.label)
+            ),
+            max(
+                round_result.candidate_scores,
+                key=lambda s: round_winner_key(s.composite_fitness, s.accuracy),
+            ),
+        )
         hits = best.hits
         total = best.total
         deprecated = 0

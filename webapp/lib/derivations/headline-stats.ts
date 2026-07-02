@@ -17,8 +17,9 @@ import { fmtPct0 } from "@/lib/format";
 // the engine always GATES on difficulty-adjusted ability θ; this just picks what
 // the operator reads (θ is jargon, so it is never the forced default). Seeded
 // from the served `dash.headline_metric` (CampaignConfig.headline_metric),
-// client-overridable. `composite` is served only on the active cycle; settled
-// forks carry accuracy only, so they fall back to it (same as `displayFitness`).
+// client-overridable. `composite_fitness` is served on every settled row
+// (dashboard candidates AND `/lineage` candidates), so all cycles honor the
+// composite selection on one basis.
 export type HeadlineMetric = "accuracy" | "composite" | "ability";
 
 // The toggle's options, in display order, each with the teaching tooltip that
@@ -34,7 +35,7 @@ export const HEADLINE_METRICS: { id: HeadlineMetric; chip: string; title: string
     id: "composite",
     chip: "Comp",
     title:
-      "Composite fitness under the active scoring formula. Served on the active cycle; settled forks (accuracy only) fall back to accuracy.",
+      "Composite fitness under the active scoring formula (equals accuracy when no formula is set).",
   },
   {
     id: "ability",
@@ -62,10 +63,9 @@ export function fmtHeadlineValue(
 }
 
 export interface HeadlineStats {
-  // Current best composite/accuracy, finite or null.
+  // Served rolling-max cumulative_accuracy, finite or null.
   best: number | null;
-  // Origin fitness (composite-or-accuracy, same basis as `best`) behind C0,
-  // finite or null.
+  // Origin's round-0 cumulative_accuracy (same basis as `best`), finite or null.
   origin: number | null;
   // best − origin when both are present; null otherwise.
   delta: number | null;
@@ -75,34 +75,22 @@ function finite(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
-// The one composite-or-accuracy resolution for a single displayed/ranked fitness
-// number: the active-formula `composite_fitness` when present (a real 0 — e.g. a
-// validation-failed candidate — is an honest score and is kept), degrading to plain
-// `accuracy` only on genuine absence (null/undefined → no active formula). Mirrors the
-// backend `display_fitness` (domain/rendering.py); use `??`, never `||`, so the honest 0
-// can't be masked by accuracy on the trend or the what-if rank. Overloaded so a wire
-// round (accuracy always present → number) and a not-yet-scored bar (accuracy nullable →
-// number | null, unranked) both resolve through the same definition.
-export function displayFitness(composite: number | null | undefined, accuracy: number): number;
-export function displayFitness(
-  composite: number | null | undefined,
-  accuracy: number | null | undefined,
-): number | null;
-export function displayFitness(
-  composite: number | null | undefined,
-  accuracy: number | null | undefined,
-): number | null {
-  return composite ?? accuracy ?? null;
-}
+// The composite-or-accuracy rule lives in the backend ONLY (`domain/rendering.py::
+// display_fitness`): every settled row is served with `composite_fitness` already
+// resolved (it equals accuracy when no formula is active), so the webapp reads it
+// verbatim. The few `?? accuracy` sites left in components tolerate in-flight rows
+// whose composite hasn't been served yet — they are not a re-implementation of the
+// rule (use `??`, never `||`, so an honest 0 survives).
 
 export function headlineStats(dash: DashboardSnapshot | null): HeadlineStats {
-  // `best` is the rolling-max composite (server-side, falls back to accuracy
-  // when no active formula). Origin must use the SAME composite-or-accuracy
-  // basis, else `delta` subtracts an accuracy from a composite — a fabricated
-  // number that ChatPane renders as the "pp/$" efficiency chip.
+  // `best` is the server-side rolling max of `rounds[].cumulative_accuracy` — the
+  // incumbent's full-population score (LiveDashboardView._absorb_round_complete is
+  // the sole writer; it is NOT composite-based). Origin must read the SAME
+  // cumulative basis, else `delta` subtracts across bases — a fabricated number
+  // that ChatPane renders as the "pp/$" efficiency chip.
   const best = finite(dash?.best);
   const round0 = (dash?.rounds ?? []).find((r) => r.round === 0);
-  const origin = round0 ? finite(displayFitness(round0.composite_fitness, round0.accuracy)) : null;
+  const origin = round0 ? finite(round0.cumulative_accuracy) : null;
   const delta = best != null && origin != null ? best - origin : null;
   return { best, origin, delta };
 }

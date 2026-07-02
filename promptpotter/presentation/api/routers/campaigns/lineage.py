@@ -55,6 +55,13 @@ class CampaignLineageCandidate(BaseModel):
     candidate_id: str = Field(description="Stable id assigned at L1-score time")
     label: str = Field(default="", description="Short L1-generated description")
     accuracy: float | None = Field(default=None, description="Per-candidate accuracy")
+    composite_fitness: float | None = Field(
+        default=None,
+        description="The candidate's fitness under the run's active formula (equals accuracy "
+        "when no formula was active) — served verbatim from the dashboard round summary so the "
+        "lineage tree can honor the composite headline selection on settled/sibling cycles too, "
+        "never recomputed client-side.",
+    )
     rank: int | None = Field(default=None, description="Final rank within the round")
     is_winner: bool = Field(default=False, description="True for the round's elected winner")
     theta: float | None = Field(
@@ -183,6 +190,7 @@ def _to_lineage_candidate(
     candidate_id: str,
     label: str,
     accuracy: Any,
+    composite_fitness: Any,
     is_winner: bool,
     evaluators: Any,
     criterion: RoundScorer | None,
@@ -191,11 +199,14 @@ def _to_lineage_candidate(
 ) -> CampaignLineageCandidate:
     """Build one lineage row — the shared construction behind the completed-round
     and in-flight mappers. ``rank`` rides ``pos`` (the webapp re-derives the
-    ``C{r}.{n}`` label from position); ``accuracy``/``theta`` are float-coerced or ``None``."""
+    ``C{r}.{n}`` label from position); numeric fields are float-coerced or ``None``."""
     return CampaignLineageCandidate(
         candidate_id=candidate_id,
         label=label,
         accuracy=float(accuracy) if isinstance(accuracy, int | float) else None,
+        composite_fitness=(
+            float(composite_fitness) if isinstance(composite_fitness, int | float) else None
+        ),
         rank=pos,
         is_winner=is_winner,
         lens_value=_lens_value(evaluators, criterion),
@@ -215,6 +226,7 @@ def _summary_candidates(
             candidate_id=str(c.get("candidate_id") or ""),
             label=str(c.get("label") or ""),
             accuracy=c.get("accuracy"),
+            composite_fitness=c.get("composite_fitness"),
             is_winner=bool(c.get("is_winner", False)),
             evaluators=c.get("evaluators"),
             criterion=criterion,
