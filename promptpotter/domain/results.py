@@ -519,7 +519,10 @@ class PayloadOutcome(BaseModel):
     """Per-payload row inside a ``SweepBatchResult``."""
 
     source_file: str
-    status: str  # completed | interrupted | skipped | skipped_already_forked
+    # A ``StopOutcome`` value for attempted forks (success | paused | halted |
+    # failed — the one StopReason classification, never a sweep-private
+    # vocabulary), or the batch bookkeeping states skipped | skipped_already_forked.
+    status: str
     cycle_id: str
 
 

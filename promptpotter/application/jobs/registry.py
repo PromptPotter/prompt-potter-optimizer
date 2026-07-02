@@ -201,8 +201,37 @@ class JobRegistry:
         out.sort(key=lambda j: j.created_at, reverse=True)
         return out
 
+    def _reap_if_orphaned(self, job: Job) -> Job:
+        """Self-heal a ``running`` job whose in-process asyncio task is gone.
+
+        Jobs run inside THIS process (single construction in the server lifespan,
+        ``--workers 1``), so a running-status file with no live task in
+        ``self._tasks`` is a zombie — the producer died without reaching
+        ``mark_finished`` (e.g. a ``BaseException`` that skipped the teardown).
+        Without this, the dead job holds the machine slot (409s every launch)
+        until a server restart, while ``derive_run_phase`` already reads the same
+        cycle as DETACHED — two liveness owners disagreeing. ``pending`` is left
+        alone: the reserve→attach window legitimately has no task yet, and a
+        pre-launch failure releases it via the launcher's ``mark_finished``."""
+        if job.status != "running":
+            return job
+        with self._lock:
+            task = self._tasks.get(job.job_id)
+        if task is not None and not task.done():
+            return job
+        logger.warning("job %s claims running but its task is gone — reaping", job.job_id)
+        self.mark_finished(job.job_id, status="stopped", stop_reason="producer_vanished")
+        return self.get(job.job_id) or job
+
     def list_running(self, *, user_id: str | None = None) -> list[Job]:
-        return [j for j in self.list_all(user_id=user_id) if j.status in ("pending", "running")]
+        out: list[Job] = []
+        for j in self.list_all(user_id=user_id):
+            if j.status not in ("pending", "running"):
+                continue
+            j = self._reap_if_orphaned(j)
+            if j.status in ("pending", "running"):
+                out.append(j)
+        return out
 
     def machine_holder(self, *, exclude_user_id: str) -> Job | None:
         """The oldest still-running job owned by a user other than *exclude_user_id*.

@@ -19,7 +19,7 @@ from promptpotter.application.views import (
     SweepSummaryView,
     render_sweep_summary,
 )
-from promptpotter.domain.phases import StopReason
+from promptpotter.domain.phases import StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.results import PayloadOutcome, SweepBatchResult
 from promptpotter.domain.run_records import ForkSpec, ForkTrigger, OperatorSweepFile
 from promptpotter.infrastructure.store import (
@@ -218,8 +218,11 @@ async def run_sweep_batch(
                     parent_cycle_id=parent_cycle_id,
                 )
 
+        # Per-payload status = the fork's StopOutcome (`stop_reason_outcome`, the one
+        # StopReason classification) — never a sweep-private vocabulary re-encoding
+        # the same fact the fork's finalize already wrote to its index.json.
         if fork_result is None:
-            status_by_source[path.name] = "crashed"
+            status_by_source[path.name] = StopOutcome.FAILED.value
             logger.warning(
                 "Sweep fork init crashed for payload=%s; stub cleaned, halting batch",
                 path.name,
@@ -227,9 +230,11 @@ async def run_sweep_batch(
             interrupted = True
             break
 
+        outcome = stop_reason_outcome(fork_result.stop_reason or StopReason.CRASHED)
+        status_by_source[path.name] = outcome.value
+
         if fork_result.n_rounds == 0:
-            stopped_by_operator = fork_result.stop_reason == StopReason.PAUSED
-            status_by_source[path.name] = "interrupted" if stopped_by_operator else "cleaned"
+            stopped_by_operator = outcome is StopOutcome.PAUSED
             logger.info(
                 "Sweep fork %s never ran a round (payload=%s, stop_reason=%s); cleaned up",
                 new_cycle_id,
@@ -242,9 +247,8 @@ async def run_sweep_batch(
             continue
 
         new_cycle_ids.append(new_cycle_id)
-        if fork_result.stop_reason == StopReason.PAUSED:
+        if outcome is StopOutcome.PAUSED:
             # _run_round_loop catches a pause / Ctrl+C and returns PAUSED — halt the batch.
-            status_by_source[path.name] = "interrupted"
             logger.warning(
                 "Sweep fork %d/%d interrupted: %s (payload=%s) — halting "
                 "batch. Resume the partial fork with `resume` against "
@@ -257,7 +261,6 @@ async def run_sweep_batch(
             )
             interrupted = True
             break
-        status_by_source[path.name] = "completed"
         logger.info(
             "Sweep fork %d/%d complete: %s (payload=%s)",
             len(new_cycle_ids),

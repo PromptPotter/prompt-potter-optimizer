@@ -74,7 +74,8 @@ class SweepStore:
                 continue
             cid = cycle_by_source.get(entry["source_file"], "")
             if cid:
-                entry["status"] = status_by_source.get(entry["source_file"], "completed")
+                # Per-payload status is a StopOutcome value (domain/phases.py).
+                entry["status"] = status_by_source.get(entry["source_file"], "success")
             else:
                 entry["status"] = "skipped"
             entry["cycle_id"] = cid
