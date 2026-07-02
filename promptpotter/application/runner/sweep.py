@@ -61,6 +61,7 @@ async def run_sweep_generation_only(
                     "label": label,
                     "status": "generation_only",
                     "accuracy": 0.0,
+                    "cumulative_accuracy": 0.0,
                     "composite_fitness": 0.0,
                     "hits": 0,
                     "total": 0,

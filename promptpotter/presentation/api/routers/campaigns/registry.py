@@ -78,12 +78,12 @@ class CampaignDetailResponse(CampaignSummary):
     )
 
 
-def _campaign_summary(campaign: Any, session_count: int) -> CampaignSummary:
+def _campaign_summary(campaign: Any, session_count: int, status: str) -> CampaignSummary:
     return CampaignSummary(
         campaign_id=campaign.campaign_id,
         dataset_name=campaign.dataset_name,
         label=campaign.label,
-        status=campaign.status,
+        status=status,
         created_at=campaign.created_at,
         root_cycle_id=campaign.root_cycle_id,
         backend_id=campaign.backend_id,
@@ -217,7 +217,11 @@ def list_campaigns(
     campaigns.sort(key=lambda c: c.created_at, reverse=True)
     return CampaignListResponse(
         campaigns=[
-            _campaign_summary(c, len(store.campaigns.list_sessions(c.campaign_id)))
+            _campaign_summary(
+                c,
+                len(store.campaigns.list_sessions(c.campaign_id)),
+                store.campaigns.latest_session_status(c.campaign_id),
+            )
             for c in campaigns
         ],
         total=len(campaigns),
@@ -260,7 +264,7 @@ def get_campaign(store: StoreDep, campaign_id: str) -> CampaignDetailResponse:
         campaign_id=campaign.campaign_id,
         dataset_name=campaign.dataset_name,
         label=campaign.label,
-        status=campaign.status,
+        status=sessions[-1].status if sessions else "active",
         created_at=campaign.created_at,
         root_cycle_id=campaign.root_cycle_id,
         backend_id=campaign.backend_id,

@@ -392,8 +392,10 @@ a read-out workflow; writes have always landed via the running loop.
 
 The on-disk layout makes the four-entity model literal. Under each
 tenant, `campaigns/{campaign_id}/` is the Campaign directory:
-`campaign.json` (manifest — `dataset_name, label, created_at, status,
-root_cycle_id, root_content_hash, backend_id, config`), `log.md`
+`campaign.json` (manifest — `dataset_name, label, created_at,
+root_cycle_id, root_content_hash, backend_id, config`; identity + config
++ lifecycle intent only — run state is owned per-cycle by
+`index.json::status` and derived on read for campaign surfaces), `log.md`
 (campaign digest — covers every session, its forks, and its rounds),
 `hard_samples.json` (campaign-scope heatmap), and `cycles/{cycle_id}/`
 holding **every** cycle — all N session roots and every fork, diag, and

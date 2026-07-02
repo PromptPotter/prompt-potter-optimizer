@@ -72,10 +72,38 @@ def round_summary(round_data: dict[str, Any]) -> dict[str, Any]:
         "round": round_data["round"],
         "label": round_data["label"],
         "accuracy": round_data["accuracy"],
+        "cumulative_accuracy": round_data["cumulative_accuracy"],
         "hits": round_data["hits"],
         "total": round_data["total"],
         "improved": round_data["improved"],
     }
+
+
+def origin_accuracy_of(index: dict[str, Any]) -> float | None:
+    """The origin's round-0 score, derived from ``rounds[]`` — there is no stored copy.
+
+    Round 0 IS the origin, and every path that (re)scores it — bootstrap, a diag
+    fork's re-measure, the interactive origin-gate rescore — re-emits round 0
+    through ``save_round_file``, so the round row is always fresh. The old
+    top-level ``origin_accuracy`` was stamped once at bootstrap and went stale on
+    a gate rescore. ``None`` until round 0 lands (fresh mint / pre-origin fork)."""
+    rounds = index.get("rounds") or []
+    return next((float(r["accuracy"]) for r in rounds if r.get("round") == 0), None)
+
+
+def _apply_best(data: dict[str, Any]) -> None:
+    """Set the index's ``best_accuracy`` / ``best_round`` from ``data["rounds"]`` — the
+    SINGLE derivation of a cycle's best.
+
+    Best = the round with the highest **full-population** ``cumulative_accuracy`` (the
+    incumbent rescored over every sample probed so far), NOT the round winner's
+    hard-first/PoBB subset ``accuracy`` (a lucky 6/8 subset is 0.75 but not comparable
+    to a full-set round). Mirrors the live dashboard's ``_absorb_round_complete`` so the
+    index and the dashboard headline (``best``) agree by construction. Empty ``rounds``
+    ⇒ the fresh-cycle floor (``0.0`` / ``None``)."""
+    best = max(data["rounds"], key=lambda r: r["cumulative_accuracy"], default=None)
+    data["best_accuracy"] = best["cumulative_accuracy"] if best else 0.0
+    data["best_round"] = best["round"] if best else None
 
 
 def fresh_sibling_index_blob(
@@ -103,8 +131,6 @@ def fresh_sibling_index_blob(
         "rounds": [],
         "n_rounds": 0,
         "best_accuracy": 0.0,
-        "best_round_id": None,
-        "origin_accuracy": parent_index.get("origin_accuracy", 0.0),
         "status": "active",
         "created_at": forked_at,
         "updated_at": forked_at,
@@ -356,10 +382,16 @@ class CampaignStore:
             out.append(campaign)
         return out
 
-    def mark_campaign_finished(self, campaign_id: str, *, status: str, finished_at: str) -> None:
-        if self.load_campaign(campaign_id) is None:
-            return
-        self.update_campaign(campaign_id, {"status": status, "finished_at": finished_at})
+    def latest_session_status(self, campaign_id: str) -> str:
+        """Status of the campaign's most-recent session, derived from its newest
+        root cycle's ``index.json`` — run state is owned per-cycle; ``campaign.json``
+        carries identity/config + lifecycle intent only. ``"active"`` when the
+        campaign has no session yet (check-in)."""
+        roots = self.list_sessions(campaign_id)
+        if not roots:
+            return "active"
+        index = self.load(campaign_id, roots[-1]) or {}
+        return str(index.get("status") or "active")
 
     def _is_active_campaign(self, campaign_id: str) -> bool:
         """Whether *campaign_id* is the tenant's active-session campaign — the live
@@ -482,8 +514,6 @@ class CampaignStore:
             "sibling_kind": sibling_kind(cycle_id),
             "n_rounds": 0,
             "best_accuracy": 0.0,
-            "best_round_id": None,
-            "origin_accuracy": 0.0,
             "rounds": [],
             # Babysat marker: flips True the moment an operator manually
             # intervenes (today: skip-searchpoint), so the cycle is permanently
@@ -624,13 +654,9 @@ class CampaignStore:
         index_path = self._index_path(campaign_id, cycle_id)
         data = read_json(index_path)
 
-        rebuilt = [round_summary(read_json(p)) for p in sorted(survivors)]
-        best = max(rebuilt, key=lambda s: s["accuracy"], default=None)
-
-        data["rounds"] = rebuilt
-        data["n_rounds"] = len(rebuilt)
-        data["best_accuracy"] = best["accuracy"] if best else 0.0
-        data["best_round_id"] = best["round_id"] if best else None
+        data["rounds"] = [round_summary(read_json(p)) for p in sorted(survivors)]
+        data["n_rounds"] = len(data["rounds"])
+        _apply_best(data)
         data["updated_at"] = utcnow_iso()
         write_json(index_path, data)
 
@@ -641,32 +667,31 @@ class CampaignStore:
         *,
         status: str,
         stop_reason: str,
-        best_accuracy: float,
-        best_round: int,
-        n_rounds: int,
         finished_at: str,
         interrupted_round: int | None = None,
         crash_traceback: str | None = None,
         final: dict[str, Any] | None = None,
     ) -> None:
-        """Write terminal status/stop_reason + outcome summary to the cycle index."""
-        from promptpotter.shared.errors import graceful
+        """Write the terminal facts this seam uniquely owns: lifecycle status +
+        the ``final`` winner block.
 
-        # Monotonic round count — a degenerate finalize (n_rounds=0) must not regress real rounds.
-        existing = read_json_optional(self._index_path(campaign_id, cycle_id)) or {}
-        no_advance = n_rounds < int(existing.get("n_rounds") or 0)
+        ``best_accuracy`` / ``best_round`` / ``n_rounds`` are NOT written here — they
+        are owned by the ``rounds[]``-writer (``save_round_file`` → ``_apply_best``) on
+        the origin-inclusive / full-population ``cumulative_accuracy`` basis. The old
+        copy-from-``CycleResult`` here maxed on a different (origin-EXCLUSIVE) round
+        count, so a now-deleted ``no_advance`` guard fired on every origin-bearing
+        cycle and silently dropped the whole block — leaving ``final`` permanently
+        unwritten. ``final`` is written unconditionally now (a crash finalize records a
+        valid crash verdict)."""
+        from promptpotter.shared.errors import graceful
 
         updates: dict[str, Any] = {
             "status": status,
             "stop_reason": stop_reason,
             "finished_at": finished_at,
         }
-        if not no_advance:
-            updates["best_accuracy"] = best_accuracy
-            updates["best_round"] = best_round
-            updates["n_rounds"] = n_rounds
-            if final is not None:
-                updates["final"] = final
+        if final is not None:
+            updates["final"] = final
         # Store partial-round / traceback markers based on what the caller computed
         # (halted_mid_round → interrupted_round; has_traceback → crash_traceback),
         # not by re-deriving from the status string — status is now the precise
@@ -696,7 +721,7 @@ class CampaignStore:
                     "status": data["status"],
                     "n_rounds": data["n_rounds"],
                     "best_accuracy": data["best_accuracy"],
-                    "origin_accuracy": data["origin_accuracy"],
+                    "origin_accuracy": origin_accuracy_of(data),
                     "created_at": data["created_at"],
                     "updated_at": data["updated_at"],
                     "parent_session_id": data.get("parent_session_id", ""),
@@ -847,18 +872,6 @@ class CampaignStore:
         ledger record via ``ForkSpec.trigger``.
         """
         parent_index = read_json_optional(self._index_path(campaign_id, parent_cycle_id)) or {}
-        best_acc = max(
-            (float(t.get("accuracy", 0.0)) for t in surviving_rounds),
-            default=0.0,
-        )
-        best_round_id = next(
-            (
-                t.get("round_id")
-                for t in surviving_rounds
-                if float(t.get("accuracy", 0.0)) == best_acc
-            ),
-            None,
-        )
         index = {
             **parent_index,
             "parent_cycle_id": parent_cycle_id,
@@ -867,11 +880,10 @@ class CampaignStore:
             "forked_at": forked_at,
             "rounds": list(surviving_rounds),
             "n_rounds": len(surviving_rounds),
-            "best_accuracy": best_acc,
-            "best_round_id": best_round_id,
             "status": "resumed",
             "updated_at": forked_at,
         }
+        _apply_best(index)
         # Identity is the directory name — never inherit a stored id from the parent.
         index.pop("cycle_id", None)
         index.pop("campaign_id", None)
@@ -939,11 +951,7 @@ class CampaignStore:
         data["rounds"] = [t for t in data["rounds"] if t.get("round") != round_num]
         data["rounds"].append(round_summary(round_data))
         data["n_rounds"] = len(data["rounds"])
-
-        if round_data["accuracy"] > data.get("best_accuracy", 0.0):
-            data["best_accuracy"] = round_data["accuracy"]
-            data["best_round_id"] = round_id
-
+        _apply_best(data)
         data["updated_at"] = utcnow_iso()
         write_json(index_path, data)
 

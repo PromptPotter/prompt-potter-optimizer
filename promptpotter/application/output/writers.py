@@ -42,6 +42,7 @@ from promptpotter.application.views import (
 )
 from promptpotter.domain.rendering import format_l1_critique_for_prompt
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
+from promptpotter.infrastructure.store.campaign_store.store import origin_accuracy_of
 from promptpotter.infrastructure.store.io import read_json_tolerant, write_json, write_text
 from promptpotter.shared.errors import graceful
 
@@ -252,7 +253,7 @@ def from_disk_log(
         parent_session_id=index.get("parent_session_id"),
         status=str(index.get("status", "active")),
         stop_reason=str(final.get("stop_reason") or index.get("stop_reason") or "(running)"),
-        origin_accuracy=float(index.get("origin_accuracy", 0.0)),
+        origin_accuracy=origin_accuracy_of(index) or 0.0,
         best_accuracy=float(index.get("best_accuracy", 0.0)),
         best_round=index.get("best_round"),
         rounds_completed=int(index.get("n_rounds", 0)),
@@ -341,7 +342,7 @@ def _fork_summary_from_index(fork_index: dict[str, Any]) -> ForkSummaryView:
         mode=str(final.get("mode") or fork_index.get("sibling_kind") or ""),
         status=str(fork_index.get("status", "active")),
         best_accuracy=float(fork_index.get("best_accuracy", 0.0)),
-        origin_accuracy=float(fork_index.get("origin_accuracy", 0.0)),
+        origin_accuracy=origin_accuracy_of(fork_index) or 0.0,
         n_rounds=int(fork_index.get("n_rounds", 0) or 0),
         stop_reason=str(final.get("stop_reason") or fork_index.get("stop_reason") or ""),
         finished_at=final.get("finished_at") or fork_index.get("finished_at"),

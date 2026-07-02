@@ -706,7 +706,7 @@ def _finalize_run(
     emitter = observers.dashboard
     # A pause is an operator interrupt that exits the worker but leaves the cycle ACTIVE and
     # resumable — NOT terminal. Skip every terminal-marking write (mark_finished /
-    # mark_campaign_finished / mark_stopped) so index.json keeps no `finished_at` and
+    # mark_stopped) so index.json keeps no `finished_at` and
     # derive_run_phase keeps reading the PAUSED the loop already declared off `pause.flag`.
     # The partial round is still drained (below) so the operator sees where it paused.
     if session.state.cycle_id and not is_paused:
@@ -731,13 +731,16 @@ def _finalize_run(
         rounds_to_95 = next((r.round for r in rounds if r.accuracy >= 0.95), None)
         final_block: dict[str, Any] = {
             "stop_reason": stop_reason,
-            "final_accuracy": cycle_result.best_accuracy,
             "rounds_to_95": rounds_to_95,
             "prompt_hashes": compute_optimizer_prompt_hashes(),
             "origin_composite_fitness": (rounds[0].matched_origin_composite if rounds else 0.0),
             "mode": "sweep" if sweep else "full",
             # The winner artifact, serialized for the disk readers: log.md's FinalWinnerView
-            # (writers.py) fetches these from `final`.
+            # (writers.py) fetches these from `final`. Basis: the COMPOSITE-fitness high-water
+            # SP (cycle.tracking) — the engine's adoption objective — which may name a
+            # different round than the index's top-level `best_accuracy`/`best_round`
+            # (`_apply_best`, cumulative-accuracy argmax). "How good did it get" reads the
+            # top-level fields; there is deliberately no accuracy scalar duplicated here.
             "winner_prompt_fields": cycle_result.winner_prompt_fields,
             "winner_pipeline_params": cycle_result.winner_pipeline_params,
         }
@@ -746,20 +749,11 @@ def _finalize_run(
             session.state.cycle_id,
             status=cycle_status,
             stop_reason=stop_reason,
-            best_accuracy=cycle_result.best_accuracy,
-            best_round=cycle_result.best_round,
-            n_rounds=cycle_result.n_rounds,
             finished_at=cycle_result.finished_at,
             interrupted_round=interrupted_round,
             crash_traceback=crash_traceback,
             final=final_block,
         )
-        if session.campaign_id:
-            session.store.campaigns.mark_campaign_finished(
-                session.campaign_id,
-                status=cycle_status,
-                finished_at=cycle_result.finished_at,
-            )
     # Drain AFTER mark_stopped so dashboard.json's stopped state is in place before audit settles.
     # `_halted_mid_round` threads `"interrupted": true` into partial round_NNNN.json — true
     # for both Ctrl+C and uncaught-exception teardowns. The operator-facing

@@ -43,7 +43,6 @@ def next_resume_round(round_summaries: list[dict[str, Any]]) -> int:
 def bootstrap_cycle(
     session: Session,
     origin_jsp: JobSearchPoint,
-    origin_accuracy: float,
     dataset: list[Sample],
     cycle_id_override: str | None,
     *,
@@ -70,9 +69,9 @@ def bootstrap_cycle(
         store.rewind_to_round(campaign_id, resolved, resume_from_round_override)
     existing = store.load(campaign_id, resolved)
     if existing is not None:
-        # Diag forks re-measure against their own JSP; refresh on drift from inherited value.
-        if existing.get("origin_accuracy") != origin_accuracy:
-            store.update(campaign_id, resolved, {"origin_accuracy": origin_accuracy})
+        # No origin_accuracy stamp here — the index derives it from rounds[0]
+        # (`origin_accuracy_of`); any re-measure re-emits round 0 through
+        # emit_origin_round → save_round_file, so the row is always fresh.
         return resolved, next_resume_round(existing.get("rounds", []))
     return resolved, 1
 
@@ -183,7 +182,6 @@ def _build_cycle_and_bootstrap(
     resolved_cycle_id, resumed_from_round = bootstrap_cycle(
         session,
         origin_jsp,
-        origin.origin_acc,
         dataset,
         cycle_id,
         resume_from_round_override=resume_from_round_override,

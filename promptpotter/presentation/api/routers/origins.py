@@ -35,6 +35,7 @@ from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.store import DatasetAccessError, Stores, readable_dataset_dir
+from promptpotter.infrastructure.store.campaign_store.store import origin_accuracy_of
 from promptpotter.infrastructure.store.dataset_access import list_readable_datasets
 from promptpotter.infrastructure.store.io import read_json
 from promptpotter.presentation.api.deps import StoreDep
@@ -95,12 +96,8 @@ def _campaign_backed_origins(store: Stores) -> list[OriginEntry]:
         accs = [
             a
             for c in group
-            if isinstance(
-                a := (store.campaigns.load(c.campaign_id, c.root_cycle_id) or {}).get(
-                    "origin_accuracy"
-                ),
-                (int, float),
-            )
+            if (a := origin_accuracy_of(store.campaigns.load(c.campaign_id, c.root_cycle_id) or {}))
+            is not None
         ]
         out.append(
             OriginEntry(

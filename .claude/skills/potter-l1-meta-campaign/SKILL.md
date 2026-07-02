@@ -168,7 +168,7 @@ Append one `screen` line per scored candidate to `log.jsonl`. Drop completed fro
 
 For each candidate in `pending_full` whose full cycle has `final.stop_reason ∈ {"max_rounds", "goal_reached", "infinite_stall"}` and whose Phase-2 `review` entry was `healthy` (non-healthy full cycles already halted the loop in Phase 2; if you reach this branch for a non-healthy cycle, it's a defect — surface it):
 
-Read `campaigns/{cycle_id}/index.json::final.{rounds_to_95, final_accuracy}` and `final.{prompt_id}_hash`.
+Read `campaigns/{cycle_id}/index.json::final.rounds_to_95`, the top-level `index.json::best_accuracy` (the cycle's best — owned by the rounds[]-writer, cumulative-accuracy basis; `final` deliberately carries no accuracy scalar), and `final.{prompt_id}_hash`. Below, `final_accuracy` means that top-level `best_accuracy`.
 
 Mode-aware verdict:
 
@@ -276,7 +276,7 @@ ls    .promptpotter/meta_campaigns/l1_generate/proposed_edits/
 | Round trace (`accuracy`, `candidate_scores`, `origin`, `critique`, `lineage.source`) | `{cycle_dir}/rounds/round_NNNN.json` |
 | Cycle completeness (authoritative) | `{cycle_dir}/index.json::final.stop_reason ∈ {"max_rounds", "goal_reached", "infinite_stall"}` — **not** the outer `status` field |
 | Cycle L1 hash (family key) | `{cycle_dir}/index.json::final.prompt_hashes.l1_generate` |
-| Cycle index summary (`final.{rounds_to_95, final_accuracy, prompt_hashes, stop_reason}`, `fork.trigger`, `parent_cycle_id`) | `{cycle_dir}/index.json` |
+| Cycle index summary (top-level `best_accuracy`; `final.{rounds_to_95, prompt_hashes, stop_reason}`, `fork.trigger`, `parent_cycle_id`) | `{cycle_dir}/index.json` |
 | Per-round audit (L1 variants, validator outcomes — fuel for `render_review.py`) | `{cycle_dir}/.runtime/cache/rounds/round_NNNN.json` (forks created at divergence may have an empty audit dir — pass parent's via `--audit-dir`) |
 | Sweep payloads | `datasets/{name}/sweep/NN_*.json` (skill-authored drafts in `sweep/proposed/`) |
 | Meta-campaign state + log | `.promptpotter/meta_campaigns/{prompt_id}/{state.json,log.jsonl}` |

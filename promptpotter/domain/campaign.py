@@ -20,18 +20,19 @@ from pydantic import BaseModel, ConfigDict, Field
 class Campaign(BaseModel):
     """Frozen manifest for one optimization campaign — ``campaign.json``.
 
-    Two orthogonal status surfaces:
+    Identity + config + operator visibility intent ONLY — no run state. Run
+    state is owned per-cycle (``index.json::status`` + ``run_phase``); campaign
+    surfaces derive "how is this campaign doing" from its cycles on read (the
+    old stored ``status``/``finished_at`` were overwritten by whichever cycle —
+    root, fork, sweep, diag — finalized last, and never reset on resume).
 
-    * ``status`` / ``finished_at`` — *session run state* (``"active"`` while a
-      session is running, ``"finished"`` / ``"paused"`` after teardown).
-      Set by the runner.
-    * ``lifecycle_status`` / ``lifecycle_changed_at`` / ``lifecycle_reason`` —
-      *operator visibility intent*. ``"archived"`` hides from the default
-      sidebar; ``"deleted"`` is soft — data stays on disk so measurements
-      still cache-hit for siblings. ``"checkin"`` is a campaign still authoring
-      its origin (minted on first ingest action, no loop yet) — it flips to
-      ``"active"`` at Start; ``root_content_hash`` / ``config`` are empty until
-      then.
+    ``lifecycle_status`` / ``lifecycle_changed_at`` / ``lifecycle_reason`` =
+    *operator visibility intent*. ``"archived"`` hides from the default
+    sidebar; ``"deleted"`` is soft — data stays on disk so measurements
+    still cache-hit for siblings. ``"checkin"`` is a campaign still authoring
+    its origin (minted on first ingest action, no loop yet) — it flips to
+    ``"active"`` at Start; ``root_content_hash`` / ``config`` are empty until
+    then.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -40,8 +41,6 @@ class Campaign(BaseModel):
     dataset_name: str
     label: str = ""
     created_at: str
-    status: str = "active"
-    finished_at: str = ""
     root_cycle_id: str
     root_content_hash: str = ""
     optimizer_prompt_hash: str = ""

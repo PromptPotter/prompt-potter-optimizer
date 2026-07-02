@@ -46,12 +46,15 @@ def resolve_resume_state(
     round-pointer self-heal. Origin rides ``rounds[0]`` like any round, so the
     seeded ``rounds`` already carries it — no separate origin reconciliation.
 
-    ``best`` is the rolling-max composite for the active cycle. The prior
-    ``dashboard.json`` may hold a number from an earlier run. That number is
-    not surfaced until the active cycle has produced an on-disk round to back
-    it; otherwise every percentage chip shows a value the loop will never
-    confirm. The stale ``round`` pointer is self-healed in the same pass — both
-    signals depend on ``disk_round``.
+    ``best`` is re-derived from the SURVIVING trajectory — the max over
+    ``rounds[].cumulative_accuracy``, the same derivation as the cycle index's
+    ``_apply_best`` — never trusted from the prior scalar. The live writer's
+    rolling max is monotonic, so a stale high-water from a rewound-away round
+    would otherwise survive forever and disagree with
+    ``index.json::best_accuracy``. Rounds ``>= resumed_from_round`` are about
+    to be overwritten (the view clamps them at L1_GENERATE enter), so they
+    don't back the headline. The stale ``round`` pointer is self-healed in the
+    same pass.
     """
     resume_from = read_json_tolerant(seed_dir / "dashboard.json")
     if not isinstance(resume_from, dict):
@@ -60,8 +63,15 @@ def resolve_resume_state(
     disk_round = _max_round_on_disk(active_cycle_dir / "rounds")
     if disk_round > int(resume_from.get("round") or 0):
         resume_from["round"] = disk_round
-    if disk_round == 0 or (resumed_from_round is not None and max(resumed_from_round - 1, 0) == 0):
-        resume_from["best"] = 0.0
+    surviving = [
+        r
+        for r in resume_from.get("rounds") or []
+        if isinstance(r, dict)
+        and (resumed_from_round is None or int(r.get("round") or 0) < resumed_from_round)
+    ]
+    resume_from["best"] = max(
+        (float(r.get("cumulative_accuracy") or 0.0) for r in surviving), default=0.0
+    )
     return resume_from
 
 

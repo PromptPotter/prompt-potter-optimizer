@@ -97,7 +97,10 @@ The persisted world is a four-entity containment hierarchy
     **measurement** produced by scoring the origin, emitted as round 0. It
     is *downstream of* the origin, **not part of its definition**; say
     "the origin's round-0 score", never equate it with the origin itself.
-    Scoring step: `establish_campaign_origin` → `emit_origin_round`.
+    Scoring step: `establish_campaign_origin` → `emit_origin_round`. Persisted
+    solely as `rounds[0]` — no separate stored field; readers derive it via
+    `origin_accuracy_of` (`campaign_store/store.py`), so a gate rescore that
+    re-emits round 0 can never leave a stale copy behind.
 - **Campaign** — one declared optimization effort: a dataset, a
   pipeline origin, context text, and the optimizer meta-prompts it runs
   under. A first-class entity holding one session root + its fork/diag/

@@ -36,7 +36,7 @@ Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [o
   projects/{tenant_id}/
     sessions/{session_id}/session.json
     campaigns/{campaign_id}/            # {dataset}__{rand6_hex}, fresh per `new`
-      campaign.json                    # manifest (dataset, status, config snapshot, declaration hashes)
+      campaign.json                    # manifest (dataset, config snapshot, declaration hashes — no run state)
       log.md                           # campaign digest — session + forks + rounds + heatmap
       hard_samples.json                # campaign-scope hard-sample artifact
       cycles/{cycle_id}/               # session root + forks + diags + sweeps, ALL FLAT
@@ -61,7 +61,7 @@ Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [o
 
 | File | Lives at | Content |
 |------|----------|---------|
-| `campaign.json` | campaign dir | Manifest: dataset, label, status, `root_cycle_id`, declaration hashes, backend, and the frozen `CampaignConfig` snapshot (single owner — no per-cycle copies). |
+| `campaign.json` | campaign dir | Manifest: dataset, label, `root_cycle_id`, declaration hashes, backend, lifecycle intent, and the frozen `CampaignConfig` snapshot (single owner — no per-cycle copies). Run state is per-cycle (`index.json::status`), derived on read for campaign surfaces. |
 | `dashboard.json` | the cycle's dir | Live per-cycle scalars: round, origin, best, candidates, counters. One stream per cycle. Post-mortem `stop_reason` is in `index.json`, not here. |
 | `log.md` / `hard_samples.json` (campaign) | campaign dir | Campaign digest + campaign-scope hard-sample artifact (across all its cycles). |
 | `index.json` | per cycle | `pipeline_params`, `cycle_id`, `parent_cycle_id`/`sibling_kind`/`sweep_batch_id` (branches), `trials[]`, `final` block (winner + stop_reason). |

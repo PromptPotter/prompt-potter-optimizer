@@ -106,13 +106,13 @@ The fork's own dir holds its per-cycle audit (`index.json`, `log.md`, `rounds/`,
 ## Where results land
 
 - `campaigns/<cycle_id>/log.md` — rendered per-round digest (status, per-round critique / L2 brief / changes, hard-samples heatmap, final winner). Regenerated every round-complete + finalize.
-- `campaigns/<cycle_id>/index.json::final` — structured form: `winner_prompt_fields`, `winner_pipeline_params`, `best_accuracy`, `origin_accuracy`, `stop_reason`.
+- `campaigns/<cycle_id>/index.json::final` — structured form: `winner_prompt_fields`, `winner_pipeline_params`, `stop_reason`, `mode`. The cycle's best score lives top-level (`index.json::best_accuracy` / `best_round`), not inside `final`.
 
 ## Stopping
 
 A campaign stops when: round limit reached, perfect accuracy, or Ctrl+C. First Ctrl+C finishes the in-flight call and saves; second force-quits.
 
-After it stops: best config in `index.json::final::winner`; per-round digest in `log.md`; live state in `dashboard.json`. Open these directly — there is no read CLI.
+After it stops: best config in `index.json::final` (`winner_prompt_fields` / `winner_pipeline_params`); per-round digest in `log.md`; live state in `dashboard.json`. Open these directly — there is no read CLI.
 
 ## Resuming and rewinding
 

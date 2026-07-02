@@ -78,7 +78,7 @@ Committed payloads: `datasets/{focus}/sweep/NN_*.json`. Skill drafts: `sweep/pro
 
 ### Phase 5 - Promote
 
-`promote_accept | promote_reject`. early/plateau: `rounds_to_95 <= parent` or `final_accuracy > parent + epsilon_lift`. bridge: both datasets win. portfolio: mean lift > 0, no per-dataset regression > epsilon_regression=0.05.
+`promote_accept | promote_reject`. early/plateau: `rounds_to_95 <= parent` or `final_accuracy > parent + epsilon_lift` (`final_accuracy` = the cycle index's top-level `best_accuracy`; `final` carries no accuracy scalar). bridge: both datasets win. portfolio: mean lift > 0, no per-dataset regression > epsilon_regression=0.05.
 
 ### Phase 6 - Record
 

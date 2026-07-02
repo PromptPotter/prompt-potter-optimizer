@@ -19,6 +19,7 @@ from promptpotter.infrastructure.store import (
     cycle_dir_for,
     read_active_pointer,
 )
+from promptpotter.infrastructure.store.campaign_store.store import origin_accuracy_of
 from promptpotter.infrastructure.store.io import read_json_tolerant, validate_path_component
 from promptpotter.infrastructure.store.paths import sibling_kind
 from promptpotter.infrastructure.store.stores import Stores
@@ -61,7 +62,6 @@ class CycleRoundEntry(BaseModel):
 
 class CycleDetailResponse(CycleSummary):
     backend_id: str = Field(default="", description="Backend this cycle optimizes against")
-    best_round_id: str | None = Field(default=None, description="Round id of the best round")
     rounds: list[CycleRoundEntry] = Field(description="Ordered round summaries")
 
 
@@ -136,15 +136,10 @@ def get_cycle(store: StoreDep, campaign_id: str, cycle_id: str) -> CycleDetailRe
             if isinstance(index.get("best_accuracy"), int | float)
             else None
         ),
-        origin_accuracy=(
-            float(index["origin_accuracy"])
-            if isinstance(index.get("origin_accuracy"), int | float)
-            else None
-        ),
+        origin_accuracy=origin_accuracy_of(index),
         created_at=str(index.get("created_at") or ""),
         updated_at=str(index.get("updated_at") or ""),
         backend_id=str((index.get("header") or {}).get("backend_id") or ""),
-        best_round_id=index.get("best_round_id"),
         rounds=_round_summaries(index),
     )
 

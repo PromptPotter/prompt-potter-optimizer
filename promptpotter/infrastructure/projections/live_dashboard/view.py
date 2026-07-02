@@ -504,10 +504,11 @@ class LiveDashboardView(DerivedView):
             # `round:display` is the sole growth site.
             s.rounds = [r for r in s.rounds if r.round < new_round]
 
-        # Mirror origin/best/round into the shared core for LiveDisplay parity.
+        # Mirror origin/round into the shared core for LiveDisplay parity. The core's
+        # ``best_acc`` (winner's hard-first SUBSET score) must NOT feed ``s.best`` —
+        # ``_absorb_round_complete`` is the sole ``s.best`` writer, on the honest
+        # full-population cumulative basis.
         apply_phase(self._core, event, view)
-        if self._core.best_acc > s.best:
-            s.best = self._core.best_acc
 
     def _update_sample_markers(self, ci: int, ct: int, qi: int, qt: int) -> None:
         s = self.state
