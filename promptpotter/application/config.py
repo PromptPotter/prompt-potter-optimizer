@@ -124,6 +124,20 @@ class EliminationMechanisms(BaseModel):
             "mathematically catch up. Fires before the ε math."
         ),
     )
+    equivalence_elimination: bool = Field(
+        True,
+        description=(
+            "Practical-equivalence (futility) stop: abort a candidate once it is "
+            "improbable (< `pobb_epsilon`, at the candidate's OWN observed hit rate) "
+            "that it will clear the round's ADOPTION bar — the seed's hits plus "
+            "`improvement_threshold`. Kills 'moderately the same' candidates that a "
+            "loser-only gate lets ride to the full budget: a tie can never be adopted, "
+            "so confirming it on the whole panel is wasted spend. The probabilistic "
+            "sibling of `deterministic_dominance` (same paired-hit arithmetic on the "
+            "shared sample universe, observed rate instead of the optimistic rate=1 "
+            "corner, adoption bar instead of the bare seed)."
+        ),
+    )
     degradation_fatal_fastpath: bool = Field(
         True,
         description=(

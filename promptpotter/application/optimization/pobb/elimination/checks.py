@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import Counter
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -12,7 +13,7 @@ from promptpotter.application.optimization.pobb.elimination.classification impor
     extract_warning_types,
     is_deprecated,
 )
-from promptpotter.application.scoring.metrics import elimination_p_best
+from promptpotter.application.scoring.metrics import binom_sf, elimination_p_best
 from promptpotter.config.settings import POBB_DEFAULT_EPSILON
 from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
 from promptpotter.domain.validators import StopRule
@@ -143,6 +144,12 @@ class PoBBConfig:
     epsilon_elimination: bool = True
     deterministic_dominance: bool = True
     leader_lock_in: bool = False
+    equivalence_elimination: bool = True
+    # The round's ADOPTION bar delta (OptimizationConfig.improvement_threshold): a
+    # candidate must beat the seed by this to be crowned, so a candidate that
+    # probably won't reach seed+this is futile. 0.0 ⇒ bar == seed (equivalence gate
+    # reduces to "probably can't beat the seed").
+    improvement_threshold: float = 0.0
 
 
 class PoBBCheck:
@@ -171,6 +178,8 @@ class PoBBCheck:
         self.epsilon_elimination = config.epsilon_elimination
         self.deterministic_dominance = config.deterministic_dominance
         self.leader_lock_in = config.leader_lock_in
+        self.equivalence_elimination = config.equivalence_elimination
+        self.improvement_threshold = config.improvement_threshold
         self.n_samples = n_samples
         # Per-prior per-sample HIT (not fitness): the θ elimination fit is over binary
         # outcomes, and ``mean(hit)`` is also what the dominance check counts.
@@ -300,6 +309,17 @@ class PoBBCheck:
             if dominance_signal is not None:
                 return dominance_signal
 
+        # Practical-equivalence futility: abort when — at the candidate's OWN observed
+        # hit rate — it is improbable (< ε) to clear the round's adoption bar
+        # (seed hits + improvement margin). The probabilistic sibling of dominance;
+        # catches "moderately the same" candidates a loser-only gate rides to full budget.
+        if self.equivalence_elimination:
+            equivalence_signal = self._equivalence_check(
+                candidate_hits, candidate_idx, n_total_candidates
+            )
+            if equivalence_signal is not None:
+                return equivalence_signal
+
         # Exclude priors with sample-set gaps rather than substitute — the θ comparison
         # pairs each prior to the candidate on the candidate's exact samples.
         paired_priors: dict[str, list[bool]] = {}
@@ -414,6 +434,80 @@ class PoBBCheck:
                     "seed_total_hits": seed_total_hits,
                     "budget": budget,
                     "remaining": remaining,
+                },
+            },
+            candidate_idx,
+            n_total_candidates,
+        )
+
+    def _equivalence_check(
+        self,
+        candidate_hits: list[bool],
+        candidate_idx: int,
+        n_total_candidates: int,
+    ) -> EscalationSignal | None:
+        """Abort when it is improbable (< ε, at the candidate's OWN observed rate) that
+        it clears the round's ADOPTION bar — ``seed_total_hits + ceil(threshold·budget)``.
+
+        The probabilistic sibling of ``_dominance_check``: dominance is the optimistic
+        rate=1 certainty corner against the bare seed; this is the observed-rate binomial
+        test against ``seed + improvement margin``. A candidate that can at best TIE the
+        seed can never be crowned (adoption needs the margin), so confirming it on the
+        full panel is wasted spend. Same paired precondition as dominance — an explicit
+        ``_sample_universe`` AND full seed coverage on it; comparison is raw HITS on the
+        shared universe, so it stays valid without the θ fit.
+        """
+        if not self.prior_ids:
+            return None
+        seed_id = self.prior_ids[0]
+        seed_full = self.priors_by_sample.get(seed_id, {})
+        universe = self._sample_universe
+        if not universe or not all(sid in seed_full for sid in universe):
+            return None
+        budget = len(universe)
+        k = len(candidate_hits)
+        if k <= 0 or k >= budget:
+            return None
+        seed_total_hits = sum(1 for sid in universe if seed_full[sid])
+        margin = math.ceil(self.improvement_threshold * budget)
+        adoption_bar = seed_total_hits + margin
+        cand_hits = sum(1 for h in candidate_hits if h)
+        need = adoption_bar - cand_hits
+        if need <= 0:
+            return None  # already clears the bar on hits banked — keep measuring
+        remaining = budget - k
+        # Laplace-smoothed rate (Beta(1,1) posterior mean), NOT the raw point rate:
+        # a candidate at 0/k would give p=0 and binom_sf(_, ≥1, 0)=0 — a pathological
+        # "certainly can't clear the bar" that fires on ANY 0-hit candidate even when
+        # the seed itself never hits (the L4-outer / target-unreachable regime, where
+        # the real signal is composite fitness, not the near-degenerate hit vector).
+        # Smoothing keeps the gate conservative there (self-disables) while still
+        # firing on genuine losers and tail-exhausted ties.
+        rate = (cand_hits + 1) / (k + 2)
+        p_clear = binom_sf(remaining, need, rate)
+        if p_clear >= self.epsilon:
+            return None
+        return _eliminate(
+            self.name,
+            {
+                "queries_scored": k,
+                "total_samples": self.n_samples,
+                "n_priors": len(self.prior_ids),
+                "p_best": 0.0,
+                "epsilon": float(self.epsilon),
+                "p_best_snapshot": {},
+                "leader_id": seed_id,
+                "gate": "equivalence",
+                "equivalence": {
+                    "seed_total_hits": seed_total_hits,
+                    "adoption_bar": adoption_bar,
+                    "margin": margin,
+                    "budget": budget,
+                    "cand_hits": cand_hits,
+                    "remaining": remaining,
+                    "observed_rate": rate,
+                    "need": need,
+                    "p_clear": p_clear,
                 },
             },
             candidate_idx,

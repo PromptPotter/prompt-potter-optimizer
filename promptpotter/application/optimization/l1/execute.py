@@ -128,6 +128,8 @@ async def execute_round(
                 epsilon_elimination=opt.mechanisms.elimination.epsilon_elimination,
                 deterministic_dominance=opt.mechanisms.elimination.deterministic_dominance,
                 leader_lock_in=opt.mechanisms.elimination.leader_lock_in,
+                equivalence_elimination=opt.mechanisms.elimination.equivalence_elimination,
+                improvement_threshold=opt.improvement_threshold,
             ),
             round_num=round_num,
             yield_stats=yield_stats,

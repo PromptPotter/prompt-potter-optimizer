@@ -153,6 +153,7 @@ _KNOB_ESTIMANDS: dict[str, frozenset[Estimand]] = {
         {Estimand.STOPPING}
     ),
     "optimization.mechanisms.elimination.leader_lock_in": frozenset({Estimand.STOPPING}),
+    "optimization.mechanisms.elimination.equivalence_elimination": frozenset({Estimand.STOPPING}),
 }
 
 # Hardcoded statistical constants that participate in couplings — not config

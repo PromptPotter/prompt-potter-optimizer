@@ -38,6 +38,7 @@ if TYPE_CHECKING:
 __all__ = [
     "Evaluator",
     "all_evaluators",
+    "binom_sf",
     "compute_composite_fitness",
     "count_degraded_samples",
     "elect_round_winner",
@@ -422,6 +423,23 @@ def elect_round_winner(
             best_rank = rank
             winner_id = cid
     return winner_id, abilities
+
+
+def binom_sf(n: int, k: int, p: float) -> float:
+    """``P(X >= k)`` for ``X ~ Binomial(n, p)`` — exact survival, ``n`` small (≤ the
+    per-round sample budget). Shared by the live practical-equivalence gate
+    (``PoBBCheck._equivalence_check``) and its resume replayer so both re-derive the
+    futility cut bit-for-bit (the same live/replay-determinism contract that keeps
+    ``elimination_p_best`` closed-form).
+    """
+    if k <= 0:
+        return 1.0
+    if k > n:
+        return 0.0
+    from math import comb
+
+    q = 1.0 - p
+    return sum(comb(n, j) * p**j * q ** (n - j) for j in range(k, n + 1))
 
 
 def elimination_p_best(

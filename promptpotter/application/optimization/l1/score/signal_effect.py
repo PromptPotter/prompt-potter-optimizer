@@ -139,6 +139,11 @@ def decode_signal_effect(
             "n_priors": int(cr.get("n_priors", 0)),
             "leader_locked": leader_locked_loose,
         }
+        eq_block = cr.get("equivalence")
+        if cr.get("gate") == "equivalence" and eq_block:
+            elim_ctx["gate"] = "equivalence"
+            elim_ctx["p_clear"] = float(eq_block.get("p_clear", 0.0))
+            elim_ctx["adoption_bar"] = int(eq_block.get("adoption_bar", 0))
 
     # Degradation context — populated when DegradationCheck (or scoring-
     # error abort) fires. Disjoint from elim_ctx: the renderer reads one
@@ -168,6 +173,11 @@ def decode_signal_effect(
     prior_histories_snapshot = elim_check.snapshot_priors(candidate_sample_ids)
     elimination_decision: tuple[dict[str, Any], dict[str, Any]] | None = None
     if elimination_stopped and signal.check_name == elim_check.name:
+        # ``gate`` discriminates which elimination rule fired: the equivalence
+        # (practical-futility) cut records under EQUIVALENCE_CUT and replays via the
+        # binomial re-derivation, since a TIED candidate it cuts has p_best≈0.5 and
+        # would NOT re-derive under the ε-gate's ``p_best < ε`` replayer. Its decision
+        # inputs (seed hits, adoption bar, budget) ride ``equivalence`` for replay.
         elimination_decision = (
             {
                 "candidate_id": candidate_id,
@@ -177,6 +187,8 @@ def decode_signal_effect(
                 "n_min": int(elim_check.n_min),
                 "round_num": round_num,
                 "recorded_p_best": recorded_p_best,
+                "gate": str(cr.get("gate", "epsilon")),
+                "equivalence": dict(cr.get("equivalence") or {}),
             },
             pobb_decision_data(
                 cr,

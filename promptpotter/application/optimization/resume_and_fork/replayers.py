@@ -17,7 +17,11 @@ from promptpotter.application.optimization.resume_and_fork.decisions import (
     GatingMode,
     ResumeCheckpointKind,
 )
-from promptpotter.application.scoring.metrics import elect_round_winner, elimination_p_best
+from promptpotter.application.scoring.metrics import (
+    binom_sf,
+    elect_round_winner,
+    elimination_p_best,
+)
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.exploration import RulerEntry
@@ -226,6 +230,42 @@ def _replay_elimination_cut(
     return float(snapshot[candidate_id]) < float(inputs_ref["epsilon"])
 
 
+def _replay_equivalence_cut(
+    ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
+) -> bool:
+    """Practical-equivalence futility re-derived from the RECORDED seed hits + the
+    RESCORED candidate hits (binomial futility vs the adoption bar; deterministic).
+
+    Mirrors ``PoBBCheck._equivalence_check``: seed_total_hits / adoption_bar / budget
+    were fixed at decision time (the seed had completed its full run) and ride
+    ``inputs_ref.equivalence``; only the candidate's hits move under a new scorer. Uses
+    the SAME ``binom_sf`` the live gate did so the cut re-derives bit-for-bit."""
+    eq = inputs_ref.get("equivalence") or {}
+    budget = int(eq.get("budget", 0))
+    adoption_bar = int(eq.get("adoption_bar", 0))
+    epsilon = float(inputs_ref.get("epsilon", 0.0))
+    candidate_sample_ids = [str(s) for s in (data.get("candidate_sample_ids") or [])]
+    if budget <= 0 or not candidate_sample_ids:
+        return False
+    candidate_id = str(inputs_ref.get("candidate_id", ""))
+    all_results: dict[str, list[dict[str, Any]]] = ctx.round_data.get("all_candidate_results") or {}
+    cur_by_sample = {
+        str(r.get("sample_id")): bool(r.get("hit"))
+        for r in (all_results.get(candidate_id) or [])
+        if r.get("sample_id") is not None
+    }
+    if not all(sid in cur_by_sample for sid in candidate_sample_ids):
+        return False
+    k = len(candidate_sample_ids)
+    cand_hits = sum(1 for sid in candidate_sample_ids if cur_by_sample[sid])
+    remaining = budget - k
+    need = adoption_bar - cand_hits
+    if remaining <= 0 or need <= 0:
+        return False
+    # Laplace-smoothed rate — MUST match PoBBCheck._equivalence_check exactly.
+    return binom_sf(remaining, need, (cand_hits + 1) / (k + 2)) < epsilon
+
+
 def _replay_leader_lock_in(
     ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
 ) -> bool:
@@ -367,6 +407,7 @@ _replay_l3_trigger = _replay_layer_trigger("l3_patience")
 REPLAYERS: dict[ResumeCheckpointKind, Replayer] = {
     ResumeCheckpointKind.ROUND_WINNER: _replay_round_winner,
     ResumeCheckpointKind.ELIMINATION_CUT: _replay_elimination_cut,
+    ResumeCheckpointKind.EQUIVALENCE_CUT: _replay_equivalence_cut,
     ResumeCheckpointKind.LEADER_LOCK_IN: _replay_leader_lock_in,
     ResumeCheckpointKind.L2_ESCALATION_TRIGGER: _replay_l2_trigger,
     ResumeCheckpointKind.L3_ESCALATION_TRIGGER: _replay_l3_trigger,

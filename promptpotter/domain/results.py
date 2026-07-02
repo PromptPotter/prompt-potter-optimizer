@@ -52,6 +52,13 @@ class EliminationContext(TypedDict, total=False):
     n_priors: int
     leader_locked: bool
     leader_label: str
+    # Set only on a practical-equivalence (futility) cut: which gate fired
+    # (``"equivalence"``), the probability the candidate would clear the round's
+    # adoption bar, and that bar in hits. The renderer branches on ``gate`` so an
+    # equivalence cut reads as "can't clear the adoption bar", not "p_best < ε".
+    gate: str
+    p_clear: float
+    adoption_bar: int
 
 
 class DegradationContext(TypedDict, total=False):

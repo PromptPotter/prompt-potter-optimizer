@@ -1483,6 +1483,67 @@ def test_pobb_dominance_aborts_when_catch_up_impossible():
     assert dom["budget"] == 20
 
 
+def test_pobb_equivalence_cuts_below_adoption_bar_keeps_contender():
+    """Practical-equivalence futility: a candidate improbable to clear the adoption bar
+    (seed hits + ceil(improvement_threshold·budget)) is cut early; a clear winner is not.
+
+    Silent harm guarded: a wrong early cut drops a candidate that could win (wrong
+    round winner, no error), or a missed cut wastes the full panel confirming a tie."""
+    cfg = PoBBConfig(n_min=4, epsilon=0.05, improvement_threshold=0.02)  # margin=ceil(.48)=1
+    ids = list(range(24))
+    # Seed: 12/24 hits ⇒ adoption bar = 12 + 1 = 13.
+    seed_scores = [1.0] * 12 + [0.0] * 12
+
+    loser = PoBBCheck(cfg, n_samples=24, delta_scale={})
+    loser.register_completed(
+        _measurements(seed_scores, sample_ids=ids), candidate_id="origin", sp=_DUMMY_SP
+    )
+    loser.set_sample_universe(ids)
+    loser.set_current("stuck")
+    sig = loser.check(
+        _measurements([0.0] * 8, sample_ids=list(range(8))), candidate_idx=1, n_total_candidates=3
+    )
+    assert sig is not None
+    cr = sig.check_result
+    assert cr["gate"] == "equivalence"
+    assert cr["equivalence"]["adoption_bar"] == 13
+    assert cr["equivalence"]["p_clear"] < 0.05
+
+    winner = PoBBCheck(cfg, n_samples=24, delta_scale={})
+    winner.register_completed(
+        _measurements(seed_scores, sample_ids=ids), candidate_id="origin", sp=_DUMMY_SP
+    )
+    winner.set_sample_universe(ids)
+    winner.set_current("rising")
+    # 8/8 hits so far — can plainly still clear the bar; the futility gate must NOT fire.
+    assert (
+        winner.check(
+            _measurements([1.0] * 8, sample_ids=list(range(8))),
+            candidate_idx=1,
+            n_total_candidates=3,
+        )
+        is None
+    )
+
+    # Target-unreachable regime (L4 outer): the seed itself never hits, so the hit
+    # vector is near-degenerate and the real signal is composite fitness. A raw p=0
+    # point rate would cut EVERY 0-hit candidate; the Laplace-smoothed rate self-disables.
+    dead = PoBBCheck(cfg, n_samples=24, delta_scale={})
+    dead.register_completed(
+        _measurements([0.0] * 24, sample_ids=ids), candidate_id="origin", sp=_DUMMY_SP
+    )
+    dead.set_sample_universe(ids)
+    dead.set_current("zero_hit")
+    assert (
+        dead.check(
+            _measurements([0.0] * 8, sample_ids=list(range(8))),
+            candidate_idx=1,
+            n_total_candidates=3,
+        )
+        is None
+    )
+
+
 def test_pobb_locks_in_dominant_leader():
     """Current candidate dominating prior past lock_in_n_min fires LEADER_LOCKED."""
     check = PoBBCheck(

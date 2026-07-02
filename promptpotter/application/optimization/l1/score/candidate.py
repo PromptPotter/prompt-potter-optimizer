@@ -194,9 +194,18 @@ async def score_one_candidate(
 
     if decisions is not None and effect.elimination_decision is not None:
         inputs_ref, data = effect.elimination_decision
+        # Equivalence (practical-futility) cuts need their own replayer — a tied
+        # candidate they cut has p_best≈0.5, so the ε-gate replayer wouldn't re-derive
+        # it. dominance + ε both ride ELIMINATION_CUT (a dominated/ε-cut candidate has
+        # p_best≈0, which the ε replayer reproduces).
+        elim_kind = (
+            ResumeCheckpointKind.EQUIVALENCE_CUT
+            if inputs_ref.get("gate") == "equivalence"
+            else ResumeCheckpointKind.ELIMINATION_CUT
+        )
         record_decision(
             decisions,
-            ResumeCheckpointKind.ELIMINATION_CUT,
+            elim_kind,
             inputs_ref,
             True,
             data=data,

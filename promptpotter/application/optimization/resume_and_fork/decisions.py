@@ -53,6 +53,7 @@ class GatingMode(enum.StrEnum):
 RESUME_CHECKPOINT_GATING: dict[ResumeCheckpointKind, GatingMode] = {
     ResumeCheckpointKind.ROUND_WINNER: GatingMode.REPLAYED,
     ResumeCheckpointKind.ELIMINATION_CUT: GatingMode.REPLAYED,
+    ResumeCheckpointKind.EQUIVALENCE_CUT: GatingMode.REPLAYED,
     ResumeCheckpointKind.LEADER_LOCK_IN: GatingMode.REPLAYED,
     ResumeCheckpointKind.L2_ESCALATION_TRIGGER: GatingMode.REPLAYED,
     ResumeCheckpointKind.L3_ESCALATION_TRIGGER: GatingMode.REPLAYED,
