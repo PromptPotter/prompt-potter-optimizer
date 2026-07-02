@@ -10,8 +10,7 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 |---|---|
 | [`architecture.md`](architecture.md) | **§0 + §0.5 — the single page every PR measures against.** AI entry point. |
 | [`glossary.md`](glossary.md) | Domain vocabulary; one line per term with canonical implementation file. Read before introducing a new word. |
-| [`roadmap.md`](roadmap.md) | Milestone-level direction; the live forward-looking version lives at [`specs/roadmap.md`](specs/roadmap.md). |
-| [`README.md`](README.md) | Operator-facing index (the friendly door). |
+| [`README.md`](README.md) | Operator-facing index (the friendly door) + the short status/roadmap summary; the live forward plan is [`specs/roadmap.md`](specs/roadmap.md). |
 
 ## Subtrees
 
@@ -19,10 +18,10 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 |---|---|---|
 | [`manual/`](manual/) | Operator onboarding: install → first campaign → reading output → troubleshooting → going deeper. Numbered chapters. | [`manual/README.md`](manual/README.md) |
 | [`concepts/`](concepts/) | How the loop works conceptually — the three-layer loop, scoring + memory, candidate-elimination, **optimizer-of-the-optimizer (L4 recursion)**, campaign tree, paired-sample PoBB. Read before the developer docs. | [`concepts/README.md`](concepts/README.md) |
-| [`developer/`](developer/) | Implementation specs — Python names, data contracts, node wiring, `pipeline.json` contract, dispatch hub, L1-generate surface, L1-candidate-analysis checklist, self-healing internals, **`conventions.md` (full style + code-shape rules)**, `stable-api.md` (v1 fork-readiness surface). | [`developer/README.md`](developer/README.md) |
+| [`developer/`](developer/) | Implementation specs — Python names, data contracts, node wiring, `pipeline.json` contract, dispatch hub + L1 layout, L1-candidate-analysis checklist (incl. the meta-campaign lookup), self-healing internals, **`conventions.md` (full style + code-shape rules)**, `stable-api.md` (v1 fork-readiness surface). | [`developer/README.md`](developer/README.md) |
 | [`operations/`](operations/) | Running it — CLI reference, env, persistence + recovery, observability, backend integration, **`secure-hosting.md`** (allowlist admin via the on-box bot), **`adding-a-dataset.md`**, **`dataset-selection-rationale.md`**, **`dataset-reasoning-matrix.md`** (per-dataset model + `reasoning_effort` + `max_tokens` defaults). | [`operations/README.md`](operations/README.md) |
 | [`methods/`](methods/) | The two spend-control procedures: PoBB elimination + hard-sample leaderboard. | [`methods/README.md`](methods/README.md) |
-| [`research/`](research/) | Benchmarks (BBEH comparison, pEvol-bench), metrics, related-work table (incl. MCTS comparison). | [`research/README.md`](research/README.md) |
+| [`research/`](research/) | Benchmarks (BBEH comparison + the PEvol-Bench definition), metrics, related-work table (incl. MCTS comparison). | [`research/README.md`](research/README.md) |
 | [`specs/`](specs/) | Forward direction in one [`roadmap.md`](specs/roadmap.md) + living contracts (verdict-resolution, frontend-surface-contract, chat-foundation, the two control-plane YAMLs) + the debt backlog. **Specs index has its own CLAUDE.md.** | [`specs/CLAUDE.md`](specs/CLAUDE.md) |
 | `assets/` | Images and diagrams; no contract. | n/a |
 
@@ -34,10 +33,14 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 | What is the shape of this project? | [`architecture.md`](architecture.md) §0 |
 | What is the load-bearing surface? | [`architecture.md`](architecture.md) §0.5 |
 | What does this domain word mean? | [`glossary.md`](glossary.md) |
+| What's the difference between origin, check-in, and round-0/C0? | [`architecture.md`](architecture.md) §0.5 (the start-definitions bullet) |
+| Under which fitness formula? active / what-if / lens / replay, `composite_fitness` vs `accuracy` | [`architecture.md`](architecture.md) §0.5 (Composite-fitness resolution chain) + [`concepts/scoring-and-memory.md`](concepts/scoring-and-memory.md) |
+| The situational reasoning doctrines (simplify-the-problem / surface-ledger / reach-the-operator)? | [`developer/conventions.md`](developer/conventions.md) § Reasoning doctrine (the two universal gates stay in root [`CLAUDE.md`](../CLAUDE.md)) |
+| Debugging the PP↔TermNorm highway (async hygiene, `--reload` session wipe, latency)? | [`operations/backend-integration.md`](operations/backend-integration.md) § Debugging the highway |
 | How does information flow through L1 / L2 / L3? | [`developer/dispatch-hub.md`](developer/dispatch-hub.md) |
 | How do I add a record / injection / view-field / connector without half-wiring it? | [`developer/adding-a-surface.md`](developer/adding-a-surface.md) (recipe + the CI guard per surface) |
 | How does a layer heal a failure? | [`developer/self-healing-internals.md`](developer/self-healing-internals.md) |
-| How is L1's evidence surface built? | [`developer/l1-generate-surface.md`](developer/l1-generate-surface.md) |
+| How is L1's evidence surface built? | [`developer/dispatch-hub.md`](developer/dispatch-hub.md) § L1 layout |
 | **What is L4 / how does PromptPotter optimize itself?** | [`concepts/optimizer-of-the-optimizer.md`](concepts/optimizer-of-the-optimizer.md) + [`specs/roadmap.md`](specs/roadmap.md) |
 | What datasets do we use? Why didn't we use Y? | [`operations/dataset-selection-rationale.md`](operations/dataset-selection-rationale.md) |
 | What model + `reasoning_effort` for this dataset? | [`operations/dataset-reasoning-matrix.md`](operations/dataset-reasoning-matrix.md) (canonical — NOT meta-campaign NOTES.md) |

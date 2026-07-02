@@ -51,11 +51,12 @@ impossible (the deep sites have nothing to call it on).
    `LiveDisplay` for the CLI). Unhandled = silently dropped — which is exactly
    what the guard prevents.
 
-**CI guard:** `test_every_cycle_record_is_dispatched_or_control_plane` fails if a
-union member has no `on_record` arm (control-plane records `CommandRecord` /
-`CommandAckRecord` are the allowlisted exception — applied by `CommandDispatcher`,
-not projected). `test_runledger_roundtrips_typed_records` proves `iter()`
-preserves the type on resume.
+**Guard (no standing test — the structural suite was cut, see
+[`tests/CLAUDE.md`](../../tests/CLAUDE.md)):** a union member with no `on_record`
+arm is silently dropped from every projection, so check the arm exists when you
+add the record (control-plane records `CommandRecord` / `CommandAckRecord` are
+the allowlisted exception — applied by `CommandDispatcher`, not projected). A
+missing arm breaks loud in use (the fact never reaches `dashboard.json`).
 
 Contract: [`application/CLAUDE.md`](../../promptpotter/application/CLAUDE.md) §
 "Per-call telemetry", [`infrastructure/CLAUDE.md`](../../promptpotter/infrastructure/CLAUDE.md)
@@ -73,17 +74,19 @@ is a pure `(InjectionBundle) -> str`.
 
 1. Write a `_r_<name>(bundle) -> str` renderer in `dispatch/hub/injections/`
    (returns `""` when its source field is empty — empty injections are skipped).
-2. Register it as an `INJECTIONS["<name>"]` entry (`name`, `kind`, `render`,
-   docstring). The slot name must equal the dict key.
-3. Use `{{<name>}}` in a template, or add it to `L1_POSSIBLE` if L2 may place it
-   in the L1 layout.
+2. Decorate it with `@signal("<name>", kind=…, description=…)` — registration
+   happens at the definition site; key and body are co-located, no separate
+   `INJECTIONS` edit.
+3. To make it reachable, add it to the node's `NODE_LAYOUTS[node].possible`
+   (and `.floor` to put it on by default — for `l1_generate` these alias
+   `L1_POSSIBLE`/`L1_MANDATORY`), or use `{{<name>}}` directly in a template.
 
-**CI guard:** `test_every_injection_renderer_is_wired` fails on a name/key
-mismatch, a non-callable render, or an orphaned `_r_*` renderer never wired in.
+**Guard (import-time, no standing test):** the registry guard in `registry.py`
+fails loud at import if a `possible` name has no registered renderer, and
 `validate_template()` (at `load_optimizer_prompt`) raises at module load on any
 `{{slot}}` not in `INJECTIONS` — typos fail loud.
 
-Contract: [`developer/l1-generate-surface.md`](l1-generate-surface.md),
+Contract: [`developer/dispatch-hub.md`](dispatch-hub.md) § L1 layout,
 [`developer/dispatch-hub.md`](dispatch-hub.md).
 
 ---
@@ -98,14 +101,15 @@ reconstructor to keep in sync** — that synchronized third edit is gone.
 **Recipe:**
 
 1. Add the field to the `*View` frozen dataclass in
-   `presentation/views/view_models.py`.
+   `application/views/view_models.py`.
 2. Set it in the live builder `_<phase>_<event>` in
-   `presentation/views/view_ingress.py` (`from_phase_event`).
-3. Render it in `presentation/views/render/` (`to_text` / `to_markdown`) and/or
+   `application/views/ingress.py` (`from_phase_event`).
+3. Render it in `presentation/views/render/text.py` (`to_text`) /
+   `application/views/render/` (`to_markdown`) and/or
    read it where the fact is surfaced — `LiveDashboardView._apply_phase` reads
    the typed view by attribute (`getattr`, presentation-agnostic).
 4. If the field also appears in post-hoc `log.md`, set it in `from_disk_round` /
-   `from_disk_log` (`presentation/writers.py`) — this builder reads on-disk
+   `from_disk_log` (`application/output/writers.py`) — this builder reads on-disk
    `round_NNNN.json` for **cross-cycle** rendering and is a genuinely separate
    source, not a roundtrip shim.
 

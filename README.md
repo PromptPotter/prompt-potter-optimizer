@@ -94,7 +94,7 @@ Developer internals (Python symbols, data contracts, wiring) live under [`docs/d
 
 ## Watching a run
 
-While `python -m promptpotter resume` is running, the cleanest setup is **`campaigns/{cycle_id}/dashboard.json` open in an auto-reloading editor + the CLI terminal visible**. `dashboard.json` is the live scalar state (phase, round, candidate, accuracy, in-flight query, per-round node I/O); the CLI prints HIT/MISS lines + per-candidate + per-round banners as they happen. Drill-down peers in the same directory: `output.log`, `rounds/`, `log.md`. Internal resume + audit state lives under `.cache/` (hidden by convention). Alternatives: `/potter-run` Claude Code skill, the notebook, or the read-only webapp at `http://localhost:8001/`. Full guide in [`CLAUDE.md`](CLAUDE.md#superuser-monitoring-live-runs).
+While `python -m promptpotter resume` is running, the cleanest setup is **`campaigns/{cycle_id}/dashboard.json` open in an auto-reloading editor + the CLI terminal visible**. `dashboard.json` is the live scalar state (phase, round, candidate, accuracy, in-flight query, per-round node I/O); the CLI prints HIT/MISS lines + per-candidate + per-round banners as they happen. Drill-down peers in the same directory: `output.log`, `rounds/`, `log.md`. Internal resume + audit state lives under `.cache/` (hidden by convention). Alternatives: `/potter-run` Claude Code skill, the notebook, or the read-only webapp at `http://localhost:8001/`. Full guide in [`docs/manual/04-reading-the-output.md`](docs/manual/04-reading-the-output.md).
 
 PromptPotter's inner **generate → score → critique** loop mirrors the classic **plan / implement / validate (PIV)** developer workflow, driven by an LLM at scale.
 
@@ -132,9 +132,9 @@ PromptPotter is a **tree search over prompt programs**: an LLM proposes prompt v
 | **Meta-learning** | 🟡 partial | The optimizer can be pointed at its own meta-prompts (L4 outer loop) — concept: [`optimizer-of-the-optimizer.md`](docs/concepts/optimizer-of-the-optimizer.md); the `potter-l1-meta-campaign` skill ships the state machine that evolves `l1_generate` / `l1_critique` / `l2_context` / `l3_plan` over assess → screen → promote cycles. The full L4 loop is planned. |
 | **MCTS** | 🟡 selection-signal shipped | L3 emits an observation-only `fork_proposal` ({round_offset, reason}) when it judges the current subtree exhausted; the operator forks manually. Backprop up the lineage + UCB-style ancestor selection + auto-fork are planned (see Aspiration below). |
 
-Full capability table including AlphaEvolve and the prompt-tooling neighbors: [`docs/research/related-work.md#capability-matrix`](docs/research/related-work.md).
+Full capability table including AlphaEvolve and the prompt-tooling neighbors: [`docs/research/related-work.md`](docs/research/related-work.md) § Feature matrix.
 
-**Aspiration — towards AlphaZero-shaped MCTS.** L3 (the strategic replan layer) is gaining MCTS-style selection in three steps. **Step 1 — shipped:** L3 may now emit an observation-only `fork_proposal` (`{round_offset, reason}`) alongside its `plan` rewrite when it judges the current subtree exhausted and a deferred ancestor more promising. The proposal lands in `round_NNNN.json::nodes[l3_plan].exit.fork_proposal`; the operator reads it and forks manually via `resume --from N` if they agree. **Step 2 — planned:** propagate round outcomes as node statistics up the lineage tree. **Step 3 — planned:** UCB-style ancestor-selection rule for automatic L3 forking. The three together = AlphaZero-shaped MCTS, categorically capable of *recovering from dead-end branches* that today the loop can only stall on. Backlog: [`docs/specs/roadmap.md`](docs/specs/roadmap.md#backlog-unscheduled).
+**Aspiration — towards AlphaZero-shaped MCTS.** L3 (the strategic replan layer) is gaining MCTS-style selection in three steps. **Step 1 — shipped:** L3 may now emit an observation-only `fork_proposal` (`{round_offset, reason}`) alongside its `plan` rewrite when it judges the current subtree exhausted and a deferred ancestor more promising. The proposal lands in `round_NNNN.json::nodes[l3_plan].exit.fork_proposal`; the operator reads it and forks manually via `resume --from N` if they agree. **Step 2 — planned:** propagate round outcomes as node statistics up the lineage tree. **Step 3 — planned:** UCB-style ancestor-selection rule for automatic L3 forking. The three together = AlphaZero-shaped MCTS, categorically capable of *recovering from dead-end branches* that today the loop can only stall on. Backlog: [`docs/specs/roadmap.md`](docs/specs/roadmap.md) § Plus-backlog.
 
 [![OpenEvolve: Towards Open Evolutionary Agents](https://img.youtube.com/vi/mWBT-szUutI/hqdefault.jpg)](https://www.youtube.com/watch?v=mWBT-szUutI)
 
@@ -147,7 +147,7 @@ Peer systems in the same family — full comparison + benchmark notes in [`docs/
 
 # Roadmap
 
-Short version: [`docs/roadmap.md`](docs/roadmap.md). Full development plan with milestones + specs: [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
+Short version: [`docs/README.md`](docs/README.md) § Status & roadmap. Full development plan with milestones + specs: [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
 
 # Citation
 

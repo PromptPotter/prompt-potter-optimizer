@@ -575,6 +575,53 @@ the PR description.
 - **`new`-verb decomposition into `task_context`** — the one-time
   `checkin` LLM call that seeds the campaign when `new <name>`
   first sees a dataset. Don't fold into `l1_generate`.
+- **Origin vs check-in vs round-0/C0 — the start definitions the whole
+  loop depends on.** These three are distinct and constantly conflated;
+  keep them straight (say "origin", never "baseline", R-23):
+  - **Origin** = the **complete specification required to start the potter
+    loop** — the *starting program* the optimizer evolves from. It is
+    everything needed to begin: the prompt fields, the per-node pipeline
+    config, the **required inputs** a pipeline declares (query/target column
+    map, answer space, and any node-type-raised dependency like a
+    `candidate_source` node's candidate library), and the dataset binding.
+    It is **per-pipeline** — different backends require different inputs —
+    and it is **independent of measurement**: the origin exists fully formed
+    *before* anything is scored. Scoring it produces round 0 / **C0** /
+    `origin_accuracy`, but that measurement is *downstream of* the origin,
+    **not part of its definition** (the recurring conflation: "origin" the
+    spec vs "the origin's round-0 score"). Resolution:
+    `resolve_origin_opt_search_point` (`application/origin.py`); scoring it is
+    a separate step (`establish_campaign_origin`).
+  - **Check-in** = the **process that produces a complete origin** from a raw
+    upload. One LLM resolver node (`application/datasets/origin_resolve.py`)
+    *proposes* the column map, the decomposed Layer-1 prompt fields (incl. an
+    `answer_format` satisfying the **scorer's** extraction contract — the
+    chosen matcher, not the backend, reads the final answer:
+    `scoring/formula/matchers.py::EXTRACTION_NOTES`, e.g. `exact_match` reads
+    the last bolded span), and the 7-field `task_context`; a deterministic,
+    no-LLM **readiness gate** (`origin_readiness.py`) *gates* — mint is
+    blocked until query + ground_truth + framing + answer-space are all
+    CONFIRMED. The check-in **nudges the operator** (the ingest UI surfaces
+    each open gap + unfulfilled pipeline dependency) until the spec is
+    complete, then it's stored as the per-pipeline origin under
+    `projects/{tenant}/datasets/{slug}/`. Dependencies (e.g. a candidate
+    library) are dropped in place here and committed alongside the origin,
+    not chased at bootstrap.
+  - **Two gates, because completeness ≠ scoreability.** The readiness gate is
+    *static* — it proves the required fields are present (incl. a non-empty
+    `answer_format` whenever the scorer extracts a label, `_check_commit_format`),
+    not that the prompt actually scores. Extractability is empirical
+    (prompt × model × scorer matcher), so the second gate is the **round-0
+    origin gate**: a floor that grades `critical` (e.g. all-`NO_RESULT`, a
+    PP-owned health signal in `domain/results_health.py`) halts before L1
+    instead of being optimized. **Resolver and operator collaborate across
+    both gates** — iterating the pipeline choice, the `answer_format`, and the
+    required starting values — until the origin both passes readiness *and*
+    runs scoreable. Only then does the loop proceed.
+  - The line: **origin is the complete start specification; check-in is the
+    resolver+gate that produces a complete one; round 0 / C0 is its
+    measurement, downstream and separate.** Forward plan:
+    [`specs/roadmap.md`](specs/roadmap.md) § Origin-resolution check-in.
 - **`MeasurementArchive` (`archive/measurements/{run_id}.json` +
   `archive/measurements.json` index + retrieval views
   `measurements_for_sample()` / `measurements_for_config()`)** — the
@@ -583,8 +630,8 @@ the PR description.
 - **Per-dataset configs in `datasets/{name}/`** (`pipeline.json`,
   `campaign.json`, `prompts/{node}.json`, `scan_variants.json`,
   `dataset.md`, `task_description.md`) — the operator's primary
-  interface for adding a new dataset. Per root CLAUDE.md "configs
-  are the source of truth — no parallel default ladders elsewhere."
+  interface for adding a new dataset. Configs are the source of truth —
+  no parallel default ladders elsewhere.
   A cleanup PR cannot move a default into PromptPotter code; if a
   setting needs a default, it goes in the dataset's config file.
 - **`Evaluator` class + `evaluators` field + `all_evaluators()`
@@ -600,10 +647,21 @@ the PR description.
   (`application/scoring/search_point_scorer.py:115`) — sole scoring
   ingress. Sibling to `CycleEventLog.append` and `INJECTIONS`. Don't
   add a second scoring entry path "for convenience."
-- **Composite-fitness resolution chain** — fitness is formula-relative
-  and mode-relative (`measured` subset vs `all`; see root CLAUDE.md
-  § Fitness), and it is produced + resolved at three single-writer choke
-  points. `compute_composite_fitness`
+- **Composite-fitness resolution chain** — **fitness is never one fixed
+  number; always ask "under which formula?"** It is formula-relative — the
+  **active** formula the run actually used; a **what-if** preview when the
+  operator re-weights the evaluators; a **lens** that re-projects the lineage
+  under an alternative criterion to show where rankings diverge
+  (`lineage-overlay`); a **replay** that re-scores the whole cycle under a new
+  config — and mode-relative (`measured`, the samples that round actually ran,
+  vs `all`, the full dataset). Two values appear in the data:
+  `composite_fitness` (the score under the active formula, **served already
+  resolved** — with no active formula the default per-round formula is plain
+  accuracy, so it **equals** `accuracy` and readers take it verbatim) and
+  `accuracy` (the plain correctness rate, formula-independent). Per-sample
+  difficulty is a *separate* view, not a fitness formula (the hard-sample
+  sorter bullet above). The chain is produced + resolved at three
+  single-writer choke points. `compute_composite_fitness`
   (`application/scoring/metrics.py`) is the sole writer of
   `composite_fitness`; with no active per-round formula it degrades to
   accuracy **at compute time** via `_default_round_scorer`
@@ -616,7 +674,9 @@ the PR description.
   argmax-over-candidates form. Alternative formulas (what-if, the
   `score:<formula>` lens, replay) never recompute in the consumer — they
   re-project from the stored evaluator namespace via
-  `value_with_mask_applied` (`metrics.py`) and are **served** (R-36). Don't
+  `value_with_mask_applied` (`metrics.py`) and are **served** (R-36: every
+  score, active or alternative, is backend-computed — the webapp never
+  recomputes). Don't
   add a second composite-or-accuracy resolution; route through
   `display_fitness`.
 - **`observed_node()` context manager** — the trace-emission seam

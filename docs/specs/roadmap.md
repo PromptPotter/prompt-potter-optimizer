@@ -58,7 +58,7 @@ Sequenced into lanes by dependency, not milestone number. **Front priority = Lan
 Terse landing for the per-milestone specs that were consolidated here. Status is truth; full original prose is in `git log`.
 
 ### Origin-resolution check-in
-LLM proposer + deterministic readiness gate resolve a messy CSV into a complete origin (no hidden defaults, no literal-column requirement); `high`-confidence fields auto-promote `proposed→confirmed` before mint. Non-derivable kernels: reuses the `checkin/2` node (no separate `origin_resolve` node/model); **deliberately off the operator surface** — `reasoning_floor/ceiling` (backend-node-only) and `model_locked` (= `forbidden_axes_strict`, a dev policy). Concept: root `CLAUDE.md` § Origin & check-in; mechanics in `git log`.
+LLM proposer + deterministic readiness gate resolve a messy CSV into a complete origin (no hidden defaults, no literal-column requirement); `high`-confidence fields auto-promote `proposed→confirmed` before mint. Non-derivable kernels: reuses the `checkin/2` node (no separate `origin_resolve` node/model); **deliberately off the operator surface** — `reasoning_floor/ceiling` (backend-node-only) and `model_locked` (= `forbidden_axes_strict`, a dev policy). Concept: [`../architecture.md`](../architecture.md) §0.5 (Origin vs check-in vs round-0/C0); mechanics in `git log`.
 
 ### Ingest + chat-first web — partially shipped (Ingest Slice 1 done; chat Arc 1 done — activity + control)
 > **Chat-first front door** (thread model, activity-stream translator, copilot decision

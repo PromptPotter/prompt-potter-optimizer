@@ -50,26 +50,21 @@ The wounds heal **candidate** failures. The prompt-budget unit is a
 **different mechanism** — not a tier or escape-hatch of the wound model —
 that guards one unrelated concern: the size of a composed optimizer
 meta-prompt. It earns its own section because it isn't a wound, not
-because the taxonomy needed an exception. It stacks **four healing modes**:
+because the taxonomy needed an exception. Two healing modes survive
+(the aggregate shed allocator + the `prompt_budget_status` L2-self-heal
+injection + the `PROMPT_BUDGET` halt were deleted — `git log` has them):
 
-1. **Truncate** — per-injection `char_cap`; an LLM-authored block over
-   its cap is cut + warned in `DispatchHub.render`.
-2. **Shed** — the aggregate allocator (`facade._apply_budget`) drops
-   whole low-tier injections when the composed prompt exceeds
-   `OPTIMIZER_PROMPT_CHAR_BUDGET`.
-3. **L2 self-heal** — the `prompt_budget_status` injection shows L2 every
-   cap + the live size of any overrun; L2 trims the blocks it authors.
-4. **Halt** — two distinct operator-recoverable stops: `RENDER_ERROR`
-   (an injection renderer *raised* — code drift) and `PROMPT_BUDGET`
-   (the prompt won't fit even after shedding everything).
+1. **Truncate** — per-injection `char_cap`; an over-cap block is
+   section-aware truncated in the hub (`facade.py`), with an
+   `injection_budget_overrun` warning naming the overrun + dropped
+   sections.
+2. **Halt** — `RENDER_ERROR`: an injection renderer *raised* (usually
+   code drift); operator-recoverable stop.
 
-Why it is not a wound: it has no single producer→nurse pair. Modes 1–2
-are mechanical (no LLM), mode 3 is LLM-routed but only for blocks L2
-itself authored, mode 4 escalates to a human. It is the one place
-mechanical healing, LLM-routed healing, and a graceful halt meet on one
-concern. It still obeys the no-sidecar rule: every mode
-rides the `INJECTIONS` registry, `DispatchHub`, and the existing
-`StopLoop` / round-loop teardown.
+Why it is not a wound: it has no producer→nurse pair — mode 1 is
+mechanical (no LLM), mode 2 escalates to a human. It obeys the
+no-sidecar rule: both modes ride the `INJECTIONS` registry,
+`DispatchHub`, and the existing `StopLoop` / round-loop teardown.
 
 ## Wound 1 — L1 tends its own `ValidationFailure`
 
@@ -94,7 +89,7 @@ The runtime block inside `_r_l1_wounds()` partitions into NEW (this round) vs AC
 
 ## Wound 3 — L3 replans on L2 stall
 
-`escalate_l2` (`application/optimization/cycle.py`) checks `esc.l2.stall_count >= opt.l2_patience`. When stalled, L3 fires (subject to its own `l3_patience`).
+`escalate_l2` (`application/optimization/escalation/firing.py`) checks `esc.l2.stall_count >= opt.l2_patience`. When stalled, L3 fires (subject to its own `l3_patience`).
 
 L3's prompt (`datasets/_optimizer/pipeline.json::resolved_prompts['l3_plan/1']`) reads:
 

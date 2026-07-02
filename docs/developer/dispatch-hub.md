@@ -1,8 +1,8 @@
-# Dispatch hub
+# Dispatch hub + L1 layout
 
-Visual + reference for `promptpotter/application/optimization/dispatch/hub/` — the registry that fills `{{placeholders}}` in the four optimizer prompts. Pairs with [`l1-generate-surface.md`](l1-generate-surface.md) (L1_GENERATE's layout surface) and [`l2-internals.md`](l2-internals.md) (L2_CONTEXT firing).
+Visual + reference for `promptpotter/application/optimization/dispatch/hub/` — the registry that fills `{{placeholders}}` in the four optimizer prompts — and for `L1Layout`, the structural surface L2 edits to decide what L1_GENERATE sees. Pairs with [`l2-internals.md`](l2-internals.md) (L2_CONTEXT firing).
 
-The hub is stateless. `INJECTIONS` is a typed `dict[str, _Injection]` — each entry carries `name`, `kind` (MEASUREMENT / DERIVED / TRACE / DIRECTIVE), `render: InjectionBundle → str`, and a docstring. `validate_template()` (called from `load_optimizer_prompt`) raises on `{{slot}}` names not in the registry: a typo in a template fails at module load, not at first render.
+The hub is stateless. `INJECTIONS` is a typed `dict[str, _Injection]` — each entry carries `name`, `kind` (MEASUREMENT / DERIVED / TRACE / DIRECTIVE), `render: InjectionBundle → str`, and a docstring, registered by the `@signal("<name>", …)` decorator at the renderer's definition site. `validate_template()` (called from `load_optimizer_prompt`) raises on `{{slot}}` names not in the registry: a typo in a template fails at module load, not at first render.
 
 ## Flow
 
@@ -124,7 +124,7 @@ flowchart LR
 
 ## Reference
 
-13 injections + 1 structural input + 1 caller extra, grouped by role. Numbered items map to the diagram superscripts. `[fenced]` = output wrapped in `<UNTRUSTED_DATASET_CONTENT>` (echoes raw query + GT text — the STATUS prefix on `diagnostics` is plain, only the dataset-content body is fenced). 🧩 follows every sub-member name — companion to the inline expansion the diagram does for `l1_overrides` (`n_variants`🧩, `creativity`🧩); lets you scan for atomic field names regardless of which placeholder owns them.
+**22 registered signals** across four modules (`injections/layer_state.py` · `panels.py` · `catalogues.py` · `wounds.py` — each slot's `@signal` docstring is the per-slot SoT), plus 1 structural input (`l1_layout`) and 1 caller extra (`n_variants`). The highest-traffic slots are detailed below, grouped by role; numbered items map to the diagram superscripts. `[fenced]` = output wrapped in `<UNTRUSTED_DATASET_CONTENT>` (echoes raw query + GT text — the STATUS prefix on `diagnostics` is plain, only the dataset-content body is fenced). 🧩 follows every sub-member name — companion to the inline expansion the diagram does for `l1_overrides` (`n_variants`🧩, `creativity`🧩); lets you scan for atomic field names regardless of which placeholder owns them.
 
 Each entry in `INJECTIONS` is a frozen `_Injection(name, kind, render, doc)`. `kind` is one of:
 
@@ -163,6 +163,8 @@ This is where the reader's mental model of a round usually starts: candidates we
 ### Cross-round derived
 
 - ¹⁴ **`axis_memory`** (DERIVED) ← `cycle.axes.digest()` — AxisIndex per-axis effect_size + sample-coverage; consumed by L1_GENERATE, L2_CONTEXT, L3_PLAN. Empty when AxisIndex isn't yet initialised (round 1).
+- **Panels family** (`injections/panels.py`, DERIVED views; each `@signal` docstring is the SoT): `escalation_panel` (L1 stall depth + `exploration_budget` — gates the `stall_exploration` citation), `evidence_health` (per-node failure rates — flags an evidence-starved enricher), `origin_strengths` (round-0 origin's per-sample hits, the floor variants must preserve), `intractable_samples` (cycle-wide miss set no candidate has solved), `archive_top_runs` (top-K historical runs on this dataset), `rare_hit_samples` (samples cracked by ≤3 of ≥10 attempts).
+- **Capability + L2-authored directives** (`injections/layer_state.py`): `rebase_capability` / `terminate_capability` (conditional escape-hatch instructions into L2+L3 prompts; render empty when the config knob is off so ablation prompt bodies stay bit-identical), `l1_supplemental_rules` (situational rules appended to L1's instruction — auto-triggered from bundle state + L2-authored), `l1_situational_examples` (worked examples pinned to currently-active triggers).
 
 ### Current state
 
@@ -184,7 +186,6 @@ This is where the reader's mental model of a round usually starts: candidates we
 ### L2_CONTEXT / L3_PLAN-internal
 
 - ¹ **`l1_signal_catalogue`** ← sorted `L1_POSSIBLE` (`domain/l1_layout.py`) · menu L2_CONTEXT picks from when assembling L1_GENERATE's layout.
-- **`prompt_budget_status`** (DERIVED) ← computed off `bundle.opt_sp` + the registry · L2_CONTEXT template only. The prompt-budget unit's L2 self-heal surface: every per-injection `char_cap` + the live size of any overrun, split into **YOURS** (`task_context`🧩, `l1_supplemental_rules`🧩, `l1_situational_examples`🧩 — L2 trims these) and **OTHER LAYERS** (flagged, not L2's to edit). `MANDATORY`-tier so the allocator never sheds the block that tells L2 how to heal. Full spec: `git log`.
 
 ### Caller extras — L1_GENERATE template scalars (`l1/generate.py`)
 
@@ -194,9 +195,42 @@ Substituted directly by `compile_prompt`; not signals.
 
 ## Mechanics
 
+- **Entry points** — two, both stateless: `render(name, bundle)` (internal, one injection's text) and `fill(template, layout, bundle)` (**every** optimizer node). `InjectionBundle` is the per-call frozen state `(opt_sp, pipeline_schema, cycle_slice, digest)`, built once via `build_bundle(cycle)`; `digest` is a `RoundDigest(diagnostics, critique)` — the post-scoring compression chain in one place, so renderers read through it instead of off two parallel `latest_*` fields.
 - **Fill** — one path for every node: `fill(template, layout, bundle)` walks the node's layout (per-slot injection-name lists — `l1_generate`'s from `opt_sp.l1_layout`, the rest from `NODE_LAYOUTS[node].floor`), appends rendered injection text to each addressable slot, then scans the filled body for any `{{name}}` left in non-layout prose (`instruction`/`answer_format`, e.g. `rebase_capability`) and renders the `INJECTIONS` ones into a kwargs dict → `(filled_template, injection_vars)`. The four meta-prompt `problem_description` bodies are now empty strings (their `{{tokens}}` moved into `NODE_LAYOUTS`). `validate_template()` (called from `load_optimizer_prompt`) errors at module load if any remaining `{{slot}}` is not in the `INJECTIONS` registry.
-- **L1_GENERATE visibility** — `L1_POSSIBLE = {plan, task_context, rendered_prompt, pipeline_param_catalogue, diagnostics, l1_wounds, critique, axis_memory}` 🧩; the other injections (`l3_to_l2_note`, `l1_overrides`, `l1_signal_catalogue`, `prompt_budget_status`, `guard_breaches`) are L1_CRITIQUE / L2_CONTEXT / L3_PLAN-internal.
-- **L1_GENERATE guard** — `L1_MANDATORY = {plan, task_context, rendered_prompt, pipeline_param_catalogue, critique}` 🧩 must appear across the 4 addressable slots; missing fires `l1_layout_missing_mandatory` — a guard breach that routes to L3_PLAN (replan) rather than letting L2_CONTEXT starve L1_GENERATE of cross-layer state.
+- **L1_GENERATE visibility** — `L1_POSSIBLE` (`domain/l1_layout.py`, 13 names) = `{plan, task_context, rendered_prompt, pipeline_param_catalogue, diagnostics, l1_wounds, critique, axis_memory, escalation_panel, origin_strengths, intractable_samples, archive_top_runs, rare_hit_samples}` 🧩; the rest (`l3_to_l2_note`, `l1_overrides`, `l1_signal_catalogue`, `guard_breaches`, the capability directives) are L1_CRITIQUE / L2_CONTEXT / L3_PLAN-internal — L2-internal signals are excluded so L1 can't see L2's own state.
+- **L1_GENERATE guard** — `L1_MANDATORY = {plan, task_context, rendered_prompt, pipeline_param_catalogue, critique}` 🧩 must appear across the 4 addressable slots; missing fires `l1_layout_missing_mandatory` — a guard breach that routes to L3_PLAN (replan) rather than letting L2_CONTEXT starve L1_GENERATE of cross-layer state (without these L1 has no parent prompt, plan, task framing, mutation surface, or failure digest).
+
+## L1 layout — L2's structural edit surface
+
+L1_GENERATE's prompt is composed by walking a per-slot list of **injection names** and resolving each through the registry above. L2 owns the layout; the registry is closed and code-derived. Concept role: [`the-loop.md`](../concepts/the-loop.md).
+
+```
+┌─ L1's prompt composition ──────────────────────────────────┐
+│  PromptTemplate (l1_generate)        per-slot static text  │
+│      +                                                     │
+│  L1Layout (on OptSearchPoint)    per-slot injection lists  │
+│      ↓                                                     │
+│  DispatchHub.fill                    resolves names via    │
+│                                      INJECTIONS registry   │
+│      ↓                                                     │
+│  RENDERED L1 PROMPT (what the LLM sees)                    │
+└────────────────────────────────────────────────────────────┘
+```
+
+`L1Layout` (`promptpotter/domain/l1_layout.py`) is a Pydantic model with one list per addressable slot: `persona`, `task_intent`, `problem_description`, `thinking_style` (all L2-mutable). `answer_format` is omitted on purpose — it carries L1's output JSON schema (a code contract), not L2's call. Static text in each slot stays; the layout's injection renderings are appended. Renderers are layer-agnostic — the same `plan` renderer feeds L1, L2, and L3; if an injection needs to differ per layer, that's two injections.
+
+**Default floor** (`default_l1_layout` = `NODE_LAYOUTS["l1_generate"].floor`): `task_context` in `task_intent`; `rendered_prompt`, `pipeline_param_catalogue`, `plan`, `critique`, `l1_wounds`, `escalation_panel`, `origin_strengths` in `problem_description`. Raw `diagnostics` and the cross-run panels stay off the floor (critique distils them); L2 adds them on stall via its layout edit, and L4 optimises that authoring. Most L2 fires don't touch the layout.
+
+**Validation — split HARD / SOFT.** `validate_l1_layout(layout, *, spec, prior_layout)` enforces against the node's `NodeLayoutSpec` (`spec.mandatory`/`spec.possible`):
+
+- HARD — missing mandatory placeholder, name outside the node's `possible`, duplicate within a slot. Caller rolls back to the prior layout / floor; outcomes append to the guard-breach wound stream for self-healing on the next L2 fire.
+- SOFT — layout unchanged from prior. Applied with a warning; flagged `score=0.5` so L3 sees the churn signal next replan.
+
+L2's parser (`escalation._parse_l2`) coerces `{slot: [name, ...]}` into `L1Layout`, validates, and only writes the new layout to OSP when HARD checks pass.
+
+**Adding an injection** → the golden-path recipe lives in [`adding-a-surface.md`](adding-a-surface.md).
+
+**File-line anchors** — `INJECTIONS`: `dispatch/hub/injections/registry.py` · `InjectionBundle`: `dispatch/hub/bundle.py` · `DispatchHub` + `build_bundle`: `dispatch/hub/facade.py` · `L1Layout`, `L1_POSSIBLE`, `L1_MANDATORY`, `L1_LAYOUT_SLOTS`, `default_l1_layout`, `validate_l1_layout`: `promptpotter/domain/l1_layout.py` · L1 compose path: `application/optimization/l1/generate.py::l1_generate` · OSP layout field: `OptSearchPoint.memory.l1_layout` (`domain/opt_search_point.py`, `L2L3Memory`).
 
 ## Future — diagnostics vs l1_wounds
 

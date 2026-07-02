@@ -1,6 +1,7 @@
 """Ratchet: the package's conceptual surface may shrink, never grow.
 
-This is the enforcement teeth behind CLAUDE.md's <surface-ledger> rules. The
+This is the enforcement teeth behind the <surface-ledger> doctrine
+(docs/developer/conventions.md § Reasoning doctrine). The
 recurring AI blind spot is additive-but-safe "refactors" that grow the module +
 import surface while claiming to simplify; a prose rule gets ignored, a red test
 does not. Each dimension is pinned to a baseline and asserted ``<=`` — a change
@@ -8,7 +9,7 @@ that raises any dimension fails here and must justify itself as a feature, not a
 refactor.
 
 When a deletion legitimately LOWERS a dimension, lower its baseline in the same
-commit (CLAUDE.md rule 4: "lower the baseline to lock the win"). The baseline IS
+commit (surface-ledger rule 4: "lower the baseline to lock the win"). The baseline IS
 the finish line — when no number can fall further without losing a load-bearing
 concept, the unification phase is done.
 """

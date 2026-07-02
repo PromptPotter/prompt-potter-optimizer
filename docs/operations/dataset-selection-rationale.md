@@ -129,7 +129,7 @@ Two new in-band candidates from the colleague-triage recon (NaturalPlan + MuSiQu
 
 The systemic finding: model-strength projections from older proxies underpredict `gpt-oss-20b @ low` by 10-20pp. Reasoning benchmarks designed for the GPT-3.5 / Llama-3-8B era are ceiling-prone for our model. Language-transfer (Swahili) bypasses this — the model's strength on reasoning *in English* is bounded by its weakness in *reading Swahili technical prose*, which is empirically a 30-50pp gap. The bias rule going forward: **prefer measurement to projection; bias projections from <20B-class anchors upward 10-20pp.**
 
-**Wired**: MMLU-ProX-sw (Round 6 outcome).
+**Wired**: JustLogic d≥6 (Round 7 outcome; MMLU-ProX-sw rejected in Round 7 — language-transfer, not English reasoning).
 
 This sequence is operator-revisable any time.
 

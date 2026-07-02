@@ -12,7 +12,7 @@ PromptPotter**.
 This is the headline self-referential capability of M12. Connector:
 `promptpotter/connectors/promptpotter.py`. Demo dataset:
 `datasets/promptpotter-self/`. Spec:
-[`../specs/roadmap.md#track-15--promptpotter-as-connector`](../specs/roadmap.md#track-15--promptpotter-as-connector).
+[`../specs/roadmap.md`](../specs/roadmap.md) § Connectors + L4 inner-cycle execution.
 
 ## Why it's interesting
 

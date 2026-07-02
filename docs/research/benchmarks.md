@@ -2,9 +2,18 @@
 
 ## Priority (2026-04-29)
 
-**Bench framing.** PromptPotter is an Algorithm Configuration solver in prompt space; the bench definition lives in [`pevol-bench.md`](pevol-bench.md). What that bench requires (canonical split, population-grade size, non-saturated or procgen) is what distinguishes a credible AC benchmark from a method-comparison harness.
+**Bench framing.** PromptPotter is an Algorithm Configuration solver in prompt space; the bench definition is § PEvol-Bench below. What that bench requires (canonical split, population-grade size, non-saturated or procgen) is what distinguishes a credible AC benchmark from a method-comparison harness.
 
 **What we actually ran.** Datasets to date were chosen for headroom and head-to-head comparability against peer optimizers (CAPO/GEPA/MIPROv2/Bootstrap) — not as PEvol-Bench-grade benchmarks. Run log below.
+
+## PEvol-Bench — the AC-grade bench definition (v1 draft, 2026-04-29)
+
+Definition only; instance assembly TBD. PromptPotter is the reference solver.
+
+- **Framing.** Algorithm Configuration (Hutter et al.) — an algorithm with a configuration space, searched for the best config; *per-instance* AC when configs adapt per input. Family: AutoML; closest classical relative HPO; in prompt space specifically, Automatic Prompt Optimization.
+- **Requirements.** (1) **Pre-assembled canonical split — hard requirement** (else every paper compares on slightly different distributions and the field can't accumulate knowledge); (2) DSPy-style compound-system pipeline description; (3) population large enough for a real **config set** (what the algorithm searches over) / **test set** (held-out, same distribution, evaluates generalization) split. BBEH / AIME / GSM8K are too small and/or saturated — you can't meaningfully split 250 instances and claim population representativeness.
+- **v1 candidates.** Procedurally generated tasks (unlimited test set) are the ideal. Curated picks: **MMLU-Pro** (~12k questions, diverse, harder than MMLU, unsaturated, canonical split) for breadth + **MATH** (7,500 test instances, clean baked-in split, understood difficulty distribution) for depth — both HuggingFace-native, no assembly required. **LiveBench** is the contamination-resistant watch item (monthly updates make a fixed test set harder).
+- **Long-term node-type coverage.** LLM-only: MMLU-Pro, MATH, LiveBench · retrieval+LLM: HotpotQA, PopQA, FEVER · multi-step agent: GAIA, τ-bench · code pipeline: SWE-bench · long-context: LongBench, FRAMES. Aspiration: ship our own procedurally-generated instances; v1 sticks to curated existing datasets.
 
 ## Trials log
 
@@ -204,4 +213,4 @@ GSM8K and AIME 2025 are effectively saturated at `gpt-oss-120b`. Literature numb
 
 Wall-clock numbers in this document rely on prior-result reuse from `archive/measurements/` (addressed by `PipelineSchema.node_configs`). No per-node cache.
 
-See [pevol-bench.md](pevol-bench.md) for the bench definition (what an AC-grade benchmark must satisfy) and the recommended dataset set going forward. See [metrics.md](metrics.md) for the four-metric reporting convention (Acc, HC, SE, R₉₀) that complements absolute accuracy. See [related-work.md](related-work.md) for the algorithm-configuration umbrella, the feature matrices, and the head-to-head numbers; [algorithm-configuration-lineage.md](algorithm-configuration-lineage.md) for the classical AutoML racing ancestry.
+See [metrics.md](metrics.md) for the four-metric reporting convention (Acc, HC, SE, R₉₀) that complements absolute accuracy. See [related-work.md](related-work.md) for the algorithm-configuration umbrella, the feature matrices, and the head-to-head numbers; [algorithm-configuration-lineage.md](algorithm-configuration-lineage.md) for the classical AutoML racing ancestry.

@@ -66,6 +66,16 @@ uvicorn promptpotter.main:app --port 8001 --reload   # Swagger: /docs
 
 [TermNorm](https://github.com/runfish5/TermNorm-excel) — terminology normalization, 6-node pipeline (cache · fuzzy · web search · entity profiling · token matching · llm ranking).
 
+## Debugging the highway (hard-won 2026-06-16 — read before flailing)
+
+A long debug session taught these; future-me: be systematic and code-first, not operational-first.
+
+- **Diagnose from the code path, not by restarting.** When the backend "goes down" — `/status` itself times out, scoring stalls — the cause is almost always a **blocking call in an `async def` request path**, not a crash / SQLite lock / double-start. Symptom→action: grep the handler for sync I/O (`requests`, `ThreadPoolExecutor.map`, `time.sleep`, blocking DB) FIRST. Killing/restarting the worker and theorizing about ports/timeouts is the slow path and hid the real bug for an hour. Root found: `web_generate_entity_profile` (async) ran `_brave_search` + `list(executor.map(scrape_url…))` synchronously, freezing the single uvicorn worker for the whole web step → every concurrent request (incl. `/status`) stalled. Fix = offload via `asyncio.to_thread` / `run_in_executor`. **Backend async hygiene is a standing check: no sync I/O on the event loop.**
+- **The highway IS a cross-repo contract — change one side, fix both.** PP consumes TermNorm response *shapes*, so a shape change on either side silently breaks the other. Known coupling points: the error envelope is TermNorm's `{status, message, code}` (a global handler in `main.py`), **not** FastAPI's `{detail}` — PP must read `message`. Session-loss self-heal keys on a stable machine-readable `code: "no_session"` (prefer codes over substring/shape guessing). The web_search warning `stats` dict keys are read by PP's display. When you touch a response field, grep the *other* repo for its consumer.
+- **`--reload` wipes the in-memory session every backend code edit.** TermNorm holds sessions in `user_sessions = {}` (process memory). Any backend edit → uvicorn reload → in-flight PP runs hit `400 no_session`. PP now self-heals (re-`POST /sessions` + retry); keep it that way — a developer editing the backend mid-run must not abort the campaign.
+- **openrouter latency is the recurring root.** The same provider slowness hit (a) the optimizer (`datasets/_optimizer/pipeline.json` loop nodes at `reasoning_effort=high` + `max_tokens=20000` on openrouter/gpt-oss-120b → blew the 360s `OPTIMIZER_CALL_DEADLINE_S`×2 deadline → `OPTIMIZER_TIMEOUT` before round 1) and (b) `entity_profiling` (openrouter/gpt-oss-20b, ~20 tok/s, 47s tails). Survival guards: bounded optimizer reasoning (`medium`) + request timeouts under PP's 120s `QUERY_TIMEOUT`. The durable fix is provider (groq is far faster) — but that's the operator's daily-volume knob; don't flip it unprompted.
+- **The `web_search` hang was fixed structurally, not with a bigger timeout (2026-06-17).** The old multi-minute scrape freeze is retired by making evidence depth a strategy axis: `scrape` runs under a hard `scrape_budget` deadline, `snippets` never hangs, `hybrid` (default) falls back per source. Contract, `web_cost` fields, and how to sweep it → § Web-search strategy above. PP-side overlay wiring in `datasets/lca-termnorm/pipeline.json` still pending.
+
 ## Troubleshooting
 
 | Symptom | Action |

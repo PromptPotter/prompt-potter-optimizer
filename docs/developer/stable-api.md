@@ -115,22 +115,7 @@ The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no 
 
 `{{slot}}` names available in any optimizer prompt. Assembled into `dispatch/hub/injections/registry.py::INJECTIONS` from the `@signal("<slot>", …)` decorator on each renderer (`injections/{panels,layer_state,catalogues,wounds}.py`). Adding a slot is one decorated renderer — key and body co-located. Using a slot not in the dict is a load-time `KeyError` via `validate_template`.
 
-| Slot | Kind | Description |
-|---|---|---|
-| `plan` | TRACE | L3's strategic plan text. Persistent until next L3 fire. |
-| `l3_to_l2_note` | DIRECTIVE | Sticky L3→L2 pointer. Mounted only in L2's template. |
-| `rendered_prompt` | TRACE | Current best searchpoint's compiled prompt body. |
-| `pipeline_param_catalogue` | DERIVED | Per-node param menu + ≤4-value enum hint, plus available models. |
-| `diagnostics` | DERIVED | Layer-agnostic round readout: STATUS header + RoundDiagnostics body. |
-| `validation_failures` | MEASUREMENT | Wound 1: L1 parse-time validator failures. |
-| `runtime_failures` | MEASUREMENT | Wound 2: DegradationCheck mid-eval failures. |
-| `l2_guard_breaches` | MEASUREMENT | Wound 4: L2 post-parse guard outcomes; non-empty force-triggers L3. |
-| `l3_guard_breaches` | MEASUREMENT | L3 post-parse guard outcomes; L3 sees own past breaches. |
-| `task_context` | TRACE | Persistent task framing refined by L2; broadcast to all four prompts. |
-| `critique` | TRACE | Compact view of the most recent L1_CRITIQUE output dict. |
-| `l1_overrides` | TRACE | Current L1 runtime knobs (creativity, n_variants, etc.) as JSON. |
-| `l1_signal_catalogue` | DERIVED | Sorted L1_POSSIBLE names L2 may use in l1_layout. |
-| `axis_memory` | DERIVED | Cross-cycle axis-keyed digest from AxisIndex. |
+**The stable contract is the mechanism, not the slot list** — the set evolves (22 today; e.g. the four old per-wound slots merged into `l1_wounds` + `guard_breaches`), so this page doesn't freeze a table that drifts. The live set is the registry itself; the doc-level reference with per-slot detail is [`dispatch-hub.md`](dispatch-hub.md) § Reference.
 
 **Per-template extras** (caller-supplied via `compile_prompt(**hub_dict, **extras)`): `l1_generate` → `{n_variants}` · `l1_critique`/`l2_context`/`l3_plan` → `{}` · `checkin` → `{consultation_instruction}`.
 

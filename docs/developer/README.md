@@ -55,33 +55,16 @@ Every node fills through the one `fill` path from its `NodeLayoutSpec` (`domain/
 | `OSP.memory.l1_layout` | L2 | L1 generate (`fill`) | persistent (on `L2L3Memory`, copied on adopt) |
 | `OSP.plan` | L3 | every prompt (`plan` injection in all 4 templates) | persistent — never cleared |
 | `OSP.memory.wounds.l3_note` | L3 | L2 (`l3_to_l2_note` injection — L2 template only) | persistent until L3 next fires |
-| `OSP.memory.wounds.l2_guard_breaches` | L2 parser + layout validator | L3 (`l2_guard_breaches` injection) | persistent until L3 fires |
-| `OSP.memory.wounds.l3_guard_breaches` | L3 parser | L3 next fire (`l3_guard_breaches` injection) | persistent |
+| `OSP.memory.wounds.l2_guard_breaches` | L2 parser + layout validator | L3 (rendered in the merged `guard_breaches` injection) | persistent until L3 fires |
+| `OSP.memory.wounds.l3_guard_breaches` | L3 parser | L3 next fire (rendered in the merged `guard_breaches` injection) | persistent |
 
 **Symmetric broadcast:** L3 writes `plan`; every prompt reads it via the same `_r_plan` renderer. L2 writes `task_context`; every prompt reads it via the same `_r_task_context` renderer. L1 sees both as framing inputs; L2 reads them as the strategic + task context for the next refinement.
 
 ### Injection registry — what's in `INJECTIONS`
 
-Layer-agnostic by contract. Every renderer reads off `InjectionBundle` and returns `str` (empty when the source field is empty — empty injections are skipped by the fillers).
+Layer-agnostic by contract. Every renderer reads off `InjectionBundle` and returns `str` (empty when the source field is empty — empty injections are skipped by the fillers). **22 slots**, each registered by `@signal("<name>", …)` at its renderer's definition site (`dispatch/hub/injections/{layer_state,panels,catalogues,wounds}.py`) — the decorator docstrings are the per-slot SoT, and [`dispatch-hub.md`](dispatch-hub.md) § Reference is the doc-level reference (this page deliberately doesn't repeat the table). Note the wound *storage* stays three typed lists on `OSP.memory.wounds`, but only two wound slots render: `l1_wounds` (validation + runtime, fenced) and `guard_breaches` (L2+L3 post-parse, plain).
 
-| Injection | Reads from `InjectionBundle` | Used by |
-|-----------|------------------------------|---------|
-| `plan` | `opt_sp.plan` | L1, L1 critique, L2, L3 |
-| `task_context` | `opt_sp.task_context` | L1, L1 critique, L2, L3 (broadcast) |
-| `rendered_prompt` | `opt_sp.render()` | L1 (parent prompt) |
-| `pipeline_param_catalogue` | `pipeline_schema` | L1 (search-space menu) |
-| `diagnostics` | STATUS prefix from `cycle_slice` (round / stall / best counters) + `digest.diagnostics` (`RoundDiagnostics`) body | L1, L1 critique, L2, L3 |
-| `validation_failures` | `opt_sp.wounds.validation_failures` (Wound 1, fenced) | L1, L1 critique, L2, L3 |
-| `runtime_failures` | `opt_sp.wounds.runtime_failures` (Wound 2, fenced) | L1, L1 critique, L2, L3 |
-| `l2_guard_breaches` | `opt_sp.wounds.l2_guard_breaches` (Wound 4, plain) | L3 only |
-| `l3_guard_breaches` | `opt_sp.wounds.l3_guard_breaches` (L3 self-heal, plain) | L3 only |
-| `critique` | `digest.critique` | L1, L2, L3 |
-| `l3_to_l2_note` | `opt_sp.wounds.l3_note` | L2 only |
-| `l1_overrides` | `opt_sp.l1_overrides` | L1 (caller extras `n_variants`/`creativity`), L2 |
-| `l1_signal_catalogue` | `L1_POSSIBLE` | L2 (menu) |
-| `axis_memory` | `cycle.axes.digest()` (DERIVED) | L1, L2, L3 |
-
-L2 owns the L1-only injection subset via `l1_layout`; see [`l1-generate-surface.md`](l1-generate-surface.md). L2-internal injections (`l1_overrides`, `l1_signal_catalogue`) are absent from `L1_POSSIBLE` so L2 cannot inject its own state into L1 as a layout entry — `l1_overrides`'s contents reach L1 only via the `n_variants`/`creativity` caller extras.
+L2 owns the L1-only injection subset via `l1_layout`; see [`dispatch-hub.md`](dispatch-hub.md) § L1 layout. L2-internal injections (`l1_overrides`, `l1_signal_catalogue`) are absent from `L1_POSSIBLE` so L2 cannot inject its own state into L1 as a layout entry — `l1_overrides`'s contents reach L1 only via the `n_variants`/`creativity` caller extras.
 
 ---
 
@@ -159,11 +142,10 @@ archive/                            MeasurementArchive
 
 Order for a contributor who wants to follow L1/L2/L3 end-to-end:
 
-1. [`dispatch-hub.md`](dispatch-hub.md) — signal routing, four wounds, mermaid flow.
-2. [`l1-generate-surface.md`](l1-generate-surface.md) — `INJECTIONS`, `L1Layout`, slot composition.
-3. [`l2-internals.md`](l2-internals.md) — `task_context` mutation, layout edits.
-4. [`../../promptpotter/CLAUDE.md`](../../promptpotter/CLAUDE.md) — L3 plan + per-layer agent contracts.
-5. [`self-healing-internals.md`](self-healing-internals.md) — wound channels, heal-trigger ladder.
+1. [`dispatch-hub.md`](dispatch-hub.md) — signal routing, `INJECTIONS`, `L1Layout`, slot composition, the mermaid flow.
+2. [`l2-internals.md`](l2-internals.md) — `task_context` mutation, layout edits.
+3. [`../../promptpotter/CLAUDE.md`](../../promptpotter/CLAUDE.md) — L3 plan + per-layer agent contracts.
+4. [`self-healing-internals.md`](self-healing-internals.md) — wound channels, heal-trigger ladder.
 
 ---
 
@@ -171,15 +153,20 @@ Order for a contributor who wants to follow L1/L2/L3 end-to-end:
 
 | Page | Covers |
 |------|--------|
-| [Adding a surface](adding-a-surface.md) | Golden-path recipes per expansion point (record/injection/view-field/decision-kind/connector/node) + the CI guard that catches each half-wiring |
+| [Adding a surface](adding-a-surface.md) | Golden-path recipes per expansion point (record/injection/view-field/decision-kind/connector/node) + the guard that catches each half-wiring |
+| [Dispatch hub + L1 layout](dispatch-hub.md) | `INJECTIONS` registry, `L1Layout`, `DispatchHub`, mermaid flow + per-placeholder source map |
 | [L2 internals](l2-internals.md) | L2 firing, output, OSP mutations, layout edits |
-| [L1 layout + dispatch hub](l1-generate-surface.md) | `INJECTIONS` registry, `L1Layout`, `DispatchHub` |
-| [Dispatch hub visual + index](dispatch-hub.md) | Mermaid flow diagram + per-placeholder source map |
 | [Self-healing internals](self-healing-internals.md) | Failure classification, escalation wiring |
 | [Node standard](node-standard.md) | Node JSON declaration format |
+| [Pipeline JSON contract](pipeline-json-contract.md) | Strict field-level `pipeline.json` shape |
 | [Stable API v1](stable-api.md) | Fork-readiness surface |
 | [Bootstrap sequence](bootstrap-sequence.md) | The four-step chain `init_services` → `populate_session_scoring` → `bootstrap_cycle` → `init_optimization_loop` with pre/postconditions and an ASCII diagram |
-| [Conventions](conventions.md) | Style + code-shape rules |
+| [Concept map](concept-map.md) | "Where does concept X live" table |
+| [Event stream](event-stream.md) | SSE Profile-A contract |
+| [Cycle fixtures](cycle-fixtures.md) | Freezing a buggy cycle as a webapp test fixture |
+| [L1 candidate analysis checklist](l1-candidate-analysis-checklist.md) | Round-trace review checklist + the meta-campaign parallel-use lookup |
+| [Local OIDC](local-oidc.md) | Dex harness for the auth-on dashboard |
+| [Conventions](conventions.md) | Style + code-shape rules + the three situational reasoning doctrines (simplify-the-problem / surface-ledger / reach-the-operator) |
 | [Glossary](../glossary.md) | Domain vocabulary + canonical file pointers |
 
 For the conceptual layer (CONTEXT, PLAN, spend control): [`../concepts/`](../concepts/README.md).

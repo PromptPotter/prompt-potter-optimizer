@@ -5,7 +5,7 @@
 A self-referential dataset: outer PromptPotter optimizes the **meta-prompts**
 that drive the inner PromptPotter cycle. Connector boundary:
 `promptpotter/connectors/promptpotter.py`. Spec:
-[`docs/specs/m12-multi-connector.md#track-15--promptpotter-as-connector`](../../docs/specs/m12-multi-connector.md#track-15--promptpotter-as-connector).
+[`docs/specs/roadmap.md`](../../docs/specs/roadmap.md) § Connectors + L4 inner-cycle execution.
 Concept: [`docs/concepts/optimizer-of-the-optimizer.md`](../../docs/concepts/optimizer-of-the-optimizer.md).
 
 Each outer "sample" runs an inner PromptPotter campaign on a small GSM8K

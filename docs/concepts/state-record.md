@@ -19,4 +19,4 @@ The record is the optimizer's working memory for two independent reasons:
 - Not the pipeline configuration — frozen target shape lives in `JobSearchPoint`.
 - Not the campaign config — operator knobs (max rounds, patience, n_variants ceiling) live on `CampaignConfig` and never mutate.
 
-For the per-layer prompt structure (8 fields, layer-specific surfaces, render chain) see [`../developer/README.md`](../developer/README.md) + [`../developer/l1-generate-surface.md`](../developer/l1-generate-surface.md).
+For the per-layer prompt structure (8 fields, layer-specific surfaces, render chain) see [`../developer/README.md`](../developer/README.md) + [`../developer/dispatch-hub.md`](../developer/dispatch-hub.md).
