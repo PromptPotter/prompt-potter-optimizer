@@ -18,6 +18,19 @@ const RUN_PHASE_LABEL: Record<string, string> = {
   detached: "Detached",
 };
 
+// The one definition of "this cycle is a live, incomplete job" — running, its
+// origin gate, paused (resumable), and detached (alive but the producer went
+// quiet >30 s, e.g. blocked inside a long L4 inner measurement). Only `terminal`
+// and `checkin` fall outside. Every "is anything running" surface reads THIS —
+// the navbar indicator, the RemoteBar, the workspace `liveCycles` — so they can't
+// disagree the way a bare `run_phase === "running"` filter did (it silently
+// vanished the moment a cycle went detached).
+const IN_FLIGHT_PHASES = new Set(["running", "detached", "paused", "gate"]);
+
+export function isInFlight(runPhase: string | null | undefined): boolean {
+  return !!runPhase && IN_FLIGHT_PHASES.has(runPhase);
+}
+
 // Live view: reason lives in `dash.stop_reason`. Cycle list: reason lives in the
 // entry's `status` (the precise StopReason value, "active" while running). Pass
 // whichever the surface has.

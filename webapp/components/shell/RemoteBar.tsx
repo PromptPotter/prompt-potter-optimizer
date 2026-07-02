@@ -2,7 +2,8 @@
 import { useState } from "react";
 import { postSkipSearchpoint, IngestApiError } from "@/lib/api";
 import { bumpRevalidation } from "@/lib/revalidate";
-import { runPhaseLabel } from "@/lib/run-phase";
+import { runPhaseLabel, isInFlight } from "@/lib/run-phase";
+import { cx } from "@/lib/cx";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
 import { RunControlButton } from "@/components/dashboard/control/RunControlButton";
@@ -39,10 +40,11 @@ export function RemoteBar() {
   if (!campaignId || !cycleId) return null;
 
   const runPhase = runPhaseResolved;
-  // Present only while the cycle is alive — running / paused (so you can resume)
-  // / origin gate. Hidden when terminal, detached, or no run yet.
-  const active = runPhase === "running" || runPhase === "paused" || runPhase === "gate";
-  if (!active) return null;
+  // Present while the viewed cycle is a live, incomplete job — the same in-flight
+  // set the navbar counts (running / gate / paused / detached), so an L4-blocked
+  // outer whose producer went quiet keeps its remote instead of vanishing.
+  // Hidden only when terminal, checkin, or no run yet.
+  if (!isInFlight(runPhase)) return null;
 
   // Babysat marker for the in-view cycle — the canonical flag rides the cycle
   // list (index.json::human_intervened), permanent once an operator intervenes.
@@ -81,8 +83,8 @@ export function RemoteBar() {
 
   return (
     <div className="remote-bar" role="group" aria-label="Campaign remote control">
-      <span className={`remote-phase remote-phase-${runPhase}`}>
-        <span className="remote-dot" aria-hidden="true" />
+      <span className={cx("phase-chip", `phase-${runPhase}`)}>
+        <span className="phase-dot" aria-hidden="true" />
         {runPhaseLabel(runPhase, dash?.stop_reason)}
       </span>
       <RunControlButton />

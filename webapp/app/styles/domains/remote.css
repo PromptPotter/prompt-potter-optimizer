@@ -21,13 +21,7 @@
   color:var(--color-text-secondary,var(--color-text-tertiary));
 }
 
-/* Run-phase chip + status dot. The dot colour pairs with the label (never
-   colour-alone) so the phase reads without relying on hue. */
-.remote-phase{display:inline-flex;align-items:center;gap:6px;font-weight:600;color:var(--color-text-primary,inherit)}
-.remote-dot{width:8px;height:8px;border-radius:50%;background:var(--color-text-tertiary)}
-.remote-phase-running .remote-dot{background:var(--color-success)}
-.remote-phase-paused .remote-dot{background:var(--color-warn)}
-.remote-phase-gate .remote-dot{background:var(--color-accent)}
+/* The run-phase chip (.phase-chip) is shared chrome — see shell.css. */
 
 /* Skip — bordered pill matching the .run-ctl register (state by icon
    colour, quiet border that lifts to accent on hover). */

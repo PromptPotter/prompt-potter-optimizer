@@ -178,16 +178,6 @@ export function ChatPane({
     loopTokens,
     totalTokens,
   } = readSpend(dash);
-  // The collapsed toggle's BUDGET chip: spent / limit. USD when the rate is
-  // known and a USD ceiling is armed; otherwise the token ceiling (the
-  // free-backend case, where USD only sees optimizer cost).
-  const budgetChip = (() => {
-    if (rateKnown && budgetUsd != null)
-      return `${usedUsd != null ? fmtUsd(usedUsd) : "$0"} / ${fmtUsd(budgetUsd)}`;
-    if (budgetTokens != null) return `${fmtTokens(totalTokens)} / ${fmtTokens(budgetTokens)}`;
-    if (rateKnown && usedUsd != null) return fmtUsd(usedUsd);
-    return "—";
-  })();
   const deltaPerSpend =
     delta != null && usedUsd != null && usedUsd > 0 ? delta / usedUsd : null;
   const effChip =
@@ -226,9 +216,6 @@ export function ChatPane({
               <span className="chip" title={TERMS.newjob_bar_best}>
                 <span className="chip-lbl">Best</span> <strong>{bestPctOnly}</strong>
                 {originPct && <span className="chip-origin"> / {originPct}</span>}
-              </span>
-              <span className="chip" title={TERMS.newjob_bar_budget}>
-                <span className="chip-lbl">Budget</span> <strong>{budgetChip}</strong>
               </span>
               <span className="chip" title={TERMS.newjob_bar_eta}>
                 <span className="chip-lbl">ETA</span> <strong>{etaChip}</strong>

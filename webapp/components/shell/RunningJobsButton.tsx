@@ -1,12 +1,15 @@
 "use client";
 import { useWorkspace } from "@/lib/workspace";
+import { runPhaseLabel } from "@/lib/run-phase";
+import { cx } from "@/lib/cx";
 import { Popover } from "@/components/ui";
 
 // The most direct "is anything running?" signal, sitting in the topbar next to
-// the view tabs. Absent when idle, the Potter glyph when one cycle is live, and
-// the glyph + a count badge when several are. It reads the same `cycles` list
-// the sidebar renders (polled by WorkspaceProvider) and filters on the
-// live `running` flag — no separate poll, no separate source of truth.
+// the view tabs. Absent when idle, the Potter glyph when one job is in flight,
+// and the glyph + a count badge when several are. It reads the workspace's
+// shared `liveCycles` derivation (running / gate / paused / detached) — the same
+// in-flight set the RemoteBar uses — so it can't disagree, and it no longer
+// silently vanishes when a live cycle goes detached (e.g. an L4 inner loop).
 
 interface Props {
   // Called after a running cycle is picked, so the topbar can switch to the
@@ -31,9 +34,8 @@ const POTTER_GLYPH = (
 );
 
 export function RunningJobsButton({ onPicked }: Props) {
-  const { cycles, campaigns, selectCycle } = useWorkspace();
-  const running = cycles.filter((c) => c.run_phase === "running");
-  const n = running.length;
+  const { liveCycles, campaigns, selectCycle } = useWorkspace();
+  const n = liveCycles.length;
 
   // Missing button === idle: the absence IS the signal.
   if (n === 0) return null;
@@ -46,15 +48,16 @@ export function RunningJobsButton({ onPicked }: Props) {
   const labelFor = (campaignId: string, dataset: string) =>
     campaigns.find((c) => c.campaign_id === campaignId)?.label || dataset || campaignId;
 
-  // Exactly one running → the button IS the direct link.
+  // Exactly one in flight → the button IS the direct link.
   if (n === 1) {
-    const c = running[0];
+    const c = liveCycles[0];
+    const label = labelFor(c.campaign_id, c.dataset_name);
     return (
       <button
         type="button"
         className="topbar-jobs"
-        aria-label={`1 campaign running — ${labelFor(c.campaign_id, c.dataset_name)}. Go to it.`}
-        title={`Running: ${labelFor(c.campaign_id, c.dataset_name)}`}
+        aria-label={`1 active job — ${label} (${runPhaseLabel(c.run_phase, c.status)}). Go to it.`}
+        title={`${runPhaseLabel(c.run_phase, c.status)}: ${label}`}
         onClick={() => pick(c.campaign_id, c.cycle_id)}
       >
         {POTTER_GLYPH}
@@ -62,7 +65,8 @@ export function RunningJobsButton({ onPicked }: Props) {
     );
   }
 
-  // Several running → glyph + count badge; click opens the list.
+  // Several in flight → glyph + count badge; click opens the list, each row
+  // tagged with its phase so running / paused / detached read at a glance.
   return (
     <Popover
       align="left"
@@ -70,10 +74,10 @@ export function RunningJobsButton({ onPicked }: Props) {
         <button
           type="button"
           className="topbar-jobs"
-          aria-label={`${n} campaigns running. Open the list.`}
+          aria-label={`${n} active jobs. Open the list.`}
           aria-expanded={open}
           aria-haspopup="menu"
-          title={`${n} campaigns running`}
+          title={`${n} active jobs`}
           onClick={toggle}
         >
           {POTTER_GLYPH}
@@ -84,8 +88,8 @@ export function RunningJobsButton({ onPicked }: Props) {
       )}
     >
       {({ close }) => (
-        <ul className="topbar-jobs-list" role="menu" aria-label="Running campaigns">
-          {running.map((c) => (
+        <ul className="topbar-jobs-list" role="menu" aria-label="Active jobs">
+          {liveCycles.map((c) => (
             <li key={`${c.campaign_id}/${c.cycle_id}`} role="none">
               <button
                 type="button"
@@ -96,7 +100,10 @@ export function RunningJobsButton({ onPicked }: Props) {
                   close();
                 }}
               >
-                <span className="topbar-jobs-dot" aria-hidden="true" />
+                <span className={cx("phase-chip", `phase-${c.run_phase}`)}>
+                  <span className="phase-dot" aria-hidden="true" />
+                  {runPhaseLabel(c.run_phase, c.status)}
+                </span>
                 <span className="topbar-jobs-item-label">
                   {labelFor(c.campaign_id, c.dataset_name)}
                 </span>

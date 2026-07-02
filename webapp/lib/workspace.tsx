@@ -27,6 +27,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -48,6 +49,7 @@ import {
 import { usePoll } from "./hooks/usePoll";
 import { bumpRevalidation, useRevalidation } from "./revalidate";
 import { useAuthGate } from "./auth-context";
+import { isInFlight } from "./run-phase";
 
 export interface WorkspaceState {
   sessionId: string | null;
@@ -72,6 +74,10 @@ export interface WorkspaceState {
   // of the prior tab's stale list.
   campaignsLoaded: boolean;
   cyclesError: string | null;
+  // The in-flight subset of `cycles` (running / gate / paused / detached) —
+  // derived once here so every "what's running" surface reads the same list
+  // instead of re-filtering `run_phase` with its own threshold.
+  liveCycles: CycleListEntry[];
   // Campaign manifests (GET /campaigns) — polled in the same tick as
   // /cycles. Carries the operator-editable `label`; surfaces resolve a
   // campaign's display name from here. Last-good list survives a failed tick.
@@ -306,6 +312,13 @@ export function WorkspaceProvider({
       : null;
   const datasetName = cycleEntry?.dataset_name ?? null;
 
+  // One workspace-wide "what is running" derivation. Recomputed only when the
+  // list mutates, so the navbar indicator and RemoteBar share it for free.
+  const liveCycles = useMemo(
+    () => cycles.filter((c) => isInFlight(c.run_phase)),
+    [cycles],
+  );
+
   // URL contract: `?path=<encoded CyclePath>` present ⇔ pinned to that address.
   // Written only while pinned, stripped while following.
   useEffect(() => {
@@ -362,6 +375,7 @@ export function WorkspaceProvider({
     cyclesLoaded,
     campaignsLoaded: campaignsFilter === lifecycleFilter,
     cyclesError,
+    liveCycles,
     campaigns,
     activeError,
     lifecycleFilter,

@@ -2,7 +2,6 @@
 import { memo, useMemo } from "react";
 import { useWorkspace } from "@/lib/workspace";
 import { useAuth } from "@/lib/auth-context";
-import { useCycleStream } from "@/lib/poll";
 import type { CycleListEntry } from "@/lib/api";
 import {
   rootCycleId,
@@ -33,22 +32,6 @@ function optionText(c: CycleListEntry): string {
   // <option> can't host a badge, so it rides the label text.
   const babysat = c.human_intervened ? " · ✎ babysat" : "";
   return `${unitDisplayName(c)} · best ${fmtPct0(c.best_accuracy)} · ${runPhaseLabel(c.run_phase, c.status)}${babysat}`;
-}
-
-// The live badge subscribes to the 2 s dashboard.json poll on its own. Kept
-// out of the picker body so the picker's heavy optgroup tree doesn't rebuild
-// on every tick.
-function LiveBadge() {
-  const { isLive } = useCycleStream();
-  if (!isLive) return null;
-  return (
-    <span
-      className="live-badge"
-      title="Campaign is actively running — dashboard updated in the last 60s"
-    >
-      ● Live
-    </span>
-  );
 }
 
 export const CyclePicker = memo(function CyclePicker({
@@ -191,7 +174,6 @@ export const CyclePicker = memo(function CyclePicker({
           </button>
         </span>
       )}
-      <LiveBadge />
     </span>
   );
 });
