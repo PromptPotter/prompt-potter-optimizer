@@ -5,7 +5,7 @@ import { ConnectorInspector } from "./ConnectorInspector";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useSelection } from "@/lib/SelectionContext";
-import { liveObserveConfig } from "@/lib/derivations";
+import { isSelfOptimization, liveObserveConfig } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
 
 // The backend target LLM is being called throughout L1 scoring (and origin).
@@ -163,14 +163,20 @@ function SingleNodeChip({
 // failed, or no dataset is bound. NOT a real node: we must not fabricate a single
 // "LLM" chip here (it would misrepresent a failed/loading fetch — or a real 5-node
 // pipeline — as a genuine single-LLM pipeline). Neutral, non-clickable, no model value.
-function PipelinePlaceholder() {
+// For an L4 self-optimization unit the empty `view` is not a failure — it has no
+// HTTP pipeline; label it honestly rather than as an unavailable one.
+function PipelinePlaceholder({ selfOpt }: { selfOpt: boolean }) {
   return (
-    <div className="wf-hero-node" aria-label="Pipeline unavailable" aria-busy="true">
+    <div
+      className="wf-hero-node"
+      aria-label={selfOpt ? "Self-optimization (L4)" : "Pipeline unavailable"}
+      aria-busy={selfOpt ? undefined : true}
+    >
       <div className="head">
         <div className="ico">{LLM_ICON}</div>
-        <div className="lbl">Pipeline</div>
+        <div className="lbl">{selfOpt ? "Self-opt" : "Pipeline"}</div>
       </div>
-      <div className="val">—</div>
+      <div className="val">{selfOpt ? "L4" : "—"}</div>
     </div>
   );
 }
@@ -291,6 +297,7 @@ function MultiNodeStrip({
 export function TargetPipelineHero({ samplesOpen, onToggle }: Props) {
   const cv = useConnector();
   const { dash } = useDashboard();
+  const selfOpt = isSelfOptimization(cv.backendType);
   const interior = cv.view ? interiorNodes(cv.view) : [];
   // The running searchpoint's resolved model when live; static origin otherwise.
   const liveModelFor = liveModelResolver(
@@ -317,9 +324,10 @@ export function TargetPipelineHero({ samplesOpen, onToggle }: Props) {
         <ConnectorInspector view={cv} />
       </div>
       {cv.view == null || interior.length === 0 ? (
-        // View not loaded (fetch in flight / failed / no dataset), or a degenerate
-        // empty pipeline — honest placeholder, never a fabricated node.
-        <PipelinePlaceholder />
+        // View not loaded (fetch in flight / failed / no dataset), a degenerate
+        // empty pipeline, or an L4 self-optimization unit with no HTTP pipeline —
+        // honest placeholder, never a fabricated node.
+        <PipelinePlaceholder selfOpt={selfOpt} />
       ) : interior.length === 1 ? (
         // A genuine single-node pipeline (first-class since the is_single_node
         // refactor) — render its REAL node, not a synthesized "LLM" stand-in.

@@ -13,7 +13,7 @@
 // control-plane wires the write half).
 
 import { cx } from "@/lib/cx";
-import { connectorReachability } from "@/lib/derivations";
+import { connectorReachability, isSelfOptimization } from "@/lib/derivations";
 import type { ConnectorView } from "@/lib/types";
 
 const SECURITY_DOC_URL =
@@ -37,18 +37,25 @@ export function ConnectorInspector({ view }: Props) {
   // Reachability verdict — shared with the CriticalAlertBanner so the LED and
   // the top banner can never disagree (lib/derivations/connector-state.ts).
   const { reachable, stateCls, stateLabel } = connectorReachability(health);
+  // An L4 self-optimization unit has no HTTP backend to probe — its backend is
+  // PromptPotter itself. Say so honestly rather than degrading to the "no backend
+  // selected" / "idle" states built for the TermNorm shape (which read as a
+  // misconfiguration). The real per-node backend lives in the inner run.
+  const selfOpt = isSelfOptimization(backendType);
   // No resolved connector (anon preview / no dataset selected) means nothing is
   // being probed — show a terminal "idle", not a perpetual "probing…" that
   // never resolves (frontend-surface-contract.md § I1).
-  const noBackend = connector == null;
-  const label = noBackend ? "idle" : stateLabel;
-  const footText = noBackend
-    ? "no backend selected"
-    : !health
-      ? "probe pending…"
-      : reachable
-        ? `reachable · ${new Date(health.checked_at).toLocaleTimeString()}`
-        : `unreachable${health.detail ? ` · ${health.detail}` : ""}`;
+  const noBackend = connector == null && !selfOpt;
+  const label = selfOpt ? "self-optimization" : noBackend ? "idle" : stateLabel;
+  const footText = selfOpt
+    ? "L4 self-optimization — backend is PromptPotter itself; the per-node backend lives in the inner run"
+    : noBackend
+      ? "no backend selected"
+      : !health
+        ? "probe pending…"
+        : reachable
+          ? `reachable · ${new Date(health.checked_at).toLocaleTimeString()}`
+          : `unreachable${health.detail ? ` · ${health.detail}` : ""}`;
   const interior = pipelineView ? pipelineView.nodes.filter((n) => n.kind !== "io") : [];
 
   return (
@@ -56,12 +63,12 @@ export function ConnectorInspector({ view }: Props) {
       <button
         type="button"
         className="connector-dot"
-        aria-label={`Connector ${connector ?? "—"} — ${label}`}
+        aria-label={`Connector ${connector ?? (selfOpt ? "PromptPotter" : "—")} — ${label}`}
       />
       <div className="connector-pop" role="group" aria-label="Connector state">
         <div className="connector-pop-head">
           <span className="dot" />
-          <span className="name">{connector ?? "—"}</span>
+          <span className="name">{connector ?? (selfOpt ? "PromptPotter" : "—")}</span>
           {backendType && <span className="kind">{backendType}</span>}
           <span className="state">{label}</span>
         </div>
@@ -100,7 +107,13 @@ export function ConnectorInspector({ view }: Props) {
           </a>
         </div>
         <ul className="connector-pop-nodes">
-          {interior.length === 0 && <li className="empty">no nodes loaded</li>}
+          {interior.length === 0 && (
+            <li className="empty">
+              {selfOpt
+                ? "meta-prompt nodes — inspect them in the inner run"
+                : "no nodes loaded"}
+            </li>
+          )}
           {interior.map((n) => {
             const model = n.kind === "llm" ? currentNodes[n.id]?.model : null;
             return (

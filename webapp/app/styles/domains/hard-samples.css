@@ -5,6 +5,16 @@
    on either axis to resize — tiles keep their size, the grid reflows how
    many show. The grip fades in on hover. Click to expand HardSamplesTable. */
 .hs-heat-wrap{display:flex;flex-direction:column;align-items:center;gap:6px;width:100%;margin-top:24px;padding:0 8px}
+/* L4 self-optimization pointer — the honest stand-in for the sample heat-map on a
+   pp-self unit (no cache.json roster). Points at the inner run, which owns the
+   real per-sample data; the Open button reuses the sidebar inner drill-in. */
+.hs-selfopt-note{gap:8px;text-align:center;max-width:32rem}
+.hs-selfopt-lead{margin:0;font-size:13px;color:var(--color-text-secondary)}
+.hs-selfopt-lead strong{color:var(--color-text-primary)}
+.hs-selfopt-hint{margin:0;font-size:12px;color:var(--color-text-tertiary)}
+.hs-selfopt-open{padding:5px 12px;border:1px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-accent);font-size:13px;font-family:inherit;cursor:pointer;transition:border-color .12s,background .12s}
+.hs-selfopt-open:hover{border-color:var(--color-accent);background:var(--color-background-hover)}
+.hs-selfopt-open:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
 /* Two-button control row: heat-map mini on the left, sample-trajectory
    mini on the right. Each owns an independent expand state; their
    expanded panels stack below (trajectory above the hard-samples table). */

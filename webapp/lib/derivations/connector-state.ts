@@ -29,3 +29,14 @@ export function connectorReachability(health: BackendHealth | null): ConnectorRe
     stateLabel: reachable ? "reachable" : down ? "unreachable" : "probing…",
   };
 }
+
+// An L4 self-optimization (pp-self) unit: its `backend_type` is PromptPotter
+// itself, not a TermNorm-shaped HTTP backend. The connector/pipeline/sample
+// panels are built for the HTTP shape and degrade to misleading empty states
+// ("no backend selected" / "no nodes loaded") for it, because pp-self has no
+// registered backend, no `cache.json` roster, and no llm/tool `view`. Panels
+// branch on THIS so they read as "self-optimization — drill into the inner run"
+// instead of "misconfigured". The real per-sample data lives in the inner cycle.
+export function isSelfOptimization(backendType: string | null | undefined): boolean {
+  return backendType === "promptpotter";
+}

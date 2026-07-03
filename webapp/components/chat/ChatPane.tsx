@@ -7,11 +7,12 @@ import { useIngestFlow } from "@/lib/hooks/useIngestFlow";
 import { IngestConversation } from "@/components/ingest/IngestConversation";
 import type { OnMinted } from "@/components/ingest/types";
 import { TERMS, targetNodeIds } from "@/lib/terms";
-import { headlineStats, readSpend } from "@/lib/derivations";
+import { headlineStats, isSelfOptimization, readSpend } from "@/lib/derivations";
 import { fmtText, fmtDuration, fmtUsd, fmtTokens } from "@/lib/format";
 import { Switch } from "@/components/ui";
 import { FitnessPanel } from "@/components/whatif/FitnessPanel";
 import { HardSamplesHeatmap } from "@/components/dashboard/samples/HardSamplesHeatmap";
+import { SelfOptSamplesPointer } from "@/components/dashboard/samples/SelfOptSamplesPointer";
 import { CyclePicker } from "@/components/shell/CyclePicker";
 import { TargetPipelineHero } from "@/components/dashboard/pipeline/TargetPipelineHero";
 import { BackendNodeDetail } from "@/components/dashboard/pipeline/BackendNodeDetail";
@@ -137,6 +138,9 @@ export function ChatPane({
 
   // Shared connector view (one provider-level fetch + health poll).
   const cv = useConnector();
+  // An L4 self-optimization unit has no cache.json roster — its samples ARE the
+  // inner campaigns — so the hard-samples panels point to the inner run instead.
+  const selfOpt = isSelfOptimization(cv.backendType);
   const { node: selectedNode, setSelectionForNode } = useSelection();
   // Target-node ids are disjoint from the optimizer canvas (membership-gate);
   // the demo/preview hero with no view exposes the synthetic "llm" chip id.
@@ -270,19 +274,22 @@ export function ChatPane({
             onClose={() => setSelectionForNode(null)}
           />
         )}
-        {samplesOpen && (
-          <HardSamplesHeatmap
-            datasetName={datasetName}
-            datasetItems={datasetItems}
-            datasetMeasuredCount={datasetMeasuredCount}
-            datasetUnmeasuredCount={datasetUnmeasuredCount}
-            datasetSplitTest={datasetSplitTest}
-            archivePerSample={archivePerSample}
-            datasetStale={datasetStale}
-            hardSamplesScope={hardSamplesScope}
-            onHardSamplesScopeChange={onHardSamplesScopeChange}
-          />
-        )}
+        {samplesOpen &&
+          (selfOpt ? (
+            <SelfOptSamplesPointer />
+          ) : (
+            <HardSamplesHeatmap
+              datasetName={datasetName}
+              datasetItems={datasetItems}
+              datasetMeasuredCount={datasetMeasuredCount}
+              datasetUnmeasuredCount={datasetUnmeasuredCount}
+              datasetSplitTest={datasetSplitTest}
+              archivePerSample={archivePerSample}
+              datasetStale={datasetStale}
+              hardSamplesScope={hardSamplesScope}
+              onHardSamplesScopeChange={onHardSamplesScopeChange}
+            />
+          ))}
       </div>
 
       <div className="chat-grid">
