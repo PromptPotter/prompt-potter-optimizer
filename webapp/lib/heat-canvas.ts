@@ -2,7 +2,7 @@
 // (MeasHeatCell). No React, no DOM — unit-testable in isolation.
 
 // Discrete cells never grow past this; beyond it the strip wastes space.
-export const MAX_CELL_PX = 8;
+const MAX_CELL_PX = 8;
 
 // One measurement: an ordinal slot and whether the sample hit it.
 export interface HeatDot {

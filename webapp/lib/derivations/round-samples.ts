@@ -21,7 +21,7 @@ import type { CandidateRow, SampleRow } from "@/lib/types";
 // from `dashboard.json::current_round.nodes.l1_score.output.candidates`
 // only. Returns rows in source order; the caller decides if it wants
 // newest-first.
-export function liveSamplesFor(
+function liveSamplesFor(
   dash: DashboardSnapshot | null,
   round: number,
   candidate_id: string,
@@ -89,7 +89,7 @@ interface RawHistoricalSample {
 // `round_NNNN.json::all_candidate_results[candidate_id]` only.
 // `roundDoc` is the document already loaded by `useRoundFile`; this
 // function is pure and synchronous.
-export function historicalSamplesFor(
+function historicalSamplesFor(
   roundDoc: RoundFileDoc | null,
   round: number,
   candidate_id: string,

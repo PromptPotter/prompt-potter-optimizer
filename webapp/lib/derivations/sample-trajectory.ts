@@ -12,7 +12,7 @@ export interface SortedRounds {
 export type CellKind = "new" | "gained" | "lost" | "kept" | "absent";
 
 // Sample-id → 1-indexed position in the round's measurement order.
-export function positionMap(bank: number[] | undefined): Map<number, number> {
+function positionMap(bank: number[] | undefined): Map<number, number> {
   const m = new Map<number, number>();
   if (!bank) return m;
   bank.forEach((sid, i) => m.set(sid, i + 1));

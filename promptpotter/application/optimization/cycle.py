@@ -447,6 +447,28 @@ class Cycle:
             delta_scale=delta_scale,
         )
 
+    def _cumulative_scores(
+        self,
+        results: list[dict[str, Any]],
+        schema: PipelineSchema | None,
+        fallback: tuple[float, float],
+    ) -> tuple[float, float]:
+        """``(accuracy, composite_fitness)`` over the cumulative frontier — the one
+        scoring call the L1 trajectory folds through (``replay_priors`` +
+        ``absorb_round``). ``fallback`` (the round's own subset scalars) stands in
+        when the cycle has no schema. ``opt_sp=None``: the cumulative pool mixes
+        multiple searchpoints, so opt_sp-aware evaluators take their vacuous fallback
+        (per the ``matched_origin_stats`` convention)."""
+        if schema is None:
+            return fallback
+        scores = compute_composite_fitness(
+            cast("list[QueryMeasurement]", results),
+            schema,
+            opt_sp=None,
+            round_scorer=self.session.scoring.round_scorer,
+        )
+        return scores["accuracy"], scores["composite_fitness"]
+
     def replay_priors(self, priors: list[dict[str, Any]]) -> None:
         """Reconstruct round-loop state from persisted prior rounds (in-place).
 
@@ -501,18 +523,9 @@ class Cycle:
         acc_cum: list[dict[str, Any]] = list(origin_results)
         for rr in self.rounds:
             acc_cum = _merge_into_cumulative(acc_cum, list(rr.results))
-            if schema is not None:
-                cumi = compute_composite_fitness(
-                    cast("list[QueryMeasurement]", acc_cum),
-                    schema,
-                    opt_sp=None,
-                    round_scorer=self.session.scoring.round_scorer,
-                )
-                cum_acc = cumi["accuracy"]
-                cum_comp = cumi["composite_fitness"]
-            else:
-                cum_acc = rr.accuracy
-                cum_comp = rr.composite_fitness
+            cum_acc, cum_comp = self._cumulative_scores(
+                acc_cum, schema, (rr.accuracy, rr.composite_fitness)
+            )
             if cum_comp > tr.best_composite_fitness:
                 tr.best_composite_fitness = cum_comp
                 tr.best_accuracy = cum_acc
@@ -532,18 +545,9 @@ class Cycle:
             if cum_theta is not None and (tr.best_theta is None or cum_theta > tr.best_theta):
                 tr.best_theta = cum_theta
         tr.current_results = acc_cum
-        if schema is not None:
-            cum = compute_composite_fitness(
-                cast("list[QueryMeasurement]", tr.current_results),
-                schema,
-                opt_sp=None,
-                round_scorer=self.session.scoring.round_scorer,
-            )
-            tr.current_accuracy = cum["accuracy"]
-            tr.current_composite_fitness = cum["composite_fitness"]
-        else:
-            tr.current_accuracy = last_rr.accuracy
-            tr.current_composite_fitness = last_rr.composite_fitness
+        tr.current_accuracy, tr.current_composite_fitness = self._cumulative_scores(
+            tr.current_results, schema, (last_rr.accuracy, last_rr.composite_fitness)
+        )
 
     def _maybe_warm_ruler(self) -> None:
         """Warm the δ ruler from a cold start, then LOCK it. While ``delta_scale`` is
@@ -610,19 +614,9 @@ class Cycle:
         )
         tr.current_sp = self.opt_sp.to_job_search_point(base_pipeline_params=_pp, schema=schema)
         tr.current_results = _merge_into_cumulative(tr.current_results, list(rr.results))
-        if schema is not None:
-            # opt_sp=None: cumulative pool mixes multiple searchpoints; opt_sp-aware evaluators take their vacuous fallback (per matched_origin_stats convention).
-            cum = compute_composite_fitness(
-                cast("list[QueryMeasurement]", tr.current_results),
-                schema,
-                opt_sp=None,
-                round_scorer=self.session.scoring.round_scorer,
-            )
-            tr.current_accuracy = cum["accuracy"]
-            tr.current_composite_fitness = cum["composite_fitness"]
-        else:
-            tr.current_accuracy = rr.accuracy
-            tr.current_composite_fitness = rr.composite_fitness
+        tr.current_accuracy, tr.current_composite_fitness = self._cumulative_scores(
+            tr.current_results, schema, (rr.accuracy, rr.composite_fitness)
+        )
         if tr.current_composite_fitness > tr.best_composite_fitness:
             tr.best_composite_fitness = tr.current_composite_fitness
             tr.best_accuracy = tr.current_accuracy

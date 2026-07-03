@@ -13,6 +13,7 @@ import {
   liveL1InputCandidates,
   roundOf,
   type DashboardSnapshot,
+  type LiveInputCandidate,
   type RoundFileDoc,
 } from "@/lib/poll";
 import { candidateLabel } from "@/lib/candidate-label";
@@ -30,15 +31,9 @@ export interface ObserveConfig {
   label: string;
 }
 
-// A candidate row carrying the two observe fields — shared by the round-file
-// `candidate_scores[]` and the live in-flight input candidate.
-interface ResolvedRow {
-  candidate_id?: string;
-  prompt_fields?: Record<string, unknown>;
-  resolved_pipeline_params?: Record<string, unknown> | null;
-}
-
-function rowConfig(row: ResolvedRow | undefined | null, label: string): ObserveConfig | null {
+// A candidate row carrying the two observe fields — the same `LiveInputCandidate`
+// shape backs both the round-file `candidate_scores[]` and the live in-flight input.
+function rowConfig(row: LiveInputCandidate | undefined | null, label: string): ObserveConfig | null {
   if (!row) return null;
   return {
     promptFields: row.prompt_fields ?? {},
@@ -70,7 +65,7 @@ export function liveObserveConfig(dash: DashboardSnapshot | null): ObserveConfig
 export function originObserveConfig(round0: RoundFileDoc | null): ObserveConfig | null {
   const scores = round0?.candidate_scores;
   if (!Array.isArray(scores)) return null;
-  return rowConfig(scores[0] as ResolvedRow, "origin");
+  return rowConfig(scores[0] as LiveInputCandidate, "origin");
 }
 
 // Historical: a specific past candidate (the last completed round's winner) out
@@ -82,6 +77,6 @@ export function candidateObserveConfig(
 ): ObserveConfig | null {
   const scores = doc?.candidate_scores;
   if (!Array.isArray(scores) || !candidateId) return null;
-  const row = (scores as ResolvedRow[]).find((c) => c && c.candidate_id === candidateId);
+  const row = (scores as LiveInputCandidate[]).find((c) => c && c.candidate_id === candidateId);
   return rowConfig(row, label);
 }

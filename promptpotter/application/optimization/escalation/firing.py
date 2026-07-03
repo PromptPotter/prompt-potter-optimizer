@@ -222,7 +222,6 @@ def _apply_l2(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
         osp.memory.l1_situational_examples = result.l1_situational_examples
     osp.memory.wounds.l2_guard_breaches = list(result.l2_guard_breaches)
     cycle.escalation.record_l2_fired(
-        best_accuracy=cycle.tracking.best_accuracy,
         best_composite_fitness=cycle.tracking.best_composite_fitness,
         best_theta=cycle.tracking.best_theta,
     )
@@ -263,7 +262,6 @@ def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "l2_round": cycle.escalation.l2_round,
         "l2_stall_count": cycle.escalation.l2_stall_count,
-        "l2_best_accuracy_at_entry": cycle.escalation.l2_best_accuracy_at_entry,
         "l2_best_composite_fitness_at_entry": cycle.escalation.l2_best_composite_fitness_at_entry,
         "l2_best_theta_at_entry": cycle.escalation.l2_best_theta_at_entry,
         "param_changes_count": len(result.opt_search_point.memory.l1_overrides),
@@ -338,7 +336,6 @@ def _apply_l3(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
     cycle.opt_sp.memory.wounds.l3_note = result.l3_note
     cycle.opt_sp.memory.wounds.l3_guard_breaches = list(result.l3_guard_breaches)
     cycle.escalation.record_l3_fired(
-        best_accuracy=cycle.tracking.best_accuracy,
         best_composite_fitness=cycle.tracking.best_composite_fitness,
         best_theta=cycle.tracking.best_theta,
     )
@@ -357,7 +354,6 @@ def _l3_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "l3_round": cycle.escalation.l3_round,
         "l3_stall_count": cycle.escalation.l3_stall_count,
-        "l3_best_accuracy_at_entry": cycle.escalation.l3_best_accuracy_at_entry,
         "l3_best_composite_fitness_at_entry": cycle.escalation.l3_best_composite_fitness_at_entry,
         "l3_best_theta_at_entry": cycle.escalation.l3_best_theta_at_entry,
         "new_plan_preview": str(result.opt_search_point.plan)[:120],
@@ -542,7 +538,6 @@ def _trigger_payload(
     patience: int | None,
     *,
     layer: str,
-    track_accuracy: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """(inputs_ref, data) for an L2/L3 escalation-trigger decision."""
     esc = cycle.escalation
@@ -560,8 +555,6 @@ def _trigger_payload(
         "best_theta_at_entry": getattr(esc, f"{layer}_best_theta_at_entry"),
         "best_theta_this_round": cycle.tracking.best_theta,
     }
-    if track_accuracy:
-        data["best_accuracy"] = cycle.tracking.best_accuracy
     return inputs_ref, data
 
 
@@ -588,9 +581,7 @@ async def escalate_l2(
     )
 
     # L2 trigger decision is replayed for divergence — record fired-or-not.
-    l2_inputs, l2_data = _trigger_payload(
-        cycle, round_num, opt.l2_patience, layer="l2", track_accuracy=True
-    )
+    l2_inputs, l2_data = _trigger_payload(cycle, round_num, opt.l2_patience, layer="l2")
     record_decision(
         cycle.pending_decisions,
         ResumeCheckpointKind.L2_ESCALATION_TRIGGER,

@@ -11,7 +11,7 @@ from promptpotter.domain.escalation_signals import (
     RuntimeFailure,
     ValidationFailure,
 )
-from promptpotter.domain.opt_search_point import EvidenceGrounding, OptSearchPoint
+from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.run_records import DecisionRecord
 
@@ -182,10 +182,6 @@ class CandidateProposal(BaseModel):
 
     osp: OptSearchPoint
     pipeline_params_override: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    evidence_grounding: EvidenceGrounding | None = Field(
-        default=None,
-        description="Mirrors osp.lineage.evidence_grounding — duplicated so audit / display sites can read it before OSP construction.",
-    )
     is_probe: bool = Field(
         default=False,
         description=(

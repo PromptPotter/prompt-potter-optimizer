@@ -364,7 +364,6 @@ def finalize_checkin_to_active(
     session.store.campaigns.update_campaign(
         campaign_id,
         {
-            "status": "active",
             "root_content_hash": target_hash,
             "optimizer_prompt_hash": combined_optimizer_prompt_hash(),
             "backend_id": session.backend_id,

@@ -22,6 +22,7 @@ import {
   liveInputCandidate,
   roundOf,
   type DashboardSnapshot,
+  type LiveInputCandidate,
   type RoundFileDoc,
 } from "@/lib/poll";
 
@@ -44,12 +45,6 @@ export function searchPoint(
     origin_prompt_fields: promptFields ?? {},
     pipeline_overlay: overlay ?? {},
   };
-}
-
-interface RawScoredCandidate {
-  candidate_id?: string;
-  prompt_fields?: Record<string, unknown>;
-  resolved_pipeline_params?: Record<string, unknown> | null;
 }
 
 // The fork `pipeline_overlay` is per-node config only — keep object-valued node
@@ -78,10 +73,10 @@ export function candidateSearchPoint(
   const scores = doc.candidate_scores;
   if (!Array.isArray(scores)) return null;
   const entry = scores.find(
-    (c): c is RawScoredCandidate =>
+    (c): c is LiveInputCandidate =>
       !!c &&
       typeof c === "object" &&
-      (c as RawScoredCandidate).candidate_id === candidateId,
+      (c as LiveInputCandidate).candidate_id === candidateId,
   );
   if (!entry) return null;
   return searchPoint(entry.prompt_fields, nodeConfigs(entry.resolved_pipeline_params));

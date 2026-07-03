@@ -301,6 +301,7 @@
                     "escalation_panel",
                     "plan",
                     "rare_hit_samples",
+                    "sample_transcripts",
                     "stall_exploration",
                     "task_context"
                   ],
@@ -354,7 +355,7 @@
           "properties": {
             "priority_fix": {
               "default": "",
-              "maxLength": 200,
+              "maxLength": 320,
               "title": "Priority Fix",
               "type": "string"
             },
@@ -691,7 +692,6 @@
       "fields": [
         "answer_format",
         "assessment",
-        "consultation",
         "findings",
         "instruction",
         "next_action",
@@ -868,11 +868,6 @@
             },
             "task_context": {
               "$ref": "#/$defs/CheckinTaskContext"
-            },
-            "consultation": {
-              "default": "",
-              "title": "Consultation",
-              "type": "string"
             },
             "assessment": {
               "default": "",

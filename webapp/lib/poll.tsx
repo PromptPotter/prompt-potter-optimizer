@@ -189,6 +189,9 @@ export interface LiveInputCandidate {
   idx?: number;
   label?: string;
   changes_description?: string;
+  // Present on settled `round_NNNN.json::candidate_scores[]` rows (the OBSERVE /
+  // STEER readers locate by it); absent on in-flight rows, which match by idx.
+  candidate_id?: string;
   prompt_fields?: Record<string, unknown>;
   // Server-resolved, config-only effective params (`{node:{param:value}, steps}`),
   // prompt stripped. The in-flight peer of round_NNNN.json::candidate_scores[].

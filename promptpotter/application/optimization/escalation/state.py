@@ -52,12 +52,10 @@ class EscalationFSM:
 
     __slots__ = (
         "_l1_stall_count",
-        "_l2_best_accuracy_at_entry",
         "_l2_best_composite_fitness_at_entry",
         "_l2_best_theta_at_entry",
         "_l2_round",
         "_l2_stall_count",
-        "_l3_best_accuracy_at_entry",
         "_l3_best_composite_fitness_at_entry",
         "_l3_best_theta_at_entry",
         "_l3_round",
@@ -68,12 +66,10 @@ class EscalationFSM:
         self._l1_stall_count = 0
         self._l2_round = 0
         self._l2_stall_count = 0
-        self._l2_best_accuracy_at_entry = 0.0
         self._l2_best_composite_fitness_at_entry = 0.0
         self._l2_best_theta_at_entry: float | None = None
         self._l3_round = 0
         self._l3_stall_count = 0
-        self._l3_best_accuracy_at_entry = 0.0
         self._l3_best_composite_fitness_at_entry = 0.0
         self._l3_best_theta_at_entry: float | None = None
 
@@ -92,10 +88,6 @@ class EscalationFSM:
         return self._l2_stall_count
 
     @property
-    def l2_best_accuracy_at_entry(self) -> float:
-        return self._l2_best_accuracy_at_entry
-
-    @property
     def l2_best_composite_fitness_at_entry(self) -> float:
         return self._l2_best_composite_fitness_at_entry
 
@@ -110,10 +102,6 @@ class EscalationFSM:
     @property
     def l3_stall_count(self) -> int:
         return self._l3_stall_count
-
-    @property
-    def l3_best_accuracy_at_entry(self) -> float:
-        return self._l3_best_accuracy_at_entry
 
     @property
     def l3_best_composite_fitness_at_entry(self) -> float:
@@ -213,33 +201,28 @@ class EscalationFSM:
     def record_l2_fired(
         self,
         *,
-        best_accuracy: float,
         best_composite_fitness: float,
         best_theta: float | None = None,
     ) -> None:
         """L2 LLM completed. Bumps L2 round, captures entry origin; resets L1 stall."""
         self._l1_stall_count = 0
         self._l2_round += 1
-        self._l2_best_accuracy_at_entry = best_accuracy
         self._l2_best_composite_fitness_at_entry = best_composite_fitness
         self._l2_best_theta_at_entry = best_theta
 
     def record_l3_fired(
         self,
         *,
-        best_accuracy: float,
         best_composite_fitness: float,
         best_theta: float | None = None,
     ) -> None:
         """L3 fired. Bump L3, reset L1 stall + the L2 counter (new plan invalidates L2's progress)."""
         self._l1_stall_count = 0
         self._l3_round += 1
-        self._l3_best_accuracy_at_entry = best_accuracy
         self._l3_best_composite_fitness_at_entry = best_composite_fitness
         self._l3_best_theta_at_entry = best_theta
         self._l2_round = 0
         self._l2_stall_count = 0
-        self._l2_best_accuracy_at_entry = best_accuracy
         self._l2_best_composite_fitness_at_entry = best_composite_fitness
         self._l2_best_theta_at_entry = best_theta
 
@@ -263,7 +246,6 @@ class EscalationFSM:
             self._l1_stall_count = 0
             self._l2_round = int(escalation_state["l2_round"])
             self._l2_stall_count = int(escalation_state["l2_stall_count"])
-            self._l2_best_accuracy_at_entry = float(escalation_state["l2_best_accuracy_at_entry"])
             self._l2_best_composite_fitness_at_entry = float(
                 escalation_state["l2_best_composite_fitness_at_entry"]
             )
@@ -271,20 +253,17 @@ class EscalationFSM:
             self._l2_best_theta_at_entry = None if l2_theta is None else float(l2_theta)
         elif record.phase == "l3_plan" and record.event == "exit":
             escalation_state = record.payload["data"]
-            best_acc = float(escalation_state["l3_best_accuracy_at_entry"])
             best_comp = float(escalation_state["l3_best_composite_fitness_at_entry"])
             l3_theta = escalation_state.get("l3_best_theta_at_entry")
             best_theta = None if l3_theta is None else float(l3_theta)
             self._l1_stall_count = 0
             self._l3_round = int(escalation_state["l3_round"])
             self._l3_stall_count = int(escalation_state["l3_stall_count"])
-            self._l3_best_accuracy_at_entry = best_acc
             self._l3_best_composite_fitness_at_entry = best_comp
             self._l3_best_theta_at_entry = best_theta
             # New plan invalidates L2's progress — wipe.
             self._l2_round = 0
             self._l2_stall_count = 0
-            self._l2_best_accuracy_at_entry = best_acc
             self._l2_best_composite_fitness_at_entry = best_comp
             self._l2_best_theta_at_entry = best_theta
 

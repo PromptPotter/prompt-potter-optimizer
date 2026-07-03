@@ -16,6 +16,7 @@
 // Items carry stable ids so the snapshot paint, the candidate start/scored, and
 // the per-sample running update all upsert to one row.
 
+import { candidateLabel } from "@/lib/candidate-label";
 
 // One outbound SSE frame. Mirrors `domain/projection_envelope.py::ProjectionEnvelope`.
 // `payload` is the underlying record's `model_dump` (so a record's own nested
@@ -68,9 +69,10 @@ function pct0(v: number | undefined): string | undefined {
   return v == null ? undefined : `${(v * 100).toFixed(0)}%`;
 }
 
-// The displayed fitness as a %. `composite_fitness` is the server-resolved
-// fitness (equals accuracy when no formula); `?? accuracy` only tolerates
-// records minted before it lands on the payload. `num` keeps the NaN guard.
+// A candidate's subset-relative fitness as a %. `composite_fitness` is the
+// server-resolved fitness (equals accuracy when no formula); `?? accuracy` tolerates
+// records minted before it lands. Per-candidate rows only — round/origin headlines
+// read `cumulative_accuracy` (the header/trend basis) so the thread agrees.
 function fitPct(rec: Record<string, unknown>): string | undefined {
   return pct0(num(rec.composite_fitness) ?? num(rec.accuracy));
 }
@@ -99,12 +101,6 @@ function candidateItem(label: string, detail: string | undefined): ActivityItem 
   };
 }
 
-// Canonical candidate label — mirrors `domain/results.py::candidate_label`:
-// `C0` for the origin, else `C{N}.{idx+1}`.
-function candLabel(round: number, idx: number): string {
-  return round === 0 ? "C0" : `C${round}.${idx + 1}`;
-}
-
 // Paint history from the leading stream_snapshot frame (the cycle's
 // dashboard.json): completed rounds + the in-flight current round's candidates +
 // recent warnings + a crash, if any — the state the file already carries.
@@ -116,8 +112,8 @@ export function snapshotToActivity(payload: Record<string, unknown>): ActivityIt
     const r = asRec(rr);
     const round = num(r.round);
     if (round == null) continue;
-    if (round === 0) out.push(candidateItem("C0", fitPct(r)));
-    else out.push(roundItem(round, fitPct(r)));
+    if (round === 0) out.push(candidateItem("C0", pct0(num(r.cumulative_accuracy))));
+    else out.push(roundItem(round, pct0(num(r.cumulative_accuracy))));
   }
 
   // The in-flight round: every planned candidate (so the one being scored shows
@@ -134,7 +130,7 @@ export function snapshotToActivity(payload: Record<string, unknown>): ActivityIt
       if (label) statByLabel.set(label, asRec(asRec(c).stats));
     }
     (inputs as unknown[]).forEach((c, i) => {
-      const label = str(asRec(c).label) ?? candLabel(crRound, i);
+      const label = str(asRec(c).label) ?? candidateLabel(crRound, i);
       const stats = statByLabel.get(label);
       out.push(candidateItem(label, stats ? fitPct(stats) : undefined));
     });
@@ -170,7 +166,7 @@ export function sampleScoredCandidate(env: ProjectionEnvelope): ActivityItem | n
   if (str(p.event) !== "sample_scored") return null;
   const running = asRec(asRec(asRec(p.payload).result)._running);
   if (Object.keys(running).length === 0) return null;
-  return candidateItem(candLabel(num(p.round) ?? 0, num(p.candidate_idx) ?? 0), fitPct(running));
+  return candidateItem(candidateLabel(num(p.round) ?? 0, num(p.candidate_idx) ?? 0), fitPct(running));
 }
 
 // Map one live tailed envelope to at most one item. `null` = a deliberately
@@ -196,7 +192,7 @@ export function projectionToActivity(env: ProjectionEnvelope): ActivityItem | nu
     case "snapshot": {
       const event = str(p.event);
       if (event === "candidate_started") {
-        return candidateItem(candLabel(num(p.round) ?? 0, num(p.candidate_idx) ?? 0), undefined);
+        return candidateItem(candidateLabel(num(p.round) ?? 0, num(p.candidate_idx) ?? 0), undefined);
       }
       if (event === "candidate_scored") {
         const scores = asRec(asRec(p.payload).scores);
@@ -214,7 +210,7 @@ export function projectionToActivity(env: ProjectionEnvelope): ActivityItem | nu
       if (str(p.phase) !== "round" || str(p.event) !== "display") return null;
       const rr = asRec(asRec(p.payload).round_result);
       const round = num(p.round) ?? num(rr.round) ?? 0;
-      return roundItem(round, fitPct(rr));
+      return roundItem(round, pct0(num(rr.cumulative_accuracy)));
     }
     case "round_warning": {
       const error = str(p.severity) === "error";

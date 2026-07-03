@@ -21,6 +21,7 @@ from promptpotter.domain.run_records import (
     CommandRecord,
     CycleRecord,
     ErrorRecord,
+    RoundWarningKind,
     RoundWarningRecord,
     TokenUsageRecord,
 )
@@ -209,7 +210,7 @@ def emit_error_record(
 
 def emit_round_warning(
     *,
-    kind: Literal["l1_zero_candidates", "l2_validator_soft_reject", "injection_budget_overrun"],
+    kind: RoundWarningKind,
     message: str,
     severity: Literal["warning", "error"] = "warning",
     detail: dict[str, Any] | None = None,

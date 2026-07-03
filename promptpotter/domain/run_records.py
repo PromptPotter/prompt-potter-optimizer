@@ -32,6 +32,7 @@ __all__ = [
     "PhaseRecord",
     "ResumeCheckpointKind",
     "ResumeCheckpointRecord",
+    "RoundWarningKind",
     "RoundWarningRecord",
     "SnapshotRecord",
     "TokenUsageRecord",
@@ -286,6 +287,15 @@ class ErrorRecord(BaseModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
+# The closed set of self-healed degradations `emit_round_warning` can raise —
+# one source so the record schema and the emit signature can't drift.
+RoundWarningKind = Literal[
+    "l1_zero_candidates",
+    "l2_validator_soft_reject",
+    "injection_budget_overrun",
+]
+
+
 class RoundWarningRecord(BaseModel):
     """Non-fatal, round-scoped degradation the operator must see on every channel.
 
@@ -310,11 +320,7 @@ class RoundWarningRecord(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     record_type: Literal["round_warning"] = "round_warning"
-    kind: Literal[
-        "l1_zero_candidates",
-        "l2_validator_soft_reject",
-        "injection_budget_overrun",
-    ]
+    kind: RoundWarningKind
     # `error` = the round produced nothing usable (zero candidates); `warning`
     # = degraded but the round still progressed. Drives dashboard styling.
     severity: Literal["warning", "error"] = "warning"

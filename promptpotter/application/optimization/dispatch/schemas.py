@@ -437,7 +437,6 @@ class CheckinOutput(BaseModel):
     thinking_style: str = ""
     answer_format: str = ""
     task_context: CheckinTaskContext = Field(default_factory=CheckinTaskContext)
-    consultation: str = ""
     # Origin-resolution block — populated only on the web ingest check-in path.
     assessment: str = Field(default="", description="One-line read of the current origin state.")
     findings: list[OriginFinding] = Field(default_factory=list)

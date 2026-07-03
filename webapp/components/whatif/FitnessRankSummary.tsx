@@ -9,7 +9,9 @@ function ranks(lines: { key: string; v: number | null }[]): Map<string, number> 
   return m;
 }
 
-function pickWinner(lines: { key: string; v: number | null }[]): string | null {
+// Top bar by composite value — NOT the campaign winner (the real crown is
+// θ-elected `isWinner`). This what-if panel ranks on composite; no θ-election claim.
+function topByFitness(lines: { key: string; v: number | null }[]): string | null {
   let best: string | null = null;
   let bestVal = -Infinity;
   for (const l of lines) {
@@ -23,8 +25,8 @@ function pickWinner(lines: { key: string; v: number | null }[]): string | null {
 }
 
 // Rank-shift read-out for the what-if ablation — compares each candidate's
-// actual rank against its what-if rank and flags whether the winner flips.
-// Spans every bar including origin and historical rounds.
+// actual composite rank against its what-if rank and flags whether the top
+// fitness bar flips. Spans every bar including origin and historical rounds.
 export function FitnessRankSummary({
   bars,
   selected,
@@ -56,9 +58,9 @@ export function FitnessRankSummary({
   }));
   const rankActual = ranks(lines.map((l) => ({ key: l.key, v: l.actual })));
   const rankWhatif = ranks(lines.map((l) => ({ key: l.key, v: l.whatif })));
-  const wA = pickWinner(lines.map((l) => ({ key: l.key, v: l.actual })));
-  const wW = pickWinner(lines.map((l) => ({ key: l.key, v: l.whatif })));
-  const winnerLabel = (k: string | null) =>
+  const wA = topByFitness(lines.map((l) => ({ key: l.key, v: l.actual })));
+  const wW = topByFitness(lines.map((l) => ({ key: l.key, v: l.whatif })));
+  const topLabel = (k: string | null) =>
     k == null ? "—" : (lines.find((l) => l.key === k)?.label ?? "—");
   let movedUp = 0, movedDown = 0, flat = 0;
   for (const l of lines) {
@@ -69,14 +71,14 @@ export function FitnessRankSummary({
     else if (rA < rW) movedDown += 1;
     else flat += 1;
   }
-  const winnerSwap = wA != null && wW != null && wA !== wW;
+  const topSwap = wA != null && wW != null && wA !== wW;
   const fmt = (v: number | null) => (v == null ? "—" : v.toFixed(3));
   return (
     <>
       <div>
-        {winnerSwap
-          ? <span className="rank-up">winner flips {winnerLabel(wA)} → {winnerLabel(wW)}</span>
-          : <span className="rank-flat">winner unchanged ({winnerLabel(wA)})</span>}
+        {topSwap
+          ? <span className="rank-up">top fitness flips {topLabel(wA)} → {topLabel(wW)}</span>
+          : <span className="rank-flat">top fitness unchanged ({topLabel(wA)})</span>}
       </div>
       <div>
         <span className="rank-up">▲ {movedUp}</span> moved up · <span className="rank-down">▼ {movedDown}</span> moved down · <span className="rank-flat">· {flat}</span> unchanged
