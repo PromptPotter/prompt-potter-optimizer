@@ -186,6 +186,15 @@ class CandidateProposal(BaseModel):
         default=None,
         description="Mirrors osp.lineage.evidence_grounding — duplicated so audit / display sites can read it before OSP construction.",
     )
+    is_probe: bool = Field(
+        default=False,
+        description=(
+            "Deliberate NO-OP probe (OptimizationConfig.noop_probe): an origin-identical arm "
+            "whose measured delta vs origin IS the backend's run-to-run noise floor. Exempt "
+            "from the no_op_variant nuke and scored force_fresh — a cache replay of an "
+            "origin-identical config would read a floor of exactly 0."
+        ),
+    )
 
 
 class RoundOrigin(BaseModel):

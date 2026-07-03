@@ -19,7 +19,7 @@ Zero released versions, zero stale on-disk data — nothing to be compatible wit
 Delete on sight — don't ask, don't TODO, don't "remove later":
 - **Shim code**, **Fallback chains**, **Breadcrumb comments**, **Redundant mechanisms** (a second validator / surface / code path doing the same *kind* of work as an existing one — fold it into the canonical mechanism, never add beside it).
 
-The codebase is mature: the remaining wins are low-value-but-they-all-count consolidations, and they get ignored precisely because each looks too small to bother. **Lean to suspicion.** When a change *could* ride an existing channel, assume it *should*; when you pass redundant paths mid-task, collapse them then — don't note-and-move-on. Fewer lines beats more lines at equal behavior.
+Many of the remaining wins are low-value-but-they-all-count consolidations, and they get ignored precisely because each looks too small to bother. **Lean to suspicion.** When a change *could* ride an existing channel, assume it *should*; when you pass redundant paths mid-task, collapse them then — don't note-and-move-on. Fewer lines beats more lines at equal behavior.
 
 <root-fix>
 When a fix would compensate for something an upstream layer should already have made true, the fix belongs upstream — not at the site where the symptom shows up. Name the structural cause and propose the upstream fix <em>before</em> touching the visible surface. The operator can still pick the patch, but they pick it knowingly. Default to root, not to symptom.

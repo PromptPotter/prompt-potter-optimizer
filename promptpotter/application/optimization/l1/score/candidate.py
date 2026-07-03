@@ -71,6 +71,7 @@ async def score_one_candidate(
     round_num: int,
     l1_diversity: float,
     next_sample: Callable[[dict[int, bool]], int | None] | None = None,
+    force_fresh: bool = False,
 ) -> CandidateRunResult:
     """Run one candidate through the three-exit-path lifecycle.
 
@@ -136,6 +137,7 @@ async def score_one_candidate(
         opt_sp=osp_c,
         next_sample=next_sample,
         on_sample_pre_check=_catch_priors_up,
+        force_fresh=force_fresh,
     )
 
     # Path 2 — scored. Snapshot priors BEFORE eval registers this candidate.

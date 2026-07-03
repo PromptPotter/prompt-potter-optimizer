@@ -158,7 +158,6 @@ def _l1_generate_enter(d: dict[str, Any], ctx: ViewContext) -> RoundStartView:
     for field_name, value in (d.get("parent_task_context") or {}).items():
         if value:
             new_flat[f"tc.{field_name}"] = str(value)
-    ctx.previous_sp_flat = dict(ctx.original_sp_flat if ctx.round_num == 0 else ctx.current_sp_flat)
     ctx.current_sp_flat = new_flat
 
     return RoundStartView(

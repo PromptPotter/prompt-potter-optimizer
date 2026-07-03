@@ -368,9 +368,6 @@ class PipelineSchema(BaseModel):
         model + params + prompt + the structured output it produces."""
         return {n.name: n.output_schema for n in self.nodes}
 
-    def has_node(self, name: str) -> bool:
-        return name in self._node_map
-
     def get_node(self, name: str) -> PipelineNode | None:
         idx = self._node_map.get(name)
         return self.nodes[idx] if idx is not None else None

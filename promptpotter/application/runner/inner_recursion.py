@@ -138,6 +138,7 @@ class _InnerTaskSpec:
     n_samples: int
     n_rounds: int
     target: float
+    n_variants: int | None  # inner_n_variants — None keeps the inner dataset's own value
 
 
 def _resolve_inner_task(ctx: InnerSpawnContext, query: str) -> _InnerTaskSpec:
@@ -153,6 +154,8 @@ def _resolve_inner_task(ctx: InnerSpawnContext, query: str) -> _InnerTaskSpec:
     n_samples = int(bench_cfg.get("n_samples_per_inner_round", 10))
     n_rounds = int(bench_cfg.get("max_inner_rounds", 3))
     target = float(bench_cfg.get("target_score", 0.8))
+    raw_variants = bench_cfg.get("inner_n_variants")
+    n_variants = int(raw_variants) if raw_variants is not None else None
     seed = 0
     for task in cfg.get("tasks", []):
         if isinstance(task, dict) and task.get("id") == query:
@@ -161,7 +164,12 @@ def _resolve_inner_task(ctx: InnerSpawnContext, query: str) -> _InnerTaskSpec:
             target = float(task.get("target_score", target))
             break
     return _InnerTaskSpec(
-        inner_dataset=bench, seed=seed, n_samples=n_samples, n_rounds=n_rounds, target=target
+        inner_dataset=bench,
+        seed=seed,
+        n_samples=n_samples,
+        n_rounds=n_rounds,
+        target=target,
+        n_variants=n_variants,
     )
 
 
@@ -263,12 +271,16 @@ async def _run_inner_campaign(
     # ``spend_budget`` stop early; it stays well inside the outer campaign's own $ cap. A None
     # (unlimited) inner budget is BOUNDED here — an inner cycle must never run open-ended.
     inner_spend_cap = max(campaign_config.optimization.spend_budget_usd or 0.05, 0.05)
+    opt_update: dict[str, Any] = {"max_rounds": spec.n_rounds, "spend_budget_usd": inner_spend_cap}
+    if spec.n_variants is not None:
+        # inner_n_variants (inner_tasks.json) — the outer task spec owns the inner
+        # search width, same as it owns the round cap; the inner dataset's own
+        # n_variants is a standalone-campaign default, not an L4 decision.
+        opt_update["n_variants"] = spec.n_variants
     campaign_config = campaign_config.model_copy(
         update={
             "sp_budget_ttest": len(train_data),
-            "optimization": campaign_config.optimization.model_copy(
-                update={"max_rounds": spec.n_rounds, "spend_budget_usd": inner_spend_cap}
-            ),
+            "optimization": campaign_config.optimization.model_copy(update=opt_update),
         }
     )
 

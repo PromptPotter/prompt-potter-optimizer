@@ -310,6 +310,9 @@ async def score_population(
             # online_reorder off → no adaptive re-rank: fixed insertion order, no
             # live sample-order preview emitted (query_loop's None fallback).
             next_sample=_next_sample if online_reorder else None,
+            # The NO-OP probe is origin-identical — a cache replay would serve the
+            # origin's own rows and read a noise floor of exactly 0.
+            force_fresh=proposals[idx].is_probe,
         )
         all_candidate_results[osp_c.lineage.id] = cr_result.results
         if order_steps:

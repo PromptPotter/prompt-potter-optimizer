@@ -483,6 +483,10 @@ def detect_invariants(
     n_duplicate = 0
     parent_tc = parent_osp.memory.task_context.to_dict()
     for i, cp in enumerate(proposals):
+        if cp.is_probe:
+            # The NO-OP probe is a DELIBERATE origin-identical arm (noise-floor
+            # measurement) — never a yield failure, never a duplicate twin.
+            continue
         child = cp.osp
         pf_delta = tuple(
             (f, getattr(child, f))
@@ -527,6 +531,6 @@ def detect_invariants(
             n_duplicate += 1
             continue
         seen[sig] = i
-    n = len(proposals)
+    n = sum(1 for cp in proposals if not cp.is_probe)
     yield_ = (n - n_no_op - n_duplicate) / n if n else 1.0
     return L1YieldStats(l1_yield=yield_, l1_n_no_op=n_no_op, l1_n_duplicate=n_duplicate)

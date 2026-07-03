@@ -66,7 +66,6 @@ class ViewContext:
     composite_fitness_formula: str | None = None
     composite_fitness_formula_short: str | None = None
     original_sp_flat: dict[str, str] = field(default_factory=dict)
-    previous_sp_flat: dict[str, str] = field(default_factory=dict)
     current_sp_flat: dict[str, str] = field(default_factory=dict)
     node_param_keys: dict[str, list[str]] | None = None
 

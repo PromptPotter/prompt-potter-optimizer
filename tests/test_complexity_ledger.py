@@ -90,11 +90,16 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # + the model's reasoning trace) on the distiller's floor. The prior surface
 # showed no LLM tier one complete failure (2 mid-word-truncated stems), which
 # starved the critique into unverifiable steers. A feature, justified.
+# then ``config_leaf_fields`` 36->37: a deliberate new operator knob --
+# ``OptimizationConfig.noop_probe`` (inject one origin-identical NO-OP arm in
+# round 1; its measured delta vs origin is the backend's run-to-run noise floor —
+# the yardstick real candidate deltas must clear on a stochastic backend, the L4
+# inner recursion being the canonical user). A feature, justified.
 LEDGER_BASELINE = {
     "modules": 297,
     "init_files": 54,
     "reexport_shims": 41,
-    "config_leaf_fields": 36,
+    "config_leaf_fields": 37,
     "settings_env": 17,
     "settings_const": 16,
     "opt_search_point_fields": 27,
