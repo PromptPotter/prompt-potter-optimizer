@@ -195,25 +195,25 @@ figure, so the partition stays MECE. The lifecycle ladder is a plain binary
 - **Storage quota (later, not urgent).** Per-tenant cap, alongside the existing
   `spend_budget_usd_daily` / `max_campaigns_per_day` in `user.json`.
 
-## Implementation arcs
+## Implementation arcs — 1–4 shipped, 5 standalone
 
-1. **Writer-slim (the size win).** Ledger init record stores a dataset reference; round-0
-   display record drops `round_result`. Verify-by-resume that escalation rebuild + rewind +
-   fork are byte-identical. ~4.1 MB → ~2.3 MB/cycle, zero reader changes.
-2. **`archive/` → recycle bin + `measurements/` relocation.** Make `archive`/`unarchive`
-   physically move trees; relocate the measurement store out of `archive/`.
-3. **Destructive delete + `--keep-results`.** Replace the soft flag-flip; audit to the
-   workspace ledger; tier-cut the keepsake.
-4. **Surfaces.** Collapse the dual vocabulary to one MECE hierarchy (Connector / Loop /
-   Dataset, Loop → State / Trace / History / Reports) across the hover, cake, and rollup;
-   the rollup accounts for 100% of the tenant's disk (campaigns + shared caches + other).
-5. **Migration (optional).** One idempotent sweep slims legacy ledgers.
+Arcs 1–4 landed on `main` (`4a97ae31`/`ffd4d36a`/`f544ed94`) and are the design in force
+today, verified live against a real cycle's on-disk `ledger.jsonl` (the `phase=init` record
+now carries `dataset_size: 400`, not a 400-row embed) and `campaign_store/store.py`
+(`archive_campaign`/`unarchive_campaign` use `shutil.move`; `delete_campaign` implements the
+`keep_results` tier-cut). Only arc 5 remains open, as an operator-run migration, not a design
+gap:
 
-## Verification points (pin at implementation)
-
-- Exact append site of the `phase=init` enter/exit records (the dataset-embed writer).
-- That the round-0 display `round_result` is write-only (no projection rebuild reads it).
-- That relocating `measurements/` updates every `archive/measurements/` path reference
-  (`MeasurementArchive`, the reuse-keying read path, the matchers).
-- That `archive`/`unarchive` as physical moves don't strand the active-session pointer or a
-  running job file.
+1. **Writer-slim (the size win) — shipped.** Ledger init record stores a dataset reference;
+   round-0 display record drops `round_result`. ~4.1 MB → ~2.3 MB/cycle, zero reader changes.
+2. **`archive/` → recycle bin + `measurements/` relocation — shipped.** `archive`/`unarchive`
+   physically move trees; the measurement store lives at `projects/{tenant}/measurements/`,
+   a peer of `archive/`, not nested under it.
+3. **Destructive delete + `--keep-results` — shipped.** Replaced the soft flag-flip; audits
+   to the workspace ledger; tier-cuts the keepsake.
+4. **Surfaces — shipped.** One MECE hierarchy (Connector / Loop / Dataset, Loop → State /
+   Trace / History / Reports) across the hover, cake, and rollup;
+   `presentation/api/routers/campaigns/storage.py` is the classifier + endpoints.
+5. **Migration — open, operator decision.** One idempotent sweep slims legacy ledgers;
+   dry-run reports ~277 MiB reclaimable across the current legacy ledgers. Ships standalone,
+   run on demand — `--apply` is an operator call, not blocking.

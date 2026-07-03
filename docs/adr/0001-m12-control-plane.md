@@ -22,7 +22,7 @@ How do we constrain the M12 interactivity envelope so that the wire surface is a
 
 ## Decision Drivers
 
-* **§0 backbone is already CQRS + event-sourcing.** The per-cycle `events.jsonl` ledger is the spine; projections are the read side; the §0 I/O kinds taxonomy names the seams. The wire surface must ride existing infrastructure, not add a sidecar.
+* **§0 backbone is already CQRS + event-sourcing.** The per-cycle `.runtime/ledger.jsonl` ledger is the spine; projections are the read side; the §0 I/O kinds taxonomy names the seams. The wire surface must ride existing infrastructure, not add a sidecar.
 * **Identity seam is already shipped.** Stage-0 `IdentityContext` (`shared/identity.py`) carries the trust boundary through to `Stores`; M12 commands consume the same seam.
 * **Drift detection must be CI-checkable.** A contract that humans-only review is not a contract.
 * **The contract must outlive M12.** Subsequent milestones (M13 chat-first user web, M14+ multi-user) inherit the wire surface unchanged.
@@ -108,11 +108,11 @@ CI runs the test on every PR. Spectral lint on the OpenAPI YAML and AsyncAPI Stu
 
 ### Highway architecture
 
-The wire surface rides the canonical per-cycle `events.jsonl` ledger alongside every other record. The "highway" is the existing Persistence stream; this contract promotes the path commands and events take through that highway to the optimal sequence by eliminating four middlemen (mirroring the spend-and-tenancy arc):
+The wire surface rides the canonical per-cycle `.runtime/ledger.jsonl` ledger alongside every other record. The "highway" is the existing Persistence stream; this contract promotes the path commands and events take through that highway to the optimal sequence by eliminating four middlemen (mirroring the spend-and-tenancy arc):
 
 1. **No process global.** `emit_command` (inbound at the FastAPI seam) reads the active ledger from `_CYCLE_LEDGER: ContextVar[CycleEventLog | None]` and the cycle target from `_ACTIVE_CYCLE: ContextVar[CycleId | None]`. `emit_command_ack` (outbound at the runner) reads the same ContextVars. Per-asyncio-task isolation; concurrent commands across cycles get isolation for free.
 2. **No wrapper dataclass.** `emit_command(*, kind, payload, idempotency_key, expected_version)` and `emit_command_ack(*, command_id, status, detail)` are kwargs-only; both build their `*Record` directly inside the helper. Mirrors `emit_token_usage` verbatim.
-3. **Sole writer per surface.** ONE `CommandDispatcher` writes `CommandRecord` (at the FastAPI seam). ONE `RunnerCommandSubscriber` writes `CommandAckRecord` (at the runner). ONE `EventStreamView` writes outbound SSE frames (subscribed to the ledger as another `DerivedView`).
+3. **Sole writer per surface.** ONE `CommandDispatcher` writes `CommandRecord` (at the FastAPI seam). ONE `RunnerCommandSubscriber` writes `CommandAckRecord` (at the runner). Outbound SSE frames have no writer at all — the in-process `EventStreamView` fan-out this ADR originally specified was replaced by `CycleLedgerTail`, which tails the on-disk ledger directly (cross-process; the API server, the CLI, or a spawned runner can all be the writer, any reader can subscribe). See [`../developer/event-stream.md`](../developer/event-stream.md).
 4. **No dual ingress.** Commands ARE events. The runner subscribes to `CommandRecord` on the ledger as another driver — no in-memory queue, no `commands.jsonl`, no parallel pipeline. The 6 pre-M12 sanctioned POSTs (`POST /forks`, `POST /stop`, `DELETE /cycle`, `POST /cleanup-empty`, `POST /backends`, `POST /backends/{id}/sync`) migrate to ride this highway at Profile B (no-back-compat — they migrate, they don't shim).
 
 Identity scope rides the ledger path (tenant prefix on the per-cycle directory) — no per-record `tenant_id` field. Outbound `ProjectionEnvelope{kind, version, cycle_id, sequence, payload}` is the only frame shape on the SSE channel. Mid-cycle subscribers receive a snapshot frame (matching current `dashboard.json`) followed by the live tail with strictly-increasing `sequence`; missed frames detectable via sequence gap; heartbeat fires every 15 s during idle.
@@ -137,7 +137,7 @@ Each profile is a named, stable conformance level. Newer profiles compose with o
 
 **Profile −1 deliverables (shipped this ADR):** §0 amended; this ADR landed in MADR shape; OpenAPI + AsyncAPI YAMLs scaffolded with empty closed sets; drift invariant test in place. No behavior change.
 
-**Profile A** — `EventStreamView` projection on `events.jsonl` is the sole writer of SSE frames. `GET /campaigns/{c}/cycles/{cy}/events:subscribe`. Snapshot-then-tail; boundary sequence explicit; heartbeat every 15 s. On certification, the contract promotes to `docs/developer/event-stream.md`; boxes 4, 13, 14, 15 flip.
+**Profile A** — `GET /campaigns/{c}/cycles/{cy}/events:subscribe` serves SSE frames by tailing the on-disk `.runtime/ledger.jsonl` (`CycleLedgerTail`) — no projection subscriber synthesizes frames; the ledger is the single medium (superseded the originally-specified in-process `EventStreamView` fan-out, which 404'd for any reader outside the runner's own process). Snapshot-then-tail; boundary sequence explicit; heartbeat every 15 s. Certified: `docs/developer/event-stream.md`; boxes 4, 13, 14, 15 flipped.
 
 **Profile B** — `CommandRecord` + `CommandAckRecord` added to `domain/run_records.py::CycleRecord`. `emit_command` + `emit_command_ack` kwargs-only helpers. `CommandDispatcher` at API seam. `_ACTIVE_CYCLE` ContextVar wired. The 6 sanctioned POSTs migrate to ride the highway:
 
@@ -167,10 +167,10 @@ Each box is unchecked at Profile −1 and flips when its enforcement is on disk,
 Wire-contract integrity:
 1. ☐ Every command + event kind has a declared schema in OpenAPI/AsyncAPI YAML *before* any handler lands.
 2. ☐ Closed-set policy: new command/event kind = YAML update in its own PR.
-3. ☐ Canonical ledger only — commands and acks are `*Record` entries on `events.jsonl`.
+3. ☐ Canonical ledger only — commands and acks are `*Record` entries on `.runtime/ledger.jsonl`.
 
 Sole writer / single emitter:
-4. ☑ ONE `CommandDispatcher` writes `CommandRecord`. ONE `EventStreamView` writes SSE frames. ONE `RunnerCommandSubscriber` writes `CommandAckRecord`. *(Outbound half certified Profile A — `EventStreamView` is sole SSE writer; inbound halves land at Profile B.)*
+4. ☑ ONE `CommandDispatcher` writes `CommandRecord`. ONE `RunnerCommandSubscriber` writes `CommandAckRecord`. Outbound SSE frames have no writer — `CycleLedgerTail` reads the ledger directly, cross-process. *(Outbound half certified Profile A; inbound halves land at Profile B.)*
 5. ☐ `emit_command(*, kind, payload, idempotency_key, expected_version)` is the sole inbound helper. `emit_command_ack(*, command_id, status, detail)` is the sole outbound helper. Kwargs-only.
 6. ☐ Runner is the sole actuator. No API handler mutates optimizer state directly.
 
@@ -206,7 +206,7 @@ The eight questions from root `CLAUDE.md`, answered:
 2. **Existing channel.** No — Control-remote is genuinely new. Per-cycle ledger Persistence already exists; this contract reuses it.
 3. **Name distinctness.** "Control-remote" parallels "Control-local"; grep confirms no collision.
 4. **Self-describing.** Yes. Q4 sub-rule (new I/O kind → amend §0 first) is satisfied by this PR cluster.
-5. **Ride existing infrastructure.** Yes — commands ride `CycleEventLog.append` as `CommandRecord` on the same `events.jsonl`.
+5. **Ride existing infrastructure.** Yes — commands ride `CycleEventLog.append` as `CommandRecord` on the same `.runtime/ledger.jsonl`.
 6. **AI/operator reads from a file.** Yes — closed sets in YAMLs; checklist + promotion log in this ADR.
 7. **§0 update.** Yes — landed in this PR cluster as a precondition.
 8. **Langfuse trace event.** Commands and acks ride the canonical ledger (already traced). Future command handlers that invoke LLM calls MUST wrap them with `observed_node()`.
@@ -227,12 +227,11 @@ enforcement detail that must move freely, so they are named in prose (see
 | Closed outbound event set | `docs/specs/m12-events-asyncapi.yaml` |
 | Identity seam consumed | `promptpotter/presentation/api/deps.py::resolve_identity` |
 | `emit_token_usage` template (mirrored by `emit_command`) | `promptpotter/infrastructure/llm/models.py::emit_token_usage` |
-| Sole-writer template (mirrored by `EventStreamView`) | `promptpotter/infrastructure/projections/live_dashboard/view.py::LiveDashboardView._handle_token_usage` |
+| Sole-writer template | `promptpotter/infrastructure/projections/live_dashboard/view.py::LiveDashboardView._handle_token_usage` |
 | `CycleRecord` discriminated union (closed outbound record set) | `promptpotter/domain/run_records.py::CycleRecord` |
 | `ProjectionEnvelope` Python wire type (Profile A) | `promptpotter/domain/projection_envelope.py` |
-| Outbound highway sole writer (Profile A) | `promptpotter/infrastructure/projections/event_stream/view.py::EventStreamView` |
+| Outbound highway ledger tail (Profile A; supersedes the originally-specified `EventStreamView` in-process projection) | `promptpotter/infrastructure/projections/event_stream/tail.py::CycleLedgerTail` |
 | SSE endpoint handler (Profile A) | `promptpotter/presentation/api/routers/campaigns/events.py::stream_cycle_events` |
-| EventStream registry (cycle → view lookup) | `promptpotter/infrastructure/projections/event_stream/registry.py` |
 | Certified Profile A contract | `docs/developer/event-stream.md` |
 
 ### Promotion log

@@ -31,6 +31,7 @@ CONTEXT and PLAN live on disk inside each round file — the loop's actual confi
 | [Glossary](../glossary.md) | Domain vocabulary |
 | [Mid-round elimination (PoBB)](../methods/candidate-elimination.md) | "Search-only-with-evidence" in detail |
 | [Paired-sample PoBB](paired-sample-pobb.md) | How sample-keyed priors + leader backfill restore PoBB's iid premise under hard-sample-first ordering |
+| [Online adaptive queue mechanism](adaptive-queue-mechanism.md) | The per-candidate sample iteration order (1PL IRT online selector, decision-information-gain pick-value) |
 | [Hard-sample leaderboard](../methods/exploration-exploitation.md) | Sample selection in detail |
 
 Implementation: [`../developer/`](../developer/README.md).

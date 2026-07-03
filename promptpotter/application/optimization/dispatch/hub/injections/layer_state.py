@@ -106,7 +106,7 @@ def _r_task_context(b: InjectionBundle) -> str:
     for k, v in pairs:
         if len(v) > TASK_CONTEXT_VALUE_CAP:
             truncated.append(f"{k}({len(v)}→{TASK_CONTEXT_VALUE_CAP})")
-            v = v[:TASK_CONTEXT_VALUE_CAP] + "…"
+            v = v[: TASK_CONTEXT_VALUE_CAP - 1].rsplit(" ", 1)[0] + "…"
         lines.append(f"  {k}: {v}")
     if truncated:
         # L2-authored overrun — heal (truncate) but leave a DISK trace too, not just a log

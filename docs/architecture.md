@@ -272,13 +272,14 @@ the flag is an explicitly-sanctioned mutation listed in
 `promptpotter/presentation/CLAUDE.md`. (4) **Control-remote** —
 HTTP-ingressed mutations authored by signed-in operators or
 signed-in clients. Every command is appended to the canonical
-per-cycle `events.jsonl` as a `CommandRecord` by a sole
+per-cycle `.runtime/ledger.jsonl` as a `CommandRecord` by a sole
 `CommandDispatcher` at the FastAPI seam (kwargs-only `emit_command`,
 ContextVar-scoped identity + cycle); the runner subscribes to
 `CommandRecord` as another ledger driver, applies the mutation, and
 acknowledges via a sibling `CommandAckRecord` written by a sole
 `RunnerCommandSubscriber` (kwargs-only `emit_command_ack`).
-Outbound, a sole `EventStreamView` projection fans out
+Outbound, no projection writes SSE frames at all — `CycleLedgerTail`
+tails the on-disk ledger directly (cross-process) and fans out
 `ProjectionEnvelope` frames over SSE. Identity scope rides the
 existing cycle-dir tenant prefix; commands and acks carry no
 per-record `tenant_id`. The closed inbound command set is declared
@@ -552,9 +553,10 @@ the PR description.
 - **Per-cycle `CycleEventLog` + `DerivedView` dispatch** — the
   persistence backbone. No second ingress, ever.
 - **Control-remote highway** — the `CommandRecord` / `CommandAckRecord`
-  / `ProjectionEnvelope` triple riding the canonical `events.jsonl` via
+  / `ProjectionEnvelope` triple riding the canonical `.runtime/ledger.jsonl` via
   sole `CommandDispatcher` (inbound), sole `RunnerCommandSubscriber`
-  (ack), sole `EventStreamView` (outbound SSE). The closed inbound +
+  (ack), `CycleLedgerTail` reading the ledger directly (outbound SSE,
+  no writer). The closed inbound +
   outbound sets live in `docs/specs/m12-api-openapi.yaml` and
   `docs/specs/m12-events-asyncapi.yaml`; the permanent contract is
   `docs/adr/0001-m12-control-plane.md`. Cleanup PRs cannot collapse

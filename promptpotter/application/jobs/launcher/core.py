@@ -55,6 +55,7 @@ from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store import Stores
+from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.infrastructure.store.paths import REPO_ROOT
 from promptpotter.shared.errors import MachineBusyError, PayloadInvalidError
 from promptpotter.shared.identity import claim_email
@@ -579,12 +580,12 @@ def _read_backend_type_from_dataset(dataset_root: Path, dataset_name: str) -> st
     proceed without it, and the dispatcher catches LaunchError into a 422.
     """
     raw_path = dataset_root / "pipeline.json"
-    if not raw_path.is_file():
-        raise LaunchError(f"dataset {dataset_name!r} has no pipeline.json — cannot resolve backend")
     try:
-        raw = json.loads(raw_path.read_text(encoding="utf-8"))
+        raw = read_json_optional(raw_path)
     except json.JSONDecodeError as exc:
         raise LaunchError(f"dataset {dataset_name!r} pipeline.json is malformed: {exc}") from exc
+    if raw is None:
+        raise LaunchError(f"dataset {dataset_name!r} has no pipeline.json — cannot resolve backend")
     bt = raw.get("backend_type")
     if not isinstance(bt, str) or not bt:
         raise LaunchError(f"dataset {dataset_name!r} pipeline.json is missing 'backend_type'")

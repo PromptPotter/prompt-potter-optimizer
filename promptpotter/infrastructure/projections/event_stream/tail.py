@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, cast, get_args
 
 from promptpotter.domain.projection_envelope import ProjectionEnvelope, ProjectionKind
+from promptpotter.infrastructure.store.io import read_json_optional
 
 logger = logging.getLogger(__name__)
 
@@ -92,14 +93,13 @@ class CycleLedgerTail:
 
     def _read_dashboard(self) -> dict[str, Any]:
         dashboard = self._cycle_dir / "dashboard.json"
-        if dashboard.is_file():
-            try:
-                body = json.loads(dashboard.read_text(encoding="utf-8"))
-            except json.JSONDecodeError:
-                logger.warning("dashboard.json malformed at %s; warming_up snapshot", dashboard)
-                return {"warming_up": True, "reason": "dashboard_unreadable"}
-            if isinstance(body, dict):
-                return body
+        try:
+            body = read_json_optional(dashboard)
+        except json.JSONDecodeError:
+            logger.warning("dashboard.json malformed at %s; warming_up snapshot", dashboard)
+            return {"warming_up": True, "reason": "dashboard_unreadable"}
+        if isinstance(body, dict):
+            return body
         return {"warming_up": True}
 
     def _seek_to_eof(self) -> int:

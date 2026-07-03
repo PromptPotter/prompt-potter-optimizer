@@ -1,0 +1,276 @@
+"""Verify use-case — re-score one campaign candidate on N additional samples.
+
+Not a cycle/fork/sweep: no ledger event, no round_id; persistence is into the
+workspace ``archive/`` tree only. The CLI shell
+(``presentation/cli/commands/verify.py``) owns arg-parsing, needle resolution
+(campaign/cycle/label), and human-string formatting; this module owns
+resolving the candidate off disk, scoring it, and assembling the
+``DiagnosticRunRecord``.
+"""
+
+from __future__ import annotations
+
+import copy
+import logging
+import random
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, cast
+
+from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.results import DiagnosticRunRecord
+from promptpotter.infrastructure.store import archive_views
+from promptpotter.infrastructure.store.paths import REPO_ROOT
+from promptpotter.shared.clock import utcnow_iso
+
+if TYPE_CHECKING:
+    from promptpotter.domain.scoring import QueryMeasurement
+    from promptpotter.infrastructure.store import Stores
+    from promptpotter.shared.identity import IdentityContext
+
+logger = logging.getLogger(__name__)
+
+__all__ = ["VerifyError", "VerifyOutcome", "verify_candidate"]
+
+
+class VerifyError(Exception):
+    """A resolved-state failure: campaign/round/candidate missing on disk, or
+    the pipeline schema is unavailable. The CLI shell maps this to a clean
+    ``SystemExit`` — this module never raises ``SystemExit`` itself."""
+
+
+@dataclass(frozen=True)
+class VerifyOutcome:
+    """Result of :func:`verify_candidate`.
+
+    ``record`` is ``None`` on the "every sample already measured" path — both
+    human-readable verdict strings are formatted by the CLI shell from this
+    outcome, never here.
+    """
+
+    dataset_name: str
+    already_measured: int
+    record: DiagnosticRunRecord | None = None
+    cache_replays: int = 0
+
+
+def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    """Recursive dict merge — *overlay* wins; lists / scalars replaced wholesale."""
+    out = copy.deepcopy(base)
+    for k, v in overlay.items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = copy.deepcopy(v)
+    return out
+
+
+def _archive_measurement_to_qm(m: Any) -> QueryMeasurement:
+    """Project a :class:`Measurement` archive row into a :class:`QueryMeasurement` dict."""
+    return cast(
+        "QueryMeasurement",
+        {
+            "sample_id": m.sample_id,
+            "query": m.query,
+            "ground_truth": m.ground_truth,
+            "predicted": m.predicted,
+            "hit": m.hit,
+            "fitness": m.fitness,
+            "error": None,
+            "pipeline_data": m.pipeline_data or {},
+        },
+    )
+
+
+async def verify_candidate(
+    *,
+    stores: Stores,
+    identity: IdentityContext,
+    campaign_id: str,
+    cycle_id: str,
+    round_num: int,
+    cand_idx: int,
+    label: str,
+    samples: int,
+    seed: int | None,
+    log: Callable[[str], None] | None = None,
+) -> VerifyOutcome:
+    """Re-score the ``C{round_num}.{cand_idx+1}`` candidate on *samples* unmeasured samples.
+
+    Raises :class:`VerifyError` when the candidate can't be resolved off disk
+    (missing campaign manifest / round file / candidate / pipeline schema).
+    """
+    from promptpotter.application.bootstrap import init_services
+    from promptpotter.application.bootstrap.scoring_context import populate_session_scoring
+    from promptpotter.application.config import configure_and_apply_pipeline
+    from promptpotter.application.config import (
+        load_campaign_config as validate_campaign_config,
+    )
+    from promptpotter.application.scoring.formula import rescore_results, split_scoring_block
+    from promptpotter.application.scoring.metrics import compute_composite_fitness
+    from promptpotter.application.scoring.search_point_scorer import score_search_point
+
+    campaign = stores.campaigns.load_campaign(campaign_id)
+    if campaign is None:
+        raise VerifyError(f"campaign {campaign_id!r} has no manifest on disk.")
+
+    if round_num == 0:
+        raise VerifyError(
+            "verifying C0 (origin) is not implemented yet — "
+            "the origin's prompt fields don't live in the round-candidate cache. "
+            "Pass a C{round}.{n} label instead."
+        )
+    proposals = stores.campaigns.load_round_candidates(campaign_id, cycle_id, round_num)
+    if not proposals:
+        raise VerifyError(
+            f"no cached candidates for round {round_num} in "
+            f"{campaign_id}/{cycle_id} — looked under .runtime/cache/candidates/."
+        )
+    if cand_idx >= len(proposals):
+        raise VerifyError(
+            f"round {round_num} only has {len(proposals)} candidates; "
+            f"{label!r} requested index {cand_idx + 1}."
+        )
+    proposal = proposals[cand_idx]
+    osp = OptSearchPoint.model_validate(proposal["osp"])
+    pp_override = proposal.get("pipeline_params_override") or {}
+
+    round_file = stores.campaigns.load_round_file(campaign_id, cycle_id, round_num)
+    if round_file is None:
+        raise VerifyError(f"round_{round_num:04d}.json missing in {campaign_id}/{cycle_id}.")
+    cand_scores: list[dict[str, Any]] = round_file.get("candidate_scores") or []
+    cand_score = next((c for c in cand_scores if c.get("label") == label), None)
+    if cand_score is None:
+        raise VerifyError(
+            f"round_{round_num:04d}.json carries labels "
+            f"{[c.get('label') for c in cand_scores]} — none match {label!r}."
+        )
+    source_campaign_accuracy = float(cand_score.get("accuracy") or 0.0)
+    source_campaign_composite = float(cand_score.get("composite_fitness") or 0.0)
+    source_campaign_n = int(cand_score.get("scored_samples") or 0)
+    source_candidate_id = str(cand_score.get("candidate_id") or "")
+
+    session = await init_services(
+        backend_id=campaign.backend_id or campaign.dataset_name,
+        dataset_name=campaign.dataset_name,
+        project_root=REPO_ROOT,
+        identity=identity,
+        store=stores,
+    )
+    session.campaign_id = campaign_id
+    session.state.cycle_id = cycle_id
+
+    campaign_config = validate_campaign_config(campaign.config)
+    log_fn = log or (lambda *_a, **_k: None)
+    pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=log_fn)
+    scoring_spec = split_scoring_block(campaign_config.scoring)
+    populate_session_scoring(
+        session,
+        obs=None,
+        scoring_formula=scoring_spec.per_sample,
+        scoring_round_formula=scoring_spec.per_round,
+        scorer_id=scoring_spec.scorer_id,
+        cycle_id=cycle_id,
+        source=f"verify:{campaign_id}:{label}",
+    )
+
+    effective_pipeline_params = _deep_merge(pipeline_params, pp_override)
+    schema = session.pipeline_schema
+    jsp = osp.to_job_search_point(effective_pipeline_params, schema=schema)
+    if schema is None:
+        raise VerifyError("pipeline schema unavailable; cannot resolve candidate config.")
+    node_configs = schema.node_configs(effective_pipeline_params or {})
+    predicate: dict[str, dict[str, Any]] = dict(node_configs)
+    config_hash = schema.sp_hash(effective_pipeline_params or {})
+
+    # Find samples this exact config has not yet been measured on.
+    prior = archive_views.measurements_for_config(
+        stores,
+        session.backend_id,
+        predicate=predicate,
+        dataset_name=campaign.dataset_name,
+    )
+    measured_ids = {m.sample_id for m in prior}
+    unmeasured = [s for s in session.samples if s.id not in measured_ids]
+    if not unmeasured:
+        return VerifyOutcome(dataset_name=campaign.dataset_name, already_measured=len(measured_ids))
+
+    rng = random.Random(seed)
+    n_to_pick = min(int(samples), len(unmeasured))
+    picked = rng.sample(unmeasured, n_to_pick)
+
+    logger.info(
+        "verify %s (%s/%s): scoring %d new sample(s); %d already in archive for this config",
+        label,
+        campaign_id,
+        cycle_id,
+        n_to_pick,
+        len(measured_ids),
+    )
+    await score_search_point(
+        jsp,
+        picked,
+        session,
+        label="verify",
+        on_sample_scored=lambda *_a, **_k: None,
+        on_sample_starting=lambda *_a, **_k: None,
+        source=f"verify:{campaign_id}:{label}",
+    )
+
+    # Workspace aggregate: archive rows matching this candidate's node-configs, deduped per sample (latest wins).
+    workspace_measurements = archive_views.measurements_for_config(
+        stores,
+        session.backend_id,
+        predicate=predicate,
+        dataset_name=campaign.dataset_name,
+    )
+    by_sample: dict[int, QueryMeasurement] = {}
+    for m in workspace_measurements:
+        by_sample[m.sample_id] = _archive_measurement_to_qm(m)
+    workspace_qms = list(by_sample.values())
+
+    if session.scoring.scorer is not None:
+        rescore_results(
+            cast("list[dict[str, Any]]", workspace_qms),
+            session.scoring.scorer,
+            session.scoring.scorer_id,
+            session.scoring.scorer_formula,
+        )
+    workspace_scores = compute_composite_fitness(
+        workspace_qms,
+        schema,
+        round_scorer=session.scoring.round_scorer,
+    )
+
+    workspace_n = len(workspace_qms)
+    workspace_composite = float(workspace_scores.get("composite_fitness") or 0.0)
+    workspace_accuracy = float(workspace_scores.get("accuracy") or 0.0)
+    samples_added = max(0, workspace_n - len(measured_ids))
+
+    record = DiagnosticRunRecord(
+        ts=utcnow_iso(),
+        dataset=campaign.dataset_name,
+        source_campaign=campaign_id,
+        source_cycle=cycle_id,
+        source_label=label,
+        source_candidate_id=source_candidate_id,
+        config_hash=config_hash[:12],
+        samples_requested=int(samples),
+        samples_added=samples_added,
+        workspace_n=workspace_n,
+        workspace_accuracy=workspace_accuracy,
+        workspace_composite=workspace_composite,
+        source_campaign_accuracy=source_campaign_accuracy,
+        source_campaign_composite=source_campaign_composite,
+        source_campaign_n=source_campaign_n,
+    )
+    sidecar_path = stores.diagnostic_runs.save(record)
+    logger.info("verify: wrote diagnostic-run record → %s", sidecar_path)
+
+    cache_replays = max(0, workspace_n - samples_added - len(measured_ids))
+    return VerifyOutcome(
+        dataset_name=campaign.dataset_name,
+        already_measured=len(measured_ids),
+        record=record,
+        cache_replays=cache_replays,
+    )

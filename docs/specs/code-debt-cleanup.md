@@ -23,25 +23,12 @@ shape was the old bloat source; readiness buckets replaced it.
 
 ## Ready — no blocker, pick up cold
 
-- **L2 `task_context` fields clip mid-word at 300c** — `injection_budget_overrun` fired on b786e9 (`data_characteristics` 309→300 etc.) despite the answer_format budget steer; the renderer hard-slices. Cheap fix: word-boundary clip + marker at the render site (same shape as `_truncate_marked`, `dispatch/schemas.py`), or teach the L2 validator to bounce over-budget fields back.
-- **`stall_exploration` grounding accepted while the banner rejects it** — b786e9 C1.3 cited `field=stall_exploration` under `exploration_budget=tight` and passed; the rendered escalation banner claims such citations are rejected. Align `validators/l1_behavior.py` (enforce the tight-budget rejection) or soften the banner — validator and prompt must not disagree.
-
-- **JSON-read sweep** — route hand-rolled `json.loads(path.read_text())` through the existing `read_json` / `read_json_tolerant` (`store/io.py`); drops redundant `.exists()` guards + try/except. The clean-win sites (full guard+try/except collapse) shipped this pass: `dispatcher.py`, `runner/entry.py`, `audit_trail.py` (×3), `origins.py` (×2). **Remaining = partial sites only** — each keeps a custom except arm, so the win is just the guard: `launcher/core.py:530` (raises `LaunchError`), `campaign_store/store.py:690` (returns a reason tuple), `event_stream/tail.py:97` (custom warming-up fallback). `shared/spend.py:95,157` is held separately — `shared/` importing `infrastructure/store/io` is a layer-direction question. Boundary-guard sites (`identity/allowlist.py`, `identity/provider_config.py`, `datasets/authored.py`, `csv_ingest.py`) are intentionally kept (`:104`). **Adopt-in-new-code for the coupon/BYO build:** the new `grant.json` / `api_keys.json` stores MUST ride `read_json_optional`/`write_json` (the `UserStore` template) from day one — don't add two more hand-rolled readers.
-
-<!-- Verified subtractive candidates (hand-verified; each removes a named concept). -->
-- `presentation/cli/commands/verify.py:125` `cmd_verify` (189 lines) — CLI command carrying application-layer logic (composite-fitness / archive-dedup / rescore, ~`:253-281`), violating `presentation/CLAUDE.md` ("no business logic in CLI commands"). Move the bootstrap→score→aggregate→record block behind an `application/` verify use-case; keep the CLI a thin arg-parse + format shell. Med-high confidence; one call site, no duplication. NOTE: this *adds* an application module — a layering fix, not a ledger-down subtraction (the surface-ledger "additive-but-safe" trap); land it as a feature-justified commit, not under a "refactor" label.
-
-**Verify-behavior (poll revalidation — NOT a clean substitution):**
-- `webapp lib/poll.tsx` local `revalCount`/`setRevalCount` (`:402,433,594`) vs the global `lib/revalidate.ts::useRevalidation()` bus — the dashboard poll uses the local counter, so it does **not** re-tick on a mutation's `bumpRevalidation()`. The filed "just swap to `useRevalidation()`" is WRONG: verified `usePoll`'s interval effect (`usePoll.ts:52-83`) deps `[intervalMs,pauseWhenHidden,tickOnFocus,enabled,runTick]` with `runTick` stable (`useCallback([])`), so on a unit switch (`enabled` unchanged) it does NOT restart/re-tick — the local `revalCount` bump (`:433`) is the ONLY immediate-tick trigger on campaign switch. Substituting the global bus would lose that. Real fix = feed BOTH signals (e.g. `revalidateOn: revalCount + globalReval`), which ADDS the mutation-tick behavior rather than removing a concept — a behavior change, deferred out of the subtractive batch.
-
-**Docs-consolidation deferrals (from the 2026-07-02 docs pass — softer merges, verified candidates):**
-- `docs/concepts/paired-sample-pobb.md` (345 lines) — two topics in one page; split the "online adaptive queue mechanism" half (~lines 257–332) into its own concepts page.
-- `docs/research/algorithm-configuration-lineage.md` — thin standalone; merge into `related-work.md` (same AC-umbrella theme, cross-linked already).
-- `docs/operations/human-in-the-loop.md` (15 lines) — restates the fork primitive; fold into `persistence-and-state.md`.
-- `specs/storage-architecture.md` ↔ `operations/persistence-and-state.md` — both describe the recycle-bin `archive/` + `measurements/` relocation, one as forward arcs, one as current; reconcile current-vs-target (drift risk, not a clean drop).
-- `docs/adr/0001-m12-control-plane.md:~140` — still calls `EventStreamView` the "sole writer of SSE frames" while `developer/event-stream.md:61` says that fan-out was replaced; verify + align.
+*(empty — every entry from the 2026-07-03 pass landed or was reclassified; `git log` has what shipped)*
 
 ## Blocked — named blocker
+
+**Behavior change (needs explicit sign-off, not a blind swap):**
+- `webapp lib/poll.tsx` local `revalCount`/`setRevalCount` (`:402,433,594`) vs the global `lib/revalidate.ts::useRevalidation()` bus — the dashboard poll uses the local counter, so it does **not** re-tick on a mutation's `bumpRevalidation()`. The filed "just swap to `useRevalidation()`" is WRONG: verified `usePoll`'s interval effect (`usePoll.ts:52-83`) deps `[intervalMs,pauseWhenHidden,tickOnFocus,enabled,runTick]` with `runTick` stable (`useCallback([])`), so on a unit switch (`enabled` unchanged) it does NOT restart/re-tick — the local `revalCount` bump (`:433`) is the ONLY immediate-tick trigger on campaign switch. Substituting the global bus would lose that. Real fix = feed BOTH signals (e.g. `revalidateOn: revalCount + globalReval`), which ADDS the mutation-tick behavior rather than removing a concept. Blocker: this is a behavior change (adds a trigger), not a subtractive cleanup — needs the light/dark + reduced-motion-style browser verification pass, not a blind edit.
 
 **Live L1 round (operator-gated):**
 - **`*_override → *_updates` L1 delta-key rename** (+ webapp searchpoint-projection collapse). `prompt_fields_override` / `task_context_override` / `pipeline_params_override` / `pp_override` are merges, not replacements, but named "override." **Decision (settle first):** unify the pipeline delta to the glossary word **`pipeline_overlay`** everywhere (kills the short/long two-name tax); the prompt/context deltas become `*_updates`. Rename writer→reader in one commit (schema `dispatch/schemas.py::L1Variant` is the source of truth — the LLM contract auto-propagates), collapse the two webapp readers (`searchPoint.ts` + `candidateSearchPoint.ts`) into one `wireToCandidateSearchPoint(wire)` helper. Full site map: grep `*_override`. **Blocker:** invalidates on-disk cycles (round-file key + optimizer structured-output contract) — verify against a FRESH cycle that completes round 1, not a resume.
@@ -66,6 +53,7 @@ shape was the old bloat source; readiness buckets replaced it.
 - **Backend fix isn't observable without clearing a cache** — PP's measurement cache + TermNorm's `match_database` both key on query/searchpoint, never on backend code/revision, so a co-owned backend fix replays stale results. Fold the connector revision-pin into the measurement-cache key (or add a `--fresh` flag); confirm the TermNorm `/matches` short-circuit only fires on `verified` aliases. Workaround: clear `archive/{measurements,dataset_runs}/`.
 
 **Coupon + BYO build (Lane A2 — blocked on the build itself; ADR-0003 § Host coupon):**
+- **Adopt-in-new-code for the coupon/BYO build:** the new `grant.json` / `api_keys.json` stores MUST ride `read_json_optional`/`write_json` (the `UserStore` template, `store/io.py`) from day one — don't add hand-rolled readers. `shared/spend.py:95,157` still hand-rolls `json.loads(path.read_text())`; held separately from the JSON-read sweep (SHIPPED elsewhere) because `shared/` importing `infrastructure/store/io` is an unresolved layer-direction question — resolve it before or alongside this build.
 - **Two host-wallet mechanisms** — `application/jobs/quota.py::effective_spend_cap_usd` + `User.spend_budget_usd_daily` (recurring daily cap, mint-time snapshot) vs the new coupon (`grant.json`, ledger-derived, live). Two guards on one concern (host's wallet) = the no-redundant-mechanism rule. Action: **delete the daily-cap path**; coupon-remaining becomes the single host ceiling, read by the per-cycle `BudgetGate` every tick (D1/D2 in ADR-0003). Blocker: lands *with* the coupon, not before — deleting first leaves the wallet unguarded.
 - `domain/run_records.py::TokenUsageRecord` lacks `key_source` → `/auth/activity` `group_by=api_key` (`routers/auth.py`) fakes a *provider slug* as the key id. Once real `key_source: host|user` lands (declared on `TokenUsagePayload` in the asyncapi), replace the fake-slug derivation with the real dimension. Blocker: the coupon build adds the field.
 
@@ -117,7 +105,16 @@ private helpers used by one caller **in the same file**.
 (substring assertions, stub-forest tests — suite cap ≤200, currently ~199);
 drifted `Field(description=…)` on LLM-facing schemas; INFO/WARN logging nobody
 surfaces; error-raising style diverging by layer (generic `Exception` vs bare
-`raise` vs `HTTPException` for the same failure class — M-sized standardization).
+`raise` vs `HTTPException` for the same failure class — M-sized standardization);
+**wider `events.jsonl` naming drift** — the per-cycle ledger file was renamed to
+`.runtime/ledger.jsonl` (ADR-0001 + `architecture.md` §0/§0.5 fixed this pass),
+but `adr/0003-spend-and-tenancy.md`, `developer/concept-map.md`,
+`developer/stable-api.md`, `glossary.md`, `concepts/campaign-tree.md`, and a few
+remaining `architecture.md` spots (`:337,367,447`) still say `events.jsonl` for
+the per-cycle ledger. **Verify per-occurrence first** — the *workspace*-level
+ledger (`projects/{tenant}/.workspace/events.jsonl`) is a genuinely different,
+still-correctly-named file (`architecture.md:238`, `persistence-and-state.md`,
+`storage-architecture.md`), so don't blanket-replace.
 
 ## Intentional UI placeholders
 

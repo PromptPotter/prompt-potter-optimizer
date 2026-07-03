@@ -213,4 +213,4 @@ GSM8K and AIME 2025 are effectively saturated at `gpt-oss-120b`. Literature numb
 
 Wall-clock numbers in this document rely on prior-result reuse from `archive/measurements/` (addressed by `PipelineSchema.node_configs`). No per-node cache.
 
-See [metrics.md](metrics.md) for the four-metric reporting convention (Acc, HC, SE, R₉₀) that complements absolute accuracy. See [related-work.md](related-work.md) for the algorithm-configuration umbrella, the feature matrices, and the head-to-head numbers; [algorithm-configuration-lineage.md](algorithm-configuration-lineage.md) for the classical AutoML racing ancestry.
+See [metrics.md](metrics.md) for the four-metric reporting convention (Acc, HC, SE, R₉₀) that complements absolute accuracy. See [related-work.md](related-work.md) for the algorithm-configuration umbrella, the feature matrices, the head-to-head numbers, and (§ Algorithm configuration: the classical lineage) the classical AutoML racing ancestry.

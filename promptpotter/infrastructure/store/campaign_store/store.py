@@ -807,14 +807,14 @@ class CampaignStore:
         """Delete a stub cycle dir → ``(deleted, reason)``. Guards: ``n_rounds == 0``, not a family root, no children."""
         cycle_dir = self.cycle_dir(campaign_id, cycle_id)
         index_path = cycle_dir / "index.json"
-        if not index_path.is_file():
+        try:
+            index = read_json_optional(index_path)
+        except (OSError, json.JSONDecodeError) as exc:
+            return False, f"index.json unreadable: {exc}"
+        if index is None:
             return False, "not on disk"
         if root_cycle_id(cycle_id) == cycle_id:
             return False, "family root — deletion is for sibling stubs only"
-        try:
-            index = json.loads(index_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            return False, f"index.json unreadable: {exc}"
         n_rounds = index.get("n_rounds", 0)
         if not isinstance(n_rounds, int) or n_rounds != 0:
             return False, f"n_rounds={n_rounds} — cycle ran real work"

@@ -101,8 +101,14 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # while it awaits a multi-minute inner campaign — instead of a second, duplicate
 # heartbeat. A shared-mechanism extraction (two callers now, no redundant loop),
 # justified, so the baseline rises.
+# then ``modules`` 298->299: extracted ``cmd_verify``'s application-layer body
+# (OSP rebuild / scoring / composite-fitness / DiagnosticRunRecord assembly) out
+# of the CLI command into ``application/verify.py::verify_candidate`` —
+# `presentation/CLAUDE.md` bans business logic in CLI commands. A layering fix,
+# not a ledger-down subtraction (code-debt-cleanup.md Ready-bucket item), so the
+# baseline rises rather than falls.
 LEDGER_BASELINE = {
-    "modules": 298,
+    "modules": 299,
     "init_files": 54,
     "reexport_shims": 41,
     "config_leaf_fields": 37,

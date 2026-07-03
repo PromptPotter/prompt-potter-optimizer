@@ -14,7 +14,7 @@ Within each candidate, samples are selected **per step** by an online 1PL Item R
 
 `pick_value = decision_information_gain` — a single objective (the earlier blended `+ explore_weight · model_information_gain` explore term was dropped 2026-05; see [`../specs/verdict-resolution.md`](../specs/verdict-resolution.md)). The seed is origin in R1 and the prior round winner R2+.
 
-Both the per-step queue mechanism and the round-subset selector (`select_round_subset`) **centre the candidate's ability prior on the seed** — a mutation is a small edit of its parent, so it starts at the parent's ability `θ_seed`, not the population-mean anchor 0. This is load-bearing: centred at 0 the decision term goes flat (no sample is contested for a candidate that could be anywhere) and the round sweeps up a fresh contiguous block of never-measured samples every round instead of re-measuring the contested band. Detail and tradeoff: [`../concepts/paired-sample-pobb.md`](../concepts/paired-sample-pobb.md#sample-selection-online-adaptive-queue-mechanism).
+Both the per-step queue mechanism and the round-subset selector (`select_round_subset`) **centre the candidate's ability prior on the seed** — a mutation is a small edit of its parent, so it starts at the parent's ability `θ_seed`, not the population-mean anchor 0. This is load-bearing: centred at 0 the decision term goes flat (no sample is contested for a candidate that could be anywhere) and the round sweeps up a fresh contiguous block of never-measured samples every round instead of re-measuring the contested band. Detail and tradeoff: [`../concepts/adaptive-queue-mechanism.md`](../concepts/adaptive-queue-mechanism.md).
 
 ## Bayesian PoBB
 

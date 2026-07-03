@@ -12,6 +12,7 @@ them out with the loud-breakage shape/contract bulk.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -351,16 +352,30 @@ def test_inner_narrative_carries_evidence_within_budget() -> None:
     assert digest.startswith("INNER justlogic seed-3")
 
 
-def test_evidence_channel_clips_are_visible_and_tail_preserving() -> None:
-    """Two silent evidence corruptions from run b786e9: (1) `priority_fix` was
+def test_evidence_channel_clips_are_visible_and_tail_preserving(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Three silent evidence corruptions from run b786e9: (1) `priority_fix` was
     hard-cut mid-quote with no marker — the clipped steer read as a complete
     instruction and candidates faithfully implemented the fragment; (2) the
     reasoning-trace head-keep dropped the CONCLUSION — the one step the critique
-    is ordered to quote. Both produce wrong prompt content with no error."""
+    is ordered to quote; (3) an over-cap `task_context` field hard-sliced mid-word
+    at the render site. All three produce wrong prompt content with no error."""
+    from promptpotter.application.optimization.dispatch.hub import (
+        CycleSlice,
+        InjectionBundle,
+        RoundDigest,
+    )
+    from promptpotter.application.optimization.dispatch.hub.injections.layer_state import (
+        _r_task_context,
+    )
     from promptpotter.application.optimization.dispatch.hub.injections.panels import (
         _edges_at_line,
     )
     from promptpotter.application.optimization.dispatch.schemas import L1CritiqueOutput
+    from promptpotter.domain.opt_search_point import L2L3Memory
+    from promptpotter.domain.round_diagnostics import RoundDiagnostics
+    from promptpotter.domain.search_point import TaskDecomposition
 
     # (1) over-cap priority_fix clips at a word boundary WITH a visible marker.
     long_fix = "thinking_style: add verification - addresses " + "pattern word " * 40
@@ -380,6 +395,40 @@ def test_evidence_channel_clips_are_visible_and_tail_preserving() -> None:
     assert "[…middle elided]" in clipped
     # Under-cap text passes through whole.
     assert _edges_at_line("a\nb", 400) == "a\nb"
+
+    # (3) over-cap task_context field clips at a word boundary WITH a visible marker.
+    long_field = "data_characteristics: " + "pattern word " * 30
+    bundle = InjectionBundle(
+        opt_sp=OptSearchPoint(
+            memory=L2L3Memory(task_context=TaskDecomposition(key_challenges=long_field))
+        ),
+        pipeline_schema=None,
+        cycle_slice=CycleSlice(
+            round_num=1,
+            current_accuracy=0.5,
+            best_accuracy=0.5,
+            best_round=0,
+            l1_stall_count=0,
+            l2_round=0,
+            l2_stall_count=0,
+            l3_round=0,
+            l3_stall_count=0,
+            exploration_budget="tight",
+        ),
+        digest=RoundDigest(diagnostics=RoundDiagnostics(n_valid=0, samples=[]), critique=None),
+        axes=None,
+    )
+    with caplog.at_level(logging.WARNING):
+        rendered = _r_task_context(bundle)
+    assert "…" in rendered, "silent truncation is the defect being fixed"
+    clipped_field = rendered.split("key_challenges: ", 1)[1].split("\n", 1)[0]
+    clipped_prefix = clipped_field.removesuffix("…")
+    assert long_field.startswith(clipped_prefix)
+    next_char = long_field[len(clipped_prefix) : len(clipped_prefix) + 1]
+    assert next_char in (" ", ""), "mid-word cut"
+    assert any("over the" in r.getMessage() and "cap" in r.getMessage() for r in caplog.records), (
+        "injection_budget_overrun warning must still fire on truncation"
+    )
 
 
 def test_hit_cache_respects_dataset(tmp_path: Path) -> None:

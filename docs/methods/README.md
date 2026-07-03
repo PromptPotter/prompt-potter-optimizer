@@ -11,4 +11,4 @@ Iteration workflow / sweep mode for hand-tuning prompts: [`../manual/06-going-de
 
 Within LLM-driven program evolution, PromptPotter targets the bounded case: fixed pipeline, labelled dataset, scalar fitness. Open-ended synthesis, multi-objective fitness, and unlabelled tasks remain open problems for the paradigm and are not supported here.
 
-Research positioning: [`../research/related-work.md`](../research/related-work.md). Classical AutoML ancestry (F-Race → irace → SMAC): [`../research/algorithm-configuration-lineage.md`](../research/algorithm-configuration-lineage.md).
+Research positioning: [`../research/related-work.md`](../research/related-work.md), which also covers the classical AutoML ancestry (F-Race → irace → SMAC) in § Algorithm configuration: the classical lineage.
