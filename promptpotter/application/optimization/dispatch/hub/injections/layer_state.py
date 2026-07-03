@@ -35,7 +35,10 @@ _LATEX_CORRUPTION_RE = re.compile(r"(?<!\\b)oxed\{|(?<![a-zA-Z])athematical")
     "plan",
     kind=InjectionKind.TRACE,
     description="L3's strategic plan text. Persistent until next L3 fire.",
-    char_cap=800,
+    # 2000 not 800: live L3 plans run ~2.8k chars and the plan is a strategic frame
+    # every prompt reads — an 800 cut silently dropped the strategy's back half.
+    # l3_plan's answer_format states the 2000 budget so the writer targets the cap.
+    char_cap=2000,
 )
 def _r_plan(b: InjectionBundle) -> str:
     """L3's strategic plan text — read by every prompt; persistent until next L3 fire."""

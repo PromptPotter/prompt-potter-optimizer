@@ -21,6 +21,14 @@
 
 **The infrastructure is done; the optimizer *application* is not — close it bug-by-bug, not by adding infrastructure.** The loop, seams, recursion, and scoring gateway all exist and are green. What remains is making the optimizer *behave well*, and that is found empirically: **run `new promptpotter-self` on `justlogic`, collect the data, read what the loop actually produced, fix the bug, re-run.** Expect several restarts; this is the loop, not a failure.
 
+**The cadence must be SELF-FIRING, not event-driven.** A supervising agent schedules its own
+wake-ups (the harness's ScheduleWakeup / self-paced loop, ~150–270 s) the moment a run starts,
+and each wake IS a researcher pass over the reading list below. A passive log Monitor does NOT
+count as supervision — it only fires on patterns you predicted, and every real bug so far
+(estimator inconsistency, evidence starvation, proxy annihilation) was found by reading the
+run's own measurement files, not by a grep hit. Monitor stays as a supplementary alarm only.
+Role split: the operator is the developer/user (UX); the agent owns everything else.
+
 **Supervise every live run actively — never fire-and-wait.** While a run (or any long optimization) is in flight, poll its output at least **every 2 minutes** looking for a newly-surfacing bug — read the fresh dashboards/measurements/goldmine log, not just the exit code. **The 2-minute window is for fanning out and researching — not for pausing.** Spend each interval *actively investigating*: fan out parallel searches over the fresh dashboards/measurements/goldmine log, chase the newest anomaly, read what the loop just produced. The cadence is **not** "check once, then wait" — it is "keep investigating and researching, up to 2 minutes, then check again." An idle wait between ticks is the wasted-run failure mode this guards against. A background run you set and forgot is a wasted run; the bugs show themselves *while it runs*, and catching one early lets you kill-fix-restart before the whole spend drains.
 
 **Default the fix to the prompts** (the `_optimizer*/` meta-prompt set — wording, evidence framing, the per-node edit schema). Reach past prompts to a code fix ONLY when the data shows a structural cause — broken information flow (a signal the prompt needs never reaches it), a missing analysis (evidence the loop should compute but doesn't), or a wiring gap. Name that structural cause before touching code; do not add new infrastructure to paper over a prompt problem.
@@ -62,30 +70,43 @@ any optimizer call > 2 min; a headline Δ that disagrees with `matched_origin_*`
   adaptive subset picks). Quantify it before trusting cross-run deltas — see the noise-floor
   item in the next-run settings below.
 
-### Next `promptpotter-self` run — settings to implement BEFORE the next mint
+### Next `promptpotter-self` run — settings queue (LANDED 2026-07-03, pre-mint batch)
 
-Queued from live supervision 2026-07-02; each is small and none may land mid-run (JSON baselines
-are read per inner mint — editing them mid-run splits the run into two baselines):
+Queued from live supervision 2026-07-02; landed as the 2026-07-03 screening-geometry batch
+(the rule stands: none of these may land mid-run — JSON baselines are read per inner mint, so a
+mid-run edit splits the run into two fingerprint families). Alongside the queue, the geometry
+itself was rebalanced toward outer breadth: outer `max_rounds` 1→2 + `n_variants` 2→3 (+probe),
+inner `max_inner_rounds` 2→1 + `inner_n_variants` 2 — screen wide on `first_round_delta`, let
+the graded ε-gate cut losers early.
 
-1. `sample_transcripts` char_cap 6000 → 7000 — observed 6,046-char render lost a WHOLE second
-   transcript to 46 chars of overflow (section-drop is all-or-nothing).
-2. Meta `l1_generate` answer_format: `variant_name` + `changes_description` came back EMPTY on
-   the first de-contaminated round — parse kept the variants, but the audit trail loses the
-   hypothesis names; nudge the schema reminder.
-3. Off-enum `evidence_grounding.field` values observed (`"failure"`) — tighten the enum line in
-   the prompt (or map the obvious aliases at parse).
-4. **Noise floor**: include one deliberate NO-OP candidate (empty meta-edit) per experiment —
-   its measured "delta" IS the inner-stochasticity floor; feeds the `proxy_lift_corr ≥ 0.6` gate.
-5. Consider inner-loop `l1_generate` temperature 0.7 → ~0.4 for L4 inner runs only (bounded
-   cheap config, slice 5) — cuts inner-campaign variance, the dominant cross-run noise source.
-6. Consider seeds 8 → 12 (more outer samples) before more inner rounds — outer θ_se is the
-   binding constraint on crowning.
-7. `plan` injection cap 800 vs observed 2.8k L3 plans — decide: raise the cap or instruct L3
-   to write within it.
-8. Meta `l1_critique` steer vocabulary: observed `priority_fix`/`suggested_axes` naming fuzzy
-   axes (`critique.prompt`, `refine.instruction`) instead of catalogue node-fields
-   (`l1_critique.instruction`) — instruct it to name `<inner_node>.<field>` from the catalogue
-   verbatim.
+1. ~~`sample_transcripts` char_cap 6000 → 7000~~ **DONE** (`panels.py`).
+2. ~~Meta `l1_generate` answer_format nudge~~ **DONE** — `variant_name`/`changes_description`
+   marked REQUIRED-non-empty in `_optimizer_meta/prompts.json`.
+3. ~~Off-enum `evidence_grounding.field`~~ **DONE** — enum line tightened ("EXACTLY one of …;
+   any other value, e.g. 'failure', is invalid").
+4. ~~Noise floor NO-OP candidate~~ **DONE, generalized** — `OptimizationConfig.noop_probe`
+   (pp-self ON): one origin-identical arm injected in round 1 via the normal candidate channel,
+   exempt from the `no_op_variant` nuke, scored `force_fresh` (an origin-identical config would
+   cache-replay the origin's own rows and read a floor of exactly 0). Its measured delta IS the
+   inner-stochasticity floor; feeds the `proxy_lift_corr ≥ 0.6` gate.
+5. Inner `l1_generate` temperature 0.7 → ~0.4 — **DEFERRED with reason**: a ContextVar config
+   override would change inner behavior WITHOUT joining the inner-baseline measurement-identity
+   fingerprint (the stale-reuse bug class the fingerprint fix closed). Needs identity-joined
+   plumbing; the NO-OP floor quantifies variance first, so we know whether it's worth it.
+6. Seeds 8 → 12 — **NOT taken this run**: the same spend went to outer breadth instead (the
+   geometry above). Revisit if the floor says candidate deltas are real but crowning starves.
+7. ~~`plan` cap 800 vs 2.8k plans~~ **DONE, both sides** — cap 800→2000 (`layer_state.py`) AND
+   `l3_plan` answer_format states the 2000-char budget so the writer targets the cap.
+8. ~~Meta `l1_critique` steer vocabulary~~ **DONE** — `priority_fix`/`suggested_axes` must name
+   `<inner_node>.<field>` verbatim from the catalogue; invented names called out as invalid.
+9. (New, observed live) L2-authored `task_context` fields truncated at the 300-char render cap —
+   **DONE** upstream: the base `l2_context` answer_format now states the per-field ≤300c budget.
+
+**Also verified 2026-07-03 (don't re-chase): candidate-arm inner round-0 is NOT re-measured.**
+Same-seed round-0 accuracies are byte-identical across the origin arm, every C1.1 arm, and the
+C1.2 arm of run `7113ca` — the tenant-global `measurements/` store under the shared
+`.inner/<cycle>/` sandbox + content-addressed reuse already replays the origin-arm's rows into
+candidate arms. A "share the origin across arms" fix is unnecessary by construction.
 
 ## Live-run learnings — bake these in, don't re-discover
 

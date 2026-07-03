@@ -366,7 +366,16 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
         # proxy composite). Keep the two formats in sync.
         INNER_RESULT_KEY: [f"inner:{query}"],
         **proxies,
-        "terminated_at": "l1_critique",
+        # terminated_at is the archive's reuse contract: a named node means "the
+        # sample's outcome depends on config only UP TO that node", and prefix-
+        # matched rows replay when they terminated inside the trusted prefix
+        # (MeasurementArchive.load_reusable_results). An inner campaign consumes
+        # the ENTIRE meta-config at once, so the only honest stamp is the LAST
+        # node of the outer chain — anything earlier lets a candidate editing a
+        # later node (l2_context/l3_plan) silently replay the origin's rows.
+        # step_timings/step_tokens stay keyed by l1_critique (the ranker node
+        # carrying the proxy observation_mappings + spend attribution).
+        "terminated_at": "l3_plan",
         "total_time": elapsed,
         "step_timings": {"l1_critique": elapsed},
     }

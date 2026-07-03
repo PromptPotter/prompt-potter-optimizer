@@ -325,7 +325,9 @@ def _head_at_line(text: str, cap: int) -> str:
         "Complete failing samples: full query + the task model's own reasoning + "
         "predicted vs GT — the raw evidence the critique's failure_highlights quote from."
     ),
-    char_cap=6000,
+    # 7000 not 6000: section-drop is all-or-nothing, and a live 6,046-char render
+    # lost a WHOLE second transcript to 46 chars of overflow.
+    char_cap=7000,
 )
 def _r_sample_transcripts(b: InjectionBundle) -> str:
     """The distiller's raw source: up to ``TRANSCRIPT_RENDER_CAP`` current misses shown

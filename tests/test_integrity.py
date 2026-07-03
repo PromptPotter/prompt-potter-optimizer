@@ -169,6 +169,64 @@ def test_reusable_results_min_grade_drops_connector_runs(tmp_path: Path) -> None
     assert set(clean_only) == {"q_clean"}
 
 
+def test_full_chain_rows_never_replay_on_prefix_match(tmp_path: Path) -> None:
+    """A sample whose outcome consumed the FULL node chain (``terminated_at`` =
+    last node — the L4 inner-recursion stamp) must not replay for a query that
+    differs at a later node. The buggy stamp (``l1_critique``, a mid-chain node)
+    let a candidate editing ``l2_context``/``l3_plan`` silently replay the
+    origin's rows — a fake score with no error and no symptom (run b786e9 C1.3).
+    A genuine mid-chain short-circuit still replays: that reuse is correct."""
+    archive = MeasurementArchive(tmp_path)
+    chain = ["l1_generate", "l1_critique", "l2_context", "l3_plan"]
+
+    def _seed_chain(run_id: str, terminated_at: str) -> None:
+        archive.save(
+            "bk",
+            run_id,
+            {
+                "run_id": run_id,
+                "name": run_id,
+                "content_hash": f"hash_{run_id}",
+                "prompt_fields_id": "pf_x",
+                "item_count": 1,
+                "scores": {"accuracy": 1.0, "total": 1},
+                "node_configs": [(n, {}) for n in chain],
+                "pipeline_params": {},
+                "created_at": "2026-07-03T00:00:00Z",
+                "measurements": [
+                    {
+                        "sample_id": 1,
+                        "query": f"q_{run_id}",
+                        "ground_truth": "g",
+                        "predicted": "p",
+                        "hit": True,
+                        "fitness": 1.0,
+                        "pipeline_data": {"terminated_at": terminated_at},
+                    }
+                ],
+                "dataset_name": "promptpotter-self",
+            },
+        )
+
+    _seed_chain("full_chain", terminated_at="l3_plan")
+    _seed_chain("short_circuit", terminated_at="l1_critique")
+
+    # Query differs at l2_context → prefix match of length 2.
+    query_configs: list[tuple[str, dict[str, Any]]] = [
+        ("l1_generate", {}),
+        ("l1_critique", {}),
+        ("l2_context", {"layout": {"problem_description": ["critique"]}}),
+        ("l3_plan", {}),
+    ]
+    cache = archive.load_reusable_results("bk", query_configs, dataset_name="promptpotter-self")
+    assert "q_full_chain" not in cache, (
+        "full-chain row replayed across a later-node config change — fake measurement"
+    )
+    assert "q_short_circuit" in cache, (
+        "a genuine mid-chain short-circuit inside the trusted prefix should still reuse"
+    )
+
+
 def test_hit_cache_respects_dataset(tmp_path: Path) -> None:
     """``load_reusable_results`` scopes by dataset — identical node-configs and a
     colliding sample_id across datasets must NOT serve one dataset's cached
