@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.intelligence.exploration import graded_response
 from promptpotter.application.optimization.pobb.elimination.classification import (
     classify_result,
     extract_warning_types,
@@ -181,9 +182,12 @@ class PoBBCheck:
         self.equivalence_elimination = config.equivalence_elimination
         self.improvement_threshold = config.improvement_threshold
         self.n_samples = n_samples
-        # Per-prior per-sample HIT (not fitness): the θ elimination fit is over binary
-        # outcomes, and ``mean(hit)`` is also what the dominance check counts.
-        self.priors_by_sample: dict[str, dict[str, bool]] = {}
+        # Per-prior per-sample GRADED response (fitness clamped to [0,1], via
+        # ``graded_response``) — the θ ε-gate fits on it directly (bit-identical to the
+        # old hit vector on binary datasets, discriminating on graded backends where
+        # hit is degenerate). The counting gates derive binary as ``grade >= 1.0`` —
+        # the same hit definition ``rescore`` applies — so they stay integer-exact.
+        self.priors_by_sample: dict[str, dict[str, float]] = {}
         self.prior_sps: dict[str, JobSearchPoint] = {}
         self.prior_ids: list[str] = []
         self._current_id: str = ""
@@ -221,20 +225,20 @@ class PoBBCheck:
         candidate_id: str,
         sp: JobSearchPoint,
     ) -> None:
-        """Add a completed candidate's per-sample HIT map to the priors pool.
+        """Add a completed candidate's per-sample graded-response map to the priors pool.
 
         ``sp`` is retained so missing (prior, sample) pairs can be backfilled
         on demand when a future candidate touches samples this prior never saw.
         Error/deprecated samples are excluded — they carry no outcome for the
         θ fit, matching how the round-winner election builds its observations.
         """
-        hits_by_sample: dict[str, bool] = {}
+        grades_by_sample: dict[str, float] = {}
         for r in results:
             sid = r.get("sample_id")
             if sid is None or is_error_result(r):
                 continue
-            hits_by_sample[str(sid)] = bool(r.get("hit"))
-        self.priors_by_sample[candidate_id] = hits_by_sample
+            grades_by_sample[str(sid)] = graded_response(r)
+        self.priors_by_sample[candidate_id] = grades_by_sample
         self.prior_sps[candidate_id] = sp
         if candidate_id not in self.prior_ids:
             self.prior_ids.append(candidate_id)
@@ -262,22 +266,22 @@ class PoBBCheck:
                 sid_new = r.get("sample_id")
                 if sid_new is None or is_error_result(r):
                     continue
-                existing[str(sid_new)] = bool(r.get("hit"))
+                existing[str(sid_new)] = graded_response(r)
             if key in existing:
                 fresh.append(cid)
         return fresh
 
-    def snapshot_priors(self, sample_ids: Sequence[int | str]) -> dict[str, dict[str, bool]]:
-        """Return the per-prior HIT map over ``sample_ids``; for decision archival.
+    def snapshot_priors(self, sample_ids: Sequence[int | str]) -> dict[str, dict[str, float]]:
+        """Return the per-prior graded-response map over ``sample_ids``; for decision archival.
 
         Only sample IDs the prior actually covers are emitted (the caller
         is asking "what did we know at decision time?"); missing entries
         are omitted rather than substituted. The resume replayer re-fits θ
-        from exactly these recorded hits, so it must store the same outcomes
+        from exactly these recorded grades, so it must store the same outcomes
         the live elimination read.
         """
         keys = [str(sid) for sid in sample_ids]
-        out: dict[str, dict[str, bool]] = {}
+        out: dict[str, dict[str, float]] = {}
         for cid in self.prior_ids:
             prior_map = self.priors_by_sample.get(cid) or {}
             out[cid] = {sid: prior_map[sid] for sid in keys if sid in prior_map}
@@ -299,12 +303,12 @@ class PoBBCheck:
             return None
         candidate_samples = [str(r.get("sample_id", "")) for r in fit_results]
         candidate_sample_ids = [int(r.get("sample_id", 0)) for r in fit_results]
-        candidate_hits = [bool(r.get("hit")) for r in fit_results]
+        candidate_grades = [graded_response(r) for r in fit_results]
 
         # Deterministic dominance: abort if cand_max_final_hits < seed_total_hits.
         if self.deterministic_dominance:
             dominance_signal = self._dominance_check(
-                candidate_hits, candidate_idx, n_total_candidates
+                candidate_grades, candidate_idx, n_total_candidates
             )
             if dominance_signal is not None:
                 return dominance_signal
@@ -315,14 +319,14 @@ class PoBBCheck:
         # catches "moderately the same" candidates a loser-only gate rides to full budget.
         if self.equivalence_elimination:
             equivalence_signal = self._equivalence_check(
-                candidate_hits, candidate_idx, n_total_candidates
+                candidate_grades, candidate_idx, n_total_candidates
             )
             if equivalence_signal is not None:
                 return equivalence_signal
 
         # Exclude priors with sample-set gaps rather than substitute — the θ comparison
         # pairs each prior to the candidate on the candidate's exact samples.
-        paired_priors: dict[str, list[bool]] = {}
+        paired_priors: dict[str, list[float]] = {}
         for cid_p in self.prior_ids:
             prior_map = self.priors_by_sample[cid_p]
             if all(sid in prior_map for sid in candidate_samples):
@@ -334,7 +338,7 @@ class PoBBCheck:
         # P(best) = difficulty-adjusted θ ability, bounded above by min over priors of
         # P(θ_cand > θ_prior_i) — the same metric the round-winner election ranks by.
         p_best_current, p_better = elimination_p_best(
-            candidate_hits, paired_priors, candidate_sample_ids, self.delta_scale
+            candidate_grades, paired_priors, candidate_sample_ids, self.delta_scale
         )
         hardest_prior_id = min(p_better, key=lambda k: p_better[k])
 
@@ -392,15 +396,16 @@ class PoBBCheck:
 
     def _dominance_check(
         self,
-        candidate_hits: list[bool],
+        candidate_grades: list[float],
         candidate_idx: int,
         n_total_candidates: int,
     ) -> EscalationSignal | None:
         """Abort when ``cand_max_final_hits < seed_total_hits`` on the candidate's budget.
 
         Seed = first ``prior_ids`` entry (origin R1, prior winner R2+).
-        Counts the stored per-sample hits directly. Requires an explicit
-        ``_sample_universe`` AND full seed coverage on it.
+        Counts hits derived from the stored grades (``grade >= 1.0`` — the rescore
+        hit definition), keeping the gate deliberately binary/integer-exact.
+        Requires an explicit ``_sample_universe`` AND full seed coverage on it.
         """
         if not self.prior_ids:
             return None
@@ -411,17 +416,17 @@ class PoBBCheck:
             return None
         if not all(sid in seed_full for sid in sample_universe):
             return None
-        seed_total_hits = sum(1 for sid in sample_universe if seed_full[sid])
-        cand_hits = sum(1 for h in candidate_hits if h)
+        seed_total_hits = sum(1 for sid in sample_universe if seed_full[sid] >= 1.0)
+        cand_hits = sum(1 for g in candidate_grades if g >= 1.0)
         budget = len(sample_universe)
-        remaining = max(0, budget - len(candidate_hits))
+        remaining = max(0, budget - len(candidate_grades))
         cand_max_hits = cand_hits + remaining
         if cand_max_hits >= seed_total_hits:
             return None
         return _eliminate(
             self.name,
             {
-                "queries_scored": len(candidate_hits),
+                "queries_scored": len(candidate_grades),
                 "total_samples": self.n_samples,
                 "n_priors": len(self.prior_ids),
                 "p_best": 0.0,
@@ -442,7 +447,7 @@ class PoBBCheck:
 
     def _equivalence_check(
         self,
-        candidate_hits: list[bool],
+        candidate_grades: list[float],
         candidate_idx: int,
         n_total_candidates: int,
     ) -> EscalationSignal | None:
@@ -465,13 +470,13 @@ class PoBBCheck:
         if not universe or not all(sid in seed_full for sid in universe):
             return None
         budget = len(universe)
-        k = len(candidate_hits)
+        k = len(candidate_grades)
         if k <= 0 or k >= budget:
             return None
-        seed_total_hits = sum(1 for sid in universe if seed_full[sid])
+        seed_total_hits = sum(1 for sid in universe if seed_full[sid] >= 1.0)
         margin = math.ceil(self.improvement_threshold * budget)
         adoption_bar = seed_total_hits + margin
-        cand_hits = sum(1 for h in candidate_hits if h)
+        cand_hits = sum(1 for g in candidate_grades if g >= 1.0)
         need = adoption_bar - cand_hits
         if need <= 0:
             return None  # already clears the bar on hits banked — keep measuring

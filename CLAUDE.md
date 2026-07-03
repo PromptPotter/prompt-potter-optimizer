@@ -51,7 +51,7 @@ python -m uvicorn promptpotter.main:app --port 8001          # read-only API + w
 ## Conventions
 
 - Full style + code-shape + git rules → [`docs/developer/conventions.md`](docs/developer/conventions.md); enumerations → [`docs/glossary.md`](docs/glossary.md).
-- **Git:** **never `git commit` or `git push` unless the operator says so** (a commit ask is not a push ask); ruff format + check before any commit (see Commands).
+- **Git — don't commit by default:** **never `git commit` or `git push` unless the operator says so** (a commit ask is not a push ask). **Sole standing exception:** where a project instruction already grants autonomous commits — the L4 closing-phase "commit small green arcs" (see Current focus) and endorsed drain passes — and **even then never push**. Ruff format + check before any commit (see Commands).
 - **Vocabulary:** say "origin" never "baseline" (R-23); "node" never service/building-block; domain framing = evolution (generation/population/fitness/mutation/selection/individual).
 - **Fewest dependencies possible** in both repos — reach for the stdlib or a small hand-rolled helper before adding a package; every new dependency must earn its place.
 

@@ -443,14 +443,19 @@ def binom_sf(n: int, k: int, p: float) -> float:
 
 
 def elimination_p_best(
-    candidate_hits: list[bool],
-    paired_prior_hits: Mapping[str, list[bool]],
+    candidate_grades: Sequence[float],
+    paired_prior_grades: Mapping[str, Sequence[float]],
     candidate_sample_ids: Sequence[int],
     delta_scale: Ruler,
 ) -> tuple[float, dict[str, float]]:
     """``P(candidate is the round's best)`` for PoBB mid-round elimination, on
     difficulty-adjusted ability θ — the SAME quality metric the round-winner election ranks by,
     so elimination and election never disagree on what "better" means (the boundary collapse).
+
+    Inputs are GRADED per-sample responses (fitness clamped to [0,1], ``graded_response``) —
+    the logistic MAP is valid for any y ∈ [0,1], so binary datasets are bit-identical to the
+    old hit vectors while graded backends (L4 outer proxies, reciprocal-rank matching) keep
+    their gradient instead of collapsing to an all-miss θ.
 
     Candidate and each prior get θ **independently on the cycle's fixed δ ruler**
     (``fit_theta_given_delta`` keyed by the candidate's real ``sample_id``s — the priors are
@@ -464,7 +469,7 @@ def elimination_p_best(
     lose to). Deterministic + closed-form (no Monte Carlo) — so the resume divergence replayer
     re-derives the elimination cut bit-for-bit.
     """
-    if not paired_prior_hits:
+    if not paired_prior_grades:
         return 1.0, {}
 
     import math
@@ -475,13 +480,14 @@ def elimination_p_best(
 
     sids = [int(s) for s in candidate_sample_ids]
     cand_obs = [
-        Observation("__cand__", sid, float(h)) for sid, h in zip(sids, candidate_hits, strict=True)
+        Observation("__cand__", sid, float(g))
+        for sid, g in zip(sids, candidate_grades, strict=True)
     ]
     theta_c, se_c = fit_theta_given_delta(cand_obs, delta_scale).get("__cand__", (0.0, 0.0))
 
     per_prior: dict[str, float] = {}
-    for pid, hits in paired_prior_hits.items():
-        prior_obs = [Observation(pid, sid, float(h)) for sid, h in zip(sids, hits, strict=True)]
+    for pid, grades in paired_prior_grades.items():
+        prior_obs = [Observation(pid, sid, float(g)) for sid, g in zip(sids, grades, strict=True)]
         theta_p, se_p = fit_theta_given_delta(prior_obs, delta_scale).get(pid, (0.0, 0.0))
         denom = math.sqrt(se_c * se_c + se_p * se_p)
         if denom > 1e-12:

@@ -12,6 +12,7 @@ import logging
 from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
+from promptpotter.application.intelligence.exploration import graded_response
 from promptpotter.application.optimization.resume_and_fork.decisions import (
     RESUME_CHECKPOINT_GATING,
     GatingMode,
@@ -178,38 +179,40 @@ def _pobb_replay_snapshot(
     """Build (candidate_id, θ-ability snapshot) for PoBB replay.
 
     Re-fits θ on the cycle's fixed δ ruler (``ctx.delta_scale``) over the recorded
-    per-prior HITS + the candidate's rescored hits on ``data.candidate_sample_ids`` and
-    recomputes ``p_best`` via ``elimination_p_best`` — the same closed-form, MC-free rule
-    the live ``PoBBCheck.check`` ran, so replay is bit-for-bit when no scorer change moved
-    the candidate's hits. ``None`` ⇒ rescored measurements aren't available.
+    per-prior GRADED responses + the candidate's rescored grades on
+    ``data.candidate_sample_ids`` and recomputes ``p_best`` via ``elimination_p_best``
+    — the same closed-form, MC-free rule the live ``PoBBCheck.check`` ran, so replay
+    is bit-for-bit when no scorer change moved the candidate's outcomes. Recorded
+    booleans from pre-graded decisions coerce to 0.0/1.0 — the identical values the
+    live path fed. ``None`` ⇒ rescored measurements aren't available.
     """
     candidate_id = str(inputs_ref.get("candidate_id", ""))
     candidate_sample_ids = [str(s) for s in (data.get("candidate_sample_ids") or [])]
-    prior_histories: dict[str, dict[str, bool]] = data.get("prior_histories") or {}
+    prior_histories: dict[str, dict[str, float]] = data.get("prior_histories") or {}
     if not candidate_sample_ids or not prior_histories:
         return None
 
     all_results: dict[str, list[dict[str, Any]]] = ctx.round_data.get("all_candidate_results") or {}
     cur_results = all_results.get(candidate_id) or []
     cur_by_sample = {
-        str(r.get("sample_id")): bool(r.get("hit"))
+        str(r.get("sample_id")): graded_response(r)
         for r in cur_results
         if r.get("sample_id") is not None
     }
     if not all(sid in cur_by_sample for sid in candidate_sample_ids):
         return None
-    candidate_hits = [cur_by_sample[sid] for sid in candidate_sample_ids]
+    candidate_grades = [cur_by_sample[sid] for sid in candidate_sample_ids]
 
-    paired_prior_hits: dict[str, list[bool]] = {}
+    paired_prior_grades: dict[str, list[float]] = {}
     for cid, hist in prior_histories.items():
         if all(sid in hist for sid in candidate_sample_ids):
-            paired_prior_hits[cid] = [bool(hist[sid]) for sid in candidate_sample_ids]
-    if not paired_prior_hits:
+            paired_prior_grades[cid] = [float(hist[sid]) for sid in candidate_sample_ids]
+    if not paired_prior_grades:
         return None
 
     p_best, per_prior = elimination_p_best(
-        candidate_hits,
-        paired_prior_hits,
+        candidate_grades,
+        paired_prior_grades,
         [int(s) for s in candidate_sample_ids],
         ctx.delta_scale or {},
     )

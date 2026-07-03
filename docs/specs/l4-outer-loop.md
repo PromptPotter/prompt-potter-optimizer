@@ -25,6 +25,68 @@
 
 **Default the fix to the prompts** (the `_optimizer*/` meta-prompt set — wording, evidence framing, the per-node edit schema). Reach past prompts to a code fix ONLY when the data shows a structural cause — broken information flow (a signal the prompt needs never reaches it), a missing analysis (evidence the loop should compute but doesn't), or a wiring gap. Name that structural cause before touching code; do not add new infrastructure to paper over a prompt problem.
 
+### THE PER-CHECKUP READING LIST — every 2-minute tick reads ALL of these, not just the log tail
+
+**A checkup that only greps the goldmine tail is NOT a checkup.** Each tick, open the newest
+`{cycle}/.runtime/cache/rounds/round_NNNN.json` (outer) and read every LLM tier's actual I/O:
+
+1. **`l1_generate`** — rendered input (are the panels populated or empty?), raw output, parsed
+   variants: `evidence_grounding.field` in the real enum? citations quote text that EXISTS in the
+   rendered input? hypotheses distinct (not one idea relocated)? `variant_name`/`changes_description`
+   populated? Any hallucinated node/param (validation drops)?
+2. **`l1_critique`** — input carries the evidence (at the inner level: SAMPLE TRANSCRIPTS +
+   MODEL REASONING present?); output `priority_fix`/`failure_highlights` quote CONCRETE evidence
+   (a reasoning step, a premise), not recycled labels or scoring artifacts.
+3. **Scoring** — per-candidate `candidate_scores` (accuracy, θ, θ_se, ci_lo), the
+   **matched-origin** comparison (NEVER the cross-subset round-0 origin — subset drift reads as
+   lift), PoBB stream (`p_best` moving off 0.5?), `decisions` (cuts firing, and on the right arm?).
+4. **`l2_context` / `l3_plan` when fired** — validator failures (`paraphrase_repeat`,
+   `dangling_trigger`), whether the task_context delta is evidence-anchored, plan text sane and
+   within its render cap.
+5. **Spot-check ≥1 inner campaign per outer sample batch** — the same four reads one level down
+   in `.inner/<outer_cycle>/…/campaigns/justlogic__*/`.
+
+Red flags that mean STOP-AND-DIAGNOSE, not keep-watching: `raw_chars: 0` / empty candidate list;
+an outer sample returning in ~0.0s (stale-cache reuse — identity bug); off-enum grounding fields;
+any optimizer call > 2 min; a headline Δ that disagrees with `matched_origin_*` / `improved`.
+
+### Cross-run comparability — rules that always hold
+
+- **Absolute outer numbers NEVER travel across runs.** Only a candidate's delta against ITS OWN
+  run's origin is meaningful (same discipline as "verdicts compare lift-over-reference per model").
+- Within a run, comparisons are **paired by seed** (each candidate runs the same 8
+  `inner_dataset_seed`-pinned banks) — draw difficulty cancels; trust the paired PoBB/θ reads.
+- The `inner_baseline` identity fingerprint partitions runs into same-baseline families; a
+  baseline edit = a NEW family. Never pool or compare across families.
+- Residual cross-run noise = inner-process stochasticity (inner optimizer LLM at temp 0.7,
+  adaptive subset picks). Quantify it before trusting cross-run deltas — see the noise-floor
+  item in the next-run settings below.
+
+### Next `promptpotter-self` run — settings to implement BEFORE the next mint
+
+Queued from live supervision 2026-07-02; each is small and none may land mid-run (JSON baselines
+are read per inner mint — editing them mid-run splits the run into two baselines):
+
+1. `sample_transcripts` char_cap 6000 → 7000 — observed 6,046-char render lost a WHOLE second
+   transcript to 46 chars of overflow (section-drop is all-or-nothing).
+2. Meta `l1_generate` answer_format: `variant_name` + `changes_description` came back EMPTY on
+   the first de-contaminated round — parse kept the variants, but the audit trail loses the
+   hypothesis names; nudge the schema reminder.
+3. Off-enum `evidence_grounding.field` values observed (`"failure"`) — tighten the enum line in
+   the prompt (or map the obvious aliases at parse).
+4. **Noise floor**: include one deliberate NO-OP candidate (empty meta-edit) per experiment —
+   its measured "delta" IS the inner-stochasticity floor; feeds the `proxy_lift_corr ≥ 0.6` gate.
+5. Consider inner-loop `l1_generate` temperature 0.7 → ~0.4 for L4 inner runs only (bounded
+   cheap config, slice 5) — cuts inner-campaign variance, the dominant cross-run noise source.
+6. Consider seeds 8 → 12 (more outer samples) before more inner rounds — outer θ_se is the
+   binding constraint on crowning.
+7. `plan` injection cap 800 vs observed 2.8k L3 plans — decide: raise the cap or instruct L3
+   to write within it.
+8. Meta `l1_critique` steer vocabulary: observed `priority_fix`/`suggested_axes` naming fuzzy
+   axes (`critique.prompt`, `refine.instruction`) instead of catalogue node-fields
+   (`l1_critique.instruction`) — instruct it to name `<inner_node>.<field>` from the catalogue
+   verbatim.
+
 ## Live-run learnings — bake these in, don't re-discover
 
 - **Inner sandbox is a FLAT registry, not physical nesting.** Inner campaigns live at `<workspace>/.inner/<spawn_cycle_id>/` (sibling of `projects/`), NOT nested under the deep outer cycle dir. Physical nesting (`…/.runtime/inner/…/.runtime/inner/…`) blows past Windows' 260-char `MAX_PATH` **at depth 1** and is hopeless by L5; a flat registry named-by-but-not-under the spawning cycle stays shallow at every depth, so the re-entrancy invariant holds without the path trap. (`runner/inner_recursion.py::InnerSpawnContext`.) The earlier spec language "rooted at the spawning cycle's `.runtime/inner/`" is superseded by this.
@@ -38,13 +100,13 @@
 - **A healthy L4 outer round looks DEAD to the webapp (not yet fixed).** The outer `dashboard.json` only ticks when an inner campaign finishes and its sample scores — but inner campaigns take ~10 min each, so the outer dashboard is legitimately quiet for 8–10 min stretches every round. The webapp's ~5-min "went silent" freshness heuristic trips on every healthy L4 round, and its ETA extrapolates budget-burn (showing hours) instead of reading `max_rounds`. Both misread structural quiet as a stall. A supervising log-grep monitor hits the same trap if it filters only outer keywords — inner per-sample rows (`io=`/`MISS`) are the real liveness signal. Fix shape: an inner-progress heartbeat on the outer dashboard (n inner campaigns done / total) so a long inner round is distinguishable from a dead one.
 - **The default `token_budget` (210 000) strangles an L4 run far below its USD budget.** `token_budget` is a normal-campaign safety rail on optimizer token spend — but the inner-spend rollup (slice 4) rolls each inner campaign's **tokens** onto the outer ledger as backend cost (~109k tok/inner campaign), so the 210k default trips after ~2 inner campaigns. A live `promptpotter-self` stopped on `token_budget` at **$0.109 of a $1.00** USD budget after only 6 of 24 inner campaigns → the 8-task panel was never probed → both candidates tied "DEGRADED — under-probed (CI 0%–66%)", no winner. For L4 the **USD budget is the meaningful cap** and the token cap is a redundant, mis-scaled second limiter; `datasets/promptpotter-self/campaign.json` sets `token_budget: null` so `spend_budget_usd` governs. (Root is L4's scale, not the rollup — the rollup correctly reports real tokens; don't uncount them.)
 
-## Open fix — finish the graded-θ migration in PoBB elimination (the missed site)
+## Graded-θ migration in PoBB elimination — FIXED 2026-07-02 (kept for the record)
 
 **Scope corrected against the record (2026-07-02):** the "θ ability fit binarizes outcomes" defect was already fixed *for the election* — `candidate_abilities` → `elect_round_winner` builds `Observation(response=graded_response(r))` (continuous `fitness`), and the δ ruler grades too (learning line 28-A). What was **missed** is the **PoBB ε-gate**: `elimination_p_best` (`application/scoring/metrics.py:445`) still fits θ from the **binary** hit vector `candidate_hits`, built in `PoBBCheck` from `bool(r.get("hit"))` (`pobb/elimination/checks.py:302` + `priors_by_sample` at `:231-237`, `:265`). On a graded backend (the L4 outer, where `hit = fitness ≥ 1.0` is always False, and TermNorm reciprocal-rank) the vector is all-0 → θ identical across arms → **`p_best = 0.5`, PoBB never discriminates or early-stops**. `graded_response`'s own docstring says it replaces the `bool(result.get("hit"))` binarization "at every Observation build site" — this is the one it didn't reach.
 
-**Honest severity: MINOR, not the readiness blocker.** This is *elimination efficiency* (no early-stop of clearly-worse candidates on a graded backend), not election. The flat outer *signal* (best == origin on run4) is the separate, KNOWN θ-LCB conservatism — at n=8 with θ_se ~0.5, a +0.005 point-lift's LCB is negative so the election correctly refuses to crown — already worked around by cf7024de (the outer proxy reads the best-**discovered** θ-LCB, not the crowned frontier). Do not conflate the two; this fix does not make the outer crown tiny lifts.
+**Honest severity: MINOR, not the readiness blocker.** This is *elimination efficiency* (no early-stop of clearly-worse candidates on a graded backend), not election. The flat outer *signal* (best == origin) rooted deeper than θ-LCB conservatism: `discovered_level_trajectory` measured the origin and the candidates on **mismatched estimators** (raw: origin point-accuracy vs candidate Wilson-LB; ability: θ-less candidates — the common case — silently skipped → trajectory collapses to origin), capping every proxy delta non-positive *by construction*, so cf7024de's θ-discount was inert for justlogic. FIXED (`exploration.py`): origin scored on the SAME Wilson-LB / θ-LCB as candidates, space chosen by candidate-θ coverage so a θ-less candidate is never skipped (demotes the whole trajectory to raw instead). Don't conflate with the ε-gate above; that fix doesn't touch the proxy scale.
 
-**The fix (mirror fix-A on the ε-gate; keep the counting gates binary):**
+**The fix (SHIPPED — option (i) below; counting gates stay binary via `grade >= 1.0`):**
 - Feed the **graded** per-sample fitness to the θ ε-gate. `elimination_p_best` accepts continuous responses already (same cross-entropy MAP as `candidate_abilities`, valid ∀ y∈[0,1] → **bit-identical for binary datasets** where `fitness ∈ {0,1} = hit`).
 - **Do NOT** change the dominance + equivalence gates — they count hits toward a bar (integer arithmetic) and are *supposed* to be binary; on a graded/0-hit backend dominance never fires and the equivalence gate already self-disables via its Laplace smoothing (the 6c0ff555 fix). That behavior is correct; leave it.
 - **The one real decision:** `PoBBCheck.priors_by_sample` + `candidate_hits` serve BOTH the θ ε-gate (wants graded) AND the counting gates (want binary). Options: (i) store graded floats and derive the binary hit for counting as `grade ≥ 1.0` (consistent with `rescore.py:27`'s own hit definition — one source of truth), or (ii) store both. Prefer (i).

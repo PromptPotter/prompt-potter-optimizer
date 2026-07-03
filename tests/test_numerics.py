@@ -68,6 +68,7 @@ from promptpotter.domain.pipeline_schema import (
 from promptpotter.domain.rendering import display_fitness
 from promptpotter.domain.sample import Sample
 from promptpotter.shared import extract_gsm8k_number
+from promptpotter.shared.statistics import wilson_ci
 
 # ===========================================================================
 # 1. Scorer matcher formulas — one parametrized family
@@ -669,11 +670,14 @@ def test_discovered_level_trajectory_is_honest_single_scale() -> None:
     )
     assert abs(o_lvl - origin_ability) < 1e-9 and levels[0] > o_lvl
 
-    # F1 — single scale: on a WARM ruler a candidate with no θ is SKIPPED, never folded in as
-    # its raw ci_lo (a different scale). With only θ-less candidates the round discovers
-    # nothing → carries the origin level (neutral), it does NOT read the 0.99 ci_lo.
+    # F1 — no-skip / estimator consistency: a single θ-less candidate demotes the WHOLE
+    # trajectory to raw space (origin + candidates both accuracy Wilson-LB) instead of the
+    # candidate being silently dropped and the round collapsing to the origin level. The old
+    # bug read lv2 == [origin_ability]; the fix reads the candidate's ci_lo on one raw scale.
+    # SILENT: the outer optimized a floored-to-origin 0 for every θ-less candidate (the common
+    # case — inner candidate θ only populates on full-bank coverage).
     o2, lv2 = discovered_level_trajectory(origin_theta, 0.44, [[(None, None, 0.99)]], ruler)
-    assert lv2 == [o2]
+    assert abs(o2 - 0.44) < 1e-9 and abs(lv2[0] - 0.99) < 1e-9
 
     # F5 — regression preserved: a round whose only candidates are worse-than-origin yields a
     # level BELOW origin (a negative delta the outer steers away from), NOT floored at origin.
@@ -699,10 +703,31 @@ def test_discovered_level_trajectory_is_honest_single_scale() -> None:
     )
     assert lv4[1] == lv4[0] > origin_ability
 
-    # Cold ruler ⇒ raw space end-to-end: origin level is raw accuracy, candidate levels read
-    # the accuracy Wilson-LB — same single-scale discipline, no θ/raw mixing.
+    # Cold ruler ⇒ raw space end-to-end: origin level is its own Wilson-LB, candidate levels
+    # read the accuracy Wilson-LB — same single-scale discipline, no θ/raw mixing.
     o5, lv5 = discovered_level_trajectory(None, 0.44, [[(None, None, 0.30)]], {})
     assert abs(o5 - 0.44) < 1e-9 and abs(lv5[0] - 0.30) < 1e-9
+
+    # Estimator consistency at production scale (n≈24) — the raw branch is the PRIMARY path
+    # (inner candidates are θ-less in the common case). Origin and candidates must be measured
+    # on the SAME Wilson-LB, so a candidate that MATCHES origin accuracy scores ~0, not the
+    # ~−0.17 the old point-vs-LB bug produced (which capped every proxy delta non-positive).
+    o_lb = wilson_ci(10, 24)[0]  # origin 10/24, its own lower bound
+    o_pt = 10 / 24  # what the OLD bug used for origin (a point estimate)
+    _, lv_match = discovered_level_trajectory(
+        None, o_lb, [[(None, None, wilson_ci(10, 24)[0])]], {}
+    )
+    assert abs(lv_match[0] - o_lb) < 1e-9  # match → delta ≈ 0
+    assert (wilson_ci(10, 24)[0] - o_pt) < -0.15  # regression guard: the old bug's ~−0.17 floor
+
+    # Raw-space real gain → POSITIVE: a genuinely better inner meta-prompt (16/24) must be
+    # visible as a positive delta — the whole point of the fix.
+    _, lv_gain = discovered_level_trajectory(None, o_lb, [[(None, None, wilson_ci(16, 24)[0])]], {})
+    assert lv_gain[0] - o_lb > 0.05
+
+    # F5 in raw space: a regressing inner meta-prompt (5/24) still goes negative (steer-away).
+    _, lv_reg = discovered_level_trajectory(None, o_lb, [[(None, None, wilson_ci(5, 24)[0])]], {})
+    assert lv_reg[0] - o_lb < 0
 
 
 def _synth_2pl(
@@ -2303,3 +2328,42 @@ def test_pick_score_artifact_ranks_contested_above_settled() -> None:
     per_sample = artifact["pick_score"]["per_sample"]
     assert per_sample["2"] > per_sample["1"]
     assert artifact["pick_score"]["sample_order"][-1] == 1
+
+
+def test_elimination_p_best_discriminates_on_graded_backend() -> None:
+    """The PoBB ε-gate must read GRADED responses, not binarized hits.
+
+    Silent harm: on a graded backend (L4 outer, reciprocal-rank) every ``hit`` is
+    False, so a binarized gate fits identical all-0 θ for every arm and pins
+    ``p_best = 0.5`` forever — elimination never discriminates, with no error.
+    Graded inputs must separate a plainly-better candidate; binary inputs must be
+    bit-identical to the historical hit-vector behavior.
+    """
+    from promptpotter.application.scoring.metrics import elimination_p_best
+
+    sids = list(range(12))
+    ruler: dict[int, float] = {}  # cold ruler — flat δ, the common early-cycle case
+
+    # Graded regime: candidate consistently outscores the prior; hit would be all-0.
+    strong = [0.66] * 12
+    weak = [0.30] * 12
+    p_best_strong, _ = elimination_p_best(strong, {"prior": weak}, sids, ruler)
+    assert p_best_strong > 0.9, f"graded gate failed to discriminate: {p_best_strong}"
+    p_best_weak, _ = elimination_p_best(weak, {"prior": strong}, sids, ruler)
+    assert p_best_weak < 0.1
+    # Identical grades ⇒ genuinely undecided.
+    p_best_tie, _ = elimination_p_best(weak, {"prior": list(weak)}, sids, ruler)
+    assert abs(p_best_tie - 0.5) < 1e-9
+
+    # Binary regime: floats {0,1} are the same values the old bool vectors carried.
+    cand_bits = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0]
+    prior_bits = [1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    p_best_bin, _ = elimination_p_best(cand_bits, {"prior": prior_bits}, sids, ruler)
+    p_best_bool, _ = elimination_p_best(
+        [bool(b) for b in cand_bits],  # type: ignore[list-item]
+        {"prior": [bool(b) for b in prior_bits]},  # type: ignore[dict-item]
+        sids,
+        ruler,
+    )
+    assert p_best_bin == p_best_bool  # bit-identical for binary datasets
+    assert p_best_bin > 0.5
