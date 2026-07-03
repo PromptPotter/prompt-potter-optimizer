@@ -2,6 +2,8 @@
 PromptPotter Optimizer API — main FastAPI application entry point.
 """
 
+import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -13,14 +15,15 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from scalar_fastapi import get_scalar_api_reference
 
-from promptpotter.application.jobs import JobRegistry, default_jobs_dir
+from promptpotter.application.jobs import Job, JobRegistry, default_jobs_dir
+from promptpotter.application.jobs.reaper import periodic_sweep, reap_cycle_by_id
 from promptpotter.config.logging import setup_logging, silence_proactor_disconnect_noise
 from promptpotter.config.settings import APP_VERSION, settings
 from promptpotter.infrastructure.identity import (
     build_identity_bundle,
     default_identity_paths,
 )
-from promptpotter.infrastructure.store.paths import REPO_ROOT
+from promptpotter.infrastructure.store.paths import DEFAULT_PROJECTS_ROOT, REPO_ROOT
 from promptpotter.presentation import api
 from promptpotter.presentation.api.middleware import install_oidc_middleware
 from promptpotter.shared.clock import utcnow_iso
@@ -39,10 +42,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # that fires when a browser tab drops a kept-alive socket.
     silence_proactor_disconnect_noise()
     app.state.identity_bundle = build_identity_bundle(default_identity_paths())
-    app.state.job_registry = JobRegistry(default_jobs_dir(), capacity=settings.MACHINE_RUN_CAPACITY)
+
+    # Liveness reconciler. The registry stamps a cycle terminal the moment its
+    # API job is proven dead (torn task, or stale-on-restart) via on_reap; the
+    # background periodic sweep clears CLI-launched dead cycles the registry
+    # never saw, for the server's whole uptime (not just at boot). Both keep the
+    # OS-style dock and the on-disk truth honest — a vanished producer is not a
+    # live unit. See application/jobs/reaper.py.
+    def _on_reap(job: Job) -> None:
+        reap_cycle_by_id(DEFAULT_PROJECTS_ROOT, job.campaign_id, job.cycle_id)
+
+    registry = JobRegistry(
+        default_jobs_dir(), capacity=settings.MACHINE_RUN_CAPACITY, on_reap=_on_reap
+    )
+    app.state.job_registry = registry
+    sweep_task = asyncio.create_task(periodic_sweep(DEFAULT_PROJECTS_ROOT))
     logger.info("Webapp available at: /")
     logger.info("API docs available at: /docs")
     yield
+    sweep_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await sweep_task
     logger.info("Shutting down PromptPotter Optimizer")
 
 

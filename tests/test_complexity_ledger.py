@@ -107,8 +107,16 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # `presentation/CLAUDE.md` bans business logic in CLI commands. A layering fix,
 # not a ledger-down subtraction (code-debt-cleanup.md Ready-bucket item), so the
 # baseline rises rather than falls.
+# then ``modules`` 299->300: the liveness reaper
+# (``application/jobs/reaper.py``) — the single owner reconciling on-disk cycle
+# state with real producer liveness. Post in-flight-heartbeat a stale dashboard
+# means a DEAD producer, so a persistently-detached cycle is stamped TERMINAL
+# (``PRODUCER_VANISHED``) instead of haunting the OS-style dock forever. Two
+# callers (JobRegistry ``on_reap`` + a startup sweep), one idempotent write seam.
+# It can't fold into ``runtime_flags.py`` (store import → circular) or
+# ``registry.py`` (kept store-free by design). A feature, justified.
 LEDGER_BASELINE = {
-    "modules": 299,
+    "modules": 300,
     "init_files": 54,
     "reexport_shims": 41,
     "config_leaf_fields": 37,

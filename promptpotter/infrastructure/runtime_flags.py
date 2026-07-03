@@ -64,10 +64,22 @@ def read_spend_cap(runtime_dir: Path) -> float | None:
 RUN_FRESH_S = 30.0
 
 
-def _producer_fresh(dashboard_path: Path, *, fresh_s: float) -> bool:
-    """True iff ``dashboard.json`` was written within ``fresh_s`` seconds."""
+def _producer_fresh(cycle_dir: Path, *, fresh_s: float) -> bool:
+    """True iff the producer's heartbeat surface was written within
+    ``fresh_s`` seconds.
+
+    ``dashboard.json`` is canonical whenever it exists — never averaged or
+    maxed against ``index.json``. Only when it is entirely ABSENT (the
+    dashboard-less window between mint and the first round's write) does this
+    fall back to ``index.json``'s mtime, so a just-minted cycle reads
+    ``running`` instead of ``detached`` before its first dashboard write
+    lands."""
     try:
-        return (time.time() - dashboard_path.stat().st_mtime) < fresh_s
+        return (time.time() - (cycle_dir / "dashboard.json").stat().st_mtime) < fresh_s
+    except OSError:
+        pass
+    try:
+        return (time.time() - (cycle_dir / "index.json").stat().st_mtime) < fresh_s
     except OSError:
         return False
 
@@ -85,13 +97,19 @@ def derive_run_phase(
        ``finished_at``, so without this it would derive ``detached``.
     1. terminal — the cycle finished (a terminal record / ``finished_at`` exists).
     2. paused   — ``pause.flag`` present (operator interrupt; resumable).
-    3. running  — producer fresh.
+    3. running  — producer fresh (``_producer_fresh``: ``dashboard.json``'s
+       mtime, falling back to ``index.json``'s only while no dashboard has
+       been written yet — so a just-minted cycle reads ``running``, not
+       ``detached``, before its first round closes).
     4. detached — active but the producer stopped writing (died without a
        terminal record). The only branch that consults freshness.
 
-    The live single-cycle view does *not* call this — it reads
-    ``dashboard.json::run_phase`` (declared by the runner) and overlays its own
-    connection-freshness for ``detached``.
+    The live single-cycle view reads ``dashboard.json::run_phase`` directly
+    (declared by the runner) rather than calling this — connection loss there
+    is presentation, not a run-phase re-derivation (frontend-surface-contract
+    I6). This is the sole liveness derivation for every other reader: the
+    cycle list/picker and the reaper's staleness sweep (``_is_dead``) both
+    call this — no second "is it running?" computation.
     """
     runtime = cycle_dir / ".runtime"
     if is_checkin(runtime):
@@ -100,7 +118,7 @@ def derive_run_phase(
         return RunPhase.TERMINAL
     if is_paused(runtime):
         return RunPhase.PAUSED
-    if _producer_fresh(cycle_dir / "dashboard.json", fresh_s=fresh_s):
+    if _producer_fresh(cycle_dir, fresh_s=fresh_s):
         return RunPhase.RUNNING
     return RunPhase.DETACHED
 

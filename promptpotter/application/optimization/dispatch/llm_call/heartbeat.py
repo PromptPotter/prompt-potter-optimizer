@@ -4,12 +4,15 @@
 awaitable is open, so the CLI display + webapp dashboard show a live elapsed
 counter (and freshness stays fresh) instead of looking frozen for 30-200s.
 
-Two callers ride this ONE loop (no duplicate heartbeat):
+Three callers ride this ONE loop (no duplicate heartbeat):
 
 - ``llm_call`` (``call.py``) — the optimizer LLM call, ``detail_fn=None``.
 - ``run_inner_cycle`` (``runner/inner_recursion.py``) — the L4 outer cycle awaiting
   a multi-minute inner campaign, with ``detail_fn`` reading the inner run's live
   ``dashboard.json`` so the outer chat shows ``"inner rX/Y · best Z%"``.
+- ``measure_sample`` (``scoring/sample_measurement.py``) — the backend scoring
+  query, ``detail_fn=None``. Backend ``QUERY_TIMEOUT`` (120s) exceeds
+  ``RUN_FRESH_S`` (30s), so without this a slow sample reads as a dead producer.
 """
 
 from __future__ import annotations

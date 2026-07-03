@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
 
@@ -342,9 +343,40 @@ async def measure_sample(
             except Exception:
                 logger.exception("backend warning ledger emit failed; continuing")
 
-        resp = await session.backend_client.run_query(
-            query, pipeline_params=wire_params, on_warning=_emit_backend_warning
-        )
+        from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
+        from promptpotter.infrastructure.llm.models import _CURRENT_ROUND
+
+        ledger = session.state.ledger
+        heartbeat_task: asyncio.Task[None] | None = None
+        if ledger is not None:
+            heartbeat_task = asyncio.create_task(
+                heartbeat(
+                    ledger,
+                    call_id=f"scoring:{sample.id}",
+                    node="backend_scoring",
+                    round_num=_CURRENT_ROUND.get(),
+                    start_monotonic=time.monotonic(),
+                )
+            )
+        try:
+            resp = await session.backend_client.run_query(
+                query, pipeline_params=wire_params, on_warning=_emit_backend_warning
+            )
+        finally:
+            # Cancel the heartbeat whether the query succeeded or raised —
+            # an in-flight task would otherwise survive and keep appending
+            # progress records against a closed call.
+            if heartbeat_task is not None:
+                heartbeat_task.cancel()
+                try:
+                    await heartbeat_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    logger.warning(
+                        "heartbeat task for backend scoring raised on teardown",
+                        exc_info=True,
+                    )
         data = resp.get("data", {})
 
         # The prediction is the head of the TERMINAL ranker's output — candidate_ranking

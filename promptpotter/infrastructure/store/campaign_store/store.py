@@ -37,8 +37,9 @@ from typing import Any
 
 from promptpotter.config.settings import DEFAULT_CONNECTOR_TYPE
 from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.phases import StopReason
 from promptpotter.domain.run_records import CycleSeed
-from promptpotter.infrastructure.runtime_flags import derive_run_phase
+from promptpotter.infrastructure.runtime_flags import derive_run_phase, is_checkin
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_max_round_complete,
 )
@@ -749,6 +750,45 @@ class CampaignStore:
             remove_keys.append("crash_traceback")
         with graceful("Cycle completion update failed"):
             self.update(campaign_id, cycle_id, updates, remove=remove_keys)
+
+    def mark_producer_vanished(self, campaign_id: str, cycle_id: str) -> bool:
+        """Reap a dead cycle: stamp it ``TERMINAL`` (``producer_vanished``) so the
+        one liveness owner and the on-disk truth agree.
+
+        Idempotent — a no-op (returns ``False``) if the cycle already carries a
+        ``finished_at`` (never clobber a real ``final`` / crash verdict). Unlike
+        a normal :meth:`mark_finished` call there is no verdict — the producer
+        simply vanished (crash / kill / sleep left no terminal record, or the
+        cycle predates ``finished_at``) — but the write itself IS
+        :meth:`mark_finished` (``final=None``): one terminal-stamp seam for every
+        stop reason, reaped or not. The caller decides the cycle is dead; this
+        method only records it, and inherits ``mark_finished``'s ``graceful()``
+        swallow — a truthy return means the write was *attempted* after the
+        guards below passed, not that it durably landed. Resumability is
+        unaffected (admissibility is ledger-gated, `scan_ledger_max_round_complete`).
+
+        Never terminates a **paused** or **check-in** cycle — pause is an
+        intentional, resumable suspend and check-in is pre-loop origin authoring
+        (no ``dashboard.json``, no producer to go silent); both are distinct from
+        a dead producer, and both reaper paths defer to these two invariants here
+        (not just the sweep's staleness gate). A paused cycle stays a suspended
+        unit until the operator resumes or archives it."""
+        runtime = self.cycle_dir(campaign_id, cycle_id) / ".runtime"
+        if (runtime / "pause.flag").is_file() or is_checkin(runtime):
+            return False
+        index_path = self._index_path(campaign_id, cycle_id)
+        data = read_json_optional(index_path)
+        if not isinstance(data, dict) or data.get("finished_at"):
+            return False
+        reason = StopReason.PRODUCER_VANISHED.value
+        self.mark_finished(
+            campaign_id,
+            cycle_id,
+            status=reason,
+            stop_reason=reason,
+            finished_at=utcnow_iso(),
+        )
+        return True
 
     def list_all(self) -> list[dict[str, Any]]:
         results = []

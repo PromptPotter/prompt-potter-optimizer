@@ -77,6 +77,7 @@ class StopReason(enum.StrEnum):
     RENDER_ERROR = "render_error"
     OPTIMIZER_TIMEOUT = "optimizer_timeout"
     REBASED = "rebased_to_fork"
+    PRODUCER_VANISHED = "producer_vanished"
 
 
 class RunPhase(enum.StrEnum):
@@ -106,7 +107,12 @@ class RunPhase(enum.StrEnum):
     - ``DETACHED`` — active lifecycle but no live producer (CLI exited or
       ``kill -9`` left no terminal record). The *only* phase that still uses
       the freshness heuristic; never written into ``dashboard.json`` (a dead
-      producer can't write) — only emitted by ``derive_run_phase``.
+      producer can't write) — only emitted by ``derive_run_phase``. Post
+      in-flight-heartbeat this is a *dead* producer, not a quiet-but-alive one
+      (a live cycle heartbeats its ledger → dashboard within ``RUN_FRESH_S``),
+      so the liveness reaper (``application/jobs/reaper.py``) stamps a
+      persistently-detached cycle ``TERMINAL`` (``PRODUCER_VANISHED``); it is
+      not an in-flight unit and drops out of the dock.
     - ``TERMINAL`` — the cycle finished; the reason is the cycle's
       :class:`StopReason` (rendered via :func:`stop_reason_label`).
     """
@@ -169,6 +175,7 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
     StopReason.ORIGIN_GATE: StopReasonInfo("Origin gate (unhealthy origin)", StopOutcome.HALTED),
     StopReason.BACKEND_UNREACHABLE: StopReasonInfo("Backend unreachable", StopOutcome.HALTED),
     StopReason.CRASHED: StopReasonInfo("Crashed", StopOutcome.FAILED),
+    StopReason.PRODUCER_VANISHED: StopReasonInfo("Producer vanished", StopOutcome.FAILED),
     StopReason.RENDER_ERROR: StopReasonInfo("Render error", StopOutcome.FAILED),
     StopReason.DIVERGED: StopReasonInfo("Diverged", StopOutcome.FAILED),
     StopReason.OPTIMIZER_TIMEOUT: StopReasonInfo("Optimizer timeout", StopOutcome.FAILED),

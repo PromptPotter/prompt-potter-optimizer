@@ -423,6 +423,7 @@ export const STOP_REASON_LABELS: Record<string, string> = {
   'origin_gate': 'Origin gate (unhealthy origin)',
   'backend_unreachable': 'Backend unreachable',
   'crashed': 'Crashed',
+  'producer_vanished': 'Producer vanished',
   'render_error': 'Render error',
   'diverged': 'Diverged',
   'optimizer_timeout': 'Optimizer timeout',

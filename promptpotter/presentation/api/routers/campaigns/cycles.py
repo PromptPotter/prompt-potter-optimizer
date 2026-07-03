@@ -321,6 +321,16 @@ def get_inner_cycles(store: StoreDep, campaign_id: str, cycle_id: str) -> Cycles
             cycles=[],
         )
     _, live_cmp, live_cid = read_active_pointer(store.tenant_id, projects_root=inner.projects_root)
+    if live_cmp and live_cid:
+        # The pointer file is freshness-blind and never cleared on death (it's
+        # written once at inner-cycle start) — a dead/finished producer would
+        # otherwise leave "Open the live inner run →" pointing at nothing. Null
+        # the pair once the pointed cycle is actually terminal; SelfOptSamplesPointer
+        # falls back to its sidebar-expand hint. The producer-side pointer file
+        # itself is left untouched — it's dead by definition, this is the read-side fix.
+        pointed = inner.campaigns.load(live_cmp, live_cid)
+        if pointed is None or pointed.get("finished_at"):
+            live_cmp, live_cid = "", ""
     entries = inner.campaigns.enumerate_cycles()
     return CyclesResponse(
         tenant_id=store.tenant_id,

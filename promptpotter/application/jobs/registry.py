@@ -17,6 +17,7 @@ import asyncio
 import logging
 import secrets
 import threading
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import date
 from json import JSONDecodeError
@@ -77,13 +78,33 @@ class JobRegistry:
     see ``docs/specs/roadmap.md § Run admission + concurrent serving``).
     """
 
-    def __init__(self, jobs_dir: Path, *, capacity: int = 1) -> None:
+    def __init__(
+        self,
+        jobs_dir: Path,
+        *,
+        capacity: int = 1,
+        on_reap: Callable[[Job], None] | None = None,
+    ) -> None:
         self._dir = jobs_dir
         self._dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._capacity = capacity
         self._tasks: dict[str, asyncio.Task[None]] = {}
+        # Fired whenever a job is proven dead (torn task, or stale-on-restart) so
+        # the same liveness owner can stamp the cycle terminal — the second half
+        # of reconciling the two owners this class's docstring names. Store-free:
+        # the wiring in main.py resolves the cycle and writes it.
+        self._on_reap = on_reap
         self._mark_stale_on_startup()
+
+    def _fire_reap(self, job: Job) -> None:
+        """Invoke the reap callback, never letting its failure break job tracking."""
+        if self._on_reap is None:
+            return
+        try:
+            self._on_reap(job)
+        except Exception:
+            logger.exception("on_reap callback failed for job %s", job.job_id)
 
     def create(
         self,
@@ -221,6 +242,7 @@ class JobRegistry:
             return job
         logger.warning("job %s claims running but its task is gone — reaping", job.job_id)
         self.mark_finished(job.job_id, status="stopped", stop_reason="producer_vanished")
+        self._fire_reap(job)
         return self.get(job.job_id) or job
 
     def list_running(self, *, user_id: str | None = None) -> list[Job]:
@@ -292,6 +314,9 @@ class JobRegistry:
             raw["stop_reason"] = "server_restart"
             write_json(path, raw)
             logger.info("marked stale job %s as stopped (server_restart)", path.stem)
+            # Reap the cycle too: an API-launched run that outlived its process
+            # left a non-terminal cycle on disk. This is the boot-time bulk clear.
+            self._fire_reap(self._job_from_dict(raw))
 
 
 def _coerce_status(raw: object) -> JobStatus:
