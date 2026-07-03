@@ -16,7 +16,7 @@ it directly rather than expecting re-exports here:
 
 Internals (``dispatch_hub``, ``l1/``, ``l1_critique``, ``validators/``,
 ``elimination``, ``llm_call``, ``round_analysis``,
-``decomposition``, ``elevation``, ``observers``) are NOT re-exported.
+``decomposition``, ``observers``) are NOT re-exported.
 Reach into the submodule directly:
 ``from promptpotter.application.optimization.l1 import execute_round``.
 """

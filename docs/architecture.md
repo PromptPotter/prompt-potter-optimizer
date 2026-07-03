@@ -680,7 +680,15 @@ the PR description.
   score, active or alternative, is backend-computed — the webapp never
   recomputes). Don't
   add a second composite-or-accuracy resolution; route through
-  `display_fitness`.
+  `display_fitness`. **A cycle's "best" deliberately has two bases:** the
+  *winner export* (and the L2/L3 stall comparator) argmaxes cumulative
+  `composite_fitness` — the optimizer's actual objective
+  (`cycle.py::absorb_round` / `replay_priors`; `escalation/firing.py`, which
+  now compares θ alongside composite) — while the index/dashboard
+  `best_round` headline argmaxes cumulative `accuracy`, the familiar
+  formula-independent number (`campaign_store/store.py::_apply_best`).
+  Forcing them to agree would make the deployed winner stop optimizing the
+  configured composite; don't "fix" one basis to the other.
 - **`observed_node()` context manager** — the trace-emission seam
   every optimizer LLM call wraps. Cutting it removes Langfuse-shape
   compatibility (the Tracing bucket's foundation collapses).

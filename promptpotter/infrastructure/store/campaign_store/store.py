@@ -100,7 +100,17 @@ def _apply_best(data: dict[str, Any]) -> None:
     hard-first/PoBB subset ``accuracy`` (a lucky 6/8 subset is 0.75 but not comparable
     to a full-set round). Mirrors the live dashboard's ``_absorb_round_complete`` so the
     index and the dashboard headline (``best``) agree by construction. Empty ``rounds``
-    ⇒ the fresh-cycle floor (``0.0`` / ``None``)."""
+    ⇒ the fresh-cycle floor (``0.0`` / ``None``).
+
+    Deliberately a DIFFERENT basis from the winner export: ``cycle.py::absorb_round`` /
+    ``replay_priors`` argmax ``best_sp``/``best_round`` on cumulative
+    ``composite_fitness`` — the optimizer's configured objective, which is also the
+    L2/L3 stall comparator (``escalation/firing.py``). This headline argmaxes plain
+    cumulative ``accuracy`` because it's the formula-independent number operators
+    recognize. Under a non-accuracy formula the two ``best_round``s can legitimately
+    disagree; flipping either basis to match the other would break the objective
+    (winner side) or the display contract (this side). See ``architecture.md`` §0.5
+    Composite-fitness resolution chain."""
     best = max(data["rounds"], key=lambda r: r["cumulative_accuracy"], default=None)
     data["best_accuracy"] = best["cumulative_accuracy"] if best else 0.0
     data["best_round"] = best["round"] if best else None
