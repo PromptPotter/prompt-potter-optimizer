@@ -47,6 +47,15 @@ invariants:
                       useAuth().status==='authed'). The browser logs failed requests itself — the app
                       can't swallow that — so the cure is not firing them. The auth/me 401 is the
                       accepted floor (it's the probe that decides anon vs authed).
+  I6_run_state_server_owned: '"Is anything running?" has ONE server-owned answer: run_phase ∈
+                      {running, gate, paused} (IN_FLIGHT_PHASES, webapp/lib/run-phase.ts). detached
+                      means a dead producer (the heartbeat invariant, architecture.md §0 State +
+                      persistence) and never renders as in-flight. Client-side connection loss
+                      (failed poll, offline, hidden tab) is presented as connection state (offline /
+                      stale affordance) and MUST NOT impersonate a run phase or unmount run controls
+                      while the last-known server phase is in-flight. Every "running" surface — the
+                      topbar jobs dock, the RemoteBar, workspace liveCycles — reads this one set AND
+                      one shared ordering (executing before suspended).'
 ```
 
 ## Surfaces
@@ -67,6 +76,18 @@ controls:
     status: ok
   - id: auth.{login,signup}
     do: Open the auth modal. Rendered only when anon (I4).
+    status: ok
+  - id: jobs.dock
+    do: The OS-style dock of open units — Potter glyph when one unit is in flight, glyph + count
+        badge when several; ABSENT when idle (absence IS the "all quiet" signal). Lists liveCycles
+        (I6 membership + ordering, running/gate above paused); clicking an entry jumps the view to
+        that cycle's dashboard. Reads server run_phase only — a client connection blip never changes
+        the count.
+    status: ok
+  - id: remote_bar
+    do: Play/pause/skip remote for the VIEWED cycle; mounted iff its server run_phase is in-flight
+        (I6). Client connection loss dims/labels it stale — it never unmounts while the last-known
+        server phase is in-flight.
     status: ok
 ```
 

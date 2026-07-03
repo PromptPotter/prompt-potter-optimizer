@@ -4,12 +4,14 @@ import { runPhaseLabel } from "@/lib/run-phase";
 import { cx } from "@/lib/cx";
 import { Popover } from "@/components/ui";
 
-// The most direct "is anything running?" signal, sitting in the topbar next to
-// the view tabs. Absent when idle, the Potter glyph when one job is in flight,
-// and the glyph + a count badge when several are. It reads the workspace's
-// shared `liveCycles` derivation (running / gate / paused / detached) — the same
-// in-flight set the RemoteBar uses — so it can't disagree, and it no longer
-// silently vanishes when a live cycle goes detached (e.g. an L4 inner loop).
+// The OS-style dock of open units, sitting in the topbar next to the view tabs:
+// aggregated, collapsed, glanceable. Absent when idle (the absence IS the "all
+// quiet" signal), the Potter glyph when one unit is live, glyph + a count badge
+// when several are. Clicking an entry OPENS it (jumps the view to its dashboard).
+// It reads the workspace's shared `liveCycles` derivation (running / gate /
+// paused) — the same in-flight set the RemoteBar uses, so they can't disagree.
+// `detached` (dead producer) is not an open app and never appears here; running
+// units sort above suspended (paused) ones so "what's executing" reads first.
 
 interface Props {
   // Called after a running cycle is picked, so the topbar can switch to the
@@ -89,6 +91,8 @@ export function RunningJobsButton({ onPicked }: Props) {
     >
       {({ close }) => (
         <ul className="topbar-jobs-list" role="menu" aria-label="Active jobs">
+          {/* liveCycles already carries the shared order (running above paused) —
+              see workspace.tsx's liveCycles memo. */}
           {liveCycles.map((c) => (
             <li key={`${c.campaign_id}/${c.cycle_id}`} role="none">
               <button

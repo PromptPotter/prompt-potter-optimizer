@@ -16,7 +16,6 @@ import { liveCandidateId } from "@/lib/candidate-label";
 import { fetchDashboardByPath } from "./api";
 import { encodeCyclePath, pathLeaf, type CyclePath } from "./ids";
 import { useAuthGate } from "./auth-context";
-import { resolveRunPhase } from "./run-phase";
 import { ageTextSeconds } from "./format";
 import type { RoundSummary, SpendRollup } from "./api/types";
 import type { SampleOrderStep } from "./types/round";
@@ -42,9 +41,12 @@ export interface DashboardSnapshot {
   state?: string;
   // The single run-state value (RunPhase), declared by the runner and projected
   // by LiveDashboardView: running | paused | gate | terminal. The webapp
-  // reads this — it does NOT re-derive "running" from `state` freshness. The
-  // server-side cycle list adds "detached"; the live view composes that as
-  // run_phase==="running" + connection offline (see `isLive`).
+  // reads this — it does NOT re-derive "running" from `state` freshness, and
+  // never synthesizes a client-side "detached" for it (I6). The server-side
+  // cycle list is the only place "detached" appears — it derives its own
+  // per-cycle value server-side (`derive_run_phase`), a computation this
+  // single-cycle stream never re-runs; connection loss here is `status`
+  // (live/stale/offline), a presentation signal, not a run phase.
   run_phase?: "running" | "paused" | "gate" | "terminal";
   // Terminal reason (raw StopReason value) once run_phase==="terminal".
   stop_reason?: string;
@@ -305,12 +307,6 @@ export interface CycleStreamState {
   // indicator (blinking rows, pulsing nodes, the round-strip "live" pill, the
   // Pause affordance). Computed once here; consumers never re-derive it.
   isLive: boolean;
-  // The connection-aware RunPhase for display (running/paused/detached/
-  // terminal). Same value the cycle list's derive_run_phase emits: the runner's
-  // declared `run_phase`, but a `running` cycle whose poll has gone quiet reads
-  // `detached`. Surfaces show this, not raw `dash.run_phase`, so a silently-dead
-  // producer is labelled `detached` here exactly as it is in the picker.
-  runPhaseResolved: string | null;
   // `dash.state` lifted to the top level so transient indicators can gate on
   // the phase (e.g. only blink a sample row when `phase === "scoring"`).
   phase: string | null;
@@ -325,7 +321,6 @@ const INITIAL_STATE: CycleStreamState = {
   termKey: "status_offline",
   error: null,
   isLive: false,
-  runPhaseResolved: null,
   phase: null,
 };
 
@@ -514,7 +509,6 @@ function useCycleStreamSource(
             ageS,
             termKey: bucket.termKey,
             isLive: bucket.status === "live" && prev.dash?.run_phase === "running",
-            runPhaseResolved: resolveRunPhase(prev.dash?.run_phase, bucket.status === "live"),
           };
         });
         return;
@@ -539,7 +533,6 @@ function useCycleStreamSource(
           ageS: null,
           error: null,
           isLive: false,
-          runPhaseResolved: null,
           phase: "warming_up",
         }));
         return;
@@ -590,7 +583,6 @@ function useCycleStreamSource(
         termKey: bucket.termKey,
         error: null,
         isLive: bucket.status === "live" && dash.run_phase === "running",
-        runPhaseResolved: resolveRunPhase(dash.run_phase, bucket.status === "live"),
         phase: typeof dash.state === "string" ? dash.state : null,
       }));
     } catch (e) {
@@ -605,9 +597,10 @@ function useCycleStreamSource(
         statusHint: "Reconnecting every 5 s — check the server is running.",
         termKey: "status_offline",
         error: (e as Error).message,
+        // Connection loss is presentation (see `status`), never a run phase —
+        // `dash.run_phase` (and everything derived from it) is left untouched,
+        // so a client blip can't make an in-flight cycle read as gone.
         isLive: false,
-        // Unreachable producer: a cycle that was running now reads detached.
-        runPhaseResolved: resolveRunPhase(prev.dash?.run_phase, false),
       }));
     }
   };

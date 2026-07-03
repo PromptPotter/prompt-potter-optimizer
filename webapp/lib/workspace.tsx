@@ -74,9 +74,10 @@ export interface WorkspaceState {
   // of the prior tab's stale list.
   campaignsLoaded: boolean;
   cyclesError: string | null;
-  // The in-flight subset of `cycles` (running / gate / paused / detached) —
-  // derived once here so every "what's running" surface reads the same list
-  // instead of re-filtering `run_phase` with its own threshold.
+  // The in-flight subset of `cycles` (running / gate / paused — `detached`
+  // is deliberately excluded, it means a dead producer, I6) — derived once
+  // here, membership AND order, so every "what's running" surface reads the
+  // same list instead of re-filtering or re-sorting its own copy.
   liveCycles: CycleListEntry[];
   // Campaign manifests (GET /campaigns) — polled in the same tick as
   // /cycles. Carries the operator-editable `label`; surfaces resolve a
@@ -312,10 +313,16 @@ export function WorkspaceProvider({
       : null;
   const datasetName = cycleEntry?.dataset_name ?? null;
 
-  // One workspace-wide "what is running" derivation. Recomputed only when the
-  // list mutates, so the navbar indicator and RemoteBar share it for free.
+  // One workspace-wide "what is running" derivation — membership AND order,
+  // so every dock reader shares both for free instead of re-sorting its own
+  // copy (frontend-surface-contract I6: one shared ordering). Executing units
+  // sort above suspended (paused) ones so "what's executing" reads first.
+  // Recomputed only when the list mutates.
   const liveCycles = useMemo(
-    () => cycles.filter((c) => isInFlight(c.run_phase)),
+    () =>
+      cycles
+        .filter((c) => isInFlight(c.run_phase))
+        .sort((a, b) => (a.run_phase === "paused" ? 1 : 0) - (b.run_phase === "paused" ? 1 : 0)),
     [cycles],
   );
 

@@ -52,9 +52,7 @@ function estimateQps(state: QpsState, dash: DashboardSnapshot | null): number | 
 
 export const TopStrip = memo(function TopStrip() {
   // Self-sourced from the cycle stream — no props threaded through the frame.
-  // `runPhaseResolved` is the connection-aware run phase (poll.tsx) — "detached"
-  // when a running cycle's poll has gone quiet, shown over raw dash.run_phase.
-  const { dash, dashRound, runPhaseResolved: runPhase } = useDashboard();
+  const { dash, dashRound, isLive } = useDashboard();
   // Sparkline: running-best composite over rounds, read from the
   // dashboard's per-round summary block.
   const spark = useMemo(() => {
@@ -80,7 +78,7 @@ export const TopStrip = memo(function TopStrip() {
 
   const { best } = headlineStats(dash);
   const lastQuery = dash?.last_query_elapsed_s ?? null;
-  const phase = runPhaseLabel(runPhase ?? dash?.run_phase, dash?.stop_reason);
+  const phase = runPhaseLabel(dash?.run_phase, dash?.stop_reason);
   const round = dashRound != null ? `R${dashRound}` : "—";
   // Current candidate being scored ("C3.2"), shown beside the round while the
   // active node is the scorer — the finer position than the round alone.
@@ -94,10 +92,12 @@ export const TopStrip = memo(function TopStrip() {
   const qpsTxt = qps != null ? `${qps.toFixed(qps < 10 ? 2 : 1)} q/s` : null;
   const phaseTip = TERMS[`phase_${phase.toLowerCase()}`] ?? "";
   // The tag is success-green by default; recolour it when the phase contradicts
-  // that — a crash terminal reads danger, a detached run reads warn.
+  // that — a crash terminal reads danger, a gone-silent run reads warn. Composed
+  // from the two orthogonal signals (server `run_phase` + this connection's
+  // `isLive`), never a client-synthesized "detached" phase value (I6).
   // A clean terminal (target hit / max rounds, no error record) stays green.
   const phaseErr = dash?.run_phase === "terminal" && !!dash?.error;
-  const phaseWarn = runPhase === "detached";
+  const phaseWarn = dash?.run_phase === "running" && !isLive;
 
   return (
     <div className="topstrip">

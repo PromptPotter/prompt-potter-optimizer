@@ -18,14 +18,20 @@ const RUN_PHASE_LABEL: Record<string, string> = {
   detached: "Detached",
 };
 
-// The one definition of "this cycle is a live, incomplete job" — running, its
-// origin gate, paused (resumable), and detached (alive but the producer went
-// quiet >30 s, e.g. blocked inside a long L4 inner measurement). Only `terminal`
-// and `checkin` fall outside. Every "is anything running" surface reads THIS —
-// the navbar indicator, the RemoteBar, the workspace `liveCycles` — so they can't
-// disagree the way a bare `run_phase === "running"` filter did (it silently
-// vanished the moment a cycle went detached).
-const IN_FLIGHT_PHASES = new Set(["running", "detached", "paused", "gate"]);
+// The one definition of "this cycle is a live, incomplete unit" — a genuine
+// entry in the OS-style dock of open units: running, its origin gate, and
+// paused (a suspended, resumable unit). `detached` is deliberately EXCLUDED:
+// post-heartbeat it means the producer is dead, not "alive but quiet". The
+// in-flight heartbeat (dispatch/llm_call/heartbeat.py, 15 s) bumps the ledger →
+// dashboard.json during any long await heartbeated today — the optimizer LLM
+// call, an L4 outer cycle awaiting a multi-minute inner campaign, and the
+// backend scoring query — so a genuinely-alive cycle can no longer go stale
+// past RUN_FRESH_S (30 s). A stale dashboard therefore means the producer
+// vanished (crash / kill / sleep); such a cycle is dead and gets reaped to
+// terminal, not shown as an open app. Every "is anything running" surface reads
+// THIS one set — the navbar dock, the RemoteBar, the workspace `liveCycles` — so
+// they can't disagree.
+const IN_FLIGHT_PHASES = new Set(["running", "paused", "gate"]);
 
 export function isInFlight(runPhase: string | null | undefined): boolean {
   return !!runPhase && IN_FLIGHT_PHASES.has(runPhase);
@@ -60,19 +66,4 @@ const PHASE_PAUSE_LABEL: Record<string, string> = {
 
 export function phasePauseLabel(state: string | null | undefined): string {
   return (state && PHASE_PAUSE_LABEL[state]) || "the current round";
-}
-
-// The connection-aware run phase for the *live single-cycle* view. The backend
-// declares running/paused/terminal into dashboard.json; only `running`
-// is ambiguous to a viewer whose poll has gone quiet — a fresh producer is
-// running, a silent one is `detached` (the same value the cycle-list's
-// derive_run_phase emits). paused/terminal are declared truths the connection
-// can't override. Computed once in poll.tsx; surfaces read the result.
-export function resolveRunPhase(
-  runPhase: string | null | undefined,
-  connectionLive: boolean,
-): string | null {
-  if (!runPhase) return null;
-  if (runPhase === "running") return connectionLive ? "running" : "detached";
-  return runPhase;
 }

@@ -114,8 +114,8 @@ export function LineageOverlayProvider({
   // phase flip — so the tree never lags the 2 s dashboard poll. A quiescent stretch
   // changes no key, so it makes no request; this provider sits under
   // CycleStreamProvider, so `dash` is available here.
-  const { dash, dashRound, runPhaseResolved } = useDashboard();
-  const dashChangeKey = `${dash?.rounds?.length ?? 0}:${dashRound ?? -1}:${runPhaseResolved ?? ""}`;
+  const { dash, dashRound } = useDashboard();
+  const dashChangeKey = `${dash?.rounds?.length ?? 0}:${dashRound ?? -1}:${dash?.run_phase ?? ""}`;
 
   const [data, setData] = useState<CampaignLineageResponse | null>(null);
   // Query identity = campaign + lens + samples. A change is a DIFFERENT served

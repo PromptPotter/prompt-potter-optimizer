@@ -6,9 +6,8 @@
 // renders on every tab.
 //
 // Inputs are already-reconciled signals owned by AppShell (its
-// `bannerStatus`/`bannerText`/`bannerHint`, plus `dash` and the
-// connection-aware `runPhaseResolved`) — no new state, no new poll.
-// Reader-side and pure, so it sits in the Vitest derivation scope.
+// `bannerStatus`/`bannerText`/`bannerHint`, plus `dash`) — no new state, no
+// new poll. Reader-side and pure, so it sits in the Vitest derivation scope.
 
 import type { RoundSummary } from "@/lib/api/types";
 import type { DashboardSnapshot, StatusKind } from "@/lib/poll";
@@ -31,7 +30,6 @@ interface Args {
   bannerText: string;
   bannerHint?: string;
   dash: DashboardSnapshot | null;
-  runPhaseResolved: string | null;
   // The SAME connector reachability the ConnectorInspector LED uses (`health != null
   // && health.status !== "live"`), reconciled by the caller from `useConnector()`.
   // The backend is the run's dependency — when its probe goes red, this banner
@@ -54,7 +52,6 @@ export function criticalAlert({
   bannerText,
   bannerHint,
   dash,
-  runPhaseResolved,
   connectorDown,
   connectorName,
   connectorDetail,
@@ -104,10 +101,13 @@ export function criticalAlert({
         : "the machine processes one campaign at a time",
     };
   }
-  // Producer went quiet: declared `running` but the poll has gone stale, so the
-  // connection-aware phase resolves to `detached`. Not fatal, but the operator
-  // should know writes stopped.
-  if (runPhaseResolved === "detached") {
+  // Producer went quiet: the server still declares `running`, but this
+  // client's poll has gone stale (offline already returned above). Composed
+  // from two orthogonal signals — `dash.run_phase` (server truth) and
+  // `bannerStatus` (this connection's freshness) — never a single conflated
+  // "detached" phase value. Not fatal, but the operator should know writes
+  // may have stopped.
+  if (dash?.run_phase === "running" && bannerStatus === "stale") {
     return { severity: "warn", title: "Run went silent", detail: bannerText };
   }
   // Degradation verdict — the run is alive and writing, but its latest round's

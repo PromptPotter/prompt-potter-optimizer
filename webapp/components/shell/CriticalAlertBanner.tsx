@@ -31,9 +31,9 @@ export function CriticalAlertBanner({
   onOpenFiles,
   onPauseCampaign,
 }: Props) {
-  // Live snapshot + connection-aware run phase, self-sourced from the cycle
-  // stream (the banner shows on every tab, so it owns its own read).
-  const { dash, runPhaseResolved } = useDashboard();
+  // Live snapshot, self-sourced from the cycle stream (the banner shows on
+  // every tab, so it owns its own read).
+  const { dash } = useDashboard();
   // Same connector reachability the ConnectorInspector LED reads — one shared
   // `useConnector()` probe, one shared `down` verdict (connector-state.ts).
   const { health, connector } = useConnector();
@@ -46,7 +46,6 @@ export function CriticalAlertBanner({
     bannerText,
     bannerHint,
     dash,
-    runPhaseResolved,
     connectorDown,
     connectorName: connector,
     connectorDetail: health?.detail ?? null,

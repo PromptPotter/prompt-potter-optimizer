@@ -23,6 +23,12 @@
 
 /* The run-phase chip (.phase-chip) is shared chrome — see shell.css. */
 
+/* Connection lost (poll.tsx status === "offline") — the bar stays mounted
+   (it reads the server's last-known run_phase, not the connection), just
+   dimmed + labelled so the operator knows the state on screen may lag. */
+.remote-bar-offline{opacity:.6}
+.remote-offline{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:var(--color-background-tertiary,var(--color-background-secondary));color:var(--color-text-tertiary);font-weight:600}
+
 /* Skip — bordered pill matching the .run-ctl register (state by icon
    colour, quiet border that lifts to accent on hover). */
 .remote-btn{

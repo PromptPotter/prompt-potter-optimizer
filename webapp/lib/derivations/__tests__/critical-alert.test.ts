@@ -7,7 +7,6 @@ const base = {
   bannerText: "Live · last write 2s ago",
   bannerHint: undefined,
   dash: null as DashboardSnapshot | null,
-  runPhaseResolved: "running" as string | null,
 };
 
 describe("criticalAlert", () => {
@@ -34,7 +33,6 @@ describe("criticalAlert", () => {
         bannerStatus: "offline",
         bannerText: "Server unreachable — retrying",
         bannerHint: "Resume: python -m promptpotter resume",
-        runPhaseResolved: null,
       }),
     ).toEqual({
       severity: "critical",
@@ -43,13 +41,14 @@ describe("criticalAlert", () => {
     });
   });
 
-  it("flags a detached (silent) run as a warning", () => {
+  it("flags a gone-silent run (server says running, this poll has gone stale) as a warning", () => {
+    const dash = { run_phase: "running" } as DashboardSnapshot;
     expect(
       criticalAlert({
         ...base,
+        dash,
         bannerStatus: "stale",
         bannerText: "Stale · last write 90s ago",
-        runPhaseResolved: "detached",
       }),
     ).toEqual({
       severity: "warn",
@@ -60,7 +59,7 @@ describe("criticalAlert", () => {
 
   it("does not flag a clean terminal (no error record)", () => {
     const dash = { run_phase: "terminal", stop_reason: "target_reached" } as DashboardSnapshot;
-    expect(criticalAlert({ ...base, dash, runPhaseResolved: "terminal" })).toBeNull();
+    expect(criticalAlert({ ...base, dash })).toBeNull();
   });
 
   it("stays silent for warming_up (reachable, no snapshot yet)", () => {
@@ -68,7 +67,6 @@ describe("criticalAlert", () => {
       ...base,
       bannerStatus: "stale",
       bannerText: "Origin running",
-      runPhaseResolved: null,
     });
     expect(out).toBeNull();
   });

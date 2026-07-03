@@ -248,10 +248,30 @@ as a `control` `PhaseRecord`, and `LiveDashboardView` projects it to
 `dashboard.json::run_phase` (the `RunPhase` vocabulary,
 `domain/phases.py`). Every surface reads that one value; the only
 reader-side computation is `derive_run_phase`
-(`infrastructure/runtime_flags.py`), used by the cycle list, which
-composes lifecycle (terminal, from `index.json::finished_at`) with
-the control flags and consults `dashboard.json` freshness *only* to
-split `running` from `detached`. The terminal reason maps onto its
+(`infrastructure/runtime_flags.py`), used by both the cycle list and
+the reaper's staleness check (`_is_dead` — no second "is it running?"
+derivation), which composes lifecycle (terminal, from
+`index.json::finished_at`) with the control flags and consults
+`dashboard.json` freshness (falling back to `index.json`'s mtime only
+while no dashboard has been written yet, e.g. a just-minted cycle)
+*only* to split `running` from `detached`. Two liveness invariants back that
+split: **every producer await that can exceed `RUN_FRESH_S` rides
+the in-flight heartbeat** (`dispatch/llm_call/heartbeat.py` —
+optimizer LLM calls, L4 inner-cycle awaits, and the backend scoring
+query), so a stale dashboard means a *dead* producer, never a quiet
+one; and the **liveness reaper** (`application/jobs/reaper.py`) is
+the single write-side reconciler stamping proven-dead cycles
+`TERMINAL` (`producer_vanished`) — the registry `on_reap` for API
+jobs plus a periodic sweep (roots include the flat `.inner/`
+sandboxes; never boot-one-shot, and it skips a tick after a
+detected machine-sleep so a woken producer's first heartbeat always
+lands before judgment). Every reap path funnels through the one
+guard seam `CampaignStore.mark_producer_vanished`, which never
+stamps a paused, check-in, or already-terminal cycle and delegates
+the write to `mark_finished`. `detached` is therefore always a dead
+producer: webapp in-flight membership is exactly {`running`,
+`gate`, `paused`}, and client-side connection loss is a
+presentation state, never a run phase. The terminal reason maps onto its
 display label + outcome class exactly once, through the single
 `STOP_REASON_INFO` table (which in turn drives `index.json::status`,
 `JobStatus`, and the webapp label). **Pause is the single

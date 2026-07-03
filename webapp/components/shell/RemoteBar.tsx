@@ -33,18 +33,21 @@ const SKIP_ICON = (
 export function RemoteBar() {
   // Identity from the workspace; live state from the per-cycle dashboard stream.
   const { campaignId, cycleId, cycles } = useWorkspace();
-  const { dash, dashRound, runPhaseResolved } = useDashboard();
+  const { dash, dashRound, status } = useDashboard();
   const [pending, setPending] = useState<"skip" | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   if (!campaignId || !cycleId) return null;
 
-  const runPhase = runPhaseResolved;
-  // Present while the viewed cycle is a live, incomplete job — the same in-flight
-  // set the navbar counts (running / gate / paused / detached), so an L4-blocked
-  // outer whose producer went quiet keeps its remote instead of vanishing.
+  // The server-declared phase, never a client connection guess — the same
+  // in-flight set the navbar counts (running / gate / paused). A poll blip
+  // no longer unmounts this bar (frontend-surface-contract I6); connection
+  // loss is shown instead by dimming it (`offline` below), reusing the poll's
+  // existing staleness signal rather than a second liveness channel.
+  const runPhase = dash?.run_phase ?? null;
   // Hidden only when terminal, checkin, or no run yet.
   if (!isInFlight(runPhase)) return null;
+  const offline = status === "offline";
 
   // Babysat marker for the in-view cycle — the canonical flag rides the cycle
   // list (index.json::human_intervened), permanent once an operator intervenes.
@@ -82,11 +85,23 @@ export function RemoteBar() {
   };
 
   return (
-    <div className="remote-bar" role="group" aria-label="Campaign remote control">
+    <div
+      className={cx("remote-bar", offline && "remote-bar-offline")}
+      role="group"
+      aria-label="Campaign remote control"
+    >
       <span className={cx("phase-chip", `phase-${runPhase}`)}>
         <span className="phase-dot" aria-hidden="true" />
         {runPhaseLabel(runPhase, dash?.stop_reason)}
       </span>
+      {offline ? (
+        <span
+          className="remote-offline"
+          title="Connection to the server was lost — showing the last known state."
+        >
+          <span aria-hidden="true">⭘</span> reconnecting
+        </span>
+      ) : null}
       <RunControlButton />
       <button
         type="button"
