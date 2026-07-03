@@ -95,8 +95,14 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # round 1; its measured delta vs origin is the backend's run-to-run noise floor —
 # the yardstick real candidate deltas must clear on a stochastic backend, the L4
 # inner recursion being the canonical user). A feature, justified.
+# then ``modules`` 297->298: extracted the ONE in-flight heartbeat loop out of
+# ``dispatch/llm_call/call.py`` into ``dispatch/llm_call/heartbeat.py`` so the L4
+# outer cycle can ride the same loop (with a live inner-progress ``detail_fn``)
+# while it awaits a multi-minute inner campaign — instead of a second, duplicate
+# heartbeat. A shared-mechanism extraction (two callers now, no redundant loop),
+# justified, so the baseline rises.
 LEDGER_BASELINE = {
-    "modules": 297,
+    "modules": 298,
     "init_files": 54,
     "reexport_shims": 41,
     "config_leaf_fields": 37,

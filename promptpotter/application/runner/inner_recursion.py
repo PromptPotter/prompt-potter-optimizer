@@ -49,6 +49,7 @@ so it fans onto the outer ledger through the existing backend-cost channel
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import contextvars
 import logging
 import random
@@ -207,6 +208,7 @@ async def _run_inner_campaign(
     ctx: InnerSpawnContext,
     spec: _InnerTaskSpec,
     meta_prompt_overrides: dict[str, dict[str, Any]],
+    cycle_dir_box: dict[str, Path],
 ) -> CycleResult:
     """Mint + run one sandboxed inner campaign; return its ``CycleResult``.
 
@@ -217,7 +219,13 @@ async def _run_inner_campaign(
     Runs in a FRESH task (the caller spawns it) so the per-task ContextVars are
     isolated from the outer cycle. Sets the per-run optimizer-prompt override
     ContextVar here (inner task only) so the outer L1's meta-prompt mutations
-    shape the inner ``_optimizer/`` prompts without leaking to the outer."""
+    shape the inner ``_optimizer/`` prompts without leaking to the outer.
+
+    ``cycle_dir_box`` is a mutable holder the caller reads from its outer-task
+    heartbeat: once the inner cycle is minted its dir is published here, so the
+    heartbeat's ``detail_fn`` can tail the inner ``dashboard.json`` for a live
+    ``"inner rX/Y · best Z%"`` line while this runs (the outer chat/dashboard
+    would otherwise go silent for the whole multi-minute inner campaign)."""
     # Lazy imports: heavy application machinery, and `run_optimization` would be a
     # package-internal import cycle (`entry.py` imports `publish_inner_spawn_context`
     # from here). Deferring to call time keeps this module import-light.
@@ -285,6 +293,12 @@ async def _run_inner_campaign(
     )
 
     prepare_fresh_cycle(session, campaign_config, train_data)
+    # Publish the freshly-minted inner cycle dir so the outer task's heartbeat
+    # detail_fn can tail this run's dashboard.json (best {best}% / round X/Y).
+    if session.campaign_id and session.state.cycle_id:
+        cycle_dir_box["dir"] = session.store.campaigns.cycle_dir(
+            session.campaign_id, session.state.cycle_id
+        )
     task_context = await load_or_build_task_context(session.dataset_config_dir)
     observers = build_run_observers(
         session=session,
@@ -332,6 +346,37 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
     overrides = payload.get("meta_prompt_overrides") or {}
 
     start = time.monotonic()
+    # Lazy imports (match this file's lazy-import discipline; sidesteps the
+    # llm_call package import cycle). ``run_inner_cycle`` runs in the OUTER task,
+    # so the outer ledger is reachable via the ``_CYCLE_LEDGER`` ContextVar — the
+    # same binding ``sample_measurement.emit_token_usage`` uses to roll inner
+    # spend onto the outer ledger. The heartbeat below appends progress to it so
+    # the outer L4 chat + dashboard stay live (never "Run went silent") through
+    # the whole multi-minute inner campaign, which emits only to its OWN sandbox
+    # ledger.
+    from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
+    from promptpotter.infrastructure.llm.models import _CURRENT_ROUND, _CYCLE_LEDGER
+
+    outer_ledger = _CYCLE_LEDGER.get()
+    cycle_dir_box: dict[str, Path] = {}
+
+    def _inner_detail() -> str | None:
+        """The outer heartbeat tick's live sub-status — read best-effort off the
+        inner cycle's ``dashboard.json`` (``round`` / ``best`` / ``run_limits
+        .max_rounds``). ``"inner campaign starting…"`` until the inner cycle is
+        minted and its dir published."""
+        cycle_dir = cycle_dir_box.get("dir")
+        if cycle_dir is None:
+            return "inner campaign starting…"
+        dash = read_json_optional(cycle_dir / "dashboard.json")
+        if not dash:
+            return "inner campaign starting…"
+        rnd = dash.get("round")
+        best = dash.get("best")
+        max_rounds = (dash.get("run_limits") or {}).get("max_rounds")
+        best_pct = f"{best:.0%}" if isinstance(best, int | float) else "—"
+        return f"inner r{rnd if rnd is not None else '?'}/{max_rounds or '?'} · best {best_pct}"
+
     # Fresh task = its own ContextVar copies (ledger / round / abort / prompt
     # overrides). create_task copies the current context at creation; the
     # inner run re-binds its copies, leaving the outer's untouched.
@@ -348,7 +393,28 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
     # still cannot kill the outer cycle. A completed inner run that merely failed
     # to improve is a SUCCESS outcome (MAX_ROUNDS) with poor proxies — measured,
     # not excluded — so a bad mutation is still penalised.
-    result = await asyncio.create_task(_run_inner_campaign(ctx, spec, overrides))
+    inner_task = asyncio.create_task(_run_inner_campaign(ctx, spec, overrides, cycle_dir_box))
+    heartbeat_task: asyncio.Task[None] | None = None
+    if outer_ledger is not None:
+        heartbeat_task = asyncio.create_task(
+            heartbeat(
+                outer_ledger,
+                call_id=f"inner:{query}",
+                node="l1_critique",
+                round_num=_CURRENT_ROUND.get(),
+                start_monotonic=start,
+                detail_fn=_inner_detail,
+            )
+        )
+    try:
+        result = await inner_task
+    finally:
+        # Cancel the heartbeat whether the inner run returned or raised — an
+        # in-flight task would otherwise keep appending against a finished sample.
+        if heartbeat_task is not None:
+            heartbeat_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await heartbeat_task
     if stop_reason_outcome(result.stop_reason) is StopOutcome.FAILED:
         raise RuntimeError(
             f"inner cycle for {query} failed as tooling (stop_reason="

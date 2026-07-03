@@ -232,7 +232,16 @@ export function projectionToActivity(env: ProjectionEnvelope): ActivityItem | nu
       }
       return null;
     }
-    // token_usage, llm_call_progress, decision, stream_snapshot — non-items here.
+    case "llm_call_progress": {
+      // Ordinary optimizer heartbeats carry no detail — curated out (the elapsed
+      // counter rides freshness, not the thread). The L4 inner-campaign heartbeat
+      // sets `detail` ("inner rX/Y · best Z%"), which becomes one ticking chip
+      // (stable id ⇒ one upserted row) so the outer chat never reads as silent.
+      const detail = str(p.detail);
+      if (!detail) return null;
+      return { id: "inner-progress", kind: "progress", icon: "·", label: detail, tone: "muted" };
+    }
+    // token_usage, decision, stream_snapshot — non-items here.
     default:
       return null;
   }

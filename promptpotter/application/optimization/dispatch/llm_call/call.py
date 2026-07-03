@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
+from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     get_optimizer_schema,
     load_optimizer_prompt,
@@ -31,7 +32,6 @@ from promptpotter.config.settings import (
 )
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.domain.run_records import (
-    LLMCallProgressRecord,
     LLMCallRecord,
     LLMCallStartRecord,
 )
@@ -76,8 +76,6 @@ class LLMCallContext:
 _LLM_DEFAULTS: dict[str, Any] = {"temperature": 0.0}
 
 
-HEARTBEAT_INTERVAL_S = 15.0
-
 # A single logical optimizer call may fire ONE schema-repair retry inside
 # chat() — a full second round-trip the client appends on schema-noncompliant
 # output (openai_compat.py, ~2x latency; capped at one). OPTIMIZER_CALL_DEADLINE_S
@@ -86,41 +84,6 @@ HEARTBEAT_INTERVAL_S = 15.0
 # bug: initial ~150s + repair ~150s = ~300s tripped a flat 180s ceiling even
 # though neither round-trip hung).
 _MAX_ROUND_TRIPS_PER_CALL = 2
-"""Seconds between in-flight progress ticks.
-
-15s is a compromise: short enough that the operator sees a fresh
-counter several times during a typical 60-120s optimizer call, long
-enough that 5-15s critique calls finish without ever emitting one. The
-ledger pays one append per tick - at four optimizer calls/round and
-~90s average call duration that's ~24 records/round, negligible."""
-
-
-async def _heartbeat(
-    ledger: CycleEventLog,
-    *,
-    call_id: str,
-    node: str,
-    round_num: int | None,
-    start_monotonic: float,
-) -> None:
-    """Periodically append :class:`LLMCallProgressRecord` while a call is open.
-
-    Cancelled by the ``finally`` block in :func:`llm_call` when the SDK
-    call returns (success, last 429 retry, or raise). The
-    :class:`asyncio.CancelledError` is swallowed at the cancel site so
-    cancellation looks like a clean exit.
-    """
-    while True:
-        await asyncio.sleep(HEARTBEAT_INTERVAL_S)
-        elapsed = time.monotonic() - start_monotonic
-        ledger.append(
-            LLMCallProgressRecord(
-                call_id=call_id,
-                node=node,
-                round=round_num,
-                elapsed_s=elapsed,
-            )
-        )
 
 
 async def _chat_under_deadline(
@@ -303,7 +266,7 @@ async def llm_call(
         heartbeat_task: asyncio.Task[None] | None = None
         if context.ledger is not None:
             heartbeat_task = asyncio.create_task(
-                _heartbeat(
+                heartbeat(
                     context.ledger,
                     call_id=call_id,
                     node=node or "llm_call",
