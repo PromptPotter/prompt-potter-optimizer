@@ -30,12 +30,12 @@
 @import "./domains/hard-samples.css";
 @import "./domains/remote.css";
 @import "./domains/verify.css";
-
-/* ── Cross-cutting a11y + responsive tail (must win) ────────── */
-@import "./foundation/reduced-motion.css";
 @import "./domains/login.css";
 @import "./domains/onboarding.css";
 @import "./domains/backend-node.css";
 @import "./domains/account.css";
 @import "./domains/auth.css";
+
+/* ── Cross-cutting a11y + responsive tail (must win) ────────── */
+@import "./foundation/reduced-motion.css";
 @import "./foundation/responsive.css";

@@ -45,6 +45,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 from promptpotter.infrastructure.store.io import (
     read_json,
     read_json_optional,
+    read_json_tolerant,
     validate_path_component,
     write_json,
 )
@@ -654,6 +655,37 @@ class CampaignStore:
             )
 
         self._rebuild_round_index(campaign_id, cycle_id, survivors)
+        self._rewind_dashboard(cycle_dir, after_round)
+
+    @staticmethod
+    def _rewind_dashboard(cycle_dir: Path, after_round: int) -> None:
+        """Truncate ``dashboard.json`` to the same survivors the index rebuild kept.
+
+        ``LiveDashboardView`` is the sole LIVE writer of ``dashboard.json``, and its
+        ``L1_GENERATE:enter`` clamp would drop the rewound rounds anyway — but only once
+        the resumed run reaches its first generate. Until then the two ``rounds[]``
+        surfaces (``index.json`` via ``get_cycle``, ``dashboard.json`` via ``/lineage``)
+        would disagree. Rewind runs offline (admissibility-gated, pre-resume, no view
+        alive), so this one repair write closes the window using the view's own
+        derivations: rounds ≤ ``after_round`` survive, ``round`` points at the last
+        survivor, ``best`` = max surviving ``cumulative_accuracy`` (mirrors
+        ``_apply_best`` / ``resolve_resume_state``). Missing/corrupt file ⇒ no-op —
+        the resume factory tolerates absence."""
+        path = cycle_dir / "dashboard.json"
+        dash = read_json_tolerant(path)
+        if not isinstance(dash, dict):
+            return
+        survivors = [
+            r
+            for r in dash.get("rounds") or []
+            if isinstance(r, dict) and int(r.get("round") or 0) <= after_round
+        ]
+        dash["rounds"] = survivors
+        dash["round"] = after_round
+        dash["best"] = max(
+            (float(r.get("cumulative_accuracy") or 0.0) for r in survivors), default=0.0
+        )
+        write_json(path, dash)
 
     def _rebuild_round_index(
         self,
