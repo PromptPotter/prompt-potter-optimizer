@@ -415,7 +415,7 @@ class FileSink:
             if trace_data is not None:
                 trace_data["output"] = {
                     "best_accuracy": event.best_accuracy,
-                    "n_rounds": event.n_rounds,
+                    "n_l1_rounds": event.n_l1_rounds,
                     "stop_reason": event.stop_reason,
                 }
                 write_json(trace_path, trace_data)
@@ -427,7 +427,7 @@ class FileSink:
                 "trace_id": trace_id,
                 "campaign_id": event.campaign_id,
                 "best_accuracy": event.best_accuracy,
-                "n_rounds": event.n_rounds,
+                "n_l1_rounds": event.n_l1_rounds,
                 "stop_reason": event.stop_reason,
                 "best_round": event.best_round,
             }

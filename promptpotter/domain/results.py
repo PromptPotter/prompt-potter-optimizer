@@ -343,7 +343,10 @@ class CycleResult(BaseModel):
     """Final result of the feedback cycling process."""
 
     rounds: list[RoundResult]
-    n_rounds: int
+    # Completed L1 rounds only — origin-EXCLUSIVE (the origin is round 0 but is
+    # not an L1 round). The persisted index.json::n_rounds counts round 0; the
+    # distinct name keeps the two counts from being conflated across sinks.
+    n_l1_rounds: int
     best_accuracy: float
     best_round: int
     origin_accuracy: float

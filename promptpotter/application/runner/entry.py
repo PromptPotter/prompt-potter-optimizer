@@ -333,7 +333,7 @@ def _build_cycle_result(
     )
     return CycleResult(
         rounds=cycle_rounds,
-        n_rounds=len(cycle_rounds),
+        n_l1_rounds=len(cycle_rounds),
         best_accuracy=cycle.tracking.best_accuracy if cycle is not None else 0.0,
         best_round=cycle.tracking.best_round if cycle is not None else 0,
         origin_accuracy=origin.origin_acc,
@@ -528,7 +528,7 @@ async def _run_single_cycle(
     forked_in_this_run = (
         pre_loop_cycle_id and session.state.cycle_id and pre_loop_cycle_id != session.state.cycle_id
     )
-    if forked_in_this_run and cycle_result.n_rounds == 0:
+    if forked_in_this_run and cycle_result.n_l1_rounds == 0:
         cleanup_stub_fork_if_empty(
             campaign_store=session.store.campaigns,
             campaign_id=session.campaign_id,
@@ -777,7 +777,7 @@ def _finalize_run(
         langfuse_trace_id = obs.end_campaign(
             session.state.tracing_campaign_id,
             best_accuracy=cycle_result.best_accuracy,
-            n_rounds=cycle_result.n_rounds,
+            n_l1_rounds=cycle_result.n_l1_rounds,
             stop_reason=stop_reason,
             best_round=cycle_result.best_round,
         )

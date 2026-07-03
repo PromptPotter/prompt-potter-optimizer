@@ -113,7 +113,7 @@ def render_completion(
     )
 
     fields: list[str] = [
-        f"Rounds       {result.n_rounds:<15d}"
+        f"Rounds       {result.n_l1_rounds:<15d}"
         f"Best         {best_round['accuracy']:.1%} (round {best_round['round']})",
         f"Stop reason  {result.stop_reason}",
     ]
@@ -268,7 +268,7 @@ async def run_optimization_notebook(
 
     if result.stop_reason == "paused":
         print(
-            f"  {YELLOW}{BOLD}[PAUSED]{RESET} after {result.n_rounds} rounds — "
+            f"  {YELLOW}{BOLD}[PAUSED]{RESET} after {result.n_l1_rounds} rounds — "
             "artifacts saved, cycle resumable. Caller decides whether to continue."
         )
 

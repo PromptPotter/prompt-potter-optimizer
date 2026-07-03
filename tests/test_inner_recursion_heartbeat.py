@@ -35,7 +35,7 @@ class _RecordingLedger:
 def _fake_result() -> CycleResult:
     return CycleResult(
         rounds=[],
-        n_rounds=1,
+        n_l1_rounds=1,
         best_accuracy=0.55,
         best_round=1,
         origin_accuracy=0.5,

@@ -23,7 +23,7 @@ shape was the old bloat source; readiness buckets replaced it.
 
 ## Ready — no blocker, pick up cold
 
-- **`n_rounds` origin-inclusive vs origin-exclusive** (double-ownership rd-2 #10) — `index.json::n_rounds = len(rounds)` counts round 0 (origin rides `rounds[0]`), but `CycleResult.n_rounds` (`domain/results.py:350`) = `len(cycle_rounds)` is origin-exclusive, and Langfuse mirrors the latter → a permanent off-by-one across sinks for one fact. Action: keep index inclusive (origin IS round 0); rename `CycleResult.n_rounds` → a name that says it counts L1 rounds only (e.g. `n_l1_rounds`). No blocker per se, but it's a frozen-domain-field rename — grep every `CycleResult.n_rounds`/`.n_rounds` consumer + the tracing mapper and re-gate; marginal value (display off-by-one), so batch it with other `results.py` work.
+*(empty — every entry from the 2026-07-03 pass landed or was reclassified; `git log` has what shipped)*
 
 ## Blocked — named blocker
 

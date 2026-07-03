@@ -230,7 +230,7 @@ def _inner_narrative(result: CycleResult, spec: _InnerTaskSpec) -> str:
     lines = [
         f"INNER {spec.inner_dataset} seed-{spec.seed}: origin {result.origin_level:.3f}"
         f" -> best-discovered {best:.3f} (D{best - result.origin_level:+.3f})"
-        f" over {result.n_rounds} rounds; stop={result.stop_reason}."
+        f" over {result.n_l1_rounds} rounds; stop={result.stop_reason}."
     ]
     by_round = {rnd.round: rnd for rnd in result.rounds}
     highlight = next(

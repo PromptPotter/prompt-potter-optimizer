@@ -314,7 +314,7 @@ def test_inner_narrative_carries_evidence_within_budget() -> None:
     def _cycle(rounds: list[RoundResult], levels: list[float]) -> CycleResult:
         return CycleResult(
             rounds=rounds,
-            n_rounds=len(levels),
+            n_l1_rounds=len(levels),
             best_accuracy=0.5,
             best_round=1,
             origin_accuracy=0.458,

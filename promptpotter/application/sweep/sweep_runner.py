@@ -207,8 +207,8 @@ async def run_sweep_batch(
             )
         finally:
             # Drop the fork dir if the run never produced a round.
-            n_rounds = fork_result.n_rounds if fork_result is not None else 0
-            if n_rounds == 0:
+            n_l1_rounds = fork_result.n_l1_rounds if fork_result is not None else 0
+            if n_l1_rounds == 0:
                 cleanup_stub_fork_if_empty(
                     campaign_store=store.campaigns,
                     campaign_id=campaign_id,
@@ -233,7 +233,7 @@ async def run_sweep_batch(
         outcome = stop_reason_outcome(fork_result.stop_reason or StopReason.CRASHED)
         status_by_source[path.name] = outcome.value
 
-        if fork_result.n_rounds == 0:
+        if fork_result.n_l1_rounds == 0:
             stopped_by_operator = outcome is StopOutcome.PAUSED
             logger.info(
                 "Sweep fork %s never ran a round (payload=%s, stop_reason=%s); cleaned up",

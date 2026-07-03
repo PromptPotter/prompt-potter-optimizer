@@ -104,7 +104,7 @@ async def _cmd_sweep_time_to(args: argparse.Namespace) -> CommandResult:
         **_variant_id_fields(variant),
         cycle_id=cycle_result.cycle_id,
         slice_name=resolved_slice,
-        rounds_to_target=cycle_result.n_rounds if target_hit else None,
+        rounds_to_target=cycle_result.n_l1_rounds if target_hit else None,
         early_exit_reason=early_exit,
         cost_usd=spend_usd,
         final_accuracy=cycle_result.best_accuracy,
@@ -115,7 +115,7 @@ async def _cmd_sweep_time_to(args: argparse.Namespace) -> CommandResult:
         data={**result, "result_path": str(out_path), "cycle_id": cycle_result.cycle_id},
         human=(
             f"Sweep time-to {args.target}%: {early_exit} "
-            f"(rounds={cycle_result.n_rounds}, best={cycle_result.best_accuracy:.3f}, "
+            f"(rounds={cycle_result.n_l1_rounds}, best={cycle_result.best_accuracy:.3f}, "
             f"spend=${spend_usd:.4f})\n"
             f"Result: {out_path}"
         ),

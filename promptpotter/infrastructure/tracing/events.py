@@ -195,7 +195,8 @@ class RoundEnd:
 class CampaignEnd:
     campaign_id: str
     best_accuracy: float
-    n_rounds: int
+    # Completed L1 rounds, origin-EXCLUSIVE (mirrors CycleResult.n_l1_rounds).
+    n_l1_rounds: int
     stop_reason: str
     best_round: int
 

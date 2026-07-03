@@ -299,7 +299,7 @@ class LangfuseSink:
             trace_id=trace_id,
             output={
                 "best_accuracy": event.best_accuracy,
-                "n_rounds": event.n_rounds,
+                "n_l1_rounds": event.n_l1_rounds,
                 "stop_reason": event.stop_reason,
             },
             metadata={"stop_reason": event.stop_reason, "best_round": event.best_round},
