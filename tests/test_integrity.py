@@ -227,6 +227,130 @@ def test_full_chain_rows_never_replay_on_prefix_match(tmp_path: Path) -> None:
     )
 
 
+def test_layout_only_override_moves_optimizer_prompt_hash() -> None:
+    """A layout-only L4 edit changes which evidence a node sees, so it must move
+    that node's ``optimizer_prompt_hash`` — otherwise cross-cycle audits joining
+    on the hash silently pool layout-differing inner cycles (run b786e9: C1.3's
+    inner campaigns stamped the origin's hash). Prose-hash behavior is untouched:
+    no override → identical hashes."""
+    from promptpotter.application.optimization.dispatch.llm_call import (
+        compute_optimizer_prompt_hashes,
+        set_optimizer_prompt_overrides,
+    )
+
+    try:
+        set_optimizer_prompt_overrides(None)
+        baseline = compute_optimizer_prompt_hashes()
+        assert compute_optimizer_prompt_hashes() == baseline
+
+        # Valid layout edit (keeps the mandatory `diagnostics`) on one node.
+        set_optimizer_prompt_overrides(
+            {"l1_critique": {"layout": {"problem_description": ["diagnostics", "axis_memory"]}}}
+        )
+        edited = compute_optimizer_prompt_hashes()
+        assert edited["l1_critique"] != baseline["l1_critique"], (
+            "layout-only override left the node hash unchanged — audits would pool "
+            "layout-differing cycles"
+        )
+        assert {k: v for k, v in edited.items() if k != "l1_critique"} == {
+            k: v for k, v in baseline.items() if k != "l1_critique"
+        }, "layout edit on one node must not move other nodes' hashes"
+    finally:
+        set_optimizer_prompt_overrides(None)
+
+
+def test_inner_narrative_carries_evidence_within_budget() -> None:
+    """The L4 outer loop's only raw evidence is the inner-campaign digest riding
+    ``reasoning_trace``. If it silently drops the critique quote / winner edit /
+    deltas, or overruns the panel cap (1200c head-keep would clip the LATEST
+    rounds), the outer loop is evidence-starved again with no error and no
+    symptom (run b786e9: transcripts degenerated to identity tokens)."""
+    from promptpotter.application.runner.inner_recursion import (
+        _inner_narrative,
+        _InnerTaskSpec,
+    )
+    from promptpotter.domain.results import CycleResult, RoundResult, ScoredCandidate
+
+    spec = _InnerTaskSpec(
+        inner_dataset="justlogic", seed=3, n_samples=24, n_rounds=2, target=0.6, n_variants=2
+    )
+
+    def _round(n: int, desc: str, fix: str, highlights: list[str]) -> RoundResult:
+        return RoundResult(
+            round=n,
+            label=f"C{n}.1" if n else "C0",
+            accuracy=0.458,
+            hits=11,
+            total=24,
+            improved=False,
+            prompt_fields={},
+            candidates_scored=2,
+            candidate_scores=(
+                []
+                if n == 0
+                else [
+                    ScoredCandidate(
+                        candidate_id=f"c{n}",
+                        label=f"C{n}.1",
+                        changes_description=desc,
+                        accuracy=0.5,
+                        composite_fitness=0.5,
+                        hits=12,
+                        total=24,
+                        matched_origin_accuracy=0.458,
+                        theta=0.31,
+                        theta_se=0.42,
+                    )
+                ]
+            ),
+            critique={
+                "priority_fix": fix,
+                "suggested_axes": [],
+                "failure_highlights": highlights,
+            },
+        )
+
+    def _cycle(rounds: list[RoundResult], levels: list[float]) -> CycleResult:
+        return CycleResult(
+            rounds=rounds,
+            n_rounds=len(levels),
+            best_accuracy=0.5,
+            best_round=1,
+            origin_accuracy=0.458,
+            origin_level=0.458,
+            round_discovered_levels=levels,
+            winner_prompt_fields={},
+            stop_reason="MAX_ROUNDS",
+            started_at="t0",
+            finished_at="t1",
+        )
+
+    rounds = [
+        _round(0, "", "add a formal entailment verification step", ["#132: hedged to Uncertain"]),
+        _round(1, "added premise-tracking sub-step", "tighten the label format", []),
+        _round(2, "set temperature 0.0", "", []),
+    ]
+    digest = _inner_narrative(_cycle(rounds, [0.472, 0.5]), spec)
+    assert len(digest) <= 1150
+    assert "formal entailment verification" in digest, "prior-round steer missing"
+    assert "premise-tracking" in digest, "winner edit missing"
+    assert "#132" in digest, "verbatim failure highlight missing"
+    assert "D+0.042" in digest, "best-discovered delta missing"
+
+    # Deep run: budget holds by eliding EARLIEST rounds, never the latest.
+    deep = [_round(0, "", "steer zero " + "x" * 120, ["hl " + "y" * 180])] + [
+        _round(n, f"edit {n} " + "z" * 90, f"fix {n} " + "w" * 110, []) for n in range(1, 9)
+    ]
+    digest = _inner_narrative(_cycle(deep, [0.46 + 0.005 * n for n in range(8)]), spec)
+    assert len(digest) <= 1150
+    assert "R8 " in digest, "latest round clipped — head-keep would starve the trajectory tail"
+    assert "[earlier rounds elided]" in digest
+
+    # No rounds at all → headline only, never an exception.
+    digest = _inner_narrative(_cycle([], []), spec)
+    assert digest.startswith("INNER justlogic seed-3")
+
+
 def test_hit_cache_respects_dataset(tmp_path: Path) -> None:
     """``load_reusable_results`` scopes by dataset — identical node-configs and a
     colliding sample_id across datasets must NOT serve one dataset's cached

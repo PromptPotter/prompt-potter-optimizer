@@ -100,7 +100,9 @@ not raw `str`/`Path`. `archive/` is cross-cycle/session/tenant;
 `write_cycle_seed`/`read_cycle_seed` over `cycles/{id}/.overrides/seed.json` —
 the **read-once** per-cycle override home (a steered fork's or campaign-origin's
 typed `CycleSeed`, written by `_mint_fork` / the mint seam, read once at the runner seam). Distinct
-from `.runtime/{stop,pause,spend_cap}` (the **polled** per-round flags,
+from `.runtime/{stop,pause,spend_cap}` (the **polled** per-checkpoint flags —
+consumed at the next sample boundary, NOT held to the round close;
+a `pause.flag` written mid-candidate pauses within seconds,
 `runtime_flags.py`): the dir name encodes read-cadence, so the two never
 share a cache path.
 

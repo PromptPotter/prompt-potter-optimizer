@@ -204,6 +204,99 @@ def _compute_proxies(result: CycleResult, target: float) -> dict[str, Any]:
     }
 
 
+def _clip(text: str, cap: int) -> str:
+    """Whitespace-normalize + head-clip at a word boundary with a visible marker."""
+    text = " ".join(text.split())
+    if len(text) <= cap:
+        return text
+    return text[: cap - 1].rsplit(" ", 1)[0] + "…"
+
+
+def _inner_narrative(result: CycleResult, spec: _InnerTaskSpec) -> str:
+    """Human-grade digest of one inner campaign — the outer loop's MODEL REASONING.
+
+    Rides the existing ``reasoning_trace`` infra key (``sample_measurement._INFRA_KEYS``)
+    so it archives, replays, and renders in the outer ``sample_transcripts`` panel for
+    both outer tiers — without it the outer transcripts degenerate to identity tokens
+    and the outer critique has literally nothing to quote (run b786e9). Authored to
+    ≤1150 chars — under the panel's ``TRANSCRIPT_REASONING_CAP`` (1200) at the writer,
+    so the render never clips it. Per round: the discovered level vs origin, the steer
+    the round acted on (the PRIOR round's ``priority_fix`` — that's the causal pairing),
+    and the strongest candidate's edit + matched-origin delta; plus one verbatim
+    failure highlight for the campaign. Exactly the evidence an outer critique needs
+    to say WHY a meta-prompt mutation helped or hurt."""
+    levels = result.round_discovered_levels
+    best = max(levels) if levels else result.origin_level
+    lines = [
+        f"INNER {spec.inner_dataset} seed-{spec.seed}: origin {result.origin_level:.3f}"
+        f" -> best-discovered {best:.3f} (D{best - result.origin_level:+.3f})"
+        f" over {result.n_rounds} rounds; stop={result.stop_reason}."
+    ]
+    by_round = {rnd.round: rnd for rnd in result.rounds}
+    highlight = next(
+        (
+            h
+            for r in sorted(by_round)
+            if (c := by_round[r].critique)
+            for h in c.get("failure_highlights") or []
+            if h.strip()
+        ),
+        None,
+    )
+    if highlight:
+        lines.append(f"saw: {_clip(highlight, 200)}")
+    for r in sorted(by_round):
+        if r == 0:
+            continue
+        rnd = by_round[r]
+        parts = []
+        if 0 <= r - 1 < len(levels):
+            parts.append(f"level {levels[r - 1]:.3f} (D{levels[r - 1] - result.origin_level:+.3f})")
+        prior = by_round.get(r - 1)
+        if prior is not None and prior.critique and prior.critique.get("priority_fix"):
+            parts.append(f"steer: {_clip(prior.critique['priority_fix'], 130)}")
+        scored = [c for c in rnd.candidate_scores if not c.invalid]
+        if scored:
+            top = max(
+                scored,
+                key=lambda c: (c.accuracy - c.matched_origin_accuracy, c.composite_fitness),
+            )
+            theta = (
+                f", th {top.theta:.2f}+/-{top.theta_se:.2f}"
+                if top.theta is not None and top.theta_se is not None
+                else ""
+            )
+            parts.append(
+                f"tried {top.label} (acc {top.accuracy:.3f} vs matched-origin "
+                f"{top.matched_origin_accuracy:.3f}{theta}): "
+                f"{_clip(top.changes_description, 100)}"
+            )
+        else:
+            parts.append("no scored candidates")
+        anomalies = [
+            f"{tag} x{n}"
+            for tag, n in (("no-op", rnd.l1_n_no_op), ("dup", rnd.l1_n_duplicate))
+            if n
+        ]
+        if anomalies:
+            parts.append(", ".join(anomalies))
+        lines.append(f"R{r} " + " | ".join(parts))
+    # Enforce the authored budget: on a deep inner run, drop the EARLIEST round
+    # lines first (the trajectory's tail is the informative end) rather than
+    # letting the panel's head-keep clip silently cut the latest rounds.
+    n_head = 2 if highlight else 1
+    head_lines, round_lines = lines[:n_head], lines[n_head:]
+    elided = False
+    while len(round_lines) > (2 if elided else 1) and (
+        len("\n".join(head_lines + round_lines)) > 1150
+    ):
+        round_lines.pop(0 if not elided else 1)
+        if not elided:
+            round_lines.insert(0, "[earlier rounds elided]")
+            elided = True
+    return "\n".join(head_lines + round_lines)
+
+
 async def _run_inner_campaign(
     ctx: InnerSpawnContext,
     spec: _InnerTaskSpec,
@@ -425,12 +518,21 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
     elapsed = time.monotonic() - start
 
     data: dict[str, Any] = {
-        # Terminal-ranker head = the inner-result token. The connector's
-        # `_extract_experiment` sets each sample's `ground_truth` to this SAME
-        # `inner:{query}` token, so a sample is a HIT iff its inner cycle
-        # produced a result (there is no label to match in L4 — fitness is the
-        # proxy composite). Keep the two formats in sync.
-        INNER_RESULT_KEY: [f"inner:{query}"],
+        # Terminal-ranker head = the inner-result token (`inner:{query}` — the
+        # connector's `_extract_experiment` sets `ground_truth` to the same
+        # prefix; keep the two in sync) plus a compact outcome suffix so the
+        # outer diagnostics/transcripts show the movement, not an identity
+        # string. Safe: the outer formula reads only the proxy scalars — no
+        # consumer matches predicted against ground_truth (outer hit is
+        # `fitness >= 1.0`), and the round-0 health gate only needs a
+        # non-empty, non-NO_RESULT prediction.
+        INNER_RESULT_KEY: [
+            f"inner:{query} D{proxies['after_N_rounds_delta']:+.3f}/r{proxies['rounds_to_N']}"
+        ],
+        # The outer loop's raw evidence: a <=1150c narrative of what the inner
+        # search tried, what steered it, and what moved — rendered as MODEL
+        # REASONING in the outer sample_transcripts panel.
+        "reasoning_trace": _inner_narrative(result, spec),
         **proxies,
         # terminated_at is the archive's reuse contract: a named node means "the
         # sample's outcome depends on config only UP TO that node", and prefix-

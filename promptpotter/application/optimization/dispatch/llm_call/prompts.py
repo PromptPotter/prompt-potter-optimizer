@@ -330,17 +330,24 @@ def list_optimizer_prompts() -> list[str]:
 
 
 def compute_optimizer_prompt_hashes() -> dict[str, str]:
-    """SHA-256 (16-char prefix) of each optimizer prompt's loaded content.
+    """SHA-256 (16-char prefix) of each optimizer prompt's effective content.
 
     Hashes the deterministic ``model_dump_json()`` of the loaded
     ``PromptTemplate`` (so the hash reflects what was actually used,
-    Langfuse-overridden or local). Persisted to ``index.json::final.prompt_hashes``
-    so cross-cycle audits can join cycles by ``l1_generate_hash`` etc.
+    Langfuse-overridden or local) plus the node's resolved injection layout —
+    a layout-only L4 edit changes which evidence a node sees, so it must move
+    the node's hash (nodes without a ``NODE_LAYOUTS`` entry, e.g. ``checkin``,
+    contribute the template alone). Persisted to
+    ``index.json::final.prompt_hashes`` so cross-cycle audits can join cycles
+    by ``l1_generate_hash`` etc.
     """
     out: dict[str, str] = {}
     for name in list_optimizer_prompts():
         tpl = load_optimizer_prompt(name)
-        out[name] = hashlib.sha256(tpl.model_dump_json().encode("utf-8")).hexdigest()[:16]
+        blob = tpl.model_dump_json()
+        if name in NODE_LAYOUTS:
+            blob += resolve_node_layout(name).model_dump_json()
+        out[name] = hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
     return out
 
 

@@ -730,6 +730,27 @@ def test_discovered_level_trajectory_is_honest_single_scale() -> None:
     assert lv_reg[0] - o_lb < 0
 
 
+def test_compute_proxies_second_round_not_double_counted() -> None:
+    # SILENT double-count (invisible for weeks): the outer fitness weights first_round_delta
+    # AND after_N_rounds_delta at 0.4 each. At 1 inner round the `levels` trajectory has ONE
+    # entry, so the two are byte-identical and 80% of the formula rides one number — a plausible
+    # score, no error. With >=2 inner rounds a meta-prompt whose SECOND round still climbs MUST
+    # register after_N > first, or the outer can't tell "kept improving" from "plateaued".
+    from promptpotter.application.runner.inner_recursion import _compute_proxies
+
+    climbing = SimpleNamespace(origin_level=0.30, round_discovered_levels=[0.40, 0.55])
+    px = _compute_proxies(climbing, target=0.60)  # type: ignore[arg-type]
+    assert px["first_round_delta"] == pytest.approx(0.10)
+    assert px["after_N_rounds_delta"] == pytest.approx(0.25)
+    assert px["after_N_rounds_delta"] > px["first_round_delta"]  # second-round climb visible
+    assert px["rounds_to_N"] == 3  # never crossed target 0.60 → len(levels)+1 sentinel
+
+    # Plateau after round 1 → the two deltas SHOULD coincide (no spurious divergence manufactured).
+    flat = SimpleNamespace(origin_level=0.30, round_discovered_levels=[0.40, 0.40])
+    pf = _compute_proxies(flat, target=0.60)  # type: ignore[arg-type]
+    assert pf["after_N_rounds_delta"] == pf["first_round_delta"]
+
+
 def _synth_2pl(
     theta: np.ndarray,
     delta: np.ndarray,

@@ -1,7 +1,7 @@
 {
   "campaign_config": {
     "dataset_name": "promptpotter-self",
-    "scoring": "(0.4 * ((first_round_delta + 1) / 2) + 0.4 * ((after_N_rounds_delta + 1) / 2) + 0.2 * (1.0 / max(rounds_to_N, 1))) * min(1.0, 250000 / max(input_tokens + output_tokens, 1))",
+    "scoring": "(0.4 * ((first_round_delta + 1) / 2) + 0.4 * ((after_N_rounds_delta + 1) / 2) + 0.2 * (1.0 / max(rounds_to_N, 1))) * min(1.0, 140000 / max(input_tokens + output_tokens, 1))",
     "headline_metric": "ability",
     "sp_budget_ttest": 8,
     "exclude_nodes": [],
@@ -17,7 +17,7 @@
       "l2_patience": 2,
       "l3_patience": 1,
       "elimination_n_min": 6,
-      "spend_budget_usd": 1.0,
+      "spend_budget_usd": 1.75,
       "token_budget": null
     }
   }

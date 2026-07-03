@@ -132,9 +132,14 @@ class NodeLayoutSpec(BaseModel):
 NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
     # `task_context` sits in `task_intent` (LLM front-of-mind); `problem_description`
     # carries the mandatory structural state + the DISTILLED failure signal (`critique`)
-    # + L1's own `l1_wounds` + `escalation_panel` + `origin_strengths` (regression guard).
-    # Raw `diagnostics` and the cross-run panels stay off the floor (critique distils them);
-    # L2 adds them on stall via its layout edit, and L4 optimises that authoring.
+    # + a bounded slice of RAW evidence (`sample_transcripts`: full query + the model's own
+    # reasoning for the worst misses) + L1's own `l1_wounds` + `escalation_panel` +
+    # `origin_strengths` (regression guard). `sample_transcripts` rides the floor because the
+    # critique's distillation is lossy for reasoning-MECHANISM errors (it can collapse to a
+    # label-distribution steer); the generator needs to SEE where a deduction actually broke,
+    # not only the distiller's summary of it. Render is capped (bundle.py::TRANSCRIPT_RENDER_CAP)
+    # so this is a couple of complete cases, not a dump. Raw `diagnostics` and the cross-run
+    # panels stay off the floor; L2 adds them on stall via its layout edit, L4 optimises that.
     "l1_generate": NodeLayoutSpec(
         editor="l2_l4",
         possible=L1_POSSIBLE,
@@ -146,6 +151,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "pipeline_param_catalogue",
                 "plan",
                 "critique",
+                "sample_transcripts",
                 "l1_wounds",
                 "escalation_panel",
                 "origin_strengths",
