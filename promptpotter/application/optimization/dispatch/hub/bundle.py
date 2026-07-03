@@ -29,8 +29,9 @@ AXES_ENUM_PREVIEW = 4
 NEAR_MISS_RENDER_CAP = 2
 SAMPLE_RENDER_CAP = 2
 # Complete failing samples the `sample_transcripts` panel shows the distiller —
-# full premises + the model's own reasoning, per-field head-capped below.
-TRANSCRIPT_RENDER_CAP = 2
+# full premises + the model's own reasoning, per-field capped below. 3, not more:
+# critique-input growth is what pushed gpt-oss-120b into long-tail latencies.
+TRANSCRIPT_RENDER_CAP = 3
 TRANSCRIPT_QUERY_CAP = 2200
 TRANSCRIPT_REASONING_CAP = 1200
 TRANSCRIPT_PREDICTED_CAP = 200

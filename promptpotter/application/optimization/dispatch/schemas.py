@@ -70,6 +70,21 @@ def _truncate(max_len: int) -> Callable[[Any], Any]:
     return _v
 
 
+def _truncate_marked(max_len: int) -> Callable[[Any], Any]:
+    """Word-boundary truncation with a visible ``…`` marker — for the fields whose
+    tail is load-bearing prose (a quoted failure pattern), where ``_truncate``'s
+    silent mid-quote cut reads as a complete-but-wrong steer downstream (run
+    b786e9: a candidate faithfully implemented a priority_fix cut mid-sentence).
+    """
+
+    def _v(value: Any) -> Any:
+        if isinstance(value, str) and len(value) > max_len:
+            return value[: max_len - 1].rsplit(" ", 1)[0] + "…"
+        return value
+
+    return _v
+
+
 __all__ = [
     "OPTIMIZER_RESPONSE_MODELS",
     "CheckinOutput",
@@ -194,8 +209,11 @@ class L1CritiqueOutput(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    priority_fix: Annotated[str, BeforeValidator(_truncate(200))] = Field(
-        default="", max_length=200
+    # 320 (not 200): the mandated format `<axis>: <change> - addresses <quoted
+    # pattern>` cannot hold a real verbatim quote in 200c — observed truncating
+    # mid-quote, and the clipped steer still drove candidates (b786e9).
+    priority_fix: Annotated[str, BeforeValidator(_truncate_marked(320))] = Field(
+        default="", max_length=320
     )
     suggested_axes: Annotated[list[str], BeforeValidator(_truncate(4))] = Field(
         default_factory=list,

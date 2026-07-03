@@ -318,6 +318,25 @@ def _head_at_line(text: str, cap: int) -> str:
     return head + "\n[…truncated]"
 
 
+def _edges_at_line(text: str, cap: int, head_frac: float = 0.55) -> str:
+    """Head+tail-keep *text* to ~``cap`` chars at line boundaries. For a reasoning
+    trace the decisive wrong step is usually the CONCLUSION — a pure head-keep
+    drops it first, which starved the critique of exactly the step it must quote.
+    Same blank-line collapse contract as :func:`_head_at_line`."""
+    text = re.sub(r"\n\s*\n+", "\n", text.strip())
+    if len(text) <= cap:
+        return text
+    head = text[: int(cap * head_frac)]
+    nl = head.rfind("\n")
+    if nl > 0:
+        head = head[:nl]
+    tail = text[len(text) - (cap - len(head)) :]
+    nl = tail.find("\n")
+    if 0 <= nl < len(tail) - 1:
+        tail = tail[nl + 1 :]
+    return f"{head}\n[…middle elided]\n{tail}"
+
+
 @signal(
     "sample_transcripts",
     kind=InjectionKind.MEASUREMENT,
@@ -325,9 +344,10 @@ def _head_at_line(text: str, cap: int) -> str:
         "Complete failing samples: full query + the task model's own reasoning + "
         "predicted vs GT — the raw evidence the critique's failure_highlights quote from."
     ),
-    # 7000 not 6000: section-drop is all-or-nothing, and a live 6,046-char render
-    # lost a WHOLE second transcript to 46 chars of overflow.
-    char_cap=7000,
+    # Sized for TRANSCRIPT_RENDER_CAP=3 typical transcripts (~2.6-3k each on
+    # justlogic); worst case (~3.8k each) degrades by section-drop of the whole
+    # 3rd transcript — today's behavior, never a severed fence.
+    char_cap=10000,
 )
 def _r_sample_transcripts(b: InjectionBundle) -> str:
     """The distiller's raw source: up to ``TRANSCRIPT_RENDER_CAP`` current misses shown
@@ -354,7 +374,10 @@ def _r_sample_transcripts(b: InjectionBundle) -> str:
         ]
         trace = (r.get("pipeline_data") or {}).get("reasoning_trace") or ""
         if trace:
-            parts.append(f"MODEL REASONING:\n{_head_at_line(str(trace), TRANSCRIPT_REASONING_CAP)}")
+            # head+tail, not head-keep: the wrong CONCLUSION is the quotable step.
+            parts.append(
+                f"MODEL REASONING:\n{_edges_at_line(str(trace), TRANSCRIPT_REASONING_CAP)}"
+            )
         predicted = _head_at_line(str(r.get("predicted") or ""), TRANSCRIPT_PREDICTED_CAP)
         gt = str(r.get("ground_truth") or "")[:60]
         parts.append(f"PREDICTED: {predicted}\nGROUND TRUTH: {gt}")

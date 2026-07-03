@@ -351,6 +351,37 @@ def test_inner_narrative_carries_evidence_within_budget() -> None:
     assert digest.startswith("INNER justlogic seed-3")
 
 
+def test_evidence_channel_clips_are_visible_and_tail_preserving() -> None:
+    """Two silent evidence corruptions from run b786e9: (1) `priority_fix` was
+    hard-cut mid-quote with no marker — the clipped steer read as a complete
+    instruction and candidates faithfully implemented the fragment; (2) the
+    reasoning-trace head-keep dropped the CONCLUSION — the one step the critique
+    is ordered to quote. Both produce wrong prompt content with no error."""
+    from promptpotter.application.optimization.dispatch.hub.injections.panels import (
+        _edges_at_line,
+    )
+    from promptpotter.application.optimization.dispatch.schemas import L1CritiqueOutput
+
+    # (1) over-cap priority_fix clips at a word boundary WITH a visible marker.
+    long_fix = "thinking_style: add verification - addresses " + "pattern word " * 40
+    out = L1CritiqueOutput(priority_fix=long_fix)
+    assert len(out.priority_fix) <= 320
+    assert out.priority_fix.endswith("…"), "silent truncation is the defect being fixed"
+    assert not out.priority_fix.removesuffix("…").endswith(" pa"), "mid-word cut"
+    # Under-cap passes through untouched.
+    assert L1CritiqueOutput(priority_fix="short steer").priority_fix == "short steer"
+
+    # (2) head+tail keep: the trace's final (decisive) line survives the clip.
+    trace = "\n".join(f"step {i}: infer premise {i}" for i in range(60)) + "\nCONCLUSION: FALSE"
+    clipped = _edges_at_line(trace, 400)
+    assert len(clipped) <= 430
+    assert "CONCLUSION: FALSE" in clipped, "head-keep starved the quotable wrong step"
+    assert clipped.startswith("step 0"), "head context lost"
+    assert "[…middle elided]" in clipped
+    # Under-cap text passes through whole.
+    assert _edges_at_line("a\nb", 400) == "a\nb"
+
+
 def test_hit_cache_respects_dataset(tmp_path: Path) -> None:
     """``load_reusable_results`` scopes by dataset — identical node-configs and a
     colliding sample_id across datasets must NOT serve one dataset's cached

@@ -131,6 +131,9 @@ EVIDENCE_GROUNDING_FIELDS: frozenset[str] = frozenset(
         "archive_top_runs",
         "rare_hit_samples",
         "escalation_panel",
+        # raw evidence: complete failing samples incl. the model's own reasoning —
+        # the one panel that shows WHERE a deduction broke, not a distillation of it
+        "sample_transcripts",
         # escape-hatch sentinel (gated on escalation_panel.exploration_budget)
         "stall_exploration",
     }
