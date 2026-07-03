@@ -136,7 +136,7 @@ class TaskDecomposition:
     - ``key_challenges`` — the failure patterns L1 should defend
       against next round. L2's primary refinement surface;
       accumulative, merged on each L2 fire. The
-      `l2_task_context_verbatim_repeat` validator fires here when L2
+      `l2_task_context_stale_repeat` validator fires here when L2
       restates without delta.
     - ``upstream_context`` — task-framing prepended around
       ``problem_description`` at render time (see

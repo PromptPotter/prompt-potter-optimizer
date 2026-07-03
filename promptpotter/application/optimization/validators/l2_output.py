@@ -1,13 +1,17 @@
 """Validators on L2-parsed outputs (soft signals; layout HARD validators live in :mod:`domain.l1_layout`).
 
-* :data:`L2_TASK_CONTEXT_VERBATIM_REPEAT` — proposed ``task_context``
-  refinement produced no semantic change vs the prior OSP framing
-  (either the LLM repeated the existing fields or sent a no-op merge).
+* :data:`L2_TASK_CONTEXT_STALE_REPEAT` — proposed ``task_context``
+  refinement landed no real semantic delta vs the prior OSP framing;
+  the evidence's ``mode`` names the shade (``verbatim`` = no-op merge,
+  ``paraphrase`` = merge succeeded but per-field token-set Jaccard ≥
+  ``PARAPHRASE_REPEAT_JACCARD_THRESHOLD``). One soft-reject reason —
+  the escalation driver treats both shades identically.
 * :data:`L2_DUPLICATE_INSERT` — proposed ``task_context`` re-asserts
   ≥``DUPLICATE_INSERT_LINE_THRESHOLD`` lines already in the prior
   framing. Merge still succeeds, but L2 is pasting back what's there.
-* :data:`L2_TASK_CONTEXT_PARAPHRASE_REPEAT` — paraphrase middle ground;
-  per-field token-set Jaccard ≥ ``PARAPHRASE_REPEAT_JACCARD_THRESHOLD``.
+  Deliberately NOT part of the stale-repeat reason: a sole
+  duplicate-insert breach force-triggers L3 (see ``firing.py``'s
+  ``SOFT_REJECT_IDS``), a sole stale-repeat does not.
 * :data:`L2_SUPPLEMENTAL_RULE_DUP_ID` / :data:`L2_SITUATIONAL_EXAMPLE_DANGLING_TRIGGER` /
   :data:`L2_SUPPLEMENTAL_RULE_DUPLICATES_AUTO_TRIGGER` — rule/example
   authoring guards.
@@ -51,65 +55,42 @@ def word_set_jaccard(a: str, b: str, *, min_len: int = 3) -> float:
     return len(wa & wb) / len(wa | wb)
 
 
-def _attr_or_key(entry: Any, name: str) -> Any:
-    """Read ``name`` off a pydantic obj or a plain dict — L2 proposals ride both
-    shapes (typed when freshly parsed, dict on disk-replay)."""
-    return getattr(entry, name, None) or (entry.get(name) if isinstance(entry, dict) else None)
-
-
-def _check_task_context_verbatim_repeat(
+def _check_task_context_stale_repeat(
     source_output: Mapping[str, Any],
     *,
     opt_sp: OptSearchPoint | None = None,
     **_: Any,
 ) -> ValidatorOutcome | None:
-    """Fire when L2 *proposed* a task_context update but it merged to a no-op.
+    """Fire when L2's proposed task_context lands no real semantic delta.
 
     ``escalation._parse_l2`` passes ``task_context_proposed`` (the raw
     dict L2 emitted) and ``task_context_applied`` (the merged
     TaskDecomposition or ``None`` when the merge produced no change).
-    A non-empty proposal that yielded ``None`` means the LLM tried but
-    repeated the prior framing — the no-op task_context analogue of a
-    verbatim signal repeat.
+    Two graded shades of one staleness fact, named by the evidence's
+    ``mode``:
+
+    * ``verbatim`` — the proposal merged to a no-op (``applied is None``):
+      the LLM repeated the prior framing outright.
+    * ``paraphrase`` — the merge *succeeds*, but some updated field's
+      word-set Jaccard vs the prior framing is ≥
+      :data:`PARAPHRASE_REPEAT_JACCARD_THRESHOLD` — a new string with no
+      real semantic delta. Per-field rather than aggregate so a
+      legitimate refinement on one field isn't drowned by a stale repeat
+      on another.
+
+    Both shades are pure soft-rejects: the prior framing is kept, L1
+    continues, and a SOLE breach does not force-trigger L3 (``firing.py``'s
+    ``SOFT_REJECT_IDS``).
     """
     proposed = source_output.get("task_context_proposed")
-    applied = source_output.get("task_context_applied")
     if not isinstance(proposed, dict) or not proposed:
         return None
-    if applied is not None:
-        return None
-    return ValidatorOutcome(
-        validator_id=L2_TASK_CONTEXT_VERBATIM_REPEAT.id,
-        evidence={"proposed_keys": sorted(proposed.keys())},
-    )
-
-
-def _check_task_context_paraphrase_repeat(
-    source_output: Mapping[str, Any],
-    *,
-    opt_sp: OptSearchPoint | None = None,
-    **_: Any,
-) -> ValidatorOutcome | None:
-    """Fire when L2's proposed task_context paraphrases the prior framing.
-
-    Sibling of ``_check_task_context_verbatim_repeat`` (no-op merge) and
-    ``_check_duplicate_insert`` (≥3 verbatim lines). This catches the
-    middle ground: the proposed update *is* a new string, the merge
-    *succeeds*, but the word-set overlap with the prior framing is so
-    high that no real semantic delta lands. Same recovery as the other
-    two — surface as evidence; L3 force-trigger via
-    ``executor.py::escalate_l2`` reads ``l2_guard_breaches`` and replans.
-
-    Token-set Jaccard above
-    :data:`PARAPHRASE_REPEAT_JACCARD_THRESHOLD` on any single updated
-    field is sufficient to fire. Per-field rather than aggregate so a
-    legitimate refinement on one field isn't drowned by a stale repeat
-    on another.
-    """
+    if source_output.get("task_context_applied") is None:
+        return ValidatorOutcome(
+            validator_id=L2_TASK_CONTEXT_STALE_REPEAT.id,
+            evidence={"mode": "verbatim", "proposed_keys": sorted(proposed.keys())},
+        )
     if opt_sp is None:
-        return None
-    proposed = source_output.get("task_context_proposed")
-    if not isinstance(proposed, dict) or not proposed:
         return None
     prior = opt_sp.memory.task_context.to_dict()
     worst_overlap = 0.0
@@ -127,8 +108,9 @@ def _check_task_context_paraphrase_repeat(
     if worst_overlap < PARAPHRASE_REPEAT_JACCARD_THRESHOLD:
         return None
     return ValidatorOutcome(
-        validator_id=L2_TASK_CONTEXT_PARAPHRASE_REPEAT.id,
+        validator_id=L2_TASK_CONTEXT_STALE_REPEAT.id,
         evidence={
+            "mode": "paraphrase",
             "field": worst_field,
             "jaccard": round(worst_overlap, 3),
             "threshold": PARAPHRASE_REPEAT_JACCARD_THRESHOLD,
@@ -143,9 +125,10 @@ def _check_duplicate_insert(
     **_: Any,
 ) -> ValidatorOutcome | None:
     """Fire when L2's proposed task_context re-asserts ≥3 lines already
-    in the prior OSP framing. Distinct from :data:`L2_TASK_CONTEXT_VERBATIM_REPEAT`
-    (no-op merge): here the merge succeeds, but L2 still pasted back lines
-    that were already there — the refinement surface is exhausted.
+    in the prior OSP framing. Distinct from :data:`L2_TASK_CONTEXT_STALE_REPEAT`:
+    here the merge succeeds, but L2 still pasted back lines that were
+    already there — the refinement surface is exhausted, so a sole breach
+    force-triggers L3 (this id is NOT in ``firing.py``'s ``SOFT_REJECT_IDS``).
     """
     if opt_sp is None:
         return None
@@ -179,21 +162,15 @@ def _check_duplicate_insert(
     )
 
 
-L2_TASK_CONTEXT_VERBATIM_REPEAT: LLMOutputValidator = LLMOutputValidator(
-    id="l2_task_context_verbatim_repeat",
-    check=_check_task_context_verbatim_repeat,
+L2_TASK_CONTEXT_STALE_REPEAT: LLMOutputValidator = LLMOutputValidator(
+    id="l2_task_context_stale_repeat",
+    check=_check_task_context_stale_repeat,
 )
 
 
 L2_DUPLICATE_INSERT: LLMOutputValidator = LLMOutputValidator(
     id="l2_duplicate_insert",
     check=_check_duplicate_insert,
-)
-
-
-L2_TASK_CONTEXT_PARAPHRASE_REPEAT: LLMOutputValidator = LLMOutputValidator(
-    id="l2_task_context_paraphrase_repeat",
-    check=_check_task_context_paraphrase_repeat,
 )
 
 
@@ -231,9 +208,7 @@ def _check_supplemental_rule_dup_id(
     seen: set[str] = set()
     dups: list[str] = []
     for entry in proposed:
-        rid = _attr_or_key(entry, "rule_id")
-        if not rid:
-            continue
+        rid = entry.rule_id
         if rid in seen:
             dups.append(rid)
         else:
@@ -267,16 +242,16 @@ def _check_situational_example_dangling_trigger(
     # opt_sp if L2 didn't propose this fire).
     rules_proposed = source_output.get("l1_supplemental_rules_proposed")
     if isinstance(rules_proposed, list) and rules_proposed:
-        rule_ids = {_attr_or_key(r, "rule_id") for r in rules_proposed}
+        rule_ids = {r.rule_id for r in rules_proposed}
     elif opt_sp is not None:
         rule_ids = {r.rule_id for r in opt_sp.memory.l1_supplemental_rules}
     else:
         rule_ids = set()
-    allowed: set[str] = set(_AUTO_TRIGGER_IDS) | {r for r in rule_ids if r}
+    allowed: set[str] = set(_AUTO_TRIGGER_IDS) | rule_ids
     dangling: list[str] = []
     for entry in proposed:
-        tid = _attr_or_key(entry, "trigger_id")
-        if tid and tid not in allowed:
+        tid = entry.trigger_id
+        if tid not in allowed:
             dangling.append(tid)
     if not dangling:
         return None
@@ -306,14 +281,10 @@ def _check_supplemental_rule_duplicates_auto_trigger(
         return None
     offenders: list[tuple[str, str, float]] = []
     for entry in proposed:
-        body = _attr_or_key(entry, "body")
-        rid = _attr_or_key(entry, "rule_id")
-        if not body or not rid:
-            continue
         for auto_id, auto_body in AUTO_RULES.items():
-            overlap = word_set_jaccard(body, auto_body)
+            overlap = word_set_jaccard(entry.body, auto_body)
             if overlap >= PARAPHRASE_REPEAT_JACCARD_THRESHOLD:
-                offenders.append((rid, auto_id, round(overlap, 3)))
+                offenders.append((entry.rule_id, auto_id, round(overlap, 3)))
                 break
     if not offenders:
         return None
@@ -347,9 +318,8 @@ L2_SUPPLEMENTAL_RULE_DUPLICATES_AUTO_TRIGGER: LLMOutputValidator = LLMOutputVali
 
 
 L2_OUTPUT_VALIDATORS: tuple[LLMOutputValidator, ...] = (
-    L2_TASK_CONTEXT_VERBATIM_REPEAT,
+    L2_TASK_CONTEXT_STALE_REPEAT,
     L2_DUPLICATE_INSERT,
-    L2_TASK_CONTEXT_PARAPHRASE_REPEAT,
     L2_SUPPLEMENTAL_RULE_DUP_ID,
     L2_SITUATIONAL_EXAMPLE_DANGLING_TRIGGER,
     L2_SUPPLEMENTAL_RULE_DUPLICATES_AUTO_TRIGGER,
@@ -371,8 +341,7 @@ __all__ = [
     "L2_SITUATIONAL_EXAMPLE_DANGLING_TRIGGER",
     "L2_SUPPLEMENTAL_RULE_DUPLICATES_AUTO_TRIGGER",
     "L2_SUPPLEMENTAL_RULE_DUP_ID",
-    "L2_TASK_CONTEXT_PARAPHRASE_REPEAT",
-    "L2_TASK_CONTEXT_VERBATIM_REPEAT",
+    "L2_TASK_CONTEXT_STALE_REPEAT",
     "PARAPHRASE_REPEAT_JACCARD_THRESHOLD",
     "run_l2_output_validators",
 ]

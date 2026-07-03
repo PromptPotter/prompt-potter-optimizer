@@ -1046,8 +1046,7 @@ from promptpotter.application.optimization.validators.l1_strict import (  # noqa
 )
 from promptpotter.application.optimization.validators.l2_output import (  # noqa: E402
     L2_DUPLICATE_INSERT,
-    L2_TASK_CONTEXT_PARAPHRASE_REPEAT,
-    L2_TASK_CONTEXT_VERBATIM_REPEAT,
+    L2_TASK_CONTEXT_STALE_REPEAT,
     run_l2_output_validators,
 )
 from promptpotter.application.optimization.validators.l3_output import (  # noqa: E402
@@ -1192,12 +1191,13 @@ def _osp(**kwargs) -> OptSearchPoint:
     return OptSearchPoint(persona="Expert", instruction="Rank items.", **kwargs)
 
 
-def test_task_context_verbatim_repeat_fires_when_proposed_merge_is_no_op():
-    out = L2_TASK_CONTEXT_VERBATIM_REPEAT.run(
+def test_task_context_stale_repeat_fires_verbatim_when_proposed_merge_is_no_op():
+    out = L2_TASK_CONTEXT_STALE_REPEAT.run(
         {"task_context_proposed": {"domain": "biotech"}, "task_context_applied": None},
         opt_sp=_osp(),
     )
     assert out is not None
+    assert out.evidence["mode"] == "verbatim"
     assert out.evidence["proposed_keys"] == ["domain"]
 
 
@@ -1207,7 +1207,7 @@ def test_run_l2_output_validators_aggregates_task_context_repeat():
         _osp(),
     )
     ids = {o.validator_id for o in outcomes}
-    assert "l2_task_context_verbatim_repeat" in ids
+    assert "l2_task_context_stale_repeat" in ids
 
 
 def test_duplicate_insert_fires_when_proposed_lines_already_in_prior_framing():
@@ -1252,7 +1252,7 @@ def test_duplicate_insert_quiet_below_threshold():
     assert out is None
 
 
-def test_paraphrase_repeat_fires_on_word_set_overlap_above_threshold():
+def test_task_context_stale_repeat_fires_paraphrase_on_word_set_overlap_above_threshold():
     """Paraphrase sharing ≥50% of words with prior framing ⇒ fire."""
     prior = (
         "Problem misreading (2/N): targeting L1 axis 'instruction' to add "
@@ -1264,7 +1264,7 @@ def test_paraphrase_repeat_fires_on_word_set_overlap_above_threshold():
         "and self-check step before any solving begins."
     )
     osp = _osp(task_context=TaskDecomposition(key_challenges=prior))
-    out = L2_TASK_CONTEXT_PARAPHRASE_REPEAT.run(
+    out = L2_TASK_CONTEXT_STALE_REPEAT.run(
         {
             "task_context_proposed": {"key_challenges": paraphrase},
             "task_context_applied": osp.memory.task_context.merge({"key_challenges": paraphrase}),
@@ -1272,18 +1272,19 @@ def test_paraphrase_repeat_fires_on_word_set_overlap_above_threshold():
         opt_sp=osp,
     )
     assert out is not None
+    assert out.evidence["mode"] == "paraphrase"
     assert out.evidence["field"] == "key_challenges"
     assert out.evidence["jaccard"] >= 0.5
 
 
-def test_paraphrase_repeat_quiet_on_genuine_refinement():
+def test_task_context_stale_repeat_quiet_on_genuine_refinement():
     prior = "Problem misreading on geometry: failing coordinate setup."
     refinement = (
         "Combinatorial enumeration failing: candidates skip casework on "
         "the 27-cell grid; needs explicit decomposition by row pattern."
     )
     osp = _osp(task_context=TaskDecomposition(key_challenges=prior))
-    out = L2_TASK_CONTEXT_PARAPHRASE_REPEAT.run(
+    out = L2_TASK_CONTEXT_STALE_REPEAT.run(
         {
             "task_context_proposed": {"key_challenges": refinement},
             "task_context_applied": osp.memory.task_context.merge({"key_challenges": refinement}),

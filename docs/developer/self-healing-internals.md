@@ -101,12 +101,11 @@ L3 writes a new `plan` (and optionally `pipeline_params`). Lands on `OptSearchPo
 
 ## Wound 4 — L3 tends L2's parsed-output failure
 
-`L2_OUTPUT_VALIDATORS` registry (`application/optimization/validators/l2_output.py`) — six validators; every guard-breach `ValidatorOutcome` routes to L3 (replan) structurally, via the non-empty-stream → `escalate_l2` trigger, so none carries an owner field:
+`L2_OUTPUT_VALIDATORS` registry (`application/optimization/validators/l2_output.py`) — five validators; every guard-breach `ValidatorOutcome` routes to L3 (replan) structurally, via the non-empty-stream → `escalate_l2` trigger, so none carries an owner field:
 
 | Validator id | Detects |
 |---|---|
-| `l2_task_context_verbatim_repeat` | proposed `task_context` merged to a no-op vs prior framing |
-| `l2_task_context_paraphrase_repeat` | per-field word-set Jaccard ≥ 0.5 vs prior framing |
+| `l2_task_context_stale_repeat` | proposed `task_context` landed no semantic delta — evidence `mode` names the shade: `verbatim` (no-op merge) or `paraphrase` (per-field word-set Jaccard ≥ 0.5 vs prior framing). Sole soft-reject id: alone it skips the L3 force-trigger |
 | `l2_duplicate_insert` | proposed `task_context` re-asserts ≥3 lines already in prior framing |
 | `l2_supplemental_rule_dup_id` | two L2-authored rules share a `rule_id` |
 | `l2_situational_example_dangling_trigger` | example `trigger_id` matches no auto-trigger or authored rule |

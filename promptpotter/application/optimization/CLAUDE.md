@@ -51,7 +51,7 @@ Receives the evidence panels plus the prior `l1_critique`. `l2_context` produces
 - a refined `task_context` — the persistent task-framing dict that every layer (L1, L1_CRITIQUE, L2, L3) reads next round, and
 - optional `l1_layout` edits + optimizer-param tweaks (never pipeline_params — those belong to `l1_generate`'s surface).
 
-The refinement is **evidence-anchored** — it cites a specific axis, sample, or yield number from the panels. Speculative refinements ("maybe try X") are out of contract. `task_context` is persistent, accumulative: each fire merges deltas onto the existing dict; full rewrites are rare. A proposed update that merges to a no-op against the prior framing is flagged as `l2_task_context_verbatim_repeat` → L3 heal trigger.
+The refinement is **evidence-anchored** — it cites a specific axis, sample, or yield number from the panels. Speculative refinements ("maybe try X") are out of contract. `task_context` is persistent, accumulative: each fire merges deltas onto the existing dict; full rewrites are rare. A proposed update that lands no semantic delta (no-op merge or ≥0.5-Jaccard paraphrase) is flagged as `l2_task_context_stale_repeat` — a soft-reject (prior framing kept; a sole breach does not force-trigger L3).
 
 Channel: written to `OptSearchPoint.task_context`; read by every prompt via the `task_context` signal. Persistent across L2 fires until L2 next refines (or L3 replans).
 
@@ -76,7 +76,7 @@ Fires only on L2-layer stall (L2 patience exceeded). Receives the evidence panel
 
 The L3-layer also **heals the L2-layer** on validator outcomes:
 
-- `l2_task_context_verbatim_repeat` (proposed framing merged to a no-op),
+- `l2_task_context_stale_repeat` when combined with other breaches (a sole stale-repeat is soft-rejected without an L3 fire),
 - L1 layout HARD-validator failures (mandatory placeholder missing, unknown name, dup within slot), or
 - repeated cross-field issues that the framing refinement surface can't resolve.
 

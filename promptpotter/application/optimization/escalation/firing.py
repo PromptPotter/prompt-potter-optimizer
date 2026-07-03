@@ -604,15 +604,12 @@ async def escalate_l2(
         )
         # Wound 4: post-L2 validator failure → L3 force-trigger. Deterministic from L2 output,
         # so resume reproduces without a separate decision record.
-        # Exception: a SOLE soft-reject (paraphrase/verbatim repeat — already discarded by the
+        # Exception: a SOLE soft-reject (stale task_context repeat — already discarded by the
         # validator) skips L3. The fork_f13331ff cascade — L3 short plan → L1 malformed plan →
         # empty L1 — showed firing L3 on a single soft-reject layers escalations instead of
         # letting the loop self-correct.
         breaches = cycle.opt_sp.memory.wounds.l2_guard_breaches
-        SOFT_REJECT_IDS = {
-            "l2_task_context_verbatim_repeat",
-            "l2_task_context_paraphrase_repeat",
-        }
+        SOFT_REJECT_IDS = {"l2_task_context_stale_repeat"}
         if breaches and not all(b.validator_id in SOFT_REJECT_IDS for b in breaches):
             logger.warning(
                 "L3 force-triggered by %d L2-output validator failure(s) at round %d",
