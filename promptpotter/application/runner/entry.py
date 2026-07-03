@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.bootstrap import init_optimization_loop
 from promptpotter.application.bootstrap.session import Session
-from promptpotter.application.config import CampaignConfig
+from promptpotter.application.config import CampaignConfig, apply_node_overlay
 from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.escalation import apply_fork_payload_to_osp
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
@@ -236,17 +236,11 @@ async def _prepare_run(
     # `configure_and_apply_pipeline` caller.
     seed = _read_cycle_seed(session)
     if seed is not None and seed.pipeline_overlay:
-        merged = dict(session.pipeline_params or {})
-        for node, cfg in seed.pipeline_overlay.items():
-            base = merged.get(node)
-            if isinstance(base, dict) and isinstance(cfg, dict):
-                merged[node] = {**base, **cfg}
-            else:
-                # A non-dict value (e.g. the reserved top-level ``steps`` list)
-                # can't be spread — assign it directly rather than crash the
-                # per-node merge with a TypeError.
-                merged[node] = cfg
-        session.pipeline_params = merged
+        # Seed overlay layers ON TOP of the dataset overlay (seed > dataset > backend);
+        # the shared shallow merge keeps the non-dict ``steps`` guard intact.
+        session.pipeline_params = apply_node_overlay(
+            session.pipeline_params or {}, seed.pipeline_overlay
+        )
     if seed is not None:
         # Reconcile the seed's run limits (rounds / spend / patience / epsilon)
         # onto a fresh config snapshot — the loop starts at round 1 and stops

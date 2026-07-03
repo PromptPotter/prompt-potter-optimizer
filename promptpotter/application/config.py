@@ -35,6 +35,7 @@ __all__ = [
     "OptimizationConfig",
     "PreflightWarning",
     "apply_inherited_overlay",
+    "apply_node_overlay",
     "configure_and_apply_pipeline",
     "load_campaign_config",
     "resolve_pipeline_config_params",
@@ -531,6 +532,30 @@ def run_preflight_checks(
     return warnings
 
 
+def apply_node_overlay(base: dict[str, Any], overlay: Mapping[str, Any]) -> dict[str, Any]:
+    """The ONE shallow per-node overlay merge → a fresh dict (``base`` untouched).
+
+    For each ``node`` in *overlay*: when both the existing and the incoming value are
+    dicts, the incoming keys win over the existing (``{**existing, **incoming}``);
+    otherwise the incoming value is assigned as-is — so the reserved non-dict
+    top-level ``steps`` list can't be spread and simply replaces. Sequential calls
+    layer correctly (later overlay > earlier), which is how the resolution chain
+    stacks dataset < campaign-override < cycle-seed.
+
+    Shared by the dataset/override resolution here, the cycle-seed overlay
+    (``runner/entry.py``) and the L1 candidate override (``optimization/l1
+    /population.py`` — which deep-copies its base and drops inactive nodes AROUND
+    this call). A RECURSIVE merge (``cli/commands/verify.py::_deep_merge``) is a
+    different operation and stays separate."""
+    merged = dict(base)
+    for node, cfg in overlay.items():
+        existing = merged.get(node)
+        merged[node] = (
+            {**existing, **cfg} if isinstance(existing, dict) and isinstance(cfg, dict) else cfg
+        )
+    return merged
+
+
 def resolve_pipeline_config_params(
     active: list[str],
     pipeline_overrides: Mapping[str, Any],
@@ -551,12 +576,18 @@ def resolve_pipeline_config_params(
     if dataset_dir is not None:
         # Per-dataset overlay — sparse overrides on backend defaults (e.g. AIME →
         # OpenRouter+Mistral). `dataset_dir` is tenant-first, so ingested datasets honor it.
-        for node, cfg in load_dataset_node_overlay(dataset_dir).items():
-            if node in active:
-                pipeline_params.setdefault(node, {}).update(cfg)
+        dataset_overlay = {
+            node: cfg
+            for node, cfg in load_dataset_node_overlay(dataset_dir).items()
+            if node in active
+        }
+        pipeline_params = apply_node_overlay(pipeline_params, dataset_overlay)
+    # Campaign overrides layer on top (override > dataset); non-dict / inactive-node
+    # entries are dropped here with an operator-visible log, then the survivors merge.
+    valid_overrides: dict[str, Any] = {}
     for key, value in pipeline_overrides.items():
         if isinstance(value, dict) and key in active:
-            pipeline_params.setdefault(key, {}).update(value)
+            valid_overrides[key] = value
         elif isinstance(value, dict):
             logger.debug(
                 "resolve_pipeline_config_params: skipping override for inactive node %r", key
@@ -568,15 +599,19 @@ def resolve_pipeline_config_params(
                 key,
                 value,
             )
+    pipeline_params = apply_node_overlay(pipeline_params, valid_overrides)
     # Connector identity contribution — LAST, never overridable: per-node entries a
     # connector declares as part of measurement identity (Connector.identity_config,
     # e.g. the promptpotter connector's inner-baseline fingerprint). Resolved from
     # the dataset dir's own backend_type so this stays pure-over-disk and both
     # callers (live setup + prospective-origin id) agree by construction.
     if dataset_dir is not None:
-        for node, cfg in _connector_identity_config(dataset_dir).items():
-            if node in active:
-                pipeline_params.setdefault(node, {}).update(cfg)
+        identity = {
+            node: cfg
+            for node, cfg in _connector_identity_config(dataset_dir).items()
+            if node in active
+        }
+        pipeline_params = apply_node_overlay(pipeline_params, identity)
     return pipeline_params
 
 

@@ -12,8 +12,7 @@ from collections.abc import Callable
 from typing import Any
 
 from promptpotter.shared import (
-    BOXED_RE,
-    NUMBER_RE,
+    extract_boxed_number,
     extract_gsm8k_number,
     extract_last_bold,
     sigmoid,
@@ -33,28 +32,21 @@ def _rr(k: int | None) -> float:
 
 
 def _aime_match(predicted: str, ground_truth: str) -> float:
-    """Match AIME integers in [0, 999]; prefers ``\\boxed{N}``, falls back to last number."""
+    """Match AIME integers in [0, 999]; prefers ``\\boxed{N}``, falls back to last number.
+
+    The extract-the-answer step is the shared :func:`extract_boxed_number` (the
+    same value the display side renders); this keeps the int-coercion +
+    ``OverflowError`` guard + ``[0, 999]``-int ground-truth semantics."""
     try:
         gt = int(ground_truth.strip())
     except (ValueError, AttributeError):
         return 0.0
 
-    text = predicted or ""
-
-    boxed = BOXED_RE.findall(text)
-    if boxed:
-        raw = boxed[-1].strip()
-        try:
-            pred = int(float(raw.replace(",", "")))
-            return 1.0 if pred == gt else 0.0
-        except (ValueError, OverflowError):
-            pass
-
-    matches = NUMBER_RE.findall(text)
-    if not matches:
+    pred_num = extract_boxed_number(predicted or "")
+    if pred_num is None:
         return 0.0
     try:
-        pred = int(float(matches[-1].replace(",", "")))
+        pred = int(pred_num)
     except (ValueError, OverflowError):
         return 0.0
     return 1.0 if pred == gt else 0.0

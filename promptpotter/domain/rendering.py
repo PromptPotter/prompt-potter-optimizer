@@ -17,7 +17,7 @@ from typing import Any
 
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.results import CritiqueReadout
-from promptpotter.shared import BOXED_RE, NUMBER_RE, extract_gsm8k_number, extract_last_bold
+from promptpotter.shared import extract_boxed_number, extract_gsm8k_number, extract_last_bold
 from promptpotter.shared.errors import ErrorCategory, error_category, is_error_result
 
 # --------------------------------------------------------------------------- #
@@ -297,17 +297,14 @@ def _extract_gsm8k_display(text: str) -> str:
 
 
 def _extract_boxed_display(text: str) -> str:
-    if not text:
-        return ""
-    boxed = BOXED_RE.findall(text)
-    if boxed:
-        last_boxed: str = boxed[-1]
-        return last_boxed.strip()
-    nums = NUMBER_RE.findall(text)
-    if nums:
-        last_num: str = nums[-1]
-        return last_num
-    return text.strip()
+    # Route through the shared AIME extractor so the shown answer IS the value the
+    # scorer (`_aime_match`) matched — a non-numeric `\boxed{…}` falls back to the
+    # last number (as the scorer does), never the raw boxed junk. Mirrors
+    # `_extract_gsm8k_display`'s int-if-integral formatting; stripped text when none.
+    n = extract_boxed_number(text or "")
+    if n is None:
+        return (text or "").strip()
+    return str(int(n)) if n.is_integer() else str(n)
 
 
 DISPLAY_EXTRACTORS: dict[str, Any] = {

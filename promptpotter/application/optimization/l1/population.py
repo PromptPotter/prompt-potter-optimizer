@@ -9,6 +9,7 @@ import copy
 import logging
 from typing import Any
 
+from promptpotter.application.config import apply_node_overlay
 from promptpotter.application.optimization.validators.l1_strict import (
     L1_CONFIG_NOT_IN_RUNTIME_FAILURES,
     L1_PROMPT_PLACEHOLDERS_INTACT,
@@ -39,15 +40,15 @@ def _merge_pipeline_params(
     overrides: dict[str, Any] | None,
     schema: PipelineSchema | None,
 ) -> dict[str, Any] | None:
-    """Deep-merge ``overrides`` into ``base``; drop overrides for nodes outside active steps."""
+    """Overlay ``overrides`` onto a DEEP COPY of ``base``; drop overrides for nodes
+    outside active steps.
+
+    The per-node merge is the shared shallow ``apply_node_overlay``; the deep copy
+    (the candidate's params must not alias the origin's nested config) and the
+    inactive-node drop are this site's own edge cases, kept around the helper."""
     if not overrides:
         return base
-    merged: dict[str, Any] = copy.deepcopy(base or {})
-    for k, v in overrides.items():
-        if isinstance(v, dict) and isinstance(merged.get(k), dict):
-            merged[k] = {**merged[k], **v}
-        else:
-            merged[k] = v
+    merged = apply_node_overlay(copy.deepcopy(base or {}), overrides)
     if schema:
         _active = set(schema.active_steps)
         for k, _cfg in list(node_config_items(merged)):
