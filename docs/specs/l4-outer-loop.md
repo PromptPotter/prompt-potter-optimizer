@@ -79,8 +79,10 @@ itself was rebalanced toward outer breadth: outer `max_rounds` 1→2 + `n_varian
 `inner_n_variants` 2, let the graded ε-gate cut losers early. Inner `max_inner_rounds` stays **2**
 — a 2→1 cut was tried and reverted 2026-07-03: at 1 round the inner `levels` trajectory is
 length-1, so `after_N_rounds_delta` equals `first_round_delta` byte-for-byte and the formula's
-two 0.4 terms silently double-count one number; 2 rounds keep the three proxies independent
-(and the outer spend cap is sized to the ~2× inner cost).
+two 0.5 delta terms silently double-count one number; 2 rounds keep the two live deltas independent
+(and the outer spend cap is sized to the ~2× inner cost). `rounds_to_N` and the per-seed cost
+multiplier were both **retired from the scoring formula 2026-07-04** (dead + anti-signal — see the
+composite-fitness section below); `rounds_to_N` is still computed for the inner narrative.
 
 1. ~~`sample_transcripts` char_cap 6000 → 7000~~ **DONE** (`panels.py`).
 2. ~~Meta `l1_generate` answer_format nudge~~ **DONE** — `variant_name`/`changes_description`
@@ -198,7 +200,7 @@ The outer cycle is a PromptPotter cycle, but its optimizer reasons about a *diff
 
 ## 4. Outer composite fitness — the "much cleverer" score
 
-The three landed proxies stay the raw signals (`datasets/promptpotter-self/campaign.json::scoring` already composes them: `0.4·first_round_delta + 0.4·after_N_rounds_delta + 0.2·(1/max(rounds_to_N,1))`). The naïve reading — "improvement within a fixed budget" — is too lossy: it is origin-strength biased, endpoint-blind, and trusts one noisy inner campaign. Enrich, don't replace:
+The landed proxies stay the raw signals. The shipped `datasets/promptpotter-self/campaign.json::scoring` composes the **two live deltas** — `0.5·((first_round_delta+1)/2) + 0.5·((after_N_rounds_delta+1)/2)` — after retiring two dead terms (2026-07-04): `rounds_to_N` (a constant `len(levels)+1` while the inner target sits above 2-round reach — it cancels in the candidate election, so its weight was pure offset; still computed for the narrative, re-add when the target is reachable) and the per-seed cost multiplier `min(1.0, DIVISOR/tokens)` (token count is a SEED property applied ~equally across candidates on a seed, so it carried no candidate gradient and penalized candidates that explored more — `spend_budget_usd` is the real cost control). The naïve reading — "improvement within a fixed budget" — is still too lossy: it is origin-strength biased, endpoint-blind, and trusts one noisy inner campaign. Enrich, don't replace:
 
 - **Normalized headroom lift** — `(best − origin) / (target − origin)`, capped at 1.0, with per-task `target` (`0.60` in `inner_tasks.json`). Removes origin-strength bias so a meta-prompt config compares across inner tasks of different difficulty.
 - **Area-under-lift-vs-budget** — rewards a config that climbs fast then plateaus over one that crawls; captures the trajectory finesse a two-endpoint delta discards. **Data-shape gap (must resolve):** per-round spend is *not* materialized — `index.json` carries no spend; `dashboard.json::spend` is a single cycle-total. Per-round (hence cumulative-by-round) spend IS reconstructible from the cycle ledger: `TokenUsageRecord` carries a `round` field in `.runtime/ledger.jsonl`. **Decision:** the fitness reads the ledger to build cumulative-spend-by-round for the AUC; a per-round spend rollup on the dashboard projection is the durable follow-up (not required for C3).

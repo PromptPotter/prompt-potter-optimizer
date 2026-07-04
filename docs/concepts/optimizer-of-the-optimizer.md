@@ -39,16 +39,27 @@ exposed simultaneously to the outer scoring formula:
 | `after_N_rounds_delta` | inner score after N rounds minus inner origin | calibration — captures improvement rate |
 | `rounds_to_N` | rounds to reach an inner target score (times out at `max_inner_rounds`) | publication — closest to "did this meta-prompt actually help" |
 
-The outer `campaign.json::scoring` composes these. Example:
+The outer `campaign.json::scoring` composes these (each delta recentred `(delta+1)/2` so
+regression < no-op < improvement stay distinct). Example:
 
 ```
-0.4 * first_round_delta + 0.4 * after_N_rounds_delta + 0.2 * (1 / max(rounds_to_N, 1))
+0.5 * ((first_round_delta + 1) / 2) + 0.5 * ((after_N_rounds_delta + 1) / 2)
 ```
+
+**`rounds_to_N` only carries a candidate gradient when the inner target is REACHABLE within
+the round budget.** If the target sits above what the inner loop reaches in `max_inner_rounds`,
+`rounds_to_N` is a constant (`len(levels)+1` on every task) that cancels in the candidate
+election — dead weight. The shipped `promptpotter-self` formula (above) therefore weights only
+the two deltas 0.5/0.5: its justlogic target (0.60) is above 2-round reach from a ~0.44 origin,
+so `rounds_to_N` is retired from scoring (still computed for the inner narrative; re-add it once
+the target becomes reachable). A per-sample cost multiplier is deliberately NOT composed here —
+inner token count is a property of the seed, not the candidate, so folding it per-sample injects
+per-seed noise rather than candidate signal; `spend_budget_usd` is the real cost control.
 
 Operators **don't pick one proxy and commit** — they accumulate evidence
 across runs: start with `first_round_delta` for cheap iteration, add
-`after_N_rounds_delta` once outer-loop dynamics stabilize, switch to a
-`rounds_to_N`-weighted formula for final runs.
+`after_N_rounds_delta` once outer-loop dynamics stabilize, and add a
+`rounds_to_N` term only once the inner target is within round-budget reach.
 
 ## Cost realism
 

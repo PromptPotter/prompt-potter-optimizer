@@ -751,6 +751,38 @@ def test_compute_proxies_second_round_not_double_counted() -> None:
     assert pf["after_N_rounds_delta"] == pf["first_round_delta"]
 
 
+def test_pp_self_scoring_carries_only_live_proxies() -> None:
+    # SILENT wrong-score: the outer L4 formula once carried two dead terms — `rounds_to_N`
+    # (a constant `len(levels)+1` while origin<target is unreachable in 2 rounds, so it cancels
+    # in the candidate election) and a per-seed cost multiplier `min(1.0, DIVISOR/tokens)` (token
+    # count is a SEED property, ~equal across candidates on a seed → no candidate gradient; where
+    # it varied it penalized candidates that explored more). Re-introducing either scores every
+    # candidate subtly wrong with no error. Guard the SHIPPED formula: it must be invariant to
+    # rounds_to_N and to token count, and monotone in the two live deltas. (`rounds_to_N` stays
+    # COMPUTED for the inner narrative — this only asserts it doesn't reach the score.)
+    import json
+    from pathlib import Path
+
+    cfg = json.loads(Path("datasets/promptpotter-self/campaign.json").read_text(encoding="utf-8"))
+    score = compile_scorer(cfg["campaign_config"]["scoring"])
+
+    def _result(first: float, after_n: float, r2n: int, tok: int) -> dict[str, object]:
+        return {
+            "pipeline_data": {
+                "first_round_delta": first,
+                "after_N_rounds_delta": after_n,
+                "rounds_to_N": r2n,
+                "step_tokens": {"l1_critique": {"input": tok, "output": tok}},
+            }
+        }
+
+    base = score(_result(0.10, 0.20, 3, 50_000))
+    assert score(_result(0.10, 0.20, 99, 50_000)) == base  # rounds_to_N does not reach the score
+    assert score(_result(0.10, 0.20, 3, 5_000_000)) == base  # token count does not reach the score
+    assert score(_result(0.20, 0.20, 3, 50_000)) > base  # monotone in first_round_delta
+    assert score(_result(0.10, 0.30, 3, 50_000)) > base  # monotone in after_N_rounds_delta
+
+
 def _synth_2pl(
     theta: np.ndarray,
     delta: np.ndarray,
