@@ -1,14 +1,15 @@
 "use client";
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import dynamic from "next/dynamic";
-import { fetchCycleFile, type HardSamplesScope } from "@/lib/api";
+import { fetchCycleFile, L4_LAB_CAP, type HardSamplesScope } from "@/lib/api";
 import { postPauseCycle } from "@/lib/api/mutations";
 import { CycleStreamProvider } from "@/lib/poll";
 import { ConnectorProvider } from "@/lib/hooks/useConnector";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
+import { useAuth } from "@/lib/auth-context";
 import { useDatasetPreview } from "@/lib/hooks/useDatasetPreview";
-import { useChampionRegistry, hasL4Data } from "@/lib/hooks/useChampionRegistry";
+import { useChampionRegistry } from "@/lib/hooks/useChampionRegistry";
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { applyChartDefaults } from "@/lib/theme";
 import { cx } from "@/lib/cx";
@@ -160,11 +161,14 @@ function AppShellInner() {
     setSidebarMobileOpen(false);
   }
 
-  // L4 Lab gate — one-shot fetch of the champion registry. `hasL4Data` is true
-  // only when this tenant has pp-self cycles on disk, which no whitelabeled
-  // end-user can produce; that's what keeps the developer Lab off their surface.
-  const { registry: championRegistry } = useChampionRegistry();
-  const showLab = hasL4Data(championRegistry);
+  // L4 Lab gate — capability-driven. The dev-only Lab (tuning PromptPotter itself)
+  // shows iff this identity carries `L4_LAB_CAP`, surfaced on `/auth/me`; a
+  // whitelabeled end-user never holds it, so the tab stays off their surface even
+  // if data somehow existed. The registry fetch only fires when gated in (the route
+  // 404s without the capability), so no end-user ever hits it.
+  const { me } = useAuth();
+  const showLab = !!me?.capabilities?.includes(L4_LAB_CAP);
+  const { registry: championRegistry } = useChampionRegistry(showLab);
 
   // Single-ingress dashboard read, kept here only for the status-banner
   // derivation below. Every dashboard surface self-sources its own live state

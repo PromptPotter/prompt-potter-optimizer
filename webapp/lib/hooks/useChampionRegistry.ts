@@ -3,26 +3,23 @@
 // reduced fresh server-side from the tenant's on-disk pp-self cycles. One-shot
 // fetch (not the 2 s poll): the L4 Lab is a dev-only on-demand surface.
 //
-// `n_cycles_scanned === 0` is the whitelabel gate: a tenant with no pp-self
-// campaigns (every end-user) gets an empty registry, so the Lab tab stays hidden.
+// Visibility is gated by the `L4_LAB_CAP` capability off `/auth/me` (the dev-only
+// whitelabel gate), NOT by whether data exists — so a developer with zero pp-self
+// cycles still opens the Lab (to its empty state), and no end-user ever hits the
+// route. Pass `enabled=false` for a non-dev identity so the fetch never fires (the
+// route 404s without the capability anyway).
 
 import { useFetch } from "@/lib/hooks/useFetch";
 import { fetchChampionRegistry, type ChampionRegistryResponse } from "@/lib/api";
 
-export function useChampionRegistry(): {
+export function useChampionRegistry(enabled: boolean): {
   registry: ChampionRegistryResponse | null;
   loading: boolean;
   error: string | null;
 } {
   const { data, loading, error } = useFetch<ChampionRegistryResponse>(
-    (signal) => fetchChampionRegistry(signal),
-    [],
+    enabled ? (signal) => fetchChampionRegistry(signal) : null,
+    [enabled],
   );
   return { registry: data, loading, error };
-}
-
-// The whitelabel dev-gate: show the L4 Lab only when the tenant has pp-self
-// cycles on disk. End-users cannot mint pp-self, so this is always false for them.
-export function hasL4Data(registry: ChampionRegistryResponse | null): boolean {
-  return !!registry && registry.n_cycles_scanned > 0;
 }

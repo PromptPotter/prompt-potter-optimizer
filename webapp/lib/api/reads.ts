@@ -53,12 +53,20 @@ export interface MeResponse {
   provider: string | null;
   connected_accounts: ConnectedAccount[];
   available_providers: string[];
+  // RBAC permit set for this identity. Dev-only surfaces gate on membership —
+  // the L4 Lab tab shows iff `L4_LAB_CAP` is present. Empty for a normal user;
+  // the pinned developer carries the admin caps. The Lab routes enforce the same.
+  capabilities: string[];
   // Consent gate. `terms_version` is the live required version; the app blocks
   // behind the consent gate while `terms_accepted_version` (what this user last
   // accepted, null = never) differs from it.
   terms_version: string;
   terms_accepted_version: string | null;
 }
+
+// Capability that gates the dev-only L4 Lab — mirror of
+// `promptpotter.shared.identity.L4_LAB_CAP`. A normal end-user never carries it.
+export const L4_LAB_CAP = "l4.lab.access";
 export function fetchMe(signal?: AbortSignal): Promise<MeResponse> {
   return jget<MeResponse>(`${API}/auth/me`, signal);
 }

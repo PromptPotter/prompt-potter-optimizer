@@ -29,6 +29,15 @@ from promptpotter.domain.identity import Issuer, TenantId, UserId, safe_name
 # cached benchmarks to first-time signups.
 BENCHMARKS_READ_CAP = "datasets.benchmarks.read"
 
+# Capability gate for the L4 Lab — the developer surface for tuning
+# PromptPotter itself (champion table, resource matrix, outer verdict). The
+# product is whitelabeled: end-users optimize THEIR pipelines but never tune
+# the optimizer, so the Lab is dev-only. Granted to the SAME single admin
+# principal as ``BENCHMARKS_READ_CAP`` (``PROMPTPOTTER_ADMIN=1`` on the Stage-0
+# box; the pinned registered developer at the OIDC seam). The two Lab read
+# routes enforce it; ``/auth/me`` surfaces it so the webapp gates the tab.
+L4_LAB_CAP = "l4.lab.access"
+
 PROMPTPOTTER_ADMIN_ENV = "PROMPTPOTTER_ADMIN"
 
 
@@ -53,7 +62,7 @@ def _admin_caps_from_env() -> frozenset[str]:
     registered-developer identity (`oidc.py`, per ADR-0004 secure-by-default).
     """
     if os.environ.get(PROMPTPOTTER_ADMIN_ENV, "").strip() == "1":
-        return frozenset({BENCHMARKS_READ_CAP})
+        return frozenset({BENCHMARKS_READ_CAP, L4_LAB_CAP})
     return frozenset()
 
 
@@ -64,7 +73,8 @@ def default_identity(tenant_id: str = "default", user_id: str = "default") -> Id
     operator (one who has signed in once, recorded in the default-claim marker)
     passes ``user_id == tenant_id == their uid`` so a terminal run lands in the
     same single workspace the authenticated web reads (one tenant per operator).
-    ``PROMPTPOTTER_ADMIN=1`` augments capabilities with :data:`BENCHMARKS_READ_CAP`.
+    ``PROMPTPOTTER_ADMIN=1`` augments capabilities with :data:`BENCHMARKS_READ_CAP`
+    and :data:`L4_LAB_CAP`.
     Stage 1 (M12 OIDC client) replaces this factory at the resolver seam
     (`presentation/api/deps.py::resolve_identity`); no other call site changes.
     """
@@ -85,6 +95,7 @@ def claim_email(identity: IdentityContext) -> str | None:
 
 __all__ = [
     "BENCHMARKS_READ_CAP",
+    "L4_LAB_CAP",
     "PROMPTPOTTER_ADMIN_ENV",
     "IdentityContext",
     "claim_email",

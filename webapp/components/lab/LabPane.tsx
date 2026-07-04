@@ -1,12 +1,13 @@
 "use client";
 // L4 Lab — the developer surface for tuning the Potter's own meta-prompts.
 // NOT part of the whitelabeled end-user product: end-users use the optimizer;
-// they never tune it. The Lab produces the champion `_optimizer_meta/prompts.json`
-// that every user then consumes silently. Shown only when the tenant has pp-self
-// cycles on disk (AppShell's `hasL4Data` gate).
+// they never tune it. The Lab elects a champion meta-prompt state; `champion apply`
+// graduates it into the distributable `_optimizer/pipeline.json` that every user
+// then consumes silently. Shown only to a dev identity holding `L4_LAB_CAP`
+// (AppShell's capability gate, off `/auth/me`).
 //
-// Slice 1 mounts the Champion Console; the Capability Matrix (resource cells) and
-// the Outer Verdict forest plot land alongside it in later L4 slices.
+// Three panels: the Capability Matrix (operator-set model×dataset cells), the Outer
+// Verdict forest plot (per-round blocked-paired read), and the Champion Console.
 
 import type { ChampionRegistryResponse } from "@/lib/api";
 import { ChampionConsole } from "@/components/lab/ChampionConsole";

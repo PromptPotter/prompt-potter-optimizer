@@ -25,6 +25,7 @@ from promptpotter.infrastructure.store.paths import REPO_ROOT, session_index
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
+from promptpotter.shared.identity import L4_LAB_CAP
 
 
 class CampaignSummary(BaseModel):
@@ -399,12 +400,23 @@ def get_campaign_config_map(store: StoreDep, campaign_id: str) -> ConfigMapRespo
     return ConfigMapResponse(groups=groups, couplings=couplings, active_count=len(active))
 
 
+def _require_l4_lab(store: Stores) -> None:
+    """Gate the L4 Lab routes on :data:`L4_LAB_CAP`. Without it, 404 (not 403) —
+    the whole Lab surface is invisible to a non-developer identity, matching the
+    existence-hiding convention the cross-user reads use. The webapp reads the same
+    capability off ``/auth/me`` and never renders the tab, so a 404 here is pure
+    defense-in-depth against a direct hit, never a path the UI walks into."""
+    if L4_LAB_CAP not in store.identity.capabilities:
+        raise NotFoundError("Not found", code="not_found")
+
+
 @campaigns_router.get("/champion-registry", response_model=ChampionRegistry)
 def get_champion_registry(store: StoreDep) -> ChampionRegistry:
     """The L4 champion table — every candidate meta-prompt state on disk, ranked by
     anchor-to-origin effect. Reduced fresh from the tenant's pp-self cycles on each
-    fetch (dev on-demand surface, not the 2 s poll); zero LLM. Empty for tenants with
-    no pp-self campaigns (i.e. every whitelabeled end-user)."""
+    fetch (dev on-demand surface, not the 2 s poll); zero LLM. Dev-only —
+    :data:`L4_LAB_CAP`-gated (404 without it); empty for a dev with no pp-self cycles."""
+    _require_l4_lab(store)
     return reduce_corpus(store.base_dir)
 
 
@@ -412,7 +424,9 @@ def get_champion_registry(store: StoreDep) -> ChampionRegistry:
 def get_resource_matrix(store: StoreDep) -> ResourceMatrix:
     """The L4 resource matrix — the (target-model × dataset) capability grid the
     operator built with ``matrix measure``. Read-only from the committed pp-self
-    ``resource_matrix.json``; empty when it has never been measured."""
+    ``resource_matrix.json``. Dev-only — :data:`L4_LAB_CAP`-gated (404 without it);
+    empty when it has never been measured."""
+    _require_l4_lab(store)
     pp_self_dir = resolve_dataset_config_dir(store, REPO_ROOT, "promptpotter-self")
     matrix = read_matrix(pp_self_dir)
     return matrix or ResourceMatrix(generated_at="", cells=[])

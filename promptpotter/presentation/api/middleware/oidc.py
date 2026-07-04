@@ -21,7 +21,7 @@ from fastapi import FastAPI, Request, Response
 from promptpotter.domain.identity import Issuer, TenantId, UserId
 from promptpotter.infrastructure.identity.bundle import IdentityBundle
 from promptpotter.infrastructure.identity.migration import registered_user_id
-from promptpotter.shared.identity import BENCHMARKS_READ_CAP, IdentityContext
+from promptpotter.shared.identity import BENCHMARKS_READ_CAP, L4_LAB_CAP, IdentityContext
 
 logger = logging.getLogger(__name__)
 
@@ -31,16 +31,17 @@ SESSION_COOKIE_NAME = "promptpotter_session"
 def _session_capabilities(user_id: str, bundle: IdentityBundle) -> frozenset[str]:
     """Capabilities for an authenticated web identity — pinned, never blanket.
 
-    ``BENCHMARKS_READ_CAP`` (repo-root install benchmarks) is granted ONLY to the
-    one pinned operator: the registered developer recorded in the default-claim
-    marker. This is the web analogue of ADR-0004's chat-id lock — admin is a
-    specific identity, not a process-wide switch. A first-time signup's
-    ``user_id`` never matches the marker, so benchmarks never bleed through; a
-    fresh box with no marker has no admin at all (secure-by-default).
+    ``BENCHMARKS_READ_CAP`` (repo-root install benchmarks) + ``L4_LAB_CAP`` (the
+    dev-only L4 Lab) are granted ONLY to the one pinned operator: the registered
+    developer recorded in the default-claim marker. This is the web analogue of
+    ADR-0004's chat-id lock — admin is a specific identity, not a process-wide
+    switch. A first-time signup's ``user_id`` never matches the marker, so neither
+    the benchmarks nor the Lab bleed through; a fresh box with no marker has no
+    admin at all (secure-by-default).
     """
     admin_uid = registered_user_id(bundle.paths.default_claim_marker)
     if admin_uid is not None and user_id == admin_uid:
-        return frozenset({BENCHMARKS_READ_CAP})
+        return frozenset({BENCHMARKS_READ_CAP, L4_LAB_CAP})
     return frozenset()
 
 
