@@ -120,23 +120,24 @@ class EliminationMechanisms(BaseModel):
     deterministic_dominance: bool = Field(
         True,
         description=(
-            "Abort a candidate when its best POSSIBLE final hit count (current hits "
-            "+ remaining budget) is already below the incumbent's — it cannot "
-            "mathematically catch up. Fires before the ε math."
+            "Arms the paired-margin gate (folded with `equivalence_elimination` — "
+            "either toggle keeps it on): abort a candidate once it cannot, or "
+            "probably cannot, net `improvement_threshold` more hits than the seed. "
+            "The deterministic corner — remaining win opportunities < the net still "
+            "needed — fires under any ε."
         ),
     )
     equivalence_elimination: bool = Field(
         True,
         description=(
-            "Practical-equivalence (futility) stop: abort a candidate once it is "
-            "improbable (< `pobb_epsilon`, at the candidate's OWN observed hit rate) "
-            "that it will clear the round's ADOPTION bar — the seed's hits plus "
-            "`improvement_threshold`. Kills 'moderately the same' candidates that a "
-            "loser-only gate lets ride to the full budget: a tie can never be adopted, "
-            "so confirming it on the whole panel is wasted spend. The probabilistic "
-            "sibling of `deterministic_dominance` (same paired-hit arithmetic on the "
-            "shared sample universe, observed rate instead of the optimistic rate=1 "
-            "corner, adoption bar instead of the bare seed)."
+            "Arms the paired-margin gate (folded with `deterministic_dominance` — "
+            "either toggle keeps it on): abort a candidate once P(netting "
+            "`improvement_threshold` more hits than the seed) < `pobb_epsilon`, "
+            "where wins are counted ONLY on samples the seed missed (stratified — "
+            "a front-loaded block of seed-hit ties can't inflate the estimate). "
+            "Kills ties and regressors early: a candidate that can't clear the "
+            "adoption margin can never be crowned, so confirming it on the whole "
+            "panel is wasted spend."
         ),
     )
     degradation_fatal_fastpath: bool = Field(

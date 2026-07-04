@@ -79,7 +79,7 @@ The single decision recorded per L2 fire is `PROBE_ROUND_COMMITMENT` — outcome
 
 ## Wound 4 — L2 self-healing via L3
 
-`run_l2_output_validators` (`validators/l2_output.py`) runs `L2_TASK_CONTEXT_STALE_REPEAT` against the proposed/applied task_context pair. Layout HARD failures from `validate_l1_layout` are appended to the same `l2_guard_breaches` list. When the list is non-empty after `_apply_l2`, the escalation driver force-triggers L3 to heal — L2's own thrashing is observable to L3 via the `l2_guard_breaches` injection on its next fire.
+`run_l2_output_validators` (`validators/l2_output.py`) runs `L2_TASK_CONTEXT_STALE_REPEAT` against the proposed/applied task_context pair. Layout HARD failures from `validate_l1_layout` are appended to the same `l2_guard_breaches` list. When the list holds any non-soft-reject breach after `_apply_l2`, the escalation driver force-triggers L3 to heal — but a list that is *all* soft-reject (`_L2_SOFT_REJECT_VALIDATOR_IDS`: stale-repeat / dangling-trigger — self-correcting, already discarded) skips the force-trigger. L2's own thrashing is observable to L3 via the `l2_guard_breaches` injection on its next fire.
 
 ## File-line anchors
 

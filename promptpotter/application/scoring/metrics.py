@@ -427,8 +427,8 @@ def elect_round_winner(
 
 def binom_sf(n: int, k: int, p: float) -> float:
     """``P(X >= k)`` for ``X ~ Binomial(n, p)`` — exact survival, ``n`` small (≤ the
-    per-round sample budget). Shared by the live practical-equivalence gate
-    (``PoBBCheck._equivalence_check``) and its resume replayer so both re-derive the
+    per-round sample budget). Shared by the live paired-margin gate
+    (``PoBBCheck._margin_stats``) and its resume replayer so both re-derive the
     futility cut bit-for-bit (the same live/replay-determinism contract that keeps
     ``elimination_p_best`` closed-form).
     """

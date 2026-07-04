@@ -121,17 +121,24 @@ def individual_summary_from_dict(
             f"{GREEN}✓ leader locked q{eq}/{eqt}{RESET}  "
             f"p_best={float(elim.get('p_best', 0.0)):.1%} (of {n_priors} prior{prior_s})"
         )
-    elif scores.get("elimination_stopped") and elim.get("gate") == "equivalence":
+    elif scores.get("elimination_stopped") and elim.get("gate") == "margin":
         eq = int(elim.get("queries_scored", 0))
         eqt = int(elim.get("total_queries", 0))
         leader_label = elim.get("leader_label") or (elim.get("leader_id", "?") or "?")[:8]
-        p_clear_pct = float(elim.get("p_clear", 0.0))
-        eps_pct = float(elim.get("epsilon", POBB_DEFAULT_EPSILON))
-        adoption_bar = int(elim.get("adoption_bar", 0))
+        wins = int(elim.get("wins", 0))
+        losses = int(elim.get("losses", 0))
+        net = int(elim.get("net", 0))
+        need = int(elim.get("need", 0))
+        opportunities = int(elim.get("opportunities_left", 0))
+        pair_str = f"net={net:+d} ({wins}W/{losses}L)"
+        if need > opportunities:
+            verdict = f"{opportunities} win-chances left < need {need} — impossible"
+        else:
+            p_clear_pct = float(elim.get("p_clear", 0.0))
+            eps_pct = float(elim.get("epsilon", POBB_DEFAULT_EPSILON))
+            verdict = f"P(net +{int(elim.get('margin', 0))})={p_clear_pct:.1%} < eps={eps_pct:.0%}"
         detail_lines.append(
-            f"{YELLOW}✂ equivalence-cut q{eq}/{eqt}{RESET}  "
-            f"P(clear {adoption_bar}-hit bar)={p_clear_pct:.1%} < eps={eps_pct:.0%}  "
-            f"can't beat {leader_label}"
+            f"{YELLOW}✂ margin-cut q{eq}/{eqt}{RESET}  {pair_str}  {verdict}  vs {leader_label}"
         )
     elif scores.get("elimination_stopped") and elim:
         eq = int(elim.get("queries_scored", 0))

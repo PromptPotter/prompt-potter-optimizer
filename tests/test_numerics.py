@@ -1550,15 +1550,18 @@ def test_pobb_check_gates_elimination_on_posterior():
     assert cr["epsilon"] == pytest.approx(0.05)
 
 
-def test_pobb_dominance_aborts_when_catch_up_impossible():
-    """Arithmetic abort: cand_max_hits < seed_hits ⇒ eliminate before the posterior runs."""
+def test_pobb_margin_cuts_regressor_when_catch_up_impossible():
+    """Deterministic corner of the paired-margin gate: banked losses exceed the
+    win opportunities left ⇒ eliminate with p_clear == 0 (binom_sf's k > n arm)."""
     check = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_samples=20, delta_scale={})
-    seed_scores = [1.0] * 10 + [0.0] * 10
+    seed_scores = [1.0] * 10 + [0.0] * 10  # ids 0-9 seed-hit, 10-19 seed-miss
     check.register_completed(
         _measurements(seed_scores, sample_ids=list(range(20))), candidate_id="origin", sp=_DUMMY_SP
     )
     check.set_sample_universe(list(range(20)))
     check.set_current("doomed")
+    # 11 straight misses: 10 losses on the seed-hit stratum + 1 unwon seed-miss.
+    # need = 0 - (0 - 10) = 10 > 9 opportunities left ⇒ impossible to net even.
     sig = check.check(
         _measurements([0.0] * 11, sample_ids=list(range(11))),
         candidate_idx=1,
@@ -1568,58 +1571,89 @@ def test_pobb_dominance_aborts_when_catch_up_impossible():
     assert sig.check_name == "elimination"
     cr = sig.check_result
     assert cr["leader_id"] == "origin"
-    dom = cr["dominance"]
-    assert dom["cand_hits"] == 0
-    assert dom["cand_max_hits"] == 9
-    assert dom["seed_total_hits"] == 10
-    assert dom["budget"] == 20
+    assert cr["gate"] == "margin"
+    m = cr["margin"]
+    assert m["wins"] == 0
+    assert m["losses"] == 10
+    assert m["need"] == 10
+    assert m["opportunities"] == 9
+    assert m["p_clear"] == 0.0
+    assert m["deterministic"] == 1.0
 
 
-def test_pobb_equivalence_cuts_below_adoption_bar_keeps_contender():
-    """Practical-equivalence futility: a candidate improbable to clear the adoption bar
-    (seed hits + ceil(improvement_threshold·budget)) is cut early; a clear winner is not.
+def test_pobb_margin_cuts_tie_at_exhaustion_and_futility_keeps_contender():
+    """Paired-margin futility on the C1.1 class: a candidate that mirrors the seed
+    banks only ties, so its win rate is estimated on the seed-MISS stratum alone —
+    a front-loaded block of seed-hit ties can no longer inflate the extrapolation.
 
     Silent harm guarded: a wrong early cut drops a candidate that could win (wrong
     round winner, no error), or a missed cut wastes the full panel confirming a tie."""
-    cfg = PoBBConfig(n_min=4, epsilon=0.05, improvement_threshold=0.02)  # margin=ceil(.48)=1
+    cfg = PoBBConfig(n_min=6, epsilon=0.05, improvement_threshold=0.02)  # margin=ceil(.48)=1
     ids = list(range(24))
-    # Seed: 12/24 hits ⇒ adoption bar = 12 + 1 = 13.
-    seed_scores = [1.0] * 12 + [0.0] * 12
+    # Seed: ids 0-8 hit (9), ids 9-23 miss (15) — the live justlogic C1.1 shape.
+    seed_scores = [1.0] * 9 + [0.0] * 15
+    miss_ids = list(range(9, 24))
 
-    loser = PoBBCheck(cfg, n_samples=24, delta_scale={})
-    loser.register_completed(
-        _measurements(seed_scores, sample_ids=ids), candidate_id="origin", sp=_DUMMY_SP
+    def _tie_check() -> PoBBCheck:
+        c = PoBBCheck(cfg, n_samples=24, delta_scale={})
+        c.register_completed(
+            _measurements(seed_scores, sample_ids=ids), candidate_id="origin", sp=_DUMMY_SP
+        )
+        c.set_sample_universe(ids)
+        c.set_current("tie")
+        return c
+
+    # Seed-miss samples first (the shared-order shape), all unwon. At 14 misses one
+    # opportunity remains: p_clear = p_w = 1/16 = 0.0625 ≥ ε=0.05 → still alive.
+    alive = _tie_check().check(
+        _measurements([0.0] * 14, sample_ids=miss_ids[:14]), candidate_idx=1, n_total_candidates=3
     )
-    loser.set_sample_universe(ids)
-    loser.set_current("stuck")
-    sig = loser.check(
-        _measurements([0.0] * 8, sample_ids=list(range(8))), candidate_idx=1, n_total_candidates=3
+    assert alive is None
+    # At 15 misses every win opportunity is spent: need 1 > 0 left ⇒ deterministic kill.
+    sig = _tie_check().check(
+        _measurements([0.0] * 15, sample_ids=miss_ids), candidate_idx=1, n_total_candidates=3
     )
     assert sig is not None
     cr = sig.check_result
-    assert cr["gate"] == "equivalence"
-    assert cr["equivalence"]["adoption_bar"] == 13
-    assert cr["equivalence"]["p_clear"] < 0.05
+    assert cr["gate"] == "margin"
+    m = cr["margin"]
+    assert (m["wins"], m["losses"], m["net"], m["need"]) == (0, 0, 0, 1)
+    assert m["opportunities"] == 0
+    assert m["p_clear"] == 0.0
+    assert m["deterministic"] == 1.0
 
-    winner = PoBBCheck(cfg, n_samples=24, delta_scale={})
-    winner.register_completed(
+    # ε=0.15 (the code default posture) kills the same tie earlier — at 13 unwon
+    # misses, p_clear = 1 - (14/15)² ≈ 0.129 < 0.15.
+    cfg_hot = PoBBConfig(n_min=6, epsilon=0.15, improvement_threshold=0.02)
+    hot = PoBBCheck(cfg_hot, n_samples=24, delta_scale={})
+    hot.register_completed(
         _measurements(seed_scores, sample_ids=ids), candidate_id="origin", sp=_DUMMY_SP
     )
-    winner.set_sample_universe(ids)
+    hot.set_sample_universe(ids)
+    hot.set_current("tie")
+    sig_hot = hot.check(
+        _measurements([0.0] * 13, sample_ids=miss_ids[:13]), candidate_idx=1, n_total_candidates=3
+    )
+    assert sig_hot is not None
+    assert sig_hot.check_result["margin"]["p_clear"] == pytest.approx(1 - (14 / 15) ** 2)
+
+    # A live candidate — one win on the miss stratum nets the margin (need ≤ 0):
+    # the futility gate must NOT fire at any prefix.
+    winner = _tie_check()
     winner.set_current("rising")
-    # 8/8 hits so far — can plainly still clear the bar; the futility gate must NOT fire.
+    win_scores = [1.0] + [0.0] * 12
     assert (
         winner.check(
-            _measurements([1.0] * 8, sample_ids=list(range(8))),
+            _measurements(win_scores, sample_ids=miss_ids[:13]),
             candidate_idx=1,
             n_total_candidates=3,
         )
         is None
     )
 
-    # Target-unreachable regime (L4 outer): the seed itself never hits, so the hit
-    # vector is near-degenerate and the real signal is composite fitness. A raw p=0
-    # point rate would cut EVERY 0-hit candidate; the Laplace-smoothed rate self-disables.
+    # Target-unreachable regime (L4 outer): the seed itself never hits, so every
+    # sample is a win opportunity and the Laplace-smoothed stratum rate self-disables
+    # the gate (a raw p=0 point rate would cut EVERY 0-hit candidate).
     dead = PoBBCheck(cfg, n_samples=24, delta_scale={})
     dead.register_completed(
         _measurements([0.0] * 24, sample_ids=ids), candidate_id="origin", sp=_DUMMY_SP
@@ -1634,6 +1668,49 @@ def test_pobb_equivalence_cuts_below_adoption_bar_keeps_contender():
         )
         is None
     )
+
+
+def test_pobb_margin_gate_is_order_agnostic():
+    """The gate is a pure function of the outcome MULTISET + seed map — any
+    permutation of the same measured set yields the identical verdict and stats.
+    This is the structural guarantee that scoring order can never re-create the
+    easy-prefix blindness the raw-rate gate had."""
+    cfg = PoBBConfig(n_min=6, epsilon=0.05, improvement_threshold=0.02)
+    ids = list(range(24))
+    seed_scores = [1.0] * 9 + [0.0] * 15
+
+    # Fixed measured set: 12 unwon seed-misses + 3 held seed-hits (survives), and
+    # the full 15-miss + 3-hit set (kills), each under several permutations.
+    survive_set = [(sid, 0.0) for sid in range(9, 21)] + [(sid, 1.0) for sid in range(0, 3)]
+    kill_set = [(sid, 0.0) for sid in range(9, 24)] + [(sid, 1.0) for sid in range(0, 3)]
+
+    def _verdict(measured: list[tuple[int, float]]) -> tuple[bool, tuple]:
+        c = PoBBCheck(cfg, n_samples=24, delta_scale={})
+        c.register_completed(
+            _measurements(seed_scores, sample_ids=ids), candidate_id="origin", sp=_DUMMY_SP
+        )
+        c.set_sample_universe(ids)
+        c.set_current("perm")
+        sig = c.check(
+            _measurements([s for _, s in measured], sample_ids=[sid for sid, _ in measured]),
+            candidate_idx=1,
+            n_total_candidates=2,
+        )
+        if sig is None or sig.check_result.get("gate") != "margin":
+            return False, ()
+        m = sig.check_result["margin"]
+        return True, (m["wins"], m["losses"], m["net"], m["opportunities"], m["p_clear"])
+
+    import random
+
+    rng = random.Random(7)
+    for base, expect_kill in ((survive_set, False), (kill_set, True)):
+        baseline = _verdict(base)
+        assert baseline[0] is expect_kill
+        for _ in range(4):
+            shuffled = list(base)
+            rng.shuffle(shuffled)
+            assert _verdict(shuffled) == baseline
 
 
 def test_pobb_locks_in_dominant_leader():
@@ -1768,6 +1845,18 @@ def test_leader_eligibility_excludes_fatal_degradation_and_pobb_loss():
         elimination_stopped=True,
         elimination_context={"p_best": 0.048, "epsilon": 0.05, "leader_locked": False},
     )
+    # Margin cut carries p_best: 0.0 by contract — the eligibility read must bar it.
+    margin_cut = _cs(
+        candidate_id="C1.5",
+        accuracy=0.375,
+        elimination_stopped=True,
+        elimination_context={
+            "p_best": 0.0,
+            "epsilon": 0.05,
+            "leader_locked": False,
+            "gate": "margin",
+        },
+    )
     leader_locked = _cs(
         candidate_id="C1.1",
         accuracy=0.55,
@@ -1778,6 +1867,7 @@ def test_leader_eligibility_excludes_fatal_degradation_and_pobb_loss():
 
     assert not is_leader_eligible(fatal)
     assert not is_leader_eligible(pobb_loss)
+    assert not is_leader_eligible(margin_cut)
     assert is_leader_eligible(leader_locked)
     assert is_leader_eligible(clean_loser)
 

@@ -52,13 +52,20 @@ class EliminationContext(TypedDict, total=False):
     n_priors: int
     leader_locked: bool
     leader_label: str
-    # Set only on a practical-equivalence (futility) cut: which gate fired
-    # (``"equivalence"``), the probability the candidate would clear the round's
-    # adoption bar, and that bar in hits. The renderer branches on ``gate`` so an
-    # equivalence cut reads as "can't clear the adoption bar", not "p_best < ε".
+    # Set only on a paired-margin (futility) cut: which gate fired (``"margin"``),
+    # the discordant-pair tallies vs the seed (wins = cand hit where seed missed,
+    # losses = cand miss where seed hit), the net still needed to clear the
+    # adoption margin, the win opportunities left, and the probability of clearing.
+    # The renderer branches on ``gate`` so a margin cut reads as "can't net the
+    # margin against the seed", not "p_best < ε".
     gate: str
     p_clear: float
-    adoption_bar: int
+    wins: int
+    losses: int
+    net: int
+    margin: int
+    need: int
+    opportunities_left: int
 
 
 class DegradationContext(TypedDict, total=False):

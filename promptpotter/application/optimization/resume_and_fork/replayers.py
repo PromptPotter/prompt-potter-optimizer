@@ -233,22 +233,25 @@ def _replay_elimination_cut(
     return float(snapshot[candidate_id]) < float(inputs_ref["epsilon"])
 
 
-def _replay_equivalence_cut(
+def _replay_margin_cut(
     ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
 ) -> bool:
-    """Practical-equivalence futility re-derived from the RECORDED seed hits + the
-    RESCORED candidate hits (binomial futility vs the adoption bar; deterministic).
+    """Paired-margin futility re-derived from the RECORDED seed strata + the
+    RESCORED candidate hits (stratified binomial vs the adoption margin;
+    deterministic).
 
-    Mirrors ``PoBBCheck._equivalence_check``: seed_total_hits / adoption_bar / budget
-    were fixed at decision time (the seed had completed its full run) and ride
-    ``inputs_ref.equivalence``; only the candidate's hits move under a new scorer. Uses
-    the SAME ``binom_sf`` the live gate did so the cut re-derives bit-for-bit."""
-    eq = inputs_ref.get("equivalence") or {}
-    budget = int(eq.get("budget", 0))
-    adoption_bar = int(eq.get("adoption_bar", 0))
+    Mirrors ``PoBBCheck._margin_stats``: the seed's hit/miss strata, the universe,
+    margin and budget were fixed at decision time and ride ``inputs_ref.margin``;
+    only the candidate's hits move under a new scorer. Uses the SAME ``binom_sf``
+    the live gate did so the cut re-derives bit-for-bit."""
+    m = inputs_ref.get("margin") or {}
+    margin = int(m.get("margin", 0))
     epsilon = float(inputs_ref.get("epsilon", 0.0))
+    seed_hit_set = {str(s) for s in (m.get("seed_hit_ids") or [])}
+    seed_miss_set = {str(s) for s in (m.get("seed_miss_ids") or [])}
+    universe_ids = [str(s) for s in (m.get("universe_ids") or [])]
     candidate_sample_ids = [str(s) for s in (data.get("candidate_sample_ids") or [])]
-    if budget <= 0 or not candidate_sample_ids:
+    if not universe_ids or not candidate_sample_ids:
         return False
     candidate_id = str(inputs_ref.get("candidate_id", ""))
     all_results: dict[str, list[dict[str, Any]]] = ctx.round_data.get("all_candidate_results") or {}
@@ -259,14 +262,20 @@ def _replay_equivalence_cut(
     }
     if not all(sid in cur_by_sample for sid in candidate_sample_ids):
         return False
-    k = len(candidate_sample_ids)
-    cand_hits = sum(1 for sid in candidate_sample_ids if cur_by_sample[sid])
-    remaining = budget - k
-    need = adoption_bar - cand_hits
-    if remaining <= 0 or need <= 0:
+    attempted = set(candidate_sample_ids)
+    wins = sum(1 for sid in candidate_sample_ids if sid in seed_miss_set and cur_by_sample[sid])
+    losses = sum(
+        1 for sid in candidate_sample_ids if sid in seed_hit_set and not cur_by_sample[sid]
+    )
+    measured_miss = sum(1 for sid in candidate_sample_ids if sid in seed_miss_set)
+    need = margin - (wins - losses)
+    if need <= 0:
         return False
-    # Laplace-smoothed rate — MUST match PoBBCheck._equivalence_check exactly.
-    return binom_sf(remaining, need, (cand_hits + 1) / (k + 2)) < epsilon
+    opportunities = sum(
+        1 for sid in universe_ids if sid not in attempted and sid not in seed_hit_set
+    )
+    # Laplace-smoothed stratum win rate — MUST match PoBBCheck._margin_stats exactly.
+    return binom_sf(opportunities, need, (wins + 1) / (measured_miss + 2)) < epsilon
 
 
 def _replay_leader_lock_in(
@@ -410,7 +419,7 @@ _replay_l3_trigger = _replay_layer_trigger("l3_patience")
 REPLAYERS: dict[ResumeCheckpointKind, Replayer] = {
     ResumeCheckpointKind.ROUND_WINNER: _replay_round_winner,
     ResumeCheckpointKind.ELIMINATION_CUT: _replay_elimination_cut,
-    ResumeCheckpointKind.EQUIVALENCE_CUT: _replay_equivalence_cut,
+    ResumeCheckpointKind.MARGIN_CUT: _replay_margin_cut,
     ResumeCheckpointKind.LEADER_LOCK_IN: _replay_leader_lock_in,
     ResumeCheckpointKind.L2_ESCALATION_TRIGGER: _replay_l2_trigger,
     ResumeCheckpointKind.L3_ESCALATION_TRIGGER: _replay_l3_trigger,

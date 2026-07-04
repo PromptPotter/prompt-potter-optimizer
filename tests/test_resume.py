@@ -121,6 +121,58 @@ def test_elimination_cut_replay_flags_divergence_when_scores_flip() -> None:
     assert div.recorded_outcome is True and div.current_outcome is False
 
 
+def test_margin_cut_replay_rederives_and_flags_flip() -> None:
+    """A recorded paired-margin cut re-derives bit-for-bit from the recorded seed
+    strata + the RESCORED candidate hits; a scorer change that flips one candidate
+    hit into a win flips the verdict and flags divergence. Silent harm guarded: a
+    resumed run silently keeping (or re-killing) a candidate the current scorer
+    would judge differently."""
+
+    def _m(sid: int, hit: bool) -> dict:
+        return {**_r(1.0 if hit else 0.0), "sample_id": sid, "hit": hit}
+
+    def _round_data(candidate_results: list[dict]) -> dict:
+        return {
+            "round": 1,
+            "all_candidate_results": {"c2": candidate_results},
+            "decisions": [
+                {
+                    "kind": "margin_cut",
+                    "inputs_ref": {
+                        "candidate_id": "c2",
+                        "queries_scored": 5,
+                        "epsilon": 0.05,
+                        "n_min": 4,
+                        "round_num": 1,
+                        "gate": "margin",
+                        "margin": {
+                            "margin": 1,
+                            "budget": 8,
+                            "seed_hit_ids": ["0", "1", "2"],
+                            "seed_miss_ids": ["3", "4", "5", "6", "7"],
+                            "universe_ids": [str(i) for i in range(8)],
+                        },
+                    },
+                    "outcome": True,
+                    "data": {"candidate_sample_ids": ["3", "4", "5", "6", "7"]},
+                }
+            ],
+        }
+
+    # Unchanged scorer: every seed-miss attempted and unwon → need 1 > 0 left,
+    # the deterministic corner re-derives the cut → no divergence.
+    unchanged = _round_data([_m(i, False) for i in range(3, 8)])
+    assert replay_decisions(unchanged) is None
+
+    # Rescore flips sample 3 into a win → net clears the margin → cut no longer
+    # re-derives → divergence.
+    flipped = _round_data([_m(3, True)] + [_m(i, False) for i in range(4, 8)])
+    div = replay_decisions(flipped)
+    assert div is not None
+    assert div.kind == "margin_cut"
+    assert div.recorded_outcome is True and div.current_outcome is False
+
+
 def test_stall_replay_uses_theta_not_composite_under_warm_ruler() -> None:
     """A warm δ ruler makes the L2/L3-trigger replay derive stall on difficulty-adjusted θ —
     the same comparator the live ``EscalationFSM`` used — instead of subset-relative composite.

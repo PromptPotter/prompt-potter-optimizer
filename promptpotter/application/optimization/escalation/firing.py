@@ -38,7 +38,11 @@ from promptpotter.application.optimization.resume_and_fork import (
     ResumeCheckpointKind,
     record_decision,
 )
-from promptpotter.application.optimization.validators.l2_output import run_l2_output_validators
+from promptpotter.application.optimization.validators.l2_output import (
+    L2_SITUATIONAL_EXAMPLE_DANGLING_TRIGGER,
+    L2_TASK_CONTEXT_STALE_REPEAT,
+    run_l2_output_validators,
+)
 from promptpotter.application.optimization.validators.l3_output import run_l3_output_validators
 from promptpotter.domain.l1_layout import (
     NODE_LAYOUTS,
@@ -66,6 +70,21 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
 logger = logging.getLogger(__name__)
+
+
+# L2-output validator breaches whose remedy is ALREADY applied by the validator itself
+# (the malformed output is discarded/dropped before it can reach L1), so a SOLE breach of
+# this kind is self-correcting and must NOT force-trigger an L3 strategic replan — forcing
+# L3 on an inert output just layers escalations (the fork_f13331ff cascade: L3 short plan →
+# L1 malformed plan → empty L1). Breaches OUTSIDE this set (e.g. l2_duplicate_insert — the
+# genuine exhausted-refinement-surface signal) still force L3. Kept next to the consumer that
+# reads it; built from the validator ``.id`` attributes so a mistyped id fails loud at import.
+_L2_SOFT_REJECT_VALIDATOR_IDS: frozenset[str] = frozenset(
+    {
+        L2_TASK_CONTEXT_STALE_REPEAT.id,  # no-op / paraphrase merge — prior framing kept
+        L2_SITUATIONAL_EXAMPLE_DANGLING_TRIGGER.id,  # example dropped by renderer (layer_state.py) — inert
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -604,13 +623,12 @@ async def escalate_l2(
         )
         # Wound 4: post-L2 validator failure → L3 force-trigger. Deterministic from L2 output,
         # so resume reproduces without a separate decision record.
-        # Exception: a SOLE soft-reject (stale task_context repeat — already discarded by the
-        # validator) skips L3. The fork_f13331ff cascade — L3 short plan → L1 malformed plan →
-        # empty L1 — showed firing L3 on a single soft-reject layers escalations instead of
-        # letting the loop self-correct.
+        # Exception: when EVERY breach is a soft-reject (self-correcting — the validator already
+        # discarded the output: a stale task_context repeat kept the prior framing; a dangling
+        # situational example was dropped by the renderer), L3 is skipped. See
+        # _L2_SOFT_REJECT_VALIDATOR_IDS — forcing L3 on an inert breach only layers escalations.
         breaches = cycle.opt_sp.memory.wounds.l2_guard_breaches
-        SOFT_REJECT_IDS = {"l2_task_context_stale_repeat"}
-        if breaches and not all(b.validator_id in SOFT_REJECT_IDS for b in breaches):
+        if breaches and not all(b.validator_id in _L2_SOFT_REJECT_VALIDATOR_IDS for b in breaches):
             logger.warning(
                 "L3 force-triggered by %d L2-output validator failure(s) at round %d",
                 len(breaches),
