@@ -17,6 +17,7 @@ import {
   type HardSamplesScope,
   type MeasurementDot,
 } from "../api";
+import { encodeCyclePath, encodeDescend, pathRoot, type CyclePath } from "../ids";
 
 interface ScopeSlice {
   items: DatasetItem[];
@@ -89,13 +90,19 @@ function sliceFrom(
 }
 
 export function useDatasetPreview(
-  campaignId: string | null,
-  cycleId: string | null,
+  path: CyclePath | null,
   datasetName: string | null,
   scope: HardSamplesScope,
 ): DatasetPreviewState {
-  // \x1f (unit separator) can't collide with id characters.
-  const unitKey = campaignId && cycleId ? `${campaignId}\x1f${cycleId}` : null;
+  // The scope artifact follows the VIEWED LEAF: the request addresses the ROOT
+  // hop + a `descend` tail (like the dashboard), so an L4 inner drill-in reads
+  // the inner sandbox's hard-samples, not the outer archive. The unit stamp is
+  // the whole encoded path, so drilling into/out of an inner loop re-fetches.
+  const root = path ? pathRoot(path) : null;
+  const rootCampaignId = root?.campaignId ?? null;
+  const rootCycleId = root?.cycleId ?? null;
+  const descend = path ? encodeDescend(path) : "";
+  const unitKey = path ? encodeCyclePath(path) : null;
 
   const [loaded, setLoaded] = useState<Loaded>({
     key: null,
@@ -106,8 +113,10 @@ export function useDatasetPreview(
   });
 
   useEffect(() => {
-    if (!unitKey || !campaignId || !cycleId || !datasetName) return;
+    if (!unitKey || !rootCampaignId || !rootCycleId || !datasetName) return;
     const name = datasetName;
+    const cmp = rootCampaignId;
+    const cyc = rootCycleId;
     let cancelled = false;
     const ac = new AbortController();
     (async () => {
@@ -117,14 +126,14 @@ export function useDatasetPreview(
         // slice + both series are floored to null: a fresh campaign legitimately
         // has no campaign-scope artifact yet (honest empty, never borrowed).
         const [dsPreview, dsSeries, cmpPreview, cmpSeries] = await Promise.all([
-          fetchDatasetPreview(name, 1000, ac.signal, "dataset", campaignId, cycleId),
-          fetchMeasurementSeries(name, 1000, ac.signal, "dataset", campaignId, cycleId).catch(
+          fetchDatasetPreview(name, 1000, ac.signal, "dataset", cmp, cyc, descend),
+          fetchMeasurementSeries(name, 1000, ac.signal, "dataset", cmp, cyc, descend).catch(
             () => null,
           ),
-          fetchDatasetPreview(name, 1000, ac.signal, "campaign", campaignId, cycleId).catch(
+          fetchDatasetPreview(name, 1000, ac.signal, "campaign", cmp, cyc, descend).catch(
             () => null,
           ),
-          fetchMeasurementSeries(name, 1000, ac.signal, "campaign", campaignId, cycleId).catch(
+          fetchMeasurementSeries(name, 1000, ac.signal, "campaign", cmp, cyc, descend).catch(
             () => null,
           ),
         ]);
@@ -153,7 +162,7 @@ export function useDatasetPreview(
       cancelled = true;
       ac.abort();
     };
-  }, [unitKey, campaignId, cycleId, datasetName]);
+  }, [unitKey, rootCampaignId, rootCycleId, descend, datasetName]);
 
   if (!unitKey) return EMPTY;
   // First load for this session — show a loading affordance, not blank chrome.

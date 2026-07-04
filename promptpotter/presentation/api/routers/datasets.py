@@ -45,6 +45,10 @@ from promptpotter.infrastructure.store.archive_views import (
 )
 from promptpotter.infrastructure.store.io import read_json
 from promptpotter.presentation.api.deps import StoreDep, get_cycle_dir_or_404
+from promptpotter.presentation.api.routers.campaigns.cycles import (
+    _decode_descend,
+    resolve_cycle_path,
+)
 from promptpotter.shared.errors import (
     BadRequestError,
     ConflictError,
@@ -314,6 +318,29 @@ def _load_dataset_cache(dataset_dir: Path) -> tuple[dict[str, Any], dict[int, di
     return raw, sample_lookup
 
 
+def _artifact_scope_store(
+    store: Any,
+    campaign_id: str | None,
+    cycle_id: str | None,
+    descend: str | None,
+) -> tuple[Any, str | None, str | None]:
+    """Store + ids the scope artifact lives in — the caller's own tree, or an L4 sandbox.
+
+    A plain per-cycle/campaign read stays in the caller's ``store``. When
+    ``?descend=`` is present the viewed leaf is an L4 inner cycle whose
+    hard-samples + measurement archive live in the off-registry
+    ``.inner/<outer cycle>`` sandbox, so walk there via :func:`resolve_cycle_path`
+    (the same seam the dashboard + event-stream readers ride) and read every scope
+    from the leaf store. Descend walks from the ROOT hop, so both root ids are
+    required alongside it.
+    """
+    if not descend:
+        return store, campaign_id, cycle_id
+    if not campaign_id or not cycle_id:
+        raise BadRequestError("descend requires campaign_id and cycle_id (the root hop)")
+    return resolve_cycle_path(store, [(campaign_id, cycle_id), *_decode_descend(descend)])
+
+
 def _resolve_scope_artifact(
     store: Any,
     *,
@@ -450,6 +477,14 @@ def get_dataset_preview(
         default=None,
         description="Required when scope=cycle; ignored otherwise.",
     ),
+    descend: str | None = Query(
+        default=None,
+        description=(
+            "L4 inner-cycle descent tail (`~`-joined `campaign::cycle` hops below the root, "
+            "mirrors `?descend=` on the dashboard route). Present → read every scope from the "
+            "inner `.inner/` sandbox; needs campaign_id + cycle_id (the root hop) to walk from."
+        ),
+    ),
 ) -> DatasetPreviewResponse:
     """Hard-sample leaderboard — hardest-first by δ_s, unmeasured trail by sample_id.
 
@@ -460,13 +495,16 @@ def get_dataset_preview(
     dataset_dir = _resolve_or_404(store, name)
     raw, sample_lookup = _load_dataset_cache(dataset_dir)
 
+    art_store, art_campaign, art_cycle = _artifact_scope_store(
+        store, campaign_id, cycle_id, descend
+    )
     artifact = _resolve_scope_artifact(
-        store,
+        art_store,
         scope=scope,
         name=name,
         backend_id=backend_id,
-        campaign_id=campaign_id,
-        cycle_id=cycle_id,
+        campaign_id=art_campaign,
+        cycle_id=art_cycle,
     )
     rasch = artifact.get("rasch", {})
     delta_map: dict[int, float] = {int(k): float(v) for k, v in rasch.get("delta", {}).items()}
@@ -588,19 +626,26 @@ def get_dataset_measurement_series(
         default=None,
         description="Required when scope=cycle; ignored otherwise.",
     ),
+    descend: str | None = Query(
+        default=None,
+        description="L4 inner-cycle descent tail — same seam as `/preview`'s `descend`.",
+    ),
 ) -> MeasurementSeriesResponse:
     """Chronological per-sample series for the Meas heat-map column. Aligned to `/preview` order
     + limit so clients can zip by sample_id. `ord` is opaque (only used for row alignment).
     """
     raw, sample_lookup = _load_dataset_cache(_resolve_or_404(store, name))
 
+    art_store, art_campaign, art_cycle = _artifact_scope_store(
+        store, campaign_id, cycle_id, descend
+    )
     artifact = _resolve_scope_artifact(
-        store,
+        art_store,
         scope=scope,
         name=name,
         backend_id=backend_id,
-        campaign_id=campaign_id,
-        cycle_id=cycle_id,
+        campaign_id=art_campaign,
+        cycle_id=art_cycle,
     )
     rasch = artifact.get("rasch", {})
     delta_map: dict[int, float] = {int(k): float(v) for k, v in rasch.get("delta", {}).items()}
@@ -613,13 +658,13 @@ def get_dataset_measurement_series(
     selected_set = set(selected)
 
     if scope == "cycle":
-        assert campaign_id is not None and cycle_id is not None  # checked in resolver
-        series = cycle_measurement_series(store, campaign_id, cycle_id, selected_set)
+        assert art_campaign is not None and art_cycle is not None  # checked in resolver
+        series = cycle_measurement_series(art_store, art_campaign, art_cycle, selected_set)
     elif scope == "campaign":
-        assert campaign_id is not None  # checked in resolver
-        series = campaign_measurement_series(store, campaign_id, selected_set)
+        assert art_campaign is not None  # checked in resolver
+        series = campaign_measurement_series(art_store, art_campaign, selected_set)
     else:
-        raw_series = measurement_series_for_samples(store, backend_id, selected)
+        raw_series = measurement_series_for_samples(art_store, backend_id, selected)
         # Dataset-scope ord carries ts/run/idx; label = first 8 chars of run_id for tooltips.
         series = {
             sid: [

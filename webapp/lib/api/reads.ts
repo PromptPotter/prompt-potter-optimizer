@@ -305,6 +305,31 @@ export function fetchFiles(
   );
 }
 
+// `descend` (the `~`-joined `campaign::cycle` tail below the root hop) makes the
+// hard-samples slice follow an L4 inner drill-in: present → the server reads the
+// scope artifact from the inner `.inner/` sandbox instead of the outer archive.
+// It only walks from the ROOT hop, so when descend is set both root ids ride
+// along regardless of scope. Empty/absent → byte-identical to a top-level read.
+function hardSamplesParams(
+  limit: number,
+  scope: HardSamplesScope,
+  campaignId?: string,
+  cycleId?: string,
+  descend?: string,
+): URLSearchParams {
+  const params = new URLSearchParams({ limit: String(limit), scope });
+  if ((scope === "campaign" || scope === "cycle") && campaignId) {
+    params.set("campaign_id", campaignId);
+  }
+  if (scope === "cycle" && cycleId) params.set("cycle_id", cycleId);
+  if (descend) {
+    params.set("descend", descend);
+    if (campaignId) params.set("campaign_id", campaignId);
+    if (cycleId) params.set("cycle_id", cycleId);
+  }
+  return params;
+}
+
 export function fetchDatasetPreview(
   name: string,
   limit = 25,
@@ -312,12 +337,9 @@ export function fetchDatasetPreview(
   scope: HardSamplesScope = "dataset",
   campaignId?: string,
   cycleId?: string,
+  descend?: string,
 ): Promise<DatasetPreviewResponse> {
-  const params = new URLSearchParams({ limit: String(limit), scope });
-  if ((scope === "campaign" || scope === "cycle") && campaignId) {
-    params.set("campaign_id", campaignId);
-  }
-  if (scope === "cycle" && cycleId) params.set("cycle_id", cycleId);
+  const params = hardSamplesParams(limit, scope, campaignId, cycleId, descend);
   return jget<DatasetPreviewResponse>(
     `${API}/datasets/${encodeURIComponent(name)}/preview?${params.toString()}`,
     signal,
@@ -331,12 +353,9 @@ export function fetchMeasurementSeries(
   scope: HardSamplesScope = "dataset",
   campaignId?: string,
   cycleId?: string,
+  descend?: string,
 ): Promise<MeasurementSeriesResponse> {
-  const params = new URLSearchParams({ limit: String(limit), scope });
-  if ((scope === "campaign" || scope === "cycle") && campaignId) {
-    params.set("campaign_id", campaignId);
-  }
-  if (scope === "cycle" && cycleId) params.set("cycle_id", cycleId);
+  const params = hardSamplesParams(limit, scope, campaignId, cycleId, descend);
   return jget<MeasurementSeriesResponse>(
     `${API}/datasets/${encodeURIComponent(name)}/measurement-series?${params.toString()}`,
     signal,

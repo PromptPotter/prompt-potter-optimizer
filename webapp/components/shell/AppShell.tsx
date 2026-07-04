@@ -9,8 +9,7 @@ import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
 import { useAuth } from "@/lib/auth-context";
 import { useDatasetPreview } from "@/lib/hooks/useDatasetPreview";
-import { useLeafDatasetName } from "@/lib/hooks/useLeafDatasetName";
-import { pathLeaf } from "@/lib/ids";
+import { useLeafCycleIndex } from "@/lib/hooks/useLeafCycleIndex";
 import { useChampionRegistry } from "@/lib/hooks/useChampionRegistry";
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { applyChartDefaults } from "@/lib/theme";
@@ -96,11 +95,12 @@ function AppShellInner() {
   // L4 inner loop shows the inner run's connector + samples, not the outer meta
   // pipeline. The CHAT THREAD (live feed, control verbs, session, Files, checkin)
   // stays on the root hop below. At depth 1 leaf == root, so every leaf value
-  // equals its root counterpart and the top-level view is unchanged.
-  const leaf = viewedPath ? pathLeaf(viewedPath) : null;
-  const leafCampaignId = leaf?.campaignId ?? campaignId;
-  const leafCycleId = leaf?.cycleId ?? cycleId;
-  const leafDatasetName = useLeafDatasetName(viewedPath, datasetName);
+  // equals its root counterpart and the top-level view is unchanged. `leafCreatedAt`
+  // is the inner cycle's own start time (null at depth 1 → keep the root value).
+  const { datasetName: leafDatasetName, createdAt: leafCreatedAt } = useLeafCycleIndex(
+    viewedPath,
+    datasetName,
+  );
   // Replit-style sub-tabs (Chat / Dashboard / Verify / Files) scoped to the
   // currently-selected cycle. Default = chat: that's where new cycles get
   // conceived and where the conversational interface lives. (The
@@ -132,7 +132,7 @@ function AppShellInner() {
     splitTest: datasetSplitTest,
     archivePerSample,
     isStale: datasetStale,
-  } = useDatasetPreview(leafCampaignId, leafCycleId, leafDatasetName, hardSamplesScope);
+  } = useDatasetPreview(viewedPath, leafDatasetName, hardSamplesScope);
   // Sidebar collapse — user-driven, persistent across reloads. Default
   // expanded; once the user collapses it, that sticks until they toggle
   // again. Tab switches never touch this state — that's the whole point
@@ -349,7 +349,7 @@ function AppShellInner() {
         ) : tab === "chat" ? (
           <ChatPane
             datasetTitle={datasetTitle}
-            cycleStartedAt={cycleStartedAt}
+            cycleStartedAt={leafCreatedAt ?? cycleStartedAt}
             datasetName={leafDatasetName}
             datasetItems={datasetItems}
             datasetMeasuredCount={datasetMeasuredCount}
