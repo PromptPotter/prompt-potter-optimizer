@@ -174,9 +174,13 @@ export function ChatPane({
 
   // Headline KPIs + spend — both read through the shared derivations so the
   // chat job-bar can't disagree with the console telemetry strip.
-  const { best, origin, delta } = headlineStats(dash);
+  const { best, delta } = headlineStats(dash);
   const bestPctOnly = best != null ? `${(best * 100).toFixed(0)}%` : "—";
-  const originPct = origin != null ? `${(origin * 100).toFixed(0)}%` : null;
+  // Lead the job-bar with the running winner's LIFT over origin — the meaningful
+  // number for a live run; absolute best rides as secondary context (the log keeps
+  // absolute). `delta` is the same-basis `best − origin` from `headlineStats`.
+  const deltaPct =
+    delta != null ? `${delta >= 0 ? "+" : ""}${(delta * 100).toFixed(0)}%` : "—";
 
   const {
     backendUsd,
@@ -225,8 +229,8 @@ export function ChatPane({
           >
             <span className="chip-row">
               <span className="chip" title={TERMS.newjob_bar_best}>
-                <span className="chip-lbl">Best</span> <strong>{bestPctOnly}</strong>
-                {originPct && <span className="chip-origin"> / {originPct}</span>}
+                <span className="chip-lbl">Lift</span> <strong>{deltaPct}</strong>
+                {best != null && <span className="chip-origin"> · best {bestPctOnly}</span>}
               </span>
               <span className="chip" title={TERMS.newjob_bar_eta}>
                 <span className="chip-lbl">ETA</span> <strong>{etaChip}</strong>

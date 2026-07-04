@@ -44,7 +44,14 @@
           {"pipeline_key": "final_ranking"},
           {"pipeline_key": "first_round_delta"},
           {"pipeline_key": "after_N_rounds_delta"},
-          {"pipeline_key": "rounds_to_N"}
+          {"pipeline_key": "rounds_to_N"},
+          {"pipeline_key": "headroom_lift"},
+          {"pipeline_key": "cleanliness"},
+          {"pipeline_key": "diversity_health"},
+          {"pipeline_key": "rounds_improved_frac"},
+          {"pipeline_key": "delta_per_dollar"},
+          {"pipeline_key": "delta_per_candidate"},
+          {"pipeline_key": "delta_per_second"}
         ],
         "langfuse_type": "generation"
       }

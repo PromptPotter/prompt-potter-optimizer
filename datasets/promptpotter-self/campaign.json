@@ -1,7 +1,7 @@
 {
   "campaign_config": {
     "dataset_name": "promptpotter-self",
-    "scoring": "0.5 * ((first_round_delta + 1) / 2) + 0.5 * ((after_N_rounds_delta + 1) / 2)",
+    "scoring": "(0.5 * ((first_round_delta + 1) / 2) + 0.5 * ((headroom_lift + 1) / 2)) * max(0.6, cleanliness * diversity_health) * (0.7 + 0.3 * max(0.0, min(1.0, delta_per_dollar / 6.0)))",
     "headline_metric": "ability",
     "sp_budget_ttest": 6,
     "exclude_nodes": [],

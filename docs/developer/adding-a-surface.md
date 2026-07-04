@@ -168,7 +168,7 @@ outside `ConnectorExecution`. Beyond that, an unknown connector raises `KeyError
 at `get()`, and an `in_process` connector raises a pointed `NotImplementedError`
 at `run_query`. The execution-mode *declaration* + dispatch seam + completeness
 guard are in place; what's deferred is only the inner-cycle **run** itself
-(the decided in-process recursion + the three proxy metrics) — Lane C3 /
+(the decided in-process recursion + the composed proxy vector) — Lane C3 /
 [`specs/l4-outer-loop.md`](../specs/l4-outer-loop.md).
 
 Contract: [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md).

@@ -44,7 +44,7 @@ export const TERMS: Record<string, string> = {
   brand_live_preview: "This page polls dashboard.json every 2s. Read-only.",
 
   // New Job status / spend bar — collapsed chips + expand-down panel
-  newjob_bar_best:   "Best composite-fitness accuracy / origin. '62% / 50%' reads as 'best 62%, origin 50%' — the gain is the spend's return.",
+  newjob_bar_best:   "Lift over origin — the running winner's gain (best − origin). '+12% · best 62%' reads as '+12 points over origin, now at 62%' — the gain is the spend's return.",
   newjob_bar_round:  "Current round number. The campaign's progress through its round budget.",
   newjob_bar_spend:  "Total LLM cost on this campaign: backend (per-sample wire calls) + loop (optimizer generate / critique / refine / replan). USD when the provider returns it (OpenRouter) or the model resolves in the bundled rate table; falls back to a token count otherwise. Tooltip splits Backend vs Loop. Source: dashboard.json::spend.",
   newjob_bar_budget: "Spend ceiling for the campaign — no cap enforced.",

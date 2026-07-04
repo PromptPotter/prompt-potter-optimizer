@@ -730,57 +730,131 @@ def test_discovered_level_trajectory_is_honest_single_scale() -> None:
     assert lv_reg[0] - o_lb < 0
 
 
-def test_compute_proxies_second_round_not_double_counted() -> None:
-    # SILENT double-count (invisible for weeks): the outer fitness weights first_round_delta
-    # AND after_N_rounds_delta at 0.4 each. At 1 inner round the `levels` trajectory has ONE
-    # entry, so the two are byte-identical and 80% of the formula rides one number — a plausible
-    # score, no error. With >=2 inner rounds a meta-prompt whose SECOND round still climbs MUST
-    # register after_N > first, or the outer can't tell "kept improving" from "plateaued".
+def _fake_inner_round(
+    rnd: int,
+    *,
+    improved: bool = True,
+    degraded_rate: float = 0.0,
+    no_result: int = 0,
+    samples: int = 24,
+    candidates_scored: int = 2,
+    parse_fail: int = 0,
+    no_op: int = 0,
+    dup: int = 0,
+) -> SimpleNamespace:
+    """A RoundResult stand-in carrying only the fields ``_compute_proxies`` reads."""
+    cand = [
+        SimpleNamespace(
+            validation_failures=(
+                [SimpleNamespace(reason="meta_prompt_parse_failure")] if i < parse_fail else []
+            )
+        )
+        for i in range(candidates_scored)
+    ]
+    return SimpleNamespace(
+        round=rnd,
+        improved=improved,
+        health=SimpleNamespace(
+            samples=samples, degraded_rate=degraded_rate, no_result_count=no_result
+        ),
+        candidates_scored=candidates_scored,
+        candidate_scores=cand,
+        l1_n_no_op=no_op,
+        l1_n_duplicate=dup,
+    )
+
+
+def _fake_inner_result(
+    levels: list[float], origin: float, rounds: list[SimpleNamespace], *, cost: float = 0.03
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        origin_level=origin,
+        round_discovered_levels=levels,
+        rounds=rounds,
+        spend=SimpleNamespace(cost_usd=cost),
+    )
+
+
+def test_compute_proxies_composed_fitness_discriminates() -> None:
+    # SILENT wrong-score: the outer L4 once distilled a signal-rich inner campaign to TWO
+    # endpoint deltas — a warning-riddled, mode-collapsing, or expensive campaign scored
+    # identically to a clean one at equal lift. The composed fitness must (a) keep the endpoint
+    # deltas exact, (b) normalize depth by the task's own headroom, and (c) let quality
+    # penalties DROP the score so a clean campaign outranks a dirty one at equal lift. All
+    # invisible if wrong: the run completes, the dashboard looks fine, the ranking is subtly off.
     from promptpotter.application.runner.inner_recursion import _compute_proxies
 
-    climbing = SimpleNamespace(origin_level=0.30, round_discovered_levels=[0.40, 0.55])
-    px = _compute_proxies(climbing, target=0.60)  # type: ignore[arg-type]
+    clean = _fake_inner_result(
+        [0.40, 0.55], 0.30, [_fake_inner_round(0), _fake_inner_round(1), _fake_inner_round(2)]
+    )
+    px = _compute_proxies(clean, target=0.60, elapsed=100.0)
     assert px["first_round_delta"] == pytest.approx(0.10)
     assert px["after_N_rounds_delta"] == pytest.approx(0.25)
-    assert px["after_N_rounds_delta"] > px["first_round_delta"]  # second-round climb visible
-    assert px["rounds_to_N"] == 3  # never crossed target 0.60 → len(levels)+1 sentinel
+    assert px["headroom_lift"] == pytest.approx(0.25 / 0.30)  # depth over (target-origin)
+    assert px["cleanliness"] == pytest.approx(1.0)
+    assert px["diversity_health"] == pytest.approx(1.0)
+    assert px["rounds_improved_frac"] == pytest.approx(1.0)
+    assert px["delta_per_dollar"] == pytest.approx(0.25 / 0.03)
 
-    # Plateau after round 1 → the two deltas SHOULD coincide (no spurious divergence manufactured).
-    flat = SimpleNamespace(origin_level=0.30, round_discovered_levels=[0.40, 0.40])
-    pf = _compute_proxies(flat, target=0.60)  # type: ignore[arg-type]
-    assert pf["after_N_rounds_delta"] == pf["first_round_delta"]
+    # Same lift, but round 1 is warning-riddled and round 2 mode-collapses → quality drops.
+    dirty = _fake_inner_result(
+        [0.40, 0.55],
+        0.30,
+        [
+            _fake_inner_round(0),
+            _fake_inner_round(1, degraded_rate=0.5, no_result=6, parse_fail=1),
+            _fake_inner_round(2, no_op=1, dup=1),
+        ],
+    )
+    pd = _compute_proxies(dirty, target=0.60, elapsed=100.0)
+    assert pd["after_N_rounds_delta"] == px["after_N_rounds_delta"]  # identical lift
+    assert pd["cleanliness"] < px["cleanliness"]  # warnings register
+    assert pd["diversity_health"] < px["diversity_health"]  # collapse registers
+
+    # The whole point: the composed formula ranks the clean campaign above the dirty one.
+    import json
+    from pathlib import Path
+
+    cfg = json.loads(Path("datasets/promptpotter-self/campaign.json").read_text(encoding="utf-8"))
+    score = compile_scorer(cfg["campaign_config"]["scoring"])
+    assert score({"pipeline_data": px}) > score({"pipeline_data": pd})
 
 
-def test_pp_self_scoring_carries_only_live_proxies() -> None:
-    # SILENT wrong-score: the outer L4 formula once carried two dead terms — `rounds_to_N`
-    # (a constant `len(levels)+1` while origin<target is unreachable in 2 rounds, so it cancels
-    # in the candidate election) and a per-seed cost multiplier `min(1.0, DIVISOR/tokens)` (token
-    # count is a SEED property, ~equal across candidates on a seed → no candidate gradient; where
-    # it varied it penalized candidates that explored more). Re-introducing either scores every
-    # candidate subtly wrong with no error. Guard the SHIPPED formula: it must be invariant to
-    # rounds_to_N and to token count, and monotone in the two live deltas. (`rounds_to_N` stays
-    # COMPUTED for the inner narrative — this only asserts it doesn't reach the score.)
+def test_pp_self_scoring_composed_and_gradient_bearing() -> None:
+    # SILENT wrong-score: the composed formula must (a) still ignore the retired flat proxies
+    # (rounds_to_N, raw token count, the held-out after_N_rounds_delta), (b) stay monotone in the
+    # lift core, (c) let quality penalties modulate DOWN — but (d) FLOOR the quality factor at
+    # 0.6 so a broken campaign is discounted, never sign-flipped into a false floor. Any of these
+    # wrong scores every candidate subtly, with no error.
     import json
     from pathlib import Path
 
     cfg = json.loads(Path("datasets/promptpotter-self/campaign.json").read_text(encoding="utf-8"))
     score = compile_scorer(cfg["campaign_config"]["scoring"])
 
-    def _result(first: float, after_n: float, r2n: int, tok: int) -> dict[str, object]:
-        return {
-            "pipeline_data": {
-                "first_round_delta": first,
-                "after_N_rounds_delta": after_n,
-                "rounds_to_N": r2n,
-                "step_tokens": {"l1_critique": {"input": tok, "output": tok}},
-            }
+    def s(**kw: float) -> float:
+        pd: dict[str, float] = {
+            "first_round_delta": 0.1,
+            "headroom_lift": 0.5,
+            "cleanliness": 0.9,
+            "diversity_health": 0.9,
+            "delta_per_dollar": 6.0,
         }
+        pd.update(kw)
+        return score({"pipeline_data": pd})
 
-    base = score(_result(0.10, 0.20, 3, 50_000))
-    assert score(_result(0.10, 0.20, 99, 50_000)) == base  # rounds_to_N does not reach the score
-    assert score(_result(0.10, 0.20, 3, 5_000_000)) == base  # token count does not reach the score
-    assert score(_result(0.20, 0.20, 3, 50_000)) > base  # monotone in first_round_delta
-    assert score(_result(0.10, 0.30, 3, 50_000)) > base  # monotone in after_N_rounds_delta
+    base = s()
+    assert s(rounds_to_N=99) == base  # retired constant does not reach the score
+    assert s(after_N_rounds_delta=0.9) == base  # superseded by headroom_lift, held out of formula
+    assert s(first_round_delta=0.3) > base  # monotone in early speed
+    assert s(headroom_lift=0.9) > base  # monotone in normalized depth
+    assert s(cleanliness=0.4) < base  # quality penalty modulates down
+    assert s(diversity_health=0.4) < base  # mode-collapse penalty modulates down
+    assert s(delta_per_dollar=0.5) < base  # efficiency rewards cheap lift
+    # Quality floor at 0.6: a maximally broken campaign keeps 60% of the quality factor, not 0.
+    assert s(cleanliness=0.0, diversity_health=0.0) == pytest.approx(
+        s(cleanliness=1.0, diversity_health=1.0) * 0.6
+    )
 
 
 def _synth_2pl(

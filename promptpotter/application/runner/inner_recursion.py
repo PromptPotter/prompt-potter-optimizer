@@ -3,9 +3,10 @@
 The ``promptpotter`` connector declares ``execution="in_process"``; its
 ``in_process_run`` delegates here. One outer "sample" = one inner PromptPotter
 campaign on a cheap proxy benchmark, scored by **how much the inner loop
-improved** (the three proxy metrics ``first_round_delta`` /
-``after_N_rounds_delta`` / ``rounds_to_N``). Decided in
-``docs/specs/l4-outer-loop.md`` § 2.
+improved** — a composed fitness (``_compute_proxies``) over endpoint deltas,
+normalized headroom, bounded quality (cleanliness / diversity), and efficiency
+ratios (lift per $/candidate/second). Decided in
+``docs/specs/l4-outer-loop.md`` § 2 + § 4.
 
 Two isolations make the recursion safe **and re-entrant** (so L5+ nests by
 construction — never a depth-1 assumption):
@@ -63,19 +64,30 @@ from promptpotter.infrastructure.store.io import read_json_optional
 
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
-    from promptpotter.domain.results import CycleResult, CycleSpend
+    from promptpotter.domain.results import CycleResult, CycleSpend, RoundResult
     from promptpotter.shared.identity import IdentityContext
 
 logger = logging.getLogger(__name__)
 
 # The terminal-ranker key the outer `promptpotter-self` pipeline reads as its
 # prediction (a non-empty list keeps the origin round-0 health gate from halting
-# on all-NO_RESULT) + the three proxy scalars the outer scoring formula reads.
-# `datasets/promptpotter-self/pipeline.json::nodes.l1_critique.optimizer
+# on all-NO_RESULT) + the composed-fitness proxy scalars the outer scoring formula
+# reads. `datasets/promptpotter-self/pipeline.json::nodes.l1_critique.optimizer
 # .observation_mappings` declares these as observation keys, so they reach
 # `pipeline_data` and the formula namespace (`scoring/formula/compiler.py`).
 INNER_RESULT_KEY = "final_ranking"
-PROXY_KEYS = ("first_round_delta", "after_N_rounds_delta", "rounds_to_N")
+PROXY_KEYS = (
+    "first_round_delta",
+    "after_N_rounds_delta",
+    "rounds_to_N",
+    "headroom_lift",
+    "cleanliness",
+    "diversity_health",
+    "rounds_improved_frac",
+    "delta_per_dollar",
+    "delta_per_candidate",
+    "delta_per_second",
+)
 
 
 @dataclass(frozen=True)
@@ -191,18 +203,76 @@ def _resolve_inner_task(ctx: InnerSpawnContext, query: str) -> _InnerTaskSpec:
     )
 
 
-def _compute_proxies(result: CycleResult, target: float) -> dict[str, Any]:
-    """The three proxy metrics from a finished inner cycle.
+def _clamp(x: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, x))
 
-    ``first_round_delta`` = round-1 discovered lift over origin; ``after_N_rounds_delta`` =
-    best discovered lift over origin (across all rounds); ``rounds_to_N`` = rounds to first
-    reach *target* (0 if the origin already meets it, ``n_rounds + 1`` as the "didn't make
-    it" sentinel just past the budget). Deltas may be negative on a regressing meta-prompt.
 
-    The heavy lifting is upstream in ``discovered_level_trajectory`` (single-scale, θ-LCB
-    over discovered candidates): here we just difference its ``origin_level`` /
-    ``round_discovered_levels`` — no mixed-space subtraction, no crowned-frontier blindness.
-    Levels are cumulative, so the last level is the best; ``max`` is defensive."""
+def _mean(xs: list[float]) -> float:
+    return sum(xs) / len(xs) if xs else 0.0
+
+
+# Generator-side ValidationFailure reasons (``domain/escalation_signals.py``): the outer
+# meta-prompt produced malformed inner-L1 output. Distinct from the mode-collapse reasons
+# (``no_op_variant`` / ``duplicate_variant``), which ride ``l1_n_no_op`` / ``l1_n_duplicate``.
+_PARSE_FAIL_REASONS = frozenset(
+    {"l1_provider_empty_response", "meta_prompt_parse_failure", "meta_prompt_unexpected_type"}
+)
+
+
+def _round_problem_rate(rnd: RoundResult) -> float:
+    """Per-round dirtiness ∈ [0,1]: inner samples that degraded or came back unscoreable
+    (``health``) PLUS the fraction of this round's candidates the outer meta-prompt made
+    unparseable. Both are candidate-controlled — a meta-prompt that makes the inner loop
+    emit malformed candidates or unscoreable predictions scores dirtier."""
+    health = rnd.health
+    struct = 0.0
+    if health and health.samples:
+        struct = health.degraded_rate + health.no_result_count / health.samples
+    scored = rnd.candidates_scored or len(rnd.candidate_scores)
+    parse_fail = sum(
+        1
+        for c in rnd.candidate_scores
+        if any(vf.reason in _PARSE_FAIL_REASONS for vf in c.validation_failures)
+    )
+    parse_rate = parse_fail / scored if scored else 0.0
+    return _clamp(struct + parse_rate, 0.0, 1.0)
+
+
+def _round_mode_collapse_rate(rnd: RoundResult) -> float:
+    """Per-round mode-collapse ∈ [0,1): share of generated variants the invariant detector
+    nuked as no-op / duplicate. A meta-prompt that induces the inner L1 to regurgitate the
+    parent (or itself) is not exploring — the outer loop should steer away from it."""
+    collapsed = rnd.l1_n_no_op + rnd.l1_n_duplicate
+    generated = collapsed + rnd.candidates_scored
+    return collapsed / generated if generated else 0.0
+
+
+def _compute_proxies(result: CycleResult, target: float, elapsed: float) -> dict[str, Any]:
+    """Composed outer fitness — a vector of subset-invariant, bounded raw signals from a
+    finished inner cycle, combined by ``campaign.json::scoring`` (the backend never hides
+    the composite; every term stays a re-weightable observation).
+
+    Endpoint deltas (kept — early speed + best depth): ``first_round_delta`` = round-1
+    discovered lift over origin; ``after_N_rounds_delta`` = best discovered lift over origin;
+    ``rounds_to_N`` = rounds to first reach *target*. These difference the single-scale θ-LCB
+    trajectory (``origin_level`` / ``round_discovered_levels``, built upstream in
+    ``discovered_level_trajectory``) — no mixed-space subtraction, no crowned-frontier blindness.
+
+    Composed terms (each carries a candidate gradient — the retired proxies died for lacking
+    one, so a flat term earns nothing and gets cut in tuning):
+    - ``headroom_lift`` — best depth normalized by the task's own headroom ``(target−origin)``,
+      so a config compares across inner tasks of different origin strength.
+    - ``cleanliness`` / ``diversity_health`` — bounded quality: 1 − mean per-round problem /
+      mode-collapse rate; the scoring formula uses them as a modulator that discounts a
+      warning-riddled or collapsing campaign without diluting the lift core.
+    - ``rounds_improved_frac`` — share of L1 rounds that beat their predecessor.
+    - ``delta_per_dollar`` / ``delta_per_candidate`` / ``delta_per_second`` — efficiency: best
+      depth over spend / candidates / wall-time. Candidate-specific numerator, so (unlike the
+      retired per-seed cost multiplier) they carry a gradient — a verbose meta-prompt burns
+      more for the same lift and scores lower.
+
+    Deltas may be negative on a regressing meta-prompt (levels are not floored at origin), so
+    the efficiency ratios can be negative too; the formula recentres / clamps."""
     origin = result.origin_level
     levels = result.round_discovered_levels
     first = (levels[0] - origin) if levels else 0.0
@@ -214,10 +284,34 @@ def _compute_proxies(result: CycleResult, target: float) -> dict[str, Any]:
             (i + 1 for i, lvl in enumerate(levels) if lvl >= target),
             len(levels) + 1,
         )
+
+    headroom = target - origin
+    headroom_lift = (
+        _clamp(after_n / headroom, -1.0, 1.0) if headroom > 1e-9 else float(after_n >= 0) * 2 - 1
+    )
+
+    l1_rounds = [r for r in result.rounds if r.round != 0]
+    cleanliness = 1.0 - _mean([_round_problem_rate(r) for r in l1_rounds])
+    diversity_health = 1.0 - _mean([_round_mode_collapse_rate(r) for r in l1_rounds])
+    rounds_improved_frac = _mean([1.0 if r.improved else 0.0 for r in l1_rounds])
+
+    cost = result.spend.cost_usd if result.spend else 0.0
+    n_cand = sum(r.candidates_scored for r in l1_rounds)
+    delta_per_dollar = after_n / max(cost, 1e-6)
+    delta_per_candidate = after_n / max(n_cand, 1)
+    delta_per_second = after_n / max(elapsed, 1e-6)
+
     return {
         "first_round_delta": round(first, 6),
         "after_N_rounds_delta": round(after_n, 6),
         "rounds_to_N": rounds_to_n,
+        "headroom_lift": round(headroom_lift, 6),
+        "cleanliness": round(cleanliness, 6),
+        "diversity_health": round(diversity_health, 6),
+        "rounds_improved_frac": round(rounds_improved_frac, 6),
+        "delta_per_dollar": round(delta_per_dollar, 6),
+        "delta_per_candidate": round(delta_per_candidate, 6),
+        "delta_per_second": round(delta_per_second, 6),
     }
 
 
@@ -497,8 +591,21 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
         rnd = dash.get("round")
         best = dash.get("best")
         max_rounds = (dash.get("run_limits") or {}).get("max_rounds")
-        best_pct = f"{best:.0%}" if isinstance(best, int | float) else "—"
-        return f"inner r{rnd if rnd is not None else '?'}/{max_rounds or '?'} · best {best_pct}"
+        # Lead with the running winner's LIFT over origin (delta) — the meaningful
+        # number for a live run — and carry absolute best as context. Origin reads the
+        # SAME cumulative basis as `best` (round-0 cumulative_accuracy), mirroring the
+        # webapp's `headlineStats` so the two surfaces can't disagree.
+        origin = next(
+            (r.get("cumulative_accuracy") for r in dash.get("rounds") or [] if r.get("round") == 0),
+            None,
+        )
+        if isinstance(best, int | float) and isinstance(origin, int | float):
+            lift = f"Δ{best - origin:+.0%} (best {best:.0%})"
+        elif isinstance(best, int | float):
+            lift = f"best {best:.0%}"
+        else:
+            lift = "best —"
+        return f"inner r{rnd if rnd is not None else '?'}/{max_rounds or '?'} · {lift}"
 
     # Fresh task = its own ContextVar copies (ledger / round / abort / prompt
     # overrides). create_task copies the current context at creation; the
@@ -544,8 +651,8 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
             f"{result.stop_reason}); excluding this outer sample, not scoring it"
         )
     inner_spend: CycleSpend | None = result.spend
-    proxies = _compute_proxies(result, spec.target)
     elapsed = time.monotonic() - start
+    proxies = _compute_proxies(result, spec.target, elapsed)
 
     data: dict[str, Any] = {
         # Terminal-ranker head = the inner-result token (`inner:{query}` — the
