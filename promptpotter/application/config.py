@@ -94,10 +94,13 @@ class SelectionMechanisms(BaseModel):
     online_reorder: bool = Field(
         True,
         description=(
-            "Within a round, re-rank the unscored samples after every measurement "
-            "(online 1PL-Rasch adaptive queue) and stream the live order to the "
-            "dashboard. Off → each candidate measures the subset in fixed "
-            "insertion order, identical across candidates, no live re-sort emitted."
+            "INERT — retained on-disk pending the config-surface shrink pass. The "
+            "within-round order is always the deterministic shared round order "
+            "(`build_round_order`: seed-miss win-opportunity samples first, a "
+            "seed-hit regression probe every 4th slot, identical across "
+            "candidates). The online per-sample re-rank it used to toggle is "
+            "deleted — it front-loaded the seed's hit set and blinded the "
+            "elimination gates."
         ),
     )
 

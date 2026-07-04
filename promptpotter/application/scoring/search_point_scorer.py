@@ -253,7 +253,6 @@ async def score_search_point(
     axes: AxisIndex | None = None,
     l1_diversity: float = 1.0,
     opt_sp: Any = None,
-    next_sample: Callable[[dict[int, bool]], int | None] | None = None,
     on_sample_pre_check: Callable[[Sample], Awaitable[None]] | None = None,
     force_fresh: bool = False,
 ) -> tuple[list[QueryMeasurement], dict[str, Any], EscalationSignal | None]:
@@ -379,7 +378,6 @@ async def score_search_point(
         axes=axes,
         persist_fresh=_persist_fresh,
         running_scores=_running_scores,
-        next_sample=next_sample,
         on_sample_pre_check=on_sample_pre_check,
     )
     results = batch.results

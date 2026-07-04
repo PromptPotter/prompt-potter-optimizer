@@ -71,7 +71,6 @@ async def l1_score(
     *,
     pipeline_params: dict[str, Any] | None = None,
     improvement_threshold: float = 0.01,
-    online_reorder: bool = True,
     callbacks: RunCallbacks,
     degradation_checks: list[StopRule] | None = None,
     pobb_config: PoBBConfig,
@@ -116,7 +115,6 @@ async def l1_score(
         round_num=round_num,
         decisions=decisions,
         l1_diversity=yield_stats.l1_yield,
-        online_reorder=online_reorder,
     )
 
     aborted_ids = {cs.candidate_id for cs in candidate_scores if not is_leader_eligible(cs)}

@@ -117,7 +117,6 @@ async def execute_round(
             scoring_set,
             pipeline_params=cycle.tracking.current_sp.pipeline_params,
             improvement_threshold=opt.improvement_threshold,
-            online_reorder=opt.mechanisms.selection.online_reorder,
             callbacks=callbacks,
             degradation_checks=degradation_checks,
             pobb_config=PoBBConfig(

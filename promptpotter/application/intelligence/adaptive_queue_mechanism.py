@@ -1,35 +1,42 @@
-"""Adaptive queue mechanism — 1PL Rasch CAT.
+"""Between-round CAT primitives + the round-static scoring-order builder.
 
-``pick_value(s) = decision_information_gain(s) + delta_learning_gain(s)``.
+Two mechanisms live here:
 
-``decision_information_gain`` = MI between next outcome and verdict ``θ_c > θ_s``;
-means-known limit recovers Bernoulli Chernoff information (Garivier-Kaufmann 2016 Track-and-Stop).
-That term alone is **myopic**: it credits only what one measurement reveals about the verdict,
-not what it reveals about the *sample's difficulty* ``δ_s``. At the seed-centred first pick
-(``μ_c = μ_s`` ⇒ ``p₀ = Φ(0) = 0.5`` for every sample) the decision term degenerates to
-"prefer the lowest-``se_δ`` sample" — i.e. re-graze origin's already-measured samples and
-starve the unmeasured headroom (where a candidate could actually *beat* origin). The
-``delta_learning_gain`` term restores the omitted parameter-information so an under-measured
-sample is *maximally informative* (the contract `l1/score/loop.py` already documents), while
-``p(1-p)→0`` keeps resolved always-hit / always-miss samples from being re-promoted — the
-pathology that retired the old ``explore_weight`` blend.
+- **``pick_value(s) = decision_information_gain(s) + delta_learning_gain(s)``** —
+  the 1PL Rasch acquisition score used BETWEEN rounds (``select_round_subset``
+  subset picking) and for display (the hard-samples artifact's contestedness
+  column). ``decision_information_gain`` = MI between next outcome and verdict
+  ``θ_c > θ_s`` (means-known limit recovers Bernoulli Chernoff information,
+  Garivier-Kaufmann 2016 Track-and-Stop); ``delta_learning_gain`` restores the
+  parameter-information the verdict-only term omits so under-measured samples
+  stay maximally informative while resolved ones (``p(1-p)→0``) are never
+  re-promoted.
+
+- **``build_round_order``** — the WITHIN-round scoring order: one deterministic
+  shared order per round, built from the seed's per-sample outcomes. It replaced
+  the online per-sample CAT re-fit, which empirically front-loaded the seed's
+  hit set (zero-information ties: every early paired comparison ties, p_best
+  pins at 0.5, and the elimination gates go blind until the tail). The round's
+  actual decision is "can this candidate NET the adoption margin against the
+  seed" — and that evidence lives only in discordance-potential samples, so the
+  shared order front-loads seed-MISS samples (win opportunities) with a seed-HIT
+  regression probe interleaved every 4th slot.
 """
 
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 
 from promptpotter.shared import sigmoid
 
 __all__ = [
+    "build_round_order",
     "decision_information_gain",
     "delta_learning_gain",
     "expected_order",
     "marginal_hit_probability",
-    "next_sample",
     "pick_value",
-    "posterior_from_outcomes",
     "update_theta_posterior",
 ]
 
@@ -84,18 +91,6 @@ def update_theta_posterior(
     new_var = max(1.0 / info, 1e-6)
     new_mu = mu + new_var * score
     return new_mu, new_var
-
-
-def posterior_from_outcomes(
-    prior_mu: float,
-    prior_var: float,
-    outcomes: Iterable[tuple[float, float, bool]],
-) -> tuple[float, float]:
-    """Fold ``update_theta_posterior`` across ``(δ_s, se_δ_s, hit)`` triples. Stateless."""
-    mu, var = prior_mu, prior_var
-    for delta_s, se_delta_s, hit in outcomes:
-        mu, var = update_theta_posterior(mu, var, delta_s, se_delta_s, hit)
-    return mu, var
 
 
 def decision_information_gain(
@@ -169,32 +164,67 @@ def pick_value(
     ) + delta_learning_gain(mu_c, var_c, delta_s, se_delta_s)
 
 
-def next_sample(
-    mu_c: float,
-    var_c: float,
-    mu_s: float,
-    var_s: float,
-    delta_map: dict[int, float],
-    delta_se_map: dict[int, float],
-    remaining: set[int],
-) -> int | None:
-    """Pick the remaining sample with the highest pick-value; ``None`` ⇒ loop exit. Ties → asc sid."""
-    if not remaining:
-        return None
-    return max(
-        remaining,
-        key=lambda sid: (
-            pick_value(
-                mu_c,
-                var_c,
-                mu_s,
-                var_s,
-                delta_map.get(sid, 0.0),
-                delta_se_map.get(sid, 1.0),
-            ),
-            -sid,
-        ),
-    )
+def _ruler_delta(entry: float | tuple[float, float]) -> float:
+    """δ from a ruler value — a bare float is 1PL; a 2PL entry is ``(δ, a)``."""
+    return float(entry[0]) if isinstance(entry, tuple) else float(entry)
+
+
+def build_round_order(
+    seed_grades: Mapping[int, float],
+    delta_ruler: Mapping[int, float | tuple[float, float]],
+    sample_ids: Sequence[int],
+) -> list[int]:
+    """One deterministic shared scoring order for a round — built to kill dead
+    candidates in as few samples as possible.
+
+    Partition by the seed's outcome: **MISS-stratum** (seed grade < 1.0, or not
+    yet measured by the seed — an unknown is a potential win, and fronting it
+    also warms the per-sample backfill earliest) vs **HIT-stratum** (seed grade
+    ≥ 1.0). Every 4th position takes the next HIT-stratum sample; all other
+    positions take the next MISS-stratum sample; when either stratum runs dry
+    the remainder of the other follows.
+
+    Why k=4: pure miss-first defers all regression evidence past the miss
+    block; proportional interleave spreads the misses so thin the paired-margin
+    gate's deterministic-exhaustion kill lands at the very end. k=4 costs a
+    pure-tie kill a handful of extra samples and buys a regression probe inside
+    the first ``elimination_n_min`` window plus steady loss accrual for
+    regressors.
+
+    Within the MISS-stratum: ascending δ (easiest win opportunities first — a
+    live candidate proves itself immediately, and a dead one's misses on the
+    easiest wins are the strongest futility evidence). Within the HIT-stratum:
+    descending δ (likeliest regression points first). Cold ruler → δ = 0;
+    ties → ascending sample id. Pure function of (seed grades, ruler, ids), so
+    a resumed round re-derives the identical order with no recorded sidecar.
+    """
+    miss_stratum: list[int] = []
+    hit_stratum: list[int] = []
+    for sid in sample_ids:
+        grade = seed_grades.get(sid)
+        (hit_stratum if grade is not None and grade >= 1.0 else miss_stratum).append(sid)
+
+    def _delta(sid: int) -> float:
+        entry = delta_ruler.get(sid)
+        return _ruler_delta(entry) if entry is not None else 0.0
+
+    miss_stratum.sort(key=lambda sid: (_delta(sid), sid))
+    hit_stratum.sort(key=lambda sid: (-_delta(sid), sid))
+
+    order: list[int] = []
+    mi, hi = 0, 0
+    for pos in range(1, len(sample_ids) + 1):
+        take_hit = pos % 4 == 0
+        if take_hit and hi < len(hit_stratum) and mi < len(miss_stratum):
+            order.append(hit_stratum[hi])
+            hi += 1
+        elif mi < len(miss_stratum):
+            order.append(miss_stratum[mi])
+            mi += 1
+        else:
+            order.append(hit_stratum[hi])
+            hi += 1
+    return order
 
 
 def expected_order(

@@ -2474,6 +2474,42 @@ def test_pick_score_artifact_ranks_contested_above_settled() -> None:
     assert artifact["pick_score"]["sample_order"][-1] == 1
 
 
+def test_build_round_order_fronts_win_opportunities_with_hit_probes() -> None:
+    """The shared round order is the elimination gate's evidence pipeline: seed-miss
+    (win-opportunity) samples front-loaded ascending-δ, a seed-hit regression probe at
+    every 4th slot descending-δ, unknowns treated as opportunities, deterministic
+    tie-breaks. Silent harm: a wrong order re-creates the tie-prefix blindness — the
+    round completes, no error, and dead candidates ride their full budget again."""
+    from promptpotter.application.intelligence.adaptive_queue_mechanism import build_round_order
+
+    ids = list(range(24))
+    # Seed hits 0-8; misses 9-22; sample 23 unmeasured by the seed (unclassified).
+    seed_grades = dict.fromkeys(range(9), 1.0) | dict.fromkeys(range(9, 23), 0.0)
+    ruler: dict[int, float | tuple[float, float]] = {sid: float(sid % 7) for sid in range(20)}
+
+    order = build_round_order(seed_grades, ruler, ids)
+    assert sorted(order) == ids
+    # Deterministic: same inputs, same order.
+    assert build_round_order(seed_grades, ruler, ids) == order
+
+    hit_set = set(range(9))
+    # Positions 4, 8, 12, 16 (1-indexed) carry seed-HIT probes while both strata remain.
+    for pos in (4, 8, 12, 16):
+        assert order[pos - 1] in hit_set, f"position {pos} should be a seed-hit probe"
+    # All other early positions are win opportunities (seed-miss or unclassified —
+    # the unmeasured sample 23 must ride the miss stratum, not the tail).
+    non_probe_head = [order[i] for i in range(16) if (i + 1) % 4 != 0]
+    assert all(sid not in hit_set for sid in non_probe_head)
+    # MISS stratum walks ascending δ (cold/unknown entries at δ=0 first, ties by sid).
+    miss_positions = [sid for sid in order if sid not in hit_set]
+    miss_keys = [(float(ruler.get(sid, 0.0)), sid) for sid in miss_positions]  # type: ignore[arg-type]
+    assert miss_keys == sorted(miss_keys)
+    # HIT stratum walks descending δ (likeliest regression points first).
+    hit_positions = [sid for sid in order if sid in hit_set]
+    hit_keys = [(-float(ruler.get(sid, 0.0)), sid) for sid in hit_positions]  # type: ignore[arg-type]
+    assert hit_keys == sorted(hit_keys)
+
+
 def test_elimination_p_best_discriminates_on_graded_backend() -> None:
     """The PoBB ε-gate must read GRADED responses, not binarized hits.
 

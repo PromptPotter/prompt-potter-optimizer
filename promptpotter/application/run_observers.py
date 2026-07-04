@@ -224,21 +224,21 @@ class RunCallbacks:
         round_num: int,
         ci: int,
         ct: int,
-        preview: list[tuple[int, float]],
+        *,
         n_priors: int,
         sample_order: list[int],
     ) -> None:
-        """Adaptive-queue-mechanism preview at candidate start — top-3 next samples + full
-        expected-info-gain order under the prior (1PL Rasch CAT) so the webapp
-        table can re-sort live. Distinct from the heatmap's hardest-first
-        ``sample_order`` (absolute difficulty vs expected info value here).
+        """The round's shared deterministic scoring order, emitted at candidate
+        start — seed-miss (win-opportunity) samples front-loaded, a seed-hit
+        regression probe every 4th slot (``build_round_order``). Every candidate
+        walks the same order. Distinct from the heatmap's hardest-first
+        ``sample_order`` (absolute difficulty vs decision relevance here).
         """
         self._snapshot(
             "sample_order_preview",
             ci,
             ct,
             {
-                "preview": [[int(sid), float(delta)] for sid, delta in preview],
                 "n_priors": int(n_priors),
                 "sample_order": [int(sid) for sid in sample_order],
             },

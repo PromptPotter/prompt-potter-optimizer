@@ -290,18 +290,13 @@ async def run_query_loop(
     axes: AxisIndex | None,
     persist_fresh: Callable[[list[QueryMeasurement]], None],
     running_scores: Callable[[list[QueryMeasurement]], dict[str, Any]],
-    next_sample: Callable[[dict[int, bool]], int | None] | None = None,
     on_sample_pre_check: Callable[[Sample], Awaitable[None]] | None = None,
 ) -> QueryLoopResult:
-    """Score dataset samples, reusing prior results where available.
+    """Score dataset samples in insertion order, reusing prior results where available.
 
-    ``next_sample`` is the online adaptive queue mechanism (1PL Rasch CAT).
-    When supplied, the loop calls it before each iteration with the
-    candidate's accumulated ``scored_outcomes`` (sample_id → hit) and
-    receives the next sample id to measure. Returning ``None`` from
-    ``next_sample`` ends the loop. Without ``next_sample``, the loop
-    falls back to dataset insertion order — the path used by paths
-    that don't need adaptive selection (PoBB backfill, unit tests).
+    The caller owns the order: ``score_population`` reorders the round's dataset
+    once (the shared deterministic round order), so walking it as-given IS the
+    round order. Elimination checks fire after every sample.
     """
     assert session.scoring.scorer is not None, "session.scoring.scorer required for scoring"
     state = _LoopState(results=[])
@@ -327,23 +322,18 @@ async def run_query_loop(
                 return signal
         return None
 
-    # Per-step adaptive picking when ``next_sample`` is supplied;
-    # otherwise iterate the dataset as-given. ``scored_outcomes`` is the
-    # full (sample_id → hit) map the queue mechanism folds its posterior over.
     by_id: dict[int, Sample] = {s.id: s for s in dataset}
-    fallback_order: list[int] = [s.id for s in dataset]
-    scored_outcomes: dict[int, bool] = {}
+    walk_order: list[int] = [s.id for s in dataset]
+    scored_ids: set[int] = set()
 
     def _pick_next() -> int | None:
-        if next_sample is not None:
-            return next_sample(scored_outcomes)
-        for sid in fallback_order:
-            if sid not in scored_outcomes:
+        for sid in walk_order:
+            if sid not in scored_ids:
                 return sid
         return None
 
     def _remaining_ids() -> list[int]:
-        return [sid for sid in fallback_order if sid not in scored_outcomes]
+        return [sid for sid in walk_order if sid not in scored_ids]
 
     try:
         i = 0
@@ -416,14 +406,7 @@ async def run_query_loop(
                     state.results, completed=False, stop_reason=outcome.abort_reason
                 )
 
-            # Record the outcome (hit / non-hit) so the queue mechanism's
-            # posterior fold sees it on the next iteration. Errored
-            # results carry no ``hit`` field — treat them as miss for
-            # the posterior since the queue mechanism is about *capability*,
-            # not infrastructure; PoBB and DegradationCheck already
-            # gate elimination on the error class itself.
-            latest_hit: bool = bool(state.results[-1].get("hit"))
-            scored_outcomes[sid] = latest_hit
+            scored_ids.add(sid)
             i += 1
     except (KeyboardInterrupt, asyncio.CancelledError):
         logger.warning(

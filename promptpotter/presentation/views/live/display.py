@@ -249,11 +249,10 @@ class LiveDisplay(DerivedView):
                 {str(k): float(v) for k, v in (payload.get("p_best") or {}).items()},
             )
         elif ev == "sample_order_preview":
-            preview_raw = payload.get("preview") or []
-            preview: list[tuple[int, float]] = [
-                (int(p[0]), float(p[1])) for p in preview_raw if len(p) >= 2
-            ]
-            self.on_sample_order_preview(preview, int(payload.get("n_priors") or 0))
+            self.on_sample_order_preview(
+                [int(sid) for sid in (payload.get("sample_order") or [])],
+                int(payload.get("n_priors") or 0),
+            )
         elif ev == "pobb_backfill":
             self.on_pobb_backfill(
                 int(payload.get("sample_id") or 0),
@@ -355,13 +354,17 @@ class LiveDisplay(DerivedView):
                 f"(of {n_priors} prior{prior_s})"
             )
 
-    def on_sample_order_preview(self, preview: list[tuple[int, float]], n_priors: int) -> None:
-        """Adaptive queue mechanism's expected-information-gain preview (1PL Rasch CAT)."""
-        if not preview:
+    def on_sample_order_preview(self, sample_order: list[int], n_priors: int) -> None:
+        """The round's shared deterministic order — win-opportunity samples first."""
+        if not sample_order:
             return
         prior_s = "" if n_priors == 1 else "s"
-        picks = ", ".join(f"#{sid:03d} (info={val:.3f})" for sid, val in preview)
-        self._write(f"  {DIM}next samples:{RESET} {picks}  ({n_priors} candidate prior{prior_s})")
+        head = ", ".join(f"#{sid:03d}" for sid in sample_order[:3])
+        self._write(
+            f"  {DIM}shared order:{RESET} {head}, …  "
+            f"({len(sample_order)} samples, win-opportunities first; "
+            f"{n_priors} candidate prior{prior_s})"
+        )
 
     def on_pobb_backfill(self, sample_id: int, prior_ids: list[str]) -> None:
         """Priors backfilled on this sample. Cache-covered priors filtered upstream."""

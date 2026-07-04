@@ -7,7 +7,6 @@ full eval, classified into SCORED / LEADER_LOCKED / ESCALATED.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Any
@@ -70,7 +69,6 @@ async def score_one_candidate(
     candidate_scores: list[ScoredCandidate],
     round_num: int,
     l1_diversity: float,
-    next_sample: Callable[[dict[int, bool]], int | None] | None = None,
     force_fresh: bool = False,
 ) -> CandidateRunResult:
     """Run one candidate through the three-exit-path lifecycle.
@@ -135,7 +133,6 @@ async def score_one_candidate(
         axes=cycle.axes,
         l1_diversity=l1_diversity,
         opt_sp=osp_c,
-        next_sample=next_sample,
         on_sample_pre_check=_catch_priors_up,
         force_fresh=force_fresh,
     )
