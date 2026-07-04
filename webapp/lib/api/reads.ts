@@ -529,6 +529,48 @@ export function fetchConfigMap(
   );
 }
 
+// --- L4 champion registry (dev-only L4 Lab) -----------------------------------
+// The ranked table of candidate meta-prompt states, reduced fresh from the
+// tenant's on-disk pp-self cycles. Empty (n_cycles_scanned=0) for every tenant
+// with no pp-self campaigns — i.e. every whitelabeled end-user — which is what
+// gates the L4 Lab out of the end-user surface.
+export interface ChampionCellEffect {
+  cell: string;
+  mean_d: number;
+  se_d: number;
+  n: number;
+}
+export interface ChampionProvenance {
+  campaign_id: string;
+  cycle_id: string;
+  round: number;
+  candidate_id: string;
+}
+export interface ChampionCandidate {
+  state_hash: string;
+  label: string;
+  prompt_state: Record<string, Record<string, string>>;
+  provenance: ChampionProvenance[];
+  per_cell_effects: ChampionCellEffect[];
+  anchor_effect: number;
+  anchor_se: number;
+  ci_lo: number;
+  ci_hi: number;
+  n_cells: number;
+  n_measurements: number;
+  coronation_results: unknown[];
+  status: string; // provisional | confirmed | champion
+  measured_at: string;
+}
+export interface ChampionRegistryResponse {
+  generated_at: string;
+  n_cycles_scanned: number;
+  candidates: ChampionCandidate[];
+}
+export function fetchChampionRegistry(signal?: AbortSignal): Promise<ChampionRegistryResponse> {
+  return jget<ChampionRegistryResponse>(`${API}/champion-registry`, signal);
+}
+
 // Conditional, like the dashboard poll: the unmasked request honors
 // `If-Modified-Since` → 304 so revalidation on the dashboard change-signal is
 // cheap during quiescent stretches. A masked request (lens/samples set) always

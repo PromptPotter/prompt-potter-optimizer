@@ -8,6 +8,7 @@ import { ConnectorProvider } from "@/lib/hooks/useConnector";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
 import { useDatasetPreview } from "@/lib/hooks/useDatasetPreview";
+import { useChampionRegistry, hasL4Data } from "@/lib/hooks/useChampionRegistry";
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { applyChartDefaults } from "@/lib/theme";
 import { cx } from "@/lib/cx";
@@ -44,6 +45,12 @@ const CheckinReopenPane = dynamic(
   () => import("@/components/ingest/CheckinReopenPane").then((m) => m.CheckinReopenPane),
   { ssr: false, loading: () => <div className="content" aria-busy="true" /> },
 );
+// The dev-only L4 Lab — mounted only when the tab is opened (which is itself
+// gated on the tenant having pp-self data), so its chunk stays off first paint.
+const LabPane = dynamic(() => import("@/components/lab/LabPane").then((m) => m.LabPane), {
+  ssr: false,
+  loading: () => <div className="content" aria-busy="true" />,
+});
 
 // Sidebar resize bounds. Default matches the CSS base (.shell{--sidebar-width}).
 const SIDEBAR_DEFAULT = 200;
@@ -152,6 +159,12 @@ function AppShellInner() {
     setPrevTab(tab);
     setSidebarMobileOpen(false);
   }
+
+  // L4 Lab gate — one-shot fetch of the champion registry. `hasL4Data` is true
+  // only when this tenant has pp-self cycles on disk, which no whitelabeled
+  // end-user can produce; that's what keeps the developer Lab off their surface.
+  const { registry: championRegistry } = useChampionRegistry();
+  const showLab = hasL4Data(championRegistry);
 
   // Single-ingress dashboard read, kept here only for the status-banner
   // derivation below. Every dashboard surface self-sources its own live state
@@ -295,6 +308,7 @@ function AppShellInner() {
           tab={tab}
           onTabChange={setTab}
           onMenuToggle={() => setSidebarMobileOpen((v) => !v)}
+          showLab={showLab}
         />
         {/* Loud failure surface — sticky, full-width, on every tab. Renders
             null on a healthy run; not gated on cycleId so a server-down state
@@ -335,6 +349,14 @@ function AppShellInner() {
           <DashboardTab />
         ) : tab === "files" ? (
           <FilesPane campaignId={campaignId} cycleId={cycleId} />
+        ) : tab === "lab" ? (
+          <LabPane
+            registry={championRegistry}
+            onOpenCycle={(cmp, cyc) => {
+              selectCycle(cmp, cyc);
+              setTab("dashboard");
+            }}
+          />
         ) : (
           <VerifyPane />
         )}

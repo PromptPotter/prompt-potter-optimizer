@@ -1,0 +1,165 @@
+/* L4 Lab — developer surface for meta-prompt tuning. Theme-aware (reads tokens);
+   leans operator/dense. Not shown to whitelabeled end-users. */
+
+.lab-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dash-zone-gap, 16px);
+}
+
+.lab-head h1 {
+  font-size: 1.15rem;
+  margin: 0 0 2px;
+  color: var(--color-text-primary);
+}
+.lab-head p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+  max-width: 60ch;
+}
+
+.lab-lede {
+  margin: 0 0 12px;
+  color: var(--color-text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  max-width: 78ch;
+}
+.lab-lede strong {
+  color: var(--color-text-primary);
+}
+
+.lab-subtle {
+  color: var(--color-text-tertiary);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.lab-empty {
+  color: var(--color-text-tertiary);
+  font-size: 0.85rem;
+}
+.lab-empty code,
+.lab-lede code {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.85em;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--color-surface-2, rgba(127, 127, 127, 0.12));
+}
+
+/* ── Table ──────────────────────────────────────────────────── */
+.lab-table-wrap {
+  overflow-x: auto; /* wide table scrolls in its own box; page never scrolls x */
+}
+.lab-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+.lab-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--color-border-tertiary);
+  white-space: nowrap;
+}
+.lab-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--color-border-tertiary);
+  vertical-align: baseline;
+}
+.lab-row-champion {
+  background: var(--color-success-bg, rgba(60, 160, 90, 0.08));
+}
+
+.lab-rank {
+  color: var(--color-text-tertiary);
+  width: 2ch;
+}
+.lab-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.lab-state code {
+  font-family: var(--font-mono, monospace);
+  color: var(--color-text-primary);
+}
+
+.lab-effect {
+  white-space: nowrap;
+}
+.lab-effect-mean {
+  font-weight: 600;
+}
+.lab-effect-ci {
+  color: var(--color-text-tertiary);
+  margin-left: 8px;
+  font-size: 0.76rem;
+}
+.lab-eff-pos .lab-effect-mean {
+  color: var(--color-success);
+}
+.lab-eff-neg .lab-effect-mean {
+  color: var(--color-danger);
+}
+.lab-eff-flat .lab-effect-mean {
+  color: var(--color-text-secondary);
+}
+
+.lab-num {
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+}
+.lab-dim {
+  color: var(--color-text-tertiary);
+}
+
+.lab-label {
+  color: var(--color-text-secondary);
+  max-width: 40ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lab-open {
+  margin-left: 8px;
+  font-size: 0.72rem;
+  color: var(--color-accent);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.lab-open:hover {
+  color: var(--color-accent-strong, var(--color-accent));
+}
+
+/* ── Preset collection ops (inert until the coronation slice) ── */
+.lab-ops {
+  display: flex;
+  gap: 6px;
+  white-space: nowrap;
+}
+.lab-op {
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border-tertiary);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: not-allowed;
+}
+.lab-op:disabled {
+  opacity: 0.55;
+}

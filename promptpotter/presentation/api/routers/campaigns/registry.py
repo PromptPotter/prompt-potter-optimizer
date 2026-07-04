@@ -17,6 +17,7 @@ from promptpotter.application.config_coupling import (
     resolve_knob_states,
 )
 from promptpotter.application.jobs.launcher import draft_wire_with_locks, load_checkin_draft
+from promptpotter.application.meta_champion import ChampionRegistry, reduce_corpus
 from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.paths import session_index
 from promptpotter.presentation.api.deps import StoreDep
@@ -394,3 +395,12 @@ def get_campaign_config_map(store: StoreDep, campaign_id: str) -> ConfigMapRespo
         for c in COUPLINGS
     ]
     return ConfigMapResponse(groups=groups, couplings=couplings, active_count=len(active))
+
+
+@campaigns_router.get("/champion-registry", response_model=ChampionRegistry)
+def get_champion_registry(store: StoreDep) -> ChampionRegistry:
+    """The L4 champion table — every candidate meta-prompt state on disk, ranked by
+    anchor-to-origin effect. Reduced fresh from the tenant's pp-self cycles on each
+    fetch (dev on-demand surface, not the 2 s poll); zero LLM. Empty for tenants with
+    no pp-self campaigns (i.e. every whitelabeled end-user)."""
+    return reduce_corpus(store.base_dir)
