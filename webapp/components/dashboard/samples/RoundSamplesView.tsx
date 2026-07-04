@@ -20,18 +20,20 @@ import { RoundSamplesEmptyState } from "./RoundSamplesEmptyState";
 
 export function RoundSamplesView() {
   const { dash, status } = useDashboard();
-  const { campaignId, cycleId } = useWorkspace();
+  // Round files follow the VIEWED leaf hop (an L4 inner loop reads the inner
+  // cycle's `rounds/`, not the outer root's) — the same address the dashboard
+  // stream uses. `useRoundSource` owns the descend-aware fetch + live guard.
+  const { viewedPath } = useWorkspace();
   const { setSelectionForCandidate, setSelectionForRound, candidate } = useSelection();
   // The active round — the explicit pick, else the live in-flight round —
-  // from the single resolver every round-scoped surface shares. `useRoundSource`
-  // owns the live/historical guard + the historical round-file fetch.
+  // from the single resolver every round-scoped surface shares.
   const { round: effectiveRound } = useEffectiveRound();
   const {
     isLive: isLiveView,
     doc: roundDoc,
     loading: roundLoading,
     error: roundError,
-  } = useRoundSource(campaignId, cycleId, effectiveRound, dash);
+  } = useRoundSource(viewedPath, effectiveRound, dash);
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [candFilter, setCandFilter] = useState<string>("all");

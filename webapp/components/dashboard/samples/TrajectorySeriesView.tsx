@@ -61,9 +61,10 @@ export function SeriesView({
   selectMode?: SelectMode;
   maxHeight?: number;
 }) {
-  // (campaignId, cycleId) self-sourced — the hover popup's lazy round-file
-  // fetch is always under the workspace context, so no threading is needed.
-  const { campaignId, cycleId } = useWorkspace();
+  // Viewed leaf path self-sourced — the hover popup's lazy round-file fetch
+  // follows the viewed cycle (an L4 inner loop reads the inner cycle's dir),
+  // always under the workspace context, so no threading is needed.
+  const { viewedPath } = useWorkspace();
   const columns = useMemo(() => unionFirstAppearance(sorted.rounds), [sorted.rounds]);
   const { sampleSet, setSelectionForSampleSet } = useSelection();
   const [hover, setHover] = useState<HoverState | null>(null);
@@ -75,7 +76,7 @@ export function SeriesView({
 
   // Lazy-fetch the hovered round's durable timeline (picker's intended order).
   // Keyed on the round, so moving between cells in the same row never refetches.
-  const { doc } = useRoundFile(campaignId, cycleId, hover ? hover.round : null);
+  const { doc } = useRoundFile(viewedPath, hover ? hover.round : null);
   const timeline = useMemo(() => historicalTimeline(doc), [doc]);
 
   const hoveredSelection = hover

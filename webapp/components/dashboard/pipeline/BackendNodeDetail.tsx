@@ -81,12 +81,14 @@ export function BackendNodeDetail({ draft, onClose, onPromptApply }: Props) {
   const node = cv.view?.nodes.find((n) => n.id === selectedId && n.kind !== "io") ?? null;
 
   const liveCfg = liveObserveConfig(dash);
-  // Unit ids from the synchronous workspace, NOT from `dash` (which hard-nulls on a
-  // soft unit switch and stays null during `warming_up`) — otherwise the round-0 /
-  // historical observe-config fetches below starve and the panel blanks even though
-  // the round files exist on disk. `liveObserveConfig(dash)` above stays on `dash`:
-  // that's live-snapshot data, correctly sourced.
-  const { campaignId, cycleId } = useWorkspace();
+  // Viewed leaf path from the synchronous workspace, NOT from `dash` (which
+  // hard-nulls on a soft unit switch and stays null during `warming_up`) —
+  // otherwise the round-0 / historical observe-config fetches below starve and
+  // the panel blanks even though the round files exist on disk. It follows the
+  // viewed leaf, so an L4 inner loop reads the inner cycle's round files.
+  // `liveObserveConfig(dash)` above stays on `dash`: live-snapshot data,
+  // correctly sourced.
+  const { viewedPath } = useWorkspace();
 
   // Historical target: the operator's selected candidate (round ≥1) if any, else
   // the last completed round's winner. The run-observe branch reads its round file.
@@ -95,8 +97,8 @@ export function BackendNodeDetail({ draft, onClose, onPromptApply }: Props) {
       ? { round: selCand.round, candidateId: selCand.candidate_id, label: `selected · ${selCand.label}` }
       : lastWinner(dash);
   const runObserve = !draft;
-  const round0 = useRoundFile(campaignId, cycleId, runObserve ? 0 : null);
-  const histFile = useRoundFile(campaignId, cycleId, runObserve ? histTarget?.round ?? null : null);
+  const round0 = useRoundFile(viewedPath, runObserve ? 0 : null);
+  const histFile = useRoundFile(viewedPath, runObserve ? histTarget?.round ?? null : null);
 
   // The explicit toggle pref, reset whenever the selected candidate changes so the
   // panel re-follows the new selection (render-phase guarded reset).

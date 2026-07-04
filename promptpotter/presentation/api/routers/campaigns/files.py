@@ -12,8 +12,12 @@ from fastapi import Query
 from pydantic import BaseModel, Field
 
 from promptpotter.infrastructure.store import campaign_root_dir_for, cycle_dir_for
-from promptpotter.presentation.api.deps import StoreDep, get_cycle_dir_or_404
+from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
+from promptpotter.presentation.api.routers.campaigns.cycles import (
+    _decode_descend,
+    resolve_cycle_path,
+)
 from promptpotter.shared.errors import BadRequestError, ContentTooLargeError, NotFoundError
 
 # Campaign-level file artifacts that live at the campaign dir, not a cycle dir.
@@ -99,10 +103,25 @@ def _classify_suffix(suffix: str) -> Literal["json", "markdown", "log", "text"] 
     "/campaigns/{campaign_id}/cycles/{cycle_id}/files",
     response_model=FilesResponse,
 )
-def list_cycle_files(store: StoreDep, campaign_id: str, cycle_id: str) -> FilesResponse:
-    """Recursive file tree for the cycle dir + campaign-level artifacts."""
-    cycle_dir = get_cycle_dir_or_404(campaign_id, cycle_id, store)
-    campaign_dir = campaign_root_dir_for(store.base_dir, campaign_id)
+def list_cycle_files(
+    store: StoreDep,
+    campaign_id: str,
+    cycle_id: str,
+    descend: str | None = Query(None),
+) -> FilesResponse:
+    """Recursive file tree for the cycle dir + campaign-level artifacts.
+
+    ``descend`` walks into the ``.inner/`` sandbox (same seam as the dashboard +
+    file-content routes), so the Files tree of an L4 inner descendant lists the
+    inner cycle's tree. Absent/empty ``descend`` is a plain per-cycle read.
+    """
+    leaf_store, leaf_campaign, leaf_cycle = resolve_cycle_path(
+        store, [(campaign_id, cycle_id), *_decode_descend(descend)]
+    )
+    cycle_dir = cycle_dir_for(leaf_store.base_dir, leaf_campaign, leaf_cycle)
+    if not cycle_dir.is_dir():
+        raise NotFoundError(f"Cycle not found: {campaign_id}/{cycle_id}")
+    campaign_dir = campaign_root_dir_for(leaf_store.base_dir, leaf_campaign)
 
     entries: list[FileEntry] = []
     for f in _walk_files(cycle_dir):
@@ -142,12 +161,22 @@ def get_cycle_file(
     cycle_id: str,
     scope: Literal["cycle", "campaign"] = Query(..., description="cycle | campaign"),
     path: str = Query(..., description="Relative path under the chosen scope root"),
+    descend: str | None = Query(None),
 ) -> FileContentResponse:
-    """Read the contents of one file under the cycle or campaign scope."""
+    """Read the contents of one file under the cycle or campaign scope.
+
+    ``descend`` walks into the ``.inner/<previous cycle id>`` sandbox one hop per
+    ``~``-joined ``campaign::cycle`` segment (same seam as the dashboard route), so
+    an L4 inner descendant's ``rounds/round_NNNN.json`` reads from the inner cycle
+    dir — not the outer root. Absent/empty ``descend`` is a plain per-cycle read.
+    """
+    leaf_store, leaf_campaign, leaf_cycle = resolve_cycle_path(
+        store, [(campaign_id, cycle_id), *_decode_descend(descend)]
+    )
     if scope == "cycle":
-        scope_root = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
+        scope_root = cycle_dir_for(leaf_store.base_dir, leaf_campaign, leaf_cycle)
     else:
-        scope_root = campaign_root_dir_for(store.base_dir, campaign_id)
+        scope_root = campaign_root_dir_for(leaf_store.base_dir, leaf_campaign)
     if not scope_root.exists():
         raise NotFoundError(f"Scope root not found: {campaign_id}/{cycle_id}")
 

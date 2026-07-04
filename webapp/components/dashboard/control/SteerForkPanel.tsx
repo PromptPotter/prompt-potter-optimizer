@@ -59,12 +59,14 @@ export function SteerForkPanel({
   // distinct — the live round's seed comes from `dashboard.json`, a completed
   // round's from its round file.
   const { dash } = useDashboard();
-  const { campaignId, cycleId } = useWorkspace();
+  // Control verbs (pause/fork) bind to the ROOT hop — they steer the operator's
+  // top-level conversation. The candidate's round FILE, though, follows the
+  // VIEWED leaf hop (an L4 inner loop seeds from the inner cycle's round file).
+  const { campaignId, cycleId, viewedPath } = useWorkspace();
   const cv = useConnector();
   const isLive = cv.isLive;
   const { isLive: roundIsLive, doc } = useRoundSource(
-    campaignId,
-    cycleId,
+    viewedPath,
     candidate.round,
     dash,
   );

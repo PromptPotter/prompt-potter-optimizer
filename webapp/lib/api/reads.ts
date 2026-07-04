@@ -270,6 +270,29 @@ export function fetchCycleFile(
   return jget<FileContentResponse>(url, signal);
 }
 
+// Per-cycle file content, addressed by a CYCLE PATH (mirrors
+// `fetchDashboardByPath`). The URL carries the path's ROOT ids; deeper hops (an
+// L4 inner loop, L5+) ride `?descend=`, which the server walks into each hop's
+// `.inner/<previous cycle id>` sandbox. At depth 1 the URL is byte-identical to
+// `fetchCycleFile` — so a top-level read is unchanged. Use this (not the bare
+// id form) for any deep-audit file that must follow the viewed leaf cycle, e.g.
+// `rounds/round_NNNN.json`.
+export function fetchCycleFileByPath(
+  path: CyclePath,
+  scope: string,
+  filePath: string,
+  signal?: AbortSignal,
+): Promise<FileContentResponse> {
+  const root = pathRoot(path);
+  const descend = encodeDescend(path);
+  const q = descend ? `&descend=${encodeURIComponent(descend)}` : "";
+  const url =
+    `${API}/campaigns/${encodeURIComponent(root.campaignId)}` +
+    `/cycles/${encodeURIComponent(root.cycleId)}/file` +
+    `?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(filePath)}${q}`;
+  return jget<FileContentResponse>(url, signal);
+}
+
 export function fetchFiles(
   campaignId: string,
   cycleId: string,

@@ -57,12 +57,13 @@ function liveNodeBlock(
 }
 
 export function OptimizerNodeDetail({ id, pipeline, onClose }: Props) {
-  // Self-sourced: live snapshot + liveness from the cycle stream, (campaignId,
-  // cycleId) from the workspace for the lazy per-round fetch. `isLive` is the
-  // freshness gate — a frozen cycle keeps `dash.state` at its last phase, so
-  // without it the panel would claim the node is "live" forever.
+  // Self-sourced: live snapshot + liveness from the cycle stream; the viewed
+  // leaf path from the workspace for the lazy per-round fetch (an L4 inner loop
+  // reads the inner cycle's round file). `isLive` is the freshness gate — a
+  // frozen cycle keeps `dash.state` at its last phase, so without it the panel
+  // would claim the node is "live" forever.
   const { dash, isLive, dashRound: liveRound } = useDashboard();
-  const { campaignId, cycleId } = useWorkspace();
+  const { viewedPath } = useWorkspace();
   const view = pipeline?.view;
   const meta = view?.nodes.find((n) => n.id === id);
   const label = meta?.label ?? id;
@@ -86,8 +87,7 @@ export function OptimizerNodeDetail({ id, pipeline, onClose }: Props) {
   // guard — it idles the fetch on the live round.
   const liveBlock = liveNodeBlock(dash, id);
   const { isLive: activeIsLive, doc: historicalDoc } = useRoundSource(
-    campaignId,
-    cycleId,
+    viewedPath,
     activeRound,
     dash,
   );

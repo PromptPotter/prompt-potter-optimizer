@@ -5,13 +5,22 @@
 // surfaces (FitnessPanel, TrendChart, TopStrip sparkline, LineageTree) read
 // `dash.rounds[]` directly and never hit this hook.
 //
+// Addressed by the viewed CYCLE PATH, not bare `(campaign, cycle)` ids: the
+// round file follows the LEAF hop the dashboard shows, so an L4 inner loop's
+// `rounds/round_NNNN.json` reads from the inner cycle's dir (via `?descend=`)
+// instead of the outer root's empty `rounds/`. `fetchCycleFileByPath` mirrors
+// `fetchDashboardByPath` — the same seam the live poll already rides.
+//
 // Pattern matches `useDatasetPreview`: the loaded data is stamped with the
-// `(campaignId, cycleId, round)` key it was fetched for, and the hook
-// returns EMPTY until the stamp matches the current key. No stale-frame
-// flash on key change, no manual reset needed by the caller.
+// `(path, round)` key it was fetched for, and the hook returns EMPTY until the
+// stamp matches the current key. No stale-frame flash on key change, no manual
+// reset needed by the caller. The key is the ENCODED path string (not the array
+// identity, which is fresh each render while following), so the fetch effect
+// re-runs only when the viewed cycle or round actually changes.
 
-import { useEffect, useState } from "react";
-import { fetchCycleFile } from "../api";
+import { useEffect, useRef, useState } from "react";
+import { fetchCycleFileByPath } from "../api";
+import { encodeCyclePath, type CyclePath } from "../ids";
 import type { RoundFileDoc } from "../poll";
 
 export interface UseRoundFileState {
@@ -27,13 +36,9 @@ interface Loaded {
 
 const EMPTY: UseRoundFileState = { doc: null, loading: false, error: null };
 
-function roundKey(
-  campaignId: string | null,
-  cycleId: string | null,
-  round: number | null,
-): string | null {
-  if (!campaignId || !cycleId || round == null) return null;
-  return `${campaignId}\x1f${cycleId}\x1f${round}`;
+function roundKey(path: CyclePath | null, round: number | null): string | null {
+  if (!path || round == null) return null;
+  return `${encodeCyclePath(path)}\x1f${round}`;
 }
 
 function roundPath(round: number): string {
@@ -41,28 +46,33 @@ function roundPath(round: number): string {
 }
 
 export function useRoundFile(
-  campaignId: string | null,
-  cycleId: string | null,
+  path: CyclePath | null,
   round: number | null,
 ): UseRoundFileState {
-  const key = roundKey(campaignId, cycleId, round);
+  const key = roundKey(path, round);
   const [loaded, setLoaded] = useState<Loaded>({ key: null, doc: null });
   const [error, setError] = useState<string | null>(null);
+  // Keep the current path/round for the fetch without depending on the array's
+  // per-render identity — the fetch effect keys on the stable `key` string
+  // alone. The refs are synced in an effect (never during render) and, being
+  // declared first, are current before the keyed fetch effect reads them.
+  const pathRef = useRef<CyclePath | null>(path);
+  const roundRef = useRef<number | null>(round);
+  useEffect(() => {
+    pathRef.current = path;
+    roundRef.current = round;
+  });
 
   useEffect(() => {
-    if (!campaignId || !cycleId || round == null) return;
+    const p = pathRef.current;
+    const r = roundRef.current;
+    if (!p || r == null) return;
     const ac = new AbortController();
     (async () => {
       try {
-        const r = await fetchCycleFile(
-          campaignId,
-          cycleId,
-          "cycle",
-          roundPath(round),
-          ac.signal,
-        );
+        const resp = await fetchCycleFileByPath(p, "cycle", roundPath(r), ac.signal);
         if (ac.signal.aborted) return;
-        const doc = r.content ? (JSON.parse(r.content) as RoundFileDoc) : null;
+        const doc = resp.content ? (JSON.parse(resp.content) as RoundFileDoc) : null;
         setLoaded({ key, doc });
         setError(null);
       } catch (e) {
@@ -72,7 +82,7 @@ export function useRoundFile(
       }
     })();
     return () => ac.abort();
-  }, [campaignId, cycleId, round, key]);
+  }, [key]);
 
   // Pure derivation — until the loaded stamp matches the current key, the
   // hook returns EMPTY (loading=true if we're actually fetching, false when

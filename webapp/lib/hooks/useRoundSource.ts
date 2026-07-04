@@ -20,6 +20,7 @@
 
 import { roundOf, type DashboardSnapshot } from "@/lib/poll";
 import { useRoundFile, type UseRoundFileState } from "@/lib/hooks/useRoundFile";
+import type { CyclePath } from "@/lib/ids";
 
 export interface UseRoundSourceState extends UseRoundFileState {
   // True when `round` is the in-flight round — the caller reads live state
@@ -28,8 +29,7 @@ export interface UseRoundSourceState extends UseRoundFileState {
 }
 
 export function useRoundSource(
-  campaignId: string | null,
-  cycleId: string | null,
+  path: CyclePath | null,
   round: number | null,
   dash: DashboardSnapshot | null,
 ): UseRoundSourceState {
@@ -51,6 +51,6 @@ export function useRoundSource(
   const isLive = round != null && round === liveRound && !closed;
   // Idle the round-file fetch on the live round — its file doesn't exist
   // until round close, and the data is already in `dash`.
-  const file = useRoundFile(campaignId, cycleId, isLive ? null : round);
+  const file = useRoundFile(isLive ? null : path, round);
   return { ...file, isLive };
 }

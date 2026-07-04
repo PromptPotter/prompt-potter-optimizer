@@ -54,7 +54,8 @@ export function FreqChart() {
   useThemeVersion();
   const chartRef = useRef(null);
   const { dash } = useDashboard();
-  const { campaignId, cycleId } = useWorkspace();
+  // Round files follow the VIEWED leaf hop (inner loop → inner cycle's dir).
+  const { viewedPath } = useWorkspace();
   // The active round, from the single resolver every round-scoped surface shares.
   const { round: effectiveRound, isLiveView } = useEffectiveRound();
 
@@ -62,12 +63,7 @@ export function FreqChart() {
   // `dashboard.json`'s in-flight sample lines; historical mode reads only
   // `round_NNNN.json`'s `results[]`. `useRoundSource` owns the guard —
   // it idles the fetch on the live round, so there's no fallback chain.
-  const { isLive, doc: roundDoc } = useRoundSource(
-    campaignId,
-    cycleId,
-    effectiveRound,
-    dash,
-  );
+  const { isLive, doc: roundDoc } = useRoundSource(viewedPath, effectiveRound, dash);
 
   const results: ResultRow[] = useMemo(() => {
     if (isLive) return liveResultsFrom(dash);

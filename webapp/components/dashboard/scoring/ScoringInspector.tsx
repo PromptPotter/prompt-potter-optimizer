@@ -23,18 +23,16 @@ const SAMPLE_CAP = 250;
 
 export function ScoringInspector({ selected, onClose }: Props) {
   const { dash } = useDashboard();
-  const { campaignId, cycleId } = useWorkspace();
+  // Round files follow the VIEWED leaf hop — so an L4 inner loop's candidate
+  // resolves its `round_NNNN.json` from the inner cycle's dir, not the outer
+  // root's empty `rounds/` (the old "round file not on disk" degradation).
+  const { viewedPath } = useWorkspace();
   // Composite + hits are deep-audit fields. For a *completed* round they live
   // in `round_NNNN.json::scoreboard`; for the *in-flight* round they live in
   // `dashboard.json`'s live l1_score stats. `useRoundSource` picks one source
   // per the no-stitch rule and never fetches the live round's not-yet-written
   // file (the old 404 + degraded-panel bug).
-  const { isLive, doc } = useRoundSource(
-    campaignId,
-    cycleId,
-    selected?.round ?? null,
-    dash,
-  );
+  const { isLive, doc } = useRoundSource(viewedPath, selected?.round ?? null, dash);
   const [steerOpen, setSteerOpen] = useState(false);
 
   const data = useMemo<{ composite?: number; hits?: number; total?: number } | null>(() => {
