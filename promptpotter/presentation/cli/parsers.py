@@ -421,6 +421,17 @@ def _add_champion_args(p_champion: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Report the coronation verdict without writing the champion pointer.",
     )
+    p_apply = champion_sub.add_parser(
+        "apply",
+        help="Graduate the reigning champion's prompt fields into the distributable "
+        "datasets/_optimizer/pipeline.json — the shipped optimizer + the next pp-self "
+        "run's inner origin both start from it. Review the git diff and commit deliberately.",
+    )
+    p_apply.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show the field diff without writing _optimizer/pipeline.json.",
+    )
     champion_sub.add_parser(
         "replay",
         help="Print the reigning champion + persisted registry from disk (zero "

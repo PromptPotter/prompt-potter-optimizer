@@ -10,10 +10,23 @@ difference per cell is just ``challenger.mean_d − champion.mean_d`` (origin ca
 a coronation is computable from the registry alone, no new run, whenever they share cells.
 The champion is dethroned only when the pooled CI clears zero (ties keep the incumbent —
 stability = distributability).
+
+**Graduation** (:func:`apply_champion_to_optimizer`) writes the reigning champion's
+``prompt_state`` field values into ``datasets/_optimizer/pipeline.json`` — the distributable
+optimizer every normal (non-L4) run loads. This is ONE mechanism doing two jobs, because
+inner pp-self cycles load ``_optimizer/`` from disk: graduating (a) makes the champion the
+shipped default every end-user's run benefits from, and (b) seeds the NEXT pp-self run's
+inner *origin* from the champion, so the outer search compounds on the best-so-far instead
+of restarting from stock each time. That's the "optimization" accumulation mode (the
+"research/analysis" mode is :func:`reduce_corpus`, which only reads + ranks, never writes).
+It edits prose fields only; a ``layout`` edit lives in ``NODE_LAYOUTS`` (code), so it is
+reported as skipped rather than silently dropped.
 """
 
 from __future__ import annotations
 
+import contextlib
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -182,9 +195,143 @@ def coronate(
     )
 
 
+class FieldChange(BaseModel):
+    """One graduated prompt field — the before/after the operator reviews in git."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    node: str
+    field: str
+    before: str
+    after: str
+
+
+class GraduationOutcome(BaseModel):
+    """The result of applying the reigning champion to the distributable optimizer."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    champion: str | None
+    applied: bool  # False on dry-run, no champion, or no net change
+    changes: list[FieldChange]
+    skipped: list[str]  # node/field entries not applied, with the reason
+    path: str
+    detail: str
+
+
+def _resolved_key(family: str, version: object) -> str:
+    """Join a node's ``prompt_family`` / ``prompt_version`` into the ``resolved_prompts``
+    registry key — mirror of ``dispatch.llm_call.prompts._resolved_key``."""
+    return f"{family}/{version}" if version is not None else str(family)
+
+
+def apply_champion_to_optimizer(*, dry_run: bool = False) -> GraduationOutcome:
+    """Graduate the reigning champion into the distributable ``datasets/_optimizer``.
+
+    Writes each champion ``prompt_state`` field into its node's body in
+    ``_optimizer/pipeline.json::resolved_prompts`` — so the shipped optimizer (and
+    thereby the next pp-self run's inner origin) starts from the champion. Prose fields
+    only; a non-``PromptTemplate`` field (e.g. a ``layout`` edit, which lives in
+    ``NODE_LAYOUTS`` code) is reported in ``skipped``, never silently dropped. Reads +
+    writes repo-global paths (the pointer + the optimizer manifest), so it needs no
+    tenant identity. ``dry_run`` computes the diff without writing."""
+    # Lazy: keeps meta_champion import-light and sidesteps the dispatch package.
+    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+        OPTIMIZER_PIPELINE_PATH,
+    )
+    from promptpotter.domain.opt_search_point import PromptTemplate
+
+    pointer = read_champion_pointer()
+    path_str = str(OPTIMIZER_PIPELINE_PATH)
+    if pointer is None:
+        return GraduationOutcome(
+            champion=None,
+            applied=False,
+            changes=[],
+            skipped=[],
+            path=path_str,
+            detail="No reigning champion — run `champion coronate <hash>` or `promote` first.",
+        )
+
+    manifest = json.loads(OPTIMIZER_PIPELINE_PATH.read_text(encoding="utf-8"))
+    nodes = manifest.get("nodes", {})
+    resolved = manifest.get("resolved_prompts", {})
+    prompt_fields = set(PromptTemplate.model_fields)
+
+    changes: list[FieldChange] = []
+    skipped: list[str] = []
+    for node, fields in pointer.prompt_state.items():
+        node_cfg = (nodes.get(node) or {}).get("config", {})
+        family = node_cfg.get("prompt_family")
+        if not family:
+            skipped.append(f"{node} (no prompt_family in the _optimizer manifest)")
+            continue
+        body = resolved.get(_resolved_key(family, node_cfg.get("prompt_version")))
+        if not isinstance(body, dict):
+            skipped.append(f"{node} (resolved_prompts body missing)")
+            continue
+        for field, new_val in fields.items():
+            if field not in prompt_fields:
+                skipped.append(
+                    f"{node}.{field} (not a prompt field — a layout edit needs a NODE_LAYOUTS change)"
+                )
+                continue
+            before, after = str(body.get(field, "")), str(new_val)
+            if before == after:
+                continue
+            changes.append(FieldChange(node=node, field=field, before=before, after=after))
+            body[field] = after
+
+    applied = bool(changes) and not dry_run
+    if applied:
+        tmp = OPTIMIZER_PIPELINE_PATH.with_suffix(".json.tmp")
+        # ensure_ascii=True matches the manifest's dominant convention, so the diff
+        # is the graduated fields (+ pre-existing whitespace normalization), not a
+        # whole-file re-encode.
+        tmp.write_text(json.dumps(manifest, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+        tmp.replace(OPTIMIZER_PIPELINE_PATH)
+        _invalidate_optimizer_prompt_caches()
+
+    if not changes:
+        detail = (
+            f"Champion {pointer.state_hash} already matches _optimizer "
+            f"({len(skipped)} field(s) skipped)."
+            if skipped
+            else f"Champion {pointer.state_hash} already matches the distributable _optimizer — nothing to do."
+        )
+    else:
+        verb = "Would graduate" if dry_run else "Graduated"
+        detail = (
+            f"{verb} champion {pointer.state_hash}: {len(changes)} field(s) "
+            f"({', '.join(sorted({c.node for c in changes}))}) into {OPTIMIZER_PIPELINE_PATH.name}."
+        )
+    return GraduationOutcome(
+        champion=pointer.state_hash,
+        applied=applied,
+        changes=changes,
+        skipped=skipped,
+        path=path_str,
+        detail=detail,
+    )
+
+
+def _invalidate_optimizer_prompt_caches() -> None:
+    """Drop the process-wide optimizer-manifest / prompt lru_caches after a write, so a
+    long-lived process (e.g. the API) re-reads the graduated file rather than a stale copy.
+    Harmless in the one-shot CLI (nothing cached yet)."""
+    from promptpotter.application.optimization.dispatch.llm_call import prompts as _p
+
+    for fn in (_p._load_optimizer_manifest, _p.get_optimizer_schema, _p._load_local):
+        with contextlib.suppress(AttributeError):
+            fn.cache_clear()
+
+
 __all__ = [
     "ChampionPointer",
     "CoronationOutcome",
+    "FieldChange",
+    "GraduationOutcome",
+    "apply_champion_to_optimizer",
     "champion_pointer_path",
     "coronate",
     "promote_champion",

@@ -79,10 +79,21 @@ function ChampionRow({
         {row.label}
       </td>
       <td className="lab-ops">
-        <OpButton
-          label="Coronation"
-          title={`Head-to-head vs the reigning champion — run: champion coronate ${row.state_hash}`}
-        />
+        {row.status === "champion" ? (
+          <OpButton
+            label="Apply"
+            title={
+              "Graduate this champion into the distributable datasets/_optimizer — " +
+              "run: champion apply. The shipped optimizer + the next pp-self inner origin " +
+              "both start from it."
+            }
+          />
+        ) : (
+          <OpButton
+            label="Coronation"
+            title={`Head-to-head vs the reigning champion — run: champion coronate ${row.state_hash}`}
+          />
+        )}
         <OpButton label="+Seeds" title="Collect more seeds on this state's cells (run more pp-self)" />
         <OpButton label="+Cells" title="Measure this state on more in-band cells" />
       </td>

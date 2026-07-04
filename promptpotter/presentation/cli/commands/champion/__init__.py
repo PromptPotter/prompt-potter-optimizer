@@ -1,8 +1,10 @@
 """``cmd_champion`` — champion-registry verbs.
 
 ``refresh`` reduces the on-disk pp-self corpus to one ranked table of candidate
-meta-prompt states (pure disk read, zero LLM — the ``ab``-verb posture). The
-coronation-match + ``replay`` verbs land with the L4 champion-selection slice.
+meta-prompt states (pure disk read, zero LLM — the ``ab``-verb posture);
+``promote``/``coronate`` elect a champion; ``apply`` graduates the reigning
+champion into the distributable ``datasets/_optimizer``; ``replay`` prints the
+current state.
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ __all__ = ["cmd_champion"]
 
 
 async def cmd_champion(args: argparse.Namespace) -> CommandResult:
-    """Dispatch ``champion <verb>`` — ``refresh`` / ``promote`` / ``coronate`` / ``replay``."""
+    """Dispatch ``champion <verb>`` — ``refresh`` / ``promote`` / ``coronate`` / ``apply`` / ``replay``."""
     verb = args.champion_verb
     if verb == "refresh":
         return _cmd_champion_refresh(args)
@@ -23,9 +25,31 @@ async def cmd_champion(args: argparse.Namespace) -> CommandResult:
         return _cmd_champion_promote(args)
     if verb == "coronate":
         return _cmd_champion_coronate(args)
+    if verb == "apply":
+        return _cmd_champion_apply(args)
     if verb == "replay":
         return _cmd_champion_replay(args)
     raise SystemExit(f"champion: unknown verb {verb!r}")
+
+
+def _cmd_champion_apply(args: argparse.Namespace) -> CommandResult:
+    """Graduate the reigning champion into the distributable ``datasets/_optimizer``."""
+    from promptpotter.application.meta_champion import apply_champion_to_optimizer
+
+    outcome = apply_champion_to_optimizer(dry_run=args.dry_run)
+    lines = [outcome.detail]
+    for c in outcome.changes:
+        lines.append(f"  ~ {c.node}.{c.field}: {len(c.before)}c -> {len(c.after)}c")
+    for s in outcome.skipped:
+        lines.append(f"  · skipped {s}")
+    if outcome.applied:
+        lines.append(
+            f"Wrote {outcome.path}. Review the diff and commit deliberately "
+            "(the next `new promptpotter-self` inner origin now starts from the champion)."
+        )
+    elif outcome.changes and args.dry_run:
+        lines.append("Dry run — re-run without --dry-run to write.")
+    return CommandResult(data=outcome.model_dump(), human="\n".join(lines))
 
 
 def _cmd_champion_promote(args: argparse.Namespace) -> CommandResult:
