@@ -571,6 +571,30 @@ export function fetchChampionRegistry(signal?: AbortSignal): Promise<ChampionReg
   return jget<ChampionRegistryResponse>(`${API}/champion-registry`, signal);
 }
 
+// --- L4 resource matrix (dev-only L4 Lab) -------------------------------------
+// The (target-model × dataset) capability grid the operator built with
+// `matrix measure`. Empty until measured.
+export interface ResourceCell {
+  dataset: string;
+  target_model: string;
+  provider: string | null;
+  origin_accuracy: number | null;
+  n: number;
+  wilson_lo: number;
+  wilson_hi: number;
+  band: string; // floor | in-band | saturated | error
+  active_in_panel: boolean;
+  measured_at: string;
+  note: string;
+}
+export interface ResourceMatrixResponse {
+  generated_at: string;
+  cells: ResourceCell[];
+}
+export function fetchResourceMatrix(signal?: AbortSignal): Promise<ResourceMatrixResponse> {
+  return jget<ResourceMatrixResponse>(`${API}/resource-matrix`, signal);
+}
+
 // Conditional, like the dashboard poll: the unmasked request honors
 // `If-Modified-Since` → 304 so revalidation on the dashboard change-signal is
 // cheap during quiescent stretches. A masked request (lens/samples set) always

@@ -10,6 +10,7 @@
 
 import type { ChampionRegistryResponse } from "@/lib/api";
 import { ChampionConsole } from "@/components/lab/ChampionConsole";
+import { CapabilityMatrixPanel } from "@/components/lab/CapabilityMatrixPanel";
 
 export function LabPane({
   registry,
@@ -27,6 +28,7 @@ export function LabPane({
           champion here is what the shipped optimizer starts from.
         </p>
       </header>
+      <CapabilityMatrixPanel />
       {registry ? (
         <ChampionConsole registry={registry} onOpenCycle={onOpenCycle} />
       ) : (

@@ -140,6 +140,11 @@ class _InnerTaskSpec:
     n_rounds: int
     target: float
     n_variants: int | None  # inner_n_variants — None keeps the inner dataset's own value
+    # Per-cell target-model override (the environment axis of the panel). None keeps
+    # the inner dataset's own pinned model. The operator sets these — never the loop —
+    # so an (target-model, dataset) cell is a fixed, in-band resource, not a fuzzy pick.
+    inner_model: str | None = None
+    inner_provider: str | None = None
 
 
 def _resolve_inner_task(ctx: InnerSpawnContext, query: str) -> _InnerTaskSpec:
@@ -148,7 +153,10 @@ def _resolve_inner_task(ctx: InnerSpawnContext, query: str) -> _InnerTaskSpec:
     Reads the spawning dataset's ``inner_tasks.json`` — top-level
     ``inner_benchmark`` + ``inner_benchmark_config`` (the inner dataset + sample
     count + round cap + target), overlaid by the matching ``tasks[]`` entry
-    (per-task seed / round cap / target)."""
+    (per-task seed / round cap / target, and — for a multi-cell panel — per-task
+    ``inner_dataset`` / ``inner_model`` / ``inner_provider``). A task that omits
+    those falls back to the single top-level benchmark + the dataset's own model,
+    so a single-cell panel needs no per-task overrides."""
     cfg = read_json_optional(ctx.dataset_config_dir / "inner_tasks.json") or {}
     bench = str(cfg.get("inner_benchmark") or "justlogic")
     bench_cfg = cfg.get("inner_benchmark_config") or {}
@@ -158,11 +166,18 @@ def _resolve_inner_task(ctx: InnerSpawnContext, query: str) -> _InnerTaskSpec:
     raw_variants = bench_cfg.get("inner_n_variants")
     n_variants = int(raw_variants) if raw_variants is not None else None
     seed = 0
+    inner_model: str | None = None
+    inner_provider: str | None = None
     for task in cfg.get("tasks", []):
         if isinstance(task, dict) and task.get("id") == query:
             seed = int(task.get("inner_dataset_seed", 0))
             n_rounds = int(task.get("n_inner_rounds", n_rounds))
             target = float(task.get("target_score", target))
+            bench = str(task.get("inner_dataset") or bench)
+            im = task.get("inner_model")
+            inner_model = str(im) if im else None
+            ip = task.get("inner_provider")
+            inner_provider = str(ip) if ip else None
             break
     return _InnerTaskSpec(
         inner_dataset=bench,
@@ -171,6 +186,8 @@ def _resolve_inner_task(ctx: InnerSpawnContext, query: str) -> _InnerTaskSpec:
         n_rounds=n_rounds,
         target=target,
         n_variants=n_variants,
+        inner_model=inner_model,
+        inner_provider=inner_provider,
     )
 
 
@@ -378,12 +395,25 @@ async def _run_inner_campaign(
         # search width, same as it owns the round cap; the inner dataset's own
         # n_variants is a standalone-campaign default, not an L4 decision.
         opt_update["n_variants"] = spec.n_variants
-    campaign_config = campaign_config.model_copy(
-        update={
-            "sp_budget_ttest": len(train_data),
-            "optimization": campaign_config.optimization.model_copy(update=opt_update),
+    cfg_update: dict[str, Any] = {
+        "sp_budget_ttest": len(train_data),
+        "optimization": campaign_config.optimization.model_copy(update=opt_update),
+    }
+    if spec.inner_model:
+        # The cell's target-model override (the panel's environment axis) rides the
+        # sanctioned pipeline_overrides channel onto the inner dataset's single-call
+        # `llm_only` node — every in-band panel cell is a single-call reasoning
+        # dataset. Merge, don't clobber, any dataset-level overrides.
+        po: dict[str, Any] = {
+            k: dict(v) for k, v in (campaign_config.pipeline_overrides or {}).items()
         }
-    )
+        node = dict(po.get("llm_only", {}))
+        node["model"] = spec.inner_model
+        if spec.inner_provider:
+            node["provider"] = spec.inner_provider
+        po["llm_only"] = node
+        cfg_update["pipeline_overrides"] = po
+    campaign_config = campaign_config.model_copy(update=cfg_update)
 
     prepare_fresh_cycle(session, campaign_config, train_data)
     # Publish the freshly-minted inner cycle dir so the outer task's heartbeat

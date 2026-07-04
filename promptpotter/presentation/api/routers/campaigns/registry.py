@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import Query
 from pydantic import BaseModel, Field
 
+from promptpotter.application.bootstrap.wiring import resolve_dataset_config_dir
 from promptpotter.application.config import CampaignConfig, MechanismConfig
 from promptpotter.application.config_coupling import (
     COUPLINGS,
@@ -18,8 +19,9 @@ from promptpotter.application.config_coupling import (
 )
 from promptpotter.application.jobs.launcher import draft_wire_with_locks, load_checkin_draft
 from promptpotter.application.meta_champion import ChampionRegistry, reduce_corpus
+from promptpotter.application.resource_matrix import ResourceMatrix, read_matrix
 from promptpotter.infrastructure.store import Stores
-from promptpotter.infrastructure.store.paths import session_index
+from promptpotter.infrastructure.store.paths import REPO_ROOT, session_index
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
@@ -404,3 +406,13 @@ def get_champion_registry(store: StoreDep) -> ChampionRegistry:
     fetch (dev on-demand surface, not the 2 s poll); zero LLM. Empty for tenants with
     no pp-self campaigns (i.e. every whitelabeled end-user)."""
     return reduce_corpus(store.base_dir)
+
+
+@campaigns_router.get("/resource-matrix", response_model=ResourceMatrix)
+def get_resource_matrix(store: StoreDep) -> ResourceMatrix:
+    """The L4 resource matrix — the (target-model × dataset) capability grid the
+    operator built with ``matrix measure``. Read-only from the committed pp-self
+    ``resource_matrix.json``; empty when it has never been measured."""
+    pp_self_dir = resolve_dataset_config_dir(store, REPO_ROOT, "promptpotter-self")
+    matrix = read_matrix(pp_self_dir)
+    return matrix or ResourceMatrix(generated_at="", cells=[])
