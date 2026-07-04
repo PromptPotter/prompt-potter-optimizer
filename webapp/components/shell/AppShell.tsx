@@ -9,6 +9,8 @@ import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
 import { useAuth } from "@/lib/auth-context";
 import { useDatasetPreview } from "@/lib/hooks/useDatasetPreview";
+import { useLeafDatasetName } from "@/lib/hooks/useLeafDatasetName";
+import { pathLeaf } from "@/lib/ids";
 import { useChampionRegistry } from "@/lib/hooks/useChampionRegistry";
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { applyChartDefaults } from "@/lib/theme";
@@ -79,6 +81,7 @@ function AppShellInner() {
   // resolution, no independent /sessions/active poll. A `cycle_id` is unique only
   // within its campaign, so `campaignId` rides alongside `cycleId`.
   const {
+    viewedPath,
     campaignId,
     cycleId,
     datasetName,
@@ -88,6 +91,16 @@ function AppShellInner() {
     cycles,
     selectCycle,
   } = useWorkspace();
+  // The DISPLAY panes (connector, pipeline hero, hard-samples) follow the VIEWED
+  // LEAF hop — the same hop the dashboard stream re-roots to — so drilling into an
+  // L4 inner loop shows the inner run's connector + samples, not the outer meta
+  // pipeline. The CHAT THREAD (live feed, control verbs, session, Files, checkin)
+  // stays on the root hop below. At depth 1 leaf == root, so every leaf value
+  // equals its root counterpart and the top-level view is unchanged.
+  const leaf = viewedPath ? pathLeaf(viewedPath) : null;
+  const leafCampaignId = leaf?.campaignId ?? campaignId;
+  const leafCycleId = leaf?.cycleId ?? cycleId;
+  const leafDatasetName = useLeafDatasetName(viewedPath, datasetName);
   // Replit-style sub-tabs (Chat / Dashboard / Verify / Files) scoped to the
   // currently-selected cycle. Default = chat: that's where new cycles get
   // conceived and where the conversational interface lives. (The
@@ -119,7 +132,7 @@ function AppShellInner() {
     splitTest: datasetSplitTest,
     archivePerSample,
     isStale: datasetStale,
-  } = useDatasetPreview(campaignId, cycleId, datasetName, hardSamplesScope);
+  } = useDatasetPreview(leafCampaignId, leafCycleId, leafDatasetName, hardSamplesScope);
   // Sidebar collapse — user-driven, persistent across reloads. Default
   // expanded; once the user collapses it, that sticks until they toggle
   // again. Tab switches never touch this state — that's the whole point
@@ -248,7 +261,7 @@ function AppShellInner() {
         at the shell root (inside CycleStreamProvider + SelectionProvider it reads
         from), consumed by the lineage card and the fitness panel. */}
     <LineageOverlayProvider campaignId={campaignId}>
-    <ConnectorProvider datasetName={datasetName}>
+    <ConnectorProvider datasetName={leafDatasetName}>
     <div
       className={cx(
         "shell",
@@ -337,7 +350,7 @@ function AppShellInner() {
           <ChatPane
             datasetTitle={datasetTitle}
             cycleStartedAt={cycleStartedAt}
-            datasetName={datasetName}
+            datasetName={leafDatasetName}
             datasetItems={datasetItems}
             datasetMeasuredCount={datasetMeasuredCount}
             datasetUnmeasuredCount={datasetUnmeasuredCount}

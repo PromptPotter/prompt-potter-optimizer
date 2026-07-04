@@ -148,7 +148,10 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
         const resp = (await fetchDatasetPipeline(datasetName)) as {
           view?: PipelineView | null;
           connector?: string | null;
-          pipeline?: { backend_type?: string | null } | null;
+          // `backend_type` is a top-level connector fact (peer of `connector`), NOT nested
+          // in `pipeline` — the server's `pipeline` is the parsed `PipelineSchema`, which
+          // drops it. Reading it here is what lets `isSelfOptimization` recognise pp-self.
+          backend_type?: string | null;
           node_config_schema?: Record<string, NodeConfigParam[]> | null;
           node_output_schema?: Record<string, NodeOutputSchema | null> | null;
           origin_prompt_fields?: Record<string, unknown> | null;
@@ -156,7 +159,7 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
         if (!cancelled) {
           setView(resp?.view ?? null);
           setConnector(resp?.connector ?? null);
-          setBackendType(resp?.pipeline?.backend_type ?? null);
+          setBackendType(resp?.backend_type ?? null);
           setNodeConfigSchema(resp?.node_config_schema ?? null);
           setNodeOutputSchema(resp?.node_output_schema ?? null);
           setOriginPromptFields(resp?.origin_prompt_fields ?? null);

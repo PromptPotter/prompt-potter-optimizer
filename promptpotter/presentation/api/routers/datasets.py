@@ -652,6 +652,11 @@ class DatasetPipelineResponse(BaseModel):
 
     name: str
     connector: str
+    # The connector KIND read straight off the raw overlay (`termnorm` / `promptpotter` / …).
+    # A connector-level fact, peer of `connector` — NOT a `PipelineSchema` field, so it is
+    # surfaced here rather than smuggled through `pipeline` (the parser drops unknown keys).
+    # The webapp branches self-optimization (pp-self) rendering on it.
+    backend_type: str | None
     pipeline: dict[str, Any]
     view: dict[str, Any] | None
     # The full operator-editable config surface per node (model/temperature/
@@ -685,6 +690,7 @@ def get_dataset_pipeline(name: str, store: StoreDep) -> DatasetPipelineResponse:
     # sequences pointing at lone low surrogates that crash UTF-8 encode).
     schema = parse_pipeline_response(raw)
     connector = (raw.get("backend_name") or raw.get("name") or name).strip()
+    backend_type = raw.get("backend_type")
     # Model/provider lock is a campaign policy (`optimization.forbidden_axes_strict`),
     # not a pipeline fact — a node may declare `model` in `param_keys` as a capability
     # while the campaign still pins it. Read the dataset's default campaign.json; absent,
@@ -712,6 +718,7 @@ def get_dataset_pipeline(name: str, store: StoreDep) -> DatasetPipelineResponse:
     return DatasetPipelineResponse(
         name=name,
         connector=connector,
+        backend_type=backend_type,
         pipeline=schema.model_dump(by_alias=True),
         view=schema.view.model_dump(by_alias=True) if schema.view is not None else None,
         node_config_schema=schema.node_config_schema(forbidden_strict),

@@ -17,6 +17,7 @@ import {
   type RoundFileDoc,
 } from "@/lib/poll";
 import { candidateLabel } from "@/lib/candidate-label";
+import { PROMPT_STRING_FIELDS } from "@/lib/prompt-fields";
 
 export type ObserveState = "origin" | "live" | "historical";
 
@@ -31,12 +32,44 @@ export interface ObserveConfig {
   label: string;
 }
 
+// Project the six PromptTemplate string fields out of ONE node's resolved params.
+// Used when the flat `prompt_fields` carries no prompt content but the selected
+// node IS prompt-bearing and its evolved fields live per-node inside
+// `resolved_pipeline_params[nodeId]` — the pp-self meta-prompt shape, where each
+// meta node (l1_generate / l1_critique / …) owns its own persona/instruction/…
+// rather than sharing one flat prompt. Only fields actually present are returned
+// (the round file carries only the optimizer's mutated delta, not the static
+// `prompts/{node}.json` baseline).
+function nodePromptFields(
+  resolved: Record<string, unknown> | undefined | null,
+  nodeId: string | null | undefined,
+): Record<string, unknown> {
+  if (!nodeId || !resolved) return {};
+  const slice = resolved[nodeId];
+  if (!slice || typeof slice !== "object") return {};
+  const rec = slice as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const k of PROMPT_STRING_FIELDS) {
+    if (k in rec) out[k] = rec[k];
+  }
+  return out;
+}
+
 // A candidate row carrying the two observe fields — the same `LiveInputCandidate`
 // shape backs both the round-file `candidate_scores[]` and the live in-flight input.
-function rowConfig(row: LiveInputCandidate | undefined | null, label: string): ObserveConfig | null {
+// `nodeId` (the selected node) lets a prompt-bearing meta node surface its OWN
+// evolved prompt when the flat `prompt_fields` is empty; single-prompt pipelines
+// (`llm_only`, every normal dataset) keep their flat prompt and ignore it.
+function rowConfig(
+  row: LiveInputCandidate | undefined | null,
+  label: string,
+  nodeId?: string | null,
+): ObserveConfig | null {
   if (!row) return null;
+  const flat = (row.prompt_fields ?? {}) as Record<string, unknown>;
+  const hasFlatPrompt = PROMPT_STRING_FIELDS.some((k) => k in flat);
   return {
-    promptFields: row.prompt_fields ?? {},
+    promptFields: hasFlatPrompt ? flat : nodePromptFields(row.resolved_pipeline_params, nodeId),
     config: row.resolved_pipeline_params ?? {},
     label,
   };
@@ -47,7 +80,10 @@ function rowConfig(row: LiveInputCandidate | undefined | null, label: string): O
 // next `L1_GENERATE:enter`, view.py:374), so this stays non-null there. The one
 // null window is l1_generate-after-reset-before-first-candidate-started; the
 // OBSERVE view falls back to origin for that brief gap.
-export function liveObserveConfig(dash: DashboardSnapshot | null): ObserveConfig | null {
+export function liveObserveConfig(
+  dash: DashboardSnapshot | null,
+  nodeId?: string | null,
+): ObserveConfig | null {
   const candidates = liveL1InputCandidates(dash);
   if (candidates.length === 0) return null;
   let latest = candidates[0];
@@ -55,17 +91,20 @@ export function liveObserveConfig(dash: DashboardSnapshot | null): ObserveConfig
     if (Number(c.idx ?? -1) > Number(latest.idx ?? -1)) latest = c;
   }
   const label = latest.label || candidateLabel(roundOf(dash), latest.idx);
-  return rowConfig(latest, `live — ${label}`);
+  return rowConfig(latest, `live — ${label}`, nodeId);
 }
 
 // Origin: the round-0 C0 row — the sole origin candidate, always index 0. Its
 // resolved config is the dataset's starting program, born complete server-side;
 // this is what retired the `{}` origin fake that dropped model/provider whenever
 // the overlay file was thin. Null until round 0 has been written.
-export function originObserveConfig(round0: RoundFileDoc | null): ObserveConfig | null {
+export function originObserveConfig(
+  round0: RoundFileDoc | null,
+  nodeId?: string | null,
+): ObserveConfig | null {
   const scores = round0?.candidate_scores;
   if (!Array.isArray(scores)) return null;
-  return rowConfig(scores[0] as LiveInputCandidate, "origin");
+  return rowConfig(scores[0] as LiveInputCandidate, "origin", nodeId);
 }
 
 // Historical: a specific past candidate (the last completed round's winner) out
@@ -74,9 +113,10 @@ export function candidateObserveConfig(
   doc: RoundFileDoc | null,
   candidateId: string,
   label: string,
+  nodeId?: string | null,
 ): ObserveConfig | null {
   const scores = doc?.candidate_scores;
   if (!Array.isArray(scores) || !candidateId) return null;
   const row = (scores as LiveInputCandidate[]).find((c) => c && c.candidate_id === candidateId);
-  return rowConfig(row, label);
+  return rowConfig(row, label, nodeId);
 }

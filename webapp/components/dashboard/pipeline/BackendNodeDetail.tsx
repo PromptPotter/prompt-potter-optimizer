@@ -80,7 +80,12 @@ export function BackendNodeDetail({ draft, onClose, onPromptApply }: Props) {
   const { node: selectedId, candidate: selCand } = useSelection();
   const node = cv.view?.nodes.find((n) => n.id === selectedId && n.kind !== "io") ?? null;
 
-  const liveCfg = liveObserveConfig(dash);
+  // The selected node id scopes prompt resolution: a meta-prompt node (pp-self's
+  // l1_generate / l1_critique / …) carries its evolved prompt per-node inside the
+  // resolved params, not in the flat `prompt_fields`, so pass it through so the
+  // observe read model can surface THIS node's evolved fields.
+  const nodeId = node?.id ?? null;
+  const liveCfg = liveObserveConfig(dash, nodeId);
   // Viewed leaf path from the synchronous workspace, NOT from `dash` (which
   // hard-nulls on a soft unit switch and stays null during `warming_up`) —
   // otherwise the round-0 / historical observe-config fetches below starve and
@@ -156,9 +161,9 @@ export function BackendNodeDetail({ draft, onClose, onPromptApply }: Props) {
   // origin fallback (round 0 not yet written) is the schema-declared config. A
   // concrete node scopes the header/prompt; the config stays whole-pipeline.
   const histCfg = histTarget
-    ? candidateObserveConfig(histFile.doc, histTarget.candidateId, histTarget.label)
+    ? candidateObserveConfig(histFile.doc, histTarget.candidateId, histTarget.label, nodeId)
     : null;
-  const originCfg = originObserveConfig(round0.doc);
+  const originCfg = originObserveConfig(round0.doc, nodeId);
   // `live` is available only while the cycle is actually running — `current_round`
   // candidates linger in dashboard.json after a stop, so gate on `isLive`, not on
   // their mere presence (else a stopped run still offers a stale "live").

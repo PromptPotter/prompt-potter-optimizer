@@ -1,6 +1,7 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { API } from "@/lib/api/client";
+import { encodeCyclePath, encodeDescend, pathRoot, type CyclePath } from "@/lib/ids";
 import {
   projectionToActivity,
   sampleScoredCandidate,
@@ -57,10 +58,12 @@ export interface CycleEventsState {
   connected: boolean;
 }
 
-export function useCycleEvents(
-  campaignId: string | null,
-  cycleId: string | null,
-): CycleEventsState {
+// Addressed by the viewed CYCLE PATH, not bare ids: the feed follows the LEAF hop
+// the dashboard shows, so an L4 inner drill-in tails the INNER cycle's ledger (via
+// `?descend=`) instead of the outer root's — each inner campaign shows its own
+// activity, not the shared outer candidate cards. At depth 1 the URL is
+// byte-identical to a plain per-cycle subscribe.
+export function useCycleEvents(path: CyclePath | null): CycleEventsState {
   const [summaries, setSummaries] = useState<ActivityItem[]>([]);
   const [trail, setTrail] = useState<ActivityItem[]>([]);
   const [progress, setProgress] = useState<ActivityItem | null>(null);
@@ -68,7 +71,8 @@ export function useCycleEvents(
 
   // Render-phase guarded reset on unit switch (webapp/CLAUDE.md § State reset on
   // prop change): clear the prior cycle's feed in the same commit, no stale frame.
-  const key = `${campaignId ?? ""}:${cycleId ?? ""}`;
+  // Keyed on the ENCODED path so a drill-in into/out of an inner loop re-subscribes.
+  const key = path ? encodeCyclePath(path) : "";
   const [prevKey, setPrevKey] = useState(key);
   if (key !== prevKey) {
     setPrevKey(key);
@@ -77,12 +81,22 @@ export function useCycleEvents(
     setProgress(null);
     setConnected(false);
   }
+  // Keep the current path for the subscribe without depending on the array's
+  // per-render identity — the effect keys on the stable `key` string alone.
+  const pathRef = useRef<CyclePath | null>(path);
+  useEffect(() => {
+    pathRef.current = path;
+  });
 
   useEffect(() => {
-    if (!campaignId || !cycleId) return;
-    const url = `${API}/campaigns/${encodeURIComponent(campaignId)}/cycles/${encodeURIComponent(
-      cycleId,
-    )}/events:subscribe`;
+    const p = pathRef.current;
+    if (!p) return;
+    const root = pathRoot(p);
+    const descend = encodeDescend(p);
+    const url =
+      `${API}/campaigns/${encodeURIComponent(root.campaignId)}` +
+      `/cycles/${encodeURIComponent(root.cycleId)}/events:subscribe` +
+      (descend ? `?descend=${encodeURIComponent(descend)}` : "");
     const es = new EventSource(url, { withCredentials: true });
 
     es.onopen = () => setConnected(true);
@@ -126,7 +140,7 @@ export function useCycleEvents(
     };
 
     return () => es.close();
-  }, [campaignId, cycleId]);
+  }, [key]);
 
   return { activity: [...summaries, ...trail], progress, connected };
 }

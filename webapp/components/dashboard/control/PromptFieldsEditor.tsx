@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { DraftPatch } from "@/lib/api";
+import { PROMPT_STRING_FIELDS } from "@/lib/prompt-fields";
 
 // The starting-prompt control panel. The check-in's decomposition (or an
 // authored dataset's prompt) lands on `draft.origin_prompt_fields` as a
@@ -10,17 +11,18 @@ import type { DraftPatch } from "@/lib/api";
 // (the minted-campaign node panel shows the origin prompt with no draft to
 // write to).
 
-// The six keys MUST stay in sync with `PROMPT_STRING_FIELDS` — the source of
-// truth at `promptpotter/config/settings.py`. They cross the TS/Py seam, so a
-// rename there must land here too.
-const FIELDS: ReadonlyArray<{ key: string; label: string; hint: string; rows: number }> = [
-  { key: "persona", label: "Persona", hint: "Who the model should act as", rows: 2 },
-  { key: "task_intent", label: "Task intent", hint: "The goal, in one line", rows: 2 },
-  { key: "problem_description", label: "Problem", hint: "What each input is", rows: 2 },
-  { key: "instruction", label: "Instructions", hint: "The directive the model follows", rows: 3 },
-  { key: "thinking_style", label: "Thinking style", hint: "How to reason before answering", rows: 2 },
-  { key: "answer_format", label: "Answer format", hint: "Exact shape of the output", rows: 2 },
-];
+// Per-field UI copy, keyed by the canonical `PROMPT_STRING_FIELDS` (the TS/Py seam
+// lives in `lib/prompt-fields.ts`); the render order + membership come from that
+// shared list, so a rename crosses the seam in one place.
+const FIELD_META: Record<string, { label: string; hint: string; rows: number }> = {
+  persona: { label: "Persona", hint: "Who the model should act as", rows: 2 },
+  task_intent: { label: "Task intent", hint: "The goal, in one line", rows: 2 },
+  problem_description: { label: "Problem", hint: "What each input is", rows: 2 },
+  instruction: { label: "Instructions", hint: "The directive the model follows", rows: 3 },
+  thinking_style: { label: "Thinking style", hint: "How to reason before answering", rows: 2 },
+  answer_format: { label: "Answer format", hint: "Exact shape of the output", rows: 2 },
+};
+const FIELDS = PROMPT_STRING_FIELDS.map((key) => ({ key, ...FIELD_META[key] }));
 
 function asStrings(value: Record<string, unknown>): Record<string, string> {
   const out: Record<string, string> = {};

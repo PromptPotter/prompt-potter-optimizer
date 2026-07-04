@@ -88,7 +88,15 @@ export function ChatPane({
 }: Props) {
   // Self-sourced live state + identity for the job bar + spend chips.
   const { dash } = useDashboard();
-  const { campaignId, cycleId, sessionId } = useWorkspace();
+  const { viewedPath, campaignId, cycleId, sessionId } = useWorkspace();
+  // The live FEED + its gate-decision control follow the viewed LEAF hop (the same
+  // hop the dashboard shows) — drilling into an L4 inner campaign tails that inner
+  // cycle's own activity, not the outer thread's candidate cards. The gate decision
+  // is derived from `dash` (already leaf), so firing it must target the leaf too.
+  // Root identity (session, ingest compose) stays on the root exports below.
+  const leaf = viewedPath ? viewedPath[viewedPath.length - 1] : null;
+  const leafCampaignId = leaf?.campaignId ?? campaignId;
+  const leafCycleId = leaf?.cycleId ?? cycleId;
   const [jobOpen, setJobOpen] = useState(false);
   const [wandOn, setWandOn] = useState(true);
   const [samplesOpen, setSamplesOpen] = useState(false);
@@ -122,13 +130,13 @@ export function ChatPane({
   // The chat's curated layer over the cycle event stream (the webapp's first
   // SSE consumer) + the inline gate-decision merge surface. Both bind to the
   // viewed (campaign, cycle); the gate decision is raised from `run_phase`.
-  const live = useCycleEvents(campaignId, cycleId);
+  const live = useCycleEvents(viewedPath);
   const decision = deriveDecision(dash?.run_phase, dash);
   const liveSegment =
-    campaignId && cycleId ? (
+    leafCampaignId && leafCycleId ? (
       <LiveSegment
-        campaignId={campaignId}
-        cycleId={cycleId}
+        campaignId={leafCampaignId}
+        cycleId={leafCycleId}
         activity={live.activity}
         progress={live.progress}
         connected={live.connected}

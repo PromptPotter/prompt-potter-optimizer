@@ -26,11 +26,17 @@ import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
 
+from fastapi import Query
 from sse_starlette import EventSourceResponse
 
 from promptpotter.infrastructure.projections.event_stream import CycleLedgerTail
+from promptpotter.infrastructure.store import cycle_dir_for
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
+from promptpotter.presentation.api.routers.campaigns.cycles import (
+    _decode_descend,
+    resolve_cycle_path,
+)
 from promptpotter.shared.errors import NotFoundError
 
 __all__ = ["stream_cycle_events"]
@@ -69,6 +75,7 @@ async def stream_cycle_events(
     store: StoreDep,
     campaign_id: str,
     cycle_id: str,
+    descend: str | None = Query(None),
 ) -> EventSourceResponse:
     """Subscribe to a cycle's live ledger via SSE.
 
@@ -84,12 +91,22 @@ async def stream_cycle_events(
        record's ``record_type`` and ``sequence`` = the record's ledger offset.
     3. Heartbeat comment line every 15 s.
 
+    The path ids address the top-level (root) cycle; the optional ``descend``
+    query walks into the ``.inner/<previous cycle id>`` sandbox one
+    ``campaign::cycle`` hop at a time, so ONE stream serves a top-level cycle or
+    an L4 inner descendant (:func:`resolve_cycle_path`) — the chat feed follows
+    the same viewed leaf the dashboard does. Absent/empty ``descend`` is a plain
+    per-cycle subscribe, byte-identical to a top-level read.
+
     See ``docs/developer/event-stream.md`` for the certified Profile A contract.
     """
-    cycle_dir = Path(store.campaigns.cycle_dir(campaign_id, cycle_id))
+    leaf_store, leaf_campaign, leaf_cycle = resolve_cycle_path(
+        store, [(campaign_id, cycle_id), *_decode_descend(descend)]
+    )
+    cycle_dir = Path(cycle_dir_for(leaf_store.base_dir, leaf_campaign, leaf_cycle))
     if not cycle_dir.exists():
-        raise NotFoundError(f"Unknown cycle {campaign_id}/{cycle_id}.")
-    tail = CycleLedgerTail(cycle_dir, cycle_id)
+        raise NotFoundError(f"Unknown cycle {leaf_campaign}/{leaf_cycle}.")
+    tail = CycleLedgerTail(cycle_dir, leaf_cycle)
     # sep="\n": LF line endings (the contract's `data: <json>\n\n`; the default
     # is CRLF). X-Accel-Buffering: the one proxy-defeating header sse-starlette
     # does not set itself; Content-Type it sets, Cache-Control the no_store_on_api
