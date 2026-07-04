@@ -374,11 +374,14 @@ def elect_round_winner(
     origin, tie-broken toward higher coverage. Every candidate **and** the origin gets θ on
     the cycle's **fixed δ ruler** ``delta_scale`` (``candidate_abilities`` → ``fit_theta_given_delta``,
     flat where the ruler is cold), so all arms share one cross-round-comparable scale; the rank
-    key is ``(θ_cand − θ_origin) − θ_se`` — the LCB shrink so an under-probed candidate (wide
-    θ posterior) can't outrank a fully-probed one at equal ability. Origin is the floor at rank
-    ``(0.0, 0)`` — only a candidate confidently above origin (lift LCB > 0) with at least
-    ``coverage_floor`` measured samples can win. Returns ``("", abilities)`` when none clears
-    the floor.
+    key is the **point-estimate** lift ``(θ_cand − θ_origin)`` — a candidate strictly above
+    origin wins, NO winner's-curse SE margin. (The prior ``− θ_se`` LCB shrink discarded
+    genuinely-better candidates whenever the θ posterior was wide — thin per-round budgets make
+    ``θ_se`` dwarf a real gain — so the loop never compounded a discovered improvement. Under-
+    probing is guarded independently by ``coverage_floor``, so no SE margin is needed to keep a
+    thin fluke out.) Origin is the floor at rank ``(0.0, 0)`` — only a candidate above origin
+    (lift > 0) with at least ``coverage_floor`` measured samples can win. Returns
+    ``("", abilities)`` when none clears the floor.
 
     Returns ``(winner_id, abilities)`` — the fixed-ruler ``RaschPosterior`` rides out so the
     caller stamps each candidate's θ onto its display row from the SAME fit the decision was
@@ -417,8 +420,16 @@ def elect_round_winner(
         theta_c = abilities.theta.get(cid)
         if theta_c is None:
             continue
-        lift_lcb = (theta_c - theta_origin) - abilities.theta_se.get(cid, 0.0)
-        rank = (lift_lcb, base["total"])
+        # Rank by the difficulty-adjusted ability lift POINT ESTIMATE — a candidate strictly
+        # above origin wins, no winner's-curse SE margin required. The prior `- theta_se` shrink
+        # discarded genuinely-better candidates whenever the posterior was wide (thin per-round
+        # budgets ⇒ theta_se can dwarf a real gain), so the loop never compounded a discovered
+        # improvement — the next round re-explored origin instead of building on the better
+        # candidate. Under-probing is already guarded independently by `coverage_floor` above
+        # (a candidate below it never reaches here), so dropping the SE shrink cannot let a thin
+        # fluke win — only fully-probed candidates compete, best point-estimate θ takes it.
+        lift = theta_c - theta_origin
+        rank = (lift, base["total"])
         if rank > best_rank:
             best_rank = rank
             winner_id = cid

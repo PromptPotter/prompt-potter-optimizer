@@ -107,11 +107,3 @@ export function pathLeaf(path: CyclePath): CycleHop {
 export function encodeDescend(path: CyclePath): string {
   return encodeCyclePath(path.slice(1));
 }
-
-export function samePath(a: CyclePath | null, b: CyclePath | null): boolean {
-  if (a === b) return true;
-  if (!a || !b || a.length !== b.length) return false;
-  return a.every(
-    (h, i) => h.campaignId === b[i].campaignId && h.cycleId === b[i].cycleId,
-  );
-}

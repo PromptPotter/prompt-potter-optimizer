@@ -5,7 +5,6 @@ import {
   encodeDescend,
   pathLeaf,
   pathRoot,
-  samePath,
   type CyclePath,
 } from "@/lib/ids";
 
@@ -48,12 +47,5 @@ describe("CyclePath", () => {
   it("encodes descend as empty at depth 1, the inner hops when deep", () => {
     expect(encodeDescend(depth1)).toBe("");
     expect(encodeDescend(depth2)).toBe("justlogic__ff00aa::cycle_1122ab_s3");
-  });
-
-  it("compares paths by value", () => {
-    expect(samePath(depth2, [outer, inner])).toBe(true);
-    expect(samePath(depth1, depth2)).toBe(false);
-    expect(samePath(null, null)).toBe(true);
-    expect(samePath(depth1, null)).toBe(false);
   });
 });

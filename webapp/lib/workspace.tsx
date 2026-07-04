@@ -43,6 +43,7 @@ import {
 import {
   decodeCyclePath,
   encodeCyclePath,
+  pathLeaf,
   pathRoot,
   type CyclePath,
 } from "./ids";
@@ -64,6 +65,11 @@ export interface WorkspaceState {
   // bare `cycle_id` (a cycle_id is unique only within its campaign). Null until
   // the pointer / pin resolves.
   campaignId: string | null;
+  // The LEAF hop — what the dashboard / live feed / samples follow (the inner
+  // cycle when drilled into an L4 loop, else identical to the root hop). Derived
+  // once here so no surface re-inlines `viewedPath[len-1]`.
+  leafCampaignId: string | null;
+  leafCycleId: string | null;
   datasetName: string | null;
   following: boolean; // the viewed path tracks the active pointer
   cycles: CycleListEntry[];
@@ -304,6 +310,12 @@ export function WorkspaceProvider({
   const campaignId = rootHop?.campaignId ?? null;
   const cycleId = rootHop?.cycleId ?? null;
 
+  // The leaf hop — the dashboard / feed / samples anchor. Identical to the root
+  // hop at depth 1; the inner cycle when drilled into an L4 loop.
+  const leafHop = viewedPath ? pathLeaf(viewedPath) : null;
+  const leafCampaignId = leafHop?.campaignId ?? null;
+  const leafCycleId = leafHop?.cycleId ?? null;
+
   // Dataset of the root hop: the cycle-list row matched on BOTH ids.
   const cycleEntry =
     cycleId && campaignId
@@ -376,6 +388,8 @@ export function WorkspaceProvider({
     viewedPath,
     cycleId,
     campaignId,
+    leafCampaignId,
+    leafCycleId,
     datasetName,
     following,
     cycles,

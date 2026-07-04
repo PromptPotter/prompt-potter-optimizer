@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { API } from "@/lib/api/client";
-import { encodeCyclePath, encodeDescend, pathRoot, type CyclePath } from "@/lib/ids";
+import { cyclePathUrl } from "@/lib/api";
+import { encodeCyclePath, type CyclePath } from "@/lib/ids";
 import {
   projectionToActivity,
   sampleScoredCandidate,
@@ -91,13 +91,9 @@ export function useCycleEvents(path: CyclePath | null): CycleEventsState {
   useEffect(() => {
     const p = pathRef.current;
     if (!p) return;
-    const root = pathRoot(p);
-    const descend = encodeDescend(p);
-    const url =
-      `${API}/campaigns/${encodeURIComponent(root.campaignId)}` +
-      `/cycles/${encodeURIComponent(root.cycleId)}/events:subscribe` +
-      (descend ? `?descend=${encodeURIComponent(descend)}` : "");
-    const es = new EventSource(url, { withCredentials: true });
+    const es = new EventSource(cyclePathUrl(p, "/events:subscribe"), {
+      withCredentials: true,
+    });
 
     es.onopen = () => setConnected(true);
     es.onerror = () => setConnected(false); // EventSource auto-reconnects; re-paints from a fresh snapshot
