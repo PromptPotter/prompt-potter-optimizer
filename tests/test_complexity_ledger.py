@@ -115,6 +115,13 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # callers (JobRegistry ``on_reap`` + a startup sweep), one idempotent write seam.
 # It can't fold into ``runtime_flags.py`` (store import → circular) or
 # ``registry.py`` (kept store-free by design). A feature, justified.
+# 2026-07-04 abort-mechanism rework (no tracked dim moved, concepts down):
+# 2 elimination gates (dominance + equivalence) folded into ONE paired-margin
+# gate; the online per-sample CAT re-fit concept deleted (next_sample closure
+# chain, posterior_from_outcomes, per-step timelines) → the shared round order
+# is one pure function. Net ≈ −190 LOC in application code. config_leaf_fields
+# unchanged: online_reorder/dominance/equivalence stay on-disk (inert / folded)
+# pending the held config-surface-shrink pass.
 LEDGER_BASELINE = {
     "modules": 300,
     "init_files": 54,

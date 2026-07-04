@@ -2467,11 +2467,13 @@ def test_pick_score_artifact_ranks_contested_above_settled() -> None:
         Observation(candidate_id="d", sample_id=2, response=0.0),
     ]
     artifact = build_hard_samples_artifact_from_observations(obs)
-    assert artifact["schema_version"] == ARTIFACT_SCHEMA_VERSION == 3
+    assert artifact["schema_version"] == ARTIFACT_SCHEMA_VERSION == 4
 
     per_sample = artifact["pick_score"]["per_sample"]
     assert per_sample["2"] > per_sample["1"]
-    assert artifact["pick_score"]["sample_order"][-1] == 1
+    # sample_order = the next round's executed order (build_round_order seeded by
+    # the best candidate, who hits both samples → hit stratum desc δ: harder 2 first).
+    assert artifact["pick_score"]["sample_order"] == [2, 1]
 
 
 def test_build_round_order_fronts_win_opportunities_with_hit_probes() -> None:

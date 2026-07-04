@@ -8,13 +8,13 @@ posterior probability of being the best falls below ε. The original
 formulation assumes every arm is observed on an i.i.d. sample of the same
 underlying distribution.
 
-PromptPotter's adaptive queue mechanism intentionally violates that: it
-reorders each candidate's evaluation so the most diagnostic samples land
-first, abandoning a clearly inferior candidate within a handful of queries
-instead of burning the full sample budget. That asymmetric ordering breaks
-PoBB's iid premise — below is the failure mode it creates, the paired-sample
-fix that keeps the sorter's speedup, and the on-disk shape that lets resume
-replay paired decisions without re-running them.
+PromptPotter's shared round order intentionally violates that: it front-loads
+the decision-relevant samples (the seed's misses — the only place a candidate
+can win) so a dead candidate is abandoned within a handful of queries instead
+of burning the full sample budget. That non-iid ordering breaks PoBB's
+premise — below is the failure mode it creates, the paired-sample fix that
+keeps the speedup, and the on-disk shape that lets resume replay paired
+decisions without re-running them.
 
 ## The pathology
 
@@ -245,50 +245,52 @@ priors surfaces as divergence via the candidate side).
 
 | File | Role |
 |---|---|
-| `promptpotter/application/optimization/pobb/elimination/checks.py::PoBBCheck` | Sample-keyed priors, `backfill_for_sample`, paired `check()`, `snapshot_priors`, `set_sample_universe` (budget for the dominance gate) |
-| `promptpotter/application/intelligence/adaptive_queue_mechanism.py` | Online adaptive queue mechanism: `update_theta_posterior`, `decision_information_gain`, `pick_value`, `next_sample`, `expected_order` |
-| `promptpotter/application/optimization/l1/score/loop.py::score_population` | Builds the `backfill_fn` closure + the `_next_sample(scored_outcomes)` closure; injects both into PoBB / the query loop |
+| `promptpotter/application/optimization/pobb/elimination/checks.py::PoBBCheck` | Sample-keyed priors, `backfill_for_sample`, paired `check()` (margin gate + θ ε-gate), `snapshot_priors`, `set_sample_universe` (the margin gate's win-opportunity universe) |
+| `promptpotter/application/intelligence/adaptive_queue_mechanism.py` | `build_round_order` (the shared round order) + between-round CAT primitives (`update_theta_posterior`, `decision_information_gain`, `pick_value`, `expected_order`) |
+| `promptpotter/application/optimization/l1/score/loop.py::score_population` | Builds the `backfill_fn` closure, the shared round order (reorders the dataset once), injects both into PoBB / the query loop |
 | `promptpotter/application/optimization/l1/score/candidate.py::score_one_candidate` | Builds `_backfill_for_sample(sample_id)` closure and passes it as `on_sample_pre_check` — reactive per-sample backfill, no upfront wall |
-| `promptpotter/application/scoring/query_loop.py::run_query_loop` | Per-step `next_sample(scored_outcomes)` + fires `on_sample_pre_check(sample.id)` after each sample lands, before degradation checks read prior coverage |
+| `promptpotter/application/scoring/query_loop.py::run_query_loop` | Walks the (pre-ordered) dataset sequentially + fires `on_sample_pre_check(sample.id)` after each sample lands, before degradation checks read prior coverage |
 | `promptpotter/application/optimization/l1/population.py::pobb_decision_data` | Embeds `candidate_sample_ids` + `prior_histories` into the decision record |
 | `promptpotter/application/scoring/metrics.py::elimination_p_best` | Joint Rasch fit over candidate + paired priors → `p_best = min P(θ_cand > θ_prior)`; the one rule shared by live `check()` and replay |
 | `promptpotter/application/optimization/resume_and_fork/replayers.py::_pobb_replay_snapshot` | Re-fits θ from recorded hits via `elimination_p_best`; no cross-round resolver, no MC |
 
-## Sample-selection: online adaptive queue mechanism
+## Sample-selection: the shared round order
 
-Backfill makes the paired comparison statistically valid; the per-candidate
-**iteration order** is what makes it cheap. That order is set by the online
-adaptive queue mechanism — split out to its own page:
-[`adaptive-queue-mechanism.md`](adaptive-queue-mechanism.md).
+Backfill makes the paired comparison statistically valid; the shared
+**iteration order** is what makes it cheap — win-opportunity samples first,
+so decision evidence arrives before the budget is spent. Split out to its
+own page: [`adaptive-queue-mechanism.md`](adaptive-queue-mechanism.md).
 
-## Elimination ladder: dominance before posterior
+## Elimination ladder: margin before posterior
 
-`PoBBCheck.check()` runs two gates in order. The first is pure arithmetic:
+`PoBBCheck.check()` runs two gates in order. The first is the
+**paired-margin gate** — integer pairing arithmetic on the shared universe:
 
 ```
-cand_max_final_hits = cand_hits + (budget − queries_scored)
-if cand_max_final_hits < seed_total_hits → ELIMINATE
+wins   = candidate HIT where the seed missed
+losses = candidate MISS where the seed hit
+need   = ⌈improvement_threshold · budget⌉ − (wins − losses)
+kill when binom_sf(unattempted win opportunities, need, p_w) < ε
 ```
 
-If even hitting every remaining sample can't tie the seed prior's
-already-known total on the candidate's intended sample budget, no further
-scoring can flip the comparison. Fires regardless of the latest sample's
-hit/miss outcome — the dominance is structural, not evidential. Seed is
-the origin (R1) or the prior round's winner (R2+); the seed's coverage
-across the candidate's budget is guaranteed by the backfill above.
+`p_w` is the Laplace-smoothed win rate on the measured seed-MISS stratum
+alone — ties carry nothing, so an easy prefix can't inflate the estimate,
+and the statistic is order-agnostic (a pure function of the outcome
+multiset + the seed's map). When `need` exceeds the remaining win
+opportunities, `binom_sf` is exactly 0 — the deterministic can't-catch-up
+corner (the old separate dominance gate) rides the same formula. Seed is
+the origin (R1) or the prior round's winner (R2+); coverage of the
+candidate's measured samples is guaranteed by the backfill above, and
+still-unclassified universe samples count as win opportunities (the gate
+under-kills, never over-kills, while backfill catches up).
 
 The second gate is the θ-ability posterior — `p_best < ε`, where `p_best =
-min over priors of P(θ_cand > θ_prior)` on the cycle's fixed δ ruler. The two gates
-are complementary: dominance is SPRT's deterministic corner (probability of
-catching up = 0); the θ gate is difficulty-adjusted evidence accumulation against
-an ε threshold. Dominance fires first because "mathematically impossible" beats
-"probably won't."
-
-The `predictable_tail_*` δ-aware ε scaling that lived here previously
-was a heuristic version of this — loosen ε when the remaining samples are
-high-|δ| because no information is coming. Replaced because the dominance
-check states the same intuition exactly (`p=1` corner) instead of
-approximating it via a tunable multiplier.
+min over priors of P(θ_cand > θ_prior)` on the cycle's fixed δ ruler. The two
+gates are complementary: the margin gate asks "can it still be ADOPTED"
+(exact pairing arithmetic, ε-futility, deterministic at the corner); the θ
+gate asks "is it credibly the BEST" (difficulty-adjusted evidence
+accumulation). Margin fires first because it is integer-exact and needs no
+θ fit.
 
 ## Related concepts
 
@@ -299,6 +301,6 @@ approximating it via a tunable multiplier.
   divergence + fork behavior.
 * `git log` — the artifact contract carrying
   the heatmap's `sample_order` (δ_s desc) and the descriptive
-  `pick_score.per_sample` blended-pick-value snapshot.
-* [`adaptive-queue-mechanism.md`](adaptive-queue-mechanism.md) — the live
-  online adaptive queue mechanism that sets each candidate's iteration order.
+  `pick_score.per_sample` contestedness snapshot.
+* [`adaptive-queue-mechanism.md`](adaptive-queue-mechanism.md) — the shared
+  round order that sets every candidate's iteration order.

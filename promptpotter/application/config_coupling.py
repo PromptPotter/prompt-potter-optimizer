@@ -358,14 +358,15 @@ COUPLINGS: tuple[Coupling, ...] = (
         ),
         estimand=Estimand.SELECTION,
         relation=(
-            "per_round_resubset (between-round) and online_reorder (within-round) "
-            "together define the sample basis: turn BOTH off to freeze one fixed "
-            "subset, fixed order, identical for every round and candidate."
+            "per_round_resubset picks the between-round subset; within a round the "
+            "order is always the deterministic shared round order (build_round_order "
+            "— seed-miss win opportunities first), identical for every candidate. "
+            "online_reorder is INERT (kept on-disk for the config shrink pass)."
         ),
         consequence=(
             "A permanent relationship — shown so the basis is legible. No violation; "
-            "changing either redefines what 'the subset' a fitness number was "
-            "measured over means."
+            "changing per_round_resubset redefines what 'the subset' a fitness "
+            "number was measured over means."
         ),
         severity="info",
         predicate=lambda c: False,

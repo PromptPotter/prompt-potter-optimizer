@@ -7,7 +7,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.intelligence.adaptive_queue_mechanism import pick_value
+from promptpotter.application.intelligence.adaptive_queue_mechanism import (
+    build_round_order,
+    pick_value,
+)
 from promptpotter.application.intelligence.exploration import build_observations, fit_rasch
 from promptpotter.shared.clock import utcnow_iso
 
@@ -22,7 +25,7 @@ __all__ = [
     "empty_artifact",
 ]
 
-ARTIFACT_SCHEMA_VERSION = 3
+ARTIFACT_SCHEMA_VERSION = 4
 
 
 def _candidate_hit_rates(observations: list[Observation]) -> dict[str, float]:
@@ -85,9 +88,21 @@ def _resolve_sample_order(
     )
 
 
-def _resolve_pick_order(pick_score: dict[int, float]) -> list[int]:
-    """Desc pick-value, asc sid; snapshot only — ``adaptive_queue_mechanism`` re-ranks live."""
-    return sorted(pick_score.keys(), key=lambda sid: (-pick_score[sid], sid))
+def _resolve_round_order(
+    observations: list[Observation],
+    posterior: RaschPosterior,
+    best_cid: str | None,
+) -> list[int]:
+    """``pick_score.sample_order`` = what the engine will actually execute next round:
+    ``build_round_order`` seeded with the best candidate's per-sample grades (the
+    likely next-round seed). Miss-stratum (win opportunities) first, hit probes
+    every 4th slot."""
+    best_grades: dict[int, float] = {}
+    if best_cid is not None:
+        best_grades = {
+            int(o.sample_id): float(o.response) for o in observations if o.candidate_id == best_cid
+        }
+    return build_round_order(best_grades, posterior.delta, sorted(posterior.delta.keys()))
 
 
 def empty_artifact(
@@ -149,6 +164,7 @@ def build_hard_samples_artifact_from_observations(
         posterior = fit_rasch(observations)
     hit_rates = _candidate_hit_rates(observations)
     miss_rates = _sample_miss_rates(observations)
+    best_cid: str | None = None
     if posterior.theta:
         best_cid = max(posterior.theta, key=lambda cid: posterior.theta[cid])
         seed_mu = posterior.theta[best_cid]
@@ -165,7 +181,7 @@ def build_hard_samples_artifact_from_observations(
 
     full_candidate_order = _resolve_candidate_order(posterior, hit_rates)
     full_sample_order = _resolve_sample_order(posterior, miss_rates)
-    full_pick_order = _resolve_pick_order(pick_score_map)
+    full_pick_order = _resolve_round_order(observations, posterior, best_cid)
 
     total_candidates = len(full_candidate_order)
     total_samples = len(full_sample_order)

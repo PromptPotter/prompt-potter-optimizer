@@ -262,16 +262,25 @@ The persisted world is a four-entity containment hierarchy
   couplings). Where the "deferred-with-the-flip" interactions in
   [`specs/fitness-comparability.md`](specs/fitness-comparability.md) became
   machine-checked.
-- **Adaptive queue mechanism** — the live per-step sample selector
-  inside the PoBB loop. Maintains a Gaussian posterior on the
-  candidate's latent ability `θ_c` and re-picks every measurement
-  by the pick-value objective.
+- **Shared round order** — the one deterministic scoring order every
+  candidate in a round walks (`build_round_order`): seed-MISS
+  win-opportunity samples first (asc δ), a seed-HIT regression probe
+  every 4th slot (desc δ), unknowns riding the miss stratum. Pure
+  function of (seed grades, δ ruler, ids) — resume re-derives it.
+  Replaced the online per-candidate CAT re-rank 2026-07-04.
   `application/intelligence/adaptive_queue_mechanism.py`.
-- **pick-value** — the adaptive queue mechanism's single one-step-greedy
-  objective: `decision_information_gain` (in nats). Drives the
-  per-step pick and the `pick_score` snapshot. (The earlier blended
-  `+ explore_weight · model_information_gain` term was dropped 2026-05;
-  see [`specs/verdict-resolution.md`](specs/verdict-resolution.md).)
+- **Paired-margin gate** — the PoBB futility gate: kill a candidate
+  when `P(net ≥ margin wins vs the seed) < ε`, wins/losses counted on
+  discordant pairs only, win rate estimated on the measured seed-MISS
+  stratum (order-agnostic). `need > opportunities` ⇒ `binom_sf` = 0 =
+  the deterministic can't-catch-up corner. Records as `margin_cut`.
+  Folded the old dominance + equivalence gates.
+  `application/optimization/pobb/elimination/checks.py::_margin_stats`.
+- **pick-value** — the between-round CAT acquisition objective:
+  `decision_information_gain + delta_learning_gain` (in nats). Drives
+  `select_round_subset` ranking and the `pick_score` snapshot. (The
+  earlier blended `+ explore_weight · model_information_gain` term was
+  dropped 2026-05; see [`specs/verdict-resolution.md`](specs/verdict-resolution.md).)
 - **Decision information gain** — the pick-value objective: the
   mutual information between the next outcome and
   the keep/abort verdict `θ_c > θ_s` against the seed. The
@@ -280,11 +289,12 @@ The persisted world is a four-entity containment hierarchy
   `pick_score.per_sample` on the hard-samples artifact: the
   pick-value for a fresh mutation of the seed, ability
   prior `N(θ_seed, σ_θ²)` (centred on the parent, not the
-  population-mean anchor 0). Consumed by the webapp dataset table;
-  the live adaptive queue mechanism uses its own per-candidate
-  posterior, not this snapshot.
+  population-mean anchor 0). Consumed by the webapp dataset table.
+  The artifact's `pick_score.sample_order` is `build_round_order`
+  seeded by the best candidate — the order the engine will actually
+  execute next round.
 - **llm_ranking** — a backend node that orders ranked_items per
-  sample. Distinct from PoBB, Rasch, and the adaptive queue mechanism.
+  sample. Distinct from PoBB, Rasch, and the shared round order.
 - **prediction (terminal ranking)** — the per-sample `predicted` is the
   head of the **terminal ranker's** ranked output (`candidate_ranking`
   for a `token_matching`-terminal pipeline, `final_ranking` for an
