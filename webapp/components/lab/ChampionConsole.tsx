@@ -79,8 +79,11 @@ function ChampionRow({
         {row.label}
       </td>
       <td className="lab-ops">
-        <OpButton label="Coronation" title="Head-to-head paired match vs the reigning champion" />
-        <OpButton label="+Seeds" title="Collect more seeds on this state's cells" />
+        <OpButton
+          label="Coronation"
+          title={`Head-to-head vs the reigning champion — run: champion coronate ${row.state_hash}`}
+        />
+        <OpButton label="+Seeds" title="Collect more seeds on this state's cells (run more pp-self)" />
         <OpButton label="+Cells" title="Measure this state on more in-band cells" />
       </td>
     </tr>

@@ -90,6 +90,20 @@ def registry_path(base_dir: Path) -> Path:
     return base_dir / "meta_champion" / "registry.json"
 
 
+def champion_pointer_path() -> Path:
+    """The committed reigning-champion pointer (shared across tenants)."""
+    from promptpotter.infrastructure.store.paths import REPO_ROOT
+
+    return REPO_ROOT / "datasets" / "_optimizer_meta" / "champion.json"
+
+
+def _reigning_champion_hash() -> str | None:
+    """The reigning champion's state_hash from the pointer (raw read, no model)."""
+    doc = _read_json(champion_pointer_path())
+    h = doc.get("state_hash")
+    return str(h) if isinstance(h, str) and h else None
+
+
 def _state_hash(prompt_state: dict[str, dict[str, str]]) -> str:
     """Stable short hash of a meta-prompt state; empty state ⇒ the origin sentinel."""
     if not prompt_state:
@@ -190,6 +204,11 @@ def reduce_corpus(base_dir: Path) -> ChampionRegistry:
                 )
 
     rows = [_finalize(state_hash, acc) for state_hash, acc in accums.items()]
+    champion_hash = _reigning_champion_hash()
+    if champion_hash is not None:
+        for row in rows:
+            if row.state_hash == champion_hash:
+                row.status = "champion"
     rows.sort(key=lambda r: r.anchor_effect, reverse=True)
     return ChampionRegistry(
         generated_at=datetime.now(UTC).isoformat(timespec="seconds"),

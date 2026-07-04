@@ -37,6 +37,28 @@ export interface DegradationHealth {
   suggested_action: string | null;
 }
 
+/** One cell's paired (variant − noop) composite difference. */
+export interface OuterCellEffect {
+  cell: string;
+  variant_fitness: number;
+  noop_fitness: number;
+  diff: number;
+}
+
+/** The pooled blocked-paired verdict for a round's target variant. */
+export interface OuterVerdict {
+  variant_id: string;
+  variant_label: string;
+  per_cell: OuterCellEffect[];
+  effect: number;
+  se: number;
+  ci_lo: number;
+  ci_hi: number;
+  n_cells: number;
+  decision: string;
+  mde_remaining: number;
+}
+
 /** Display row for `dashboard.json::rounds[]` — webapp's completed-round source. */
 export interface RoundSummary {
   round: number;
@@ -47,6 +69,7 @@ export interface RoundSummary {
   candidates: RoundSummaryCandidate[];
   selection: number[];
   health: DegradationHealth | null;
+  outer_verdict: OuterVerdict | null;
 }
 
 /** One on-demand candidate verification → webapp Verify tab. */

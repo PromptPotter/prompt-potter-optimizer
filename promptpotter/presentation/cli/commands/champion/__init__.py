@@ -15,11 +15,74 @@ __all__ = ["cmd_champion"]
 
 
 async def cmd_champion(args: argparse.Namespace) -> CommandResult:
-    """Dispatch ``champion <verb>`` — currently ``refresh``."""
+    """Dispatch ``champion <verb>`` — ``refresh`` / ``promote`` / ``coronate`` / ``replay``."""
     verb = args.champion_verb
     if verb == "refresh":
         return _cmd_champion_refresh(args)
+    if verb == "promote":
+        return _cmd_champion_promote(args)
+    if verb == "coronate":
+        return _cmd_champion_coronate(args)
+    if verb == "replay":
+        return _cmd_champion_replay(args)
     raise SystemExit(f"champion: unknown verb {verb!r}")
+
+
+def _cmd_champion_promote(args: argparse.Namespace) -> CommandResult:
+    """Elect a state as the reigning champion (writes the pointer)."""
+    from promptpotter.application.meta_champion import promote_champion
+    from promptpotter.infrastructure.store import build_stores
+
+    stores = build_stores(identity_from_args(args))
+    pointer, message = promote_champion(stores.base_dir, args.state_hash)
+    return CommandResult(data=pointer.model_dump() if pointer else {}, human=message)
+
+
+def _cmd_champion_coronate(args: argparse.Namespace) -> CommandResult:
+    """Head-to-head a challenger vs the reigning champion; crown it if the CI clears."""
+    from promptpotter.application.meta_champion import coronate
+    from promptpotter.infrastructure.store import build_stores
+
+    stores = build_stores(identity_from_args(args))
+    outcome = coronate(stores.base_dir, args.state_hash, promote_on_win=not args.dry_run)
+    human = (
+        f"Coronation: {outcome.challenger} vs champion "
+        f"{outcome.champion or '(none)'} — {outcome.decision.upper()}.\n"
+        f"  pooled effect {outcome.effect:+.4f} [{outcome.ci_lo:+.3f}, {outcome.ci_hi:+.3f}] "
+        f"over {outcome.n_shared_cells} shared cell(s).\n  {outcome.detail}"
+    )
+    return CommandResult(data=outcome.model_dump(), human=human)
+
+
+def _cmd_champion_replay(args: argparse.Namespace) -> CommandResult:
+    """Print the reigning champion + persisted table from disk (zero recompute)."""
+    from promptpotter.application.meta_champion import read_champion_pointer, read_registry
+    from promptpotter.infrastructure.store import build_stores
+
+    stores = build_stores(identity_from_args(args))
+    pointer = read_champion_pointer()
+    registry = read_registry(stores.base_dir)
+    lines = []
+    if pointer is None:
+        lines.append("No reigning champion yet (run `champion coronate <hash>` or `promote`).")
+    else:
+        lines.append(
+            f"Reigning champion: {pointer.state_hash} — anchor {pointer.anchor_effect:+.4f} "
+            f"over {pointer.n_cells} cell(s), since {pointer.since}.\n  {pointer.label[:70]}"
+        )
+    if registry is not None:
+        lines.append(
+            f"Registry: {len(registry.candidates)} state(s), generated {registry.generated_at}."
+        )
+    else:
+        lines.append("Registry not built yet — run `champion refresh`.")
+    return CommandResult(
+        data={
+            "champion": pointer.model_dump() if pointer else None,
+            "n_states": len(registry.candidates) if registry else 0,
+        },
+        human="\n".join(lines),
+    )
 
 
 def _cmd_champion_refresh(args: argparse.Namespace) -> CommandResult:

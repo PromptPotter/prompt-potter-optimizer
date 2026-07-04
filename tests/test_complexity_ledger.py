@@ -122,10 +122,18 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # is one pure function. Net ≈ −190 LOC in application code. config_leaf_fields
 # unchanged: online_reorder/dominance/equivalence stay on-disk (inert / folded)
 # pending the held config-surface-shrink pass.
+# then ``modules`` 300->309 / ``init_files`` 54->58 / ``reexport_shims`` 41->45:
+# the L4 Lab subsystem (statistically-rigorous L4). New packages
+# ``application/meta_champion`` (reduce the pp-self corpus to a ranked champion
+# table + coronate/promote), ``application/resource_matrix`` (the target-model ×
+# dataset capability grid), the ``domain/outer_verdict`` blocked-paired verdict,
+# plus ``matrix`` / ``champion`` CLI verb packages. Each is a concept the loop
+# lacked: select the overall-best meta-prompt, match models to datasets, a
+# rigorous per-round read. A feature, justified.
 LEDGER_BASELINE = {
-    "modules": 300,
-    "init_files": 54,
-    "reexport_shims": 41,
+    "modules": 309,
+    "init_files": 58,
+    "reexport_shims": 45,
     "config_leaf_fields": 37,
     "settings_env": 17,
     "settings_const": 16,

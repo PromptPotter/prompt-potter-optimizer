@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from promptpotter.domain.outer_verdict import CandidateInfo, compute_outer_verdict
 from promptpotter.domain.results import (
     RoundResult,
     RoundSummary,
@@ -75,6 +76,20 @@ def build_round_summary(rr: RoundResult) -> RoundSummary:
             )
         )
     selection = _measurement_order(rr.all_candidate_results or {})
+    verdict = compute_outer_verdict(
+        rr.all_candidate_results or {},
+        [
+            CandidateInfo(
+                candidate_id=c.candidate_id,
+                label=c.label,
+                changes_description=c.changes_description,
+                composite_fitness=c.composite_fitness,
+                is_winner=is_round_winner(c.changes_description, winner_label),
+            )
+            for c in rr.candidate_scores
+        ],
+        winner_label,
+    )
     return RoundSummary(
         round=rr.round,
         accuracy=float(rr.accuracy),
@@ -84,6 +99,7 @@ def build_round_summary(rr: RoundResult) -> RoundSummary:
         candidates=candidates,
         selection=selection,
         health=rr.health,
+        outer_verdict=verdict,
     )
 
 

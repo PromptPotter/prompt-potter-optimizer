@@ -31,6 +31,8 @@ export type {
   MeasurementSeriesResponse,
   NodeConfigParam,
   NodeOutputSchema,
+  OuterCellEffect,
+  OuterVerdict,
   RoundSummary,
   RoundSummaryCandidate,
   SampleSeries,

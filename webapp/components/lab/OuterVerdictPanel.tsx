@@ -1,0 +1,141 @@
+"use client";
+// Outer verdict — the blocked, paired L4 read of the viewed pp-self cycle's latest
+// round: per-cell (variant − noop) diffs as dots on a shared 0-centred axis, plus the
+// pooled effect as a diamond with its CI whisker, and a 3-way decision. Net-new SVG
+// (no CI/forest primitive existed). Sign-coloured, but the number + label always carry
+// the meaning. Reads the served verdict off dash.rounds; never recomputes.
+
+import { memo, useMemo } from "react";
+import { useDashboard } from "@/lib/hooks/useDashboard";
+import type { OuterVerdict } from "@/lib/api/types";
+import { CardFrame, Badge, type BadgeTone } from "@/components/ui";
+
+const DECISION_TONE: Record<string, BadgeTone> = {
+  adopt: "success",
+  reject: "danger",
+  inconclusive: "accent",
+};
+
+const AXIS_W = 220;
+const ROW_H = 18;
+
+function fmt(n: number): string {
+  return (n >= 0 ? "+" : "") + n.toFixed(3);
+}
+
+function Row({
+  label,
+  x,
+  children,
+  value,
+}: {
+  label: string;
+  x: (v: number) => number;
+  children: React.ReactNode;
+  value: string;
+}) {
+  return (
+    <div className="ov-row">
+      <span className="ov-cell-label" title={label}>
+        {label}
+      </span>
+      <svg
+        className="ov-axis"
+        width={AXIS_W}
+        height={ROW_H}
+        viewBox={`0 0 ${AXIS_W} ${ROW_H}`}
+        role="img"
+        aria-label={`${label}: ${value}`}
+      >
+        <line
+          x1={x(0)}
+          y1={2}
+          x2={x(0)}
+          y2={ROW_H - 2}
+          stroke="var(--color-border-tertiary)"
+          strokeWidth={1}
+        />
+        {children}
+      </svg>
+      <span className="ov-cell-val">{value}</span>
+    </div>
+  );
+}
+
+function ForestPlot({ verdict }: { verdict: OuterVerdict }) {
+  const x = useMemo(() => {
+    const vals = [0, verdict.ci_lo, verdict.ci_hi, ...verdict.per_cell.map((c) => c.diff)];
+    const lo = Math.min(...vals);
+    const hi = Math.max(...vals);
+    const span = hi - lo || 1;
+    const pad = span * 0.1;
+    const d0 = lo - pad;
+    const d1 = hi + pad;
+    return (v: number) => 4 + ((v - d0) / (d1 - d0)) * (AXIS_W - 8);
+  }, [verdict]);
+
+  const sign =
+    verdict.ci_lo > 0 ? "var(--color-success)" : verdict.ci_hi < 0 ? "var(--color-danger)" : "var(--color-text-secondary)";
+
+  return (
+    <div className="ov-forest">
+      {verdict.per_cell.map((c) => (
+        <Row key={c.cell} label={c.cell} x={x} value={fmt(c.diff)}>
+          <circle cx={x(c.diff)} cy={ROW_H / 2} r={3} fill="var(--color-text-secondary)" />
+        </Row>
+      ))}
+      <Row label="pooled" x={x} value={`${fmt(verdict.effect)}`}>
+        <line
+          x1={x(verdict.ci_lo)}
+          y1={ROW_H / 2}
+          x2={x(verdict.ci_hi)}
+          y2={ROW_H / 2}
+          stroke={sign}
+          strokeWidth={1.5}
+        />
+        <path
+          d={`M ${x(verdict.effect)} ${ROW_H / 2 - 4} L ${x(verdict.effect) + 4} ${ROW_H / 2} L ${x(verdict.effect)} ${ROW_H / 2 + 4} L ${x(verdict.effect) - 4} ${ROW_H / 2} Z`}
+          fill={sign}
+        />
+      </Row>
+    </div>
+  );
+}
+
+function pickVerdict(rounds: { round: number; outer_verdict?: OuterVerdict | null }[]):
+  | OuterVerdict
+  | null {
+  for (let i = rounds.length - 1; i >= 0; i--) {
+    if (rounds[i].outer_verdict) return rounds[i].outer_verdict as OuterVerdict;
+  }
+  return null;
+}
+
+export const OuterVerdictPanel = memo(function OuterVerdictPanel() {
+  const { dash } = useDashboard();
+  const verdict = useMemo(() => pickVerdict(dash?.rounds ?? []), [dash?.rounds]);
+
+  return (
+    <CardFrame title="Outer verdict" headingTag="h2">
+      {!verdict ? (
+        <p className="lab-empty">
+          Select a pp-self cycle with a completed round to see its blocked paired verdict
+          (per-cell variant−noop effects pooled across the panel).
+        </p>
+      ) : (
+        <>
+          <p className="lab-lede">
+            <Badge tone={DECISION_TONE[verdict.decision] ?? "default"}>{verdict.decision}</Badge>{" "}
+            Variant lifts the optimizer <strong>{fmt(verdict.effect)}</strong> [{fmt(verdict.ci_lo)},{" "}
+            {fmt(verdict.ci_hi)}] across {verdict.n_cells} cell
+            {verdict.n_cells === 1 ? "" : "s"} vs the no-op probe.
+            {verdict.decision === "inconclusive"
+              ? ` CI spans 0 — MDE at this cell count ≈ ${verdict.mde_remaining.toFixed(3)}.`
+              : ""}
+          </p>
+          <ForestPlot verdict={verdict} />
+        </>
+      )}
+    </CardFrame>
+  );
+});

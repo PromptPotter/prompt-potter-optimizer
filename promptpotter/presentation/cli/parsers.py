@@ -404,6 +404,28 @@ def _add_champion_args(p_champion: argparse.ArgumentParser) -> None:
         help="Rebuild the champion registry from every pp-self cycle on disk and "
         "print the ranked table (anchor-to-origin effect). Zero LLM calls.",
     )
+    p_promote = champion_sub.add_parser(
+        "promote",
+        help="Elect a state (by state_hash) as the reigning champion — writes the "
+        "datasets/_optimizer_meta/champion.json pointer. Uncontested.",
+    )
+    p_promote.add_argument("state_hash", help="The candidate state_hash to crown.")
+    p_coronate = champion_sub.add_parser(
+        "coronate",
+        help="Head-to-head a challenger vs the reigning champion on their shared "
+        "cells (paired, from the registry); crown it only if the pooled CI clears 0.",
+    )
+    p_coronate.add_argument("state_hash", help="The challenger state_hash.")
+    p_coronate.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report the coronation verdict without writing the champion pointer.",
+    )
+    champion_sub.add_parser(
+        "replay",
+        help="Print the reigning champion + persisted registry from disk (zero "
+        "recompute) — the auditable current state.",
+    )
 
 
 def _add_matrix_args(p_matrix: argparse.ArgumentParser) -> None:

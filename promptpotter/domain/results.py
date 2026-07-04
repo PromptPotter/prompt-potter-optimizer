@@ -12,6 +12,7 @@ from promptpotter.domain.escalation_signals import (
     ValidationFailure,
 )
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.outer_verdict import OuterVerdict
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.run_records import DecisionRecord
 
@@ -528,6 +529,10 @@ class RoundSummary(BaseModel):
     # ``None`` only when the round measured zero samples. Webapp/CLI render it;
     # never recompute (R-36).
     health: DegradationHealth | None = None
+    # Blocked, paired L4 outer verdict: the target variant's pooled (variant − noop)
+    # effect across the panel's cells + a 3-way decision. ``None`` on any non-L4 round
+    # (no no-op probe to pair against). Webapp/CLI render it; never recompute.
+    outer_verdict: OuterVerdict | None = None
 
 
 class PayloadOutcome(BaseModel):

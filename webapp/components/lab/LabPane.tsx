@@ -11,6 +11,7 @@
 import type { ChampionRegistryResponse } from "@/lib/api";
 import { ChampionConsole } from "@/components/lab/ChampionConsole";
 import { CapabilityMatrixPanel } from "@/components/lab/CapabilityMatrixPanel";
+import { OuterVerdictPanel } from "@/components/lab/OuterVerdictPanel";
 
 export function LabPane({
   registry,
@@ -29,6 +30,7 @@ export function LabPane({
         </p>
       </header>
       <CapabilityMatrixPanel />
+      <OuterVerdictPanel />
       {registry ? (
         <ChampionConsole registry={registry} onOpenCycle={onOpenCycle} />
       ) : (

@@ -234,3 +234,39 @@
   outline: 2px solid var(--color-accent);
   outline-offset: -1px;
 }
+
+/* ── Outer verdict forest plot ──────────────────────────────── */
+.ov-forest {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 6px;
+}
+.ov-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+.ov-cell-label {
+  flex: 0 0 12ch;
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.72rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-axis {
+  flex: 0 0 auto;
+}
+.ov-cell-val {
+  flex: 0 0 auto;
+  color: var(--color-text-primary);
+}
+.ov-row:last-child .ov-cell-label,
+.ov-row:last-child .ov-cell-val {
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
