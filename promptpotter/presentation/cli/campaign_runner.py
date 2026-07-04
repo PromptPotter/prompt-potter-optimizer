@@ -22,6 +22,7 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
 from promptpotter.presentation.cli.commands import (
     cmd_ab,
     cmd_archive,
+    cmd_champion,
     cmd_delete,
     cmd_new,
     cmd_reset,
@@ -40,6 +41,7 @@ COMMANDS = {
     "new": cmd_new,
     "resume": cmd_resume,
     "ab": cmd_ab,
+    "champion": cmd_champion,
     "sweep": cmd_sweep,
     "reset": cmd_reset,
     "verify": cmd_verify,

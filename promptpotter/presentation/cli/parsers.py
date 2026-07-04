@@ -392,6 +392,20 @@ def _add_sweep_args(p_sweep: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_champion_args(p_champion: argparse.ArgumentParser) -> None:
+    """``champion <verb>`` — the L4 champion registry. Pure disk reads.
+
+    ``refresh`` reduces the pp-self corpus to a ranked table of candidate
+    meta-prompt states under ``<tenant>/meta_champion/registry.json``.
+    """
+    champion_sub = p_champion.add_subparsers(dest="champion_verb", required=True)
+    champion_sub.add_parser(
+        "refresh",
+        help="Rebuild the champion registry from every pp-self cycle on disk and "
+        "print the ranked table (anchor-to-origin effect). Zero LLM calls.",
+    )
+
+
 def _add_verify_args(p_verify: argparse.ArgumentParser) -> None:
     """Campaign + candidate selectors + sample budget for ``verify``."""
     p_verify.add_argument(
@@ -515,6 +529,15 @@ def build_parser() -> argparse.ArgumentParser:
             "(recycle bin + optimizer_calls + sweeps). The escape hatch for cycles "
             "obsoleted by code changes — per-sample measurements survive so the "
             "next `new` hits cache immediately.",
+        )
+    )
+
+    _add_champion_args(
+        sub.add_parser(
+            "champion",
+            help="L4 champion registry — reduce the on-disk pp-self corpus to one ranked "
+            "table of candidate meta-prompt states. Pure disk read (zero LLM); developer "
+            "surface for 'which meta-prompt state is overall best?'.",
         )
     )
 
