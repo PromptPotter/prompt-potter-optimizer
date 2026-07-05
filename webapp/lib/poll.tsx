@@ -51,6 +51,9 @@ export interface DashboardSnapshot {
   // Terminal reason (raw StopReason value) once run_phase==="terminal".
   stop_reason?: string;
   round?: number;
+  // Banked lives ("hearts") when the run is in improvement-banked-budget mode;
+  // absent/null when lives mode is off (the round counter shows instead).
+  hearts?: number | null;
   // Current candidate being scored, "C3.2/4" form (candidate_label + count).
   // Set during scoring; stale between rounds, so surface it only while the
   // active node is l1_score (see `activeNodeId`).

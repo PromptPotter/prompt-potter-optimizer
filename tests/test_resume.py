@@ -415,3 +415,43 @@ def test_steered_fork_seed_narrowing_overrides_campaign_locks_per_node() -> None
     assert merged.optimizer_narrowing["llm"].param_keys == []
     # Untouched node: the campaign's mint-time narrowing is inherited unchanged.
     assert merged.optimizer_narrowing["retriever"].param_keys == ["top_k"]
+
+
+def test_lives_resume_fold_matches_live_observe() -> None:
+    """Resume-integrity: the banked-lives ("hearts") count rebuilt from the ledger's
+    ``improved`` sequence (``EscalationFSM.fold``) must equal the live in-run count
+    (``observe_round``). A mismatch is silent — a resumed run would grant a different
+    round budget than the un-interrupted run, quietly changing how long it optimizes."""
+    from promptpotter.application.config import LivesConfig
+    from promptpotter.application.optimization.escalation.state import EscalationFSM, NextAction
+    from promptpotter.domain.phases import StopReason
+    from promptpotter.domain.run_records import PhaseRecord
+
+    cfg = LivesConfig(start=2, cap=4)
+    sequence = [True, True, True, True, False, False, False]  # streak saturates at cap, then drains
+
+    live = EscalationFSM()
+    live_trace: list[int | None] = []
+    last_event = None
+    for improved in sequence:
+        last_event = live.observe_round(
+            improved=improved, current_accuracy=0.5, l1_patience=99, lives=cfg
+        )
+        live_trace.append(live.lives)
+
+    replay = EscalationFSM()
+    replay_trace: list[int | None] = []
+    for improved in sequence:
+        replay.fold(
+            PhaseRecord(phase="round", event="complete", payload={"improved": improved}),
+            lives=cfg,
+        )
+        replay_trace.append(replay.lives)
+
+    assert replay_trace == live_trace == [3, 4, 4, 4, 3, 2, 1]
+    # And exhausting the bank on the resumed FSM stops with the same reason the live loop uses.
+    exhaust = replay.observe_round(improved=False, current_accuracy=0.5, l1_patience=99, lives=cfg)
+    assert replay.lives == 0
+    assert exhaust.next_action is NextAction.STOP_LIVES
+    assert exhaust.stop_reason is StopReason.LIVES_EXHAUSTED
+    assert last_event is not None  # streak never stopped mid-sequence

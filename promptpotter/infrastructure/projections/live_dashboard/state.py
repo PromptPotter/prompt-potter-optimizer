@@ -233,6 +233,11 @@ class LiveDashboardState(BaseModel):
     candidate: str = ""
     query: str = ""
     patience: str = ""
+    # Banked lives ("hearts") — the high-level ♥ readout when the run is in
+    # improvement-banked-budget mode; ``None`` when lives mode is off (the UI then
+    # shows the round counter as before). A dynamic per-round marker, not a declared
+    # ceiling, so it sits here beside ``round`` rather than in ``run_limits``.
+    hearts: int | None = None
 
     # Origin is round 0 — it lives in ``rounds[]`` as a normal one-candidate
     # RoundSummary, not a separate block. Same shape every L1 round has.

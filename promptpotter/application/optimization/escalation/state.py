@@ -17,6 +17,7 @@ from promptpotter.domain.phases import StopReason
 from promptpotter.domain.run_records import CycleRecord, PhaseRecord
 
 if TYPE_CHECKING:
+    from promptpotter.application.config import LivesConfig
     from promptpotter.infrastructure.ledger import CycleEventLog
 
 
@@ -28,11 +29,13 @@ class NextAction(enum.StrEnum):
     FIRE_L3 = "fire_l3"
     STOP_PERFECT = "stop_perfect"
     STOP_L3_PATIENCE = "stop_l3_patience"
+    STOP_LIVES = "stop_lives"
 
 
 _NEXT_ACTION_TO_STOP: dict[NextAction, StopReason] = {
     NextAction.STOP_PERFECT: StopReason.PERFECT,
     NextAction.STOP_L3_PATIENCE: StopReason.L3_PATIENCE,
+    NextAction.STOP_LIVES: StopReason.LIVES_EXHAUSTED,
 }
 
 
@@ -60,10 +63,16 @@ class EscalationFSM:
         "_l3_best_theta_at_entry",
         "_l3_round",
         "_l3_stall_count",
+        "_lives",
     )
 
     def __init__(self) -> None:
         self._l1_stall_count = 0
+        # Improvement-banked round budget ("hearts"). ``None`` until the first
+        # lives-enabled round seeds it from ``LivesConfig.start`` — a banking sibling
+        # of ``_l1_stall_count`` over the SAME per-round ``improved`` verdict, folded
+        # identically on resume. Stays ``None`` for the whole run when lives mode is off.
+        self._lives: int | None = None
         self._l2_round = 0
         self._l2_stall_count = 0
         self._l2_best_composite_fitness_at_entry = 0.0
@@ -78,6 +87,19 @@ class EscalationFSM:
     @property
     def l1_stall_count(self) -> int:
         return self._l1_stall_count
+
+    @property
+    def lives(self) -> int | None:
+        """Current banked lives ('hearts'), or ``None`` when lives mode is off."""
+        return self._lives
+
+    @staticmethod
+    def _bank_life(current: int | None, improved: bool, lives: LivesConfig) -> int:
+        """Bank the round's ``improved`` verdict: +1 if improved, -1 if not, seeded
+        from ``start`` on the first round, clamped to ``[0, cap]``. Used identically by
+        the live ``observe_round`` and the resume ``fold`` so the two never diverge."""
+        base = lives.start if current is None else current
+        return max(0, min(lives.cap, base + (1 if improved else -1)))
 
     @property
     def l2_round(self) -> int:
@@ -137,17 +159,24 @@ class EscalationFSM:
         improved: bool,
         current_accuracy: float,
         l1_patience: int,
+        lives: LivesConfig | None = None,
         axes_with_positive_yield: int | None = None,
         l1_mandatory_breach: bool = False,
         evidence_starved: bool = False,
     ) -> EscalationEvent:
-        """L1 round outcome — bumps stall, delegates the routing to `decide_escalation`."""
+        """L1 round outcome — bumps stall (+ banks lives when enabled), delegates routing
+        to `decide_escalation`. When the lives bank hits zero it stops the loop — but only
+        if `decide_escalation` did not already stop on its own (a natural PERFECT / L3
+        convergence keeps its more-specific reason); an exhausted bank overrides a would-be
+        CONTINUE or escalation, skipping the doomed final layer fire."""
         from promptpotter.application.optimization.escalation.decide import (
             EscalationInputs,
             decide_escalation,
         )
 
         self._l1_stall_count = 0 if improved else self._l1_stall_count + 1
+        if lives is not None:
+            self._lives = self._bank_life(self._lives, improved, lives)
 
         inputs = EscalationInputs(
             current_accuracy=current_accuracy,
@@ -157,7 +186,10 @@ class EscalationFSM:
             l1_mandatory_breach=l1_mandatory_breach,
             evidence_starved=evidence_starved,
         )
-        return decide_escalation(inputs)
+        event = decide_escalation(inputs)
+        if event.stop_reason is None and lives is not None and self._lives == 0:
+            return EscalationEvent(next_action=NextAction.STOP_LIVES)
+        return event
 
     def observe_l2_escalation(
         self,
@@ -229,8 +261,11 @@ class EscalationFSM:
     # Reducer: round-complete → L1 stall; l2_context.exit → l2 state; l3_plan.exit → l3 state + l2 reset.
     # Live mutators above are the in-memory cache; from_ledger rebuilds on resume.
 
-    def fold(self, record: CycleRecord) -> None:
-        """Advance state from one ledger record. No-op for unrelated records."""
+    def fold(self, record: CycleRecord, *, lives: LivesConfig | None = None) -> None:
+        """Advance state from one ledger record. No-op for unrelated records. ``lives``
+        (when set) reconstructs the banked-lives accumulator from the same ``improved``
+        sequence that drives the stall counter — so resume rebuilds it exactly, no new
+        persisted field."""
         if not isinstance(record, PhaseRecord):
             return
         if record.phase == "round" and record.event == "complete":
@@ -238,9 +273,10 @@ class EscalationFSM:
             # emit "complete" so display + audit see them, but they aren't L1 progress evidence.
             if record.payload.get("is_probe"):
                 return
-            self._l1_stall_count = (
-                0 if bool(record.payload["improved"]) else self._l1_stall_count + 1
-            )
+            improved = bool(record.payload["improved"])
+            self._l1_stall_count = 0 if improved else self._l1_stall_count + 1
+            if lives is not None:
+                self._lives = self._bank_life(self._lives, improved, lives)
         elif record.phase == "l2_context" and record.event == "exit":
             escalation_state = record.payload["data"]
             self._l1_stall_count = 0
@@ -268,13 +304,16 @@ class EscalationFSM:
             self._l2_best_theta_at_entry = best_theta
 
     @classmethod
-    def from_ledger(cls, ledger: CycleEventLog | None) -> EscalationFSM:
-        """Rebuild state by folding every record in ``ledger``. ``None`` ⇒ fresh state."""
+    def from_ledger(
+        cls, ledger: CycleEventLog | None, *, lives: LivesConfig | None = None
+    ) -> EscalationFSM:
+        """Rebuild state by folding every record in ``ledger``. ``None`` ⇒ fresh state.
+        Pass ``lives`` to reconstruct the banked-lives accumulator on resume."""
         s = cls()
         if ledger is None:
             return s
         for rec in ledger.iter():
-            s.fold(rec)
+            s.fold(rec, lives=lives)
         return s
 
 

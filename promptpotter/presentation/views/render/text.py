@@ -79,11 +79,18 @@ def _render_round_start(v: RoundStartView) -> str:
         crit = "none yet (first round)"
     else:
         crit = f"none (R{v.round - 1} produced none)"
+    # Lives mode → show the ♥ bank instead of the fixed round ceiling (which is null/999
+    # when lives governs the budget); non-lives runs keep the "ROUND N/max" form.
+    round_label = (
+        f"ROUND {v.round}  {'♥' * v.hearts or '💀'}"
+        if v.hearts is not None
+        else f"ROUND {v.round}/{v.max_rounds or 999}"
+    )
     return "\n".join(
         [
             "",
             _round_rule(
-                f"ROUND {v.round}/{v.max_rounds or 999}",
+                round_label,
                 f"patience {v.l1_stall_count}/{v.patience}",
             ),
             "",

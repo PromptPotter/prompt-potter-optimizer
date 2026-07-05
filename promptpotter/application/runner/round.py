@@ -270,7 +270,7 @@ async def close_round(
     round_payload["health"] = (
         round_result.health.model_dump() if round_result.health is not None else None
     )
-    cb.on_round_complete(round_result, cycle.escalation.l1_stall_count)
+    cb.on_round_complete(round_result, cycle.escalation.l1_stall_count, cycle.escalation.lives)
     persist_round(cycle, round_result, round_payload, round_num, session, is_probe=is_probe)
     if cycle.axes and session.store and session.backend_id:
         cycle.axes.refresh(
@@ -314,6 +314,7 @@ async def post_round(
         improved=round_result.improved,
         current_accuracy=cycle.tracking.current_accuracy,
         l1_patience=config.optimization.l1_patience,
+        lives=config.optimization.lives,
         axes_with_positive_yield=axes_with_positive_yield,
         l1_mandatory_breach=l1_mandatory_breach,
         evidence_starved=evidence_starved,

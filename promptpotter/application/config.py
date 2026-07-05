@@ -178,12 +178,45 @@ class MechanismConfig(BaseModel):
     elimination: EliminationMechanisms = Field(default_factory=EliminationMechanisms)
 
 
+class LivesConfig(BaseModel):
+    """Improvement-banked round budget ("hearts"). Opt-in alternative to the fixed
+    ``max_rounds`` calendar boundary: the run starts with ``start`` lives, banks one
+    each round that improves and loses one each round that doesn't, and stops when the
+    bank hits zero — so a compounding run chains itself more rounds and a stall dies
+    fast. Rides the SAME per-round ``improved`` verdict that drives ``l1_stall_count``
+    (no new verdict). ``max_rounds``/``HARD_CAP`` and the spend budget stay the absolute
+    ceilings. See docs/specs/l4-outer-loop.md."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    start: int = Field(
+        2,
+        ge=1,
+        description="Lives a run starts with (a fully-stalling run does exactly this many L1 rounds).",
+    )
+    cap: int = Field(
+        4,
+        ge=1,
+        description="Bank ceiling — lives never exceed this no matter how long the improving streak runs.",
+    )
+
+
 class OptimizationConfig(BaseModel):
     """Optimization-loop knobs. `improvement_threshold` + `degradation_threshold` are required (no default)."""
 
     model_config = ConfigDict(extra="forbid")
 
     max_rounds: int | None = Field(50, description="Max rounds (None = unlimited)")
+    lives: LivesConfig | None = Field(
+        None,
+        description=(
+            "Opt-in improvement-banked round budget ('hearts'). When set, replaces the "
+            "fixed ``max_rounds`` boundary: +1 life per improving round, -1 per "
+            "non-improving one, stop at 0, banked up to ``cap``. ``None`` (default) → "
+            "``max_rounds`` governs, behaviour unchanged. ``max_rounds`` still caps from "
+            "above, so a lives run wanting the full bank sets ``max_rounds: null``."
+        ),
+    )
     l1_patience: int = Field(3, description="Stop after N consecutive non-improving L1 rounds")
     n_variants: int = Field(5, description="Candidates per round")
     improvement_threshold: float = Field(..., description="Min accuracy delta")

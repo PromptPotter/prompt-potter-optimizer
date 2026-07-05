@@ -355,8 +355,10 @@ class LiveDashboardView(DerivedView):
             # payload['round_result'] is the lean 3-scalar form for the SSE tail).
             round_result = record.live_round_result
             l1_stall = int(payload.get("l1_stall_count") or 0)
+            hearts_raw = payload.get("hearts")
+            hearts = None if hearts_raw is None else int(hearts_raw)
             if round_result is not None:
-                self._absorb_round_complete(round_result.cumulative_accuracy, l1_stall)
+                self._absorb_round_complete(round_result.cumulative_accuracy, l1_stall, hearts)
                 if self._recorder is not None:
                     self._recorder.set_l1_score(self._l1_score_block(round_result))
                 # Append round summary; re-firing the same round (replay / sweep) replaces in place.
@@ -666,7 +668,9 @@ class LiveDashboardView(DerivedView):
     def _update_current_acc(self, scores: dict[str, Any]) -> None:
         self.state.current_acc = round(scores.get("accuracy", 0.0), 4)
 
-    def _absorb_round_complete(self, cumulative_accuracy: float, l1_stall_count: int) -> None:
+    def _absorb_round_complete(
+        self, cumulative_accuracy: float, l1_stall_count: int, hearts: int | None = None
+    ) -> None:
         """Settle the headline ``current_acc``/``best`` to the incumbent's **cumulative** accuracy
         (``RoundResult.cumulative_accuracy`` — the incumbent rescored over every sample probed so
         far), the same honest full-population figure the console GENERATE header shows. The
@@ -681,6 +685,7 @@ class LiveDashboardView(DerivedView):
         if acc > s.best:
             s.best = acc
         s.patience = f"{l1_stall_count}/{self.patience_max}"
+        s.hearts = hearts
 
     # -- Round-state mutations (snapshot-record fan-out) ----------------------
     # The per-candidate / per-sample / P(best) writes live on the ``RoundBuffer``

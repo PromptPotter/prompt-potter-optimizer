@@ -8,6 +8,7 @@ import { runPhaseLabel } from "@/lib/run-phase";
 import { activeNodeId } from "@/components/workflow";
 import { headlineStats, fitnessTrend } from "@/lib/derivations";
 import { fmtSecs, fmtPct0 } from "@/lib/format";
+import { HeartIcon } from "./HeartIcon";
 
 // Single-line, frameless run summary. Everything the operator scans in
 // the first second sits on one inline row, separated by hairline dividers:
@@ -80,6 +81,9 @@ export const TopStrip = memo(function TopStrip() {
   const lastQuery = dash?.last_query_elapsed_s ?? null;
   const phase = runPhaseLabel(dash?.run_phase, dash?.stop_reason);
   const round = dashRound != null ? `R${dashRound}` : "—";
+  // Banked lives ("hearts") — shown as pips beside the round when the run is in
+  // improvement-banked-budget mode; `null`/undefined ⇒ the round counter alone.
+  const hearts = dash?.hearts ?? null;
   // Current candidate being scored ("C3.2"), shown beside the round while the
   // active node is the scorer — the finer position than the round alone.
   // `dash.candidate` is "C3.2/4" and stale between rounds; gate on scoring.
@@ -122,6 +126,19 @@ export const TopStrip = memo(function TopStrip() {
           <span className="topstrip-cand">{scoringCand}</span>
         ) : (
           <span className="topstrip-round">{round}</span>
+        )}
+        {hearts != null && (
+          <span
+            className="topstrip-hearts"
+            title={`${hearts} ${hearts === 1 ? "life" : "lives"} left`}
+            aria-label={`${hearts} lives left`}
+          >
+            {hearts > 0 ? (
+              Array.from({ length: hearts }, (_, i) => <HeartIcon key={i} filled />)
+            ) : (
+              <HeartIcon filled={false} />
+            )}
+          </span>
         )}
       </span>
       <span className="topstrip-sep" aria-hidden="true" />

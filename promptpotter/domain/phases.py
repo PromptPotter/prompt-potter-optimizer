@@ -61,6 +61,7 @@ class StopReason(enum.StrEnum):
 
     PERFECT = "perfect_score"
     MAX_ROUNDS = "max_rounds"
+    LIVES_EXHAUSTED = "lives_exhausted"
     PAUSED = "paused"
     CRASHED = "crashed"
     DIVERGED = "diverged"
@@ -163,6 +164,7 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
     StopReason.PERFECT: StopReasonInfo("Perfect score", StopOutcome.SUCCESS),
     StopReason.TARGET_HIT: StopReasonInfo("Target reached", StopOutcome.SUCCESS),
     StopReason.MAX_ROUNDS: StopReasonInfo("Max rounds", StopOutcome.SUCCESS),
+    StopReason.LIVES_EXHAUSTED: StopReasonInfo("Out of lives", StopOutcome.SUCCESS),
     StopReason.HARD_CAP: StopReasonInfo("Round cap", StopOutcome.SUCCESS),
     StopReason.SWEEP_COMPLETE: StopReasonInfo("Sweep complete", StopOutcome.SUCCESS),
     StopReason.DIAG_COMPLETE: StopReasonInfo("Diagnostic complete", StopOutcome.SUCCESS),

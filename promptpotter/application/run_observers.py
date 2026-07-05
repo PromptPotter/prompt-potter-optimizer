@@ -105,12 +105,17 @@ class RunCallbacks:
             )
         )
 
-    def on_round_complete(self, round_result: Any, l1_stall_count: int) -> None:
+    def on_round_complete(
+        self, round_result: Any, l1_stall_count: int, hearts: int | None = None
+    ) -> None:
         # ``event="display"`` keeps ``EscalationFSM.fold`` reading only the lean ``event="complete"`` audit emit.
         # The full ``RoundResult`` rides ``live_round_result`` (in-memory-only) for
         # the live subscribers; disk persists only the three scalars the SSE→webapp
         # chat reads — the fat arrays are already in round_NNNN.json + dashboard.json.
+        # ``hearts`` = the banked-lives count (``None`` when lives mode is off) — the
+        # high-level ♥ readout, a peer of the stall counter on the same channel.
         self._phase_ctx.l1_stall_count = l1_stall_count
+        self._phase_ctx.hearts = hearts
         self._emit(
             PhaseRecord(
                 phase="round",
@@ -124,6 +129,7 @@ class RunCallbacks:
                         "composite_fitness": float(round_result.composite_fitness),
                     },
                     "l1_stall_count": l1_stall_count,
+                    "hearts": hearts,
                     "phase_ctx": asdict(self._phase_ctx),
                 },
             )

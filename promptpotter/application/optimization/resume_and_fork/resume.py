@@ -99,7 +99,9 @@ def resume_with_divergence_check(
                     campaign_id, {"config": cycle.config.model_dump(mode="json")}
                 )
             cycle.replay_priors(prior)
-            cycle.escalation = EscalationFSM.from_ledger(session.state.ledger)
+            cycle.escalation = EscalationFSM.from_ledger(
+                session.state.ledger, lives=cycle.config.optimization.lives
+            )
             return None
         if scope is DiffScope.DATA_AFFECTING and diffed:
             logger.info(
@@ -132,7 +134,9 @@ def resume_with_divergence_check(
                     surviving_rounds=survivors,
                 )
                 cycle.replay_priors(survivors)
-                cycle.escalation = EscalationFSM.from_ledger(session.state.ledger)
+                cycle.escalation = EscalationFSM.from_ledger(
+                    session.state.ledger, lives=cycle.config.optimization.lives
+                )
                 logger.warning(
                     "Resume diverged at round %d (%s); forked → %s",
                     div.round_num,

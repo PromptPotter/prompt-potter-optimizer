@@ -50,6 +50,7 @@ _FIELD_SCOPES: dict[tuple[str, ...], Literal["policy", "data"]] = {
     ("dataset_split",): "policy",  # display-only metadata — no data fork
     # OptimizationConfig
     ("optimization", "max_rounds"): "policy",
+    ("optimization", "lives"): "policy",  # subtree — round-budget policy, twin of max_rounds
     ("optimization", "l1_patience"): "policy",
     ("optimization", "n_variants"): "policy",
     ("optimization", "optimizer_set"): "policy",  # which meta-prompt set the optimizer runs (L4)

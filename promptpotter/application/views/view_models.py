@@ -61,6 +61,8 @@ class ViewContext:
     patience: int = 0
     round_num: int = 0
     l1_stall_count: int = 0
+    # Banked lives ("hearts") entering the current round; ``None`` when lives mode is off.
+    hearts: int | None = None
     origin_accuracy: float = 0.0
     origin_composite_fitness: float | None = None
     composite_fitness_formula: str | None = None
@@ -136,6 +138,7 @@ class RoundStartView:
     n_variants: int
     model: str
     has_l1_critique: bool
+    hearts: int | None = None
 
 
 @dataclass(frozen=True)
