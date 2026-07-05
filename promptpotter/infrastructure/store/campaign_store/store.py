@@ -452,7 +452,13 @@ class CampaignStore:
         return True
 
     def delete_campaign(
-        self, campaign_id: str, *, keep_results: bool, changed_at: str, reason: str = ""
+        self,
+        campaign_id: str,
+        *,
+        keep_results: bool,
+        changed_at: str,
+        reason: str = "",
+        inner_sandbox_root: Path | None = None,
     ) -> bool:
         """Destructive — no recovery. ``keep_results=False`` removes the whole tree;
         ``True`` strips the heavy tiers (Resume + Audit + Mirror) in place and flags
@@ -460,6 +466,16 @@ class CampaignStore:
         shallow langfuse loop trace). The cross-campaign measurement cache
         (``measurements/``) is NEVER touched — it belongs to no single campaign, so a
         re-run on the same ``(dataset × config)`` reproduces the identical key.
+
+        ``inner_sandbox_root`` (the workspace ``.inner/``, i.e.
+        ``Stores.projects_root.parent / ".inner"``) — when given, the off-registry L4
+        inner-proxy sandboxes this campaign's cycles spawned
+        (``.inner/<cycle_id>``, siblings of ``projects/`` and so missed by the
+        campaign-tree rmtree above) are removed for every cycle_id. Without this a
+        deleted L4 campaign orphans dozens of inner campaign trees on disk forever.
+        Passed only on delete — NOT on archive, which is recoverable and must keep the
+        sandboxes for a later unarchive + the self-potter-hop.
+
         Returns ``False`` if the campaign isn't found; raises ``ConflictError`` if
         it's the active campaign."""
         campaign_dir = self._campaign_dir(campaign_id)
@@ -467,6 +483,13 @@ class CampaignStore:
             return False
         if self._is_active_campaign(campaign_id):
             raise ConflictError(f"refusing to delete {campaign_id}: active campaign — switch first")
+        # Enumerate cycle_ids BEFORE the tree is stripped/removed — the inner
+        # sandboxes are keyed by cycle_id and live off-tree, so we need the ids first.
+        inner_cycle_ids: list[str] = []
+        if inner_sandbox_root is not None:
+            cycles_dir = campaign_dir / "cycles"
+            if cycles_dir.is_dir():
+                inner_cycle_ids = [p.name for p in cycles_dir.iterdir() if p.is_dir()]
         if keep_results:
             self.update_campaign(
                 campaign_id, self._lifecycle_updates("deleted", changed_at, reason)
@@ -474,6 +497,11 @@ class CampaignStore:
             _strip_to_keepsake(campaign_dir)
         else:
             _rmtree_robust(campaign_dir)
+        if inner_sandbox_root is not None:
+            for cycle_id in inner_cycle_ids:
+                inner_dir = inner_sandbox_root / cycle_id
+                if inner_dir.exists():
+                    _rmtree_robust(inner_dir)
         return True
 
     def list_sessions(self, campaign_id: str) -> list[str]:

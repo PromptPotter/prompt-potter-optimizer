@@ -473,8 +473,16 @@ async def _run_inner_campaign(
     # read-only inner dataset.
     store = build_stores(ctx.identity, projects_root=ctx.inner_sandbox_root)
 
+    # enable_tracing=False: inner campaigns are ephemeral fitness measurements —
+    # their per-(sample x candidate x round) cloud traces have no operator value,
+    # burn Langfuse quota, and (the root of the L4 OOM) piled payload-bearing span
+    # objects in the logger's _trace_metadata until the process was OOM-killed. The
+    # local FileSink still records inner traces to disk for the self-potter-hop.
     session = await init_services(
-        dataset_name=spec.inner_dataset, identity=ctx.identity, store=store
+        dataset_name=spec.inner_dataset,
+        identity=ctx.identity,
+        store=store,
+        enable_tracing=False,
     )
     all_samples = session.samples or []
     if not all_samples:
@@ -548,16 +556,38 @@ async def _run_inner_campaign(
         resumed_from_round=None,
         origin_accuracy=0.0,
     )
-    result = await run_optimization(
-        train_data,
-        campaign_config,
-        session=session,
-        observers=observers,
-        experiment_id=session.experiment_id,
-        task_context=task_context,
-        mode=RunMode(),
-        spend_budget_usd=campaign_config.optimization.spend_budget_usd,
-    )
+    try:
+        result = await run_optimization(
+            train_data,
+            campaign_config,
+            session=session,
+            observers=observers,
+            experiment_id=session.experiment_id,
+            task_context=task_context,
+            mode=RunMode(),
+            spend_budget_usd=campaign_config.optimization.spend_budget_usd,
+        )
+    finally:
+        # Release THIS inner campaign's per-campaign resources before the next
+        # sequential inner campaign starts. One process runs dozens of inner
+        # campaigns back-to-back (6 origin seeds + per-round candidates, deeper at
+        # L5+), so anything holding an OS handle or a large payload that leans on
+        # GC piles up until the process is OOM-killed (no traceback):
+        #   - backend_client: a fresh httpx pool per inner Session (wiring.py) —
+        #     close it, since GC is not prompt for sockets.
+        #   - langfuse: inner cloud tracing is disabled (enable_tracing=False
+        #     above), so no LangfuseSink / _trace_metadata spans accumulate; reset()
+        #     is a cheap belt-and-braces release of any stray span refs.
+        # The optimizer LLM clients are process-shared (get_llm_client is
+        # @functools.cache) AND the Langfuse SDK is a process-wide singleton
+        # (keyed by public key) — so NEITHER is shut down here; that would break
+        # every later campaign. Cleanup must never mask the run's own outcome, so
+        # failures are suppressed.
+        with contextlib.suppress(Exception):
+            await session.backend_client.aclose()
+        if session.langfuse is not None:
+            with contextlib.suppress(Exception):
+                session.langfuse.reset()
     return result
 
 

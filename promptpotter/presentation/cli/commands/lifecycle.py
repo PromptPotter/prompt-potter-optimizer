@@ -85,7 +85,11 @@ async def cmd_delete(args: argparse.Namespace) -> CommandResult:
     keep_results: bool = bool(getattr(args, "keep_results", False))
     try:
         store.campaigns.delete_campaign(
-            campaign_id, keep_results=keep_results, changed_at=utcnow_iso(), reason=reason
+            campaign_id,
+            keep_results=keep_results,
+            changed_at=utcnow_iso(),
+            reason=reason,
+            inner_sandbox_root=store.projects_root.parent / ".inner",
         )
     except ConflictError as exc:
         return CommandResult(

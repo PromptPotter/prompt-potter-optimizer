@@ -8,7 +8,7 @@
     "pipeline_overrides": {},
     "optimization": {
       "optimizer_set": "meta",
-      "replicate_survivors": 1,
+      "replicate_survivors": 0,
       "l1_patience": 2,
       "max_rounds": null,
       "lives": { "start": 2, "cap": 4 },

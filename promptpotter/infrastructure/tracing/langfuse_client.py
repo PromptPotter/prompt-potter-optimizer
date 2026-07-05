@@ -38,10 +38,15 @@ def langfuse_trace_url(trace_id: str | None) -> str | None:
 class LangfuseLogger:
     """Langfuse SDK wrapper. Disabled if credentials are missing."""
 
-    def __init__(self) -> None:
-
+    def __init__(self, *, enabled: bool = True) -> None:
+        # ``enabled=False`` force-disables regardless of credentials. Used for
+        # ephemeral L4 inner campaigns: their cloud traces have no operator value
+        # (the self-potter-hop reads the LOCAL FileSink traces, not the cloud),
+        # they burn Langfuse quota (429s), and — before this — piled payload-bearing
+        # span objects in ``_trace_metadata`` until the process OOM-killed.
         self.enabled = bool(
-            settings.LANGFUSE_ENABLED
+            enabled
+            and settings.LANGFUSE_ENABLED
             and settings.LANGFUSE_SECRET_KEY
             and settings.LANGFUSE_PUBLIC_KEY
         )
@@ -259,10 +264,26 @@ class LangfuseLogger:
         if not self.enabled or not self.client or not trace_id:
             return
 
+        # POP (not get): the root span carries the trace's full I/O payload; leaving
+        # it in ``_trace_metadata`` after the trace ends made the dict append-only —
+        # a memory leak that a long-lived process (L4: dozens of campaigns) grows
+        # until OOM. Popping releases the span object the moment the trace closes.
         with graceful("Failed to end Langfuse trace"):
-            root = self._trace_metadata.get(trace_id)
+            root = self._trace_metadata.pop(trace_id, None)
             if root:
                 root.end()
+
+    def reset(self) -> None:
+        """Drop this logger's retained span references without touching the SDK.
+
+        The Langfuse SDK client is a process-wide singleton (shared across every
+        campaign in the process) — it must NOT be shut down per campaign. But the
+        payload-bearing span objects this wrapper holds in ``_trace_metadata`` /
+        ``_open_observations`` are per-logger; any whose ``end_*`` hook never fired
+        (an error mid-node) would linger until GC. Called at a campaign boundary to
+        release them deterministically. Idempotent."""
+        self._trace_metadata.clear()
+        self._open_observations.clear()
 
     # -- Dataset API ---------------------------------------------------------
 

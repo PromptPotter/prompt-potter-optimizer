@@ -471,7 +471,11 @@ class CommandDispatcher:
             campaigns.unarchive_campaign(campaign_id, changed_at=changed_at, reason=reason)
         else:  # delete-campaign — destructive (keepsake spared only with keep_results)
             campaigns.delete_campaign(
-                campaign_id, keep_results=keep_results, changed_at=changed_at, reason=reason
+                campaign_id,
+                keep_results=keep_results,
+                changed_at=changed_at,
+                reason=reason,
+                inner_sandbox_root=self._store.projects_root.parent / ".inner",
             )
 
     def _apply_register_backend(self, payload: dict[str, Any]) -> None:

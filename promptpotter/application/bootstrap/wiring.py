@@ -341,6 +341,7 @@ async def init_services(
     on_status: Callable[[str], None] | None = None,
     identity: IdentityContext | None = None,
     store: Stores | None = None,
+    enable_tracing: bool = True,
 ) -> Session:
     """Init store, client, pipeline schema, scoring data — step 1 of bootstrap.
 
@@ -432,7 +433,12 @@ async def init_services(
         dataset_config_dir=dataset_config_dir,
         identity=resolved_identity,
         project_root=str(store.base_dir),
-        langfuse=LangfuseLogger(),
+        # ``enable_tracing=False`` (L4 inner campaigns) force-disables the cloud
+        # Langfuse logger so ``bridge.from_settings`` skips ``LangfuseSink`` — no
+        # cloud spans, no ``_trace_metadata`` accumulation, no quota burn. The
+        # local ``FileSink`` (gated on OBS_ENABLED) is untouched, so on-disk inner
+        # traces still exist for the self-potter-hop drill-down.
+        langfuse=LangfuseLogger(enabled=enable_tracing),
     )
 
     if dataset_name:
