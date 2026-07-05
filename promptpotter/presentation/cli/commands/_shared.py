@@ -30,6 +30,7 @@ from promptpotter.shared.identity import IdentityContext, default_identity
 
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
+    from promptpotter.infrastructure.store import Stores
     from promptpotter.presentation.cli.session import SessionCtx
 
 logger = logging.getLogger("promptpotter.presentation.cli")
@@ -198,6 +199,54 @@ def _build_divergence_hint() -> str:
 _DIVERGENCE_HINT = _build_divergence_hint()
 
 
+def resolve_campaign(stores: Stores, needle: str) -> str:
+    """Resolve *needle* to a campaign id; accepts full id, 6-hex suffix, or unambiguous prefix.
+
+    Shared by any command that names a campaign by needle (``verify``, ``noise-floor``) — one
+    resolver, not a copy per command."""
+    ids = stores.campaigns.list_campaign_ids()
+    if needle in ids:
+        return needle
+    candidates = [cid for cid in ids if cid.endswith(f"__{needle}") or cid.startswith(needle)]
+    if needle and not candidates:
+        candidates = [cid for cid in ids if needle in cid]
+    if not candidates:
+        raise SystemExit(f"ERROR: no campaign matches {needle!r}.")
+    if len(candidates) > 1:
+        raise SystemExit(
+            f"ERROR: {needle!r} matches {len(candidates)} campaigns: "
+            f"{', '.join(candidates[:5])}{'…' if len(candidates) > 5 else ''}. "
+            "Pass the full id."
+        )
+    return candidates[0]
+
+
+def resolve_cycle(stores: Stores, campaign_id: str, hint: str | None) -> str:
+    """Resolve a cycle id within *campaign_id*; ``hint=None`` auto-picks the sole cycle (raises on ambiguity)."""
+    cycles_dir = stores.campaigns.campaign_root_dir(campaign_id) / "cycles"
+    if not cycles_dir.exists():
+        raise SystemExit(f"ERROR: campaign {campaign_id!r} has no cycles/ directory.")
+    ids = sorted(p.name for p in cycles_dir.iterdir() if p.is_dir())
+    if not ids:
+        raise SystemExit(f"ERROR: campaign {campaign_id!r} has no cycles on disk.")
+    if hint:
+        matches = [cid for cid in ids if cid == hint or cid.startswith(hint) or hint in cid]
+        if not matches:
+            raise SystemExit(f"ERROR: no cycle in {campaign_id!r} matches {hint!r}.")
+        if len(matches) > 1:
+            raise SystemExit(
+                f"ERROR: {hint!r} matches {len(matches)} cycles in {campaign_id!r}: "
+                f"{', '.join(matches[:5])}."
+            )
+        return matches[0]
+    if len(ids) > 1:
+        raise SystemExit(
+            f"ERROR: campaign {campaign_id!r} has {len(ids)} cycles; pass --cycle <prefix>. "
+            f"Available: {', '.join(ids[:5])}{'…' if len(ids) > 5 else ''}."
+        )
+    return ids[0]
+
+
 def confirm_tty(prompt: str, *, default_no: bool = True) -> bool | None:
     """Ask y/N at the terminal. Returns:
 
@@ -231,5 +280,7 @@ __all__ = [
     "identity_from_args",
     "init_services_cli",
     "log_startup_summary",
+    "resolve_campaign",
+    "resolve_cycle",
     "set_verbose",
 ]

@@ -69,6 +69,8 @@ export function useFitnessBars(
           // so it's suppressed in slice mode just like composite / what-if.
           theta: null,
           thetaSe: null,
+          compositeCiLo: null,
+          compositeCiHi: null,
           started: sliced.n > 0,
           nSamples: sliced.n,
           // Surface the chosen-set size as the budget so the chart's per-bar
@@ -102,6 +104,8 @@ export function useFitnessBars(
         whatif,
         theta: row.theta,
         thetaSe: row.theta_se,
+        compositeCiLo: row.compositeCiLo,
+        compositeCiHi: row.compositeCiHi,
         started,
         nSamples: row.n_samples,
         nExpected: row.n_expected,

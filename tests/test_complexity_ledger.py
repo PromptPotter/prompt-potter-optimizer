@@ -130,11 +130,19 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # plus ``matrix`` / ``champion`` CLI verb packages. Each is a concept the loop
 # lacked: select the overall-best meta-prompt, match models to datasets, a
 # rigorous per-round read. A feature, justified.
+# 2026-07-05 L4 variance fix: ``config_leaf_fields`` 37->36 — deleted
+# ``OptimizationConfig.noop_probe`` end-to-end (the in-loop no-op probe arm read
+# noise as a win; killed, no config is ever re-measured mid-run). Subtraction, so
+# the baseline falls. ``modules`` 309->311: the noise-floor capability survives
+# ONLY as a fenced debug diagnostic (``application/noise_floor.py`` +
+# ``presentation/cli/commands/noise_floor.py``, mirroring ``verify``) — a new CLI
+# verb, not a loop feature (no config field, no L1 injection). A feature,
+# justified, so the baseline rises.
 LEDGER_BASELINE = {
-    "modules": 309,
+    "modules": 311,
     "init_files": 58,
     "reexport_shims": 45,
-    "config_leaf_fields": 37,
+    "config_leaf_fields": 36,
     "settings_env": 17,
     "settings_const": 16,
     "opt_search_point_fields": 27,

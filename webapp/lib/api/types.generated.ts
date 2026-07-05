@@ -16,6 +16,8 @@ export interface RoundSummaryCandidate {
   partial_reason: string;
   theta: number | null;
   theta_se: number | null;
+  composite_ci_lo: number | null;
+  composite_ci_hi: number | null;
 }
 
 /** Context-aware degradation verdict for a round (origin included), computed */
@@ -37,11 +39,11 @@ export interface DegradationHealth {
   suggested_action: string | null;
 }
 
-/** One cell's paired (variant − noop) composite difference. */
+/** One cell's paired (variant − origin) composite difference. */
 export interface OuterCellEffect {
   cell: string;
   variant_fitness: number;
-  noop_fitness: number;
+  origin_fitness: number;
   diff: number;
 }
 
@@ -72,7 +74,7 @@ export interface RoundSummary {
   outer_verdict: OuterVerdict | null;
 }
 
-/** One on-demand candidate verification → webapp Verify tab. */
+/** One on-demand workspace-scope diagnostic run — the ``verify`` and ``noise-floor`` */
 export interface DiagnosticRunRecord {
   ts: string;
   dataset: string;
@@ -89,6 +91,11 @@ export interface DiagnosticRunRecord {
   source_campaign_accuracy: number;
   source_campaign_composite: number;
   source_campaign_n: number;
+  noise_floor_k: number | null;
+  noise_floor_mean: number | null;
+  noise_floor_ci_lo: number | null;
+  noise_floor_ci_hi: number | null;
+  noise_floor_raw: number[] | null;
 }
 
 /** One spend sub-bucket (backend or optimizer-loop). Mutated only by */
@@ -180,6 +187,7 @@ export interface NodeOutputSchema {
 export interface DatasetPipelineResponse {
   name: string;
   connector: string;
+  backend_type: string | null;
   pipeline: Record<string, unknown>;
   view: Record<string, unknown> | null;
   node_config_schema: Record<string, NodeConfigParam[]>;

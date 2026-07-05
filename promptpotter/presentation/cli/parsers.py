@@ -510,6 +510,31 @@ def _add_verify_args(p_verify: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_noise_floor_args(p_noise_floor: argparse.ArgumentParser) -> None:
+    """Campaign selector + replicate count for ``noise-floor``."""
+    p_noise_floor.add_argument(
+        "campaign",
+        help="Campaign id, 6-hex suffix, or unambiguous prefix "
+        "(e.g. 'promptpotter-self__ca6d4d' or 'ca6d4d').",
+    )
+    p_noise_floor.add_argument(
+        "--cycle",
+        dest="cycle",
+        default=None,
+        help="Cycle id (full or prefix) when the campaign has more than one cycle. "
+        "Omit when the campaign has exactly one cycle.",
+    )
+    p_noise_floor.add_argument(
+        "--k",
+        dest="k",
+        type=int,
+        default=3,
+        help="Number of force_fresh re-scores of the cached origin (default 3). "
+        "kx real spend — on a pp-self cycle each re-score re-runs the full inner "
+        "recursion, so keep k small.",
+    )
+
+
 def _add_reset_args(p_reset: argparse.ArgumentParser) -> None:
     """Tenant scope + safety flags for ``reset``.
 
@@ -624,6 +649,17 @@ def build_parser() -> argparse.ArgumentParser:
             "workspace-scope diagnostic-run record. Use to doublecheck whether "
             "a confidence-locked candidate's verdict generalises beyond the round's "
             "leader-locked sample budget. Does not mutate the source cycle.",
+        )
+    )
+
+    _add_noise_floor_args(
+        sub.add_parser(
+            "noise-floor",
+            help="Debug diagnostic (NOT a loop feature): re-score a campaign's cached "
+            "origin --k times with force_fresh and report the mean+CI spread — the "
+            "backend's own run-to-run noise. On a pp-self cycle this measures the "
+            "true inner-recursion noise floor. kx real spend; does not mutate the "
+            "source cycle and is never invoked by the loop itself.",
         )
     )
 

@@ -22,6 +22,7 @@
   --color-accent-rgb:9,12,155;
   --color-accent-glow:rgba(var(--color-accent-rgb),0.28);
   --color-selection:#55251D;                 /* oxblood — cross-panel selection stroke */
+  --color-ci:#525252;                        /* composite-fitness CI whisker — neutral, not status */
   --color-success:#1a8265;
   --color-success-rgb:26,130,101;
   --color-success-bg:rgba(var(--color-success-rgb),0.18);

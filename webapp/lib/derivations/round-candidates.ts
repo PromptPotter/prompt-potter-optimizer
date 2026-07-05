@@ -88,6 +88,8 @@ export function roundCandidates(dash: DashboardSnapshot | null): CandidateRow[] 
         composite: c.composite_fitness,
         theta: c.theta,
         theta_se: c.theta_se,
+        compositeCiLo: c.composite_ci_lo,
+        compositeCiHi: c.composite_ci_hi,
         evaluators: c.evaluators,
         is_winner: c.is_winner,
         // Winner carries the round's cumulative frontier (the spine value the lineage
@@ -126,6 +128,9 @@ export function roundCandidates(dash: DashboardSnapshot | null): CandidateRow[] 
         // θ is an end-of-round election fit; the in-flight round has none yet.
         theta: null,
         theta_se: null,
+        // Composite CI is stamped at the same round-close seam as θ — none yet either.
+        compositeCiLo: null,
+        compositeCiHi: null,
         evaluators,
         is_winner: false,
         // In-flight round hasn't closed — no cumulative frontier yet.

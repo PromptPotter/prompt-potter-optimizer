@@ -34,6 +34,11 @@ export interface CandidateRow {
   // for candidates outside the round's election fit (eliminated / under the coverage floor).
   theta: number | null;
   theta_se: number | null;
+  // Normal-CLT CI on the mean of this candidate's per-sample composite fitness —
+  // always present once scored, unlike `theta_se` (fit-restricted). `null` for the
+  // in-flight round (stamped only at round close, alongside `theta`).
+  compositeCiLo: number | null;
+  compositeCiHi: number | null;
   evaluators: Record<string, number>;
   is_winner: boolean;
   // The round's cumulative frontier accuracy (the adopted lineage rescored over every

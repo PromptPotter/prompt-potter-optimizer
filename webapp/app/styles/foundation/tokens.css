@@ -17,6 +17,9 @@
   /* Cross-panel "this candidate is selected" stroke. Lineage stub, fitness
      bar border, and any future panel highlight all read this one var. */
   --color-selection:#dc2626;
+  /* Composite-fitness CI whisker on the fitness chart — a neutral mark, not a
+     status colour, so it reads as "statistical range" not "good/bad". */
+  --color-ci:#9ca3af;
   /* Dashboard layout — one source for the centred spines. NarrowSpine
      wraps the header + diagnostics; WideSpine wraps the panel grids. */
   --dash-narrow-max:980px;

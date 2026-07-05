@@ -11,6 +11,7 @@ from promptpotter.presentation.cli.commands.champion import cmd_champion
 from promptpotter.presentation.cli.commands.lifecycle import cmd_archive, cmd_delete, cmd_unarchive
 from promptpotter.presentation.cli.commands.matrix import cmd_matrix
 from promptpotter.presentation.cli.commands.new import cmd_new
+from promptpotter.presentation.cli.commands.noise_floor import cmd_noise_floor
 from promptpotter.presentation.cli.commands.reset import cmd_reset
 from promptpotter.presentation.cli.commands.resume_command import cmd_resume
 from promptpotter.presentation.cli.commands.sweep import cmd_sweep
@@ -23,6 +24,7 @@ __all__ = [
     "cmd_delete",
     "cmd_matrix",
     "cmd_new",
+    "cmd_noise_floor",
     "cmd_reset",
     "cmd_resume",
     "cmd_sweep",

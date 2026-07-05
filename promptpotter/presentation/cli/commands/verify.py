@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-from typing import TYPE_CHECKING
 
 from promptpotter.application.verify import VerifyError, verify_candidate
 from promptpotter.infrastructure.store import build_stores
@@ -20,57 +19,11 @@ from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
     get_verbose,
     identity_from_args,
+    resolve_campaign,
+    resolve_cycle,
 )
 
-if TYPE_CHECKING:
-    from promptpotter.infrastructure.store import Stores
-
 logger = logging.getLogger("promptpotter.presentation.cli")
-
-
-def _resolve_campaign(stores: Stores, needle: str) -> str:
-    """Resolve *needle* to a campaign id; accepts full id, 6-hex suffix, or unambiguous prefix."""
-    ids = stores.campaigns.list_campaign_ids()
-    if needle in ids:
-        return needle
-    candidates = [cid for cid in ids if cid.endswith(f"__{needle}") or cid.startswith(needle)]
-    if needle and not candidates:
-        candidates = [cid for cid in ids if needle in cid]
-    if not candidates:
-        raise SystemExit(f"ERROR: no campaign matches {needle!r}.")
-    if len(candidates) > 1:
-        raise SystemExit(
-            f"ERROR: {needle!r} matches {len(candidates)} campaigns: "
-            f"{', '.join(candidates[:5])}{'…' if len(candidates) > 5 else ''}. "
-            "Pass the full id."
-        )
-    return candidates[0]
-
-
-def _resolve_cycle(stores: Stores, campaign_id: str, hint: str | None) -> str:
-    """Resolve a cycle id within *campaign_id*; ``hint=None`` auto-picks the sole cycle (raises on ambiguity)."""
-    cycles_dir = stores.campaigns.campaign_root_dir(campaign_id) / "cycles"
-    if not cycles_dir.exists():
-        raise SystemExit(f"ERROR: campaign {campaign_id!r} has no cycles/ directory.")
-    ids = sorted(p.name for p in cycles_dir.iterdir() if p.is_dir())
-    if not ids:
-        raise SystemExit(f"ERROR: campaign {campaign_id!r} has no cycles on disk.")
-    if hint:
-        matches = [cid for cid in ids if cid == hint or cid.startswith(hint) or hint in cid]
-        if not matches:
-            raise SystemExit(f"ERROR: no cycle in {campaign_id!r} matches {hint!r}.")
-        if len(matches) > 1:
-            raise SystemExit(
-                f"ERROR: {hint!r} matches {len(matches)} cycles in {campaign_id!r}: "
-                f"{', '.join(matches[:5])}."
-            )
-        return matches[0]
-    if len(ids) > 1:
-        raise SystemExit(
-            f"ERROR: campaign {campaign_id!r} has {len(ids)} cycles; pass --cycle <prefix>. "
-            f"Available: {', '.join(ids[:5])}{'…' if len(ids) > 5 else ''}."
-        )
-    return ids[0]
 
 
 def _parse_label(label: str) -> tuple[int, int]:
@@ -97,8 +50,8 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
     setup_logging(style="full" if get_verbose() else "cli")
     identity = identity_from_args(args)
     stores = build_stores(identity)
-    campaign_id = _resolve_campaign(stores, args.campaign)
-    cycle_id = _resolve_cycle(stores, campaign_id, args.cycle)
+    campaign_id = resolve_campaign(stores, args.campaign)
+    cycle_id = resolve_cycle(stores, campaign_id, args.cycle)
     round_num, cand_idx = _parse_label(args.label)
 
     try:

@@ -17,6 +17,7 @@ declare module "chart.js" {
     sampleCount?: { counts: (number | null)[] };
     divergenceLine?: { index: number | null };
     inFlightPulse?: { index: number | null };
+    compositeCiWhisker?: { ciLo: (number | null)[]; ciHi: (number | null)[] };
   }
 }
 
@@ -44,6 +45,54 @@ const sampleCountPlugin: Plugin<"bar", { counts: (number | null)[] }> = {
       const labelY = Math.max(topY - 4, chartArea.top + 10);
       ctx.fillText(String(n), xScale.getPixelForValue(i), labelY);
     });
+    ctx.restore();
+  },
+};
+
+// Error-bar whisker on the composite bar — a vertical line from `ciLo` to `ciHi`
+// (mapped value→pixel via the y scale) with short end-caps, so no composite point
+// estimate stands alone. Drawn at the composite dataset's OWN rendered x (which
+// shifts within the bar group depending on how many series are showing), not the
+// category center — a whisker must sit on the bar it brackets. Bars with a null
+// CI (in-flight round, or composite itself null) are skipped.
+const compositeCiWhiskerPlugin: Plugin<
+  "bar",
+  { ciLo: (number | null)[]; ciHi: (number | null)[] }
+> = {
+  id: "compositeCiWhisker",
+  afterDatasetsDraw(chart, _args, opts) {
+    const ciLo = opts?.ciLo;
+    const ciHi = opts?.ciHi;
+    const yScale = chart.scales.y;
+    if (!ciLo || !ciHi || !yScale) return;
+    const dsIndex = chart.data.datasets.findIndex((ds) => ds.label === "composite");
+    if (dsIndex < 0) return;
+    const meta = chart.getDatasetMeta(dsIndex);
+    const { ctx } = chart;
+    ctx.save();
+    ctx.strokeStyle = getCss("--color-ci");
+    ctx.lineWidth = 1.5;
+    const capHalf = 4;
+    for (let i = 0; i < ciLo.length; i++) {
+      const lo = ciLo[i];
+      const hi = ciHi[i];
+      if (lo == null || hi == null) continue;
+      const el = meta.data[i] as
+        | { getProps?: (p: string[], final: boolean) => Record<string, number> }
+        | undefined;
+      const x = el?.getProps?.(["x"], true)?.x;
+      if (typeof x !== "number") continue;
+      const yLo = yScale.getPixelForValue(lo);
+      const yHi = yScale.getPixelForValue(hi);
+      ctx.beginPath();
+      ctx.moveTo(x, yLo);
+      ctx.lineTo(x, yHi);
+      ctx.moveTo(x - capHalf, yLo);
+      ctx.lineTo(x + capHalf, yLo);
+      ctx.moveTo(x - capHalf, yHi);
+      ctx.lineTo(x + capHalf, yHi);
+      ctx.stroke();
+    }
     ctx.restore();
   },
 };
@@ -160,7 +209,12 @@ const inFlightPulsePlugin: Plugin<"bar", { index: number | null }> = {
 };
 
 // Stable identity — passing a fresh array each render churns the chart.
-const CHART_PLUGINS = [sampleCountPlugin, divergenceLinePlugin, inFlightPulsePlugin];
+const CHART_PLUGINS = [
+  sampleCountPlugin,
+  divergenceLinePlugin,
+  inFlightPulsePlugin,
+  compositeCiWhiskerPlugin,
+];
 
 // Above this real-bar count, x-axis labels rotate 60° so they stop
 // overlapping their neighbours. Picked empirically against the 240px
@@ -193,6 +247,11 @@ export interface BarSlot {
   // election fit (in-flight / eliminated). This is what explains a lower-accuracy winner.
   theta?: number | null;
   thetaSe?: number | null;
+  // Normal-CLT CI on the mean of this bar's per-sample composite fitness — drawn as
+  // an error-bar whisker around the composite bar. Null when not yet stamped (in-flight
+  // round) or when composite itself is null (nothing to bracket).
+  compositeCiLo?: number | null;
+  compositeCiHi?: number | null;
   // Workspace-verify overlay — `accuracy` is the workspace accuracy
   // (mean hit rate) over every archive measurement for this candidate's
   // config; `workspaceN` is the total sample count behind it (typically
@@ -424,6 +483,11 @@ export const FitnessChart = memo(function FitnessChart({
               const tail = typeof se === "number" ? ` ± ${se.toFixed(2)}` : "";
               lines.push(`ability θ ${theta.toFixed(2)}${tail} (elected on θ, not accuracy)`);
             }
+            const ciLo = bars[idx]?.compositeCiLo;
+            const ciHi = bars[idx]?.compositeCiHi;
+            if (typeof ciLo === "number" && typeof ciHi === "number") {
+              lines.push(`composite 95% CI [${ciLo.toFixed(3)}, ${ciHi.toFixed(3)}]`);
+            }
             return lines.join("\n");
           },
         },
@@ -431,6 +495,10 @@ export const FitnessChart = memo(function FitnessChart({
       sampleCount: { counts: bars.map((b) => b.nSamples) },
       divergenceLine: { index: divergenceBoundary },
       inFlightPulse: { index: inFlightIndex },
+      compositeCiWhisker: {
+        ciLo: bars.map((b) => b.compositeCiLo ?? null),
+        ciHi: bars.map((b) => b.compositeCiHi ?? null),
+      },
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [themeVersion, accRaw, compRaw, whatifRaw, verifyRaw, rotate, bars, selectedKey, onSelect, divergenceBoundary, inFlightIndex]);
