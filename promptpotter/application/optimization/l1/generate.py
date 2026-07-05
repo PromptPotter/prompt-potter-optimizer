@@ -19,7 +19,7 @@ from promptpotter.application.optimization.validators.l1_strict import (
     build_l1_output_schema,
 )
 from promptpotter.domain.escalation_signals import ValidationFailure
-from promptpotter.domain.opt_search_point import EvidenceGrounding, OptSearchPoint
+from promptpotter.domain.opt_search_point import EvidenceGrounding
 from promptpotter.domain.results import CandidateProposal, candidate_label
 from promptpotter.infrastructure.llm.json_parse import MetaPromptParseError
 from promptpotter.infrastructure.llm.models import emit_round_warning
@@ -48,24 +48,6 @@ def _parse_evidence_grounding(raw: VariantEvidenceGrounding | None) -> EvidenceG
         )
         return None
     return EvidenceGrounding(field=raw.field, citation=raw.citation.strip())
-
-
-def noop_probe_proposal(parent: OptSearchPoint) -> CandidateProposal:
-    """The deliberate NO-OP probe arm (``OptimizationConfig.noop_probe``).
-
-    An origin-identical child — no prompt, task_context, or pipeline-param edit —
-    whose measured delta vs origin IS the backend's run-to-run noise floor. The
-    ``changes_description`` doubles as the LLM-facing framing so the critique
-    reads it as a calibration arm, not a hypothesis to diagnose or imitate."""
-    child = parent.mutate(
-        changes_description=(
-            "NO-OP probe — deliberately identical to the parent; its delta vs origin "
-            "measures the run-to-run noise floor. Not a hypothesis: do not diagnose "
-            "or imitate this arm."
-        ),
-        source="noop_probe",
-    )
-    return CandidateProposal(osp=child, is_probe=True)
 
 
 def candidate_summaries(proposals: list[CandidateProposal], round_num: int) -> list[dict[str, Any]]:
@@ -259,4 +241,4 @@ async def l1_generate(
     return population
 
 
-__all__ = ["candidate_summaries", "l1_generate", "noop_probe_proposal"]
+__all__ = ["candidate_summaries", "l1_generate"]

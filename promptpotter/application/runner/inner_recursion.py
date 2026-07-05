@@ -493,20 +493,26 @@ async def _run_inner_campaign(
         "sp_budget_ttest": len(train_data),
         "optimization": campaign_config.optimization.model_copy(update=opt_update),
     }
+    # CRN (common random numbers): pin this cell's inner LLM seed on the `llm_only`
+    # node — `spec.seed` is the per-cell data-draw seed, already fixed per cell and
+    # identical across every outer arm (origin + every variant) hitting that cell.
+    # Every inner LLM call for this cell then shares one seed regardless of which
+    # outer meta-prompt spawned it, so the inner's own run-to-run noise is common
+    # and cancels in the (variant − origin) paired outer diff — for zero extra spend.
+    # Rides the same sanctioned pipeline_overrides channel as the model override
+    # below (merge, don't clobber, any dataset-level overrides).
+    po: dict[str, Any] = {k: dict(v) for k, v in (campaign_config.pipeline_overrides or {}).items()}
+    node = dict(po.get("llm_only", {}))
+    node["seed"] = spec.seed
     if spec.inner_model:
         # The cell's target-model override (the panel's environment axis) rides the
-        # sanctioned pipeline_overrides channel onto the inner dataset's single-call
-        # `llm_only` node — every in-band panel cell is a single-call reasoning
-        # dataset. Merge, don't clobber, any dataset-level overrides.
-        po: dict[str, Any] = {
-            k: dict(v) for k, v in (campaign_config.pipeline_overrides or {}).items()
-        }
-        node = dict(po.get("llm_only", {}))
+        # same channel onto the inner dataset's single-call `llm_only` node — every
+        # in-band panel cell is a single-call reasoning dataset.
         node["model"] = spec.inner_model
         if spec.inner_provider:
             node["provider"] = spec.inner_provider
-        po["llm_only"] = node
-        cfg_update["pipeline_overrides"] = po
+    po["llm_only"] = node
+    cfg_update["pipeline_overrides"] = po
     campaign_config = campaign_config.model_copy(update=cfg_update)
 
     prepare_fresh_cycle(session, campaign_config, train_data)

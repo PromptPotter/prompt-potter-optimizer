@@ -48,7 +48,10 @@ from promptpotter.infrastructure.projections.live_dashboard.render import (
     build_pobb_block,
 )
 from promptpotter.infrastructure.projections.live_dashboard.round_buffer import RoundBuffer
-from promptpotter.infrastructure.projections.live_dashboard.round_summary import build_round_summary
+from promptpotter.infrastructure.projections.live_dashboard.round_summary import (
+    build_round_summary,
+    origin_cells_from_disk,
+)
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     BackendWarning,
     BackfillLogEntry,
@@ -357,7 +360,10 @@ class LiveDashboardView(DerivedView):
                 if self._recorder is not None:
                     self._recorder.set_l1_score(self._l1_score_block(round_result))
                 # Append round summary; re-firing the same round (replay / sweep) replaces in place.
-                summary = build_round_summary(round_result)
+                origin_cells = (
+                    {} if round_result.round == 0 else origin_cells_from_disk(self.cycle_dir)
+                )
+                summary = build_round_summary(round_result, origin_cells)
                 rounds_list = [r for r in self.state.rounds if r.round != round_result.round]
                 rounds_list.append(summary)
                 rounds_list.sort(key=lambda r: r.round)

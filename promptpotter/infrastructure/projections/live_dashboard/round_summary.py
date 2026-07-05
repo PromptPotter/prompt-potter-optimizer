@@ -9,15 +9,38 @@ is fetched on demand by the deep-inspection consumers.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
-from promptpotter.domain.outer_verdict import CandidateInfo, compute_outer_verdict
+from promptpotter.domain.outer_verdict import CandidateInfo, cell_fitness, compute_outer_verdict
 from promptpotter.domain.results import (
     RoundResult,
     RoundSummary,
     RoundSummaryCandidate,
     is_round_winner,
 )
+
+
+def origin_cells_from_disk(cycle_dir: Path) -> dict[str, float]:
+    """The round-0 (origin) per-cell composite off the cached ``rounds/round_0000.json`` —
+    the un-edited-meta-prompt control every later round's outer verdict pairs against. The
+    sole reader of this file for this purpose; ``application/meta_champion/reducer.py``
+    reuses it instead of keeping its own copy."""
+    origin_file = Path(cycle_dir) / "rounds" / "round_0000.json"
+    if not origin_file.is_file():
+        return {}
+    try:
+        doc = json.loads(origin_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(doc, dict):
+        return {}
+    acr = doc.get("all_candidate_results") or {}
+    if not acr:
+        return {}
+    origin_id = next(iter(acr))  # round 0 is the single origin arm
+    return cell_fitness(acr.get(origin_id) or [])
 
 
 def _measurement_order(acr: dict[str, list[dict[str, Any]]]) -> list[int]:
@@ -43,7 +66,7 @@ def _measurement_order(acr: dict[str, list[dict[str, Any]]]) -> list[int]:
     return out
 
 
-def build_round_summary(rr: RoundResult) -> RoundSummary:
+def build_round_summary(rr: RoundResult, origin_cells: dict[str, float]) -> RoundSummary:
     """One :class:`RoundSummary` from a closed-round :class:`RoundResult`.
 
     Winner detection rides the shared ``is_round_winner`` rule (also used by
@@ -55,6 +78,10 @@ def build_round_summary(rr: RoundResult) -> RoundSummary:
     ``health`` is copied straight from ``rr.health`` (stamped once at round close
     by ``compute_round_health``) — the projection renders the served verdict, it
     does not recompute it (R-36).
+
+    *origin_cells* is the cached round-0 origin's per-cell composite (``{}`` off an
+    L4 round, or when summarizing round 0 itself — the origin is the control, never a
+    verdict subject).
     """
     winner_label = rr.label
     candidates: list[RoundSummaryCandidate] = []
@@ -73,22 +100,29 @@ def build_round_summary(rr: RoundResult) -> RoundSummary:
                 partial_reason=c.partial_reason,
                 theta=c.theta,
                 theta_se=c.theta_se,
+                composite_ci_lo=c.composite_ci_lo,
+                composite_ci_hi=c.composite_ci_hi,
             )
         )
     selection = _measurement_order(rr.all_candidate_results or {})
-    verdict = compute_outer_verdict(
-        rr.all_candidate_results or {},
-        [
-            CandidateInfo(
-                candidate_id=c.candidate_id,
-                label=c.label,
-                changes_description=c.changes_description,
-                composite_fitness=c.composite_fitness,
-                is_winner=is_round_winner(c.changes_description, winner_label),
-            )
-            for c in rr.candidate_scores
-        ],
-        winner_label,
+    verdict = (
+        None
+        if rr.round == 0
+        else compute_outer_verdict(
+            rr.all_candidate_results or {},
+            [
+                CandidateInfo(
+                    candidate_id=c.candidate_id,
+                    label=c.label,
+                    changes_description=c.changes_description,
+                    composite_fitness=c.composite_fitness,
+                    is_winner=is_round_winner(c.changes_description, winner_label),
+                )
+                for c in rr.candidate_scores
+            ],
+            winner_label,
+            origin_cells,
+        )
     )
     return RoundSummary(
         round=rr.round,
@@ -103,4 +137,4 @@ def build_round_summary(rr: RoundResult) -> RoundSummary:
     )
 
 
-__all__ = ["build_round_summary"]
+__all__ = ["build_round_summary", "origin_cells_from_disk"]

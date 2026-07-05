@@ -89,11 +89,18 @@ composite-fitness section below); `rounds_to_N` is still computed for the inner 
    marked REQUIRED-non-empty in `_optimizer_meta/prompts.json`.
 3. ~~Off-enum `evidence_grounding.field`~~ **DONE** — enum line tightened ("EXACTLY one of …;
    any other value, e.g. 'failure', is invalid").
-4. ~~Noise floor NO-OP candidate~~ **DONE, generalized** — `OptimizationConfig.noop_probe`
-   (pp-self ON): one origin-identical arm injected in round 1 via the normal candidate channel,
-   exempt from the `no_op_variant` nuke, scored `force_fresh` (an origin-identical config would
-   cache-replay the origin's own rows and read a floor of exactly 0). Its measured delta IS the
-   inner-stochasticity floor; feeds the `proxy_lift_corr ≥ 0.6` gate.
+4. ~~Noise floor NO-OP candidate~~ **REVERTED 2026-07-05** — the in-loop `noop_probe` arm
+   backfired: at n=1 a same-config inner swing read as a real win (C1.3), and it contaminated
+   `detect_invariants`/L1 injection with a probe-only exemption. Deleted end-to-end (no config
+   is ever re-measured mid-run; an origin-identical candidate is now illegal → `no_op_variant` →
+   L2 heals). The noise-floor *capability* survives as an on-demand debug diagnostic
+   (`python -m promptpotter noise-floor --k N`, re-scores the cached origin `--k` times with
+   `force_fresh`) — Claude-Code-invoked, never wired into the loop. The actual variance fix is
+   (a) CRN — pin a per-cell inner LLM seed shared by origin + every variant so common noise
+   cancels in the paired diff (`runner/inner_recursion.py`), and (b) an always-on composite CI
+   per candidate (`mean_ci`) so no point estimate stands alone. The per-round verdict
+   (`domain/outer_verdict.py::compute_outer_verdict`) now pairs the round's variant against the
+   **cached round-0 origin**, not a re-measured probe.
 5. Inner `l1_generate` temperature 0.7 → ~0.4 — **DEFERRED with reason**: a ContextVar config
    override would change inner behavior WITHOUT joining the inner-baseline measurement-identity
    fingerprint (the stale-reuse bug class the fingerprint fix closed). Needs identity-joined

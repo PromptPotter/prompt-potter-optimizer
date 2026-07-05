@@ -116,7 +116,24 @@ def paired_diff_posterior(
     return (mean_d, se_d, n)
 
 
+def mean_ci(values: list[float], alpha: float = 0.05) -> tuple[float, float, float]:
+    """Normal-CLT confidence interval on the mean of *values* — the same posterior
+    ``_normal_posterior`` gives PoBB and ``paired_diff_posterior``, expressed as
+    ``(mean, ci_lo, ci_hi)`` on the values' own [0,1] scale (composite fitness), not a
+    difference. ``n=0`` is degenerate: ``(0.0, 0.0, 0.0)``.
+    """
+    if not values:
+        return (0.0, 0.0, 0.0)
+
+    from scipy.stats import norm
+
+    mean, se = _normal_posterior(values)
+    z = norm.ppf(1 - alpha / 2)
+    return (mean, mean - z * se, mean + z * se)
+
+
 __all__ = [
+    "mean_ci",
     "min_detectable_effect",
     "paired_diff_posterior",
     "proportion_test",

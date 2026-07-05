@@ -15,7 +15,8 @@
         "provider": "openrouter",
         "model": "openai/gpt-oss-20b:nitro",
         "temperature": 0.0,
-        "reasoning_effort": "low"
+        "reasoning_effort": "low",
+        "seed": 0
       },
       "optimizer": {
         "param_keys": ["temperature", "max_tokens", "model", "reasoning_effort", "persona", "task_intent", "problem_description", "instruction", "thinking_style", "answer_format"],

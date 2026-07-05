@@ -176,9 +176,7 @@ async def score_population(
             candidate_scores=candidate_scores,
             round_num=round_num,
             l1_diversity=l1_diversity,
-            # The NO-OP probe is origin-identical — a cache replay would serve the
-            # origin's own rows and read a noise floor of exactly 0.
-            force_fresh=proposals[idx].is_probe,
+            force_fresh=False,
         )
         all_candidate_results[osp_c.lineage.id] = cr_result.results
         if cr_result.runtime_failure is not None:

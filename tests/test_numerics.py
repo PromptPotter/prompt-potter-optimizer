@@ -68,7 +68,7 @@ from promptpotter.domain.pipeline_schema import (
 from promptpotter.domain.rendering import display_fitness
 from promptpotter.domain.sample import Sample
 from promptpotter.shared import extract_gsm8k_number
-from promptpotter.shared.statistics import wilson_ci
+from promptpotter.shared.statistics import mean_ci, wilson_ci
 
 # ===========================================================================
 # 1. Scorer matcher formulas — one parametrized family
@@ -2623,3 +2623,21 @@ def test_elimination_p_best_discriminates_on_graded_backend() -> None:
     )
     assert p_best_bin == p_best_bool  # bit-identical for binary datasets
     assert p_best_bin > 0.5
+
+
+def test_mean_ci_bounds_and_degenerate_n() -> None:
+    """``mean_ci`` is the always-on per-candidate composite CI (L4 variance fix) — a
+    wrong bound would silently mislabel a real difference as noise or vice versa, with
+    no visible symptom. Pin the degenerate n=0/n=1 cases and that the interval always
+    brackets the mean."""
+    assert mean_ci([]) == (0.0, 0.0, 0.0)
+
+    mean, lo, hi = mean_ci([0.7])
+    assert mean == 0.7
+    assert lo < mean < hi  # n=1 still yields a real (non-degenerate) interval
+
+    values = [0.6, 0.7, 0.65, 0.72, 0.68]
+    mean, lo, hi = mean_ci(values)
+    assert abs(mean - sum(values) / len(values)) < 1e-9
+    assert lo < mean < hi
+    assert lo < hi

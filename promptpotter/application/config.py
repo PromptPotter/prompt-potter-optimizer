@@ -202,19 +202,6 @@ class OptimizationConfig(BaseModel):
         ),
     )
 
-    noop_probe: bool = Field(
-        False,
-        description=(
-            "Inject one deliberate NO-OP probe candidate (origin-identical, empty mutation) "
-            "into round 1. Its measured delta vs origin IS the backend's run-to-run noise "
-            "floor — the yardstick a real candidate's delta must clear before it means "
-            "anything. Only worth an arm on a stochastic backend (the L4 inner recursion is "
-            "the canonical user); the probe is exempt from the no_op_variant nuke and scored "
-            "force_fresh, since a cache replay of an origin-identical config reads a floor of "
-            "exactly 0 by construction."
-        ),
-    )
-
     l2_patience: int | None = Field(2)
     l3_patience: int | None = Field(1)
     degradation_threshold: float = Field(...)

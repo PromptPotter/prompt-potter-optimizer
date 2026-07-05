@@ -1,15 +1,15 @@
 """Blocked, paired outer verdict — the statistically-rigorous L4 read of a round.
 
 An L4 outer round scores each meta-prompt variant across the panel's cells (one inner
-cycle per (variant, cell)). The no-op probe is the within-panel control. This computes,
-for the round's target variant, the paired ``(variant − noop)`` composite difference per
-cell, pooled across cells into an effect + CI, and a three-way decision. Cells are the
-blocks; the pooling treats them as exchangeable (a flat paired posterior across cells —
-per-cell n is 1, so inverse-variance weighting degenerates to this; a random-effects
-refinement is the documented next step).
+cycle per (variant, cell)). The **cached round-0 origin** is the within-panel control —
+no config is ever re-measured mid-run. This computes, for the round's target variant,
+the paired ``(variant − origin)`` composite difference per cell, pooled across cells into
+an effect + CI, and a three-way decision. Cells are the blocks; the pooling treats them as
+exchangeable (a flat paired posterior across cells — per-cell n is 1, so inverse-variance
+weighting degenerates to this; a random-effects refinement is the documented next step).
 
-Pure domain: no I/O. The projection (`round_summary`) builds the inputs from a
-`RoundResult` and copies the result onto the summary, exactly like `health`.
+Pure domain: no I/O. The projection (`round_summary`) reads the cached round-0 origin
+cells off disk and passes them in; this module never touches the filesystem.
 """
 
 from __future__ import annotations
@@ -19,9 +19,6 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 from promptpotter.shared.statistics import min_detectable_effect, paired_diff_posterior
-
-# The verbatim marker on the no-op probe's changes_description (l1/generate.py).
-NOOP_MARKER = "NO-OP probe"
 
 DECISION_ADOPT = "adopt"
 DECISION_REJECT = "reject"
@@ -41,13 +38,13 @@ class CandidateInfo(BaseModel):
 
 
 class OuterCellEffect(BaseModel):
-    """One cell's paired (variant − noop) composite difference."""
+    """One cell's paired (variant − origin) composite difference."""
 
     model_config = ConfigDict(frozen=True)
 
     cell: str
     variant_fitness: float
-    noop_fitness: float
+    origin_fitness: float
     diff: float
 
 
@@ -59,7 +56,7 @@ class OuterVerdict(BaseModel):
     variant_id: str
     variant_label: str
     per_cell: list[OuterCellEffect]
-    effect: float  # pooled mean paired (variant − noop) across cells
+    effect: float  # pooled mean paired (variant − origin) across cells
     se: float
     ci_lo: float
     ci_hi: float
@@ -68,8 +65,13 @@ class OuterVerdict(BaseModel):
     mde_remaining: float  # min detectable effect at the current cell count
 
 
-def _cell_fitness(rows: list[dict[str, Any]]) -> dict[str, float]:
-    """``{cell_query: composite_fitness}`` from a candidate's per-cell rows."""
+def cell_fitness(rows: list[dict[str, Any]]) -> dict[str, float]:
+    """``{cell_query: composite_fitness}`` from a candidate's per-cell rows.
+
+    The one shared pure extraction — callers reading a fresh round (``compute_outer_verdict``
+    below) and callers reading an archived round doc off disk
+    (``application/meta_champion/reducer.py``) both walk the same row shape.
+    """
     out: dict[str, float] = {}
     for r in rows:
         cell = r.get("query")
@@ -79,53 +81,48 @@ def _cell_fitness(rows: list[dict[str, Any]]) -> dict[str, float]:
     return out
 
 
-def _pick_variant(
-    candidates: list[CandidateInfo], noop_id: str, winner_label: str
-) -> CandidateInfo | None:
-    """The variant the verdict scores: the round winner if it isn't the noop, else the
-    strongest non-noop candidate by composite (so a round that crowned nothing still
-    reports its best arm's verdict)."""
-    non_noop = [c for c in candidates if c.candidate_id != noop_id]
-    if not non_noop:
+def _pick_variant(candidates: list[CandidateInfo], winner_label: str) -> CandidateInfo | None:
+    """The variant the verdict scores: the round winner, else the strongest candidate by
+    composite (so a round that crowned nothing still reports its best arm's verdict)."""
+    if not candidates:
         return None
-    winners = [c for c in non_noop if c.is_winner]
+    winners = [c for c in candidates if c.is_winner]
     if winners:
         return winners[0]
-    return max(non_noop, key=lambda c: c.composite_fitness)
+    return max(candidates, key=lambda c: c.composite_fitness)
 
 
 def compute_outer_verdict(
     all_candidate_results: dict[str, list[dict[str, Any]]],
     candidates: list[CandidateInfo],
     winner_label: str,
+    origin_cells: dict[str, float],
 ) -> OuterVerdict | None:
-    """The round's blocked-paired verdict, or ``None`` when there is no no-op arm to
-    pair against (i.e. a non-L4 round, or a round with no probe)."""
-    noop = next((c for c in candidates if NOOP_MARKER in c.changes_description), None)
-    if noop is None:
+    """The round's blocked-paired verdict against the **cached round-0 origin**
+    (*origin_cells*, supplied by the caller — round 0 is never re-measured), or ``None``
+    when there are no origin cells to pair against (a non-L4 round, or round 0 itself —
+    the origin is the control, not a verdict subject)."""
+    if not origin_cells:
         return None
-    noop_cells = _cell_fitness(all_candidate_results.get(noop.candidate_id, []))
-    if not noop_cells:
-        return None
-    variant = _pick_variant(candidates, noop.candidate_id, winner_label)
+    variant = _pick_variant(candidates, winner_label)
     if variant is None:
         return None
-    var_cells = _cell_fitness(all_candidate_results.get(variant.candidate_id, []))
+    var_cells = cell_fitness(all_candidate_results.get(variant.candidate_id, []))
 
-    shared = sorted(c for c in var_cells if c in noop_cells)
+    shared = sorted(c for c in var_cells if c in origin_cells)
     if not shared:
         return None
     per_cell = [
         OuterCellEffect(
             cell=c,
             variant_fitness=var_cells[c],
-            noop_fitness=noop_cells[c],
-            diff=var_cells[c] - noop_cells[c],
+            origin_fitness=origin_cells[c],
+            diff=var_cells[c] - origin_cells[c],
         )
         for c in shared
     ]
     effect, se, n = paired_diff_posterior(
-        [var_cells[c] for c in shared], [noop_cells[c] for c in shared]
+        [var_cells[c] for c in shared], [origin_cells[c] for c in shared]
     )
     ci_lo, ci_hi = effect - 1.96 * se, effect + 1.96 * se
     if ci_lo > 0:
@@ -152,5 +149,6 @@ __all__ = [
     "CandidateInfo",
     "OuterCellEffect",
     "OuterVerdict",
+    "cell_fitness",
     "compute_outer_verdict",
 ]

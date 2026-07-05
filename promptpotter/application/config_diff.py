@@ -53,7 +53,6 @@ _FIELD_SCOPES: dict[tuple[str, ...], Literal["policy", "data"]] = {
     ("optimization", "l1_patience"): "policy",
     ("optimization", "n_variants"): "policy",
     ("optimization", "optimizer_set"): "policy",  # which meta-prompt set the optimizer runs (L4)
-    ("optimization", "noop_probe"): "policy",  # one extra calibration arm — search policy, not data
     ("optimization", "improvement_threshold"): "policy",
     ("optimization", "l2_patience"): "policy",
     ("optimization", "l3_patience"): "policy",

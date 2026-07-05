@@ -13,7 +13,6 @@ from promptpotter.application.optimization.dispatch.llm_call import (
 from promptpotter.application.optimization.l1.generate import (
     candidate_summaries,
     l1_generate,
-    noop_probe_proposal,
 )
 from promptpotter.application.optimization.validators.l1_strict import (
     L1YieldStats,
@@ -131,12 +130,6 @@ async def generate_or_load_candidates(
             obs=obs,
             round_num=round_num,
         )
-
-    # One NO-OP probe arm per experiment (round 1 only): rides the population as a
-    # normal candidate — persisted below, so a resume replays it from disk instead
-    # of re-injecting. LLM candidates first; the probe measures last.
-    if opt.noop_probe and round_num == 1 and candidates:
-        candidates.append(noop_probe_proposal(cycle.opt_sp))
 
     yield_stats = detect_invariants(candidates, cycle.opt_sp)
 

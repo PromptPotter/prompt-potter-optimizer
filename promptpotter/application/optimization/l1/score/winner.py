@@ -33,7 +33,7 @@ from promptpotter.domain.results import (
 )
 from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.validators import StopRule
-from promptpotter.shared.statistics import paired_diff_posterior
+from promptpotter.shared.statistics import mean_ci, paired_diff_posterior
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
@@ -188,6 +188,21 @@ async def l1_score(
             }
         )
         electable.append(ind.lineage.id)
+
+    # Composite-fitness CI — always stamped for any candidate with ≥1 scored sample (broader
+    # than ``electable``: eliminated/under-coverage candidates still get one). No composite
+    # point estimate should stand alone in the round record or the dashboard.
+    for cs_idx, cs in enumerate(candidate_scores):
+        rows = all_candidate_results.get(cs.candidate_id)
+        if not rows:
+            continue
+        composites = [float(val) for r in rows if isinstance(val := r.get("fitness"), int | float)]
+        if not composites:
+            continue
+        _, ci_lo, ci_hi = mean_ci(composites)
+        candidate_scores[cs_idx] = cs.model_copy(
+            update={"composite_ci_lo": ci_lo, "composite_ci_hi": ci_hi}
+        )
 
     # ``coverage_floor`` is persisted so the replayer applies the same electability floor — without
     # it a resumed run could elect a thin candidate the live path rejected, manufacturing divergence.

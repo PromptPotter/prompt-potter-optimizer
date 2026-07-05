@@ -167,6 +167,13 @@ class ScoredCandidate(BaseModel):
     # the election fit (eliminated / under the coverage floor).
     theta: float | None = None
     theta_se: float | None = None
+    # Normal-CLT CI on the mean of this candidate's per-sample composite fitness
+    # (``mean_ci`` over ``all_candidate_results[cid][*]["fitness"]``) — always present for
+    # any candidate with ≥1 scored sample, unlike ``theta_se`` (fit-restricted). No composite
+    # point estimate should stand alone; ``ci_lo``/``ci_hi`` below are the Wilson interval on
+    # binary ``hits``/``total``, a different (and always-present) quantity.
+    composite_ci_lo: float | None = None
+    composite_ci_hi: float | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -190,15 +197,6 @@ class CandidateProposal(BaseModel):
 
     osp: OptSearchPoint
     pipeline_params_override: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    is_probe: bool = Field(
-        default=False,
-        description=(
-            "Deliberate NO-OP probe (OptimizationConfig.noop_probe): an origin-identical arm "
-            "whose measured delta vs origin IS the backend's run-to-run noise floor. Exempt "
-            "from the no_op_variant nuke and scored force_fresh — a cache replay of an "
-            "origin-identical config would read a floor of exactly 0."
-        ),
-    )
 
 
 class RoundOrigin(BaseModel):
@@ -389,10 +387,16 @@ class CycleResult(BaseModel):
 
 
 class DiagnosticRunRecord(BaseModel):
-    """One on-demand candidate verification → webapp Verify tab.
+    """One on-demand workspace-scope diagnostic run — the ``verify`` and ``noise-floor``
+    CLI verbs' shared sidecar shape.
 
-    Per-sample data lands in `measurements/`; this record carries the
-    workspace-scope verdict (did the source-campaign composite hold).
+    Per-sample data lands in `measurements/`; this record carries the workspace-scope
+    verdict. ``verify`` populates the base fields (did the source-campaign composite
+    hold on more samples); ``noise-floor`` additionally populates the ``noise_floor_*``
+    fields (the run-to-run spread of ``--k`` ``force_fresh`` re-scores of the SAME
+    config) and leaves ``samples_added``/``source_campaign_*`` at the origin round's
+    recorded values (there is nothing new to "add" — every re-score targets the same
+    already-measured set).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -412,6 +416,13 @@ class DiagnosticRunRecord(BaseModel):
     source_campaign_accuracy: float
     source_campaign_composite: float
     source_campaign_n: int
+    # ``noise-floor`` only: the spread of ``k`` ``force_fresh`` re-scores of one fixed
+    # config — the backend's own run-to-run noise, not a comparison to history.
+    noise_floor_k: int | None = None
+    noise_floor_mean: float | None = None
+    noise_floor_ci_lo: float | None = None
+    noise_floor_ci_hi: float | None = None
+    noise_floor_raw: list[float] | None = None
 
 
 class RoundSummaryCandidate(BaseModel):
@@ -433,6 +444,10 @@ class RoundSummaryCandidate(BaseModel):
     # was elected on, so the chart can explain a lower-accuracy winner. `None` outside the fit.
     theta: float | None = None
     theta_se: float | None = None
+    # Composite-fitness CI (`ScoredCandidate.composite_ci_lo/hi`) — always present for any
+    # candidate with ≥1 scored sample; the whisker the chart draws around `composite_fitness`.
+    composite_ci_lo: float | None = None
+    composite_ci_hi: float | None = None
 
 
 class WarningDict(TypedDict):

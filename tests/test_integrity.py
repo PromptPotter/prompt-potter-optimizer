@@ -448,23 +448,3 @@ def test_hit_cache_respects_dataset(tmp_path: Path) -> None:
     assert aime_queries.isdisjoint(just_queries)
     assert any("aime" in q for q in aime_queries)
     assert any("justlogic" in q for q in just_queries)
-
-
-def test_noop_probe_survives_invariant_nuke() -> None:
-    """The NO-OP probe is a deliberate origin-identical arm (noise-floor measurement).
-    ``detect_invariants`` flagging it ``no_op_variant`` would route it through the
-    synthetic-0 skip path — silently reporting a noise floor of exactly 0 instead of
-    measuring one. The probe must pass unflagged and stay out of the yield stats."""
-    from promptpotter.application.optimization.l1.generate import noop_probe_proposal
-    from promptpotter.application.optimization.validators.l1_strict import detect_invariants
-    from promptpotter.domain.opt_search_point import OptSearchPoint
-
-    parent = OptSearchPoint(persona="Expert", instruction="Solve.")
-    probe = noop_probe_proposal(parent)
-    assert probe.is_probe
-    assert probe.osp.prompt_field_dict() == parent.prompt_field_dict()
-
-    stats = detect_invariants([probe], parent)
-    assert probe.osp.memory.wounds.validation_failures == []
-    assert stats.l1_n_no_op == 0
-    assert stats.l1_yield == 1.0

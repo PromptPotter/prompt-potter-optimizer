@@ -8,11 +8,11 @@ refresh`` is reproducible.
 The comparison metric here is the **anchor-to-origin** paired effect: for each candidate
 meta-prompt state, the per-cell ``(candidate − origin) composite`` diff, paired on the
 shared cells the candidate was measured on, aggregated across every occurrence of that
-state anywhere in the corpus. Origin (the un-edited meta-prompt) is the round-0 arm; it is
-the deterministic stand-in for the no-op control until an explicit no-op probe is measured
-(the rigorous coronation in the L4 verdict slice tightens this). Absolute scores across
-runs are not comparable — only these paired-on-shared-cells effects are — which is why the
-table ranks by anchor effect, and confirmation is earned separately by a coronation match.
+state anywhere in the corpus. Origin (the un-edited meta-prompt) is the round-0 arm — the
+same cached control the per-round ``outer_verdict`` (``domain/outer_verdict.py``) pairs
+against, never re-measured. Absolute scores across runs are not comparable — only these
+paired-on-shared-cells effects are — which is why the table ranks by anchor effect, and
+confirmation is earned separately by a coronation match.
 """
 
 from __future__ import annotations
@@ -25,6 +25,10 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
+from promptpotter.domain.outer_verdict import cell_fitness
+from promptpotter.infrastructure.projections.live_dashboard.round_summary import (
+    origin_cells_from_disk,
+)
 from promptpotter.shared.statistics import paired_diff_posterior
 
 # The datasets whose cycles carry meta-prompt candidates (the L4 recursion connector).
@@ -117,29 +121,12 @@ def _cell_composites(round_doc: dict[str, Any], candidate_id: str) -> dict[str, 
 
     Reads the per-sample rows under ``all_candidate_results[candidate_id]`` — one row per
     outer sample, whose ``query`` is the cell id and whose ``fitness`` is that cell's
-    composite (its mean equals the candidate's round ``composite_fitness``).
+    composite (its mean equals the candidate's round ``composite_fitness``). Thin adapter
+    over the shared pure extraction (``domain.outer_verdict.cell_fitness``) — this module's
+    input is an already-loaded round doc, not a fresh disk read.
     """
     rows = (round_doc.get("all_candidate_results") or {}).get(candidate_id) or []
-    out: dict[str, float] = {}
-    for row in rows:
-        cell = row.get("query")
-        fit = row.get("fitness")
-        if isinstance(cell, str) and isinstance(fit, int | float):
-            out[cell] = float(fit)
-    return out
-
-
-def _origin_cells(cycle_dir: Path) -> dict[str, float]:
-    """The round-0 (origin) per-cell composite — the un-edited-meta-prompt baseline."""
-    origin_file = cycle_dir / "rounds" / "round_0000.json"
-    if not origin_file.is_file():
-        return {}
-    doc = _read_json(origin_file)
-    acr = doc.get("all_candidate_results") or {}
-    if not acr:
-        return {}
-    origin_id = next(iter(acr))  # round 0 is the single origin arm
-    return _cell_composites(doc, origin_id)
+    return cell_fitness(rows)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -192,7 +179,7 @@ def reduce_corpus(base_dir: Path) -> ChampionRegistry:
             rounds_dir = cycle_dir / "rounds"
             if not rounds_dir.is_dir():
                 continue
-            origin_cells = _origin_cells(cycle_dir)
+            origin_cells = origin_cells_from_disk(cycle_dir)
             if not origin_cells:
                 continue
             n_cycles += 1
