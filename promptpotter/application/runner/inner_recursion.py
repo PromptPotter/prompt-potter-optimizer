@@ -157,6 +157,13 @@ class _InnerTaskSpec:
     # so an (target-model, dataset) cell is a fixed, in-band resource, not a fuzzy pick.
     inner_model: str | None = None
     inner_provider: str | None = None
+    # Determinism clamp for the inner OPTIMIZER's sampling temperature. Each inner
+    # campaign is a fitness MEASUREMENT of one meta-prompt; at the file default
+    # (l1_generate creativity ~0.4) identical meta-prompts generate different
+    # candidates → run-to-run swing that swamps the outer proxy. Pinning this (0.0)
+    # makes the inner loop a near-deterministic function of its meta-prompt. None
+    # keeps the optimizer's file temperature (feature off). Applied inner-task-only.
+    inner_optimizer_temperature: float | None = None
 
 
 def _resolve_inner_task(ctx: InnerSpawnContext, query: str) -> _InnerTaskSpec:
@@ -177,6 +184,8 @@ def _resolve_inner_task(ctx: InnerSpawnContext, query: str) -> _InnerTaskSpec:
     target = float(bench_cfg.get("target_score", 0.8))
     raw_variants = bench_cfg.get("inner_n_variants")
     n_variants = int(raw_variants) if raw_variants is not None else None
+    raw_opt_temp = bench_cfg.get("inner_optimizer_temperature")
+    inner_optimizer_temperature = float(raw_opt_temp) if raw_opt_temp is not None else None
     seed = 0
     inner_model: str | None = None
     inner_provider: str | None = None
@@ -200,6 +209,7 @@ def _resolve_inner_task(ctx: InnerSpawnContext, query: str) -> _InnerTaskSpec:
         n_variants=n_variants,
         inner_model=inner_model,
         inner_provider=inner_provider,
+        inner_optimizer_temperature=inner_optimizer_temperature,
     )
 
 
@@ -438,6 +448,7 @@ async def _run_inner_campaign(
     from promptpotter.application.datasets import read_campaign_config_file
     from promptpotter.application.jobs.mint import prepare_fresh_cycle
     from promptpotter.application.optimization.dispatch.llm_call import (
+        set_optimizer_config_overrides,
         set_optimizer_prompt_overrides,
     )
     from promptpotter.application.optimization.task_context import load_or_build_task_context
@@ -448,6 +459,12 @@ async def _run_inner_campaign(
     # Apply the outer L1's meta-prompt mutations to the inner optimizer prompts —
     # set in THIS task's context copy, so it can't reach the outer's optimizer.
     set_optimizer_prompt_overrides(meta_prompt_overrides or None)
+    # Clamp the inner optimizer's sampling temperature (determinism for measurement)
+    # in THIS task only — so the inner campaign is a near-deterministic function of
+    # its meta-prompt and the outer optimizer's own temperature is untouched. None
+    # (unset in inner_tasks.json) leaves the optimizer's file temperature in place.
+    if spec.inner_optimizer_temperature is not None:
+        set_optimizer_config_overrides({"temperature": spec.inner_optimizer_temperature})
 
     # Sandbox: the inner tenant tree roots at the spawning cycle's flat, shallow
     # `<workspace>/.inner/<cycle_id>` home (re-entrant + Windows MAX_PATH-safe; see

@@ -101,10 +101,17 @@ composite-fitness section below); `rounds_to_N` is still computed for the inner 
    per candidate (`mean_ci`) so no point estimate stands alone. The per-round verdict
    (`domain/outer_verdict.py::compute_outer_verdict`) now pairs the round's variant against the
    **cached round-0 origin**, not a re-measured probe.
-5. Inner `l1_generate` temperature 0.7 → ~0.4 — **DEFERRED with reason**: a ContextVar config
-   override would change inner behavior WITHOUT joining the inner-baseline measurement-identity
-   fingerprint (the stale-reuse bug class the fingerprint fix closed). Needs identity-joined
-   plumbing; the NO-OP floor quantifies variance first, so we know whether it's worth it.
+5. Inner-optimizer determinism clamp — **TAKEN 2026-07-05 (identity-joined).**
+   `inner_tasks.json::inner_benchmark_config.inner_optimizer_temperature` (pp-self = 0.0) pins the
+   inner OPTIMIZER's sampling temperature for L4 inner campaigns via a per-run ContextVar
+   (`set_optimizer_config_overrides`, set inside the inner asyncio task; clamped LAST in `llm_call`
+   so it beats `l1_generate`'s per-call creativity temp — the dominant same-config swing source),
+   the outer optimizer untouched. The deferral's blocker is closed: the knob now JOINS the
+   inner-baseline measurement-identity fingerprint (`connectors/promptpotter.py::_identity_config`
+   folds the whole `inner_benchmark_config`), so changing it invalidates stale outer-sample rows
+   instead of reusing them. Complements the CRN target seed (item 4) — CRN pairs the inner
+   TARGET's sampling; this pins the inner OPTIMIZER's. Validate on the next run: the cached-origin
+   paired swing collapses toward the provider floor while the inner best-beats-origin rate holds.
 6. Seeds 8 → 12 — **NOT taken this run**: the same spend went to outer breadth instead (the
    geometry above). Revisit if the floor says candidate deltas are real but crowning starves.
 7. ~~`plan` cap 800 vs 2.8k plans~~ **DONE, both sides** — cap 800→2000 (`layer_state.py`) AND

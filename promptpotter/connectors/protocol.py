@@ -29,6 +29,8 @@ from promptpotter.domain.pipeline_schema import NodeType
 from promptpotter.shared.errors import PotterError
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     import httpx
 
 # How a connector's backend runs, so the loop dispatches on a *declared*
@@ -136,17 +138,20 @@ class Connector:
     is down. ``None`` opts the connector out (in-process backends like
     ``promptpotter`` have nothing to probe)."""
 
-    identity_config: Callable[[], dict[str, dict[str, Any]]] | None = None
+    identity_config: Callable[[Path], dict[str, dict[str, Any]]] | None = None
     """Per-node config entries that are part of MEASUREMENT IDENTITY but not
     wire tunables — folded into ``resolve_pipeline_config_params`` so the
     origin cycle id and the archive's node-config reuse key change whenever
-    the backend's effective revision does. The canonical user is the
-    in-process ``promptpotter`` connector: its backend IS the inner optimizer
-    (meta-prompt baseline + layouts + engine), so without this a baseline edit
-    silently reuses stale measurements recorded under the old behavior. The
-    connector's ``wire_adapter`` must strip these reserved keys from the
-    outbound payload. ``None`` = the backend's revision is not part of
-    identity (remote backends use the advisory ``version_check`` instead)."""
+    the backend's effective revision does. Receives the resolved dataset config
+    dir so a connector can fold dataset-scoped inner behavior into the
+    fingerprint. The canonical user is the in-process ``promptpotter``
+    connector: its backend IS the inner optimizer (meta-prompt baseline +
+    layouts + engine + the dataset's ``inner_tasks.json`` inner-run config), so
+    without this a baseline edit silently reuses stale measurements recorded
+    under the old behavior. The connector's ``wire_adapter`` must strip these
+    reserved keys from the outbound payload. ``None`` = the backend's revision
+    is not part of identity (remote backends use the advisory ``version_check``
+    instead)."""
 
     default_pipeline: tuple[str, ...] = ()
     """First-tenant default pipeline step list — the launcher's chat-first

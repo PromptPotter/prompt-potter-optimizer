@@ -35,11 +35,13 @@ __all__ = [
     "OPTIMIZER_PIPELINE_PATH",
     "combined_optimizer_prompt_hash",
     "compute_optimizer_prompt_hashes",
+    "get_optimizer_config_overrides",
     "get_optimizer_schema",
     "list_optimizer_prompts",
     "load_optimizer_prompt",
     "load_optimizer_set_overrides",
     "resolve_node_layout",
+    "set_optimizer_config_overrides",
     "set_optimizer_prompt_overrides",
 ]
 
@@ -72,6 +74,38 @@ def set_optimizer_prompt_overrides(overrides: dict[str, dict[str, Any]] | None) 
     (:func:`load_optimizer_set_overrides`); the inner runner
     (`runner/inner_recursion.py`) binds the outer's per-node mutations."""
     _OPTIMIZER_PROMPT_OVERRIDES.set(overrides or None)
+
+
+# Per-run override of optimizer NODE-CONFIG tunables (a flat ``{param: value}`` map,
+# e.g. ``{"temperature": 0.0}``), applied to EVERY optimizer node call. Distinct from
+# the prompt-field override above: that swaps meta-prompt TEXT; this clamps the sampling
+# knobs. Sole caller: the L4 inner-cycle runner, which binds ``{"temperature": 0.0}``
+# inside the inner asyncio task so an inner campaign is a (near-)deterministic fitness
+# function of its meta-prompt — killing the run-to-run swing that swamps the outer proxy
+# — WITHOUT touching the outer optimizer (its own task keeps the file default). Applied
+# LAST in ``llm_call`` (a hard clamp), so it also neutralizes ``l1_generate``'s per-call
+# creativity temperature, the dominant noise source. Task-isolated ContextVar; default
+# ``None`` = no override (every normal, non-inner call).
+_OPTIMIZER_CONFIG_OVERRIDES: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "optimizer_config_overrides", default=None
+)
+
+
+def set_optimizer_config_overrides(overrides: dict[str, Any] | None) -> None:
+    """Bind per-run optimizer node-config (tunable) overrides for this task's context.
+
+    A flat ``{param: value}`` map (e.g. ``{"temperature": 0.0}``) clamped onto EVERY
+    optimizer node call by :func:`..call.llm_call`, applied last so it beats both the
+    node's file config and any per-call override (``l1_generate``'s creativity temp).
+    Sole caller: the L4 inner-cycle runner (`runner/inner_recursion.py`), inside the
+    inner task, so an inner campaign runs its optimizer deterministically without
+    affecting the outer cycle's own task."""
+    _OPTIMIZER_CONFIG_OVERRIDES.set(overrides or None)
+
+
+def get_optimizer_config_overrides() -> dict[str, Any] | None:
+    """The per-run optimizer node-config overrides bound for this task, or ``None``."""
+    return _OPTIMIZER_CONFIG_OVERRIDES.get()
 
 
 def load_optimizer_set_overrides(opt_set: str) -> dict[str, dict[str, Any]]:

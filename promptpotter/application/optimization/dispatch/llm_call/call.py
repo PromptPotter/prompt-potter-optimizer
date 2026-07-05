@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+    get_optimizer_config_overrides,
     get_optimizer_schema,
     load_optimizer_prompt,
 )
@@ -196,6 +197,13 @@ async def llm_call(
         else:
             config = {}
     merged = {**_LLM_DEFAULTS, **config, **overrides}
+    # Per-run tunable clamp (L4 inner-cycle determinism), applied LAST so it beats
+    # both the node's file config and any per-call override — notably `l1_generate`'s
+    # `temperature=creativity`, the dominant run-to-run noise source. Bound only inside
+    # an inner asyncio task (`set_optimizer_config_overrides`); `None` on every normal
+    # call, so this is a no-op outside L4 inner campaigns.
+    if config_overrides := get_optimizer_config_overrides():
+        merged = {**merged, **config_overrides}
     llm_client = get_llm_client(merged["provider"])
 
     cache_key: str | None = None

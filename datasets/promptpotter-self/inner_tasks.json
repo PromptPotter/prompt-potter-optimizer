@@ -6,7 +6,8 @@
     "n_samples_per_inner_round": 24,
     "max_inner_rounds": 2,
     "inner_n_variants": 2,
-    "target_score": 0.60
+    "target_score": 0.60,
+    "inner_optimizer_temperature": 0.0
   },
   "tasks": [
     {

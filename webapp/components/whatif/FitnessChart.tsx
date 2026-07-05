@@ -68,11 +68,17 @@ const compositeCiWhiskerPlugin: Plugin<
     const dsIndex = chart.data.datasets.findIndex((ds) => ds.label === "composite");
     if (dsIndex < 0) return;
     const meta = chart.getDatasetMeta(dsIndex);
-    const { ctx } = chart;
+    const { ctx, chartArea } = chart;
     ctx.save();
     ctx.strokeStyle = getCss("--color-ci");
     ctx.lineWidth = 1.5;
     const capHalf = 4;
+    // The normal-CLT CI (`mean_ci`) can spill past [0,1] near the boundary — a
+    // real case is ci_lo < 0 on a low-composite candidate. The y-axis is fixed
+    // [0,1], so an unclamped pixel lands OUTSIDE the plot (a whisker hanging below
+    // the axis reads as a stray bar). Clamp both ends to the plot's own pixel span.
+    const clampY = (px: number) =>
+      Math.min(chartArea.bottom, Math.max(chartArea.top, px));
     for (let i = 0; i < ciLo.length; i++) {
       const lo = ciLo[i];
       const hi = ciHi[i];
@@ -82,8 +88,8 @@ const compositeCiWhiskerPlugin: Plugin<
         | undefined;
       const x = el?.getProps?.(["x"], true)?.x;
       if (typeof x !== "number") continue;
-      const yLo = yScale.getPixelForValue(lo);
-      const yHi = yScale.getPixelForValue(hi);
+      const yLo = clampY(yScale.getPixelForValue(lo));
+      const yHi = clampY(yScale.getPixelForValue(hi));
       ctx.beginPath();
       ctx.moveTo(x, yLo);
       ctx.lineTo(x, yHi);

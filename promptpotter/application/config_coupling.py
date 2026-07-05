@@ -120,6 +120,8 @@ _KNOB_ESTIMANDS: dict[str, frozenset[Estimand]] = {
     "headline_metric": frozenset({Estimand.DISPLAY}),
     "dataset_split": frozenset({Estimand.DISPLAY}),
     "optimization.max_rounds": frozenset({Estimand.ESCALATION, Estimand.SPEND}),
+    "optimization.lives.start": frozenset({Estimand.ESCALATION, Estimand.SPEND}),
+    "optimization.lives.cap": frozenset({Estimand.ESCALATION, Estimand.SPEND}),
     "optimization.l1_patience": frozenset({Estimand.ESCALATION}),
     "optimization.n_variants": frozenset({Estimand.SEARCH}),
     "optimization.optimizer_set": frozenset({Estimand.SEARCH}),

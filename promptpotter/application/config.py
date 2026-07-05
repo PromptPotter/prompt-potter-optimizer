@@ -671,7 +671,7 @@ def _connector_identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
     connector = CONNECTORS.get(str((raw or {}).get("backend_type") or ""))
     if connector is None or connector.identity_config is None:
         return {}
-    return connector.identity_config()
+    return connector.identity_config(dataset_dir)
 
 
 def missing_template_vars(rendered: str, declared: list[str]) -> list[str]:

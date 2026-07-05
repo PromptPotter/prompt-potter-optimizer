@@ -32,6 +32,8 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.connectors.protocol import Connector
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     import httpx
 
 logger = logging.getLogger(__name__)
@@ -43,15 +45,18 @@ logger = logging.getLogger(__name__)
 INNER_BASELINE_KEY = "inner_baseline"
 
 
-def _identity_config() -> dict[str, dict[str, Any]]:
+def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
     """The inner optimizer's effective-revision fingerprint, as identity config.
 
     The backend this connector runs IS the inner optimizer, so a measurement's
     identity must change whenever the inner baseline does: the shared meta-prompt
     text (``datasets/_optimizer/pipeline.json``), the per-node information-flow
-    layouts, and the engine version. Otherwise an outer origin scored under an old
-    baseline is silently reused against candidates run under the new one — a
-    stale-vs-fresh comparison that fabricates (or masks) outer signal.
+    layouts, the engine version, AND the dataset's ``inner_tasks.json``
+    ``inner_benchmark_config`` (the inner-run behavior — sample count, round /
+    variant geometry, target, and the ``inner_optimizer_temperature`` determinism
+    clamp). Otherwise an outer origin scored under an old baseline/config is
+    silently reused against candidates run under the new one — a stale-vs-fresh
+    comparison that fabricates (or masks) outer signal.
     """
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         OPTIMIZER_PIPELINE_PATH,
@@ -59,10 +64,18 @@ def _identity_config() -> dict[str, dict[str, Any]]:
     from promptpotter.config.settings import APP_VERSION
     from promptpotter.domain.l1_layout import NODE_LAYOUTS
     from promptpotter.domain.pipeline_schema import stable_hash
+    from promptpotter.infrastructure.store.io import read_json_optional
 
     baseline_text = OPTIMIZER_PIPELINE_PATH.read_text(encoding="utf-8")
     layouts = {name: spec.model_dump(mode="json") for name, spec in sorted(NODE_LAYOUTS.items())}
-    fingerprint = stable_hash([baseline_text, layouts, APP_VERSION])[:12]
+    # The inner-run config is part of the inner baseline's effective behavior, so it
+    # joins the fingerprint — changing `inner_optimizer_temperature` (or any geometry
+    # knob) invalidates outer-sample rows measured under the prior value instead of
+    # reusing them stale (the identity-joined plumbing l4-outer-loop.md § item 5 named).
+    inner_cfg = (read_json_optional(dataset_dir / "inner_tasks.json") or {}).get(
+        "inner_benchmark_config"
+    ) or {}
+    fingerprint = stable_hash([baseline_text, layouts, APP_VERSION, inner_cfg])[:12]
     return {"l1_generate": {INNER_BASELINE_KEY: fingerprint}}
 
 
