@@ -203,4 +203,51 @@ async def score_population(
     return all_candidate_results, candidate_scores, escalation_signal, representative_timeline
 
 
-__all__ = ["score_population"]
+async def replicate_survivors_pass(
+    cycle: Cycle,
+    survivors: list[OptSearchPoint],
+    effective_by_id: dict[str, dict[str, Any] | None],
+    all_candidate_results: dict[str, list[QueryMeasurement]],
+    dataset: list[Sample],
+    k: int,
+) -> None:
+    """Opt-in successive-halving replication (``OptimizationConfig.replicate_survivors``).
+
+    Re-measure each SURVIVING candidate ``k`` more times with ``force_fresh`` (independent inner
+    draws, cache bypassed) and APPEND the rows to ``all_candidate_results`` — the estimators
+    average replicate rows per cell (``paired_fitness`` / ``cell_fitness``) and the Rasch θ fit
+    consumes them natively (repeated ``sample_id`` → more item responses → tighter θ). A
+    background re-score: no foreground per-sample callbacks (the arm already displayed on the
+    first pass), spend rides the token ledger. Only survivors pay — losers were already
+    PoBB-eliminated, so this is the halving's extra lives, not a uniform k× on the whole
+    population. Kills the idiosyncratic single-run inner-campaign draw that CRN cannot (the
+    treatment changes the inner-prompt path, so its search noise is not common). The origin
+    reference is replicated separately in ``winner.py::l1_score`` (its draws thread only into the
+    decision estimators, not the display floor). A DEV-STAGE tool.
+    """
+    schema = cycle.session.pipeline_schema
+    assert schema is not None, "replication requires pipeline_schema"
+    for _ in range(k):
+        for osp_c in survivors:
+            cid = osp_c.lineage.id
+            jsp = osp_c.to_job_search_point(
+                base_pipeline_params=effective_by_id.get(cid), schema=schema
+            )
+            rows, _scores, _signal = await score_search_point(
+                jsp,
+                dataset,
+                cycle.session,
+                label="replicate",
+                degradation_checks=None,
+                n_total_candidates=0,
+                axes=cycle.axes,
+                l1_diversity=0.0,
+                opt_sp=osp_c,
+                on_sample_scored=None,
+                on_sample_starting=None,
+                force_fresh=True,
+            )
+            all_candidate_results[cid].extend(rows)
+
+
+__all__ = ["replicate_survivors_pass", "score_population"]

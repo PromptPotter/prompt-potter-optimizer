@@ -138,11 +138,16 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # ``presentation/cli/commands/noise_floor.py``, mirroring ``verify``) — a new CLI
 # verb, not a loop feature (no config field, no L1 injection). A feature,
 # justified, so the baseline rises.
+# 2026-07-05 successive-halving replication: ``config_leaf_fields`` 36->37 — a
+# deliberate OPT-IN operator knob ``OptimizationConfig.replicate_survivors``
+# (default 0 = off in the distributable): re-measure survivors with force_fresh
+# for independent draws the estimators average, killing the idiosyncratic inner
+# draw CRN cannot. A dev-stage feature, justified, so the baseline rises.
 LEDGER_BASELINE = {
     "modules": 311,
     "init_files": 58,
     "reexport_shims": 45,
-    "config_leaf_fields": 36,
+    "config_leaf_fields": 37,
     "settings_env": 17,
     "settings_const": 16,
     "opt_search_point_fields": 27,

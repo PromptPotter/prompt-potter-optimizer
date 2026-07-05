@@ -113,6 +113,33 @@ composite-fitness section below); `rounds_to_N` is still computed for the inner 
    `<inner_node>.<field>` verbatim from the catalogue; invented names called out as invalid.
 9. (New, observed live) L2-authored `task_context` fields truncated at the 300-char render cap —
    **DONE** upstream: the base `l2_context` answer_format now states the per-field ≤300c budget.
+10. **Successive-halving replication — OPT-IN, dev-stage (2026-07-05).** `OptimizationConfig.replicate_survivors:
+   int = 0` (default off = the distributable default). When `>0`, after a round's scoring pass each
+   SURVIVING candidate (reached the coverage floor, not PoBB-eliminated) is re-measured
+   `replicate_survivors` more times with `force_fresh` (independent inner draws, cache bypassed;
+   `l1/score/loop.py::replicate_survivors_pass`, wired in `winner.py::l1_score` before the estimators
+   run). The replicate rows are APPENDED to `all_candidate_results`; the estimators average per cell
+   (`paired_fitness` / `outer_verdict.cell_fitness`) and the Rasch θ fit consumes them natively
+   (repeated `sample_id` → more item responses → tighter θ = inverse-variance pooling), while the 2PL
+   ruler's per-item discrimination down-weights flat cells — so the replicates make BOTH the pooling
+   and the information-weighting estimable without new estimator code. **Why it's a complement to CRN,
+   not a substitute:** CRN (item 4a) pins a shared inner seed so *common-input* noise cancels in the
+   paired diff — but the DOMINANT discovered-level noise rides the *diverging* inner-prompt path (each
+   outer meta-prompt makes inner-L1 generate different inner prompts, so the search noise is not common
+   and a shared seed can't cancel it). Replication averages that idiosyncratic single-run draw out
+   directly (the empirically-observed `C1.2 / seed-3` collapse 0.427→0.082 was one unlucky inner
+   campaign). Only survivors pay the k-times spend (losers already PoBB-dropped) — this IS the halving's
+   "extra lives." **It is a DEV-STAGE tool: keep it 0 in the distributable** — an extra measurement pass
+   adds cost and cognitive surface, and the shipped optimizer should stay simple; turn it on only to
+   tighten a development read. **The ORIGIN reference is replicated too** (`k` extra `force_fresh`
+   `rescore_origin` draws): origin is the shared comparison anchor, so its single-draw noise was the
+   correlated term flooding every candidate's diff (the ~0.808 the variance read found). Its replicate
+   draws thread ONLY into the decision estimators (`origin_election_results` → `elect_round_winner` /
+   `paired_fitness` / the `delta_ok` gate), leaving the base single draw as the matched-origin DISPLAY
+   floor so its cell count stays honest. A replicated candidate's displayed composite + accuracy are
+   recomputed over ALL its rows (`winner.py`), so the shown point matches what the θ election read.
+   Coverage counts DISTINCT cells (`_distinct_valid_cells`), so replicates never falsely satisfy the
+   floor. Probe rounds keep their own re-scope and are not replicated.
 
 **Also verified 2026-07-03 (don't re-chase): candidate-arm inner round-0 is NOT re-measured.**
 Same-seed round-0 accuracies are byte-identical across the origin arm, every C1.1 arm, and the

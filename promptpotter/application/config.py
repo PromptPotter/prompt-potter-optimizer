@@ -202,6 +202,24 @@ class OptimizationConfig(BaseModel):
         ),
     )
 
+    replicate_survivors: int = Field(
+        0,
+        description=(
+            "OPT-IN successive-halving replication (0 = off; the distributable default). "
+            "When >0, after a round's scoring pass each SURVIVING candidate (reached the "
+            "coverage floor, not PoBB-eliminated) is re-measured `replicate_survivors` more "
+            "times with `force_fresh` (independent draws, cache bypassed); the estimators "
+            "average the replicate rows per cell (`paired_fitness`/`cell_fitness`) and the "
+            "Rasch θ fit consumes them natively (more item responses → tighter θ). Kills the "
+            "idiosyncratic single-run inner-campaign draw that CRN cannot (the treatment "
+            "changes the inner-prompt path, so its search noise is not common) — complementary "
+            "to CRN, not a substitute. The origin reference is replicated too (its draws thread "
+            "only into the decision estimators, not the display floor). Spends k times the "
+            "survivor+origin budget, so it rides the elimination floor (losers already dropped). "
+            "A DEV-STAGE tool: off in the distributable to keep it simple. See l4-outer-loop.md."
+        ),
+    )
+
     l2_patience: int | None = Field(2)
     l3_patience: int | None = Field(1)
     degradation_threshold: float = Field(...)

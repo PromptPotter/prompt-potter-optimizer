@@ -123,6 +123,7 @@ _KNOB_ESTIMANDS: dict[str, frozenset[Estimand]] = {
     "optimization.l1_patience": frozenset({Estimand.ESCALATION}),
     "optimization.n_variants": frozenset({Estimand.SEARCH}),
     "optimization.optimizer_set": frozenset({Estimand.SEARCH}),
+    "optimization.replicate_survivors": frozenset({Estimand.SEARCH, Estimand.SPEND}),
     "optimization.improvement_threshold": frozenset({Estimand.GATE}),
     "optimization.l2_patience": frozenset({Estimand.ESCALATION}),
     "optimization.l3_patience": frozenset({Estimand.ESCALATION}),

@@ -8,7 +8,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.optimization.l1.population import parse_population
-from promptpotter.application.optimization.l1.score.loop import score_population
+from promptpotter.application.optimization.l1.score.loop import (
+    replicate_survivors_pass,
+    score_population,
+)
 from promptpotter.application.optimization.pobb.elimination import PoBBConfig
 from promptpotter.application.optimization.resume_and_fork import (
     ResumeCheckpointKind,
@@ -19,6 +22,7 @@ from promptpotter.application.optimization.validators.l1_strict import L1YieldSt
 from promptpotter.application.origin import rescore_origin
 from promptpotter.application.scoring.metrics import (
     _compute_accuracy,
+    compute_composite_fitness,
     count_degraded_samples,
     elect_round_winner,
     matched_origin_stats,
@@ -123,12 +127,27 @@ async def l1_score(
         for ind in osp_population
         if ind.lineage.id in all_candidate_results and ind.lineage.id not in aborted_ids
     ]
+    # Opt-in successive-halving replication: give survivors extra independent draws BEFORE the
+    # estimators run, so the per-cell mean (and the θ fit) averages out an idiosyncratic
+    # single-run inner draw. Losers were already PoBB-eliminated (not in `scored`), so only
+    # survivors pay the k× spend. Off by default (`replicate_survivors == 0`).
+    rep_k = cycle.config.optimization.replicate_survivors
+    if rep_k > 0 and scored:
+        await replicate_survivors_pass(
+            cycle,
+            scored,
+            {ind.lineage.id: params_by_id[ind.lineage.id] for ind in scored},
+            all_candidate_results,
+            dataset,
+            rep_k,
+        )
     # The incumbent floor, scored on the SAME samples the candidates ran. PoBB already
     # backfilled the incumbent (seed) onto every sample a candidate touched, so re-scoring
     # it over the touched union is all cache hits — a real matched origin floor at no added
     # spend, and nothing wasted on subset samples no candidate reached. Probe rounds keep
     # their cumulative re-scope (the incumbent already measured the warned-query set).
     if cycle.probe_next_round:
+        origin_scoring_set = dataset
         origin = cycle.origin_for_round(dataset, round_num)
     else:
         scored_sids = {
@@ -138,7 +157,23 @@ async def l1_score(
             if r.get("sample_id") is not None
         }
         touched = [s for s in dataset if int(s.id) in scored_sids]
-        origin = await rescore_origin(cycle, touched or dataset, round_num, callbacks=callbacks)
+        origin_scoring_set = touched or dataset
+        origin = await rescore_origin(cycle, origin_scoring_set, round_num, callbacks=callbacks)
+    # Opt-in replication of the ORIGIN reference. Origin is the shared comparison anchor for the
+    # θ election + paired diff, so its single-draw noise floods every candidate's comparison
+    # (correlated across arms — the 0.808 the variance read found). Give it `rep_k` extra
+    # force_fresh draws too, but thread them ONLY into the decision estimators
+    # (`origin_election_results`); the base single draw stays the matched-origin DISPLAY floor so
+    # its cell count stays honest. Probe rounds keep their own re-scope (not replicated).
+    origin_election_results: list[QueryMeasurement] = list(
+        cast("list[QueryMeasurement]", origin.results)
+    )
+    if rep_k > 0 and not cycle.probe_next_round:
+        for _ in range(rep_k):
+            extra = await rescore_origin(
+                cycle, origin_scoring_set, round_num, callbacks=callbacks, force_fresh=True
+            )
+            origin_election_results.extend(cast("list[QueryMeasurement]", extra.results))
     # Full-set origin stats — fallback for `matched_origin` when every candidate ran every sample.
     origin_base = _compute_accuracy(cast("list[QueryMeasurement]", origin.results))
     best_acc = origin.accuracy
@@ -192,6 +227,7 @@ async def l1_score(
     # Composite-fitness CI — always stamped for any candidate with ≥1 scored sample (broader
     # than ``electable``: eliminated/under-coverage candidates still get one). No composite
     # point estimate should stand alone in the round record or the dashboard.
+    osp_by_id = {ind.lineage.id: ind for ind in osp_population}
     for cs_idx, cs in enumerate(candidate_scores):
         rows = all_candidate_results.get(cs.candidate_id)
         if not rows:
@@ -200,16 +236,31 @@ async def l1_score(
         if not composites:
             continue
         _, ci_lo, ci_hi = mean_ci(composites)
-        candidate_scores[cs_idx] = cs.model_copy(
-            update={"composite_ci_lo": ci_lo, "composite_ci_hi": ci_hi}
-        )
+        update: dict[str, Any] = {"composite_ci_lo": ci_lo, "composite_ci_hi": ci_hi}
+        # Replicated candidate: its pass-1 composite/accuracy predate the extra draws, but the θ
+        # election read every row — recompute the displayed point over ALL rows so it matches the
+        # decision. Guarded on genuine replication (rows > distinct cells), so the n=1 default is
+        # byte-identical; same opt_sp + l1_diversity as the gateway's pass-1 compute.
+        n_cells = len({r.get("sample_id") for r in rows if r.get("sample_id") is not None})
+        osp = osp_by_id.get(cs.candidate_id)
+        if rep_k > 0 and len(rows) > n_cells and osp is not None:
+            s = compute_composite_fitness(
+                rows,
+                schema,
+                opt_sp=osp,
+                round_scorer=session.scoring.round_scorer,
+                l1_diversity=yield_stats.l1_yield,
+            )
+            update["composite_fitness"] = s["composite_fitness"]
+            update["accuracy"] = s["accuracy"]
+        candidate_scores[cs_idx] = cs.model_copy(update=update)
 
     # ``coverage_floor`` is persisted so the replayer applies the same electability floor — without
     # it a resumed run could elect a thin candidate the live path rejected, manufacturing divergence.
     winner_id, abilities = elect_round_winner(
         electable,
         all_candidate_results,
-        list(cast("list[QueryMeasurement]", origin.results)),
+        origin_election_results,
         coverage_floor,
         cycle.delta_scale or {},
     )
@@ -259,9 +310,7 @@ async def l1_score(
         # not binary hits: a candidate that lifts ground-truth's rank without yet landing it at
         # rank 1 is real improvement on the smooth signal, and a binary-hit test is blind to it.
         # One-sided paired-difference posterior — the same machinery PoBB elimination runs.
-        cand_fit, origin_fit = paired_fitness(
-            best_results, list(cast("list[QueryMeasurement]", origin.results))
-        )
+        cand_fit, origin_fit = paired_fitness(best_results, origin_election_results)
         if cand_fit:
             mean_d, se_d, _ = paired_diff_posterior(cand_fit, origin_fit)
             if se_d > 1e-12:
@@ -289,7 +338,7 @@ async def l1_score(
 
         gate_fit = candidate_abilities(
             {winner_id: best_results},
-            list(cast("list[QueryMeasurement]", origin.results)),
+            origin_election_results,
             cycle.delta_scale or {},
         )
         theta_lift = gate_fit.theta.get(winner_id, 0.0) - gate_fit.theta.get(ORIGIN_ABILITY_ID, 0.0)

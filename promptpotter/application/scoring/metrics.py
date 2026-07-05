@@ -341,25 +341,53 @@ def matched_origin_stats(
 # ---------------------------------------------------------------------------
 
 
+def _mean_fitness_by_cell(rows: list[QueryMeasurement]) -> dict[Any, float]:
+    """``{sample_id: mean composite fitness}``, collapsing REPLICATE rows (same
+    ``sample_id``, multiple measurements under ``replicate_survivors``) to their per-cell
+    mean. At the n=1 default this is the identity — one row per cell. A degraded sample
+    with no recorded fitness contributes 0 (the score it earned), not a dropped row.
+    """
+    acc: dict[Any, list[float]] = {}
+    for r in rows:
+        sid = r.get("sample_id")
+        if sid is not None:
+            acc.setdefault(sid, []).append(float(r.get("fitness", 0.0) or 0.0))
+    return {sid: sum(v) / len(v) for sid, v in acc.items()}
+
+
+def _distinct_valid_cells(results: list[QueryMeasurement]) -> int:
+    """Distinct non-deprecated cells (``sample_id``) a candidate was measured on — the
+    coverage notion under ``replicate_survivors``: k replicates of one cell count once, so
+    replication can never falsely satisfy ``coverage_floor``. Identity with row count at n=1.
+    """
+    from promptpotter.application.optimization.pobb.elimination import is_deprecated
+
+    return len(
+        {
+            r.get("sample_id")
+            for r in results
+            if not is_deprecated(r) and r.get("sample_id") is not None
+        }
+    )
+
+
 def paired_fitness(
     candidate_results: list[QueryMeasurement],
     origin_results: list[QueryMeasurement],
 ) -> tuple[list[float], list[float]]:
-    """Per-sample reciprocal-rank fitness for the candidate and origin on the SAME samples,
+    """Per-cell mean composite fitness for the candidate and origin on the SAME cells,
     aligned by ``sample_id``. The matched pairs the round-significance test runs on — origin's
-    fitness restricted to whatever subset the online picker scored the candidate on. A degraded
-    sample with no recorded fitness contributes 0 (the score it earned), not a dropped pair.
+    fitness restricted to whatever subset the online picker scored the candidate on. Replicate
+    rows per cell are averaged first (``_mean_fitness_by_cell``), so one paired point per shared
+    cell regardless of replication depth; sorted by ``sample_id`` for replay determinism.
     """
-    origin_by_sid = {
-        r.get("sample_id"): float(r.get("fitness", 0.0) or 0.0) for r in origin_results
-    }
+    cand_by_sid = _mean_fitness_by_cell(candidate_results)
+    origin_by_sid = _mean_fitness_by_cell(origin_results)
     cand_fit: list[float] = []
     origin_fit: list[float] = []
-    for r in candidate_results:
-        sid = r.get("sample_id")
-        if sid in origin_by_sid:
-            cand_fit.append(float(r.get("fitness", 0.0) or 0.0))
-            origin_fit.append(origin_by_sid[sid])
+    for sid in sorted(cand_by_sid.keys() & origin_by_sid.keys(), key=lambda s: (s is None, s)):
+        cand_fit.append(cand_by_sid[sid])
+        origin_fit.append(origin_by_sid[sid])
     return cand_fit, origin_fit
 
 
@@ -411,8 +439,8 @@ def elect_round_winner(
     winner_id = ""
     for cid in candidate_ids:
         cand_results = list(results_by_id.get(cid) or [])
-        base = _compute_accuracy(cand_results)
-        if base["total"] < coverage_floor:
+        n_cells = _distinct_valid_cells(cand_results)
+        if n_cells < coverage_floor:
             continue
         cand_fit, _ = paired_fitness(cand_results, origin_results)
         if not cand_fit:
@@ -429,7 +457,7 @@ def elect_round_winner(
         # (a candidate below it never reaches here), so dropping the SE shrink cannot let a thin
         # fluke win — only fully-probed candidates compete, best point-estimate θ takes it.
         lift = theta_c - theta_origin
-        rank = (lift, base["total"])
+        rank = (lift, n_cells)
         if rank > best_rank:
             best_rank = rank
             winner_id = cid

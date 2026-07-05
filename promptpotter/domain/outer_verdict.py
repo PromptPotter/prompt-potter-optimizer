@@ -66,19 +66,21 @@ class OuterVerdict(BaseModel):
 
 
 def cell_fitness(rows: list[dict[str, Any]]) -> dict[str, float]:
-    """``{cell_query: composite_fitness}`` from a candidate's per-cell rows.
+    """``{cell_query: mean composite_fitness}`` from a candidate's per-cell rows, averaging
+    REPLICATE rows per cell (``replicate_survivors``) so the blocked-paired diff carries one
+    point per cell at any replication depth. Identity with last-wins at the n=1 default.
 
     The one shared pure extraction — callers reading a fresh round (``compute_outer_verdict``
     below) and callers reading an archived round doc off disk
     (``application/meta_champion/reducer.py``) both walk the same row shape.
     """
-    out: dict[str, float] = {}
+    acc: dict[str, list[float]] = {}
     for r in rows:
         cell = r.get("query")
         fit = r.get("fitness")
         if isinstance(cell, str) and isinstance(fit, int | float):
-            out[cell] = float(fit)
-    return out
+            acc.setdefault(cell, []).append(float(fit))
+    return {cell: sum(v) / len(v) for cell, v in acc.items()}
 
 
 def _pick_variant(candidates: list[CandidateInfo], winner_label: str) -> CandidateInfo | None:
