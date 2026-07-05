@@ -21,6 +21,12 @@ from promptpotter.domain.results import (
     is_round_winner,
 )
 
+# The ``ScoredCandidate`` fields each display model copies verbatim — its own field list
+# minus the derived ``is_winner``. Deriving from ``model_fields`` keeps the copy set in
+# lockstep with the model definition (add a field there, it flows here automatically).
+_SUMMARY_INCLUDE = set(RoundSummaryCandidate.model_fields) - {"is_winner"}
+_CANDIDATE_INFO_INCLUDE = set(CandidateInfo.model_fields) - {"is_winner"}
+
 
 def origin_cells_from_disk(cycle_dir: Path) -> dict[str, float]:
     """The round-0 (origin) per-cell composite off the cached ``rounds/round_0000.json`` —
@@ -84,26 +90,18 @@ def build_round_summary(rr: RoundResult, origin_cells: dict[str, float]) -> Roun
     verdict subject).
     """
     winner_label = rr.label
-    candidates: list[RoundSummaryCandidate] = []
-    for c in rr.candidate_scores:
-        candidates.append(
-            RoundSummaryCandidate(
-                candidate_id=c.candidate_id,
-                label=c.label,
-                accuracy=c.accuracy,
-                composite_fitness=c.composite_fitness,
-                scored_samples=c.scored_samples,
-                expected_samples=c.expected_samples,
-                is_winner=is_round_winner(c.changes_description, winner_label),
-                evaluators=dict(c.evaluators),
-                changes_description=c.changes_description,
-                partial_reason=c.partial_reason,
-                theta=c.theta,
-                theta_se=c.theta_se,
-                composite_ci_lo=c.composite_ci_lo,
-                composite_ci_hi=c.composite_ci_hi,
-            )
+    # Both display models are strict name-subsets of ``ScoredCandidate`` plus a derived
+    # ``is_winner`` — so each is a ``model_dump(include=…)`` projection, not a hand-copy.
+    # The include-set is the target model's OWN field list minus ``is_winner``: a field
+    # added to the target can't be silently forgotten here (it just flows), and a field
+    # the source lacks fails loud at construction. One field-list, spelled at the model.
+    candidates = [
+        RoundSummaryCandidate(
+            **c.model_dump(include=_SUMMARY_INCLUDE),
+            is_winner=is_round_winner(c.changes_description, winner_label),
         )
+        for c in rr.candidate_scores
+    ]
     selection = _measurement_order(rr.all_candidate_results or {})
     verdict = (
         None
@@ -112,10 +110,7 @@ def build_round_summary(rr: RoundResult, origin_cells: dict[str, float]) -> Roun
             rr.all_candidate_results or {},
             [
                 CandidateInfo(
-                    candidate_id=c.candidate_id,
-                    label=c.label,
-                    changes_description=c.changes_description,
-                    composite_fitness=c.composite_fitness,
+                    **c.model_dump(include=_CANDIDATE_INFO_INCLUDE),
                     is_winner=is_round_winner(c.changes_description, winner_label),
                 )
                 for c in rr.candidate_scores

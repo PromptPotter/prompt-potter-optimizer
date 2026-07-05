@@ -6,7 +6,7 @@ import { RotatePrompt } from "@/components/shell/RotatePrompt";
 interface ScoreboardEntry {
   rank?: number;
   candidate_id?: string;
-  label?: string;
+  changes_description?: string;
   accuracy?: number;
   composite_fitness?: number;
   hits?: number;
@@ -95,8 +95,8 @@ export function RoundFileView({ doc, raw }: Props) {
                 {scoreboard.map((s, i) => (
                   <tr key={s.candidate_id ?? i}>
                     <td>{s.rank ?? i + 1}</td>
-                    <td style={{ maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.label}>
-                      {s.label || s.candidate_id || "—"}
+                    <td style={{ maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.changes_description}>
+                      {s.changes_description || s.candidate_id || "—"}
                     </td>
                     <td>{pct(s.accuracy)}</td>
                     <td>{num(s.composite_fitness)}</td>

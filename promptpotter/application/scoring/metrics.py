@@ -91,6 +91,27 @@ def _compute_accuracy(results: list[QueryMeasurement]) -> dict[str, Any]:
     }
 
 
+def composite_ci(results: list[QueryMeasurement]) -> tuple[float | None, float | None]:
+    """95% normal-CLT CI on the mean per-cell composite ``fitness`` — the always-on
+    whisker every scored candidate carries so no composite point estimate stands alone.
+
+    The **single home** for the CI idiom: every stamping site (``l1_score`` for L1
+    candidates, ``emit_origin_round`` for C0) routes through here. It reads the per-sample
+    ``fitness`` through the SAME ``_mean_fitness_by_cell`` the decision metrics use (θ /
+    ``paired_fitness``), so the CI and the decision can never disagree on what a scoreless
+    row is worth (both: 0.0) — and replicate draws of one cell collapse to that cell's mean,
+    so the CI's independent unit is the sample, not the re-draw (identity at the ``rep_k=0``
+    default). ``(None, None)`` when no cell was measured — nothing to bracket.
+    """
+    from promptpotter.shared.statistics import mean_ci
+
+    per_cell = list(_mean_fitness_by_cell(results).values())
+    if not per_cell:
+        return (None, None)
+    _, ci_lo, ci_hi = mean_ci(per_cell)
+    return (ci_lo, ci_hi)
+
+
 def count_degraded_samples(results: Sequence[Mapping[str, Any]]) -> int:
     """Count samples that have pipeline degradation warnings."""
     return sum(1 for r in results if has_pipeline_warnings(r))

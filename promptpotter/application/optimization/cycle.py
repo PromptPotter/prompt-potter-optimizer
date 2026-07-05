@@ -41,6 +41,28 @@ logger = logging.getLogger(__name__)
 __all__ = ["Cycle", "CycleRoundState"]
 
 
+# The ranked round-file table subset (round_NNNN.json::scoreboard). A projection of
+# ScoredCandidate — its fields spelled once as an include-set, plus the derived rank +
+# is_winner. Deliberately narrower than the full ``candidate_scores`` dump beside it in the
+# same file (no θ / composite_ci): scoreboard = the display table, candidate_scores = the
+# complete record. The mutation text rides ``changes_description`` (its real name) — the
+# dashboard's ``label`` (the C{r}.{i} id) is a different field, so the two never collide.
+_SCOREBOARD_INCLUDE: set[str] = {
+    "candidate_id",
+    "changes_description",
+    "accuracy",
+    "composite_fitness",
+    "hits",
+    "total",
+    "ci_lo",
+    "ci_hi",
+    "escalation_aborted",
+    "matched_origin_accuracy",
+    "matched_origin_hits",
+    "matched_origin_composite",
+}
+
+
 def _build_scoreboard(
     candidate_scores: list[ScoredCandidate], winner_label: str
 ) -> list[dict[str, Any]]:
@@ -50,27 +72,14 @@ def _build_scoreboard(
         key=lambda c: (c.composite_fitness, c.accuracy),
         reverse=True,
     )
-    rows: list[dict[str, Any]] = []
-    for i, c in enumerate(ranked, start=1):
-        rows.append(
-            {
-                "rank": i,
-                "candidate_id": c.candidate_id,
-                "label": c.changes_description,
-                "accuracy": c.accuracy,
-                "composite_fitness": c.composite_fitness,
-                "hits": c.hits,
-                "total": c.total,
-                "ci_lo": c.ci_lo,
-                "ci_hi": c.ci_hi,
-                "is_winner": is_round_winner(c.changes_description, winner_label),
-                "escalation_aborted": c.escalation_aborted,
-                "matched_origin_accuracy": c.matched_origin_accuracy,
-                "matched_origin_hits": c.matched_origin_hits,
-                "matched_origin_composite": c.matched_origin_composite,
-            }
-        )
-    return rows
+    return [
+        {
+            "rank": i,
+            **c.model_dump(include=_SCOREBOARD_INCLUDE),
+            "is_winner": is_round_winner(c.changes_description, winner_label),
+        }
+        for i, c in enumerate(ranked, start=1)
+    ]
 
 
 def build_round_payload(
@@ -332,6 +341,10 @@ class CycleRoundState:
     best_sp: JobSearchPoint | None = None
     origin_accuracy: float = 0.0
     origin_composite_fitness: float = 0.0
+    # The origin's per-evaluator breakdown (same namespace every L1 candidate carries) —
+    # computed at ``start`` and kept so C0 shows the same evaluator columns as C1+ rather
+    # than blank. ``{}`` for a degenerate empty origin.
+    origin_evaluators: dict[str, float] = field(default_factory=dict)
     origin_per_sample_results: list[dict[str, Any]] = field(default_factory=list)
     # The frozen C0 origin's ability θ on the cycle's fixed δ ruler (slice 2) —
     # the θ-space peer of ``origin_accuracy``, the cross-round floor ``c0_ok``
@@ -402,15 +415,17 @@ class Cycle:
         config: CampaignConfig,
     ) -> Cycle:
         """Construct a fresh Cycle from a scored origin."""
-        composite_fitness = (
-            compute_composite_fitness(
+        if origin_results and schema is not None:
+            origin_score = compute_composite_fitness(
                 origin_results,  # type: ignore[arg-type]
                 schema,
                 round_scorer=round_scorer,
-            )["composite_fitness"]
-            if origin_results and schema is not None
-            else origin_accuracy
-        )
+            )
+            composite_fitness = origin_score["composite_fitness"]
+            origin_evaluators = dict(origin_score["evaluators"])
+        else:
+            composite_fitness = origin_accuracy
+            origin_evaluators = {}
         opt_sp = _build_initial_opt_sp(resolved_origin, task_context)
         # Pass session.pipeline_params (carries dataset overlay) — schema.to_pipeline_params() is sparse and strips operator config.
         sp = opt_sp.to_job_search_point(
@@ -438,6 +453,7 @@ class Cycle:
                 best_sp=sp,
                 origin_accuracy=origin_accuracy,
                 origin_composite_fitness=composite_fitness,
+                origin_evaluators=origin_evaluators,
                 origin_per_sample_results=list(origin_results or []),
                 origin_theta=origin_theta,
                 best_theta=origin_theta,

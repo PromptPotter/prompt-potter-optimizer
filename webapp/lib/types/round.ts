@@ -14,7 +14,7 @@ export type { RoundSummary, RoundSummaryCandidate } from "@/lib/api/types";
 export interface ScoreboardEntry {
   rank?: number;
   candidate_id?: string;
-  label?: string;
+  changes_description?: string;
   accuracy?: number;
   composite?: number;
   hits?: number;

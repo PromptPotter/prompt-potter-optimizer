@@ -23,7 +23,7 @@ from promptpotter.application.output import (
     write_review_md,
 )
 from promptpotter.application.run_observers import RunCallbacks
-from promptpotter.application.scoring.metrics import _compute_accuracy
+from promptpotter.application.scoring.metrics import _compute_accuracy, composite_ci
 from promptpotter.domain.phases import StopLoop
 from promptpotter.domain.results import (
     RoundResult,
@@ -39,7 +39,6 @@ from promptpotter.domain.results_health import (
 from promptpotter.domain.run_records import PhaseRecord, ResumeCheckpointRecord
 from promptpotter.infrastructure.tracing import observed_node
 from promptpotter.shared.errors import graceful
-from promptpotter.shared.statistics import mean_ci
 
 if TYPE_CHECKING:
     from promptpotter.domain.scoring import QueryMeasurement
@@ -73,16 +72,14 @@ async def emit_origin_round(
     base = _compute_accuracy(cast("list[QueryMeasurement]", results))
     prompt_fields = {**osp.prompt_field_dict(), "lineage": osp.lineage.model_dump()}
     label = candidate_label(0, 0)  # "C0"
-    # Composite-fitness CI over the origin's own per-sample fitness — the same
-    # always-on whisker every L1 candidate carries (``l1_score``). Without it C0's
-    # point estimate stands alone on the dashboard, the exact thing the CI exists
-    # to prevent; the origin round bypasses ``l1_score`` so it must stamp its own.
-    origin_composites = [
-        float(val) for r in results if isinstance(val := r.get("fitness"), int | float)
-    ]
-    ci_lo, ci_hi = (None, None)
-    if origin_composites:
-        _, ci_lo, ci_hi = mean_ci(origin_composites)
+    # C0 is enriched through the SAME shared derivations every L1 candidate uses, so
+    # the origin row can't silently omit a field the L1 path stamps: ``composite_ci``
+    # (the always-on whisker, one reader home in metrics.py), its difficulty-adjusted
+    # ability θ (the frozen round-0 ``origin_theta`` on the cycle's δ ruler — the exact
+    # floor ``c0_ok`` judges every winner against), and the per-evaluator ``evaluators``
+    # breakdown. All three are already-computed values (``tracking``); the origin round
+    # bypasses ``l1_score`` only for population/election, not for these.
+    ci_lo, ci_hi = composite_ci(cast("list[QueryMeasurement]", results))
     sc = ScoredCandidate(
         candidate_id=osp.lineage.id,
         label=label,
@@ -93,6 +90,8 @@ async def emit_origin_round(
         composite_fitness=tr.origin_composite_fitness,
         composite_ci_lo=ci_lo,
         composite_ci_hi=ci_hi,
+        theta=tr.origin_theta,
+        evaluators=dict(tr.origin_evaluators),
         hits=base["hits"],
         total=base["total"],
         prompt_fields=prompt_fields,
@@ -123,6 +122,10 @@ async def emit_origin_round(
         candidate_scores=[sc],
         deprecated=base["deprecated"],
         cumulative_accuracy=tr.origin_accuracy,
+        # Round 0's frontier θ is the origin's θ (what ``best_theta`` seeds to), the θ-peer of
+        # ``cumulative_accuracy=origin_accuracy`` — so the trend line starts on the θ scale too.
+        cumulative_theta=tr.origin_theta,
+        evaluators=dict(tr.origin_evaluators),
     )
     # Seed round 1's L1 with a critique over the origin's misses. The loop runs
     # critique only at round end (``l1/execute.py``), so without this seed round 1

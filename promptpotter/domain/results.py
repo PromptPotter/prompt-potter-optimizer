@@ -167,11 +167,11 @@ class ScoredCandidate(BaseModel):
     # the election fit (eliminated / under the coverage floor).
     theta: float | None = None
     theta_se: float | None = None
-    # Normal-CLT CI on the mean of this candidate's per-sample composite fitness
-    # (``mean_ci`` over ``all_candidate_results[cid][*]["fitness"]``) — always present for
-    # any candidate with ≥1 scored sample, unlike ``theta_se`` (fit-restricted). No composite
-    # point estimate should stand alone; ``ci_lo``/``ci_hi`` below are the Wilson interval on
-    # binary ``hits``/``total``, a different (and always-present) quantity.
+    # Normal-CLT CI on the mean per-cell composite fitness (``metrics.composite_ci`` —
+    # ``mean_ci`` over ``_mean_fitness_by_cell``, the same reader the θ / paired decision
+    # metrics use) — always present for any candidate with ≥1 scored cell, unlike ``theta_se``
+    # (fit-restricted). No composite point estimate should stand alone; ``ci_lo``/``ci_hi``
+    # below are the Wilson interval on binary ``hits``/``total``, a different quantity.
     composite_ci_lo: float | None = None
     composite_ci_hi: float | None = None
 

@@ -22,6 +22,7 @@ from promptpotter.application.optimization.validators.l1_strict import L1YieldSt
 from promptpotter.application.origin import rescore_origin
 from promptpotter.application.scoring.metrics import (
     _compute_accuracy,
+    composite_ci,
     compute_composite_fitness,
     count_degraded_samples,
     elect_round_winner,
@@ -37,7 +38,7 @@ from promptpotter.domain.results import (
 )
 from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.validators import StopRule
-from promptpotter.shared.statistics import mean_ci, paired_diff_posterior
+from promptpotter.shared.statistics import paired_diff_posterior
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
@@ -232,10 +233,9 @@ async def l1_score(
         rows = all_candidate_results.get(cs.candidate_id)
         if not rows:
             continue
-        composites = [float(val) for r in rows if isinstance(val := r.get("fitness"), int | float)]
-        if not composites:
+        ci_lo, ci_hi = composite_ci(rows)
+        if ci_lo is None:
             continue
-        _, ci_lo, ci_hi = mean_ci(composites)
         update: dict[str, Any] = {"composite_ci_lo": ci_lo, "composite_ci_hi": ci_hi}
         # Replicated candidate: its pass-1 composite/accuracy predate the extra draws, but the θ
         # election read every row — recompute the displayed point over ALL rows so it matches the
@@ -331,17 +331,15 @@ async def l1_score(
     # candidate, the exact case where subset accuracy is no longer comparable.
     delta_ok = False
     if winner_id:
-        from promptpotter.application.intelligence.exploration import (
-            ORIGIN_ABILITY_ID,
-            candidate_abilities,
-        )
+        from promptpotter.application.intelligence.exploration import ORIGIN_ABILITY_ID
 
-        gate_fit = candidate_abilities(
-            {winner_id: best_results},
-            origin_election_results,
-            cycle.delta_scale or {},
+        # θ decouples per candidate given the FIXED δ ruler (``fit_theta_given_delta``), so the
+        # election's ``abilities`` posterior already carries the winner's and origin's θ on that
+        # ruler — the exact fit both gates need. Read it, don't refit (was a deterministic re-run
+        # of the same 1-D MAP over the same rows).
+        theta_lift = abilities.theta.get(winner_id, 0.0) - abilities.theta.get(
+            ORIGIN_ABILITY_ID, 0.0
         )
-        theta_lift = gate_fit.theta.get(winner_id, 0.0) - gate_fit.theta.get(ORIGIN_ABILITY_ID, 0.0)
         slope = max(best_matched_origin_acc * (1.0 - best_matched_origin_acc), _GATE_SLOPE_FLOOR)
         delta_ok = theta_lift > improvement_threshold / slope
     n_min = pobb_config.n_min
@@ -358,23 +356,10 @@ async def l1_score(
     # (one ruler, θ always). Holds up once per-round subsets drift, where raw accuracy stops
     # being cross-round comparable.
     origin_theta = cycle.tracking.origin_theta
-    winner_theta: float | None = None
-    if winner_id:
-        from promptpotter.application.intelligence.exploration import (
-            Observation,
-            fit_theta_given_delta,
-            graded_response,
-        )
-        from promptpotter.shared.errors import is_error_result
-
-        winner_obs = [
-            Observation(winner_id, int(sid), graded_response(r))
-            for r in best_results
-            if (sid := r.get("sample_id")) is not None and not is_error_result(r)
-        ]
-        fit = fit_theta_given_delta(winner_obs, cycle.delta_scale or {})
-        if winner_id in fit:
-            winner_theta = fit[winner_id][0]
+    # Same decoupling: the winner's θ on the fixed ruler is the election's ``abilities`` value —
+    # the c0_ok floor compares it against the FROZEN round-0 ``origin_theta`` (a different,
+    # cross-round number kept as-is), so only the winner-θ side is the deduplicated refit.
+    winner_theta = abilities.theta.get(winner_id) if winner_id else None
     if winner_theta is not None and origin_theta is not None:
         c0_ok = winner_theta >= origin_theta
         c0_desc = f"θ={winner_theta:.3f} < origin_c0_θ={origin_theta:.3f}"
