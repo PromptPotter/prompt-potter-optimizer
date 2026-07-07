@@ -442,6 +442,7 @@ export const STOP_REASON_LABELS: Record<string, string> = {
   'perfect_score': 'Perfect score',
   'target_hit': 'Target reached',
   'max_rounds': 'Max rounds',
+  'lives_exhausted': 'Out of lives',
   'hard_cap_reached': 'Round cap',
   'sweep_complete': 'Sweep complete',
   'diag_complete': 'Diagnostic complete',
