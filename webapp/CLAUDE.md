@@ -53,8 +53,8 @@ Next.js 16 has breaking changes from prior versions — APIs, file conventions, 
 Three guarantees the writer side MUST hold:
 
 1. **Always on disk.** `dashboard.json` exists after any ledger event in a cycle. Sole writer: `LiveDashboardView` (`promptpotter/infrastructure/projections/live_dashboard/view.py`). Sole writer of `round_NNNN.json`: `AuditTrailView` (`promptpotter/infrastructure/projections/audit_trail.py`). Both use atomic-swap (tmp + rename) — never partial-write, never torn read.
-2. **Settles within `_DASHBOARD_DEBOUNCE_S` (0.25 s) of the last event.** The writer debounces high-frequency events (sample-scored, token-usage, LLM-call progress) to coalesce bursts, but converges to current state at most 250 ms behind real-time. Constant at `view.py:88`; flush plumbing at `_schedule_persist()` (`view.py:448`).
-3. **Immediate (no debounce) at round boundaries.** `PhaseRecord("round"|"origin", "complete"|"exit")` and `mark_stopped` flush synchronously via `_flush_pending_persist()` (`view.py:472`). When a round ends, its file is current before the next round begins. **Do not remove these flushes.** Do not relax atomic-swap. Do not introduce a path that lets `dashboard.json` lag past a completed round.
+2. **Settles within `_DASHBOARD_DEBOUNCE_S` (0.25 s) of the last event.** The writer debounces high-frequency events (sample-scored, token-usage, LLM-call progress) to coalesce bursts, but converges to current state at most 250 ms behind real-time. Constant at `view.py:92`; flush plumbing at `_schedule_persist()` (`view.py:277`).
+3. **Immediate (no debounce) at round boundaries.** `PhaseRecord("round"|"origin", "complete"|"exit")` and `mark_stopped` flush synchronously via `_flush_pending_persist()` (`view.py:301`). When a round ends, its file is current before the next round begins. **Do not remove these flushes.** Do not relax atomic-swap. Do not introduce a path that lets `dashboard.json` lag past a completed round.
 
 If a future change wants to defer or skip a write, the question to answer first is: *can an operator who alt-tabs to the file tree right now still see the truth?* If no, the change is wrong.
 

@@ -70,7 +70,7 @@ Two architectural commitments shape every bucket on this page:
 - `l1_generate` produces N candidate searchpoints from the parent.
 - `l1_score` runs each candidate against the dataset via the **sole
   scoring entry point** `score_search_point()`
-  (`application/scoring/search_point_scorer.py:115`). PromptPotter
+  (`application/scoring/search_point_scorer.py:241`). PromptPotter
   has three single-place-to-extend mechanisms — exactly one entry
   for each shape: **scoring** goes through `score_search_point()`,
   **persistence** through `CycleEventLog.append`, **prompt-fill**
@@ -115,7 +115,7 @@ mid-eval, deprecated cache entry from a transient backend hiccup) is
 **innocent** — a technical issue, not the candidate's fault. We log
 it, ignore it, and keep accumulating evidence on the same candidate.
 A candidate is aborted only when its **`DegradationCheck`**
-(`application/optimization/pobb/elimination/checks.py:68`) fires — i.e. when its
+(`application/optimization/pobb/elimination/checks.py:60`) fires — i.e. when its
 fraction of failed measurements crosses the per-campaign
 `degradation_threshold` (`campaign.json::degradation_threshold`,
 e.g. `0.4` on gsm8k). Aggregated failures surface at round end and
@@ -465,7 +465,7 @@ via the `observed_node()` context manager. Every optimizer LLM call
 site (`l1_generate`, `l1_critique`, `l2_context`, `l3_plan`) is
 wrapped. Events serialize to local JSONL under
 `langfuse/events.jsonl` (verified path:
-`infrastructure/tracing/file_sink.py:67`) — no Langfuse instance, no
+`infrastructure/tracing/file_sink.py:65`) — no Langfuse instance, no
 MLflow server, no external dependency required.
 
 **A nexus to the operator's existing observability stack — a core
@@ -666,7 +666,7 @@ the PR description.
   test harness). Audit during cleanup §1 for accumulated cruft, but
   don't delete the underlying scripts without operator confirmation.
 - **`score_search_point()` gateway**
-  (`application/scoring/search_point_scorer.py:115`) — sole scoring
+  (`application/scoring/search_point_scorer.py:241`) — sole scoring
   ingress. Sibling to `CycleEventLog.append` and `INJECTIONS`. Don't
   add a second scoring entry path "for convenience."
 - **Composite-fitness resolution chain** — **fitness is never one fixed
