@@ -44,14 +44,16 @@ def merge_pipeline_params(
     """The ONE candidate-override merge: overlay ``overrides`` onto a DEEP COPY of
     ``base``, then drop overrides for nodes outside active steps.
 
-    The per-node merge is the shared shallow ``apply_node_overlay``; the deep copy
+    The per-node merge is the shared ``apply_node_overlay`` (declaration-driven: a
+    ``param_types: object`` param merges one level, so a candidate that names one nested
+    key does not revert its parent's siblings); the deep copy
     (the candidate's params must not alias the origin's nested config) and the
     inactive-node drop are this operation's own edge cases, kept around the helper.
     Shared by the live L1 path (:func:`parse_population`) and the ``verify``/``ab``
     replay verbs, so a re-derived candidate hashes the same config the loop did."""
     if not overrides:
         return base
-    merged = apply_node_overlay(copy.deepcopy(base or {}), overrides)
+    merged = apply_node_overlay(copy.deepcopy(base or {}), overrides, schema)
     if schema:
         _active = set(schema.active_steps)
         for k, _cfg in list(node_config_items(merged)):

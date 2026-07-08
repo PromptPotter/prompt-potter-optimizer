@@ -566,8 +566,12 @@ def run_preflight_checks(
     return warnings
 
 
-def apply_node_overlay(base: dict[str, Any], overlay: Mapping[str, Any]) -> dict[str, Any]:
-    """The ONE shallow per-node overlay merge → a fresh dict (``base`` untouched).
+def apply_node_overlay(
+    base: dict[str, Any],
+    overlay: Mapping[str, Any],
+    schema: PipelineSchema | None,
+) -> dict[str, Any]:
+    """The ONE per-node overlay merge → a fresh dict (``base`` untouched).
 
     For each ``node`` in *overlay*: when both the existing and the incoming value are
     dicts, the incoming keys win over the existing (``{**existing, **incoming}``);
@@ -575,6 +579,20 @@ def apply_node_overlay(base: dict[str, Any], overlay: Mapping[str, Any]) -> dict
     top-level ``steps`` list can't be spread and simply replaces. Sequential calls
     layer correctly (later overlay > earlier), which is how the resolution chain
     stacks dataset < campaign-override < cycle-seed.
+
+    **A param declared ``param_types: object`` merges one level deeper**: the incoming
+    keys win, the siblings it did not name SURVIVE. Without this, a nested param is a
+    single key in the node config and an incoming partial dict replaces it whole — so a
+    candidate that improved one ``output_schema_descriptions`` entry silently reverted
+    every entry its parent earned, and the description axis could not accumulate across
+    generations. Depth is bounded by the DECLARATION, never by sniffing ``isinstance``:
+    an undeclared param keeps the node-level shallow semantics, and ``array`` replaces
+    wholesale because a merged ordering is meaningless. This is the same per-slot
+    contract ``resolve_node_layout`` hand-rolls (named slot replaces, unnamed keeps the
+    floor) — one nesting contract, not two.
+
+    ``schema`` supplies those declarations; ``None`` (the schema-less
+    ``experiment_extract`` path) declares nothing, so every param stays shallow.
 
     Shared by the dataset/override resolution here, the cycle-seed overlay
     (``runner/entry.py``) and the candidate-override merge
@@ -584,9 +602,21 @@ def apply_node_overlay(base: dict[str, Any], overlay: Mapping[str, Any]) -> dict
     merged = dict(base)
     for node, cfg in overlay.items():
         existing = merged.get(node)
-        merged[node] = (
-            {**existing, **cfg} if isinstance(existing, dict) and isinstance(cfg, dict) else cfg
-        )
+        if not (isinstance(existing, dict) and isinstance(cfg, dict)):
+            merged[node] = cfg
+            continue
+        node_obj = schema.get_node(node) if schema else None
+        param_types = node_obj.param_types if node_obj else {}
+        node_cfg = {**existing, **cfg}
+        for param, incoming in cfg.items():
+            prior = existing.get(param)
+            if (
+                param_types.get(param) == "object"
+                and isinstance(prior, dict)
+                and isinstance(incoming, dict)
+            ):
+                node_cfg[param] = {**prior, **incoming}
+        merged[node] = node_cfg
     return merged
 
 
@@ -594,6 +624,7 @@ def resolve_pipeline_config_params(
     active: list[str],
     pipeline_overrides: Mapping[str, Any],
     dataset_dir: Path | None,
+    schema: PipelineSchema | None,
 ) -> dict[str, Any]:
     """The dataset→effective node-config merge, pure: the sparse ``{"steps": active}``
     base layered with the per-dataset overlay (``pipeline.json::nodes.{name}.config``) and
@@ -615,7 +646,7 @@ def resolve_pipeline_config_params(
             for node, cfg in load_dataset_node_overlay(dataset_dir).items()
             if node in active
         }
-        pipeline_params = apply_node_overlay(pipeline_params, dataset_overlay)
+        pipeline_params = apply_node_overlay(pipeline_params, dataset_overlay, schema)
     # Campaign overrides layer on top (override > dataset); non-dict / inactive-node
     # entries are dropped here with an operator-visible log, then the survivors merge.
     valid_overrides: dict[str, Any] = {}
@@ -633,7 +664,7 @@ def resolve_pipeline_config_params(
                 key,
                 value,
             )
-    pipeline_params = apply_node_overlay(pipeline_params, valid_overrides)
+    pipeline_params = apply_node_overlay(pipeline_params, valid_overrides, schema)
     # Connector identity contribution — LAST, never overridable: per-node entries a
     # connector declares as part of measurement identity (Connector.identity_config,
     # e.g. the promptpotter connector's inner-baseline fingerprint). Resolved from
@@ -645,7 +676,7 @@ def resolve_pipeline_config_params(
             for node, cfg in _connector_identity_config(dataset_dir).items()
             if node in active
         }
-        pipeline_params = apply_node_overlay(pipeline_params, identity)
+        pipeline_params = apply_node_overlay(pipeline_params, identity, schema)
     return pipeline_params
 
 
@@ -832,7 +863,7 @@ def configure_and_apply_pipeline(
     # (`content_hash`/`node_configs` over `session.pipeline_params`) AND the origin cycle id
     # (`build_origin_cycle_id` hashes these merged params). Starting prompts land on top below.
     pipeline_params = resolve_pipeline_config_params(
-        active, campaign_config.pipeline_overrides, dataset_dir
+        active, campaign_config.pipeline_overrides, dataset_dir, filtered
     )
 
     # Starting prompts from `{dataset_dir}/prompts/[<node>|default].json`, per prompt-bearing node.

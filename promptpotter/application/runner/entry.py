@@ -242,9 +242,9 @@ async def _prepare_run(
     seed = _read_cycle_seed(session)
     if seed is not None and seed.pipeline_overlay:
         # Seed overlay layers ON TOP of the dataset overlay (seed > dataset > backend);
-        # the shared shallow merge keeps the non-dict ``steps`` guard intact.
+        # the shared merge keeps the non-dict ``steps`` guard intact.
         session.pipeline_params = apply_node_overlay(
-            session.pipeline_params or {}, seed.pipeline_overlay
+            session.pipeline_params or {}, seed.pipeline_overlay, session.pipeline_schema
         )
     if seed is not None:
         # Reconcile the seed's run limits (rounds / spend / patience / epsilon)

@@ -381,11 +381,25 @@ def _fmt_pp_val(v: object) -> str:
 
 
 def flatten_sp_summary(pp: dict[str, Any] | None) -> dict[str, str]:
-    """``{node: {param: value}}`` → ``{node.param: value}`` display dict."""
+    """``{node: {param: value}}`` → ``{node.param: value}`` display dict.
+
+    A nested param flattens ONE level further, to ``node.param.key`` — the depth its
+    declaration lets the merge accumulate at, so the searchpoint diff names the single
+    ``output_schema_descriptions`` entry a candidate rewrote instead of printing two
+    dict reprs and asking the operator to spot the difference. ``group_diff_keys``
+    splits on the first dot, so the extra segment still groups under its node.
+
+    Sniffing the value is right *here* and wrong in the merge: this is display depth,
+    not semantics, and a dict never reads better flattened than as its own repr.
+    """
     flat: dict[str, str] = {}
     for k, v in node_config_items(pp):
         for sub_k, sub_v in v.items():
-            flat[f"{k}.{sub_k}"] = _fmt_pp_val(sub_v)
+            if isinstance(sub_v, dict):
+                for leaf_k, leaf_v in sub_v.items():
+                    flat[f"{k}.{sub_k}.{leaf_k}"] = _fmt_pp_val(leaf_v)
+            else:
+                flat[f"{k}.{sub_k}"] = _fmt_pp_val(sub_v)
     return flat
 
 

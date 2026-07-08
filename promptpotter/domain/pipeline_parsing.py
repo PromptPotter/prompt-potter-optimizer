@@ -185,6 +185,8 @@ _PY_TO_JSON_TYPE: dict[type, str] = {
     int: "integer",
     float: "number",
     str: "string",
+    dict: "object",
+    list: "array",
 }
 
 

@@ -528,6 +528,147 @@ def test_schema_description_axis_reaches_the_model_and_cannot_rename_a_field() -
         set_optimizer_prompt_overrides(None)
 
 
+def test_nested_param_override_accumulates_instead_of_reverting_its_parent() -> None:
+    """A `param_types: object` param merges one level; siblings the child did not name survive.
+
+    The silent harm: a nested param is ONE key in the node config, so the node-level
+    `{**existing, **incoming}` spread replaced it whole. A candidate that improved a single
+    `output_schema_descriptions` entry silently reverted every entry its parent earned — the
+    description axis could not accumulate across generations, and a `--sweep` would have
+    measured the merge instead of the lever, then (per `schema-description-axis.md`) reverted
+    a correct idea on the strength of a false negative.
+
+    An `array` param must NOT merge: a list is an ordering, and a merged ordering is
+    meaningless. `layout`'s per-slot lists are the live case, and this is the same contract
+    `resolve_node_layout` states — one nesting contract, not two.
+
+    The declaration is what makes the merge happen, so EVERY nested param the schema grafts
+    must be declared. Undeclared, it silently reverts to whole-replace — the same bug, one
+    param over. `output_schema_field_names` shipped undeclared and this asserts the pair.
+    """
+    import json
+    from pathlib import Path
+
+    from promptpotter.application.optimization.l1.population import merge_pipeline_params
+    from promptpotter.domain.pipeline_parsing import parse_pipeline_response
+
+    raw = json.loads(
+        (
+            Path(__file__).resolve().parents[1] / "datasets/promptpotter-self/pipeline.json"
+        ).read_text(encoding="utf-8")
+    )
+    schema = parse_pipeline_response(raw)
+
+    # Every nested param the l1_generate schema can graft accumulates, not just the first one.
+    for nested in ("output_schema_descriptions", "output_schema_field_names"):
+        got = merge_pipeline_params(
+            {"l1_generate": {nested: {"a": "A", "b": "B"}}},
+            {"l1_generate": {nested: {"a": "A2"}}},
+            schema,
+        )
+        assert got is not None
+        assert got["l1_generate"][nested] == {"a": "A2", "b": "B"}, (
+            f"{nested} is not declared `param_types: object` — a child override reverts its "
+            f"parent's siblings"
+        )
+
+    # `object` — the child's key wins, the parent's untouched sibling survives.
+    base = {
+        "l1_generate": {
+            "temperature": 0.7,
+            "output_schema_descriptions": {"changes_description": "A", "variant_name": "B"},
+        }
+    }
+    merged = merge_pipeline_params(
+        base, {"l1_generate": {"output_schema_descriptions": {"changes_description": "A2"}}}, schema
+    )
+    assert merged is not None
+    assert merged["l1_generate"]["output_schema_descriptions"] == {
+        "changes_description": "A2",
+        "variant_name": "B",
+    }
+    assert merged["l1_generate"]["temperature"] == 0.7
+    # The origin is never aliased or mutated by a candidate's merge.
+    assert base["l1_generate"]["output_schema_descriptions"]["changes_description"] == "A"
+
+    # A named slot's list REPLACES; an unnamed slot keeps the floor.
+    lay_base = {
+        "l2_context": {"layout": {"problem_description": ["critique"], "instruction": ["plan"]}}
+    }
+    lay = merge_pipeline_params(
+        lay_base, {"l2_context": {"layout": {"problem_description": ["axis_memory"]}}}, schema
+    )
+    assert lay is not None
+    assert lay["l2_context"]["layout"] == {
+        "problem_description": ["axis_memory"],
+        "instruction": ["plan"],
+    }
+
+    # Undeclared param → node-level shallow semantics, unchanged. Depth comes from the
+    # declaration, never from sniffing `isinstance`.
+    plain = merge_pipeline_params(
+        {"l1_generate": {"persona": "x", "instruction": "y"}},
+        {"l1_generate": {"persona": "z"}},
+        schema,
+    )
+    assert plain == {"l1_generate": {"persona": "z", "instruction": "y"}}
+
+
+def test_emittable_param_surface_is_one_set_the_schema_and_the_validator_agree_on() -> None:
+    """`node_param_keys` is the single emittable surface — and every reader must read it.
+
+    The silent harm: `validate_overrides` had no membership check, so a param the node never
+    advertised merged into `pipeline_params` unchecked and rode to the wire. Unlike a
+    hallucinated NODE (which `merge_pipeline_params` drops), an invented PARAM survives, the
+    round completes, and the candidate is scored as though the edit were a legitimate axis.
+    Nothing raises; the fitness is simply attributed to a param that does not exist.
+
+    Same set, two readers: what `build_l1_output_schema` declares is exactly what
+    `validate_overrides` accepts. A graft on one side without the other is either an
+    unhonoured edit (schema-only) or an unguarded one (validator-only).
+    """
+    import json
+    from pathlib import Path
+
+    from promptpotter.application.optimization.validators.l1_strict import (
+        build_l1_output_schema,
+        validate_overrides,
+    )
+    from promptpotter.domain.pipeline_parsing import parse_pipeline_response
+
+    raw = json.loads(
+        (
+            Path(__file__).resolve().parents[1] / "datasets/promptpotter-self/pipeline.json"
+        ).read_text(encoding="utf-8")
+    )
+    schema = parse_pipeline_response(raw)
+
+    emitted = build_l1_output_schema(schema)["schema"]["properties"]["variants"]["items"][
+        "properties"
+    ]["pipeline_params_override"]["properties"]
+    surface = schema.node_param_keys()
+    # The field-NAME lever is dropped from BOTH the emitted schema and the surface's
+    # locked view — the lock is structural, so the LLM cannot emit a key that isn't there.
+    assert "output_schema_field_names" not in emitted["l1_generate"]["properties"]
+    for node, keys in surface.items():
+        assert set(emitted[node]["properties"]) <= keys, (
+            f"{node}: the schema declares a key `validate_overrides` rejects as unknown_param"
+        )
+
+    # A param no node advertises is rejected, not silently merged.
+    reasons = [
+        (f.axis, f.reason)
+        for f in validate_overrides({"l1_generate": {"invented_knob": 1}}, schema)
+    ]
+    assert reasons == [("l1_generate.invented_knob", "unknown_param")]
+    # A nested param is declared `object`, so a scalar in its slot is caught rather than
+    # merged as a string — `_matches_declared_type` used to wave through every non-scalar type.
+    assert [f.reason for f in validate_overrides({"l1_critique": {"layout": "hdr"}}, schema)] == [
+        "type_mismatch"
+    ]
+    assert validate_overrides({"l1_critique": {"layout": {"instruction": ["plan"]}}}, schema) == []
+
+
 def test_schema_field_rename_is_locked_by_default_and_never_silently_half_applies() -> None:
     """The field-NAME lever. Three silent harms, none of which raise.
 
