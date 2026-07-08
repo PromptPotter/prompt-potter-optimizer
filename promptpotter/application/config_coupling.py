@@ -140,6 +140,7 @@ _KNOB_ESTIMANDS: dict[str, frozenset[Estimand]] = {
     "optimization.token_budget": frozenset({Estimand.SPEND}),
     "optimization.origin_gate": frozenset({Estimand.GATE}),
     "optimization.forbidden_axes_strict": frozenset({Estimand.SEARCH}),
+    "optimization.schema_field_rename": frozenset({Estimand.SEARCH}),
     "optimization.rebase_capability": frozenset({Estimand.ESCALATION}),
     "optimization.terminate_capability": frozenset({Estimand.ESCALATION}),
     "optimization.seed_heatmap_from_archive": frozenset({Estimand.DIFFICULTY}),

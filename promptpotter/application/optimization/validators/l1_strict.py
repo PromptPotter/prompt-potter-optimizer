@@ -26,6 +26,7 @@ from typing import Any
 from promptpotter.application.config import missing_template_vars
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     resolve_node_schema_descriptions,
+    resolve_node_schema_field_names,
 )
 from promptpotter.application.optimization.dispatch.schemas import L1GenerateOutput, L1Variant
 from promptpotter.config.settings import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVERRIDES
@@ -47,6 +48,7 @@ __all__ = [
     "L1YieldStats",
     "build_l1_output_schema",
     "detect_invariants",
+    "effective_l1_field_names",
     "validate_overrides",
 ]
 
@@ -78,8 +80,44 @@ def _inline_refs(node: Any, defs: dict[str, dict[str, Any]]) -> Any:
     return node
 
 
+def effective_l1_field_names() -> dict[str, str]:
+    """The `{field: wire_name}` rename in force for this call — the ONE source both the emitted
+    JSON Schema and the response model derive from. Two surfaces, one function: a schema that
+    renames a field the response model does not alias fails every parse, every round.
+
+    **Unconditional, and it must be.** `schema_field_rename` governs whether an OUTER campaign's
+    L1 may *propose* a rename — it gates the graft, below. The INNER cycle honours whatever
+    mutation it is handed, exactly as it does for prose, `layout`, and
+    `output_schema_descriptions`. Gating this on the inner cycle's own config would open a silent
+    no-op channel: an inner campaign loads its config from the inner dataset's `campaign.json`
+    (`runner/inner_recursion.py`), never from the outer's, so the outer would emit a rename that
+    nothing applied — and score it as a legitimate mutation.
+
+    Empty on every normal, non-L4 cycle (no override bound). A proposed rename is dropped when
+    its target collides with a field that is not itself being renamed away
+    (`{changes_description: variant_name}` would make the response ambiguous).
+    """
+    proposed = resolve_node_schema_field_names("l1_generate")
+    if not proposed:
+        return {}
+    survivors = set(L1Variant.model_fields) - set(proposed)
+    return {f: w for f, w in proposed.items() if f in L1Variant.model_fields and w not in survivors}
+
+
+def _rename_variant_schema(variant: dict[str, Any], field_names: dict[str, str]) -> None:
+    """Rewrite `properties` keys and the `required` list in place; order is preserved."""
+    props = variant.get("properties") or {}
+    variant["properties"] = {field_names.get(k, k): v for k, v in props.items()}
+    required = variant.get("required")
+    if isinstance(required, list):
+        variant["required"] = [field_names.get(k, k) for k in required]
+
+
 def build_l1_output_schema(
-    pipeline_schema: PipelineSchema, *, forbidden_axes_strict: bool = True
+    pipeline_schema: PipelineSchema,
+    *,
+    forbidden_axes_strict: bool = True,
+    schema_field_rename: bool = False,
 ) -> dict[str, Any]:
     """l1_generate response_schema — three constrained slots per variant.
 
@@ -174,6 +212,25 @@ def build_l1_output_schema(
         # Properties are the closed set of `L1Variant`'s field NAMES, so the optimizer can
         # describe a field but never rename one — the lock is structural, not policed.
         # Inert for every normal campaign: its backend nodes are absent from NODE_LAYOUTS.
+        # Lever 1, the field NAME — the strongest and the only one that can break a parser.
+        # Grafted ONLY when the campaign unlocks it, so in base mode the LLM cannot emit a key
+        # that does not exist (structural lock, no per-round rejection). Unlocked, the rename is
+        # a presentation transform: `build_l1_response_model` aliases the wire key back onto the
+        # real field, so no downstream reader observes it.
+        if node_name == "l1_generate" and layout_spec is not None and schema_field_rename:
+            param_props["output_schema_field_names"] = {
+                "type": "object",
+                "description": (
+                    "Rename a field on the inner optimizer's own output schema. The model holds "
+                    "strong priors about what belongs under a given key, so the name steers "
+                    "before a single token of the value is written. Keys are the existing field "
+                    "names; values are the new wire names. Rename only when the current name "
+                    "misdescribes what the field should hold — a rename the model then fails to "
+                    "honour makes the round unparseable and scores it maximally dirty."
+                ),
+                "properties": {f: {"type": "string"} for f in L1Variant.model_fields},
+                "additionalProperties": False,
+            }
         if node_name == "l1_generate" and layout_spec is not None:
             param_props["output_schema_descriptions"] = {
                 "type": "object",
@@ -214,6 +271,12 @@ def build_l1_output_schema(
     for field, description in resolve_node_schema_descriptions("l1_generate").items():
         if field in variant_props:
             variant_props[field]["description"] = description
+
+    # 5. Rename last, so `description` edits above are keyed by the REAL field name and a
+    # rename cannot silently orphan one. `build_l1_response_model` aliases the same map back.
+    field_names = effective_l1_field_names()
+    if field_names:
+        _rename_variant_schema(inlined["properties"]["variants"]["items"], field_names)
 
     return {"name": "l1_variants", "schema": inlined, "strict": False}
 

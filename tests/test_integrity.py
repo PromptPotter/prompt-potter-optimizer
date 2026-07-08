@@ -526,3 +526,105 @@ def test_schema_description_axis_reaches_the_model_and_cannot_rename_a_field() -
         assert [f.reason for f in forbidden] == ["forbidden_axis"]
     finally:
         set_optimizer_prompt_overrides(None)
+
+
+def test_schema_field_rename_is_locked_by_default_and_never_silently_half_applies() -> None:
+    """The field-NAME lever. Three silent harms, none of which raise.
+
+    (1) A rename the emitted schema advertises but the response model does not alias fails
+    EVERY parse of EVERY round — the schema and the model must derive from one function.
+    (2) Gating the *apply* on the inner cycle's own config would silently drop every rename an
+    outer campaign emits (an inner campaign loads the inner dataset's `campaign.json`, not the
+    outer's), scoring a no-op as a legitimate mutation.
+    (3) `populate_by_name` must stay off: if the old key still validated, a rename the model
+    ignored would look applied, and the axis would measure nothing.
+    """
+    import json
+    from pathlib import Path
+
+    from promptpotter.application.optimization.dispatch.llm_call import (
+        set_optimizer_prompt_overrides,
+    )
+    from promptpotter.application.optimization.dispatch.schemas import (
+        L1GenerateOutput,
+        build_l1_response_model,
+    )
+    from promptpotter.application.optimization.validators.l1_strict import (
+        build_l1_output_schema,
+        effective_l1_field_names,
+    )
+    from promptpotter.domain.pipeline_parsing import parse_pipeline_response
+
+    root = Path(__file__).resolve().parents[1]
+    outer = parse_pipeline_response(
+        json.loads((root / "datasets/promptpotter-self/pipeline.json").read_text(encoding="utf-8"))
+    )
+    inner = parse_pipeline_response(
+        json.loads((root / "datasets/justlogic/pipeline.json").read_text(encoding="utf-8"))
+    )
+
+    def emittable(schema: dict) -> set[str]:
+        variants = schema["schema"]["properties"]["variants"]["items"]["properties"]
+        node = variants["pipeline_params_override"]["properties"].get("l1_generate", {})
+        return set(node.get("properties", {}))
+
+    rename = {"changes_description": "mutation_rationale"}
+    try:
+        # Locked by default: the outer cannot even emit the key.
+        set_optimizer_prompt_overrides(None)
+        assert "output_schema_field_names" not in emittable(build_l1_output_schema(outer))
+        # Unlocked: the key appears. Descriptions stay free either way.
+        unlocked = emittable(build_l1_output_schema(outer, schema_field_rename=True))
+        assert "output_schema_field_names" in unlocked
+        assert "output_schema_descriptions" in unlocked
+
+        # The inner cycle applies a bound rename even though its OWN knob is off (default).
+        set_optimizer_prompt_overrides({"l1_generate": {"output_schema_field_names": rename}})
+        assert effective_l1_field_names() == rename
+        variant = build_l1_output_schema(inner)["schema"]["properties"]["variants"]["items"]
+        assert "mutation_rationale" in variant["properties"]
+        assert "changes_description" not in variant["properties"]
+        assert "mutation_rationale" in variant["required"]
+
+        # Schema and model agree: the wire key parses, and binds back onto the real field.
+        model = build_l1_response_model(effective_l1_field_names())
+        parsed = model.model_validate(
+            {
+                "variants": [
+                    {
+                        "variant_name": "v",
+                        "mutation_rationale": "r",
+                        "prompt_fields_override": {"persona": "p"},
+                    }
+                ]
+            }
+        )
+        assert parsed.variants[0].changes_description == "r"
+        assert isinstance(parsed, L1GenerateOutput)
+
+        # No backward compatibility: the OLD key must now fail, so an unhonoured rename is
+        # a parse failure (charged 1.0) rather than a silently-scored no-op.
+        with pytest.raises(pydantic.ValidationError):
+            model.model_validate(
+                {
+                    "variants": [
+                        {
+                            "variant_name": "v",
+                            "changes_description": "r",
+                            "prompt_fields_override": {"persona": "p"},
+                        }
+                    ]
+                }
+            )
+
+        # An ambiguous rename onto a surviving field is dropped, not applied.
+        set_optimizer_prompt_overrides(
+            {"l1_generate": {"output_schema_field_names": {"changes_description": "variant_name"}}}
+        )
+        assert effective_l1_field_names() == {}
+
+        # Nothing bound → the plain model, allocated once.
+        set_optimizer_prompt_overrides(None)
+        assert build_l1_response_model(effective_l1_field_names()) is L1GenerateOutput
+    finally:
+        set_optimizer_prompt_overrides(None)

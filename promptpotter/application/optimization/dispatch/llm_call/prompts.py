@@ -42,6 +42,7 @@ __all__ = [
     "load_optimizer_set_overrides",
     "resolve_node_layout",
     "resolve_node_schema_descriptions",
+    "resolve_node_schema_field_names",
     "set_optimizer_config_overrides",
     "set_optimizer_prompt_overrides",
 ]
@@ -378,6 +379,45 @@ def resolve_node_schema_descriptions(node: str) -> dict[str, str]:
     if not isinstance(raw, dict):
         return {}
     return {k: v for k, v in raw.items() if isinstance(k, str) and isinstance(v, str) and v.strip()}
+
+
+def resolve_node_schema_field_names(node: str) -> dict[str, str]:
+    """The outer L4 cycle's field-NAME edits for *node*'s output schema — ``{field: wire_name}``.
+
+    The first and strongest lever (``docs/concepts/structured-output.md`` § 1): the model holds
+    strong priors about what belongs under ``rationale`` vs ``evidence`` vs ``scratch``. Unlike a
+    ``description``, a name IS the wire contract — so a rename is a **presentation transform
+    only**: the emitted schema advertises ``wire_name``, the response validates through a
+    ``validation_alias``, and every downstream reader still sees the model's own field name.
+    Nothing but the LLM observes the change.
+
+    **Locked by default.** ``build_l1_output_schema`` grafts the key only when the campaign sets
+    ``optimization.schema_field_rename``, so the LLM cannot emit a key that does not exist —
+    structural, not policed. Rides the same per-node override object as the prose, ``layout``,
+    and ``output_schema_descriptions`` edits.
+
+    Dropped rather than raised on: non-strings, blanks, non-identifiers, no-op self-renames, and
+    duplicate targets (two fields claiming one wire name is an unresolvable response). Collisions
+    with a field that is NOT being renamed are rejected at the apply site, which knows the field
+    set. A bad L4 mutation must score poorly, never break the run.
+    """
+    overrides = _OPTIMIZER_PROMPT_OVERRIDES.get() or {}
+    node_override = overrides.get(node)
+    raw = (
+        node_override.get("output_schema_field_names") if isinstance(node_override, dict) else None
+    )
+    if not isinstance(raw, dict):
+        return {}
+    clean: dict[str, str] = {}
+    for field, wire in raw.items():
+        if not isinstance(field, str) or not isinstance(wire, str):
+            continue
+        wire = wire.strip()
+        if not wire.isidentifier() or wire == field:
+            continue
+        clean[field] = wire
+    targets = list(clean.values())
+    return {f: w for f, w in clean.items() if targets.count(w) == 1}
 
 
 def list_optimizer_prompts() -> list[str]:

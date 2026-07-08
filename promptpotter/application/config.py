@@ -301,6 +301,26 @@ class OptimizationConfig(BaseModel):
         ),
     )
 
+    schema_field_rename: bool = Field(
+        False,
+        description=(
+            "Whether THIS campaign's L1 may PROPOSE renaming a field on the inner "
+            "``l1_generate``'s output schema (``L1Variant``). Off by default: "
+            "``build_l1_output_schema`` never grafts ``output_schema_field_names``, so the "
+            "LLM cannot emit a key the schema omits — the same structural lock "
+            "``forbidden_axes_strict`` uses, not a per-round rejection. A field NAME is the "
+            "wire contract; a ``description`` is not, which is why descriptions are always "
+            "free and names are not. It gates the PROPOSAL only: an inner cycle honours a "
+            "rename it is handed unconditionally (it loads its own ``campaign.json``, so "
+            "gating there would silently drop every rename the outer emits). The rename is "
+            "a presentation transform — ``build_l1_response_model`` aliases the wire key "
+            "back onto the real field, so no downstream reader observes it, and a rename the "
+            "model fails to honour makes the round unparseable, scoring it "
+            "``problem_rate = 1.0``. Unlocking changes the search space: it is ``policy`` "
+            "and bound to ``Estimand.SEARCH``, so it must ride a fork, never a resume."
+        ),
+    )
+
     rebase_capability: bool = Field(
         True,
         description=(

@@ -154,11 +154,21 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # ``LivesConfig{start, cap}``, default None = off): improvement-banked variable
 # round length replacing the fixed ``max_rounds`` boundary. A feature, justified,
 # so the baseline rises (two leaves: start, cap).
+# then ``config_leaf_fields`` 38->39: a deliberate new operator knob --
+# ``OptimizationConfig.schema_field_rename`` (may THIS campaign's L1 propose renaming a
+# field on the inner ``l1_generate``'s output schema). A field NAME is the wire contract,
+# so unlike the always-free ``description``/order levers it needs a lock; the lock is that
+# ``build_l1_output_schema`` never grafts ``output_schema_field_names``, so the LLM cannot
+# emit a key the schema omits -- structural, the same shape ``forbidden_axes_strict`` uses.
+# It cannot ride the dataset file instead: L2 reaches it through ``fork_proposal``'s config
+# delta, and a dataset's ``optimizer.param_keys`` is not fork-overridable. A feature,
+# justified. Paid back immediately below.
+
 LEDGER_BASELINE = {
     "modules": 311,
     "init_files": 58,
     "reexport_shims": 45,
-    "config_leaf_fields": 38,
+    "config_leaf_fields": 39,
     "settings_env": 17,
     "settings_const": 16,
     "opt_search_point_fields": 27,

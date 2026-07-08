@@ -70,6 +70,7 @@ _FIELD_SCOPES: dict[tuple[str, ...], Literal["policy", "data"]] = {
     ("optimization", "token_budget"): "policy",
     ("optimization", "origin_gate"): "policy",
     ("optimization", "forbidden_axes_strict"): "policy",
+    ("optimization", "schema_field_rename"): "policy",
     ("optimization", "rebase_capability"): "policy",
     ("optimization", "terminate_capability"): "policy",
     ("optimization", "seed_heatmap_from_archive"): "policy",

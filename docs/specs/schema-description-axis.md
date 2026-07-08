@@ -28,7 +28,7 @@ pipeline_params_override:
 
 Two properties fall out of the seam rather than being policed:
 
-- **Renaming is impossible.** The apply step assigns onto existing properties only, so an invented field name is dropped before the wire. The grafted `output_schema_descriptions` object enumerates `L1Variant`'s field names with `additionalProperties: false`, so the LLM cannot emit one that does not exist.
+- **Renaming is impossible *by default*, and the default is the only mode built.** The apply step assigns onto existing properties only, so an invented field name is dropped before the wire; the grafted `output_schema_descriptions` object enumerates `L1Variant`'s field names with `additionalProperties: false`, so the LLM cannot emit one that does not exist. This is a *lock*, not a law — see § Unlocking the name (lever 1).
 - **The graft is self-scoping.** On the **outer** (`promptpotter-self`) build, the pipeline has an `l1_generate` node, so the emittable key appears; the ContextVar is unbound in the outer task, so the outer's own schema is untouched. On the **inner** build, the backend pipeline has no `l1_generate` node, so nothing is grafted — and the bound override applies. Same function, opposite halves.
 
 **Why the node-config route does not work.** `optimizer_node_config()` reads `datasets/_optimizer/pipeline.json` and nothing else (`prompts.py`, cached, no merge). A `nodes.{name}.config` key never reaches the inner optimizer; only the per-node override channel does. `datasets/_optimizer/pipeline.json` is *read* by the running optimizer — it is not the surface `promptpotter-self`'s `OptSearchPoint` mutates.
@@ -40,11 +40,28 @@ Ride the existing lock. `OptimizationConfig.forbidden_axes_strict` + `PARAM_FORB
 | Tier | Surface | Default |
 |---|---|---|
 | **Free** — the axis | `description` strings; field order; `enum` order + per-value gloss | **On.** The optimizer *should* propose better descriptions — that is the point. |
-| **Locked** — contract | field names, dot-paths, `enum` values | **Off**, via `PARAM_FORBIDDEN_KEYS`. Unlock is an explicit operator act with a warning: renaming breaks every downstream parser and validator. |
+| **Locked** — contract | field names, dot-paths, `enum` values | **Off.** Not via `PARAM_FORBIDDEN_KEYS` — `L1Variant`'s field names are not `pipeline_params`; the lock is that the rename object is never grafted, so the key does not exist to emit. Unlock forks the cycle (§ Unlocking the name). |
 
 The overlay exposes description strings and a field permutation, **never a raw schema.** An optimizer handed a whole schema renames `candidate` and takes the pipeline down ([`../concepts/structured-output.md`](../concepts/structured-output.md) § which levers are free).
 
-**L2 does not unlock.** Its control vocabulary is closed at `fork_proposal` + `terminate_proposal` ([`../../promptpotter/application/optimization/CLAUDE.md`](../../promptpotter/application/optimization/CLAUDE.md)); a third control output is an architectural amendment, not a convenience. L2 requests through the surface it has; the operator flips the bit.
+**L2 unlocks through the surface it already has.** Its control vocabulary stays closed at `fork_proposal` + `terminate_proposal` ([`../../promptpotter/application/optimization/CLAUDE.md`](../../promptpotter/application/optimization/CLAUDE.md)) — a *third* control output would be an architectural amendment. But `fork_proposal` is the right vehicle regardless of L2: `forbidden_axes_strict` is classified **policy** (`config_diff.py`) and bound to `Estimand.SEARCH` (`config_coupling.py`), so unlocking an axis invalidates search comparability and **must** mint a sibling cycle rather than mutate the running one. Extending `ForkProposal` to carry an `OptimizationConfig` delta is the same move `LimitOverrides.per_round_resubset` already makes for the operator's "behaviour-knob change → fork-at-offset-0" workflow.
+
+## Unlocking the name (lever 1)
+
+The field **name** is the strongest lever and the one that breaks things (`../concepts/structured-output.md` § 1). It is locked by default and stays that way in base mode. Making it reachable is *not* a matter of loosening a check:
+
+**A rename is fatal today, not self-healing.** `L1GenerateOutput` is `extra="forbid"` and requires `changes_description`. A model that emits `mutation_rationale` instead fails validation, `l1_generate` returns zero candidates, and the round is charged `problem_rate = 1.0` (slice 1 — *before* slice 1 it scored perfectly clean, which is why this was unsafe to contemplate). So a rename is always punished and can never pay off. The lever only exists if the same override map that renames the property in the emitted schema **un-renames the key before validation**. Rename is then a pure presentation transform: the model's priors about the key change; every downstream reader still sees `changes_description`.
+
+1. **Un-rename at the parse seam — SHIPPED.** `output_schema_field_names: {model_field: wire_name}` rides the same per-node override object. `build_l1_response_model` derives an `L1GenerateOutput` subclass whose fields carry a `validation_alias`, so the wire key binds back onto the real field and every downstream reader still sees `changes_description`. `populate_by_name` stays **off**: the old key stops validating, so a rename the model ignores is a parse failure, not a half-applied mutation.
+2. **A policy knob, not a param — SHIPPED.** `L1Variant`'s field names are not `pipeline_params`, so `PARAM_FORBIDDEN_KEYS` was the wrong lock. `optimization.schema_field_rename` (default `false`), classified `policy` + coupled to `Estimand.SEARCH`. Locked ⇒ the object is never grafted, so the LLM cannot emit a key that does not exist.
+3. **L2 reaches it via `fork_proposal`** — not built. Extend `ForkProposal` with the config delta (and delete the `LimitOverrides` name, kept only for on-disk seed-compat — a compat shim this project forbids). The unlock mints a sibling cycle; the parent keeps its frozen config and its comparability.
+4. **It should rarely fire in base mode** — not built. L2's prompt names the rename request only under a narrow condition; the default remains "describe the field, don't rename it."
+
+**The knob gates the PROPOSAL, never the apply.** An inner cycle honours a rename it is handed unconditionally — as it already does for prose, `layout`, and descriptions. Gating the apply on the inner cycle's config would silently drop every rename the outer emits, because an inner campaign loads the *inner dataset's* `campaign.json`, never the outer's (`runner/inner_recursion.py`) — and the outer would score that no-op as a legitimate mutation.
+
+Both surfaces derive the rename from one function, `effective_l1_field_names()`. A schema that renames a field the response model does not alias would fail every parse of every round; `tests/test_integrity.py` pins the round-trip, the inner-apply, and the old-key rejection.
+
+Safety rests on slice 1, not on cleverness: a rename the model then ignores or mangles yields an unparseable shape, and that round now scores maximally dirty. The optimizer steers away without anybody policing it.
 
 ## Two blockers
 

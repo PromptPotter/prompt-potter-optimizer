@@ -40,10 +40,11 @@ on every round. With distinct slots the LLM cannot conflate the buckets.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import functools
+from collections.abc import Callable, Mapping
 from typing import Annotated, Any, Literal, cast
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, create_model
 
 from promptpotter.domain.opt_search_point import (
     EVIDENCE_GROUNDING_FIELDS,
@@ -97,6 +98,7 @@ __all__ = [
     "L2ContextOutput",
     "L3PlanOutput",
     "VariantEvidenceGrounding",
+    "build_l1_response_model",
 ]
 
 
@@ -194,6 +196,51 @@ class L1GenerateOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     variants: list[L1Variant]
+
+
+def build_l1_response_model(field_names: Mapping[str, str]) -> type[L1GenerateOutput]:
+    """``L1GenerateOutput`` whose variant fields validate through renamed wire keys.
+
+    The un-rename half of the field-NAME lever (`docs/specs/schema-description-axis.md`
+    § Unlocking the name). ``field_names`` maps a real :class:`L1Variant` field to the wire
+    key the emitted JSON Schema advertises; a ``validation_alias`` accepts that key and binds
+    it back onto the field. Every downstream reader keeps seeing ``changes_description``.
+
+    **The old name stops working, deliberately.** ``populate_by_name`` is left off, so a model
+    that ignores the rename and emits the original key fails validation → zero candidates →
+    the round is charged ``problem_rate = 1.0``. That is the whole safety story: a rename the
+    model cannot honour is self-penalising, not silently half-applied.
+
+    Empty map → :class:`L1GenerateOutput` itself, so the non-renamed path allocates nothing.
+    """
+    if not field_names:
+        return L1GenerateOutput
+    return _build_l1_response_model(tuple(sorted(field_names.items())))
+
+
+@functools.lru_cache(maxsize=16)
+def _build_l1_response_model(items: tuple[tuple[str, str], ...]) -> type[L1GenerateOutput]:
+    overrides: dict[str, Any] = {}
+    for field, wire in items:
+        info = L1Variant.model_fields[field]
+        kwargs: dict[str, Any] = {
+            "validation_alias": wire,
+            "serialization_alias": wire,
+            "description": info.description,
+        }
+        if info.default_factory is not None:
+            kwargs["default_factory"] = info.default_factory
+        elif not info.is_required():
+            kwargs["default"] = info.default
+        # No default and no default_factory ⇒ Field() stays required, matching the source field.
+        overrides[field] = (info.annotation, Field(**kwargs))
+    variant = create_model("L1Variant", __base__=L1Variant, **overrides)
+    suffix = "_".join(f"{f}2{w}" for f, w in items)
+    return create_model(
+        f"L1GenerateOutput__{suffix}",
+        __base__=L1GenerateOutput,
+        variants=(list[variant], ...),
+    )
 
 
 # ---------------------------------------------------------------------------

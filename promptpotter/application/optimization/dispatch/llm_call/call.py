@@ -401,6 +401,7 @@ async def run_optimizer_node(
     template_name: str,
     prompt_vars: dict[str, Any],
     temperature: float | None = None,
+    response_model: type[BaseModel] | None = None,
     response_schema: dict[str, Any] | None = None,
     user_content: str | None = None,
     context: LLMCallContext | None = None,
@@ -435,6 +436,11 @@ async def run_optimizer_node(
     derived from the response model — used by ``l1_generate`` whose
     schema is built dynamically per backend ``PipelineSchema``.
 
+    *response_model* overrides the ``OPTIMIZER_RESPONSE_MODELS`` lookup. ``l1_generate``
+    passes one when a field RENAME is in force: the wire schema advertises the new keys and
+    the model aliases them back (``build_l1_response_model``). Both derive from
+    ``effective_l1_field_names``, so the two can never disagree.
+
     *context* bundles the audit/cache kwargs (ledger, round, candidate,
     cache); forwarded verbatim to :func:`llm_call`.
     """
@@ -454,6 +460,7 @@ async def run_optimizer_node(
     response = await llm_call(
         messages=messages,
         node=template_name,
+        response_model=response_model,
         response_schema=response_schema,
         context=context,
         trace_meta={

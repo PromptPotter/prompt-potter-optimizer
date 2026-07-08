@@ -14,9 +14,11 @@ from promptpotter.application.optimization.dispatch.llm_call import (
 from promptpotter.application.optimization.dispatch.schemas import (
     L1GenerateOutput,
     VariantEvidenceGrounding,
+    build_l1_response_model,
 )
 from promptpotter.application.optimization.validators.l1_strict import (
     build_l1_output_schema,
+    effective_l1_field_names,
 )
 from promptpotter.domain.escalation_signals import ValidationFailure
 from promptpotter.domain.opt_search_point import EvidenceGrounding
@@ -113,19 +115,25 @@ async def l1_generate(
     )
     prompt_vars: dict[str, str] = {"n_variants": str(n_variants), **injection_vars}
 
+    schema_field_rename = cycle.config.optimization.schema_field_rename
     output_schema = (
         build_l1_output_schema(
             pipeline_schema,
             forbidden_axes_strict=cycle.config.optimization.forbidden_axes_strict,
+            schema_field_rename=schema_field_rename,
         )
         if pipeline_schema
         else None
     )
+    # The wire schema advertises renamed keys; the response model aliases them back. Both read
+    # the SAME `effective_l1_field_names` — a disagreement would fail every parse, every round.
+    response_model = build_l1_response_model(effective_l1_field_names())
     try:
         generated, meta_prompt, _ = await run_optimizer_node(
             template_name="l1_generate",
             prompt_vars=prompt_vars,
             temperature=creativity,
+            response_model=response_model,
             response_schema=output_schema,
             context=LLMCallContext(
                 ledger=cycle.session.state.ledger,
