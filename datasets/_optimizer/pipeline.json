@@ -229,7 +229,7 @@
       ],
       "json_schema": {
         "name": "l1_generate",
-        "strict": true,
+        "strict": false,
         "schema": {
           "$defs": {
             "L1Variant": {
@@ -342,13 +342,13 @@
     },
     "l1_critique/1": {
       "fields": [
-        "failure_highlights",
         "priority_fix",
-        "suggested_axes"
+        "suggested_axes",
+        "failure_highlights"
       ],
       "json_schema": {
         "name": "l1_critique",
-        "strict": true,
+        "strict": false,
         "schema": {
           "additionalProperties": false,
           "description": "Critique returned at round-end. Three load-bearing fields only:\n``priority_fix`` (the headline steer), ``failure_highlights`` (per-\nsample evidence quotes), ``suggested_axes`` (for L2's axis pick).\nProse ``summary`` + ``positive_critique`` + ``negative_critique``\nwere dropped \u2014 priority_fix already names axis+change, origin_strengths\npanel carries the preserve signal, failure_highlights enumerates the\nother open clusters.",
@@ -385,20 +385,20 @@
     },
     "l2_context/1": {
       "fields": [
+        "task_context",
         "action",
         "axis_targeted",
-        "fork_proposal",
         "l1_layout",
         "l1_overrides",
-        "l1_situational_examples",
         "l1_supplemental_rules",
+        "l1_situational_examples",
         "rationale",
-        "task_context",
+        "fork_proposal",
         "terminate_proposal"
       ],
       "json_schema": {
         "name": "l2_context",
-        "strict": true,
+        "strict": false,
         "schema": {
           "$defs": {
             "ForkProposal": {
@@ -595,15 +595,15 @@
     },
     "l3_plan/1": {
       "fields": [
-        "fork_proposal",
-        "note",
         "plan",
+        "note",
         "rationale",
+        "fork_proposal",
         "terminate_proposal"
       ],
       "json_schema": {
         "name": "l3_plan",
-        "strict": true,
+        "strict": false,
         "schema": {
           "$defs": {
             "ForkProposal": {
@@ -690,21 +690,21 @@
     },
     "checkin/1": {
       "fields": [
+        "persona",
+        "task_intent",
+        "problem_description",
+        "instruction",
+        "thinking_style",
         "answer_format",
+        "task_context",
         "assessment",
         "findings",
-        "instruction",
         "next_action",
-        "persona",
-        "problem_description",
-        "recap",
-        "task_context",
-        "task_intent",
-        "thinking_style"
+        "recap"
       ],
       "json_schema": {
         "name": "checkin",
-        "strict": true,
+        "strict": false,
         "schema": {
           "$defs": {
             "CheckinTaskContext": {

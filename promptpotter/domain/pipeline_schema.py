@@ -29,7 +29,12 @@ _PROMPT_OWNED_FIELDS = frozenset(PROMPT_STRING_FIELDS) | {"few_shot_examples", "
 #      ("Schema must contain 'properties'"). So `node_param_keys` strips them from
 #      the optimizer's emittable surface — UNCONDITIONALLY, unlike model/provider
 #      (`PARAM_FORBIDDEN_KEYS`), which have an ablation unlock; the schema never does.
-SCHEMA_OWNED_FIELDS = frozenset({"output_schema", "schema_family", "schema_version"})
+#      `answer_field` is the same structural contract by another name: it names WHICH
+#      slot of `output_schema` carries the answer, so a mutated one makes the executor
+#      destructure the wrong field and grade every sample against reasoning prose.
+SCHEMA_OWNED_FIELDS = frozenset(
+    {"output_schema", "schema_family", "schema_version", "answer_field"}
+)
 
 # The `param_types` values that make a param NESTED — a container the optimizer edits
 # one level deep rather than a scalar it replaces. Naming them once keeps the three

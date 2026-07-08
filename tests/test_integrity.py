@@ -614,6 +614,57 @@ def test_nested_param_override_accumulates_instead_of_reverting_its_parent() -> 
     assert plain == {"l1_generate": {"persona": "z", "instruction": "y"}}
 
 
+def test_schema_violation_is_a_non_result_not_a_wrong_answer() -> None:
+    """A response that misses its declared answer slot yields `final_ranking: []`, not a MISS.
+
+    The silent harm: projecting the whole `{reasoning, answer}` blob (or an empty string)
+    into `final_ranking[0]` makes every schema violation grade as a *confident wrong answer*.
+    The run completes, the score is real-looking, and a schema regression is indistinguishable
+    from the model getting the logic wrong — exactly the failure JustLogic's card names.
+    `sample_measurement` already yields NO_RESULT on an empty ranking; the connector's job is
+    to produce one. Both execution arms destructure the named slot the same way, so the
+    in-process and wire measurements of one node config cannot disagree.
+    """
+    import asyncio
+
+    from promptpotter.connectors.llm_only import llm_only_in_process_run
+    from promptpotter.infrastructure.llm import models as llm_models
+
+    schema = {"type": "object", "properties": {"reasoning": {}, "answer": {}}}
+    base_cfg = {"provider": "p", "model": "m", "prompt": "q"}
+
+    def _run(parsed: Any, content: str = "", cfg_extra: dict[str, Any] | None = None) -> list[Any]:
+        resp = llm_models.LLMResponse(content=content, model="m", parsed=parsed)
+
+        class _Client:
+            async def chat(self, *_: Any, **__: Any) -> Any:
+                return resp
+
+        import promptpotter.infrastructure.llm as llm_pkg
+
+        original = llm_pkg.get_llm_client
+        llm_pkg.get_llm_client = lambda _p: _Client()  # type: ignore[assignment]
+        try:
+            payload = {"node_config": {"llm_only": {**base_cfg, **(cfg_extra or {})}}}
+            out = asyncio.run(llm_only_in_process_run("q", payload))
+        finally:
+            llm_pkg.get_llm_client = original  # type: ignore[assignment]
+        return list(out["data"]["final_ranking"])
+
+    schema_cfg = {"output_schema": schema, "answer_field": "answer"}
+    # The named slot is destructured — the reasoning never reaches the matcher.
+    assert _run({"reasoning": "because", "answer": "TRUE"}, cfg_extra=schema_cfg) == ["TRUE"]
+    # Slot absent, and response that never decoded to an object: both are NON-results.
+    assert _run({"reasoning": "because"}, cfg_extra=schema_cfg) == []
+    assert _run(None, content="TRUE", cfg_extra=schema_cfg) == []
+    # An `output_schema` without `answer_field` would silently grade the wrong slot.
+    with pytest.raises(ValueError, match="answer_field"):
+        _run({"answer": "TRUE"}, cfg_extra={"output_schema": schema})
+    # No schema declared → text mode, unchanged; an empty answer is still a non-result.
+    assert _run(None, content="**TRUE**") == ["**TRUE**"]
+    assert _run(None, content="   ") == []
+
+
 def test_emittable_param_surface_is_one_set_the_schema_and_the_validator_agree_on() -> None:
     """`node_param_keys` is the single emittable surface — and every reader must read it.
 
@@ -769,3 +820,68 @@ def test_schema_field_rename_is_locked_by_default_and_never_silently_half_applie
         assert build_l1_response_model(effective_l1_field_names()) is L1GenerateOutput
     finally:
         set_optimizer_prompt_overrides(None)
+
+
+def test_l2_rename_unlock_survives_the_fork_it_rides() -> None:
+    """The unlock's whole journey is silent when it breaks.
+
+    L2 asks to rename; the request rides a `fork_proposal` into `RebaseRequest`, becomes the
+    fork's `ConfigOverrides`, and reaches `build_l1_output_schema` as the emittable rename
+    param. Drop it ANYWHERE on that path and nothing raises: the fork mints, the loop runs,
+    L1 simply never emits the key it was granted — and the outer campaign scores a whole
+    sibling cycle as a legitimate trajectory that measured nothing it was forked to measure.
+
+    Also pinned: an unlock is never granted without the rewind that isolates it. The parent's
+    frozen config is what makes its measurements comparable, so a policy change that did not
+    fork would silently re-base every number recorded before it.
+    """
+    import json
+    from pathlib import Path
+
+    from promptpotter.application.config import CampaignConfig, OptimizationConfig
+    from promptpotter.application.optimization.dispatch.schemas import ForkProposal
+    from promptpotter.application.optimization.validators.l1_strict import build_l1_output_schema
+    from promptpotter.application.runner.entry import _apply_config_overrides
+    from promptpotter.domain.pipeline_parsing import parse_pipeline_response
+    from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM
+    from promptpotter.domain.run_records import ConfigOverrides, CycleSeed
+
+    root = Path(__file__).resolve().parents[1]
+    outer = parse_pipeline_response(
+        json.loads((root / "datasets/promptpotter-self/pipeline.json").read_text(encoding="utf-8"))
+    )
+
+    def emittable(cfg_flag: bool) -> set[str]:
+        schema = build_l1_output_schema(outer, schema_field_rename=cfg_flag)
+        variants = schema["schema"]["properties"]["variants"]["items"]["properties"]
+        return set(variants["pipeline_params_override"]["properties"]["l1_generate"]["properties"])
+
+    # The lever exists on this dataset and is locked. Both halves matter: an unlock that
+    # granted nothing, or a lock that leaked, would each look like a working axis.
+    assert SCHEMA_RENAME_PARAM not in emittable(False)
+    assert SCHEMA_RENAME_PARAM in emittable(True)
+
+    # Off unless the layer asks for it: a default-true unlock would widen every
+    # campaign's search space with nothing in the ledger to say when, or why.
+    assert ForkProposal(round_offset=-2).unlock_schema_field_rename is False
+
+    # ConfigOverrides → the fork's config snapshot → the emittable surface.
+    base = CampaignConfig(
+        optimization=OptimizationConfig(improvement_threshold=0.01, degradation_threshold=0.05)
+    )
+    assert base.optimization.schema_field_rename is False
+    forked, _ = _apply_config_overrides(base, None, ConfigOverrides(schema_field_rename=True))
+    assert forked.optimization.schema_field_rename is True
+    assert SCHEMA_RENAME_PARAM in emittable(forked.optimization.schema_field_rename)
+    # The parent snapshot is untouched — its rounds stay comparable to each other.
+    assert base.optimization.schema_field_rename is False
+
+    # An unrelated fork carries no policy delta: absent knobs inherit, they do not reset.
+    inherited, _ = _apply_config_overrides(forked, None, ConfigOverrides(max_rounds=3))
+    assert inherited.optimization.schema_field_rename is True
+
+    # The seed that persists the unlock carries no origin, so it must carry no C0 stamp
+    # either — and a seeded origin without one is a hard error, not a KeyError in bootstrap.
+    assert CycleSeed(config_overrides=ConfigOverrides(schema_field_rename=True)).origin_source == ""
+    with pytest.raises(pydantic.ValidationError):
+        CycleSeed(origin_prompt_fields={"persona": "p"})

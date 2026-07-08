@@ -770,7 +770,7 @@ def _apply_starting_prompts(
         # 0% on email-replies). Fail loud: a generation node must advertise
         # `prompt_info` in GET /pipeline (or the dataset overlay).
         logger.warning(
-            "configure_pipeline: dataset %r has starting prompts but NO "
+            "configure_and_apply_pipeline: dataset %r has starting prompts but NO "
             "prompt-bearing node in the active pipeline %s — the prompt will "
             "NOT reach the backend. A generation node must declare `prompt_info`.",
             dataset_name,

@@ -83,9 +83,8 @@ def _entry_matches_dataset(
 class MeasurementArchive:
     """File I/O for the measurement store — the DB core, NOT the recycle bin.
 
-    Tenant-global, self-contained under `measurements/` (regardless of backend_id —
-    content-addressed via `PipelineSchema.node_configs()` avoids cross-backend
-    collisions): run-detail files `measurements/{run_id}.json`, the index
+    Tenant-global, self-contained under `measurements/` (regardless of backend_id):
+    run-detail files `measurements/{run_id}.json`, the index
     `measurements/measurements_index.json`, and the alias groups
     `measurements/prompt_aliases.json` all live together. It sits beside
     `campaigns/` and `archive/` (the recycle bin), never inside `archive/` — it is
@@ -93,6 +92,14 @@ class MeasurementArchive:
     (`load_by_id`) or via the index (`list_all`); nothing globs the dir, so the
     index + alias files share it safely. `backend_id` is preserved on public
     methods for call-site stability but ignored for paths.
+
+    **Identity does not include the execution path.** A measurement is keyed by
+    `content_hash(prompt, dataset, pipeline_params)` and reused by
+    `PipelineSchema.node_configs()`, neither of which carries `backend_type`. So
+    repointing a dataset at a different connector (wire TermNorm → in-process
+    `llm_only`, say) does NOT invalidate rows measured under the old one — it
+    silently serves them. Change the connector and you must change the config the
+    hash sees, or re-mint the campaign.
     """
 
     def __init__(self, base_dir: Path):

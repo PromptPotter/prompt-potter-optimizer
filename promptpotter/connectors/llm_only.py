@@ -24,6 +24,7 @@ Exports the ``CONNECTOR`` binding consumed by :data:`promptpotter.connectors.CON
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import Any
@@ -31,7 +32,7 @@ from typing import Any
 import httpx
 
 from promptpotter.connectors.protocol import Connector
-from promptpotter.domain.opt_search_point import RESERVED_PIPELINE_PARAM_KEYS
+from promptpotter.domain.opt_search_point import node_config_items
 
 logger = logging.getLogger(__name__)
 
@@ -57,17 +58,11 @@ def llm_only_wire_adapter(
 
     Mirrors the TermNorm wire shape (so the in_process arm reads node config the
     same way) minus the HTTP ``steps`` list: a single-node pipeline has nothing to
-    route. Every per-node dict rides ``node_config``; non-dict params are dropped.
+    route. Every per-node dict rides ``node_config``; ``node_config_items`` owns the
+    "reserved key or non-dict" question for every adapter.
     """
     payload: dict[str, Any] = {"query": query}
-    node_config: dict[str, dict[str, Any]] = {}
-    for k, v in (pipeline_params or {}).items():
-        if k in RESERVED_PIPELINE_PARAM_KEYS:
-            continue
-        if isinstance(v, dict):
-            node_config[k] = v
-        else:
-            logger.debug("llm_only_wire_adapter: dropping non-dict pipeline_param %r=%r", k, v)
+    node_config = dict(node_config_items(pipeline_params))
     if node_config:
         payload["node_config"] = node_config
     return payload
@@ -85,6 +80,27 @@ def _pick_llm_node(node_config: dict[str, dict[str, Any]]) -> dict[str, Any]:
         return node_config[LLM_ONLY_NODE]
     with_model = [cfg for cfg in node_config.values() if isinstance(cfg, dict) and cfg.get("model")]
     return with_model[0] if len(with_model) == 1 else {}
+
+
+def _extract_answer(resp: Any, output_schema: Any, answer_field: str) -> str:
+    """The answer string, destructured from its named slot when a schema is declared.
+
+    Reading the field the schema declares is NOT pre-judging it: the scoring matcher still
+    decides HIT/MISS downstream. A response that omits `answer_field`, or that never decoded
+    to an object, yields `""` — which the caller turns into the structural NO_RESULT. The
+    wire arm (`TermNorm::_step_llm_only`) destructures identically; the two arms must agree
+    on shape for the same node config, or one measures a different thing than the other.
+    """
+    if not output_schema:
+        return resp.content or ""
+    if not isinstance(resp.parsed, dict):
+        logger.warning(
+            "llm_only: schema declared but response decoded as %s — NO_RESULT",
+            type(resp.parsed).__name__,
+        )
+        return ""
+    value = resp.parsed.get(answer_field, "")
+    return value if isinstance(value, str) else json.dumps(value)
 
 
 async def llm_only_in_process_run(query: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -115,17 +131,42 @@ async def llm_only_in_process_run(query: str, payload: dict[str, Any]) -> dict[s
     # it through chat(**kwargs), so the provider client handles it identically.
     if cfg.get("reasoning_effort"):
         chat_kwargs["reasoning_effort"] = cfg["reasoning_effort"]
+    # `seed` rides the same kwargs passthrough. Both arms dropped it, and both claimed the
+    # other honoured it: the wire arm forwards the node config to TermNorm, but
+    # `_step_llm_only` named every kwarg it passed on and never named this one. justlogic
+    # pins `seed: 0` and has been non-deterministic since it was written — on a benchmark
+    # whose determinism is the reason its noise floor is readable.
+    if cfg.get("seed") is not None:
+        chat_kwargs["seed"] = int(cfg["seed"])
+    # The node's SECOND prompt. When the dataset declares one, the answer arrives in a slot
+    # we named, ordered, and described, instead of being regex-scraped out of prose. Field
+    # names / dot-paths / enum VALUES are the wire contract; the order, the `description`
+    # strings, and the enum ORDER are read by nothing but the model — those are the levers.
+    # `answer_field` is validated against the schema at pipeline-load, not here.
+    output_schema = cfg.get("output_schema")
+    answer_field = str(cfg.get("answer_field") or "")
+    if output_schema:
+        if not answer_field:
+            raise ValueError(
+                "llm_only node config sets `output_schema` but not `answer_field` — "
+                "declare which schema field carries the answer. Defaulting it here would "
+                "silently grade the wrong slot."
+            )
+        chat_kwargs["response_schema"] = output_schema
 
     client = get_llm_client(provider)
     start = time.monotonic()
     resp = await client.chat([{"role": "user", "content": prompt}], model=model, **chat_kwargs)
     duration_s = time.monotonic() - start
 
-    answer = resp.content or ""
+    answer = _extract_answer(resp, output_schema, answer_field)
     usage = resp.usage or {}
     data: dict[str, Any] = {
         # The terminal ranking the scorer reads: the answer is the (single) candidate.
-        LLM_ONLY_RESULT_KEY: [answer],
+        # An empty / declined answer is a structural NO_RESULT — `final_ranking == []`,
+        # which `sample_measurement` already grades as NO_RESULT rather than a confident
+        # wrong candidate. A schema violation is a non-result, never a MISS.
+        LLM_ONLY_RESULT_KEY: [answer] if answer.strip() else [],
         # Same head-cap as TermNorm's reasoning_trace_cap — the PP<->TermNorm
         # envelope stays shape-identical on both execution arms.
         "reasoning_trace": (resp.reasoning or "")[:4000],

@@ -16,7 +16,24 @@
         "model": "openai/gpt-oss-20b:nitro",
         "temperature": 0.0,
         "reasoning_effort": "low",
-        "seed": 0
+        "seed": 0,
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "reasoning": {
+              "type": "string",
+              "description": "Work the logical chain step by step. Identify each premise; track negations, quantifiers (all/some/no) and conditionals explicitly; trace premises to the claim. Recheck each step against the stated premises before moving on."
+            },
+            "answer": {
+              "type": "string",
+              "enum": ["TRUE", "FALSE", "Uncertain"],
+              "description": "TRUE when the premises strictly entail the claim; FALSE when they strictly entail its negation; Uncertain ONLY when the premises genuinely do not determine the claim either way — never as a hedge against difficulty."
+            }
+          },
+          "required": ["reasoning", "answer"],
+          "additionalProperties": false
+        },
+        "answer_field": "answer"
       },
       "optimizer": {
         "param_keys": ["temperature", "max_tokens", "model", "reasoning_effort", "persona", "task_intent", "problem_description", "instruction", "thinking_style", "answer_format"],

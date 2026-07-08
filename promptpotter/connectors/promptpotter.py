@@ -30,6 +30,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.connectors.protocol import Connector
+from promptpotter.domain.opt_search_point import node_config_items
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -39,22 +40,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Reserved per-node config key carrying the inner-baseline fingerprint. Part of
+# Reserved per-node config key carrying the inner-origin fingerprint. Part of
 # measurement identity (rides node_configs / the origin cycle id), NEVER a wire
 # tunable — the adapter strips it before building ``meta_prompt_overrides``.
-INNER_BASELINE_KEY = "inner_baseline"
+INNER_ORIGIN_KEY = "inner_origin"
 
 
 def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
     """The inner optimizer's effective-revision fingerprint, as identity config.
 
     The backend this connector runs IS the inner optimizer, so a measurement's
-    identity must change whenever the inner baseline does: the shared meta-prompt
+    identity must change whenever the inner origin does: the shared meta-prompt
     text (``datasets/_optimizer/pipeline.json``), the per-node information-flow
     layouts, the engine version, AND the dataset's ``inner_tasks.json``
     ``inner_benchmark_config`` (the inner-run behavior — sample count, round /
     variant geometry, target, and the ``inner_optimizer_temperature`` determinism
-    clamp). Otherwise an outer origin scored under an old baseline/config is
+    clamp). Otherwise an outer origin scored under an old origin/config is
     silently reused against candidates run under the new one — a stale-vs-fresh
     comparison that fabricates (or masks) outer signal.
     """
@@ -66,7 +67,7 @@ def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
     from promptpotter.domain.pipeline_schema import stable_hash
     from promptpotter.infrastructure.store.io import read_json_optional
 
-    baseline_text = OPTIMIZER_PIPELINE_PATH.read_text(encoding="utf-8")
+    origin_text = OPTIMIZER_PIPELINE_PATH.read_text(encoding="utf-8")
     layouts = {name: spec.model_dump(mode="json") for name, spec in sorted(NODE_LAYOUTS.items())}
     # The inner-run config is part of the inner baseline's effective behavior, so it
     # joins the fingerprint — changing `inner_optimizer_temperature` (or any geometry
@@ -75,8 +76,8 @@ def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
     inner_cfg = (read_json_optional(dataset_dir / "inner_tasks.json") or {}).get(
         "inner_benchmark_config"
     ) or {}
-    fingerprint = stable_hash([baseline_text, layouts, APP_VERSION, inner_cfg])[:12]
-    return {"l1_generate": {INNER_BASELINE_KEY: fingerprint}}
+    fingerprint = stable_hash([origin_text, layouts, APP_VERSION, inner_cfg])[:12]
+    return {"l1_generate": {INNER_ORIGIN_KEY: fingerprint}}
 
 
 # ---------------------------------------------------------------------------
@@ -104,28 +105,19 @@ def promptpotter_wire_adapter(
     ```
 
     Each per-node dict overrides template fields on the inner cycle's
-    ``datasets/_optimizer/pipeline.json`` for that run. Non-dict values are dropped
-    with a debug log — the contract is "every key is a per-node config
-    dict" (matching the TermNorm convention).
+    ``datasets/_optimizer/pipeline.json`` for that run. ``node_config_items`` owns the
+    "reserved key or non-dict" question for every adapter (matching the TermNorm
+    convention).
     """
     payload: dict[str, Any] = {"query": query}
 
-    _pp = pipeline_params or {}
-
     meta_prompt_overrides: dict[str, dict[str, Any]] = {}
-    for k, v in _pp.items():
-        if isinstance(v, dict):
-            # The inner-baseline fingerprint is identity config, not an override —
-            # the inner loop must never see it as a template field.
-            stripped = {fk: fv for fk, fv in v.items() if fk != INNER_BASELINE_KEY}
-            if stripped:
-                meta_prompt_overrides[k] = stripped
-        else:
-            logger.debug(
-                "promptpotter_wire_adapter: dropping non-dict pipeline_param %r=%r",
-                k,
-                v,
-            )
+    for k, v in node_config_items(pipeline_params):
+        # The inner-origin fingerprint is identity config, not an override —
+        # the inner loop must never see it as a template field.
+        stripped = {fk: fv for fk, fv in v.items() if fk != INNER_ORIGIN_KEY}
+        if stripped:
+            meta_prompt_overrides[k] = stripped
 
     if meta_prompt_overrides:
         payload["meta_prompt_overrides"] = meta_prompt_overrides
