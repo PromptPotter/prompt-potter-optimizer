@@ -15,6 +15,7 @@ from promptpotter.application.optimization.pobb.elimination import extract_warni
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.opt_search_point import OptSearchPoint, node_config_items
+from promptpotter.domain.rendering import display_fitness
 from promptpotter.domain.results import (
     CritiqueReadout,
     DegradationHealth,
@@ -664,7 +665,9 @@ class Cycle:
                     round_scorer=self.session.scoring.round_scorer,
                 )
                 accuracy = subset_scores["accuracy"]
-                composite_fitness = subset_scores.get("composite_fitness", accuracy)
+                composite_fitness = display_fitness(
+                    subset_scores.get("composite_fitness"), accuracy
+                )
                 results = subset
         return RoundOrigin(
             accuracy=accuracy,

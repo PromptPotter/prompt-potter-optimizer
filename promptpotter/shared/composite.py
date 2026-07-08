@@ -1,45 +1,114 @@
-"""Composite-score utilities — short-form formula inlining + render primitives.
+"""Composite-score utilities — the short-code vocabulary + render primitives.
 
-Two related concerns share this module so the short codes (``acc``, ``H``,
-``lat``, ``R``, ``pc``) stay in lockstep with the renderers that use them:
+This module is the **single source** for the evaluator short codes (``acc``,
+``H``, ``lat``, ``R``, ``pc``, …). It lives in ``shared/`` because all three
+caller layers use it — application (``views``), presentation (``live``) and
+infrastructure (``live_dashboard``) — and infrastructure must not import the
+application-layer evaluator registry. The vocabulary is therefore data here, not
+a field on ``Evaluator``; ``evaluators.py::default_per_round_formula_short``
+derives its short form from this table (``to_short_formula``) rather than
+hand-syncing a literal.
 
-1. **Short-form formula inlining** (``inline_short_formula_values``) —
-   transforms ``0.65*acc + 0.15*H + ...`` into
-   ``0.65*acc|0.667 + 0.15*H|0.972 + ...`` for ``dashboard.json``. Used by
-   both the application layer (``evaluators``, ``phase_views``) and the
-   infrastructure layer (``session_emitter``). Codes are tightly coupled to
-   ``application/scoring/evaluators.py::default_per_round_formula_short``;
-   keep them in sync by hand if the registry default changes.
+Two concerns share the module:
 
+1. **Short-form formula inlining** (``inline_short_formula_values``) — transforms
+   ``0.65*acc + 0.15*H + ...`` into ``0.65*acc|0.667 + 0.15*H|0.972 + ...`` for
+   ``dashboard.json`` so the operator sees the formula and its resolved inputs on
+   one line.
 2. **Composite-score render primitives** (``render_composite_fitness_oneliner`` /
-   ``render_composite_fitness_block``) — operator-facing forms that surfaces
-   share. Without seeing the inputs the operator can't tell *why*
-   composite_fitness moved when accuracy didn't.
+   ``render_composite_fitness_block``) — operator-facing forms surfaces share.
+   Without the inputs the operator can't tell *why* composite_fitness moved when
+   accuracy didn't.
 
-Pure functions; no I/O, no Session, no logging side-effects.
+Both read the one ``SHORT_NAMES`` table (+ ``AGGREGATES`` for the synthesized
+``H``/``R`` terms); the code regex and the short↔full inversion are derived, so
+adding or renaming an evaluator is a single edit here. Pure functions; no I/O.
 """
 
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 __all__ = [
     "SHORT_NAMES",
     "inline_short_formula_values",
     "render_composite_fitness_block",
     "render_composite_fitness_oneliner",
+    "to_short_formula",
 ]
 
 
-# Direct-mapping codes used by ``default_per_round_formula_short``;
-# ``H`` and ``R`` are synthesized aggregates handled separately below.
-_SHORT_DIRECT: dict[str, str] = {
-    "acc": "accuracy",
-    "lat": "latency_norm",
-    "pc": "prompt_compactness",
+# ===========================================================================
+# The short-code vocabulary — SINGLE SOURCE
+# ===========================================================================
+
+# Full evaluator name → short code. Both the short-formula inliner and the
+# value-breakdown renderer read this one map; names absent from it render as
+# themselves (so operator-defined evaluators still surface). Adding or renaming
+# an evaluator's short code is a single edit here — everything else derives.
+SHORT_NAMES: dict[str, str] = {
+    "accuracy": "acc",
+    "error_rate": "err",
+    "degraded_rate": "degr",
+    "runtime_failure_rate": "rf",
+    "latency_norm": "lat",
+    "prompt_compactness": "pc",
+    "pipeline_compactness": "ppl",
+    "source_recall": "src",
+    "candidate_recall": "cand",
+    "cache_hit_rate": "cache",
+    "mean_retrieval_shortfall": "retr",
 }
 
-_SHORT_CODE_RE = re.compile(r"\b(acc|H|lat|R|pc)\b")
+
+@dataclass(frozen=True)
+class _ShortAggregate:
+    """A synthesized short code (``H``/``R``) that rolls several evaluators into
+    one displayed term. Its membership is declared once here — never re-listed in
+    a renderer. ``H`` and ``R`` are *display* aggregates over the evaluator dict,
+    not registry evaluators (adding them to ``_REGISTRY`` would materialize and
+    serve them, changing behavior)."""
+
+    short_code: str
+    members: tuple[str, ...]
+    complement: bool  # True → mean(1 - v) (health); False → mean(v) (recall)
+
+
+AGGREGATES: tuple[_ShortAggregate, ...] = (
+    _ShortAggregate("H", ("error_rate", "degraded_rate", "runtime_failure_rate"), complement=True),
+    _ShortAggregate("R", ("source_recall", "candidate_recall", "cache_hit_rate"), complement=False),
+)
+
+# short code → full evaluator name; inverse of SHORT_NAMES, for value lookup.
+_FULL_BY_SHORT: dict[str, str] = {short: full for full, short in SHORT_NAMES.items()}
+
+# Every short code that can appear in a formula — direct evaluators + aggregates.
+# Longest-first so the alternation never settles for a shorter prefix.
+_ALL_SHORT_CODES: tuple[str, ...] = tuple(
+    sorted({*SHORT_NAMES.values(), *(a.short_code for a in AGGREGATES)}, key=len, reverse=True)
+)
+_SHORT_CODE_RE = re.compile(r"\b(" + "|".join(re.escape(c) for c in _ALL_SHORT_CODES) + r")\b")
+
+_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z_0-9]*")
+
+
+def to_short_formula(formula: str) -> str:
+    """Translate a full-name formula (``0.7*accuracy + 0.3*latency_norm``) into its
+    short form (``0.7*acc + 0.3*lat``) via ``SHORT_NAMES``. Names without a short
+    code render unchanged. This is how ``default_per_round_formula_short`` derives —
+    no hand-synced literal."""
+    return _NAME_RE.sub(lambda m: SHORT_NAMES.get(m.group(0), m.group(0)), formula)
+
+
+def _aggregate_value(agg: _ShortAggregate, evaluators: dict[str, float]) -> float | None:
+    """Reduce an aggregate over whichever of its members are present; None if none."""
+    vals: list[float] = []
+    for member in agg.members:
+        v = evaluators.get(member)
+        if v is not None:
+            vals.append(1.0 - float(v) if agg.complement else float(v))
+    return sum(vals) / len(vals) if vals else None
 
 
 def inline_short_formula_values(
@@ -48,22 +117,19 @@ def inline_short_formula_values(
 ) -> str | None:
     """Inline resolved values into the short formula string.
 
-    Transforms ``0.65*acc + 0.15*H + 0.10*lat + 0.05*R + 0.05*pc``
-    into ``0.65*acc|0.667 + 0.15*H|0.972 + 0.10*lat|0.965 + ...`` so
-    an operator tailing dashboard.json sees the formula and its
-    resolved inputs in a single line — no separate legend, no separate
-    ``evaluators`` lookup.
+    Transforms ``0.65*acc + 0.15*H + 0.10*lat + 0.05*R + 0.05*pc`` into
+    ``0.65*acc|0.667 + 0.15*H|0.972 + 0.10*lat|0.965 + ...`` so an operator tailing
+    dashboard.json sees the formula and its resolved inputs in a single line — no
+    separate legend, no separate ``evaluators`` lookup.
 
-    ``acc`` / ``lat`` / ``pc`` resolve directly from the evaluators
-    dict. ``H`` and ``R`` are synthesized: ``H = mean(1 - error_rate,
-    1 - degraded_rate, 1 - runtime_failure_rate)``; ``R`` is the mean
-    of whichever recall evaluators (``source_recall``,
-    ``candidate_recall``, ``cache_hit_rate``) are present.
+    Direct codes resolve from the evaluators dict via ``SHORT_NAMES``; the ``H`` /
+    ``R`` aggregates reduce their member evaluators (see ``AGGREGATES``). A code
+    present in the formula but unresolved (its evaluator absent this round) renders
+    unchanged.
 
-    Returns *formula_short* unchanged when *evaluators* is empty (e.g.
-    before the first candidate has scored). Returns ``None`` when
-    *formula_short* is None (custom formula authored by the operator —
-    no template structure to inline into).
+    Returns *formula_short* unchanged when *evaluators* is empty (e.g. before the
+    first candidate has scored). Returns ``None`` when *formula_short* is None
+    (custom formula authored by the operator — no template structure to inline into).
     """
     if formula_short is None:
         return None
@@ -71,26 +137,14 @@ def inline_short_formula_values(
         return formula_short
 
     values: dict[str, float] = {}
-    for short, full in _SHORT_DIRECT.items():
+    for short, full in _FULL_BY_SHORT.items():
         v = evaluators.get(full)
         if v is not None:
             values[short] = float(v)
-
-    health: list[float] = []
-    for name in ("error_rate", "degraded_rate", "runtime_failure_rate"):
-        v = evaluators.get(name)
-        if v is not None:
-            health.append(1.0 - float(v))
-    if health:
-        values["H"] = sum(health) / len(health)
-
-    recall: list[float] = []
-    for name in ("source_recall", "candidate_recall", "cache_hit_rate"):
-        v = evaluators.get(name)
-        if v is not None:
-            recall.append(float(v))
-    if recall:
-        values["R"] = sum(recall) / len(recall)
+    for agg in AGGREGATES:
+        av = _aggregate_value(agg, evaluators)
+        if av is not None:
+            values[agg.short_code] = av
 
     def _sub(match: re.Match[str]) -> str:
         code = match.group(0)
@@ -128,26 +182,6 @@ _FORMULA_BUILTINS = {
     "True",
     "False",
 }
-
-# Short codes used by ``render_composite_fitness_block`` when ``use_short_names``
-# is enabled. Names not in this map fall back to themselves so user-
-# defined evaluators still surface — only the registry-known ones get
-# squeezed into short codes for the round-level live frame.
-SHORT_NAMES: dict[str, str] = {
-    "accuracy": "acc",
-    "error_rate": "err",
-    "degraded_rate": "degr",
-    "runtime_failure_rate": "rf",
-    "latency_norm": "lat",
-    "prompt_compactness": "pc",
-    "pipeline_compactness": "ppl",
-    "source_recall": "src",
-    "candidate_recall": "cand",
-    "cache_hit_rate": "cache",
-    "mean_retrieval_shortfall": "retr",
-}
-
-_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z_0-9]*")
 
 
 def extract_evaluator_names(formula: str, available: set[str]) -> list[str]:

@@ -1,4 +1,5 @@
 import { type BarSlot } from "./FitnessChart";
+import { resolveComposite } from "@/lib/fitness";
 
 // 1-based rank of each line by value descending; lines with a null value
 // are dropped (unranked).
@@ -51,9 +52,7 @@ export function FitnessRankSummary({
   const lines = bars.map((b) => ({
     key: b.key,
     label: b.label,
-    // Server-resolved fitness; `?? accuracy` only covers in-flight bars whose
-    // composite hasn't been served yet.
-    actual: b.composite ?? b.accuracy,
+    actual: resolveComposite(b.composite, b.accuracy),
     whatif: b.whatif,
   }));
   const rankActual = ranks(lines.map((l) => ({ key: l.key, v: l.actual })));

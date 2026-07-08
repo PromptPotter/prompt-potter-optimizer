@@ -26,6 +26,7 @@ from promptpotter.application.mask.record import MaskRecord
 from promptpotter.application.scoring.formula import compile_round_scorer
 from promptpotter.application.scoring.metrics import value_with_mask_applied
 from promptpotter.domain.cycle_paths import CycleDir
+from promptpotter.domain.rendering import display_fitness
 from promptpotter.domain.run_records import (
     UNATTRIBUTED_OPERATOR,
     ForkTrigger,
@@ -200,13 +201,16 @@ def _to_lineage_candidate(
     """Build one lineage row — the shared construction behind the completed-round
     and in-flight mappers. ``rank`` rides ``pos`` (the webapp re-derives the
     ``C{r}.{n}`` label from position); numeric fields are float-coerced or ``None``."""
+    _acc = float(accuracy) if isinstance(accuracy, int | float) else None
+    _comp = float(composite_fitness) if isinstance(composite_fitness, int | float) else None
     return CampaignLineageCandidate(
         candidate_id=candidate_id,
         label=label,
-        accuracy=float(accuracy) if isinstance(accuracy, int | float) else None,
-        composite_fitness=(
-            float(composite_fitness) if isinstance(composite_fitness, int | float) else None
-        ),
+        accuracy=_acc,
+        # Resolve the composite-or-accuracy rule server-side (the one `display_fitness`),
+        # so the wire carries a settled number and no client re-runs `?? accuracy`.
+        # None-tolerant on accuracy (a malformed/in-flight row may lack it).
+        composite_fitness=display_fitness(_comp, _acc) if _acc is not None else _comp,
         rank=pos,
         is_winner=is_winner,
         lens_value=_lens_value(evaluators, criterion),

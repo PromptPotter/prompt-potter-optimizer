@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.rendering import display_fitness
 from promptpotter.domain.results import DiagnosticRunRecord
 from promptpotter.infrastructure.store import archive_views
 from promptpotter.infrastructure.store.paths import REPO_ROOT
@@ -146,7 +147,9 @@ async def verify_candidate(
             f"{[c.get('label') for c in cand_scores]} — none match {label!r}."
         )
     source_campaign_accuracy = float(cand_score.get("accuracy") or 0.0)
-    source_campaign_composite = float(cand_score.get("composite_fitness") or 0.0)
+    source_campaign_composite = display_fitness(
+        cand_score.get("composite_fitness"), source_campaign_accuracy
+    )
     source_campaign_n = int(cand_score.get("scored_samples") or 0)
     source_candidate_id = str(cand_score.get("candidate_id") or "")
 
@@ -243,8 +246,10 @@ async def verify_candidate(
     )
 
     workspace_n = len(workspace_qms)
-    workspace_composite = float(workspace_scores.get("composite_fitness") or 0.0)
     workspace_accuracy = float(workspace_scores.get("accuracy") or 0.0)
+    workspace_composite = display_fitness(
+        workspace_scores.get("composite_fitness"), workspace_accuracy
+    )
     samples_added = max(0, workspace_n - len(measured_ids))
 
     record = DiagnosticRunRecord(

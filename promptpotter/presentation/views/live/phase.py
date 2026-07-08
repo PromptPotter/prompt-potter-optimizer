@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.rendering import round_winner_key
+from promptpotter.domain.rendering import display_fitness, round_winner_key
 from promptpotter.domain.results import is_round_winner
 from promptpotter.presentation.views.display import (
     BOLD,
@@ -64,7 +64,7 @@ def render_progress_table(rounds: list[dict[str, Any]], window: int = 8) -> str:
             rl = "0"
         else:
             rl = str(rd.get("round", "?"))
-        comp = rd.get("composite_fitness") if rd.get("composite_fitness") is not None else acc
+        comp = display_fitness(rd.get("composite_fitness"), acc)
         row = f"  {rl:<5s} {acc:>8.1%} {comp:>9.4f} {rolling:>12.1%}  {trend}"
         lines.append(_node_line(row))
 

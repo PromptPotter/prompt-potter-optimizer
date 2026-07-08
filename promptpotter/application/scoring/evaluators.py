@@ -8,6 +8,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.application.scoring.formula import extract_item_label
+from promptpotter.shared.composite import to_short_formula
 from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
 
 if TYPE_CHECKING:
@@ -511,5 +512,6 @@ def default_per_round_formula(schema: PipelineSchema) -> str:
 
 
 def default_per_round_formula_short(schema: PipelineSchema) -> str:
-    """Short form of the default formula — fits the 70-char live-render frame."""
-    return "acc"
+    """Short form of the default formula — derived from the full formula via the
+    shared short-code table (no hand-synced literal); fits the 70-char frame."""
+    return to_short_formula(default_per_round_formula(schema))

@@ -30,7 +30,6 @@ from promptpotter.application.scoring.metrics import (
     paired_fitness,
 )
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.rendering import round_winner_key as round_winner_key
 from promptpotter.domain.results import (
     CandidateProposal,
     RoundResult,
@@ -418,4 +417,4 @@ async def l1_score(
     return round_result, best_osp
 
 
-__all__ = ["is_leader_eligible", "l1_score", "round_winner_key"]
+__all__ = ["is_leader_eligible", "l1_score"]

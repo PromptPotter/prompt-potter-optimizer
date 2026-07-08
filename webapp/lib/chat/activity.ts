@@ -17,6 +17,7 @@
 // the per-sample running update all upsert to one row.
 
 import { candidateLabel } from "@/lib/candidate-label";
+import { resolveComposite } from "@/lib/fitness";
 
 // One outbound SSE frame. Mirrors `domain/projection_envelope.py::ProjectionEnvelope`.
 // `payload` is the underlying record's `model_dump` (so a record's own nested
@@ -65,16 +66,14 @@ function str(v: unknown): string | undefined {
 function num(v: unknown): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
 }
-function pct0(v: number | undefined): string | undefined {
+function pct0(v: number | null | undefined): string | undefined {
   return v == null ? undefined : `${(v * 100).toFixed(0)}%`;
 }
 
-// A candidate's subset-relative fitness as a %. `composite_fitness` is the
-// server-resolved fitness (equals accuracy when no formula); `?? accuracy` tolerates
-// records minted before it lands. Per-candidate rows only — round/origin headlines
-// read `cumulative_accuracy` (the header/trend basis) so the thread agrees.
+// A candidate's subset-relative fitness as a %. Per-candidate rows only — round/origin
+// headlines read `cumulative_accuracy` (the header/trend basis) so the thread agrees.
 function fitPct(rec: Record<string, unknown>): string | undefined {
-  return pct0(num(rec.composite_fitness) ?? num(rec.accuracy));
+  return pct0(resolveComposite(num(rec.composite_fitness), num(rec.accuracy)));
 }
 
 // `{node}` or `{node}·r{round}` — the same label shape `LiveDisplay` prints.
