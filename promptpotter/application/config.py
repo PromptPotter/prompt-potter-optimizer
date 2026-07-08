@@ -81,27 +81,18 @@ class EliminationMechanisms(BaseModel):
             "the round's best falls below `pobb_epsilon`. The main loser-elimination rule."
         ),
     )
-    deterministic_dominance: bool = Field(
+    margin_elimination: bool = Field(
         True,
         description=(
-            "Arms the paired-margin gate (folded with `equivalence_elimination` — "
-            "either toggle keeps it on): abort a candidate once it cannot, or "
-            "probably cannot, net `improvement_threshold` more hits than the seed. "
-            "The deterministic corner — remaining win opportunities < the net still "
-            "needed — fires under any ε."
-        ),
-    )
-    equivalence_elimination: bool = Field(
-        True,
-        description=(
-            "Arms the paired-margin gate (folded with `deterministic_dominance` — "
-            "either toggle keeps it on): abort a candidate once P(netting "
-            "`improvement_threshold` more hits than the seed) < `pobb_epsilon`, "
-            "where wins are counted ONLY on samples the seed missed (stratified — "
-            "a front-loaded block of seed-hit ties can't inflate the estimate). "
-            "Kills ties and regressors early: a candidate that can't clear the "
-            "adoption margin can never be crowned, so confirming it on the whole "
-            "panel is wasted spend."
+            "Arms the paired-margin gate: abort a candidate once it cannot, or probably "
+            "cannot, net `improvement_threshold` more hits than the seed. Two corners, one "
+            "gate — the deterministic one (remaining win opportunities < the net still "
+            "needed) fires under any ε; the probabilistic one fires when P(netting "
+            "`improvement_threshold` more hits) < `pobb_epsilon`, counting wins ONLY on "
+            "samples the seed missed (stratified — a front-loaded block of seed-hit ties "
+            "can't inflate the estimate). Kills ties and regressors early: a candidate that "
+            "can't clear the adoption margin can never be crowned, so confirming it on the "
+            "whole panel is wasted spend. Off = no margin gate, ε-stop only."
         ),
     )
     degradation_fatal_fastpath: bool = Field(

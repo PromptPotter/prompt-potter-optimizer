@@ -163,12 +163,18 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # It cannot ride the dataset file instead: L2 reaches it through ``fork_proposal``'s config
 # delta, and a dataset's ``optimizer.param_keys`` is not fork-overridable. A feature,
 # justified. Paid back immediately below.
+# then ``config_leaf_fields`` 39->38: subtraction. ``deterministic_dominance`` +
+# ``equivalence_elimination`` folded into one ``margin_elimination`` leaf. They were two
+# toggles ORed at a single call site into one ``PoBBConfig.margin_elimination`` -- two
+# names for one gate's two corners, never independently settable in any meaningful way,
+# and the code called them "legacy", a word ``domain/CLAUDE.md`` never sanctions. A named
+# concept subtracted, not relocated. Baseline falls; the rename knob is paid for.
 
 LEDGER_BASELINE = {
     "modules": 311,
     "init_files": 58,
     "reexport_shims": 45,
-    "config_leaf_fields": 39,
+    "config_leaf_fields": 38,
     "settings_env": 17,
     "settings_const": 16,
     "opt_search_point_fields": 27,

@@ -17,7 +17,7 @@ function draft(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
         selection: { per_round_resubset: true },
         elimination: {
           epsilon_elimination: true,
-          deterministic_dominance: true,
+          margin_elimination: true,
           degradation_fatal_fastpath: true,
           leader_lock_in: false,
         },
