@@ -38,6 +38,14 @@ collects everything else.
 - **Escalation flows via return value** (`QueryLoopResult.escalation_signal`),
   not exception. Use `graceful()` (`shared/errors.py`) where exceptions must
   escape.
+- **Schema field order IS generation order.** A response model's fields are
+  emitted left-to-right, each becoming context for the next; a `description=`
+  is prompt, not documentation (root `CLAUDE.md` forbids trimming them).
+  Put reasoning/evidence fields *above* the fields they justify — below, they
+  are structurally post-hoc. **Order and `description` are free to change
+  (nothing but the model reads them); field names, dot-paths, and `enum`
+  values are wire contract — parsers and validators key on them.** Concept:
+  `docs/concepts/structured-output.md`.
 - **String-keyed *call* dispatch is a defect** — it hides the caller→handler
   edge from `grep`, so "is this method live?" costs a multi-hop tour.
   Fix by template: key is internal → explicit `match` with literal calls;

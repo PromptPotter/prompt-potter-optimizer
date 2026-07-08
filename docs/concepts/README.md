@@ -27,6 +27,7 @@ CONTEXT and PLAN live on disk inside each round file — the loop's actual confi
 | [Scoring and memory](scoring-and-memory.md) | Traces are facts; scores are policy; the measurement archive |
 | [Campaign tree](campaign-tree.md) | Cycles, forks, and the sweep primitive |
 | [Nodes and pipelines](nodes-and-pipelines.md) | Backend pipeline node anatomy |
+| [Structured output](structured-output.md) | The schema is a second prompt — name, field order, `description`; shape-determinism ≠ content-determinism |
 | [Optimizer of the optimizer](optimizer-of-the-optimizer.md) | PromptPotter optimizing its own meta-prompts (M12) |
 | [Glossary](../glossary.md) | Domain vocabulary |
 | [Mid-round elimination (PoBB)](../methods/candidate-elimination.md) | "Search-only-with-evidence" in detail |

@@ -28,6 +28,8 @@ If a panel field speaks against a mutation, `l1_generate` does not propose it.
 
 Each emitted variant declares an `evidence_grounding: {field, citation}` naming the panel entry that justifies the mutation. `field ∈ EVIDENCE_GROUNDING_FIELDS`; `stall_exploration` is the escape hatch and is only valid when `escalation_panel.exploration_budget ∈ {normal, wide}`. Variants without a real citation fail the `evidence_grounding_present` behavior check (`validators/l1_behavior.py`) — surfaced in `review.md` and `round_NNNN.json`. The healing rule that converts this signal into an L2 `task_context` nudge is backlog — `docs/specs/roadmap.md` § Plus-backlog.
 
+**Field order is load-bearing — never reorder `L1Variant` alone.** `evidence_grounding` generates second, above `changes_description` *and* the `*_override` slots (`dispatch/schemas.py`), because fields generate in schema order: emitted after the mutation, a citation can only rationalize it. Three surfaces state that order and move together — the Pydantic model (the SoT), `l1_generate`'s `answer_format` prose, and the regenerated `datasets/_optimizer/pipeline.json::resolved_schemas` (`scripts/build_optimizer_schemas.py`). A schema that disagrees with its own prose teaches twice, contradictorily. See `docs/concepts/structured-output.md` § coordinates.
+
 Channel: `task_context` (L2-refined task framing) and `plan` (L3-set strategy) arrive on `OptSearchPoint` and surface alongside the panels — `l1_generate` is fan-in, reading both layers' outputs in the same round. Composed by `DispatchHub.fill` walking `opt_sp.memory.l1_layout` (l1_generate's per-node layout from `NODE_LAYOUTS`) over the `INJECTIONS` registry (`dispatch/hub/injections/registry.py`).
 
 **Reviewing an L1 round trace.** Load

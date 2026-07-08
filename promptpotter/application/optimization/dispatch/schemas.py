@@ -156,6 +156,14 @@ class L1Variant(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     variant_name: str
+    # FIELD ORDER IS GENERATION ORDER — evidence precedes every decision it justifies.
+    # `variant_name` is an identifier, not a choice, so it may lead. `changes_description`
+    # already names "the concrete change", so it IS a decision: emitted before the citation,
+    # the citation could only rationalise a mutation already committed to. Optional at parse
+    # time so a provider omitting it on one variant doesn't crash the round — the
+    # ``evidence_grounding_present`` behavior check is the canonical enforcement point and
+    # records missing/malformed entries as wounds without burning the LLM call.
+    evidence_grounding: VariantEvidenceGrounding | None = None
     changes_description: str
     pipeline_params_override: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
@@ -178,11 +186,6 @@ class L1Variant(BaseModel):
             "Pipeline-context strings; keys must be one of {upstream_context, downstream_context}."
         ),
     )
-    # Optional at parse time so providers that omit it on a single variant
-    # don't crash the entire round — the ``evidence_grounding_present`` behavior
-    # check is the canonical enforcement point and flags missing/malformed
-    # entries as wounds without burning the LLM call.
-    evidence_grounding: VariantEvidenceGrounding | None = None
 
 
 class L1GenerateOutput(BaseModel):
