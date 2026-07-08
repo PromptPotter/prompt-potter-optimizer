@@ -246,7 +246,7 @@ def validate_overrides(
             # JSON-schema node-name enum is advisory (``build_l1_output_schema`` emits
             # ``strict=False``, so a weakly-conformant provider slips a phantom key past
             # ``additionalProperties: false``). The phantom edit is stripped from the wire
-            # downstream (``_merge_pipeline_params`` drops nodes outside ``active_steps``),
+            # downstream (``merge_pipeline_params`` drops nodes outside ``active_steps``),
             # so recording it here ROUTES the signal without changing what runs — and it is
             # NON-FATAL (the reason-aware synthetic-0 gate in ``l1/score/candidate.py`` lets
             # the candidate's real edits score). It flows through the existing channel:

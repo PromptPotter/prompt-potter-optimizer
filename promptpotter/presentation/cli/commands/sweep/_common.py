@@ -29,25 +29,6 @@ if TYPE_CHECKING:
     from promptpotter.presentation.cli.session import SessionCtx
 
 
-def _sweep_early_exit_reason(stop_reason: str) -> str:
-    """Map ``StopReason`` → sweep-result ``early_exit_reason`` enum.
-
-    ``target_hit | max_rounds | spend_budget`` is the documented surface;
-    anything else (patience, interrupt, hard-cap) lands as the raw
-    stop_reason string so the operator sees why the sweep didn't bottom
-    out on one of the three intentional exits.
-    """
-    from promptpotter.domain.phases import StopReason
-
-    mapping = {
-        StopReason.TARGET_HIT.value: "target_hit",
-        StopReason.MAX_ROUNDS.value: "max_rounds",
-        StopReason.SPEND_BUDGET.value: "spend_budget",
-        StopReason.TOKEN_BUDGET.value: "token_budget",
-    }
-    return mapping.get(stop_reason, stop_reason)
-
-
 @dataclass
 class _Variant:
     """One optimizer-meta-prompt variant in a panel iteration."""

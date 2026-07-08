@@ -80,19 +80,6 @@ class AbReport:
         }
 
 
-def _merge_frontier(rounds: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Cumulative winner frontier — each round's winner ``results`` merged by sample_id (later
-    overwrites earlier). Mirrors ``Cycle.tracking.current_results``, which resume passes as the
-    election's origin floor for the divergence replay."""
-    by_sid: dict[Any, dict[str, Any]] = {}
-    for t in rounds:
-        for r in t.get("results") or []:
-            sid = r.get("sample_id")
-            if sid is not None:
-                by_sid[sid] = r
-    return list(by_sid.values())
-
-
 def ab_replay_cycle(
     campaign_store: CampaignStore,
     campaign_id: str,
@@ -105,11 +92,14 @@ def ab_replay_cycle(
     """Re-derive every recorded decision of *cycle_id* under the session's active engine +
     scorer; return all divergences. Deterministic, no LLM calls. ``n_min`` is the campaign's
     ``optimization.elimination_n_min`` — the ruler-warmth floor (see ``_calibrate_delta_ruler``);
-    ``enable_2pl`` is ``optimization.exploration.enable_2pl_graduation`` — the same 1PL/2PL
+    ``enable_2pl`` is ``optimization.enable_2pl_graduation`` — the same 1PL/2PL
     calibration gate the live cycle ran, so the reconstructed ruler matches its model."""
     # Lazy import: cycle.py is a sibling in this layer and pulls the whole loop; importing it
     # at module load would risk an import cycle through resume_and_fork/__init__.
-    from promptpotter.application.optimization.cycle import _calibrate_delta_ruler
+    from promptpotter.application.optimization.cycle import (
+        _calibrate_delta_ruler,
+        _merge_into_cumulative,
+    )
 
     sc = session.scoring
     scorer = sc.scorer
@@ -133,7 +123,12 @@ def ab_replay_cycle(
         for items in (t.get("all_candidate_results") or {}).values():
             _rescore(items)
 
-    origin_frontier = _merge_frontier(rounds)
+    # Cumulative winner frontier — the same sample-keyed fold the live loop keeps in
+    # ``Cycle.tracking.current_results`` (resume's election origin floor), so replay and live
+    # agree by construction rather than by two hand-copied merges.
+    origin_frontier: list[dict[str, Any]] = []
+    for t in rounds:
+        origin_frontier = _merge_into_cumulative(origin_frontier, t.get("results") or [])
     # Round 0 = the origin scored; its results calibrate the ruler, exactly as Cycle.start did.
     origin_results = rounds[0].get("results") or [] if rounds else []
     delta_scale, _ = _calibrate_delta_ruler(session, origin_results, n_min, enable_2pl=enable_2pl)

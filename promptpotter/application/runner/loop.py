@@ -43,8 +43,7 @@ from promptpotter.domain.phases import (
     StopReason,
     emit_phase,
 )
-from promptpotter.domain.results import CycleError
-from promptpotter.domain.run_records import PhaseRecord
+from promptpotter.domain.run_records import ErrorRecord, PhaseRecord
 from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.llm.models import emit_error_record
 
@@ -65,7 +64,7 @@ async def run_round_loop(
     diag: bool = False,
     halt_at_accuracy: float | None = None,
     budget_gate: BudgetGate | None = None,
-) -> tuple[StopReason, CycleError | None]:
+) -> tuple[StopReason, ErrorRecord | None]:
     """Round loop. sweep/diag halt after round 2. ``halt_at_accuracy`` → TARGET_HIT;
     ``budget_gate.tripped()`` → SPEND_BUDGET / TOKEN_BUDGET (omit ⇒ no budget halt).
 
@@ -244,13 +243,14 @@ async def run_round_loop(
         session.state.crash_traceback = tb
         message = str(exc) or type(exc).__name__
         kind = type(exc).__name__
-        emit_error_record(kind=kind, message=message, stop_reason="RENDER_ERROR", traceback=tb)
         logger.exception(
             "Optimization halted at round %d — an injection renderer failed. "
             "Fix the renderer and resume.",
             round_num,
         )
-        return StopReason.RENDER_ERROR, CycleError(kind=kind, message=message, traceback=tb)
+        return StopReason.RENDER_ERROR, emit_error_record(
+            kind=kind, message=message, stop_reason="RENDER_ERROR", traceback=tb
+        )
     except TimeoutError:
         # Optimizer LLM blew deadline twice (provider stalled mid-stream); plain ``resume`` re-fires.
         logger.warning(
@@ -265,9 +265,10 @@ async def run_round_loop(
         session.state.crash_traceback = tb
         message = str(exc) or type(exc).__name__
         kind = type(exc).__name__
-        emit_error_record(kind=kind, message=message, stop_reason="CRASHED", traceback=tb)
         logger.exception("Optimization crashed at round %d.", round_num)
-        return StopReason.CRASHED, CycleError(kind=kind, message=message, traceback=tb)
+        return StopReason.CRASHED, emit_error_record(
+            kind=kind, message=message, stop_reason="CRASHED", traceback=tb
+        )
 
 
 __all__ = ["HARD_CAP", "run_round_loop"]

@@ -1,11 +1,11 @@
 """Pure rendering + classification helpers shared by application + presentation.
 
-These four functions (plus their tightly-coupled private helpers + the
+These functions (plus their tightly-coupled private helpers + the
 ``ResultClassification`` dataclass) take plain dicts / scalars and return text or
 a verdict — no I/O, no orchestration state. They live in ``domain/`` so the
 display formatters in ``presentation/views/`` can render rounds without importing
-``application/`` (the layer rule, both directions). Their original application
-homes re-export them so existing optimizer-side callers don't churn.
+``application/`` (the layer rule, both directions). This module is the single home:
+callers import from here directly.
 """
 
 from __future__ import annotations

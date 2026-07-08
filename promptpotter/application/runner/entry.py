@@ -38,8 +38,14 @@ from promptpotter.application.runner.loop import run_round_loop
 from promptpotter.application.runner.termination import BudgetGate
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.domain.phases import StopReason
-from promptpotter.domain.results import CycleError, CycleResult, CycleSpend
-from promptpotter.domain.run_records import CycleSeed, ForkSpec, LimitOverrides, RebaseRequest
+from promptpotter.domain.results import CycleResult, CycleSpend
+from promptpotter.domain.run_records import (
+    CycleSeed,
+    ErrorRecord,
+    ForkSpec,
+    LimitOverrides,
+    RebaseRequest,
+)
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import ScoringSpec
 from promptpotter.domain.search_point import TaskDecomposition
@@ -135,9 +141,9 @@ def _apply_limit_overrides(
     to every reader (loop ``max_rounds`` / patience, L1 ``pobb_epsilon``, the
     per-round subset selection, the ``INIT.enter`` display event). The reconciled
     ``spend_budget_usd`` also becomes the spend-cap probe's initial ceiling
-    (``change-spend-budget`` can still move it at runtime). Selection-policy
-    overrides (``per_round_resubset`` / ``online_reorder``) ride the nested
-    ``mechanisms.selection`` so a fork can A/B a behaviour knob in isolation."""
+    (``change-spend-budget`` can still move it at runtime). The selection-policy
+    override (``per_round_resubset``) rides the nested ``mechanisms.selection``
+    so a fork can A/B a behaviour knob in isolation."""
     opt_updates: dict[str, Any] = {
         k: v
         for k, v in {
@@ -155,7 +161,6 @@ def _apply_limit_overrides(
         k: v
         for k, v in {
             "per_round_resubset": limits.per_round_resubset,
-            "online_reorder": limits.online_reorder,
         }.items()
         if v is not None
     }
@@ -292,7 +297,7 @@ def _build_cycle_result(
     session: Session,
     *,
     stop_reason: StopReason,
-    cycle_error: CycleError | None,
+    cycle_error: ErrorRecord | None,
     started_at: str,
     finished_at: str,
     spend: CycleSpend | None,
@@ -494,19 +499,19 @@ async def _run_single_cycle(
         # Operator-recoverable; fix is ``--fork-on-divergence``.
         message = str(exc) or type(exc).__name__
         kind = type(exc).__name__
-        emit_error_record(kind=kind, message=message, stop_reason="DIVERGED")
         logger.warning("Resume halted on divergence:\n%s", exc)
         stop_reason = StopReason.DIVERGED
-        cycle_error = CycleError(kind=kind, message=message)
+        cycle_error = emit_error_record(kind=kind, message=message, stop_reason="DIVERGED")
     except Exception as exc:
         tb = traceback.format_exc()
         session.state.crash_traceback = tb
         message = str(exc) or type(exc).__name__
         kind = type(exc).__name__
-        emit_error_record(kind=kind, message=message, stop_reason="CRASHED", traceback=tb)
         logger.exception("Optimization crashed before round loop entered.")
         stop_reason = StopReason.CRASHED
-        cycle_error = CycleError(kind=kind, message=message, traceback=tb)
+        cycle_error = emit_error_record(
+            kind=kind, message=message, stop_reason="CRASHED", traceback=tb
+        )
 
     finished_at = utcnow_iso()
     cycle_result = _build_cycle_result(

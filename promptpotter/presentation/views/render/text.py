@@ -22,7 +22,7 @@ from promptpotter.application.views.view_models import (
     RoundCompleteView,
     RoundStartView,
 )
-from promptpotter.domain.rendering import display_fitness
+from promptpotter.domain.rendering import round_winner_key
 from promptpotter.presentation.views.display import (
     BOLD,
     CYAN,
@@ -126,7 +126,7 @@ def _render_round_complete(v: RoundCompleteView) -> str:
             f"{s.label}={s.accuracy:.1%}{' (aborted)' if s.escalation_aborted else ''}"
             for s in sorted(
                 v.scores,
-                key=lambda s: (display_fitness(s.composite_fitness, s.accuracy), s.accuracy),
+                key=lambda s: round_winner_key(s.composite_fitness, s.accuracy),
                 reverse=True,
             )
         ]

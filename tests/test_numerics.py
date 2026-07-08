@@ -46,7 +46,6 @@ from promptpotter.application.scoring.evaluators import all_evaluators, material
 from promptpotter.application.scoring.formula import (
     ScoringFormulaError,
     compile_scorer,
-    extract_display_answer,
     extract_item_label,
 )
 from promptpotter.application.scoring.formula.matchers import (
@@ -65,7 +64,7 @@ from promptpotter.domain.pipeline_schema import (
     PipelineNode,
     PipelineSchema,
 )
-from promptpotter.domain.rendering import display_fitness
+from promptpotter.domain.rendering import display_fitness, extract_display_answer
 from promptpotter.domain.sample import Sample
 from promptpotter.shared import extract_gsm8k_number
 from promptpotter.shared.statistics import mean_ci, wilson_ci
@@ -1064,7 +1063,7 @@ def test_classify_result_routes_refusal_to_infra() -> None:
     the optimizer can't propose mitigations (different model, rephrase) for
     queries where the model literally refuses to engage.
     """
-    from promptpotter.application.optimization.pobb.elimination import classify_result
+    from promptpotter.domain.rendering import classify_result
 
     cases_route_to_infra = [
         "I'm sorry, but I cannot solve this problem.",
@@ -1100,7 +1099,7 @@ def test_classify_result_routes_structural_warning_to_fatal() -> None:
     grades it structural-critical off the same stamped field. A transient-stamped code
     stays advisory-only — NOT deprecated, since the measurement is still valid. An
     unstamped warning is NOT routed fatal (no guessing)."""
-    from promptpotter.application.optimization.pobb.elimination import classify_result
+    from promptpotter.domain.rendering import classify_result
 
     structural = classify_result(
         {

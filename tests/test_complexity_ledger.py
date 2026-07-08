@@ -122,6 +122,12 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # is one pure function. Net ≈ −190 LOC in application code. config_leaf_fields
 # unchanged: online_reorder/dominance/equivalence stay on-disk (inert / folded)
 # pending the held config-surface-shrink pass.
+# 2026-07-08 config-surface shrink: ``config_leaf_fields`` 39->38 — deleted the
+# INERT ``SelectionMechanisms.online_reorder`` toggle end-to-end (field + the
+# LimitOverrides fork-delta twin + its dead-predicate ``selection_basis_pair``
+# coupling + estimand entry + wire schema + fork sel_updates). The within-round
+# order is always the deterministic shared ``build_round_order``; the online
+# per-sample re-rank it toggled was already deleted. Subtraction, baseline falls.
 # then ``modules`` 300->309 / ``init_files`` 54->58 / ``reexport_shims`` 41->45:
 # the L4 Lab subsystem (statistically-rigorous L4). New packages
 # ``application/meta_champion`` (reduce the pp-self corpus to a ranked champion
@@ -152,7 +158,7 @@ LEDGER_BASELINE = {
     "modules": 311,
     "init_files": 58,
     "reexport_shims": 45,
-    "config_leaf_fields": 39,
+    "config_leaf_fields": 38,
     "settings_env": 17,
     "settings_const": 16,
     "opt_search_point_fields": 27,

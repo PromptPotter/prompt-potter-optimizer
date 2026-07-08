@@ -29,30 +29,6 @@ def wilson_ci(hits: int, total: int, alpha: float = 0.05) -> tuple[float, float]
     return (max(0.0, center - margin), min(1.0, center + margin))
 
 
-def proportion_test(
-    hits_a: int,
-    total_a: int,
-    hits_b: int,
-    total_b: int,
-) -> float:
-    """Two-proportion z-test p-value (two-sided).
-
-    Returns p-value, or 1.0 when the test is degenerate.
-    """
-    if total_a == 0 or total_b == 0:
-        return 1.0
-
-    from scipy.stats import norm
-
-    p_pool = (hits_a + hits_b) / (total_a + total_b)
-    se = math.sqrt(p_pool * (1 - p_pool) * (1 / total_a + 1 / total_b))
-    if se < 1e-12:
-        return 1.0
-
-    z = (hits_a / total_a - hits_b / total_b) / se
-    return float(2 * norm.sf(abs(z)))
-
-
 def min_detectable_effect(n: int, alpha: float = 0.05, power: float = 0.8) -> float:
     """Minimum detectable effect size for a given sample size.
 
@@ -136,6 +112,5 @@ __all__ = [
     "mean_ci",
     "min_detectable_effect",
     "paired_diff_posterior",
-    "proportion_test",
     "wilson_ci",
 ]

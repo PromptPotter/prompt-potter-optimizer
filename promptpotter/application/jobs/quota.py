@@ -65,12 +65,6 @@ def _consume_rate_token(user_id: str) -> bool:
         return True
 
 
-def reset_rate_buckets() -> None:
-    """Test helper — clear the module-scope rate-limiter state."""
-    with _rate_lock:
-        _rate_buckets.clear()
-
-
 def check_launch_quotas(
     *,
     user: User,
@@ -148,5 +142,4 @@ __all__ = [
     "QuotaExceededError",
     "check_launch_quotas",
     "effective_spend_cap_usd",
-    "reset_rate_buckets",
 ]

@@ -1909,8 +1909,8 @@ components:
         never mutates the parent's frozen config. Two kinds of knob ride here:
         (1) run limits (`max_rounds`/`spend_budget_usd`/`token_budget`/patiences/
         `pobb_epsilon`) — ABSOLUTE values the reconcile dialog re-sets (defaults to
-        the parent's remaining, e.g. "3 of 6 rounds left"); (2) selection-policy
-        toggles (`per_round_resubset`/`online_reorder`) → the nested
+        the parent's remaining, e.g. "3 of 6 rounds left"); (2) the selection-policy
+        toggle (`per_round_resubset`) → the nested
         `mechanisms.selection`, so a fork-at-offset-0 can A/B a behaviour knob in
         isolation without touching the global default or the parent cycle. (Schema
         name kept for on-disk seed-compat; it is the whole OptimizationConfig
@@ -1957,12 +1957,6 @@ components:
             Re-pick the most-informative scoring subset every round (adaptive
             Rasch selection) for this fork. `null` inherits the parent. Safe to
             A/B now that every cross-round comparator measures on one fixed θ ruler.
-        online_reorder:
-          type: boolean
-          nullable: true
-          description: |
-            Re-rank unscored samples after every measurement (online adaptive
-            queue) for this fork. `null` inherits the parent.
 
     DeleteCyclePayload:
       $ref: '#/components/schemas/CycleRef'

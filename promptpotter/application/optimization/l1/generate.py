@@ -207,10 +207,10 @@ async def l1_generate(
         # absent from the active schema (hallucinated) is NOT pre-filtered here: it flows to
         # the one validation producer (``validate_overrides`` via ``parse_population``), which
         # records it as a non-fatal ``hallucinated_node`` wound (routed to l1_wounds +
-        # validation_failure_rate), and ``_merge_pipeline_params`` strips it from the wire.
-        prompt_changes = dict(v.prompt_fields_override or {})
-        tc_changes = dict(v.task_context_override or {})
-        pipeline_params_override = v.pipeline_params_override or {}
+        # validation_failure_rate), and ``merge_pipeline_params`` strips it from the wire.
+        prompt_changes = dict(v.prompt_fields_override)
+        tc_changes = dict(v.task_context_override)
+        pipeline_params_override = v.pipeline_params_override
         # Override validation is deferred to parse_population — one producer of truth.
         evidence = _parse_evidence_grounding(v.evidence_grounding)
         child = opt_sp.mutate(

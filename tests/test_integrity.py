@@ -321,7 +321,7 @@ def test_inner_narrative_carries_evidence_within_budget() -> None:
             origin_level=0.458,
             round_discovered_levels=levels,
             winner_prompt_fields={},
-            stop_reason="MAX_ROUNDS",
+            stop_reason="max_rounds",
             started_at="t0",
             finished_at="t1",
         )

@@ -10,7 +10,6 @@ resolving the candidate off disk, scoring it, and assembling the
 
 from __future__ import annotations
 
-import copy
 import logging
 import random
 from collections.abc import Callable
@@ -55,17 +54,6 @@ class VerifyOutcome:
     cache_replays: int = 0
 
 
-def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    """Recursive dict merge — *overlay* wins; lists / scalars replaced wholesale."""
-    out = copy.deepcopy(base)
-    for k, v in overlay.items():
-        if isinstance(v, dict) and isinstance(out.get(k), dict):
-            out[k] = _deep_merge(out[k], v)
-        else:
-            out[k] = copy.deepcopy(v)
-    return out
-
-
 def _archive_measurement_to_qm(m: Any) -> QueryMeasurement:
     """Project a :class:`Measurement` archive row into a :class:`QueryMeasurement` dict."""
     return cast(
@@ -107,6 +95,7 @@ async def verify_candidate(
     from promptpotter.application.config import (
         load_campaign_config as validate_campaign_config,
     )
+    from promptpotter.application.optimization.l1.population import merge_pipeline_params
     from promptpotter.application.scoring.formula import rescore_results, split_scoring_block
     from promptpotter.application.scoring.metrics import compute_composite_fitness
     from promptpotter.application.scoring.search_point_scorer import score_search_point
@@ -177,14 +166,14 @@ async def verify_candidate(
         source=f"verify:{campaign_id}:{label}",
     )
 
-    effective_pipeline_params = _deep_merge(pipeline_params, pp_override)
     schema = session.pipeline_schema
-    jsp = osp.to_job_search_point(effective_pipeline_params, schema=schema)
     if schema is None:
         raise VerifyError("pipeline schema unavailable; cannot resolve candidate config.")
-    node_configs = schema.node_configs(effective_pipeline_params or {})
+    effective_pipeline_params = merge_pipeline_params(pipeline_params, pp_override, schema) or {}
+    jsp = osp.to_job_search_point(effective_pipeline_params, schema=schema)
+    node_configs = schema.node_configs(effective_pipeline_params)
     predicate: dict[str, dict[str, Any]] = dict(node_configs)
-    config_hash = schema.sp_hash(effective_pipeline_params or {})
+    config_hash = schema.sp_hash(effective_pipeline_params)
 
     # Find samples this exact config has not yet been measured on.
     prior = archive_views.measurements_for_config(

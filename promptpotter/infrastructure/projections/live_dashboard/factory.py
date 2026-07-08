@@ -13,6 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from promptpotter.domain.results import best_round_by_cumulative_accuracy
 from promptpotter.infrastructure.store.io import read_json_tolerant
 
 
@@ -46,9 +47,9 @@ def resolve_resume_state(
     round-pointer self-heal. Origin rides ``rounds[0]`` like any round, so the
     seeded ``rounds`` already carries it — no separate origin reconciliation.
 
-    ``best`` is re-derived from the SURVIVING trajectory — the max over
-    ``rounds[].cumulative_accuracy``, the same derivation as the cycle index's
-    ``_apply_best`` — never trusted from the prior scalar. The live writer's
+    ``best`` is re-derived from the SURVIVING trajectory via the shared
+    ``best_round_by_cumulative_accuracy`` (the cycle index's ``_apply_best`` rides the
+    same helper) — never trusted from the prior scalar. The live writer's
     rolling max is monotonic, so a stale high-water from a rewound-away round
     would otherwise survive forever and disagree with
     ``index.json::best_accuracy``. Rounds ``>= resumed_from_round`` are about
@@ -69,9 +70,7 @@ def resolve_resume_state(
         if isinstance(r, dict)
         and (resumed_from_round is None or int(r.get("round") or 0) < resumed_from_round)
     ]
-    resume_from["best"] = max(
-        (float(r.get("cumulative_accuracy") or 0.0) for r in surviving), default=0.0
-    )
+    resume_from["best"], _ = best_round_by_cumulative_accuracy(surviving)
     return resume_from
 
 

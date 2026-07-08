@@ -11,7 +11,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.opt_search_point import node_config_items
-from promptpotter.domain.rendering import display_fitness
+from promptpotter.domain.rendering import display_fitness, round_winner_key
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -20,14 +20,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
-
-
-def fmt_pct(value: Any) -> str:
-    """Render a fraction in [0, 1] as ``"XX.X%"``; non-numerics → ``"-"``."""
-    try:
-        return f"{float(value):.1%}"
-    except (TypeError, ValueError):
-        return "-"
 
 
 def fmt_ci(lower: float, upper: float) -> str:
@@ -237,7 +229,7 @@ def _scoreboard(
 
     ranked = sorted(
         scored,
-        key=lambda s: (display_fitness(s.composite_fitness, s.accuracy), s.accuracy),
+        key=lambda s: round_winner_key(s.composite_fitness, s.accuracy),
         reverse=True,
     )
     w = 78
@@ -331,12 +323,11 @@ def _step_tag(step_name: str | None) -> str:
 # Live-display formatting helpers shared across views.
 # Markdown/box helpers consumed by ``live.py``, ``reports.py``, and the
 # notebook ↔ Claude exchange channel; plus the ``fmt_*`` numeric formatters
-# (``fmt_pct`` / ``fmt_ci`` / ``fmt_pvalue``) — single import surface.
+# (``fmt_ci`` / ``fmt_pvalue``) — single import surface.
 # ===========================================================================
 
 __all__ = [
     "fmt_ci",
-    "fmt_pct",
     "fmt_pvalue",
     "render_pipeline_overrides",
 ]

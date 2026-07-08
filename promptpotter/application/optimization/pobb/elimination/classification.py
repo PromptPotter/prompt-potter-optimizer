@@ -29,8 +29,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.rendering import ResultClassification as ResultClassification
-from promptpotter.domain.rendering import classify_result as classify_result
+from promptpotter.domain.rendering import classify_result
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -100,8 +99,6 @@ def is_deprecated(result: Mapping[str, Any]) -> bool:
 
 
 __all__ = [
-    "ResultClassification",
-    "classify_result",
     "extract_warning_types",
     "get_ranked_items",
     "is_deprecated",

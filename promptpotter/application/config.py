@@ -31,7 +31,6 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "CampaignConfig",
-    "ExplorationConfig",
     "OptimizationConfig",
     "PreflightWarning",
     "apply_inherited_overlay",
@@ -41,32 +40,6 @@ __all__ = [
     "resolve_pipeline_config_params",
     "run_preflight_checks",
 ]
-
-
-class ExplorationConfig(BaseModel):
-    """Round-level Rasch IRT — one posterior fit per round drives `select_round_subset` + the heatmap."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    seed_heatmap_from_archive: bool = Field(
-        False,
-        description=(
-            "Round-end hard-sample artifact's Rasch fit folds in archive "
-            "observations. δ_s ordering on the heatmap X-axis reflects "
-            "cross-cycle evidence."
-        ),
-    )
-    enable_2pl_graduation: bool = Field(
-        True,
-        description=(
-            "Allow the per-cycle difficulty ruler to graduate from 1PL (difficulty "
-            "δ only) to 2PL (per-sample discrimination aₛ too) when a data-rich, "
-            "genuinely-discriminating dataset wins held-out cross-validation. The "
-            "switch is gated — cold/non-discriminating datasets stay 1PL — so this "
-            "only ever changes the ruler where 2PL provably fits better out-of-sample; "
-            "it can never regress a dataset. Off → always 1PL (the slice-2 behaviour)."
-        ),
-    )
 
 
 class SelectionMechanisms(BaseModel):
@@ -89,18 +62,6 @@ class SelectionMechanisms(BaseModel):
             "warm the ruler fastest; it thaws to adaptive once the ruler locks. Off → "
             "the campaign-start selection (deterministic bank prefix) for every round, "
             "the whole campaign."
-        ),
-    )
-    online_reorder: bool = Field(
-        True,
-        description=(
-            "INERT — retained on-disk pending the config-surface shrink pass. The "
-            "within-round order is always the deterministic shared round order "
-            "(`build_round_order`: seed-miss win-opportunity samples first, a "
-            "seed-hit regression probe every 4th slot, identical across "
-            "candidates). The online per-sample re-rank it used to toggle is "
-            "deleted — it front-loaded the seed's hit set and blinded the "
-            "elimination gates."
         ),
     )
 
@@ -374,7 +335,27 @@ class OptimizationConfig(BaseModel):
         ),
     )
 
-    exploration: ExplorationConfig = Field(default_factory=ExplorationConfig)
+    # Round-level Rasch IRT — one posterior fit per round drives `select_round_subset`
+    # + the heatmap.
+    seed_heatmap_from_archive: bool = Field(
+        False,
+        description=(
+            "Round-end hard-sample artifact's Rasch fit folds in archive "
+            "observations. δ_s ordering on the heatmap X-axis reflects "
+            "cross-cycle evidence."
+        ),
+    )
+    enable_2pl_graduation: bool = Field(
+        True,
+        description=(
+            "Allow the per-cycle difficulty ruler to graduate from 1PL (difficulty "
+            "δ only) to 2PL (per-sample discrimination aₛ too) when a data-rich, "
+            "genuinely-discriminating dataset wins held-out cross-validation. The "
+            "switch is gated — cold/non-discriminating datasets stay 1PL — so this "
+            "only ever changes the ruler where 2PL provably fits better out-of-sample; "
+            "it can never regress a dataset. Off → always 1PL (the slice-2 behaviour)."
+        ),
+    )
     mechanisms: MechanismConfig = Field(default_factory=MechanismConfig)
 
 
@@ -585,10 +566,10 @@ def apply_node_overlay(base: dict[str, Any], overlay: Mapping[str, Any]) -> dict
     stacks dataset < campaign-override < cycle-seed.
 
     Shared by the dataset/override resolution here, the cycle-seed overlay
-    (``runner/entry.py``) and the L1 candidate override (``optimization/l1
-    /population.py`` — which deep-copies its base and drops inactive nodes AROUND
-    this call). A RECURSIVE merge (``cli/commands/verify.py::_deep_merge``) is a
-    different operation and stays separate."""
+    (``runner/entry.py``) and the candidate-override merge
+    (``optimization/l1/population.py::merge_pipeline_params`` — which deep-copies its
+    base and drops inactive nodes AROUND this call, and is itself the single merge the
+    live loop and the ``verify``/``ab`` replay verbs both ride)."""
     merged = dict(base)
     for node, cfg in overlay.items():
         existing = merged.get(node)

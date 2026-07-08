@@ -5,13 +5,13 @@ from __future__ import annotations
 import argparse
 import logging
 
+from promptpotter.domain.phases import StopReason
 from promptpotter.presentation.cli.commands._shared import _DIVERGENCE_HINT, CommandResult
 from promptpotter.presentation.cli.commands.sweep._common import (
     _parse_variants,
     _resolve_template,
     _run_sweep_optimize,
     _setup_sweep_cycle,
-    _sweep_early_exit_reason,
     _variant_id_fields,
 )
 from promptpotter.presentation.cli.session import load_session
@@ -94,8 +94,8 @@ async def _cmd_sweep_time_to(args: argparse.Namespace) -> CommandResult:
         )
 
     spend_usd = observers.dashboard.spend_total_used_usd
-    early_exit = _sweep_early_exit_reason(cycle_result.stop_reason)
-    target_hit = early_exit == "target_hit"
+    early_exit = cycle_result.stop_reason
+    target_hit = early_exit == StopReason.TARGET_HIT
 
     result = build_sweep_result(
         verb="time-to",

@@ -123,7 +123,7 @@ class OpenAICompatibleClient(LLMClientBase):
             if reservation is not None:
                 reservation.close(result.usage["total_tokens"])
             return result
-        response, content, validation_err = result
+        response, content, validation_err, parsed = result
         schema_repair_attempts = 0
         # The failed first attempt still burned tokens; carry them so the returned usage
         # meters BOTH round-trips (emit_token_usage otherwise under-reports a repaired call
@@ -184,7 +184,7 @@ class OpenAICompatibleClient(LLMClientBase):
                 if reservation is not None:
                     reservation.close(result.usage["total_tokens"])
                 return result
-            response, content, validation_err = result
+            response, content, validation_err, parsed = result
             if validation_err is not None:
                 content_len = len(content.strip())
                 cause = (
@@ -206,9 +206,6 @@ class OpenAICompatibleClient(LLMClientBase):
                     raw=content, error=validation_err, attempts=2
                 ) from validation_err
 
-        parsed = parse_response_content(
-            content, response_model, response_schema, self._provider_name
-        )
         usage = response.usage
         if reservation is not None and usage is not None:
             reservation.close(usage.total_tokens)
@@ -237,12 +234,14 @@ class OpenAICompatibleClient(LLMClientBase):
         request_params: dict[str, Any],
         response_model: type[BaseModel] | None,
         response_schema: dict[str, Any] | None,
-    ) -> LLMResponse | tuple[Any, str, ValidationError | None]:
-        """One provider round-trip + parse pre-flight.
+    ) -> LLMResponse | tuple[Any, str, ValidationError | None, Any]:
+        """One provider round-trip + parse.
 
         Returns either an :class:`LLMResponse` (Groq ``json_validate_failed``
-        salvage — already validated) or ``(response, content, validation_err)``
-        — caller decides retry vs raise on non-None ``validation_err``.
+        salvage — already validated) or ``(response, content, validation_err,
+        parsed)`` — caller decides retry vs raise on non-None ``validation_err``
+        and consumes ``parsed`` directly on success (parsed once here, never
+        re-validated by the caller).
 
         SDK ``max_retries`` covers 408/409/429/5xx + Retry-After; this layer
         only intercepts request-too-large, 404 model-not-found, and Groq's 400
@@ -268,13 +267,13 @@ class OpenAICompatibleClient(LLMClientBase):
             raise ValueError(f"{self._provider_name} returned empty choices")
         content = response.choices[0].message.content or ""
 
-        if response_model is None:
-            return response, content, None
         try:
-            parse_response_content(content, response_model, response_schema, self._provider_name)
+            parsed = parse_response_content(
+                content, response_model, response_schema, self._provider_name
+            )
         except ValidationError as err:
-            return response, content, err
-        return response, content, None
+            return response, content, err, None
+        return response, content, None, parsed
 
     def _try_recover_from_chat_error(
         self,

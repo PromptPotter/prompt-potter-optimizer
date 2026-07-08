@@ -10,13 +10,13 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.intelligence.exploration import graded_response
 from promptpotter.application.optimization.pobb.elimination.classification import (
-    classify_result,
     extract_warning_types,
     is_deprecated,
 )
 from promptpotter.application.scoring.metrics import binom_sf, elimination_p_best
 from promptpotter.config.settings import POBB_DEFAULT_EPSILON
 from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
+from promptpotter.domain.rendering import classify_result
 from promptpotter.domain.validators import StopRule
 from promptpotter.shared.errors import is_error_result
 

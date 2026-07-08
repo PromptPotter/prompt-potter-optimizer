@@ -1,5 +1,6 @@
 import { type BarSlot } from "./FitnessChart";
 import { resolveComposite } from "@/lib/fitness";
+import { fmtNum } from "@/lib/format";
 
 // 1-based rank of each line by value descending; lines with a null value
 // are dropped (unranked).
@@ -71,7 +72,6 @@ export function FitnessRankSummary({
     else flat += 1;
   }
   const topSwap = wA != null && wW != null && wA !== wW;
-  const fmt = (v: number | null) => (v == null ? "—" : v.toFixed(3));
   return (
     <>
       <div>
@@ -92,7 +92,7 @@ export function FitnessRankSummary({
           return (
             <span key={l.key}>
               {i > 0 && " · "}
-              {l.label} {fmt(l.actual)}→{fmt(l.whatif)} {arrow}
+              {l.label} {fmtNum(l.actual, 3)}→{fmtNum(l.whatif, 3)} {arrow}
             </span>
           );
         })}

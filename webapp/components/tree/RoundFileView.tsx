@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { Badge, CardFrame } from "@/components/ui";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
+import { fmtNum, fmtPct1 } from "@/lib/format";
 
 interface ScoreboardEntry {
   rank?: number;
@@ -42,16 +43,6 @@ interface Props {
   raw: string;
 }
 
-function pct(n: number | undefined): string {
-  if (typeof n !== "number" || !isFinite(n)) return "—";
-  return `${(n * 100).toFixed(1)}%`;
-}
-
-function num(n: number | undefined, digits = 3): string {
-  if (typeof n !== "number" || !isFinite(n)) return "—";
-  return n.toFixed(digits);
-}
-
 export function RoundFileView({ doc, raw }: Props) {
   const [showRaw, setShowRaw] = useState(false);
   const results = doc.results ?? [];
@@ -65,10 +56,10 @@ export function RoundFileView({ doc, raw }: Props) {
       <div className="round-file-summary">
         <div className="round-file-summary-row">
           <Badge>round {doc.round ?? "—"}</Badge>
-          <span>accuracy {pct(doc.accuracy)} {typeof doc.origin_accuracy === "number" && (<span style={{ color: "var(--color-text-tertiary)" }}>(origin {pct(doc.origin_accuracy)})</span>)}</span>
-          <span>composite {num(doc.composite_fitness)}</span>
+          <span>accuracy {fmtPct1(doc.accuracy)} {typeof doc.origin_accuracy === "number" && (<span style={{ color: "var(--color-text-tertiary)" }}>(origin {fmtPct1(doc.origin_accuracy)})</span>)}</span>
+          <span>composite {fmtNum(doc.composite_fitness)}</span>
           <span>{hits}/{total} hits</span>
-          {typeof doc.p_value === "number" && <span>p {num(doc.p_value, 3)}</span>}
+          {typeof doc.p_value === "number" && <span>p {fmtNum(doc.p_value, 3)}</span>}
           {doc.improved ? <span className="pass">improved</span> : <span style={{ color: "var(--color-text-tertiary)" }}>no improvement</span>}
         </div>
       </div>
@@ -98,8 +89,8 @@ export function RoundFileView({ doc, raw }: Props) {
                     <td style={{ maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.changes_description}>
                       {s.changes_description || s.candidate_id || "—"}
                     </td>
-                    <td>{pct(s.accuracy)}</td>
-                    <td>{num(s.composite_fitness)}</td>
+                    <td>{fmtPct1(s.accuracy)}</td>
+                    <td>{fmtNum(s.composite_fitness)}</td>
                     <td>{s.hits ?? "—"}/{s.total ?? "—"}</td>
                     <td>{s.is_winner ? <span className="pass">win</span> : ""}</td>
                   </tr>

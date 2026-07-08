@@ -367,10 +367,10 @@ class LimitOverrides(BaseModel):
     - **Run limits** (`max_rounds` / `spend_budget_usd` / `token_budget` /
       patiences / `pobb_epsilon`) — absolute values the fork-time reconcile
       dialog re-sets ("3 of 6 rounds left" → confirm the fork's own ceiling).
-    - **Selection policy** (`per_round_resubset` / `online_reorder`) — the
-      `mechanisms.selection` toggles, so a fork-at-offset-0 can A/B a behaviour
-      knob (the operator's "behaviour-knob change → sibling cycle" workflow)
-      without touching the global default or the parent cycle.
+    - **Selection policy** (`per_round_resubset`) — the `mechanisms.selection`
+      toggle, so a fork-at-offset-0 can A/B a behaviour knob (the operator's
+      "behaviour-knob change → sibling cycle" workflow) without touching the
+      global default or the parent cycle.
 
     Domain twin of the `LimitOverrides` wire schema. (Name kept for on-disk
     seed-compat — ~live `.overrides/seed.json` files key on it; the model is
@@ -386,7 +386,6 @@ class LimitOverrides(BaseModel):
     l3_patience: int | None = None
     pobb_epsilon: float | None = None
     per_round_resubset: bool | None = None
-    online_reorder: bool | None = None
 
 
 class CycleSeed(BaseModel):

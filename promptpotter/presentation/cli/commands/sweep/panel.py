@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.domain.phases import StopReason
 from promptpotter.presentation.cli.commands._shared import (
     _DIVERGENCE_HINT,
     CommandResult,
@@ -160,7 +161,7 @@ def _variant_to_result(
     # partial panel cut mid-candidate. Rendering it as r1=0.000 / $0.0000 falsely
     # ranks the variant as a loser and hides the partial spend. Mark both
     # as None so the print loop shows ``incomplete``.
-    interrupted = cycle_result.stop_reason == "paused"
+    interrupted = cycle_result.stop_reason == StopReason.PAUSED
     cost_usd: float | None = None if interrupted else spend_usd_raw
     if not rounds:
         return build_sweep_result(

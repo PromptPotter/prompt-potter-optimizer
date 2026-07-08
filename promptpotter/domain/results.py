@@ -13,8 +13,9 @@ from promptpotter.domain.escalation_signals import (
 )
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.outer_verdict import OuterVerdict
+from promptpotter.domain.phases import StopReason
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
-from promptpotter.domain.run_records import DecisionRecord
+from promptpotter.domain.run_records import DecisionRecord, ErrorRecord
 
 __all__ = [
     "CandidateProposal",
@@ -34,6 +35,7 @@ __all__ = [
     "ScoredCandidate",
     "SweepBatchResult",
     "WarningDict",
+    "best_round_by_cumulative_accuracy",
     "candidate_label",
     "is_round_winner",
 ]
@@ -99,6 +101,24 @@ def candidate_label(round_num: int, idx: int) -> str:
     if round_num == 0:
         return "C0"
     return f"C{round_num}.{idx + 1}"
+
+
+def best_round_by_cumulative_accuracy(
+    rounds: list[dict[str, Any]],
+) -> tuple[float, int | None]:
+    """Highest full-population ``cumulative_accuracy`` across ``rounds`` → ``(accuracy, round)``.
+    Ties keep the earliest round (``max`` returns the first). Empty ⇒ ``(0.0, None)``.
+
+    Sole definition of the headline-best derivation — the cycle index (`_apply_best`) and
+    the resume/fork trajectory rebuild (`resolve_resume_state`) both call this so
+    ``index.json::best_accuracy`` and ``dashboard.json::best`` agree by construction rather
+    than by two hand-copied ``max`` folds. NOT the winner export (that argmaxes cumulative
+    ``composite_fitness`` — the optimizer's objective); this is the formula-independent
+    accuracy operators recognize. See ``architecture.md`` §0.5."""
+    best = max(rounds, key=lambda r: float(r.get("cumulative_accuracy") or 0.0), default=None)
+    if best is None:
+        return (0.0, None)
+    return (float(best.get("cumulative_accuracy") or 0.0), best.get("round"))
 
 
 def is_round_winner(changes_description: str | None, winner_label: str) -> bool:
@@ -313,24 +333,6 @@ class RoundResult(BaseModel):
     health: DegradationHealth | None = None
 
 
-class CycleError(BaseModel):
-    """Structured error carried on :class:`CycleResult` when the runner exited
-    on ``CRASHED`` / ``RENDER_ERROR`` / ``DIVERGED``.
-
-    Mirrors the trailing ``ErrorRecord`` on the canonical ledger; carried as a
-    typed field so :class:`~promptpotter.application.jobs.registry.JobRegistry`
-    and the post-run teardown read crash detail from one place without
-    coupling to projection state. The runner's ``except`` sites build this
-    instance and call ``emit_error_record`` from the same kwargs.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    kind: str
-    message: str
-    traceback: str | None = None
-
-
 class CycleSpend(BaseModel):
     """Terminal token/USD totals for a finished cycle — the summed cost across
     the backend + optimizer-loop buckets.
@@ -370,7 +372,7 @@ class CycleResult(BaseModel):
     round_discovered_levels: list[float] = Field(default_factory=list)
     winner_prompt_fields: dict[str, Any]
     winner_pipeline_params: dict[str, Any] | None = None
-    stop_reason: str
+    stop_reason: StopReason
     started_at: str
     finished_at: str
     langfuse_trace_id: str | None = None
@@ -381,9 +383,10 @@ class CycleResult(BaseModel):
     # finalize. ``None`` only on an init-crash before any observer wired up.
     spend: CycleSpend | None = None
     # Set when ``stop_reason`` ∈ ``{CRASHED, RENDER_ERROR, DIVERGED}``;
-    # ``None`` on clean completions. The runner's ``except`` sites populate
-    # this in lockstep with the ``emit_error_record`` ledger append.
-    error: CycleError | None = None
+    # ``None`` on clean completions. The runner's ``except`` sites carry the
+    # record returned by ``emit_error_record`` straight here — the same
+    # ``ErrorRecord`` that lands on the ledger, no twin model.
+    error: ErrorRecord | None = None
 
 
 class DiagnosticRunRecord(BaseModel):

@@ -14,7 +14,7 @@ function draft(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
       max_rounds: 5,
       lock_model: true,
       mechanisms: {
-        selection: { per_round_resubset: true, online_reorder: true },
+        selection: { per_round_resubset: true },
         elimination: {
           epsilon_elimination: true,
           deterministic_dominance: true,

@@ -30,22 +30,25 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "INVALID_SCORES",
     "build_score_report",
+    "merge_pipeline_params",
     "parse_population",
     "pobb_decision_data",
 ]
 
 
-def _merge_pipeline_params(
+def merge_pipeline_params(
     base: dict[str, Any] | None,
     overrides: dict[str, Any] | None,
     schema: PipelineSchema | None,
 ) -> dict[str, Any] | None:
-    """Overlay ``overrides`` onto a DEEP COPY of ``base``; drop overrides for nodes
-    outside active steps.
+    """The ONE candidate-override merge: overlay ``overrides`` onto a DEEP COPY of
+    ``base``, then drop overrides for nodes outside active steps.
 
     The per-node merge is the shared shallow ``apply_node_overlay``; the deep copy
     (the candidate's params must not alias the origin's nested config) and the
-    inactive-node drop are this site's own edge cases, kept around the helper."""
+    inactive-node drop are this operation's own edge cases, kept around the helper.
+    Shared by the live L1 path (:func:`parse_population`) and the ``verify``/``ab``
+    replay verbs, so a re-derived candidate hashes the same config the loop did."""
     if not overrides:
         return base
     merged = apply_node_overlay(copy.deepcopy(base or {}), overrides)
@@ -73,7 +76,7 @@ def parse_population(
     osp_list: list[OptSearchPoint] = []
     merged: list[dict[str, Any] | None] = []
     for cp in proposals:
-        pipeline_params_override = cp.pipeline_params_override or None
+        pipeline_params_override = cp.pipeline_params_override
         osp = cp.osp
         if schema:
             failures: list[ValidationFailure] = []
@@ -114,7 +117,7 @@ def parse_population(
                         vf.reason,
                     )
         osp_list.append(osp)
-        merged.append(_merge_pipeline_params(pipeline_params, pipeline_params_override, schema))
+        merged.append(merge_pipeline_params(pipeline_params, pipeline_params_override, schema))
     return osp_list, merged
 
 

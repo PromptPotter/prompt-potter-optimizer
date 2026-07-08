@@ -99,7 +99,7 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict[str, An
       **dataset** scope: the archive snapshot for this backend + dataset.
 
     Returns the artifact selected for inline log.md rendering: the
-    campaign-scope one when ``exploration.seed_heatmap_from_archive`` is on,
+    campaign-scope one when ``optimization.seed_heatmap_from_archive`` is on,
     otherwise the cycle-scope one. ``None`` when no observations exist yet.
     """
     if not session.state.cycle_id or session.store is None:
@@ -128,7 +128,7 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict[str, An
         top_k_samples=None,
     )
 
-    exp_cfg = cycle.config.optimization.exploration
+    opt_cfg = cycle.config.optimization
     # Archive candidates contribute to the joint Rasch fit but stay off the
     # heatmap Y-axis — it's filtered to this cycle's own cand_NNN.
     live_cids = {cid for rr in cycle.rounds for cid in rr.all_candidate_results}
@@ -154,7 +154,7 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict[str, An
         )
         write_json(tenant_path, archive_artifact)
 
-    return campaign_artifact if exp_cfg.seed_heatmap_from_archive else cycle_artifact
+    return campaign_artifact if opt_cfg.seed_heatmap_from_archive else cycle_artifact
 
 
 def from_disk_round(

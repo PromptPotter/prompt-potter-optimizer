@@ -32,6 +32,7 @@ from promptpotter.config.settings import (
     DEFAULT_BACKEND_URL,
     DEFAULT_EXPERIMENT_ID,
 )
+from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import CycleResult
 from promptpotter.infrastructure.tracing import langfuse_trace_url
 from promptpotter.presentation.views.display import (
@@ -105,7 +106,7 @@ def render_completion(
     campaign_id: str | None = None,
 ) -> str:
     """Render the closing summary box (paused vs complete) + pipeline overrides."""
-    paused = result.stop_reason == "paused"
+    paused = result.stop_reason == StopReason.PAUSED
     title = (
         f"{YELLOW}{BOLD}PAUSED{RESET} — resumable (re-run resume to continue)"
         if paused
@@ -266,7 +267,7 @@ async def run_optimization_notebook(
     )
     _try_display_html(render_completion_html(result))
 
-    if result.stop_reason == "paused":
+    if result.stop_reason == StopReason.PAUSED:
         print(
             f"  {YELLOW}{BOLD}[PAUSED]{RESET} after {result.n_l1_rounds} rounds — "
             "artifacts saved, cycle resumable. Caller decides whether to continue."

@@ -15,7 +15,7 @@ from promptpotter.application.optimization.pobb.elimination import extract_warni
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.opt_search_point import OptSearchPoint, node_config_items
-from promptpotter.domain.rendering import display_fitness
+from promptpotter.domain.rendering import display_fitness, round_winner_key
 from promptpotter.domain.results import (
     CritiqueReadout,
     DegradationHealth,
@@ -67,10 +67,10 @@ _SCOREBOARD_INCLUDE: set[str] = {
 def _build_scoreboard(
     candidate_scores: list[ScoredCandidate], winner_label: str
 ) -> list[dict[str, Any]]:
-    """Trial-JSON `scoreboard`: rank by (composite_fitness, accuracy) desc; tag winner."""
+    """Trial-JSON `scoreboard`: rank by `round_winner_key` (composite-first) desc; tag winner."""
     ranked = sorted(
         candidate_scores,
-        key=lambda c: (c.composite_fitness, c.accuracy),
+        key=lambda c: round_winner_key(c.composite_fitness, c.accuracy),
         reverse=True,
     )
     return [
@@ -223,7 +223,7 @@ def _calibrate_delta_ruler(
     The model is chosen by ``graduate_ruler_model`` (slice 3): the bank uses 1PL until a
     data-rich, genuinely-discriminating dataset wins held-out cross-validation, then the
     ruler carries per-sample discrimination ``(δ, a)``. Gated by ``enable_2pl``
-    (``optimization.exploration.enable_2pl_graduation``). The switch is invisible above the
+    (``optimization.enable_2pl_graduation``). The switch is invisible above the
     seam — ``ruler()`` folds δ + a into the one mapping every θ consumer already reads.
     """
     from promptpotter.application.intelligence.exploration import (
@@ -439,7 +439,7 @@ class Cycle:
             session,
             origin_results,
             config.optimization.elimination_n_min,
-            enable_2pl=config.optimization.exploration.enable_2pl_graduation,
+            enable_2pl=config.optimization.enable_2pl_graduation,
         )
         return cls(
             session=session,
@@ -584,7 +584,7 @@ class Cycle:
             self.session,
             self.tracking.origin_per_sample_results,
             self.config.optimization.elimination_n_min,
-            enable_2pl=self.config.optimization.exploration.enable_2pl_graduation,
+            enable_2pl=self.config.optimization.enable_2pl_graduation,
             extra_obs=build_observations(self.rounds),
         )
         if delta_scale:  # warmed — lock the ruler + re-read origin θ on it

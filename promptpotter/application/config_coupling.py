@@ -142,14 +142,13 @@ _KNOB_ESTIMANDS: dict[str, frozenset[Estimand]] = {
     "optimization.forbidden_axes_strict": frozenset({Estimand.SEARCH}),
     "optimization.rebase_capability": frozenset({Estimand.ESCALATION}),
     "optimization.terminate_capability": frozenset({Estimand.ESCALATION}),
-    "optimization.exploration.seed_heatmap_from_archive": frozenset({Estimand.DIFFICULTY}),
-    "optimization.exploration.enable_2pl_graduation": frozenset(
+    "optimization.seed_heatmap_from_archive": frozenset({Estimand.DIFFICULTY}),
+    "optimization.enable_2pl_graduation": frozenset(
         {Estimand.DISCRIMINATION, Estimand.DIFFICULTY, Estimand.ABILITY}
     ),
     "optimization.mechanisms.selection.per_round_resubset": frozenset(
         {Estimand.SELECTION, Estimand.GATE}
     ),
-    "optimization.mechanisms.selection.online_reorder": frozenset({Estimand.SELECTION}),
     "optimization.mechanisms.elimination.epsilon_elimination": frozenset({Estimand.STOPPING}),
     "optimization.mechanisms.elimination.deterministic_dominance": frozenset({Estimand.STOPPING}),
     "optimization.mechanisms.elimination.degradation_fatal_fastpath": frozenset(
@@ -333,7 +332,7 @@ COUPLINGS: tuple[Coupling, ...] = (
     Coupling(
         name="graduation_self_gated_on_holdout",
         knobs=(
-            "optimization.exploration.enable_2pl_graduation",
+            "optimization.enable_2pl_graduation",
             "optimization.elimination_n_min",
         ),
         estimand=Estimand.DISCRIMINATION,
@@ -348,27 +347,6 @@ COUPLINGS: tuple[Coupling, ...] = (
             "1PL automatically, and the held-out gate means 2PL can never regress a "
             "dataset. Shown so the operator sees the ruler may carry discrimination "
             "once the bank is rich. Turn OFF to pin 1PL everywhere."
-        ),
-        severity="info",
-        predicate=lambda c: False,
-    ),
-    Coupling(
-        name="selection_basis_pair",
-        knobs=(
-            "optimization.mechanisms.selection.per_round_resubset",
-            "optimization.mechanisms.selection.online_reorder",
-        ),
-        estimand=Estimand.SELECTION,
-        relation=(
-            "per_round_resubset picks the between-round subset; within a round the "
-            "order is always the deterministic shared round order (build_round_order "
-            "— seed-miss win opportunities first), identical for every candidate. "
-            "online_reorder is INERT (kept on-disk for the config shrink pass)."
-        ),
-        consequence=(
-            "A permanent relationship — shown so the basis is legible. No violation; "
-            "changing per_round_resubset redefines what 'the subset' a fitness "
-            "number was measured over means."
         ),
         severity="info",
         predicate=lambda c: False,

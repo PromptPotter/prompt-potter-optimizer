@@ -72,7 +72,8 @@ _FIELD_SCOPES: dict[tuple[str, ...], Literal["policy", "data"]] = {
     ("optimization", "forbidden_axes_strict"): "policy",
     ("optimization", "rebase_capability"): "policy",
     ("optimization", "terminate_capability"): "policy",
-    ("optimization", "exploration"): "policy",  # entire subtree
+    ("optimization", "seed_heatmap_from_archive"): "policy",
+    ("optimization", "enable_2pl_graduation"): "policy",
     ("optimization", "mechanisms"): "policy",  # entire subtree — every toggle, now and future
 }
 
