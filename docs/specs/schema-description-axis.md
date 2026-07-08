@@ -1,6 +1,6 @@
 # Schema-description axis — structured-output `description` as an optimizable parameter
 
-> **Status:** design. **Nothing below is implemented.** Why the schema steers at all: [`../concepts/structured-output.md`](../concepts/structured-output.md) (name / coordinates / description). This spec covers only what it takes to make the third lever searchable.
+> **Status:** design. **Slice 1 shipped; the axis itself is not implemented.** Why the schema steers at all: [`../concepts/structured-output.md`](../concepts/structured-output.md) (name / coordinates / description). This spec covers only what it takes to make the third lever searchable.
 
 ## The representation gap
 
@@ -38,13 +38,13 @@ The overlay exposes description strings and a field permutation, **never a raw s
 
 ## Two blockers
 
-**Reflexivity.** Mutating `L1GenerateOutput`'s descriptions changes how the optimizer parses *its own children's* proposals. Not self-penalizing at all: the failure is charged to **nobody**. `MetaPromptParseError` kills the whole `l1_generate` call (zero candidates) and appends the wound to the *parent's* `opt_sp.memory.wounds`; `mutate()` resets child wounds, so `_round_problem_rate`'s `parse_fail` sum over `rnd.candidate_scores` — empty in exactly that round — is structurally always `0`. A candidate that makes its children unreadable scores *perfectly clean*. Slice 1 fixes attribution; the axis stays off until it does.
+**Reflexivity — cleared by slice 1.** Mutating `L1GenerateOutput`'s descriptions changes how the optimizer parses *its own children's* proposals. It used to be charged to **nobody**: `MetaPromptParseError` kills the whole `l1_generate` call (zero candidates) and appends the wound to the *parent's* `opt_sp.memory.wounds`; `mutate()` resets child wounds, so `_round_problem_rate`'s `parse_fail` sum over `rnd.candidate_scores` — empty in exactly that round — was structurally always `0`, and a candidate that made its children unreadable scored *perfectly clean*. `l1_generate` now returns the reason beside its empty candidate list; it rides `L1YieldStats` → `RoundResult.l1_parse_failure`, and `_round_problem_rate` charges the **round** `1.0`. A parse failure is never charged per-candidate — that round has no candidate to charge.
 
 **Unmeasured.** "Huge lever" is an empirical claim and this repo adjudicates exactly that claim. Turned on when `--sweep` says so, not because it sounds right.
 
 ## Slices
 
-1. **Parse-failure attribution.** Charge a schema-induced parse failure to the round it occurred in — today a zero-candidate round scores `problem_rate = 0.0`, the cleanest possible. Prerequisite; ships alone, measurable on existing cycles. *(A live measurement bug independent of this spec.)*
+1. ~~**Parse-failure attribution.**~~ **Shipped.** A schema-induced parse failure is charged to the round it occurred in (`RoundResult.l1_parse_failure` → `_round_problem_rate` = `1.0`); before, a zero-candidate round scored `problem_rate = 0.0`, the cleanest possible. *(A live measurement bug independent of this spec.)*
 2. **Descriptions become data.** Default table + overlay resolution. Byte-identical defaults; C0 must reproduce exactly. Pure refactor, no axis.
 3. **One axis, narrowest scope.** `datasets/promptpotter-self/` only, node `l1_generate`, model `L1Variant`.
 4. **Sweep gate.** `--sweep` on `justlogic`; promote only on `proxy_lift_corr ≥ 0.6`. **A negative result closes this spec** — record the finding and stop. That is a successful outcome.

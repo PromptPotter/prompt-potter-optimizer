@@ -221,31 +221,24 @@ def _mean(xs: list[float]) -> float:
     return sum(xs) / len(xs) if xs else 0.0
 
 
-# Generator-side ValidationFailure reasons (``domain/escalation_signals.py``): the outer
-# meta-prompt produced malformed inner-L1 output. Distinct from the mode-collapse reasons
-# (``no_op_variant`` / ``duplicate_variant``), which ride ``l1_n_no_op`` / ``l1_n_duplicate``.
-_PARSE_FAIL_REASONS = frozenset(
-    {"l1_provider_empty_response", "meta_prompt_parse_failure", "meta_prompt_unexpected_type"}
-)
-
-
 def _round_problem_rate(rnd: RoundResult) -> float:
     """Per-round dirtiness ∈ [0,1]: inner samples that degraded or came back unscoreable
-    (``health``) PLUS the fraction of this round's candidates the outer meta-prompt made
-    unparseable. Both are candidate-controlled — a meta-prompt that makes the inner loop
-    emit malformed candidates or unscoreable predictions scores dirtier."""
+    (``health``), or a round the outer meta-prompt made unparseable outright. Both are
+    candidate-controlled — a meta-prompt that makes the inner loop emit unscoreable
+    predictions, or no candidates at all, scores dirtier.
+
+    A parse failure is charged to the ROUND, not to a candidate. It cannot be read off
+    ``candidate_scores``: ``l1_generate`` returns zero candidates in exactly that case, so
+    any per-candidate scan is structurally always empty and the worst possible round —
+    a meta-prompt that makes its own children unreadable — would score perfectly clean.
+    """
+    if rnd.l1_parse_failure:
+        return 1.0
     health = rnd.health
     struct = 0.0
     if health and health.samples:
         struct = health.degraded_rate + health.no_result_count / health.samples
-    scored = rnd.candidates_scored or len(rnd.candidate_scores)
-    parse_fail = sum(
-        1
-        for c in rnd.candidate_scores
-        if any(vf.reason in _PARSE_FAIL_REASONS for vf in c.validation_failures)
-    )
-    parse_rate = parse_fail / scored if scored else 0.0
-    return _clamp(struct + parse_rate, 0.0, 1.0)
+    return _clamp(struct, 0.0, 1.0)
 
 
 def _round_mode_collapse_rate(rnd: RoundResult) -> float:

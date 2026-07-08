@@ -458,6 +458,10 @@ class L1YieldStats:
     l1_yield: float  # n_valid / n_proposed (1.0 when no proposals)
     l1_n_no_op: int
     l1_n_duplicate: int
+    # Set when the meta-prompt made L1's own output unparseable — the round then holds zero
+    # candidates. `detect_invariants` never sets it (it only sees proposals that exist); it is
+    # stamped from `l1_generate`'s return in `generate_or_load_candidates`.
+    l1_parse_failure: str | None = None
 
 
 _INVARIANT_REASONS = frozenset({"no_op_variant", "duplicate_variant"})

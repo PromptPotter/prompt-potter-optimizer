@@ -758,19 +758,18 @@ def _fake_inner_round(
     no_result: int = 0,
     samples: int = 24,
     candidates_scored: int = 2,
-    parse_fail: int = 0,
+    parse_failure: str | None = None,
     no_op: int = 0,
     dup: int = 0,
 ) -> SimpleNamespace:
-    """A RoundResult stand-in carrying only the fields ``_compute_proxies`` reads."""
-    cand = [
-        SimpleNamespace(
-            validation_failures=(
-                [SimpleNamespace(reason="meta_prompt_parse_failure")] if i < parse_fail else []
-            )
-        )
-        for i in range(candidates_scored)
-    ]
+    """A RoundResult stand-in carrying only the fields ``_compute_proxies`` reads.
+
+    A parse failure yields ZERO candidates by construction (``l1_generate`` returns ``[]``),
+    so it is modelled on the round, never on a candidate — no ``ScoredCandidate`` can carry
+    a ``meta_prompt_parse_failure``.
+    """
+    if parse_failure:
+        candidates_scored = 0
     return SimpleNamespace(
         round=rnd,
         improved=improved,
@@ -778,9 +777,12 @@ def _fake_inner_round(
             samples=samples, degraded_rate=degraded_rate, no_result_count=no_result
         ),
         candidates_scored=candidates_scored,
-        candidate_scores=cand,
+        candidate_scores=[
+            SimpleNamespace(validation_failures=[]) for _ in range(candidates_scored)
+        ],
         l1_n_no_op=no_op,
         l1_n_duplicate=dup,
+        l1_parse_failure=parse_failure,
     )
 
 
@@ -822,7 +824,7 @@ def test_compute_proxies_composed_fitness_discriminates() -> None:
         0.30,
         [
             _fake_inner_round(0),
-            _fake_inner_round(1, degraded_rate=0.5, no_result=6, parse_fail=1),
+            _fake_inner_round(1, degraded_rate=0.5, no_result=6),
             _fake_inner_round(2, no_op=1, dup=1),
         ],
     )
@@ -830,6 +832,25 @@ def test_compute_proxies_composed_fitness_discriminates() -> None:
     assert pd["after_N_rounds_delta"] == px["after_N_rounds_delta"]  # identical lift
     assert pd["cleanliness"] < px["cleanliness"]  # warnings register
     assert pd["diversity_health"] < px["diversity_health"]  # collapse registers
+
+    # A meta-prompt that makes its OWN children unparseable yields a zero-candidate round.
+    # Nobody can be charged per-candidate (`candidate_scores` is empty in exactly that round),
+    # so the round must carry the failure — otherwise the worst possible outer candidate scores
+    # `problem_rate == 0.0`, i.e. cleaner than a merely degraded one, and the L4 outer loop
+    # silently steers TOWARD schema-breaking meta-prompts. The run completes; nothing errors.
+    broke = _fake_inner_result(
+        [0.40, 0.55],
+        0.30,
+        [
+            _fake_inner_round(0),
+            _fake_inner_round(1, parse_failure="meta_prompt_parse_failure"),
+            _fake_inner_round(2),
+        ],
+    )
+    pb = _compute_proxies(broke, target=0.60, elapsed=100.0)
+    assert pb["cleanliness"] < px["cleanliness"]  # a broken round is NOT clean
+    assert pb["cleanliness"] == pytest.approx(1.0 - 1.0 / 2)  # one of two L1 rounds fully dirty
+    assert pb["cleanliness"] < pd["cleanliness"]  # and dirtier than mere sample degradation
 
     # The whole point: the composed formula ranks the clean campaign above the dirty one.
     import json
