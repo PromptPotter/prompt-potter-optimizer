@@ -1897,24 +1897,24 @@ components:
             campaign's mint-time `optimizer_narrowing` for THIS cycle only (the
             cycle-level peer of `CampaignConfig.optimizer_narrowing`). Absent
             inherits the campaign-wide locks unchanged.
-        limit_overrides:
-          $ref: '#/components/schemas/LimitOverrides'
+        config_overrides:
+          $ref: '#/components/schemas/ConfigOverrides'
 
-    LimitOverrides:
+    ConfigOverrides:
       type: object
       additionalProperties: false
       description: |
         The fork's `OptimizationConfig` delta. Every field optional — absent
         inherits the parent's value; applied to the fork's snapshot at bootstrap,
-        never mutates the parent's frozen config. Two kinds of knob ride here:
+        never mutates the parent's frozen config. Three kinds of knob ride here:
         (1) run limits (`max_rounds`/`spend_budget_usd`/`token_budget`/patiences/
         `pobb_epsilon`) — ABSOLUTE values the reconcile dialog re-sets (defaults to
         the parent's remaining, e.g. "3 of 6 rounds left"); (2) the selection-policy
         toggle (`per_round_resubset`) → the nested
-        `mechanisms.selection`, so a fork-at-offset-0 can A/B a behaviour knob in
-        isolation without touching the global default or the parent cycle. (Schema
-        name kept for on-disk seed-compat; it is the whole OptimizationConfig
-        override set, not only run limits.)
+        `mechanisms.selection`; (3) the search-space policy toggle
+        (`schema_field_rename`). Both policy knobs invalidate search comparability,
+        so a fork-at-offset-0 is how you A/B one without touching the global default
+        or the parent cycle.
       properties:
         max_rounds:
           type: integer
@@ -1957,6 +1957,16 @@ components:
             Re-pick the most-informative scoring subset every round (adaptive
             Rasch selection) for this fork. `null` inherits the parent. Safe to
             A/B now that every cross-round comparator measures on one fixed θ ruler.
+        schema_field_rename:
+          type: boolean
+          nullable: true
+          description: |
+            Let this fork's L1 rename a field on the inner `l1_generate`'s output
+            schema, not merely re-describe it. `null` inherits the parent (locked by
+            default: `build_l1_output_schema` never declares the rename param, so the
+            LLM cannot emit a key the schema omits). Only meaningful on a campaign
+            that optimizes an optimizer (`promptpotter-self`). An L2/L3
+            `fork_proposal` can request this same unlock autonomously.
 
     DeleteCyclePayload:
       $ref: '#/components/schemas/CycleRef'

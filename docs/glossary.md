@@ -151,7 +151,7 @@ The persisted world is a four-entity containment hierarchy
   Absorbs the old free-dict `index.json::fork` + ledger `ForkPayload`.
 - **CycleSeed** — the chosen-searchpoint seed a non-root cycle begins from
   (`domain/run_records.py`):
-  `{origin_prompt_fields, pipeline_overlay, limit_overrides, origin_source}`.
+  `{origin_prompt_fields, pipeline_overlay, config_overrides, origin_source}`.
   Carried by every operator-steered fork's `ForkSpec` (the wire
   `OperatorForkOverride` command payload deserializes into it) AND written by the
   mint seam for campaign-from-origin. The seed prompt becomes the cycle's origin
@@ -204,14 +204,12 @@ The persisted world is a four-entity containment hierarchy
   `campaign.json::scoring.per_sample` and `per_round`. Each measurement
   carries `{scorer_id: {score, hit, formula}}`. Rescored on every load.
   `application/scoring/search_point_scorer.py`.
-- **metric / basis / `Fitness`** — the tag every fitness number carries:
-  *metric* ∈ {accuracy, composite, ability θ} × *basis* ∈ {subset, matched,
-  cumulative}. A cross-product, not redundancy — a candidate has a subset AND a
-  matched AND a cumulative value at once. Name a number by its cell instead of
-  re-explaining it. `domain/rendering.py` (`Metric`/`Basis`/`Fitness`).
-- **`resolve_fitness_value` / `display_fitness`** — THE one composite-or-accuracy
-  rule: active composite when present (honest `0.0` kept), else accuracy on
-  `None`. `display_fitness` is its widely-imported alias; never add a second
+- **metric / basis** — the cell any fitness number occupies: *metric* ∈ {accuracy,
+  composite, ability θ} × *basis* ∈ {subset, matched, cumulative}. A cross-product,
+  not redundancy — a candidate has a subset AND a matched AND a cumulative value at
+  once. Name a number by its cell instead of re-explaining it.
+- **`display_fitness`** — THE one composite-or-accuracy rule: active composite when
+  present (honest `0.0` kept), else accuracy on `None`. Never add a second
   resolution. `domain/rendering.py`.
 - **score_search_point()** — the single scoring gateway. Every scoring
   call MUST go through it. `application/scoring/search_point_scorer.py`.
@@ -349,12 +347,10 @@ The persisted world is a four-entity containment hierarchy
   `application/optimization/validators/l1_behavior.py`.
 - **Meta-prompt** — synonym for "optimizer prompt" (L1/L2/L3/Critique
   LLM template). Field-standard from PromptWizard / DSPy / OPRO.
-- **Second prompt** — a structured-output schema, viewed as input: its field
-  names, field *order*, and `description=` strings are in-context tokens that
-  steer generation. Three levers, `docs/concepts/structured-output.md`.
-- **Shape-determinism** — what a schema guarantees (a parseable object with
-  the fields you named) as opposed to content-determinism (which it does not
-  guarantee at all). The precondition for measuring an approximator.
+- **Second prompt** — a structured-output schema viewed as input; its three
+  levers are names, order, `description=`. `docs/concepts/structured-output.md`.
+- **Shape-determinism** — a schema guarantees a parseable object with the fields
+  you named, never the content in them. `docs/concepts/structured-output.md`.
 - **checkin** — the fifth optimizer node (**renamed from `restructure`**,
   commit `269e9b87` — that old name is gone from the code). One node, two
   modes sharing `CheckinOutput`

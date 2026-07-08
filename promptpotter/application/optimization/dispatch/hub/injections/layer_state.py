@@ -20,6 +20,7 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
     InjectionKind,
     signal,
 )
+from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM
 from promptpotter.domain.rendering import format_l1_critique_for_prompt
 from promptpotter.domain.search_point import PARAM_SCOPE_KEYS
 from promptpotter.infrastructure.llm.models import emit_round_warning
@@ -157,14 +158,27 @@ _REBASE_CAPABILITY_TEXT = (
     "refining this trajectory cannot recover."
 )
 
+# Rendered only where the unlock would change something — see `_r_rebase_capability`.
+_SCHEMA_RENAME_UNLOCK_TEXT = (
+    " On that same fork_proposal you may set unlock_schema_field_rename = true, which "
+    "lets the fork's L1 RENAME a field on the optimizer's own output schema (today it "
+    "may only rewrite each field's description). The name is the strongest lever — the "
+    "model has priors about what belongs under a key, so the name steers before a single "
+    "token of the value is written — and it is the only one that can break the parser. "
+    "Request it ONLY when the panels show the search stalling on what a field is FOR "
+    "rather than on what it says: a field whose name misdescribes the content it should "
+    "hold. Otherwise omit it — describe the field, do not rename it."
+)
+
 
 @signal(
     "rebase_capability",
     kind=InjectionKind.DIRECTIVE,
     description=(
         "Conditional fork_proposal escape-hatch instruction (renders into L2 + "
-        "L3 prompts). Empty when ``OptimizationConfig.rebase_capability`` is "
-        "off — keeps prompt body bit-for-bit identical to a no-rebase "
+        "L3 prompts), plus the schema_field_rename unlock clause where that lever "
+        "exists and is still locked. Empty when ``OptimizationConfig.rebase_capability`` "
+        "is off — keeps prompt body bit-for-bit identical to a no-rebase "
         "ablation so the input distribution doesn't drift on prompt text."
     ),
     char_cap=None,
@@ -173,10 +187,26 @@ def _r_rebase_capability(b: InjectionBundle) -> str:
     """Render the fork_proposal escape-hatch instruction, gated by
     ``OptimizationConfig.rebase_capability``. When the capability is off
     this returns the empty string so the L2/L3 prompt body is bit-for-bit
-    identical to a no-rebase ablation run."""
+    identical to a no-rebase ablation run.
+
+    The rename-unlock clause rides this same directive rather than a signal of its
+    own: it is one more sentence about the same emitted object, and a second
+    injection would render an empty line into every prompt that lacks the lever.
+    It appears only when the unlock is both *reachable* — some node DECLARES the
+    rename param, which only an optimizer-of-the-optimizer dataset does — and *not
+    already open*. Reachability is read off the declaration, never off a node name:
+    teaching a lever the campaign cannot pull is the same defect as a citable panel
+    that never renders, and hardcoding ``"l1_generate"`` here would re-file the
+    knowledge of the target that ``node_param_keys`` exists to hold."""
     if not b.rebase_capability:
         return ""
-    return _REBASE_CAPABILITY_TEXT
+    schema = b.pipeline_schema
+    unlockable = (
+        not b.schema_field_rename
+        and schema is not None
+        and any(SCHEMA_RENAME_PARAM in n.param_keys for n in schema.nodes)
+    )
+    return _REBASE_CAPABILITY_TEXT + (_SCHEMA_RENAME_UNLOCK_TEXT if unlockable else "")
 
 
 _TERMINATE_CAPABILITY_TEXT = (

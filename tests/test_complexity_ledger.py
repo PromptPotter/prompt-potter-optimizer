@@ -124,7 +124,7 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # pending the held config-surface-shrink pass.
 # 2026-07-08 config-surface shrink: ``config_leaf_fields`` 39->38 — deleted the
 # INERT ``SelectionMechanisms.online_reorder`` toggle end-to-end (field + the
-# LimitOverrides fork-delta twin + its dead-predicate ``selection_basis_pair``
+# ConfigOverrides fork-delta twin + its dead-predicate ``selection_basis_pair``
 # coupling + estimand entry + wire schema + fork sel_updates). The within-round
 # order is always the deterministic shared ``build_round_order``; the online
 # per-sample re-rank it toggled was already deleted. Subtraction, baseline falls.
@@ -154,21 +154,12 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # ``LivesConfig{start, cap}``, default None = off): improvement-banked variable
 # round length replacing the fixed ``max_rounds`` boundary. A feature, justified,
 # so the baseline rises (two leaves: start, cap).
-# then ``config_leaf_fields`` 38->39: a deliberate new operator knob --
-# ``OptimizationConfig.schema_field_rename`` (may THIS campaign's L1 propose renaming a
-# field on the inner ``l1_generate``'s output schema). A field NAME is the wire contract,
-# so unlike the always-free ``description``/order levers it needs a lock; the lock is that
-# ``build_l1_output_schema`` never grafts ``output_schema_field_names``, so the LLM cannot
-# emit a key the schema omits -- structural, the same shape ``forbidden_axes_strict`` uses.
-# It cannot ride the dataset file instead: L2 reaches it through ``fork_proposal``'s config
-# delta, and a dataset's ``optimizer.param_keys`` is not fork-overridable. A feature,
-# justified. Paid back immediately below.
-# then ``config_leaf_fields`` 39->38: subtraction. ``deterministic_dominance`` +
-# ``equivalence_elimination`` folded into one ``margin_elimination`` leaf. They were two
-# toggles ORed at a single call site into one ``PoBBConfig.margin_elimination`` -- two
-# names for one gate's two corners, never independently settable in any meaningful way,
-# and the code called them "legacy", a word ``domain/CLAUDE.md`` never sanctions. A named
-# concept subtracted, not relocated. Baseline falls; the rename knob is paid for.
+# 2026-07-08 schema-rename lever, paid for: ``config_leaf_fields`` net 39->38. In, one
+# knob -- ``OptimizationConfig.schema_field_rename`` (may THIS campaign's L1 rename a field
+# on the inner ``l1_generate``'s output schema). A field NAME is the wire contract, so
+# unlike the always-free ``description``/order levers it needs a lock. Out, two:
+# ``deterministic_dominance`` + ``equivalence_elimination`` were two names for one gate's
+# two corners, ORed at a single call site, and are now one ``PoBBConfig.margin_elimination``.
 
 LEDGER_BASELINE = {
     "modules": 311,

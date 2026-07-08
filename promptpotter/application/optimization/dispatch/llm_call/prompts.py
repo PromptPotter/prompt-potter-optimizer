@@ -315,6 +315,14 @@ def _apply_prompt_override(name: str, template: PromptTemplate) -> PromptTemplat
     return template.model_copy(update=fields) if fields else template
 
 
+def _node_override_dict(node: str, key: str) -> dict[str, Any]:
+    """The outer L4 cycle's ``overrides[node][key]`` object, or ``{}`` — the one read every
+    structural (not-a-``PromptTemplate``-field) per-node lever shares."""
+    node_override = (_OPTIMIZER_PROMPT_OVERRIDES.get() or {}).get(node)
+    raw = node_override.get(key) if isinstance(node_override, dict) else None
+    return raw if isinstance(raw, dict) else {}
+
+
 def resolve_node_layout(node: str) -> L1Layout:
     """The effective per-node injection layout for *node* — its floor ± the outer
     L4 cycle's per-node ``layout`` edit.
@@ -331,10 +339,8 @@ def resolve_node_layout(node: str) -> L1Layout:
     non-L4 cycle) → the floor unchanged (``_apply_prompt_override``'s peer for the
     structural, not-a-``PromptTemplate``-field, half of a per-node edit)."""
     spec = NODE_LAYOUTS[node]
-    overrides = _OPTIMIZER_PROMPT_OVERRIDES.get() or {}
-    node_override = overrides.get(node)
-    raw = node_override.get("layout") if isinstance(node_override, dict) else None
-    if not isinstance(raw, dict) or not raw:
+    raw = _node_override_dict(node, "layout")
+    if not raw:
         return spec.floor
     update: dict[str, list[str]] = {}
     for slot in L1_LAYOUT_SLOTS:
@@ -371,13 +377,7 @@ def resolve_node_schema_descriptions(node: str) -> dict[str, str]:
     node with no override bound (every normal, non-L4 cycle) builds today's schema
     byte-for-byte. Non-string values are dropped.
     """
-    overrides = _OPTIMIZER_PROMPT_OVERRIDES.get() or {}
-    node_override = overrides.get(node)
-    raw = (
-        node_override.get("output_schema_descriptions") if isinstance(node_override, dict) else None
-    )
-    if not isinstance(raw, dict):
-        return {}
+    raw = _node_override_dict(node, "output_schema_descriptions")
     return {k: v for k, v in raw.items() if isinstance(k, str) and isinstance(v, str) and v.strip()}
 
 
@@ -401,13 +401,7 @@ def resolve_node_schema_field_names(node: str) -> dict[str, str]:
     with a field that is NOT being renamed are rejected at the apply site, which knows the field
     set. A bad L4 mutation must score poorly, never break the run.
     """
-    overrides = _OPTIMIZER_PROMPT_OVERRIDES.get() or {}
-    node_override = overrides.get(node)
-    raw = (
-        node_override.get("output_schema_field_names") if isinstance(node_override, dict) else None
-    )
-    if not isinstance(raw, dict):
-        return {}
+    raw = _node_override_dict(node, "output_schema_field_names")
     clean: dict[str, str] = {}
     for field, wire in raw.items():
         if not isinstance(field, str) or not isinstance(wire, str):

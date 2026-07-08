@@ -44,6 +44,15 @@ SCHEMA_OWNED_FIELDS = frozenset(
 # sub-schema, whose value space is the param's own, not the node's).
 NESTED_PARAM_TYPES = frozenset({"object", "array"})
 
+# The one nested param a campaign must UNLOCK before its L1 may emit it
+# (`OptimizationConfig.schema_field_rename`): renaming a field on the optimizer's own
+# output schema is the strongest lever and the only one that can break a parser. Named
+# here, beside the other structural param constants, because two layers must agree on the
+# literal without importing each other: `build_l1_output_schema` (drops it from the emitted
+# schema when locked, so the LLM cannot emit a key that does not exist) and the
+# `rebase_capability` directive (offers L2/L3 the unlock only where a node declares it).
+SCHEMA_RENAME_PARAM = "output_schema_field_names"
+
 
 def stable_hash(value: Any) -> str:
     """Deterministic 16-char hex digest of an arbitrary JSON-able value."""

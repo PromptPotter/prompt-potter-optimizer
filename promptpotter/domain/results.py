@@ -320,7 +320,7 @@ class RoundResult(BaseModel):
     l1_n_duplicate: int = 0
     # Reason the outer meta-prompt made this round's L1 output unparseable (zero candidates).
     # The round owns it: a parse failure yields no candidate to charge, and `candidate_scores`
-    # is empty in exactly that round. See `l1/generate.py::PARSE_FAIL_REASONS`.
+    # is empty in exactly that round.
     l1_parse_failure: str | None = None
     # Adaptive-queue-mechanism sample-selection timeline for the round's
     # representative (longest-surviving) candidate — one row per measurement

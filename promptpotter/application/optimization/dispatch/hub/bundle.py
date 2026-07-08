@@ -144,6 +144,9 @@ class InjectionBundle:
     # Mirrors OptimizationConfig.terminate_capability; gates the terminate_capability
     # injection so L2/L3 prompts are bit-for-bit identical to a no-terminate ablation run.
     terminate_capability: bool = True
+    # Mirrors OptimizationConfig.schema_field_rename. Already unlocked ⇒ the
+    # rebase_capability directive drops the unlock clause: there is nothing left to ask for.
+    schema_field_rename: bool = False
 
 
 Renderer = Callable[[InjectionBundle], str]

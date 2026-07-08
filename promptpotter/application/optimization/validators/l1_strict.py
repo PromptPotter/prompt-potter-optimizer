@@ -36,6 +36,7 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import (
     NESTED_PARAM_TYPES,
     SCHEMA_OWNED_FIELDS,
+    SCHEMA_RENAME_PARAM,
     PipelineSchema,
 )
 from promptpotter.domain.results import CandidateProposal
@@ -117,8 +118,6 @@ def _rename_variant_schema(variant: dict[str, Any], field_names: dict[str, str])
         variant["required"] = [field_names.get(k, k) for k in required]
 
 
-SCHEMA_RENAME_PARAM = "output_schema_field_names"
-
 _OUTPUT_SCHEMA_PARAM_DESCRIPTIONS: dict[str, str] = {
     SCHEMA_RENAME_PARAM: (
         "Rename a field on the inner optimizer's own output schema. The model holds "
@@ -142,18 +141,18 @@ def _nested_param_property(node_name: str, param: str) -> dict[str, Any] | None:
     """The emitted sub-schema for a NESTED (`object`-declared) optimizer param.
 
     A nested param's value space is PromptPotter's own — the L4 case, where the target IS
-    this optimizer — exactly as `model`'s value space is `available_models`. So it resolves
-    by PARAM name, never by node name: a node offers the lever iff its dataset declares it
-    in `param_keys`, and `architecture.md` §0's "zero hardcoded knowledge of the target"
-    survives. `None` means *declared but unwired* — the param is dropped from the emitted
-    schema rather than advertised as an edit nothing would honour.
+    this optimizer — exactly as `model`'s value space is `available_models`. A node offers
+    the lever iff its dataset declares it in `param_keys`, so `architecture.md` §0's "zero
+    hardcoded knowledge of the target" survives. `None` means *declared but unwired* — the
+    param is dropped from the emitted schema rather than advertised as an edit nothing
+    would honour, which is what `NODE_LAYOUTS` membership decides: a node with no layout
+    spec is not one of this optimizer's own.
 
     `layout` (L4's information-flow lever): per-slot lists of injection names; the value
     space is the node's own `NODE_LAYOUTS` add/excise vocabulary. `output_schema_*` (L4's
     schema levers, `docs/concepts/structured-output.md`): keyed by the inner `l1_generate`'s
     own variant fields — a closed set, so the optimizer can describe or rename a field but
-    never invent one. That `L1Variant` reference is the last hardcode here; it dissolves
-    once a node declares its own `schema_info` (Arc 1).
+    never invent one.
     """
     if param == "layout":
         spec = NODE_LAYOUTS.get(node_name)

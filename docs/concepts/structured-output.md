@@ -17,10 +17,13 @@ Three levers, in increasing order of neglect.
 | Lever | Who reads it | Safe to change? |
 |---|---|---|
 | Field **name** / dot-path | downstream parsers, validators, the wire | **No** — contract |
+| Field **type** | the parser, and every consumer of the parsed value | **No** — contract |
 | `enum` **values** | whatever branches on the value | **No** — that *is* the value space |
 | `enum` **order** + per-value gloss | nobody but the model | **Yes** |
 | Field **order** | nobody but the model | **Yes** — a parsed object is unordered |
 | **`description`** | nobody but the model | **Yes** — no code reads it |
+
+**What the optimizer may reach, and how it is stopped.** `description` is free and always on — no toggle, because a toggle on a free lever is a fallback chain wearing a flag. The field **name** is the one contract lever the optimizer may pull, and only after an L2/L3 fork opens `optimization.schema_field_rename` (off by default); it is safe there because a rename is a presentation transform — the emitted schema advertises the new name, a `validation_alias` binds it back, and no downstream reader observes it. **Type, `enum` values, and the schema itself have no toggle at all**: `SCHEMA_OWNED_FIELDS` (`domain/pipeline_schema.py`) subtracts `output_schema` / `schema_family` / `schema_version` / `answer_field` from every emittable param surface, so the LLM cannot emit a key that does not exist. Structural, not policed per round.
 
 An `enum` is easy to misfile. Its *values* are contract — `validators/l1_behavior.py` checks `field ∈ EVIDENCE_GROUNDING_FIELDS`, and an n8n node dispatches on its operation enum, so renaming one breaks the consumer exactly as a field rename would. What is free is the *order* the values are listed in (the model reads the first as prototypical) and any per-value gloss. Same split as everywhere else: the tokens the model reads are free; the tokens something branches on are not.
 

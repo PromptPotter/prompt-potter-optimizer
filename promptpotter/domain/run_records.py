@@ -10,7 +10,7 @@ from __future__ import annotations
 import enum
 from typing import Annotated, Any, Literal, TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.shared.clock import utcnow_iso
@@ -18,6 +18,7 @@ from promptpotter.shared.clock import utcnow_iso
 __all__ = [
     "CommandAckRecord",
     "CommandRecord",
+    "ConfigOverrides",
     "CycleRecord",
     "CycleSeed",
     "DecisionRecord",
@@ -27,7 +28,6 @@ __all__ = [
     "LLMCallProgressRecord",
     "LLMCallRecord",
     "LLMCallStartRecord",
-    "LimitOverrides",
     "OperatorSweepFile",
     "PhaseRecord",
     "ResumeCheckpointKind",
@@ -359,22 +359,26 @@ class ForkTrigger(enum.StrEnum):
     SCORING_DIVERGENCE = "scoring_divergence"
 
 
-class LimitOverrides(BaseModel):
+class ConfigOverrides(BaseModel):
     """The fork's `OptimizationConfig` delta — every field optional (absent
     inherits the parent), applied to the fork's snapshot at bootstrap; never
-    mutates the parent's frozen config. Two kinds of knob ride here:
+    mutates the parent's frozen config. Three kinds of knob ride here:
 
     - **Run limits** (`max_rounds` / `spend_budget_usd` / `token_budget` /
       patiences / `pobb_epsilon`) — absolute values the fork-time reconcile
       dialog re-sets ("3 of 6 rounds left" → confirm the fork's own ceiling).
-    - **Selection policy** (`per_round_resubset`) — the `mechanisms.selection`
-      toggle, so a fork-at-offset-0 can A/B a behaviour knob (the operator's
-      "behaviour-knob change → sibling cycle" workflow) without touching the
-      global default or the parent cycle.
+    - **Selection policy** (`per_round_resubset`) — the `mechanisms.selection` toggle.
+    - **Search-space policy** (`schema_field_rename`) — unlocks the field-NAME
+      lever on the inner `l1_generate`'s output schema.
 
-    Domain twin of the `LimitOverrides` wire schema. (Name kept for on-disk
-    seed-compat — ~live `.overrides/seed.json` files key on it; the model is
-    the fork's whole OptimizationConfig override set, not only run limits.)"""
+    The two policy knobs ride here for the same reason: `config_diff` classifies
+    each `policy` and `config_coupling` binds each to `Estimand.SEARCH`, so
+    changing one invalidates search comparability and MUST mint a sibling cycle
+    rather than mutate the running one (the operator's "behaviour-knob change →
+    sibling cycle" workflow). `schema_field_rename`'s two writers are that
+    operator fork and an L2/L3 `fork_proposal`.
+
+    Domain twin of the `ConfigOverrides` wire schema."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -386,6 +390,7 @@ class LimitOverrides(BaseModel):
     l3_patience: int | None = None
     pobb_epsilon: float | None = None
     per_round_resubset: bool | None = None
+    schema_field_rename: bool | None = None
 
 
 class CycleSeed(BaseModel):
@@ -396,12 +401,14 @@ class CycleSeed(BaseModel):
     (seed > dataset > backend default) for this cycle only — the dataset
     `pipeline.json` stays immutable. `origin_source` stamps the C0 lineage
     provenance: `fork_seed` for an operator-steered fork, `campaign_origin` for a
-    fresh campaign minted from a chosen prior origin.
+    fresh campaign minted from a chosen prior origin, and **empty when the cycle
+    recovers its origin by replay** — an L2/L3 auto-rebase seeds a config delta,
+    never an origin, so it has no C0 provenance to stamp.
 
     Carried by every `operator_steered` fork (the wire `OperatorForkOverride`
-    command payload deserializes into this) and written by the mint seam for
-    campaign-from-origin; non-operator triggers (sweep / diag / rebase) carry no
-    seed."""
+    command payload deserializes into this), written by the mint seam for
+    campaign-from-origin, and written by an L2/L3 `fork_proposal` that carries a
+    `config_overrides` unlock; sweep + diag triggers carry no seed."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -415,10 +422,24 @@ class CycleSeed(BaseModel):
         "`CampaignConfig.optimizer_narrowing`. Empty for an unedited fork or a "
         "campaign-from-origin seed.",
     )
-    limit_overrides: LimitOverrides = Field(default_factory=LimitOverrides)
+    config_overrides: ConfigOverrides = Field(default_factory=ConfigOverrides)
     origin_source: str = Field(
-        description="C0 lineage provenance — 'fork_seed' | 'campaign_origin'.",
+        default="",
+        description=(
+            "C0 lineage provenance — 'fork_seed' | 'campaign_origin'; empty when the "
+            "seed carries no origin (an L2/L3 rebase replays its own)."
+        ),
     )
+
+    @model_validator(mode="after")
+    def _origin_needs_provenance(self) -> CycleSeed:
+        """A seeded origin MUST name where it came from. `resolve_origin_opt_search_point`
+        looks `origin_source` up in `_SEED_ORIGIN_LINEAGE` the moment `origin_prompt_fields`
+        is non-empty — an unstamped origin would `KeyError` there, deep inside bootstrap.
+        Fail here instead, at the boundary that built the seed."""
+        if self.origin_prompt_fields and not self.origin_source:
+            raise ValueError("origin_prompt_fields set without an origin_source stamp")
+        return self
 
 
 # The `issued_by` value an operator fork carries when the client sent no
@@ -449,7 +470,13 @@ class RebaseRequest(BaseModel):
     """In-loop rebase signal stashed by L2/L3 emission on the cycle, resolved
     post-finalize by ``runner.entry`` into a ``_mint_fork`` call + observer
     rebuild + loop re-entry on the new fork. ``trigger`` discriminates the
-    audit-trail label (``L2_REBASE`` / ``L3_REBASE`` / ``OPERATOR_REWIND``)."""
+    audit-trail label (``L2_REBASE`` / ``L3_REBASE`` / ``OPERATOR_REWIND``).
+
+    ``config_overrides`` is the search-policy delta the layer asked to change
+    *while* rewinding. A policy change and a rewind are one move, not two: the
+    parent keeps its frozen config and its comparability, and the new axis is
+    searched only on the sibling. It rides the fork's ``CycleSeed``, so a later
+    ``resume`` of that fork reads the same unlock back off disk."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -457,6 +484,7 @@ class RebaseRequest(BaseModel):
     trigger: ForkTrigger
     reason: str
     issued_by: str
+    config_overrides: ConfigOverrides | None = None
 
 
 class OperatorSweepFile(BaseModel):

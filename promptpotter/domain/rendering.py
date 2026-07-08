@@ -13,83 +13,22 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import Any
-
-from pydantic import BaseModel, ConfigDict
 
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.results import CritiqueReadout
 from promptpotter.shared import extract_boxed_number, extract_gsm8k_number, extract_last_bold
 from promptpotter.shared.errors import ErrorCategory, error_category, is_error_result
 
-# --------------------------------------------------------------------------- #
-# The fitness value model — the one composite-or-accuracy rule + its tag        #
-# (metric, basis). display_fitness / round_winner_key are the scalar face.      #
-# --------------------------------------------------------------------------- #
-#
-# Every fitness figure is one cell of a small cross-product: a *metric* (what
-# statistic — plain ``accuracy``, the active ``composite`` formula, or difficulty-
-# adjusted ``ability`` θ) over a *basis* (which sample pool — this round's ``subset``
-# draw, the candidate∩origin ``matched`` cells, or the cross-round ``cumulative``
-# frontier). Stored bare, a float can't say which cell it is; ``Metric`` / ``Basis``
-# name the cross-product once so a docstring or UI says "(composite, subset)" in two
-# words. The cross-product is NOT redundancy to collapse — a candidate legitimately
-# has a subset accuracy AND a matched-origin accuracy AND a cumulative frontier, so
-# the served models keep their scalar basis fields; this type *labels* a number, it
-# is not nested per-number over the wire (that would add verbosity, delete no field).
-
-
-def resolve_fitness_value(composite: float | None, accuracy: float) -> float:
-    """THE composite-or-accuracy rule, one implementation: the active-formula
-    ``composite`` when present (an honest ``0.0`` — a validation-failed candidate — is a
-    real score and is kept), degrading to plain ``accuracy`` only on genuine absence
-    (``None``, no active formula). ``display_fitness`` is its widely-imported alias."""
-    return composite if composite is not None else accuracy
-
-
-class Metric(StrEnum):
-    """What statistic a fitness number is."""
-
-    ACCURACY = "accuracy"
-    COMPOSITE = "composite"
-    ABILITY = "ability"  # θ — a logit, not a percent
-
-
-class Basis(StrEnum):
-    """Which sample pool a fitness number is measured over."""
-
-    SUBSET = "subset"  # this round's signal-chased draw — difficulty-blind, swings round-to-round
-    MATCHED = "matched"  # candidate ∩ origin cells — the apples-to-apples paired PoBB basis
-    CUMULATIVE = "cumulative"  # cross-round growing frontier — the honest trend series
-
-
-class Fitness(BaseModel):
-    """A fitness number that carries its ``(metric, basis)``. Build via ``resolve`` for
-    the composite-or-accuracy case; construct directly (``metric=Metric.ABILITY``) for θ,
-    which the render layer switches on to choose logit-vs-percent formatting."""
-
-    model_config = ConfigDict(frozen=True)
-
-    value: float
-    metric: Metric
-    basis: Basis
-
-    @classmethod
-    def resolve(cls, composite: float | None, accuracy: float, basis: Basis) -> Fitness:
-        """The composite-or-accuracy rule as a constructor you cannot forget to call:
-        tags ``COMPOSITE`` when a formula is active (honest ``0.0`` kept), else ``ACCURACY``."""
-        metric = Metric.COMPOSITE if composite is not None else Metric.ACCURACY
-        return cls(value=resolve_fitness_value(composite, accuracy), metric=metric, basis=basis)
-
 
 def display_fitness(composite_fitness: float | None, accuracy: float) -> float:
-    """The canonical fitness value shown to / ranked-by the operator. Thin scalar alias
-    of ``resolve_fitness_value`` (above) — the widely-imported name every display +
-    ranking site routes through, so an ``or`` can never mask an honest ``0.0`` composite.
-    For the tagged form use ``Fitness.resolve``.
+    """THE composite-or-accuracy rule, one implementation: the active-formula composite
+    when present (an honest ``0.0`` — a validation-failed candidate — is a real score and
+    is kept), degrading to plain ``accuracy`` only on genuine absence (``None``, no active
+    formula). Every display + ranking site routes through this name, so an ``or`` can
+    never mask an honest ``0.0``.
     """
-    return resolve_fitness_value(composite_fitness, accuracy)
+    return composite_fitness if composite_fitness is not None else accuracy
 
 
 def round_winner_key(composite_fitness: float | None, accuracy: float) -> tuple[float, float]:
@@ -384,14 +323,10 @@ def extract_display_answer(predicted: str, formula: str | None) -> str:
 
 __all__ = [
     "DISPLAY_EXTRACTORS",
-    "Basis",
-    "Fitness",
-    "Metric",
     "ResultClassification",
     "classify_result",
     "display_fitness",
     "extract_display_answer",
     "format_l1_critique_for_prompt",
-    "resolve_fitness_value",
     "round_winner_key",
 ]

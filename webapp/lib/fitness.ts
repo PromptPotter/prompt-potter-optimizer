@@ -1,6 +1,5 @@
 // The client-side fitness picks, in one place. Mirrors the backend rule-owner
-// (`resolve_fitness_value` in promptpotter/domain/fitness.py); see
-// docs/specs/fitness-value-model.md.
+// (`display_fitness` in promptpotter/domain/rendering.py).
 //
 // The bare `number | null` fields stay as they are: a candidate's accuracy,
 // composite, and cumulative values are distinct (metric, basis) cells the trend,
@@ -13,7 +12,7 @@
 /**
  * Composite-or-accuracy: the active-formula composite when present, else accuracy.
  * The backend already resolves this server-side, so this only covers in-flight rows
- * minted before the composite field lands. Mirror of `resolve_fitness_value`.
+ * minted before the composite field lands. Mirror of `display_fitness`.
  */
 export function resolveComposite(
   composite: number | null | undefined,

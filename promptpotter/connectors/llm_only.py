@@ -131,11 +131,7 @@ async def llm_only_in_process_run(query: str, payload: dict[str, Any]) -> dict[s
     # it through chat(**kwargs), so the provider client handles it identically.
     if cfg.get("reasoning_effort"):
         chat_kwargs["reasoning_effort"] = cfg["reasoning_effort"]
-    # `seed` rides the same kwargs passthrough. Both arms dropped it, and both claimed the
-    # other honoured it: the wire arm forwards the node config to TermNorm, but
-    # `_step_llm_only` named every kwarg it passed on and never named this one. justlogic
-    # pins `seed: 0` and has been non-deterministic since it was written — on a benchmark
-    # whose determinism is the reason its noise floor is readable.
+    # `seed` rides the same passthrough — a benchmark that pins it needs both arms to honour it.
     if cfg.get("seed") is not None:
         chat_kwargs["seed"] = int(cfg["seed"])
     # The node's SECOND prompt. When the dataset declares one, the answer arrives in a slot

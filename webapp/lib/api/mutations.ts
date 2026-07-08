@@ -67,11 +67,16 @@ async function _postCommand(
   return (await r.json()) as CommandAcceptedBody;
 }
 
-// Run-limit knobs the fork reconcile dialog re-sets — twin of the OpenAPI
-// `LimitOverrides`. Every field optional; absent inherits the parent. Values
-// are ABSOLUTE for the fork (the dialog defaults rounds/spend to the parent's
-// remaining, then the operator confirms the fork's own ceiling).
-export interface LimitOverrides {
+// The fork's `OptimizationConfig` delta — twin of the OpenAPI `ConfigOverrides`.
+// Every field optional; absent inherits the parent. Values are ABSOLUTE for the
+// fork (the dialog defaults rounds/spend to the parent's remaining, then the
+// operator confirms the fork's own ceiling).
+//
+// Deliberately the RUN-LIMIT subset: the wire also carries the policy knobs
+// (`per_round_resubset`, `schema_field_rename`), which invalidate search
+// comparability and are set at mint or by an L2/L3 `fork_proposal` — never by a
+// checkbox on a dialog whose job is "how much budget does this fork get".
+export interface ConfigOverrides {
   max_rounds?: number;
   spend_budget_usd?: number | null;
   token_budget?: number | null;
@@ -92,7 +97,7 @@ export interface OperatorForkOverride {
   origin_prompt_fields?: Record<string, unknown>;
   pipeline_overlay?: Record<string, unknown>;
   optimizer_narrowing?: Record<string, unknown>;
-  limit_overrides?: LimitOverrides;
+  config_overrides?: ConfigOverrides;
 }
 
 // Mint an `operator_steered` fork rooted at the selected searchpoint, carrying

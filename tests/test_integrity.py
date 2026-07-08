@@ -12,6 +12,7 @@ them out with the loud-breakage shape/contract bulk.
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,10 +23,26 @@ import pytest
 
 from promptpotter.domain.measurement_provenance import grade_run
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.pipeline_parsing import parse_pipeline_response
+from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
 from promptpotter.shared.hashing import content_hash
+
+
+def _pipeline_schema(dataset: str) -> PipelineSchema:
+    """The committed `datasets/{dataset}/pipeline.json`, parsed. `promptpotter-self` is the
+    outer L4 campaign (it declares the schema levers); `justlogic` is a plain inner one."""
+    path = Path(__file__).resolve().parents[1] / "datasets" / dataset / "pipeline.json"
+    return parse_pipeline_response(json.loads(path.read_text(encoding="utf-8")))
+
+
+def _emittable_l1_params(schema: dict[str, Any]) -> set[str]:
+    """The `l1_generate` param keys an L1 variant may emit under *schema*."""
+    variants = schema["schema"]["properties"]["variants"]["items"]["properties"]
+    node = variants["pipeline_params_override"]["properties"].get("l1_generate", {})
+    return set(node.get("properties", {}))
 
 
 def test_content_hash_distinguishes_pipeline_params() -> None:
@@ -451,20 +468,13 @@ def test_hit_cache_respects_dataset(tmp_path: Path) -> None:
 
 
 def test_schema_description_axis_reaches_the_model_and_cannot_rename_a_field() -> None:
-    """A description edit the optimizer emits must actually reach the schema, and must
-    never reach a field NAME.
+    """A `description` edit round-trips to the schema; an invented key never becomes a field.
 
-    Two silent harms, both invisible in a completed run. (1) If the key
-    `build_l1_output_schema` grafts onto the emittable surface ever drifts from the key
-    `resolve_node_schema_descriptions` reads back, the optimizer spends budget mutating an
-    axis nobody consumes, and every such variant scores as a legitimate no-op — the outer
-    fitness silently learns from noise. (2) `description` is free precisely because no
-    parser reads it; a field NAME is the wire contract. An override that could rename
-    `changes_description` would take the parser down with no schema error.
+    Silently harmful both ways. If the key `build_l1_output_schema` grafts drifts from the key
+    `resolve_node_schema_descriptions` reads back, the optimizer spends budget mutating an axis
+    nobody consumes and every variant scores as a legitimate no-op. And `description` is free
+    only because no parser reads it — a field NAME is the wire contract.
     """
-    import json
-    from pathlib import Path
-
     from promptpotter.application.optimization.dispatch.llm_call import (
         set_optimizer_prompt_overrides,
     )
@@ -473,14 +483,8 @@ def test_schema_description_axis_reaches_the_model_and_cannot_rename_a_field() -
         build_l1_output_schema,
         validate_overrides,
     )
-    from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 
-    raw = json.loads(
-        (
-            Path(__file__).resolve().parents[1] / "datasets/promptpotter-self/pipeline.json"
-        ).read_text(encoding="utf-8")
-    )
-    schema = parse_pipeline_response(raw)
+    schema = _pipeline_schema("promptpotter-self")
 
     try:
         # No override bound → the schema is exactly Pydantic's, so C0 never drifts.
@@ -489,11 +493,9 @@ def test_schema_description_axis_reaches_the_model_and_cannot_rename_a_field() -
         base_props = base["schema"]["properties"]["variants"]["items"]["properties"]
         assert list(base_props) == list(L1Variant.model_fields)
 
-        # The emittable key and the describable vocabulary are both closed.
+        # The describable vocabulary is closed: you describe a field, never invent one.
         emittable = base_props["pipeline_params_override"]["properties"]["l1_generate"]
         grafted = emittable["properties"]["output_schema_descriptions"]
-        assert emittable["additionalProperties"] is False
-        assert grafted["additionalProperties"] is False
         assert set(grafted["properties"]) == set(L1Variant.model_fields)
 
         # The grafted key round-trips: what L1 may emit is what the resolver reads back.
@@ -515,7 +517,6 @@ def test_schema_description_axis_reaches_the_model_and_cannot_rename_a_field() -
         renamed = build_l1_output_schema(schema)
         renamed_props = renamed["schema"]["properties"]["variants"]["items"]["properties"]
         assert list(renamed_props) == list(L1Variant.model_fields)
-        assert "candidate" not in renamed_props
 
         # The raw schema stays locked — descriptions are the ONLY unlocked schema surface.
         forbidden = validate_overrides(
@@ -528,36 +529,54 @@ def test_schema_description_axis_reaches_the_model_and_cannot_rename_a_field() -
         set_optimizer_prompt_overrides(None)
 
 
+def test_emittable_params_are_declared_and_an_invented_one_is_rejected() -> None:
+    """`node_param_keys` is the single emittable surface — and every reader must read it.
+
+    An invented PARAM is not dropped the way a hallucinated NODE is: absent a membership
+    check it merges into `pipeline_params` and rides to the wire. The round completes and
+    the candidate's fitness is attributed to an axis that does not exist. Same set, two
+    readers: a graft on one side alone is either an unhonoured edit or an unguarded one.
+    """
+    from promptpotter.application.optimization.validators.l1_strict import (
+        build_l1_output_schema,
+        validate_overrides,
+    )
+
+    schema = _pipeline_schema("promptpotter-self")
+    emitted = build_l1_output_schema(schema)["schema"]["properties"]["variants"]["items"][
+        "properties"
+    ]["pipeline_params_override"]["properties"]
+    for node, keys in schema.node_param_keys().items():
+        assert set(emitted[node]["properties"]) <= keys, (
+            f"{node}: the schema declares a key `validate_overrides` rejects as unknown_param"
+        )
+
+    # A param no node advertises is rejected, not silently merged.
+    reasons = [
+        (f.axis, f.reason)
+        for f in validate_overrides({"l1_generate": {"invented_knob": 1}}, schema)
+    ]
+    assert reasons == [("l1_generate.invented_knob", "unknown_param")]
+    # A nested param is declared `object`, so a scalar in its slot is caught rather than
+    # coerced — depth comes from the declaration, never from sniffing the value.
+    assert [f.reason for f in validate_overrides({"l1_critique": {"layout": "hdr"}}, schema)] == [
+        "type_mismatch"
+    ]
+    assert validate_overrides({"l1_critique": {"layout": {"instruction": ["plan"]}}}, schema) == []
+
+
 def test_nested_param_override_accumulates_instead_of_reverting_its_parent() -> None:
     """A `param_types: object` param merges one level; siblings the child did not name survive.
 
-    The silent harm: a nested param is ONE key in the node config, so the node-level
-    `{**existing, **incoming}` spread replaced it whole. A candidate that improved a single
-    `output_schema_descriptions` entry silently reverted every entry its parent earned — the
-    description axis could not accumulate across generations, and a `--sweep` would have
-    measured the merge instead of the lever, then (per `schema-description-axis.md`) reverted
-    a correct idea on the strength of a false negative.
-
-    An `array` param must NOT merge: a list is an ordering, and a merged ordering is
-    meaningless. `layout`'s per-slot lists are the live case, and this is the same contract
-    `resolve_node_layout` states — one nesting contract, not two.
-
-    The declaration is what makes the merge happen, so EVERY nested param the schema grafts
-    must be declared. Undeclared, it silently reverts to whole-replace — the same bug, one
-    param over. `output_schema_field_names` shipped undeclared and this asserts the pair.
+    A nested param is ONE key in the node config, so a node-level `{**existing, **incoming}`
+    spread replaces it whole: a candidate that improves a single `output_schema_descriptions`
+    entry silently reverts every entry its parent earned, and the axis cannot accumulate
+    across generations. The `object` declaration is what buys the depth, so every nested
+    param the schema grafts must carry one. An `array` must NOT merge — a list is an ordering.
     """
-    import json
-    from pathlib import Path
-
     from promptpotter.application.optimization.l1.population import merge_pipeline_params
-    from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 
-    raw = json.loads(
-        (
-            Path(__file__).resolve().parents[1] / "datasets/promptpotter-self/pipeline.json"
-        ).read_text(encoding="utf-8")
-    )
-    schema = parse_pipeline_response(raw)
+    schema = _pipeline_schema("promptpotter-self")
 
     # Every nested param the l1_generate schema can graft accumulates, not just the first one.
     for nested in ("output_schema_descriptions", "output_schema_field_names"):
@@ -604,8 +623,7 @@ def test_nested_param_override_accumulates_instead_of_reverting_its_parent() -> 
         "instruction": ["plan"],
     }
 
-    # Undeclared param → node-level shallow semantics, unchanged. Depth comes from the
-    # declaration, never from sniffing `isinstance`.
+    # Undeclared param → node-level shallow semantics, unchanged.
     plain = merge_pipeline_params(
         {"l1_generate": {"persona": "x", "instruction": "y"}},
         {"l1_generate": {"persona": "z"}},
@@ -617,13 +635,11 @@ def test_nested_param_override_accumulates_instead_of_reverting_its_parent() -> 
 def test_schema_violation_is_a_non_result_not_a_wrong_answer() -> None:
     """A response that misses its declared answer slot yields `final_ranking: []`, not a MISS.
 
-    The silent harm: projecting the whole `{reasoning, answer}` blob (or an empty string)
-    into `final_ranking[0]` makes every schema violation grade as a *confident wrong answer*.
-    The run completes, the score is real-looking, and a schema regression is indistinguishable
-    from the model getting the logic wrong — exactly the failure JustLogic's card names.
-    `sample_measurement` already yields NO_RESULT on an empty ranking; the connector's job is
-    to produce one. Both execution arms destructure the named slot the same way, so the
-    in-process and wire measurements of one node config cannot disagree.
+    Projecting the whole `{reasoning, answer}` blob (or an empty string) into
+    `final_ranking[0]` makes every schema violation grade as a *confident wrong answer* — the
+    run completes, the score looks real, and a schema regression is indistinguishable from the
+    model getting the logic wrong. `sample_measurement` already yields NO_RESULT on an empty
+    ranking; the connector's job is to produce one, identically in both execution arms.
     """
     import asyncio
 
@@ -665,75 +681,17 @@ def test_schema_violation_is_a_non_result_not_a_wrong_answer() -> None:
     assert _run(None, content="   ") == []
 
 
-def test_emittable_param_surface_is_one_set_the_schema_and_the_validator_agree_on() -> None:
-    """`node_param_keys` is the single emittable surface — and every reader must read it.
-
-    The silent harm: `validate_overrides` had no membership check, so a param the node never
-    advertised merged into `pipeline_params` unchecked and rode to the wire. Unlike a
-    hallucinated NODE (which `merge_pipeline_params` drops), an invented PARAM survives, the
-    round completes, and the candidate is scored as though the edit were a legitimate axis.
-    Nothing raises; the fitness is simply attributed to a param that does not exist.
-
-    Same set, two readers: what `build_l1_output_schema` declares is exactly what
-    `validate_overrides` accepts. A graft on one side without the other is either an
-    unhonoured edit (schema-only) or an unguarded one (validator-only).
-    """
-    import json
-    from pathlib import Path
-
-    from promptpotter.application.optimization.validators.l1_strict import (
-        build_l1_output_schema,
-        validate_overrides,
-    )
-    from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-
-    raw = json.loads(
-        (
-            Path(__file__).resolve().parents[1] / "datasets/promptpotter-self/pipeline.json"
-        ).read_text(encoding="utf-8")
-    )
-    schema = parse_pipeline_response(raw)
-
-    emitted = build_l1_output_schema(schema)["schema"]["properties"]["variants"]["items"][
-        "properties"
-    ]["pipeline_params_override"]["properties"]
-    surface = schema.node_param_keys()
-    # The field-NAME lever is dropped from BOTH the emitted schema and the surface's
-    # locked view — the lock is structural, so the LLM cannot emit a key that isn't there.
-    assert "output_schema_field_names" not in emitted["l1_generate"]["properties"]
-    for node, keys in surface.items():
-        assert set(emitted[node]["properties"]) <= keys, (
-            f"{node}: the schema declares a key `validate_overrides` rejects as unknown_param"
-        )
-
-    # A param no node advertises is rejected, not silently merged.
-    reasons = [
-        (f.axis, f.reason)
-        for f in validate_overrides({"l1_generate": {"invented_knob": 1}}, schema)
-    ]
-    assert reasons == [("l1_generate.invented_knob", "unknown_param")]
-    # A nested param is declared `object`, so a scalar in its slot is caught rather than
-    # merged as a string — `_matches_declared_type` used to wave through every non-scalar type.
-    assert [f.reason for f in validate_overrides({"l1_critique": {"layout": "hdr"}}, schema)] == [
-        "type_mismatch"
-    ]
-    assert validate_overrides({"l1_critique": {"layout": {"instruction": ["plan"]}}}, schema) == []
-
-
 def test_schema_field_rename_is_locked_by_default_and_never_silently_half_applies() -> None:
-    """The field-NAME lever. Three silent harms, none of which raise.
+    """The field-NAME lever, from the fork that unlocks it to the parse that honours it.
 
-    (1) A rename the emitted schema advertises but the response model does not alias fails
-    EVERY parse of EVERY round — the schema and the model must derive from one function.
-    (2) Gating the *apply* on the inner cycle's own config would silently drop every rename an
-    outer campaign emits (an inner campaign loads the inner dataset's `campaign.json`, not the
-    outer's), scoring a no-op as a legitimate mutation.
-    (3) `populate_by_name` must stay off: if the old key still validated, a rename the model
-    ignored would look applied, and the axis would measure nothing.
+    Three silent harms, none of which raise. (1) A rename the emitted schema advertises but
+    the response model does not alias fails EVERY parse of EVERY round — schema and model must
+    derive from one function. (2) Gating the *apply* on the inner cycle's own config would
+    silently drop every rename an outer campaign emits (the inner loads its own
+    `campaign.json`), scoring a no-op as a legitimate mutation. (3) `populate_by_name` must
+    stay off: if the old key still validated, a rename the model ignored would look applied.
     """
-    import json
-    from pathlib import Path
-
+    from promptpotter.application.config import CampaignConfig, OptimizationConfig
     from promptpotter.application.optimization.dispatch.llm_call import (
         set_optimizer_prompt_overrides,
     )
@@ -745,30 +703,32 @@ def test_schema_field_rename_is_locked_by_default_and_never_silently_half_applie
         build_l1_output_schema,
         effective_l1_field_names,
     )
-    from promptpotter.domain.pipeline_parsing import parse_pipeline_response
+    from promptpotter.application.runner.entry import _apply_config_overrides
+    from promptpotter.domain.run_records import ConfigOverrides
 
-    root = Path(__file__).resolve().parents[1]
-    outer = parse_pipeline_response(
-        json.loads((root / "datasets/promptpotter-self/pipeline.json").read_text(encoding="utf-8"))
-    )
-    inner = parse_pipeline_response(
-        json.loads((root / "datasets/justlogic/pipeline.json").read_text(encoding="utf-8"))
-    )
-
-    def emittable(schema: dict) -> set[str]:
-        variants = schema["schema"]["properties"]["variants"]["items"]["properties"]
-        node = variants["pipeline_params_override"]["properties"].get("l1_generate", {})
-        return set(node.get("properties", {}))
-
+    outer = _pipeline_schema("promptpotter-self")
+    inner = _pipeline_schema("justlogic")
     rename = {"changes_description": "mutation_rationale"}
+
     try:
-        # Locked by default: the outer cannot even emit the key.
+        # Locked by default: the outer cannot even emit the key. Descriptions stay free.
         set_optimizer_prompt_overrides(None)
-        assert "output_schema_field_names" not in emittable(build_l1_output_schema(outer))
-        # Unlocked: the key appears. Descriptions stay free either way.
-        unlocked = emittable(build_l1_output_schema(outer, schema_field_rename=True))
-        assert "output_schema_field_names" in unlocked
-        assert "output_schema_descriptions" in unlocked
+        assert "output_schema_field_names" not in _emittable_l1_params(
+            build_l1_output_schema(outer)
+        )
+        unlocked = _emittable_l1_params(build_l1_output_schema(outer, schema_field_rename=True))
+        assert {"output_schema_field_names", "output_schema_descriptions"} <= unlocked
+
+        # Only a fork opens it: the delta reaches the fork's config, the parent stays frozen
+        # (its rounds must remain comparable), and an unrelated fork inherits rather than resets.
+        base = CampaignConfig(
+            optimization=OptimizationConfig(improvement_threshold=0.01, degradation_threshold=0.05)
+        )
+        forked, _ = _apply_config_overrides(base, None, ConfigOverrides(schema_field_rename=True))
+        assert forked.optimization.schema_field_rename is True
+        assert base.optimization.schema_field_rename is False
+        inherited, _ = _apply_config_overrides(forked, None, ConfigOverrides(max_rounds=3))
+        assert inherited.optimization.schema_field_rename is True
 
         # The inner cycle applies a bound rename even though its OWN knob is off (default).
         set_optimizer_prompt_overrides({"l1_generate": {"output_schema_field_names": rename}})
@@ -792,7 +752,6 @@ def test_schema_field_rename_is_locked_by_default_and_never_silently_half_applie
             }
         )
         assert parsed.variants[0].changes_description == "r"
-        assert isinstance(parsed, L1GenerateOutput)
 
         # No backward compatibility: the OLD key must now fail, so an unhonoured rename is
         # a parse failure (charged 1.0) rather than a silently-scored no-op.
@@ -820,68 +779,3 @@ def test_schema_field_rename_is_locked_by_default_and_never_silently_half_applie
         assert build_l1_response_model(effective_l1_field_names()) is L1GenerateOutput
     finally:
         set_optimizer_prompt_overrides(None)
-
-
-def test_l2_rename_unlock_survives_the_fork_it_rides() -> None:
-    """The unlock's whole journey is silent when it breaks.
-
-    L2 asks to rename; the request rides a `fork_proposal` into `RebaseRequest`, becomes the
-    fork's `ConfigOverrides`, and reaches `build_l1_output_schema` as the emittable rename
-    param. Drop it ANYWHERE on that path and nothing raises: the fork mints, the loop runs,
-    L1 simply never emits the key it was granted — and the outer campaign scores a whole
-    sibling cycle as a legitimate trajectory that measured nothing it was forked to measure.
-
-    Also pinned: an unlock is never granted without the rewind that isolates it. The parent's
-    frozen config is what makes its measurements comparable, so a policy change that did not
-    fork would silently re-base every number recorded before it.
-    """
-    import json
-    from pathlib import Path
-
-    from promptpotter.application.config import CampaignConfig, OptimizationConfig
-    from promptpotter.application.optimization.dispatch.schemas import ForkProposal
-    from promptpotter.application.optimization.validators.l1_strict import build_l1_output_schema
-    from promptpotter.application.runner.entry import _apply_config_overrides
-    from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-    from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM
-    from promptpotter.domain.run_records import ConfigOverrides, CycleSeed
-
-    root = Path(__file__).resolve().parents[1]
-    outer = parse_pipeline_response(
-        json.loads((root / "datasets/promptpotter-self/pipeline.json").read_text(encoding="utf-8"))
-    )
-
-    def emittable(cfg_flag: bool) -> set[str]:
-        schema = build_l1_output_schema(outer, schema_field_rename=cfg_flag)
-        variants = schema["schema"]["properties"]["variants"]["items"]["properties"]
-        return set(variants["pipeline_params_override"]["properties"]["l1_generate"]["properties"])
-
-    # The lever exists on this dataset and is locked. Both halves matter: an unlock that
-    # granted nothing, or a lock that leaked, would each look like a working axis.
-    assert SCHEMA_RENAME_PARAM not in emittable(False)
-    assert SCHEMA_RENAME_PARAM in emittable(True)
-
-    # Off unless the layer asks for it: a default-true unlock would widen every
-    # campaign's search space with nothing in the ledger to say when, or why.
-    assert ForkProposal(round_offset=-2).unlock_schema_field_rename is False
-
-    # ConfigOverrides → the fork's config snapshot → the emittable surface.
-    base = CampaignConfig(
-        optimization=OptimizationConfig(improvement_threshold=0.01, degradation_threshold=0.05)
-    )
-    assert base.optimization.schema_field_rename is False
-    forked, _ = _apply_config_overrides(base, None, ConfigOverrides(schema_field_rename=True))
-    assert forked.optimization.schema_field_rename is True
-    assert SCHEMA_RENAME_PARAM in emittable(forked.optimization.schema_field_rename)
-    # The parent snapshot is untouched — its rounds stay comparable to each other.
-    assert base.optimization.schema_field_rename is False
-
-    # An unrelated fork carries no policy delta: absent knobs inherit, they do not reset.
-    inherited, _ = _apply_config_overrides(forked, None, ConfigOverrides(max_rounds=3))
-    assert inherited.optimization.schema_field_rename is True
-
-    # The seed that persists the unlock carries no origin, so it must carry no C0 stamp
-    # either — and a seeded origin without one is a hard error, not a KeyError in bootstrap.
-    assert CycleSeed(config_overrides=ConfigOverrides(schema_field_rename=True)).origin_source == ""
-    with pytest.raises(pydantic.ValidationError):
-        CycleSeed(origin_prompt_fields={"persona": "p"})

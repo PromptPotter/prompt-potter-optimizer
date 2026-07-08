@@ -232,8 +232,7 @@ export function useLineage({
     // Accuracy view: the WINNER (lineage spine) paints the round's cumulative
     // frontier — the cross-round-comparable series the trend plots — so the spine
     // reads as honest progress, not the per-round subset swing. Losers keep their
-    // own subset score. Composite view: the served value as chosen (`?? accuracy`
-    // only tolerates rows minted before the field was served).
+    // own subset score.
     for (const c of data?.cycles ?? []) {
       for (const r of c.rounds) {
         r.candidates.forEach((cand, i) => {

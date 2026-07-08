@@ -294,12 +294,27 @@ class ForkProposal(BaseModel):
     exits the current cycle with ``StopReason.REBASED``, and
     auto-continues optimization on the new fork (capped at
     ``MAX_AUTO_REBASES`` per CLI invocation).
+
+    ``unlock_schema_field_rename`` is the layer's one search-policy request. It is
+    a bool and not a ``ConfigOverrides`` object on purpose: handed the whole delta
+    the layer could move its own spend ceiling. Unlocking widens the search space,
+    which is why it can only ride a rewind — the parent cycle keeps its frozen
+    config, so its measurements stay comparable.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     round_offset: int
     reason: str = ""
+    unlock_schema_field_rename: bool = Field(
+        False,
+        description=(
+            "Let the fork's L1 rename a field on the inner l1_generate's output schema "
+            "(it can only describe fields today). Set ONLY when the panels show the search "
+            "stalling on what a field is FOR rather than on what it says — a field whose "
+            "name misdescribes its content. Default false."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------

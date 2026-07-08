@@ -73,17 +73,6 @@ def candidate_summaries(proposals: list[CandidateProposal], round_num: int) -> l
     return summaries
 
 
-# Generator-side failure reasons: the meta-prompt made the L1 output unparseable, so the
-# round yields ZERO candidates. Charged to the round that produced them (`RoundResult
-# .l1_parse_failure`), never to a candidate — a round with no candidates has nobody to
-# charge, and a meta-prompt that makes its children unreadable must not score clean.
-# Distinct from the mode-collapse reasons (`no_op_variant` / `duplicate_variant`), which
-# ride real candidates and are counted by `l1_n_no_op` / `l1_n_duplicate`.
-PARSE_FAIL_REASONS = frozenset(
-    {"l1_provider_empty_response", "meta_prompt_parse_failure", "meta_prompt_unexpected_type"}
-)
-
-
 async def l1_generate(
     cycle: Cycle,
     *,
@@ -94,9 +83,9 @@ async def l1_generate(
 ) -> tuple[list[CandidateProposal], str | None]:
     """Generate candidate variants via LLM meta-prompt; context read from cycle.
 
-    Returns ``(candidates, parse_failure)``. ``parse_failure`` is the
-    :data:`PARSE_FAIL_REASONS` member when the meta-prompt produced unparseable output —
-    the round then carries zero candidates and the reason travels with it, rather than
+    Returns ``(candidates, parse_failure)``. ``parse_failure`` names the reason when the
+    meta-prompt produced unparseable output — the round then carries zero candidates and
+    the reason travels with it (charged to the round, never to a candidate), rather than
     vanishing into a bare ``[]``.
     """
     if n_variants <= 0:
@@ -266,4 +255,4 @@ async def l1_generate(
     return population, None
 
 
-__all__ = ["PARSE_FAIL_REASONS", "candidate_summaries", "l1_generate"]
+__all__ = ["candidate_summaries", "l1_generate"]

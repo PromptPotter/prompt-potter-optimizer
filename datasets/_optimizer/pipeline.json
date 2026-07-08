@@ -403,7 +403,7 @@
           "$defs": {
             "ForkProposal": {
               "additionalProperties": false,
-              "description": "L2/L3-emitted proposal to rewind the search to an earlier round.\n\n``round_offset`` is relative to the current round and typically\nnegative (rewind). When set, the runner mints a sibling cycle via\n``_mint_fork(L{2,3}_REBASE, fork_from_round=current + round_offset)``,\nexits the current cycle with ``StopReason.REBASED``, and\nauto-continues optimization on the new fork (capped at\n``MAX_AUTO_REBASES`` per CLI invocation).",
+              "description": "L2/L3-emitted proposal to rewind the search to an earlier round.\n\n``round_offset`` is relative to the current round and typically\nnegative (rewind). When set, the runner mints a sibling cycle via\n``_mint_fork(L{2,3}_REBASE, fork_from_round=current + round_offset)``,\nexits the current cycle with ``StopReason.REBASED``, and\nauto-continues optimization on the new fork (capped at\n``MAX_AUTO_REBASES`` per CLI invocation).\n\n``unlock_schema_field_rename`` is the layer's one search-policy request. It is\na bool and not a ``ConfigOverrides`` object on purpose: handed the whole delta\nthe layer could move its own spend ceiling. Unlocking widens the search space,\nwhich is why it can only ride a rewind \u2014 the parent cycle keeps its frozen\nconfig, so its measurements stay comparable.",
               "properties": {
                 "round_offset": {
                   "title": "Round Offset",
@@ -413,6 +413,12 @@
                   "default": "",
                   "title": "Reason",
                   "type": "string"
+                },
+                "unlock_schema_field_rename": {
+                  "default": false,
+                  "description": "Let the fork's L1 rename a field on the inner l1_generate's output schema (it can only describe fields today). Set ONLY when the panels show the search stalling on what a field is FOR rather than on what it says \u2014 a field whose name misdescribes its content. Default false.",
+                  "title": "Unlock Schema Field Rename",
+                  "type": "boolean"
                 }
               },
               "required": [
@@ -608,7 +614,7 @@
           "$defs": {
             "ForkProposal": {
               "additionalProperties": false,
-              "description": "L2/L3-emitted proposal to rewind the search to an earlier round.\n\n``round_offset`` is relative to the current round and typically\nnegative (rewind). When set, the runner mints a sibling cycle via\n``_mint_fork(L{2,3}_REBASE, fork_from_round=current + round_offset)``,\nexits the current cycle with ``StopReason.REBASED``, and\nauto-continues optimization on the new fork (capped at\n``MAX_AUTO_REBASES`` per CLI invocation).",
+              "description": "L2/L3-emitted proposal to rewind the search to an earlier round.\n\n``round_offset`` is relative to the current round and typically\nnegative (rewind). When set, the runner mints a sibling cycle via\n``_mint_fork(L{2,3}_REBASE, fork_from_round=current + round_offset)``,\nexits the current cycle with ``StopReason.REBASED``, and\nauto-continues optimization on the new fork (capped at\n``MAX_AUTO_REBASES`` per CLI invocation).\n\n``unlock_schema_field_rename`` is the layer's one search-policy request. It is\na bool and not a ``ConfigOverrides`` object on purpose: handed the whole delta\nthe layer could move its own spend ceiling. Unlocking widens the search space,\nwhich is why it can only ride a rewind \u2014 the parent cycle keeps its frozen\nconfig, so its measurements stay comparable.",
               "properties": {
                 "round_offset": {
                   "title": "Round Offset",
@@ -618,6 +624,12 @@
                   "default": "",
                   "title": "Reason",
                   "type": "string"
+                },
+                "unlock_schema_field_rename": {
+                  "default": false,
+                  "description": "Let the fork's L1 rename a field on the inner l1_generate's output schema (it can only describe fields today). Set ONLY when the panels show the search stalling on what a field is FOR rather than on what it says \u2014 a field whose name misdescribes its content. Default false.",
+                  "title": "Unlock Schema Field Rename",
+                  "type": "boolean"
                 }
               },
               "required": [

@@ -338,27 +338,6 @@ def test_composite_fitness_matches_default_formula():
     assert scored["composite_fitness"] == pytest.approx(0.5, abs=1e-4)
 
 
-def test_fitness_resolve_keeps_honest_zero_composite():
-    # Silent-harm guard for the one composite-or-accuracy rule (`domain/rendering.py`,
-    # aliased by `display_fitness`): a real 0.0 composite (validation-failed candidate)
-    # is an honest score and MUST survive — degrade to accuracy ONLY on None (no active
-    # formula). An `or 0.0`/`or accuracy` here would silently promote a failed candidate
-    # to its raw accuracy and mis-rank it. Also checks the tag: present→COMPOSITE,
-    # None→ACCURACY, θ built directly as ABILITY.
-    from promptpotter.domain.rendering import Basis, Fitness, Metric, resolve_fitness_value
-
-    assert resolve_fitness_value(0.0, 0.9) == 0.0  # honest zero kept, not 0.9
-    assert resolve_fitness_value(None, 0.9) == 0.9  # only None degrades to accuracy
-    assert resolve_fitness_value(0.42, 0.9) == 0.42
-
-    f0 = Fitness.resolve(0.0, 0.9, Basis.SUBSET)
-    assert (f0.value, f0.metric, f0.basis) == (0.0, Metric.COMPOSITE, Basis.SUBSET)
-    fn = Fitness.resolve(None, 0.9, Basis.CUMULATIVE)
-    assert (fn.value, fn.metric) == (0.9, Metric.ACCURACY)
-    theta = Fitness(value=-0.3, metric=Metric.ABILITY, basis=Basis.CUMULATIVE)
-    assert theta.metric == Metric.ABILITY  # θ is a logit, tagged distinctly from percents
-
-
 def test_matched_origin_stats_restricts_to_candidate_subset():
     """Guards the round-winner gate: when PoBB leader-locks a candidate on a
     subset of samples, the comparison must use origin's stats on the SAME

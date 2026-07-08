@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { forkReconcileDefaults, limitOverridesFromDefaults } from "../forkReconcile";
+import { configOverridesFromDefaults, forkReconcileDefaults } from "../forkReconcile";
 import type { DashboardSnapshot } from "@/lib/poll";
 
 // "3 of 6 rounds used → 3 left"; "$4 of $10 spent → $6 left". The cap lives in
@@ -46,12 +46,12 @@ describe("forkReconcileDefaults", () => {
     expect(d.spentUsd).toBe(0);
   });
 
-  it("turns the shown defaults into the pre-confirm LimitOverrides", () => {
-    expect(limitOverridesFromDefaults(forkReconcileDefaults(dash))).toEqual({
+  it("turns the shown defaults into the pre-confirm ConfigOverrides", () => {
+    expect(configOverridesFromDefaults(forkReconcileDefaults(dash))).toEqual({
       max_rounds: 3,
       spend_budget_usd: 6,
     });
     // Unknown parent ceiling/cap → omit (inherit), never a zero/NaN ceiling.
-    expect(limitOverridesFromDefaults(forkReconcileDefaults(null))).toEqual({});
+    expect(configOverridesFromDefaults(forkReconcileDefaults(null))).toEqual({});
   });
 });

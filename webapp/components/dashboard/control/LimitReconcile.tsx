@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { LimitOverrides } from "@/lib/api";
+import type { ConfigOverrides } from "@/lib/api";
 import { forkReconcileDefaults } from "@/lib/derivations";
 import { fmtUsd, fmtTokens } from "@/lib/format";
 import { useDashboard } from "@/lib/hooks/useDashboard";
@@ -13,7 +13,7 @@ import { useDashboard } from "@/lib/hooks/useDashboard";
 // the parent by default and live behind an "Advanced" disclosure (placeholders
 // show the inherited value; blank = inherit).
 //
-// Emits a sparse `LimitOverrides` on every edit: a field is included only when
+// Emits a sparse `ConfigOverrides` on every edit: a field is included only when
 // the operator's value is present + valid, so blank = inherit. Self-contained
 // presentational input; the parent panel folds the result into the OperatorForkOverride.
 
@@ -30,7 +30,7 @@ interface Fields {
 export function LimitReconcile({
   onChange,
 }: {
-  onChange: (limits: LimitOverrides) => void;
+  onChange: (limits: ConfigOverrides) => void;
 }) {
   const { dash } = useDashboard();
   // Snapshot the defaults once at open — the cycle is stopped/paused while
@@ -50,7 +50,7 @@ export function LimitReconcile({
 
   const set = (next: Fields) => {
     setF(next);
-    const limits: LimitOverrides = {};
+    const limits: ConfigOverrides = {};
     const intGte1 = (s: string) => {
       const n = Number.parseInt(s, 10);
       return s.trim() !== "" && Number.isInteger(n) && n >= 1 ? n : null;
