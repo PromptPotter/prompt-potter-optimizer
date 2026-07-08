@@ -448,3 +448,81 @@ def test_hit_cache_respects_dataset(tmp_path: Path) -> None:
     assert aime_queries.isdisjoint(just_queries)
     assert any("aime" in q for q in aime_queries)
     assert any("justlogic" in q for q in just_queries)
+
+
+def test_schema_description_axis_reaches_the_model_and_cannot_rename_a_field() -> None:
+    """A description edit the optimizer emits must actually reach the schema, and must
+    never reach a field NAME.
+
+    Two silent harms, both invisible in a completed run. (1) If the key
+    `build_l1_output_schema` grafts onto the emittable surface ever drifts from the key
+    `resolve_node_schema_descriptions` reads back, the optimizer spends budget mutating an
+    axis nobody consumes, and every such variant scores as a legitimate no-op — the outer
+    fitness silently learns from noise. (2) `description` is free precisely because no
+    parser reads it; a field NAME is the wire contract. An override that could rename
+    `changes_description` would take the parser down with no schema error.
+    """
+    import json
+    from pathlib import Path
+
+    from promptpotter.application.optimization.dispatch.llm_call import (
+        set_optimizer_prompt_overrides,
+    )
+    from promptpotter.application.optimization.dispatch.schemas import L1Variant
+    from promptpotter.application.optimization.validators.l1_strict import (
+        build_l1_output_schema,
+        validate_overrides,
+    )
+    from promptpotter.domain.pipeline_parsing import parse_pipeline_response
+
+    raw = json.loads(
+        (
+            Path(__file__).resolve().parents[1] / "datasets/promptpotter-self/pipeline.json"
+        ).read_text(encoding="utf-8")
+    )
+    schema = parse_pipeline_response(raw)
+
+    try:
+        # No override bound → the schema is exactly Pydantic's, so C0 never drifts.
+        set_optimizer_prompt_overrides(None)
+        base = build_l1_output_schema(schema)
+        base_props = base["schema"]["properties"]["variants"]["items"]["properties"]
+        assert list(base_props) == list(L1Variant.model_fields)
+
+        # The emittable key and the describable vocabulary are both closed.
+        emittable = base_props["pipeline_params_override"]["properties"]["l1_generate"]
+        grafted = emittable["properties"]["output_schema_descriptions"]
+        assert emittable["additionalProperties"] is False
+        assert grafted["additionalProperties"] is False
+        assert set(grafted["properties"]) == set(L1Variant.model_fields)
+
+        # The grafted key round-trips: what L1 may emit is what the resolver reads back.
+        edit = {
+            "l1_generate": {
+                "output_schema_descriptions": {"changes_description": "EVIDENCE FIRST."}
+            }
+        }
+        assert validate_overrides(edit, schema, forbidden_axes_strict=True) == []
+        set_optimizer_prompt_overrides(edit)
+        after = build_l1_output_schema(schema)
+        after_props = after["schema"]["properties"]["variants"]["items"]["properties"]
+        assert after_props["changes_description"]["description"] == "EVIDENCE FIRST."
+
+        # Names are contract: an invented key is dropped, never grafted onto the wire.
+        set_optimizer_prompt_overrides(
+            {"l1_generate": {"output_schema_descriptions": {"candidate": "rename attempt"}}}
+        )
+        renamed = build_l1_output_schema(schema)
+        renamed_props = renamed["schema"]["properties"]["variants"]["items"]["properties"]
+        assert list(renamed_props) == list(L1Variant.model_fields)
+        assert "candidate" not in renamed_props
+
+        # The raw schema stays locked — descriptions are the ONLY unlocked schema surface.
+        forbidden = validate_overrides(
+            {"l1_generate": {"output_schema": {"type": "object"}}},
+            schema,
+            forbidden_axes_strict=True,
+        )
+        assert [f.reason for f in forbidden] == ["forbidden_axis"]
+    finally:
+        set_optimizer_prompt_overrides(None)

@@ -24,7 +24,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from promptpotter.application.config import missing_template_vars
-from promptpotter.application.optimization.dispatch.schemas import L1GenerateOutput
+from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+    resolve_node_schema_descriptions,
+)
+from promptpotter.application.optimization.dispatch.schemas import L1GenerateOutput, L1Variant
 from promptpotter.config.settings import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVERRIDES
 from promptpotter.domain.escalation_signals import ValidationFailure
 from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, NODE_LAYOUTS
@@ -164,6 +167,26 @@ def build_l1_output_schema(
                 },
                 "additionalProperties": False,
             }
+        # L4's third free lever: the inner `l1_generate`'s own output-schema `description`
+        # strings — the only prose that sits INSIDE the field-filling loop, and which no
+        # parser reads (`docs/concepts/structured-output.md`). Rides the same per-node
+        # override object as `layout`; resolved back out by `resolve_node_schema_descriptions`.
+        # Properties are the closed set of `L1Variant`'s field NAMES, so the optimizer can
+        # describe a field but never rename one — the lock is structural, not policed.
+        # Inert for every normal campaign: its backend nodes are absent from NODE_LAYOUTS.
+        if node_name == "l1_generate" and layout_spec is not None:
+            param_props["output_schema_descriptions"] = {
+                "type": "object",
+                "description": (
+                    "Rewrite the JSON-Schema `description` of a field on the inner "
+                    "optimizer's own output schema. This prose sits adjacent to the slot it "
+                    "governs, inside the field-filling loop, so it steers harder per token "
+                    "than the instruction does. Keys are field names and are FIXED — you "
+                    "describe a field, you never rename or add one."
+                ),
+                "properties": {f: {"type": "string"} for f in L1Variant.model_fields},
+                "additionalProperties": False,
+            }
         if not param_props:
             continue
         pp_properties[node_name] = {
@@ -183,6 +206,14 @@ def build_l1_output_schema(
         field: {"type": "string"} for field in sorted(TASK_CONTEXT_OVERRIDES)
     }
     tc_override["additionalProperties"] = False
+
+    # 4. Apply the outer L4 cycle's `description` edits, if any are bound for this task.
+    # Assignment onto EXISTING properties only: a field name the optimizer invented is
+    # dropped here rather than reaching the wire. No override bound (every normal cycle)
+    # → the schema is byte-identical to Pydantic's, so C0 is unchanged by construction.
+    for field, description in resolve_node_schema_descriptions("l1_generate").items():
+        if field in variant_props:
+            variant_props[field]["description"] = description
 
     return {"name": "l1_variants", "schema": inlined, "strict": False}
 

@@ -1,27 +1,37 @@
 # Schema-description axis — structured-output `description` as an optimizable parameter
 
-> **Status:** design. **Slice 1 shipped; the axis itself is not implemented.** Why the schema steers at all: [`../concepts/structured-output.md`](../concepts/structured-output.md) (name / coordinates / description). This spec covers only what it takes to make the third lever searchable.
+> **Status:** **built, unmeasured.** Slices 1-3 shipped; the axis is live on `promptpotter-self` and has never been swept (slice 4). Why the schema steers at all: [`../concepts/structured-output.md`](../concepts/structured-output.md) (name / coordinates / description). This spec covers only what it takes to make the third lever searchable.
 
 ## The representation gap
 
 Not excluded by a decision anyone defended — **invisible**, for one reason:
 
-- `OptSearchPoint` addresses prompt fields + `pipeline_params` (node-keyed config dicts) in `datasets/{name}/pipeline.json::nodes.{name}.config`. **Data.**
+- `OptSearchPoint` addresses prompt fields + `pipeline_params` (node-keyed config dicts). **Data.**
 - The ~45 `description=` strings (17 in `dispatch/schemas.py`) live in Python source. **Code.**
 
-The population cannot reach them. Lift them into the overlay and the axis exists — `OptSearchPoint` already carries node config. **No new searchpoint machinery, no sidecar.** That is the whole change.
+The population cannot reach them. But *no lift is needed* — the strings need only be **resolvable** where the wire schema is built, not **stored** as data.
 
 ## Mechanism
 
-`schemas.py` stops holding literals. One default table; schema construction resolves each `description` from the overlay, keyed `{Model}.{field}`:
+`build_l1_output_schema()` (`validators/l1_strict.py`) already derives the wire schema from Pydantic **at call time**. That is the seam: after inlining, it assigns overridden `description` strings onto properties that already exist.
+
+The edit rides the per-node override object the L4 outer cycle already owns — the same channel `layout` uses (`set_optimizer_prompt_overrides` → `overrides[node]["output_schema_descriptions"]`), resolved back by `resolve_node_schema_descriptions()`:
 
 ```
-nodes.l1_generate.config.output_schema_descriptions:
-  L1Variant:
-    changes_description: "Why this variant differs from its parent, in one line."
+pipeline_params_override:
+  l1_generate:
+    output_schema_descriptions:
+      changes_description: "Name the failure pattern, then the concrete change."
 ```
 
-Defaults reproduce today's strings byte-for-byte, so C0 is unchanged and existing measurements stay comparable. Because `promptpotter-self` optimizes `datasets/_optimizer/pipeline.json`, **the axis is an L4 axis the moment the strings are data.**
+**Pydantic stays the sole default.** No default table — a second home for the same strings is the six-copy defect (`schemas.py:11-14` already declares Pydantic the SoT). With no override bound, every normal cycle builds today's schema byte-for-byte, so C0 is unchanged *by construction* rather than by a byte-comparison ritual.
+
+Two properties fall out of the seam rather than being policed:
+
+- **Renaming is impossible.** The apply step assigns onto existing properties only, so an invented field name is dropped before the wire. The grafted `output_schema_descriptions` object enumerates `L1Variant`'s field names with `additionalProperties: false`, so the LLM cannot emit one that does not exist.
+- **The graft is self-scoping.** On the **outer** (`promptpotter-self`) build, the pipeline has an `l1_generate` node, so the emittable key appears; the ContextVar is unbound in the outer task, so the outer's own schema is untouched. On the **inner** build, the backend pipeline has no `l1_generate` node, so nothing is grafted — and the bound override applies. Same function, opposite halves.
+
+**Why the node-config route does not work.** `optimizer_node_config()` reads `datasets/_optimizer/pipeline.json` and nothing else (`prompts.py`, cached, no merge). A `nodes.{name}.config` key never reaches the inner optimizer; only the per-node override channel does. `datasets/_optimizer/pipeline.json` is *read* by the running optimizer — it is not the surface `promptpotter-self`'s `OptSearchPoint` mutates.
 
 ## Permission tiers — what the optimizer may touch
 
@@ -40,15 +50,17 @@ The overlay exposes description strings and a field permutation, **never a raw s
 
 **Reflexivity — cleared by slice 1.** Mutating `L1GenerateOutput`'s descriptions changes how the optimizer parses *its own children's* proposals. It used to be charged to **nobody**: `MetaPromptParseError` kills the whole `l1_generate` call (zero candidates) and appends the wound to the *parent's* `opt_sp.memory.wounds`; `mutate()` resets child wounds, so `_round_problem_rate`'s `parse_fail` sum over `rnd.candidate_scores` — empty in exactly that round — was structurally always `0`, and a candidate that made its children unreadable scored *perfectly clean*. `l1_generate` now returns the reason beside its empty candidate list; it rides `L1YieldStats` → `RoundResult.l1_parse_failure`, and `_round_problem_rate` charges the **round** `1.0`. A parse failure is never charged per-candidate — that round has no candidate to charge.
 
-**Unmeasured.** "Huge lever" is an empirical claim and this repo adjudicates exactly that claim. Turned on when `--sweep` says so, not because it sounds right.
+**Unmeasured — still open.** "Huge lever" is an empirical claim and this repo adjudicates exactly that claim. The axis is *reachable* (slice 3) but unproven. There is deliberately **no toggle**: a negative sweep closes the spec by reverting the commit, not by leaving dead config behind. Keep it that way — a disabled-but-present axis is a fallback chain wearing a flag.
 
 ## Slices
 
 1. ~~**Parse-failure attribution.**~~ **Shipped.** A schema-induced parse failure is charged to the round it occurred in (`RoundResult.l1_parse_failure` → `_round_problem_rate` = `1.0`); before, a zero-candidate round scored `problem_rate = 0.0`, the cleanest possible. *(A live measurement bug independent of this spec.)*
-2. **Descriptions become data.** Default table + overlay resolution. Byte-identical defaults; C0 must reproduce exactly. Pure refactor, no axis.
-3. **One axis, narrowest scope.** `datasets/promptpotter-self/` only, node `l1_generate`, model `L1Variant`.
-4. **Sweep gate.** `--sweep` on `justlogic`; promote only on `proxy_lift_corr ≥ 0.6`. **A negative result closes this spec** — record the finding and stop. That is a successful outcome.
+2. ~~**Descriptions become data.**~~ **Dropped — the premise was wrong.** Nothing has to become data: `build_l1_output_schema` resolves the overrides at call time and Pydantic keeps the defaults. A default table would have given the strings two homes.
+3. ~~**One axis, narrowest scope.**~~ **Shipped.** `promptpotter-self` only, node `l1_generate`, model `L1Variant` — the graft is self-scoping (see Mechanism), so nothing gates it by dataset name. Pinned by `tests/test_integrity.py::test_schema_description_axis_reaches_the_model_and_cannot_rename_a_field`, which fails if the grafted key ever drifts from the resolved one (a silent no-op axis) or if a field could be renamed.
+4. **Sweep gate.** `--sweep` on `justlogic`; promote only on `proxy_lift_corr ≥ 0.6`. **A negative result closes this spec** — record the finding and stop. That is a successful outcome. **Not yet run — this is the next action, and the first that costs money.**
 5. **Widen** to remaining optimizer-owned schemas, iff 4 passes.
+
+**One comparability caveat.** Turning the axis on adds `output_schema_descriptions` to `promptpotter-self`'s emittable `l1_generate` params, which changes the **outer** meta-prompt's in-context tokens. Outer C0 therefore shifts, and pp-self runs from before this commit are not comparable to runs after it. Inner cycles and every normal campaign are untouched — their backend pipelines carry no `l1_generate` node, and with no override bound the schema is Pydantic's byte-for-byte.
 
 ## Scope — two surfaces, not one
 

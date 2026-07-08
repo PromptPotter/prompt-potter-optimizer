@@ -41,6 +41,7 @@ __all__ = [
     "load_optimizer_prompt",
     "load_optimizer_set_overrides",
     "resolve_node_layout",
+    "resolve_node_schema_descriptions",
     "set_optimizer_config_overrides",
     "set_optimizer_prompt_overrides",
 ]
@@ -351,6 +352,32 @@ def resolve_node_layout(node: str) -> L1Layout:
         )
         return spec.floor
     return merged
+
+
+def resolve_node_schema_descriptions(node: str) -> dict[str, str]:
+    """The outer L4 cycle's per-field ``description`` edits for *node*'s output schema.
+
+    The third free lever (``docs/concepts/structured-output.md``): a ``description`` is the
+    only natural language placed *inside* the field-filling loop, and no code reads it — so
+    mutating it changes what the model writes while leaving every parser bit-for-bit
+    unaffected. Field NAMES are the wire contract and stay locked: the caller only ever
+    assigns onto properties that already exist, so a renamed key is structurally dropped
+    rather than policed.
+
+    Rides the SAME per-node override object as the prose and ``layout`` edits
+    (:func:`set_optimizer_prompt_overrides` → ``overrides[node]["output_schema_descriptions"]
+    = {field: text}``) — Pydantic's ``Field(description=)`` remains the sole default, so a
+    node with no override bound (every normal, non-L4 cycle) builds today's schema
+    byte-for-byte. Non-string values are dropped.
+    """
+    overrides = _OPTIMIZER_PROMPT_OVERRIDES.get() or {}
+    node_override = overrides.get(node)
+    raw = (
+        node_override.get("output_schema_descriptions") if isinstance(node_override, dict) else None
+    )
+    if not isinstance(raw, dict):
+        return {}
+    return {k: v for k, v in raw.items() if isinstance(k, str) and isinstance(v, str) and v.strip()}
 
 
 def list_optimizer_prompts() -> list[str]:
