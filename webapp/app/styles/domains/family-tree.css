@@ -49,6 +49,9 @@
 .family-cladogram-gridline{stroke:var(--color-border-tertiary);stroke-width:1;opacity:0.4;stroke-dasharray:1 3}
 .family-cladogram-roundlabel{fill:var(--color-text-tertiary);font-size:9px;font-variant-numeric:tabular-nums}
 .family-cladogram-cyclelabel{fill:var(--color-text-secondary);font-size:11px;letter-spacing:.02em}
+/* The lane's ♥ bank, drawn as text glyphs (the cladogram is an <svg>, so the shared
+   <Hearts> component can't mount here). Same danger hue the TopStrip pips use. */
+.family-cladogram-hearts{fill:var(--color-danger);font-size:10px;letter-spacing:-.04em}
 .family-cladogram-glyph{font-weight:600;fill:var(--color-text-tertiary)}
 .family-cladogram-dot{fill:var(--color-text-secondary);stroke:var(--color-background-primary);stroke-width:1}
 .family-cladogram-dot.kind-root{fill:var(--color-text-primary)}

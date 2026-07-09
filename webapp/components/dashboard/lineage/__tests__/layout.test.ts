@@ -30,6 +30,8 @@ function cycle(
     round_column_offset: 0,
     status: "",
     dataset_name: "ds",
+    hearts: null,
+    lives_cap: null,
     best_accuracy: null,
     rounds: [],
     ...opts,

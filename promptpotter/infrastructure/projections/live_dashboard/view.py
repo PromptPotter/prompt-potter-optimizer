@@ -498,6 +498,8 @@ class LiveDashboardView(DerivedView):
                 pobb_epsilon=opt.pobb_epsilon,
                 spend_budget_usd=opt.spend_budget_usd,
                 token_budget=opt.token_budget,
+                lives_start=opt.lives.start if opt.lives else None,
+                lives_cap=opt.lives.cap if opt.lives else None,
             )
         elif phase == "scoring_steer" and event.event == "applied":
             # Operator hot-swap — custom formulas render verbatim (no short form).

@@ -7,6 +7,8 @@ export * from "./Card";
 export * from "./CopyButton";
 export * from "./Dialog";
 export * from "./ErrorBoundary";
+export * from "./HeartIcon";
+export * from "./Hearts";
 export * from "./Popover";
 export * from "./states";
 export * from "./Switch";

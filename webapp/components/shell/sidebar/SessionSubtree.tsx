@@ -7,7 +7,7 @@ import { campaignOriginHash } from "@/lib/ids";
 import { campaignDisplayName, unitDisplayName } from "@/lib/names";
 import { fmtPct0 } from "@/lib/format";
 import { runPhaseLabel } from "@/lib/run-phase";
-import { isSelfOptimization } from "@/lib/derivations/connector-state";
+import { isSelfOptimization } from "@/lib/derivations";
 import { buildUnitTree, type SessionGroup } from "./grouping";
 import { UnitBranchRows } from "./UnitBranchRows";
 import { CampaignMenu } from "./CampaignMenu";

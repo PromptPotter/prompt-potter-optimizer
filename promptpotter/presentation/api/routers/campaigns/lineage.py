@@ -137,6 +137,11 @@ class CampaignLineageCycle(BaseModel):
     status: str
     dataset_name: str
     best_accuracy: float | None
+    # Banked lives ("hearts") + the bank's ceiling, so a lineage row shows how much runway
+    # each cycle has left. Both ``None`` when the cycle isn't in lives mode. The cap travels
+    # WITH the count — a reader handed only the count cannot tell 3-of-4 from 3-of-7.
+    hearts: int | None = None
+    lives_cap: int | None = None
     # Origin is round 0 — it rides ``rounds[]`` like any round (no separate
     # trunk anchor). The cladogram renders it through the same round path.
     rounds: list[CampaignLineageRound]
@@ -242,11 +247,35 @@ def _summary_candidates(
     ]
 
 
+def _read_dashboard(cycle_dir: Path) -> dict[str, Any] | None:
+    """The cycle's live projection, parsed once per cycle and split by the readers below."""
+    dash = read_json_optional(cycle_dir / "dashboard.json")
+    return dash if isinstance(dash, dict) else None
+
+
+def _lives_from_dashboard(dash: dict[str, Any] | None) -> tuple[int | None, int | None]:
+    """``(hearts, lives_cap)`` — the cycle's ♥ bank and its ceiling, or ``(None, None)``.
+
+    Served so the lineage tree can render each cycle's remaining life beside its rounds.
+    The cap is the denominator: a bare ``hearts`` count is scaleless, and in lives mode
+    ``max_rounds`` is null, so nothing else on the row carries the scale."""
+    if dash is None:
+        return None, None
+    hearts = dash.get("hearts")
+    limits = dash.get("run_limits")
+    cap = limits.get("lives_cap") if isinstance(limits, dict) else None
+    return (
+        hearts if isinstance(hearts, int) else None,
+        cap if isinstance(cap, int) else None,
+    )
+
+
 def _rounds_from_dashboard(
-    cycle_dir: Path, criterion: RoundScorer | None
+    dash: dict[str, Any] | None, criterion: RoundScorer | None
 ) -> list[CampaignLineageRound]:
     """The SETTLED rounds for a cycle from its live ``dashboard.json`` — the
-    single round-state projection (``LiveDashboardView``).
+    single round-state projection (``LiveDashboardView``). Takes the ALREADY-PARSED
+    dashboard so the caller reads the file once and splits it into rounds + lives.
 
     Completed rounds ride ``rounds[]`` (the full per-candidate scoreboard). The
     in-flight ``current_round`` is deliberately NOT appended here: the active
@@ -258,8 +287,7 @@ def _rounds_from_dashboard(
     sibling_kind — still rides ``index.json`` in the caller; write-once identity,
     not updating state.)
     """
-    dash = read_json_optional(cycle_dir / "dashboard.json")
-    if not isinstance(dash, dict):
+    if dash is None:
         return []
     out: list[CampaignLineageRound] = []
     rounds_raw = dash.get("rounds")
@@ -575,10 +603,13 @@ def get_campaign_lineage(
 
         # Round progress reads from the single live projection (dashboard.json),
         # NOT index.json::rounds — so a round in progress shows the instant its
-        # first candidate is seeded, on the same cadence the chart updates.
+        # first candidate is seeded, on the same cadence the chart updates. One read,
+        # two facts: the settled rounds and the cycle's ♥ bank.
+        dash = _read_dashboard(cdir)
         rounds_out = _filter_post_divergence_rounds(
-            _rounds_from_dashboard(cdir, score_criterion), trigger, from_round
+            _rounds_from_dashboard(dash, score_criterion), trigger, from_round
         )
+        hearts, lives_cap = _lives_from_dashboard(dash)
         col_offset = (
             from_round
             if trigger == _OPERATOR_RESTART_TRIGGER and isinstance(from_round, int)
@@ -600,6 +631,8 @@ def get_campaign_lineage(
                 round_column_offset=col_offset,
                 status=str(index.get("status") or ""),
                 dataset_name=str(header.get("dataset_name") or entry["dataset_name"]),
+                hearts=hearts,
+                lives_cap=lives_cap,
                 best_accuracy=(
                     float(index["best_accuracy"])
                     if isinstance(index.get("best_accuracy"), int | float)

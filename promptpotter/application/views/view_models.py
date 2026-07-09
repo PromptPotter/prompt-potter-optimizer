@@ -63,6 +63,9 @@ class ViewContext:
     l1_stall_count: int = 0
     # Banked lives ("hearts") entering the current round; ``None`` when lives mode is off.
     hearts: int | None = None
+    # The bank's ceiling — the denominator every ♥ readout renders against. A bare count
+    # is scaleless, and in lives mode there is no ``max_rounds`` to fall back on.
+    hearts_cap: int | None = None
     origin_accuracy: float = 0.0
     origin_composite_fitness: float | None = None
     composite_fitness_formula: str | None = None
@@ -139,6 +142,7 @@ class RoundStartView:
     model: str
     has_l1_critique: bool
     hearts: int | None = None
+    hearts_cap: int | None = None
 
 
 @dataclass(frozen=True)

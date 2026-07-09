@@ -72,6 +72,20 @@ def _render_init_exit(v: InitExitView) -> str:
     return "\n".join(out)
 
 
+def _heart_bar(hearts: int, cap: int | None) -> str:
+    """``♥♥♥♡♡`` — banked lives filled, the rest of the ceiling hollow; ``💀`` at zero.
+
+    The empty pips ARE the readout: ``♥♥♥`` alone cannot distinguish healthy-of-four from
+    nearly-dead-of-seven, and in lives mode there is no ``ROUND n/max`` left to carry the
+    scale. Falls back to a bare count when the cap is unknown (lives off, or a dashboard
+    written before ``run_limits.lives_cap`` existed)."""
+    if hearts <= 0:
+        return "💀"
+    if cap is None or cap < hearts:
+        return "♥" * hearts
+    return "♥" * hearts + "♡" * (cap - hearts)
+
+
 def _render_round_start(v: RoundStartView) -> str:
     if v.has_l1_critique:
         crit = f"from R{v.round - 1}"
@@ -82,16 +96,23 @@ def _render_round_start(v: RoundStartView) -> str:
     # Lives mode → show the ♥ bank instead of the fixed round ceiling (which is null/999
     # when lives governs the budget); non-lives runs keep the "ROUND N/max" form.
     round_label = (
-        f"ROUND {v.round}  {'♥' * v.hearts or '💀'}"
+        f"ROUND {v.round}  {_heart_bar(v.hearts, v.hearts_cap)}"
         if v.hearts is not None
         else f"ROUND {v.round}/{v.max_rounds or 999}"
+    )
+    # `l1_patience` is the distance to the next ESCALATION, not the run's remaining life —
+    # hearts own that. Labelling it "patience" beside a ♥ bank put two different facts under
+    # one word and read as a duplicate. At 0 the `l1_to_l2` fall-through fires L2 every round,
+    # which "stall 1/0" would state as a riddle; say it plainly instead.
+    escalation = (
+        "L2 every round" if v.patience == 0 else f"stall {v.l1_stall_count}/{v.patience} → L2"
     )
     return "\n".join(
         [
             "",
             _round_rule(
                 round_label,
-                f"patience {v.l1_stall_count}/{v.patience}",
+                escalation,
             ),
             "",
             _node_block(

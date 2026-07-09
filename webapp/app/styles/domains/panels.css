@@ -22,8 +22,11 @@ h1{font-size:26px;font-weight:600;line-height:1.2}
 .topstrip-cand{font-weight:600;color:var(--color-success)}
 /* Banked lives ("hearts") — pips beside the round in improvement-banked-budget
    mode. Warm/danger hue reads as "lives" in both themes; the heart SVG inherits
-   it via currentColor. */
-.topstrip-hearts{display:inline-flex;align-items:center;gap:1px;color:var(--color-danger);line-height:0}
+   it via currentColor. The hollow pips (`fill-opacity` on the icon) are the
+   denominator, so they share the hue rather than fading to a neutral. */
+.topstrip-hearts,.chat-activity-hearts{display:inline-flex;align-items:center;gap:1px;color:var(--color-danger);line-height:0}
+.chat-activity-hearts{margin-left:auto;padding-left:8px}
+.hearts-dead{line-height:1;font-size:.85em}
 .topstrip-qps{color:var(--color-text-tertiary)}
 .topstrip-counter-val{font-size:13px;color:var(--color-text-primary);font-family:var(--font-mono);font-weight:500}
 .topstrip-trace{font-size:11px;color:var(--color-accent);text-decoration:none;font-weight:600}

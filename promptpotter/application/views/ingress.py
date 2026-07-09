@@ -78,6 +78,7 @@ def _init_enter(d: dict[str, Any], ctx: ViewContext) -> InitEnterView:
     ctx.round_num = 0
     ctx.l1_stall_count = 0
     ctx.hearts = opt.lives.start if opt.lives is not None else None
+    ctx.hearts_cap = opt.lives.cap if opt.lives is not None else None
     ctx.origin_accuracy = 0.0
 
     # Resolve the per-round composite formula at INIT.enter so the live
@@ -172,6 +173,7 @@ def _l1_generate_enter(d: dict[str, Any], ctx: ViewContext) -> RoundStartView:
         model=d.get("model") or "(default)",
         has_l1_critique=bool(d.get("has_l1_critique")),
         hearts=ctx.hearts,
+        hearts_cap=ctx.hearts_cap,
     )
 
 

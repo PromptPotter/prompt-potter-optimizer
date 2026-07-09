@@ -140,6 +140,8 @@ export function ChatPane({
         progress={live.progress}
         connected={live.connected}
         decision={decision}
+        hearts={dash?.hearts ?? null}
+        livesCap={dash?.run_limits?.lives_cap ?? null}
       />
     ) : null;
 

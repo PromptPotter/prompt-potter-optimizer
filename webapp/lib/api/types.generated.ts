@@ -413,6 +413,8 @@ export interface CampaignLineageCycle {
   status: string;
   dataset_name: string;
   best_accuracy: number | null;
+  hearts: number | null;
+  lives_cap: number | null;
   rounds: CampaignLineageRound[];
 }
 

@@ -10,6 +10,7 @@ import { cx } from "@/lib/cx";
 import { shortFamilyTail } from "@/lib/ids";
 import { useSelection } from "@/lib/SelectionContext";
 import { useLineageOverlay } from "@/lib/lineage-overlay";
+import { heartsText } from "@/lib/derivations";
 import {
   CAND_STUB,
   COL_W,
@@ -339,6 +340,12 @@ export function Forest({
                   : shortFamilyTail(layoutEntry.cycle.cycle_id)
                 : n.cycleId;
               const rowLabelText = n.isLastInLane && layoutEntry ? cycName : null;
+              // The lane's ♥ bank, as glyphs — the cladogram is an <svg>, so the shared
+              // <Hearts> component can't mount here; `heartsText` is the same derivation
+              // rendered as text. Empty string when the cycle isn't in lives mode.
+              const laneHearts = layoutEntry
+                ? heartsText(layoutEntry.cycle.hearts, layoutEntry.cycle.lives_cap)
+                : "";
               const key = nodeKey(n.cycleId, n.round);
               const isDivergence = divergenceByKey.has(key);
               const isDivergent = divergentKeys.has(key);
@@ -392,6 +399,11 @@ export function Forest({
                         {TRIGGER_GLYPH[n.trigger] ?? ""}
                       </tspan>
                       <tspan dx="4">{rowLabelText}</tspan>
+                      {laneHearts && (
+                        <tspan dx="6" className="family-cladogram-hearts">
+                          {laneHearts}
+                        </tspan>
+                      )}
                     </text>
                   )}
                   <title>

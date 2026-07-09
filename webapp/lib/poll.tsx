@@ -124,6 +124,11 @@ export interface DashboardSnapshot {
     pobb_epsilon?: number;
     spend_budget_usd?: number | null;
     token_budget?: number | null;
+    // The ♥ bank's declared ceilings — the DENOMINATOR for the live `hearts` count above.
+    // Without `lives_cap` a heart strip is scaleless, and in lives mode `max_rounds` is
+    // null so the round counter it replaced carried the only scale there was.
+    lives_start?: number | null;
+    lives_cap?: number | null;
   };
   // Fresh-campaign placeholder — set by the server when `dashboard.json`
   // hasn't been written yet (origin still running). The companion

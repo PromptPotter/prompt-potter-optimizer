@@ -6,6 +6,7 @@ export * from "./connector-state";
 export * from "./critical-alert";
 export * from "./forkReconcile";
 export * from "./headline-stats";
+export * from "./hearts";
 export * from "./nodeConfig";
 export * from "./round-axis";
 export * from "./round-candidates";

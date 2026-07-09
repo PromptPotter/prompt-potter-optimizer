@@ -4,6 +4,7 @@ import { postOriginGateDecision, IngestApiError, type OriginGateDecision } from 
 import { bumpRevalidation } from "@/lib/revalidate";
 import { fmtPct0 } from "@/lib/format";
 import { cx } from "@/lib/cx";
+import { Hearts } from "@/components/ui";
 import type { ActivityItem } from "@/lib/chat/activity";
 import type { DecisionItem, GateVerdict } from "@/lib/chat/decision";
 
@@ -20,6 +21,8 @@ export function LiveSegment({
   progress,
   connected,
   decision,
+  hearts,
+  livesCap,
 }: {
   campaignId: string;
   cycleId: string;
@@ -27,6 +30,10 @@ export function LiveSegment({
   progress: ActivityItem | null;
   connected: boolean;
   decision: DecisionItem | null;
+  /** Banked lives of the VIEWED cycle; `null` when it isn't in lives mode. */
+  hearts?: number | null;
+  /** The bank's ceiling — the denominator. Passed down, never re-derived here. */
+  livesCap?: number | null;
 }) {
   const [pending, setPending] = useState<OriginGateDecision | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -82,6 +89,12 @@ export function LiveSegment({
             {progress.icon}
           </span>
           <span className="chat-activity-label">{progress.label}</span>
+          {/* The ♥ bank rides the PROGRESS chip, not the round rows above it: the feed is a
+              history, and painting the current bank onto a finished round would misdate it.
+              The chip is the one row that means "now". */}
+          {hearts != null && (
+            <Hearts hearts={hearts} cap={livesCap} className="chat-activity-hearts" />
+          )}
         </div>
       ) : null}
 
