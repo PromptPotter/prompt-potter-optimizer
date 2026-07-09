@@ -82,7 +82,7 @@ Exactly what `decision_information_gain` computes (`adaptive_queue_mechanism.py:
 
 Not shipped. Outlined here so the substrate doesn't paint into a corner.
 
-Today every archive observation contributes equally to a sample's population profile. Phase 2 will weight each observation by how relevant the producing candidate is to the current one — using similarity (lineage distance, prompt distance, or pipeline-config distance — undecided) and recency (older observations weighted lower, because pipeline capability drifts over time). The same scoring framework applies; only the conditioning is richer. The breaking primitive change Phase 2 needs is extending `Observation` (`exploration.py:26-31`) with a timestamp and a lineage hint, or routing those through a sidecar lookup. Open design question: archive-wide capability-drift estimate vs per-pipeline-node capability curve — this determines the `Observation` schema.
+Today every archive observation contributes equally to a sample's population profile. Phase 2 will weight each observation by how relevant the producing candidate is to the current one — using similarity (lineage distance, prompt distance, or pipeline-config distance — undecided) and recency (older observations weighted lower, because pipeline capability drifts over time). The same scoring framework applies; only the conditioning is richer. The breaking primitive change Phase 2 needs is extending `Observation` (`exploration.py:53`) with a timestamp and a lineage hint, or routing those through a sidecar lookup. Open design question: archive-wide capability-drift estimate vs per-pipeline-node capability curve — this determines the `Observation` schema.
 
 ---
 
@@ -91,5 +91,5 @@ Today every archive observation contributes equally to a sample's population pro
 - Adaptive queue mechanism math: `promptpotter/application/intelligence/adaptive_queue_mechanism.py::decision_information_gain`
 - Per-candidate posterior fold: `promptpotter/application/optimization/l1/score/loop.py::score_population`
 - Population profile fit: `promptpotter/application/intelligence/exploration.py::fit_rasch`
-- Observation: `promptpotter/application/intelligence/exploration.py:26-31`
+- Observation: `promptpotter/application/intelligence/exploration.py:53`
 - Persisted ranking writer: `promptpotter/application/intelligence/hard_sample_sorter.py::build_hard_samples_artifact_from_observations`

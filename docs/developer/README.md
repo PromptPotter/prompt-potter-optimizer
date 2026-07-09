@@ -117,20 +117,20 @@ archive/                            MeasurementArchive
                                         sample)    config)  both)
 ```
 
-**Write path:** `score_search_point()` → `build_dataset_run_data()` (`application/datasets/loaders.py:368`) → `archive.save(run_id, data)` (`infrastructure/store/measurement_archive.py:101`) → `AxisIndex.refresh()` (`application/intelligence/indexes/axis.py:283`) pulls via `archive.load_since()`.
+**Write path:** `score_search_point()` → `build_dataset_run_data()` (`application/datasets/loaders.py:378`) → `archive.save(run_id, data)` (`infrastructure/store/measurement_archive.py:126`) → `AxisIndex.refresh()` (`application/intelligence/indexes/axis.py:331`) pulls via `archive.load_since()`.
 
 **Read paths** (both return `list[Measurement]`):
 
 - `measurements_for_sample(backend_id, sample_id)` — *"history of training example X"*. Caller: `archive_views.measurements_for_sample()` (sweep toolkit).
 - `measurements_for_config(backend_id, predicate)` — *"runs whose config matches this subset"*. Optional `run_ids` hint keeps the scan O(K + matches).
 
-**Schema** (`domain/sample.py:77`, frozen dataclass): `run_id, content_hash, sample_id, query, ground_truth, predicted, hit, score, run_scores, node_configs, pipeline_data, created_at`.
+**Schema** (`domain/sample.py:48`, frozen dataclass): `run_id, content_hash, sample_id, query, ground_truth, predicted, hit, score, run_scores, node_configs, pipeline_data, created_at`.
 
 **Extension seams:**
 
 | Change | Files |
 |---|---|
-| New field on every measurement | `Measurement` (`domain/sample.py`), `build_dataset_run_data()` (`datasets/loaders.py:397`), `_to_measurement()` (`measurement_archive.py:418`); bump `MEASUREMENTS_SCHEMA_VERSION` (`config/settings.py:45`) |
+| New field on every measurement | `Measurement` (`domain/sample.py`), `build_dataset_run_data()` (`datasets/loaders.py:378`), `_to_measurement()` (`measurement_archive.py:510`); bump `MEASUREMENTS_SCHEMA_VERSION` (`config/settings.py:78`) |
 | New retrieval view | Method on `MeasurementArchive` parallel to `for_sample/for_config`. Pair with an index class if filtering must stay efficient. |
 | New derived index | Class with `_seen_runs` cursor + `ingest_run()`, register on `AxisIndex.refresh()` |
 

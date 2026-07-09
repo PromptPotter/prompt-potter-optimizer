@@ -94,7 +94,6 @@ Campaign knobs + scoring + optimizer LLM. Validated by `application/config.py::C
 | `improvement_significance` | 1.0 | Significance gate (disabled by default; <1.0 requires p < this). |
 | `forbidden_axes_strict` | True | Reject L1 candidates that mutate operator-fixed axes (`model`, `provider`). |
 | `seed_heatmap_from_archive` | False | Round-end hard-sample Rasch fit folds in prior archive observations (cross-cycle δ_s ordering). |
-| `exploration.heatmap_show_archive_candidates` | False | When seeding from archive: also show archive candidate IDs on the heatmap Y-axis (else hidden from display). |
 
 **Optimizer LLM:** install-global, **not** in `campaign.json`. Provider, model, temperature, `reasoning_effort`, and `max_tokens` are per-node config in `datasets/_optimizer/pipeline.json` (`nodes.{l1_generate|l1_critique|l2_context|l3_plan|checkin}.config`), resolved inside `llm_call` like any other node tunable. One file configures the optimizer for every campaign.
 
