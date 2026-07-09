@@ -37,6 +37,7 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 | Under which fitness formula? active / what-if / lens / replay, `composite_fitness` vs `accuracy` | [`architecture.md`](architecture.md) §0.5 (Composite-fitness resolution chain) + [`concepts/scoring-and-memory.md`](concepts/scoring-and-memory.md) |
 | The situational reasoning doctrines (simplify-the-problem / surface-ledger / reach-the-operator)? | [`developer/conventions.md`](developer/conventions.md) § Reasoning doctrine (the two universal gates stay in root [`CLAUDE.md`](../CLAUDE.md)) |
 | Debugging the PP↔TermNorm highway (async hygiene, `--reload` session wipe, latency)? | [`operations/backend-integration.md`](operations/backend-integration.md) § Debugging the highway |
+| Why does a schema's field order / `description=` change what the model says? | [`concepts/structured-output.md`](concepts/structured-output.md) (the schema is a second prompt) |
 | How does information flow through L1 / L2 / L3? | [`developer/dispatch-hub.md`](developer/dispatch-hub.md) |
 | How do I add a record / injection / view-field / connector without half-wiring it? | [`developer/adding-a-surface.md`](developer/adding-a-surface.md) (recipe + the CI guard per surface) |
 | How does a layer heal a failure? | [`developer/self-healing-internals.md`](developer/self-healing-internals.md) |

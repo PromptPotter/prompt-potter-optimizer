@@ -41,7 +41,7 @@ jupyter = [
     "ipython>=8.0",     # why kept: in-notebook HTML rendering (presentation/views/notebook_run.py)
 ]
 stats = [
-    "scipy>=1.12.0",    # why kept: Rasch fit + statistical proportion test
+    "scipy>=1.12.0",    # why kept: Rasch fit + Wilson/normal-CI statistics
 ]
 benchmarks = [
     "datasets>=2.14.0", # why kept: HuggingFace BBEH loader (M11 benchmark track)

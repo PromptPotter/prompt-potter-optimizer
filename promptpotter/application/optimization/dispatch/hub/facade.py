@@ -237,6 +237,7 @@ def build_bundle(
         forbidden_axes_strict=cycle.config.optimization.forbidden_axes_strict,
         rebase_capability=cycle.config.optimization.rebase_capability,
         terminate_capability=cycle.config.optimization.terminate_capability,
+        schema_field_rename=cycle.config.optimization.schema_field_rename,
     )
 
 

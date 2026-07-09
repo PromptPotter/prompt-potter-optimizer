@@ -133,28 +133,6 @@ def active_pointer_exists(tenant_id: TenantId, *, projects_root: Path | None = N
     return _active_pointer_path(tenant_id, projects_root).exists()
 
 
-def walk_cycle_lineage(tenant_root: Path, campaign_id: str, cycle_id: str) -> list[str]:
-    """Walk the ``parent_cycle_id`` chain via index.json reads. Returns ``[root, …, cycle_id]``.
-
-    All cycles of a campaign's lineage live flat under the same
-    ``campaigns/{campaign_id}/cycles/`` dir; this follows the
-    ``parent_cycle_id`` field until it hits the root. O(depth) reads.
-    """
-    chain = [cycle_id]
-    current = cycle_id
-    while True:
-        idx_path = cycle_dir_for(tenant_root, campaign_id, current) / "index.json"
-        data = read_json_tolerant(idx_path)
-        if not isinstance(data, dict):
-            break
-        parent = data.get("parent_cycle_id")
-        if not parent:
-            break
-        chain.insert(0, str(parent))
-        current = str(parent)
-    return chain
-
-
 __all__ = [
     "BackendStore",
     "CampaignStore",
@@ -185,6 +163,5 @@ __all__ = [
     "session_dir_for",
     "session_index",
     "sibling_kind",
-    "walk_cycle_lineage",
     "write_json",
 ]

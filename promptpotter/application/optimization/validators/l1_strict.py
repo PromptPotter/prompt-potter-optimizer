@@ -24,12 +24,21 @@ from dataclasses import dataclass
 from typing import Any
 
 from promptpotter.application.config import missing_template_vars
-from promptpotter.application.optimization.dispatch.schemas import L1GenerateOutput
+from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+    resolve_node_schema_descriptions,
+    resolve_node_schema_field_names,
+)
+from promptpotter.application.optimization.dispatch.schemas import L1GenerateOutput, L1Variant
 from promptpotter.config.settings import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVERRIDES
 from promptpotter.domain.escalation_signals import ValidationFailure
 from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, NODE_LAYOUTS
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.pipeline_schema import SCHEMA_OWNED_FIELDS, PipelineSchema
+from promptpotter.domain.pipeline_schema import (
+    NESTED_PARAM_TYPES,
+    SCHEMA_OWNED_FIELDS,
+    SCHEMA_RENAME_PARAM,
+    PipelineSchema,
+)
 from promptpotter.domain.results import CandidateProposal
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 from promptpotter.domain.validators import LLMOutputValidator, ValidatorOutcome
@@ -44,6 +53,7 @@ __all__ = [
     "L1YieldStats",
     "build_l1_output_schema",
     "detect_invariants",
+    "effective_l1_field_names",
     "validate_overrides",
 ]
 
@@ -75,8 +85,104 @@ def _inline_refs(node: Any, defs: dict[str, dict[str, Any]]) -> Any:
     return node
 
 
+def effective_l1_field_names() -> dict[str, str]:
+    """The `{field: wire_name}` rename in force for this call — the ONE source both the emitted
+    JSON Schema and the response model derive from. Two surfaces, one function: a schema that
+    renames a field the response model does not alias fails every parse, every round.
+
+    **Unconditional, and it must be.** `schema_field_rename` governs whether an OUTER campaign's
+    L1 may *propose* a rename — it gates the graft, below. The INNER cycle honours whatever
+    mutation it is handed, exactly as it does for prose, `layout`, and
+    `output_schema_descriptions`. Gating this on the inner cycle's own config would open a silent
+    no-op channel: an inner campaign loads its config from the inner dataset's `campaign.json`
+    (`runner/inner_recursion.py`), never from the outer's, so the outer would emit a rename that
+    nothing applied — and score it as a legitimate mutation.
+
+    Empty on every normal, non-L4 cycle (no override bound). A proposed rename is dropped when
+    its target collides with a field that is not itself being renamed away
+    (`{changes_description: variant_name}` would make the response ambiguous).
+    """
+    proposed = resolve_node_schema_field_names("l1_generate")
+    if not proposed:
+        return {}
+    survivors = set(L1Variant.model_fields) - set(proposed)
+    return {f: w for f, w in proposed.items() if f in L1Variant.model_fields and w not in survivors}
+
+
+def _rename_variant_schema(variant: dict[str, Any], field_names: dict[str, str]) -> None:
+    """Rewrite `properties` keys and the `required` list in place; order is preserved."""
+    props = variant.get("properties") or {}
+    variant["properties"] = {field_names.get(k, k): v for k, v in props.items()}
+    required = variant.get("required")
+    if isinstance(required, list):
+        variant["required"] = [field_names.get(k, k) for k in required]
+
+
+_OUTPUT_SCHEMA_PARAM_DESCRIPTIONS: dict[str, str] = {
+    SCHEMA_RENAME_PARAM: (
+        "Rename a field on the inner optimizer's own output schema. The model holds "
+        "strong priors about what belongs under a given key, so the name steers "
+        "before a single token of the value is written. Keys are the existing field "
+        "names; values are the new wire names. Rename only when the current name "
+        "misdescribes what the field should hold — a rename the model then fails to "
+        "honour makes the round unparseable and scores it maximally dirty."
+    ),
+    "output_schema_descriptions": (
+        "Rewrite the JSON-Schema `description` of a field on the inner "
+        "optimizer's own output schema. This prose sits adjacent to the slot it "
+        "governs, inside the field-filling loop, so it steers harder per token "
+        "than the instruction does. Keys are field names and are FIXED — you "
+        "describe a field, you never rename or add one."
+    ),
+}
+
+
+def _nested_param_property(node_name: str, param: str) -> dict[str, Any] | None:
+    """The emitted sub-schema for a NESTED (`object`-declared) optimizer param.
+
+    A nested param's value space is PromptPotter's own — the L4 case, where the target IS
+    this optimizer — exactly as `model`'s value space is `available_models`. A node offers
+    the lever iff its dataset declares it in `param_keys`, so `architecture.md` §0's "zero
+    hardcoded knowledge of the target" survives. `None` means *declared but unwired* — the
+    param is dropped from the emitted schema rather than advertised as an edit nothing
+    would honour, which is what `NODE_LAYOUTS` membership decides: a node with no layout
+    spec is not one of this optimizer's own.
+
+    `layout` (L4's information-flow lever): per-slot lists of injection names; the value
+    space is the node's own `NODE_LAYOUTS` add/excise vocabulary. `output_schema_*` (L4's
+    schema levers, `docs/concepts/structured-output.md`): keyed by the inner `l1_generate`'s
+    own variant fields — a closed set, so the optimizer can describe or rename a field but
+    never invent one.
+    """
+    if param == "layout":
+        spec = NODE_LAYOUTS.get(node_name)
+        if spec is None:
+            return None
+        allowed = sorted(spec.possible)
+        return {
+            "type": "object",
+            "properties": {
+                slot: {"type": "array", "items": {"type": "string", "enum": allowed}}
+                for slot in L1_LAYOUT_SLOTS
+            },
+            "additionalProperties": False,
+        }
+    description = _OUTPUT_SCHEMA_PARAM_DESCRIPTIONS.get(param)
+    if description is None or NODE_LAYOUTS.get(node_name) is None:
+        return None
+    return {
+        "type": "object",
+        "description": description,
+        "properties": {f: {"type": "string"} for f in L1Variant.model_fields},
+        "additionalProperties": False,
+    }
+
+
 def build_l1_output_schema(
-    pipeline_schema: PipelineSchema, *, forbidden_axes_strict: bool = True
+    pipeline_schema: PipelineSchema,
+    *,
+    forbidden_axes_strict: bool = True,
+    schema_field_rename: bool = False,
 ) -> dict[str, Any]:
     """l1_generate response_schema — three constrained slots per variant.
 
@@ -132,8 +238,13 @@ def build_l1_output_schema(
         node = pipeline_schema.get_node(node_name)
         if node is None:
             continue
+        # Scalars first, then the nested params, each alphabetical. Field ORDER is what
+        # this schema teaches (`docs/concepts/structured-output.md`), so the two groups
+        # are emitted in a fixed sequence rather than one interleaved sort — the meta-
+        # levers read after the surface they act on.
+        nested = {p for p in keys if node.param_types.get(p) in NESTED_PARAM_TYPES}
         param_props: dict[str, dict[str, Any]] = {}
-        for param in sorted(keys):
+        for param in sorted(keys - nested):
             if param == "model" and available_models:
                 param_props[param] = {"type": "string", "enum": available_models}
                 continue
@@ -145,25 +256,17 @@ def build_l1_output_schema(
                 param_props[param] = {"type": declared_type}
             else:
                 param_props[param] = {}
-        # L4's information-flow lever (slice 6): for an optimizer node the outer
-        # cycle may edit not only prose but WHICH signals reach it. Graft a `layout`
-        # param — a per-slot list of injection names — riding the SAME per-node
-        # override object as the prose edits. Only `editor == "l4"` nodes (the fill
-        # sites route through `resolve_node_layout`); `l1_generate` (L2-edited
-        # in-campaign) is excluded so the schema never offers an unwired edit. Enum =
-        # the node's legal add/excise vocabulary (`possible`). Inert for every normal
-        # campaign — its backend nodes are absent from NODE_LAYOUTS.
-        layout_spec = NODE_LAYOUTS.get(node_name)
-        if layout_spec is not None and layout_spec.editor == "l4":
-            allowed = sorted(layout_spec.possible)
-            param_props["layout"] = {
-                "type": "object",
-                "properties": {
-                    slot: {"type": "array", "items": {"type": "string", "enum": allowed}}
-                    for slot in L1_LAYOUT_SLOTS
-                },
-                "additionalProperties": False,
-            }
+        # The field-NAME lever is the strongest and the only one that can break a parser,
+        # so the campaign must unlock it: dropped from the emitted schema when locked, and
+        # the LLM cannot emit a key the schema omits. Structural, never policed per round.
+        # Unlocked, the rename is a presentation transform — `build_l1_response_model`
+        # aliases the wire key back onto the real field, so no downstream reader observes it.
+        if not schema_field_rename:
+            nested.discard(SCHEMA_RENAME_PARAM)
+        for param in sorted(nested):
+            prop = _nested_param_property(node_name, param)
+            if prop is not None:
+                param_props[param] = prop
         if not param_props:
             continue
         pp_properties[node_name] = {
@@ -184,6 +287,20 @@ def build_l1_output_schema(
     }
     tc_override["additionalProperties"] = False
 
+    # 4. Apply the outer L4 cycle's `description` edits, if any are bound for this task.
+    # Assignment onto EXISTING properties only: a field name the optimizer invented is
+    # dropped here rather than reaching the wire. No override bound (every normal cycle)
+    # → the schema is byte-identical to Pydantic's, so C0 is unchanged by construction.
+    for field, description in resolve_node_schema_descriptions("l1_generate").items():
+        if field in variant_props:
+            variant_props[field]["description"] = description
+
+    # 5. Rename last, so `description` edits above are keyed by the REAL field name and a
+    # rename cannot silently orphan one. `build_l1_response_model` aliases the same map back.
+    field_names = effective_l1_field_names()
+    if field_names:
+        _rename_variant_schema(inlined["properties"]["variants"]["items"], field_names)
+
     return {"name": "l1_variants", "schema": inlined, "strict": False}
 
 
@@ -192,6 +309,8 @@ _JSON_TYPE_TO_PY: dict[str, tuple[type, ...]] = {
     "integer": (int,),
     "number": (int, float),
     "boolean": (bool,),
+    "object": (dict,),
+    "array": (list,),
 }
 
 
@@ -234,9 +353,18 @@ def validate_overrides(
     ``node_param_keys`` already strips them from the emittable surface, so this is
     the deterministic backstop for a provider that leaks the key past its schema —
     the structural twin of the model/provider lock.
+
+    A param the node never advertised is rejected as ``reason="unknown_param"``. The
+    emitted schema declares exactly ``node_param_keys``; anything else arrived past a
+    weakly-conformant provider's ``additionalProperties: false`` and would merge into
+    ``pipeline_params`` unchecked — unlike a hallucinated NODE, which
+    ``merge_pipeline_params`` drops downstream. This is the node-name check's per-param
+    twin, and it is what makes ``node_param_keys`` the single emittable surface its own
+    docstring claims: the catalogue and the schema derived from it; the validator did not.
     """
     failures: list[ValidationFailure] = []
     allowed_models = list(pipeline_schema.available_models)
+    emittable = pipeline_schema.node_param_keys(forbidden_strict=forbidden_axes_strict)
     for node_name, node_params in pipeline_params_override.items():
         if not isinstance(node_params, dict):
             continue
@@ -246,7 +374,7 @@ def validate_overrides(
             # JSON-schema node-name enum is advisory (``build_l1_output_schema`` emits
             # ``strict=False``, so a weakly-conformant provider slips a phantom key past
             # ``additionalProperties: false``). The phantom edit is stripped from the wire
-            # downstream (``_merge_pipeline_params`` drops nodes outside ``active_steps``),
+            # downstream (``merge_pipeline_params`` drops nodes outside ``active_steps``),
             # so recording it here ROUTES the signal without changing what runs — and it is
             # NON-FATAL (the reason-aware synthetic-0 gate in ``l1/score/candidate.py`` lets
             # the candidate's real edits score). It flows through the existing channel:
@@ -264,6 +392,7 @@ def validate_overrides(
             continue
         node_allowed = node.param_allowed_values
         node_types = node.param_types
+        node_emittable = emittable.get(node_name, set())
         for param, value in node_params.items():
             if param in SCHEMA_OWNED_FIELDS or (
                 forbidden_axes_strict and param in PARAM_FORBIDDEN_KEYS
@@ -274,6 +403,17 @@ def validate_overrides(
                         value=str(value),
                         allowed=[],
                         reason="forbidden_axis",
+                    )
+                )
+                continue
+            # After the locked axes, so a leaked `model` keeps its specific reason.
+            if param not in node_emittable:
+                failures.append(
+                    ValidationFailure(
+                        axis=f"{node_name}.{param}",
+                        value=str(value),
+                        allowed=sorted(node_emittable),
+                        reason="unknown_param",
                     )
                 )
                 continue
@@ -458,6 +598,10 @@ class L1YieldStats:
     l1_yield: float  # n_valid / n_proposed (1.0 when no proposals)
     l1_n_no_op: int
     l1_n_duplicate: int
+    # Set when the meta-prompt made L1's own output unparseable — the round then holds zero
+    # candidates. `detect_invariants` never sets it (it only sees proposals that exist); it is
+    # stamped from `l1_generate`'s return in `generate_or_load_candidates`.
+    l1_parse_failure: str | None = None
 
 
 _INVARIANT_REASONS = frozenset({"no_op_variant", "duplicate_variant"})

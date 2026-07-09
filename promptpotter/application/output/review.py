@@ -20,6 +20,7 @@ from promptpotter.application.optimization.validators.l1_behavior import (
 )
 from promptpotter.application.optimization.validators.l2_behavior import run_all_l2_checks
 from promptpotter.domain.escalation_signals import exploration_budget
+from promptpotter.domain.phases import StopReason
 
 __all__ = ["render_review_md"]
 
@@ -168,7 +169,7 @@ def _halt_info(index: dict[str, Any], rounds: list[dict[str, Any]]) -> dict[str,
     ``suggested_action``, ``terminated`` ``"yes"`` when L2 emitted ``terminate_proposal``
     (``stop_reason == escalation_abort``), else ``""``."""
     stop_reason = (index.get("stop_reason") or "").strip()
-    terminated = "yes" if stop_reason == "escalation_abort" else ""
+    terminated = "yes" if stop_reason == StopReason.ABORT else ""
     last_health: dict[str, Any] | None = None
     last_critical: dict[str, Any] | None = None
     for r in rounds:

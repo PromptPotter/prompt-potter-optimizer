@@ -547,7 +547,7 @@ def _rerun_would_repeat_token_budget_failure(
     defaults, which can carry a larger ``max_tokens`` than the
     candidate's pinch.
     """
-    from promptpotter.application.optimization.pobb.elimination import classify_result
+    from promptpotter.domain.rendering import classify_result
 
     # The terminal LLM node (llm_only single-node, llm_ranking multi-node) is
     # read from the cached result itself, so the infra-code / token lookups key

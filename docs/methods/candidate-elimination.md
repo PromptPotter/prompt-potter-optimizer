@@ -41,7 +41,7 @@ PoBB beats LUCB-style pairwise tests by sampling the joint posterior over **all*
 ## Tunable knobs
 
 - `OptimizationConfig.pobb_epsilon` (default `0.15`, `POBB_DEFAULT_EPSILON`) — smaller = more conservative. Shared by the Bayesian *best*-test and the paired-margin *futility*-test: "kill a candidate whose probability of mattering is below ε".
-- `mechanisms.elimination.deterministic_dominance` / `equivalence_elimination` (both default on) — either arms the paired-margin gate (they folded into one `PoBBConfig.margin_elimination`); both off = no margin gate. `improvement_threshold` (what counts as "meaningfully better") sets the margin, so it *is* the tie-pruning aggressiveness knob.
+- `mechanisms.elimination.margin_elimination` (default on) — arms the paired-margin gate; off = ε-stop only. Two corners, one gate: the deterministic one (remaining win opportunities < the net still needed) and the probabilistic one (P(clearing the margin) < ε). `improvement_threshold` (what counts as "meaningfully better") sets the margin, so it *is* the tie-pruning aggressiveness knob.
 - `OptimizationConfig.elimination_n_min` (default `6`) — the single min-samples floor. It gates PoBB (below this a candidate's θ posterior is too under-determined to act on) **and** the difficulty-ruler warmth: the per-cycle δ ruler stays flat (δ≡0 ⇒ θ = logit-accuracy) until at least this many grade-A samples are banked. Difficulty and ability become trustworthy at the same evidence threshold — one knob, no separate ruler-only constant.
 
 ## Open questions

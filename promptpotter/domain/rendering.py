@@ -1,11 +1,11 @@
 """Pure rendering + classification helpers shared by application + presentation.
 
-These four functions (plus their tightly-coupled private helpers + the
+These functions (plus their tightly-coupled private helpers + the
 ``ResultClassification`` dataclass) take plain dicts / scalars and return text or
 a verdict — no I/O, no orchestration state. They live in ``domain/`` so the
 display formatters in ``presentation/views/`` can render rounds without importing
-``application/`` (the layer rule, both directions). Their original application
-homes re-export them so existing optimizer-side callers don't churn.
+``application/`` (the layer rule, both directions). This module is the single home:
+callers import from here directly.
 """
 
 from __future__ import annotations
@@ -20,17 +20,13 @@ from promptpotter.domain.results import CritiqueReadout
 from promptpotter.shared import extract_boxed_number, extract_gsm8k_number, extract_last_bold
 from promptpotter.shared.errors import ErrorCategory, error_category, is_error_result
 
-# --------------------------------------------------------------------------- #
-# display_fitness + round_winner_key — the one composite-or-accuracy resolution #
-# --------------------------------------------------------------------------- #
-
 
 def display_fitness(composite_fitness: float | None, accuracy: float) -> float:
-    """The canonical fitness value shown to / ranked-by the operator: the active-formula
-    `composite_fitness` when present (a real `0.0` — e.g. a validation-failed candidate — is
-    an honest score and is kept), degrading to plain `accuracy` only on genuine absence
-    (`None`, i.e. no active formula). One resolution of the composite-or-accuracy rule that
-    every display + ranking site routes through, so an `or` can never mask the honest 0.
+    """THE composite-or-accuracy rule, one implementation: the active-formula composite
+    when present (an honest ``0.0`` — a validation-failed candidate — is a real score and
+    is kept), degrading to plain ``accuracy`` only on genuine absence (``None``, no active
+    formula). Every display + ranking site routes through this name, so an ``or`` can
+    never mask an honest ``0.0``.
     """
     return composite_fitness if composite_fitness is not None else accuracy
 
@@ -329,6 +325,7 @@ __all__ = [
     "DISPLAY_EXTRACTORS",
     "ResultClassification",
     "classify_result",
+    "display_fitness",
     "extract_display_answer",
     "format_l1_critique_for_prompt",
     "round_winner_key",

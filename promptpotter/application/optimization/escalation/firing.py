@@ -56,7 +56,12 @@ from promptpotter.domain.opt_search_point import (
     OptSearchPoint,
 )
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent, StopLoop, StopReason, emit_phase
-from promptpotter.domain.run_records import ForkSpec, ForkTrigger, RebaseRequest
+from promptpotter.domain.run_records import (
+    ConfigOverrides,
+    ForkSpec,
+    ForkTrigger,
+    RebaseRequest,
+)
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.infrastructure.llm.models import emit_round_warning
@@ -534,20 +539,31 @@ def _stash_rebase_request(cycle: Cycle, layer_id: str, proposal: Any, round_num:
     ``session.state.cycle_id`` — a crash mid-finalize leaves the old
     cycle clean and the rebase un-minted, which the operator can
     re-trigger by re-invoking ``resume``.
+
+    An ``unlock_schema_field_rename`` request widens into the fork's
+    ``ConfigOverrides`` here — the unlock rides the rewind and cannot travel
+    without it, so the parent keeps its frozen config and its comparability.
+    Re-requesting a lock that is already open is dropped: it would change nothing
+    and still cost a whole sibling cycle.
     """
     trigger = ForkTrigger.L2_REBASE if layer_id == "L2" else ForkTrigger.L3_REBASE
     target_round = max(0, round_num + int(proposal.round_offset))
+    unlock = bool(proposal.unlock_schema_field_rename) and not (
+        cycle.config.optimization.schema_field_rename
+    )
     cycle.rebase_request = RebaseRequest(
         fork_from_round=target_round,
         trigger=trigger,
         reason=str(proposal.reason or f"{layer_id} fork_proposal: rewind {proposal.round_offset}"),
         issued_by=f"{layer_id}/round_{round_num}",
+        config_overrides=ConfigOverrides(schema_field_rename=True) if unlock else None,
     )
     logger.info(
-        "%s emitted fork_proposal: rewind to round %d (offset=%d) — cycle will exit with REBASED",
+        "%s emitted fork_proposal: rewind to round %d (offset=%d)%s — cycle will exit with REBASED",
         layer_id,
         target_round,
         proposal.round_offset,
+        ", unlocking schema_field_rename" if unlock else "",
     )
 
 

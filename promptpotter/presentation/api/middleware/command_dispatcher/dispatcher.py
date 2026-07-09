@@ -385,7 +385,7 @@ class CommandDispatcher:
                 # when steering from the web). One gesture = stop parent → mint →
                 # continue optimizing from the edited searchpoint. Pass no
                 # spend/halt: the seed's reconciled limits govern at the runner
-                # seam (runner/entry.py::_apply_limit_overrides).
+                # seam (runner/entry.py::_apply_config_overrides).
                 new_cycle_id = mint_operator_fork(
                     stores=self._store,
                     campaign_id=campaign_id,

@@ -44,7 +44,7 @@ rejection and content-hash sensitivity by
 | `short_circuit` | required | `bool` | Whether a successful match in this node bypasses downstream nodes. |
 | `config` | optional | `dict` | Node-local defaults. For LLM nodes typically `{model, temperature, max_tokens, ...}`. For optimizer nodes also `{prompt_family, prompt_version, schema_family, schema_version}` keys that index into the registries. |
 | `prompt_info` | optional | `dict` | Inline `{family, template_variables, description}` — marks the node as prompt-bearing (the candidate-prompt injection point). Used when no `resolved_prompts` registry is present. |
-| `output_schema` | optional | `dict` | Inline output schema. Same role as a `resolved_schemas` entry. |
+| `output_schema` | — | — | **Not a node-level key.** An inline output schema is declared at `config.output_schema` — the same place the connector forwards it to the backend from, so there is one schema, not a display copy beside a wire copy. Parsed by `parse_resolved_schema` into the node's read-model exactly like a `resolved_schemas` entry, and locked against the optimizer (`SCHEMA_OWNED_FIELDS`). |
 | `input_schema` | optional | `dict` | Reserved for future input-validation work. |
 | `optimizer` | optional | `dict` | See **`optimizer` sub-object**. Required for any node PromptPotter is allowed to mutate or trace. |
 

@@ -189,23 +189,24 @@ def emit_error_record(
     message: str,
     stop_reason: Literal["CRASHED", "RENDER_ERROR", "DIVERGED"],
     traceback: str | None = None,
-) -> None:
-    """Append an ``ErrorRecord`` to the active cycle ledger.
+) -> ErrorRecord:
+    """Append an ``ErrorRecord`` to the active cycle ledger and return it.
 
     Same ContextVar surface as ``emit_token_usage``. The runner's three
-    ``except`` sites call this from
-    ``application/runner/{entry,loop}.py``; ``LiveDashboardView`` is the
-    sole subscriber writing ``dashboard.json::error``. Errors emitted
-    before the round loop entered carry ``round=None``."""
-    _append_record(
-        ErrorRecord(
-            kind=kind,
-            message=message,
-            traceback=traceback,
-            stop_reason=stop_reason,
-            round=_CURRENT_ROUND.get(),
-        )
+    ``except`` sites call this from ``application/runner/{entry,loop}.py``
+    and carry the returned record straight onto ``CycleResult.error`` — one
+    build, no twin. ``LiveDashboardView`` is the sole subscriber writing
+    ``dashboard.json::error``. Errors emitted before the round loop entered
+    carry ``round=None``."""
+    record = ErrorRecord(
+        kind=kind,
+        message=message,
+        traceback=traceback,
+        stop_reason=stop_reason,
+        round=_CURRENT_ROUND.get(),
     )
+    _append_record(record)
+    return record
 
 
 def emit_round_warning(

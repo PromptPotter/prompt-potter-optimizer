@@ -18,6 +18,7 @@ import { useCallback, useMemo, useState } from "react";
 import { postCleanupEmpty } from "@/lib/api";
 import type { CampaignLineageCycle } from "@/lib/api";
 import { candidateLabel, liveCandidateId } from "@/lib/candidate-label";
+import { accuracyBasisValue, resolveComposite } from "@/lib/fitness";
 import {
   groupByRound,
   roundCandidates,
@@ -231,17 +232,14 @@ export function useLineage({
     // Accuracy view: the WINNER (lineage spine) paints the round's cumulative
     // frontier — the cross-round-comparable series the trend plots — so the spine
     // reads as honest progress, not the per-round subset swing. Losers keep their
-    // own subset score. Composite view: the served value as chosen (`?? accuracy`
-    // only tolerates rows minted before the field was served).
+    // own subset score.
     for (const c of data?.cycles ?? []) {
       for (const r of c.rounds) {
         r.candidates.forEach((cand, i) => {
           const id = cand.candidate_id || liveCandidateId(r.round, i);
           const value = usesComposite
-            ? cand.composite_fitness ?? cand.accuracy
-            : cand.is_winner && typeof r.cumulative_accuracy === "number"
-              ? r.cumulative_accuracy
-              : cand.accuracy;
+            ? resolveComposite(cand.composite_fitness, cand.accuracy)
+            : accuracyBasisValue(cand.is_winner, r.cumulative_accuracy, cand.accuracy);
           m.set(`${c.cycle_id}::${id}`, value);
         });
       }
@@ -249,8 +247,8 @@ export function useLineage({
     if (cycleId && dash) {
       for (const row of liveRows) {
         const value = usesComposite
-          ? row.composite ?? row.accuracy
-          : (row.is_winner ? row.cumulative_accuracy : null) ?? row.accuracy;
+          ? resolveComposite(row.composite, row.accuracy)
+          : accuracyBasisValue(row.is_winner, row.cumulative_accuracy, row.accuracy);
         m.set(`${cycleId}::${row.candidate_id}`, value);
       }
     }

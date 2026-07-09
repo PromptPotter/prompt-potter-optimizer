@@ -29,7 +29,29 @@ _PROMPT_OWNED_FIELDS = frozenset(PROMPT_STRING_FIELDS) | {"few_shot_examples", "
 #      ("Schema must contain 'properties'"). So `node_param_keys` strips them from
 #      the optimizer's emittable surface — UNCONDITIONALLY, unlike model/provider
 #      (`PARAM_FORBIDDEN_KEYS`), which have an ablation unlock; the schema never does.
-SCHEMA_OWNED_FIELDS = frozenset({"output_schema", "schema_family", "schema_version"})
+#      `answer_field` is the same structural contract by another name: it names WHICH
+#      slot of `output_schema` carries the answer, so a mutated one makes the executor
+#      destructure the wrong field and grade every sample against reasoning prose.
+SCHEMA_OWNED_FIELDS = frozenset(
+    {"output_schema", "schema_family", "schema_version", "answer_field"}
+)
+
+# The `param_types` values that make a param NESTED — a container the optimizer edits
+# one level deep rather than a scalar it replaces. Naming them once keeps the three
+# readers agreeing: `apply_node_overlay` (merge one level, siblings survive — `array`
+# replaces wholesale, since a merged ordering is meaningless), `node_config_schema`
+# (no scalar widget exists, so no widget), and `build_l1_output_schema` (the emitted
+# sub-schema, whose value space is the param's own, not the node's).
+NESTED_PARAM_TYPES = frozenset({"object", "array"})
+
+# The one nested param a campaign must UNLOCK before its L1 may emit it
+# (`OptimizationConfig.schema_field_rename`): renaming a field on the optimizer's own
+# output schema is the strongest lever and the only one that can break a parser. Named
+# here, beside the other structural param constants, because two layers must agree on the
+# literal without importing each other: `build_l1_output_schema` (drops it from the emitted
+# schema when locked, so the LLM cannot emit a key that does not exist) and the
+# `rebase_capability` directive (offers L2/L3 the unlock only where a node declares it).
+SCHEMA_RENAME_PARAM = "output_schema_field_names"
 
 
 def stable_hash(value: Any) -> str:
@@ -318,6 +340,12 @@ class PipelineSchema(BaseModel):
         → ``param_allowed_values`` (→ enum) → ``param_types`` (number/bool/string;
         ``param_types`` covers config-only keys too, see ``_infer_param_types``).
         ``forbidden_strict`` only sets the display-only ``optimizer_locked`` flag.
+
+        A param declared ``object``/``array`` (:data:`NESTED_PARAM_TYPES`) carries no
+        widget and is skipped: the three widget kinds are all scalar, and a nested
+        value in a text box is a corrupt edit waiting to happen. These params are
+        optimizer-only (L4's ``layout`` / ``output_schema_descriptions``); the operator
+        reads them in the searchpoint diff, not here.
         """
         locked = PARAM_FORBIDDEN_KEYS if forbidden_strict else frozenset()
         out: dict[str, list[NodeConfigParam]] = {}
@@ -326,6 +354,8 @@ class PipelineSchema(BaseModel):
             for key in sorted(
                 (n.param_keys | set(n.current_config)) - _PROMPT_OWNED_FIELDS - SCHEMA_OWNED_FIELDS
             ):
+                if n.param_types.get(key) in NESTED_PARAM_TYPES:
+                    continue
                 if key == "model":
                     kind, options = "model", list(self.available_models)
                 elif key in n.param_allowed_values:

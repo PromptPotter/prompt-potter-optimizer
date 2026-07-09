@@ -25,7 +25,6 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
 
 __all__ = [
-    "find_by_prefix",
     "list_runs",
     "load_run",
     "measurement_series_for_samples",
@@ -155,20 +154,6 @@ def runs_since(
     """Yield ``(run_id, detail)`` for runs not in *seen_ids*; missing details skipped."""
     return stores.archive.load_since(
         backend_id, seen_ids, dataset_name=dataset_name, include_unknown=include_unknown
-    )
-
-
-def find_by_prefix(
-    stores: Stores,
-    backend_id: str,
-    node_configs: list[tuple[str, dict[str, Any]]],
-    *,
-    dataset_name: str | None = None,
-    include_unknown: bool = False,
-) -> list[tuple[dict[str, Any], int]]:
-    """Index entries sharing a node-config prefix; ``(entry, match_length)``, best first."""
-    return stores.archive.find_by_node_configs(
-        backend_id, node_configs, dataset_name=dataset_name, include_unknown=include_unknown
     )
 
 

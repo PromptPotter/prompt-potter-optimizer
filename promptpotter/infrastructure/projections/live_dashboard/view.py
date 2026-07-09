@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.cycle_paths import CycleDir
-from promptpotter.domain.phases import CampaignPhase, PhaseEvent
+from promptpotter.domain.phases import CampaignPhase, PhaseEvent, RunPhase
 from promptpotter.domain.results import RoundSummary, candidate_label
 from promptpotter.domain.run_records import (
     CycleRecord,
@@ -257,7 +257,7 @@ class LiveDashboardView(DerivedView):
         canonical ledger; ``mark_stopped`` only flips the liveness state.
         """
         self.state.stop_reason = reason
-        self.state.run_phase = "terminal"
+        self.state.run_phase = RunPhase.TERMINAL
         self._set_state("stopped")
         self._flush_pending_persist()
 
@@ -323,8 +323,9 @@ class LiveDashboardView(DerivedView):
             # the terminal `mark_stopped`. Flushing here bumps the file mtime at
             # the transition, so the 304-cached dashboard route serves the new
             # phase and a stale (paused) file still reads as paused.
-            if self.state.run_phase not in ("terminal", record.event):
-                self.state.run_phase = record.event
+            event_phase = RunPhase(record.event)
+            if self.state.run_phase not in (RunPhase.TERMINAL, event_phase):
+                self.state.run_phase = event_phase
                 self._flush_pending_persist()
             return
 

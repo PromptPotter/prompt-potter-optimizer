@@ -126,12 +126,7 @@ async def execute_round(
                 lock_in_n_min=opt.pobb_lock_in_n_min,
                 epsilon_elimination=opt.mechanisms.elimination.epsilon_elimination,
                 leader_lock_in=opt.mechanisms.elimination.leader_lock_in,
-                # The two legacy toggles fold into the one paired-margin gate:
-                # either keeps it armed; both off preserves "no early abort".
-                margin_elimination=(
-                    opt.mechanisms.elimination.deterministic_dominance
-                    or opt.mechanisms.elimination.equivalence_elimination
-                ),
+                margin_elimination=opt.mechanisms.elimination.margin_elimination,
                 improvement_threshold=opt.improvement_threshold,
             ),
             round_num=round_num,

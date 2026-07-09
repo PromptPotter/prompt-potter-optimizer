@@ -15,8 +15,8 @@ from collections.abc import Mapping
 
 from promptpotter.application.mask.divergence import Verdict, VerdictOutcome
 from promptpotter.application.mask.record import MaskRound
-from promptpotter.application.optimization.l1.score.winner import round_winner_key
 from promptpotter.application.scoring.metrics import value_with_mask_applied
+from promptpotter.domain.rendering import round_winner_key
 from promptpotter.domain.scoring import RoundScorer
 
 

@@ -14,9 +14,11 @@ from promptpotter.application.optimization.dispatch.llm_call import (
 from promptpotter.application.optimization.dispatch.schemas import (
     L1GenerateOutput,
     VariantEvidenceGrounding,
+    build_l1_response_model,
 )
 from promptpotter.application.optimization.validators.l1_strict import (
     build_l1_output_schema,
+    effective_l1_field_names,
 )
 from promptpotter.domain.escalation_signals import ValidationFailure
 from promptpotter.domain.opt_search_point import EvidenceGrounding
@@ -78,8 +80,14 @@ async def l1_generate(
     creativity: float,
     obs: ObservabilityBridge | None = None,
     round_num: int = 0,
-) -> list[CandidateProposal]:
-    """Generate candidate variants via LLM meta-prompt; context read from cycle."""
+) -> tuple[list[CandidateProposal], str | None]:
+    """Generate candidate variants via LLM meta-prompt; context read from cycle.
+
+    Returns ``(candidates, parse_failure)``. ``parse_failure`` names the reason when the
+    meta-prompt produced unparseable output — the round then carries zero candidates and
+    the reason travels with it (charged to the round, never to a candidate), rather than
+    vanishing into a bare ``[]``.
+    """
     if n_variants <= 0:
         raise ValueError(f"n_variants must be >0, got {n_variants}")
 
@@ -96,19 +104,25 @@ async def l1_generate(
     )
     prompt_vars: dict[str, str] = {"n_variants": str(n_variants), **injection_vars}
 
+    schema_field_rename = cycle.config.optimization.schema_field_rename
     output_schema = (
         build_l1_output_schema(
             pipeline_schema,
             forbidden_axes_strict=cycle.config.optimization.forbidden_axes_strict,
+            schema_field_rename=schema_field_rename,
         )
         if pipeline_schema
         else None
     )
+    # The wire schema advertises renamed keys; the response model aliases them back. Both read
+    # the SAME `effective_l1_field_names` — a disagreement would fail every parse, every round.
+    response_model = build_l1_response_model(effective_l1_field_names())
     try:
         generated, meta_prompt, _ = await run_optimizer_node(
             template_name="l1_generate",
             prompt_vars=prompt_vars,
             temperature=creativity,
+            response_model=response_model,
             response_schema=output_schema,
             context=LLMCallContext(
                 ledger=cycle.session.state.ledger,
@@ -153,7 +167,7 @@ async def l1_generate(
             ),
             detail={"reason": reason, "raw_chars": len(raw), "model": model},
         )
-        return []
+        return [], reason
     slot_sizes = sorted(
         (
             (slot, len(slot_text.rstrip()))
@@ -197,7 +211,7 @@ async def l1_generate(
             ),
             detail={"reason": "meta_prompt_unexpected_type", "model": model},
         )
-        return []
+        return [], "meta_prompt_unexpected_type"
 
     variants_list = generated.variants
 
@@ -207,10 +221,10 @@ async def l1_generate(
         # absent from the active schema (hallucinated) is NOT pre-filtered here: it flows to
         # the one validation producer (``validate_overrides`` via ``parse_population``), which
         # records it as a non-fatal ``hallucinated_node`` wound (routed to l1_wounds +
-        # validation_failure_rate), and ``_merge_pipeline_params`` strips it from the wire.
-        prompt_changes = dict(v.prompt_fields_override or {})
-        tc_changes = dict(v.task_context_override or {})
-        pipeline_params_override = v.pipeline_params_override or {}
+        # validation_failure_rate), and ``merge_pipeline_params`` strips it from the wire.
+        prompt_changes = dict(v.prompt_fields_override)
+        tc_changes = dict(v.task_context_override)
+        pipeline_params_override = v.pipeline_params_override
         # Override validation is deferred to parse_population — one producer of truth.
         evidence = _parse_evidence_grounding(v.evidence_grounding)
         child = opt_sp.mutate(
@@ -238,7 +252,7 @@ async def l1_generate(
                     candidate_id=child.lineage.id,
                 )
 
-    return population
+    return population, None
 
 
 __all__ = ["candidate_summaries", "l1_generate"]

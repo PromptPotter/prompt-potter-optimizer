@@ -64,8 +64,8 @@ any optimizer call > 2 min; a headline Δ that disagrees with `matched_origin_*`
   run's origin is meaningful (same discipline as "verdicts compare lift-over-reference per model").
 - Within a run, comparisons are **paired by seed** (each candidate runs the same 8
   `inner_dataset_seed`-pinned banks) — draw difficulty cancels; trust the paired PoBB/θ reads.
-- The `inner_baseline` identity fingerprint partitions runs into same-baseline families; a
-  baseline edit = a NEW family. Never pool or compare across families.
+- The `inner_origin` identity fingerprint partitions runs into same-origin families; an
+  origin edit = a NEW family. Never pool or compare across families.
 - Residual cross-run noise = inner-process stochasticity (inner optimizer LLM at temp 0.7,
   adaptive subset picks). Quantify it before trusting cross-run deltas — see the noise-floor
   item in the next-run settings below.

@@ -24,7 +24,7 @@ from promptpotter.application.optimization.l1.score.signal_effect import (
     SignalEffect,
     decode_signal_effect,
 )
-from promptpotter.application.optimization.l1.score.winner import l1_score, round_winner_key
+from promptpotter.application.optimization.l1.score.winner import l1_score
 
 __all__ = [
     "CandidateOutcome",
@@ -32,7 +32,6 @@ __all__ = [
     "SignalEffect",
     "decode_signal_effect",
     "l1_score",
-    "round_winner_key",
     "score_one_candidate",
     "score_population",
 ]

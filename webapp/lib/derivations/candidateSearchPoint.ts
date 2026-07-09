@@ -26,7 +26,7 @@ import {
   type RoundFileDoc,
 } from "@/lib/poll";
 
-// The seed-able half of a candidate's searchpoint. `limit_overrides` is
+// The seed-able half of a candidate's searchpoint. `config_overrides` is
 // NOT here — it comes from the reconcile dialog, not the candidate.
 export interface CandidateSearchPoint {
   origin_prompt_fields: Record<string, unknown>;

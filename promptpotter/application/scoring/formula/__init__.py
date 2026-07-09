@@ -13,7 +13,6 @@ from promptpotter.application.scoring.formula.compiler import (
 from promptpotter.application.scoring.formula.matchers import SCORING_FUNCTIONS
 from promptpotter.application.scoring.formula.rescore import rescore_results
 from promptpotter.application.scoring.formula.round_scorer import compile_round_scorer
-from promptpotter.domain.rendering import DISPLAY_EXTRACTORS, extract_display_answer
 
 
 def extract_item_label(c: Any) -> str:
@@ -24,13 +23,11 @@ def extract_item_label(c: Any) -> str:
 
 
 __all__ = [
-    "DISPLAY_EXTRACTORS",
     "SCORING_FUNCTIONS",
     "ScoringFormulaError",
     "auto_scorer_id",
     "compile_round_scorer",
     "compile_scorer",
-    "extract_display_answer",
     "extract_item_label",
     "rescore_results",
     "split_scoring_block",

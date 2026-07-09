@@ -15,7 +15,7 @@ CONCEPT MAP (the gateway's implementation, by module — import from each):
 * ``evaluators`` — registry + materializers of per-node evaluators
   (compute fns returning float in [0, 1]).
 * ``formula`` — ``compile_round_scorer``, ``rescore_results``,
-  ``extract_item_label``, ``extract_display_answer``, ``split_scoring_block``.
+  ``extract_item_label``, ``split_scoring_block``.
 * ``metrics`` — ``compute_composite_fitness``, ``count_degraded_samples``,
   ``find_rank``, ``extract_sample_diagnostics`` (composite-fitness rollups).
 """

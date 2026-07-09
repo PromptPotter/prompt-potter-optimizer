@@ -26,8 +26,6 @@ from promptpotter.application.optimization.pobb.elimination.checks import (
     build_elimination_check,
 )
 from promptpotter.application.optimization.pobb.elimination.classification import (
-    ResultClassification,
-    classify_result,
     extract_warning_types,
     get_ranked_items,
     is_deprecated,
@@ -40,10 +38,8 @@ __all__ = [
     "PoBBCheck",
     "PoBBConfig",
     "PoBBSnapshot",
-    "ResultClassification",
     "build_degradation_checks",
     "build_elimination_check",
-    "classify_result",
     "extract_warning_types",
     "get_ranked_items",
     "is_deprecated",

@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -38,8 +38,14 @@ from promptpotter.application.runner.loop import run_round_loop
 from promptpotter.application.runner.termination import BudgetGate
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.domain.phases import StopReason
-from promptpotter.domain.results import CycleError, CycleResult, CycleSpend
-from promptpotter.domain.run_records import CycleSeed, ForkSpec, LimitOverrides, RebaseRequest
+from promptpotter.domain.results import CycleResult, CycleSpend
+from promptpotter.domain.run_records import (
+    ConfigOverrides,
+    CycleSeed,
+    ErrorRecord,
+    ForkSpec,
+    RebaseRequest,
+)
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import ScoringSpec
 from promptpotter.domain.search_point import TaskDecomposition
@@ -123,39 +129,40 @@ def _build_budget_gate(
     )
 
 
-def _apply_limit_overrides(
+def _apply_config_overrides(
     config: CampaignConfig,
     spend_budget_usd: float | None,
-    limits: LimitOverrides,
+    overrides: ConfigOverrides,
 ) -> tuple[CampaignConfig, float | None]:
     """Snapshot the fork's effective `OptimizationConfig`: parent frozen config
-    with the operator's reconciled overrides applied (absolute values; an absent
-    knob inherits the parent). A new-cycle snapshot only — the parent config is
-    never mutated. Reassigning the returned config at the runner seam propagates
-    to every reader (loop ``max_rounds`` / patience, L1 ``pobb_epsilon``, the
-    per-round subset selection, the ``INIT.enter`` display event). The reconciled
-    ``spend_budget_usd`` also becomes the spend-cap probe's initial ceiling
-    (``change-spend-budget`` can still move it at runtime). Selection-policy
-    overrides (``per_round_resubset`` / ``online_reorder``) ride the nested
-    ``mechanisms.selection`` so a fork can A/B a behaviour knob in isolation."""
+    with the fork's overrides applied (absolute values; an absent knob inherits
+    the parent). A new-cycle snapshot only — the parent config is never mutated.
+    Reassigning the returned config at the runner seam propagates to every reader
+    (loop ``max_rounds`` / patience, L1 ``pobb_epsilon``, the per-round subset
+    selection, ``build_l1_output_schema``'s emittable param surface, the
+    ``INIT.enter`` display event). The reconciled ``spend_budget_usd`` also becomes
+    the spend-cap probe's initial ceiling (``change-spend-budget`` can still move it
+    at runtime). The selection-policy override (``per_round_resubset``) rides the
+    nested ``mechanisms.selection``; ``schema_field_rename`` sits flat beside the
+    limits. Both are policy, so a fork can A/B a behaviour knob in isolation."""
     opt_updates: dict[str, Any] = {
         k: v
         for k, v in {
-            "max_rounds": limits.max_rounds,
-            "spend_budget_usd": limits.spend_budget_usd,
-            "token_budget": limits.token_budget,
-            "l1_patience": limits.l1_patience,
-            "l2_patience": limits.l2_patience,
-            "l3_patience": limits.l3_patience,
-            "pobb_epsilon": limits.pobb_epsilon,
+            "max_rounds": overrides.max_rounds,
+            "spend_budget_usd": overrides.spend_budget_usd,
+            "token_budget": overrides.token_budget,
+            "l1_patience": overrides.l1_patience,
+            "l2_patience": overrides.l2_patience,
+            "l3_patience": overrides.l3_patience,
+            "pobb_epsilon": overrides.pobb_epsilon,
+            "schema_field_rename": overrides.schema_field_rename,
         }.items()
         if v is not None
     }
     sel_updates = {
         k: v
         for k, v in {
-            "per_round_resubset": limits.per_round_resubset,
-            "online_reorder": limits.online_reorder,
+            "per_round_resubset": overrides.per_round_resubset,
         }.items()
         if v is not None
     }
@@ -170,7 +177,7 @@ def _apply_limit_overrides(
         update={"optimization": config.optimization.model_copy(update=opt_updates)}
     )
     effective_spend = (
-        limits.spend_budget_usd if limits.spend_budget_usd is not None else spend_budget_usd
+        overrides.spend_budget_usd if overrides.spend_budget_usd is not None else spend_budget_usd
     )
     return new_config, effective_spend
 
@@ -237,16 +244,16 @@ async def _prepare_run(
     seed = _read_cycle_seed(session)
     if seed is not None and seed.pipeline_overlay:
         # Seed overlay layers ON TOP of the dataset overlay (seed > dataset > backend);
-        # the shared shallow merge keeps the non-dict ``steps`` guard intact.
+        # the shared merge keeps the non-dict ``steps`` guard intact.
         session.pipeline_params = apply_node_overlay(
-            session.pipeline_params or {}, seed.pipeline_overlay
+            session.pipeline_params or {}, seed.pipeline_overlay, session.pipeline_schema
         )
     if seed is not None:
-        # Reconcile the seed's run limits (rounds / spend / patience / epsilon)
+        # Reconcile the seed's config delta (run limits + search/selection policy)
         # onto a fresh config snapshot — the loop starts at round 1 and stops
         # after the reconciled max_rounds. Reassign before any downstream call.
-        campaign_config, spend_budget_usd = _apply_limit_overrides(
-            campaign_config, spend_budget_usd, seed.limit_overrides
+        campaign_config, spend_budget_usd = _apply_config_overrides(
+            campaign_config, spend_budget_usd, seed.config_overrides
         )
 
     if origin is None:
@@ -292,7 +299,7 @@ def _build_cycle_result(
     session: Session,
     *,
     stop_reason: StopReason,
-    cycle_error: CycleError | None,
+    cycle_error: ErrorRecord | None,
     started_at: str,
     finished_at: str,
     spend: CycleSpend | None,
@@ -494,19 +501,19 @@ async def _run_single_cycle(
         # Operator-recoverable; fix is ``--fork-on-divergence``.
         message = str(exc) or type(exc).__name__
         kind = type(exc).__name__
-        emit_error_record(kind=kind, message=message, stop_reason="DIVERGED")
         logger.warning("Resume halted on divergence:\n%s", exc)
         stop_reason = StopReason.DIVERGED
-        cycle_error = CycleError(kind=kind, message=message)
+        cycle_error = emit_error_record(kind=kind, message=message, stop_reason="DIVERGED")
     except Exception as exc:
         tb = traceback.format_exc()
         session.state.crash_traceback = tb
         message = str(exc) or type(exc).__name__
         kind = type(exc).__name__
-        emit_error_record(kind=kind, message=message, stop_reason="CRASHED", traceback=tb)
         logger.exception("Optimization crashed before round loop entered.")
         stop_reason = StopReason.CRASHED
-        cycle_error = CycleError(kind=kind, message=message, traceback=tb)
+        cycle_error = emit_error_record(
+            kind=kind, message=message, stop_reason="CRASHED", traceback=tb
+        )
 
     finished_at = utcnow_iso()
     cycle_result = _build_cycle_result(
@@ -549,12 +556,29 @@ def _mint_and_rebase_fork(
     dataset: list[Sample],
     rebase_req: RebaseRequest,
     rebase_count: int,
-) -> RunObservers:
+) -> tuple[_PreparedRun, RunObservers]:
     """Mint the auto-rebase fork the just-finalized cycle stashed, and rebuild
     observers around the new cycle's own ledger (carrying phase_ctx). Repoints
-    ``session.state`` at the fork and returns the rebuilt observers; the caller
-    loops back into :func:`_run_single_cycle` on the new cycle."""
+    ``session.state`` at the fork and returns the fork's prep + rebuilt observers;
+    the caller loops back into :func:`_run_single_cycle` on the new cycle.
+
+    A rebase carrying a ``config_overrides`` delta (an L2/L3 search-policy unlock)
+    re-snapshots the config BEFORE the mint, so the seed written to disk and the
+    in-process config are the same delta: a later ``resume`` of this fork reads the
+    seed back through the same ``_apply_config_overrides``. Without the seed the
+    unlock would live only in memory and evaporate on the first resume; without the
+    re-snapshot it would live only on disk and never reach this run's L1. Neither
+    failure raises — the fork simply never searches the axis it was minted for."""
     parent_cycle_id = session.state.cycle_id
+    seed: CycleSeed | None = None
+    if rebase_req.config_overrides is not None:
+        campaign_config, spend_budget_usd = _apply_config_overrides(
+            prep.campaign_config, prep.spend_budget_usd, rebase_req.config_overrides
+        )
+        prep = replace(prep, campaign_config=campaign_config, spend_budget_usd=spend_budget_usd)
+        # No `origin_prompt_fields`: a rebase replays its origin from the parent's
+        # round, so it has no C0 provenance to stamp (`origin_source` stays empty).
+        seed = CycleSeed(config_overrides=rebase_req.config_overrides)
     new_cycle_id = _mint_fork(
         campaign_store=session.store.campaigns,
         campaign_id=session.campaign_id,
@@ -566,6 +590,7 @@ def _mint_and_rebase_fork(
             trigger=rebase_req.trigger,
             reason=rebase_req.reason,
             issued_by=rebase_req.issued_by,
+            seed=seed,
         ),
     )
     session.state.cycle_id = new_cycle_id
@@ -591,7 +616,7 @@ def _mint_and_rebase_fork(
         rebase_req.trigger.value,
         rebase_req.reason,
     )
-    return observers
+    return prep, observers
 
 
 async def run_optimization(
@@ -678,7 +703,7 @@ async def run_optimization(
             return cycle_result
 
         rebase_count += 1
-        observers = _mint_and_rebase_fork(
+        prep, observers = _mint_and_rebase_fork(
             prep,
             session=session,
             observers=observers,

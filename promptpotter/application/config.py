@@ -31,7 +31,6 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "CampaignConfig",
-    "ExplorationConfig",
     "OptimizationConfig",
     "PreflightWarning",
     "apply_inherited_overlay",
@@ -41,32 +40,6 @@ __all__ = [
     "resolve_pipeline_config_params",
     "run_preflight_checks",
 ]
-
-
-class ExplorationConfig(BaseModel):
-    """Round-level Rasch IRT — one posterior fit per round drives `select_round_subset` + the heatmap."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    seed_heatmap_from_archive: bool = Field(
-        False,
-        description=(
-            "Round-end hard-sample artifact's Rasch fit folds in archive "
-            "observations. δ_s ordering on the heatmap X-axis reflects "
-            "cross-cycle evidence."
-        ),
-    )
-    enable_2pl_graduation: bool = Field(
-        True,
-        description=(
-            "Allow the per-cycle difficulty ruler to graduate from 1PL (difficulty "
-            "δ only) to 2PL (per-sample discrimination aₛ too) when a data-rich, "
-            "genuinely-discriminating dataset wins held-out cross-validation. The "
-            "switch is gated — cold/non-discriminating datasets stay 1PL — so this "
-            "only ever changes the ruler where 2PL provably fits better out-of-sample; "
-            "it can never regress a dataset. Off → always 1PL (the slice-2 behaviour)."
-        ),
-    )
 
 
 class SelectionMechanisms(BaseModel):
@@ -91,18 +64,6 @@ class SelectionMechanisms(BaseModel):
             "the whole campaign."
         ),
     )
-    online_reorder: bool = Field(
-        True,
-        description=(
-            "INERT — retained on-disk pending the config-surface shrink pass. The "
-            "within-round order is always the deterministic shared round order "
-            "(`build_round_order`: seed-miss win-opportunity samples first, a "
-            "seed-hit regression probe every 4th slot, identical across "
-            "candidates). The online per-sample re-rank it used to toggle is "
-            "deleted — it front-loaded the seed's hit set and blinded the "
-            "elimination gates."
-        ),
-    )
 
 
 class EliminationMechanisms(BaseModel):
@@ -120,27 +81,18 @@ class EliminationMechanisms(BaseModel):
             "the round's best falls below `pobb_epsilon`. The main loser-elimination rule."
         ),
     )
-    deterministic_dominance: bool = Field(
+    margin_elimination: bool = Field(
         True,
         description=(
-            "Arms the paired-margin gate (folded with `equivalence_elimination` — "
-            "either toggle keeps it on): abort a candidate once it cannot, or "
-            "probably cannot, net `improvement_threshold` more hits than the seed. "
-            "The deterministic corner — remaining win opportunities < the net still "
-            "needed — fires under any ε."
-        ),
-    )
-    equivalence_elimination: bool = Field(
-        True,
-        description=(
-            "Arms the paired-margin gate (folded with `deterministic_dominance` — "
-            "either toggle keeps it on): abort a candidate once P(netting "
-            "`improvement_threshold` more hits than the seed) < `pobb_epsilon`, "
-            "where wins are counted ONLY on samples the seed missed (stratified — "
-            "a front-loaded block of seed-hit ties can't inflate the estimate). "
-            "Kills ties and regressors early: a candidate that can't clear the "
-            "adoption margin can never be crowned, so confirming it on the whole "
-            "panel is wasted spend."
+            "Arms the paired-margin gate: abort a candidate once it cannot, or probably "
+            "cannot, net `improvement_threshold` more hits than the seed. Two corners, one "
+            "gate — the deterministic one (remaining win opportunities < the net still "
+            "needed) fires under any ε; the probabilistic one fires when P(netting "
+            "`improvement_threshold` more hits) < `pobb_epsilon`, counting wins ONLY on "
+            "samples the seed missed (stratified — a front-loaded block of seed-hit ties "
+            "can't inflate the estimate). Kills ties and regressors early: a candidate that "
+            "can't clear the adoption margin can never be crowned, so confirming it on the "
+            "whole panel is wasted spend. Off = no margin gate, ε-stop only."
         ),
     )
     degradation_fatal_fastpath: bool = Field(
@@ -340,6 +292,26 @@ class OptimizationConfig(BaseModel):
         ),
     )
 
+    schema_field_rename: bool = Field(
+        False,
+        description=(
+            "Whether THIS campaign's L1 may PROPOSE renaming a field on the inner "
+            "``l1_generate``'s output schema (``L1Variant``). Off by default: "
+            "``build_l1_output_schema`` never grafts ``output_schema_field_names``, so the "
+            "LLM cannot emit a key the schema omits — the same structural lock "
+            "``forbidden_axes_strict`` uses, not a per-round rejection. A field NAME is the "
+            "wire contract; a ``description`` is not, which is why descriptions are always "
+            "free and names are not. It gates the PROPOSAL only: an inner cycle honours a "
+            "rename it is handed unconditionally (it loads its own ``campaign.json``, so "
+            "gating there would silently drop every rename the outer emits). The rename is "
+            "a presentation transform — ``build_l1_response_model`` aliases the wire key "
+            "back onto the real field, so no downstream reader observes it, and a rename the "
+            "model fails to honour makes the round unparseable, scoring it "
+            "``problem_rate = 1.0``. Unlocking changes the search space: it is ``policy`` "
+            "and bound to ``Estimand.SEARCH``, so it must ride a fork, never a resume."
+        ),
+    )
+
     rebase_capability: bool = Field(
         True,
         description=(
@@ -374,7 +346,27 @@ class OptimizationConfig(BaseModel):
         ),
     )
 
-    exploration: ExplorationConfig = Field(default_factory=ExplorationConfig)
+    # Round-level Rasch IRT — one posterior fit per round drives `select_round_subset`
+    # + the heatmap.
+    seed_heatmap_from_archive: bool = Field(
+        False,
+        description=(
+            "Round-end hard-sample artifact's Rasch fit folds in archive "
+            "observations. δ_s ordering on the heatmap X-axis reflects "
+            "cross-cycle evidence."
+        ),
+    )
+    enable_2pl_graduation: bool = Field(
+        True,
+        description=(
+            "Allow the per-cycle difficulty ruler to graduate from 1PL (difficulty "
+            "δ only) to 2PL (per-sample discrimination aₛ too) when a data-rich, "
+            "genuinely-discriminating dataset wins held-out cross-validation. The "
+            "switch is gated — cold/non-discriminating datasets stay 1PL — so this "
+            "only ever changes the ruler where 2PL provably fits better out-of-sample; "
+            "it can never regress a dataset. Off → always 1PL (the slice-2 behaviour)."
+        ),
+    )
     mechanisms: MechanismConfig = Field(default_factory=MechanismConfig)
 
 
@@ -574,8 +566,12 @@ def run_preflight_checks(
     return warnings
 
 
-def apply_node_overlay(base: dict[str, Any], overlay: Mapping[str, Any]) -> dict[str, Any]:
-    """The ONE shallow per-node overlay merge → a fresh dict (``base`` untouched).
+def apply_node_overlay(
+    base: dict[str, Any],
+    overlay: Mapping[str, Any],
+    schema: PipelineSchema | None,
+) -> dict[str, Any]:
+    """The ONE per-node overlay merge → a fresh dict (``base`` untouched).
 
     For each ``node`` in *overlay*: when both the existing and the incoming value are
     dicts, the incoming keys win over the existing (``{**existing, **incoming}``);
@@ -584,17 +580,43 @@ def apply_node_overlay(base: dict[str, Any], overlay: Mapping[str, Any]) -> dict
     layer correctly (later overlay > earlier), which is how the resolution chain
     stacks dataset < campaign-override < cycle-seed.
 
+    **A param declared ``param_types: object`` merges one level deeper**: the incoming
+    keys win, the siblings it did not name SURVIVE. Without this, a nested param is a
+    single key in the node config and an incoming partial dict replaces it whole — so a
+    candidate that improved one ``output_schema_descriptions`` entry silently reverted
+    every entry its parent earned, and the description axis could not accumulate across
+    generations. Depth is bounded by the DECLARATION, never by sniffing ``isinstance``:
+    an undeclared param keeps the node-level shallow semantics, and ``array`` replaces
+    wholesale because a merged ordering is meaningless. This is the same per-slot
+    contract ``resolve_node_layout`` hand-rolls (named slot replaces, unnamed keeps the
+    floor) — one nesting contract, not two.
+
+    ``schema`` supplies those declarations; ``None`` (the schema-less
+    ``experiment_extract`` path) declares nothing, so every param stays shallow.
+
     Shared by the dataset/override resolution here, the cycle-seed overlay
-    (``runner/entry.py``) and the L1 candidate override (``optimization/l1
-    /population.py`` — which deep-copies its base and drops inactive nodes AROUND
-    this call). A RECURSIVE merge (``cli/commands/verify.py::_deep_merge``) is a
-    different operation and stays separate."""
+    (``runner/entry.py``) and the candidate-override merge
+    (``optimization/l1/population.py::merge_pipeline_params`` — which deep-copies its
+    base and drops inactive nodes AROUND this call, and is itself the single merge the
+    live loop and the ``verify``/``ab`` replay verbs both ride)."""
     merged = dict(base)
     for node, cfg in overlay.items():
         existing = merged.get(node)
-        merged[node] = (
-            {**existing, **cfg} if isinstance(existing, dict) and isinstance(cfg, dict) else cfg
-        )
+        if not (isinstance(existing, dict) and isinstance(cfg, dict)):
+            merged[node] = cfg
+            continue
+        node_obj = schema.get_node(node) if schema else None
+        param_types = node_obj.param_types if node_obj else {}
+        node_cfg = {**existing, **cfg}
+        for param, incoming in cfg.items():
+            prior = existing.get(param)
+            if (
+                param_types.get(param) == "object"
+                and isinstance(prior, dict)
+                and isinstance(incoming, dict)
+            ):
+                node_cfg[param] = {**prior, **incoming}
+        merged[node] = node_cfg
     return merged
 
 
@@ -602,6 +624,7 @@ def resolve_pipeline_config_params(
     active: list[str],
     pipeline_overrides: Mapping[str, Any],
     dataset_dir: Path | None,
+    schema: PipelineSchema | None,
 ) -> dict[str, Any]:
     """The dataset→effective node-config merge, pure: the sparse ``{"steps": active}``
     base layered with the per-dataset overlay (``pipeline.json::nodes.{name}.config``) and
@@ -623,7 +646,7 @@ def resolve_pipeline_config_params(
             for node, cfg in load_dataset_node_overlay(dataset_dir).items()
             if node in active
         }
-        pipeline_params = apply_node_overlay(pipeline_params, dataset_overlay)
+        pipeline_params = apply_node_overlay(pipeline_params, dataset_overlay, schema)
     # Campaign overrides layer on top (override > dataset); non-dict / inactive-node
     # entries are dropped here with an operator-visible log, then the survivors merge.
     valid_overrides: dict[str, Any] = {}
@@ -641,7 +664,7 @@ def resolve_pipeline_config_params(
                 key,
                 value,
             )
-    pipeline_params = apply_node_overlay(pipeline_params, valid_overrides)
+    pipeline_params = apply_node_overlay(pipeline_params, valid_overrides, schema)
     # Connector identity contribution — LAST, never overridable: per-node entries a
     # connector declares as part of measurement identity (Connector.identity_config,
     # e.g. the promptpotter connector's inner-baseline fingerprint). Resolved from
@@ -653,7 +676,7 @@ def resolve_pipeline_config_params(
             for node, cfg in _connector_identity_config(dataset_dir).items()
             if node in active
         }
-        pipeline_params = apply_node_overlay(pipeline_params, identity)
+        pipeline_params = apply_node_overlay(pipeline_params, identity, schema)
     return pipeline_params
 
 
@@ -747,7 +770,7 @@ def _apply_starting_prompts(
         # 0% on email-replies). Fail loud: a generation node must advertise
         # `prompt_info` in GET /pipeline (or the dataset overlay).
         logger.warning(
-            "configure_pipeline: dataset %r has starting prompts but NO "
+            "configure_and_apply_pipeline: dataset %r has starting prompts but NO "
             "prompt-bearing node in the active pipeline %s — the prompt will "
             "NOT reach the backend. A generation node must declare `prompt_info`.",
             dataset_name,
@@ -840,7 +863,7 @@ def configure_and_apply_pipeline(
     # (`content_hash`/`node_configs` over `session.pipeline_params`) AND the origin cycle id
     # (`build_origin_cycle_id` hashes these merged params). Starting prompts land on top below.
     pipeline_params = resolve_pipeline_config_params(
-        active, campaign_config.pipeline_overrides, dataset_dir
+        active, campaign_config.pipeline_overrides, dataset_dir, filtered
     )
 
     # Starting prompts from `{dataset_dir}/prompts/[<node>|default].json`, per prompt-bearing node.

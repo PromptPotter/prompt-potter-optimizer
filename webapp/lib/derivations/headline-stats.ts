@@ -75,13 +75,6 @@ function finite(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
-// The composite-or-accuracy rule lives in the backend ONLY (`domain/rendering.py::
-// display_fitness`): every settled row is served with `composite_fitness` already
-// resolved (it equals accuracy when no formula is active), so the webapp reads it
-// verbatim. The few `?? accuracy` sites left in components tolerate in-flight rows
-// whose composite hasn't been served yet — they are not a re-implementation of the
-// rule (use `??`, never `||`, so an honest 0 survives).
-
 export function headlineStats(dash: DashboardSnapshot | null): HeadlineStats {
   // `best` is the server-side rolling max of `rounds[].cumulative_accuracy` — the
   // incumbent's full-population score (LiveDashboardView._absorb_round_complete is

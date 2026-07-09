@@ -5,7 +5,7 @@ import {
   postForkCycle,
   postPauseCycle,
   type DraftPatch,
-  type LimitOverrides,
+  type ConfigOverrides,
   type OperatorForkOverride,
 } from "@/lib/api";
 import { bumpRevalidation } from "@/lib/revalidate";
@@ -18,7 +18,7 @@ import {
   candidateSearchPoint,
   liveCandidateSearchPoint,
   forkReconcileDefaults,
-  limitOverridesFromDefaults,
+  configOverridesFromDefaults,
   searchPoint,
 } from "@/lib/derivations";
 import type { SelectedCandidate } from "@/lib/types";
@@ -97,7 +97,7 @@ export function SteerForkPanel({
   // Seed with the pre-filled "remaining" defaults so confirming an untouched
   // reconcile dialog forks with the SHOWN ceilings — not a silent inherit of
   // the parent's full budget. `LimitReconcile.onChange` overwrites on edit.
-  const limits = useRef<LimitOverrides>(limitOverridesFromDefaults(forkReconcileDefaults(dash)));
+  const limits = useRef<ConfigOverrides>(configOverridesFromDefaults(forkReconcileDefaults(dash)));
 
   const [pending, setPending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -111,7 +111,7 @@ export function SteerForkPanel({
     const forkSeed: OperatorForkOverride = {
       origin_prompt_fields: editedPrompt.current ?? seedPrompt,
       pipeline_overlay: editedOverlay.current ?? overlay,
-      limit_overrides: limits.current,
+      config_overrides: limits.current,
       ...(Object.keys(editedNarrowing.current).length > 0
         ? { optimizer_narrowing: editedNarrowing.current }
         : {}),

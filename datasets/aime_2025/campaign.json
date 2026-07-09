@@ -19,9 +19,7 @@
       "l3_patience": 1,
       "elimination_n_min": 4,
       "pobb_epsilon": 0.2,
-      "exploration": {
-        "seed_heatmap_from_archive": true
-      }
+      "seed_heatmap_from_archive": true
     }
   }
 }

@@ -21,10 +21,15 @@ def main() -> int:
     for node, model_cls in OPTIMIZER_RESPONSE_MODELS.items():
         schema = model_cls.model_json_schema()
         resolved[f"{node}/1"] = {
-            "fields": sorted(schema.get("properties", {}).keys()),
+            # DECLARATION order, never sorted. `fields` IS the order declaration
+            # (`NodeOutputSchema`), and field order is generation order — alphabetizing
+            # it makes the manifest disagree with the schema the wire actually carries.
+            "fields": list(schema.get("properties", {})),
             "json_schema": {
                 "name": node,
-                "strict": True,
+                # The wire ships `strict: False` (`openai_compat.py`); claiming True here
+                # made the manifest describe a constraint no provider was ever given.
+                "strict": False,
                 "schema": schema,
             },
         }

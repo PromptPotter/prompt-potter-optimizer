@@ -120,12 +120,37 @@ def derive_pipeline_view(schema: PipelineSchema) -> PipelineView:
 
 
 def parse_resolved_schema(resolved: dict[str, Any]) -> NodeOutputSchema:
-    """Convert a ``_resolved_schema`` dict from the enriched response."""
+    """Convert a ``{fields, json_schema}`` dict into a node's structured-output read-model.
+
+    Two declaration sources, one parser: a ``resolved_schemas`` registry entry (keyed by
+    the node's ``schema_family``) or the inline ``config.output_schema`` the wire payload
+    already carries. Same twin the prompt side has (``resolved_prompts`` / inline
+    ``prompt_info``).
+
+    ``fields`` **constrains** ``json_schema`` rather than summarising it. The schema is a
+    second prompt and field order is generation order (``docs/concepts/structured-output.md``),
+    so the properties are re-emitted in the declared order — a `fields` list that merely
+    described the schema, or (worse) alphabetised it, would silently teach a different
+    generation order than the one declared. A `fields` list that does not name exactly the
+    schema's properties is a load-time error, never a quietly dropped or invented field.
+
+    An EMPTY ``description`` is kept. Once ``description`` is a search axis, *deliberately
+    undescribed* is a distinct searchpoint from *absent*, and dropping the empty string
+    made the two inexpressible.
+    """
     json_schema = resolved.get("json_schema", {})
     props = json_schema.get("properties", {})
-    fields = resolved.get("fields") or list(props.keys())
+    fields = resolved.get("fields") or list(props)
+    if props and set(fields) != set(props):
+        raise ValueError(
+            f"output schema `fields` {fields} does not name exactly the schema's "
+            f"properties {list(props)} — the order declaration must cover the schema"
+        )
+    if props and list(props) != fields:
+        props = {f: props[f] for f in fields}
+        json_schema = {**json_schema, "properties": props}
     field_descriptions = {
-        k: v.get("description", "") for k, v in props.items() if v.get("description")
+        k: v["description"] for k, v in props.items() if isinstance(v, dict) and "description" in v
     }
     return NodeOutputSchema(
         fields=fields,
@@ -185,6 +210,8 @@ _PY_TO_JSON_TYPE: dict[type, str] = {
     int: "integer",
     float: "number",
     str: "string",
+    dict: "object",
+    list: "array",
 }
 
 
@@ -292,6 +319,28 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
         # Inline prompt_info (for static pipeline.json without resolved_prompts)
         if "prompt_info" not in step_kwargs and "prompt_info" in node:
             step_kwargs["prompt_info"] = NodePromptInfo(**node["prompt_info"])
+
+        # Inline output_schema — the schema the WIRE already carries. A node that declares
+        # its structured output on `config.output_schema` (rather than via a
+        # `schema_family` registry entry) gets the same read-model, from the same parser,
+        # off the same declaration the connector forwards to the backend. One schema, not
+        # a display copy beside a wire copy — which is why it is read from `config` and
+        # why `SCHEMA_OWNED_FIELDS` locks the optimizer out of it.
+        if "output_schema" not in step_kwargs and isinstance(nc.get("output_schema"), dict):
+            step_kwargs["output_schema"] = parse_resolved_schema(
+                {"json_schema": nc["output_schema"]}
+            )
+            # `answer_field` names which slot IS the answer. Checked at LOAD, before one
+            # call is paid for: an executor destructuring a field the schema never declares
+            # reads "" for every sample, and the whole run grades NO_RESULT with nothing
+            # but a floor score to say why.
+            answer_field = nc.get("answer_field")
+            props = nc["output_schema"].get("properties") or {}
+            if answer_field is not None and answer_field not in props:
+                raise ValueError(
+                    f"node {name!r}: answer_field {answer_field!r} is not a property of its "
+                    f"output_schema (have: {sorted(props)})"
+                )
 
         steps.append(PipelineNode(**step_kwargs))
 

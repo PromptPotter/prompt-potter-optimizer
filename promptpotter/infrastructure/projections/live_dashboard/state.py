@@ -18,6 +18,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.results import RoundSummary
 
 __all__ = [
@@ -224,7 +225,7 @@ class LiveDashboardState(BaseModel):
     # coarse lifecycle+control axis every surface reads. Never "detached" here
     # (a dead producer can't write) — that value is emitted only by the
     # server-side ``derive_run_phase`` reader.
-    run_phase: str = "running"
+    run_phase: RunPhase = RunPhase.RUNNING
 
     stop_reason: str | None = None
 

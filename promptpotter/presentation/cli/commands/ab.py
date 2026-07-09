@@ -55,7 +55,7 @@ async def cmd_ab(args: argparse.Namespace) -> CommandResult:
         ctx.cycle_id,
         session,
         campaign_config.optimization.elimination_n_min,
-        enable_2pl=campaign_config.optimization.exploration.enable_2pl_graduation,
+        enable_2pl=campaign_config.optimization.enable_2pl_graduation,
     )
 
     if report.n_divergences == 0:

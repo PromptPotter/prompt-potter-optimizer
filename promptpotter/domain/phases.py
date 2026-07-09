@@ -18,7 +18,6 @@ __all__ = [
     "StopOutcome",
     "StopReason",
     "emit_phase",
-    "stop_reason_label",
     "stop_reason_outcome",
 ]
 
@@ -115,7 +114,7 @@ class RunPhase(enum.StrEnum):
       persistently-detached cycle ``TERMINAL`` (``PRODUCER_VANISHED``); it is
       not an in-flight unit and drops out of the dock.
     - ``TERMINAL`` — the cycle finished; the reason is the cycle's
-      :class:`StopReason` (rendered via :func:`stop_reason_label`).
+      :class:`StopReason` (labelled via the :data:`STOP_REASON_INFO` table).
     """
 
     CHECKIN = "checkin"
@@ -189,11 +188,6 @@ if _missing_stop_info:
         f"STOP_REASON_INFO is missing rows for {sorted(r.value for r in _missing_stop_info)} — "
         "every StopReason needs a label + outcome (domain/phases.py)."
     )
-
-
-def stop_reason_label(reason: StopReason | str) -> str:
-    """Operator-facing label for a terminal reason — the one display mapping."""
-    return STOP_REASON_INFO[StopReason(reason)].label
 
 
 def stop_reason_outcome(reason: StopReason | str) -> StopOutcome:

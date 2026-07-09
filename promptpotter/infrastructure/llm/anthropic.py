@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
@@ -21,9 +22,13 @@ from promptpotter.infrastructure.llm.rate_limit import (
 if TYPE_CHECKING:
     from anthropic import AsyncAnthropic
 
+logger = logging.getLogger(__name__)
+
 
 class AnthropicClient(LLMClientBase):
     """Anthropic API client."""
+
+    _schema_warned = False
 
     def __init__(
         self,
@@ -58,6 +63,17 @@ class AnthropicClient(LLMClientBase):
     ) -> LLMResponse:
         # Anthropic has no wire ``response_format``: JSON is contractual via the prompt;
         # ``response_model``/``response_schema`` parse + validate client-side, never sent.
+        # So the schema's two free levers — field ORDER and per-field ``description``
+        # (`docs/concepts/structured-output.md`) — reach no model here. A campaign that
+        # optimizes them on this provider measures noise. Warned once per process rather
+        # than raised: parsing still works, only the second prompt is missing.
+        if (response_schema or response_model) and not AnthropicClient._schema_warned:
+            AnthropicClient._schema_warned = True
+            logger.warning(
+                "AnthropicClient: response schema is parsed client-side and never sent — "
+                "field order and `description` strings reach no model on this provider. "
+                "Schema-axis optimization against Anthropic measures nothing."
+            )
         client = self._ensure_client()
 
         # Anthropic convention: system message lifts out of the messages array.

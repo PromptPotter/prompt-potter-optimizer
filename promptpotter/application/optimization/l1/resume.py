@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from promptpotter.application.optimization.dispatch.llm_call import (
@@ -123,7 +124,7 @@ async def generate_or_load_candidates(
         campaign_id=session.state.tracing_campaign_id,
         round_num=round_num,
     ):
-        candidates = await l1_generate(
+        candidates, parse_failure = await l1_generate(
             cycle,
             n_variants=_n_variants,
             creativity=_creativity,
@@ -131,7 +132,11 @@ async def generate_or_load_candidates(
             round_num=round_num,
         )
 
-    yield_stats = detect_invariants(candidates, cycle.opt_sp)
+    # `detect_invariants` only sees proposals that exist, so a parse failure (zero candidates)
+    # is invisible to it. Carry the reason onto the round's L1-quality record instead.
+    yield_stats = replace(
+        detect_invariants(candidates, cycle.opt_sp), l1_parse_failure=parse_failure
+    )
 
     if session.state.cycle_id:
         session.store.campaigns.save_round_candidates(

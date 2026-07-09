@@ -10,7 +10,6 @@ resolving the candidate off disk, scoring it, and assembling the
 
 from __future__ import annotations
 
-import copy
 import logging
 import random
 from collections.abc import Callable
@@ -18,6 +17,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.rendering import display_fitness
 from promptpotter.domain.results import DiagnosticRunRecord
 from promptpotter.infrastructure.store import archive_views
 from promptpotter.infrastructure.store.paths import REPO_ROOT
@@ -52,17 +52,6 @@ class VerifyOutcome:
     already_measured: int
     record: DiagnosticRunRecord | None = None
     cache_replays: int = 0
-
-
-def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    """Recursive dict merge — *overlay* wins; lists / scalars replaced wholesale."""
-    out = copy.deepcopy(base)
-    for k, v in overlay.items():
-        if isinstance(v, dict) and isinstance(out.get(k), dict):
-            out[k] = _deep_merge(out[k], v)
-        else:
-            out[k] = copy.deepcopy(v)
-    return out
 
 
 def _archive_measurement_to_qm(m: Any) -> QueryMeasurement:
@@ -106,6 +95,7 @@ async def verify_candidate(
     from promptpotter.application.config import (
         load_campaign_config as validate_campaign_config,
     )
+    from promptpotter.application.optimization.l1.population import merge_pipeline_params
     from promptpotter.application.scoring.formula import rescore_results, split_scoring_block
     from promptpotter.application.scoring.metrics import compute_composite_fitness
     from promptpotter.application.scoring.search_point_scorer import score_search_point
@@ -146,7 +136,9 @@ async def verify_candidate(
             f"{[c.get('label') for c in cand_scores]} — none match {label!r}."
         )
     source_campaign_accuracy = float(cand_score.get("accuracy") or 0.0)
-    source_campaign_composite = float(cand_score.get("composite_fitness") or 0.0)
+    source_campaign_composite = display_fitness(
+        cand_score.get("composite_fitness"), source_campaign_accuracy
+    )
     source_campaign_n = int(cand_score.get("scored_samples") or 0)
     source_candidate_id = str(cand_score.get("candidate_id") or "")
 
@@ -174,14 +166,14 @@ async def verify_candidate(
         source=f"verify:{campaign_id}:{label}",
     )
 
-    effective_pipeline_params = _deep_merge(pipeline_params, pp_override)
     schema = session.pipeline_schema
-    jsp = osp.to_job_search_point(effective_pipeline_params, schema=schema)
     if schema is None:
         raise VerifyError("pipeline schema unavailable; cannot resolve candidate config.")
-    node_configs = schema.node_configs(effective_pipeline_params or {})
+    effective_pipeline_params = merge_pipeline_params(pipeline_params, pp_override, schema) or {}
+    jsp = osp.to_job_search_point(effective_pipeline_params, schema=schema)
+    node_configs = schema.node_configs(effective_pipeline_params)
     predicate: dict[str, dict[str, Any]] = dict(node_configs)
-    config_hash = schema.sp_hash(effective_pipeline_params or {})
+    config_hash = schema.sp_hash(effective_pipeline_params)
 
     # Find samples this exact config has not yet been measured on.
     prior = archive_views.measurements_for_config(
@@ -243,8 +235,10 @@ async def verify_candidate(
     )
 
     workspace_n = len(workspace_qms)
-    workspace_composite = float(workspace_scores.get("composite_fitness") or 0.0)
     workspace_accuracy = float(workspace_scores.get("accuracy") or 0.0)
+    workspace_composite = display_fitness(
+        workspace_scores.get("composite_fitness"), workspace_accuracy
+    )
     samples_added = max(0, workspace_n - len(measured_ids))
 
     record = DiagnosticRunRecord(

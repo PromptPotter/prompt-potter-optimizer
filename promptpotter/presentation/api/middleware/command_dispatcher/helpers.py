@@ -54,7 +54,7 @@ def _parse_cycle_seed(raw: object) -> CycleSeed:
     searchpoint + reconciled limits). The wire payload is always a fork, so the
     C0 lineage provenance is stamped ``origin_source="fork_seed"`` here (the wire
     schema `OperatorForkOverride` doesn't carry it). A missing or malformed seed
-    is a 422 (the typed schema is the contract; `LimitOverrides` bounds ride
+    is a 422 (the typed schema is the contract; `ConfigOverrides` bounds ride
     `m12-api-openapi.yaml`)."""
     if not isinstance(raw, dict):
         raise PayloadInvalidError("payload.seed (object) is required.")

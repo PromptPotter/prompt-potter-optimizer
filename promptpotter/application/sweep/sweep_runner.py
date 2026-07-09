@@ -19,7 +19,7 @@ from promptpotter.application.views import (
     SweepSummaryView,
     render_sweep_summary,
 )
-from promptpotter.domain.phases import StopOutcome, StopReason, stop_reason_outcome
+from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.results import PayloadOutcome, SweepBatchResult
 from promptpotter.domain.run_records import ForkSpec, ForkTrigger, OperatorSweepFile
 from promptpotter.infrastructure.store import (
@@ -230,7 +230,7 @@ async def run_sweep_batch(
             interrupted = True
             break
 
-        outcome = stop_reason_outcome(fork_result.stop_reason or StopReason.CRASHED)
+        outcome = stop_reason_outcome(fork_result.stop_reason)
         status_by_source[path.name] = outcome.value
 
         if fork_result.n_l1_rounds == 0:

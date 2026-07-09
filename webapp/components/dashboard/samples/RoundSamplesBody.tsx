@@ -1,6 +1,7 @@
 "use client";
 import type { CandidateRow, SampleRow, SelectedCandidate } from "@/lib/types";
 import { SampleRowItem } from "./SampleRowItem";
+import { fmtPct0 } from "@/lib/format";
 
 export type StatusFilter = "all" | "hit" | "miss";
 
@@ -49,7 +50,7 @@ export function RoundSamplesBody({
           {candidates.map((c) => (
             <option key={c.candidate_id} value={c.candidate_id}>
               {c.label}
-              {c.accuracy != null ? ` · ${(c.accuracy * 100).toFixed(0)}%` : ""}
+              {c.accuracy != null ? ` · ${fmtPct0(c.accuracy)}` : ""}
             </option>
           ))}
         </select>

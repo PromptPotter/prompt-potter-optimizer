@@ -41,6 +41,8 @@ __all__ = [
     "load_optimizer_prompt",
     "load_optimizer_set_overrides",
     "resolve_node_layout",
+    "resolve_node_schema_descriptions",
+    "resolve_node_schema_field_names",
     "set_optimizer_config_overrides",
     "set_optimizer_prompt_overrides",
 ]
@@ -313,6 +315,14 @@ def _apply_prompt_override(name: str, template: PromptTemplate) -> PromptTemplat
     return template.model_copy(update=fields) if fields else template
 
 
+def _node_override_dict(node: str, key: str) -> dict[str, Any]:
+    """The outer L4 cycle's ``overrides[node][key]`` object, or ``{}`` — the one read every
+    structural (not-a-``PromptTemplate``-field) per-node lever shares."""
+    node_override = (_OPTIMIZER_PROMPT_OVERRIDES.get() or {}).get(node)
+    raw = node_override.get(key) if isinstance(node_override, dict) else None
+    return raw if isinstance(raw, dict) else {}
+
+
 def resolve_node_layout(node: str) -> L1Layout:
     """The effective per-node injection layout for *node* — its floor ± the outer
     L4 cycle's per-node ``layout`` edit.
@@ -329,10 +339,8 @@ def resolve_node_layout(node: str) -> L1Layout:
     non-L4 cycle) → the floor unchanged (``_apply_prompt_override``'s peer for the
     structural, not-a-``PromptTemplate``-field, half of a per-node edit)."""
     spec = NODE_LAYOUTS[node]
-    overrides = _OPTIMIZER_PROMPT_OVERRIDES.get() or {}
-    node_override = overrides.get(node)
-    raw = node_override.get("layout") if isinstance(node_override, dict) else None
-    if not isinstance(raw, dict) or not raw:
+    raw = _node_override_dict(node, "layout")
+    if not raw:
         return spec.floor
     update: dict[str, list[str]] = {}
     for slot in L1_LAYOUT_SLOTS:
@@ -351,6 +359,59 @@ def resolve_node_layout(node: str) -> L1Layout:
         )
         return spec.floor
     return merged
+
+
+def resolve_node_schema_descriptions(node: str) -> dict[str, str]:
+    """The outer L4 cycle's per-field ``description`` edits for *node*'s output schema.
+
+    The third free lever (``docs/concepts/structured-output.md``): a ``description`` is the
+    only natural language placed *inside* the field-filling loop, and no code reads it — so
+    mutating it changes what the model writes while leaving every parser bit-for-bit
+    unaffected. Field NAMES are the wire contract and stay locked: the caller only ever
+    assigns onto properties that already exist, so a renamed key is structurally dropped
+    rather than policed.
+
+    Rides the SAME per-node override object as the prose and ``layout`` edits
+    (:func:`set_optimizer_prompt_overrides` → ``overrides[node]["output_schema_descriptions"]
+    = {field: text}``) — Pydantic's ``Field(description=)`` remains the sole default, so a
+    node with no override bound (every normal, non-L4 cycle) builds today's schema
+    byte-for-byte. Non-string values are dropped.
+    """
+    raw = _node_override_dict(node, "output_schema_descriptions")
+    return {k: v for k, v in raw.items() if isinstance(k, str) and isinstance(v, str) and v.strip()}
+
+
+def resolve_node_schema_field_names(node: str) -> dict[str, str]:
+    """The outer L4 cycle's field-NAME edits for *node*'s output schema — ``{field: wire_name}``.
+
+    The first and strongest lever (``docs/concepts/structured-output.md`` § 1): the model holds
+    strong priors about what belongs under ``rationale`` vs ``evidence`` vs ``scratch``. Unlike a
+    ``description``, a name IS the wire contract — so a rename is a **presentation transform
+    only**: the emitted schema advertises ``wire_name``, the response validates through a
+    ``validation_alias``, and every downstream reader still sees the model's own field name.
+    Nothing but the LLM observes the change.
+
+    **Locked by default.** ``build_l1_output_schema`` grafts the key only when the campaign sets
+    ``optimization.schema_field_rename``, so the LLM cannot emit a key that does not exist —
+    structural, not policed. Rides the same per-node override object as the prose, ``layout``,
+    and ``output_schema_descriptions`` edits.
+
+    Dropped rather than raised on: non-strings, blanks, non-identifiers, no-op self-renames, and
+    duplicate targets (two fields claiming one wire name is an unresolvable response). Collisions
+    with a field that is NOT being renamed are rejected at the apply site, which knows the field
+    set. A bad L4 mutation must score poorly, never break the run.
+    """
+    raw = _node_override_dict(node, "output_schema_field_names")
+    clean: dict[str, str] = {}
+    for field, wire in raw.items():
+        if not isinstance(field, str) or not isinstance(wire, str):
+            continue
+        wire = wire.strip()
+        if not wire.isidentifier() or wire == field:
+            continue
+        clean[field] = wire
+    targets = list(clean.values())
+    return {f: w for f, w in clean.items() if targets.count(w) == 1}
 
 
 def list_optimizer_prompts() -> list[str]:

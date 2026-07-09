@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.domain.measurement_provenance import entry_grade
+from promptpotter.domain.rendering import display_fitness
 from promptpotter.domain.scoring import Scorer
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 from promptpotter.infrastructure.store import archive_views
@@ -405,7 +406,9 @@ class AxisIndex:
                 run_id=run_id,
                 name=entry.get("name", ""),
                 accuracy=scores.get("accuracy", 0.0),
-                composite=scores.get("composite_fitness", 0.0),
+                composite=display_fitness(
+                    scores.get("composite_fitness"), scores.get("accuracy", 0.0)
+                ),
                 hits=scores.get("hits", 0),
                 total=total,
             )

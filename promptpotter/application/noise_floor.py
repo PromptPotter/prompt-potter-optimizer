@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.rendering import display_fitness
 from promptpotter.domain.results import DiagnosticRunRecord
 from promptpotter.infrastructure.store.paths import REPO_ROOT
 from promptpotter.shared.clock import utcnow_iso
@@ -151,7 +152,9 @@ async def measure_noise_floor(
             source=f"noise_floor:{campaign_id}:C0:{i}",
             force_fresh=True,
         )
-        composites.append(float(scores.get("composite_fitness") or 0.0))
+        composites.append(
+            display_fitness(scores.get("composite_fitness"), float(scores.get("accuracy") or 0.0))
+        )
         accuracies.append(float(scores.get("accuracy") or 0.0))
         log_fn(f"noise-floor rescore {i + 1}/{k}: composite={composites[-1]:.4f}")
 
@@ -171,7 +174,9 @@ async def measure_noise_floor(
         workspace_accuracy=sum(accuracies) / len(accuracies) if accuracies else 0.0,
         workspace_composite=mean_composite,
         source_campaign_accuracy=float(round_file.get("accuracy") or 0.0),
-        source_campaign_composite=float(round_file.get("composite_fitness") or 0.0),
+        source_campaign_composite=display_fitness(
+            round_file.get("composite_fitness"), float(round_file.get("accuracy") or 0.0)
+        ),
         source_campaign_n=int(round_file.get("total") or 0),
         noise_floor_k=k,
         noise_floor_mean=mean_composite,

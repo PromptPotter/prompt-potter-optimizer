@@ -40,10 +40,11 @@ on every round. With distinct slots the LLM cannot conflate the buckets.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import functools
+from collections.abc import Callable, Mapping
 from typing import Annotated, Any, Literal, cast
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, create_model
 
 from promptpotter.domain.opt_search_point import (
     EVIDENCE_GROUNDING_FIELDS,
@@ -97,6 +98,7 @@ __all__ = [
     "L2ContextOutput",
     "L3PlanOutput",
     "VariantEvidenceGrounding",
+    "build_l1_response_model",
 ]
 
 
@@ -156,6 +158,14 @@ class L1Variant(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     variant_name: str
+    # FIELD ORDER IS GENERATION ORDER — evidence precedes every decision it justifies.
+    # `variant_name` is an identifier, not a choice, so it may lead. `changes_description`
+    # already names "the concrete change", so it IS a decision: emitted before the citation,
+    # the citation could only rationalise a mutation already committed to. Optional at parse
+    # time so a provider omitting it on one variant doesn't crash the round — the
+    # ``evidence_grounding_present`` behavior check is the canonical enforcement point and
+    # records missing/malformed entries as wounds without burning the LLM call.
+    evidence_grounding: VariantEvidenceGrounding | None = None
     changes_description: str
     pipeline_params_override: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
@@ -178,11 +188,6 @@ class L1Variant(BaseModel):
             "Pipeline-context strings; keys must be one of {upstream_context, downstream_context}."
         ),
     )
-    # Optional at parse time so providers that omit it on a single variant
-    # don't crash the entire round — the ``evidence_grounding_present`` behavior
-    # check is the canonical enforcement point and flags missing/malformed
-    # entries as wounds without burning the LLM call.
-    evidence_grounding: VariantEvidenceGrounding | None = None
 
 
 class L1GenerateOutput(BaseModel):
@@ -191,6 +196,51 @@ class L1GenerateOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     variants: list[L1Variant]
+
+
+def build_l1_response_model(field_names: Mapping[str, str]) -> type[L1GenerateOutput]:
+    """``L1GenerateOutput`` whose variant fields validate through renamed wire keys.
+
+    The un-rename half of the field-NAME lever (`docs/specs/schema-description-axis.md`
+    § Unlocking the name). ``field_names`` maps a real :class:`L1Variant` field to the wire
+    key the emitted JSON Schema advertises; a ``validation_alias`` accepts that key and binds
+    it back onto the field. Every downstream reader keeps seeing ``changes_description``.
+
+    **The old name stops working, deliberately.** ``populate_by_name`` is left off, so a model
+    that ignores the rename and emits the original key fails validation → zero candidates →
+    the round is charged ``problem_rate = 1.0``. That is the whole safety story: a rename the
+    model cannot honour is self-penalising, not silently half-applied.
+
+    Empty map → :class:`L1GenerateOutput` itself, so the non-renamed path allocates nothing.
+    """
+    if not field_names:
+        return L1GenerateOutput
+    return _build_l1_response_model(tuple(sorted(field_names.items())))
+
+
+@functools.lru_cache(maxsize=16)
+def _build_l1_response_model(items: tuple[tuple[str, str], ...]) -> type[L1GenerateOutput]:
+    overrides: dict[str, Any] = {}
+    for field, wire in items:
+        info = L1Variant.model_fields[field]
+        kwargs: dict[str, Any] = {
+            "validation_alias": wire,
+            "serialization_alias": wire,
+            "description": info.description,
+        }
+        if info.default_factory is not None:
+            kwargs["default_factory"] = info.default_factory
+        elif not info.is_required():
+            kwargs["default"] = info.default
+        # No default and no default_factory ⇒ Field() stays required, matching the source field.
+        overrides[field] = (info.annotation, Field(**kwargs))
+    variant = create_model("L1Variant", __base__=L1Variant, **overrides)
+    suffix = "_".join(f"{f}2{w}" for f, w in items)
+    return create_model(
+        f"L1GenerateOutput__{suffix}",
+        __base__=L1GenerateOutput,
+        variants=(list[variant], ...),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -244,12 +294,27 @@ class ForkProposal(BaseModel):
     exits the current cycle with ``StopReason.REBASED``, and
     auto-continues optimization on the new fork (capped at
     ``MAX_AUTO_REBASES`` per CLI invocation).
+
+    ``unlock_schema_field_rename`` is the layer's one search-policy request. It is
+    a bool and not a ``ConfigOverrides`` object on purpose: handed the whole delta
+    the layer could move its own spend ceiling. Unlocking widens the search space,
+    which is why it can only ride a rewind — the parent cycle keeps its frozen
+    config, so its measurements stay comparable.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     round_offset: int
     reason: str = ""
+    unlock_schema_field_rename: bool = Field(
+        False,
+        description=(
+            "Let the fork's L1 rename a field on the inner l1_generate's output schema "
+            "(it can only describe fields today). Set ONLY when the panels show the search "
+            "stalling on what a field is FOR rather than on what it says — a field whose "
+            "name misdescribes its content. Default false."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
