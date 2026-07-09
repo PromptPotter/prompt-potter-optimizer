@@ -13,9 +13,11 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from promptpotter.application.optimization.dispatch.llm_call import heartbeat as heartbeat_mod
 from promptpotter.application.runner import inner_recursion
-from promptpotter.domain.results import CycleResult, CycleSpend
+from promptpotter.domain.results import CycleResult, CycleSpend, RoundResult
 from promptpotter.domain.run_records import LLMCallProgressRecord
 from promptpotter.infrastructure.llm import models as llm_models
 from promptpotter.infrastructure.store.io import write_json
@@ -33,8 +35,21 @@ class _RecordingLedger:
 
 
 def _fake_result() -> CycleResult:
+    # One real L1 round: `run_inner_cycle` excludes an evidence-free cycle (`rounds=[]` would
+    # raise `InnerCycleUnscoreableError`, never reaching the `{"data": …}` this test asserts on).
     return CycleResult(
-        rounds=[],
+        rounds=[
+            RoundResult(
+                round=1,
+                label="R1",
+                accuracy=0.55,
+                hits=11,
+                total=20,
+                improved=True,
+                prompt_fields={},
+                candidates_scored=2,
+            )
+        ],
         n_l1_rounds=1,
         best_accuracy=0.55,
         best_round=1,
@@ -45,7 +60,9 @@ def _fake_result() -> CycleResult:
         stop_reason="max_rounds",  # SUCCESS outcome — not excluded
         started_at="t0",
         finished_at="t1",
-        spend=CycleSpend(),
+        # Fully-priced, non-zero: a cycle recording no spend is excluded as unscoreable, since
+        # dividing lift by a zero cost would report it as maximally efficient.
+        spend=CycleSpend(input_tokens=5000, output_tokens=2000, cost_usd=0.018),
     )
 
 
@@ -90,3 +107,47 @@ async def test_outer_ledger_gets_progress_with_detail(tmp_path: Path, monkeypatc
     assert detailed, "heartbeat records carried no inner-progress detail"
     assert any(r.detail == "inner r2/3 · best 55%" for r in detailed)
     assert all(r.call_id == "inner:justlogic-d67/seed-0" for r in progress)
+
+
+async def test_outer_sample_deadline_cancels_the_inner_campaign(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    # SILENT resource leak. The deadline only bounds SPEND because the inner campaign is awaited
+    # directly, making it the awaiting coroutine's `_fut_waiter` so the timeout's cancellation
+    # reaches it. Detach that await — `asyncio.shield`, `asyncio.wait`, a `gather` — and the
+    # timed-out campaign keeps running, keeps calling the optimizer, and keeps billing tokens
+    # against a sample nobody will read. Nothing errors; the run just costs more and ends later.
+    # So this pins the PROPERTY (the campaign stops), not the shape of the code that achieves it.
+    monkeypatch.setattr(heartbeat_mod, "HEARTBEAT_INTERVAL_S", 0.01)
+    monkeypatch.setattr(inner_recursion, "OUTER_SAMPLE_WALL_S_PER_ROUND", 0.02)
+
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def _hanging_inner(
+        ctx: Any, spec: Any, overrides: Any, cycle_dir_box: dict[str, Path]
+    ) -> CycleResult:
+        started.set()
+        try:
+            await asyncio.sleep(30)  # far past the deadline
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+        return _fake_result()
+
+    monkeypatch.setattr(inner_recursion, "_run_inner_campaign", _hanging_inner)
+    inner_recursion._INNER_SPAWN.set(
+        inner_recursion.InnerSpawnContext(
+            inner_sandbox_root=tmp_path,
+            dataset_config_dir=tmp_path,
+            identity=None,  # type: ignore[arg-type]
+            shared_root=tmp_path,
+        )
+    )
+    llm_models._CYCLE_LEDGER.set(_RecordingLedger())  # type: ignore[arg-type]
+
+    with pytest.raises(inner_recursion.InnerCycleUnscoreableError, match="wall-clock deadline"):
+        await inner_recursion.run_inner_cycle("justlogic-d67/seed-0", {})
+
+    assert started.is_set(), "the inner campaign never started — the deadline proved nothing"
+    assert cancelled.is_set(), "the inner campaign outlived its deadline and kept spending"

@@ -26,7 +26,7 @@ from promptpotter.application.scoring.sample_measurement import (
     execute_stale_data_protocol as _execute_stale_data_protocol,
 )
 from promptpotter.domain.escalation_signals import EscalationSignal
-from promptpotter.domain.phases import RunPhase
+from promptpotter.domain.phases import RunPhase, StopLoop
 from promptpotter.domain.scoring import QueryMeasurement, Scorer
 from promptpotter.domain.validators import StopRule
 from promptpotter.shared.errors import (
@@ -366,6 +366,24 @@ async def run_query_loop(
                 logger.debug("Pause after query %d/%d.", len(state.results), len(dataset))
                 declare_run_phase(session, RunPhase.PAUSED)
                 return QueryLoopResult(state.results, completed=False, stop_reason="graceful")
+            # Budget checkpoint, same cadence. The round-boundary gate could not fire until the
+            # round closed, so a run overshot its ceiling by up to one full round of scoring —
+            # and for an L4 outer round every sample is an entire inner CAMPAIGN. `StopLoop` is
+            # the existing mid-round stop channel (caught once at the top of `run_round_loop`)
+            # and carries the gate's own reason; unwinding via the `graceful` path instead would
+            # have relabelled a budget halt as an operator PAUSE. Samples already scored are on
+            # disk (`persist_fresh` ran per fresh sample), so the cycle stays resumable.
+            if (
+                session.budget_tripped is not None
+                and (stop := session.budget_tripped()) is not None
+            ):
+                logger.warning(
+                    "Budget ceiling reached after query %d/%d (%s); halting mid-round.",
+                    len(state.results),
+                    len(dataset),
+                    stop.value,
+                )
+                raise StopLoop(stop)
 
             if on_sample_starting is not None:
                 on_sample_starting(sample.query, i, len(dataset), sample.id)

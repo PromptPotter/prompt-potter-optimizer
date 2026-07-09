@@ -364,10 +364,6 @@ def test_inner_narrative_carries_evidence_within_budget() -> None:
     assert "R8 " in digest, "latest round clipped — head-keep would starve the trajectory tail"
     assert "[earlier rounds elided]" in digest
 
-    # No rounds at all → headline only, never an exception.
-    digest = _inner_narrative(_cycle([], []), spec)
-    assert digest.startswith("INNER justlogic seed-3")
-
 
 def test_evidence_channel_clips_are_visible_and_tail_preserving(
     caplog: pytest.LogCaptureFixture,

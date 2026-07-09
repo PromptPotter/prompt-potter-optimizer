@@ -23,6 +23,7 @@ from typing import Any
 
 from promptpotter.application.scoring.formula.compiler import (
     ScoringFormulaError,
+    ScoringTermMissingError,
     auto_scorer_id,
     compile_scorer,
     split_scoring_block,
@@ -42,6 +43,7 @@ def extract_item_label(c: Any) -> str:
 __all__ = [
     "SCORING_FUNCTIONS",
     "ScoringFormulaError",
+    "ScoringTermMissingError",
     "auto_scorer_id",
     "compile_round_scorer",
     "compile_scorer",

@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.domain.phases import StopReason
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import RoundScorer, Scorer
 from promptpotter.infrastructure.backend import BackendClient
@@ -102,6 +103,12 @@ class Session:
     # one searchpoint is cut, not the whole round.
     skip_check: Callable[[], bool] | None = None
     skip_consume: Callable[[], None] | None = None
+    # `budget_tripped` returns the `StopReason` once a spend/token ceiling is met, else None.
+    # Bound at the runner seam to the SAME `BudgetGate.tripped` the round loop consults — one
+    # object, so the two cadences can't disagree and a mid-flight ceiling change moves both.
+    # The round-boundary check alone let a whole round of scoring run past the ceiling; for an
+    # L4 outer round that is `n_candidates x n_samples` inner CAMPAIGNS of overshoot.
+    budget_tripped: Callable[[], StopReason | None] | None = None
 
 
 def new_session_state(

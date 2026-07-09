@@ -60,6 +60,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.config import LivesConfig
+from promptpotter.domain.outer_verdict import OUTER_PROXY_KEYS, OuterSampleProxies
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.results import L1_PARSE_FAILURE_TOOLING
 from promptpotter.infrastructure.store.io import read_json_optional
@@ -73,12 +74,13 @@ logger = logging.getLogger(__name__)
 
 
 class InnerCycleUnscoreableError(RuntimeError):
-    """The inner cycle ran to completion but produced no evidence about the meta-prompt.
+    """The inner cycle produced no evidence about the meta-prompt under test.
 
-    Rides the same exclusion channel as a crashed inner cycle: ``run_inner_cycle`` raises,
-    ``measure_sample``'s catch-all turns it into one EXCLUDED row, and the candidate is
-    scored on its surviving samples. Never a zero — a zero is a verdict, and this is the
-    absence of one."""
+    THE exclusion signal — a crash, a cycle that never reached an L1 round, and a cycle whose
+    every round lost its candidates are one fact, not three, so they raise one exception with
+    one vocabulary (see :func:`_no_evidence_reason`). ``measure_sample``'s catch-all turns it
+    into one EXCLUDED row and the candidate is scored on its surviving samples. Never a zero —
+    a zero is a verdict, and this is the absence of one."""
 
 
 # The terminal-ranker key the outer `promptpotter-self` pipeline reads as its
@@ -95,17 +97,23 @@ INNER_RESULT_KEY = "final_ranking"
 # each L1 round ~$0.006 (optimizer + backend). Doubled, so a pricier model or a wider bank
 # still finishes its declared rounds rather than tripping the cost stop mid-budget.
 INNER_SPEND_PER_ROUND_USD = 0.012
-PROXY_KEYS = (
-    "first_round_delta",
-    "after_N_rounds_delta",
-    "rounds_to_N",
-    "headroom_lift",
-    "cleanliness",
-    "diversity_health",
-    "rounds_improved_frac",
-    "delta_per_dollar",
-    "delta_per_candidate",
-    "delta_per_second",
+
+# Per-round wall-clock allowance for ONE outer sample, sized like the spend cap above. Every
+# individual await inside an inner campaign is already bounded (optimizer 180s x2, backend 120s,
+# MAX_429_ATTEMPTS, rounds <= HARD_CAP) — but nothing bounded their SUM, so sustained 429
+# throttling could stretch one sample across tens of minutes inside every one of those bounds,
+# silently truncating how many outer rounds completed. Measured over the 155 inner cycles on
+# disk that ran to a SUCCESS outcome: per-round p50 81s, p90 116s, max 245s. At 300s none of
+# them would have tripped, so the deadline catches only a genuinely stuck sample.
+OUTER_SAMPLE_WALL_S_PER_ROUND = 300.0
+
+# How deep the recursion may nest. L4 (an outer campaign scoring inner campaigns) is depth 1;
+# the module is written to re-enter, so L5+ nests by construction and nothing stopped it. Depth
+# is carried on a ContextVar rather than the spawn context because `create_task` copies the
+# context into the inner campaign, so each level reads exactly its parent's value.
+MAX_INNER_DEPTH = 2
+_INNER_DEPTH: contextvars.ContextVar[int] = contextvars.ContextVar(
+    "promptpotter_inner_depth", default=0
 )
 
 
@@ -166,6 +174,7 @@ def publish_inner_spawn_context(session: Session) -> None:
     # to avoid. Identical for a top-level cycle, where the two roots coincide.
     shared_root = session.store.shared_root
     inner_root = shared_root.parent / ".inner" / cycle_id
+    _verify_outer_observation_contract(session, Path(dataset_dir))
     _INNER_SPAWN.set(
         InnerSpawnContext(
             inner_sandbox_root=inner_root,
@@ -174,6 +183,30 @@ def publish_inner_spawn_context(session: Session) -> None:
             shared_root=shared_root,
         )
     )
+
+
+def _verify_outer_observation_contract(session: Session, dataset_dir: Path) -> None:
+    """An outer dataset must DECLARE every key its inner samples emit — checked once, at the
+    seam that arms the recursion, against the schema the campaign actually loaded.
+
+    A dataset that owns an ``inner_tasks.json`` IS an outer dataset (the file is what
+    :func:`_resolve_inner_task` reads), so no name test is needed to recognise one. An
+    emitted-but-undeclared key is dropped on the floor by ``sample_measurement`` and never
+    reaches ``pipeline_data`` — so the scoring formula either dies on a name it cannot see
+    (loud, but a run in) or, worse, the observation quietly never lands in the archive and
+    the what-if panel scores a term nobody measured. Fail at arm time instead."""
+    schema = session.pipeline_schema
+    if schema is None or not (dataset_dir / "inner_tasks.json").is_file():
+        return
+    declared = {key for node in schema.nodes for key in node.output_keys}
+    missing = [k for k in (INNER_RESULT_KEY, *OUTER_PROXY_KEYS) if k not in declared]
+    if missing:
+        raise ValueError(
+            f"{dataset_dir.name} runs inner campaigns but its pipeline.json declares no "
+            f"observation_mappings for {missing} — every key an inner sample emits must be "
+            "declared, or it never reaches pipeline_data and the outer formula scores a "
+            "measurement that was silently dropped."
+        )
 
 
 @dataclass(frozen=True)
@@ -263,7 +296,15 @@ def _clamp(x: float, lo: float, hi: float) -> float:
 
 
 def _mean(xs: list[float]) -> float:
-    return sum(xs) / len(xs) if xs else 0.0
+    """Mean of a NON-EMPTY sequence. The empty case is a caller bug, not a zero: every use
+    here feeds a proxy the outer formula reads as a positive signal, so ``sum([])/1 -> 0.0``
+    would report an unexercised meta-prompt as perfectly clean. Callers exclude first
+    (:func:`_no_evidence_reason`); this refuses to invent the verdict for them."""
+    if not xs:
+        raise InnerCycleUnscoreableError(
+            "a proxy was averaged over no rounds — the cycle should have been excluded"
+        )
+    return sum(xs) / len(xs)
 
 
 def _is_evidential(rnd: RoundResult) -> bool:
@@ -298,6 +339,47 @@ def _round_problem_rate(rnd: RoundResult) -> float:
     return _clamp(struct, 0.0, 1.0)
 
 
+def _no_evidence_reason(result: CycleResult) -> str | None:
+    """Why this inner cycle says nothing about the meta-prompt under test — ``None`` if it does.
+
+    THE exclusion decision, asked once. The question is **"did this run produce evidence?"**,
+    never "did it fail?". Those differ: a cycle can end SUCCESS/HALTED/PAUSED having never run
+    an L1 round (target hit or perfect at origin, spend/token budget, origin gate, an operator
+    Ctrl+C), and every aggregate below then reads an *unexercised* meta-prompt as flawless —
+    ``_mean([]) -> 0.0``, so ``cleanliness = diversity_health = 1.0``. That is a fabricated
+    measurement, the same class of harm as scoring a crash as a bad mutation.
+
+    ``result.rounds`` holds L1 rounds only (``Cycle.absorb_round`` is their sole sink; resume
+    peels round 0 off), and ``round_discovered_levels`` carries one level per such round."""
+    if stop_reason_outcome(result.stop_reason) is StopOutcome.FAILED:
+        return f"it failed as tooling (stop_reason={result.stop_reason})"
+    if not result.rounds:
+        return f"it ran no L1 rounds (stop_reason={result.stop_reason})"
+    if not any(_is_evidential(r) for r in result.rounds):
+        return (
+            f"every one of its {len(result.rounds)} L1 round(s) lost its candidates to an "
+            "empty optimizer response"
+        )
+    if result.origin_level is None:
+        return "its origin was never scored, so there is no floor to difference its rounds against"
+    if not result.round_discovered_levels:
+        return "it discovered no levels to difference against its origin"
+    # Unmeasured spend is not cheap spend. `delta_per_dollar` divides by cost, and the outer
+    # formula reads it as `0.7 + 0.3*clamp(dpd/6)` — so a cost of 0.0 pins efficiency to its
+    # MAXIMUM. Under-reporting spend made a run score fitter, which is the incentive exactly
+    # backwards. `unpriced_tokens > 0` is the same harm partially applied: cost_usd is then a
+    # floor, not a total, and the ratio is inflated by however much went unpriced.
+    spend = result.spend
+    if spend is None or spend.cost_usd <= 0.0:
+        return "it recorded no spend, so its cost-efficiency cannot be measured"
+    if spend.unpriced_tokens > 0:
+        return (
+            f"{spend.unpriced_tokens} of its tokens have no USD rate on file, so its recorded "
+            f"cost (${spend.cost_usd:.4f}) understates real spend"
+        )
+    return None
+
+
 def _round_mode_collapse_rate(rnd: RoundResult) -> float:
     """Per-round mode-collapse ∈ [0,1): share of generated variants the invariant detector
     nuked as no-op / duplicate. A meta-prompt that induces the inner L1 to regurgitate the
@@ -307,7 +389,7 @@ def _round_mode_collapse_rate(rnd: RoundResult) -> float:
     return collapsed / generated if generated else 0.0
 
 
-def _compute_proxies(result: CycleResult, target: float, elapsed: float) -> dict[str, Any]:
+def _compute_proxies(result: CycleResult, target: float, elapsed: float) -> OuterSampleProxies:
     """Composed outer fitness — a vector of subset-invariant, bounded raw signals from a
     finished inner cycle, combined by ``campaign.json::scoring`` (the backend never hides
     the composite; every term stays a re-weightable observation).
@@ -332,11 +414,20 @@ def _compute_proxies(result: CycleResult, target: float, elapsed: float) -> dict
       more for the same lift and scores lower.
 
     Deltas may be negative on a regressing meta-prompt (levels are not floored at origin), so
-    the efficiency ratios can be negative too; the formula recentres / clamps."""
+    the efficiency ratios can be negative too; the formula recentres / clamps.
+
+    Raises :class:`InnerCycleUnscoreableError` when the cycle carries no evidence. Asking that
+    first is what makes "absent" un-representable here; :class:`OuterSampleProxies` is what keeps
+    it so — bounded fields carry their bound, and no field has a default, because the absence of
+    a measurement is not a value a meta-prompt can be scored on."""
+    if (reason := _no_evidence_reason(result)) is not None:
+        raise InnerCycleUnscoreableError(reason)
+
+    assert result.origin_level is not None  # guaranteed by _no_evidence_reason
     origin = result.origin_level
     levels = result.round_discovered_levels
-    first = (levels[0] - origin) if levels else 0.0
-    after_n = (max(levels) - origin) if levels else 0.0
+    first = levels[0] - origin
+    after_n = max(levels) - origin
     if origin >= target:
         rounds_to_n = 0
     else:
@@ -350,39 +441,37 @@ def _compute_proxies(result: CycleResult, target: float, elapsed: float) -> dict
         _clamp(after_n / headroom, -1.0, 1.0) if headroom > 1e-9 else float(after_n >= 0) * 2 - 1
     )
 
-    l1_rounds = [r for r in result.rounds if r.round != 0]
-    # Rounds that carry no evidence about the meta-prompt are dropped, not scored. Note the
-    # order: `_mean([]) -> 0.0` would read an all-tooling-failed cycle as PERFECTLY clean
-    # (cleanliness 1.0), the exact inverse of the truth — so that cycle is excluded as an
-    # outer sample instead, on the same channel as a crashed one (`run_inner_cycle`).
-    evidential = [r for r in l1_rounds if _is_evidential(r)]
-    if l1_rounds and not evidential:
-        raise InnerCycleUnscoreableError(
-            "every L1 round lost its candidates to an empty optimizer response "
-            f"({len(l1_rounds)} round(s)) — no evidence about this meta-prompt"
-        )
+    # Individual rounds that carry no evidence are dropped, not scored — an all-tooling cycle
+    # already left via `_no_evidence_reason`, so `evidential` is non-empty here.
+    evidential = [r for r in result.rounds if _is_evidential(r)]
     cleanliness = 1.0 - _mean([_round_problem_rate(r) for r in evidential])
     diversity_health = 1.0 - _mean([_round_mode_collapse_rate(r) for r in evidential])
     rounds_improved_frac = _mean([1.0 if r.improved else 0.0 for r in evidential])
 
-    cost = result.spend.cost_usd if result.spend else 0.0
-    n_cand = sum(r.candidates_scored for r in l1_rounds)
-    delta_per_dollar = after_n / max(cost, 1e-6)
-    delta_per_candidate = after_n / max(n_cand, 1)
+    # No `max(cost, eps)` floor: `_no_evidence_reason` already refused a cycle whose spend is
+    # zero or under-priced, so the divisor is a real, fully-priced cost.
+    assert result.spend is not None  # guaranteed by _no_evidence_reason
+    cost = result.spend.cost_usd
+    n_cand = sum(r.candidates_scored for r in result.rounds)
+    delta_per_dollar = after_n / cost
+    # n_cand == 0 only when no candidate was ever scored — and then the trajectory never rose
+    # above origin, so `after_n` is 0.0 and this is 0/0. Say 0.0 outright instead of letting a
+    # `max(n_cand, 1)` divisor pretend one candidate existed.
+    delta_per_candidate = after_n / n_cand if n_cand else 0.0
     delta_per_second = after_n / max(elapsed, 1e-6)
 
-    return {
-        "first_round_delta": round(first, 6),
-        "after_N_rounds_delta": round(after_n, 6),
-        "rounds_to_N": rounds_to_n,
-        "headroom_lift": round(headroom_lift, 6),
-        "cleanliness": round(cleanliness, 6),
-        "diversity_health": round(diversity_health, 6),
-        "rounds_improved_frac": round(rounds_improved_frac, 6),
-        "delta_per_dollar": round(delta_per_dollar, 6),
-        "delta_per_candidate": round(delta_per_candidate, 6),
-        "delta_per_second": round(delta_per_second, 6),
-    }
+    return OuterSampleProxies(
+        first_round_delta=first,
+        after_N_rounds_delta=after_n,
+        rounds_to_N=rounds_to_n,
+        headroom_lift=headroom_lift,
+        cleanliness=cleanliness,
+        diversity_health=diversity_health,
+        rounds_improved_frac=rounds_improved_frac,
+        delta_per_dollar=delta_per_dollar,
+        delta_per_candidate=delta_per_candidate,
+        delta_per_second=delta_per_second,
+    )
 
 
 def _clip(text: str, cap: int) -> str:
@@ -406,11 +495,15 @@ def _inner_narrative(result: CycleResult, spec: _InnerTaskSpec) -> str:
     and the strongest candidate's edit + matched-origin delta; plus one verbatim
     failure highlight for the campaign. Exactly the evidence an outer critique needs
     to say WHY a meta-prompt mutation helped or hurt."""
+    # Narrated only for a cycle that carried evidence, so both are present (`_compute_proxies`
+    # raised otherwise). No `or 0.0`: an origin that was never scored has no level to narrate.
+    assert result.origin_level is not None
+    origin = result.origin_level
     levels = result.round_discovered_levels
-    best = max(levels) if levels else result.origin_level
+    best = max(levels)
     lines = [
-        f"INNER {spec.inner_dataset} seed-{spec.seed}: origin {result.origin_level:.3f}"
-        f" -> best-discovered {best:.3f} (D{best - result.origin_level:+.3f})"
+        f"INNER {spec.inner_dataset} seed-{spec.seed}: origin {origin:.3f}"
+        f" -> best-discovered {best:.3f} (D{best - origin:+.3f})"
         f" over {result.n_l1_rounds} rounds; stop={result.stop_reason}."
     ]
     by_round = {rnd.round: rnd for rnd in result.rounds}
@@ -432,7 +525,7 @@ def _inner_narrative(result: CycleResult, spec: _InnerTaskSpec) -> str:
         rnd = by_round[r]
         parts = []
         if 0 <= r - 1 < len(levels):
-            parts.append(f"level {levels[r - 1]:.3f} (D{levels[r - 1] - result.origin_level:+.3f})")
+            parts.append(f"level {levels[r - 1]:.3f} (D{levels[r - 1] - origin:+.3f})")
         prior = by_round.get(r - 1)
         if prior is not None and prior.critique and prior.critique.get("priority_fix"):
             parts.append(f"steer: {_clip(prior.critique['priority_fix'], 130)}")
@@ -516,6 +609,9 @@ async def _run_inner_campaign(
     from promptpotter.application.runner import RunMode, run_optimization
     from promptpotter.infrastructure.store import build_stores
 
+    # One level deeper, recorded in THIS task's context copy only — so a campaign nested inside
+    # this one reads its parent's depth, and the outer cycle's own depth is untouched.
+    _INNER_DEPTH.set(_INNER_DEPTH.get() + 1)
     # Apply the outer L1's meta-prompt mutations to the inner optimizer prompts —
     # set in THIS task's context copy, so it can't reach the outer's optimizer.
     set_optimizer_prompt_overrides(meta_prompt_overrides or None)
@@ -680,17 +776,27 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
     ``{"data": {…}}`` shape ``measure_sample`` parses from an HTTP body — so the
     outer scorer reads an inner result identically to a remote one.
 
-    A TOOLING failure (``StopOutcome.FAILED`` — inner timeout/crash/diverge/render
-    error, however it surfaced) RAISES, so ``measure_sample`` excludes it as one
-    error row (missing data, not a real proxy) instead of scoring a false floor
-    that mimics a bad mutation. A completed inner run that merely failed to improve
-    returns normally with poor proxies (measured, so a bad mutation is penalised).
-    One excluded sample cannot kill the outer cycle."""
+    An inner cycle that produced **no evidence** about the meta-prompt — it crashed, or
+    never reached an L1 round, or every round lost its candidates — raises
+    ``InnerCycleUnscoreableError`` from ``_compute_proxies`` (see ``_no_evidence_reason``,
+    the one exclusion decision), so ``measure_sample`` excludes it as one error row
+    (missing data, not a real proxy) instead of scoring a false floor that mimics a bad
+    mutation. A completed inner run that merely failed to improve returns normally with
+    poor proxies (measured, so a bad mutation is penalised). One excluded sample cannot
+    kill the outer cycle."""
     ctx = _INNER_SPAWN.get()
     if ctx is None:
         raise RuntimeError(
             "promptpotter connector: no inner-spawn context published — "
             "run_optimization must call publish_inner_spawn_context first."
+        )
+    depth = _INNER_DEPTH.get()
+    if depth >= MAX_INNER_DEPTH:
+        raise RuntimeError(
+            f"promptpotter connector: inner recursion is already {depth} level(s) deep "
+            f"(MAX_INNER_DEPTH={MAX_INNER_DEPTH}); refusing to spawn another inner campaign. "
+            "An inner dataset whose own backend_type is 'promptpotter' recurses without bound — "
+            "check the inner_benchmark named in inner_tasks.json."
         )
     spec = _resolve_inner_task(ctx, query)
     overrides = payload.get("meta_prompt_overrides") or {}
@@ -744,18 +850,11 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
     # overrides). create_task copies the current context at creation; the
     # inner run re-binds its copies, leaving the outer's untouched.
     #
-    # A TOOLING failure (the inner optimizer timed out, crashed, diverged, or hit
-    # a render error) is NOT evidence the outer meta-prompt mutation was bad — it
-    # is missing data. Scoring it as a real proxy (the old -1.0 floor) is
-    # indistinguishable from a genuinely-regressing mutation and silently corrupts
-    # the outer signal. So we RAISE on a FAILED outcome, whether it surfaced as a
-    # returned ``stop_reason`` (e.g. OPTIMIZER_TIMEOUT — the runner returns it, it
-    # does not raise) or as an exception. ``measure_sample``'s own catch-all turns
-    # that raise into one EXCLUDED error row (out of hits/accuracy/rescore/θ), so
-    # the candidate is scored on its surviving samples and one broken inner cycle
-    # still cannot kill the outer cycle. A completed inner run that merely failed
-    # to improve is a SUCCESS outcome (MAX_ROUNDS) with poor proxies — measured,
-    # not excluded — so a bad mutation is still penalised.
+    # A FAILED outcome surfaces as a returned ``stop_reason`` (e.g. OPTIMIZER_TIMEOUT — the
+    # runner returns it, it does not raise), so it is classified below with every other
+    # no-evidence shape rather than caught here. A completed inner run that merely failed to
+    # improve is a SUCCESS outcome (MAX_ROUNDS) with poor proxies — measured, not excluded —
+    # so a bad mutation is still penalised.
     inner_task = asyncio.create_task(_run_inner_campaign(ctx, spec, overrides, cycle_dir_box))
     heartbeat_task: asyncio.Task[None] | None = None
     if outer_ledger is not None:
@@ -769,8 +868,22 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
                 detail_fn=_inner_detail,
             )
         )
+    # The ONE bound on this sample's total wall clock. Awaiting `inner_task` DIRECTLY makes it
+    # this coroutine's `_fut_waiter`, so the timeout's cancellation propagates into the inner
+    # campaign and it really stops. Do not wrap the await in `asyncio.shield` or `asyncio.wait`:
+    # both detach the campaign from the cancellation, orphaning it to keep calling the optimizer
+    # and billing tokens against a sample nobody will read.
+    deadline_s = OUTER_SAMPLE_WALL_S_PER_ROUND * (spec.n_rounds + 1)
     try:
-        result = await inner_task
+        try:
+            async with asyncio.timeout(deadline_s):
+                result = await inner_task
+        except TimeoutError:
+            raise InnerCycleUnscoreableError(
+                f"it ran past its {deadline_s:.0f}s wall-clock deadline "
+                f"({spec.n_rounds} rounds + origin, at {OUTER_SAMPLE_WALL_S_PER_ROUND:.0f}s each) "
+                "and was cancelled"
+            ) from None
     finally:
         # Cancel the heartbeat whether the inner run returned or raised — an
         # in-flight task would otherwise keep appending against a finished sample.
@@ -778,20 +891,12 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
             heartbeat_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await heartbeat_task
-    if stop_reason_outcome(result.stop_reason) is StopOutcome.FAILED:
-        raise RuntimeError(
-            f"inner cycle for {query} failed as tooling (stop_reason="
-            f"{result.stop_reason}); excluding this outer sample, not scoring it"
-        )
     inner_spend: CycleSpend | None = result.spend
     elapsed = time.monotonic() - start
-    try:
-        proxies = _compute_proxies(result, spec.target, elapsed)
-    except InnerCycleUnscoreableError as exc:
-        raise RuntimeError(
-            f"inner cycle for {query} is unscoreable ({exc}); "
-            "excluding this outer sample, not scoring it"
-        ) from exc
+    # No exclusion decision here: `_compute_proxies` asks `_no_evidence_reason` and raises
+    # `InnerCycleUnscoreableError`, which `measure_sample`'s catch-all turns into this sample's
+    # EXCLUDED row. The row already names the sample, so the message carries only the reason.
+    proxies = _compute_proxies(result, spec.target, elapsed)
 
     data: dict[str, Any] = {
         # Terminal-ranker head = the inner-result token (`inner:{query}` — the
@@ -803,13 +908,13 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
         # `fitness >= 1.0`), and the round-0 health gate only needs a
         # non-empty, non-NO_RESULT prediction.
         INNER_RESULT_KEY: [
-            f"inner:{query} D{proxies['after_N_rounds_delta']:+.3f}/r{proxies['rounds_to_N']}"
+            f"inner:{query} D{proxies.after_N_rounds_delta:+.3f}/r{proxies.rounds_to_N}"
         ],
         # The outer loop's raw evidence: a <=1150c narrative of what the inner
         # search tried, what steered it, and what moved — rendered as MODEL
         # REASONING in the outer sample_transcripts panel.
         "reasoning_trace": _inner_narrative(result, spec),
-        **proxies,
+        **proxies.model_dump(),
         # terminated_at is the archive's reuse contract: a named node means "the
         # sample's outcome depends on config only UP TO that node", and prefix-
         # matched rows replay when they terminated inside the trusted prefix
@@ -840,7 +945,6 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
 
 __all__ = [
     "INNER_RESULT_KEY",
-    "PROXY_KEYS",
     "InnerSpawnContext",
     "publish_inner_spawn_context",
     "run_inner_cycle",

@@ -58,6 +58,7 @@ from promptpotter.application.scoring.metrics import (
     matched_origin_stats,
     value_with_mask_applied,
 )
+from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import (
     NodeType,
     ObservationMapping,
@@ -167,6 +168,65 @@ def test_scorer_raises_loud_on_formula_trace_mismatch() -> None:
     non_numeric = compile_scorer("ground_truth")
     with pytest.raises(ScoringFormulaError):
         non_numeric(_result_min("a", "not-a-number"))
+
+
+def test_scorer_rejects_non_finite_instead_of_scoring_it_perfect() -> None:
+    # SILENT wrong-score, and it INVERTS. Python's `min` short-circuits on its first argument,
+    # so `min(1.0, nan)` is `1.0` and the clamp `max(0.0, min(1.0, nan))` returns 1.0 — a NaN
+    # scored a PERFECT sample. An unmeasured proxy or an empty denominator anywhere in a
+    # composite formula therefore read as a flawless answer. `inf` clamps to 1.0 the same way.
+    assert max(0.0, min(1.0, float("nan"))) == 1.0  # the trap, pinned
+    for expr in ("1e400", "-1e400", "1e400 - 1e400"):
+        with pytest.raises(ScoringFormulaError, match="non-finite"):
+            compile_scorer(expr)(_result_min("a", "a"))
+
+    # The reachable shape: a non-finite value arriving through `pipeline_data` — how an L4
+    # proxy would deliver one — not a literal a human would notice in the formula string.
+    result = _result_min("a", "a") | {"pipeline_data": {"headroom_lift": float("nan")}}
+    with pytest.raises(ScoringFormulaError, match="non-finite"):
+        compile_scorer("headroom_lift")(result)
+
+    # The per-ROUND scorer clamps identically and was the twin hole: the fix to the per-sample
+    # clamp above left the composite one wide open, so a NaN evaluator scored a perfect ROUND.
+    # Both now pass through one `clamp_unit_score`; this pins that they cannot drift apart again.
+    from promptpotter.application.scoring.formula import compile_round_scorer
+
+    with pytest.raises(ScoringFormulaError, match="non-finite"):
+        compile_round_scorer("accuracy")({"accuracy": float("nan")})
+
+
+def test_an_unmeasured_term_is_never_scored_as_zero() -> None:
+    # SILENT wrong-score. Every empty-collection aggregate in the evaluator registry used to
+    # return a PERFECT value — no rows meant "no errors" (0.0), "instant" (1.0), "maximally
+    # compact" (1.0). The registry now omits the key, so a formula that names an unmeasured term
+    # halts instead of scoring the round on a number nobody computed. The distinction matters:
+    # a round that measured every sample and failed them all IS a 0.0; a round that measured
+    # nothing is not.
+    from promptpotter.application.scoring.evaluators import (
+        compute_accuracy,
+        compute_error_rate,
+        compute_latency_norm,
+        compute_output_compactness,
+    )
+    from promptpotter.application.scoring.formula import (
+        ScoringTermMissingError,
+        compile_round_scorer,
+    )
+
+    assert compute_accuracy(results=[]) is None
+    assert compute_error_rate(results=[]) is None
+    assert compute_latency_norm(results=[]) is None
+    assert compute_output_compactness(results=[]) is None
+
+    # All samples measured, all fatally deprecated → a verdict of 0.0, not an absence.
+    deprecated = _result_min("q", "a") | {"error": "SCHEMA_VALIDATION_FAILED", "fitness": 0.0}
+    assert compute_accuracy(results=[deprecated]) == 0.0
+
+    # The default composite (`accuracy`) refuses a round it cannot score, rather than 0.0.
+    with pytest.raises(ScoringTermMissingError, match="accuracy"):
+        compile_round_scorer(None)({"latency_norm": 0.9})
+    with pytest.raises(ScoringTermMissingError, match="latency_norm"):
+        compile_round_scorer("0.5 * accuracy + 0.5 * latency_norm")({"accuracy": 0.9})
 
 
 def test_compile_scorer_accepts_known_formulas() -> None:
@@ -511,8 +571,9 @@ def test_prompt_compactness_penalizes_verbose_prompt():
 
     assert compute_prompt_compactness(opt_sp=short) > 0.99
     assert compute_prompt_compactness(opt_sp=verbose) == 0.0
-    # Vacuous (no opt_sp) returns 1.0 so the term never injects a phantom penalty.
-    assert compute_prompt_compactness(opt_sp=None) == 1.0
+    # No prompt to measure → unmeasured (None), NOT a maximally compact 1.0. The old vacuous
+    # 1.0 was a free full-marks award on the term for a candidate carrying no prompt at all.
+    assert compute_prompt_compactness(opt_sp=None) is None
 
 
 # ===========================================================================
@@ -766,13 +827,22 @@ def _fake_inner_round(
 
 
 def _fake_inner_result(
-    levels: list[float], origin: float, rounds: list[SimpleNamespace], *, cost: float = 0.03
+    levels: list[float],
+    origin: float | None,
+    rounds: list[SimpleNamespace],
+    *,
+    cost: float = 0.03,
+    stop_reason: StopReason = StopReason.MAX_ROUNDS,
+    unpriced_tokens: int = 0,
 ) -> SimpleNamespace:
+    """``rounds`` carries L1 rounds ONLY — round 0 is peeled off upstream (``Cycle.absorb_round``
+    is the sole sink for a finished L1 round), and ``levels`` carries one level per L1 round."""
     return SimpleNamespace(
         origin_level=origin,
         round_discovered_levels=levels,
         rounds=rounds,
-        spend=SimpleNamespace(cost_usd=cost),
+        spend=SimpleNamespace(cost_usd=cost, unpriced_tokens=unpriced_tokens),
+        stop_reason=stop_reason,
     )
 
 
@@ -785,10 +855,8 @@ def test_compute_proxies_composed_fitness_discriminates() -> None:
     # invisible if wrong: the run completes, the dashboard looks fine, the ranking is subtly off.
     from promptpotter.application.runner.inner_recursion import _compute_proxies
 
-    clean = _fake_inner_result(
-        [0.40, 0.55], 0.30, [_fake_inner_round(0), _fake_inner_round(1), _fake_inner_round(2)]
-    )
-    px = _compute_proxies(clean, target=0.60, elapsed=100.0)
+    clean = _fake_inner_result([0.40, 0.55], 0.30, [_fake_inner_round(1), _fake_inner_round(2)])
+    px = _compute_proxies(clean, target=0.60, elapsed=100.0).model_dump()
     assert px["first_round_delta"] == pytest.approx(0.10)
     assert px["after_N_rounds_delta"] == pytest.approx(0.25)
     assert px["headroom_lift"] == pytest.approx(0.25 / 0.30)  # depth over (target-origin)
@@ -802,12 +870,11 @@ def test_compute_proxies_composed_fitness_discriminates() -> None:
         [0.40, 0.55],
         0.30,
         [
-            _fake_inner_round(0),
             _fake_inner_round(1, degraded_rate=0.5, no_result=6),
             _fake_inner_round(2, no_op=1, dup=1),
         ],
     )
-    pd = _compute_proxies(dirty, target=0.60, elapsed=100.0)
+    pd = _compute_proxies(dirty, target=0.60, elapsed=100.0).model_dump()
     assert pd["after_N_rounds_delta"] == px["after_N_rounds_delta"]  # identical lift
     assert pd["cleanliness"] < px["cleanliness"]  # warnings register
     assert pd["diversity_health"] < px["diversity_health"]  # collapse registers
@@ -821,12 +888,11 @@ def test_compute_proxies_composed_fitness_discriminates() -> None:
         [0.40, 0.55],
         0.30,
         [
-            _fake_inner_round(0),
             _fake_inner_round(1, parse_failure="meta_prompt_parse_failure"),
             _fake_inner_round(2),
         ],
     )
-    pb = _compute_proxies(broke, target=0.60, elapsed=100.0)
+    pb = _compute_proxies(broke, target=0.60, elapsed=100.0).model_dump()
     assert pb["cleanliness"] < px["cleanliness"]  # a broken round is NOT clean
     assert pb["cleanliness"] == pytest.approx(1.0 - 1.0 / 2)  # one of two L1 rounds fully dirty
     assert pb["cleanliness"] < pd["cleanliness"]  # and dirtier than mere sample degradation
@@ -852,10 +918,8 @@ def test_compute_proxies_excludes_tooling_failures_from_cleanliness() -> None:
         _compute_proxies,
     )
 
-    clean = _fake_inner_result(
-        [0.40, 0.55], 0.30, [_fake_inner_round(0), _fake_inner_round(1), _fake_inner_round(2)]
-    )
-    px = _compute_proxies(clean, target=0.60, elapsed=100.0)
+    clean = _fake_inner_result([0.40, 0.55], 0.30, [_fake_inner_round(1), _fake_inner_round(2)])
+    px = _compute_proxies(clean, target=0.60, elapsed=100.0).model_dump()
 
     # One tooling round out of two → dropped, not charged. The surviving round is clean, so
     # cleanliness stays 1.0. (Charging it would give 0.5 — the same score as a meta-prompt that
@@ -864,12 +928,11 @@ def test_compute_proxies_excludes_tooling_failures_from_cleanliness() -> None:
         [0.40, 0.55],
         0.30,
         [
-            _fake_inner_round(0),
             _fake_inner_round(1, parse_failure="l1_provider_empty_response"),
             _fake_inner_round(2),
         ],
     )
-    pt = _compute_proxies(tooling, target=0.60, elapsed=100.0)
+    pt = _compute_proxies(tooling, target=0.60, elapsed=100.0).model_dump()
     assert pt["cleanliness"] == pytest.approx(px["cleanliness"])
     assert pt["cleanliness"] == pytest.approx(1.0)
 
@@ -878,12 +941,11 @@ def test_compute_proxies_excludes_tooling_failures_from_cleanliness() -> None:
         [0.40, 0.55],
         0.30,
         [
-            _fake_inner_round(0),
             _fake_inner_round(1, parse_failure="meta_prompt_parse_failure"),
             _fake_inner_round(2),
         ],
     )
-    assert _compute_proxies(malformed, target=0.60, elapsed=100.0)["cleanliness"] < 1.0
+    assert _compute_proxies(malformed, target=0.60, elapsed=100.0).cleanliness < 1.0
 
     # Every L1 round tooling-failed → the cycle carries no evidence. It must be EXCLUDED as an
     # outer sample, not scored: `_mean([])` is 0.0, so a naive filter would report the
@@ -892,13 +954,99 @@ def test_compute_proxies_excludes_tooling_failures_from_cleanliness() -> None:
         [0.40],
         0.30,
         [
-            _fake_inner_round(0),
             _fake_inner_round(1, parse_failure="l1_provider_empty_response"),
             _fake_inner_round(2, parse_failure="l1_provider_empty_response"),
         ],
     )
     with pytest.raises(InnerCycleUnscoreableError):
         _compute_proxies(all_tooling, target=0.60, elapsed=100.0)
+
+
+def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
+    # SILENT wrong-score. Every aggregate here is TOTAL on an empty input (`_mean([])` is 0.0),
+    # so a cycle that never ran an L1 round scores `cleanliness = diversity_health = 1.0` — an
+    # unexercised meta-prompt reported as flawless, and a *high* outer fitness. Nothing errors.
+    # Six non-FAILED stop reasons reach here, including an operator's Ctrl+C (`paused`) and the
+    # inner spend cap (`spend_budget`), which binds EARLIEST for the verbose candidates whose
+    # efficiency term it then inflates. The exclusion predicate must ask "produced evidence?",
+    # not "failed?" — the two answers differ on exactly these rows.
+    from promptpotter.application.runner.inner_recursion import (
+        InnerCycleUnscoreableError,
+        _compute_proxies,
+    )
+
+    # Zero L1 rounds, reached by a SUCCESS, a HALTED and a PAUSED stop reason alike.
+    for stop in (StopReason.TARGET_HIT, StopReason.SPEND_BUDGET, StopReason.PAUSED):
+        empty = _fake_inner_result([], 0.30, [], stop_reason=stop)
+        with pytest.raises(InnerCycleUnscoreableError, match="no L1 rounds"):
+            _compute_proxies(empty, target=0.60, elapsed=100.0)
+
+    # A crash is the SAME fact — missing data — and rides the same exception, not a rival one.
+    crashed = _fake_inner_result(
+        [0.40], 0.30, [_fake_inner_round(1)], stop_reason=StopReason.OPTIMIZER_TIMEOUT
+    )
+    with pytest.raises(InnerCycleUnscoreableError, match="failed as tooling"):
+        _compute_proxies(crashed, target=0.60, elapsed=100.0)
+
+    # Rounds ran, but the trajectory is empty → nothing to difference against origin. Without
+    # the guard `first`/`after_N_rounds_delta` would both read a flat 0.0: "no lift" is a
+    # plausible-looking number for "no measurement", which is what makes it dangerous.
+    levelless = _fake_inner_result([], 0.30, [_fake_inner_round(1)])
+    with pytest.raises(InnerCycleUnscoreableError, match="no levels"):
+        _compute_proxies(levelless, target=0.60, elapsed=100.0)
+
+    # Rounds AND levels, but the origin was never scored. Every delta here is measured against
+    # that floor, so substituting 0.0 (the old `origin_acc` stand-in, itself 0.0 when nothing
+    # was scored) reports the whole trajectory as an enormous lift over nothing — and it does so
+    # for the CHEAPEST rows, since a crash at round 0 is what leaves the origin unscored.
+    floorless = _fake_inner_result([0.40, 0.55], None, [_fake_inner_round(1), _fake_inner_round(2)])
+    with pytest.raises(InnerCycleUnscoreableError, match="origin was never scored"):
+        _compute_proxies(floorless, target=0.60, elapsed=100.0)
+
+    # ...and a cycle that DID produce evidence still scores, on the same predicate.
+    ok = _fake_inner_result([0.40, 0.55], 0.30, [_fake_inner_round(1), _fake_inner_round(2)])
+    ok_px = _compute_proxies(ok, target=0.60, elapsed=100.0)
+    assert ok_px.after_N_rounds_delta == pytest.approx(0.25)
+
+
+def test_unmeasured_spend_never_scores_as_maximal_efficiency() -> None:
+    # SILENT wrong-score, and the incentive points BACKWARDS. `delta_per_dollar` divides lift by
+    # cost, and the pp-self formula reads it as `0.7 + 0.3*clamp(dpd/6)`. With `cost = 0.0` the
+    # old `max(cost, 1e-6)` floor made dpd ~250_000, pinning the efficiency factor to its MAXIMUM
+    # 1.0 — so the LESS spend a run recorded, the fitter it scored. Two ways to record no spend:
+    # none at all, and tokens billed under a model with no USD rate on file (`unpriced_tokens`),
+    # where `cost_usd` is a floor rather than a total. Both must EXCLUDE, never default to zero.
+    import json
+    from pathlib import Path
+
+    from promptpotter.application.runner.inner_recursion import (
+        InnerCycleUnscoreableError,
+        _compute_proxies,
+    )
+
+    rounds = [_fake_inner_round(1), _fake_inner_round(2)]
+
+    broke = _fake_inner_result([0.40, 0.55], 0.30, rounds, cost=0.0)
+    with pytest.raises(InnerCycleUnscoreableError, match="no spend"):
+        _compute_proxies(broke, target=0.60, elapsed=100.0)
+
+    # Partially unpriced: a real, positive cost that nonetheless understates the true total.
+    understated = _fake_inner_result([0.40, 0.55], 0.30, rounds, cost=0.03, unpriced_tokens=4096)
+    with pytest.raises(InnerCycleUnscoreableError, match="understates real spend"):
+        _compute_proxies(understated, target=0.60, elapsed=100.0)
+
+    # The gradient the exclusion protects: at equal lift, the CHEAPER run scores higher — and no
+    # run may reach the efficiency ceiling by reporting nothing.
+    cfg = json.loads(Path("datasets/promptpotter-self/campaign.json").read_text(encoding="utf-8"))
+    score = compile_scorer(cfg["campaign_config"]["scoring"])
+    cheap = _compute_proxies(
+        _fake_inner_result([0.40, 0.55], 0.30, rounds, cost=0.01), target=0.60, elapsed=100.0
+    ).model_dump()
+    dear = _compute_proxies(
+        _fake_inner_result([0.40, 0.55], 0.30, rounds, cost=0.30), target=0.60, elapsed=100.0
+    ).model_dump()
+    assert cheap["delta_per_dollar"] > dear["delta_per_dollar"]
+    assert score({"pipeline_data": cheap}) > score({"pipeline_data": dear})
 
 
 def test_pp_self_scoring_composed_and_gradient_bearing() -> None:

@@ -1,10 +1,12 @@
-"""Blocked, paired outer verdict — the statistically-rigorous L4 read of a round.
+"""The L4 outer reads: one sample's proxy vector, and the round's blocked-paired verdict.
 
 An L4 outer round scores each meta-prompt variant across the panel's cells (one inner
-cycle per (variant, cell)). The **cached round-0 origin** is the within-panel control —
-no config is ever re-measured mid-run. This computes, for the round's target variant,
-the paired ``(variant − origin)`` composite difference per cell, pooled across cells into
-an effect + CI, and a three-way decision. Cells are the blocks; the pooling treats them as
+cycle per (variant, cell)). Each cell yields a :class:`OuterSampleProxies` — the raw
+signals the outer scoring formula composes. The round then pairs them:
+the **cached round-0 origin** is the within-panel control — no config is ever re-measured
+mid-run. :func:`compute_outer_verdict` computes, for the round's target variant, the paired
+``(variant − origin)`` composite difference per cell, pooled across cells into an effect +
+CI, and a three-way decision. Cells are the blocks; the pooling treats them as
 exchangeable (a flat paired posterior across cells — per-cell n is 1, so inverse-variance
 weighting degenerates to this; a random-effects refinement is the documented next step).
 
@@ -16,13 +18,57 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from promptpotter.shared.statistics import min_detectable_effect, paired_diff_posterior
 
 DECISION_ADOPT = "adopt"
 DECISION_REJECT = "reject"
 DECISION_INCONCLUSIVE = "inconclusive"
+
+
+class OuterSampleProxies(BaseModel):
+    """One outer sample's observation vector — what a finished inner cycle says about the
+    meta-prompt that ran it. The type IS the governing law that used to be prose in
+    ``datasets/promptpotter-self/inner_tasks.json::description``.
+
+    **Bounded** is enforced where it is provable: ``headroom_lift`` is clamped at the ratio,
+    the two quality terms are ``1 − mean(rate ∈ [0,1])``, and ``rounds_improved_frac`` is a
+    share. The endpoint deltas and the three efficiency ratios are genuinely unbounded —
+    a regressing meta-prompt goes negative, and lift-per-dollar has no natural ceiling — so
+    they carry the one bound that always holds: **finite**. ``allow_inf_nan=False`` is what
+    keeps a ``0/0`` or an ``x/0`` from reaching the scoring clamp, where ``min(1.0, nan)``
+    short-circuits to ``1.0`` and a sample that measured nothing scores perfect.
+
+    Every field is a *measurement*. There is no field that can be defaulted, because the
+    absence of a measurement is not a value — a cycle that cannot fill this in is excluded
+    (``InnerCycleUnscoreableError``), never scored on zeros.
+
+    ``extra="forbid"`` + ``frozen`` make the emitted key set exactly the declared one, so it
+    can be diffed against the outer dataset's ``observation_mappings``
+    (``verify_outer_observation_contract``) rather than drifting from it silently."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    # `after_N_rounds_delta` / `rounds_to_N` are wire keys: they name the pipeline_data
+    # observation the outer scoring formula reads, so their spelling is not ours to normalize.
+    first_round_delta: float = Field(allow_inf_nan=False)
+    after_N_rounds_delta: float = Field(allow_inf_nan=False)  # noqa: N815
+    rounds_to_N: int = Field(ge=0)  # noqa: N815
+    headroom_lift: float = Field(ge=-1.0, le=1.0)
+    cleanliness: float = Field(ge=0.0, le=1.0)
+    diversity_health: float = Field(ge=0.0, le=1.0)
+    rounds_improved_frac: float = Field(ge=0.0, le=1.0)
+    delta_per_dollar: float = Field(allow_inf_nan=False)
+    delta_per_candidate: float = Field(allow_inf_nan=False)
+    delta_per_second: float = Field(allow_inf_nan=False)
+
+
+# The observation keys one outer sample emits — DERIVED from the model, never hand-listed.
+# Three lists used to drift independently (a `PROXY_KEYS` tuple with no importers, the literal
+# dict `_compute_proxies` returned, and the dataset's `observation_mappings`); whether a drift
+# bit loudly or silently depended on whether the scoring formula happened to name the drifted key.
+OUTER_PROXY_KEYS: tuple[str, ...] = tuple(OuterSampleProxies.model_fields)
 
 
 class CandidateInfo(BaseModel):
@@ -148,8 +194,10 @@ def compute_outer_verdict(
 
 
 __all__ = [
+    "OUTER_PROXY_KEYS",
     "CandidateInfo",
     "OuterCellEffect",
+    "OuterSampleProxies",
     "OuterVerdict",
     "cell_fitness",
     "compute_outer_verdict",

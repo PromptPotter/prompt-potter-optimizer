@@ -20,14 +20,19 @@ HEADLINE_ACC = 0.95
 
 @dataclass(frozen=True)
 class L1Stats:
+    """``None`` on any rate means *not measured*, and renders as ``—``. It is never a 0.0
+    (nothing yielded) or a 1.0 (everything passed): a cycle with no rounds did not fail to
+    yield, and a conformance rate over zero checks is not a clean bill of health."""
+
     rounds_to_95: int | None
-    yield_rate: float
-    top_lift_mean: float
-    behavior_pass_rate: float
+    yield_rate: float | None
+    top_lift_mean: float | None
+    behavior_pass_rate: float | None
     stagnation_max: int
     l2_fires: int
-    # `l2_context` meta-prompt conformance — vacuous 1.0 when `l2_fires == 0` (read both).
-    l2_behavior_pass_rate: float
+    # `l2_context` meta-prompt conformance — None when L2 never fired, so the reader
+    # doesn't have to cross-check `l2_fires` to know a 1.0 was vacuous.
+    l2_behavior_pass_rate: float | None
     round_1_verdict: str  # "healthy" | "degraded" | "broken" | "unknown"
 
 
@@ -42,7 +47,7 @@ def compute_l1_stats(
     rounds_to_95 = _first_round_at_threshold(rounds, HEADLINE_ACC)
     yield_rate = _mean_yield_rate(rounds)
     top_lifts = _top_lifts(rounds, origin_composite_fitness)
-    top_lift_mean = sum(top_lifts) / len(top_lifts) if top_lifts else 0.0
+    top_lift_mean = sum(top_lifts) / len(top_lifts) if top_lifts else None
     stagnation_max = _max_stagnation_streak(top_lifts)
     behavior_pass_rate = _behavior_pass_rate(behavior_results)
     l2_behavior_pass_rate = _behavior_pass_rate(l2_behavior_results or [])
@@ -97,10 +102,11 @@ def _first_round_at_threshold(rounds: list[dict[str, Any]], threshold: float) ->
     return None
 
 
-def _mean_yield_rate(rounds: list[dict[str, Any]]) -> float:
-    """Mean of per-round l1_yield (variants beating parent / variants generated)."""
+def _mean_yield_rate(rounds: list[dict[str, Any]]) -> float | None:
+    """Mean of per-round l1_yield (variants beating parent / variants generated).
+    ``None`` with no rounds — a cycle that generated nothing had no yield to fall short of."""
     if not rounds:
-        return 0.0
+        return None
     return sum(float(r.get("l1_yield") or 0.0) for r in rounds) / len(rounds)
 
 
@@ -127,10 +133,11 @@ def _max_stagnation_streak(top_lifts: list[float]) -> int:
     return longest
 
 
-def _behavior_pass_rate(behavior_results: list[list[CheckResult]]) -> float:
+def _behavior_pass_rate(behavior_results: list[list[CheckResult]]) -> float | None:
+    """``None`` when no check ran — a conformance rate over zero checks is not a pass."""
     total = sum(len(r) for r in behavior_results)
     if not total:
-        return 1.0
+        return None
     passed = sum(1 for r in behavior_results for c in r if c.passed)
     return passed / total
 

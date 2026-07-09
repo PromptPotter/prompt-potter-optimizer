@@ -1,4 +1,6 @@
-"""Evaluator registry + materializers; per-round/per-sample compute fns return float in [0, 1]."""
+"""Evaluator registry + materializers; per-round/per-sample compute fns return a float in [0, 1],
+or ``None`` when the round/sample carried nothing to measure — the materializers then omit the
+key rather than fabricate a value. A zero is a verdict; an absence is not."""
 
 from __future__ import annotations
 
@@ -48,26 +50,32 @@ __all__ = [
 ]
 
 
-def compute_accuracy(*, results: list[QueryMeasurement], **_: Any) -> float:
-    """Mean fitness over non-deprecated samples (deprecated already penalized via runtime_failure_rate)."""
+def compute_accuracy(*, results: list[QueryMeasurement], **_: Any) -> float | None:
+    """Mean fitness over non-deprecated samples (deprecated already penalized via runtime_failure_rate).
+
+    ``None`` when the round scored no samples at all. All-deprecated is different — the round
+    *did* measure, and every sample was fatal: that is a verdict of 0.0, and the candidate
+    deserves to lose on it."""
     # Lazy: scoring → optimization circular.
     from promptpotter.application.optimization.pobb.elimination import is_deprecated
 
+    if not results:
+        return None
     valid = [r for r in results if not is_deprecated(r)]
     if not valid:
         return 0.0
     return sum(r.get("fitness", 0.0) for r in valid) / len(valid)
 
 
-def compute_error_rate(*, results: list[QueryMeasurement], **_: Any) -> float:
+def compute_error_rate(*, results: list[QueryMeasurement], **_: Any) -> float | None:
     if not results:
-        return 0.0
+        return None
     return sum(1 for r in results if is_error_result(r)) / len(results)
 
 
-def compute_degraded_rate(*, results: list[QueryMeasurement], **_: Any) -> float:
+def compute_degraded_rate(*, results: list[QueryMeasurement], **_: Any) -> float | None:
     if not results:
-        return 0.0
+        return None
     return sum(1 for r in results if has_pipeline_warnings(r)) / len(results)
 
 
@@ -106,9 +114,11 @@ def _make_self_healer_evaluator(spec: SelfHealerSpec) -> Evaluator:
     """Build the per-channel self-heal Evaluator: ``min(len(events)/n_samples, 1.0)``,
     ``direction='low'``. ``events`` is the matching list on ``opt_sp.memory.wounds``."""
 
-    def compute(*, results: list[QueryMeasurement], opt_sp: Any = None, **_: Any) -> float:
+    def compute(*, results: list[QueryMeasurement], opt_sp: Any = None, **_: Any) -> float | None:
+        # No samples, or no OptSearchPoint to read the wound channels off: the heal rate was
+        # not measured. 0.0 would read as "nothing needed healing".
         if not results or opt_sp is None:
-            return 0.0
+            return None
         # The four wound channels live on ``opt_sp.memory.wounds`` (not the OSP
         # top level, which is ``extra="forbid"``); reading the top level always
         # missed, so every self-heal rate silently computed 0.0.
@@ -124,7 +134,8 @@ def _make_self_healer_evaluator(spec: SelfHealerSpec) -> Evaluator:
     )
 
 
-def compute_latency_norm(*, results: list[QueryMeasurement], **_: Any) -> float:
+def compute_latency_norm(*, results: list[QueryMeasurement], **_: Any) -> float | None:
+    """``None`` when no sample carried a timing — an untimed round is not an instant one."""
     latencies: list[float] = []
     for r in results:
         pd = r.get("pipeline_data") or {}
@@ -136,7 +147,7 @@ def compute_latency_norm(*, results: list[QueryMeasurement], **_: Any) -> float:
         except (TypeError, ValueError):
             continue
     if not latencies:
-        return 1.0
+        return None
     mean_ms = sum(latencies) / len(latencies)
     return max(0.0, 1.0 - mean_ms / LATENCY_BUDGET_MS)
 
@@ -147,8 +158,9 @@ def _compute_recall(
     node: PipelineNode,
     candidate_key: str,
     **_: Any,
-) -> float:
-    """Fraction of non-error queries (where *node* ran) with GT in *candidate_key*'s list."""
+) -> float | None:
+    """Fraction of non-error queries (where *node* ran) with GT in *candidate_key*'s list.
+    ``None`` when the node ran on no query — recall over nothing is not zero recall."""
 
     def _step_ran(r: QueryMeasurement) -> bool:
         pd = r.get("pipeline_data") or {}
@@ -158,7 +170,7 @@ def _compute_recall(
 
     scoped = [r for r in results if _step_ran(r) and not is_error_result(r)]
     if not scoped:
-        return 0.0
+        return None
     found = 0
     for r in scoped:
         pd = r.get("pipeline_data") or {}
@@ -172,9 +184,8 @@ def _compute_recall(
 
 def compute_cache_hit_rate(
     *, results: list[QueryMeasurement], node: PipelineNode, **_: Any
-) -> float:
-    if not results:
-        return 0.0
+) -> float | None:
+    """``None`` when every query errored — a rate over no completed query is unmeasured."""
     cache_hits = non_error = 0
     for r in results:
         if is_error_result(r):
@@ -183,7 +194,7 @@ def compute_cache_hit_rate(
         pd = r.get("pipeline_data") or {}
         if (pd.get("step_timings") or {}).get(node.name) is not None:
             cache_hits += 1
-    return cache_hits / non_error if non_error else 0.0
+    return cache_hits / non_error if non_error else None
 
 
 _LIMIT_KEY_SUFFIXES = ("max_sites", "num_results", "max_token_candidates", "max_tokens")
@@ -227,23 +238,24 @@ def _retrieval_shortfall_for_result(
 
 def compute_retrieval_shortfall_per_sample(
     *, result: QueryMeasurement, schema: PipelineSchema | None = None, **_: Any
-) -> float:
+) -> float | None:
+    """``None`` when no limit-bearing node produced a list for this sample — a retrieval that
+    never ran did not meet its target."""
     if schema is None:
-        return 1.0
-    v = _retrieval_shortfall_for_result(result, schema)
-    return 1.0 if v is None else v
+        return None
+    return _retrieval_shortfall_for_result(result, schema)
 
 
 def compute_mean_retrieval_shortfall(
     *, results: list[QueryMeasurement], schema: PipelineSchema, **_: Any
-) -> float:
+) -> float | None:
     values: list[float] = []
     for r in results:
         v = _retrieval_shortfall_for_result(r, schema)
         if v is not None:
             values.append(v)
     if not values:
-        return 1.0
+        return None
     return sum(values) / len(values)
 
 
@@ -255,22 +267,25 @@ def compute_pipeline_compactness(*, schema: PipelineSchema, **_: Any) -> float:
     return max(0.0, 1.0 - (n - 1) / (worst - 1))
 
 
-def compute_prompt_compactness(*, opt_sp: Any = None, **_: Any) -> float:
-    """``1 - len(render)/budget``; 1.0 on missing/empty (vacuous prompt doesn't fake a penalty)."""
+def compute_prompt_compactness(*, opt_sp: Any = None, **_: Any) -> float | None:
+    """``1 - len(render)/budget``; ``None`` when there is no prompt to measure — an absent
+    prompt is not a maximally compact one."""
     if opt_sp is None or not hasattr(opt_sp, "render"):
-        return 1.0
+        return None
     rendered = opt_sp.render() or ""
     if not rendered:
-        return 1.0
+        return None
     return max(0.0, 1.0 - len(rendered) / PROMPT_BUDGET_CHARS)
 
 
-def compute_output_compactness(*, results: list[QueryMeasurement], **_: Any) -> float:
+def compute_output_compactness(*, results: list[QueryMeasurement], **_: Any) -> float | None:
     """``1 - mean(output_tokens)/budget`` — the generation-cost twin of
     ``prompt_compactness`` (output side). Sums each step's completion tokens from
-    ``pipeline_data.step_tokens[*].output``; 1.0 on missing token data (vacuous, no
-    fake penalty). This is the accuracy-vs-cost axis the optimizer can trade
-    against — a terse candidate scores higher here than a verbose one."""
+    ``pipeline_data.step_tokens[*].output``; ``None`` when no sample reported token
+    counts — a round whose cost we failed to record is not a maximally cheap one, and
+    scoring it 1.0 paid a fitness bonus for missing telemetry. This is the
+    accuracy-vs-cost axis the optimizer can trade against — a terse candidate scores
+    higher here than a verbose one."""
     totals: list[float] = []
     for r in results:
         st = (r.get("pipeline_data") or {}).get("step_tokens") or {}
@@ -281,7 +296,7 @@ def compute_output_compactness(*, results: list[QueryMeasurement], **_: Any) -> 
                 out += float(o)
         totals.append(out)
     if not totals or not any(totals):
-        return 1.0
+        return None
     mean_out = sum(totals) / len(totals)
     return max(0.0, 1.0 - mean_out / OUTPUT_TOKEN_BUDGET)
 
@@ -291,7 +306,12 @@ class Evaluator:
     name: str
     description: str
     scope: Scope
-    compute: Callable[..., float]
+    # ``None`` = this round/sample carried nothing to measure. The materializers below OMIT
+    # the key rather than substituting a default, so a formula naming an unmeasured term halts
+    # loud (``round_scorer``) instead of scoring the round on a number nobody computed. Every
+    # empty-collection default here used to read as PERFECT — no errors, no latency, maximal
+    # compactness — precisely inverted for a health term a formula reads as a positive signal.
+    compute: Callable[..., float | None]
     data_type: DataType = "NUMERIC"
     # `high` = larger is better; `low` = larger is worse (webapp What-If panel direction-corrects).
     direction: Literal["high", "low"] = "high"
@@ -464,13 +484,16 @@ def materialize_round_values(
     *,
     opt_sp: Any = None,
 ) -> dict[str, float]:
-    """Run every per-round evaluator that applies; return ``{name: value}``."""
+    """Run every per-round evaluator that applies; return ``{name: value}``, omitting the
+    evaluators that had nothing to measure (``None``)."""
     values: dict[str, float] = {}
     for display_name, ev, node in _concrete_round_entries(schema):
         kwargs: dict[str, Any] = {"results": results, "schema": schema, "opt_sp": opt_sp}
         if node is not None:
             kwargs["node"] = node
-        values[display_name] = round(float(ev.compute(**kwargs)), 6)
+        value = ev.compute(**kwargs)
+        if value is not None:
+            values[display_name] = float(value)
     return values
 
 
@@ -480,26 +503,32 @@ def materialize_row_derivable(results: list[QueryMeasurement]) -> dict[str, floa
     ``latency_norm``, ``error_rate``, ``degraded_rate``. No schema, no ``opt_sp``: the
     read-side mask recomputes exactly these from ``all_candidate_results`` so they are
     present on every record (and re-scored over a sample subset when masked), while the
-    schema/opt_sp-bound evaluators come from the stored snapshot."""
-    return {
-        ev.name: round(float(ev.compute(results=results)), 6)
-        for ev in _REGISTRY
-        if ev.scope == "per_round" and ev.from_rows
-    }
+    schema/opt_sp-bound evaluators come from the stored snapshot. An evaluator with nothing
+    to measure on this row subset is omitted, not defaulted."""
+    out: dict[str, float] = {}
+    for ev in _REGISTRY:
+        if ev.scope != "per_round" or not ev.from_rows:
+            continue
+        value = ev.compute(results=results)
+        if value is not None:
+            out[ev.name] = float(value)
+    return out
 
 
 def materialize_sample_values(
     schema: PipelineSchema,
     result: QueryMeasurement,
 ) -> dict[str, float]:
-    """Run every per-sample evaluator that applies on a single result."""
+    """Run every per-sample evaluator that applies on a single result; omit the unmeasured."""
     values: dict[str, float] = {}
     for ev in _REGISTRY:
         if ev.scope != "per_sample":
             continue
         if not ev.applies(schema):
             continue
-        values[ev.name] = round(float(ev.compute(result=result, schema=schema)), 6)
+        value = ev.compute(result=result, schema=schema)
+        if value is not None:
+            values[ev.name] = float(value)
     return values
 
 

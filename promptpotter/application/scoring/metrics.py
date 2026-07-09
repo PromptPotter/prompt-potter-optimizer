@@ -21,7 +21,11 @@ from promptpotter.application.scoring.evaluators import (
     default_per_round_formula,
     materialize_round_values,
 )
-from promptpotter.application.scoring.formula import compile_round_scorer, extract_item_label
+from promptpotter.application.scoring.formula import (
+    ScoringTermMissingError,
+    compile_round_scorer,
+    extract_item_label,
+)
 from promptpotter.domain.pipeline_schema import NodeType
 from promptpotter.domain.scoring import RoundScorer
 from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
@@ -280,7 +284,7 @@ def compute_composite_fitness(
     # L1-generation quality is a batch property, not a per-result derivation —
     # injected after registry materialization so operator formulas can
     # reference ``l1_diversity`` via campaign.json::scoring / scoring_steer.json.
-    evaluator_values["l1_diversity"] = round(float(l1_diversity), 6)
+    evaluator_values["l1_diversity"] = float(l1_diversity)
 
     if callable(round_scorer):
         scorer = round_scorer
@@ -307,7 +311,7 @@ def compute_composite_fitness(
         **base,
         **evaluator_values,
         "evaluators": dict(evaluator_values),
-        "composite_fitness": round(composite_fitness, 6),
+        "composite_fitness": composite_fitness,
         "degraded_samples": degraded,
         "validation_failure_count": validation_failure_count,
         "runtime_failure_count": runtime_failure_count,
@@ -575,9 +579,10 @@ def value_with_mask_applied(
     Missing-name resolution lives **here, once** — the only place the mask scores a
     record under a criterion the record may not satisfy. A schema-bound evaluator
     (``*_recall`` on a pipeline with no such node) genuinely doesn't apply to that
-    record; the formula's ``NameError`` becomes ``None`` (the caller treats it like a
-    missing candidate, claims no divergence). The live round scorer stays fail-loud —
-    there the namespace is materialized fresh, so a missing name is a broken formula.
+    record; ``ScoringTermMissingError`` becomes ``None`` (the caller treats it like a
+    missing candidate, claims no divergence). Every OTHER scoring error still propagates,
+    and the live round scorer stays fail-loud — there the namespace is materialized fresh,
+    so a missing name is a broken formula.
     Row-derivable evaluators are recomputed into every record's namespace upstream
     (``load._candidates``), so this path only fires for genuinely-absent schema-bound
     names, never for a stale record missing a newer row-derivable evaluator.
@@ -585,5 +590,5 @@ def value_with_mask_applied(
     scorer = criterion if callable(criterion) else compile_round_scorer(criterion)
     try:
         return float(scorer(dict(evaluators)))
-    except NameError:
+    except ScoringTermMissingError:
         return None

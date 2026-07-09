@@ -236,17 +236,18 @@ def _render_stats_block(
     calls_per_round: list[int],
     halt: dict[str, str] | None,
 ) -> list[str]:
-    rounds_to_95 = "—" if stats.rounds_to_95 is None else str(stats.rounds_to_95)
-    # L2 conformance "n/a" when L2 never fired (distinguishes from a vacuous 1.0).
-    l2_conf = "n/a" if stats.l2_fires == 0 else f"{stats.l2_behavior_pass_rate:.2f}"
+    def _rate(value: float | None, spec: str = ".2f") -> str:
+        """An unmeasured rate renders as ``—``, never as a number the cycle never produced."""
+        return "—" if value is None else format(value, spec)
+
     lines = [
         "## L1Stats",
         "",
-        f"- **rounds_to_95**: {rounds_to_95}",
-        f"- yield_rate: {stats.yield_rate:.2f}",
-        f"- top_lift_mean: {stats.top_lift_mean:+.4f}",
-        f"- behavior_pass_rate: {stats.behavior_pass_rate:.2f}",
-        f"- l2_behavior_pass_rate: {l2_conf}",
+        f"- **rounds_to_95**: {'—' if stats.rounds_to_95 is None else stats.rounds_to_95}",
+        f"- yield_rate: {_rate(stats.yield_rate)}",
+        f"- top_lift_mean: {_rate(stats.top_lift_mean, '+.4f')}",
+        f"- behavior_pass_rate: {_rate(stats.behavior_pass_rate)}",
+        f"- l2_behavior_pass_rate: {_rate(stats.l2_behavior_pass_rate)}",
         f"- stagnation_max: {stats.stagnation_max}",
         f"- l2_fires: {stats.l2_fires}",
     ]

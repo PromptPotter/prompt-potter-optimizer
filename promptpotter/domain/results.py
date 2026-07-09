@@ -117,10 +117,13 @@ def best_round_by_cumulative_accuracy(
     than by two hand-copied ``max`` folds. NOT the winner export (that argmaxes cumulative
     ``composite_fitness`` — the optimizer's objective); this is the formula-independent
     accuracy operators recognize. See ``architecture.md`` §0.5."""
-    best = max(rounds, key=lambda r: float(r.get("cumulative_accuracy") or 0.0), default=None)
+    # `or 0.0` would rank a round that never recorded a cumulative accuracy alongside one that
+    # genuinely scored 0% — and could crown it. A round with no number doesn't back the headline.
+    scored = [r for r in rounds if r.get("cumulative_accuracy") is not None]
+    best = max(scored, key=lambda r: float(r["cumulative_accuracy"]), default=None)
     if best is None:
         return (0.0, None)
-    return (float(best.get("cumulative_accuracy") or 0.0), best.get("round"))
+    return (float(best["cumulative_accuracy"]), best.get("round"))
 
 
 def is_round_winner(changes_description: str | None, winner_label: str) -> bool:
@@ -364,6 +367,11 @@ class CycleSpend(BaseModel):
     input_tokens: int = 0
     output_tokens: int = 0
     cost_usd: float = 0.0
+    # Tokens billed with no resolvable USD rate, summed across both buckets. >0 means
+    # ``cost_usd`` UNDERSTATES real spend — it is a floor, not the total. Carried up from
+    # ``SpendBucket`` because a consumer that divides by cost (the L4 efficiency proxy) would
+    # otherwise read cheapness that never happened, and score the run fitter for it.
+    unpriced_tokens: int = 0
 
 
 class CycleResult(BaseModel):
@@ -386,8 +394,13 @@ class CycleResult(BaseModel):
     # election deployed): at a small inner sample budget the conservative election rarely
     # crowns, so reading the crowned frontier gave the outer ~zero signal. Levels are NOT
     # floored at origin — a regressing meta-prompt yields a level below origin so the outer
-    # keeps a gradient to avoid it. Empty for an init-crash / no rounds.
-    origin_level: float = 0.0
+    # keeps a gradient to avoid it.
+    #
+    # `origin_level` is `None`, not `0.0`, when the origin was never scored (an init-crash, a
+    # cycle that halted before round 0). A zero floor is not a low floor: every round's
+    # discovered lift is differenced against it, so a fabricated 0.0 reports the whole
+    # trajectory as an enormous improvement over nothing. Absent ⇒ the cycle is excluded.
+    origin_level: float | None = None
     round_discovered_levels: list[float] = Field(default_factory=list)
     winner_prompt_fields: dict[str, Any]
     winner_pipeline_params: dict[str, Any] | None = None

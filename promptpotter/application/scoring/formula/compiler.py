@@ -28,6 +28,17 @@ class ScoringFormulaError(Exception):
     campaign's fitness (the exact trap ``compile_scorer`` already guards at compile)."""
 
 
+class ScoringTermMissingError(ScoringFormulaError):
+    """The formula names a term the measurement does not carry.
+
+    Distinct from its parent because the two readers want opposite things. The live scorer
+    materializes its namespace fresh, so an absent term means a broken formula and must halt.
+    The read-side mask (``metrics.value_with_mask_applied``) scores stored records under
+    criteria they may predate — a schema-bound evaluator that never applied to that record —
+    and reports *unscorable*, never a fabricated number. Both need to tell "this term was
+    never measured" apart from "this formula divided by zero"."""
+
+
 _SAFE_BUILTINS = {
     "__builtins__": {
         "min": min,
@@ -96,6 +107,29 @@ def validate_ast(tree: ast.AST, *, source: str) -> None:
         )
 
 
+def clamp_unit_score(raw: Any, *, formula: str, subject: str) -> float:
+    """The ONE gate every scoring formula's result passes through, per-sample and per-round.
+
+    NaN/inf must never reach the clamp: ``min(1.0, nan)`` short-circuits to its FIRST
+    argument, so ``max(0.0, min(1.0, nan))`` is ``1.0`` — a ``0/0`` anywhere in a formula
+    would score a PERFECT sample, silently. A non-finite result is missing data, not a
+    verdict. *subject* names what was being scored (a query, a round)."""
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise ScoringFormulaError(
+            f"Scoring formula {formula!r} returned non-numeric {raw!r} on {subject} — "
+            "it must evaluate to a number."
+        ) from exc
+    if not math.isfinite(value):
+        raise ScoringFormulaError(
+            f"Scoring formula {formula!r} evaluated to {value!r} on {subject} — a non-finite "
+            "score is missing data (a division by zero, or a term that was never measured), "
+            "not a perfect one. Fix the formula or exclude the measurement."
+        )
+    return max(0.0, min(1.0, value))
+
+
 def _build_namespace(result: dict[str, Any]) -> dict[str, Any]:
     pd = result.get("pipeline_data") or {}
 
@@ -154,13 +188,7 @@ def compile_scorer(formula: str | None) -> Callable[[dict[str, Any]], float]:
                 "trace doesn't carry (or a matcher rejected the input) — fix the "
                 "formula or the pipeline output, don't score it as a wrong answer."
             ) from exc
-        try:
-            return max(0.0, min(1.0, float(raw)))
-        except (TypeError, ValueError) as exc:
-            raise ScoringFormulaError(
-                f"Scoring formula {formula!r} returned non-numeric {raw!r} on query "
-                f"{query!r} — it must evaluate to a number."
-            ) from exc
+        return clamp_unit_score(raw, formula=formula, subject=f"query {query!r}")
 
     return _scorer
 
@@ -189,7 +217,9 @@ def split_scoring_block(
 
 __all__ = [
     "ScoringFormulaError",
+    "ScoringTermMissingError",
     "auto_scorer_id",
+    "clamp_unit_score",
     "compile_scorer",
     "split_scoring_block",
     "validate_ast",

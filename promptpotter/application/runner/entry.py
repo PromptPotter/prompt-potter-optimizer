@@ -65,6 +65,10 @@ logger = logging.getLogger(__name__)
 # every fire would otherwise spiral; after this many in-process rebases
 # we exit with the last cycle's stop_reason and let the operator
 # re-invoke ``resume`` if they want to keep going.
+#
+# PER LEVEL, not per run: an L4 inner campaign gets its own budget of 10, so it multiplies the
+# inner wall-time envelope that `OUTER_SAMPLE_WALL_S_PER_ROUND` (inner_recursion.py) bounds. The
+# product is finite, and that deadline is what makes it so — sizing either one means reading both.
 MAX_AUTO_REBASES = 10
 
 
@@ -290,6 +294,7 @@ def _cycle_spend(observers: RunObservers) -> CycleSpend:
         input_tokens=sp.backend.input_tokens + sp.loop.input_tokens,
         output_tokens=sp.backend.output_tokens + sp.loop.output_tokens,
         cost_usd=sp.total_used_usd,
+        unpriced_tokens=sp.backend.unpriced_tokens + sp.loop.unpriced_tokens,
     )
 
 
@@ -324,20 +329,23 @@ def _build_cycle_result(
     cycle_rounds = cycle.rounds if cycle is not None else []
     ds = cycle.delta_scale if cycle is not None else None
     tr = cycle.tracking if cycle is not None else None
-    # Origin's OWN Wilson lower bound, computed with the SAME hits/total definition
-    # (deprecated-excluded) that each candidate's ci_lo uses — so raw-space deltas
-    # subtract like-for-like. Init-crash fallback: no per-sample results ⇒ point acc.
+    # The trajectory needs the origin's OWN Wilson lower bound, computed with the SAME
+    # hits/total definition (deprecated-excluded) that each candidate's ci_lo uses — so
+    # raw-space deltas subtract like-for-like. With no origin rows there IS no lower bound:
+    # `origin.origin_acc` is a POINT estimate, and it is 0.0 when nothing was ever scored, so
+    # standing it in here floored the trajectory at zero and reported every round's discovered
+    # level as an enormous lift over nothing. An unmeasured origin has no level; the cycle is
+    # then excluded as an outer sample rather than differenced against an invented floor.
+    origin_level: float | None = None
+    round_levels: list[float] = []
     if tr is not None and tr.origin_per_sample_results:
         base = _compute_accuracy(cast("list[QueryMeasurement]", tr.origin_per_sample_results))
-        origin_ci_lo = wilson_ci(base["hits"], base["total"])[0]
-    else:
-        origin_ci_lo = origin.origin_acc
-    origin_level, round_levels = discovered_level_trajectory(
-        tr.origin_theta if tr else None,
-        origin_ci_lo,
-        [[(c.theta, c.theta_se, c.ci_lo) for c in rr.candidate_scores] for rr in cycle_rounds],
-        ds,
-    )
+        origin_level, round_levels = discovered_level_trajectory(
+            tr.origin_theta,
+            wilson_ci(base["hits"], base["total"])[0],
+            [[(c.theta, c.theta_se, c.ci_lo) for c in rr.candidate_scores] for rr in cycle_rounds],
+            ds,
+        )
     return CycleResult(
         rounds=cycle_rounds,
         n_l1_rounds=len(cycle_rounds),
@@ -472,6 +480,17 @@ async def _run_single_cycle(
             # instant it fires so exactly one searchpoint is cut.
             session.skip_check = skip_flag.is_file
             session.skip_consume = partial(skip_flag.unlink, missing_ok=True)
+        budget_gate = _build_budget_gate(
+            observers,
+            cycle_dir_for_probe,
+            usd_cap=prep.spend_budget_usd
+            if prep.spend_budget_usd is not None
+            else campaign_config.optimization.spend_budget_usd,
+            token_cap=campaign_config.optimization.token_budget,
+        )
+        # Same gate, two cadences — the round boundary and the per-sample checkpoint. Bound as
+        # the one object so a ceiling moved mid-flight moves both, and both name one reason.
+        session.budget_tripped = budget_gate.tripped if budget_gate is not None else None
         stop_reason, cycle_error = await run_round_loop(
             cycle,
             dataset,
@@ -481,14 +500,7 @@ async def _run_single_cycle(
             sweep=mode.sweep,
             diag=mode.diag,
             halt_at_accuracy=mode.halt_at_accuracy,
-            budget_gate=_build_budget_gate(
-                observers,
-                cycle_dir_for_probe,
-                usd_cap=prep.spend_budget_usd
-                if prep.spend_budget_usd is not None
-                else campaign_config.optimization.spend_budget_usd,
-                token_cap=campaign_config.optimization.token_budget,
-            ),
+            budget_gate=budget_gate,
         )
     except (KeyboardInterrupt, asyncio.CancelledError) as exc:
         cause = (

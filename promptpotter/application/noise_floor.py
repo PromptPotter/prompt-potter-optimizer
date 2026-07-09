@@ -152,10 +152,11 @@ async def measure_noise_floor(
             source=f"noise_floor:{campaign_id}:C0:{i}",
             force_fresh=True,
         )
-        composites.append(
-            display_fitness(scores.get("composite_fitness"), float(scores.get("accuracy") or 0.0))
-        )
-        accuracies.append(float(scores.get("accuracy") or 0.0))
+        # `scores["accuracy"]` — never `.get(..., 0.0)`. A rescore that measured nothing must
+        # not enter the noise band as a 0% run; the KeyError says so.
+        accuracy = float(scores["accuracy"])
+        composites.append(display_fitness(scores.get("composite_fitness"), accuracy))
+        accuracies.append(accuracy)
         log_fn(f"noise-floor rescore {i + 1}/{k}: composite={composites[-1]:.4f}")
 
     mean_composite, ci_lo, ci_hi = mean_ci(composites)
@@ -171,7 +172,7 @@ async def measure_noise_floor(
         samples_requested=len(scoring_set),
         samples_added=0,
         workspace_n=len(scoring_set),
-        workspace_accuracy=sum(accuracies) / len(accuracies) if accuracies else 0.0,
+        workspace_accuracy=sum(accuracies) / len(accuracies),
         workspace_composite=mean_composite,
         source_campaign_accuracy=float(round_file.get("accuracy") or 0.0),
         source_campaign_composite=display_fitness(

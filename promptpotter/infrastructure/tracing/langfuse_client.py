@@ -21,6 +21,9 @@ from promptpotter.shared.errors import graceful
 
 logger = logging.getLogger(__name__)
 
+# Ceiling on concurrently-open observations one logger holds (see ``_evict_orphans``).
+_MAX_OPEN_OBSERVATIONS = 256
+
 # SDK flush blocks on an internal queue.join() that's uninterruptible until
 # a second SIGINT. Bounded daemon flush — drop spans before deadlocking Ctrl+C.
 FLUSH_TIMEOUT_SEC: float = 5.0
@@ -110,6 +113,24 @@ class LangfuseLogger:
             logger.debug("Failed to create Langfuse trace", exc_info=True)
             return None
 
+    def _evict_orphans(self) -> None:
+        """Close the oldest still-open observations once the map exceeds its bound.
+
+        Every ``start_span`` is paired with an ``end_observation`` on the happy path, but an
+        error mid-node skips the pairing and the span object lingers — payload and all — until
+        the campaign's ``reset()``. That is fine for a 10-minute cycle and a slow leak for the
+        9-hour outer L4 campaign, which is exactly the shape that OOM-killed a run before. The
+        bound makes the map's size a property of the code, not of how often the run errors:
+        spans are opened sequentially (one LLM call at a time), so real concurrent depth is a
+        handful and anything below the oldest end of a 256-entry map is an orphan by
+        construction."""
+        while len(self._open_observations) >= _MAX_OPEN_OBSERVATIONS:
+            orphan_id, orphan = next(iter(self._open_observations.items()))
+            del self._open_observations[orphan_id]
+            logger.debug("Closing orphaned Langfuse observation %s", orphan_id)
+            with graceful("Failed to close orphaned Langfuse observation"):
+                orphan.end()
+
     def _resolve_parent(self, trace_id: str, parent_observation_id: str | None) -> Any | None:
         """Find an SDK observation to nest under: explicit open obs → root → None."""
         if parent_observation_id:
@@ -143,6 +164,7 @@ class LangfuseLogger:
                 metadata=metadata or {},
             )
             observation_id = getattr(child, "id", uuid.uuid4().hex[:12])
+            self._evict_orphans()
             self._open_observations[observation_id] = child
             return observation_id
         except Exception:

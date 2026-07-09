@@ -669,7 +669,12 @@ class LiveDashboardView(DerivedView):
         self._flush_pending_persist()
 
     def _update_current_acc(self, scores: dict[str, Any]) -> None:
-        self.state.current_acc = round(scores.get("accuracy", 0.0), 4)
+        # An absent `accuracy` means the in-flight candidate has scored nothing yet. Defaulting
+        # it to 0.0 dropped the live headline to 0% mid-round and then climbed back — the
+        # operator read a regression that never happened. Hold the last measured value.
+        acc = scores.get("accuracy")
+        if acc is not None:
+            self.state.current_acc = round(float(acc), 4)
 
     def _absorb_round_complete(
         self, cumulative_accuracy: float, l1_stall_count: int, hearts: int | None = None
