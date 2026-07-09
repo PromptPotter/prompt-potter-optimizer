@@ -4,6 +4,13 @@
 formula's namespace; ``EXTRACTION_NOTES`` is the answer-format contract each
 extract-then-compare matcher imposes on the committed prompt. (Display-side
 extraction lives in ``domain/rendering.py``.)
+
+**This is the LABEL arm of a two-arm extraction seam** — it parses the answer prose
+and decides HIT/MISS. It is NOT where a structured-output response is opened: that
+runs earlier, in ``connectors/llm_only.py::_extract_answer``, which destructures the
+slot named by ``answer_field`` (the SHAPE arm). If a task returns JSON and scoring
+looks wrong, check that arm first — by the time a matcher here runs, the envelope is
+already gone.
 """
 
 from __future__ import annotations

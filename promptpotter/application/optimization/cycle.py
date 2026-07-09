@@ -1,4 +1,13 @@
-"""Cycle state — round-loop mutable orchestration object."""
+"""Cycle state — round-loop mutable orchestration object.
+
+**Wrong-level guardrail:** new *optimizer* state flows through ``OptSearchPoint``
+(``domain/opt_search_point.py``), never a sidecar field here. `Cycle` holds
+round-loop orchestration — the escalation FSM, the axis index, this round's
+bookkeeping — and is rebuilt per cycle. State a layer must carry ACROSS
+generations (anything L1/L2/L3 reads or writes about the individual) belongs on
+the searchpoint, which is what lineage, hashing, and resume all key on. A field
+added here instead is invisible to `derive()` and silently lost on fork.
+"""
 
 from __future__ import annotations
 

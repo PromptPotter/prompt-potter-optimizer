@@ -90,7 +90,7 @@ Self-healing fires through a different door: failures route directly to the laye
 
 ## 3. Scoring node
 
-`score_search_point()` (`application/scoring/search_point_scorer.py:115`) is the only optimizer node that's **not LLM-driven**. It:
+`score_search_point()` (`application/scoring/search_point_scorer.py`) is the only optimizer node that's **not LLM-driven**. It:
 
 - Runs a frozen `JobSearchPoint` (rendered prompt + `pipeline_params`) against the **backend**, not the optimizer LLM.
 - Loops over the scoring dataset, calls the backend per sample, applies the scorer formula.

@@ -720,7 +720,13 @@ def _resolve_active_schema(
     exclude: list[str],
     narrowing: dict[str, NodeSearchNarrowing],
 ) -> tuple[list[str], PipelineSchema | None]:
-    """Resolve the active node list + the exclude-filtered, campaign-narrowed schema."""
+    """Resolve the active node list + the exclude-filtered, campaign-narrowed schema.
+
+    ``steps`` is two shapes under one word. Here it is the BACKEND's
+    ``list[dict]`` (each ``{"name": ..., ...}``) out of ``GET /pipeline``. On
+    ``pipeline_params`` it is the reserved top-level ``list[str]`` of active node
+    names (``RESERVED_PIPELINE_PARAM_KEYS``). Hence the ``s["name"]`` below.
+    """
     from promptpotter.infrastructure.backend import extract_pipeline_config
 
     if pipeline_schema:

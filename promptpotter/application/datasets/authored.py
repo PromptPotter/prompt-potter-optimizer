@@ -66,9 +66,15 @@ class AuthoredDataset:
 
 
 def read_campaign_config_file(path: Path) -> dict[str, Any]:
-    """Read ``campaign.json`` → dict, unwrapping the optional outer
+    """Read a dataset's ``campaign.json`` → dict, unwrapping the optional outer
     ``campaign_config`` key (the repo on-disk convention). ``{}`` when the file
-    is absent, empty, or whitespace-only."""
+    is absent, empty, or whitespace-only.
+
+    This is the dataset **template** at ``datasets/{name}/campaign.json`` — a
+    ``campaign_config`` wrapper. NOT the minted **manifest** at
+    ``campaigns/{id}/campaign.json`` (a frozen :class:`Campaign`, ``extra="forbid"``,
+    owned by ``CampaignStore``). Two incompatible schemas share one filename; check
+    which tree the path is under before assuming a shape."""
     if not path.is_file():
         return {}
     raw = path.read_text(encoding="utf-8").strip()

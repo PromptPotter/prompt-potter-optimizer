@@ -6,18 +6,25 @@ wire only half of it. The pre-flight gate (root `CLAUDE.md`) and the six
 per-layer `CLAUDE.md` files say *what* the rules are; this page says *where you
 type* and *which test catches you* if you miss a half.
 
-The pattern every recipe shares: **one registry is the source of truth, an
-import-time or AST contract proves nothing fell out of it.** A capability can't
-silently disappear because the registry is code-derived and the test walks it.
+The pattern every recipe shares: **one registry is the source of truth, and an
+import-time assert proves nothing fell out of it.** A capability can't silently
+disappear because the registry is code-derived and the assert walks it.
 
-| You want to add… | Recipe | CI guard |
+**Where the guard lives.** Per [`tests/CLAUDE.md`](../../tests/CLAUDE.md) a test
+earns its place only if it catches *silent* harm; the structural / wire / shape
+suites were deliberately cut because those failures break loud. So most guards
+below are **import-time asserts beside the registry they validate**, not standing
+tests. Add new ones the same way — never as a `test_structure` scan.
+
+| You want to add… | Recipe | What actually catches you |
 |---|---|---|
-| A telemetry event / ledger record | [§1](#1-a-ledger-record--telemetry-event) | `test_every_cycle_record_is_dispatched_or_control_plane` |
-| A prompt injection (`{{slot}}`) | [§2](#2-a-prompt-injection) | `test_every_injection_renderer_is_wired` |
-| A dashboard / view field | [§3](#3-a-dashboard--view-field) | `test_round_complete_view_roundtrip` |
-| A resume / decision checkpoint | [§4](#4-a-resumedecision-checkpoint-kind) | `test_every_decision_kind_has_a_gating_entry` |
-| A connector (backend) | [§5](#5-a-connector-backend) | `test_every_connector_implements_protocol` |
-| An optimizer node | [§6](#6-an-optimizer-node) | `validate_template()` at module load |
+| A telemetry event / ledger record | [§1](#1-a-ledger-record--telemetry-event) | Breaks loud in use — a union member with no `on_record` arm never reaches `dashboard.json` |
+| A prompt injection (`{{slot}}`) | [§2](#2-a-prompt-injection) | Import-time: the `registry.py` guard + `validate_template()` |
+| A dashboard / view field | [§3](#3-a-dashboard--view-field) | Breaks loud — a wrong/empty dashboard |
+| A resume / decision checkpoint | [§4](#4-a-resumedecision-checkpoint-kind) | Import-time: `decisions.py` + `replayers.py` asserts |
+| A connector (backend) | [§5](#5-a-connector-backend) | Import-time: the `CONNECTORS` registry guard |
+| An optimizer node | [§6](#6-an-optimizer-node) | Import-time: `validate_template()` at prompt load |
+| A CLI verb | [§7](#7-a-cli-verb) | Breaks loud — an unknown verb exits non-zero |
 | A measurement field | [developer README §4](README.md#4-cross-run-memory) | `MEASUREMENTS_SCHEMA_VERSION` bump |
 
 ---
@@ -128,16 +135,16 @@ A replayable or archival decision (`ResumeCheckpointKind` + its gating mode).
 
 **Recipe:**
 
-1. Add the kind to `ResumeCheckpointKind` and a gating entry to
-   `RESUME_CHECKPOINT_GATING` (`domain/run_records.py`) — import-time
-   exhaustiveness raises before the module loads if you add one without the other.
-2. If replayable, add it to the replayer; if archival, leave it out (the two
-   guards below enforce the split).
+1. Add the kind to `ResumeCheckpointKind` (`domain/run_records.py`) **and** a gating
+   entry to `RESUME_CHECKPOINT_GATING` (`application/optimization/resume_and_fork/
+   decisions.py` — the gating SoT; the enum and the table live in different files).
+2. If replayable, add it to the replayer; if archival, leave it out.
 3. Emit it through `record_decision` with the typed kind, never a bare string.
 
-**CI guards:** `test_every_decision_kind_has_a_gating_entry`,
-`test_replayed_kinds_have_a_replayer` / `test_archival_kinds_have_no_replayer`,
-`test_no_bare_string_decision_kinds`, `test_divergence_hint_lists_every_decision_kind`.
+**Guards (all import-time, no standing test):** `decisions.py` raises on a
+`ResumeCheckpointKind` member missing from `RESUME_CHECKPOINT_GATING`;
+`replayers.py` raises when a `REPLAYED` kind has no replayer or an `ARCHIVAL` kind
+has one; `cli/commands/_shared.py` asserts the divergence hint lists every kind.
 
 ---
 
@@ -161,15 +168,16 @@ or `infrastructure/backend.py`.**
 4. Optional: set `expected_revision` + a `version_check` hook for cross-repo
    drift warnings at bootstrap.
 
-**CI guard:** `test_every_connector_implements_protocol` walks `CONNECTORS` and
-fails the build if any row is half-wired — registry key ≠ `name`, a non-callable
-hook, a session factory that doesn't build a `SessionProtocol`, or an `execution`
-outside `ConnectorExecution`. Beyond that, an unknown connector raises `KeyError`
-at `get()`, and an `in_process` connector raises a pointed `NotImplementedError`
-at `run_query`. The execution-mode *declaration* + dispatch seam + completeness
-guard are in place; what's deferred is only the inner-cycle **run** itself
-(the decided in-process recursion + the composed proxy vector) — Lane C3 /
-[`specs/l4-outer-loop.md`](../specs/l4-outer-loop.md).
+**Guard (import-time, no standing test):** the registry guard at the bottom of
+`connectors/__init__.py` raises at import if any row is half-wired — registry key ≠
+`name`, a non-callable hook, an `execution` outside `ConnectorExecution`, an
+`in_process` connector without `in_process_run` (or a `remote_http` one with it), or
+a `DEFAULT_CONNECTOR` naming an unregistered backend. An unknown connector raises
+`KeyError` at `get()`.
+
+**The `in_process` arm is SHIPPED**, and two connectors ride it: `llm_only` (one
+direct LLM call, no backend server) and `promptpotter` (an inner cycle — L4, via
+`runner/inner_recursion.py`). It does not raise `NotImplementedError`.
 
 Contract: [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md).
 
@@ -184,21 +192,51 @@ One of the five LLM nodes (`l1_generate`, `l1_critique`, `l2_context`,
 `PromptTemplate` through the same `DispatchHub` fill path as every other node —
 adding a slot it needs is §2.
 
-**CI guard:** `validate_template()` at module load rejects any `{{slot}}` the
-node's template references that isn't in `INJECTIONS`; `test_llm_calls_funnel_through_dispatch`
-keeps every LLM call on the one `dispatch/llm_call/call.py` path.
+**Guard (import-time):** `validate_template()` at `load_optimizer_prompt` rejects any
+`{{slot}}` the node's template references that isn't in `INJECTIONS`. Keep every
+optimizer LLM call on the one `dispatch/llm_call/call.py::llm_call` path — an
+unwrapped LLM call is an automatic block at review (pre-flight gate), not a test.
+
+---
+
+## 7. A CLI verb
+
+A new `python -m promptpotter <verb>`. The CLI is a **thin shell**: parse, call into
+`application/`, format. Business logic that lands here is drift.
+
+**Recipe:**
+
+1. Write `presentation/cli/commands/<verb>.py` exporting one `cmd_<verb>(args)`
+   entry function (a subpackage instead of a module when the verb needs helpers —
+   see `commands/sweep/`).
+2. Add its argparse subparser in `presentation/cli/parsers.py`.
+3. Add the `"<verb>": cmd_<verb>` row to `COMMANDS` in
+   `presentation/cli/campaign_runner.py`, importing the function at the top.
+4. Decide the verb's class and honor it: **write** (`new` / `resume` — these mint or
+   extend a cycle), **lifecycle** (`archive` / `delete` / `unarchive` / `reset`), or
+   **diagnostic** (`ab` / `verify` / `sweep` / `noise-floor` / `champion` / `matrix` —
+   these must not perturb an existing cycle's measurements).
+5. Do **not** add a read verb. Reads happen by opening the artifact tree — the file
+   tree *is* the dashboard. Nor an `ingest` verb: raw-file ingest is `new <file.csv>`.
+
+**Guard:** none needed — an unknown verb exits non-zero and a missing `COMMANDS` row
+breaks loud on first invocation. Both are the "breaks loud → no test" class.
+
+Contract: [`presentation/CLAUDE.md`](../../promptpotter/presentation/CLAUDE.md);
+verb reference: [`operations/`](../operations/).
 
 ---
 
 ## The shared discipline
 
-Three invariants hold across all of the above and have their own guards:
+Three invariants hold across all of the above. None is a standing test — each
+breaks loud, which is exactly why [`tests/CLAUDE.md`](../../tests/CLAUDE.md) says
+not to test it:
 
-- **One ingress.** Observers are built only via `build_run_observers`
-  (`test_observers_built_via_shared_helper`); campaign artifacts are written only
-  through the canonical I/O seams (`test_no_hand_rolled_io_seam_bypass`).
+- **One ingress.** Observers are built only via `build_run_observers`; campaign
+  artifacts are written only through the canonical I/O seams (`CycleEventLog.append`
+  or a declared projection).
 - **Layers don't reach backward.** `domain↛anything`, `intelligence↛optimization`,
-  `infrastructure↛{application,intelligence,optimization}`
-  (`test_no_unexpected_runtime_layer_violations`).
-- **Registries are code-derived.** If a capability isn't in its registry, it
-  doesn't exist — and the matching contract test proves the registry is whole.
+  `infrastructure↛{application,intelligence,optimization}`. Violations fail at import.
+- **Registries are code-derived.** If a capability isn't in its registry, it doesn't
+  exist — and the registry's own import-time assert proves it is whole.

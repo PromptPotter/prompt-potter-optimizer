@@ -45,6 +45,11 @@ cached deprecated answer instead of re-evaluating."""
 # Prompt template interpolation
 # ---------------------------------------------------------------------------
 
+# TARGET-prompt interpolation — the `{{var}}` slots a dataset row fills on its way
+# to the backend. NOT the dispatch-hub `INJECTIONS` registry, which fills `{{slot}}`s
+# in the OPTIMIZER's meta-prompts. Same syntax, two populations, two regexes (the
+# other is `dispatch/hub/facade.py`); adding a signal for an L1/L2/L3 prompt goes
+# there, never here.
 _TEMPLATE_VAR_RE = re.compile(r"\{\{(\w+)\}\}")
 
 # Fields that must never be interpolated into prompts (answer leakage).
@@ -549,9 +554,13 @@ def _rerun_would_repeat_token_budget_failure(
     """
     from promptpotter.domain.rendering import classify_result
 
-    # The terminal LLM node (llm_only single-node, llm_ranking multi-node) is
-    # read from the cached result itself, so the infra-code / token lookups key
-    # on the SAME node classify_result stamped — no literal "llm_only" coupling.
+    # The terminal LLM node (llm_only single-node, llm_ranking multi-node) is read
+    # from the cached result itself, so the infra-code / token lookups key on the SAME
+    # node classify_result stamped. The trailing `or "llm_only"` IS a literal coupling
+    # to the single-node sentinel — it fires when the row carries no `terminated_at`.
+    # "llm_only" names two things (a connector AND the single-node pipeline sentinel);
+    # folding the sentinel into a declared constant is an open design call, not an
+    # absence of coupling.
     node = ((cached_result.get("pipeline_data") or {}).get("terminated_at")) or "llm_only"
     cl = classify_result(cached_result)
     budget_exhausted = (

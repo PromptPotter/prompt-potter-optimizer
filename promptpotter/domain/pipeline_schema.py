@@ -157,12 +157,22 @@ class ObservationMapping(BaseModel):
 
 
 class NodeOutputSchema(BaseModel):
-    """Resolved output schema for a pipeline node."""
+    """Resolved output schema for a TARGET pipeline node — the structured output the
+    backend node produces, parsed from ``GET /pipeline``.
+
+    This is the ``output_schema`` the word belongs to. NOT the optimizer's own
+    response schema (``validators/l1_strict.py::build_l1_response_schema``), which
+    describes what ``l1_generate`` returns. The L4 levers named ``output_schema_*``
+    act on the optimizer side; the target-side axis is spec-only today.
+    """
 
     model_config = {"frozen": True}
 
     fields: list[str] = Field(default_factory=list)
     field_descriptions: dict[str, str] = Field(default_factory=dict)
+    """Parsed, never read. RESERVED SURFACE — the anchor the target-side description
+    axis binds to (`docs/concepts/structured-output.md`). Deleting it as dead code
+    re-orphans exactly the seam a lever was once built against by mistake."""
     json_schema: dict[str, Any] = Field(default_factory=dict)
 
 

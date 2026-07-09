@@ -40,7 +40,7 @@ intelligence; intelligence does not depend on either.
 - New optimizer state MUST flow through `OptSearchPoint` — no sidecar state.
 - Backend tunables ride the per-dataset overlay
   (`datasets/{name}/pipeline.json::nodes.{name}.config`) merged by
-  `configure_and_apply_pipeline()` (`config.py:426`). See **Backend overlay** below for the merge contract.
+  `configure_and_apply_pipeline()` (`config.py`). See **Backend overlay** below for the merge contract.
 - **Per-call telemetry from deep async chains uses the `emit_*` shape**, not
   `RunCallbacks`. Canonical template (set by `TokenUsageRecord`):
   define the `*Record` in `domain/run_records.py`, add the `*Record` arm to

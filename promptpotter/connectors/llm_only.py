@@ -85,6 +85,13 @@ def _pick_llm_node(node_config: dict[str, dict[str, Any]]) -> dict[str, Any]:
 def _extract_answer(resp: Any, output_schema: Any, answer_field: str) -> str:
     """The answer string, destructured from its named slot when a schema is declared.
 
+    **The pre-scoring arm of a two-arm extraction seam.** This one is about SHAPE: pull
+    the value out of the structured-output slot `answer_field` names. The other arm is
+    about the LABEL — `scoring/formula/matchers.py::EXTRACTION_NOTES` + `SCORING_FUNCTIONS`,
+    which parse the answer prose (last bold span, last `\\boxed{N}`) and decide HIT/MISS.
+    That arm is the one the nav stack reaches; this one is grep-only, so a reader chasing
+    "where is the answer extracted?" lands there and never learns this ran first.
+
     Reading the field the schema declares is NOT pre-judging it: the scoring matcher still
     decides HIT/MISS downstream. A response that omits `answer_field`, or that never decoded
     to an object, yields `""` — which the caller turns into the structural NO_RESULT. The

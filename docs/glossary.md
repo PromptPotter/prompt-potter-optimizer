@@ -10,6 +10,55 @@ implementation site lands, or rename to a term already on the list.
 
 ---
 
+## Same word, two referents — check before you grep
+
+Bare words that name more than one live thing. This section exists because the
+expensive mistake is never "couldn't find it" — it is "found the wrong one."
+
+- **`output_schema`** — (1) the **target** node's wire schema: what a backend node
+  is asked to return. `domain/pipeline_schema.py::NodeOutputSchema`, edited at
+  `datasets/{name}/pipeline.json::nodes.{node}.config.output_schema`. (2) the
+  **optimizer's own** response schema: what `l1_generate` returns, built by
+  `validators/l1_strict.py::build_l1_response_schema`. The L4 levers named
+  `output_schema_*` act on (2). Sense (1) is where a "describe the fields" axis
+  belongs; building it against (2) is the mistake this section was written for.
+- **`seed`** — three senses. (1) **`CycleSeed`** — the chosen starting point a
+  non-root cycle begins from (`domain/run_records.py`). (2) the **incumbent
+  candidate** a round measures against (`seed-MISS` stratum, `θ_seed`,
+  `domain/results.py`). (3) an **RNG integer** on a node's wire config
+  (`cfg["seed"]`, `connectors/llm_only.py`). Only (1) is a fork concept.
+- **`campaign.json`** — two incompatible schemas, one filename. Under
+  `datasets/{name}/` it is the **template** (a `campaign_config` wrapper, read by
+  `application/datasets/authored.py`). Under `campaigns/{id}/` it is the minted
+  **manifest** (a frozen `Campaign`, `extra="forbid"`, owned by `CampaignStore`).
+  Check which tree the path is under before assuming a shape.
+- **`"llm_only"`** — a registered **connector** AND the **single-node pipeline
+  sentinel** (`terminated_at`, `LLM_ONLY_NODE`). A raw literal in scoring code is
+  usually the sentinel.
+- **answer extraction** — a **double seam**. The SHAPE arm
+  (`connectors/llm_only.py::_extract_answer`) destructures the structured-output slot
+  named by `answer_field`, before scoring. The LABEL arm
+  (`scoring/formula/matchers.py`, `EXTRACTION_NOTES` + `SCORING_FUNCTIONS`) parses the
+  answer prose and decides HIT/MISS. Display-side extraction is a third thing
+  (`domain/rendering.py`). Shape first, label second.
+- **`steps`** — `list[str]` as the reserved top-level `pipeline_params` key (active
+  node names, `RESERVED_PIPELINE_PARAM_KEYS`); `list[dict]` on the backend's
+  `GET /pipeline` payload (each `{"name": …}`). Walk the former with
+  `node_config_items`, never a re-derived isinstance check.
+- **`config`** — at least six referents: `CampaignConfig` (the campaign's knobs), a
+  node's `nodes.{name}.config` overlay block, `config/settings.py` (install-global
+  constants), `promptpotter/config/` (the package), a connector's
+  `default_node_config`, and `node_config` (the wire key). Qualify the word.
+- **`session`** — (1) a **campaign run's** session (`SessionStore`,
+  `application/bootstrap/session.py`, `s_xxxx`); (2) a **browser login**
+  (`OIDCSessionStore`, `infrastructure/identity/session.py`); (3) TermNorm's
+  **backend handshake** (`POST /sessions` with a terms array, `TermNormSession`);
+  (4) the `Session` wiring object threaded through the runner.
+- **`index_terms`** — the retrieval index a `candidate_source` node ranks each query
+  against; the second half of every connector's `extract_experiment -> (queries,
+  index_terms)`. Empty for connectors with no retrieval index. Sourced from
+  `candidate_library.txt` for an authored dataset.
+
 ## Loop layers — what generates, what refines, what replans
 
 - **L1** — `l1_generate`: the candidate-mutation layer that emits new
@@ -347,6 +396,20 @@ The persisted world is a four-entity containment hierarchy
   `application/optimization/validators/l1_behavior.py`.
 - **Meta-prompt** — synonym for "optimizer prompt" (L1/L2/L3/Critique
   LLM template). Field-standard from PromptWizard / DSPy / OPRO.
+- **Prompt homes** — three, don't confuse them. The **target** prompt the optimizer
+  evolves: `datasets/{name}/prompts/{node}.json`. The **optimizer's** meta-prompts
+  (install-global): `datasets/_optimizer/pipeline.json::resolved_prompts` — keyed
+  `{node}/{n}`, so check-in's second mode lives at `resolved_prompts.checkin/2`. The
+  **outer** L4 meta-prompts: `datasets/_optimizer_meta/`. A per-node **overlay**
+  (`pipeline.json::nodes.{name}.config.prompt`) is a fourth, and is a tunable, not a home.
+- **L4** — PromptPotter optimizing its own meta-prompts: an outer cycle whose backend
+  is an inner cycle. **Recursion, not a fourth layer** — the ladder is closed at
+  L1/L2/L3 and there is no `l4_*.py`. Lives at the connector seam
+  (`connectors/promptpotter.py`) + `runner/inner_recursion.py::run_inner_cycle`, driven
+  by `datasets/promptpotter-self/`. Plan: `docs/specs/l4-outer-loop.md`.
+- **sweep** — a cheap A/B of L1 candidates ahead of full promotion: sibling cycles
+  under `campaigns/{id}/sweeps/{batch_id}`, run by `python -m promptpotter sweep`.
+  `application/sweep/`. A sweep cycle carries no `CycleSeed`; `sibling_kind == "sweep"`.
 - **Second prompt** — a structured-output schema viewed as input; its three
   levers are names, order, `description=`. `docs/concepts/structured-output.md`.
 - **Shape-determinism** — a schema guarantees a parseable object with the fields
@@ -366,7 +429,9 @@ The persisted world is a four-entity containment hierarchy
 
 - **Connector** — the bundled shape `{wire adapter, session lifecycle,
   experiment-data extract, ground-truth resolver}` registered under one
-  name. Today: TermNorm. `promptpotter/connectors/`.
+  name in `CONNECTORS`. Three today: `termnorm`, `llm_only`, `promptpotter`
+  (L4). `DEFAULT_CONNECTOR` names the fresh-upload default.
+  `promptpotter/connectors/`.
 - **Backend** — a connector's running service (TermNorm's FastAPI is
   the canonical example). Read-only from PromptPotter's perspective —
   we never edit a backend's static config.
@@ -386,7 +451,9 @@ The persisted world is a four-entity containment hierarchy
 ## Persistence — what writes where
 
 - **CycleEventLog** — the single persistence ingress per cycle. Owns
-  `events.jsonl`. `infrastructure/ledger.py`.
+  `.runtime/ledger.jsonl`. (`events.jsonl` is the *workspace* ledger at
+  `.workspace/events.jsonl` — different scope, different file.)
+  `infrastructure/ledger.py`.
 - **RunCallbacks** — typed event constructor over
   `CycleEventLog.append`. The writer-side API orchestration uses.
   `application/run_observers.py`.
