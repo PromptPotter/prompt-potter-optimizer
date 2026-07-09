@@ -279,7 +279,7 @@ class OptimizationConfig(BaseModel):
             "``model`` axis is ABSENT from the optimizer surface — "
             "``PipelineSchema.node_param_keys`` drops ``PARAM_FORBIDDEN_KEYS`` "
             "(``model``, ``provider``), so the param catalogue never advertises "
-            "them and ``build_l1_output_schema`` never declares them; the LLM "
+            "them and ``build_l1_response_schema`` never declares them; the LLM "
             "cannot emit a key the schema omits. ``validate_overrides`` is the "
             "lone deterministic backstop for a provider that leaks the key past "
             "its own schema — it rejects the candidate with "
@@ -297,7 +297,7 @@ class OptimizationConfig(BaseModel):
         description=(
             "Whether THIS campaign's L1 may PROPOSE renaming a field on the inner "
             "``l1_generate``'s output schema (``L1Variant``). Off by default: "
-            "``build_l1_output_schema`` never grafts ``output_schema_field_names``, so the "
+            "``build_l1_response_schema`` never grafts ``output_schema_field_names``, so the "
             "LLM cannot emit a key the schema omits — the same structural lock "
             "``forbidden_axes_strict`` uses, not a per-round rejection. A field NAME is the "
             "wire contract; a ``description`` is not, which is why descriptions are always "

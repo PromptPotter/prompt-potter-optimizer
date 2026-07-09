@@ -30,16 +30,13 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from promptpotter.application.config import MechanismConfig
+from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.domain.identity import TenantId, safe_name
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
     from promptpotter.connectors.protocol import Connector
-
-DEFAULT_CONNECTOR = "termnorm"
-"""Only registered connector today (per root CLAUDE.md); operator-editable."""
-
 
 DEFAULT_SCORING_COMPOSITE = "exact_match"
 """Only universally-applicable scorer for ``(query, ground_truth)`` shape."""
@@ -551,7 +548,6 @@ def default_slug_from_filename(filename: str) -> str:
 
 
 __all__ = [
-    "DEFAULT_CONNECTOR",
     "DEFAULT_MAX_ROUNDS",
     "DEFAULT_SCORING_COMPOSITE",
     "PREVIEW_ROWS",

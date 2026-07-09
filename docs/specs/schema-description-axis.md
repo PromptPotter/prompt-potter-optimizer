@@ -18,7 +18,7 @@ But *no lift is needed*. Every target node already carries its schema (`NodeOutp
 Three seams, each a one-nesting-contract reuse — no bespoke code path:
 
 1. **Synthesize at parse (`pipeline_parsing.py`).** Any node with an `output_schema` gets `output_schema_descriptions` added to its `param_keys` and declared `param_types: object` — exactly as a hand-declared nested param. Schema-driven, never a per-dataset opt-in.
-2. **Emit (`build_l1_output_schema`, `validators/l1_strict.py`).** The nested `output_schema_descriptions` object is emitted under `pipeline_params_override[node]`, its `properties` keyed by **that node's own schema fields** (`_nested_param_property` reads `node.output_schema.fields`) with `additionalProperties: false` — describe a field, never invent one.
+2. **Emit (`build_l1_response_schema`, `validators/l1_strict.py`).** The nested `output_schema_descriptions` object is emitted under `pipeline_params_override[node]`, its `properties` keyed by **that node's own schema fields** (`_nested_param_property` reads `node.output_schema.fields`) with `additionalProperties: false` — describe a field, never invent one.
 3. **Fold at the wire seam (`OptSearchPoint.to_job_search_point` → `fold_schema_descriptions`).** The override accumulates across generations as a normal `object` param (`apply_node_overlay` merges one level), then at render→wire it is written onto the node's real `output_schema.properties[field].description` **for existing fields only**, and the virtual key is deleted. The backend receives a valid schema and no pseudo-param.
 
 ```
@@ -75,7 +75,7 @@ Safety rests on slice 1, not on cleverness: a rename the model then ignores or m
 ## Slices
 
 1. ~~**Parse-failure attribution.**~~ **Shipped.** A schema-induced parse failure is charged to the round it occurred in (`RoundResult.l1_parse_failure` → `_round_problem_rate` = `1.0`); before, a zero-candidate round scored `problem_rate = 0.0`, the cleanest possible. *(A live measurement bug independent of this spec.)*
-2. ~~**Descriptions become data.**~~ **Dropped — the premise was wrong.** Nothing has to become data: `build_l1_output_schema` resolves the overrides at call time and Pydantic keeps the defaults. A default table would have given the strings two homes.
+2. ~~**Descriptions become data.**~~ **Dropped — the premise was wrong.** Nothing has to become data: `build_l1_response_schema` resolves the overrides at call time and Pydantic keeps the defaults. A default table would have given the strings two homes.
 3. ~~**One axis, narrowest scope (`promptpotter-self` / `l1_generate` / `L1Variant`).**~~ **Superseded.** That was the wrong level — the optimizer describing its own response schema. Replaced by the core, schema-driven build above: the lever is synthesized onto **every** `output_schema`-bearing target node, keyed by that node's own fields. Pinned by `tests/test_integrity.py::test_schema_description_axis_reaches_the_target_and_cannot_rename_a_field`, which fails if the emitted key drifts from the folded one (a silent no-op axis) or if an invented field could reach the wire.
 4. **Sweep gate.** `--sweep` on `justlogic`; promote only on `proxy_lift_corr ≥ 0.6`. **A negative result closes this spec** — record the finding and revert. That is a successful outcome. **Not yet run — this is the next action, and the first that costs money.**
 5. ~~**Widen** to remaining optimizer-owned schemas.~~ **Folded into the core build** — there is no widening step; it is on for all targets at once.

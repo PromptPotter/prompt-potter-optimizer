@@ -18,13 +18,18 @@ from promptpotter.connectors.protocol import (
 )
 from promptpotter.connectors.termnorm import CONNECTOR as _TERMNORM
 
-__all__ = ["CONNECTORS", "BackendUnreachableError", "Connector", "get"]
+__all__ = ["CONNECTORS", "DEFAULT_CONNECTOR", "BackendUnreachableError", "Connector", "get"]
 
 CONNECTORS: dict[str, Connector] = {
     "termnorm": _TERMNORM,
     "promptpotter": _PROMPTPOTTER,
     "llm_only": _LLM_ONLY,
 }
+
+DEFAULT_CONNECTOR = "termnorm"
+"""Connector a fresh upload drafts against when its ``pipeline.json`` names none.
+Lives beside :data:`CONNECTORS` because that is what knows a name is registered;
+the import-time guard below keeps the two from drifting."""
 
 
 # Fail import if any row is half-wired: registry key must match ``name``, the
@@ -51,6 +56,9 @@ for _key, _c in CONNECTORS.items():
             f"in_process_run {'set' if _c.execution == 'in_process' else 'unset'}."
         )
 del _valid_execution, _key, _c, _hook
+
+if DEFAULT_CONNECTOR not in CONNECTORS:
+    raise RuntimeError(f"DEFAULT_CONNECTOR {DEFAULT_CONNECTOR!r} is not a registered connector.")
 
 
 def get(name: str) -> Connector:

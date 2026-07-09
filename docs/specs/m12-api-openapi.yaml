@@ -1963,7 +1963,7 @@ components:
           description: |
             Let this fork's L1 rename a field on the inner `l1_generate`'s output
             schema, not merely re-describe it. `null` inherits the parent (locked by
-            default: `build_l1_output_schema` never declares the rename param, so the
+            default: `build_l1_response_schema` never declares the rename param, so the
             LLM cannot emit a key the schema omits). Only meaningful on a campaign
             that optimizes an optimizer (`promptpotter-self`). An L2/L3
             `fork_proposal` can request this same unlock autonomously.

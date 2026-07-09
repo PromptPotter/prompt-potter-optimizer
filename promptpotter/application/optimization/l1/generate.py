@@ -17,7 +17,7 @@ from promptpotter.application.optimization.dispatch.schemas import (
     build_l1_response_model,
 )
 from promptpotter.application.optimization.validators.l1_strict import (
-    build_l1_output_schema,
+    build_l1_response_schema,
     effective_l1_field_names,
 )
 from promptpotter.domain.escalation_signals import ValidationFailure
@@ -111,7 +111,7 @@ async def l1_generate(
 
     schema_field_rename = cycle.config.optimization.schema_field_rename
     output_schema = (
-        build_l1_output_schema(
+        build_l1_response_schema(
             pipeline_schema,
             forbidden_axes_strict=cycle.config.optimization.forbidden_axes_strict,
             schema_field_rename=schema_field_rename,

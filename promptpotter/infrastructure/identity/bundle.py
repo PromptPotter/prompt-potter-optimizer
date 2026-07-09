@@ -23,7 +23,7 @@ from promptpotter.infrastructure.identity.provider_config import (
     ProviderConfigBundle,
     load_provider_config,
 )
-from promptpotter.infrastructure.identity.session import SessionStore
+from promptpotter.infrastructure.identity.session import OIDCSessionStore
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ class IdentityBundle:
 
     paths: IdentityPaths
     config: ProviderConfigBundle
-    session_store: SessionStore
+    session_store: OIDCSessionStore
     jwks_cache: JWKSCache
     google: GoogleProviderClient | None
     github: GitHubProviderClient | None
@@ -95,7 +95,7 @@ def build_identity_bundle(paths: IdentityPaths) -> IdentityBundle:
     return IdentityBundle(
         paths=paths,
         config=config,
-        session_store=SessionStore(paths.sessions_dir),
+        session_store=OIDCSessionStore(paths.sessions_dir),
         jwks_cache=jwks_cache,
         google=google,
         github=github,

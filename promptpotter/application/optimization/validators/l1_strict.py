@@ -2,7 +2,7 @@
 
 Three concerns, all validation-shaped:
 
-- **Schema construction**: ``build_l1_output_schema`` grafts per-node
+- **Schema construction**: ``build_l1_response_schema`` grafts per-node
   ``param_allowed_values`` into the static l1_generate envelope and
   constrains the prompt-field + task-context slots so the LLM is
   constrained at output-time across all three override slots.
@@ -52,7 +52,7 @@ __all__ = [
     "L1_PROMPT_PLACEHOLDERS_INTACT",
     "L1_SCHEMA_COMPLIANCE",
     "L1YieldStats",
-    "build_l1_output_schema",
+    "build_l1_response_schema",
     "detect_invariants",
     "effective_l1_field_names",
     "validate_overrides",
@@ -188,7 +188,7 @@ def _nested_param_property(node: PipelineNode, param: str) -> dict[str, Any] | N
     return None
 
 
-def build_l1_output_schema(
+def build_l1_response_schema(
     pipeline_schema: PipelineSchema,
     *,
     forbidden_axes_strict: bool = True,
@@ -347,7 +347,7 @@ def validate_overrides(
 
     Type mismatch (``"0.2"`` proposed for a ``number``-declared param) is
     rejected with ``reason="type_mismatch"``. This catches the case the
-    JSON-schema ``type`` constraint in :func:`build_l1_output_schema` is
+    JSON-schema ``type`` constraint in :func:`build_l1_response_schema` is
     meant to prevent — both layers run because not every provider/SDK
     enforces structured-output schemas with full fidelity.
 
@@ -375,7 +375,7 @@ def validate_overrides(
         node = pipeline_schema.get_node(node_name)
         if node is None:
             # Hallucinated node: L1 named a node absent from the active schema. The
-            # JSON-schema node-name enum is advisory (``build_l1_output_schema`` emits
+            # JSON-schema node-name enum is advisory (``build_l1_response_schema`` emits
             # ``strict=False``, so a weakly-conformant provider slips a phantom key past
             # ``additionalProperties: false``). The phantom edit is stripped from the wire
             # downstream (``merge_pipeline_params`` drops nodes outside ``active_steps``),

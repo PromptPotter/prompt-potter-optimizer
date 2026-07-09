@@ -54,6 +54,7 @@ from promptpotter.infrastructure.store.io import (
 from promptpotter.infrastructure.store.paths import (
     archive_root_dir_for,
     campaign_root_dir_for,
+    cycle_dir_under,
     root_cycle_id,
     session_index,
     sibling_kind,
@@ -247,7 +248,7 @@ class CampaignStore:
         return self._campaign_dir(campaign_id)
 
     def cycle_dir(self, campaign_id: str, cycle_id: str) -> Path:
-        return self._campaign_dir(campaign_id) / "cycles" / validate_path_component(cycle_id)
+        return cycle_dir_under(self._campaign_dir(campaign_id), cycle_id)
 
     def _manifest_path(self, campaign_id: str) -> Path:
         return self.campaign_root_dir(campaign_id) / "campaign.json"

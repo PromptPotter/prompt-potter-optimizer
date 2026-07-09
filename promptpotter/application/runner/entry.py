@@ -139,7 +139,7 @@ def _apply_config_overrides(
     the parent). A new-cycle snapshot only — the parent config is never mutated.
     Reassigning the returned config at the runner seam propagates to every reader
     (loop ``max_rounds`` / patience, L1 ``pobb_epsilon``, the per-round subset
-    selection, ``build_l1_output_schema``'s emittable param surface, the
+    selection, ``build_l1_response_schema``'s emittable param surface, the
     ``INIT.enter`` display event). The reconciled ``spend_budget_usd`` also becomes
     the spend-cap probe's initial ceiling (``change-spend-budget`` can still move it
     at runtime). The selection-policy override (``per_round_resubset``) rides the

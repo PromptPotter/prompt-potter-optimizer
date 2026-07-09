@@ -347,7 +347,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
         # `output_schema` with fields — schema-driven, never a per-dataset `param_keys`
         # opt-in. The field NAME stays locked (`SCHEMA_OWNED_FIELDS`); only the free
         # prose becomes tunable. Declared as an `object` param so the one nesting
-        # contract (`apply_node_overlay` merges one level, `build_l1_output_schema`
+        # contract (`apply_node_overlay` merges one level, `build_l1_response_schema`
         # emits the sub-schema, `validate_overrides` type-checks it) applies with no
         # special case downstream — the same shape a hand-declared nested param has.
         out_schema = step_kwargs.get("output_schema")

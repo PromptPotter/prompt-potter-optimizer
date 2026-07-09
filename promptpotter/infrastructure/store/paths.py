@@ -84,11 +84,16 @@ def archive_root_dir_for(tenant_root: Path, campaign_id: str) -> Path:
     return tenant_root / "archive" / validate_path_component(campaign_id)
 
 
+def cycle_dir_under(campaign_root: Path, cycle_id: str) -> Path:
+    """Per-cycle dir under an ALREADY-RESOLVED campaign root — the sole owner of the
+    ``cycles/{cycle_id}`` layout. ``CampaignStore`` passes an archive-aware root here;
+    :func:`cycle_dir_for` passes the ``campaigns/``-only one."""
+    return campaign_root / "cycles" / validate_path_component(cycle_id)
+
+
 def cycle_dir_for(tenant_root: Path, campaign_id: str, cycle_id: str) -> Path:
     """Per-cycle dir ``campaigns/{campaign_id}/cycles/{cycle_id}``; flat — sibling kind in ``index.json``, not the path."""
-    validate_path_component(campaign_id)
-    validate_path_component(cycle_id)
-    return tenant_root / "campaigns" / campaign_id / "cycles" / cycle_id
+    return cycle_dir_under(campaign_root_dir_for(tenant_root, campaign_id), cycle_id)
 
 
 def sweep_batch_dir_for(tenant_root: Path, campaign_id: str, batch_id: str) -> Path:
@@ -110,6 +115,7 @@ __all__ = [
     "archive_root_dir_for",
     "campaign_root_dir_for",
     "cycle_dir_for",
+    "cycle_dir_under",
     "root_cycle_id",
     "session_dir_for",
     "session_index",

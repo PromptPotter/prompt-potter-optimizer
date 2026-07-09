@@ -27,7 +27,6 @@ from promptpotter.application.datasets.csv_ingest import (
     read_tabular,
 )
 from promptpotter.application.datasets.draft_campaign import (
-    DEFAULT_CONNECTOR,
     DEFAULT_MAX_ROUNDS,
     DEFAULT_SCORING_COMPOSITE,
     PREVIEW_ROWS,
@@ -42,6 +41,7 @@ from promptpotter.application.datasets.prompts import (
     list_dataset_prompts,
     load_dataset_prompt,
 )
+from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.paths import validate_dataset_name

@@ -151,14 +151,6 @@ def extract_sample_diagnostics(
     return diag
 
 
-def _gt_pos(items: list[Any], gt: str) -> int | None:
-    """0-based position of *gt* in *items*, or None."""
-    for i, c in enumerate(items):
-        if extract_item_label(c) == gt:
-            return i
-    return None
-
-
 def _diag_ranking(
     pd: Mapping[str, Any],
     gt: str,
@@ -166,9 +158,11 @@ def _diag_ranking(
     key: str,
     label: str,
 ) -> dict[str, float | bool | int | str | None]:
-    """Shared shape for candidate_source + ranker diagnostics."""
+    """Shared shape for candidate_source + ranker diagnostics. Diagnostics report the
+    ground-truth position 0-based; ``find_rank`` is the canonical 1-based walk."""
     candidates = pd.get(key, [])
-    pos = _gt_pos(candidates, gt)
+    rank = find_rank(candidates, gt)
+    pos = rank - 1 if rank is not None else None
     return {
         f"gt_in_{label}": pos is not None,
         f"n_{label}_candidates": len(candidates),
@@ -186,7 +180,8 @@ def _diag_ranker(
     node: PipelineNode, pd: Mapping[str, Any], gt: str
 ) -> dict[str, float | bool | int | str | None]:
     candidates = pd.get("final_ranking", [])
-    pos = _gt_pos(candidates, gt)
+    rank = find_rank(candidates, gt)
+    pos = rank - 1 if rank is not None else None
     top_score_gap: float | None = None
     if len(candidates) >= 2:
         scores = []

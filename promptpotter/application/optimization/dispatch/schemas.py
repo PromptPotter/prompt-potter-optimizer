@@ -22,7 +22,7 @@ silently falls back to lenient parsing.
 
 - ``pipeline_params_override`` — per-node tunables (e.g. ``{"llm_only":
   {"temperature": 0.7}}``). Inner shape is grafted at runtime by
-  :func:`l1_validators.build_l1_output_schema` from the active
+  :func:`l1_validators.build_l1_response_schema` from the active
   ``PipelineSchema``.
 - ``prompt_fields_override`` — the six top-level prompt fields (``persona``,
   ``task_intent``, ``problem_description``, ``instruction``,
@@ -139,7 +139,7 @@ class L1Variant(BaseModel):
 
     - ``pipeline_params_override`` — per-node tunables, shape ``{node:
       {param: value}}``. Inner shape is grafted at runtime by
-      :func:`l1_validators.build_l1_output_schema` from the active
+      :func:`l1_validators.build_l1_response_schema` from the active
       ``PipelineSchema``; the keys at this level remain ``dict[str, dict]``
       so the Pydantic parse never fails on a legitimately backend-specific
       node name.
@@ -239,7 +239,7 @@ def _build_l1_response_model(items: tuple[tuple[str, str], ...]) -> type[L1Gener
     return create_model(
         f"L1GenerateOutput__{suffix}",
         __base__=L1GenerateOutput,
-        variants=(list[variant], ...),  # type: ignore[valid-type]  # `variant` is a runtime-built model
+        variants=(list[variant], ...),  # `variant` is a runtime-built model
     )
 
 

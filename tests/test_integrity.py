@@ -479,7 +479,7 @@ def test_schema_description_axis_reaches_the_target_and_cannot_rename_a_field() 
     so an invented field must be dropped before the wire, never grafted on.
     """
     from promptpotter.application.optimization.validators.l1_strict import (
-        build_l1_output_schema,
+        build_l1_response_schema,
         validate_overrides,
     )
     from promptpotter.domain.opt_search_point import fold_schema_descriptions
@@ -490,9 +490,9 @@ def test_schema_description_axis_reaches_the_target_and_cannot_rename_a_field() 
     fields = list(node.output_schema.fields)  # ["reasoning", "answer"] — the closed set
 
     # EMIT: the lever is handed to L1, keyed by the target node's OWN fields, schema-driven.
-    emitted = _emittable_l1_params(build_l1_output_schema(schema), node="llm_only")
+    emitted = _emittable_l1_params(build_l1_response_schema(schema), node="llm_only")
     assert "output_schema_descriptions" in emitted
-    describable = build_l1_output_schema(schema)["schema"]["properties"]["variants"]["items"][
+    describable = build_l1_response_schema(schema)["schema"]["properties"]["variants"]["items"][
         "properties"
     ]["pipeline_params_override"]["properties"]["llm_only"]["properties"][
         "output_schema_descriptions"
@@ -541,12 +541,12 @@ def test_emittable_params_are_declared_and_an_invented_one_is_rejected() -> None
     readers: a graft on one side alone is either an unhonoured edit or an unguarded one.
     """
     from promptpotter.application.optimization.validators.l1_strict import (
-        build_l1_output_schema,
+        build_l1_response_schema,
         validate_overrides,
     )
 
     schema = _pipeline_schema("promptpotter-self")
-    emitted = build_l1_output_schema(schema)["schema"]["properties"]["variants"]["items"][
+    emitted = build_l1_response_schema(schema)["schema"]["properties"]["variants"]["items"][
         "properties"
     ]["pipeline_params_override"]["properties"]
     for node, keys in schema.node_param_keys().items():
@@ -703,7 +703,7 @@ def test_schema_field_rename_is_locked_by_default_and_never_silently_half_applie
         build_l1_response_model,
     )
     from promptpotter.application.optimization.validators.l1_strict import (
-        build_l1_output_schema,
+        build_l1_response_schema,
         effective_l1_field_names,
     )
     from promptpotter.application.runner.entry import _apply_config_overrides
@@ -717,9 +717,9 @@ def test_schema_field_rename_is_locked_by_default_and_never_silently_half_applie
         # Locked by default: the outer cannot even emit the rename key.
         set_optimizer_prompt_overrides(None)
         assert "output_schema_field_names" not in _emittable_l1_params(
-            build_l1_output_schema(outer)
+            build_l1_response_schema(outer)
         )
-        unlocked = _emittable_l1_params(build_l1_output_schema(outer, schema_field_rename=True))
+        unlocked = _emittable_l1_params(build_l1_response_schema(outer, schema_field_rename=True))
         assert "output_schema_field_names" in unlocked
 
         # Only a fork opens it: the delta reaches the fork's config, the parent stays frozen
@@ -736,7 +736,7 @@ def test_schema_field_rename_is_locked_by_default_and_never_silently_half_applie
         # The inner cycle applies a bound rename even though its OWN knob is off (default).
         set_optimizer_prompt_overrides({"l1_generate": {"output_schema_field_names": rename}})
         assert effective_l1_field_names() == rename
-        variant = build_l1_output_schema(inner)["schema"]["properties"]["variants"]["items"]
+        variant = build_l1_response_schema(inner)["schema"]["properties"]["variants"]["items"]
         assert "mutation_rationale" in variant["properties"]
         assert "changes_description" not in variant["properties"]
         assert "mutation_rationale" in variant["required"]

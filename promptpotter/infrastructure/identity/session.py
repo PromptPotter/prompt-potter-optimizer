@@ -42,8 +42,13 @@ class SessionData:
         return (now if now is not None else int(time.time())) >= self.expires_at
 
 
-class SessionStore:
-    """File-backed opaque session store."""
+class OIDCSessionStore:
+    """File-backed opaque store for BROWSER LOGIN sessions — the OIDC cookie a
+    request authenticates with.
+
+    NOT :class:`promptpotter.infrastructure.store.SessionStore`, which persists a
+    campaign run's session artifacts. Same word, two referents; the ``OIDC`` prefix
+    is what keeps a reader from grabbing the wrong one."""
 
     def __init__(self, sessions_dir: Path, ttl_s: int = DEFAULT_SESSION_TTL_S) -> None:
         self._dir = sessions_dir
@@ -126,4 +131,4 @@ class SessionStore:
         return self._dir / f"{session_id}.json"
 
 
-__all__ = ["DEFAULT_SESSION_TTL_S", "SessionData", "SessionStore"]
+__all__ = ["DEFAULT_SESSION_TTL_S", "OIDCSessionStore", "SessionData"]

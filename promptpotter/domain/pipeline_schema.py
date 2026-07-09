@@ -40,7 +40,7 @@ SCHEMA_OWNED_FIELDS = frozenset(
 # one level deep rather than a scalar it replaces. Naming them once keeps the three
 # readers agreeing: `apply_node_overlay` (merge one level, siblings survive — `array`
 # replaces wholesale, since a merged ordering is meaningless), `node_config_schema`
-# (no scalar widget exists, so no widget), and `build_l1_output_schema` (the emitted
+# (no scalar widget exists, so no widget), and `build_l1_response_schema` (the emitted
 # sub-schema, whose value space is the param's own, not the node's).
 NESTED_PARAM_TYPES = frozenset({"object", "array"})
 
@@ -48,7 +48,7 @@ NESTED_PARAM_TYPES = frozenset({"object", "array"})
 # (`OptimizationConfig.schema_field_rename`): renaming a field on the optimizer's own
 # output schema is the strongest lever and the only one that can break a parser. Named
 # here, beside the other structural param constants, because two layers must agree on the
-# literal without importing each other: `build_l1_output_schema` (drops it from the emitted
+# literal without importing each other: `build_l1_response_schema` (drops it from the emitted
 # schema when locked, so the LLM cannot emit a key that does not exist) and the
 # `rebase_capability` directive (offers L2/L3 the unlock only where a node declares it).
 SCHEMA_RENAME_PARAM = "output_schema_field_names"
@@ -58,7 +58,7 @@ SCHEMA_RENAME_PARAM = "output_schema_field_names"
 # language inside the field-filling loop and no code reads it, so it is free to move on
 # ANY node that declares an `output_schema` — unlike the field NAME (the wire + grading
 # contract). Synthesized onto such nodes at parse time (`pipeline_parsing.py`), keyed by
-# that node's own fields; emitted by `build_l1_output_schema`; folded into the wire schema
+# that node's own fields; emitted by `build_l1_response_schema`; folded into the wire schema
 # at `OptSearchPoint.to_job_search_point`. See `docs/concepts/structured-output.md`.
 SCHEMA_DESCRIPTIONS_PARAM = "output_schema_descriptions"
 
@@ -488,7 +488,7 @@ class PipelineSchema(BaseModel):
         stripped UNCONDITIONALLY — they are the pipeline's structural wire contract,
         not tunables; an L1 variant that mutated `output_schema` would break the
         backend. Unlike model/provider there is no unlock: the schema is never an
-        optimizer axis. Stripping here keeps `build_l1_output_schema` from declaring
+        optimizer axis. Stripping here keeps `build_l1_response_schema` from declaring
         them, so the LLM can't emit a key the schema omits.
         """
         out: dict[str, set[str]] = {}

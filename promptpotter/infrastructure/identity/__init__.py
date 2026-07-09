@@ -39,8 +39,8 @@ from promptpotter.infrastructure.identity.provider_config import (
     load_provider_config,
 )
 from promptpotter.infrastructure.identity.session import (
+    OIDCSessionStore,
     SessionData,
-    SessionStore,
 )
 
 __all__ = [
@@ -50,10 +50,10 @@ __all__ = [
     "IdentityBundle",
     "IdentityPaths",
     "OIDCProviderConfig",
+    "OIDCSessionStore",
     "ProviderConfigBundle",
     "ProviderIdentity",
     "SessionData",
-    "SessionStore",
     "add_email",
     "build_identity_bundle",
     "check_allowlist",

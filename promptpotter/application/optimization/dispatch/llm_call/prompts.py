@@ -370,7 +370,7 @@ def resolve_node_schema_field_names(node: str) -> dict[str, str]:
     ``validation_alias``, and every downstream reader still sees the model's own field name.
     Nothing but the LLM observes the change.
 
-    **Locked by default.** ``build_l1_output_schema`` grafts the key only when the campaign sets
+    **Locked by default.** ``build_l1_response_schema`` grafts the key only when the campaign sets
     ``optimization.schema_field_rename``, so the LLM cannot emit a key that does not exist —
     structural, not policed. Rides the same per-node override object as the prose, ``layout``,
     and ``output_schema_descriptions`` edits.

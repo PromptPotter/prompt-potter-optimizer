@@ -15,7 +15,11 @@ from promptpotter.shared.clock import utcnow_iso
 
 
 class SessionStore:
-    """Tenant-scoped per-session artifacts at ``sessions/{session_id}/`` (no ``backend_id`` axis)."""
+    """Tenant-scoped per-session artifacts at ``sessions/{session_id}/`` (no ``backend_id`` axis).
+
+    A CAMPAIGN RUN's session, not a browser login — that is
+    :class:`promptpotter.infrastructure.identity.OIDCSessionStore`.
+    """
 
     def __init__(self, base_dir: Path):
         self._base_dir = base_dir

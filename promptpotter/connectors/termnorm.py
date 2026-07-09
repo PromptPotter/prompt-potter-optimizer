@@ -17,7 +17,7 @@ from typing import Any
 import httpx
 
 from promptpotter.connectors.protocol import BackendUnreachableError, Connector
-from promptpotter.domain.opt_search_point import RESERVED_PIPELINE_PARAM_KEYS
+from promptpotter.domain.opt_search_point import node_config_items
 from promptpotter.domain.pipeline_schema import NodeType
 
 logger = logging.getLogger(__name__)
@@ -36,8 +36,8 @@ def termnorm_wire_adapter(
 
     ``pipeline_params`` carries ``steps`` (which nodes to run) plus per-node
     override dicts (e.g. ``{"entity_profiling": {"prompt": "..."}}``)
-    which become the ``node_config`` key in the wire payload. Non-dict
-    pipeline_param values are dropped with a debug log — the backend
+    which become the ``node_config`` key in the wire payload.
+    ``node_config_items`` owns the reserved-key/non-dict walk — the backend
     contract is "everything beyond steps is a per-node config dict".
     """
     payload: dict[str, Any] = {"query": query}
@@ -47,19 +47,7 @@ def termnorm_wire_adapter(
     if "steps" in _pp:
         payload["steps"] = _pp["steps"]
 
-    wire_overrides: dict[str, dict[str, Any]] = {}
-    for k, v in _pp.items():
-        if k in RESERVED_PIPELINE_PARAM_KEYS:
-            continue
-        if isinstance(v, dict):
-            wire_overrides[k] = v
-        else:
-            logger.debug(
-                "termnorm_wire_adapter: dropping non-dict pipeline_param %r=%r",
-                k,
-                v,
-            )
-
+    wire_overrides = dict(node_config_items(_pp))
     if wire_overrides:
         payload["node_config"] = wire_overrides
 
