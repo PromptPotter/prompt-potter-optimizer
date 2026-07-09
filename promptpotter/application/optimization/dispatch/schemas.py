@@ -239,7 +239,10 @@ def _build_l1_response_model(items: tuple[tuple[str, str], ...]) -> type[L1Gener
     return create_model(
         f"L1GenerateOutput__{suffix}",
         __base__=L1GenerateOutput,
-        variants=(list[variant], ...),  # `variant` is a runtime-built model
+        # `variant` is a class built at runtime, so it is a *variable* to mypy, not a type name.
+        # Pydantic resolves it fine; only the static checker can't. The subscript is evaluated
+        # eagerly here (not a string annotation), so this is the narrowest possible silence.
+        variants=(list[variant], ...),  # type: ignore[valid-type]
     )
 
 

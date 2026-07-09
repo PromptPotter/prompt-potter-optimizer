@@ -115,7 +115,7 @@ def _cmd_champion_refresh(args: argparse.Namespace) -> CommandResult:
     from promptpotter.infrastructure.store import build_stores
 
     stores = build_stores(identity_from_args(args))
-    registry = reduce_corpus(stores.base_dir)
+    registry = reduce_corpus(stores)
     path = write_registry(stores.base_dir, registry)
 
     if not registry.candidates:

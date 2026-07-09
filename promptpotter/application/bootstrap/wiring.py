@@ -200,6 +200,29 @@ def _read_backend_type(dataset_config_dir: Path | None, dataset_name: str | None
     return bt.lower()
 
 
+def backend_type_of_dataset(store: Stores, project_root: Path, dataset_name: str) -> str:
+    """Connector kind of *dataset_name*, or ``""`` when it cannot be resolved.
+
+    THE predicate for "which connector does this dataset use?" for every read-side caller —
+    the sidebar's self-optimization test and the meta-champion reducer's corpus filter both
+    ask it, so neither hand-maintains a list of dataset NAMES (a name allowlist silently skips
+    an arm, a fork, or a renamed dataset instead of loudly rejecting it).
+
+    Tolerant, unlike the strict twin ``_read_backend_type`` above: a campaign outlives its
+    dataset dir, and a reader that raises because one old dataset was deleted is worse than one
+    that treats that campaign as a plain (non-L4) campaign. Bootstrap still raises, because
+    there a missing kind means the run cannot pick a connector at all.
+    """
+    try:
+        raw = read_json_optional(
+            resolve_dataset_config_dir(store, project_root, dataset_name) / "pipeline.json"
+        )
+    except (OSError, ValueError):
+        return ""
+    bt = (raw or {}).get("backend_type")
+    return bt.lower() if isinstance(bt, str) else ""
+
+
 def _load_dataset_into_session(
     session: Session,
     dataset_name: str,
@@ -448,4 +471,4 @@ async def init_services(
     return session
 
 
-__all__ = ["init_services", "resolve_dataset_config_dir"]
+__all__ = ["backend_type_of_dataset", "init_services", "resolve_dataset_config_dir"]

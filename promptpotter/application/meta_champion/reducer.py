@@ -21,26 +21,23 @@ import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict
 
+from promptpotter.application.bootstrap.wiring import backend_type_of_dataset
 from promptpotter.domain.outer_verdict import cell_fitness
 from promptpotter.infrastructure.projections.live_dashboard.round_summary import (
     origin_cells_from_disk,
 )
+from promptpotter.infrastructure.store.paths import REPO_ROOT
 from promptpotter.shared.statistics import paired_diff_posterior
 
-# The datasets whose cycles carry meta-prompt candidates (the L4 recursion connector).
-#
-# KNOWN DEFECT — this is a NAME allowlist standing in for "does this campaign's dataset use
-# the `promptpotter` connector?". The authoritative answer is `pipeline.json::backend_type ==
-# "promptpotter"` (the same predicate the webapp's `isSelfOptimization` reads off the served
-# `CampaignSummary.backend_type`). Any pp-self dataset under another name — an A/B arm, a fork
-# — is silently skipped by the reducer rather than loudly rejected. Fixing it means resolving
-# each campaign's dataset config dir here; left as a named debt rather than widened by hand,
-# because widening the list is what made it wrong twice.
-_PP_SELF_DATASETS = frozenset({"promptpotter-self"})
+if TYPE_CHECKING:
+    from promptpotter.infrastructure.store import Stores
+
+# The connector whose cycles carry meta-prompt candidates — i.e. the L4 recursion.
+_PP_SELF_BACKEND_TYPE = "promptpotter"
 _ORIGIN_HASH = "origin"
 
 
@@ -157,10 +154,17 @@ class _Accum:
         self.orig_by_cell: dict[str, list[float]] = {}
 
 
-def _pp_self_campaign_dirs(campaigns_dir: Path) -> list[Path]:
-    """Campaign dirs whose ``campaign.json`` binds a pp-self dataset."""
+def _pp_self_campaign_dirs(store: Stores, campaigns_dir: Path) -> list[Path]:
+    """Campaign dirs whose bound dataset drives the L4 recursion connector.
+
+    Asks each dataset's ``pipeline.json::backend_type`` — the same predicate the sidebar's
+    ``isSelfOptimization`` reads — never a list of dataset NAMES. A name allowlist silently
+    skipped an A/B arm, a fork, or a renamed dataset instead of loudly rejecting it, and
+    widening it by hand is what made it wrong twice.
+    """
     if not campaigns_dir.is_dir():
         return []
+    kind_of: dict[str, str] = {}  # once per dataset, not once per campaign
     dirs: list[Path] = []
     for child in sorted(campaigns_dir.iterdir()):
         if not child.is_dir():
@@ -168,18 +172,23 @@ def _pp_self_campaign_dirs(campaigns_dir: Path) -> list[Path]:
         cfg = _read_json(child / "campaign.json")
         block_raw = cfg.get("campaign_config")
         block = block_raw if isinstance(block_raw, dict) else cfg
-        if str(block.get("dataset_name", "")) in _PP_SELF_DATASETS:
+        dataset_name = str(block.get("dataset_name", ""))
+        if not dataset_name:
+            continue
+        if dataset_name not in kind_of:
+            kind_of[dataset_name] = backend_type_of_dataset(store, REPO_ROOT, dataset_name)
+        if kind_of[dataset_name] == _PP_SELF_BACKEND_TYPE:
             dirs.append(child)
     return dirs
 
 
-def reduce_corpus(base_dir: Path) -> ChampionRegistry:
-    """Walk every pp-self cycle under ``base_dir`` and build the ranked champion table."""
-    campaigns_dir = base_dir / "campaigns"
+def reduce_corpus(store: Stores) -> ChampionRegistry:
+    """Walk every pp-self cycle in *store*'s workspace and build the ranked champion table."""
+    campaigns_dir = store.base_dir / "campaigns"
     accums: dict[str, _Accum] = {}
     n_cycles = 0
 
-    for campaign_dir in _pp_self_campaign_dirs(campaigns_dir):
+    for campaign_dir in _pp_self_campaign_dirs(store, campaigns_dir):
         cycles_dir = campaign_dir / "cycles"
         if not cycles_dir.is_dir():
             continue

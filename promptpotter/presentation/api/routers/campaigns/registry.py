@@ -7,7 +7,10 @@ from typing import Any
 from fastapi import Query
 from pydantic import BaseModel, Field
 
-from promptpotter.application.bootstrap.wiring import resolve_dataset_config_dir
+from promptpotter.application.bootstrap.wiring import (
+    backend_type_of_dataset,
+    resolve_dataset_config_dir,
+)
 from promptpotter.application.config import CampaignConfig, MechanismConfig
 from promptpotter.application.config_coupling import (
     COUPLINGS,
@@ -21,7 +24,6 @@ from promptpotter.application.jobs.launcher import draft_wire_with_locks, load_c
 from promptpotter.application.meta_champion import ChampionRegistry, reduce_corpus
 from promptpotter.application.resource_matrix import ResourceMatrix, read_matrix
 from promptpotter.infrastructure.store import Stores
-from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.infrastructure.store.paths import REPO_ROOT, session_index
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
@@ -94,24 +96,10 @@ class CampaignDetailResponse(CampaignSummary):
 
 
 def _backend_type(store: Stores, dataset_name: str, memo: dict[str, str]) -> str:
-    """Connector kind of *dataset_name*, from its resolved ``pipeline.json::backend_type``.
-
-    The listing endpoint answers this once per DATASET, not once per campaign (*memo*), since a
-    workspace holds many campaigns per dataset. Tolerant on purpose: a campaign outlives its
-    dataset dir, and a sidebar that 500s because one old dataset was deleted is worse than one
-    that renders that row as a plain (non-L4) campaign. The strict twin
-    (``wiring._read_backend_type``) still raises at bootstrap, where a missing kind means the run
-    cannot pick a connector.
-    """
+    """Memo over ``backend_type_of_dataset`` — the listing endpoint answers it once per DATASET,
+    not once per campaign, since a workspace holds many campaigns per dataset."""
     if dataset_name not in memo:
-        try:
-            raw = read_json_optional(
-                resolve_dataset_config_dir(store, REPO_ROOT, dataset_name) / "pipeline.json"
-            )
-            bt = (raw or {}).get("backend_type")
-            memo[dataset_name] = bt.lower() if isinstance(bt, str) else ""
-        except (OSError, ValueError):
-            memo[dataset_name] = ""
+        memo[dataset_name] = backend_type_of_dataset(store, REPO_ROOT, dataset_name)
     return memo[dataset_name]
 
 
@@ -456,7 +444,7 @@ def get_champion_registry(store: StoreDep) -> ChampionRegistry:
     fetch (dev on-demand surface, not the 2 s poll); zero LLM. Dev-only —
     :data:`L4_LAB_CAP`-gated (404 without it); empty for a dev with no pp-self cycles."""
     _require_l4_lab(store)
-    return reduce_corpus(store.base_dir)
+    return reduce_corpus(store)
 
 
 @campaigns_router.get("/resource-matrix", response_model=ResourceMatrix)

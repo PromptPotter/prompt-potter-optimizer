@@ -7,6 +7,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.escalation_signals import RuntimeFailure
+from promptpotter.domain.phases import StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.infrastructure.store.io import read_json_tolerant
 
 if TYPE_CHECKING:
@@ -14,10 +15,28 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Sibling ran to a meaningful boundary — terminal opt_sp carries trustworthy runtime_failures.
-_FINISHED_STOP_REASONS = frozenset(
-    {"max_rounds", "goal_reached", "infinite_stall", "perfect_score", "l3_patience"}
-)
+
+def _ran_to_completion(raw_stop_reason: Any) -> bool:
+    """Sibling reached a natural conclusion, so its terminal opt_sp carries trustworthy
+    runtime_failures.
+
+    Classified through the canonical ``StopReason`` table, never a hand-written name allowlist.
+    The frozenset this replaced had gone stale in BOTH directions and nothing could notice:
+    three of its five strings matched no ``StopReason`` at all, and it dropped seven real
+    SUCCESS outcomes — among them ``target_hit`` and ``lives_exhausted``, which is the dominant
+    stop for an L4 inner cycle. Siblings that stopped well were silently denied their wounds.
+    """
+    if not isinstance(raw_stop_reason, str):
+        return False
+    try:
+        reason = StopReason(raw_stop_reason)
+    except ValueError:
+        logger.warning(
+            "sibling carries an unknown stop_reason %r — skipped; its wounds are not inherited",
+            raw_stop_reason,
+        )
+        return False
+    return stop_reason_outcome(reason) is StopOutcome.SUCCESS
 
 
 def _rf_dedup_key(rf_dict: dict[str, Any]) -> tuple[str, str, str]:
@@ -57,7 +76,7 @@ def gather_sibling_runtime_failures(
         idx = read_json_tolerant(sibling / "index.json")
         if not isinstance(idx, dict):
             continue
-        if idx.get("stop_reason") not in _FINISHED_STOP_REASONS:
+        if not _ran_to_completion(idx.get("stop_reason")):
             continue
         n_rounds = int(idx.get("n_rounds") or 0)
         if n_rounds <= 0:
