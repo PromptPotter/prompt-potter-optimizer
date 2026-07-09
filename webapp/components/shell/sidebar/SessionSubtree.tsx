@@ -7,17 +7,12 @@ import { campaignOriginHash } from "@/lib/ids";
 import { campaignDisplayName, unitDisplayName } from "@/lib/names";
 import { fmtPct0 } from "@/lib/format";
 import { runPhaseLabel } from "@/lib/run-phase";
+import { isSelfOptimization } from "@/lib/derivations/connector-state";
 import { buildUnitTree, type SessionGroup } from "./grouping";
 import { UnitBranchRows } from "./UnitBranchRows";
 import { CampaignMenu } from "./CampaignMenu";
 import { CampaignSizeHover } from "./CampaignSizeHover";
 import { InnerCampaignRows } from "./InnerCampaignRows";
-
-// The self-optimizer dataset. An L4 outer cycle on this dataset spawns a fan-out
-// of real inner campaigns (one per candidate×seed) under a `.inner/` sandbox; the
-// sidebar lets the operator drill into them. Kept as one shared constant so the
-// breadcrumb + this row agree on what "L4" means.
-export const L4_DATASET = "promptpotter-self";
 
 // One session row + (when expanded) its fork-tree. Rendered either AS the
 // campaign row (single-session campaign) or as a child session row
@@ -52,7 +47,10 @@ export function SessionSubtree({
   // fan-out of inner campaigns. Show them as a separate disclosure (the fork
   // twist above is a different axis; most L4 cycles have no forks). Only on the
   // campaign row (the root cycle that owns the `.inner/` sandbox).
-  const isL4 = isCampaignRow && campaign.dataset_name === L4_DATASET;
+  // Keyed on the connector KIND, never on a dataset name: ANY dataset whose
+  // `pipeline.json::backend_type` is `promptpotter` recurses, including an
+  // operator's own pp-self variant. Same predicate the panels branch on.
+  const isL4 = isCampaignRow && isSelfOptimization(campaign.backend_type);
   const [innerOpen, setInnerOpen] = useState(false);
   const selected = cid === campaignId && root.cycle_id === cycleId;
   // Archived campaigns live in the archive/ recycle bin — inert to browse (their

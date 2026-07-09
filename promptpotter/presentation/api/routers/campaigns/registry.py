@@ -21,6 +21,7 @@ from promptpotter.application.jobs.launcher import draft_wire_with_locks, load_c
 from promptpotter.application.meta_champion import ChampionRegistry, reduce_corpus
 from promptpotter.application.resource_matrix import ResourceMatrix, read_matrix
 from promptpotter.infrastructure.store import Stores
+from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.infrastructure.store.paths import REPO_ROOT, session_index
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
@@ -36,6 +37,16 @@ class CampaignSummary(BaseModel):
     created_at: str = Field(description="ISO 8601 creation timestamp")
     root_cycle_id: str = Field(description="The campaign's first session's root cycle id")
     backend_id: str = Field(default="", description="Backend this campaign optimizes against")
+    backend_type: str = Field(
+        default="",
+        description=(
+            "Connector KIND of the campaign's dataset ('termnorm' / 'promptpotter' / …), read off "
+            "`{dataset}/pipeline.json::backend_type`. The webapp's ONE test for a self-optimizing "
+            "(L4) campaign — it renders the 'inner loops' disclosure and the pp-self panel "
+            "variants on it. Empty when the dataset config is gone (a campaign outlives its "
+            "dataset dir); callers treat empty as 'not self-optimizing'."
+        ),
+    )
     session_count: int = Field(
         default=1, description="Number of sessions (re-runs of the declaration) in the campaign"
     )
@@ -82,7 +93,31 @@ class CampaignDetailResponse(CampaignSummary):
     )
 
 
-def _campaign_summary(campaign: Any, session_count: int, status: str) -> CampaignSummary:
+def _backend_type(store: Stores, dataset_name: str, memo: dict[str, str]) -> str:
+    """Connector kind of *dataset_name*, from its resolved ``pipeline.json::backend_type``.
+
+    The listing endpoint answers this once per DATASET, not once per campaign (*memo*), since a
+    workspace holds many campaigns per dataset. Tolerant on purpose: a campaign outlives its
+    dataset dir, and a sidebar that 500s because one old dataset was deleted is worse than one
+    that renders that row as a plain (non-L4) campaign. The strict twin
+    (``wiring._read_backend_type``) still raises at bootstrap, where a missing kind means the run
+    cannot pick a connector.
+    """
+    if dataset_name not in memo:
+        try:
+            raw = read_json_optional(
+                resolve_dataset_config_dir(store, REPO_ROOT, dataset_name) / "pipeline.json"
+            )
+            bt = (raw or {}).get("backend_type")
+            memo[dataset_name] = bt.lower() if isinstance(bt, str) else ""
+        except (OSError, ValueError):
+            memo[dataset_name] = ""
+    return memo[dataset_name]
+
+
+def _campaign_summary(
+    campaign: Any, session_count: int, status: str, backend_type: str
+) -> CampaignSummary:
     return CampaignSummary(
         campaign_id=campaign.campaign_id,
         dataset_name=campaign.dataset_name,
@@ -91,6 +126,7 @@ def _campaign_summary(campaign: Any, session_count: int, status: str) -> Campaig
         created_at=campaign.created_at,
         root_cycle_id=campaign.root_cycle_id,
         backend_id=campaign.backend_id,
+        backend_type=backend_type,
         session_count=session_count,
         owner_user_id=campaign.owner_user_id,
         lifecycle_status=campaign.lifecycle_status,
@@ -219,12 +255,14 @@ def list_campaigns(
             dataset, lifecycle="checkin", owner_user_id=owner
         )
     campaigns.sort(key=lambda c: c.created_at, reverse=True)
+    memo: dict[str, str] = {}
     return CampaignListResponse(
         campaigns=[
             _campaign_summary(
                 c,
                 len(store.campaigns.list_sessions(c.campaign_id)),
                 store.campaigns.latest_session_status(c.campaign_id),
+                _backend_type(store, c.dataset_name, memo),
             )
             for c in campaigns
         ],
@@ -272,6 +310,7 @@ def get_campaign(store: StoreDep, campaign_id: str) -> CampaignDetailResponse:
         created_at=campaign.created_at,
         root_cycle_id=campaign.root_cycle_id,
         backend_id=campaign.backend_id,
+        backend_type=_backend_type(store, campaign.dataset_name, {}),
         session_count=len(sessions) or 1,
         owner_user_id=campaign.owner_user_id,
         lifecycle_status=campaign.lifecycle_status,

@@ -27,7 +27,8 @@ rejection and content-hash sensitivity by
 | `version` | optional | `str` | Connector schema version; rendered into `PipelineSchema.version`. |
 | `description` | optional | `str` | One-line human description. |
 | `available_models` | optional | `list[str]` | Models the connector exposes — surfaced into `PipelineSchema.available_models`. |
-| `backend_name` / `backend_type` | optional | `str` | Connector identity metadata. Read by dataset registration; not parsed into the schema today. |
+| `backend_name` | optional | `str` | Human label for the backend. |
+| `backend_type` | **required** | `str` | The connector KIND (`termnorm` / `promptpotter` / …). Picks the connector at bootstrap (`wiring._read_backend_type` raises when absent), and is served on `CampaignSummary.backend_type` — the ONE test for a self-optimizing (L4) campaign, which the webapp branches on (`isSelfOptimization`). Never a `PipelineSchema` field: the parser drops it, so readers take it off the raw overlay. |
 | `llm_defaults` | optional | `dict` | Default LLM provider/model bundle. Read by bootstrap, not by the parser. |
 | `resolved_prompts` | optional | `dict[str, ResolvedPrompt]` | Prompt registry keyed by `"{family}/{version}"`. Each node references its prompt via `config.prompt_family` + `config.prompt_version`. |
 | `resolved_schemas` | optional | `dict[str, ResolvedSchema]` | Output-schema registry keyed by `"{family}/{version}"`. Each node references its schema via `config.schema_family` + `config.schema_version`. |

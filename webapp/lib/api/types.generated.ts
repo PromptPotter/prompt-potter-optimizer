@@ -271,6 +271,13 @@ export interface CampaignSummary {
   root_cycle_id: string;
   /** Backend this campaign optimizes against */
   backend_id: string;
+  /** Connector KIND of the campaign's dataset ('termnorm' / 'promptpotter' / …),
+   * read off `{dataset}/pipeline.json::backend_type`. The webapp's ONE test
+   * for a self-optimizing (L4) campaign — it renders the 'inner loops'
+   * disclosure and the pp-self panel variants on it. Empty when the dataset
+   * config is gone (a campaign outlives its dataset dir); callers treat empty
+   * as 'not self-optimizing'. */
+  backend_type: string;
   /** Number of sessions (re-runs of the declaration) in the campaign */
   session_count: number;
   /** UserId of the operator who minted the campaign */
@@ -442,6 +449,7 @@ export const STOP_REASON_LABELS: Record<string, string> = {
   'perfect_score': 'Perfect score',
   'target_hit': 'Target reached',
   'max_rounds': 'Max rounds',
+  'lives_exhausted': 'Out of lives',
   'hard_cap_reached': 'Round cap',
   'sweep_complete': 'Sweep complete',
   'diag_complete': 'Diagnostic complete',
