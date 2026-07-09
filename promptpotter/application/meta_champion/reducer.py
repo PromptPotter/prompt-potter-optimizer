@@ -32,7 +32,15 @@ from promptpotter.infrastructure.projections.live_dashboard.round_summary import
 from promptpotter.shared.statistics import paired_diff_posterior
 
 # The datasets whose cycles carry meta-prompt candidates (the L4 recursion connector).
-_PP_SELF_DATASETS = frozenset({"promptpotter-self", "promptpotter"})
+#
+# KNOWN DEFECT — this is a NAME allowlist standing in for "does this campaign's dataset use
+# the `promptpotter` connector?". The authoritative answer is `pipeline.json::backend_type ==
+# "promptpotter"` (the same predicate the webapp's `isSelfOptimization` reads off the served
+# `CampaignSummary.backend_type`). Any pp-self dataset under another name — an A/B arm, a fork
+# — is silently skipped by the reducer rather than loudly rejected. Fixing it means resolving
+# each campaign's dataset config dir here; left as a named debt rather than widened by hand,
+# because widening the list is what made it wrong twice.
+_PP_SELF_DATASETS = frozenset({"promptpotter-self"})
 _ORIGIN_HASH = "origin"
 
 

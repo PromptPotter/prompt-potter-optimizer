@@ -39,8 +39,7 @@ Optional:
 | `aime_2025` | `termnorm` (OpenRouter+Mistral overlay) | AIME competition math; overlay routes off Groq default. |
 | `justlogic` | `termnorm` | Logic reasoning at variable depth. |
 | `email-tagging` | `termnorm` | Built-in try-and-learn demo (n8n inbox email-classification); surfaced while `User.demo_mode_enabled`. |
-| `promptpotter` | `promptpotter` | Outer cycle whose backend is the optimizer itself (L4 recursion). |
-| `promptpotter-self` | `promptpotter` | Optimizer-of-the-optimizer demo dataset. See [§ L4 below](#l4--promptpotter-self). |
+| `promptpotter-self` | `promptpotter` | **The one L4 dataset.** Optimizer-of-the-optimizer; outer cycle whose backend is the optimizer itself. See [§ L4 below](#l4--promptpotter-self). |
 | `_optimizer/` | n/a | The optimizer's own `pipeline.json` + prompt variants — same shape as a target backend's pipeline.json (per §0 self-optimization commitment). |
 
 ## L4 — `promptpotter-self`
