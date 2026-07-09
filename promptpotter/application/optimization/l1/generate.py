@@ -22,7 +22,12 @@ from promptpotter.application.optimization.validators.l1_strict import (
 )
 from promptpotter.domain.escalation_signals import ValidationFailure
 from promptpotter.domain.opt_search_point import EvidenceGrounding
-from promptpotter.domain.results import CandidateProposal, candidate_label
+from promptpotter.domain.results import (
+    L1_PARSE_FAILURE_MALFORMED,
+    L1_PARSE_FAILURE_TOOLING,
+    CandidateProposal,
+    candidate_label,
+)
 from promptpotter.infrastructure.llm.json_parse import MetaPromptParseError
 from promptpotter.infrastructure.llm.models import emit_round_warning
 from promptpotter.infrastructure.tracing import CandidateCreated
@@ -136,14 +141,15 @@ async def l1_generate(
         # structurally wrong — both wound the same channel but `reason` steers L2's heal direction.
         raw = (parse_err.raw or "").strip()
         is_empty = len(raw) < 20
-        reason = "l1_provider_empty_response" if is_empty else "meta_prompt_parse_failure"
+        reason = L1_PARSE_FAILURE_TOOLING if is_empty else L1_PARSE_FAILURE_MALFORMED
         logger.error(
-            "L1 R%d: %s — zero candidates this round (raw=%d chars)",
+            "L1 R%d: %s — zero candidates this round (raw=%d chars) [%s]",
             round_num,
             "provider returned empty/truncated content"
             if is_empty
             else "meta-prompt parse failure after retry",
             len(raw),
+            parse_err.diagnosis(),
         )
         opt_sp.memory.wounds.validation_failures.append(
             ValidationFailure(
@@ -165,7 +171,20 @@ async def l1_generate(
                 )
                 + f" (model {model})."
             ),
-            detail={"reason": reason, "raw_chars": len(raw), "model": model},
+            detail={
+                "reason": reason,
+                "raw_chars": len(raw),
+                "model": model,
+                # The provider's own account. `finish_reason: length` + a large
+                # `reasoning_tokens` means the meta-prompt is too big for the token
+                # budget (fix the prompt); `stop` with ~2 completion tokens means the
+                # provider degraded (retry/route elsewhere). Same symptom, opposite fix,
+                # so both land on disk rather than only in the log.
+                "finish_reason": parse_err.finish_reason,
+                "completion_tokens": parse_err.completion_tokens,
+                "reasoning_tokens": parse_err.reasoning_tokens,
+                "reasoning_chars": parse_err.reasoning_chars,
+            },
         )
         return [], reason
     slot_sizes = sorted(

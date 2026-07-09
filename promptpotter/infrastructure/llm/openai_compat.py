@@ -30,6 +30,28 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _failure_diagnostics(response: Any, first_prompt: int, first_completion: int) -> dict[str, Any]:
+    """Provider's own account of a parse failure, for ``MetaPromptParseError``.
+
+    ``reasoning_tokens`` is the tell: a reasoning model can spend the whole
+    ``max_tokens`` budget thinking and emit zero content tokens, which is a
+    prompt-size problem, not a flaky provider. Both round-trips are metered —
+    the caller bills them, and a failed call is billed the same as a good one."""
+    usage = getattr(response, "usage", None)
+    details = getattr(usage, "completion_tokens_details", None)
+    message = response.choices[0].message if getattr(response, "choices", None) else None
+    return {
+        "model": getattr(response, "model", None),
+        "finish_reason": (
+            response.choices[0].finish_reason if getattr(response, "choices", None) else None
+        ),
+        "prompt_tokens": (usage.prompt_tokens if usage else 0) + first_prompt,
+        "completion_tokens": (usage.completion_tokens if usage else 0) + first_completion,
+        "reasoning_tokens": int(getattr(details, "reasoning_tokens", 0) or 0),
+        "reasoning_chars": len(getattr(message, "reasoning", None) or "" if message else ""),
+    }
+
+
 class OpenAICompatibleClient(LLMClientBase):
     """Client for any OpenAI-compatible API (OpenAI, Groq, etc.)."""
 
@@ -192,19 +214,24 @@ class OpenAICompatibleClient(LLMClientBase):
                     if content_len < 20
                     else "schema-noncompliant after repair retry"
                 )
+                err = MetaPromptParseError(
+                    raw=content,
+                    error=validation_err,
+                    attempts=2,
+                    **_failure_diagnostics(response, first_prompt, first_completion),
+                )
                 logger.error(
                     "%s: %s parse failed AGAIN after repair retry (%d errors, "
                     "%d content chars) — %s. Round will record the failure and "
-                    "continue with zero candidates.",
+                    "continue with zero candidates. [%s]",
                     self._provider_name,
                     schema_name,
                     validation_err.error_count(),
                     content_len,
                     cause,
+                    err.diagnosis(),
                 )
-                raise MetaPromptParseError(
-                    raw=content, error=validation_err, attempts=2
-                ) from validation_err
+                raise err from validation_err
 
         usage = response.usage
         if reservation is not None and usage is not None:

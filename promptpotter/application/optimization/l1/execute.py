@@ -48,6 +48,7 @@ async def execute_round(
     degradation_checks: list[StopRule] | None = None,
     *,
     skip_critique: bool = False,
+    is_final_round: bool = False,
 ) -> RoundResult:
     """Execute one L1 round: generate → score+select → critique. Returns a
     ``RoundResult`` (`.critique` set when L1_CRITIQUE fired); runner folds it
@@ -55,6 +56,9 @@ async def execute_round(
 
     ``skip_critique=True`` (sweep mode) drops the round-end critique so the
     cheap-fork stays one LLM call; round 1 is identical across all forks.
+
+    ``is_final_round=True`` (the loop's calendar cap is about to bite) likewise drops
+    it — see the critique site for why a critique nobody will read is pure latency.
     """
     session = cycle.session
     config = cycle.config
@@ -182,7 +186,17 @@ async def execute_round(
     # ``candidates`` guard critique would fire a meta LLM call to critique nothing. Skip it:
     # the empty generation is already recorded as a ``ValidationFailure`` wound that routes
     # L2 to heal l1_generate — that is the right next move, not another critique.
-    if candidates and round_result.results and not skip_critique:
+    # Critique is feedback FOR THE NEXT ROUND's l1_generate — nothing else reads it. When no
+    # next round will run, the call is pure latency: on the L4 inner benchmark the terminal
+    # critique + the terminal L2 fire together burned 15.8% of all inner wall time producing
+    # output that died with the cycle. Both boundaries must be checked: the calendar cap
+    # (`is_final_round`, known before the round) and the lives bank emptying (knowable only
+    # now, from this round's `improved` verdict — asked through the FSM so the lookahead can
+    # never disagree with the banking `post_round` is about to do).
+    will_stop = is_final_round or cycle.escalation.would_exhaust_lives(
+        round_result.improved, config.optimization.lives
+    )
+    if candidates and round_result.results and not skip_critique and not will_stop:
         # Critique is round-over-round feedback — survive a malformed response.
         with graceful("L1 critique failed; continuing without round-over-round feedback"):
             async with observed_node(

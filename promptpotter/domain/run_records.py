@@ -293,6 +293,7 @@ RoundWarningKind = Literal[
     "l1_zero_candidates",
     "l2_validator_soft_reject",
     "injection_budget_overrun",
+    "layer_parse_failure",
 ]
 
 

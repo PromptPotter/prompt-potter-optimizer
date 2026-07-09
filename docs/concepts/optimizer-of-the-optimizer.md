@@ -95,7 +95,14 @@ runs real inner campaigns: each outer "sample" (an inner task in `inner_tasks.js
 mints + runs a full inner PromptPotter cycle **in its own asyncio task** under a
 **flat `<workspace>/.inner/<spawn_cycle_id>/` sandbox** (NOT physically nested —
 that overflows Windows `MAX_PATH`; flat keeps it re-entrant at any depth), and the
-composed fitness vector flows into the outer scoring formula. The shared `in_process`
+composed fitness vector flows into the outer scoring formula. **The sandbox holds
+campaign STATE only.** The two content-addressed caches (`MeasurementArchive`,
+`OptimizerCallCache`) stay tenant-global via `Stores.shared_root`: their keys are
+content hashes, so a hit is the same measurement by construction. Sandboxing them
+made every outer cycle re-score every inner origin — and an inner origin is
+stochastic, so each cycle subtracted a freshly-redrawn baseline (one searchpoint,
+one sample set, scored 0.375 in seven cycles and 0.417 in two) from the lift it was
+trying to measure. The shared `in_process`
 seam also yields the in-process `llm_only` connector (no TermNorm server for the
 basic case). Implementation: `promptpotter/application/runner/inner_recursion.py`.
 

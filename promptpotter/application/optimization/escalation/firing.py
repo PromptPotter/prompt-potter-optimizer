@@ -64,6 +64,7 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.validators import ValidatorOutcome
+from promptpotter.infrastructure.llm.json_parse import MetaPromptParseError
 from promptpotter.infrastructure.llm.models import emit_round_warning
 from promptpotter.infrastructure.tracing import LayerApplied, observed_node
 from promptpotter.shared import truncate
@@ -464,17 +465,57 @@ async def _run_transition(
             resolve_node_layout(transition.template_name),
             build_bundle(cycle),
         )
-        raw, prompt, _ = await run_optimizer_node(
-            template_name=transition.template_name,
-            prompt_vars=prompt_vars,
-            template=template,
-            context=LLMCallContext(
-                ledger=cycle.session.state.ledger,
-                round_num=round_num,
-                cache=cycle.session.store.optimizer_calls,
-            ),
-        )
-        result = transition.parse(raw, cycle.opt_sp, prompt)
+        try:
+            raw, prompt, _ = await run_optimizer_node(
+                template_name=transition.template_name,
+                prompt_vars=prompt_vars,
+                template=template,
+                context=LLMCallContext(
+                    ledger=cycle.session.state.ledger,
+                    round_num=round_num,
+                    cache=cycle.session.store.optimizer_calls,
+                ),
+            )
+            result = transition.parse(raw, cycle.opt_sp, prompt)
+        except MetaPromptParseError as parse_err:
+            # A refinement that never parsed costs a REFINEMENT, not a MEASUREMENT. Left
+            # unhandled this kills the whole cycle — and under L4 that voids an entire outer
+            # sample, so one flaky provider response is scored as "this meta-prompt is bad".
+            # `l1_generate` has always survived the same failure (`l1/generate.py`); L2/L3
+            # simply never got the same treatment. Prior `task_context`/`plan` stays adopted
+            # (identical to a soft-reject), the round is a stall, and the loop continues.
+            logger.error(
+                "%s: meta-prompt parse failure — refinement discarded, prior framing kept. [%s]",
+                transition.template_name,
+                parse_err.diagnosis(),
+            )
+            emit_round_warning(
+                kind="layer_parse_failure",
+                severity="error",
+                message=(
+                    f"{transition.template_name} returned unusable output "
+                    f"({'empty/truncated' if len((parse_err.raw or '').strip()) < 20 else 'schema-noncompliant'}) "
+                    "— the prior framing was kept and the loop continues."
+                ),
+                detail={
+                    "node": transition.template_name,
+                    "layer": transition.layer_id,
+                    "finish_reason": parse_err.finish_reason,
+                    "completion_tokens": parse_err.completion_tokens,
+                    "reasoning_tokens": parse_err.reasoning_tokens,
+                    "reasoning_chars": parse_err.reasoning_chars,
+                    "raw_chars": len((parse_err.raw or "").strip()),
+                },
+            )
+            emit_phase(
+                on_phase,
+                transition.phase,
+                "exit",
+                round=round_num,
+                view=None,
+                data={"action": "parse_failure", "node": transition.template_name},
+            )
+            return
 
     new_opt = result.opt_search_point
     cycle.opt_sp.copy_memory_to(new_opt)

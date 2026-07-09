@@ -101,6 +101,17 @@ class EscalationFSM:
         base = lives.start if current is None else current
         return max(0, min(lives.cap, base + (1 if improved else -1)))
 
+    def would_exhaust_lives(self, improved: bool, lives: LivesConfig | None) -> bool:
+        """Would banking this round's verdict empty the bank (i.e. stop the loop)?
+
+        Pure lookahead — banks nothing. Lets a caller know THIS round is the last one
+        before it spends an LLM call on output only the NEXT round could read. Reads
+        through ``_bank_life`` rather than re-deriving the arithmetic, so the answer can
+        never disagree with what ``observe_round`` is about to do."""
+        if lives is None:
+            return False
+        return self._bank_life(self._lives, improved, lives) == 0
+
     @property
     def l2_round(self) -> int:
         return self._l2_round

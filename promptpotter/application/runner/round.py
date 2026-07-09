@@ -307,10 +307,17 @@ async def post_round(
     config: CampaignConfig,
     session: Session,
     cb: RunCallbacks,
+    *,
+    is_final_round: bool = False,
 ) -> None:
     """Clean-round escalation observation; raises ``StopLoop`` on stop condition.
     State machine observes outcome (CONTINUE / FIRE_L2 / STOP_*), then closes the round and dispatches.
-    Probe rounds bypass observation and call ``close_round`` directly."""
+    Probe rounds bypass observation and call ``close_round`` directly.
+
+    ``is_final_round`` suppresses the L2 fire: L2's refined ``task_context`` is read by the
+    NEXT round's L1, so on the last round it is a ~35s LLM call whose output dies with the
+    cycle. The lives-exhausted boundary needs no flag — ``observe_round`` sets
+    ``stop_reason`` and we raise before reaching the fire."""
     axes_with_positive_yield = count_positive_yield_axes(cycle)
     # A dropped mandatory backend placeholder is structural, not a stall — heal L2 now
     # (patience 0) instead of burning l1_patience rounds while L1 re-drops it.
@@ -340,6 +347,8 @@ async def post_round(
 
     if event.stop_reason is not None:
         raise StopLoop(event.stop_reason)
+    if is_final_round:
+        return
     if event.next_action == NextAction.FIRE_L2:
         await escalate_or_stop(cycle, config, session, round_num, cb)
 

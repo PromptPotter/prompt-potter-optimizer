@@ -18,6 +18,8 @@ from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.run_records import DecisionRecord, ErrorRecord
 
 __all__ = [
+    "L1_PARSE_FAILURE_MALFORMED",
+    "L1_PARSE_FAILURE_TOOLING",
     "CandidateProposal",
     "CritiqueReadout",
     "CycleResult",
@@ -255,6 +257,17 @@ class SampleOrderStep(BaseModel):
     planned: list[int] = Field(default_factory=list)
 
 
+# The two reasons `RoundResult.l1_parse_failure` can carry. Opposite kinds of evidence,
+# so no reader may treat the field as a bool:
+#   MALFORMED — the meta-prompt drove the optimizer LLM to emit schema-noncompliant output.
+#               That IS the meta-prompt's fault; charge it (L4 scores the round dirty).
+#   TOOLING   — the optimizer LLM returned empty/truncated content. Missing data, not a
+#               verdict. Charging it scores provider flakiness as a bad mutation; the round
+#               must be EXCLUDED, exactly as a crashed inner cycle is excluded as a sample.
+L1_PARSE_FAILURE_MALFORMED = "meta_prompt_parse_failure"
+L1_PARSE_FAILURE_TOOLING = "l1_provider_empty_response"
+
+
 class RoundResult(BaseModel):
     """Per-round outcome — the flat wire shape persisted to `index.json`.
 
@@ -318,9 +331,11 @@ class RoundResult(BaseModel):
     l1_yield: float = 1.0
     l1_n_no_op: int = 0
     l1_n_duplicate: int = 0
-    # Reason the outer meta-prompt made this round's L1 output unparseable (zero candidates).
-    # The round owns it: a parse failure yields no candidate to charge, and `candidate_scores`
-    # is empty in exactly that round.
+    # Reason this round's L1 output was unparseable (zero candidates), or None. The round owns
+    # it: a parse failure yields no candidate to charge, and `candidate_scores` is empty in
+    # exactly that round. One of `L1_PARSE_FAILURE_MALFORMED` / `L1_PARSE_FAILURE_TOOLING` —
+    # the two are opposite kinds of evidence (see their docstrings) and must never be
+    # collapsed to a bool by a reader.
     l1_parse_failure: str | None = None
     # Adaptive-queue-mechanism sample-selection timeline for the round's
     # representative (longest-surviving) candidate — one row per measurement

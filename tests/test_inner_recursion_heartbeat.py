@@ -74,6 +74,7 @@ async def test_outer_ledger_gets_progress_with_detail(tmp_path: Path, monkeypatc
         inner_sandbox_root=tmp_path,
         dataset_config_dir=tmp_path,
         identity=None,  # type: ignore[arg-type]  # stubbed inner run never reads it
+        shared_root=tmp_path,
     )
     inner_recursion._INNER_SPAWN.set(ctx)
 

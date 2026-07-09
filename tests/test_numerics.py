@@ -840,6 +840,67 @@ def test_compute_proxies_composed_fitness_discriminates() -> None:
     assert score({"pipeline_data": px}) > score({"pipeline_data": pd})
 
 
+def test_compute_proxies_excludes_tooling_failures_from_cleanliness() -> None:
+    # SILENT wrong-score, the mirror image of the case above. `l1_parse_failure` carries a
+    # REASON, and the two reasons are opposite evidence: a MALFORMED round is the meta-prompt's
+    # fault, a TOOLING round (the optimizer LLM returned empty content) says nothing about the
+    # meta-prompt at all. Charging tooling scores provider flakiness as a bad mutation — and
+    # since an empty response is the single most common inner failure, the outer fitness becomes
+    # mostly a measurement of provider noise. Nothing errors; the ranking is just wrong.
+    from promptpotter.application.runner.inner_recursion import (
+        InnerCycleUnscoreableError,
+        _compute_proxies,
+    )
+
+    clean = _fake_inner_result(
+        [0.40, 0.55], 0.30, [_fake_inner_round(0), _fake_inner_round(1), _fake_inner_round(2)]
+    )
+    px = _compute_proxies(clean, target=0.60, elapsed=100.0)
+
+    # One tooling round out of two → dropped, not charged. The surviving round is clean, so
+    # cleanliness stays 1.0. (Charging it would give 0.5 — the same score as a meta-prompt that
+    # genuinely broke its own children.)
+    tooling = _fake_inner_result(
+        [0.40, 0.55],
+        0.30,
+        [
+            _fake_inner_round(0),
+            _fake_inner_round(1, parse_failure="l1_provider_empty_response"),
+            _fake_inner_round(2),
+        ],
+    )
+    pt = _compute_proxies(tooling, target=0.60, elapsed=100.0)
+    assert pt["cleanliness"] == pytest.approx(px["cleanliness"])
+    assert pt["cleanliness"] == pytest.approx(1.0)
+
+    # ...but a malformed round in the same slot IS charged. Same field, opposite handling.
+    malformed = _fake_inner_result(
+        [0.40, 0.55],
+        0.30,
+        [
+            _fake_inner_round(0),
+            _fake_inner_round(1, parse_failure="meta_prompt_parse_failure"),
+            _fake_inner_round(2),
+        ],
+    )
+    assert _compute_proxies(malformed, target=0.60, elapsed=100.0)["cleanliness"] < 1.0
+
+    # Every L1 round tooling-failed → the cycle carries no evidence. It must be EXCLUDED as an
+    # outer sample, not scored: `_mean([])` is 0.0, so a naive filter would report the
+    # most-broken possible cycle as PERFECTLY clean (cleanliness 1.0) — inverting the truth.
+    all_tooling = _fake_inner_result(
+        [0.40],
+        0.30,
+        [
+            _fake_inner_round(0),
+            _fake_inner_round(1, parse_failure="l1_provider_empty_response"),
+            _fake_inner_round(2, parse_failure="l1_provider_empty_response"),
+        ],
+    )
+    with pytest.raises(InnerCycleUnscoreableError):
+        _compute_proxies(all_tooling, target=0.60, elapsed=100.0)
+
+
 def test_pp_self_scoring_composed_and_gradient_bearing() -> None:
     # SILENT wrong-score: the composed formula must (a) still ignore the retired flat proxies
     # (rounds_to_N, raw token count, the held-out after_N_rounds_delta), (b) stay monotone in the

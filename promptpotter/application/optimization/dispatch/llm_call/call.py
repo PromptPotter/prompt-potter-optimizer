@@ -46,6 +46,7 @@ from promptpotter.infrastructure.llm import (
     get_llm_client,
     wait_with_countdown,
 )
+from promptpotter.infrastructure.llm.json_parse import MetaPromptParseError
 from promptpotter.infrastructure.store.stores import OptimizerCallCache, hash_call
 
 if TYPE_CHECKING:
@@ -320,6 +321,26 @@ async def llm_call(
                         decision.seconds,
                     )
                     await wait_with_countdown(decision.seconds, f"{label} {decision.scope}")
+        except MetaPromptParseError as parse_err:
+            # A call that failed to parse was billed exactly like one that parsed. Meter it
+            # here — this is the sole `emit_token_usage` site, and the raise happens upstream
+            # of the success path's usage block, so without this the two round-trips of every
+            # empty/malformed response are invisible to the ledger, to `dashboard.json::spend`,
+            # and to the `spend_budget_usd` gate that is supposed to bound the run.
+            logger.error(
+                "%s: optimizer call failed to parse — %s",
+                node or "llm_call",
+                parse_err.diagnosis(),
+            )
+            emit_token_usage(
+                node=node or "llm_call",
+                kind="optimizer",
+                input_tokens=parse_err.prompt_tokens,
+                output_tokens=parse_err.completion_tokens,
+                duration_s=round(time.monotonic() - _t0, 2),
+                model=parse_err.model or merged.get("model"),
+            )
+            raise
         finally:
             # Cancel the heartbeat whether the call succeeded or raised —
             # an in-flight task would otherwise survive the function exit
@@ -356,7 +377,15 @@ async def llm_call(
             cost_usd=float(cost_raw) if cost_raw is not None else None,
         )
 
-        if context.cache is not None and cache_key is not None:
+        # Never cache a response that carries no payload. A provider returning empty
+        # content (`finish_reason: stop`, 2 completion tokens, schema repair exhausted)
+        # is a TRANSIENT failure; storing it converts that flake into a PERMANENT one,
+        # because the key is the prompt hash and every later call replays the emptiness.
+        # The caller then sees a zero-candidate round forever and reads it as provider
+        # flakiness. Harmless while the cache was per-sandbox and thrown away with the
+        # run; load-bearing now that it is tenant-global (`Stores.shared_root`).
+        usable = bool(response.content.strip()) or response.parsed is not None
+        if context.cache is not None and cache_key is not None and usable:
             context.cache.save(cache_key, response.model_dump())
 
     if context.ledger is not None:

@@ -83,7 +83,11 @@ admissibility checks.
 ## Stores — composite over leaves
 
 `store/stores.py`: `Stores` frozen dataclass + `build_stores(identity,
-*, projects_root=…, datasets_root=…)` builder. `identity` is the
+*, projects_root=…, datasets_root=…, shared_root=…)` builder.
+`shared_root` roots the two CONTENT-ADDRESSED caches (`archive`,
+`optimizer_calls`) and equals `projects_root` everywhere except an L4
+inner sandbox, which isolates campaign state but must NOT isolate a
+cache keyed by content hash. `identity` is the
 Stage-0 `IdentityContext` (`shared/identity.py`); `Stores.identity` is
 the sole source of tenant scope, with `Stores.tenant_id` a derived
 `@property` returning the `TenantId` newtype (identity-foundation

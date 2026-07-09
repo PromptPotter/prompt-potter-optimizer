@@ -59,7 +59,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.config import LivesConfig
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
+from promptpotter.domain.results import L1_PARSE_FAILURE_TOOLING
 from promptpotter.infrastructure.store.io import read_json_optional
 
 if TYPE_CHECKING:
@@ -69,6 +71,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+class InnerCycleUnscoreableError(RuntimeError):
+    """The inner cycle ran to completion but produced no evidence about the meta-prompt.
+
+    Rides the same exclusion channel as a crashed inner cycle: ``run_inner_cycle`` raises,
+    ``measure_sample``'s catch-all turns it into one EXCLUDED row, and the candidate is
+    scored on its surviving samples. Never a zero — a zero is a verdict, and this is the
+    absence of one."""
+
+
 # The terminal-ranker key the outer `promptpotter-self` pipeline reads as its
 # prediction (a non-empty list keeps the origin round-0 health gate from halting
 # on all-NO_RESULT) + the composed-fitness proxy scalars the outer scoring formula
@@ -76,6 +88,13 @@ logger = logging.getLogger(__name__)
 # .observation_mappings` declares these as observation keys, so they reach
 # `pipeline_data` and the formula namespace (`scoring/formula/compiler.py`).
 INNER_RESULT_KEY = "final_ranking"
+
+# Per-round inner spend allowance, used to size an inner cycle's `spend_budget_usd` from its
+# round budget. Measured on the L4 inner benchmark (justlogic, 24-sample bank, 2 inner
+# variants, gpt-oss-120b optimizer + gpt-oss-20b target): the origin round costs ~$0.006 and
+# each L1 round ~$0.006 (optimizer + backend). Doubled, so a pricier model or a wider bank
+# still finishes its declared rounds rather than tripping the cost stop mid-budget.
+INNER_SPEND_PER_ROUND_USD = 0.012
 PROXY_KEYS = (
     "first_round_delta",
     "after_N_rounds_delta",
@@ -105,11 +124,20 @@ class InnerSpawnContext:
     path-length trap. Still out of the ``projects/`` tree, so inner campaigns never
     show in the outer campaign listing. ``dataset_config_dir`` is the spawning
     campaign's config dir, read for ``inner_tasks.json``; ``identity`` roots the
-    sandbox stores under the same tenant."""
+    sandbox stores under the same tenant.
+
+    ``shared_root`` is the REAL workspace root, carried through so the inner store keeps
+    its ``archive`` + ``optimizer_calls`` tenant-global while its campaign state stays
+    sandboxed. Sandboxing those caches too meant every outer cycle re-scored every inner
+    origin from scratch — and because an inner origin is stochastic, it redrew a different
+    accuracy each time (observed: the same content hash on the same 24 samples scoring
+    0.375 in seven sandboxes and 0.417 in two). The outer fitness subtracts that origin,
+    so the isolation injected a noise term larger than the lift it was measuring."""
 
     inner_sandbox_root: Path
     dataset_config_dir: Path
     identity: IdentityContext
+    shared_root: Path
 
 
 _INNER_SPAWN: contextvars.ContextVar[InnerSpawnContext | None] = contextvars.ContextVar(
@@ -131,13 +159,19 @@ def publish_inner_spawn_context(session: Session) -> None:
         return
     # Flat, shallow sandbox home: the workspace's ``.inner/<cycle_id>`` (sibling of
     # ``projects/``), NOT the deep outer cycle dir — keeps the path short at any
-    # recursion depth (Windows MAX_PATH). projects_root is ``<workspace>/projects``.
-    inner_root = session.store.projects_root.parent / ".inner" / cycle_id
+    # recursion depth (Windows MAX_PATH). Anchored on ``shared_root`` (the REAL
+    # workspace root, invariant across depth), not on this store's ``projects_root``:
+    # inside a sandbox the latter already IS ``.inner/<parent>``, so an L5 would nest
+    # at ``.inner/.inner/<id>`` and reintroduce the path-length trap the flat layout exists
+    # to avoid. Identical for a top-level cycle, where the two roots coincide.
+    shared_root = session.store.shared_root
+    inner_root = shared_root.parent / ".inner" / cycle_id
     _INNER_SPAWN.set(
         InnerSpawnContext(
             inner_sandbox_root=inner_root,
             dataset_config_dir=Path(dataset_dir),
             identity=session.store.identity,
+            shared_root=shared_root,
         )
     )
 
@@ -152,6 +186,14 @@ class _InnerTaskSpec:
     n_rounds: int
     target: float
     n_variants: int | None  # inner_n_variants — None keeps the inner dataset's own value
+    # ``inner_lives`` — the improvement-banked round budget for the inner cycle. ``n_rounds``
+    # is the CEILING a compounding inner campaign is allowed to reach; ``lives`` is what makes
+    # a stalling one stop early (a fully-stalling run does exactly ``start`` L1 rounds). Without
+    # it, every inner campaign — improving or dead — pays the full round budget, which is the
+    # dominant cost of raising that budget at all. Owned by the outer task spec for the same
+    # reason ``n_rounds`` and ``n_variants`` are: it is an L4 decision about how much evidence
+    # to buy, not the inner dataset's standalone default. None ⇒ ``max_rounds`` alone governs.
+    lives: LivesConfig | None = None
     # Per-cell target-model override (the environment axis of the panel). None keeps
     # the inner dataset's own pinned model. The operator sets these — never the loop —
     # so an (target-model, dataset) cell is a fixed, in-band resource, not a fuzzy pick.
@@ -184,6 +226,8 @@ def _resolve_inner_task(ctx: InnerSpawnContext, query: str) -> _InnerTaskSpec:
     target = float(bench_cfg.get("target_score", 0.8))
     raw_variants = bench_cfg.get("inner_n_variants")
     n_variants = int(raw_variants) if raw_variants is not None else None
+    raw_lives = bench_cfg.get("inner_lives")
+    lives = LivesConfig.model_validate(raw_lives) if raw_lives is not None else None
     raw_opt_temp = bench_cfg.get("inner_optimizer_temperature")
     inner_optimizer_temperature = float(raw_opt_temp) if raw_opt_temp is not None else None
     seed = 0
@@ -207,6 +251,7 @@ def _resolve_inner_task(ctx: InnerSpawnContext, query: str) -> _InnerTaskSpec:
         n_rounds=n_rounds,
         target=target,
         n_variants=n_variants,
+        lives=lives,
         inner_model=inner_model,
         inner_provider=inner_provider,
         inner_optimizer_temperature=inner_optimizer_temperature,
@@ -221,11 +266,23 @@ def _mean(xs: list[float]) -> float:
     return sum(xs) / len(xs) if xs else 0.0
 
 
+def _is_evidential(rnd: RoundResult) -> bool:
+    """False when the round says nothing about the meta-prompt under test.
+
+    A ``L1_PARSE_FAILURE_TOOLING`` round lost its candidates to an empty optimizer
+    response. That is missing data, the same class as the crashed inner cycle this module
+    already excludes as an outer sample — *"a TOOLING failure is NOT evidence the outer
+    meta-prompt mutation was bad."* Scoring it dirty makes provider flakiness look like a
+    bad mutation, which is precisely the noise that swamps the outer signal."""
+    return rnd.l1_parse_failure != L1_PARSE_FAILURE_TOOLING
+
+
 def _round_problem_rate(rnd: RoundResult) -> float:
-    """Per-round dirtiness ∈ [0,1]: inner samples that degraded or came back unscoreable
-    (``health``), or a round the outer meta-prompt made unparseable outright. Both are
-    candidate-controlled — a meta-prompt that makes the inner loop emit unscoreable
-    predictions, or no candidates at all, scores dirtier.
+    """Per-round dirtiness ∈ [0,1] for an EVIDENTIAL round (see ``_is_evidential``): inner
+    samples that degraded or came back unscoreable (``health``), or a round the outer
+    meta-prompt made unparseable outright. Both are candidate-controlled — a meta-prompt
+    that makes the inner loop emit unscoreable predictions, or no candidates at all,
+    scores dirtier.
 
     A parse failure is charged to the ROUND, not to a candidate. It cannot be read off
     ``candidate_scores``: ``l1_generate`` returns zero candidates in exactly that case, so
@@ -294,9 +351,19 @@ def _compute_proxies(result: CycleResult, target: float, elapsed: float) -> dict
     )
 
     l1_rounds = [r for r in result.rounds if r.round != 0]
-    cleanliness = 1.0 - _mean([_round_problem_rate(r) for r in l1_rounds])
-    diversity_health = 1.0 - _mean([_round_mode_collapse_rate(r) for r in l1_rounds])
-    rounds_improved_frac = _mean([1.0 if r.improved else 0.0 for r in l1_rounds])
+    # Rounds that carry no evidence about the meta-prompt are dropped, not scored. Note the
+    # order: `_mean([]) -> 0.0` would read an all-tooling-failed cycle as PERFECTLY clean
+    # (cleanliness 1.0), the exact inverse of the truth — so that cycle is excluded as an
+    # outer sample instead, on the same channel as a crashed one (`run_inner_cycle`).
+    evidential = [r for r in l1_rounds if _is_evidential(r)]
+    if l1_rounds and not evidential:
+        raise InnerCycleUnscoreableError(
+            "every L1 round lost its candidates to an empty optimizer response "
+            f"({len(l1_rounds)} round(s)) — no evidence about this meta-prompt"
+        )
+    cleanliness = 1.0 - _mean([_round_problem_rate(r) for r in evidential])
+    diversity_health = 1.0 - _mean([_round_mode_collapse_rate(r) for r in evidential])
+    rounds_improved_frac = _mean([1.0 if r.improved else 0.0 for r in evidential])
 
     cost = result.spend.cost_usd if result.spend else 0.0
     n_cand = sum(r.candidates_scored for r in l1_rounds)
@@ -462,9 +529,16 @@ async def _run_inner_campaign(
     # Sandbox: the inner tenant tree roots at the spawning cycle's flat, shallow
     # `<workspace>/.inner/<cycle_id>` home (re-entrant + Windows MAX_PATH-safe; see
     # InnerSpawnContext). The store reads benchmarks from the repo `datasets/`
-    # (build_stores default), so only campaign STATE is sandboxed, not the
-    # read-only inner dataset.
-    store = build_stores(ctx.identity, projects_root=ctx.inner_sandbox_root)
+    # (build_stores default) and keeps the content-addressed caches (`archive` +
+    # `optimizer_calls`) on the REAL tenant tree via `shared_root`, so only campaign
+    # STATE is sandboxed — not the read-only inner dataset, and not the measurement
+    # cache. A cache hit here is the same measurement by content hash; re-scoring it
+    # would re-pay for it AND redraw its stochastic value under the outer's fitness.
+    store = build_stores(
+        ctx.identity,
+        projects_root=ctx.inner_sandbox_root,
+        shared_root=ctx.shared_root,
+    )
 
     # enable_tracing=False: inner campaigns are ephemeral fitness measurements —
     # their per-(sample x candidate x round) cloud traces have no operator value,
@@ -496,17 +570,30 @@ async def _run_inner_campaign(
     # not a thinner per-round subset: the outer proxy reads each candidate's θ-LCB, whose
     # width is set by how many samples that candidate was scored on, so a bank drawn but not
     # fully scored just widens the LCB and starves the outer signal (the inner draw and the
-    # inner measurement must be the same size — anything less is wasted samples). The inner
-    # spend cap is lifted to fit a full-bank × N-round run so this doesn't merely trip the
-    # ``spend_budget`` stop early; it stays well inside the outer campaign's own $ cap. A None
-    # (unlimited) inner budget is BOUNDED here — an inner cycle must never run open-ended.
-    inner_spend_cap = max(campaign_config.optimization.spend_budget_usd or 0.05, 0.05)
+    # inner measurement must be the same size — anything less is wasted samples).
+    #
+    # The inner spend cap is sized off ``spec.n_rounds`` (+1 for the origin round), NOT pinned
+    # to a constant. A constant cap that the round budget can outgrow silently converts the
+    # ROUND budget into a COST budget — and because a verbose meta-prompt burns more per round,
+    # it binds EARLIER for exactly the candidates ``delta_per_dollar`` exists to penalise, so
+    # the confound gets scored as the signal. Sizing off ``n_rounds`` keeps the cap identical
+    # across every candidate in an outer round. A None (unlimited) inner budget is still BOUNDED
+    # here — an inner cycle must never run open-ended.
+    inner_spend_cap = max(
+        campaign_config.optimization.spend_budget_usd or 0.0,
+        INNER_SPEND_PER_ROUND_USD * (spec.n_rounds + 1),
+    )
     opt_update: dict[str, Any] = {"max_rounds": spec.n_rounds, "spend_budget_usd": inner_spend_cap}
     if spec.n_variants is not None:
         # inner_n_variants (inner_tasks.json) — the outer task spec owns the inner
         # search width, same as it owns the round cap; the inner dataset's own
         # n_variants is a standalone-campaign default, not an L4 decision.
         opt_update["n_variants"] = spec.n_variants
+    if spec.lives is not None:
+        # inner_lives (inner_tasks.json) — `max_rounds` above is the ceiling a COMPOUNDING
+        # inner campaign may reach; lives is what stops a STALLING one early. Same channel,
+        # same ownership rationale as `n_variants`.
+        opt_update["lives"] = spec.lives
     cfg_update: dict[str, Any] = {
         "sp_budget_ttest": len(train_data),
         "optimization": campaign_config.optimization.model_copy(update=opt_update),
@@ -698,7 +785,13 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
         )
     inner_spend: CycleSpend | None = result.spend
     elapsed = time.monotonic() - start
-    proxies = _compute_proxies(result, spec.target, elapsed)
+    try:
+        proxies = _compute_proxies(result, spec.target, elapsed)
+    except InnerCycleUnscoreableError as exc:
+        raise RuntimeError(
+            f"inner cycle for {query} is unscoreable ({exc}); "
+            "excluding this outer sample, not scoring it"
+        ) from exc
 
     data: dict[str, Any] = {
         # Terminal-ranker head = the inner-result token (`inner:{query}` — the

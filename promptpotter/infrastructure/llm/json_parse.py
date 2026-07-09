@@ -23,9 +23,29 @@ class MetaPromptParseError(RuntimeError):
     """LLM returned content that failed Pydantic validation after one repair-hint retry.
 
     Carries raw + last ValidationError → L1 records Wound 1, L2 heals next round.
+
+    Also carries the provider's own account of WHY, because the dominant failure is an
+    empty ``content`` and the raw string alone cannot distinguish its causes: a reasoning
+    model that spent its whole ``max_tokens`` budget on reasoning (``finish_reason:
+    length``, large ``reasoning_tokens``) looks identical to a provider that simply
+    returned nothing (``finish_reason: stop``, ``completion_tokens: 2``). The caller
+    (``dispatch/llm_call/call.py``) meters the burned tokens off this record — the call
+    is billed whether or not it parsed, and it is the sole ``emit_token_usage`` site.
     """
 
-    def __init__(self, raw: str, error: ValidationError, *, attempts: int = 2):
+    def __init__(
+        self,
+        raw: str,
+        error: ValidationError,
+        *,
+        attempts: int = 2,
+        model: str | None = None,
+        finish_reason: str | None = None,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        reasoning_tokens: int = 0,
+        reasoning_chars: int = 0,
+    ):
         super().__init__(
             f"Meta-prompt response failed Pydantic validation after {attempts} attempt(s): "
             f"{error.error_count()} errors"
@@ -33,6 +53,20 @@ class MetaPromptParseError(RuntimeError):
         self.raw = raw
         self.error = error
         self.attempts = attempts
+        self.model = model
+        self.finish_reason = finish_reason
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+        self.reasoning_tokens = reasoning_tokens
+        self.reasoning_chars = reasoning_chars
+
+    def diagnosis(self) -> str:
+        """One-line, disk-bound account of the failure — the wound's ``value`` and the log."""
+        return (
+            f"finish_reason={self.finish_reason} completion_tokens={self.completion_tokens} "
+            f"reasoning_tokens={self.reasoning_tokens} reasoning_chars={self.reasoning_chars} "
+            f"content_chars={len((self.raw or '').strip())} model={self.model}"
+        )
 
 
 def try_parse_json(content: str, provider: str) -> Any | None:

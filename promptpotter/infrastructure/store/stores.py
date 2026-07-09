@@ -103,6 +103,15 @@ class Stores:
     The relation is fixed: ``base_dir = projects_root / identity.tenant_id``.
     Use ``projects_root`` directly — do not re-walk ``base_dir.parent``.
 
+    ``shared_root`` is the workspace root holding the two CONTENT-ADDRESSED caches
+    (``archive`` + ``optimizer_calls``). It equals ``projects_root`` for every normal
+    run and DIVERGES only inside an L4 inner sandbox, where campaign state is rooted at
+    ``.inner/<cycle_id>`` but the caches must stay tenant-global. Keys are content
+    hashes, so a hit is the same measurement by construction — isolating them would not
+    make a run safer, only re-pay for it (and redraw the origin's stochastic score, which
+    the outer fitness subtracts). It is a field rather than a re-walk of ``projects_root``
+    so it survives recursion: an L5 sandbox reads its parent's ``shared_root``, not its own.
+
     ``benchmarks_root`` is the install-global ``datasets/`` dir (repo benchmarks,
     shared across tenants). Access to it is capability-gated — go through
     ``store/dataset_access.py``, never read this path directly from a handler.
@@ -110,6 +119,7 @@ class Stores:
 
     base_dir: Path
     projects_root: Path
+    shared_root: Path
     benchmarks_root: Path
     identity: IdentityContext
     backends: BackendStore
@@ -134,6 +144,7 @@ def build_stores(
     *,
     projects_root: Path | str | None = None,
     datasets_root: Path | str | None = None,
+    shared_root: Path | str | None = None,
 ) -> Stores:
     """Assemble an :class:`IdentityContext`-rooted :class:`Stores` bundle.
 
@@ -142,13 +153,22 @@ def build_stores(
     Tests pass ``tmp_path``. The tenant slug rides ``identity.tenant_id`` —
     use :func:`~promptpotter.shared.identity.default_identity` for Stage-0
     single-operator callers.
+
+    ``shared_root`` roots the two content-addressed caches (``archive`` +
+    ``optimizer_calls``) somewhere other than ``projects_root``. Its ONE caller is the
+    L4 inner sandbox (``inner_recursion``), which must isolate campaign STATE without
+    isolating the tenant-global measurement cache. Omit it and the caches sit under
+    ``projects_root``, as they do for every non-recursive run.
     """
     root = Path(projects_root) if projects_root else DEFAULT_PROJECTS_ROOT
     tenant_dir = root / identity.tenant_id
+    shared = Path(shared_root) if shared_root else root
+    shared_tenant = shared / identity.tenant_id
     ds_root = Path(datasets_root) if datasets_root else DEFAULT_DATASETS_ROOT
     return Stores(
         base_dir=tenant_dir,
         projects_root=root,
+        shared_root=shared,
         benchmarks_root=ds_root,
         identity=identity,
         backends=BackendStore(tenant_dir, ds_root),
@@ -157,8 +177,8 @@ def build_stores(
         campaigns=CampaignStore(tenant_dir),
         checkin=CheckinDraftStore(tenant_dir),
         sweeps=SweepStore(tenant_dir),
-        archive=MeasurementArchive(tenant_dir),
-        optimizer_calls=OptimizerCallCache(tenant_dir),
+        archive=MeasurementArchive(shared_tenant),
+        optimizer_calls=OptimizerCallCache(shared_tenant),
         diagnostic_runs=DiagnosticRunStore(tenant_dir),
         users=UserStore(tenant_dir),
     )

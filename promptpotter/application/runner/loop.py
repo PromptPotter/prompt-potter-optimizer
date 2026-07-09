@@ -147,6 +147,11 @@ async def run_round_loop(
             )
             ledger.append(PhaseRecord(phase="round", event="enter", round=round_num))
 
+            # The calendar cap's half of "no round will follow this one". The lives bank's
+            # half can only be known after the round is scored, so `execute_round` /
+            # `post_round` fold it in themselves via `EscalationFSM.would_exhaust_lives`.
+            is_final_round = clean_rounds + 1 >= max_rounds
+
             round_result = await execute_round(
                 cycle,
                 round_num,
@@ -154,6 +159,7 @@ async def run_round_loop(
                 cb,
                 degradation_checks=round_checks,
                 skip_critique=sweep,
+                is_final_round=is_final_round,
             )
             round_payload = cycle.absorb_round(round_result, round_num)
 
@@ -195,7 +201,16 @@ async def run_round_loop(
                 round_num += 1
                 continue
 
-            await post_round(cycle, round_result, round_payload, round_num, config, session, cb)
+            await post_round(
+                cycle,
+                round_result,
+                round_payload,
+                round_num,
+                config,
+                session,
+                cb,
+                is_final_round=is_final_round,
+            )
             # A round that was mostly backend-down isn't a measurement — halt instead
             # of grinding more zero-accuracy rounds against a dead backend (the operator
             # restarts it and ``resume``s). Mid-run sibling of the round-0 origin gate.
