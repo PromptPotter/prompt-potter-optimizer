@@ -25,7 +25,6 @@ from typing import Any
 
 from promptpotter.application.config import missing_template_vars
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
-    resolve_node_schema_descriptions,
     resolve_node_schema_field_names,
 )
 from promptpotter.application.optimization.dispatch.schemas import L1GenerateOutput, L1Variant
@@ -35,8 +34,10 @@ from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, NODE_LAYOUTS
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import (
     NESTED_PARAM_TYPES,
+    SCHEMA_DESCRIPTIONS_PARAM,
     SCHEMA_OWNED_FIELDS,
     SCHEMA_RENAME_PARAM,
+    PipelineNode,
     PipelineSchema,
 )
 from promptpotter.domain.results import CandidateProposal
@@ -118,44 +119,54 @@ def _rename_variant_schema(variant: dict[str, Any], field_names: dict[str, str])
         variant["required"] = [field_names.get(k, k) for k in required]
 
 
-_OUTPUT_SCHEMA_PARAM_DESCRIPTIONS: dict[str, str] = {
-    SCHEMA_RENAME_PARAM: (
-        "Rename a field on the inner optimizer's own output schema. The model holds "
-        "strong priors about what belongs under a given key, so the name steers "
-        "before a single token of the value is written. Keys are the existing field "
-        "names; values are the new wire names. Rename only when the current name "
-        "misdescribes what the field should hold — a rename the model then fails to "
-        "honour makes the round unparseable and scores it maximally dirty."
-    ),
-    "output_schema_descriptions": (
-        "Rewrite the JSON-Schema `description` of a field on the inner "
-        "optimizer's own output schema. This prose sits adjacent to the slot it "
-        "governs, inside the field-filling loop, so it steers harder per token "
-        "than the instruction does. Keys are field names and are FIXED — you "
-        "describe a field, you never rename or add one."
-    ),
-}
+_SCHEMA_DESCRIPTIONS_INSTRUCTION = (
+    "Rewrite the JSON-Schema `description` of a field on this node's OWN output "
+    "schema. This prose sits adjacent to the slot it governs, inside the field-"
+    "filling loop, so it steers the model harder per token than the instruction "
+    "does. Keys are the node's existing field names and are FIXED — you describe a "
+    "field, you never rename or add one. Describe only where the current prose "
+    "underspecifies what the field should hold."
+)
+
+_SCHEMA_RENAME_INSTRUCTION = (
+    "Rename a field on the inner optimizer's own output schema. The model holds "
+    "strong priors about what belongs under a given key, so the name steers "
+    "before a single token of the value is written. Keys are the existing field "
+    "names; values are the new wire names. Rename only when the current name "
+    "misdescribes what the field should hold — a rename the model then fails to "
+    "honour makes the round unparseable and scores it maximally dirty."
+)
 
 
-def _nested_param_property(node_name: str, param: str) -> dict[str, Any] | None:
+def _nested_param_property(node: PipelineNode, param: str) -> dict[str, Any] | None:
     """The emitted sub-schema for a NESTED (`object`-declared) optimizer param.
 
-    A nested param's value space is PromptPotter's own — the L4 case, where the target IS
-    this optimizer — exactly as `model`'s value space is `available_models`. A node offers
-    the lever iff its dataset declares it in `param_keys`, so `architecture.md` §0's "zero
-    hardcoded knowledge of the target" survives. `None` means *declared but unwired* — the
-    param is dropped from the emitted schema rather than advertised as an edit nothing
-    would honour, which is what `NODE_LAYOUTS` membership decides: a node with no layout
-    spec is not one of this optimizer's own.
+    Three levers, each keyed by a CLOSED set so the optimizer can edit but never invent:
 
-    `layout` (L4's information-flow lever): per-slot lists of injection names; the value
-    space is the node's own `NODE_LAYOUTS` add/excise vocabulary. `output_schema_*` (L4's
-    schema levers, `docs/concepts/structured-output.md`): keyed by the inner `l1_generate`'s
-    own variant fields — a closed set, so the optimizer can describe or rename a field but
-    never invent one.
+    - `output_schema_descriptions` — the always-on `description` lever
+      (`docs/concepts/structured-output.md`). Keyed by **this node's own output-schema
+      fields** — synthesized onto every `output_schema`-bearing node, target or optimizer,
+      at parse time. This is the core case: `l1_generate` describing `llm_only`'s
+      `{reasoning, answer}` is the same code path as describing the inner optimizer's own
+      variant fields. `None` when the node ships no schema.
+    - `layout` (L4's information-flow lever): per-slot lists of injection names; value space
+      is the node's own `NODE_LAYOUTS` vocabulary. `None` when the node is not one of this
+      optimizer's own (no layout spec).
+    - `output_schema_field_names` (L4 rename, gated): the strongest lever, keyed by the inner
+      `l1_generate`'s own variant fields; offered only where a node declares it.
     """
+    if param == SCHEMA_DESCRIPTIONS_PARAM:
+        out_schema = node.output_schema
+        if out_schema is None or not out_schema.fields:
+            return None
+        return {
+            "type": "object",
+            "description": _SCHEMA_DESCRIPTIONS_INSTRUCTION,
+            "properties": {f: {"type": "string"} for f in out_schema.fields},
+            "additionalProperties": False,
+        }
     if param == "layout":
-        spec = NODE_LAYOUTS.get(node_name)
+        spec = NODE_LAYOUTS.get(node.name)
         if spec is None:
             return None
         allowed = sorted(spec.possible)
@@ -167,15 +178,14 @@ def _nested_param_property(node_name: str, param: str) -> dict[str, Any] | None:
             },
             "additionalProperties": False,
         }
-    description = _OUTPUT_SCHEMA_PARAM_DESCRIPTIONS.get(param)
-    if description is None or NODE_LAYOUTS.get(node_name) is None:
-        return None
-    return {
-        "type": "object",
-        "description": description,
-        "properties": {f: {"type": "string"} for f in L1Variant.model_fields},
-        "additionalProperties": False,
-    }
+    if param == SCHEMA_RENAME_PARAM and NODE_LAYOUTS.get(node.name) is not None:
+        return {
+            "type": "object",
+            "description": _SCHEMA_RENAME_INSTRUCTION,
+            "properties": {f: {"type": "string"} for f in L1Variant.model_fields},
+            "additionalProperties": False,
+        }
+    return None
 
 
 def build_l1_output_schema(
@@ -264,7 +274,7 @@ def build_l1_output_schema(
         if not schema_field_rename:
             nested.discard(SCHEMA_RENAME_PARAM)
         for param in sorted(nested):
-            prop = _nested_param_property(node_name, param)
+            prop = _nested_param_property(node, param)
             if prop is not None:
                 param_props[param] = prop
         if not param_props:
@@ -287,16 +297,10 @@ def build_l1_output_schema(
     }
     tc_override["additionalProperties"] = False
 
-    # 4. Apply the outer L4 cycle's `description` edits, if any are bound for this task.
-    # Assignment onto EXISTING properties only: a field name the optimizer invented is
-    # dropped here rather than reaching the wire. No override bound (every normal cycle)
-    # → the schema is byte-identical to Pydantic's, so C0 is unchanged by construction.
-    for field, description in resolve_node_schema_descriptions("l1_generate").items():
-        if field in variant_props:
-            variant_props[field]["description"] = description
-
-    # 5. Rename last, so `description` edits above are keyed by the REAL field name and a
-    # rename cannot silently orphan one. `build_l1_response_model` aliases the same map back.
+    # 4. Rename LAST. `build_l1_response_model` aliases the same map back so no downstream
+    # reader observes the wire name. (The `description` lever no longer touches THIS schema:
+    # it rewrites each TARGET node's own `output_schema` at the wire seam
+    # `OptSearchPoint.to_job_search_point`, keyed by that node's fields — the core case.)
     field_names = effective_l1_field_names()
     if field_names:
         _rename_variant_schema(inlined["properties"]["variants"]["items"], field_names)
@@ -607,15 +611,42 @@ class L1YieldStats:
 _INVARIANT_REASONS = frozenset({"no_op_variant", "duplicate_variant"})
 
 
+def _parent_value(parent_cfg: dict[str, Any], param: str, proposed: Any) -> Any:
+    """The parent's CURRENT value for *param*, shaped like the override that proposes it.
+
+    Every param but one reads straight off the parent's node config. ``output_schema_descriptions``
+    is virtual: the prose it edits lives folded inside ``output_schema.properties[f].description``
+    (:func:`fold_schema_descriptions`), so the parent never carries the key and a naive lookup
+    returns ``None`` — making an exact re-proposal of the existing prose read as a mutation. It is
+    reconstructed here, keyed by the fields the override actually names.
+    """
+    if param == SCHEMA_DESCRIPTIONS_PARAM and isinstance(proposed, dict):
+        props = (parent_cfg.get("output_schema") or {}).get("properties") or {}
+        return {f: (props.get(f) or {}).get("description", "") for f in proposed}
+    return parent_cfg.get(param)
+
+
 def detect_invariants(
-    proposals: list[CandidateProposal], parent_osp: OptSearchPoint
+    proposals: list[CandidateProposal],
+    parent_osp: OptSearchPoint,
+    parent_pipeline_params: dict[str, Any] | None,
 ) -> L1YieldStats:
     """Attach no_op_variant / duplicate_variant failures; return yield stats.
 
     Failures route through score_population's synthetic-0 path (Path 1) so
     invariant variants don't burn LLM calls. Idempotent — pre-existing
     invariant failures are dropped first so resume-from-disk doesn't dup.
+
+    All three components of the signature are DELTAS against the parent — *parent_pipeline_params*
+    is the parent's resolved, folded config (``JobSearchPoint.pipeline_params``). The param
+    component used to be the raw override, so a variant re-proposing a value the parent already
+    held — ``temperature: 0.0`` onto a parent at ``0.0``, or the parent's own ``answer``
+    description echoed back verbatim — counted as a mutation, cleared the no-op gate, and burned
+    a full scoring pass on a searchpoint identical to its parent. ``None`` is the honest
+    "parent declared no node config" case (:attr:`JobSearchPoint.pipeline_params`), where every
+    override is by definition a real delta.
     """
+    parent_pp = parent_pipeline_params or {}
     for cp in proposals:
         cp.osp.memory.wounds.validation_failures = [
             vf
@@ -637,14 +668,17 @@ def detect_invariants(
         tc_delta = tuple(sorted((k, v) for k, v in child_tc.items() if v != parent_tc.get(k)))
         # json canon (not tuple-of-items) so a nested value — e.g. a slice-6 `layout`
         # dict riding alongside the prose edits — stays hashable for the `seen` sig.
-        no_canon = tuple(
+        # Per-PARAM, and only where the proposal actually moves the parent's value: an
+        # override that restates what the parent already holds is not a mutation.
+        pp_delta = tuple(
             sorted(
-                (n, json.dumps(p, sort_keys=True))
-                for n, p in (cp.pipeline_params_override or {}).items()
-                if p
+                (n, p, json.dumps(v, sort_keys=True))
+                for n, cfg in (cp.pipeline_params_override or {}).items()
+                for p, v in (cfg or {}).items()
+                if v != _parent_value(parent_pp.get(n) or {}, p, v)
             )
         )
-        sig = (pf_delta, tc_delta, no_canon)
+        sig = (pf_delta, tc_delta, pp_delta)
         if not any(sig):
             cp.osp.memory.wounds.validation_failures = [
                 *cp.osp.memory.wounds.validation_failures,

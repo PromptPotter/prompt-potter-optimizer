@@ -20,6 +20,7 @@ from typing import Any
 
 from promptpotter.config.settings import WELL_KNOWN_PARAM_TYPES
 from promptpotter.domain.pipeline_schema import (
+    SCHEMA_DESCRIPTIONS_PARAM,
     NodeOutputSchema,
     NodePromptInfo,
     ObservationMapping,
@@ -341,6 +342,21 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
                     f"node {name!r}: answer_field {answer_field!r} is not a property of its "
                     f"output_schema (have: {sorted(props)})"
                 )
+
+        # Synthesize the always-on `description` lever onto any node that ships an
+        # `output_schema` with fields — schema-driven, never a per-dataset `param_keys`
+        # opt-in. The field NAME stays locked (`SCHEMA_OWNED_FIELDS`); only the free
+        # prose becomes tunable. Declared as an `object` param so the one nesting
+        # contract (`apply_node_overlay` merges one level, `build_l1_output_schema`
+        # emits the sub-schema, `validate_overrides` type-checks it) applies with no
+        # special case downstream — the same shape a hand-declared nested param has.
+        out_schema = step_kwargs.get("output_schema")
+        if out_schema is not None and out_schema.fields:
+            step_kwargs["param_keys"] = pk | {SCHEMA_DESCRIPTIONS_PARAM}
+            step_kwargs["param_types"] = {
+                **step_kwargs["param_types"],
+                SCHEMA_DESCRIPTIONS_PARAM: "object",
+            }
 
         steps.append(PipelineNode(**step_kwargs))
 

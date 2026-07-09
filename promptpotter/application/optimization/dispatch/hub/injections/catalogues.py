@@ -11,6 +11,29 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
     signal,
 )
 from promptpotter.domain.l1_layout import L1_POSSIBLE
+from promptpotter.domain.pipeline_schema import SCHEMA_DESCRIPTIONS_PARAM, PipelineNode
+
+
+def _schema_description_block(node: PipelineNode) -> list[str]:
+    """The node's CURRENT output-schema `description` per field — the value space of the
+    ``output_schema_descriptions`` param, rendered the way an enum's values are.
+
+    Without it the lever is offered blind: its instruction says "describe only where the
+    current prose underspecifies", and a model that cannot read the current prose either
+    rewrites good text or skips the lever. An undescribed field is marked, because an empty
+    slot is the highest-value target, not an absent one.
+    """
+    out_schema = node.output_schema
+    if out_schema is None or not out_schema.fields:
+        return []
+    described = out_schema.field_descriptions
+    lines = [
+        f"    {SCHEMA_DESCRIPTIONS_PARAM} — current prose per field (rewrite what underspecifies):"
+    ]
+    for field in out_schema.fields:
+        prose = described.get(field)
+        lines.append(f"      {field}: {prose}" if prose else f"      {field}: (undescribed)")
+    return lines
 
 
 @signal(
@@ -53,6 +76,8 @@ def _r_pipeline_param_catalogue(b: InjectionBundle) -> str:
             else:
                 bits.append(p)
         lines.append(f"  {node_name}: {', '.join(bits)}")
+        if SCHEMA_DESCRIPTIONS_PARAM in params:
+            lines.extend(_schema_description_block(node))
     return "\n".join(lines)
 
 

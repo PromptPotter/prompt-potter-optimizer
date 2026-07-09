@@ -53,6 +53,9 @@ async def generate_or_load_candidates(
     prompt_preview = cycle.opt_sp.render()[:120]
 
     assert cycle.tracking.current_sp is not None
+    # The parent's RESOLVED, folded config — the baseline every candidate's param override is
+    # a delta against (`detect_invariants`). Bound once: the narrowing does not survive the await.
+    parent_pipeline_params = cycle.tracking.current_sp.pipeline_params
     emit_phase(
         on_phase,
         CampaignPhase.L1_GENERATE,
@@ -64,7 +67,7 @@ async def generate_or_load_candidates(
         creativity=_creativity,
         model=optimizer_model(),
         has_l1_critique=bool(cycle.rounds[-1].critique) if cycle.rounds else False,
-        pipeline_params=cycle.tracking.current_sp.pipeline_params,
+        pipeline_params=parent_pipeline_params,
         parent_prompt_fields={k: v for k, v in cycle.opt_sp.prompt_field_dict().items() if v},
         parent_task_context={
             k: v for k, v in cycle.opt_sp.memory.task_context.to_dict().items() if v
@@ -80,7 +83,7 @@ async def generate_or_load_candidates(
         if persisted_raw is not None:
             persisted = [CandidateProposal.model_validate(d) for d in persisted_raw]
             logger.debug("Loaded %d persisted candidates for round %d", len(persisted), round_num)
-            yield_stats = detect_invariants(persisted, cycle.opt_sp)
+            yield_stats = detect_invariants(persisted, cycle.opt_sp, parent_pipeline_params)
             # llm_call never fires on this branch — synthesize an
             # ``LLMCallRecord(payload_kind="synthesized")`` so the audit
             # trail + dashboard see the node, without lying about a real
@@ -135,7 +138,8 @@ async def generate_or_load_candidates(
     # `detect_invariants` only sees proposals that exist, so a parse failure (zero candidates)
     # is invisible to it. Carry the reason onto the round's L1-quality record instead.
     yield_stats = replace(
-        detect_invariants(candidates, cycle.opt_sp), l1_parse_failure=parse_failure
+        detect_invariants(candidates, cycle.opt_sp, parent_pipeline_params),
+        l1_parse_failure=parse_failure,
     )
 
     if session.state.cycle_id:

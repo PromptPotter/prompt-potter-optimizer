@@ -1210,7 +1210,7 @@ def test_no_op_clone_attaches_validation_failure():
     parent = _parent()
     proposals = [_child(parent), _child(parent, persona="Expert ranker")]
 
-    stats = detect_invariants(proposals, parent)
+    stats = detect_invariants(proposals, parent, {})
 
     no_op_reasons = [vf.reason for vf in proposals[0].osp.memory.wounds.validation_failures]
     assert "no_op_variant" in no_op_reasons
@@ -1228,7 +1228,7 @@ def test_duplicate_signature_attaches_validation_failure():
         _child(parent, instruction="Rank with care."),
     ]
 
-    stats = detect_invariants(proposals, parent)
+    stats = detect_invariants(proposals, parent, {})
 
     assert proposals[0].osp.memory.wounds.validation_failures == []
     dup_reasons = [vf.reason for vf in proposals[1].osp.memory.wounds.validation_failures]
@@ -1237,6 +1237,54 @@ def test_duplicate_signature_attaches_validation_failure():
     assert stats.l1_n_duplicate == 1
     assert stats.l1_n_no_op == 0
     assert stats.l1_yield == 2 / 3
+
+
+def test_param_override_echoing_parent_value_is_a_no_op():
+    """A variant that restates what the parent already holds must not score as a mutation.
+
+    Silent harm: it clears the no-op gate, burns a full scoring pass on a searchpoint
+    identical to its parent, and books the resulting noise as an axis effect. Both shapes
+    are covered — a scalar echo (`temperature`) and a virtual-param echo
+    (`output_schema_descriptions`, whose current prose lives folded inside `output_schema`,
+    so the parent never carries the key the override names).
+    """
+    parent = _parent()
+    parent_pp = {
+        "llm_only": {
+            "temperature": 0.0,
+            "output_schema": {
+                "properties": {"answer": {"description": "Commit to one label."}},
+            },
+        }
+    }
+    proposals = [
+        CandidateProposal(
+            osp=parent.mutate(), pipeline_params_override={"llm_only": {"temperature": 0.0}}
+        ),
+        CandidateProposal(
+            osp=parent.mutate(),
+            pipeline_params_override={
+                "llm_only": {"output_schema_descriptions": {"answer": "Commit to one label."}}
+            },
+        ),
+        CandidateProposal(
+            osp=parent.mutate(),
+            pipeline_params_override={
+                "llm_only": {"output_schema_descriptions": {"answer": "Never hedge."}}
+            },
+        ),
+    ]
+
+    stats = detect_invariants(proposals, parent, parent_pp)
+
+    assert "no_op_variant" in [
+        vf.reason for vf in proposals[0].osp.memory.wounds.validation_failures
+    ]
+    assert "no_op_variant" in [
+        vf.reason for vf in proposals[1].osp.memory.wounds.validation_failures
+    ]
+    assert proposals[2].osp.memory.wounds.validation_failures == []
+    assert stats.l1_n_no_op == 2
 
 
 def test_parse_population_attaches_forbidden_axis_failure_to_osp():

@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
 from promptpotter.domain.l1_layout import L1Layout, default_l1_layout
+from promptpotter.domain.pipeline_schema import SCHEMA_DESCRIPTIONS_PARAM
 from promptpotter.domain.search_point import SearchPoint, TaskDecomposition
 from promptpotter.domain.validators import ValidatorOutcome
 
@@ -308,6 +309,11 @@ class OptSearchPoint(PromptTemplate):
         if rendered and prompt_node:
             pp.setdefault(prompt_node, {})["prompt"] = rendered
 
+        # Fold the accumulated `output_schema_descriptions` into each node's real
+        # `output_schema` prose and drop the virtual key — the wire carries a valid schema.
+        # `schema` resolves the registry-declared case (`schema_family`, no inline schema).
+        fold_schema_descriptions(pp, schema)
+
         pf = None
         if rendered and prompt_node:
             pf = {f: v for f, v in self.prompt_field_dict().items() if f != "few_shot_examples"}
@@ -369,6 +375,66 @@ def node_config_items(pp: dict[str, Any] | None) -> Iterator[tuple[str, dict[str
         if k in RESERVED_PIPELINE_PARAM_KEYS or not isinstance(v, dict):
             continue
         yield k, v
+
+
+def fold_schema_descriptions(
+    pp: dict[str, Any] | None, schema: PipelineSchema | None = None
+) -> None:
+    """Fold each node's virtual ``output_schema_descriptions`` into its wire
+    ``output_schema`` prose, in place, then remove the virtual key.
+
+    This is the apply site for the core structured-output `description` lever
+    (`docs/concepts/structured-output.md`): the optimizer accumulates
+    ``output_schema_descriptions`` as a normal ``object`` param (so
+    ``apply_node_overlay`` merges it one level across generations), and here — at the
+    render→wire seam — its entries are written onto the node's REAL
+    ``output_schema.properties[field].description`` before the connector sends it.
+    Assignment onto EXISTING properties only: a field the optimizer invented is dropped
+    rather than reaching the wire (names are the locked contract). The virtual key is then
+    deleted, so the backend receives a valid schema and no pseudo-param, and identity still
+    separates two description sets because the folded ``output_schema`` differs.
+
+    A node may declare its schema INLINE (``config.output_schema``) or by REGISTRY
+    IDENTITY (``config.schema_family`` — TermNorm's ``entity_profiling`` / ``llm_ranking``).
+    In the registry case the config carries no schema to write on, so *schema* supplies the
+    resolved one (``PipelineNode.output_schema.json_schema``, parsed from the same
+    ``GET /pipeline`` payload) and the fold materializes it inline. Without this the
+    descriptions were popped and dropped: two opposite steers produced a byte-identical wire
+    payload, so the searchpoint hashes collided and the optimizer scored one measurement
+    twice — a lever it could propose but never pull.
+
+    Materialization happens ONLY for a node that actually carries descriptions, so a normal
+    cycle's payload is byte-identical to the pre-lever one and C0 identity is unchanged.
+
+    Idempotent + safe on any pp: a node without the virtual key, or with no schema from
+    either source, is untouched. Mutates in place — callers pass a deep copy.
+    """
+    for node, cfg in node_config_items(pp):
+        descriptions = cfg.pop(SCHEMA_DESCRIPTIONS_PARAM, None)
+        if not isinstance(descriptions, dict) or not descriptions:
+            continue
+        out_schema = cfg.get("output_schema")
+        if not isinstance(out_schema, dict):
+            resolved = schema.get_node(node) if schema else None
+            out_schema = (
+                copy.deepcopy(resolved.output_schema.json_schema)
+                if resolved and resolved.output_schema
+                else None
+            )
+            if not isinstance(out_schema, dict) or not out_schema:
+                continue
+            cfg["output_schema"] = out_schema
+        props = out_schema.get("properties")
+        if not isinstance(props, dict):
+            continue
+        for field, text in descriptions.items():
+            if (
+                field in props
+                and isinstance(props[field], dict)
+                and isinstance(text, str)
+                and text.strip()
+            ):
+                props[field] = {**props[field], "description": text}
 
 
 # --- Diff helpers (views) ---

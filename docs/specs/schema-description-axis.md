@@ -1,37 +1,38 @@
 # Schema-description axis — structured-output `description` as an optimizable parameter
 
-> **Status:** **built, unmeasured.** Slices 1-3 shipped; the axis is live on `promptpotter-self` and has never been swept (slice 4). Why the schema steers at all: [`../concepts/structured-output.md`](../concepts/structured-output.md) (name / coordinates / description). This spec covers only what it takes to make the third lever searchable.
+> **Status:** **built at the core (target) level, unmeasured.** The axis is now schema-driven and always-on: **any** pipeline node that ships an `output_schema` gets its `description` prose as a tunable, so `l1_generate` describing `justlogic`'s `{reasoning, answer}` is the same code path that describes any target's output. (An earlier build wired it one level too high — against the optimizer's *own* `l1_generate` response schema, `L1Variant`-hardcoded, gated behind `promptpotter-self`'s `param_keys`. That was the wrong seam; it has been replaced.) Not yet swept (slice 4). Why the schema steers at all: [`../concepts/structured-output.md`](../concepts/structured-output.md) (name / coordinates / description).
 
 ## The representation gap
 
 Not excluded by a decision anyone defended — **invisible**, for one reason:
 
 - `OptSearchPoint` addresses prompt fields + `pipeline_params` (node-keyed config dicts). **Data.**
-- The ~45 `description=` strings (17 in `dispatch/schemas.py`) live in Python source. **Code.**
+- A node's `output_schema.description` strings are read by the model but by **no parser** — they were never on the tunable surface.
 
-The population cannot reach them. But *no lift is needed* — the strings need only be **resolvable** where the wire schema is built, not **stored** as data.
+But *no lift is needed*. Every target node already carries its schema (`NodeOutputSchema.field_descriptions`, `pipeline_schema.py`) and the connector already ships it to the model (`llm_only.py`). The strings need only be **reachable as an override** and **folded into the wire schema** — not stored as new data.
+
+**Two schema-declaration shapes, not one.** A node declares its output schema either INLINE (`config.output_schema` — `justlogic`'s `llm_only`) or by REGISTRY IDENTITY (`config.schema_family` — TermNorm's `entity_profiling` / `llm_ranking`, resolved into the `resolved_schemas` block of `GET /pipeline`). Only the inline shape has a schema *in the node config* for the fold to write on. The registry shape must be materialized from `PipelineNode.output_schema.json_schema` at fold time — otherwise the descriptions are popped and silently dropped, and every proposal on those nodes hashes to its parent.
 
 ## Mechanism
 
-`build_l1_output_schema()` (`validators/l1_strict.py`) already derives the wire schema from Pydantic **at call time**. That is the seam: after inlining, it assigns overridden `description` strings onto properties that already exist.
+Three seams, each a one-nesting-contract reuse — no bespoke code path:
 
-The edit rides the per-node override object the L4 outer cycle already owns — the same channel `layout` uses (`set_optimizer_prompt_overrides` → `overrides[node]["output_schema_descriptions"]`), resolved back by `resolve_node_schema_descriptions()`:
+1. **Synthesize at parse (`pipeline_parsing.py`).** Any node with an `output_schema` gets `output_schema_descriptions` added to its `param_keys` and declared `param_types: object` — exactly as a hand-declared nested param. Schema-driven, never a per-dataset opt-in.
+2. **Emit (`build_l1_output_schema`, `validators/l1_strict.py`).** The nested `output_schema_descriptions` object is emitted under `pipeline_params_override[node]`, its `properties` keyed by **that node's own schema fields** (`_nested_param_property` reads `node.output_schema.fields`) with `additionalProperties: false` — describe a field, never invent one.
+3. **Fold at the wire seam (`OptSearchPoint.to_job_search_point` → `fold_schema_descriptions`).** The override accumulates across generations as a normal `object` param (`apply_node_overlay` merges one level), then at render→wire it is written onto the node's real `output_schema.properties[field].description` **for existing fields only**, and the virtual key is deleted. The backend receives a valid schema and no pseudo-param.
 
 ```
 pipeline_params_override:
-  l1_generate:
+  llm_only:                         # ← the TARGET node, not the optimizer
     output_schema_descriptions:
-      changes_description: "Name the failure pattern, then the concrete change."
+      answer: "TRUE / FALSE / Uncertain only. Uncertain is not a hedge against difficulty."
 ```
 
-**Pydantic stays the sole default.** No default table — a second home for the same strings is the six-copy defect (`schemas.py:11-14` already declares Pydantic the SoT). With no override bound, every normal cycle builds today's schema byte-for-byte, so C0 is unchanged *by construction* rather than by a byte-comparison ritual.
+**Pydantic / the dataset schema stays the sole default.** No default table. With no override bound, `fold_schema_descriptions` is a no-op and the wire schema is byte-identical, so a dataset's C0 is unchanged *by construction*.
 
-Two properties fall out of the seam rather than being policed:
-
-- **Renaming is impossible *by default*.** The apply step assigns onto existing properties only, so an invented field name is dropped before the wire; the grafted `output_schema_descriptions` object enumerates `L1Variant`'s field names with `additionalProperties: false`, so the LLM cannot emit one that does not exist. This is a *lock*, not a law, and the unlock is built — see § Unlocking the name (lever 1).
-- **The graft is self-scoping.** On the **outer** (`promptpotter-self`) build, the pipeline has an `l1_generate` node, so the emittable key appears; the ContextVar is unbound in the outer task, so the outer's own schema is untouched. On the **inner** build, the backend pipeline has no `l1_generate` node, so nothing is grafted — and the bound override applies. Same function, opposite halves.
-
-**Why the node-config route does not work.** `optimizer_node_config()` reads `datasets/_optimizer/pipeline.json` and nothing else (`prompts.py`, cached, no merge). A `nodes.{name}.config` key never reaches the inner optimizer; only the per-node override channel does. `datasets/_optimizer/pipeline.json` is *read* by the running optimizer — it is not the surface `promptpotter-self`'s `OptSearchPoint` mutates.
+- **Renaming is impossible.** The fold assigns onto existing properties only, so an invented field name is dropped before the wire; the emitted object enumerates the node's fields with `additionalProperties: false`, so the LLM cannot emit one that does not exist. Field NAMES stay locked in `SCHEMA_OWNED_FIELDS` — the prose is the only free surface. (The separate, meta-only *rename* lever — § Unlocking the name — is L4's, not a target axis.)
+- **Cache-safe.** Two description sets fold to two different `output_schema`s, so identity/measurement keys separate them; the virtual key is gone before hashing the wire point, so nothing double-counts. This holds *only* because the fold resolves the registry shape too — before that it silently folded nothing on those nodes, and two opposite steers shared one `sp_hash`.
+- **An echo is a no-op.** The parent's current prose lives folded inside `output_schema`, so the parent never carries the virtual key and a naive diff reads *any* description proposal as a mutation. `detect_invariants` reconstructs the parent's effective value per param, so a variant restating what the parent already holds is rejected before it burns a scoring pass — the same guard that catches a `temperature: 0.0` proposal onto a parent at `0.0`.
 
 ## Permission tiers — what the optimizer may touch
 
@@ -75,11 +76,11 @@ Safety rests on slice 1, not on cleverness: a rename the model then ignores or m
 
 1. ~~**Parse-failure attribution.**~~ **Shipped.** A schema-induced parse failure is charged to the round it occurred in (`RoundResult.l1_parse_failure` → `_round_problem_rate` = `1.0`); before, a zero-candidate round scored `problem_rate = 0.0`, the cleanest possible. *(A live measurement bug independent of this spec.)*
 2. ~~**Descriptions become data.**~~ **Dropped — the premise was wrong.** Nothing has to become data: `build_l1_output_schema` resolves the overrides at call time and Pydantic keeps the defaults. A default table would have given the strings two homes.
-3. ~~**One axis, narrowest scope.**~~ **Shipped.** `promptpotter-self` only, node `l1_generate`, model `L1Variant` — the graft is self-scoping (see Mechanism), so nothing gates it by dataset name. Pinned by `tests/test_integrity.py::test_schema_description_axis_reaches_the_model_and_cannot_rename_a_field`, which fails if the grafted key ever drifts from the resolved one (a silent no-op axis) or if a field could be renamed.
-4. **Sweep gate.** `--sweep` on `justlogic`; promote only on `proxy_lift_corr ≥ 0.6`. **A negative result closes this spec** — record the finding and stop. That is a successful outcome. **Not yet run — this is the next action, and the first that costs money.**
-5. **Widen** to remaining optimizer-owned schemas, iff 4 passes.
+3. ~~**One axis, narrowest scope (`promptpotter-self` / `l1_generate` / `L1Variant`).**~~ **Superseded.** That was the wrong level — the optimizer describing its own response schema. Replaced by the core, schema-driven build above: the lever is synthesized onto **every** `output_schema`-bearing target node, keyed by that node's own fields. Pinned by `tests/test_integrity.py::test_schema_description_axis_reaches_the_target_and_cannot_rename_a_field`, which fails if the emitted key drifts from the folded one (a silent no-op axis) or if an invented field could reach the wire.
+4. **Sweep gate.** `--sweep` on `justlogic`; promote only on `proxy_lift_corr ≥ 0.6`. **A negative result closes this spec** — record the finding and revert. That is a successful outcome. **Not yet run — this is the next action, and the first that costs money.**
+5. ~~**Widen** to remaining optimizer-owned schemas.~~ **Folded into the core build** — there is no widening step; it is on for all targets at once.
 
-**One comparability caveat.** Turning the axis on adds `output_schema_descriptions` to `promptpotter-self`'s emittable `l1_generate` params, which changes the **outer** meta-prompt's in-context tokens. Outer C0 therefore shifts, and pp-self runs from before this commit are not comparable to runs after it. Inner cycles and every normal campaign are untouched — their backend pipelines carry no `l1_generate` node, and with no override bound the schema is Pydantic's byte-for-byte.
+**One comparability caveat.** Turning the axis on adds `output_schema_descriptions` to the emittable params of any target node that ships a schema, which changes that dataset's L1 in-context tokens. A dataset's C0 therefore shifts, and its runs from before this commit are not comparable to runs after it. With no override bound the wire schema is byte-identical, so only the *emittable-surface* text moves, not the origin's actual schema.
 
 ## Scope — two surfaces, not one
 

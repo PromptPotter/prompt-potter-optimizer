@@ -68,9 +68,13 @@ a real reasoning failure, not a label-skew artifact.
   is pinned to `low` for this campaign
   (`pipeline.json::nodes.llm_only.optimizer.param_allowed_values`) — a
   `medium`/`high` proposal is rejected as invalid and self-healed.
-- L1 may freely mutate: `temperature`, `max_tokens`, and any prompt
+- L1 may freely mutate: `temperature`, `max_tokens`, any prompt
   field (`persona`, `task_intent`, `problem_description`,
-  `instruction`, `thinking_style`, `answer_format`). The hedge bias
+  `instruction`, `thinking_style`, `answer_format`), and
+  `output_schema_descriptions` — the `description` prose on the
+  `llm_only` output schema's own `reasoning` and `answer` fields. The hedge bias
   toward `Uncertain` must be broken by prompt engineering, not by
   buying reasoning compute — the hedge-breaking prompt mutation is the
-  highest-EV target.
+  highest-EV target. Note that `answer`'s description already forbids the
+  hedge and is being ignored, and that it sits *inside* the field-filling
+  loop: it is the second prompt, and the shortest path to that target.

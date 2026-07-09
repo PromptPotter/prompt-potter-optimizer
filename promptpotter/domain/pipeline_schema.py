@@ -53,6 +53,15 @@ NESTED_PARAM_TYPES = frozenset({"object", "array"})
 # `rebase_capability` directive (offers L2/L3 the unlock only where a node declares it).
 SCHEMA_RENAME_PARAM = "output_schema_field_names"
 
+# The core, always-on structured-output lever: rewrite the JSON-Schema `description`
+# strings of a TARGET node's own output schema. A `description` is the only natural
+# language inside the field-filling loop and no code reads it, so it is free to move on
+# ANY node that declares an `output_schema` — unlike the field NAME (the wire + grading
+# contract). Synthesized onto such nodes at parse time (`pipeline_parsing.py`), keyed by
+# that node's own fields; emitted by `build_l1_output_schema`; folded into the wire schema
+# at `OptSearchPoint.to_job_search_point`. See `docs/concepts/structured-output.md`.
+SCHEMA_DESCRIPTIONS_PARAM = "output_schema_descriptions"
+
 
 def stable_hash(value: Any) -> str:
     """Deterministic 16-char hex digest of an arbitrary JSON-able value."""

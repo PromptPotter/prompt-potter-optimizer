@@ -38,11 +38,11 @@ def _pipeline_schema(dataset: str) -> PipelineSchema:
     return parse_pipeline_response(json.loads(path.read_text(encoding="utf-8")))
 
 
-def _emittable_l1_params(schema: dict[str, Any]) -> set[str]:
-    """The `l1_generate` param keys an L1 variant may emit under *schema*."""
+def _emittable_l1_params(schema: dict[str, Any], node: str = "l1_generate") -> set[str]:
+    """The param keys an L1 variant may emit for *node* under *schema*."""
     variants = schema["schema"]["properties"]["variants"]["items"]["properties"]
-    node = variants["pipeline_params_override"]["properties"].get("l1_generate", {})
-    return set(node.get("properties", {}))
+    node_props = variants["pipeline_params_override"]["properties"].get(node, {})
+    return set(node_props.get("properties", {}))
 
 
 def test_content_hash_distinguishes_pipeline_params() -> None:
@@ -467,66 +467,69 @@ def test_hit_cache_respects_dataset(tmp_path: Path) -> None:
     assert any("justlogic" in q for q in just_queries)
 
 
-def test_schema_description_axis_reaches_the_model_and_cannot_rename_a_field() -> None:
-    """A `description` edit round-trips to the schema; an invented key never becomes a field.
+def test_schema_description_axis_reaches_the_target_and_cannot_rename_a_field() -> None:
+    """A `description` edit folds into the TARGET's wire schema; an invented key never lands.
 
-    Silently harmful both ways. If the key `build_l1_output_schema` grafts drifts from the key
-    `resolve_node_schema_descriptions` reads back, the optimizer spends budget mutating an axis
-    nobody consumes and every variant scores as a legitimate no-op. And `description` is free
-    only because no parser reads it — a field NAME is the wire contract.
+    The core structured-output lever: `l1_generate` describes a TARGET node's own output
+    schema (justlogic's `{reasoning, answer}`), keyed by that node's fields, on any
+    `output_schema`-bearing target — no per-dataset opt-in. Silently harmful two ways. If the
+    key the schema advertises drifts from the field the fold writes, the optimizer spends
+    budget on an axis the wire never carries, and every variant scores as a legitimate no-op.
+    And `description` is free only because no parser reads it — a field NAME is the contract,
+    so an invented field must be dropped before the wire, never grafted on.
     """
-    from promptpotter.application.optimization.dispatch.llm_call import (
-        set_optimizer_prompt_overrides,
-    )
-    from promptpotter.application.optimization.dispatch.schemas import L1Variant
     from promptpotter.application.optimization.validators.l1_strict import (
         build_l1_output_schema,
         validate_overrides,
     )
+    from promptpotter.domain.opt_search_point import fold_schema_descriptions
 
-    schema = _pipeline_schema("promptpotter-self")
+    schema = _pipeline_schema("justlogic")
+    node = schema.get_node("llm_only")
+    assert node is not None and node.output_schema is not None
+    fields = list(node.output_schema.fields)  # ["reasoning", "answer"] — the closed set
 
-    try:
-        # No override bound → the schema is exactly Pydantic's, so C0 never drifts.
-        set_optimizer_prompt_overrides(None)
-        base = build_l1_output_schema(schema)
-        base_props = base["schema"]["properties"]["variants"]["items"]["properties"]
-        assert list(base_props) == list(L1Variant.model_fields)
+    # EMIT: the lever is handed to L1, keyed by the target node's OWN fields, schema-driven.
+    emitted = _emittable_l1_params(build_l1_output_schema(schema), node="llm_only")
+    assert "output_schema_descriptions" in emitted
+    describable = build_l1_output_schema(schema)["schema"]["properties"]["variants"]["items"][
+        "properties"
+    ]["pipeline_params_override"]["properties"]["llm_only"]["properties"][
+        "output_schema_descriptions"
+    ]
+    assert set(describable["properties"]) == set(fields)
 
-        # The describable vocabulary is closed: you describe a field, never invent one.
-        emittable = base_props["pipeline_params_override"]["properties"]["l1_generate"]
-        grafted = emittable["properties"]["output_schema_descriptions"]
-        assert set(grafted["properties"]) == set(L1Variant.model_fields)
+    # A description edit is a valid `object` override (declared, type-checked).
+    edit = {"llm_only": {"output_schema_descriptions": {"answer": "ANSWER FIRST."}}}
+    assert validate_overrides(edit, schema, forbidden_axes_strict=True) == []
 
-        # The grafted key round-trips: what L1 may emit is what the resolver reads back.
-        edit = {
-            "l1_generate": {
-                "output_schema_descriptions": {"changes_description": "EVIDENCE FIRST."}
-            }
+    # APPLY: the fold rewrites the wire schema's prose and removes the virtual key; an
+    # invented field (`made_up`) never reaches the wire; and no edit bound → schema untouched.
+    base_cfg = dict(node.current_config)
+    pp = {
+        "llm_only": {
+            **base_cfg,
+            "output_schema_descriptions": {"answer": "ANSWER FIRST.", "made_up": "dropped"},
         }
-        assert validate_overrides(edit, schema, forbidden_axes_strict=True) == []
-        set_optimizer_prompt_overrides(edit)
-        after = build_l1_output_schema(schema)
-        after_props = after["schema"]["properties"]["variants"]["items"]["properties"]
-        assert after_props["changes_description"]["description"] == "EVIDENCE FIRST."
+    }
+    fold_schema_descriptions(pp)
+    props = pp["llm_only"]["output_schema"]["properties"]
+    assert props["answer"]["description"] == "ANSWER FIRST."
+    assert "made_up" not in props
+    assert "output_schema_descriptions" not in pp["llm_only"]
 
-        # Names are contract: an invented key is dropped, never grafted onto the wire.
-        set_optimizer_prompt_overrides(
-            {"l1_generate": {"output_schema_descriptions": {"candidate": "rename attempt"}}}
-        )
-        renamed = build_l1_output_schema(schema)
-        renamed_props = renamed["schema"]["properties"]["variants"]["items"]["properties"]
-        assert list(renamed_props) == list(L1Variant.model_fields)
+    untouched = {"llm_only": dict(base_cfg)}
+    before = json.dumps(untouched, sort_keys=True)
+    fold_schema_descriptions(untouched)
+    assert json.dumps(untouched, sort_keys=True) == before  # no override → byte-identical wire
 
-        # The raw schema stays locked — descriptions are the ONLY unlocked schema surface.
-        forbidden = validate_overrides(
-            {"l1_generate": {"output_schema": {"type": "object"}}},
-            schema,
-            forbidden_axes_strict=True,
-        )
-        assert [f.reason for f in forbidden] == ["forbidden_axis"]
-    finally:
-        set_optimizer_prompt_overrides(None)
+    # The raw schema stays locked — the `description` prose is the ONLY unlocked schema surface.
+    forbidden = validate_overrides(
+        {"llm_only": {"output_schema": {"type": "object"}}},
+        schema,
+        forbidden_axes_strict=True,
+    )
+    assert [f.reason for f in forbidden] == ["forbidden_axis"]
 
 
 def test_emittable_params_are_declared_and_an_invented_one_is_rejected() -> None:
@@ -578,37 +581,37 @@ def test_nested_param_override_accumulates_instead_of_reverting_its_parent() -> 
 
     schema = _pipeline_schema("promptpotter-self")
 
-    # Every nested param the l1_generate schema can graft accumulates, not just the first one.
-    for nested in ("output_schema_descriptions", "output_schema_field_names"):
+    # Every nested param a node's schema can graft accumulates, not just the first one:
+    # `output_schema_field_names` + `layout` on the optimizer's own nodes (pp-self),
+    # `output_schema_descriptions` on any target node (justlogic's `llm_only`, below).
+    for node, nested in (("l1_generate", "output_schema_field_names"), ("l1_critique", "layout")):
         got = merge_pipeline_params(
-            {"l1_generate": {nested: {"a": "A", "b": "B"}}},
-            {"l1_generate": {nested: {"a": "A2"}}},
+            {node: {nested: {"a": "A", "b": "B"}}},
+            {node: {nested: {"a": "A2"}}},
             schema,
         )
         assert got is not None
-        assert got["l1_generate"][nested] == {"a": "A2", "b": "B"}, (
-            f"{nested} is not declared `param_types: object` — a child override reverts its "
-            f"parent's siblings"
+        assert got[node][nested] == {"a": "A2", "b": "B"}, (
+            f"{node}.{nested} is not declared `param_types: object` — a child override reverts "
+            f"its parent's siblings"
         )
 
-    # `object` — the child's key wins, the parent's untouched sibling survives.
+    # The description axis accumulates on the TARGET node, keyed by that node's fields.
+    just = _pipeline_schema("justlogic")
     base = {
-        "l1_generate": {
+        "llm_only": {
             "temperature": 0.7,
-            "output_schema_descriptions": {"changes_description": "A", "variant_name": "B"},
+            "output_schema_descriptions": {"reasoning": "A", "answer": "B"},
         }
     }
     merged = merge_pipeline_params(
-        base, {"l1_generate": {"output_schema_descriptions": {"changes_description": "A2"}}}, schema
+        base, {"llm_only": {"output_schema_descriptions": {"reasoning": "A2"}}}, just
     )
     assert merged is not None
-    assert merged["l1_generate"]["output_schema_descriptions"] == {
-        "changes_description": "A2",
-        "variant_name": "B",
-    }
-    assert merged["l1_generate"]["temperature"] == 0.7
+    assert merged["llm_only"]["output_schema_descriptions"] == {"reasoning": "A2", "answer": "B"}
+    assert merged["llm_only"]["temperature"] == 0.7
     # The origin is never aliased or mutated by a candidate's merge.
-    assert base["l1_generate"]["output_schema_descriptions"]["changes_description"] == "A"
+    assert base["llm_only"]["output_schema_descriptions"]["reasoning"] == "A"
 
     # A named slot's list REPLACES; an unnamed slot keeps the floor.
     lay_base = {
@@ -711,13 +714,13 @@ def test_schema_field_rename_is_locked_by_default_and_never_silently_half_applie
     rename = {"changes_description": "mutation_rationale"}
 
     try:
-        # Locked by default: the outer cannot even emit the key. Descriptions stay free.
+        # Locked by default: the outer cannot even emit the rename key.
         set_optimizer_prompt_overrides(None)
         assert "output_schema_field_names" not in _emittable_l1_params(
             build_l1_output_schema(outer)
         )
         unlocked = _emittable_l1_params(build_l1_output_schema(outer, schema_field_rename=True))
-        assert {"output_schema_field_names", "output_schema_descriptions"} <= unlocked
+        assert "output_schema_field_names" in unlocked
 
         # Only a fork opens it: the delta reaches the fork's config, the parent stays frozen
         # (its rounds must remain comparable), and an unrelated fork inherits rather than resets.

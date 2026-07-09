@@ -18,8 +18,8 @@
         "description": "Six-field PromptTemplate scheme — outer L1 mutates these to evolve the inner L1's behavior."
       },
       "optimizer": {
-        "param_keys": ["persona", "task_intent", "problem_description", "instruction", "thinking_style", "answer_format", "output_schema_descriptions", "output_schema_field_names"],
-        "param_types": {"output_schema_descriptions": "object", "output_schema_field_names": "object"},
+        "param_keys": ["persona", "task_intent", "problem_description", "instruction", "thinking_style", "answer_format", "output_schema_field_names"],
+        "param_types": {"output_schema_field_names": "object"},
         "param_allowed_values": {},
         "observation_name": "l1_generate",
         "observation_mappings": [],
