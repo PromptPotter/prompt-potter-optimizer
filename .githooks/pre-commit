@@ -1,22 +1,57 @@
 #!/bin/sh
-# Block commit if staged Python files have format drift or lint errors.
+# Block a commit whose staged files would fail CI's lint/typecheck gates.
 # Enabled per-clone by: git config core.hooksPath .githooks
+#
+# Why the webapp half exists: next.config sets `typescript.ignoreBuildErrors`
+# and Next 16 dropped build-time linting, so `npm run build` checks NEITHER.
+# Both live only in .github/workflows/ci.yml — which never runs on work that is
+# committed locally and never pushed. This hook is the sole local gate.
+#
+# Cost: python-only commits pay nothing extra. A commit touching webapp/ pays
+# ~30s (eslint builds a TS program for its type-aware rules; ~21s of that is
+# irreducible, and --cache does not help). tsc stays warm via .tsbuildinfo.
 
 set -e
 
-staged_py=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.py$' || true)
-[ -z "$staged_py" ] && exit 0
+changed=$(git diff --cached --name-only --diff-filter=ACM)
 
-if ! python -m ruff format --check $staged_py; then
-    echo ""
-    echo "ruff format would reformat staged files."
-    echo "Fix: python -m ruff format $staged_py && git add $staged_py"
-    exit 1
+staged_py=$(echo "$changed" | grep -E '\.py$' || true)
+if [ -n "$staged_py" ]; then
+    if ! python -m ruff format --check $staged_py; then
+        echo ""
+        echo "ruff format would reformat staged files."
+        echo "Fix: python -m ruff format $staged_py && git add $staged_py"
+        exit 1
+    fi
+
+    if ! python -m ruff check $staged_py; then
+        echo ""
+        echo "ruff check found issues in staged files."
+        echo "Fix: python -m ruff check --fix $staged_py && git add $staged_py"
+        exit 1
+    fi
 fi
 
-if ! python -m ruff check $staged_py; then
-    echo ""
-    echo "ruff check found issues in staged files."
-    echo "Fix: python -m ruff check --fix $staged_py && git add $staged_py"
-    exit 1
+# Paths arrive repo-relative; eslint and tsc both want to run from webapp/.
+staged_web=$(echo "$changed" | grep -E '^webapp/.*\.(ts|tsx|js|jsx|mjs)$' | sed 's|^webapp/||' || true)
+if [ -n "$staged_web" ]; then
+    cd webapp
+
+    # Whole-program, not staged-only: a staged file can break a type in a file
+    # nobody staged.
+    if ! npx tsc --noEmit --incremental --tsBuildInfoFile .tsbuildinfo; then
+        echo ""
+        echo "tsc found type errors (webapp/)."
+        echo "Fix: cd webapp && npx tsc --noEmit"
+        exit 1
+    fi
+
+    # Scoped to the staged files: a full-tree lint is 73s, these are ~21s. eslint
+    # exits non-zero on errors only, so the repo's standing warnings don't block.
+    if ! npx eslint $staged_web; then
+        echo ""
+        echo "eslint found errors in staged webapp files."
+        echo "Fix: cd webapp && npx eslint --fix $staged_web"
+        exit 1
+    fi
 fi

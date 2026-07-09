@@ -35,7 +35,7 @@ When a fix would compensate for something an upstream layer should already have 
 ```bash
 pip install -e ".[all,dev]"
 ruff check . && ruff format --check . && deptry . && mypy promptpotter/ && pytest -q   # CI runs same chain; run ruff format+check before any commit — CI fails on format drift
-git config core.hooksPath .githooks                           # one-time per clone: pre-commit ruff format + check
+git config core.hooksPath .githooks                           # one-time per clone: pre-commit ruff (py) + tsc & eslint (webapp — `next build` checks neither)
 python -m promptpotter new <name>                            # fresh: mint campaign+root cycle from datasets/<name>/, run from round 0
 python -m promptpotter new <file.csv> --set task_description=…  # fresh from RAW file: ingest → resolve origin check-in → run
 python -m promptpotter resume                                # resume active cycle; Ctrl+C: 1st saves, 2nd force-quits
