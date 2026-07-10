@@ -66,7 +66,7 @@ Connector-described pipeline (the shape `GET /pipeline` exposes, plus an operato
 - `name`, `version` — pipeline identity.
 - `backend_type` — connector name; must match a registered connector.
 - `backend_name` — display name for operator surfaces.
-- `nodes` — node graph. Per-node: `runtime` (`python`/`llm`/`cache`/`network`) · `short_circuit` (bool) · `node_type` (`candidate_source`/`ranker`/`enricher`/`cache`/`""`) · `optimizer.param_keys` (list — operator-tunable knobs) · `optimizer.observation_mappings` (wire-name → optimizer-name) · `optimizer.langfuse_type` · `config` (per-dataset overlay merged onto the wire payload).
+- `nodes` — node graph. Per-node: `runtime` (`backend`/`frontend`/`in_process`) · `short_circuit` (bool) · `node_type` (`candidate_source`/`ranker`/`enricher`/`cache`/`""`) · `optimizer.param_keys` (list — operator-tunable knobs) · `optimizer.observation_mappings` (wire-name → optimizer-name) · `optimizer.langfuse_type` · `config` (per-dataset overlay merged onto the wire payload).
 - `pipelines` — named pipeline variants.
 - `available_models` — model menu shown to L1.
 - `llm_defaults` — snapshot of `GET /pipeline` defaults. Informational; do not repurpose.

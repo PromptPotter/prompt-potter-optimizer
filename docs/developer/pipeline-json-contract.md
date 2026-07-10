@@ -37,10 +37,10 @@ rejection and content-hash sensitivity by
 
 | Field | Required | Type | Notes |
 |---|---|---|---|
-| `type` | required | `str` | Wire type — one of `llm`, `llm/structured`, `llm/meta`, `agent`, `deterministic`, `measurement`, `web_search`. Mapped to `PipelineNode.wire_type`. |
+| `type` | required | `str` | Wire type — one of `generation`, `cache`, `retriever`, `tool`, `meta_prompt` (user-facing connectors) or `llm/meta`, `measurement`, `agent` (`_optimizer` internal nodes). Mapped to `PipelineNode.wire_type`. |
 | `node_role` | required | `str` | One of `""`, `candidate_source`, `ranker`, `enricher`, `cache`. Mapped to `PipelineNode.node_type` (the typed `NodeType` enum). |
 | `description` | required | `str` | One-line node description. |
-| `runtime` | required | `str` | One of `backend`, `optimizer`. Distinguishes connector-served nodes from optimizer-internal LLM calls. |
+| `runtime` | required | `str` | One of `backend`, `frontend`, `in_process`. Distinguishes connector-served nodes by execution location. |
 | `short_circuit` | required | `bool` | Whether a successful match in this node bypasses downstream nodes. |
 | `config` | optional | `dict` | Node-local defaults. For LLM nodes typically `{model, temperature, max_tokens, ...}`. For optimizer nodes also `{prompt_family, prompt_version, schema_family, schema_version}` keys that index into the registries. |
 | `prompt_info` | optional | `dict` | Inline `{family, template_variables, description}` — marks the node as prompt-bearing (the candidate-prompt injection point). Used when no `resolved_prompts` registry is present. |

@@ -319,8 +319,8 @@ The persisted world is a four-entity containment hierarchy
   `DEFAULT_ESCALATION_RULES`) deciding CONTINUE / FIRE_L2 / STOP_*.
   `application/optimization/escalation/`.
 - **Wound** — one of the four self-healing channels between layers:
-  Wound 1 (L1 validation failure → L2 heal), Wound 2 (mid-eval
-  degradation → L2 heal), Wound 3 (L1 self-healing on critique),
+  Wound 1 (L1 validation failure → L1 re-proposes), Wound 2 (mid-eval
+  degradation → L1 retunes / OPERATOR), Wound 3 (L2 stall → L3 replan),
   Wound 4 (L2 guard-breach → L3 heal). See
   `docs/developer/self-healing-internals.md`.
 - **Guard breach** — programmatic post-parse validator outcome on the
