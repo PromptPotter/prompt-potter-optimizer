@@ -92,7 +92,7 @@ def _extract_answer(resp: Any, output_schema: Any, answer_field: str) -> str:
     on shape for the same node config, or one measures a different thing than the other.
     """
     if not output_schema:
-        return resp.content or ""
+        return str(resp.content)
     if not isinstance(resp.parsed, dict):
         logger.warning(
             "llm_only: schema declared but response decoded as %s — NO_RESULT",
@@ -156,7 +156,7 @@ async def llm_only_in_process_run(query: str, payload: dict[str, Any]) -> dict[s
     duration_s = time.monotonic() - start
 
     answer = _extract_answer(resp, output_schema, answer_field)
-    usage = resp.usage or {}
+    usage = resp.usage
     data: dict[str, Any] = {
         # The terminal ranking the scorer reads: the answer is the (single) candidate.
         # An empty / declined answer is a structural NO_RESULT — `final_ranking == []`,
@@ -165,7 +165,7 @@ async def llm_only_in_process_run(query: str, payload: dict[str, Any]) -> dict[s
         LLM_ONLY_RESULT_KEY: [answer] if answer.strip() else [],
         # Same head-cap as TermNorm's reasoning_trace_cap — the PP<->TermNorm
         # envelope stays shape-identical on both execution arms.
-        "reasoning_trace": (resp.reasoning or "")[:4000],
+        "reasoning_trace": resp.reasoning[:4000],
         "terminated_at": LLM_ONLY_NODE,
         "llm_provider": provider,
         "total_time": duration_s,
@@ -174,7 +174,7 @@ async def llm_only_in_process_run(query: str, payload: dict[str, Any]) -> dict[s
             LLM_ONLY_NODE: {
                 "input": int(usage.get("prompt_tokens", 0)),
                 "output": int(usage.get("completion_tokens", 0)),
-                "model": resp.model or model,
+                "model": resp.model,
             }
         },
     }

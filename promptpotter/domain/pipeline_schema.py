@@ -408,17 +408,9 @@ class PipelineSchema(BaseModel):
             update={"nodes": [n for n in self.nodes if n.name in active]},
         )
 
-    def exclude(self, names: set[str] | None) -> "PipelineSchema":
-        if not names:
-            return self
-        return self.model_copy(
-            update={"nodes": [n for n in self.nodes if n.name not in names]},
-        )
-
     def narrow(self, narrowing: dict[str, NodeSearchNarrowing] | None) -> "PipelineSchema":
         """Return a copy with each node's optimizer search space narrowed to the
-        campaign's per-node subset (the third search-space lever beside
-        :meth:`exclude` and ``forbidden_axes_strict``).
+        campaign's per-node subset (the third search-space lever beside ``forbidden_axes_strict``).
 
         A node's ``param_keys`` intersect the campaign subset (``None`` = inherit
         the full set); prompt-decomposition fields are always kept tunable (the
