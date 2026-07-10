@@ -1,6 +1,6 @@
 
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
-.topbar{background:var(--color-background-primary);border-bottom:0.5px solid var(--color-border-tertiary);padding:0 20px;display:flex;align-items:center;gap:16px;height:52px;flex-shrink:0}
+.topbar{background:var(--color-background-primary);border-bottom:0.5px solid var(--color-border);padding:0 20px;display:flex;align-items:center;gap:16px;height:52px;flex-shrink:0}
 /* Search is a single magnifying-glass placeholder at every width (disabled —
    M13+ scope). No input field; the icon just holds the spot + saves room. */
 .topbar-search-icon{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;background:transparent;border:0;border-radius:var(--border-radius-md);color:var(--color-text-tertiary);cursor:pointer;font-family:inherit;flex-shrink:0;padding:0}
@@ -20,7 +20,7 @@
    gate / paused / detached; sits right of the view tabs). The accent-tinted
    Potter glyph is the presence signal; a count badge rides the corner when
    several run, and the popover rows carry a shared .phase-chip (see shell.css). */
-.topbar-jobs{position:relative;display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:var(--border-radius-md);background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);color:var(--color-accent);cursor:pointer;transition:background .15s,color .15s,border-color .15s;flex-shrink:0;padding:0;font-family:inherit}
+.topbar-jobs{position:relative;display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:var(--border-radius-md);background:var(--color-background-secondary);border:0.5px solid var(--color-border);color:var(--color-accent);cursor:pointer;transition:background .15s,color .15s,border-color .15s;flex-shrink:0;padding:0;font-family:inherit}
 .topbar-jobs:hover{background:var(--color-background-hover);border-color:var(--color-accent)}
 .topbar-jobs-count{position:absolute;top:-5px;right:-5px;min-width:15px;height:15px;padding:0 3px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;line-height:1;border-radius:8px;background:var(--color-accent-strong);color:#fff;border:1.5px solid var(--color-background-primary)}
 .topbar-jobs-list{list-style:none;margin:0;padding:4px;min-width:180px}
@@ -28,7 +28,7 @@
 .topbar-jobs-item:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
 .topbar-jobs-item .phase-chip{flex-shrink:0;font-size:11px}
 .topbar-jobs-item-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.theme-toggle{margin-left:auto;background:var(--color-background-secondary);color:var(--color-text-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);width:34px;height:30px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:background .15s,color .15s,border-color .15s;flex-shrink:0}
+.theme-toggle{margin-left:auto;background:var(--color-background-secondary);color:var(--color-text-secondary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-md);width:34px;height:30px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:background .15s,color .15s,border-color .15s;flex-shrink:0}
 .theme-toggle:hover{background:var(--color-background-hover);color:var(--color-accent);border-color:var(--color-accent)}
 .theme-toggle .sun{display:block}
 .theme-toggle .moon{display:none}

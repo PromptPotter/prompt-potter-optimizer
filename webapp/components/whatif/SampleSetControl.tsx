@@ -25,7 +25,7 @@ const BTN: CSSProperties = {
   fontFamily: "var(--font-mono)",
   fontSize: 10,
   padding: "1px 8px",
-  border: "0.5px solid var(--color-border-tertiary)",
+  border: "0.5px solid var(--color-border)",
   borderRadius: 2,
   cursor: "pointer",
   background: "transparent",
@@ -35,7 +35,7 @@ const BTN: CSSProperties = {
 function activeStyle(on: boolean): CSSProperties {
   return {
     ...BTN,
-    borderColor: on ? NEW_BORDER : "var(--color-border-tertiary)",
+    borderColor: on ? NEW_BORDER : "var(--color-border)",
     background: on ? NEW_BG : "transparent",
     color: on ? NEW_COLOR : "var(--color-text-secondary)",
   };
@@ -60,7 +60,7 @@ export function SampleSetControl({ rounds }: { rounds: RoundSummary[] }) {
         gap: 6,
         padding: "6px 8px",
         marginBottom: 6,
-        border: "0.5px solid var(--color-border-tertiary)",
+        border: "0.5px solid var(--color-border)",
         borderRadius: 3,
         background: "rgba(59, 130, 246, 0.08)",
       }}
@@ -84,8 +84,8 @@ export function SampleSetControl({ rounds }: { rounds: RoundSummary[] }) {
                 padding: "1px 4px",
                 borderRadius: 2,
                 cursor: "pointer",
-                border: "0.5px solid var(--color-border-tertiary)",
-                borderColor: on ? "rgba(59,130,246,0.55)" : "var(--color-border-tertiary)",
+                border: "0.5px solid var(--color-border)",
+                borderColor: on ? "rgba(59,130,246,0.55)" : "var(--color-border)",
                 background: on ? "rgba(59,130,246,0.18)" : "var(--color-background-secondary)",
                 color: on ? NEW_COLOR : "var(--color-text-tertiary)",
                 fontWeight: on ? 600 : 400,

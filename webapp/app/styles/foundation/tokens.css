@@ -7,10 +7,9 @@
   --color-background-hover:#1a1a1a;
   --color-background-tint-active:#2a1f10;
   --color-background-tint-icon:#3a2a10;
-  --color-background-tint-soft:#1f1a14;
   --color-text-primary:#f3f4f6; --color-text-secondary:#9ca3af; --color-text-tertiary:#6b7280;
   --color-text-on-accent:#0d0d0d;
-  --color-border-tertiary:#2a2a2a;
+  --color-border:#2a2a2a;
   --color-accent:#f59e0b; --color-accent-strong:#ea580c;
   --color-accent-rgb:245,158,11;
   --color-accent-glow:rgba(var(--color-accent-rgb),0.30);
@@ -50,7 +49,6 @@
      Applied via @media (pointer:coarse) so a touchscreen laptop also
      gets the larger targets. */
   --touch-target-min:44px;
-  --touch-target-spacing:8px;
 
   /* Safe-area insets — iOS notch + home indicator. Always pair with a
      fallback (0px) so non-iOS chrome stays unaffected. WebKit primary
@@ -70,12 +68,16 @@
      browsers get the static-height behaviour. */
   --vh-full:100vh;
   --vh-full:100dvh;
+  /* Elevation overlays: a translucent scrim over the surface, not a solid fill.
+     Theme-aware by necessity — white lifts a dark surface, black recedes a light one. */
+  --color-background-tint:rgba(255,255,255,0.04);
+  --color-background-tint-strong:rgba(255,255,255,0.12);
   --color-success:#10b981; --color-success-rgb:16,185,129;
   --color-success-bg:rgba(var(--color-success-rgb),0.12); --color-success-border:rgba(var(--color-success-rgb),0.35);
   --color-danger:#f87171;  --color-danger-rgb:248,113,113;
   --color-danger-bg:rgba(var(--color-danger-rgb),0.12);  --color-danger-border:rgba(var(--color-danger-rgb),0.35);
   --color-warn:#f59e0b;    --color-warn-bg:rgba(var(--color-accent-rgb),0.12);     --color-warn-border:rgba(var(--color-accent-rgb),0.35);
-  --border-radius-md:6px; --border-radius-lg:10px;
+  --border-radius-sm:4px; --border-radius-md:6px; --border-radius-lg:10px;
   --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
   /* Mono stack: Cascadia Mono first so Windows ClearType gets the heaviest
      hinted face it has; SF Mono picks up macOS; fallbacks for everyone else. */

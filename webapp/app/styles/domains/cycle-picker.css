@@ -7,7 +7,7 @@
    slightly tinted plate, not a button. No accent border on focus (that
    was painting the trigger yellow after the first click and not letting
    go until the operator clicked elsewhere). */
-.cycle-picker select{appearance:none;-webkit-appearance:none;background:var(--color-background-secondary,rgba(127,127,127,0.06));border:0;border-radius:4px;color:inherit;font:inherit;padding:3px 22px 3px 8px;margin:0;cursor:pointer;max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);background-position:right 10px center,right 6px center;background-size:4px 4px,4px 4px;background-repeat:no-repeat}
+.cycle-picker select{appearance:none;-webkit-appearance:none;background:var(--color-background-secondary);border:0;border-radius:4px;color:inherit;font:inherit;padding:3px 22px 3px 8px;margin:0;cursor:pointer;max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);background-position:right 10px center,right 6px center;background-size:4px 4px,4px 4px;background-repeat:no-repeat}
 .cycle-picker select:hover{color:var(--color-text-primary);background-color:var(--color-background-hover)}
 .cycle-picker select:focus{outline:none}
 /* Standalone variant — the chat header's campaign/session location switcher.
@@ -17,4 +17,4 @@
 .cycle-picker.standalone{flex:0 1 auto;min-width:0}
 .cycle-picker.standalone select{color:var(--color-accent);font-weight:600;font-size:14px;padding:5px 24px 5px 8px;max-width:340px}
 .cycle-picker.standalone select:hover{color:var(--color-accent);background-color:var(--color-background-hover)}
-.cycle-picker-err{color:var(--color-status-error,#c53030);font-size:13px}
+.cycle-picker-err{color:var(--color-danger);font-size:13px}

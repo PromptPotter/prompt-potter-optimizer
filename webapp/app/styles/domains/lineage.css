@@ -32,7 +32,7 @@
    is on. After a successful POST the action is replaced by the CLI command
    to run the new fork. */
 .inspector-actions{padding:8px 12px;border-top:1px solid var(--color-border);display:flex;align-items:center;gap:8px}
-.fork-button{background:var(--color-accent);color:var(--color-accent-contrast,#fff);border:0;border-radius:6px;padding:6px 14px;font-size:13px;cursor:pointer;font-family:inherit}
+.fork-button{background:var(--color-accent);color:var(--color-text-on-accent);border:0;border-radius:6px;padding:6px 14px;font-size:13px;cursor:pointer;font-family:inherit}
 .fork-button:disabled{opacity:0.5;cursor:not-allowed}
 
 /* Operator-steered fork — the inline edit+reconcile panel that replaces the
@@ -40,12 +40,12 @@
    node config → reconcile limits → confirm `operator_steered` fork. */
 .steer-fork{display:flex;flex-direction:column;gap:12px;min-width:min(440px,82vw);max-width:560px}
 .steer-fork-sub{font-size:12px;color:var(--color-text-tertiary);margin:0 0 2px}
-.steer-fork-note{font-size:12px;color:var(--color-text-secondary);background:var(--color-background-tint,rgba(0,0,0,0.04));border-radius:5px;padding:6px 8px;margin:0}
-.steer-fork-err{color:var(--color-status-error,#c53030);font-size:12px}
+.steer-fork-note{font-size:12px;color:var(--color-text-secondary);background:var(--color-background-tint);border-radius:5px;padding:6px 8px;margin:0}
+.steer-fork-err{color:var(--color-danger);font-size:12px}
 .steer-fork-locks{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--color-border);padding-top:10px}
 .steer-fork-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px}
 .steer-fork-cancel{background:transparent;color:var(--color-text-secondary);border:1px solid var(--color-border);border-radius:6px;padding:6px 14px;font-size:13px;font-family:inherit;cursor:pointer}
-.steer-fork-confirm{background:var(--color-accent);color:var(--color-accent-contrast,#fff);border:0;border-radius:6px;padding:6px 14px;font-size:13px;font-family:inherit;cursor:pointer}
+.steer-fork-confirm{background:var(--color-accent);color:var(--color-text-on-accent);border:0;border-radius:6px;padding:6px 14px;font-size:13px;font-family:inherit;cursor:pointer}
 .steer-fork-cancel:disabled,.steer-fork-confirm:disabled{opacity:0.5;cursor:not-allowed}
 
 /* Node structured-output — read-only contract shown beside the config. */
@@ -57,11 +57,11 @@
 .node-output-desc{margin:0;font-size:11px;color:var(--color-text-tertiary)}
 
 /* Limit reconcile — rounds + spend defaults to the parent's remaining. */
-.limit-reconcile{display:flex;flex-direction:column;gap:8px;padding:8px;border:0.5px solid var(--color-border-tertiary,var(--color-border));border-radius:6px}
+.limit-reconcile{display:flex;flex-direction:column;gap:8px;padding:8px;border:0.5px solid var(--color-border);border-radius:6px}
 .limit-reconcile-title{font-size:11px;font-weight:600;color:var(--color-text-secondary)}
 .limit-row{display:grid;grid-template-columns:74px 1fr;align-items:center;gap:6px 10px}
 .limit-label{font-size:12px;color:var(--color-text-secondary)}
-.limit-input{width:100%;min-width:0;padding:5px 8px;border:0.5px solid var(--color-border-tertiary,var(--color-border));border-radius:5px;background:var(--color-background-secondary);color:var(--color-text-primary);font-size:12px;font-family:var(--font-mono)}
+.limit-input{width:100%;min-width:0;padding:5px 8px;border:0.5px solid var(--color-border);border-radius:5px;background:var(--color-background-secondary);color:var(--color-text-primary);font-size:12px;font-family:var(--font-mono)}
 .limit-input-usd{display:flex;align-items:center;gap:6px}
 .limit-usd-prefix{color:var(--color-text-tertiary);font-size:12px}
 .limit-note{grid-column:2;color:var(--color-text-tertiary);font-size:11px;line-height:1.4}

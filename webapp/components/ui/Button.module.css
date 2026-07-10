@@ -26,7 +26,7 @@
 
 .primary {
   background: var(--color-accent);
-  color: var(--color-accent-contrast, #fff);
+  color: var(--color-text-on-accent);
   border-color: var(--color-accent);
 }
 .primary:hover {
@@ -35,12 +35,12 @@
 }
 
 .danger {
-  background: var(--color-status-error, #c53030);
+  background: var(--color-danger);
   color: #fff;
-  border-color: var(--color-status-error, #c53030);
+  border-color: var(--color-danger);
 }
 .danger:hover {
-  background: var(--color-status-error, #c53030);
+  background: var(--color-danger);
   filter: brightness(1.08);
 }
 

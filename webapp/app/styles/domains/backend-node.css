@@ -24,7 +24,7 @@
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  border: 0.5px solid var(--color-border-tertiary);
+  border: 0.5px solid var(--color-border);
   border-radius: var(--border-radius-sm);
   color: var(--color-text-tertiary);
   vertical-align: middle;
@@ -57,7 +57,7 @@
   font: inherit;
   cursor: pointer;
   background: none;
-  border: 0.5px solid var(--color-border-tertiary);
+  border: 0.5px solid var(--color-border);
   border-radius: var(--border-radius-sm);
   padding: 2px 8px;
   color: inherit;

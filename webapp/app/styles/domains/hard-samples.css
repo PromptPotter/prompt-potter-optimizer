@@ -12,7 +12,7 @@
 .hs-selfopt-lead{margin:0;font-size:13px;color:var(--color-text-secondary)}
 .hs-selfopt-lead strong{color:var(--color-text-primary)}
 .hs-selfopt-hint{margin:0;font-size:12px;color:var(--color-text-tertiary)}
-.hs-selfopt-open{padding:5px 12px;border:1px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-accent);font-size:13px;font-family:inherit;cursor:pointer;transition:border-color .12s,background .12s}
+.hs-selfopt-open{padding:5px 12px;border:1px solid var(--color-border);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-accent);font-size:13px;font-family:inherit;cursor:pointer;transition:border-color .12s,background .12s}
 .hs-selfopt-open:hover{border-color:var(--color-accent);background:var(--color-background-hover)}
 .hs-selfopt-open:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
 /* Two-button control row: heat-map mini on the left, sample-trajectory
@@ -23,7 +23,7 @@
    toggles. Play/pause matches their bordered-rect shape (state shown by icon
    colour, not a loud accent disc); fork is a quiet ghost, present but hushed. */
 .run-ctl{display:inline-flex;align-items:center;gap:4px;margin-left:2px}
-.run-ctl-primary{display:inline-flex;align-items:center;justify-content:center;width:30px;height:22px;padding:0;border:1px solid var(--color-border-tertiary);border-radius:5px;background:var(--color-background-secondary);cursor:pointer;transition:border-color .12s,color .12s,background .12s}
+.run-ctl-primary{display:inline-flex;align-items:center;justify-content:center;width:30px;height:22px;padding:0;border:1px solid var(--color-border);border-radius:5px;background:var(--color-background-secondary);cursor:pointer;transition:border-color .12s,color .12s,background .12s}
 .run-ctl-primary.is-play{color:var(--color-success)}
 .run-ctl-primary.is-pause{color:var(--color-warn)}
 .run-ctl-primary:hover:not(:disabled){border-color:var(--color-accent)}
@@ -32,17 +32,17 @@
 .run-ctl-fork{display:inline-flex;align-items:center;justify-content:center;width:20px;height:22px;padding:0;border:0;background:transparent;color:var(--color-text-tertiary);opacity:0.5;cursor:pointer;transition:opacity .12s,color .12s}
 .run-ctl-fork:hover:not(:disabled){opacity:1;color:var(--color-accent)}
 .run-ctl-fork:disabled{opacity:0.3;cursor:not-allowed}
-.run-ctl-err{color:var(--color-danger,#c53030);font-size:11px;max-width:160px}
+.run-ctl-err{color:var(--color-danger);font-size:11px;max-width:160px}
 /* Pause-pending hint — shown between the click and the run declaring `paused`,
    explaining the graceful wait. Warn-toned to match the pause icon. */
 .run-ctl-pausing{color:var(--color-warn);font-size:11px;max-width:220px}
 /* Sample-trajectory mini button — fixed dimensions mirroring `.hs-heat-mini-btn`
    (57x22px, non-draggable). Inner `.st-mini` renders a miniature Series view
    (4px tiles) — same shape as the heat-map's mini, different palette. */
-.st-mini-btn{position:relative;display:block;margin:0;padding:3px;cursor:pointer;border:1px solid var(--color-border-tertiary);border-radius:5px;background:var(--color-background-secondary);overflow:hidden;width:57px;height:22px;transition:border-color .12s,box-shadow .12s,background .12s}
+.st-mini-btn{position:relative;display:block;margin:0;padding:3px;cursor:pointer;border:1px solid var(--color-border);border-radius:5px;background:var(--color-background-secondary);overflow:hidden;width:57px;height:22px;transition:border-color .12s,box-shadow .12s,background .12s}
 .st-mini-btn:hover{border-color:var(--color-accent)}
 .st-mini-btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
-.st-mini-btn[aria-expanded="true"]{border-color:var(--color-accent);background:var(--color-background-tertiary,var(--color-background-secondary))}
+.st-mini-btn[aria-expanded="true"]{border-color:var(--color-accent);background:var(--color-background-tertiary)}
 /* 4px tiles; auto-fill so the round x sample matrix flows without ever
    changing tile size. */
 .st-mini{display:grid;grid-template-columns:repeat(auto-fill,4px);grid-auto-rows:4px;gap:1px;align-content:start}
@@ -52,8 +52,8 @@
 .st-mini-cell.lost{background:var(--color-warn)}
 .st-mini-cell.kept{background:var(--color-text-tertiary);opacity:.5}
 .st-mini-cell.absent{background:var(--color-background-tertiary)}
-.hs-heat-mini-btn{position:relative;display:block;margin:0;padding:3px;cursor:pointer;border:1px solid var(--color-border-tertiary);border-radius:5px;background:var(--color-background-secondary);overflow:hidden;resize:both;width:57px;height:22px;min-width:30px;min-height:14px;max-width:90%;max-height:50vh;transition:border-color .12s,box-shadow .12s,background .12s}
-.hs-heat-mini-btn[aria-expanded="true"]{border-color:var(--color-accent);background:var(--color-background-tertiary,var(--color-background-secondary))}
+.hs-heat-mini-btn{position:relative;display:block;margin:0;padding:3px;cursor:pointer;border:1px solid var(--color-border);border-radius:5px;background:var(--color-background-secondary);overflow:hidden;resize:both;width:57px;height:22px;min-width:30px;min-height:14px;max-width:90%;max-height:50vh;transition:border-color .12s,box-shadow .12s,background .12s}
+.hs-heat-mini-btn[aria-expanded="true"]{border-color:var(--color-accent);background:var(--color-background-tertiary)}
 .hs-heat-mini-btn:hover{border-color:var(--color-accent)}
 .hs-heat-mini-btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
 /* Native resizer glyph hidden; a diagonal-line grip fades in on hover. */
@@ -78,10 +78,10 @@
    space; max-width caps it at the available width. resize:both — drag the
    bottom-right corner on either axis; that writes an inline `width` which
    overrides the custom property, so a manual size sticks. */
-.hs-block{width:var(--hs-table-w,fit-content);max-width:100%;min-width:360px;display:flex;flex-direction:column;align-items:stretch;border:1px solid var(--color-border-tertiary);border-radius:10px;background:var(--color-background-secondary);overflow:hidden;resize:both;height:calc(30px + 16.5 * 26px + 33px);min-height:200px;max-height:80vh}
+.hs-block{width:var(--hs-table-w,fit-content);max-width:100%;min-width:360px;display:flex;flex-direction:column;align-items:stretch;border:1px solid var(--color-border);border-radius:10px;background:var(--color-background-secondary);overflow:hidden;resize:both;height:calc(30px + 16.5 * 26px + 33px);min-height:200px;max-height:80vh}
 .hs-scroll{flex:1;min-height:0;overflow:auto}
 .hs-grid{display:grid;grid-auto-rows:min-content;background:var(--color-background-secondary);position:relative}
-.hs-header{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:4px;padding:0 8px;height:30px;background:var(--color-background-secondary);border-bottom:1px solid var(--color-border-tertiary);font-size:10px;letter-spacing:.10em;text-transform:uppercase;color:var(--color-text-tertiary);font-weight:600;user-select:none;overflow:hidden}
+.hs-header{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:4px;padding:0 8px;height:30px;background:var(--color-background-secondary);border-bottom:1px solid var(--color-border);font-size:10px;letter-spacing:.10em;text-transform:uppercase;color:var(--color-text-tertiary);font-weight:600;user-select:none;overflow:hidden}
 .hs-header[data-align="right"]{justify-content:flex-end}
 .hs-header[data-align="center"]{justify-content:center}
 .hs-header.folded{padding:0 2px;justify-content:center}
@@ -97,9 +97,9 @@
 .hs-tool{background:transparent;border:0;font-size:11px;cursor:pointer;color:var(--color-text-tertiary);padding:2px 4px;border-radius:3px;line-height:1}
 .hs-tool:hover{background:rgba(var(--color-accent-rgb),0.10);color:var(--color-accent)}
 .hs-tool.on{color:var(--color-accent);background:rgba(var(--color-accent-rgb),0.12)}
-.hs-resize{width:6px;align-self:stretch;margin-left:2px;cursor:col-resize;background:transparent;border-right:1px solid var(--color-border-tertiary);flex-shrink:0;touch-action:none}
+.hs-resize{width:6px;align-self:stretch;margin-left:2px;cursor:col-resize;background:transparent;border-right:1px solid var(--color-border);flex-shrink:0;touch-action:none}
 .hs-resize:hover{border-right-color:var(--color-accent);background:rgba(var(--color-accent-rgb),0.10);border-right-width:2px}
-.hs-cell{padding:6px 10px;font-family:var(--font-mono);font-size:12px;color:var(--color-text-primary);border-bottom:1px solid var(--color-border-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;content-visibility:auto;contain-intrinsic-size:auto 26px;display:flex;align-items:center;min-width:0}
+.hs-cell{padding:6px 10px;font-family:var(--font-mono);font-size:12px;color:var(--color-text-primary);border-bottom:1px solid var(--color-border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;content-visibility:auto;contain-intrinsic-size:auto 26px;display:flex;align-items:center;min-width:0}
 .hs-cell[data-align="right"]{justify-content:flex-end;font-variant-numeric:tabular-nums}
 .hs-cell[data-align="center"]{justify-content:center}
 .hs-cell.wrapped{white-space:normal;overflow-wrap:anywhere;align-items:flex-start;padding:6px 10px}
@@ -110,25 +110,25 @@
 .hs-cell.meas{padding:0;overflow:hidden}
 /* flex-wrap so a narrow table (folded columns / shrink-wrapped width)
    wraps whole controls onto a second row instead of squashing their text. */
-.hs-footer{padding:6px 10px;border-top:1px solid var(--color-border-tertiary);background:var(--color-background-primary);font-size:11px;color:var(--color-text-tertiary);letter-spacing:.04em;display:flex;flex-wrap:wrap;justify-content:flex-start;align-items:center;gap:8px 12px}
+.hs-footer{padding:6px 10px;border-top:1px solid var(--color-border);background:var(--color-background-primary);font-size:11px;color:var(--color-text-tertiary);letter-spacing:.04em;display:flex;flex-wrap:wrap;justify-content:flex-start;align-items:center;gap:8px 12px}
 .hs-counts{margin-left:32px;font-family:var(--font-mono);color:var(--color-text-secondary);white-space:nowrap;flex-shrink:0}
-.hs-reset{margin-left:auto;flex-shrink:0;white-space:nowrap;font-family:var(--font-mono);font-size:11px;background:transparent;border:1px solid var(--color-border-tertiary);color:var(--color-text-secondary);padding:3px 8px;border-radius:4px;cursor:pointer}
+.hs-reset{margin-left:auto;flex-shrink:0;white-space:nowrap;font-family:var(--font-mono);font-size:11px;background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);padding:3px 8px;border-radius:4px;cursor:pointer}
 .hs-reset:hover{border-color:var(--color-accent);color:var(--color-accent)}
 .hs-header.sort-locked .hs-header-label{color:var(--color-text-tertiary);cursor:default}
 .hs-header.sort-locked .hs-header-label:hover{color:var(--color-text-tertiary)}
 .hs-sync-toggle{display:inline-flex;align-items:center;gap:6px;flex-shrink:0;white-space:nowrap;font-family:var(--font-mono);font-size:11px;color:var(--color-text-secondary);letter-spacing:.04em;cursor:pointer;user-select:none}
 .hs-sync-toggle input[type="checkbox"]{accent-color:var(--color-accent);margin:0;cursor:pointer}
 .hs-sync-toggle:hover{color:var(--color-text-primary)}
-.hs-scope-toggle{display:inline-flex;flex-shrink:0;border:1px solid var(--color-border-tertiary);border-radius:4px;overflow:hidden;font-family:var(--font-mono);font-size:11px;letter-spacing:.04em}
-.hs-scope-opt{background:transparent;border:0;color:var(--color-text-secondary);padding:3px 9px;cursor:pointer;white-space:nowrap;border-right:1px solid var(--color-border-tertiary)}
+.hs-scope-toggle{display:inline-flex;flex-shrink:0;border:1px solid var(--color-border);border-radius:4px;overflow:hidden;font-family:var(--font-mono);font-size:11px;letter-spacing:.04em}
+.hs-scope-opt{background:transparent;border:0;color:var(--color-text-secondary);padding:3px 9px;cursor:pointer;white-space:nowrap;border-right:1px solid var(--color-border)}
 .hs-scope-opt:last-child{border-right:0}
 .hs-scope-opt:hover{color:var(--color-text-primary)}
 .hs-scope-opt.on{background:var(--color-accent);color:var(--color-background-primary)}
 .hs-cell[data-running="true"]{animation:hs-soft-blink 1.4s ease-in-out infinite}
 @keyframes hs-soft-blink{0%,100%{background-color:transparent}50%{background-color:rgba(var(--color-accent-rgb),0.18)}}
 .hs-popover-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:24px}
-.hs-popover{background:var(--color-background-secondary);border:1px solid var(--color-border-tertiary);border-radius:10px;max-width:80vw;max-height:80vh;min-width:320px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.5)}
-.hs-popover-header{padding:10px 14px;border-bottom:1px solid var(--color-border-tertiary);display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--color-text-secondary);letter-spacing:.04em}
+.hs-popover{background:var(--color-background-secondary);border:1px solid var(--color-border);border-radius:10px;max-width:80vw;max-height:80vh;min-width:320px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.5)}
+.hs-popover-header{padding:10px 14px;border-bottom:1px solid var(--color-border);display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--color-text-secondary);letter-spacing:.04em}
 .hs-popover-header button{background:transparent;border:0;color:var(--color-text-tertiary);font-size:18px;cursor:pointer;padding:0 4px;line-height:1}
 .hs-popover-header button:hover{color:var(--color-accent)}
 .hs-popover-body{margin:0;padding:14px;overflow:auto;font-family:var(--font-mono);font-size:12px;color:var(--color-text-primary);white-space:pre-wrap;word-break:break-word}
@@ -142,7 +142,7 @@
    widths stay aligned across the sticky boundary. */
 .hs-header-row{position:sticky;top:0;z-index:3}
 .hs-body{will-change:transform}
-.hs-row{border-bottom:1px solid var(--color-border-tertiary)}
+.hs-row{border-bottom:1px solid var(--color-border)}
 .hs-row > .hs-cell{border-bottom:0}
 /* Selection marker — anchored inside .hs-body, spans the full virtual
    height (the body's height drives the scroll-bar, so 0..100% covers every
@@ -152,7 +152,7 @@
    over a prior-unit cache hit. The prior data stays readable but the
    block dims so the operator knows it's transitional. */
 .hs-block[data-stale="true"]{opacity:.55;transition:opacity .12s}
-.hs-heat-tip{position:fixed;z-index:1000;padding:3px 7px;border-radius:4px;background:var(--color-background-primary);border:1px solid var(--color-border-tertiary);font-family:var(--font-mono);font-size:11px;color:var(--color-text-primary);white-space:nowrap;pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,0.35)}
+.hs-heat-tip{position:fixed;z-index:1000;padding:3px 7px;border-radius:4px;background:var(--color-background-primary);border:1px solid var(--color-border);font-family:var(--font-mono);font-size:11px;color:var(--color-text-primary);white-space:nowrap;pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,0.35)}
 @media (prefers-reduced-motion:reduce){
   .hs-cell[data-running="true"]{animation:none;background-color:rgba(var(--color-accent-rgb),0.12)}
 }

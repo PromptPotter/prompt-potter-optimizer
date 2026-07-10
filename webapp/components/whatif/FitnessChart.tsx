@@ -126,7 +126,7 @@ const divergenceLinePlugin: Plugin<"bar", { index: number | null }> = {
       const step = xScale.getPixelForValue(1) - xScale.getPixelForValue(0);
       x = Math.max(chartArea.left, c - (Number.isFinite(step) ? step : 0) / 2);
     }
-    const red = getCss("--color-status-error") || "#e5484d";
+    const red = getCss("--color-danger") || "#e5484d";
     ctx.save();
     ctx.strokeStyle = red;
     ctx.lineWidth = 2;
@@ -461,7 +461,7 @@ export const FitnessChart = memo(function FitnessChart({
     },
     scales: {
       x: { grid: { display: false }, ticks: { font: { size: rotate ? 10 : 11, family: "Cascadia Mono, SF Mono, Menlo, Consolas, monospace" }, autoSkip: false, maxRotation: rotate ? 60 : 0, minRotation: rotate ? 60 : 0 } },
-      y: { min: 0, max: 1, grid: { color: getCss("--color-border-tertiary") }, ticks: { font: { size: 11 }, stepSize: 0.25 } },
+      y: { min: 0, max: 1, grid: { color: getCss("--color-border") }, ticks: { font: { size: 11 }, stepSize: 0.25 } },
     },
     plugins: {
       legend: { display: false },

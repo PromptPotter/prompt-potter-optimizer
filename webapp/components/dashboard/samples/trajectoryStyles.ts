@@ -18,7 +18,7 @@ export const SQ_BASE: CSSProperties = {
   justifyContent: "center",
   fontFamily: "var(--font-mono)",
   fontSize: 10,
-  border: "0.5px solid var(--color-border-tertiary)",
+  border: "0.5px solid var(--color-border)",
   borderRadius: 2,
   background: "var(--color-background-secondary)",
   color: "var(--color-text-secondary)",
@@ -57,8 +57,8 @@ export const SQ_LOST: CSSProperties = {
 export const SQ_KEPT = SQ_BASE;
 export const SQ_ABSENT: CSSProperties = {
   ...SQ_BASE,
-  background: "var(--color-background-tertiary, #1a1a1a)",
-  borderColor: "var(--color-border-secondary)",
+  background: "var(--color-background-tertiary)",
+  borderColor: "var(--color-border)",
   color: "transparent",
 };
 
@@ -86,7 +86,7 @@ const POP_CHIP: CSSProperties = {
   fontSize: 10,
   padding: "1px 4px",
   borderRadius: 2,
-  border: "0.5px solid var(--color-border-tertiary)",
+  border: "0.5px solid var(--color-border)",
 };
 export const POP_COMPUTED: CSSProperties = {
   ...POP_CHIP,

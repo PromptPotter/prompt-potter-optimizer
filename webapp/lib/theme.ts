@@ -71,7 +71,7 @@ export function cssRgba(rgbVar: string, alpha: number): string {
 // once on mount and re-called on every theme flip via bumpThemeVersion.
 export function applyChartDefaults(): void {
   ChartJS.defaults.color = getCss("--color-text-secondary");
-  ChartJS.defaults.borderColor = getCss("--color-border-tertiary");
+  ChartJS.defaults.borderColor = getCss("--color-border");
 }
 
 export const THEME_STORAGE_KEY = "promptpotter.theme";

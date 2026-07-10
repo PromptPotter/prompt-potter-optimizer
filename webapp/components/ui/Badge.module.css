@@ -8,7 +8,7 @@
   border-radius: var(--border-radius-md);
   background: var(--color-background-secondary);
   color: var(--color-text-secondary);
-  border: 0.5px solid var(--color-border-tertiary);
+  border: 0.5px solid var(--color-border);
 }
 
 .accent {

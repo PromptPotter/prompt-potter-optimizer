@@ -173,7 +173,7 @@ function PoBBBackfillLog({ dash }: { dash: DashboardSnapshot | null }) {
               <span style={{ color: "var(--color-text-tertiary)" }}>
                 R{round} C{cidx + 1}/{ctot}
               </span>{" "}
-              <span style={{ color: "var(--color-accent, #2563eb)" }}>↻</span>{" "}
+              <span style={{ color: "var(--color-accent)" }}>↻</span>{" "}
               #{sid}
               {priors.length > 0 && (
                 <span style={{ color: "var(--color-text-tertiary)" }}> — {priors.join(", ")}</span>
@@ -209,7 +209,7 @@ function BackendWarnings({ dash }: { dash: DashboardSnapshot | null }) {
           return (
             <div key={i} style={{ marginBottom: 2 }}>
               <span style={{ color: "var(--color-text-tertiary)" }}>{ts}</span>{" "}
-              <span style={{ color: "var(--color-warn, #d97706)" }}>{w.kind ?? "warning"}</span>
+              <span style={{ color: "var(--color-warn)" }}>{w.kind ?? "warning"}</span>
               {code}{err}{attempts}{wait}{final}{q}
             </div>
           );

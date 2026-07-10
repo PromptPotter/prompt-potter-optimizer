@@ -7,10 +7,10 @@
 /* Skip-to-content — off-screen until it takes keyboard focus, then it
    parks at the top-left over the shell. First Tab from page load lands
    here so a keyboard user can bypass the sidebar + topbar. */
-.skip-link{position:absolute;left:8px;top:-48px;z-index:1000;padding:8px 14px;background:var(--color-accent);color:var(--color-accent-contrast,#fff);border-radius:var(--border-radius-md);font-size:13px;text-decoration:none;transition:top .15s ease}
+.skip-link{position:absolute;left:8px;top:-48px;z-index:1000;padding:8px 14px;background:var(--color-accent);color:var(--color-text-on-accent);border-radius:var(--border-radius-md);font-size:13px;text-decoration:none;transition:top .15s ease}
 .skip-link:focus{top:8px}
 .shell.sidebar-collapsed{--sidebar-width:36px}
-.sidebar{width:var(--sidebar-width);flex-shrink:0;background:var(--color-background-primary);border-right:0.5px solid var(--color-border-tertiary);display:flex;flex-direction:column;padding:16px 0;overflow:hidden}
+.sidebar{width:var(--sidebar-width);flex-shrink:0;background:var(--color-background-primary);border-right:0.5px solid var(--color-border);display:flex;flex-direction:column;padding:16px 0;overflow:hidden}
 /* Sidebar resize handle — straddles the right edge (tracks --sidebar-width),
    overlaid so it consumes no flex column and never shifts layout. Rendered
    only when expanded; hidden in the mobile drawer. A hairline shows on
@@ -27,7 +27,7 @@
 .shell.sidebar-collapsed .sidebar > .sidebar-primary,
 .shell.sidebar-collapsed .sidebar > .unit-library,
 .shell.sidebar-collapsed .sidebar > .sidebar-footer{display:none}
-.brand{padding:8px 16px 20px;border-bottom:0.5px solid var(--color-border-tertiary);margin-bottom:8px}
+.brand{padding:8px 16px 20px;border-bottom:0.5px solid var(--color-border);margin-bottom:8px}
 .brand-name{font-size:16px;font-weight:500}
 .brand-sub{font-size:11px;letter-spacing:.1em;color:var(--color-text-tertiary)}
 .nav-item{display:flex;align-items:center;gap:8px;padding:8px 16px;cursor:pointer;color:var(--color-text-secondary);font-size:14px;transition:background .1s;background:none;border:none;width:100%;text-align:left;font-family:inherit}
@@ -36,7 +36,7 @@
 .nav-item.disabled{opacity:.45;cursor:not-allowed}
 .nav-item.disabled:hover{background:transparent;color:var(--color-text-secondary)}
 .nav-item.disabled svg{opacity:.4 !important}
-.sidebar-footer{margin-top:auto;padding:12px 16px;border-top:0.5px solid var(--color-border-tertiary)}
+.sidebar-footer{margin-top:auto;padding:12px 16px;border-top:0.5px solid var(--color-border)}
 .sidebar-footer-item{display:block;width:100%;text-align:left;font-size:13px;color:var(--color-text-tertiary);padding:5px 0;background:none;border:none;font-family:inherit;text-decoration:none;cursor:pointer}
 .sidebar-footer-item:hover{color:var(--color-text-primary)}
 .sidebar-footer-item:disabled{opacity:.5;cursor:default}
@@ -44,13 +44,13 @@
    "Create something new" pattern: full-width, prominent, sits between
    the brand and the campaign library. */
 .sidebar-primary{padding:8px 12px 6px;display:flex;flex-direction:column;gap:6px}
-.sidebar-cta{display:flex;align-items:center;justify-content:center;gap:6px;padding:8px 12px;background:var(--color-background-tint,rgba(255,255,255,0.04));color:var(--color-text-primary);border:0.5px solid var(--color-border);border-radius:8px;font-family:inherit;font-size:13px;font-weight:500;cursor:pointer;width:100%}
+.sidebar-cta{display:flex;align-items:center;justify-content:center;gap:6px;padding:8px 12px;background:var(--color-background-tint);color:var(--color-text-primary);border:0.5px solid var(--color-border);border-radius:8px;font-family:inherit;font-size:13px;font-weight:500;cursor:pointer;width:100%}
 .sidebar-cta:hover{background:var(--color-background-hover);border-color:var(--color-text-secondary)}
 /* Campaign library — chat-history-style list of every campaign on disk
    under the tenant, each expanding to its unit-tree. Active per CLI
    bullet-marked; currently-viewed highlighted. The list is kept current
    by the shared workspace poll. */
-.unit-library{margin-top:14px;padding:0 8px;border-top:0.5px solid var(--color-border-tertiary);padding-top:10px;display:flex;flex-direction:column;min-height:0;flex:1}
+.unit-library{margin-top:14px;padding:0 8px;border-top:0.5px solid var(--color-border);padding-top:10px;display:flex;flex-direction:column;min-height:0;flex:1}
 .unit-library-head{display:flex;align-items:center;justify-content:space-between;padding:0 8px 6px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--color-text-tertiary)}
 /* Filter button in the library header — folds the lifecycle + dataset filters
    into one popover so the sidebar body stays a clean forest. A dot marks a
@@ -80,13 +80,13 @@
 .unit-library-empty{padding:12px 10px;display:flex;flex-direction:column;gap:6px}
 .unit-library-empty .empty-headline{font-size:13px;font-weight:500;color:var(--color-text-secondary)}
 .unit-library-empty .empty-body{font-size:12px;color:var(--color-text-tertiary)}
-.unit-library-empty .empty-cmd{margin:2px 0;padding:6px 8px;background:var(--color-surface-elev,rgba(255,255,255,.04));border:0.5px solid var(--color-border-tertiary);border-radius:4px;font-size:11px;overflow-x:auto;white-space:nowrap}
-.unit-library-empty .empty-cmd code{font-family:var(--font-mono,monospace);color:var(--color-text-secondary)}
+.unit-library-empty .empty-cmd{margin:2px 0;padding:6px 8px;background:var(--color-background-tint);border:0.5px solid var(--color-border);border-radius:4px;font-size:11px;overflow-x:auto;white-space:nowrap}
+.unit-library-empty .empty-cmd code{font-family:var(--font-mono);color:var(--color-text-secondary)}
 .unit-library-empty .empty-hint{font-size:11px;color:var(--color-text-tertiary)}
 .unit-library-empty .empty-hint code{font-size:11px}
 /* Lifecycle tabs — Active / Archived. Deleted is hidden from the UI;
    reach for the file tree by campaign id to recover one. */
-.unit-library-tabs{display:flex;gap:4px;padding:4px 8px 6px;border-bottom:0.5px solid var(--color-border-tertiary)}
+.unit-library-tabs{display:flex;gap:4px;padding:4px 8px 6px;border-bottom:0.5px solid var(--color-border)}
 .sidebar-filter-panel .unit-library-tabs{padding:0 0 4px}
 .unit-library-tab{flex:1;padding:4px 8px;background:transparent;border:0;border-bottom:1.5px solid transparent;cursor:pointer;font-family:inherit;font-size:11px;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.04em}
 .unit-library-tab:hover{color:var(--color-text-primary)}
@@ -100,9 +100,9 @@
 .campaign-menu-trigger:disabled{cursor:default;opacity:.5}
 .campaign-menu-item{padding:6px 12px;background:transparent;border:0;text-align:left;cursor:pointer;font-family:inherit;font-size:12px;color:var(--color-text-secondary);width:100%}
 .campaign-menu-item:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
-.campaign-menu-item-danger{color:var(--color-status-error,#dc2626)}
-.campaign-menu-item-danger:hover{color:var(--color-status-error,#dc2626);background:var(--color-background-hover)}
-.campaign-menu-err{margin-left:4px;color:var(--color-status-error,#dc2626);font-weight:700;font-size:11px}
+.campaign-menu-item-danger{color:var(--color-danger)}
+.campaign-menu-item-danger:hover{color:var(--color-danger);background:var(--color-background-hover)}
+.campaign-menu-err{margin-left:4px;color:var(--color-danger);font-weight:700;font-size:11px}
 /* Dataset filter chips — inside the header filter popover; narrow the flat
    campaign list to one dataset. Shown only when 2+ datasets are on disk. */
 .unit-library-filter{display:flex;flex-wrap:wrap;gap:4px;padding:0 8px 8px}
@@ -120,7 +120,7 @@
 .unit-library-row{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1}
 .unit-library-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .unit-library-meta{font-size:11px;color:var(--color-text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.unit-library-live{color:var(--color-status-success,#16a34a);margin-left:4px;font-size:8px;vertical-align:middle}
+.unit-library-live{color:var(--color-success);margin-left:4px;font-size:8px;vertical-align:middle}
 /* Terminal run-state on a non-running unit row — distinguishes a stopped/aborted
    campaign from the live one (CLI↔webapp parity). The reason word carries the
    meaning; a terminal run's status reads as stale, not done. */
@@ -128,7 +128,7 @@
 /* Unit-kind badge on a non-root unit row (fork / diag / sweep). Small,
    uppercase, low-contrast — a qualifier, not a focal point. The root unit
    gets no badge. */
-.unit-library-kind{display:inline-block;margin-left:6px;padding:0 4px;border-radius:3px;background:var(--color-background-secondary,rgba(127,127,127,0.18));border:0.5px solid var(--color-border);color:var(--color-text-tertiary);font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;vertical-align:middle}
+.unit-library-kind{display:inline-block;margin-left:6px;padding:0 4px;border-radius:3px;background:var(--color-background-secondary);border:0.5px solid var(--color-border);color:var(--color-text-tertiary);font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;vertical-align:middle}
 /* Tiny clickable chips alongside the % on a family row — one per child
    kind (forks/sweeps/diag). Sits OUTSIDE the row's <button> so we don't
    nest interactive elements; flex on the family wrapper keeps it on the
@@ -138,7 +138,7 @@
    three "subtle" tokens (hover-tint bg, tertiary text, 10px, 0.5px border)
    and the chip was effectively invisible against the sidebar. Real chip
    color + 1px border + secondary text + min-width gives a clear silhouette. */
-.unit-library-chip{display:inline-flex;align-items:center;justify-content:center;gap:3px;min-width:28px;padding:1px 5px;background:var(--color-background-secondary,rgba(127,127,127,0.18));border:1px solid var(--color-border);border-radius:4px;cursor:pointer;font-family:inherit;color:var(--color-text-secondary);font-size:11px;font-weight:500;line-height:1.3}
+.unit-library-chip{display:inline-flex;align-items:center;justify-content:center;gap:3px;min-width:28px;padding:1px 5px;background:var(--color-background-secondary);border:1px solid var(--color-border);border-radius:4px;cursor:pointer;font-family:inherit;color:var(--color-text-secondary);font-size:11px;font-weight:500;line-height:1.3}
 .unit-library-chip:hover{background:var(--color-background-tint-active);color:var(--color-accent);border-color:var(--color-accent)}
 .unit-library-chip-glyph{font-weight:600;opacity:0.75}
 .unit-library-chip-count{font-variant-numeric:tabular-nums}
@@ -162,11 +162,11 @@
 .unit-library-twist{flex:0 0 18px;background:transparent;border:0;color:var(--color-text-secondary);cursor:pointer;font-size:9px;padding:0;line-height:1;display:flex;align-items:center;justify-content:center;border-radius:4px}
 .unit-library-twist:hover:not(:disabled){background:var(--color-background-hover);color:var(--color-text-primary)}
 .unit-library-twist:disabled{cursor:default;visibility:hidden}
-.unit-library-children{list-style:none;margin:2px 0 4px 14px;padding:0;border-left:1px solid var(--color-border-tertiary)}
+.unit-library-children{list-style:none;margin:2px 0 4px 14px;padding:0;border-left:1px solid var(--color-border)}
 /* Campaign on-disk size hover card. position:fixed (set inline from the row
    rect) escapes sidebar overflow clipping. */
 .csize-wrap{display:block}
-.csize-card{z-index:50;pointer-events:none;display:grid;grid-template-columns:auto auto;align-items:baseline;column-gap:14px;row-gap:4px;background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.28);padding:8px 12px;min-width:96px}
+.csize-card{z-index:50;pointer-events:none;display:grid;grid-template-columns:auto auto;align-items:baseline;column-gap:14px;row-gap:4px;background:var(--color-background-secondary);border:0.5px solid var(--color-border);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.28);padding:8px 12px;min-width:96px}
 .csize-label{justify-self:start;font-size:10px;letter-spacing:0.04em;text-transform:uppercase;color:var(--color-text-tertiary)}
 .csize-val{justify-self:end;font-size:13px;font-weight:700;color:var(--color-text-primary);font-variant-numeric:tabular-nums}
 .csize-label[data-indent]{padding-left:12px;text-transform:none;letter-spacing:0.02em}
@@ -175,7 +175,7 @@
 /* Run-phase chip — a status dot paired with the phase word (never colour
    alone), shared by the RemoteBar and the topbar active-jobs list so a run's
    phase reads identically wherever it surfaces. */
-.phase-chip{display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:12px;color:var(--color-text-primary,inherit)}
+.phase-chip{display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:12px;color:var(--color-text-primary)}
 .phase-dot{width:8px;height:8px;border-radius:50%;background:var(--color-text-tertiary)}
 .phase-running .phase-dot{background:var(--color-success)}
 .phase-paused .phase-dot{background:var(--color-warn)}
@@ -184,7 +184,7 @@
 /* Breadcrumb affordance shown only while the view is pinned to a campaign
    (workspace `following` is false) — one click resumes following the
    CLI's active campaign. */
-.follow-active-btn{display:inline-flex;align-items:center;gap:4px;margin-left:8px;padding:2px 8px;border-radius:10px;background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);color:var(--color-text-secondary);font-family:inherit;font-size:11px;cursor:pointer;transition:color .15s,border-color .15s}
+.follow-active-btn{display:inline-flex;align-items:center;gap:4px;margin-left:8px;padding:2px 8px;border-radius:10px;background:var(--color-background-secondary);border:0.5px solid var(--color-border);color:var(--color-text-secondary);font-family:inherit;font-size:11px;cursor:pointer;transition:color .15s,border-color .15s}
 .follow-active-btn:hover{color:var(--color-accent);border-color:var(--color-accent)}
 /* L4 inner-loop disclosure — the "inner loops" toggle row under an
    L4 outer campaign, its nested inner-campaign list, and the

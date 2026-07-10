@@ -11,23 +11,24 @@
   --color-background-hover:#E7E1D2;
   --color-background-tint-active:#C5AFA4;    /* taupe — active tint */
   --color-background-tint-icon:#696047;      /* olive — icon tint */
-  --color-background-tint-soft:#D8D1BE;      /* subtle warm neutral */
   --color-text-primary:#0a0a0a;              /* near-black ink */
   --color-text-secondary:#525252;
   --color-text-tertiary:#737373;
   --color-text-on-accent:#ffffff;
-  --color-border-tertiary:#A89E8A;           /* olive-derived border */
+  --color-border:#A89E8A;           /* olive-derived border */
   --color-accent:#090C9B;                    /* cobalt — primary accent */
   --color-accent-strong:#060888;             /* cobalt hover/active */
   --color-accent-rgb:9,12,155;
   --color-accent-glow:rgba(var(--color-accent-rgb),0.28);
   --color-selection:#55251D;                 /* oxblood — cross-panel selection stroke */
   --color-ci:#525252;                        /* composite-fitness CI whisker — neutral, not status */
+  --color-background-tint:rgba(0,0,0,0.04);
+  --color-background-tint-strong:rgba(0,0,0,0.12);
   --color-success:#1a8265;
   --color-success-rgb:26,130,101;
   --color-success-bg:rgba(var(--color-success-rgb),0.18);
   --color-success-border:rgba(var(--color-success-rgb),0.45);
-  --color-danger:#b03d3d;
+  --color-danger:#C53030;                    /* tomato jam */
   --color-danger-rgb:176,61,61;
   --color-danger-bg:rgba(var(--color-danger-rgb),0.16);
   --color-danger-border:rgba(var(--color-danger-rgb),0.45);

@@ -52,7 +52,7 @@ function Row({
           y1={2}
           x2={x(0)}
           y2={ROW_H - 2}
-          stroke="var(--color-border-tertiary)"
+          stroke="var(--color-border)"
           strokeWidth={1}
         />
         {children}

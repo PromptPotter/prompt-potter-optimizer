@@ -6,7 +6,7 @@
    so the bars never shift on toggle. */
 .fitness-card{margin-bottom:14px;width:auto;max-width:100%;margin-left:auto;margin-right:auto}
 .fitness-toggles{display:flex;gap:6px}
-.fitness-chip{font-family:inherit;font-size:11px;padding:3px 9px;border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-secondary);border:0.5px solid var(--color-border-tertiary);cursor:pointer;letter-spacing:.04em;transition:background .15s,color .15s,border-color .15s}
+.fitness-chip{font-family:inherit;font-size:11px;padding:3px 9px;border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-secondary);border:0.5px solid var(--color-border);cursor:pointer;letter-spacing:.04em;transition:background .15s,color .15s,border-color .15s}
 .fitness-chip:hover{background:var(--color-background-hover);color:var(--color-text-primary);border-color:var(--color-accent)}
 .fitness-chip.on{background:var(--color-background-tint-active);color:var(--color-accent);border-color:rgba(var(--color-accent-rgb),0.55)}
 /* Chart frame: fills available width so 5 → 25 bars all read; height stays
@@ -27,7 +27,7 @@
 .ability-help p{margin:0 0 8px}
 .ability-help p:last-child{margin-bottom:0}
 .ability-help strong{color:var(--color-text-primary)}
-.ability-help-calib{padding-top:6px;border-top:0.5px solid var(--color-border-tertiary);color:var(--color-text-tertiary)}
+.ability-help-calib{padding-top:6px;border-top:0.5px solid var(--color-border);color:var(--color-text-tertiary)}
 /* What-If opens to the RIGHT of the chart (side-by-side) inside the
    fitness card. .fitness-chart-wrap groups the legend + chart so the
    legend stays positioned above the bars (matching the Composite-only
@@ -57,7 +57,7 @@
 /* Chart caps at 432px but shrinks with the container (column is minmax(0,432px)),
    so it never spills off a narrow card. */
 .fitness-card.whatif-open .fitness-chart-wrap{grid-column:1;grid-row:2;width:100%;max-width:432px;align-self:start}
-.fitness-card.whatif-open .fitness-whatif{grid-column:2;grid-row:1 / span 2;align-self:stretch;min-width:0;margin-top:0;padding-top:0;padding-left:18px;border-top:0;border-left:0.5px solid var(--color-border-tertiary)}
+.fitness-card.whatif-open .fitness-whatif{grid-column:2;grid-row:1 / span 2;align-self:stretch;min-width:0;margin-top:0;padding-top:0;padding-left:18px;border-top:0;border-left:0.5px solid var(--color-border)}
 /* Stacked layout: align-items:stretch (overriding the grid layout's `start`) so
    flex children fill the card width instead of hugging their max-content (the
    ~455px what-if grid row), which would overflow a narrow card. */
@@ -66,7 +66,7 @@
   .fitness-card.whatif-open > .card-title{max-width:none}
   .fitness-card.whatif-open > .fitness-body{display:flex;flex-direction:column}
   .fitness-card.whatif-open .fitness-chart-wrap{width:100%}
-  .fitness-card.whatif-open .fitness-whatif{padding-left:0;padding-top:18px;border-left:0;border-top:0.5px solid var(--color-border-tertiary);margin-top:0}
+  .fitness-card.whatif-open .fitness-whatif{padding-left:0;padding-top:18px;border-left:0;border-top:0.5px solid var(--color-border);margin-top:0}
 }
 /* Same stack keyed on the card's CONTAINER width (the `.job-whatif` cell) not
    the viewport — in the chat pane the @media query above never fires (wide
@@ -76,9 +76,9 @@
   .fitness-card.whatif-open > .card-title{max-width:none}
   .fitness-card.whatif-open > .fitness-body{display:flex;flex-direction:column}
   .fitness-card.whatif-open .fitness-chart-wrap{width:100%}
-  .fitness-card.whatif-open .fitness-whatif{padding-left:0;padding-top:18px;border-left:0;border-top:0.5px solid var(--color-border-tertiary);margin-top:0}
+  .fitness-card.whatif-open .fitness-whatif{padding-left:0;padding-top:18px;border-left:0;border-top:0.5px solid var(--color-border);margin-top:0}
 }
-.fitness-whatif{margin-top:18px;padding-top:18px;border-top:0.5px solid var(--color-border-tertiary)}
+.fitness-whatif{margin-top:18px;padding-top:18px;border-top:0.5px solid var(--color-border)}
 .fitness-empty{color:var(--color-text-tertiary);font-style:italic;font-size:12px;padding:16px 0;text-align:center}
 .whatif-legend{display:flex;flex-wrap:wrap;gap:14px;font-size:11px;color:var(--color-text-tertiary);margin-bottom:14px;letter-spacing:.04em}
 .whatif-legend .swatch{display:inline-block;width:13px;height:13px;border-radius:3px;vertical-align:middle;margin-right:5px;border:1.5px solid var(--color-text-tertiary);background:var(--color-background-secondary);text-align:center;line-height:11px;font-size:11px;font-weight:900}
@@ -93,7 +93,7 @@
    padding = 274px. The tile carries a toggle button + a weight thermometer. */
 .whatif-grid-wrap{overflow-y:auto;max-height:274px;padding:6px 4px 6px 0;margin-bottom:12px}
 .whatif-grid{display:grid;grid-template-columns:repeat(auto-fill,100px);justify-content:start;gap:10px}
-.whatif-sq{position:relative;width:100px;background:var(--color-background-secondary);border:1.5px dashed var(--color-border-tertiary);border-radius:9px;padding:0;display:flex;flex-direction:column;text-align:center;transition:border-color .15s,background .15s,opacity .15s,transform .1s,box-shadow .15s;height:126px;user-select:none;z-index:1;font-family:inherit}
+.whatif-sq{position:relative;width:100px;background:var(--color-background-secondary);border:1.5px dashed var(--color-border);border-radius:9px;padding:0;display:flex;flex-direction:column;text-align:center;transition:border-color .15s,background .15s,opacity .15s,transform .1s,box-shadow .15s;height:126px;user-select:none;z-index:1;font-family:inherit}
 .whatif-sq:hover:not(.disabled){border-color:var(--color-accent);transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,0.35);z-index:3}
 /* The toggle is the upper area (tick/dir/icon/name); the weight row sits below. */
 .whatif-sq-toggle{position:relative;flex:1;display:flex;flex-direction:column;align-items:center;gap:7px;width:100%;padding:13px 7px 4px;background:transparent;border:0;color:inherit;font:inherit;cursor:pointer}

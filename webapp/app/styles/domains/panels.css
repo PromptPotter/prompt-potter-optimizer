@@ -9,7 +9,7 @@ h1{font-size:26px;font-weight:600;line-height:1.2}
    operator scans first: best%, phase, round, query progress, throughput. */
 .topstrip{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:2px 0;font-family:var(--font-mono)}
 .topstrip-label{font-size:10px;letter-spacing:.08em;color:var(--color-text-tertiary);text-transform:uppercase;font-weight:600}
-.topstrip-sep{width:1px;height:13px;background:var(--color-border-tertiary);flex:0 0 auto}
+.topstrip-sep{width:1px;height:13px;background:var(--color-border);flex:0 0 auto}
 .topstrip-best{display:inline-flex;align-items:center;gap:7px}
 .topstrip-best-val{font-size:15px;font-weight:600;color:var(--color-text-primary);font-family:var(--font-mono);line-height:1}
 .topstrip-spark{width:88px;height:15px;display:block}
@@ -35,21 +35,21 @@ h1{font-size:26px;font-weight:600;line-height:1.2}
 .phase-tag.is-error{color:var(--color-danger);background:var(--color-danger-bg);border-color:var(--color-danger-border)}
 .phase-tag.is-warn{color:var(--color-warn);background:var(--color-warn-bg);border-color:var(--color-warn-border)}
 
-.card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:16px}
+.card{background:var(--color-background-primary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-lg);padding:16px}
 .card-title{font-size:14px;font-weight:500;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between}
-.badge{font-size:11px;padding:2px 8px;border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-secondary);border:0.5px solid var(--color-border-tertiary)}
+.badge{font-size:11px;padding:2px 8px;border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-secondary);border:0.5px solid var(--color-border)}
 
 .table-wrap{overflow-x:auto;max-height:340px;overflow-y:auto}
 table{width:100%;border-collapse:collapse;font-size:13px}
-th{font-size:12px;font-weight:500;color:var(--color-text-secondary);padding:6px 10px;text-align:left;border-bottom:0.5px solid var(--color-border-tertiary);position:sticky;top:0;background:var(--color-background-primary)}
-td{padding:8px 10px;border-bottom:0.5px solid var(--color-border-tertiary);vertical-align:top;color:var(--color-text-secondary)}
+th{font-size:12px;font-weight:500;color:var(--color-text-secondary);padding:6px 10px;text-align:left;border-bottom:0.5px solid var(--color-border);position:sticky;top:0;background:var(--color-background-primary)}
+td{padding:8px 10px;border-bottom:0.5px solid var(--color-border);vertical-align:top;color:var(--color-text-secondary)}
 td:first-child{color:var(--color-text-primary);font-weight:500}
 .pass{display:inline-block;background:var(--color-success-bg);color:var(--color-success);border:0.5px solid var(--color-success-border);border-radius:4px;padding:1px 7px;font-size:11px;font-weight:500;margin-bottom:3px}
 .fail{display:inline-block;background:var(--color-danger-bg);color:var(--color-danger);border:0.5px solid var(--color-danger-border);border-radius:4px;padding:1px 7px;font-size:11px;font-weight:500;margin-bottom:3px}
 
 /* Live-state card */
 .live-state-card{margin-bottom:14px}
-.formula-row{font-family:var(--font-mono);font-size:12px;color:var(--color-text-secondary);background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:8px 12px;margin-bottom:14px;overflow-x:auto;white-space:nowrap}
+.formula-row{font-family:var(--font-mono);font-size:12px;color:var(--color-text-secondary);background:var(--color-background-secondary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-md);padding:8px 12px;margin-bottom:14px;overflow-x:auto;white-space:nowrap}
 .kv-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:12px 18px}
 .kv{display:flex;flex-direction:column;gap:2px;min-width:0}
 .kv-label{font-size:11px;letter-spacing:.06em;color:var(--color-text-tertiary);text-transform:uppercase;font-weight:500}

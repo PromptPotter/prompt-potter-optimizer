@@ -4,7 +4,7 @@
 .lab-pane {
   display: flex;
   flex-direction: column;
-  gap: var(--dash-zone-gap, 16px);
+  gap: var(--dash-zone-gap);
 }
 
 .lab-head h1 {
@@ -42,11 +42,11 @@
 }
 .lab-empty code,
 .lab-lede code {
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
   font-size: 0.85em;
   padding: 1px 4px;
   border-radius: 4px;
-  background: var(--color-surface-2, rgba(127, 127, 127, 0.12));
+  background: var(--color-background-tint-strong);
 }
 
 /* ── Table ──────────────────────────────────────────────────── */
@@ -67,16 +67,16 @@
   text-transform: uppercase;
   letter-spacing: 0.03em;
   padding: 4px 10px;
-  border-bottom: 1px solid var(--color-border-tertiary);
+  border-bottom: 1px solid var(--color-border);
   white-space: nowrap;
 }
 .lab-table td {
   padding: 7px 10px;
-  border-bottom: 1px solid var(--color-border-tertiary);
+  border-bottom: 1px solid var(--color-border);
   vertical-align: baseline;
 }
 .lab-row-champion {
-  background: var(--color-success-bg, rgba(60, 160, 90, 0.08));
+  background: var(--color-success-bg);
 }
 
 .lab-rank {
@@ -90,7 +90,7 @@
   white-space: nowrap;
 }
 .lab-state code {
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
   color: var(--color-text-primary);
 }
 
@@ -142,7 +142,7 @@
   text-decoration: underline;
 }
 .lab-open:hover {
-  color: var(--color-accent-strong, var(--color-accent));
+  color: var(--color-accent-strong);
 }
 
 /* ── Preset collection ops (inert until the coronation slice) ── */
@@ -155,7 +155,7 @@
   font-size: 0.72rem;
   padding: 2px 8px;
   border-radius: 6px;
-  border: 1px solid var(--color-border-tertiary);
+  border: 1px solid var(--color-border);
   background: transparent;
   color: var(--color-text-tertiary);
   cursor: not-allowed;
@@ -180,13 +180,13 @@
 }
 .cap-ds {
   color: var(--color-text-secondary) !important;
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
 }
 .cap-cell {
   min-width: 72px;
   padding: 5px 8px;
   border-radius: 6px;
-  border: 1px solid var(--color-border-tertiary);
+  border: 1px solid var(--color-border);
   vertical-align: top;
   line-height: 1.25;
 }
@@ -215,7 +215,7 @@
 }
 /* Band = colour + the text tag above; never colour alone. */
 .cap-band-in-band {
-  background: var(--color-success-bg, rgba(60, 160, 90, 0.1));
+  background: var(--color-success-bg);
 }
 .cap-band-in-band .cap-band-tag {
   color: var(--color-success);
@@ -225,10 +225,10 @@
   color: var(--color-text-tertiary);
 }
 .cap-band-saturated {
-  background: var(--color-warn-bg, rgba(200, 150, 40, 0.1));
+  background: var(--color-warn-bg);
 }
 .cap-band-saturated .cap-band-tag {
-  color: var(--color-warn, var(--color-danger));
+  color: var(--color-warn);
 }
 .cap-active {
   outline: 2px solid var(--color-accent);
@@ -252,7 +252,7 @@
 .ov-cell-label {
   flex: 0 0 12ch;
   color: var(--color-text-secondary);
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
   font-size: 0.72rem;
   overflow: hidden;
   text-overflow: ellipsis;

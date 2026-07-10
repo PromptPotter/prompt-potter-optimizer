@@ -128,9 +128,9 @@ function ViewToggle({ view, onChange }: { view: ViewKind; onChange: (v: ViewKind
           padding: "2px 10px",
           fontSize: 11,
           fontFamily: "var(--font-mono)",
-          border: "0.5px solid var(--color-border-tertiary)",
+          border: "0.5px solid var(--color-border)",
           borderRadius: 2,
-          background: active ? "var(--color-background-tertiary, var(--color-background-secondary))" : "transparent",
+          background: active ? "var(--color-background-tertiary)" : "transparent",
           color: active ? "var(--color-text-primary)" : "var(--color-text-tertiary)",
           cursor: "pointer",
         }}

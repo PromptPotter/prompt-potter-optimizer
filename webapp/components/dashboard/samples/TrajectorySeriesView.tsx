@@ -148,7 +148,7 @@ export function SeriesView({
                       style={{
                         ...style,
                         cursor: "pointer",
-                        outline: isHovered ? "1px solid var(--color-accent, #3b82f6)" : undefined,
+                        outline: isHovered ? "1px solid var(--color-accent)" : undefined,
                         outlineOffset: isHovered ? -1 : undefined,
                       }}
                       onMouseEnter={(e) =>
@@ -236,9 +236,9 @@ function SeriesHoverPopup({
         maxHeight: 260,
         overflowY: "auto",
         padding: 8,
-        border: "0.5px solid var(--color-border-tertiary)",
+        border: "0.5px solid var(--color-border)",
         borderRadius: 4,
-        background: "var(--color-background-primary, var(--color-background-secondary))",
+        background: "var(--color-background-primary)",
         boxShadow: "0 6px 24px rgba(0,0,0,0.35)",
         fontFamily: "var(--font-mono)",
         pointerEvents: "none",

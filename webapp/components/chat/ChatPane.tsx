@@ -97,7 +97,6 @@ export function ChatPane({
   const { viewedPath, cycleId, leafCampaignId, leafCycleId, sessionId } =
     useWorkspace();
   const [jobOpen, setJobOpen] = useState(false);
-  const [wandOn, setWandOn] = useState(true);
   const [samplesOpen, setSamplesOpen] = useState(false);
   const toggleSamples = () => setSamplesOpen((v) => !v);
 
@@ -368,15 +367,13 @@ export function ChatPane({
                   </svg>
                 </span>
                 <div className="row-body">
-                  <div className="name">Optimize prompt while using<span className="beta-tag">Beta</span></div>
+                  <div className="name">Optimize prompt while using<span className="soon-tag">Soon</span></div>
                   <div className="desc">Quietly evolves parameters across your project</div>
                 </div>
               </div>
-              <Switch
-                checked={wandOn}
-                onChange={() => setWandOn((v) => !v)}
-                label="Optimize prompt while using"
-              />
+              {/* Locked until a backend wires it, like its three neighbours. It read as
+                  operable and toggled nothing — the one affordance-honesty (I3) breach. */}
+              <Switch checked={false} locked label="Optimize prompt while using" />
               <span className="sparkle s1" /><span className="sparkle s2" /><span className="sparkle s3" /><span className="sparkle s4" />
               <span className="sparkle s5" /><span className="sparkle s6" /><span className="sparkle s7" /><span className="sparkle s8" />
             </div>
