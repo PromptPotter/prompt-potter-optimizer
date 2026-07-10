@@ -66,22 +66,24 @@ class AuthoredDataset:
 
 
 def read_campaign_config_file(path: Path) -> dict[str, Any]:
-    """Read a dataset's ``campaign.json`` → dict, unwrapping the optional outer
-    ``campaign_config`` key (the repo on-disk convention). ``{}`` when the file
-    is absent, empty, or whitespace-only.
+    """Read a dataset's ``campaign.json`` → the config under its ``campaign_config`` key.
+    ``{}`` when the file is absent, empty, or whitespace-only.
 
-    This is the dataset **template** at ``datasets/{name}/campaign.json`` — a
-    ``campaign_config`` wrapper. NOT the minted **manifest** at
-    ``campaigns/{id}/campaign.json`` (a frozen :class:`Campaign`, ``extra="forbid"``,
-    owned by ``CampaignStore``). Two incompatible schemas share one filename; check
-    which tree the path is under before assuming a shape."""
+    **The sole reader of this file.** It is the dataset **template** at
+    ``datasets/{name}/campaign.json`` — always wrapped in ``campaign_config``, which is what
+    every writer emits (``draft_build._build_default_campaign_json``, ingest's
+    ``write_committed_dataset``) and what ``TenantDatasetStore._rewrite_campaign_self_ref``
+    requires. It is NOT the minted **manifest** at ``campaigns/{id}/campaign.json`` (a frozen
+    :class:`Campaign`, ``extra="forbid"``, owned by ``CampaignStore``). Two incompatible schemas
+    share one filename; check which tree the path is under before assuming a shape — and read
+    the template through here, never with a hand-rolled ``.get("campaign_config", data)``, which
+    quietly accepted an unwrapped shape no writer produces."""
     if not path.is_file():
         return {}
     raw = path.read_text(encoding="utf-8").strip()
     if not raw:
         return {}
-    data = json.loads(raw)
-    result: dict[str, Any] = data.get("campaign_config", data) or {}
+    result: dict[str, Any] = json.loads(raw).get("campaign_config") or {}
     return result
 
 

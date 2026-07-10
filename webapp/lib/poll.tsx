@@ -303,7 +303,6 @@ export interface CycleStreamState {
   status: StatusKind;
   statusText: string;
   statusHint: string;
-  ageS: number | null;
   termKey: string;
   error: string | null;
   // The optimizer is actively executing this cycle — the composition of the two
@@ -325,7 +324,6 @@ const INITIAL_STATE: CycleStreamState = {
   status: "offline",
   statusText: "Connecting…",
   statusHint: "",
-  ageS: null,
   termKey: "status_offline",
   error: null,
   isLive: false,
@@ -514,7 +512,6 @@ function useCycleStreamSource(
             status: bucket.status,
             statusText: bucket.statusText,
             statusHint: bucket.statusHint,
-            ageS,
             termKey: bucket.termKey,
             isLive: bucket.status === "live" && prev.dash?.run_phase === "running",
           };
@@ -538,7 +535,6 @@ function useCycleStreamSource(
           statusHint:
             "First snapshot lands when origin completes — campaign is initialising.",
           termKey: "status_warming_up",
-          ageS: null,
           error: null,
           isLive: false,
           phase: "warming_up",
@@ -587,7 +583,6 @@ function useCycleStreamSource(
         status: bucket.status,
         statusText: bucket.statusText,
         statusHint: bucket.statusHint,
-        ageS,
         termKey: bucket.termKey,
         error: null,
         isLive: bucket.status === "live" && dash.run_phase === "running",

@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 
 from promptpotter.application.config import load_campaign_config, resolve_pipeline_config_params
 from promptpotter.application.datasets import resolve_dataset_items
+from promptpotter.application.datasets.authored import read_campaign_config_file
 from promptpotter.application.datasets.csv_ingest import IngestError
 from promptpotter.application.datasets.ingest import draft_from_dataset
 from promptpotter.application.datasets.prompts import has_dataset_prompts
@@ -83,8 +84,8 @@ def _campaign_backed_origins(store: Stores) -> list[OriginEntry]:
     campaigns = store.campaigns.list_campaigns(None, lifecycle="active", owner_user_id=None)
     by_origin: dict[str, list[Campaign]] = {}
     for c in campaigns:
-        # Empty hash (legacy/in-flight manifest) → keep the campaign as its own
-        # origin rather than collapsing every blank into one bogus group.
+        # Empty hash (a `checkin` campaign still authoring its origin) → keep the campaign as
+        # its own origin rather than collapsing every blank into one bogus group.
         by_origin.setdefault(c.root_content_hash or c.campaign_id, []).append(c)
 
     out: list[OriginEntry] = []
@@ -126,8 +127,7 @@ def _dataset_origin_id(store: Stores, dataset_dir: Path, dataset_name: str) -> s
     try:
         raw = read_json(dataset_dir / "pipeline.json")
         schema = parse_pipeline_response(raw)
-        craw = read_json(dataset_dir / "campaign.json")
-        cfg = load_campaign_config(craw.get("campaign_config", craw))
+        cfg = load_campaign_config(read_campaign_config_file(dataset_dir / "campaign.json"))
         exclude = set(cfg.exclude_nodes)
         active = [n for n in schema.active_steps if n not in exclude]
         if not active:
@@ -207,8 +207,8 @@ def list_origins(store: StoreDep) -> OriginListResponse:
 def _campaign_for_origin(store: Stores, origin_id: str) -> Campaign | None:
     """The canonical (earliest) active campaign whose origin identity is ``origin_id``.
 
-    Mirrors :func:`_campaign_backed_origins`' grouping key (``root_content_hash``,
-    or ``campaign_id`` for a blank-hash legacy manifest). ``None`` for a *prepared*
+    Mirrors :func:`_campaign_backed_origins`' grouping key (``root_content_hash``, or
+    ``campaign_id`` for a blank-hash ``checkin`` manifest). ``None`` for a *prepared*
     origin id (no campaign yet) — those reuse the dataset-draft path, not this one.
     """
     matches = [

@@ -182,13 +182,13 @@ class AuditTrailView(DerivedView):
 
     # -- Ledger subscription (PhaseRecord 3) ----------------------------------------
 
-    # Origin emits `PhaseRecord("origin", "enter"|"exit", round=0)` — same boundary logic;
-    # origin IS round 0 on disk (`round_0000.json`).
+    # One phase, one boundary pair. Origin IS round 0 (`round_0000.json`) and `emit_origin_round`
+    # closes it through the same `close_round` seam, so it arrives as `("round", "complete", 0)`.
     def _handle_phase(self, record: PhaseRecord) -> None:
-        if record.phase in ("round", "origin"):
+        if record.phase == "round":
             if record.event == "enter" and record.round is not None:
                 self.begin_round(record.round, started_at=record.timestamp)
-            elif record.event in ("complete", "exit"):
+            elif record.event == "complete":
                 self._finished_at = record.timestamp
                 self.flush()
 

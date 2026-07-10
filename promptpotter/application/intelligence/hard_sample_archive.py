@@ -28,7 +28,6 @@ def build_archive_observations(
     backend_id: str,
     *,
     dataset_name: str | None,
-    include_unknown: bool = False,
     min_grade: str | None = None,
 ) -> list[Observation]:
     """Walk the measurement store → ``Observation(content_hash[:12], sample_id, response)`` triples.
@@ -42,9 +41,7 @@ def build_archive_observations(
     (default) keeps every grade — the hard-samples display path's prior behavior.
     """
     obs: list[Observation] = []
-    for entry in archive_views.list_runs(
-        stores, backend_id, dataset_name=dataset_name, include_unknown=include_unknown
-    ):
+    for entry in archive_views.list_runs(stores, backend_id, dataset_name=dataset_name):
         if min_grade is not None and not meets_grade(entry_grade(entry), min_grade):
             continue
         content_hash = (entry.get("content_hash") or "").strip()
@@ -80,7 +77,6 @@ def build_archive_hard_samples_artifact(
     dataset_name: str | None,
     top_k_candidates: int | None = 40,
     top_k_samples: int | None = 40,
-    include_unknown: bool = False,
 ) -> dict[str, Any]:
     """Per-dataset hard-samples artifact fit on every archive measurement (``cycle_id=None``)."""
     return build_hard_samples_artifact_from_observations(
@@ -88,7 +84,6 @@ def build_archive_hard_samples_artifact(
             stores,
             backend_id,
             dataset_name=dataset_name,
-            include_unknown=include_unknown,
         ),
         cycle_id=None,
         top_k_candidates=top_k_candidates,

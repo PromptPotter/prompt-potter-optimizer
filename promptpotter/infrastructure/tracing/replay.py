@@ -231,7 +231,7 @@ def sync_langfuse_runs(
         logger.info("Langfuse push state reset — will re-push all runs.")
 
     # Backfill is cross-dataset on purpose (observability spans datasets).
-    n_runs = len(archive_views.list_runs(store, backend_id, include_unknown=True))
+    n_runs = len(archive_views.list_runs(store, backend_id))
     if n_runs == 0:
         logger.info("No completed dataset runs — skipping Langfuse backfill.")
         return None
@@ -257,7 +257,7 @@ def push_all_runs(
     already_done = set(state["backfilled_run_ids"])
 
     # Cross-dataset by design (admin/observability) — see backfill comment above.
-    summaries = archive_views.list_runs(store, backend_id, include_unknown=True)
+    summaries = archive_views.list_runs(store, backend_id)
     total_on_disk = len(summaries)
 
     def _emit(msg: str) -> None:

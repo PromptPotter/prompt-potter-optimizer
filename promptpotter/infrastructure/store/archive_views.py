@@ -48,7 +48,6 @@ def measurements_for_sample(
     *,
     run_ids: list[str] | None = None,
     dataset_name: str | None = None,
-    include_unknown: bool = False,
 ) -> list[Measurement]:
     """Every measurement of one sample, across configs; *dataset_name* scopes the slice."""
     return stores.archive.measurements_for_sample(
@@ -56,7 +55,6 @@ def measurements_for_sample(
         sample_id,
         run_ids=run_ids,
         dataset_name=dataset_name,
-        include_unknown=include_unknown,
     )
 
 
@@ -66,7 +64,6 @@ def measurement_series_for_samples(
     sample_ids: list[int],
     *,
     dataset_name: str | None = None,
-    include_unknown: bool = False,
 ) -> dict[int, list[dict[str, Any]]]:
     """Per-sample chronological series, one archive walk for the whole set.
 
@@ -77,9 +74,7 @@ def measurement_series_for_samples(
     Powers the ``/datasets/{name}/measurement-series`` endpoint."""
     wanted = set(sample_ids)
     out: dict[int, list[dict[str, Any]]] = {sid: [] for sid in wanted}
-    for entry in stores.archive.list_all(
-        backend_id, dataset_name=dataset_name, include_unknown=include_unknown
-    ):
+    for entry in stores.archive.list_all(backend_id, dataset_name=dataset_name):
         run_id = entry["run_id"]
         detail = stores.archive.load_by_id(backend_id, run_id)
         if detail is None:
@@ -111,7 +106,6 @@ def measurements_for_config(
     *,
     run_ids: set[str] | list[str] | None = None,
     dataset_name: str | None = None,
-    include_unknown: bool = False,
 ) -> list[Measurement]:
     """Every measurement under configs matching *predicate*, across all samples."""
     return stores.archive.measurements_for_config(
@@ -119,7 +113,6 @@ def measurements_for_config(
         predicate,
         run_ids=run_ids,
         dataset_name=dataset_name,
-        include_unknown=include_unknown,
     )
 
 
@@ -135,12 +128,9 @@ def list_runs(
     backend_id: str,
     *,
     dataset_name: str | None = None,
-    include_unknown: bool = False,
 ) -> list[dict[str, Any]]:
     """All run-summary entries from the archive index, scoped to ``dataset_name``."""
-    return stores.archive.list_all(
-        backend_id, dataset_name=dataset_name, include_unknown=include_unknown
-    )
+    return stores.archive.list_all(backend_id, dataset_name=dataset_name)
 
 
 def runs_since(
@@ -149,12 +139,9 @@ def runs_since(
     seen_ids: set[str],
     *,
     dataset_name: str | None = None,
-    include_unknown: bool = False,
 ) -> Iterator[tuple[str, dict[str, Any]]]:
     """Yield ``(run_id, detail)`` for runs not in *seen_ids*; missing details skipped."""
-    return stores.archive.load_since(
-        backend_id, seen_ids, dataset_name=dataset_name, include_unknown=include_unknown
-    )
+    return stores.archive.load_since(backend_id, seen_ids, dataset_name=dataset_name)
 
 
 def reusable_results(
@@ -164,7 +151,6 @@ def reusable_results(
     is_fatal: Callable[[dict[str, Any]], bool] | None = None,
     *,
     dataset_name: str | None = None,
-    include_unknown: bool = False,
     min_grade: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Per-sample cache reuse from prior runs sharing *node_configs*; *dataset_name* scopes the slice.
@@ -174,7 +160,6 @@ def reusable_results(
         node_configs,
         is_fatal=is_fatal,
         dataset_name=dataset_name,
-        include_unknown=include_unknown,
         min_grade=min_grade,
     )
 

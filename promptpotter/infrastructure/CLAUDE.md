@@ -72,10 +72,9 @@ post-mortem readers can see what the ledger has.
 
 `CampaignStore.rewind_to_round` consults the ledger (not the public
 `rounds/` tree) for admissibility: `--from N` is valid iff the ledger
-contains a closing PhaseRecord for round N (`(phase="round", event="complete")`
-— round 0 now closes through the same path as any round via `emit_origin_round`,
-so it carries `(phase="round", event="complete", round=0)`; the legacy
-`(phase="origin", event="exit")` close is still accepted by the scan). The pure ledger scan
+contains a closing PhaseRecord for round N — `(phase="round", event="complete")`,
+the one closing signature. Round 0 closes through the same path as any round via
+`emit_origin_round`, so it carries `(phase="round", event="complete", round=0)`. The pure ledger scan
 lives in `scan_ledger_max_round_complete` (`store/campaign_store/ledger_scan.py`)
 and never instantiates `CycleEventLog`, so no subscribers fire during
 admissibility checks.

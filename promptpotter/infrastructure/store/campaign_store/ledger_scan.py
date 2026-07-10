@@ -9,8 +9,9 @@ from pathlib import Path
 def scan_ledger_max_round_complete(ledger_path: Path) -> int:
     """Highest round with a closing PhaseRecord in ``ledger_path``; ``-1`` if none closed.
 
-    Closing events: ``(phase="origin", event="exit", round=0)`` and
-    ``(phase="round", event="complete", round=N)``. Corrupt lines skipped.
+    One closing event: ``(phase="round", event="complete", round=N)``. Round 0 closes through
+    it too — ``emit_origin_round`` sends the origin down the same ``close_round`` seam every L1
+    round uses. Corrupt lines skipped.
     """
     max_complete = -1
     try:
@@ -25,11 +26,7 @@ def scan_ledger_max_round_complete(ledger_path: Path) -> int:
                     continue
                 if rec.get("record_type") != "phase":
                     continue
-                phase = rec.get("phase")
-                event = rec.get("event")
-                if (phase == "round" and event == "complete") or (
-                    phase == "origin" and event == "exit"
-                ):
+                if rec.get("phase") == "round" and rec.get("event") == "complete":
                     rnd = rec.get("round")
                     if isinstance(rnd, int) and rnd > max_complete:
                         max_complete = rnd

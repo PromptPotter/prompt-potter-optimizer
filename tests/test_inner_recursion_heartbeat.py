@@ -34,6 +34,23 @@ class _RecordingLedger:
         return len(self.records)
 
 
+def _write_inner_tasks(dataset_dir: Path) -> None:
+    """`_resolve_inner_task` has no default ladder — the benchmark, its sample count, round cap
+    and target score are declared, or the spawn raises. Mirrors `datasets/promptpotter-self/`."""
+    write_json(
+        dataset_dir / "inner_tasks.json",
+        {
+            "inner_benchmark": "justlogic",
+            "inner_benchmark_config": {
+                "n_samples_per_inner_round": 24,
+                "max_inner_rounds": 7,
+                "target_score": 0.6,
+            },
+            "tasks": [{"id": "justlogic-d67/seed-0", "inner_dataset_seed": 0}],
+        },
+    )
+
+
 def _fake_result() -> CycleResult:
     # One real L1 round: `run_inner_cycle` excludes an evidence-free cycle (`rounds=[]` would
     # raise `InnerCycleUnscoreableError`, never reaching the `{"data": …}` this test asserts on).
@@ -87,6 +104,7 @@ async def test_outer_ledger_gets_progress_with_detail(tmp_path: Path, monkeypatc
 
     monkeypatch.setattr(inner_recursion, "_run_inner_campaign", _fake_inner)
 
+    _write_inner_tasks(tmp_path)
     ctx = inner_recursion.InnerSpawnContext(
         inner_sandbox_root=tmp_path,
         dataset_config_dir=tmp_path,
@@ -136,6 +154,7 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
         return _fake_result()
 
     monkeypatch.setattr(inner_recursion, "_run_inner_campaign", _hanging_inner)
+    _write_inner_tasks(tmp_path)
     inner_recursion._INNER_SPAWN.set(
         inner_recursion.InnerSpawnContext(
             inner_sandbox_root=tmp_path,

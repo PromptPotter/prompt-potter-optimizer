@@ -18,7 +18,6 @@ from filelock import FileLock
 from promptpotter.config.settings import (
     DEFAULT_CONNECTOR_TYPE,
     LOCK_TIMEOUT,
-    MEASUREMENTS_SCHEMA_VERSION,
 )
 from promptpotter.domain.measurement_provenance import entry_grade, meets_grade
 from promptpotter.domain.sample import Measurement
@@ -63,21 +62,12 @@ def _entry_dataset(entry: dict[str, Any]) -> str | None:
     return val if isinstance(val, str) and val else None
 
 
-def _entry_matches_dataset(
-    entry: dict[str, Any],
-    dataset_name: str | None,
-    *,
-    include_unknown: bool,
-) -> bool:
-    """`None` ⇒ everything (forensic/admin). Concrete name ⇒ stamped match; v1-unstamped entries
-    pass only with `include_unknown=True`.
+def _entry_matches_dataset(entry: dict[str, Any], dataset_name: str | None) -> bool:
+    """`None` ⇒ everything (forensic/admin). A concrete name ⇒ that dataset's entries.
+
+    An entry carrying no ``dataset_name`` belongs to no dataset, so it matches no concrete name.
     """
-    if dataset_name is None:
-        return True
-    ds = _entry_dataset(entry)
-    if ds == dataset_name:
-        return True
-    return ds is None and include_unknown
+    return dataset_name is None or _entry_dataset(entry) == dataset_name
 
 
 class MeasurementArchive:
@@ -178,7 +168,6 @@ class MeasurementArchive:
                 entries.append(summary)
 
             index["total"] = len(entries)
-            index["schema_version"] = MEASUREMENTS_SCHEMA_VERSION
             write_json(index_path, index)
 
         return detail_path
@@ -231,24 +220,16 @@ class MeasurementArchive:
         backend_id: str,
         *,
         dataset_name: str | None = None,
-        include_unknown: bool = False,
     ) -> list[dict[str, Any]]:
-        """Index entries (summaries). *dataset_name* scopes to one dataset (None = forensic/admin);
-        v1-unstamped entries appear only with `include_unknown=True`.
-        """
+        """Index entries (summaries). *dataset_name* scopes to one dataset (None = forensic/admin)."""
         index = read_json_optional(self._index_path(backend_id)) or {
             "measurements": [],
             "total": 0,
-            "schema_version": MEASUREMENTS_SCHEMA_VERSION,
         }
         entries: list[dict[str, Any]] = index.get("measurements", [])
-        if dataset_name is None and include_unknown:
+        if dataset_name is None:
             return entries
-        return [
-            e
-            for e in entries
-            if _entry_matches_dataset(e, dataset_name, include_unknown=include_unknown)
-        ]
+        return [e for e in entries if _entry_matches_dataset(e, dataset_name)]
 
     def load_since(
         self,
@@ -256,14 +237,11 @@ class MeasurementArchive:
         seen_ids: set[str],
         *,
         dataset_name: str | None = None,
-        include_unknown: bool = False,
     ) -> Iterator[tuple[str, dict[str, Any]]]:
         """`(run_id, detail)` for runs not in *seen_ids*. Index scan + per-run load encapsulated
         so derived views (AxisIndex) don't reinvent it. Dataset-filtered per `list_all`.
         """
-        for entry in self.list_all(
-            backend_id, dataset_name=dataset_name, include_unknown=include_unknown
-        ):
+        for entry in self.list_all(backend_id, dataset_name=dataset_name):
             run_id = entry["run_id"]
             if run_id in seen_ids:
                 continue
@@ -278,7 +256,6 @@ class MeasurementArchive:
         node_configs: list[tuple[str, dict[str, Any]]],
         *,
         dataset_name: str | None = None,
-        include_unknown: bool = False,
     ) -> list[tuple[dict[str, Any], int]]:
         """Position-by-position prefix-equal match. `(entry, match_length)` sorted by match_length
         desc then item_count desc.
@@ -287,9 +264,7 @@ class MeasurementArchive:
             return []
 
         scored: list[tuple[dict[str, Any], int]] = []
-        for entry in self.list_all(
-            backend_id, dataset_name=dataset_name, include_unknown=include_unknown
-        ):
+        for entry in self.list_all(backend_id, dataset_name=dataset_name):
             stored = entry.get("node_configs")
             if not stored:
                 continue
@@ -316,7 +291,6 @@ class MeasurementArchive:
         *,
         run_ids: list[str] | None = None,
         dataset_name: str | None = None,
-        include_unknown: bool = False,
     ) -> list[Measurement]:
         """Every measurement of one sample, across all configs. *run_ids* hint (from `Sample.run_ids`)
         skips the index scan; without it, walks every batch. Caller-supplied ids must already be
@@ -331,9 +305,7 @@ class MeasurementArchive:
         else:
             sources = (
                 (entry["run_id"], detail)
-                for entry in self.list_all(
-                    backend_id, dataset_name=dataset_name, include_unknown=include_unknown
-                )
+                for entry in self.list_all(backend_id, dataset_name=dataset_name)
                 if (detail := self.load_by_id(backend_id, entry["run_id"])) is not None
             )
 
@@ -351,7 +323,6 @@ class MeasurementArchive:
         *,
         run_ids: set[str] | list[str] | None = None,
         dataset_name: str | None = None,
-        include_unknown: bool = False,
     ) -> list[Measurement]:
         """Every measurement under configs matching *predicate*, across samples. Empty predicate → [].
         *run_ids* hint turns O(N) into O(K + matches); must be dataset-scoped at source.
@@ -370,9 +341,7 @@ class MeasurementArchive:
             return out
 
         out = []
-        for entry in self.list_all(
-            backend_id, dataset_name=dataset_name, include_unknown=include_unknown
-        ):
+        for entry in self.list_all(backend_id, dataset_name=dataset_name):
             stored = entry.get("node_configs")
             if not stored:
                 continue
@@ -393,7 +362,6 @@ class MeasurementArchive:
         is_fatal: Callable[[dict[str, Any]], bool] | None = None,
         *,
         dataset_name: str | None = None,
-        include_unknown: bool = False,
         min_grade: str | None = None,
     ) -> dict[str, dict[str, Any]]:
         """Per-sample cache from prior runs sharing *node_configs*. Exact match → reuse all
@@ -420,7 +388,6 @@ class MeasurementArchive:
             backend_id,
             node_configs,
             dataset_name=dataset_name,
-            include_unknown=include_unknown,
         ):
             if min_grade is not None and not meets_grade(entry_grade(entry), min_grade):
                 continue

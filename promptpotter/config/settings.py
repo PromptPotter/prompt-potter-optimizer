@@ -71,11 +71,6 @@ WELL_KNOWN_PARAM_TYPES: dict[str, str] = {
 }
 
 
-# Persistence versioning. v2 adds `dataset_name` to every index entry and
-# detail file; reads filter by it. Entries written under v1 lack the field
-# and are treated as `<unknown>` (excluded from cross-cycle views unless
-# `include_unknown=True` is passed explicitly).
-MEASUREMENTS_SCHEMA_VERSION = 2
 DEFAULT_CONNECTOR_TYPE = "default"
 
 # Optimizer-call reliability + size visibility.
@@ -196,7 +191,6 @@ __all__ = [
     "DEFAULT_CONNECTOR_TYPE",
     "DEFAULT_EXPERIMENT_ID",
     "LOCK_TIMEOUT",
-    "MEASUREMENTS_SCHEMA_VERSION",
     "NO_RESULT",
     "OPTIMIZER_CALL_DEADLINE_S",
     "OPTIMIZER_PROMPT_WARN_CHARS",

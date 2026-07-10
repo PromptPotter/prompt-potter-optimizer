@@ -9,6 +9,7 @@ from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
 from promptpotter.application.config import load_campaign_config
+from promptpotter.application.datasets.authored import read_campaign_config_file
 from promptpotter.application.datasets.csv_ingest import (
     MAX_SAMPLES,
     IngestError,
@@ -565,8 +566,7 @@ def get_dataset_preview(
     split_test: int | None = None
     campaign_path = dataset_dir / "campaign.json"
     if campaign_path.is_file():
-        cc = read_json(campaign_path)
-        declared = (cc.get("campaign_config") or {}).get("dataset_split")
+        declared = read_campaign_config_file(campaign_path).get("dataset_split")
         if isinstance(declared, dict):
             split_train = declared.get("train")
             split_test = declared.get("test")
@@ -743,8 +743,7 @@ def get_dataset_pipeline(name: str, store: StoreDep) -> DatasetPipelineResponse:
     forbidden_strict = True
     campaign_path = dataset_dir / "campaign.json"
     if campaign_path.is_file():
-        craw = read_json(campaign_path)
-        cfg = load_campaign_config(craw.get("campaign_config", craw))
+        cfg = load_campaign_config(read_campaign_config_file(campaign_path))
         forbidden_strict = cfg.optimization.forbidden_axes_strict
         # Apply the dataset's default search-space narrowing so the setup editor
         # opens showing the recommended per-node locks (e.g. retrieval nodes

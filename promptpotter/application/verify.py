@@ -242,7 +242,14 @@ async def verify_candidate(
     )
 
     workspace_n = len(workspace_qms)
-    workspace_accuracy = float(workspace_scores.get("accuracy") or 0.0)
+    # Same rule as the source side above: `compute_accuracy` returns None on no scoreable rows,
+    # and a 0.0 here reads as "the fresh re-score collapsed", the exact verdict `verify` reports.
+    if workspace_scores.get("accuracy") is None:
+        raise VerifyError(
+            f"the fresh re-score of {label!r} produced no scoreable sample — there is nothing "
+            "to compare against the recorded measurement."
+        )
+    workspace_accuracy = float(workspace_scores["accuracy"])
     workspace_composite = display_fitness(
         workspace_scores.get("composite_fitness"), workspace_accuracy
     )

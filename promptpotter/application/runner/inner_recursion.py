@@ -241,6 +241,9 @@ class _InnerTaskSpec:
     inner_optimizer_temperature: float | None = None
 
 
+_REQUIRED_BENCH_KEYS = ("n_samples_per_inner_round", "max_inner_rounds", "target_score")
+
+
 def _resolve_inner_task(ctx: InnerSpawnContext, query: str) -> _InnerTaskSpec:
     """Map an outer query (``"justlogic-d67/seed-0"``) to its inner-campaign spec.
 
@@ -249,14 +252,34 @@ def _resolve_inner_task(ctx: InnerSpawnContext, query: str) -> _InnerTaskSpec:
     count + round cap + target), overlaid by the matching ``tasks[]`` entry
     (per-task seed / round cap / target, and — for a multi-cell panel — per-task
     ``inner_dataset`` / ``inner_model`` / ``inner_provider``). A task that omits
-    those falls back to the single top-level benchmark + the dataset's own model,
-    so a single-cell panel needs no per-task overrides."""
-    cfg = read_json_optional(ctx.dataset_config_dir / "inner_tasks.json") or {}
-    bench = str(cfg.get("inner_benchmark") or "justlogic")
+    those inherits the single top-level benchmark + the dataset's own model,
+    so a single-cell panel needs no per-task overrides.
+
+    **The config is the source of truth; there is no default ladder here.** ``target_score`` is
+    the denominator of ``headroom_lift``, a proxy the outer L4 formula scores on, and the round
+    cap and sample count set what the inner cycle is even allowed to discover. Defaulting them in
+    code silently rescales every meta-prompt candidate's fitness against a benchmark nobody
+    declared — and the defaults this used to carry (``justlogic``/10/3/0.8) had already drifted
+    from the shipped config (24/7/0.6) on three of four values, with nothing to reveal it."""
+    path = ctx.dataset_config_dir / "inner_tasks.json"
+    cfg = read_json_optional(path)
+    if not isinstance(cfg, dict):
+        raise InnerCycleUnscoreableError(
+            f"{path} is missing or is not an object — the inner benchmark, its sample count, "
+            "round cap and target score are all declared there. There is no default to run."
+        )
+    bench = str(cfg.get("inner_benchmark") or "")
     bench_cfg = cfg.get("inner_benchmark_config") or {}
-    n_samples = int(bench_cfg.get("n_samples_per_inner_round", 10))
-    n_rounds = int(bench_cfg.get("max_inner_rounds", 3))
-    target = float(bench_cfg.get("target_score", 0.8))
+    missing = [k for k in _REQUIRED_BENCH_KEYS if bench_cfg.get(k) is None]
+    if not bench or missing:
+        raise InnerCycleUnscoreableError(
+            f"{path} must declare 'inner_benchmark' and inner_benchmark_config"
+            f"{list(_REQUIRED_BENCH_KEYS)}; missing: "
+            f"{([] if bench else ['inner_benchmark']) + missing}."
+        )
+    n_samples = int(bench_cfg["n_samples_per_inner_round"])
+    n_rounds = int(bench_cfg["max_inner_rounds"])
+    target = float(bench_cfg["target_score"])
     raw_variants = bench_cfg.get("inner_n_variants")
     n_variants = int(raw_variants) if raw_variants is not None else None
     raw_lives = bench_cfg.get("inner_lives")

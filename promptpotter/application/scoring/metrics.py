@@ -188,16 +188,16 @@ def _diag_ranker(
     pos = rank - 1 if rank is not None else None
     top_score_gap: float | None = None
     if len(candidates) >= 2:
-        scores = []
-        for c in candidates[:2]:
-            if isinstance(c, dict):
-                # final_ranking items carry one canonical score key,
-                # `relevance_score` (single- and multi-node alike); `similarity`
-                # is the legacy fuzzy-tuple-dict fallback.
-                raw = c.get("relevance_score", c.get("similarity", 0.0))
-                scores.append(float(raw if raw is not None else 0.0))
-            elif isinstance(c, (list, tuple)) and len(c) >= 2:
-                scores.append(float(c[1]))
+        # Two shapes reach here, both across the highway contract: TermNorm emits scored dicts
+        # keyed `relevance_score` (its fuzzy arm converts its own `(term, score)` tuples before
+        # they leave), and `llm_only` emits bare answer strings, which carry no score. Nothing
+        # emits a `similarity` key or a bare tuple. An item without a score contributes none —
+        # a gap between a real score and an invented 0.0 is not a gap.
+        scores = [
+            float(c["relevance_score"])
+            for c in candidates[:2]
+            if isinstance(c, dict) and isinstance(c.get("relevance_score"), (int, float))
+        ]
         if len(scores) == 2:
             top_score_gap = scores[0] - scores[1]
     return {
@@ -336,7 +336,9 @@ def matched_origin_stats(
     """
     candidate_sids = {r.get("sample_id") for r in candidate_results}
     matched = [r for r in origin_results if r.get("sample_id") in candidate_sids]
-    base = _compute_accuracy(matched)
+    # `compute_composite_fitness` already spreads `_compute_accuracy(matched)` into its result —
+    # calling it again here was a second `is_deprecated` walk over the same rows for the same
+    # numbers, and a second place for the two to disagree.
     composite = compute_composite_fitness(
         matched,
         pipeline_schema,
@@ -344,12 +346,7 @@ def matched_origin_stats(
         round_scorer=round_scorer,
         l1_diversity=1.0,
     )
-    return {
-        "accuracy": base["accuracy"],
-        "hits": base["hits"],
-        "total": base["total"],
-        "composite_fitness": composite["composite_fitness"],
-    }
+    return {key: composite[key] for key in ("accuracy", "hits", "total", "composite_fitness")}
 
 
 # ---------------------------------------------------------------------------
