@@ -95,7 +95,7 @@ export function MeasHeatCell({
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, w, CANVAS_H);
       const success = readRgb("--color-success-rgb", [16, 185, 129]);
-      const danger = readRgb("--color-danger-rgb", [248, 113, 113]);
+      const danger = readRgb("--color-danger-rgb", [197, 48, 48]);
       const layout = heatLayout(ordCols.length, w);
       const buckets = bucketRow(layout, byOrd, ordIndex);
       // Neat-square mode: cells wide enough for a 1 px gap + rounded

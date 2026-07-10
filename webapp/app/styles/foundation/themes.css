@@ -24,17 +24,11 @@
   --color-ci:#525252;                        /* composite-fitness CI whisker — neutral, not status */
   --color-background-tint:rgba(0,0,0,0.04);
   --color-background-tint-strong:rgba(0,0,0,0.12);
+  --status-tint:0.18; --status-edge:0.45;    /* paper needs a heavier fill than lava */
   --color-success:#1a8265;
   --color-success-rgb:26,130,101;
-  --color-success-bg:rgba(var(--color-success-rgb),0.18);
-  --color-success-border:rgba(var(--color-success-rgb),0.45);
-  --color-danger:#C53030;                    /* tomato jam */
-  --color-danger-rgb:176,61,61;
-  --color-danger-bg:rgba(var(--color-danger-rgb),0.16);
-  --color-danger-border:rgba(var(--color-danger-rgb),0.45);
   --color-warn:#55251D;                      /* oxblood — warn (no orange in light) */
-  --color-warn-bg:rgba(85,37,29,0.14);
-  --color-warn-border:rgba(85,37,29,0.40);
+  --color-warn-rgb:85,37,29;
   --scrollbar-thumb:rgba(85,37,29,0.30);     /* oxblood-tinted scrollbar */
   --scrollbar-thumb-hover:rgba(85,37,29,0.55);
   --scrollbar-thumb-active:rgba(9,12,155,0.65);

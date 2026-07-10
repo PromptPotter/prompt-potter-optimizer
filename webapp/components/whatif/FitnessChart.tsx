@@ -126,7 +126,7 @@ const divergenceLinePlugin: Plugin<"bar", { index: number | null }> = {
       const step = xScale.getPixelForValue(1) - xScale.getPixelForValue(0);
       x = Math.max(chartArea.left, c - (Number.isFinite(step) ? step : 0) / 2);
     }
-    const red = getCss("--color-danger") || "#e5484d";
+    const red = getCss("--color-danger") || "#C53030";
     ctx.save();
     ctx.strokeStyle = red;
     ctx.lineWidth = 2;

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { DatasetItem, HardSamplesScope, MeasurementDot } from "@/lib/api";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
@@ -23,6 +23,20 @@ import { useSelection } from "@/lib/SelectionContext";
 import { useCycleEvents } from "@/lib/chat/useCycleEvents";
 import { deriveDecision } from "@/lib/chat/decision";
 import { LiveSegment } from "@/components/chat/LiveSegment";
+
+// Fireflies orbiting the wand frame. Offset, phase and size are all that differ
+// between them, so they are data rather than eight near-identical CSS rules.
+type SparkleStyle = CSSProperties & Record<`--sparkle-${string}`, string>;
+const SPARKLES: SparkleStyle[] = [
+  { top: "-3px", left: "18%", "--sparkle-delay": "0s", "--sparkle-dur": "2.1s", "--sparkle-size": "4px" },
+  { top: "30%", right: "-3px", "--sparkle-delay": ".7s", "--sparkle-dur": "3.3s", "--sparkle-size": "4px" },
+  { bottom: "-3px", right: "25%", "--sparkle-delay": "1.5s", "--sparkle-dur": "2.7s", "--sparkle-size": "4px" },
+  { bottom: "40%", left: "-3px", "--sparkle-delay": ".4s", "--sparkle-dur": "3.6s", "--sparkle-size": "3px" },
+  { top: "-2px", right: "30%", "--sparkle-delay": "2.0s", "--sparkle-dur": "2.4s", "--sparkle-size": "3px" },
+  { bottom: "-2px", left: "38%", "--sparkle-delay": "1.2s", "--sparkle-dur": "3.0s", "--sparkle-size": "3px" },
+  { top: "60%", right: "-3px", "--sparkle-delay": "1.8s", "--sparkle-dur": "3.5s", "--sparkle-size": "3px" },
+  { top: "20%", left: "-3px", "--sparkle-delay": ".9s", "--sparkle-dur": "2.8s", "--sparkle-size": "3px" },
+];
 
 interface Props {
   datasetTitle: string | null;
@@ -374,8 +388,9 @@ export function ChatPane({
               {/* Locked until a backend wires it, like its three neighbours. It read as
                   operable and toggled nothing — the one affordance-honesty (I3) breach. */}
               <Switch checked={false} locked label="Optimize prompt while using" />
-              <span className="sparkle s1" /><span className="sparkle s2" /><span className="sparkle s3" /><span className="sparkle s4" />
-              <span className="sparkle s5" /><span className="sparkle s6" /><span className="sparkle s7" /><span className="sparkle s8" />
+              {SPARKLES.map((style, i) => (
+                <span key={i} className="sparkle" style={style} />
+              ))}
             </div>
           </div>
         </div>

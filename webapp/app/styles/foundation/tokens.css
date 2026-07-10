@@ -72,11 +72,20 @@
      Theme-aware by necessity — white lifts a dark surface, black recedes a light one. */
   --color-background-tint:rgba(255,255,255,0.04);
   --color-background-tint-strong:rgba(255,255,255,0.12);
+  /* Status hues. A theme overrides the hue + its rgb triple (and the two tint
+     alphas); the -bg / -border fills derive here and re-resolve per theme,
+     because a custom property substitutes var() against the element it lands on
+     — and both :root and [data-theme] are <html>. Danger is theme-invariant. */
+  --status-tint:0.12; --status-edge:0.35;
   --color-success:#10b981; --color-success-rgb:16,185,129;
-  --color-success-bg:rgba(var(--color-success-rgb),0.12); --color-success-border:rgba(var(--color-success-rgb),0.35);
-  --color-danger:#f87171;  --color-danger-rgb:248,113,113;
-  --color-danger-bg:rgba(var(--color-danger-rgb),0.12);  --color-danger-border:rgba(var(--color-danger-rgb),0.35);
-  --color-warn:#f59e0b;    --color-warn-bg:rgba(var(--color-accent-rgb),0.12);     --color-warn-border:rgba(var(--color-accent-rgb),0.35);
+  --color-danger:#C53030;  --color-danger-rgb:197,48,48;
+  --color-warn:#f59e0b;    --color-warn-rgb:245,158,11;
+  --color-success-bg:rgba(var(--color-success-rgb),var(--status-tint));
+  --color-success-border:rgba(var(--color-success-rgb),var(--status-edge));
+  --color-danger-bg:rgba(var(--color-danger-rgb),var(--status-tint));
+  --color-danger-border:rgba(var(--color-danger-rgb),var(--status-edge));
+  --color-warn-bg:rgba(var(--color-warn-rgb),var(--status-tint));
+  --color-warn-border:rgba(var(--color-warn-rgb),var(--status-edge));
   --border-radius-sm:4px; --border-radius-md:6px; --border-radius-lg:10px;
   --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
   /* Mono stack: Cascadia Mono first so Windows ClearType gets the heaviest
