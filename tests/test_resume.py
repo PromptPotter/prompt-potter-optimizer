@@ -417,6 +417,54 @@ def test_steered_fork_seed_narrowing_overrides_campaign_locks_per_node() -> None
     assert merged.optimizer_narrowing["retriever"].param_keys == ["top_k"]
 
 
+def test_a_campaign_frozen_before_todays_config_still_loads(built_stores: Stores) -> None:
+    """A `CampaignConfig` field rename silently bricks every campaign already on disk.
+
+    Both `Campaign` and `CampaignConfig` are `extra="forbid"`, and `campaign.json` embeds a
+    config snapshot. Rename a field and `load_campaign_config` raises `extra_forbidden` for
+    every campaign minted before the rename — `resume`, `ab`, `verify`, `noise-floor` and L4's
+    inner cycles all die at load, before any scoring. Nothing else catches it: the campaign that
+    can no longer be read is one nobody is currently running, so the failure surfaces days later
+    as lost, irreplaceable measurement data. It has fired twice (50/177, then 156/169 campaigns).
+
+    So this test does the one thing no freshly-built dict can: it feeds a **pinned** manifest
+    through the real store reader. See `tests/fixtures/cycles/frozen_campaign/README.md` for what
+    to do when it fails — a re-stamp, never `extra="allow"` and never a shim.
+    """
+    import json
+    from pathlib import Path
+
+    from promptpotter.application.config import apply_inherited_overlay, load_campaign_config
+    from promptpotter.application.config_diff import DiffScope, classify_config_diff
+
+    fixture = Path(__file__).parent / "fixtures" / "cycles" / "frozen_campaign" / "campaign.json"
+    manifest = json.loads(fixture.read_text(encoding="utf-8"))
+    campaign_id = manifest["campaign_id"]
+
+    store = built_stores.campaigns
+    path = store.campaign_root_dir(campaign_id) / "campaign.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    # `Campaign` itself is extra="forbid" — a renamed manifest field dies here.
+    campaign = store.load_campaign(campaign_id)
+    assert campaign is not None
+    # ...and so is the embedded `CampaignConfig` snapshot, non-default leaves and all.
+    frozen = load_campaign_config(campaign.config)
+    assert frozen.optimization.max_rounds == 7
+    assert frozen.optimization.mechanisms.elimination.leader_lock_in is True
+
+    # The resume path: the live dataset file never carries these two, so they are read back off
+    # the snapshot. They must survive the round trip or the campaign resumes with its locks open.
+    live = load_campaign_config({"optimization": _OPT})
+    restored = apply_inherited_overlay(live, campaign.config, seed=None)
+    assert restored.optimizer_narrowing["llm"].param_keys == ["temperature"]
+    assert restored.pipeline_overrides == {"llm": {"temperature": 0.2}}
+
+    # The snapshot is already a delta, so resuming on the config it was minted from is a no-op.
+    assert classify_config_diff(frozen, campaign.config) == (DiffScope.NONE, [])
+
+
 def test_lives_resume_fold_matches_live_observe() -> None:
     """Resume-integrity: the banked-lives ("hearts") count rebuilt from the ledger's
     ``improved`` sequence (``EscalationFSM.fold``) must equal the live in-run count

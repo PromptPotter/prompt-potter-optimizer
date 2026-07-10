@@ -100,8 +100,25 @@ def _diff_paths(
 def classify_config_diff(
     config: CampaignConfig, frozen: dict[str, Any]
 ) -> tuple[DiffScope, list[str]]:
-    """Classify *config* vs *frozen*; returns `(scope, dotted_paths)`. Unknown paths warn + classify DATA."""
-    active = config.model_dump(mode="json")
+    """Classify *config* vs the frozen snapshot; returns `(scope, dotted_paths)`.
+
+    Both sides are **deltas from the code defaults** (`freeze_campaign_config`), so this
+    answers the question resume actually asks — *did the operator edit the dataset's authored
+    `campaign.json` since this campaign was minted?* — without ever validating the snapshot.
+    That matters: the snapshot is the one config on disk that a schema change can invalidate,
+    and the resume that must report the drift is exactly the one that must not die on it. A
+    stale path survives the walk and lands in the unclassified branch below, which names it and
+    classifies DATA_AFFECTING — a divergence replay, zero spend, loud.
+
+    ⚠ The trade-off of comparing deltas: a change to a *code* default no longer surfaces as a
+    config diff. It never should have — pinning a stale default while the surrounding code moved
+    is a false reproducibility, and `ab`/`verify` re-derive under the current engine by design.
+    """
+    if not frozen:
+        # A check-in skeleton (`mint_checkin_skeleton`) carries `config: {}` — the campaign has
+        # no snapshot yet. That is "nothing to diff against", not "every leaf changed".
+        return DiffScope.NONE, []
+    active = config.model_dump(mode="json", exclude_defaults=True)
     diffs = _diff_paths(active, frozen)
     if not diffs:
         return DiffScope.NONE, []
@@ -111,9 +128,11 @@ def classify_config_diff(
         scope = _FIELD_SCOPES.get(path)
         if scope is None:
             logger.warning(
-                "classify_config_diff: unclassified config path %r — "
-                "treating as DATA_AFFECTING. Add an entry to _FIELD_SCOPES "
-                "in promptpotter/application/config_diff.py to silence this.",
+                "classify_config_diff: unclassified config path %r — treating as "
+                "DATA_AFFECTING. Either this campaign's snapshot names a knob the engine no "
+                "longer has (re-stamp it: scripts/restamp_campaign_configs.py), or a new "
+                "CampaignConfig leaf needs an entry in _FIELD_SCOPES "
+                "(promptpotter/application/config_diff.py).",
                 ".".join(path),
             )
             has_data = True

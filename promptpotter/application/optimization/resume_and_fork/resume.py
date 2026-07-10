@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.config import freeze_campaign_config
 from promptpotter.application.config_diff import DiffScope, classify_config_diff
 
 # Leaf import (not the package surface): rebuilding the foundational FSM via
@@ -96,7 +97,7 @@ def resume_with_divergence_check(
                 # Refresh the campaign snapshot so future resumes diff
                 # against current state.
                 campaign_store.update_campaign(
-                    campaign_id, {"config": cycle.config.model_dump(mode="json")}
+                    campaign_id, {"config": freeze_campaign_config(cycle.config)}
                 )
             cycle.replay_priors(prior)
             cycle.escalation = EscalationFSM.from_ledger(

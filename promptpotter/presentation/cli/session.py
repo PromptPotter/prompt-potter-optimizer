@@ -37,11 +37,18 @@ class SessionCtx:
 
     @property
     def campaign_config(self) -> CampaignConfig:
-        """Live ``datasets/{name}/campaign.json`` (edits picked up + drift-detected) with the
+        """The dataset's live ``campaign.json`` (edits picked up + drift-detected) with the
         per-campaign overlay (origin-floor values + param locks) re-applied from the frozen
         ``campaign.json::config`` — that overlay lives only on the snapshot, so a live-file
-        rebuild would drop it. Frozen config is also the fallback when the dataset file is gone.
-        Session-state copy never consulted (may carry stale schema fields)."""
+        rebuild would drop it. Session-state copy never consulted (may carry stale schema fields).
+
+        Resolution is **tenant-first**, via the same ``resolve_dataset_config_dir`` the runner
+        uses: a tenant upload at ``projects/{tenant}/datasets/{slug}/`` before a repo benchmark
+        at ``datasets/{name}/``. Reading only the repo root meant every *ingested* dataset — the
+        only kind a distributed install has — found no live file and resumed off the frozen
+        snapshot instead, making it the config of record for exactly the campaigns whose
+        snapshot is least likely to still validate."""
+        from promptpotter.application.bootstrap.wiring import resolve_dataset_config_dir
         from promptpotter.application.config import (
             apply_inherited_overlay,
         )
@@ -49,20 +56,17 @@ class SessionCtx:
             load_campaign_config as validate_campaign_config,
         )
         from promptpotter.application.datasets import read_campaign_config_file
-        from promptpotter.infrastructure.store.paths import DEFAULT_DATASETS_ROOT
+        from promptpotter.infrastructure.store.paths import REPO_ROOT
 
         dataset_name = self.init_params.get("dataset_name") or ""
         raw: dict[str, Any] = {}
         if dataset_name:
-            ds_path = DEFAULT_DATASETS_ROOT / dataset_name / "campaign.json"
-            if ds_path.is_file():
-                raw = read_campaign_config_file(ds_path)
+            ds_dir = resolve_dataset_config_dir(self.store, REPO_ROOT, dataset_name)
+            raw = read_campaign_config_file(ds_dir / "campaign.json")
+        config = validate_campaign_config(raw)
         campaign = (
             self.store.campaigns.load_campaign(self.campaign_id) if self.campaign_id else None
         )
-        if not raw and campaign is not None:
-            raw = campaign.config
-        config = validate_campaign_config(raw)
         if campaign is not None:
             seed = self.store.campaigns.read_cycle_seed(self.campaign_id, self.cycle_id)
             config = apply_inherited_overlay(config, campaign.config, seed)

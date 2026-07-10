@@ -114,14 +114,12 @@ class Session:
 def new_session_state(
     *,
     init_params: dict[str, Any],
-    campaign_config: dict[str, Any],
     pipeline_params: dict[str, Any],
     active_steps: list[str],
 ) -> dict[str, Any]:
     return {
         "phase": "init",
         "init_params": init_params,
-        "campaign_config": campaign_config,
         "pipeline_params": pipeline_params,
         "active_steps": active_steps,
         "origin_prompt_fields": {},
@@ -165,6 +163,7 @@ def auto_mint_session(
     """Mint fresh campaign + session + root cycle; claim the active pointer."""
     from datetime import UTC, datetime
 
+    from promptpotter.application.config import freeze_campaign_config
     from promptpotter.application.optimization.dispatch.llm_call import (
         combined_optimizer_prompt_hash,
     )
@@ -189,7 +188,6 @@ def auto_mint_session(
             "experiment_id": experiment_id,
             "dataset_name": session.dataset_name,
         },
-        campaign_config=campaign_config.model_dump(),
         pipeline_params=pipeline_params or {},
         active_steps=list(active_steps or []),
     )
@@ -214,7 +212,7 @@ def auto_mint_session(
             owner_user_id=str(session.identity.user_id),
             lifecycle_status="active",
             lifecycle_changed_at=now.isoformat(),
-            config=campaign_config.model_dump(mode="json"),
+            config=freeze_campaign_config(campaign_config),
         )
     )
 
@@ -345,6 +343,7 @@ def finalize_checkin_to_active(
     mints nothing new; the caller binds the session + detaches the run."""
     from datetime import UTC, datetime
 
+    from promptpotter.application.config import freeze_campaign_config
     from promptpotter.application.optimization.dispatch.llm_call import (
         combined_optimizer_prompt_hash,
     )
@@ -360,7 +359,6 @@ def finalize_checkin_to_active(
             "experiment_id": experiment_id,
             "dataset_name": session.dataset_name,
         },
-        campaign_config=campaign_config.model_dump(),
         pipeline_params=cycle_plan.pipeline_params,
         active_steps=list(cycle_plan.pipeline_params.get("steps", [])),
     )
@@ -376,7 +374,7 @@ def finalize_checkin_to_active(
             "backend_id": session.backend_id,
             "lifecycle_status": "active",
             "lifecycle_changed_at": now,
-            "config": campaign_config.model_dump(mode="json"),
+            "config": freeze_campaign_config(campaign_config),
         },
     )
     session.store.campaigns.create(

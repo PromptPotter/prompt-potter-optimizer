@@ -20,9 +20,13 @@ rather than under `webapp/`.
 
 ## Available fixtures
 
-| Name | What it captures |
-|---|---|
-| `l2_terminal/` | Completed cycle whose round 4 ran `l1_generate` → `l1_critique` → `l2_context` and stopped — no `l1_score` ever fired. Triggers the "fitness bars vanish on completed cycle" loading-skeleton bug. |
+| Name | Loaded by | What it captures |
+|---|---|---|
+| `l2_terminal/` | vitest | Completed cycle whose round 4 ran `l1_generate` → `l1_critique` → `l2_context` and stopped — no `l1_score` ever fired. Triggers the "fitness bars vanish on completed cycle" loading-skeleton bug. |
+| `frozen_campaign/` | pytest | A minted `campaign.json` pinned against the *current* `Campaign` / `CampaignConfig`. Both are `extra="forbid"`, so renaming a field makes every campaign already on disk unloadable — `resume`, `ab`, `verify` and L4's inner cycles die before any scoring. Fed through the real store reader by `tests/test_resume.py`; a freshly-built dict cannot catch this, because by construction it never carries a stale key. |
+
+Note the two fixtures hold **different files**: a cycle's `dashboard.json` and a
+campaign's `campaign.json`. The tree is keyed by bug class, not by file kind.
 
 Add more as they're needed for specific bug classes (see § "Freezing a
 new fixture" below). Recommended additions when their bug class lands:
@@ -46,7 +50,21 @@ it("emits every historical round's candidates", () => {
 
 `loadCycleFixture(name)` (`webapp/lib/test-utils/fixtures.ts`) hides
 the relative-path arithmetic to `tests/fixtures/cycles/<name>/dashboard.json`
-and returns it typed as `DashboardSnapshot`.
+and returns it typed as `DashboardSnapshot`. It hardcodes that filename, so a
+fixture holding some other file is loaded by its own test.
+
+## How a pytest test loads a fixture
+
+There is no Python loader and none is needed — it's two lines against the
+`tests/` tree, and the point of a pinned fixture is that nothing regenerates it:
+
+```python
+fixture = Path(__file__).parent / "fixtures" / "cycles" / "frozen_campaign" / "campaign.json"
+manifest = json.loads(fixture.read_text(encoding="utf-8"))
+```
+
+Write it into a `built_stores` tmp workspace and read it back through the real
+store method, so the test exercises the loader the engine actually uses.
 
 ## Running the tests
 

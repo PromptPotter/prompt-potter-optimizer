@@ -36,6 +36,7 @@ __all__ = [
     "apply_inherited_overlay",
     "apply_node_overlay",
     "configure_and_apply_pipeline",
+    "freeze_campaign_config",
     "load_campaign_config",
     "resolve_pipeline_config_params",
     "run_preflight_checks",
@@ -429,6 +430,25 @@ def load_campaign_config(raw: dict[str, Any] | CampaignConfig) -> CampaignConfig
     return CampaignConfig.model_validate(raw)
 
 
+def freeze_campaign_config(config: CampaignConfig) -> dict[str, Any]:
+    """Serialize *config* for the ``campaign.json::config`` snapshot — the **delta** from defaults.
+
+    Sole writer of the snapshot's shape. Only the leaves whose value differs from the code
+    default are persisted, so a knob nobody ever set never appears — and renaming or dropping
+    such a knob later cannot make the snapshot unloadable. Measured on 156 broken campaigns,
+    this alone would have spared 41 of them.
+
+    It is not a rename-proofing device: a field the operator *did* set still lands in the
+    snapshot and still breaks under ``extra="forbid"`` if it is later renamed. That case is
+    caught in CI by the frozen fixture in ``tests/test_resume.py`` and remedied by re-stamping
+    (``scripts/restamp_campaign_configs.py``) — never by ``extra="allow"``, an alias, or a shim.
+
+    The two ``improvement_threshold`` / ``degradation_threshold`` leaves are declared without a
+    default, so they are always emitted and the delta always re-validates.
+    """
+    return config.model_dump(mode="json", exclude_defaults=True)
+
+
 def apply_inherited_overlay(
     config: CampaignConfig,
     frozen_config: dict[str, Any],
@@ -443,15 +463,25 @@ def apply_inherited_overlay(
     ``Campaign.config`` snapshot. Without this they silently revert to the dataset
     defaults on every resume/fork (the lock-drop bug). A steered-fork *seed*'s
     ``optimizer_narrowing`` overrides the campaign-wide narrowing per node — the
-    cycle-level lock edit. Idempotent when ``frozen_config`` already equals
-    ``config`` (dataset-file-gone fallback)."""
-    frozen = load_campaign_config(frozen_config)
-    narrowing = {**config.optimizer_narrowing, **frozen.optimizer_narrowing}
+    cycle-level lock edit.
+
+    Reads the two fields it consumes straight off the snapshot dict. Validating the
+    *whole* snapshot to recover two of its ~38 leaves made every resume hostage to
+    every other leaf: ``CampaignConfig`` is ``extra="forbid"``, so one renamed knob —
+    even one nobody ever set — raised ``extra_forbidden`` here and no campaign minted
+    before the rename could resume. A snapshot is a record of what was; only the
+    fields actually read need to still be a thing."""
+    frozen_narrowing = {
+        node: NodeSearchNarrowing.model_validate(raw)
+        for node, raw in (frozen_config.get("optimizer_narrowing") or {}).items()
+    }
+    narrowing = {**config.optimizer_narrowing, **frozen_narrowing}
     if seed is not None:
         narrowing.update(seed.optimizer_narrowing)
+    frozen_overrides: dict[str, Any] = frozen_config.get("pipeline_overrides") or {}
     return config.model_copy(
         update={
-            "pipeline_overrides": {**config.pipeline_overrides, **frozen.pipeline_overrides},
+            "pipeline_overrides": {**config.pipeline_overrides, **frozen_overrides},
             "optimizer_narrowing": narrowing,
         }
     )
