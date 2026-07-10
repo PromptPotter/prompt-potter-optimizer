@@ -25,7 +25,6 @@ CANDIDATE_HASH_LEN = 12
 
 def build_archive_observations(
     stores: Stores,
-    backend_id: str,
     *,
     dataset_name: str | None,
     min_grade: str | None = None,
@@ -41,7 +40,7 @@ def build_archive_observations(
     (default) keeps every grade — the hard-samples display path's prior behavior.
     """
     obs: list[Observation] = []
-    for entry in archive_views.list_runs(stores, backend_id, dataset_name=dataset_name):
+    for entry in archive_views.list_runs(stores, dataset_name=dataset_name):
         if min_grade is not None and not meets_grade(entry_grade(entry), min_grade):
             continue
         content_hash = (entry.get("content_hash") or "").strip()
@@ -51,7 +50,7 @@ def build_archive_observations(
         run_id = entry.get("run_id")
         if not run_id:
             continue
-        detail = archive_views.load_run(stores, backend_id, run_id)
+        detail = archive_views.load_run(stores, run_id)
         if detail is None:
             continue
         for item in detail.get("measurements", []):
@@ -72,7 +71,6 @@ def build_archive_observations(
 
 def build_archive_hard_samples_artifact(
     stores: Stores,
-    backend_id: str,
     *,
     dataset_name: str | None,
     top_k_candidates: int | None = 40,
@@ -82,7 +80,6 @@ def build_archive_hard_samples_artifact(
     return build_hard_samples_artifact_from_observations(
         build_archive_observations(
             stores,
-            backend_id,
             dataset_name=dataset_name,
         ),
         cycle_id=None,

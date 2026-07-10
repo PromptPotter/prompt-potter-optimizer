@@ -263,7 +263,7 @@ def _apply_resume_fork(
             resumed_from_round = fork_result.new_resumed_from_round
     if session.store:
         archive_views.register_prompt_alias(
-            session.store, session.backend_id, origin.instruction, resolved_origin.render()
+            session.store, origin.instruction, resolved_origin.render()
         )
     return resolved_cycle_id, resumed_from_round
 
@@ -287,7 +287,6 @@ def _finalize_loop_state(
 
     cycle.axes = AxisIndex.ensure_for(
         session.store,
-        session.backend_id,
         scorer=session.scoring.scorer,
         scorer_id=session.scoring.scorer_id,
         scorer_formula=session.scoring.scorer_formula,

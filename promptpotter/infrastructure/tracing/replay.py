@@ -121,7 +121,7 @@ def _collect_ground_truth(
     gt_map: dict[str, str] = {}
     for s in summaries:
         rid = s.get("run_id", "")
-        detail = archive_views.load_run(store, backend_id, rid)
+        detail = archive_views.load_run(store, rid)
         if not detail:
             continue
         for item in detail.get("measurements", []):
@@ -142,7 +142,7 @@ def _replay_run(
     dataset_name: str,
 ) -> bool:
     """Replay one dataset_run's items as events. Returns ``True`` on success."""
-    detail = archive_views.load_run(store, backend_id, run_id)
+    detail = archive_views.load_run(store, run_id)
     if not detail:
         logger.warning("replay: could not load detail for run %s", run_id)
         return False
@@ -231,7 +231,7 @@ def sync_langfuse_runs(
         logger.info("Langfuse push state reset — will re-push all runs.")
 
     # Backfill is cross-dataset on purpose (observability spans datasets).
-    n_runs = len(archive_views.list_runs(store, backend_id))
+    n_runs = len(archive_views.list_runs(store))
     if n_runs == 0:
         logger.info("No completed dataset runs — skipping Langfuse backfill.")
         return None
@@ -257,7 +257,7 @@ def push_all_runs(
     already_done = set(state["backfilled_run_ids"])
 
     # Cross-dataset by design (admin/observability) — see backfill comment above.
-    summaries = archive_views.list_runs(store, backend_id)
+    summaries = archive_views.list_runs(store)
     total_on_disk = len(summaries)
 
     def _emit(msg: str) -> None:
@@ -312,7 +312,7 @@ def push_all_runs(
                 dataset_name=dataset_name,
             )
             if ok:
-                detail = archive_views.load_run(store, backend_id, rid)
+                detail = archive_views.load_run(store, rid)
                 if detail:
                     scores = detail.get("scores", {})
                     accuracies.append(scores.get("accuracy", 0.0))

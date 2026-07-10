@@ -78,7 +78,6 @@ def _seed_run(archive: MeasurementArchive, *, run_id: str, dataset_name: str, hi
     """Minimal ``MeasurementArchive.save`` envelope — one sample whose query text
     is dataset-tagged, so a cross-dataset bleed is detectable by query overlap."""
     archive.save(
-        "bk",
         run_id,
         {
             "run_id": run_id,
@@ -139,7 +138,6 @@ def _seed_graded(
     """Save one run carrying a provenance grade and a single dataset-tagged sample."""
     provenance: dict[str, Any] = {"grade": grade, "deliberate_source": grade != "C"}
     archive.save(
-        "bk",
         run_id,
         {
             "run_id": run_id,
@@ -178,12 +176,10 @@ def test_reusable_results_min_grade_drops_connector_runs(tmp_path: Path) -> None
     _seed_graded(archive, run_id="connector", grade="C", terminated_at="token_matching")
     node_configs = [("llm_only", {"model": "X"})]
 
-    everything = archive.load_reusable_results("bk", node_configs, dataset_name="aime")
+    everything = archive.load_reusable_results(node_configs, dataset_name="aime")
     assert set(everything) == {"q_clean", "q_connector"}
 
-    clean_only = archive.load_reusable_results(
-        "bk", node_configs, dataset_name="aime", min_grade="A"
-    )
+    clean_only = archive.load_reusable_results(node_configs, dataset_name="aime", min_grade="A")
     assert set(clean_only) == {"q_clean"}
 
 
@@ -199,7 +195,6 @@ def test_full_chain_rows_never_replay_on_prefix_match(tmp_path: Path) -> None:
 
     def _seed_chain(run_id: str, terminated_at: str) -> None:
         archive.save(
-            "bk",
             run_id,
             {
                 "run_id": run_id,
@@ -236,7 +231,7 @@ def test_full_chain_rows_never_replay_on_prefix_match(tmp_path: Path) -> None:
         ("l2_context", {"layout": {"problem_description": ["critique"]}}),
         ("l3_plan", {}),
     ]
-    cache = archive.load_reusable_results("bk", query_configs, dataset_name="promptpotter-self")
+    cache = archive.load_reusable_results(query_configs, dataset_name="promptpotter-self")
     assert "q_full_chain" not in cache, (
         "full-chain row replayed across a later-node config change — fake measurement"
     )
@@ -453,8 +448,8 @@ def test_hit_cache_respects_dataset(tmp_path: Path) -> None:
     _seed_run(archive, run_id="just_fresh", dataset_name="justlogic", hit=False)
 
     node_configs = [("llm_only", {"model": "X"})]
-    aime_cache = archive.load_reusable_results("bk", node_configs, dataset_name="aime")
-    just_cache = archive.load_reusable_results("bk", node_configs, dataset_name="justlogic")
+    aime_cache = archive.load_reusable_results(node_configs, dataset_name="aime")
+    just_cache = archive.load_reusable_results(node_configs, dataset_name="justlogic")
 
     aime_queries = set(aime_cache.keys())
     just_queries = set(just_cache.keys())

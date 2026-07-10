@@ -1,9 +1,9 @@
 """L1 / L2 / L3 optimizer loop primitives.
 
-Two state-container entry points are re-exported here:
+Nothing is re-exported here — every consumer imports the leaf directly:
 
 * :class:`Cycle` — round/escalation state container threaded through every
-  layer of the loop (see :mod:`cycle`).
+  layer of the loop: ``from promptpotter.application.optimization.cycle import Cycle``.
 
 The escalation subpackage carries its own curated surface — import from
 it directly rather than expecting re-exports here:
@@ -20,7 +20,3 @@ Internals (``dispatch_hub``, ``l1/``, ``l1_critique``, ``validators/``,
 Reach into the submodule directly:
 ``from promptpotter.application.optimization.l1 import execute_round``.
 """
-
-from promptpotter.application.optimization.cycle import Cycle
-
-__all__ = ["Cycle"]

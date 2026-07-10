@@ -288,10 +288,9 @@ async def close_round(
     )
     cb.on_round_complete(round_result, cycle.escalation.l1_stall_count, cycle.escalation.lives)
     persist_round(cycle, round_result, round_payload, round_num, session, is_probe=is_probe)
-    if cycle.axes and session.store and session.backend_id:
+    if cycle.axes and session.store:
         cycle.axes.refresh(
             session.store,
-            session.backend_id,
             scorer=session.scoring.scorer,
             scorer_id=session.scoring.scorer_id,
             scorer_formula=session.scoring.scorer_formula,

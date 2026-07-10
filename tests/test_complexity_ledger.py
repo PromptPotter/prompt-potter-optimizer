@@ -160,14 +160,19 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # unlike the always-free ``description``/order levers it needs a lock. Out, two:
 # ``deterministic_dominance`` + ``equivalence_elimination`` were two names for one gate's
 # two corners, ORed at a single call site, and are now one ``PoBBConfig.margin_elimination``.
+# 2026-07-10 dead-surface pass: ``reexport_shims`` 45->44 —
+# ``application/optimization/__init__.py`` re-exported ``Cycle``, which every one of its
+# 20+ consumers already imports from the leaf; the shim had zero callers.
+# ``settings_const`` 16->15 — ``FAILURE_WARNING_PREVIEW`` was referenced nowhere, not even
+# inside its own module. Both subtractions, so the baseline falls.
 
 LEDGER_BASELINE = {
     "modules": 311,
     "init_files": 58,
-    "reexport_shims": 45,
+    "reexport_shims": 44,
     "config_leaf_fields": 38,
     "settings_env": 17,
-    "settings_const": 16,
+    "settings_const": 15,
     "opt_search_point_fields": 27,
     "prompt_string_fields": 6,
     "injections": 23,

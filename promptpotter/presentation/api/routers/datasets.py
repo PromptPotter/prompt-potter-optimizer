@@ -368,7 +368,6 @@ def _resolve_scope_artifact(
     *,
     scope: HeatmapScope,
     name: str,
-    backend_id: str,
     campaign_id: str | None,
     cycle_id: str | None,
 ) -> dict[str, Any]:
@@ -402,7 +401,6 @@ def _resolve_scope_artifact(
     # `dataset` — always per-dataset (cross-dataset pooling is meaningless).
     return build_archive_hard_samples_artifact(
         store,
-        backend_id,
         dataset_name=name,
         top_k_samples=None,
     )
@@ -479,7 +477,6 @@ class DatasetPreviewResponse(BaseModel):
 def get_dataset_preview(
     name: str,
     store: StoreDep,
-    backend_id: str = Query(default="local"),
     limit: int = Query(default=50, ge=1, le=1000),
     max_unmeasured: int | None = Query(
         default=None,
@@ -524,7 +521,6 @@ def get_dataset_preview(
         art_store,
         scope=scope,
         name=name,
-        backend_id=backend_id,
         campaign_id=art_campaign,
         cycle_id=art_cycle,
     )
@@ -627,7 +623,6 @@ class MeasurementSeriesResponse(BaseModel):
 def get_dataset_measurement_series(
     name: str,
     store: StoreDep,
-    backend_id: str = Query(default="local"),
     limit: int = Query(default=50, ge=1, le=1000),
     max_unmeasured: int | None = Query(
         default=None,
@@ -664,7 +659,6 @@ def get_dataset_measurement_series(
         art_store,
         scope=scope,
         name=name,
-        backend_id=backend_id,
         campaign_id=art_campaign,
         cycle_id=art_cycle,
     )
@@ -685,7 +679,7 @@ def get_dataset_measurement_series(
         assert art_campaign is not None  # checked in resolver
         series = campaign_measurement_series(art_store, art_campaign, selected_set)
     else:
-        raw_series = measurement_series_for_samples(art_store, backend_id, selected)
+        raw_series = measurement_series_for_samples(art_store, selected)
         # Dataset-scope ord carries ts/run/idx; label = first 8 chars of run_id for tooltips.
         series = {
             sid: [

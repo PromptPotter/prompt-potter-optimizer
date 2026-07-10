@@ -132,7 +132,6 @@ def _resolve_prior_cache(
             "dict[str, QueryMeasurement]",
             archive_views.reusable_results(
                 store,
-                backend_id,
                 node_configs,
                 is_fatal=is_deprecated,
                 dataset_name=session.dataset_name,
@@ -329,7 +328,7 @@ async def score_search_point(
             experiment_id=session.experiment_id,
             pipeline_schema=pipeline_schema,
         )
-        archive_views.record_measurement_run(store, backend_id, run_id, run_data)
+        archive_views.record_measurement_run(store, run_id, run_data)
 
     def _persist_fresh(results: list[QueryMeasurement]) -> None:
         if not (store and backend_id):

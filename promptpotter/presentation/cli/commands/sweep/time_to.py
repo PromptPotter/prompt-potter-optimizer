@@ -58,7 +58,6 @@ async def _cmd_sweep_time_to(args: argparse.Namespace) -> CommandResult:
         train_data,
         args.slice_spec,
         stores=session.store,
-        backend_id=session.backend_id,
         dataset_name=session.dataset_name,
     )
     variants = _parse_variants(args)

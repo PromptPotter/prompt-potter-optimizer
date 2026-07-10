@@ -1,7 +1,8 @@
 """MeasurementArchive facade — sole gateway to the cross-cycle archive.
 
 The archive is the database core (per ``docs/architecture.md``): cross-cycle,
-content-addressed measurements indexed by sample + node-config. Every archive
+content-addressed measurements indexed by sample + node-config, and **tenant-global
+— never backend-scoped**, so nothing here takes a ``backend_id``. Every archive
 read/write lives behind this module; reaching ``stores.archive`` (or aliasing
 it) outside this file is drift, enforced by
 ``test_no_direct_archive_access_outside_facade``.
@@ -43,7 +44,6 @@ __all__ = [
 
 def measurements_for_sample(
     stores: Stores,
-    backend_id: str,
     sample_id: int,
     *,
     run_ids: list[str] | None = None,
@@ -51,7 +51,6 @@ def measurements_for_sample(
 ) -> list[Measurement]:
     """Every measurement of one sample, across configs; *dataset_name* scopes the slice."""
     return stores.archive.measurements_for_sample(
-        backend_id,
         sample_id,
         run_ids=run_ids,
         dataset_name=dataset_name,
@@ -60,7 +59,6 @@ def measurements_for_sample(
 
 def measurement_series_for_samples(
     stores: Stores,
-    backend_id: str,
     sample_ids: list[int],
     *,
     dataset_name: str | None = None,
@@ -74,9 +72,9 @@ def measurement_series_for_samples(
     Powers the ``/datasets/{name}/measurement-series`` endpoint."""
     wanted = set(sample_ids)
     out: dict[int, list[dict[str, Any]]] = {sid: [] for sid in wanted}
-    for entry in stores.archive.list_all(backend_id, dataset_name=dataset_name):
+    for entry in stores.archive.list_all(dataset_name=dataset_name):
         run_id = entry["run_id"]
-        detail = stores.archive.load_by_id(backend_id, run_id)
+        detail = stores.archive.load_by_id(run_id)
         if detail is None:
             continue
         created_at = str(detail.get("created_at", ""))
@@ -101,7 +99,6 @@ def measurement_series_for_samples(
 
 def measurements_for_config(
     stores: Stores,
-    backend_id: str,
     predicate: dict[str, dict[str, Any]],
     *,
     run_ids: set[str] | list[str] | None = None,
@@ -109,44 +106,40 @@ def measurements_for_config(
 ) -> list[Measurement]:
     """Every measurement under configs matching *predicate*, across all samples."""
     return stores.archive.measurements_for_config(
-        backend_id,
         predicate,
         run_ids=run_ids,
         dataset_name=dataset_name,
     )
 
 
-def load_run(stores: Stores, backend_id: str, run_id: str) -> dict[str, Any] | None:
+def load_run(stores: Stores, run_id: str) -> dict[str, Any] | None:
     """Load one run's detail file by ``run_id``; ``None`` if absent.
     Dataset-agnostic — run_id encodes its dataset via the index;
     callers needing the stamp read ``detail['dataset_name']`` themselves."""
-    return stores.archive.load_by_id(backend_id, run_id)
+    return stores.archive.load_by_id(run_id)
 
 
 def list_runs(
     stores: Stores,
-    backend_id: str,
     *,
     dataset_name: str | None = None,
 ) -> list[dict[str, Any]]:
     """All run-summary entries from the archive index, scoped to ``dataset_name``."""
-    return stores.archive.list_all(backend_id, dataset_name=dataset_name)
+    return stores.archive.list_all(dataset_name=dataset_name)
 
 
 def runs_since(
     stores: Stores,
-    backend_id: str,
     seen_ids: set[str],
     *,
     dataset_name: str | None = None,
 ) -> Iterator[tuple[str, dict[str, Any]]]:
     """Yield ``(run_id, detail)`` for runs not in *seen_ids*; missing details skipped."""
-    return stores.archive.load_since(backend_id, seen_ids, dataset_name=dataset_name)
+    return stores.archive.load_since(seen_ids, dataset_name=dataset_name)
 
 
 def reusable_results(
     stores: Stores,
-    backend_id: str,
     node_configs: list[tuple[str, dict[str, Any]]],
     is_fatal: Callable[[dict[str, Any]], bool] | None = None,
     *,
@@ -156,7 +149,6 @@ def reusable_results(
     """Per-sample cache reuse from prior runs sharing *node_configs*; *dataset_name* scopes the slice.
     *min_grade* drops runs below that provenance grade (clean-substrate reads); default keeps all."""
     return stores.archive.load_reusable_results(
-        backend_id,
         node_configs,
         is_fatal=is_fatal,
         dataset_name=dataset_name,
@@ -164,9 +156,9 @@ def reusable_results(
     )
 
 
-def resolve_aliases(stores: Stores, backend_id: str, rp_hash: str) -> set[str]:
+def resolve_aliases(stores: Stores, rp_hash: str) -> set[str]:
     """All ``rendered_prompt_hash`` values equivalent to *rp_hash* (including itself)."""
-    return stores.archive.resolve_aliases(backend_id, rp_hash)
+    return stores.archive.resolve_aliases(rp_hash)
 
 
 # -- writes -------------------------------------------------------------------
@@ -174,19 +166,17 @@ def resolve_aliases(stores: Stores, backend_id: str, rp_hash: str) -> set[str]:
 
 def record_measurement_run(
     stores: Stores,
-    backend_id: str,
     run_id: str,
     data: dict[str, Any],
 ) -> Path:
     """Sole write entry point — persist one measurement-batch detail + index upsert."""
-    return stores.archive.save(backend_id, run_id, data)
+    return stores.archive.save(run_id, data)
 
 
 def register_prompt_alias(
     stores: Stores,
-    backend_id: str,
     raw_text: str,
     canonical_text: str,
 ) -> None:
     """Alias a raw prompt string to its canonical form (no-op if either is empty / equal)."""
-    stores.archive.register_prompt_alias(backend_id, raw_text, canonical_text)
+    stores.archive.register_prompt_alias(raw_text, canonical_text)

@@ -147,7 +147,6 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict[str, An
     with graceful("dataset hard_samples snapshot write failed"):
         archive_artifact = build_archive_hard_samples_artifact(
             session.store,
-            session.backend_id,
             dataset_name=session.dataset_name,
             top_k_candidates=None,
             top_k_samples=None,

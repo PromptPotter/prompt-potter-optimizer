@@ -191,14 +191,13 @@ def _assert_overlay_preserved(
 
 
 def _load_archive_observations(session: Session) -> list[Observation]:
-    """Per-(backend, dataset) prior-measurement observations for the intelligence layer."""
+    """Per-dataset prior-measurement observations for the intelligence layer."""
     from promptpotter.application.intelligence.hard_sample_archive import (
         build_archive_observations,
     )
 
     return build_archive_observations(
         session.store,
-        session.backend_id,
         dataset_name=session.dataset_name,
     )
 
@@ -249,7 +248,6 @@ def _calibrate_delta_ruler(
 
     archive_obs = build_archive_observations(
         session.store,
-        session.backend_id,
         dataset_name=session.dataset_name,
         min_grade="A",
     )

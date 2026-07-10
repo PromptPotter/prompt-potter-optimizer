@@ -331,7 +331,6 @@ class AxisIndex:
     def refresh(
         self,
         store: Stores,
-        backend_id: str,
         scorer: Scorer | None = None,
         scorer_id: str = "none",
         scorer_formula: str | None = None,
@@ -341,7 +340,7 @@ class AxisIndex:
         """Incremental archive refresh, dataset-scoped (required) to prevent cross-dataset pollution."""
         added = 0
         for run_id, detail in archive_views.runs_since(
-            store, backend_id, self.sample_index._seen_runs, dataset_name=dataset_name
+            store, self.sample_index._seen_runs, dataset_name=dataset_name
         ):
             if scorer is not None:
                 rescore_results(detail.get("measurements") or [], scorer, scorer_id, scorer_formula)
@@ -355,7 +354,7 @@ class AxisIndex:
         # deliberately-explored datapoints, not whichever connector replayed most.
         touched_axes: set[str] = set()
         all_entries: list[dict[str, Any]] = []
-        for entry in archive_views.list_runs(store, backend_id, dataset_name=dataset_name):
+        for entry in archive_views.list_runs(store, dataset_name=dataset_name):
             if entry_grade(entry) == "C":
                 continue
             all_entries.append(entry)
@@ -440,20 +439,18 @@ class AxisIndex:
     def ensure_for(
         cls,
         store: Stores | None,
-        backend_id: str,
         scorer: Scorer | None = None,
         scorer_id: str = "none",
         scorer_formula: str | None = None,
         *,
         dataset_name: str | None,
     ) -> AxisIndex | None:
-        """Fresh ``AxisIndex`` + refresh once. Returns ``None`` when store/backend_id missing."""
-        if not (store and backend_id):
+        """Fresh ``AxisIndex`` + refresh once. Returns ``None`` when the store is missing."""
+        if store is None:
             return None
         idx = cls()
         idx.refresh(
             store,
-            backend_id,
             scorer=scorer,
             scorer_id=scorer_id,
             scorer_formula=scorer_formula,

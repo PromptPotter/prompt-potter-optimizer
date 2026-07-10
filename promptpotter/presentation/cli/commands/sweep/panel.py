@@ -254,7 +254,6 @@ async def _run_panel_verb(
         train_data,
         args.slice_spec,
         stores=session.store,
-        backend_id=session.backend_id,
         dataset_name=session.dataset_name,
     )
     dataset = ctx.init_params["dataset_name"] or "unknown"

@@ -185,7 +185,6 @@ async def verify_candidate(
     # Find samples this exact config has not yet been measured on.
     prior = archive_views.measurements_for_config(
         stores,
-        session.backend_id,
         predicate=predicate,
         dataset_name=campaign.dataset_name,
     )
@@ -219,7 +218,6 @@ async def verify_candidate(
     # Workspace aggregate: archive rows matching this candidate's node-configs, deduped per sample (latest wins).
     workspace_measurements = archive_views.measurements_for_config(
         stores,
-        session.backend_id,
         predicate=predicate,
         dataset_name=campaign.dataset_name,
     )

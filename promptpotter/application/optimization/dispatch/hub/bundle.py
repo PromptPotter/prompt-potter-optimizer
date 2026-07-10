@@ -35,7 +35,6 @@ TRANSCRIPT_RENDER_CAP = 3
 TRANSCRIPT_QUERY_CAP = 2200
 TRANSCRIPT_REASONING_CAP = 1200
 TRANSCRIPT_PREDICTED_CAP = 200
-FAILURE_WARNING_PREVIEW = 1
 # Worst-N nodes the evidence_health panel lists — enough to show a dead enricher
 # plus a couple of collateral nodes, never a full pipeline dump.
 NODE_FAILURE_RENDER_CAP = 3
@@ -189,7 +188,6 @@ def injection_registry() -> dict[str, _Injection]:
 
 __all__ = [
     "AXES_ENUM_PREVIEW",
-    "FAILURE_WARNING_PREVIEW",
     "INTRACTABLE_SAMPLES_RENDER_CAP",
     "NEAR_MISS_RENDER_CAP",
     "NODE_FAILURE_RENDER_CAP",

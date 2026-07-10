@@ -188,7 +188,6 @@ SLICE_NAMES: tuple[str, ...] = ("all", "easy", "hard")
 
 def _archive_hit_rates(
     stores: Any,
-    backend_id: str,
     sample_ids: list[int],
     *,
     dataset_name: str | None,
@@ -199,9 +198,7 @@ def _archive_hit_rates(
     out: dict[int, tuple[float, int]] = {}
     for sid in sample_ids:
         try:
-            ms = archive_views.measurements_for_sample(
-                stores, backend_id, sid, dataset_name=dataset_name
-            )
+            ms = archive_views.measurements_for_sample(stores, sid, dataset_name=dataset_name)
         except Exception:
             logger.debug("archive lookup failed for sample %d", sid, exc_info=True)
             continue
@@ -217,7 +214,6 @@ def slice_samples(
     slice_spec: str,
     *,
     stores: Any | None = None,
-    backend_id: str | None = None,
     dataset_name: str | None = None,
 ) -> tuple[list[Sample], str]:
     """Filter by *slice_spec* ∈ SLICE_NAMES or ``samples=ID1,ID2,...``.
@@ -238,13 +234,11 @@ def slice_samples(
     if name not in ("easy", "hard"):
         raise ValueError(f"unknown slice: {slice_spec!r} (expected one of {SLICE_NAMES})")
 
-    if stores is None or backend_id is None:
+    if stores is None:
         logger.info("slice %s requested without stores — falling back to all", name)
         return samples, "all"
 
-    rates = _archive_hit_rates(
-        stores, backend_id, [s.id for s in samples], dataset_name=dataset_name
-    )
+    rates = _archive_hit_rates(stores, [s.id for s in samples], dataset_name=dataset_name)
     if not rates:
         logger.info("slice %s requested but archive is empty — falling back to all", name)
         return samples, "all"

@@ -73,23 +73,23 @@ def _entry_matches_dataset(entry: dict[str, Any], dataset_name: str | None) -> b
 class MeasurementArchive:
     """File I/O for the measurement store — the DB core, NOT the recycle bin.
 
-    Tenant-global, self-contained under `measurements/` (regardless of backend_id):
-    run-detail files `measurements/{run_id}.json`, the index
-    `measurements/measurements_index.json`, and the alias groups
-    `measurements/prompt_aliases.json` all live together. It sits beside
-    `campaigns/` and `archive/` (the recycle bin), never inside `archive/` — it is
-    a cross-campaign cache, not trash. Run files are reached by explicit `run_id`
-    (`load_by_id`) or via the index (`list_all`); nothing globs the dir, so the
-    index + alias files share it safely. `backend_id` is preserved on public
-    methods for call-site stability but ignored for paths.
+    Tenant-global, self-contained under `measurements/`: run-detail files
+    `measurements/{run_id}.json`, the index `measurements/measurements_index.json`,
+    and the alias groups `measurements/prompt_aliases.json` all live together. It
+    sits beside `campaigns/` and `archive/` (the recycle bin), never inside
+    `archive/` — it is a cross-campaign cache, not trash. Run files are reached by
+    explicit `run_id` (`load_by_id`) or via the index (`list_all`); nothing globs
+    the dir, so the index + alias files share it safely.
 
     **Identity does not include the execution path.** A measurement is keyed by
     `content_hash(prompt, dataset, pipeline_params)` and reused by
     `PipelineSchema.node_configs()`, neither of which carries `backend_type`. So
-    repointing a dataset at a different connector (wire TermNorm → in-process
-    `llm_only`, say) does NOT invalidate rows measured under the old one — it
-    silently serves them. Change the connector and you must change the config the
-    hash sees, or re-mint the campaign.
+    the archive is not backend-scoped at all — no read or write takes a
+    `backend_id`, and repointing a dataset at a different connector (wire TermNorm
+    → in-process `llm_only`, say) does NOT invalidate rows measured under the old
+    one — it silently serves them. Change the connector and you must change the
+    config the hash sees, or re-mint the campaign. (`dataset_snapshot_path` is the
+    one exception: its FILENAME carries the backend, so it takes one.)
     """
 
     def __init__(self, base_dir: Path):
@@ -100,10 +100,7 @@ class MeasurementArchive:
     def _store_dir(self) -> Path:
         return self._base_dir / "measurements"
 
-    def _runs_dir(self, _backend_id: str) -> Path:
-        return self._store_dir()
-
-    def _index_path(self, _backend_id: str) -> Path:
+    def _index_path(self) -> Path:
         return self._store_dir() / "measurements_index.json"
 
     def dataset_snapshot_path(self, backend_id: str, dataset_name: str) -> Path:
@@ -115,14 +112,13 @@ class MeasurementArchive:
 
     def save(
         self,
-        backend_id: str,
         run_id: str,
         data: dict[str, Any],
     ) -> Path:
         """Write detail + upsert index. *data* needs `run_id`, `content_hash`, `scores`.
         Detail = atomic write; index = `filelock`-protected against concurrent writers.
         """
-        detail_path = self._runs_dir(backend_id) / f"{run_id}.json"
+        detail_path = self._store_dir() / f"{run_id}.json"
         write_json(detail_path, data)
 
         summary = {
@@ -143,7 +139,7 @@ class MeasurementArchive:
             "created_at": data["created_at"],
         }
 
-        index_path = self._index_path(backend_id)
+        index_path = self._index_path()
         lock_path = index_path.with_suffix(".json.lock")
         lock_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -162,7 +158,7 @@ class MeasurementArchive:
                     entries[i] = summary
                     replaced = True
                     if old_run_id and old_run_id != run_id:
-                        (self._runs_dir(backend_id) / f"{old_run_id}.json").unlink(missing_ok=True)
+                        (self._store_dir() / f"{old_run_id}.json").unlink(missing_ok=True)
                     break
             if not replaced:
                 entries.append(summary)
@@ -172,13 +168,9 @@ class MeasurementArchive:
 
         return detail_path
 
-    def load_by_id(
-        self,
-        backend_id: str,
-        run_id: str,
-    ) -> dict[str, Any] | None:
+    def load_by_id(self, run_id: str) -> dict[str, Any] | None:
         """Load a run detail file directly by run_id (no index scan)."""
-        return read_json_optional(self._runs_dir(backend_id) / f"{run_id}.json")
+        return read_json_optional(self._store_dir() / f"{run_id}.json")
 
     def restamp_dataset(self, old_name: str, new_name: str) -> int:
         """Rewrite every archive entry stamped *old_name* → *new_name* (index summary
@@ -189,11 +181,10 @@ class MeasurementArchive:
         archived under a ``-vN`` name, its prior campaigns' measurements move with
         it so dataset-scoped reuse + filtering stay truthful. Idempotent — only
         entries still stamped *old_name* are touched, so a re-run after a crash is
-        a no-op. ``backend_id`` is path-irrelevant here (the archive is
-        tenant-global), so it's elided. Index write is ``filelock``-protected
-        against a concurrent writer, mirroring :meth:`save`.
+        a no-op. Index write is ``filelock``-protected against a concurrent writer,
+        mirroring :meth:`save`.
         """
-        index_path = self._index_path("")
+        index_path = self._index_path()
         if not index_path.exists():
             return 0
         lock_path = index_path.with_suffix(".json.lock")
@@ -207,22 +198,21 @@ class MeasurementArchive:
                 entry["dataset_name"] = new_name
                 count += 1
                 run_id = entry.get("run_id", "")
-                detail = self.load_by_id("", run_id) if run_id else None
+                detail = self.load_by_id(run_id) if run_id else None
                 if detail is not None and detail.get("dataset_name") == old_name:
                     detail["dataset_name"] = new_name
-                    write_json(self._runs_dir("") / f"{run_id}.json", detail)
+                    write_json(self._store_dir() / f"{run_id}.json", detail)
             if count:
                 write_json(index_path, index)
         return count
 
     def list_all(
         self,
-        backend_id: str,
         *,
         dataset_name: str | None = None,
     ) -> list[dict[str, Any]]:
         """Index entries (summaries). *dataset_name* scopes to one dataset (None = forensic/admin)."""
-        index = read_json_optional(self._index_path(backend_id)) or {
+        index = read_json_optional(self._index_path()) or {
             "measurements": [],
             "total": 0,
         }
@@ -233,7 +223,6 @@ class MeasurementArchive:
 
     def load_since(
         self,
-        backend_id: str,
         seen_ids: set[str],
         *,
         dataset_name: str | None = None,
@@ -241,18 +230,17 @@ class MeasurementArchive:
         """`(run_id, detail)` for runs not in *seen_ids*. Index scan + per-run load encapsulated
         so derived views (AxisIndex) don't reinvent it. Dataset-filtered per `list_all`.
         """
-        for entry in self.list_all(backend_id, dataset_name=dataset_name):
+        for entry in self.list_all(dataset_name=dataset_name):
             run_id = entry["run_id"]
             if run_id in seen_ids:
                 continue
-            detail = self.load_by_id(backend_id, run_id)
+            detail = self.load_by_id(run_id)
             if detail is None:
                 continue
             yield run_id, detail
 
     def find_by_node_configs(
         self,
-        backend_id: str,
         node_configs: list[tuple[str, dict[str, Any]]],
         *,
         dataset_name: str | None = None,
@@ -264,7 +252,7 @@ class MeasurementArchive:
             return []
 
         scored: list[tuple[dict[str, Any], int]] = []
-        for entry in self.list_all(backend_id, dataset_name=dataset_name):
+        for entry in self.list_all(dataset_name=dataset_name):
             stored = entry.get("node_configs")
             if not stored:
                 continue
@@ -286,7 +274,6 @@ class MeasurementArchive:
 
     def measurements_for_sample(
         self,
-        backend_id: str,
         sample_id: int,
         *,
         run_ids: list[str] | None = None,
@@ -298,15 +285,13 @@ class MeasurementArchive:
         """
         if run_ids is not None:
             sources: Iterator[tuple[str, dict[str, Any]]] = (
-                (rid, detail)
-                for rid in run_ids
-                if (detail := self.load_by_id(backend_id, rid)) is not None
+                (rid, detail) for rid in run_ids if (detail := self.load_by_id(rid)) is not None
             )
         else:
             sources = (
                 (entry["run_id"], detail)
-                for entry in self.list_all(backend_id, dataset_name=dataset_name)
-                if (detail := self.load_by_id(backend_id, entry["run_id"])) is not None
+                for entry in self.list_all(dataset_name=dataset_name)
+                if (detail := self.load_by_id(entry["run_id"])) is not None
             )
 
         out: list[Measurement] = []
@@ -318,7 +303,6 @@ class MeasurementArchive:
 
     def measurements_for_config(
         self,
-        backend_id: str,
         predicate: dict[str, dict[str, Any]],
         *,
         run_ids: set[str] | list[str] | None = None,
@@ -333,7 +317,7 @@ class MeasurementArchive:
         if run_ids is not None:
             out: list[Measurement] = []
             for rid in run_ids:
-                detail = self.load_by_id(backend_id, rid)
+                detail = self.load_by_id(rid)
                 if detail is None:
                     continue
                 for item in detail.get("measurements", []):
@@ -341,14 +325,14 @@ class MeasurementArchive:
             return out
 
         out = []
-        for entry in self.list_all(backend_id, dataset_name=dataset_name):
+        for entry in self.list_all(dataset_name=dataset_name):
             stored = entry.get("node_configs")
             if not stored:
                 continue
             if not _matches_subset(stored, predicate):
                 continue
             run_id = entry["run_id"]
-            detail = self.load_by_id(backend_id, run_id)
+            detail = self.load_by_id(run_id)
             if detail is None:
                 continue
             for item in detail.get("measurements", []):
@@ -357,7 +341,6 @@ class MeasurementArchive:
 
     def load_reusable_results(
         self,
-        backend_id: str,
         node_configs: list[tuple[str, dict[str, Any]]],
         is_fatal: Callable[[dict[str, Any]], bool] | None = None,
         *,
@@ -385,13 +368,12 @@ class MeasurementArchive:
         cache: dict[str, dict[str, Any]] = {}
 
         for entry, match_length in self.find_by_node_configs(
-            backend_id,
             node_configs,
             dataset_name=dataset_name,
         ):
             if min_grade is not None and not meets_grade(entry_grade(entry), min_grade):
                 continue
-            detail = self.load_by_id(backend_id, entry["run_id"])
+            detail = self.load_by_id(entry["run_id"])
             if not detail:
                 continue
             is_full_match = match_length >= chain_len
@@ -419,10 +401,10 @@ class MeasurementArchive:
 
     # -- prompt alias groups ---------------------------------------------------
 
-    def _alias_path(self, _backend_id: str) -> Path:
+    def _alias_path(self) -> Path:
         return self._store_dir() / "prompt_aliases.json"
 
-    def register_alias(self, backend_id: str, *hashes: str) -> None:
+    def register_alias(self, *hashes: str) -> None:
         """Link rendered_prompt_hashes as semantically equivalent; new hashes merge into any group
         that overlaps theirs.
         """
@@ -430,7 +412,7 @@ class MeasurementArchive:
         if len(hashes_set) < 2:
             return
 
-        path = self._alias_path(backend_id)
+        path = self._alias_path()
         data = read_json_optional(path) or {"groups": []}
         groups: list[list[str]] = data["groups"]
 
@@ -449,7 +431,6 @@ class MeasurementArchive:
 
     def register_prompt_alias(
         self,
-        backend_id: str,
         raw_text: str,
         canonical_text: str,
     ) -> None:
@@ -460,14 +441,14 @@ class MeasurementArchive:
         canonical_hash = hashlib.sha256(canonical_text.encode()).hexdigest()[:HASH_TRUNCATE]
         if raw_hash == canonical_hash:
             return
-        self.register_alias(backend_id, raw_hash, canonical_hash)
+        self.register_alias(raw_hash, canonical_hash)
         logger.info("Registered prompt alias: %s ↔ %s", raw_hash[:8], canonical_hash[:8])
 
-    def resolve_aliases(self, backend_id: str, rp_hash: str) -> set[str]:
+    def resolve_aliases(self, rp_hash: str) -> set[str]:
         """Return all hashes equivalent to *rp_hash* (including itself)."""
         if not rp_hash:
             return set()
-        data = read_json_optional(self._alias_path(backend_id)) or {"groups": []}
+        data = read_json_optional(self._alias_path()) or {"groups": []}
         for group in data.get("groups", []):
             if rp_hash in group:
                 return set(group)
