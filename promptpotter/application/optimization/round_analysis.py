@@ -210,11 +210,9 @@ def _evolution(rounds: list[RoundResult]) -> tuple[list[EvolutionRow], list[str]
 
 
 def _trajectory(rounds: list[RoundResult]) -> tuple[TrajectoryClass, str]:
-    """Classify cycle trajectory from the accuracy series.
-
-    Mirrors :func:`build_trajectory_report` decisions (stall, oscillation,
-    ceiling) but returns the typed enum + a one-line description suitable
-    for direct prompt inclusion.
+    """Classify cycle trajectory (stall / oscillation / ceiling / healthy) from the accuracy
+    series — the sole owner of that decision. Returns the typed :data:`TrajectoryClass` plus a
+    one-line description suitable for direct prompt inclusion.
     """
     if len(rounds) < 2:
         return "healthy", "Too few rounds to classify"

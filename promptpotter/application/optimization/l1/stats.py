@@ -94,9 +94,18 @@ def _compute_round_1_verdict(
 # --- aggregation helpers ---------------------------------------------------
 
 
+def _measured(round_data: dict[str, Any], key: str) -> float | None:
+    """A round's *measured* value at *key*, or ``None``. A round that carries no number for a
+    metric did not score zero on it — the registry omits an evaluator's key when it had nothing
+    to measure. Folding the absence in as 0.0 is what deflates every mean below."""
+    value = round_data.get(key)
+    return None if value is None else float(value)
+
+
 def _first_round_at_threshold(rounds: list[dict[str, Any]], threshold: float) -> int | None:
     for r in rounds:
-        if float(r.get("accuracy") or 0.0) >= threshold:
+        accuracy = _measured(r, "accuracy")
+        if accuracy is not None and accuracy >= threshold:
             round_num = r.get("round")
             return int(round_num) if isinstance(round_num, (int, float)) else None
     return None
@@ -104,19 +113,28 @@ def _first_round_at_threshold(rounds: list[dict[str, Any]], threshold: float) ->
 
 def _mean_yield_rate(rounds: list[dict[str, Any]]) -> float | None:
     """Mean of per-round l1_yield (variants beating parent / variants generated).
-    ``None`` with no rounds — a cycle that generated nothing had no yield to fall short of."""
-    if not rounds:
+    ``None`` when no round measured one — a cycle that generated nothing had no yield to fall
+    short of, and a round that never recorded a yield must not drag the mean toward zero."""
+    yields = [y for r in rounds if (y := _measured(r, "l1_yield")) is not None]
+    if not yields:
         return None
-    return sum(float(r.get("l1_yield") or 0.0) for r in rounds) / len(rounds)
+    return sum(yields) / len(yields)
 
 
 def _top_lifts(rounds: list[dict[str, Any]], origin_composite_fitness: float) -> list[float]:
     """Per-round (best variant composite_fitness − parent composite_fitness). Round 0's parent
-    is the origin composite_fitness; subsequent rounds inherit the prior round's."""
+    is the origin composite_fitness; subsequent rounds inherit the prior round's.
+
+    A round with no recorded composite_fitness contributes no lift and does not become the next
+    round's parent. Reading it as 0.0 charged that round a lift of ``−parent`` and then re-based
+    every later round on zero — one unscored round, and ``stagnation_max`` reports a stall streak
+    that never happened."""
     lifts: list[float] = []
-    parent = float(origin_composite_fitness or 0.0)
+    parent = origin_composite_fitness
     for r in rounds:
-        composite_fitness = float(r.get("composite_fitness") or 0.0)
+        composite_fitness = _measured(r, "composite_fitness")
+        if composite_fitness is None:
+            continue
         lifts.append(composite_fitness - parent)
         parent = composite_fitness
     return lifts

@@ -190,9 +190,11 @@ def _variant_to_result(
     }
     if verb == "round2" and len(rounds) >= 2:
         r2 = _panel_stats_from_round(rounds[1], panel_size)
-        fields["round2_accuracy"] = r2["round1_accuracy"]
+        r2_acc = r2["round1_accuracy"]
+        fields["round2_accuracy"] = r2_acc
         anchor = prior_round1_acc if prior_round1_acc is not None else r1["round1_accuracy"]
-        fields["round2_lift"] = r2["round1_accuracy"] - anchor
+        # A panel that received no candidate has no accuracy — so it has no lift either.
+        fields["round2_lift"] = None if (r2_acc is None or anchor is None) else r2_acc - anchor
 
     return build_sweep_result(
         verb=verb,

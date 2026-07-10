@@ -174,9 +174,10 @@ async def _run_sweep_optimize(
     return cycle_result, observers
 
 
-def _panel_stats_from_round(round_result: Any, panel_size: int) -> dict[str, float]:
+def _panel_stats_from_round(round_result: Any, panel_size: int) -> dict[str, float | None]:
     """Pull per-candidate accuracy + pipeline_params from a ``RoundResult``
-    and route through :func:`compute_panel_stats`."""
+    and route through :func:`compute_panel_stats`. ``None`` on a stat the panel
+    could not measure — a panel that received no candidate has no accuracy."""
     from promptpotter.application.sweep import compute_panel_stats
 
     scores = list(round_result.candidate_scores or [])

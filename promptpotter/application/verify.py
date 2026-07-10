@@ -135,7 +135,14 @@ async def verify_candidate(
             f"round_{round_num:04d}.json carries labels "
             f"{[c.get('label') for c in cand_scores]} — none match {label!r}."
         )
-    source_campaign_accuracy = float(cand_score.get("accuracy") or 0.0)
+    # `verify` exists to compare the recorded score against a fresh one. A candidate row with no
+    # recorded accuracy has nothing to compare; read as 0.0 it fabricates a full-scale regression.
+    if cand_score.get("accuracy") is None:
+        raise VerifyError(
+            f"round_{round_num:04d}.json candidate {label!r} records no accuracy — there is no "
+            "source measurement to verify against."
+        )
+    source_campaign_accuracy = float(cand_score["accuracy"])
     source_campaign_composite = display_fitness(
         cand_score.get("composite_fitness"), source_campaign_accuracy
     )

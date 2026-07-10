@@ -1224,6 +1224,55 @@ def test_round_winner_elects_by_ability_not_subset_accuracy() -> None:
     assert abilities.theta["able_on_hard"] > abilities.theta["weak_on_easy"]
 
 
+def test_an_origin_that_never_scored_is_no_floor_to_beat() -> None:
+    """An origin whose every sample errored must not be scored as a coin-flip.
+
+    ``candidate_abilities`` drops errored rows, and ``fit_theta_given_delta`` omits an arm with
+    no observation — so such an origin carries no ``ORIGIN_ABILITY_ID`` entry. Reading it as
+    ``.get(ORIGIN_ABILITY_ID, 0.0)`` invented θ=0, i.e. an origin able on ~50% of the ruler, and
+    both the winner election and the ``delta_ok`` promotion gate ranked against that phantom.
+
+    ``paired_fitness`` does not catch it: it grades an errored row as a 0.0 cell, so the
+    origin-overlap guard passes on the very rows the θ fit discarded.
+
+    Silent harm: a backend outage during the origin's round makes every later round elect and
+    promote a winner against a floor that was never measured. No error, no symptom — the lineage
+    is built on a number nobody observed.
+    """
+    from promptpotter.application.intelligence.exploration import (
+        ORIGIN_ABILITY_ID,
+        candidate_abilities,
+        theta_lift_over_origin,
+    )
+    from promptpotter.application.scoring.metrics import elect_round_winner, paired_fitness
+
+    def res(sid: int, fitness: float, errored: bool = False) -> dict:
+        row = {"sample_id": sid, "hit": fitness > 0.5, "fitness": fitness}
+        if errored:
+            row["error_category"] = "transport"
+        return row
+
+    origin = [res(i, 0.0, errored=True) for i in range(6)]
+    candidate = [res(i, 0.55) for i in range(6)]
+    abilities = candidate_abilities({"c1": candidate}, origin, {})
+
+    # The origin was never fit — nothing to floor against.
+    assert ORIGIN_ABILITY_ID not in abilities.theta
+    # ...yet the overlap guard sees six shared cells, so it cannot be the thing that stops us.
+    assert len(paired_fitness(candidate, origin)[0]) == 6
+
+    assert theta_lift_over_origin(abilities, "c1") is None
+    winner_id, _ = elect_round_winner(["c1"], {"c1": candidate}, origin, 1, {})
+    assert winner_id == ""
+
+    # A measured origin still elects normally — the guard costs nothing when there IS a floor.
+    scored_origin = [res(i, 0.1) for i in range(6)]
+    scored_abilities = candidate_abilities({"c1": candidate}, scored_origin, {})
+    lift = theta_lift_over_origin(scored_abilities, "c1")
+    assert lift is not None and lift > 0.0
+    assert elect_round_winner(["c1"], {"c1": candidate}, scored_origin, 1, {})[0] == "c1"
+
+
 # ===========================================================================
 # 5. Measurement rerun short-circuit + refusal classification
 # ===========================================================================

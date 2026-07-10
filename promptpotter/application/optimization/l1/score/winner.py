@@ -330,17 +330,18 @@ async def l1_score(
     # candidate, the exact case where subset accuracy is no longer comparable.
     delta_ok = False
     if winner_id:
-        from promptpotter.application.intelligence.exploration import ORIGIN_ABILITY_ID
+        from promptpotter.application.intelligence.exploration import theta_lift_over_origin
 
         # θ decouples per candidate given the FIXED δ ruler (``fit_theta_given_delta``), so the
         # election's ``abilities`` posterior already carries the winner's and origin's θ on that
         # ruler — the exact fit both gates need. Read it, don't refit (was a deterministic re-run
-        # of the same 1-D MAP over the same rows).
-        theta_lift = abilities.theta.get(winner_id, 0.0) - abilities.theta.get(
-            ORIGIN_ABILITY_ID, 0.0
-        )
+        # of the same 1-D MAP over the same rows). ``None`` = the origin was never fit (every
+        # row errored), so there is no floor to have improved on: the gate stays shut. This is
+        # the same policy ``c0_ok`` states below; both read one helper so they cannot drift apart
+        # (they had, and this branch was the one inventing a coin-flip origin).
+        theta_lift = theta_lift_over_origin(abilities, winner_id)
         slope = max(best_matched_origin_acc * (1.0 - best_matched_origin_acc), _GATE_SLOPE_FLOOR)
-        delta_ok = theta_lift > improvement_threshold / slope
+        delta_ok = theta_lift is not None and theta_lift > improvement_threshold / slope
     n_min = pobb_config.n_min
     n_ok = base["total"] >= n_min
     # Anchor the promotion verdict to the FROZEN round-0 origin (C0), not just the current

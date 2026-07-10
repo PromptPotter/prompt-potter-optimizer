@@ -47,6 +47,7 @@ __all__ = [
     "graduate_ruler_model",
     "ruler_expected_accuracy",
     "select_round_subset",
+    "theta_lift_over_origin",
 ]
 
 
@@ -705,6 +706,29 @@ def candidate_abilities(
         delta_se={},
         discrimination={sid: a for sid, (_, a) in split.items() if a != 1.0},
     )
+
+
+def theta_lift_over_origin(abilities: RaschPosterior, candidate_id: str) -> float | None:
+    """``θ_candidate − θ_origin`` on the fixed ruler, or ``None`` when either arm was never fit.
+
+    The one reader of the matched origin's ability. ``fit_theta_given_delta`` **omits an arm
+    with no observation**, and ``candidate_abilities`` drops every errored row — so an origin
+    whose samples all failed carries no ``ORIGIN_ABILITY_ID`` entry at all. Defaulting it to
+    ``0.0`` invents a logit-0 origin: an arm as able as a coin, on a floor nobody measured.
+    Both the winner election and the promotion gate read the lift, so both would rank against
+    that phantom.
+
+    ``paired_fitness`` does not catch this. It counts an errored row as a 0.0 cell (its
+    declared policy — "the score it earned"), so the origin-overlap guard passes on exactly the
+    rows the θ fit threw away.
+
+    There is no lift over a floor that was never measured. Absent is not a number.
+    """
+    theta_c = abilities.theta.get(candidate_id)
+    theta_origin = abilities.theta.get(ORIGIN_ABILITY_ID)
+    if theta_c is None or theta_origin is None:
+        return None
+    return theta_c - theta_origin
 
 
 def select_round_subset(

@@ -161,6 +161,15 @@ async def measure_noise_floor(
 
     mean_composite, ci_lo, ci_hi = mean_ci(composites)
 
+    # The record's whole point is source-vs-workspace. A round file with no recorded accuracy has
+    # no source number, and reading it as 0.0 manufactures a 100%-drift the operator will chase.
+    if round_file.get("accuracy") is None:
+        raise NoiseFloorError(
+            f"round_0000.json in {campaign_id}/{cycle_id} records no accuracy — there is no "
+            "source measurement to compare this noise band against."
+        )
+    source_accuracy = float(round_file["accuracy"])
+
     record = DiagnosticRunRecord(
         ts=utcnow_iso(),
         dataset=campaign.dataset_name,
@@ -174,9 +183,9 @@ async def measure_noise_floor(
         workspace_n=len(scoring_set),
         workspace_accuracy=sum(accuracies) / len(accuracies),
         workspace_composite=mean_composite,
-        source_campaign_accuracy=float(round_file.get("accuracy") or 0.0),
+        source_campaign_accuracy=source_accuracy,
         source_campaign_composite=display_fitness(
-            round_file.get("composite_fitness"), float(round_file.get("accuracy") or 0.0)
+            round_file.get("composite_fitness"), source_accuracy
         ),
         source_campaign_n=int(round_file.get("total") or 0),
         noise_floor_k=k,

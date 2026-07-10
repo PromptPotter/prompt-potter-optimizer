@@ -276,18 +276,22 @@ def compute_panel_stats(
     candidates_planned: int,
     candidate_accuracies: list[float],
     candidate_pipeline_params: list[dict[str, Any]],
-) -> dict[str, float]:
+) -> dict[str, float | None]:
     """Per-round panel summary: mean/max accuracy, `parse_fail_rate = (planned−received)/planned`,
-    `pipeline_params_entropy = unique_param_jsons / received` (1.0 = all distinct mutations)."""
+    `pipeline_params_entropy = unique_param_jsons / received` (1.0 = all distinct mutations).
+
+    A panel that received **no** candidate has no accuracy — `None`, rendered `incomplete`, never
+    `0.0`. A variant whose L1 prompt parsed nothing and one whose five candidates all scored zero
+    are different results, and the sweep rank table is what promotes the winner."""
     received = len(candidate_accuracies)
     planned = max(received, candidates_planned)
     parse_fail = max(0.0, (planned - received) / planned) if planned else 0.0
     if not received:
         return {
-            "round1_accuracy": 0.0,
-            "round1_best": 0.0,
+            "round1_accuracy": None,
+            "round1_best": None,
             "parse_fail_rate": parse_fail,
-            "pipeline_params_entropy": 0.0,
+            "pipeline_params_entropy": None,
         }
     unique = {json.dumps(pp, sort_keys=True, default=str) for pp in candidate_pipeline_params}
     return {
@@ -333,10 +337,16 @@ _DERIVED_COLUMNS: tuple[str, ...] = ("cost_per_lift",)
 
 
 def _derive_cost_per_lift(row: dict[str, Any]) -> float | None:
-    """Accuracy per $ (origin assumed 0 — archive has no per-sweep origin); None sorts last."""
-    cost = row.get("cost_usd") or 0.0
-    acc = row.get("final_accuracy") or row.get("round1_accuracy") or 0.0
-    if not cost:
+    """Accuracy per $ (origin assumed 0 — archive has no per-sweep origin); None sorts last.
+
+    `final_accuracy` first, then the round-1 panel mean — chosen by *presence*, not truthiness:
+    a run that genuinely finished at 0.0 accuracy is a measurement, and `or` would discard it in
+    favour of the round-1 number. Unmeasured on both, or costless, and there is no rate."""
+    cost = row.get("cost_usd")
+    acc = row.get("final_accuracy")
+    if acc is None:
+        acc = row.get("round1_accuracy")
+    if acc is None or not cost:
         return None
     return float(acc) / float(cost)
 

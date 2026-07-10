@@ -438,14 +438,19 @@ def elect_round_winner(
     This is the cross-candidate comparison that drifts under per-round resubset: with each
     candidate on a different signal-chased subset, raw subset accuracy is difficulty-blind, so
     the candidate handed the easier samples wins on paper. θ is subset-invariant and crowns the
-    genuinely abler candidate. ``paired_fitness`` stays the origin-overlap guard — a candidate
-    with no samples in common with origin cannot win, else it would "beat" a phantom 0.0 floor
-    on samples the incumbent never ran. Pure + deterministic in its inputs, so the resume
-    replayer re-elects the same winner under an unchanged scorer.
+    genuinely abler candidate.
+
+    Two guards, and they cover different holes. ``paired_fitness`` is the origin-**overlap**
+    guard: a candidate sharing no sample with origin cannot win, else it would beat the floor on
+    rows the incumbent never ran. It does *not* guard the origin's ability, because it grades an
+    errored row as a 0.0 cell while the θ fit drops that row entirely — so an all-errored origin
+    still yields overlap. ``theta_lift_over_origin`` is the guard for that: no fitted origin θ,
+    no lift, no winner. Pure + deterministic in its inputs, so the resume replayer re-elects the
+    same winner under an unchanged scorer.
     """
     from promptpotter.application.intelligence.exploration import (
-        ORIGIN_ABILITY_ID,
         candidate_abilities,
+        theta_lift_over_origin,
     )
 
     abilities = candidate_abilities(
@@ -453,7 +458,6 @@ def elect_round_winner(
         origin_results,
         delta_scale,
     )
-    theta_origin = abilities.theta.get(ORIGIN_ABILITY_ID, 0.0)
 
     best_rank: tuple[float, int] = (0.0, 0)
     winner_id = ""
@@ -465,9 +469,6 @@ def elect_round_winner(
         cand_fit, _ = paired_fitness(cand_results, origin_results)
         if not cand_fit:
             continue
-        theta_c = abilities.theta.get(cid)
-        if theta_c is None:
-            continue
         # Rank by the difficulty-adjusted ability lift POINT ESTIMATE — a candidate strictly
         # above origin wins, no winner's-curse SE margin required. The prior `- theta_se` shrink
         # discarded genuinely-better candidates whenever the posterior was wide (thin per-round
@@ -476,7 +477,10 @@ def elect_round_winner(
         # candidate. Under-probing is already guarded independently by `coverage_floor` above
         # (a candidate below it never reaches here), so dropping the SE shrink cannot let a thin
         # fluke win — only fully-probed candidates compete, best point-estimate θ takes it.
-        lift = theta_c - theta_origin
+        # `None` = this candidate or the origin was never fit; there is no lift to rank on.
+        lift = theta_lift_over_origin(abilities, cid)
+        if lift is None:
+            continue
         rank = (lift, n_cells)
         if rank > best_rank:
             best_rank = rank

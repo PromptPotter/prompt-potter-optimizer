@@ -69,9 +69,9 @@ class RoundDiagnostics:
 
     Renderers in the dispatch hub read this; they do not recompute. The
     plan field ``trajectory`` widens the existing 4-class model with
-    ``ceiling`` (long-running stall at known best) for parity with
-    :func:`build_trajectory_report`'s classification — the field type
-    encodes which classifications the renderer must handle.
+    ``ceiling`` (long-running stall at known best) — the field type
+    encodes which classifications the renderer must handle. The classifier
+    itself is ``optimization/round_analysis.py::_trajectory``.
     """
 
     # Rank distribution — where does GT land in candidates?
