@@ -363,7 +363,7 @@ def _apply_findings(
     prompt_fields = {
         name: getattr(output, name)
         for name in PROMPT_STRING_FIELDS
-        if str(getattr(output, name, "")).strip()
+        if str(getattr(output, name)).strip()
     }
     if prompt_fields:
         values["origin_prompt_fields"] = {**draft.origin_prompt_fields, **prompt_fields}

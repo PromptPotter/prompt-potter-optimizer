@@ -56,7 +56,6 @@ from promptpotter.infrastructure.store.paths import (
     campaign_root_dir_for,
     cycle_dir_under,
     root_cycle_id,
-    session_index,
     sibling_kind,
 )
 from promptpotter.shared.clock import utcnow_iso
@@ -404,8 +403,12 @@ class CampaignStore:
         """Whether *campaign_id* is the tenant's active-session campaign — the live
         lens / running run. Archiving or deleting it would strand the pointer + its
         open ``.runtime/`` handles, so the move + destructive verbs refuse it."""
-        ptr = read_json_optional(self._base_dir / ".workspace" / "active_session.json")
-        return isinstance(ptr, dict) and ptr.get("campaign_id") == campaign_id
+        # Function-local: the package `__init__` imports this module, so the
+        # pointer reader can only be reached at call time.
+        from promptpotter.infrastructure.store import read_active_pointer_under
+
+        _, active_campaign, _ = read_active_pointer_under(self._base_dir)
+        return bool(active_campaign) and active_campaign == campaign_id
 
     def _lifecycle_updates(self, status: str, changed_at: str, reason: str) -> dict[str, str]:
         return {
@@ -500,16 +503,15 @@ class CampaignStore:
         return True
 
     def list_sessions(self, campaign_id: str) -> list[str]:
-        """Session-root cycle ids in the campaign tree, ordered by ``session_index``."""
+        """Session-root cycle ids in the campaign tree, ordered by id."""
         cycles_dir = self.campaign_root_dir(campaign_id) / "cycles"
         if not cycles_dir.exists():
             return []
-        roots = [
+        return sorted(
             p.name
             for p in cycles_dir.iterdir()
             if p.is_dir() and (p / "index.json").is_file() and root_cycle_id(p.name) == p.name
-        ]
-        return sorted(roots, key=session_index)
+        )
 
     # ------------------------------------------------------------------
     # Per-cycle ``index.json`` CRUD — create, update, rewind, enumerate

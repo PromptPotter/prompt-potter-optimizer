@@ -8,10 +8,11 @@
 //     by `unitDisplayName`. No session-label field exists yet.
 
 import type { CampaignSummary, CycleListEntry, UnitKind } from "./api";
-import { sessionIndexOf, shortFamilyTail } from "./ids";
+import { shortFamilyTail } from "./ids";
 
-// Operator-facing unit-kind labels — the time-horizon taxonomy. A session
-// root reads as "Session N"; the others tag a fork / diag / sweep branch.
+// Operator-facing unit-kind labels — the time-horizon taxonomy. A campaign
+// has exactly one root, which reads as "Session"; the others tag a fork /
+// diag / sweep branch.
 export const UNIT_KIND_LABEL: Record<UnitKind, string> = {
   session: "Session",
   divergent_resume: "divergent resume",
@@ -25,9 +26,9 @@ export function campaignDisplayName(c: CampaignSummary): string {
   return c.label || c.dataset_name || c.campaign_id;
 }
 
-// Human name for one unit — "Session N" for a session root, "{kind} {tail}"
+// Human name for one unit — "Session" for the campaign's root, "{kind} {tail}"
 // for a fork / diag / sweep branch.
 export function unitDisplayName(c: CycleListEntry): string {
-  if (c.is_root) return `Session ${sessionIndexOf(c.cycle_id)}`;
+  if (c.is_root) return UNIT_KIND_LABEL.session;
   return `${UNIT_KIND_LABEL[c.unit_kind]} ${shortFamilyTail(c.cycle_id)}`;
 }

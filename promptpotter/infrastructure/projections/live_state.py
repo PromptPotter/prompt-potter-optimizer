@@ -96,24 +96,21 @@ def apply_phase(core: LiveStateCore, event: PhaseEvent, view: Any = None) -> Non
     never re-anchored (immutable campaign origin). Leader (``best_acc``) advances
     on improved ``L1_SCORE:exit``.
 
-    ``view`` is the typed view object the producer built (``InitExitView`` /
-    ``RoundCompleteView`` for the phases read here); read by attribute via
-    ``getattr`` so this projection stays agnostic to the presentation view types."""
+    ``view`` is the typed view object the producer built — ``InitExitView`` on
+    ``INIT:exit``, ``RoundCompleteView`` on ``L1_SCORE:exit`` (``from_phase_event``
+    binds each phase to its view type). Read by attribute so this projection stays
+    agnostic to the view classes without importing them upward."""
     if event.round is not None:
         core.round_num = event.round
     if view is None:
         return
     if event.phase == CampaignPhase.INIT and event.event == "exit":
-        new_origin = getattr(view, "origin_acc", core.origin_acc)
+        new_origin: float = view.origin_acc
         core.origin_acc = new_origin
         if new_origin > core.best_acc:
             core.best_acc = new_origin
-    elif (
-        event.phase == CampaignPhase.L1_SCORE
-        and event.event == "exit"
-        and getattr(view, "improved", False)
-    ):
-        winner = getattr(view, "winner_accuracy", core.best_acc)
+    elif event.phase == CampaignPhase.L1_SCORE and event.event == "exit" and view.improved:
+        winner: float = view.winner_accuracy
         if winner > core.best_acc:
             core.best_acc = winner
 

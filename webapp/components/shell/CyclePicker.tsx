@@ -3,14 +3,7 @@ import { memo, useMemo } from "react";
 import { useWorkspace } from "@/lib/workspace";
 import { useAuth } from "@/lib/auth-context";
 import type { CycleListEntry } from "@/lib/api";
-import {
-  rootCycleId,
-  sessionIndexOf,
-  campaignOriginHash,
-  pathLeaf,
-  unitKey,
-  UNIT_SEP,
-} from "@/lib/ids";
+import { campaignOriginHash, pathLeaf, unitKey, UNIT_SEP } from "@/lib/ids";
 import { unitDisplayName } from "@/lib/names";
 import { runPhaseLabel } from "@/lib/run-phase";
 import { fmtPct0 } from "@/lib/format";
@@ -72,9 +65,6 @@ export const CyclePicker = memo(function CyclePicker({
     }
     for (const arr of g.values()) {
       arr.sort((a, b) => {
-        const sa = sessionIndexOf(rootCycleId(a.cycle_id));
-        const sb = sessionIndexOf(rootCycleId(b.cycle_id));
-        if (sa !== sb) return sa - sb;
         if (a.is_root !== b.is_root) return a.is_root ? -1 : 1;
         return a.updated_at < b.updated_at ? 1 : -1;
       });

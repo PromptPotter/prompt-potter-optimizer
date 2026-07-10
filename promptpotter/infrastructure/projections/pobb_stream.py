@@ -13,7 +13,6 @@ Per-cycle scope: each fork's projection points at its own
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -21,6 +20,7 @@ from typing import Any
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import SnapshotRecord
 from promptpotter.infrastructure.projections.base import DerivedView
+from promptpotter.infrastructure.store.io import append_jsonl
 
 logger = logging.getLogger(__name__)
 
@@ -102,10 +102,7 @@ class PoBBStreamView(DerivedView):
         self._last_p_best = dict(p_best)
 
     def _append(self, round_num: int, line: dict[str, Any]) -> None:
-        self.streams_dir.mkdir(parents=True, exist_ok=True)
-        path = self.streams_dir / f"round_{round_num:04d}_p_best.jsonl"
         try:
-            with path.open("a", encoding="utf-8") as f:
-                f.write(json.dumps(line, default=str) + "\n")
+            append_jsonl(self.streams_dir / f"round_{round_num:04d}_p_best.jsonl", line)
         except OSError as exc:
             logger.warning("PoBBStreamView: append failed for round %d: %s", round_num, exc)

@@ -176,7 +176,7 @@ export interface NodeConfigParam {
   optimizer_tunable: boolean;
 }
 
-/** Resolved output schema for a pipeline node. */
+/** Resolved output schema for a TARGET pipeline node — the structured output the */
 export interface NodeOutputSchema {
   fields: string[];
   field_descriptions: Record<string, string>;
@@ -302,8 +302,6 @@ export interface CampaignListResponse {
 export interface SessionSummary {
   /** The session's root cycle id */
   root_cycle_id: string;
-  /** 1-based session ordinal within the campaign */
-  session_index: number;
   /** Session root cycle status */
   status: string;
   /** Rounds completed on the session root cycle */

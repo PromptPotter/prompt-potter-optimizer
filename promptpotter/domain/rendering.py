@@ -168,10 +168,7 @@ def _collect_advisories(result: Mapping[str, Any]) -> set[str]:
     pd = result.get("pipeline_data") or {}
     advisories: set[str] = set()
     for w in (pd.get("diagnostics") or {}).get("warnings") or []:
-        if isinstance(w, dict):
-            advisories.add(f"{w.get('step', 'unknown')}:{w.get('code', 'unknown')}")
-        elif isinstance(w, str):
-            advisories.add(w)
+        advisories.add(f"{w.get('step', 'unknown')}:{w.get('code', 'unknown')}")
     if not advisories and is_error_result(result):
         advisories.add(f"{pd.get('terminated_at', 'unknown')}:error")
     if _is_refusal(result):
@@ -190,7 +187,7 @@ def _structural_advisory_keys(result: Mapping[str, Any]) -> set[str]:
     pd = result.get("pipeline_data") or {}
     keys: set[str] = set()
     for w in (pd.get("diagnostics") or {}).get("warnings") or []:
-        if isinstance(w, dict) and w.get("kind") == "structural":
+        if w.get("kind") == "structural":
             keys.add(f"{w.get('step', 'unknown')}:{w.get('code', 'unknown')}")
     return keys
 

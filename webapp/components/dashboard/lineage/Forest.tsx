@@ -132,7 +132,6 @@ export function Forest({
   expanded,
   onLaneActivate,
   onSelectCycle,
-  sessionLabel,
 }: {
   tree: CycleNode;
   campaignId: string;
@@ -156,7 +155,6 @@ export function Forest({
   // Navigate the dashboard to a cycle — fired when a candidate in a non-selected
   // lane is clicked (the inspector/samples follow the searchpoint).
   onSelectCycle: (campaignId: string, cycleId: string) => void;
-  sessionLabel: string | null;
 }) {
   const { candidate, setSelectionForCandidate } = useSelection();
   // Served scoring-mask overlay, read straight from its provider (the single
@@ -222,9 +220,6 @@ export function Forest({
 
   return (
     <div className="family-cladogram-forest">
-      {sessionLabel && (
-        <div className="family-cladogram-session-head">{sessionLabel}</div>
-      )}
         <svg
           width={width}
           height={height}

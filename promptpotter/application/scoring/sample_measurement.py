@@ -160,9 +160,19 @@ def _compute_step_tokens(
     a count, falls back to a chars/4 heuristic over the interpolated prompt
     and the node's observed output text (marks ``estimated=True``).
 
+    Every entry carries the node's ``model``: the backend's upstream id when it
+    reports one, else the model the overlay pinned for that node
+    (``wire_params[node]["model"]`` — the dataset OWNS its task model, so this is
+    never absent for an LLM node). Downstream reads ``entry["model"]`` directly.
+
     Returns an empty dict when the schema carries no LLM nodes.
     """
     out: dict[str, StepTokenUsage] = {}
+
+    def _configured_model(node_name: str) -> str | None:
+        cfg = wire_params.get(node_name)
+        model = cfg.get("model") if isinstance(cfg, dict) else None
+        return model if isinstance(model, str) else None
 
     raw = resp_data.get("step_tokens")
     if isinstance(raw, dict):
@@ -175,13 +185,14 @@ def _compute_step_tokens(
                 }
                 # Forward per-node cost/model when the backend surfaced them
                 # (provider returned USD; upstream model id) — the dashboard
-                # prefers these over its bundled rate table + provider slug.
+                # prefers these over its bundled rate table.
                 cost = entry.get("cost_usd")
                 if isinstance(cost, (int, float)):
                     seeded["cost_usd"] = float(cost)
                 wire_model = entry.get("model")
-                if isinstance(wire_model, str):
-                    seeded["model"] = wire_model
+                model = wire_model if isinstance(wire_model, str) else _configured_model(node_name)
+                if model is not None:
+                    seeded["model"] = model
                 # Forward the raw response shape so ``classify_result`` can
                 # distinguish a truncation (``finish_reason=length``) from a
                 # genuinely empty response. Dropping these collapses every
@@ -220,11 +231,15 @@ def _compute_step_tokens(
                 out_text_parts.append(str(pipeline_val))
         out_text = " ".join(out_text_parts)
 
-        out[node.name] = {
+        estimated: StepTokenUsage = {
             "input": len(in_text) // 4,
             "output": len(out_text) // 4,
             "estimated": True,
         }
+        model = _configured_model(node.name)
+        if model is not None:
+            estimated["model"] = model
+        out[node.name] = estimated
 
     return out
 
@@ -425,9 +440,6 @@ async def measure_sample(
             # rides — one TokenUsageRecord per pipeline node per uncached
             # sample. measure_sample only reaches here for fresh backend
             # calls (cache hits return early), so this never double-counts.
-            # Prefer the per-node upstream model (TermNorm 1.0.7+); fall
-            # back to the top-level provider slug on older backends.
-            fallback_model = data.get("llm_provider")
             step_timings = data.get("step_timings") or {}
             for node_name, entry in step_tokens.items():
                 in_tok = entry["input"]
@@ -441,14 +453,13 @@ async def measure_sample(
                 raw_dur = step_timings.get(node_name)
                 duration_s: float
                 duration_s = float(raw_dur) if isinstance(raw_dur, (int, float)) else 0.0
-                node_model = entry.get("model")
                 emit_token_usage(
                     node=str(node_name),
                     kind="backend",
                     input_tokens=in_tok,
                     output_tokens=out_tok,
                     duration_s=duration_s,
-                    model=node_model or fallback_model,
+                    model=entry.get("model"),
                     cost_usd=cost_usd,
                 )
 

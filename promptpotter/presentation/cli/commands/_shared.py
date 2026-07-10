@@ -79,17 +79,13 @@ def log_startup_summary(
 def campaign_result_human(campaign_dir: Any, *, dataset_name: str, cycle_id: str | None) -> str:
     """Operator-facing summary block for a finished ``new`` / ``resume`` run.
 
-    Names the dataset, campaign, session, and cycle. ``campaign.json`` +
-    ``log.md`` live at the campaign dir; per-session ``dashboard.json``
-    and round detail live under ``cycles/{cycle_id}/``.
+    Names the dataset, campaign, and cycle. ``campaign.json`` + ``log.md``
+    live at the campaign dir; per-cycle ``dashboard.json`` and round detail
+    live under ``cycles/{cycle_id}/``.
     """
-    from promptpotter.infrastructure.store import root_cycle_id, session_index
-
-    session_n = session_index(root_cycle_id(cycle_id)) if cycle_id else 1
     return (
         f"Dataset:   {dataset_name}\n"
         f"Campaign:  {campaign_dir.name}\n"
-        f"Session:   {session_n}\n"
         f"Cycle:     {cycle_id or '?'}\n"
         f"Directory: {campaign_dir}\n"
         f"  campaign.json          — manifest\n"

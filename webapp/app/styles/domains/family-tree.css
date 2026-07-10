@@ -33,12 +33,9 @@
    horizontally. resize is a no-op on touch Safari, which degrades to the
    scroller. */
 .family-cladogram-viewport{max-height:60vh;overflow:auto;resize:vertical}
-/* A campaign is a forest — one cladogram per session. Each forest is its
-   own <svg>; the session sub-header appears only for multi-session
-   campaigns (a single-session campaign needs no per-session label). */
+/* A campaign is a forest — one cladogram per root cycle, each its own <svg>. */
 .family-cladogram-forest{margin-top:6px}
 .family-cladogram-forest:first-of-type{margin-top:0}
-.family-cladogram-session-head{padding:2px 2px 1px;font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--color-text-tertiary)}
 /* Natural size — the tree renders at its intrinsic px dimensions. The box
    grows to fit it (and drops to its own full-width row when wide); horizontal
    scroll is only a last resort when even a full-width row can't hold it. */

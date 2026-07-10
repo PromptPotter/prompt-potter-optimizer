@@ -286,7 +286,6 @@ async def _mint_fresh_session(
     from promptpotter.application.config import load_campaign_config as _load_cfg
     from promptpotter.application.datasets import read_campaign_config_file
     from promptpotter.application.origin import prepare_datasets
-    from promptpotter.infrastructure.store import session_index
 
     # Shared unwrap only — `new` validates AFTER merging with the connector
     # profile ({**profile, **file_config}), a different composition order than
@@ -340,11 +339,7 @@ async def _mint_fresh_session(
         log=logger.info if get_verbose() else None,
     )
 
-    sess_n = session_index(minted.cycle_id)
-    if sess_n == 1:
-        checkin_line("campaign", f"minted {minted.campaign_id} — session #1")
-    else:
-        checkin_line("campaign", f"joined {minted.campaign_id} — session #{sess_n}")
+    checkin_line("campaign", f"minted {minted.campaign_id}")
 
     return session, campaign_config, dataset_name, minted.session_id
 

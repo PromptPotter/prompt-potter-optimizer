@@ -3,7 +3,7 @@
 // components own the rendering.
 
 import type { CampaignSummary, CycleListEntry } from "@/lib/api";
-import { rootCycleId, sessionIndexOf } from "@/lib/ids";
+import { rootCycleId } from "@/lib/ids";
 
 // One session in a campaign's forest: its root cycle + every fork / diag /
 // sweep that descends from it.
@@ -141,9 +141,7 @@ export function groupCampaigns(
         bestAccuracy: bestAccuracyOf([s.root, ...s.branches]),
       });
     }
-    sessions.sort(
-      (a, b) => sessionIndexOf(a.root.cycle_id) - sessionIndexOf(b.root.cycle_id),
-    );
+    sessions.sort((a, b) => (a.root.cycle_id < b.root.cycle_id ? -1 : 1));
     const updatedAt = sessions.reduce(
       (m, s) => (s.updatedAt > m ? s.updatedAt : m),
       campaign.created_at,

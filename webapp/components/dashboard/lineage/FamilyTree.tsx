@@ -1,6 +1,6 @@
 "use client";
 import { memo, type CSSProperties } from "react";
-import { sessionIndexOf, shortFamilyTail } from "@/lib/ids";
+import { shortFamilyTail } from "@/lib/ids";
 import { fmtPct0 } from "@/lib/format";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
@@ -33,7 +33,6 @@ export const FamilyTree = memo(function FamilyTree() {
     expanded,
     onLaneActivate,
     naturalWidth,
-    multiSession,
     totalDescendants,
     viewedHasRounds,
     isInheritedSibling,
@@ -165,9 +164,6 @@ export const FamilyTree = memo(function FamilyTree() {
                 expanded={expanded}
                 onLaneActivate={onLaneActivate}
                 onSelectCycle={onSelectCycle}
-                sessionLabel={
-                  multiSession ? `Session ${sessionIndexOf(f.rootId)}` : null
-                }
               />
             ))}
           </div>

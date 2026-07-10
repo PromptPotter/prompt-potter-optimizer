@@ -24,7 +24,7 @@ from promptpotter.application.jobs.launcher import draft_wire_with_locks, load_c
 from promptpotter.application.meta_champion import ChampionRegistry, reduce_corpus
 from promptpotter.application.resource_matrix import ResourceMatrix, read_matrix
 from promptpotter.infrastructure.store import Stores
-from promptpotter.infrastructure.store.paths import REPO_ROOT, session_index
+from promptpotter.infrastructure.store.paths import REPO_ROOT
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
@@ -77,7 +77,6 @@ class SessionSummary(BaseModel):
     """One session in a campaign's forest — a root cycle + its forks."""
 
     root_cycle_id: str = Field(description="The session's root cycle id")
-    session_index: int = Field(description="1-based session ordinal within the campaign")
     status: str = Field(default="", description="Session root cycle status")
     n_rounds: int = Field(default=0, description="Rounds completed on the session root cycle")
     best_accuracy: float | None = Field(default=None, description="Best round accuracy")
@@ -91,7 +90,7 @@ class CampaignDetailResponse(CampaignSummary):
     )
     config: dict[str, Any] = Field(description="Frozen CampaignConfig snapshot for this campaign")
     sessions: list[SessionSummary] = Field(
-        description="Every session in the campaign's forest, ordered by session index"
+        description="Every session in the campaign's forest, ordered by root cycle id"
     )
 
 
@@ -132,7 +131,6 @@ def _session_summaries(store: Stores, campaign_id: str) -> list[SessionSummary]:
         out.append(
             SessionSummary(
                 root_cycle_id=e["cycle_id"],
-                session_index=session_index(e["cycle_id"]),
                 status=e["status"],
                 n_rounds=e["n_rounds"],
                 best_accuracy=e["best_accuracy"],
@@ -140,7 +138,7 @@ def _session_summaries(store: Stores, campaign_id: str) -> list[SessionSummary]:
                 updated_at=e["updated_at"],
             )
         )
-    out.sort(key=lambda s: s.session_index)
+    out.sort(key=lambda s: s.root_cycle_id)
     return out
 
 

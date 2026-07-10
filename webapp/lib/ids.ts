@@ -24,13 +24,6 @@ export function shortFamilyTail(cycleId: string): string {
   return cycleId;
 }
 
-// Session ordinal from a root cycle id — `cycle_{hash}` → 1,
-// `cycle_{hash}_s3` → 3. Mirrors `session_index()` in paths.py.
-export function sessionIndexOf(rootId: string): number {
-  const m = rootId.match(/_s(\d+)$/);
-  return m ? Number(m[1]) : 1;
-}
-
 // Origin-hash tail of a campaign id — `{dataset}__{hash}` → the hash.
 // Disambiguates two campaigns on the same dataset.
 export function campaignOriginHash(campaignId: string): string {

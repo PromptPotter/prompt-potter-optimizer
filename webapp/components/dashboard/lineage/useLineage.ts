@@ -25,7 +25,7 @@ import {
   type HeadlineMetric,
 } from "@/lib/derivations";
 import { useDashboard } from "@/lib/hooks/useDashboard";
-import { rootCycleId, sessionIndexOf } from "@/lib/ids";
+import { rootCycleId } from "@/lib/ids";
 import { bumpRevalidation } from "@/lib/revalidate";
 import { useLineageOverlay } from "@/lib/lineage-overlay";
 import { useStableContent } from "@/lib/stable";
@@ -119,7 +119,6 @@ export interface Lineage {
   headlineMetric: HeadlineMetric;
   headlineMetricDefault: HeadlineMetric;
   setHeadlineMetric: (m: HeadlineMetric) => void;
-  multiSession: boolean;
   totalDescendants: number;
   // Empty-state facts for the in-view cycle.
   viewedHasRounds: boolean;
@@ -190,14 +189,16 @@ export function useLineage({
     });
   }, []);
 
-  // The campaign's session roots — one cladogram per session, ordered by session.
-  const rootCycleIds = useMemo(() => {
-    const roots = (data?.cycles ?? [])
-      .filter((c) => c.sibling_kind === "root")
-      .map((c) => c.cycle_id);
-    roots.sort((a, b) => sessionIndexOf(a) - sessionIndexOf(b));
-    return roots;
-  }, [data]);
+  // The campaign's root cycles — one cladogram each. A campaign mints exactly
+  // one root today; the list shape survives so lineage stays id-ordered.
+  const rootCycleIds = useMemo(
+    () =>
+      (data?.cycles ?? [])
+        .filter((c) => c.sibling_kind === "root")
+        .map((c) => c.cycle_id)
+        .sort(),
+    [data],
+  );
 
   // Normalized per-cycle STRUCTURE — source-by-cycle-role: the in-view active
   // cycle from the live dashboard (so its in-flight round shows and tracks the
@@ -363,7 +364,6 @@ export function useLineage({
     expanded,
     onLaneActivate,
     naturalWidth,
-    multiSession: rootCycleIds.length > 1,
     totalDescendants: forests.reduce((n, f) => n + countDescendants(f.tree), 0),
     viewedHasRounds,
     isInheritedSibling,

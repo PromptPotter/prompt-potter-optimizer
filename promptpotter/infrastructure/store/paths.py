@@ -5,12 +5,6 @@ On-disk shape: ``campaigns/{campaign_id}/`` holds ``campaign.json`` + ``log.md``
 mint ``campaign_id = {dataset}__{rand6_hex}`` per ``new``; root cycle is
 ``cycle_{target_hash[:12]}``. Sibling kind + sweep batch id live in
 ``cycles/{cycle_id}/index.json``, not the path.
-
-**Pre-existing shape (readers parse, writers don't emit).** Campaigns from
-the ``{dataset}__{declaration_hash}`` scheme carry a session forest with
-``_s{N}`` suffixes on session-root cycle ids. The suffix only disambiguates the
-session root; :func:`session_index` parses it, :func:`root_cycle_id` /
-:func:`sibling_kind` ignore it.
 """
 
 from __future__ import annotations
@@ -31,7 +25,6 @@ DEFAULT_DATASETS_ROOT = REPO_ROOT / "datasets"
 
 _SIBLING_SEP_RE = re.compile(r"_(fork|diag|sweep)_")
 _SIBLING_LAST_SEP_RE = re.compile(r"_(fork|diag|sweep)_(?!.*_(fork|diag|sweep)_)")
-_SESSION_SUFFIX_RE = re.compile(r"_s(\d+)$")
 _DATASET_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
@@ -63,12 +56,6 @@ def sibling_kind(cycle_id: str) -> Literal["root", "fork", "diag", "sweep"]:
     if m is None:
         return "root"
     return m.group(1)  # type: ignore[return-value]
-
-
-def session_index(cycle_id: str) -> int:
-    """Session ordinal from a session-root id; ``cycle_{hash}_s3`` ⇒ 3, bare ⇒ 1. Session-root only."""
-    m = _SESSION_SUFFIX_RE.search(cycle_id)
-    return int(m.group(1)) if m else 1
 
 
 def campaign_root_dir_for(tenant_root: Path, campaign_id: str) -> Path:
@@ -118,7 +105,6 @@ __all__ = [
     "cycle_dir_under",
     "root_cycle_id",
     "session_dir_for",
-    "session_index",
     "sibling_kind",
     "sweep_batch_dir_for",
     "validate_dataset_name",

@@ -24,6 +24,9 @@ Also owns the per-tenant active-session pointer
 workspace ledger); the tenant slug is the path key, not a JSON field, so
 the on-disk shape is ``{session_id, campaign_id, cycle_id}``. The session
 is the operator's lens into the workspace: which campaign + cycle are live.
+``read_active_pointer_under`` is the tenant-root-keyed core the id-keyed
+readers wrap — ``CampaignStore`` holds a resolved root, so it reads through
+that seam rather than re-encoding the path.
 
 No global pointer — by construction, no tenant can read or clobber another
 tenant's active session.
@@ -58,7 +61,6 @@ from promptpotter.infrastructure.store.paths import (
     cycle_dir_for,
     root_cycle_id,
     session_dir_for,
-    session_index,
     sibling_kind,
 )
 from promptpotter.infrastructure.store.session_store import SessionStore
@@ -68,11 +70,15 @@ from promptpotter.infrastructure.store.tenant_dataset_store import TenantDataset
 from promptpotter.infrastructure.store.user_store import User, UserStore
 
 
-def _active_pointer_path(tenant_id: TenantId, projects_root: Path | None = None) -> Path:
-    """Resolve the per-tenant active-pointer file under the tenant workspace dir."""
+def _tenant_root(tenant_id: TenantId, projects_root: Path | None = None) -> Path:
     validate_path_component(tenant_id)
-    root = projects_root if projects_root is not None else DEFAULT_PROJECTS_ROOT
-    return root / tenant_id / ".workspace" / "active_session.json"
+    return (projects_root if projects_root is not None else DEFAULT_PROJECTS_ROOT) / tenant_id
+
+
+def active_pointer_path_under(tenant_root: Path) -> Path:
+    """Pointer path under an ALREADY-RESOLVED tenant root — the one place the
+    ``.workspace/active_session.json`` layout is written down."""
+    return tenant_root / ".workspace" / "active_session.json"
 
 
 def mint_session_id() -> str:
@@ -97,7 +103,7 @@ def save_active_pointer(
     validate_path_component(campaign_id)
     validate_path_component(cycle_id)
     write_json(
-        _active_pointer_path(tenant_id, projects_root),
+        active_pointer_path_under(_tenant_root(tenant_id, projects_root)),
         {
             "session_id": session_id,
             "campaign_id": campaign_id,
@@ -108,17 +114,15 @@ def save_active_pointer(
 
 def clear_active_pointer(tenant_id: TenantId, *, projects_root: Path | None = None) -> None:
     """Delete the tenant's active-session pointer file, if present. Idempotent."""
-    _active_pointer_path(tenant_id, projects_root).unlink(missing_ok=True)
+    active_pointer_path_under(_tenant_root(tenant_id, projects_root)).unlink(missing_ok=True)
 
 
-def read_active_pointer(
-    tenant_id: TenantId, *, projects_root: Path | None = None
-) -> tuple[str, str, str]:
-    """Return ``(session_id, campaign_id, cycle_id)`` for *tenant_id*.
+def read_active_pointer_under(tenant_root: Path) -> tuple[str, str, str]:
+    """``(session_id, campaign_id, cycle_id)`` under an already-resolved tenant root.
 
     Returns ``("", "", "")`` when the pointer is missing or unreadable.
     """
-    ptr = read_json_tolerant(_active_pointer_path(tenant_id, projects_root))
+    ptr = read_json_tolerant(active_pointer_path_under(tenant_root))
     if not isinstance(ptr, dict):
         return "", "", ""
     return (
@@ -128,9 +132,16 @@ def read_active_pointer(
     )
 
 
+def read_active_pointer(
+    tenant_id: TenantId, *, projects_root: Path | None = None
+) -> tuple[str, str, str]:
+    """Return ``(session_id, campaign_id, cycle_id)`` for *tenant_id*."""
+    return read_active_pointer_under(_tenant_root(tenant_id, projects_root))
+
+
 def active_pointer_exists(tenant_id: TenantId, *, projects_root: Path | None = None) -> bool:
     """Public predicate — whether the tenant's active-session pointer is on disk."""
-    return _active_pointer_path(tenant_id, projects_root).exists()
+    return active_pointer_path_under(_tenant_root(tenant_id, projects_root)).exists()
 
 
 __all__ = [
@@ -149,6 +160,7 @@ __all__ = [
     "User",
     "UserStore",
     "active_pointer_exists",
+    "active_pointer_path_under",
     "archive_views",
     "build_stores",
     "campaign_root_dir_for",
@@ -157,11 +169,11 @@ __all__ = [
     "list_readable_datasets",
     "mint_session_id",
     "read_active_pointer",
+    "read_active_pointer_under",
     "readable_dataset_dir",
     "root_cycle_id",
     "save_active_pointer",
     "session_dir_for",
-    "session_index",
     "sibling_kind",
     "write_json",
 ]
