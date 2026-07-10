@@ -169,7 +169,7 @@ four. Classifier + endpoints: `presentation/api/routers/campaigns/storage.py` (`
 |---|---|---|
 | **Dataset** | — | `langfuse/datasets/` — the sacred ground-truth mirror (input-data copy; usually the biggest chunk) |
 | **Connector** | — | `.runtime/cache/**` + the per-sample `results`/`all_candidate_results` arrays carved from the public `rounds/round_*.json` |
-| **State** | Loop | the resume point — non-array remainder of `rounds/round_*.json` + `.overrides/` |
+| **State** | Loop | the resume point — non-array remainder of `rounds/round_*.json` (the read-once cycle seed now rides the ledger, so it lands in **History**) |
 | **Trace** | Loop | telemetry — `.runtime/streams/`, `prompts/`, `langfuse/{traces,observations,scores}/` |
 | **History** | Loop | the durable event spine — `.runtime/ledger.jsonl` |
 | **Reports** | Loop | readable output — `campaign.json`, `index.json`, `dashboard.json`, `log.md`, `review.md`, `hard_samples.json` |

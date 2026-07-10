@@ -2,12 +2,13 @@
 
 ``CampaignStore`` owns the whole ``campaigns/`` tree: the ``campaign.json`` manifest,
 per-cycle ``index.json`` CRUD, fork-sibling index writers, round + candidate detail
-files, and the per-cycle ``.overrides/seed.json`` home.
+files, and the cycle-seed ledger I/O (``CycleSeedRecord``).
 
-**The directory name encodes read cadence.** ``.overrides/`` is declared-at-mint,
-read-once-at-bootstrap (the cycle seed); ``.runtime/`` (``pause.flag`` /
-``spend_cap.json``) is mutated-during-run, polled-every-tick. Conflating the two
-invites cache-staleness bugs. Full contract: ``store.py``'s module docstring.
+**The read-once cycle seed rides the ledger** (declared-at-mint, read-once-at-bootstrap,
+recovered by replay), NOT a ``.overrides/`` sidecar. Contrast ``.runtime/``
+(``pause.flag`` / ``spend_cap.json``) — mutated-during-run, polled-every-tick, transient.
+Don't conflate a durable ledger fact with a transient flag. Full contract:
+``store.py``'s module docstring.
 
 Note ``campaign.json`` here is the minted **manifest** (a frozen :class:`Campaign`),
 NOT the dataset **template** of the same name under ``datasets/{name}/`` — two

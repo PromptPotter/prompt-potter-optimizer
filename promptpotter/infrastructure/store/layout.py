@@ -154,14 +154,6 @@ class CycleLayout:
     def round_file(self, round_num: int) -> Path:
         return self.rounds / round_basename(round_num)
 
-    @property
-    def overrides(self) -> Path:
-        return self.cycle_dir / ".overrides"
-
-    @property
-    def seed(self) -> Path:
-        return self.overrides / "seed.json"
-
     # --- .runtime/ durability classes (spine / cache / control / rewind) ---
     @property
     def runtime(self) -> Path:
@@ -246,8 +238,7 @@ class FileKind(Enum):
         "state",
         False,
     )  # rounds/round_*.json — bytes split connector/state by the rollup
-    OVERRIDES = ("state", False)  # .overrides/** — read-once cycle seed
-    LEDGER = ("history", False)  # .runtime/ledger.jsonl — the event spine
+    LEDGER = ("history", False)  # .runtime/ledger.jsonl — the event spine (carries the cycle seed)
     LOOP_TELEMETRY = ("trace", False)  # .runtime/streams, prompts/, sweeps/, residual
 
     # Keepsake — spared by ``delete --keep-results``.
@@ -283,8 +274,6 @@ def classify(rel: Path) -> FileKind:
         return FileKind.LOOP_TELEMETRY  # streams/ + anything else under .runtime
     if rel.name in _REPORT_NAMES:
         return FileKind.REPORT
-    if ".overrides" in parts:
-        return FileKind.OVERRIDES
     if "rounds" in parts and rel.name.startswith("round_") and rel.suffix == ".json":
         return FileKind.ROUND_PUBLIC
     return FileKind.LOOP_TELEMETRY  # prompts/, sweeps/summary.md, residual → loop telemetry

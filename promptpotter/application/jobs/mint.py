@@ -123,8 +123,9 @@ def prepare_fresh_cycle(
 
     ``origin_override`` (campaign-from-origin) re-homes C0 to a chosen prior
     origin: the plan's cycle_id derives from it, and the matching
-    :class:`CycleSeed` is written to ``.overrides/seed.json`` so the runner seam
-    resolves the same origin at bootstrap (the generic fork/steer read path). The
+    :class:`CycleSeed` is appended to the cycle's ledger as a ``CycleSeedRecord`` so
+    the runner seam resolves the same origin at bootstrap (the generic fork/steer read
+    path). The
     root is parentless, so the origin still scores fresh — no inherited measurement.
     """
     seed = _campaign_origin_seed(origin_override)

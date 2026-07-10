@@ -100,14 +100,16 @@ not raw `str`/`Path`. `archive/` is cross-cycle/session/tenant;
 `MeasurementArchive` is the DB core.
 
 `CampaignStore` (`store/campaign_store/store.py`) exposes
-`write_cycle_seed`/`read_cycle_seed` over `cycles/{id}/.overrides/seed.json` —
-the **read-once** per-cycle override home (a steered fork's or campaign-origin's
-typed `CycleSeed`, written by `_mint_fork` / the mint seam, read once at the runner seam). Distinct
-from `.runtime/{stop,pause,spend_cap}` (the **polled** per-checkpoint flags —
-consumed at the next sample boundary, NOT held to the round close;
-a `pause.flag` written mid-candidate pauses within seconds,
-`runtime_flags.py`): the dir name encodes read-cadence, so the two never
-share a cache path.
+`write_cycle_seed`/`read_cycle_seed`, which append/scan the **read-once** cycle
+seed as a `CycleSeedRecord` on the cycle's ledger (a steered fork's or
+campaign-origin's typed `CycleSeed`, written by `_mint_fork` / the mint seam,
+read once at the runner seam; the pure scan lives in `ledger_scan.py`, no
+subscribers fire). The seed rides the replayable spine — a fork inherits the
+parent's seed record virtually then appends its own, so a scan of the cycle's
+own ledger returns that cycle's seed. Distinct from `.runtime/{skip,pause,spend_cap}`
+(the **polled** per-checkpoint flags — consumed at the next sample boundary, NOT
+held to the round close; a `pause.flag` written mid-candidate pauses within seconds,
+`runtime_flags.py`): one is a durable ledger fact, the others are transient flags.
 
 ## LLM client
 

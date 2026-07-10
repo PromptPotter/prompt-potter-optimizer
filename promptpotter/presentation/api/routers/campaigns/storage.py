@@ -8,7 +8,7 @@ that sum to the on-disk total. The top-level axis is the operator's mental model
 - ``dataset``   — the langfuse ground-truth mirror (the input-data copy; biggest chunk)
 - ``connector`` — what the backend produced/consumed (its per-node I/O cache + the
                   per-sample result arrays it wrote into the public round files)
-- ``state``     — the loop's resume point (round searchpoint state + ``.overrides``)
+- ``state``     — the loop's resume point (the non-array remainder of the round files)
 - ``trace``     — loop telemetry (``streams``, rendered ``prompts``, the langfuse loop trace)
 - ``history``   — the durable event spine (``ledger.jsonl``)
 - ``reports``   — the readable output (manifest + dashboard/index/log/review + hard_samples)

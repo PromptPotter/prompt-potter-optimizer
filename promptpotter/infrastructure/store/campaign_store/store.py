@@ -2,22 +2,23 @@
 
 ``CampaignStore`` owns the whole ``campaigns/`` tree: the ``campaign.json``
 manifest, per-cycle ``index.json`` CRUD, fork-sibling index writers, round +
-candidate detail files, and the per-cycle ``.overrides/seed.json`` home. Path
+candidate detail files, and the per-cycle cycle-seed ledger I/O. Path
 resolution + cross-cutting reads (``load_campaign``, index enumeration) sit at
-the top of the class; the no-subscriber pure ledger scan lives in its own
-``ledger_scan.py`` module (imported here for ``rewind_to_round``).
+the top of the class; the no-subscriber pure ledger scans live in their own
+``ledger_scan.py`` module (imported here for ``rewind_to_round`` + the seed read).
 
-``.overrides/`` holds **declared-at-mint, read-once-at-bootstrap** data: the
-cycle seed (chosen origin prompt + pipeline overlay + limit overrides), written
-for an operator-steered fork OR a campaign-from-origin root mint. Contrast
-``.runtime/`` (``pause.flag`` / ``skip.flag`` / ``spend_cap.json``) — those are
-**mutated-during-run, polled-every-tick** by the round loop (read via
-``infrastructure/runtime_flags.py``). The directory name encodes the read
-cadence; conflating the two invites cache-staleness bugs.
+The **cycle seed** — declared-at-mint, read-once-at-bootstrap data (chosen origin
+prompt + pipeline overlay + reconciled limits), written for an operator-steered fork
+OR a campaign-from-origin root mint — rides the ledger as the read-once
+:class:`CycleSeedRecord` (``write_cycle_seed`` appends it, ``read_cycle_seed`` scans
+for it), NOT a ``.overrides/`` sidecar. It joins the replayable spine, so a
+resume/fork recovers it by construction. Contrast the ``.runtime/`` control flags
+(``pause.flag`` / ``skip.flag`` / ``spend_cap.json``) — **mutated-during-run,
+polled-every-tick** by the round loop (read via ``infrastructure/runtime_flags.py``).
 
-For a fork, the seed is one of three projections of a typed :class:`ForkSpec`:
-the ledger ``FORK_CUT`` record is the SoT, ``.overrides/seed.json`` is the
-bootstrap-read copy the origin resolver consumes, ``index.json::fork`` is the
+For a fork, the seed is one of the fork's on-disk projections: the ledger
+``FORK_CUT`` record is the lineage SoT, the ``CycleSeedRecord`` carries the chosen
+starting point the origin resolver consumes, ``index.json::fork`` is the
 lineage-read copy (seed-excluded). Writers: ``_mint_fork`` (forks) and the mint
 seam (campaign-from-origin).
 """
@@ -38,11 +39,14 @@ from typing import Any
 
 from promptpotter.config.settings import DEFAULT_CONNECTOR_TYPE
 from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import best_round_by_cumulative_accuracy
-from promptpotter.domain.run_records import CycleSeed
+from promptpotter.domain.run_records import CycleSeed, CycleSeedRecord
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.runtime_flags import derive_run_phase, is_checkin
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    scan_ledger_cycle_seed,
     scan_ledger_max_round_complete,
 )
 from promptpotter.infrastructure.store.io import (
@@ -239,7 +243,7 @@ class CampaignStore:
 
     One class over the whole tree: manifest CRUD, per-cycle ``index.json``
     CRUD + rewind + enumeration, fork-sibling writers, round/candidate detail
-    files, and the ``.overrides/seed.json`` cycle-seed home.
+    files, and the cycle-seed ledger I/O (``CycleSeedRecord``).
     """
 
     def __init__(self, base_dir: Path):
@@ -287,9 +291,6 @@ class CampaignStore:
 
     def _candidates_dir(self, campaign_id: str, cycle_id: str) -> Path:
         return self._layout(campaign_id, cycle_id).candidates_cache
-
-    def _overrides_dir(self, campaign_id: str, cycle_id: str) -> Path:
-        return self._layout(campaign_id, cycle_id).overrides
 
     def load_campaign(self, campaign_id: str) -> Campaign | None:
         data = read_json_optional(self._manifest_path(campaign_id))
@@ -1135,21 +1136,20 @@ class CampaignStore:
             )
 
     # ------------------------------------------------------------------
-    # Per-cycle override store — the ``.overrides/seed.json`` cycle-seed home
+    # Cycle-seed I/O — the read-once ``CycleSeedRecord`` on the ledger
     # ------------------------------------------------------------------
 
-    def write_cycle_seed(self, campaign_id: str, cycle_id: str, seed: CycleSeed) -> Path:
-        """Persist the cycle seed (read once at bootstrap)."""
-        path = self._layout(campaign_id, cycle_id).seed
-        write_json(path, seed.model_dump(mode="json"))
-        return path
+    def write_cycle_seed(self, campaign_id: str, cycle_id: str, seed: CycleSeed) -> None:
+        """Append the cycle seed as the read-once ``CycleSeedRecord`` on the ledger
+        (was ``.overrides/seed.json``). A steered fork appends its own after inheriting
+        the parent's virtually, so on disk it is this cycle's own first seed record."""
+        cycle_dir = self.cycle_dir(campaign_id, cycle_id)
+        CycleEventLog.open(CycleDir(cycle_dir)).append(CycleSeedRecord(seed=seed))
 
     def read_cycle_seed(self, campaign_id: str, cycle_id: str) -> CycleSeed | None:
-        """Load the cycle seed, or ``None`` when this cycle wasn't seeded."""
-        data = read_json_optional(self._layout(campaign_id, cycle_id).seed)
-        if data is None:
-            return None
-        return CycleSeed.model_validate(data)
+        """The cycle's own seed from its ledger, or ``None`` when it wasn't seeded. Pure
+        scan — no ``CycleEventLog``, no subscribers fire (mirrors the admissibility scan)."""
+        return scan_ledger_cycle_seed(self._layout(campaign_id, cycle_id).ledger)
 
 
 __all__ = ["CampaignStore"]

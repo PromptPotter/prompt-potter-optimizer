@@ -237,8 +237,8 @@ async def _prepare_run(
             session.store.campaigns.cycle_dir(session.campaign_id, session.state.cycle_id)
         )
 
-    # Cycle seed: the chosen searchpoint, declared at mint, lives at
-    # `.overrides/seed.json` (read-once-at-bootstrap, keyed by the known cycle_id —
+    # Cycle seed: the chosen searchpoint, declared at mint, rides the ledger as a
+    # `CycleSeedRecord` (read-once-at-bootstrap, keyed by the known cycle_id —
     # set before this seam by the CLI resume, the API start-run launchers, and the
     # campaign-from-origin mint). It re-homes the origin (`origin_prompt_fields`)
     # and layers its `pipeline_overlay` ON TOP of the dataset overlay

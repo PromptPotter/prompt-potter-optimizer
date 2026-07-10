@@ -12,8 +12,8 @@ All :class:`ForkTrigger` variants wired:
   (``fork_from_round=0`` + ``sweep_batch_id`` + ``sweep_source_file``).
 * ``OPERATOR_STEERED`` — operator fork from the lineage/control panel
   (``fork_from_round=0``, ``_fork_`` id), carrying an edited-searchpoint
-  ``CycleSeed`` written to ``.overrides/seed.json``. Application entry:
-  :func:`mint_operator_fork` (below).
+  ``CycleSeed`` appended to the fork's ledger as a ``CycleSeedRecord``. Application
+  entry: :func:`mint_operator_fork` (below).
 
 A fork is a new *cycle* inside the **same campaign** — all cycles land
 flat under ``campaigns/{campaign_id}/cycles/``.
@@ -301,8 +301,8 @@ def _mint_fork(
             forked_at=now,
         )
     # The lineage-read fork block — serialized from the one typed ForkSpec (no
-    # hand-built per-trigger dict). The heavy `seed` payload is excluded; it has
-    # its own read-once home at `.overrides/seed.json`.
+    # hand-built per-trigger dict). The heavy `seed` payload is excluded; it rides
+    # the fork's ledger as its own read-once `CycleSeedRecord`.
     campaign_store.update(
         campaign_id, new_cycle_id, {"fork": payload.model_dump(mode="json", exclude={"seed"})}
     )
@@ -363,8 +363,8 @@ def mint_operator_fork(
     Every operator fork is ``operator_steered``: a clean offshoot (fresh ledger,
     numbering restarts at round 1) carrying *seed* (the chosen searchpoint's
     evolved prompt + config + reconciled run limits — recorded, not forbidden:
-    operators may act, we record it), persisted to ``.overrides/seed.json`` and
-    re-scored as the fork's origin at bootstrap.
+    operators may act, we record it), appended to the fork's ledger as a
+    ``CycleSeedRecord`` and re-scored as the fork's origin at bootstrap.
     """
     parent_index = stores.campaigns.load(campaign_id, cycle_id) or {}
     spec = ForkSpec(

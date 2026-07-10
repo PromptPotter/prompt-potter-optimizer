@@ -1874,8 +1874,8 @@ components:
       description: |
         The edited-searchpoint origin override that makes a fork's origin =
         chosen searchpoint + operator edits. Required on every operator fork
-        (all are `operator_steered`). Persisted to the fork's `.overrides/seed.json`
-        (read once at bootstrap) and onto the parent's `FORK_CUT` ledger record.
+        (all are `operator_steered`). Persisted to the fork's ledger as a read-once
+        `CycleSeedRecord` (read at bootstrap) and onto the parent's `FORK_CUT` ledger record.
       properties:
         origin_prompt_fields:
           type: object

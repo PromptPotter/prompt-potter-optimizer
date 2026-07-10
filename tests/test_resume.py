@@ -503,3 +503,30 @@ def test_lives_resume_fold_matches_live_observe() -> None:
     assert exhaust.next_action is NextAction.STOP_LIVES
     assert exhaust.stop_reason is StopReason.LIVES_EXHAUSTED
     assert last_event is not None  # streak never stopped mid-sequence
+
+
+def test_cycle_seed_ledger_roundtrip(built_stores: Stores) -> None:
+    """The read-once cycle seed now rides the ledger as a ``CycleSeedRecord``; a broken
+    write→read round-trip silently starts a fork / campaign-from-origin from the WRONG
+    origin (or none). An unseeded cycle reads back ``None``; a seeded one reads back
+    intact even after later records land (the scan doesn't assume it's the last line)."""
+    stores = built_stores
+    cyc = "cycle_seed_roundtrip"
+    stores.campaigns.create(_CAMPAIGN, cyc, {"sibling_kind": "root"})
+    assert stores.campaigns.read_cycle_seed(_CAMPAIGN, cyc) is None  # unseeded → None
+
+    seed = CycleSeed(
+        origin_prompt_fields={"instruction": "do the thing"},
+        origin_source="campaign_origin",
+    )
+    stores.campaigns.write_cycle_seed(_CAMPAIGN, cyc, seed)
+    # A second seed after the first must win (last-wins), proving the scan spans the file.
+    final_seed = CycleSeed(
+        origin_prompt_fields={"instruction": "do it precisely"},
+        origin_source="campaign_origin",
+    )
+    stores.campaigns.write_cycle_seed(_CAMPAIGN, cyc, final_seed)
+
+    got = stores.campaigns.read_cycle_seed(_CAMPAIGN, cyc)
+    assert got == final_seed
+    assert got is not None and got.origin_source == "campaign_origin"

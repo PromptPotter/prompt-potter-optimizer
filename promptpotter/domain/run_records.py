@@ -21,6 +21,7 @@ __all__ = [
     "ConfigOverrides",
     "CycleRecord",
     "CycleSeed",
+    "CycleSeedRecord",
     "DecisionRecord",
     "ErrorRecord",
     "ForkSpec",
@@ -338,23 +339,6 @@ class RoundWarningRecord(BaseModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-# Discriminated union by `record_type`; keep order alphabetical — hash-keyed snapshots go stale otherwise.
-CycleRecord = Annotated[
-    ResumeCheckpointRecord
-    | CommandAckRecord
-    | CommandRecord
-    | ErrorRecord
-    | LLMCallProgressRecord
-    | LLMCallRecord
-    | LLMCallStartRecord
-    | PhaseRecord
-    | RoundWarningRecord
-    | SnapshotRecord
-    | TokenUsageRecord,
-    Field(discriminator="record_type"),
-]
-
-
 class ForkTrigger(enum.StrEnum):
     """Why a fork was minted — one value per caller of :func:`_mint_fork`."""
 
@@ -448,6 +432,39 @@ class CycleSeed(BaseModel):
         if self.origin_prompt_fields and not self.origin_source:
             raise ValueError("origin_prompt_fields set without an origin_source stamp")
         return self
+
+
+class CycleSeedRecord(BaseModel):
+    """The cycle's read-once starting point (`CycleSeed`) as a ledger record — appended
+    at mint / operator-steered fork / check-in flip, re-read at bootstrap. Folds the old
+    `.overrides/seed.json` sidecar into the replayable spine: a fork inherits its parent's
+    seed record *virtually* (`inherit_from`) but appends its OWN, so a scan of the cycle's
+    own ledger file returns that cycle's seed — and `None` for a cycle that carries none
+    (sweep / diag). Not a progress event: the SSE tail skips it (not in `ProjectionKind`)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    record_type: Literal["cycle_seed"] = "cycle_seed"
+    seed: CycleSeed
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
+# Discriminated union by `record_type`; keep order alphabetical — hash-keyed snapshots go stale otherwise.
+CycleRecord = Annotated[
+    ResumeCheckpointRecord
+    | CommandAckRecord
+    | CommandRecord
+    | CycleSeedRecord
+    | ErrorRecord
+    | LLMCallProgressRecord
+    | LLMCallRecord
+    | LLMCallStartRecord
+    | PhaseRecord
+    | RoundWarningRecord
+    | SnapshotRecord
+    | TokenUsageRecord,
+    Field(discriminator="record_type"),
+]
 
 
 # The `issued_by` value an operator fork carries when the client sent no
