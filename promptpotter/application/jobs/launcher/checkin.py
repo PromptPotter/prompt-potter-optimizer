@@ -33,6 +33,7 @@ from promptpotter.application.bootstrap.session import (
 from promptpotter.application.bootstrap.wiring import resolve_dataset_config_dir
 from promptpotter.application.datasets.dataset_replace import recover_pending_replacements
 from promptpotter.application.datasets.draft_campaign import DraftCampaign, dataset_source_of
+from promptpotter.application.datasets.origin_readiness import resolution_block
 from promptpotter.application.jobs.launcher.core import (
     LaunchError,
     _admit,
@@ -98,12 +99,19 @@ def load_checkin_draft(stores: Stores, campaign_id: str) -> DraftCampaign | None
     return DraftCampaign.from_disk(data, draft_id=campaign_id, tenant_id=stores.identity.tenant_id)
 
 
-def save_checkin_draft(stores: Stores, draft: DraftCampaign) -> DraftCampaign:
+def save_checkin_draft(
+    stores: Stores, draft: DraftCampaign, *, resolution: dict[str, Any] | None = None
+) -> DraftCampaign:
     """Persist a mutated check-in draft back to disk (``draft_id`` IS the campaign id).
 
-    The single write-back seam every draft-mutating handler (edit / resolve / candidate
-    library) rides, replacing the old in-memory ``registry.update``."""
+    The single write-back seam every draft-mutating handler rides. It writes BOTH
+    ``draft.json`` and the ``cache.json::resolution`` breadcrumb, because the latter
+    is derived from the former: a caller that refreshed one and not the other left
+    the operator reading stale gaps out of the file tree. Pass ``resolution`` only to
+    enrich the default block (the resolver appends its raw output + degradation).
+    """
     stores.checkin.write_draft(draft.draft_id, draft.to_disk())
+    stores.checkin.write_resolution(draft.draft_id, resolution or resolution_block(draft))
     return draft
 
 

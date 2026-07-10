@@ -9,9 +9,11 @@ The proposer half of the proposer/gate split (spec:
 2. Run the origin-aware ``checkin`` node (``checkin/2``) — the same node CLI
    ``new`` uses for task decomposition, reused here per the operator's steer
    rather than a parallel ``origin_resolve`` node. Wrapped in ``observed_node``;
-   token/cost ride the **tenant workspace ledger**
-   (``projects/{tenant}/.workspace/events.jsonl``), matching how
-   ``register-backend`` / ``sync-backend-experiments`` ride it.
+   token/cost ride the **check-in cycle's own ledger** (``cycle_chk_*``, minted
+   by ``mint_checkin_skeleton`` at the first ingest action and retained across
+   the flip to ``active``), beside the ``CommandRecord`` the dispatcher writes
+   for the turn — so an origin's authoring spend belongs to the campaign that
+   incurred it.
 3. Apply the resolver's evidence-cited findings: ``confidence=="high"``
    auto-confirms (``CONFIRMED``); ``"low"`` lands the field ``PROPOSED`` and
    waits for an operator click. Findings citing no evidence are rejected.
@@ -36,6 +38,7 @@ from promptpotter.application.datasets.origin_readiness import (
     origin_readiness,
     resolution_block,
 )
+from promptpotter.application.jobs.launcher import save_checkin_draft
 from promptpotter.application.optimization.dispatch.llm_call import (
     LLMCallContext,
     run_optimizer_node,
@@ -43,7 +46,7 @@ from promptpotter.application.optimization.dispatch.llm_call import (
 from promptpotter.application.optimization.dispatch.schemas import CheckinOutput
 from promptpotter.application.scoring.formula.matchers import extraction_note_for_scoring
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
-from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.models import reset_cycle_ledger, set_cycle_ledger
@@ -52,20 +55,47 @@ from promptpotter.infrastructure.tracing import observed_node
 
 logger = logging.getLogger(__name__)
 
-# Checklist field id → DraftCampaign attribute the resolver may set. ONLY the
-# genuinely-variable fields: the two column picks and the task framing. Config
-# (connector / scoring / optimizer LLM / max_rounds) is NOT proposed — those are
-# defaults the operator edits in the optional Advanced block, not facts the LLM
-# infers from the data. The proposer also authors the Layer-1 prompt (incl.
-# answer_format, enumerating the answer space + honoring the scorer's extraction
-# requirement); it reads columns + frames the task, it does not negotiate config.
-_FINDING_SETTERS: dict[str, str] = {
+# Checklist field id → the ``edit-draft-campaign`` patch key that sets it, which is
+# also the ``DraftCampaign`` attribute name. ONLY the genuinely-variable fields: the
+# two column picks and the task framing. Config (connector / scoring / optimizer LLM
+# / max_rounds) is NOT proposed — those are defaults the operator edits in the
+# optional Advanced block, not facts the LLM infers from the data.
+#
+# Every finding is therefore expressible as a command, which is why the resolver
+# never has to name one: it proposes a field, code derives the button. Pinned by an
+# import-time assert in the commands router against ``_EditDraftPatch``.
+FINDING_PATCH_KEYS: dict[str, str] = {
     "column.query": "column_query",
     "column.ground_truth": "column_ground_truth",
     "task_description": "raw_task_description",
 }
 
 _PREVIEW_ROWS = 10
+
+
+@dataclass(frozen=True, slots=True)
+class RaisedCommand:
+    """One proposal, already shaped as the command that would apply it.
+
+    The operator clicks it; the assistant never fires it. ``confidence`` decides
+    whether the operator-invoked resolver turn applies it inline (``high``) or
+    leaves it PROPOSED for a click (``low``) — a policy of the caller, not of the
+    model, which only ever emits a field and a value.
+    """
+
+    field: str
+    patch_key: str
+    value: Any
+    confidence: str
+    evidence: str
+
+    def to_wire(self, draft_id: str) -> dict[str, Any]:
+        return {
+            "kind": "edit-draft-campaign",
+            "payload": {"draft_id": draft_id, "patch": {self.patch_key: self.value}},
+            "confidence": self.confidence,
+            "evidence": self.evidence,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,11 +106,17 @@ class OriginResolutionResult:
     draft: DraftCampaign
 
 
-def build_origin_consultation(draft: DraftCampaign) -> tuple[str, str]:
+def build_origin_consultation(draft: DraftCampaign, message: str | None = None) -> tuple[str, str]:
     """Deterministic origin-context message + the origin-mode instruction.
 
     Returns ``(user_content, consultation_instruction)``. Pure formatting — no
     LLM call, no summarisation; the resolver reads the raw facts and proposes.
+
+    ``message`` is the operator's turn, kept separate from the draft's
+    ``raw_task_description`` (the task-framing field the resolver proposes and the
+    operator confirms). Folding a correction into the framing was the only way to
+    be heard before, which meant "the target is the `answer` column" had to be
+    written as a task description.
     """
     readiness = origin_readiness(draft)
     values = field_values(draft)
@@ -114,15 +150,19 @@ def build_origin_consultation(draft: DraftCampaign) -> tuple[str, str]:
     extraction_note = extraction_note_for_scoring(draft.scoring_composite)
     if extraction_note:
         state["answer_extraction_requirement"] = extraction_note
-    operator_message = draft.raw_task_description  # latest operator framing, if any
     user_content = (
         "DRAFT-CAMPAIGN ORIGIN to resolve. Propose values for the OPEN gaps "
         "below, each with cited evidence; write a plain-language "
         "task_description grounded in the sample rows.\n\n"
         f"{json.dumps(state, indent=2, ensure_ascii=False)}"
     )
-    if operator_message:
-        user_content += f"\n\nOperator's stated framing so far:\n{operator_message}"
+    if draft.raw_task_description:
+        user_content += f"\n\nOperator's stated framing so far:\n{draft.raw_task_description}"
+    if message and message.strip():
+        user_content += (
+            "\n\nOperator's message this turn (takes precedence over the framing "
+            f"above where they conflict):\n{message.strip()}"
+        )
 
     consultation_instruction = (
         "This is a draft-campaign origin. Fill 'assessment', 'findings', and "
@@ -138,20 +178,36 @@ def build_origin_consultation(draft: DraftCampaign) -> tuple[str, str]:
     return user_content, consultation_instruction
 
 
+def _checkin_cycle_ledger(stores: Stores, campaign_id: str) -> CycleEventLog:
+    """The check-in campaign's own cycle ledger — the resolver turn's audit home.
+
+    ``draft_id`` IS the ``campaign_id`` (re-keyed at ``create_checkin_campaign``),
+    and the campaign's ``root_cycle_id`` is the ``cycle_chk_*`` minted alongside it.
+    """
+    campaign = stores.campaigns.load_campaign(campaign_id)
+    if campaign is None:
+        raise ValueError(f"check-in campaign {campaign_id!r} not found — cannot resolve its origin")
+    return CycleEventLog.open(
+        CycleDir(stores.campaigns.cycle_dir(campaign_id, campaign.root_cycle_id))
+    )
+
+
 async def resolve_origin_turn(
     *,
     stores: Stores,
     draft: DraftCampaign,
+    message: str | None = None,
 ) -> OriginResolutionResult:
     """Run one resolver turn, apply findings, re-gate, persist. Returns the
     resolution + post-apply draft.
 
     Persists the mutated draft + resolution block to the check-in store under the
     draft's ``draft_id`` (which IS the owning ``campaign_id``)."""
-    user_content, consultation_instruction = build_origin_consultation(draft)
+    user_content, consultation_instruction = build_origin_consultation(draft, message)
 
-    # Token/cost ride the tenant workspace ledger (no cycle exists pre-mint).
-    ledger = CycleEventLog.open_workspace(WorkspaceDir(stores.base_dir))
+    # Bound here as well as in `CommandDispatcher` so the CLI path (`new <file>`,
+    # no dispatcher) files its spend on the same cycle the web path does.
+    ledger = _checkin_cycle_ledger(stores, draft.draft_id)
     token = set_cycle_ledger(ledger)
     try:
         async with observed_node(
@@ -165,7 +221,10 @@ async def resolve_origin_turn(
                 template_name="checkin",
                 prompt_vars={"consultation_instruction": consultation_instruction},
                 user_content=user_content,
-                context=LLMCallContext(ledger=ledger, round_num=0),
+                # The consultation is deterministic (no timestamps, no ids), so an
+                # unchanged turn replays free off `archive/optimizer_calls/`; a schema
+                # or meta-prompt edit changes `hash_call` and correctly misses.
+                context=LLMCallContext(ledger=ledger, round_num=0, cache=stores.optimizer_calls),
             )
     finally:
         reset_cycle_ledger(token)
@@ -174,7 +233,8 @@ async def resolve_origin_turn(
         f"checkin must return CheckinOutput, got {type(raw).__name__}"
     )
 
-    updated = _apply_findings(draft, raw)
+    raised = raised_commands(draft, raw)
+    updated = _apply_findings(draft, raw, raised)
 
     # Degradation gate. The resolver LLM can return a structurally-valid but
     # content-empty CheckinOutput (every field defaults ``""``), which
@@ -194,13 +254,19 @@ async def resolve_origin_turn(
             + "; ".join(degraded["reasons"])
         )
 
-    stores.checkin.write_draft(updated.draft_id, updated.to_disk())
-
     block = resolution_block(updated)
     block["last_resolution"] = _resolution_wire(raw)
+    # Proposals the operator may still click. High-confidence ones already landed
+    # CONFIRMED inside this operator-invoked turn, so only the unsettled remain
+    # actionable — the assistant offers, it never fires.
+    block["raised"] = [
+        proposal.to_wire(updated.draft_id)
+        for proposal in raised
+        if updated.field_provenance.get(proposal.field) is not Provenance.CONFIRMED
+    ]
     if degraded is not None:
         block["degraded"] = degraded
-    stores.checkin.write_resolution(updated.draft_id, block)
+    save_checkin_draft(stores, updated, resolution=block)
 
     return OriginResolutionResult(resolution=block, draft=updated)
 
@@ -243,22 +309,51 @@ def _grade_resolution(
     return None
 
 
-def _apply_findings(draft: DraftCampaign, output: CheckinOutput) -> DraftCampaign:
-    """Apply evidence-cited findings to the draft. High-confidence → CONFIRMED,
-    low → PROPOSED (waits for an operator confirmation via ``edit-draft-campaign``).
-    Evidence-less or unmappable findings are dropped."""
-    values: dict[str, Any] = {}
-    provenance: dict[str, Provenance] = {}
+def raised_commands(draft: DraftCampaign, output: CheckinOutput) -> list[RaisedCommand]:
+    """The turn's proposals, as commands the operator could click.
+
+    The single admission gate: a finding must map to a patchable field, cite
+    evidence, coerce to the attribute's type, and not downgrade a settled field.
+    Both the button surface and the inline apply read this one list, so what the
+    operator sees offered is exactly what a click would do.
+    """
+    raised: list[RaisedCommand] = []
     for finding in output.findings:
-        attr = _FINDING_SETTERS.get(finding.field)
-        if attr is None or not finding.evidence.strip():
+        patch_key = FINDING_PATCH_KEYS.get(finding.field)
+        if patch_key is None or not finding.evidence.strip():
+            continue
+        # Provenance ratchets: a settled field is not reopened by a low-confidence
+        # re-proposal. Drop the finding whole — skipping only its tag would strand a
+        # CONFIRMED marker on a value nobody vouched for.
+        settled = draft.field_provenance.get(finding.field) is Provenance.CONFIRMED
+        if settled and finding.confidence != "high":
             continue
         coerced = _coerce(finding.field, finding.proposed_value, draft)
         if coerced is None:
             continue
-        values[attr] = coerced
-        provenance[finding.field] = (
-            Provenance.CONFIRMED if finding.confidence == "high" else Provenance.PROPOSED
+        raised.append(
+            RaisedCommand(
+                field=finding.field,
+                patch_key=patch_key,
+                value=coerced,
+                confidence=finding.confidence,
+                evidence=finding.evidence,
+            )
+        )
+    return raised
+
+
+def _apply_findings(
+    draft: DraftCampaign, output: CheckinOutput, raised: list[RaisedCommand]
+) -> DraftCampaign:
+    """Apply the turn's proposals to the draft. High-confidence → CONFIRMED, low →
+    PROPOSED (the value lands, the click confirms it)."""
+    values: dict[str, Any] = {}
+    provenance: dict[str, Provenance] = {}
+    for proposal in raised:
+        values[proposal.patch_key] = proposal.value
+        provenance[proposal.field] = (
+            Provenance.CONFIRMED if proposal.confidence == "high" else Provenance.PROPOSED
         )
     # The same check-in node returns the decomposition half (the six Layer-1
     # prompt strings) alongside the origin findings — see the CheckinOutput

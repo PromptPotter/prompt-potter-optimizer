@@ -36,7 +36,6 @@ from promptpotter.application.datasets.draft_campaign import (
     new_draft,
 )
 from promptpotter.application.datasets.loaders import resolve_dataset_items
-from promptpotter.application.datasets.origin_readiness import resolution_block
 from promptpotter.application.datasets.prompts import (
     list_dataset_prompts,
     load_dataset_prompt,
@@ -98,7 +97,7 @@ def ingest_draft(
     orphan). Byte-size capping is the wire boundary's concern — not enforced here.
     Returns the keyed draft (``draft_id`` == the new ``campaign_id``).
     """
-    from promptpotter.application.jobs.launcher import create_checkin_campaign
+    from promptpotter.application.jobs.launcher import create_checkin_campaign, save_checkin_draft
 
     table = read_tabular(blob, fmt=format_from_filename(filename or "upload.csv"))
     base_slug = (slug or default_slug_from_filename(filename or "upload")).lower()
@@ -120,14 +119,14 @@ def ingest_draft(
     # materialization to Samples waits until the column mapping is confirmed (at
     # Start). The resolution block lets an operator open checkin/cache.json and
     # see what still blocks mint.
-    campaign_id, _cycle_id, keyed = create_checkin_campaign(
+    _campaign_id, _cycle_id, keyed = create_checkin_campaign(
         stores,
         draft=draft,
         bank_items=list(table.rows),
         source_file=filename or "",
         headers=tuple(table.headers),
     )
-    stores.checkin.write_resolution(campaign_id, resolution_block(keyed))
+    save_checkin_draft(stores, keyed)
     return keyed
 
 

@@ -231,7 +231,9 @@ class _BuildLibraryBody(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    draft_id: str = Field(min_length=8, max_length=64)
+    # `draft_id` IS the owning `campaign_id`; bound it exactly as every other
+    # check-in route does (`commands.py::_require_checkin_id`), not 64.
+    draft_id: str = Field(min_length=8, max_length=128)
     column: str = Field(min_length=1, max_length=256)
 
 

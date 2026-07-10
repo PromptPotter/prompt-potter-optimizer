@@ -8,8 +8,9 @@ resumable from disk like any other campaign. Two files:
   * ``draft.json`` — the lossless ``DraftCampaign.to_disk()`` dict (every gated
     field + provenance). The readiness gate at Start rehydrates from this.
   * ``cache.json`` — the pre-commit sample bank (raw header-keyed rows + the
-    ``resolution`` breadcrumb), same shape the old draft cache wrote; on Start
-    its dir is atomic-renamed into ``datasets/{slug}/``.
+    ``resolution`` breadcrumb), same shape the old draft cache wrote. Start reads
+    it and writes ``datasets/{slug}/`` fresh; nothing under ``campaigns/{id}/``
+    ever moves.
 
 The ``checkin/`` subdir is invisible to the ``campaigns/*/cycles/*/index.json``
 cycle scan, so it never pollutes cycle/campaign enumeration. Tenant scope is by
@@ -72,8 +73,9 @@ class CheckinDraftStore:
         On ingest ``items`` are the raw header-keyed rows (the column mapping
         isn't confirmed yet); ``headers`` records the column order. A prior
         ``resolution`` block (provenance + gaps) is preserved across a rewrite.
-        On Start the launcher rewrites this with materialized ``Sample`` rows,
-        then atomic-renames the dir into ``datasets/{slug}/``.
+        On Start the launcher rewrites this with materialized ``Sample`` rows and
+        hands them to ``write_committed_dataset``, which writes ``datasets/{slug}/``
+        fresh — this dir stays put as the check-in's audit breadcrumb.
         """
         from promptpotter.domain.sample import Sample
 

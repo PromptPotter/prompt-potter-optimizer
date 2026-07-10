@@ -175,12 +175,15 @@ def emit_command_ack(
     command_id: str,
     status: Literal["applied", "rejected"],
     detail: str = "",
+    effect: dict[str, Any] | None = None,
 ) -> None:
     """Append a ``CommandAckRecord`` to the active cycle ledger.
 
     Same ContextVar surface as ``emit_command``; the actuator that applied
     (or refused) the command emits this through the same binding."""
-    _append_record(CommandAckRecord(command_id=command_id, status=status, detail=detail))
+    _append_record(
+        CommandAckRecord(command_id=command_id, status=status, detail=detail, effect=effect or {})
+    )
 
 
 def emit_error_record(

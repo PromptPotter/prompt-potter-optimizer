@@ -593,6 +593,13 @@ components:
         Projection of `CommandAckRecord` (Profile B Phase 2a). Echoes the
         originating `command_id` + status (`applied` | `rejected`) +
         optional human-readable detail (never load-bearing for clients).
+
+        `effect` is what the applier ACTUALLY changed, as opposed to what the
+        `CommandRecord.payload` asked for. The two diverge whenever the applier
+        gates, coerces, or infers: `resolve-origin` carries only `{draft_id}` in
+        its payload, so the fields its LLM turn moved exist nowhere else on the
+        ledger. Empty for commands whose payload already IS their effect
+        (`pause-cycle`, `change-spend-budget`), and for every `rejected` ack.
       required: [command_id, status, timestamp]
       additionalProperties: false
       properties:
@@ -601,6 +608,22 @@ components:
           type: string
           enum: [applied, rejected]
         detail: { type: string }
+        effect:
+          type: object
+          description: |
+            Applied state change, keyed by domain field. The check-in commands
+            key it by `origin_projection` field id (`prompt.task_intent`,
+            `column.ground_truth`, `connector`, …), each value a
+            `{from, to}` pair. Replaying these in ledger order reconstructs the
+            committed origin without re-running an LLM call.
+            Order matters: provenance is non-monotonic, so never coalesce.
+          additionalProperties:
+            type: object
+            required: [from, to]
+            additionalProperties: false
+            properties:
+              from: {}
+              to: {}
         timestamp:
           type: string
           format: date-time

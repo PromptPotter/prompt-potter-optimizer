@@ -925,8 +925,13 @@ paths:
         Drives the chat ↔ panel dual-surface mutation path (see
         `docs/specs/roadmap.md § State binding`). Both the
         assistant tool-call surface and the panel "Apply" button ride this
-        same verb. Workspace-scoped — the draft is server-held state, not
-        yet a ledger-bearing cycle, so no `Expected-Version`.
+        same verb. Check-in scoped — dispatched through `CommandDispatcher`
+        onto the check-in cycle's ledger (`cycle_chk_*`, minted with its own
+        `.runtime/` at the first ingest action and retained across the flip to
+        `active`), so an origin edit is a `CommandRecord` + `CommandAckRecord`
+        like every other Control-remote mutation. No `Expected-Version` — a
+        draft is authored, not raced. An `Idempotency-Key` retry is deduped and
+        the body re-read from `draft.json`.
 
         `patch` is a sparse object — only declared field names are accepted,
         omitted fields are unchanged. Slug edits go through the same slug
@@ -991,8 +996,13 @@ paths:
         4. Resolves the cycle plan, flips `checkin` → `active`, clears
            `.runtime/checkin.flag`, and detaches the runner.
 
-        Workspace-scoped — no `Expected-Version`. `Idempotency-Key` set by the
-        client; the durable campaign makes a retry safe.
+        Check-in scoped — dispatched through `CommandDispatcher` onto the
+        check-in cycle's ledger, the same cycle the run then appends its rounds
+        to. No `Expected-Version`. `Idempotency-Key` set by the client, but this
+        verb alone is NOT ledger-deduped: `job_id` is a live `JobRegistry` handle
+        with no disk home, so a deduped retry could only fabricate one. The
+        durable campaign is what makes a retry safe — a second Start finds the
+        campaign `active` and raises `LaunchError` (422).
       tags: [datasets]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1267,9 +1277,12 @@ paths:
         completeness; a false `ready` is re-checked and rejected.
 
         Synchronous (mirrors `edit-draft-campaign`): returns the resolver
-        output + the post-apply `DraftCampaign`. Workspace-scoped — no
-        `Expected-Version`; the LLM call's token/cost ride the tenant
-        workspace ledger. Drives subsequent turns from the UI; bounded by
+        output + the post-apply `DraftCampaign`. Check-in scoped — dispatched
+        through `CommandDispatcher` onto the check-in cycle's ledger, so a turn
+        that moved the origin is a `CommandRecord`. No `Expected-Version`. An
+        `Idempotency-Key` retry is deduped and the body re-read from
+        `cache.json::resolution` + `draft.json`, so a network retry never
+        re-spends the LLM call. Drives subsequent turns from the UI; bounded by
         operator interaction.
       tags: [datasets]
       parameters:
@@ -2544,14 +2557,25 @@ components:
       description: |
         One resolver turn against an existing `DraftCampaign`. Tenant-scoped —
         a `draft_id` resolving to a different `IdentityContext.tenant_id`
-        returns 404 (existence-leak gate). The operator's latest framing is
-        read off the draft's `raw_task_description`; no separate message field this
-        slice.
+        returns 404 (existence-leak gate).
+
+        `message` is what the operator just said ("the ground truth is the
+        `answer` column"). It is distinct from the draft's
+        `raw_task_description`, which is the *task framing field* the resolver
+        may propose and the operator confirms — conflating the two meant a
+        correction could only be delivered by overwriting the framing. The
+        message is turn-scoped: it rides the `CommandRecord` payload as the
+        operator's verbatim contribution to the thread, and is not persisted
+        onto the draft.
       properties:
         draft_id:
           type: string
           minLength: 8
           maxLength: 128
+        message:
+          type: string
+          maxLength: 4000
+          description: The operator's turn. Omitted or empty on an unprompted turn.
           description: The check-in `campaign_id` (the draft's `draft_id`), from `/datasets/ingest`.
 
     OriginResolution:

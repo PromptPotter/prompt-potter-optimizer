@@ -1,6 +1,7 @@
-"""``origin_readiness`` — the deterministic gate between ingest and mint.
+"""``origin_readiness`` — the deterministic gate between ingest and mint, plus the
+projection of what a draft would commit (``origin_projection`` / ``origin_delta``).
 
-Pure function, no I/O. The proposer/gate split (spec:
+Pure functions, no I/O. The proposer/gate split (spec:
 ``docs/specs/roadmap.md``) puts *two* parties on
 "is this origin complete": an LLM resolver *proposes* (the ``checkin`` node,
 origin-aware version), and this checklist *gates*. Mint is blocked until the
@@ -12,9 +13,9 @@ state — not config that has a sane default:
 
 * **Column mapping** (``column.query`` / ``column.ground_truth``) — satisfied
   only when CONFIRMED *and* a member of the uploaded headers.
-* **Task framing** (``task_description``) — satisfied when CONFIRMED. It's the
-  one field with no default; the operator states it or the resolver proposes it
-  high-confidence.
+* **Task framing** (``task_description``) — satisfied when CONFIRMED *and*
+  non-blank. It's the one field with no default; the operator states it or the
+  resolver proposes it high-confidence.
 * **Answer space** — a closed-label target must enumerate every label in the
   committed prompt. The check-in resolver authors ``answer_format`` (handed the
   full label set in its raw context); this is the *gate* that trips when the
@@ -108,6 +109,7 @@ def origin_readiness(draft: DraftCampaign) -> OriginReadiness:
     _check_confirmed(
         draft,
         field_key="task_description",
+        value=draft.raw_task_description,
         label="task framing",
         hint="Describe what the prompt should do.",
         gaps=gaps,
@@ -155,15 +157,17 @@ def _check_confirmed(
     draft: DraftCampaign,
     *,
     field_key: str,
+    value: str,
     label: str,
     hint: str,
     gaps: list[FieldGap],
 ) -> None:
-    """``task_description`` is satisfied by CONFIRMED provenance — the operator
-    stated it, or the resolver proposed it high-confidence. PROPOSED (low
-    confidence) blocks until the operator confirms or corrects the framing."""
+    """``task_description`` is satisfied by CONFIRMED provenance over a non-empty
+    value. PROPOSED (low confidence) blocks until the operator confirms or corrects
+    the framing. Provenance records *who settled* a field, never that it holds
+    anything — so a CONFIRMED blank is ``unset``, not a passing gate."""
     provenance = draft.field_provenance.get(field_key, Provenance.UNSET)
-    if provenance is Provenance.CONFIRMED:
+    if provenance is Provenance.CONFIRMED and value.strip():
         return
     reason = "proposed_unconfirmed" if provenance is Provenance.PROPOSED else "unset"
     extra = " (proposed — confirm or correct)." if provenance is Provenance.PROPOSED else ""
@@ -296,6 +300,54 @@ def field_values(draft: DraftCampaign) -> dict[str, Any]:
     return {key: getter(draft) for key, getter in getters.items()}
 
 
+def origin_projection(draft: DraftCampaign) -> dict[str, Any]:
+    """The origin ``draft`` would commit, flattened to comparable field ids.
+
+    The gate above decides whether a draft *may* mint; this describes *what* it
+    would mint. Only CONFIRMED values project — a PROPOSED column pick has not
+    moved the origin, it is a proposal awaiting an operator.
+
+    **Not hash-equivalent to the committed origin.** :func:`content_hash` folds the
+    rendered prompt, the FULL dataset's ``(query, ground_truth)`` pairs, and the
+    connector-merged ``pipeline_params``; a draft carries only ``sample_preview``
+    and an unmerged overlay. So a provenance-only confirm shows here as a change
+    yet is hash-neutral, and any "the replayed origin reproduces its recorded
+    ``content_hash``" assertion must run end-to-end through
+    ``materialize_and_write_origin``, never against this dict.
+    """
+    projection: dict[str, Any] = {
+        "slug": draft.slug,
+        "connector": draft.connector,
+        "scoring_composite": draft.scoring_composite,
+        "pipeline_steps": list(draft.pipeline_steps),
+        "pipeline_overlay": draft.pipeline_overlay,
+        "optimization_overrides": draft.optimization_overrides,
+        "candidate_library": list(draft.candidate_library),
+        "reused_origin_id": draft.reused_origin_id,
+    }
+    for field_key, value in (
+        ("column.query", draft.column_query),
+        ("column.ground_truth", draft.column_ground_truth),
+        ("task_description", draft.raw_task_description),
+    ):
+        if draft.field_provenance.get(field_key) is Provenance.CONFIRMED:
+            projection[field_key] = value
+    for name, text in draft.committed_prompt_fields().items():
+        projection[f"prompt.{name}"] = text
+    return projection
+
+
+def origin_delta(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
+    """Projected fields that moved, as ``{field: {"from": x, "to": y}}``. A field
+    absent on one side reads ``None`` there, so confirming a column is a change
+    from ``None``."""
+    return {
+        key: {"from": before.get(key), "to": after.get(key)}
+        for key in before.keys() | after.keys()
+        if before.get(key) != after.get(key)
+    }
+
+
 def resolution_block(draft: DraftCampaign) -> dict[str, Any]:
     """Serialize the draft's checklist state for the on-disk ``cache.json``.
 
@@ -324,6 +376,8 @@ __all__ = [
     "FieldGap",
     "OriginReadiness",
     "field_values",
+    "origin_delta",
+    "origin_projection",
     "origin_readiness",
     "resolution_block",
 ]

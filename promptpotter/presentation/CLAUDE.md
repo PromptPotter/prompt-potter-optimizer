@@ -59,6 +59,8 @@ operator-admin channel.
   `RunnerCommandSubscriber` (cycle-scoped).
 - `POST /datasets/ingest` — multipart CSV upload; mints a durable `checkin` campaign and returns its `DraftCampaign` (`draft_id` IS the `campaign_id`; declared in `docs/specs/m12-api-openapi.yaml`; spec at `docs/specs/roadmap.md § Ingest`). Workspace-scoped, identity-bound; the check-in shows in the sidebar + survives a restart, but nothing runs until the operator starts it via the separate `/commands/start-checkin` verb. Mutation verbs (`edit-draft-campaign`, `resolve-origin`, the candidate-library uploads) key on the `campaign_id` and persist to `campaigns/{id}/checkin/` via `CheckinDraftStore`.
 
+**A 200 body never justifies bypassing the dispatcher.** `edit-draft-campaign` / `resolve-origin` / `start-checkin` are typed routes because each answers a domain object rather than a `CommandAcceptedBody` — but they dispatch through `CommandDispatcher.dispatch_checkin_command`, whose `CommandOutcome.result` carries that object back. They once applied inline for exactly this reason, and the consequence was that **no origin edit was recorded anywhere on disk, nor who made it** — a standing violation of `architecture.md` §0 ("sole `CommandDispatcher`"). The target is the check-in cycle `cycle_chk_*`, which exists from the first ingest action and is retained across the flip to `active`; a fork inherits its records via `CycleEventLog.inherit_from`. If a future verb needs a bespoke response, give it a typed route — never its own write path.
+
 ## Display constraint
 
 Markdown writes go only to documented paths. Anything emitted to stdout

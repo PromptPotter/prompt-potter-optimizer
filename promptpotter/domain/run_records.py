@@ -244,6 +244,12 @@ class CommandAckRecord(BaseModel):
     `status="applied"` ⇒ the mutation landed; `"rejected"` ⇒ the actuator
     refused (capability denied, target gone, etc.). `detail` is operator-
     readable explanation, never load-bearing for clients.
+
+    `effect` is what the applier changed, keyed by domain field, each value a
+    `{from, to}` pair — as opposed to `CommandRecord.payload`, which is what was
+    asked for. The two diverge whenever the applier gates or infers: a
+    `resolve-origin` payload names only the draft, so the fields its LLM turn
+    moved are recorded nowhere else. Empty on rejection.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -252,6 +258,7 @@ class CommandAckRecord(BaseModel):
     command_id: str
     status: Literal["applied", "rejected"]
     detail: str = ""
+    effect: dict[str, Any] = Field(default_factory=dict)
     timestamp: str = Field(default_factory=utcnow_iso)
 
 

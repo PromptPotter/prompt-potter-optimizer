@@ -26,6 +26,13 @@ Three dispatch shapes:
   ``projects/{tenant}/.workspace/events.jsonl`` per the §0 Persistence
   sibling amendment. No ``Expected-Version``.
 
+- ``dispatch_checkin_command`` — the origin-authoring commands (the
+  ``CheckinScopedKind`` set: edit-draft-campaign, resolve-origin,
+  start-checkin). Target is the check-in campaign's root cycle
+  (``cycle_chk_*``); the caller supplies the applier because each answers a
+  domain object, carried back on ``CommandOutcome.result``. No
+  ``Expected-Version``.
+
 Closed inbound set: ``docs/specs/m12-api-openapi.yaml``. Permanent contract:
 ``docs/adr/0001-m12-control-plane.md``.
 """
@@ -36,6 +43,7 @@ import asyncio
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -76,7 +84,7 @@ from promptpotter.shared.errors import (
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["CommandAcceptedBody", "CommandDispatcher"]
+__all__ = ["CommandAcceptedBody", "CommandDispatcher", "CommandOutcome"]
 
 
 LifecycleKind = Literal["archive-campaign", "delete-campaign", "unarchive-campaign"]
@@ -92,8 +100,9 @@ CycleScopedKind = Literal[
     "start-run",
 ]
 WorkspaceBackendKind = Literal["register-backend", "sync-backend-experiments", "mint-campaign"]
+CheckinScopedKind = Literal["edit-draft-campaign", "resolve-origin", "start-checkin"]
 
-Applier = Callable[[], Awaitable[None]] | Callable[[], None]
+Applier = Callable[[], Awaitable[Any]] | Callable[[], Any]
 
 
 class CommandAcceptedBody(BaseModel):
@@ -104,6 +113,20 @@ class CommandAcceptedBody(BaseModel):
     ledger_sequence: int = Field(
         description="Offset at which the `CommandRecord` was appended.", ge=0
     )
+
+
+@dataclass(frozen=True, slots=True)
+class CommandOutcome:
+    """A dispatched command's audit body plus the applier's value.
+
+    ``result`` is ``None`` for the 202 kinds and a domain object for the check-in
+    kinds, whose 200 bodies are declared in ``m12-api-openapi.yaml``. Carrying it
+    here is what let those three stop bypassing the dispatcher — each applied
+    inline purely so it could return something.
+    """
+
+    accepted: CommandAcceptedBody
+    result: Any = None
 
 
 class CommandDispatcher:
@@ -130,7 +153,7 @@ class CommandDispatcher:
         idempotency_key: str,
         client_metadata: dict[str, Any] | None = None,
         keep_results: bool = False,
-    ) -> CommandAcceptedBody:
+    ) -> CommandOutcome:
         """Workspace-scoped inline-apply dispatch for campaign lifecycle commands.
 
         The ``CommandRecord`` lands on the WORKSPACE ledger
@@ -172,7 +195,7 @@ class CommandDispatcher:
         idempotency_key: str,
         expected_version: int | None,
         client_metadata: dict[str, Any] | None = None,
-    ) -> CommandAcceptedBody:
+    ) -> CommandOutcome:
         """Cycle-scoped inline-apply dispatch. ``Expected-Version`` validated
         when present; absent header skips the check (v0 relaxation)."""
         campaign = self._load_owned_campaign(campaign_id)
@@ -223,7 +246,7 @@ class CommandDispatcher:
         cycle_id: str,
         idempotency_key: str,
         client_metadata: dict[str, Any] | None,
-    ) -> CommandAcceptedBody:
+    ) -> CommandOutcome:
         """delete-cycle writes its audit trail on the campaign's root cycle
         ledger — the target cycle's own ledger goes away as part of the apply."""
         _, active_campaign, active_cycle = read_active_pointer(
@@ -259,7 +282,7 @@ class CommandDispatcher:
         payload: dict[str, Any],
         idempotency_key: str,
         client_metadata: dict[str, Any] | None = None,
-    ) -> CommandAcceptedBody:
+    ) -> CommandOutcome:
         """Tenant-scoped inline-apply dispatch — backend-registry mutations
         that have no cycle target. ``CommandRecord`` lands on the workspace
         ledger (``projects/{tenant}/.workspace/events.jsonl``) per the §0
@@ -288,6 +311,55 @@ class CommandDispatcher:
         )
 
     # ------------------------------------------------------------------
+    # Check-in scoped (origin authoring — the draft-mutating commands)
+    # ------------------------------------------------------------------
+    async def dispatch_checkin_command(
+        self,
+        *,
+        kind: CheckinScopedKind,
+        campaign_id: str,
+        payload: dict[str, Any],
+        idempotency_key: str,
+        applier: Applier,
+        on_replay: Callable[[], Any] | None = None,
+        dedupe: bool = True,
+        effect_fn: Callable[[], dict[str, Any]] | None = None,
+        client_metadata: dict[str, Any] | None = None,
+    ) -> CommandOutcome:
+        """Inline-apply dispatch for the three commands that author an origin.
+
+        Target is the check-in campaign's root cycle — ``cycle_chk_*``, minted with
+        its own ``.runtime/`` by ``mint_checkin_skeleton`` and retained across the
+        flip to ``active``, so an origin edit lands on the same ledger the run later
+        appends its rounds to and a fork inherits it via ``inherit_from``. No
+        ``Expected-Version`` — a draft is authored, not raced.
+
+        ``on_replay`` rebuilds the 200 body from disk on a deduped
+        ``Idempotency-Key`` retry (``draft.json`` + ``cache.json::resolution``
+        reconstruct both draft verbs exactly). ``start-checkin`` alone passes
+        ``dedupe=False``: its ``job_id`` has no disk home, and the ``checkin →
+        active`` lifecycle is already the retry guard.
+        """
+        campaign = self._load_owned_campaign(campaign_id)
+        cycle_dir = self._store.campaigns.cycle_dir(campaign_id, campaign.root_cycle_id)
+        if not (cycle_dir / "index.json").is_file():
+            raise NotFoundError(
+                f"check-in cycle not found: {campaign_id}/{campaign.root_cycle_id}",
+                code="command_target_not_found",
+            )
+        return await self._record_and_apply(
+            ledger=CycleEventLog.open(CycleDir(cycle_dir)),
+            kind=kind,
+            payload=payload,
+            idempotency_key=idempotency_key,
+            client_metadata=client_metadata,
+            applier=applier,
+            on_replay=on_replay,
+            dedupe=dedupe,
+            effect_fn=effect_fn,
+        )
+
+    # ------------------------------------------------------------------
     # Shared record / apply / ack pipeline
     # ------------------------------------------------------------------
     async def _record_and_apply(
@@ -299,17 +371,28 @@ class CommandDispatcher:
         idempotency_key: str,
         client_metadata: dict[str, Any] | None,
         applier: Applier,
-    ) -> CommandAcceptedBody:
-        existing = _find_idempotent_command(ledger, idempotency_key)
-        if existing is not None:
-            return CommandAcceptedBody(
-                command_id=existing.command_id,
-                correlation_id=idempotency_key,
-                ledger_sequence=existing.offset,
-            )
+        on_replay: Callable[[], Any] | None = None,
+        dedupe: bool = True,
+        effect_fn: Callable[[], dict[str, Any]] | None = None,
+    ) -> CommandOutcome:
+        # A deduped retry never re-runs the applier, so a 200-body kind supplies
+        # `on_replay` to rebuild its body from disk; one whose body has no disk
+        # home passes `dedupe=False` and lets its own domain guard answer.
+        if dedupe:
+            existing = _find_idempotent_command(ledger, idempotency_key)
+            if existing is not None:
+                return CommandOutcome(
+                    accepted=CommandAcceptedBody(
+                        command_id=existing.command_id,
+                        correlation_id=idempotency_key,
+                        ledger_sequence=existing.offset,
+                    ),
+                    result=on_replay() if on_replay is not None else None,
+                )
 
         command_id = str(uuid.uuid4())
         token = set_cycle_ledger(ledger)
+        applied_value: Any = None
         try:
             offset = emit_command(
                 command_id=command_id,
@@ -324,7 +407,8 @@ class CommandDispatcher:
             try:
                 result = applier()
                 if asyncio.iscoroutine(result):
-                    await result
+                    result = await result
+                applied_value = result
             except _DeleteCycleRejectedError as exc:
                 ack_status = "rejected"
                 ack_detail = exc.reason
@@ -342,7 +426,10 @@ class CommandDispatcher:
                 logger.exception("apply failed for %s", kind)
                 ack_status = "rejected"
                 ack_detail = str(exc)
-            emit_command_ack(command_id=command_id, status=ack_status, detail=ack_detail)
+            effect = effect_fn() if (effect_fn is not None and ack_status == "applied") else None
+            emit_command_ack(
+                command_id=command_id, status=ack_status, detail=ack_detail, effect=effect
+            )
         finally:
             reset_cycle_ledger(token)
 
@@ -355,10 +442,13 @@ class CommandDispatcher:
                 details={"command_id": command_id, "reason": ack_detail},
             )
 
-        return CommandAcceptedBody(
-            command_id=command_id,
-            correlation_id=idempotency_key,
-            ledger_sequence=offset if offset is not None else 0,
+        return CommandOutcome(
+            accepted=CommandAcceptedBody(
+                command_id=command_id,
+                correlation_id=idempotency_key,
+                ledger_sequence=offset if offset is not None else 0,
+            ),
+            result=applied_value,
         )
 
     # ------------------------------------------------------------------
