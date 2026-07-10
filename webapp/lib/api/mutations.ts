@@ -507,6 +507,7 @@ export async function postUploadCandidateLibrary(
   form.append("draft_id", draftId);
   const r = await fetch(`${API}/datasets/draft/candidate-library`, {
     method: "POST",
+    headers: { "Idempotency-Key": _mintIdempotencyKey() },
     body: form,
     cache: "no-store",
   });
@@ -524,7 +525,10 @@ export async function postBuildCandidateLibraryFromColumn(
 ): Promise<DraftCampaignWire> {
   const r = await fetch(`${API}/datasets/draft/candidate-library/from-column`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": _mintIdempotencyKey(),
+    },
     body: JSON.stringify({ draft_id: draftId, column }),
     cache: "no-store",
   });

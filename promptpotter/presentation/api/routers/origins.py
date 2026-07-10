@@ -29,7 +29,7 @@ from promptpotter.application.datasets.authored import read_campaign_config_file
 from promptpotter.application.datasets.csv_ingest import IngestError
 from promptpotter.application.datasets.ingest import draft_from_dataset
 from promptpotter.application.datasets.prompts import has_dataset_prompts
-from promptpotter.application.jobs.launcher import draft_wire_with_locks, save_checkin_draft
+from promptpotter.application.jobs.launcher import draft_wire_with_locks
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.runner import build_origin_cycle_id
 from promptpotter.domain.campaign import Campaign
@@ -239,19 +239,19 @@ def draft_from_origin(origin_id: str, store: StoreDep) -> dict[str, Any]:
         dataset_dir = readable_dataset_dir(store, match.dataset_name)
     except DatasetAccessError as exc:
         raise NotFoundError(f"Dataset '{match.dataset_name}' not found") from exc
+    seed = store.campaigns.read_cycle_seed(match.campaign_id, match.root_cycle_id)
+    overrides: dict[str, Any] = {"reused_origin_id": origin_id}
+    if seed is not None and seed.origin_prompt_fields:
+        overrides["origin_prompt_fields"] = dict(seed.origin_prompt_fields)
     try:
         draft = draft_from_dataset(
             stores=store,
             dataset_dir=dataset_dir,
             dataset_name=match.dataset_name,
+            overrides=overrides,
         )
     except IngestError as exc:
         raise PayloadInvalidError(
             exc.message, code="ingest_failed", details={"reason": exc.reason}
         ) from None
-    seed = store.campaigns.read_cycle_seed(match.campaign_id, match.root_cycle_id)
-    changes: dict[str, Any] = {"reused_origin_id": origin_id}
-    if seed is not None and seed.origin_prompt_fields:
-        changes["origin_prompt_fields"] = dict(seed.origin_prompt_fields)
-    draft = save_checkin_draft(store, draft.patch(**changes))
     return draft_wire_with_locks(draft)

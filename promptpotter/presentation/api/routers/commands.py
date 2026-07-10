@@ -120,7 +120,7 @@ class CommandEnvelope(BaseModel):
     client_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-def _ensure_idempotency_key(header_value: str | None) -> str:
+def ensure_idempotency_key(header_value: str | None) -> str:
     """Trust-boundary check — 400 ``idempotency_key_missing`` when absent or empty."""
     if not header_value or not header_value.strip():
         raise BadRequestError(
@@ -233,6 +233,9 @@ class _EditDraftPatch(BaseModel):
     # `DraftCampaign.simulated_checkin`. Free dict `{by, model, at}`; lands in the
     # resolution block. Empty/absent on a real check-in.
     simulated_checkin: dict[str, Any] | None = None
+    # The origin's target library. Set from the operator's upload or derived from one
+    # of the draft's own columns (`routers/datasets.py`); both ride this patch.
+    candidate_library: list[str] | None = Field(default=None, min_length=1)
 
 
 # Every field the origin resolver may propose must be settable by this command —
@@ -283,27 +286,22 @@ def _origin_effect(store: Stores, draft_id: str, before: dict[str, Any]) -> dict
     return origin_delta(before, origin_projection(_reread_draft(store, draft_id)))
 
 
-@commands_router.post("/edit-draft-campaign")
-async def edit_draft_campaign(
-    request: Request,
-    store: StoreDep,
-    envelope: CommandEnvelope,
-    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+async def dispatch_draft_patch(
+    store: Stores,
+    *,
+    draft_id: str,
+    patch_raw: dict[str, Any],
+    idempotency_key: str,
+    client_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Sparse-patch a `DraftCampaign`. Returns the post-mutation full shape.
+    """Validate a sparse draft patch, apply it through `CommandDispatcher`, return
+    the post-mutation draft wire.
 
-    Per ``docs/specs/m12-api-openapi.yaml::editDraftCampaign``. The mutation rides
-    `CommandDispatcher` (architecture.md §0: sole writer of `CommandRecord`); only
-    the response shape differs from the generic 202 verbs, never the ingress.
+    The single write path behind `edit-draft-campaign`. The candidate-library routes
+    (`routers/datasets.py`) derive their patch from a multipart upload or one of the
+    draft's own columns and then ride this — an origin edit is a `CommandRecord`
+    whatever the ingress looked like.
     """
-    _require_kind(envelope, "edit-draft-campaign")
-    idemp = _ensure_idempotency_key(idempotency_key)
-
-    raw_payload = envelope.payload
-    draft_id = _require_checkin_id(raw_payload, "draft_id")
-    patch_raw = raw_payload.get("patch", {})
-    if not isinstance(patch_raw, dict):
-        raise PayloadInvalidError("payload.patch must be an object.")
     patch = _EditDraftPatch.model_validate(patch_raw)
 
     draft = load_checkin_draft(store, draft_id)
@@ -329,6 +327,7 @@ async def edit_draft_campaign(
         (patch.origin_prompt_fields, "origin_prompt_fields"),
         (patch.simulated_checkin, "simulated_checkin"),
         (patch.pipeline_steps, "pipeline_steps"),
+        (patch.candidate_library, "candidate_library"),
     ):
         if patch_val is not None:
             changes[draft_attr] = patch_val
@@ -376,14 +375,41 @@ async def edit_draft_campaign(
     outcome = await dispatcher.dispatch_checkin_command(
         kind="edit-draft-campaign",
         campaign_id=draft_id,
-        payload=raw_payload,
-        idempotency_key=idemp,
+        payload={"draft_id": draft_id, "patch": patch_raw},
+        idempotency_key=idempotency_key,
         applier=_apply,
         on_replay=lambda: _reread_draft_wire(store, draft_id),
         effect_fn=lambda: _origin_effect(store, draft_id, before),
-        client_metadata=envelope.client_metadata,
+        client_metadata=client_metadata,
     )
     return cast("dict[str, Any]", outcome.result)
+
+
+@commands_router.post("/edit-draft-campaign")
+async def edit_draft_campaign(
+    store: StoreDep,
+    envelope: CommandEnvelope,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> dict[str, Any]:
+    """Sparse-patch a `DraftCampaign`. Returns the post-mutation full shape.
+
+    Per ``docs/specs/m12-api-openapi.yaml::editDraftCampaign``. The mutation rides
+    `CommandDispatcher` (architecture.md §0: sole writer of `CommandRecord`); only
+    the response shape differs from the generic 202 verbs, never the ingress.
+    """
+    _require_kind(envelope, "edit-draft-campaign")
+    idemp = ensure_idempotency_key(idempotency_key)
+    draft_id = _require_checkin_id(envelope.payload, "draft_id")
+    patch_raw = envelope.payload.get("patch", {})
+    if not isinstance(patch_raw, dict):
+        raise PayloadInvalidError("payload.patch must be an object.")
+    return await dispatch_draft_patch(
+        store,
+        draft_id=draft_id,
+        patch_raw=patch_raw,
+        idempotency_key=idemp,
+        client_metadata=envelope.client_metadata,
+    )
 
 
 @commands_router.post("/resolve-origin")
@@ -400,7 +426,7 @@ async def resolve_origin(
     deterministic checklist re-gates before the response.
     """
     _require_kind(envelope, "resolve-origin")
-    idemp = _ensure_idempotency_key(idempotency_key)
+    idemp = ensure_idempotency_key(idempotency_key)
     draft_id = _require_checkin_id(envelope.payload, "draft_id")
     message = _optional_string(envelope.payload, "message", max_len=4000)
     draft = load_checkin_draft(store, draft_id)
@@ -464,7 +490,7 @@ async def start_checkin(
     the run cycle, and detaches the loop.
     """
     _require_kind(envelope, "start-checkin")
-    idemp = _ensure_idempotency_key(idempotency_key)
+    idemp = ensure_idempotency_key(idempotency_key)
     campaign_id = _require_checkin_id(envelope.payload, "campaign_id")
 
     draft = load_checkin_draft(store, campaign_id)
@@ -539,7 +565,7 @@ async def replace_dataset(
     freed name is re-ingested in a separate ``/datasets/ingest`` call.
     """
     _require_kind(envelope, "replace-dataset")
-    _ensure_idempotency_key(idempotency_key)
+    ensure_idempotency_key(idempotency_key)
     raw_slug = _require_dataset_name(envelope.payload, "slug")
     try:
         result = version_and_repoint(stores=store, slug=raw_slug)
@@ -567,7 +593,7 @@ async def post_command(
     """Closed-set command surface — every wired kind validates against the
     declared schema in ``m12-api-openapi.yaml`` and dispatches through
     ``CommandDispatcher``."""
-    idemp = _ensure_idempotency_key(idempotency_key)
+    idemp = ensure_idempotency_key(idempotency_key)
     if kind != envelope.kind:
         raise PayloadInvalidError(
             f"path kind {kind!r} does not match envelope.kind {envelope.kind!r}"

@@ -1426,10 +1426,13 @@ paths:
         origin, and the run unions it into the session's term index.
 
         Soft dependency — it sharpens the candidate pool but does NOT gate mint
-        (the answers already in the data are a runnable pool). NOT a Control-remote
-        command — like `/datasets/ingest` it mutates the draft only; no
-        `CommandRecord` lands until mint.
+        (the answers already in the data are a runnable pool). A multipart ingress
+        for `edit-draft-campaign`: the parsed terms become that command's
+        `patch.candidate_library` and dispatch through `CommandDispatcher`, so the
+        edit lands on the check-in cycle's ledger like every other origin mutation.
       tags: [datasets]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -1445,8 +1448,8 @@ paths:
                 draft_id:
                   type: string
                   minLength: 8
-                  maxLength: 64
-                  description: The draft to attach the library to.
+                  maxLength: 128
+                  description: The draft to attach the library to (the check-in `campaign_id`).
       responses:
         '200':
           description: |
@@ -1457,6 +1460,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DraftCampaign'
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
         '404':
           description: Draft not found (or owned by another tenant).
           content:
@@ -1482,8 +1486,11 @@ paths:
         category sheets), derive the candidate library from the distinct values of
         a chosen column rather than uploading an external file. Blanks and the
         TermNorm `--` placeholder are dropped; order preserved, duplicates
-        collapsed. NOT a Control-remote command.
+        collapsed. Like its upload sibling, the derived terms dispatch as
+        `edit-draft-campaign`'s `patch.candidate_library`.
       tags: [datasets]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -1496,7 +1503,7 @@ paths:
                 draft_id:
                   type: string
                   minLength: 8
-                  maxLength: 64
+                  maxLength: 128
                 column:
                   type: string
                   minLength: 1
@@ -1512,6 +1519,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DraftCampaign'
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
         '404':
           description: Draft not found (or owned by another tenant).
           content:
@@ -2722,6 +2730,27 @@ components:
               description: |
                 Replaces (not deep-merges) the draft's origin prompt — the editor
                 sends the full `PromptTemplate.prompt_field_dict()` object.
+            pipeline_steps:
+              type: array
+              items: { type: string }
+              description: |
+                The active pipeline step list (`["llm_only"]` vs the full
+                cache_lookup→…→token_matching). The setup-panel mode toggle writes it.
+            simulated_checkin:
+              type: object
+              additionalProperties: true
+              description: |
+                Audit marker `{by, model, at}` stamped when an agent authors the origin
+                decomposition by hand instead of spending the check-in LLM call.
+            candidate_library:
+              type: array
+              minItems: 1
+              items: { type: string }
+              description: |
+                The origin's target library. `POST /datasets/draft/candidate-library`
+                and its `/from-column` sibling derive this value from an upload or a
+                column and dispatch it as this patch — they are alternate ingresses
+                for `edit-draft-campaign`, not separate write paths.
 
     StartCheckinPayload:
       type: object

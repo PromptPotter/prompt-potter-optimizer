@@ -97,7 +97,7 @@ def ingest_draft(
     orphan). Byte-size capping is the wire boundary's concern — not enforced here.
     Returns the keyed draft (``draft_id`` == the new ``campaign_id``).
     """
-    from promptpotter.application.jobs.launcher import create_checkin_campaign, save_checkin_draft
+    from promptpotter.application.jobs.launcher import create_checkin_campaign
 
     table = read_tabular(blob, fmt=format_from_filename(filename or "upload.csv"))
     base_slug = (slug or default_slug_from_filename(filename or "upload")).lower()
@@ -126,7 +126,6 @@ def ingest_draft(
         source_file=filename or "",
         headers=tuple(table.headers),
     )
-    save_checkin_draft(stores, keyed)
     return keyed
 
 
@@ -135,9 +134,14 @@ def draft_from_dataset(
     stores: Stores,
     dataset_dir: Path,
     dataset_name: str,
+    overrides: dict[str, Any] | None = None,
 ) -> DraftCampaign:
     """Build a fully-confirmed :class:`DraftCampaign` straight from an authored
     dataset's on-disk files, then mint a check-in campaign from it.
+
+    ``overrides`` are draft fields the *campaign* supplies rather than the dataset
+    (campaign-from-origin passes ``reused_origin_id`` + the seed's prompt). They are
+    applied before the mint, so creation persists the final state in one write.
 
     This is the direct path behind "open an existing dataset (demo / benchmark /
     owned tenant dataset) in the ingest panel": no browser-side CSV reconstruction,
@@ -232,6 +236,8 @@ def draft_from_dataset(
         },
         provenance={"task_description": Provenance.CONFIRMED},
     )
+    if overrides:
+        draft = draft.patch(**overrides)
     _campaign_id, _cycle_id, keyed = create_checkin_campaign(
         stores,
         draft=draft,

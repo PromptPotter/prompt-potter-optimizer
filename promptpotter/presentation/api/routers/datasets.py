@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, File, Form, Query, Request, UploadFile
+from fastapi import APIRouter, File, Form, Header, Query, Request, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
 from promptpotter.application.config import load_campaign_config
@@ -31,7 +31,6 @@ from promptpotter.application.intelligence.measurement_series import (
 from promptpotter.application.jobs.launcher import (
     draft_wire_with_locks,
     load_checkin_draft,
-    save_checkin_draft,
 )
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import NodeConfigParam, NodeOutputSchema
@@ -49,6 +48,10 @@ from promptpotter.presentation.api.deps import StoreDep, get_cycle_dir_or_404
 from promptpotter.presentation.api.routers.campaigns.cycles import (
     _decode_descend,
     resolve_cycle_path,
+)
+from promptpotter.presentation.api.routers.commands import (
+    dispatch_draft_patch,
+    ensure_idempotency_key,
 )
 from promptpotter.shared.errors import (
     BadRequestError,
@@ -195,20 +198,22 @@ async def upload_candidate_library(
         UploadFile,
         File(description="Target library — one entry per line, or a single-column CSV/Excel."),
     ],
-    draft_id: Annotated[str, Form(description="Draft to attach the library to.")],
+    draft_id: Annotated[
+        str, Form(description="Draft to attach the library to.", min_length=8, max_length=128)
+    ],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> dict[str, Any]:
     """Attach a candidate library to a draft — the operator's "drop in place" for an
     unfulfilled ``candidate_source`` dependency. Returns the updated draft wire (its
     ``dependencies`` block now reports the dependency ``fulfilled``).
 
-    Mutates the in-flight check-in draft only; nothing runs until Start. Wire
-    contract pinned in ``docs/specs/m12-api-openapi.yaml::POST /datasets/draft/candidate-library``.
+    A multipart ingress for an `edit-draft-campaign`: the upload is parsed into the
+    patch value, then dispatched, so the edit lands on the check-in ledger like every
+    other origin mutation. Nothing runs until Start. Wire contract pinned in
+    ``docs/specs/m12-api-openapi.yaml::POST /datasets/draft/candidate-library``.
     ``draft_id`` is the check-in campaign id.
     """
-    draft = load_checkin_draft(store, draft_id)
-    if draft is None:
-        raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
-
+    idemp = ensure_idempotency_key(idempotency_key)
     blob = await _read_capped(request, file, MAX_UPLOAD_BYTES)
     try:
         terms = parse_candidate_library(blob, file.filename or "")
@@ -222,8 +227,12 @@ async def upload_candidate_library(
             code="ingest_failed",
             details={"reason": "empty"},
         )
-    updated = save_checkin_draft(store, draft.patch(candidate_library=terms))
-    return draft_wire_with_locks(updated)
+    return await dispatch_draft_patch(
+        store,
+        draft_id=draft_id,
+        patch_raw={"candidate_library": terms},
+        idempotency_key=idemp,
+    )
 
 
 class _BuildLibraryBody(BaseModel):
@@ -238,17 +247,23 @@ class _BuildLibraryBody(BaseModel):
 
 
 @datasets_router.post("/draft/candidate-library/from-column")
-def build_candidate_library_from_column(store: StoreDep, body: _BuildLibraryBody) -> dict[str, Any]:
+async def build_candidate_library_from_column(
+    store: StoreDep,
+    body: _BuildLibraryBody,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> dict[str, Any]:
     """Build a draft's candidate library from the distinct values of one of its own
     columns — the unified "build from dataset" path (no external file).
 
     When the targets already live in the data (the ground-truth/target column, the
     union of the dataset's category sheets), the library is derived rather than
-    uploaded. Returns the updated draft wire (its `candidate_library` dependency now
-    `fulfilled`). Mutates the check-in draft only. Wire contract pinned in
+    uploaded. The derived terms become an `edit-draft-campaign` patch, so this lands
+    on the check-in ledger exactly like the upload does. Returns the updated draft
+    wire (its `candidate_library` dependency now `fulfilled`). Wire contract pinned in
     `docs/specs/m12-api-openapi.yaml::POST /datasets/draft/candidate-library/from-column`.
     `draft_id` is the check-in campaign id.
     """
+    idemp = ensure_idempotency_key(idempotency_key)
     draft = load_checkin_draft(store, body.draft_id)
     if draft is None:
         raise NotFoundError(f"draft {body.draft_id!r} not found.", code="command_target_not_found")
@@ -266,8 +281,12 @@ def build_candidate_library_from_column(store: StoreDep, body: _BuildLibraryBody
             code="ingest_failed",
             details={"reason": "empty"},
         )
-    updated = save_checkin_draft(store, draft.patch(candidate_library=terms))
-    return draft_wire_with_locks(updated)
+    return await dispatch_draft_patch(
+        store,
+        draft_id=body.draft_id,
+        patch_raw={"candidate_library": terms},
+        idempotency_key=idemp,
+    )
 
 
 @datasets_router.post("/{name}/draft")

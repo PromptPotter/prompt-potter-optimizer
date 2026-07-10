@@ -78,14 +78,16 @@ def create_checkin_campaign(
     state (``checkin/draft.json``) + the sample bank (``checkin/cache.json``). The
     campaign appears in the sidebar immediately and is resumable. Returns
     ``(campaign_id, cycle_id, keyed_draft)`` — the keyed draft (``draft_id`` now the
-    ``campaign_id``) is the wire/return value the ingest handlers hand back."""
+    ``campaign_id``) is the wire/return value the ingest handlers hand back.
+
+    The bank lands before the draft: :meth:`write_resolution` patches ``cache.json``
+    and no-ops when no bank exists, so minting through the seam in the other order
+    would leave a fresh check-in with no ``resolution`` breadcrumb on disk."""
     _session_id, campaign_id, cycle_id = mint_checkin_skeleton(stores, slug=draft.slug)
-    keyed = draft.patch(draft_id=campaign_id)
-    stores.checkin.write_draft(campaign_id, keyed.to_disk())
     stores.checkin.write_bank(
         campaign_id, bank_items, source_file=source_file or draft.source_file, headers=headers
     )
-    return campaign_id, cycle_id, keyed
+    return campaign_id, cycle_id, save_checkin_draft(stores, draft.patch(draft_id=campaign_id))
 
 
 def load_checkin_draft(stores: Stores, campaign_id: str) -> DraftCampaign | None:
