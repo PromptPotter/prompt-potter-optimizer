@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.rendering import display_fitness
-from promptpotter.domain.results import DiagnosticRunRecord
+from promptpotter.domain.results import DiagnosticRunRecord, candidate_label
 from promptpotter.infrastructure.store.paths import REPO_ROOT
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.statistics import mean_ci
@@ -175,7 +175,7 @@ async def measure_noise_floor(
         dataset=campaign.dataset_name,
         source_campaign=campaign_id,
         source_cycle=cycle_id,
-        source_label="C0",
+        source_label=candidate_label(0, 0),
         source_candidate_id=origin_id,
         config_hash=config_hash[:12],
         samples_requested=len(scoring_set),

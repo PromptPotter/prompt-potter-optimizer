@@ -25,7 +25,6 @@ which knobs collide.
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -39,6 +38,7 @@ from promptpotter.application.config_coupling import (
     knob_label,
     resolve_knob_states,
 )
+from promptpotter.application.datasets.authored import read_campaign_config_file
 
 
 def _load_config(arg: str) -> CampaignConfig:
@@ -48,10 +48,7 @@ def _load_config(arg: str) -> CampaignConfig:
         path = Path("datasets") / arg / "campaign.json"
     if not path.exists():
         raise SystemExit(f"config_map: no campaign.json for {arg!r} (tried {path})")
-    data = json.loads(path.read_text(encoding="utf-8"))
-    if "campaign_config" in data:
-        data = data["campaign_config"]
-    return CampaignConfig.model_validate(data)
+    return CampaignConfig.model_validate(read_campaign_config_file(path))
 
 
 def _default_config() -> CampaignConfig:
@@ -70,25 +67,13 @@ def format_map(states: list[KnobState], violated_names: set[str], *, static: boo
     for s in states:
         for e in s.estimands:
             by_estimand[e].append(s)
-    # DIFFICULTY/ABILITY appear via tags even with no DISPLAY entries; keep declared order.
-    order = [
-        Estimand.SELECTION,
-        Estimand.DIFFICULTY,
-        Estimand.ABILITY,
-        Estimand.GATE,
-        Estimand.STOPPING,
-        Estimand.ESCALATION,
-        Estimand.SEARCH,
-        Estimand.SPEND,
-        Estimand.DISPLAY,
-    ]
     lines = ["config map", ""]
     if static:
         lines.append(
             "(static registry — values are DEFAULTS; pass a dataset to resolve effective values)"
         )
         lines.append("")
-    for e in order:
+    for e in Estimand:
         rows = by_estimand[e]
         if not rows:
             continue

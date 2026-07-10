@@ -277,8 +277,14 @@ def get_campaign_checkin(store: StoreDep, campaign_id: str) -> dict[str, Any]:
             code="command_target_not_found",
         )
     bank = store.checkin.load_bank(campaign_id) or {}
-    resolution = (bank.get("resolution") or {}).get("last_resolution")
-    return {"draft": draft_wire_with_locks(draft), "resolution": resolution}
+    block = bank.get("resolution") or {}
+    return {
+        "draft": draft_wire_with_locks(draft),
+        "resolution": block.get("last_resolution"),
+        # Proposals the last turn left unclicked. Without these a re-opened check-in
+        # would drop the operator's outstanding actions on the floor.
+        "raised": block.get("raised") or [],
+    }
 
 
 @campaigns_router.get("/campaigns/{campaign_id}", response_model=CampaignDetailResponse)
@@ -359,19 +365,6 @@ class ConfigMapResponse(BaseModel):
     active_count: int = Field(description="Number of couplings currently active (violating)")
 
 
-_ESTIMAND_ORDER: tuple[Estimand, ...] = (
-    Estimand.SELECTION,
-    Estimand.DIFFICULTY,
-    Estimand.ABILITY,
-    Estimand.GATE,
-    Estimand.STOPPING,
-    Estimand.ESCALATION,
-    Estimand.SEARCH,
-    Estimand.SPEND,
-    Estimand.DISPLAY,
-)
-
-
 @campaigns_router.get("/campaigns/{campaign_id}/config-map", response_model=ConfigMapResponse)
 def get_campaign_config_map(store: StoreDep, campaign_id: str) -> ConfigMapResponse:
     """The knob coupling/provenance map for one campaign — what moves which
@@ -397,7 +390,7 @@ def get_campaign_config_map(store: StoreDep, campaign_id: str) -> ConfigMapRespo
         for s in states
     }
     groups: list[ConfigEstimandGroup] = []
-    for estimand in _ESTIMAND_ORDER:
+    for estimand in Estimand:
         knobs = [knob_models[s.path] for s in states if estimand in s.estimands]
         if not knobs:
             continue

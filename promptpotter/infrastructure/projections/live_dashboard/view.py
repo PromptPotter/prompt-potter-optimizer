@@ -433,10 +433,6 @@ class LiveDashboardView(DerivedView):
             # Mirror the latest snapshot into the shared core so LiveDisplay sees
             # the same round-wide P(best) state.
             apply_p_best_update(self._core, current_id, n_samples, p_best)
-        elif ev == "sample_order_preview":
-            order_raw = payload.get("sample_order")
-            if isinstance(order_raw, list):
-                self.state.hard_sample_order = [int(sid) for sid in order_raw]
         elif ev == "pobb_backfill":
             self._append_backfill(
                 int(record.round or 0),

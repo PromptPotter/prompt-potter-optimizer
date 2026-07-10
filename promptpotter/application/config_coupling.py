@@ -74,6 +74,11 @@ class Estimand(StrEnum):
 
     A knob may touch more than one. Couplings are *between knobs that share an
     estimand*: that shared quantity is what goes ill-defined when they disagree.
+
+    **Declaration order IS presentation order.** Both the CLI config map and the
+    webapp's config panel iterate this enum directly. Never copy these members into
+    an ordering tuple: two such copies existed, both silently omitted
+    ``DISCRIMINATION``, and its group vanished from both surfaces.
     """
 
     SELECTION = "selection"

@@ -64,9 +64,10 @@ class LLMCallContext:
     Bundles the four kwargs that always travel together across
     ``llm_call`` and ``run_optimizer_node``: the ledger that receives
     start/progress/end records, the round/candidate identity those records
-    carry, and the cross-cycle response cache. Defaults to all-``None`` —
-    used by non-ledger paths (checkin) and by callers that don't need the
-    audit trail.
+    carry, and the cross-cycle response cache. Defaults to all-``None`` for
+    callers that need no audit trail; note ``llm_call`` consults and writes
+    ``cache`` only when it is not ``None``, so an omitted cache silently
+    re-spends on every call.
     """
 
     ledger: CycleEventLog | None = None
@@ -323,10 +324,10 @@ async def llm_call(
                     await wait_with_countdown(decision.seconds, f"{label} {decision.scope}")
         except MetaPromptParseError as parse_err:
             # A call that failed to parse was billed exactly like one that parsed. Meter it
-            # here — this is the sole `emit_token_usage` site, and the raise happens upstream
-            # of the success path's usage block, so without this the two round-trips of every
-            # empty/malformed response are invisible to the ledger, to `dashboard.json::spend`,
-            # and to the `spend_budget_usd` gate that is supposed to bound the run.
+            # here — the raise happens upstream of the success path's usage block, so this is
+            # the ONLY metering point on the parse-failure path. Without it the two round-trips
+            # of every empty/malformed response are invisible to the ledger, to
+            # `dashboard.json::spend`, and to the `spend_budget_usd` gate meant to bound the run.
             logger.error(
                 "%s: optimizer call failed to parse — %s",
                 node or "llm_call",
