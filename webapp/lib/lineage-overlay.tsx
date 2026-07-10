@@ -31,7 +31,7 @@ const LENS_LABELS: Record<string, string> = {
   "abort:all_off": "No abort",
 };
 
-export interface LineageOverlay {
+interface LineageOverlay {
   // The whole campaign lineage response — cycles + the served divergence overlay.
   data: CampaignLineageResponse | null;
   // The PRESET lens dropdown value: "" (off), "score:<formula>", or "abort:<variant>".

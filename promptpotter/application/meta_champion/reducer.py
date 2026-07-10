@@ -48,7 +48,6 @@ class CellEffect(BaseModel):
 
     cell: str
     mean_d: float
-    se_d: float
     n: int
 
 
@@ -74,14 +73,11 @@ class CandidateRow(BaseModel):
     provenance: list[Provenance]
     per_cell_effects: list[CellEffect]
     anchor_effect: float  # grand paired mean across all cells+occurrences
-    anchor_se: float
     ci_lo: float
     ci_hi: float
     n_cells: int
     n_measurements: int
-    coronation_results: list[dict[str, Any]]  # filled by the coronation slice
     status: str  # provisional | confirmed | champion
-    measured_at: str
 
 
 class ChampionRegistry(BaseModel):
@@ -273,14 +269,12 @@ def _finalize(state_hash: str, acc: _Accum) -> CandidateRow:
     for cell in sorted(acc.cand_by_cell):
         cand_vals = acc.cand_by_cell[cell]
         orig_vals = acc.orig_by_cell[cell]
-        mean_d, se_d, n = paired_diff_posterior(cand_vals, orig_vals)
-        per_cell.append(CellEffect(cell=cell, mean_d=mean_d, se_d=se_d, n=n))
+        mean_d, _se_d, n = paired_diff_posterior(cand_vals, orig_vals)
+        per_cell.append(CellEffect(cell=cell, mean_d=mean_d, n=n))
         flat_cand.extend(cand_vals)
         flat_orig.extend(orig_vals)
 
     anchor, anchor_se, n_meas = paired_diff_posterior(flat_cand, flat_orig)
-    # Best-effort measured_at from the most recent occurrence's round file is overkill here;
-    # the registry-level generated_at stamps freshness. Per-row we record scan time.
     return CandidateRow(
         state_hash=state_hash,
         label=acc.label,
@@ -288,14 +282,11 @@ def _finalize(state_hash: str, acc: _Accum) -> CandidateRow:
         provenance=acc.provenance,
         per_cell_effects=per_cell,
         anchor_effect=anchor,
-        anchor_se=anchor_se,
         ci_lo=anchor - 1.96 * anchor_se,
         ci_hi=anchor + 1.96 * anchor_se,
         n_cells=len(per_cell),
         n_measurements=n_meas,
-        coronation_results=[],
         status="provisional",
-        measured_at=datetime.now(UTC).isoformat(timespec="seconds"),
     )
 
 

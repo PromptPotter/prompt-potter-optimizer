@@ -34,7 +34,7 @@ export interface ProjectionEnvelope {
 
 // State pairs an icon AND a label (never colour alone) per the frontend
 // accessibility invariant; `tone` is a styling hint layered on top.
-export type ActivityKind =
+type ActivityKind =
   | "running" // llm_call_start  — an optimizer call in flight
   | "done" //    llm_call        — a call completed (dur · tok)
   | "candidate" // a scored / in-flight individual (C0, C1.1, …)
@@ -44,7 +44,7 @@ export type ActivityKind =
   | "merge" //   command / command_ack — a fired control on the trace
   | "progress"; // snapshot sample_scored — the transient "scoring i/n" chip
 
-export type ActivityTone = "good" | "warn" | "bad" | "muted";
+type ActivityTone = "good" | "warn" | "bad" | "muted";
 
 // `id` is stable per logical event so every source upserts by id rather than
 // duplicate.

@@ -5,7 +5,7 @@
 // `sampleId` = dataset sample_id — diverges from qi once the Rasch sorter
 // drives the iteration order; the heatmap consumer uses sampleId.
 
-export interface ParsedSample {
+interface ParsedSample {
   raw?: string;
   elapsed?: number;
   idx?: number;
@@ -21,7 +21,7 @@ export interface ParsedSample {
   query?: string;
 }
 
-export const SAMPLE_RE =
+const SAMPLE_RE =
   /^\s*([\d.]+)s\s+#(\d+)(?:\s+sid:(\d+))?\s+(HIT|MISS)\s+\[([^\]]*)\][^>]*->\s*'([\s\S]*?)'\s+gt:'([\s\S]*?)'\s+q:'([\s\S]*?)'\s*$/;
 
 export function parseSampleLine(line: string): ParsedSample {

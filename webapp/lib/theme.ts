@@ -74,7 +74,7 @@ export function applyChartDefaults(): void {
   ChartJS.defaults.borderColor = getCss("--color-border");
 }
 
-export const THEME_STORAGE_KEY = "promptpotter.theme";
+const THEME_STORAGE_KEY = "promptpotter.theme";
 
 export type Theme = "light" | "dark";
 

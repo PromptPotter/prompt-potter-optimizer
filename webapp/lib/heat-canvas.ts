@@ -10,7 +10,7 @@ export interface HeatDot {
   hit: boolean;
 }
 
-export interface HeatLayout {
+interface HeatLayout {
   // discrete: one output column per ordinal, left-packed at `cellW` (<= MAX).
   // bucket:   one output column per pixel, each folding several ordinals.
   mode: "discrete" | "bucket";
@@ -39,7 +39,7 @@ export function heatLayout(len: number, widthPx: number): HeatLayout {
   return { mode: "bucket", len, widthPx: w, count, cellW: w / count };
 }
 
-export interface RowBucket {
+interface RowBucket {
   hits: number;
   total: number;
 }

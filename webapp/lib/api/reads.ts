@@ -552,7 +552,6 @@ export interface ConfigKnob {
   label: string;
   value: unknown;
   source: string; // default | campaign | required | constant
-  estimands: string[];
 }
 export interface ConfigEstimandGroup {
   key: string;
@@ -573,7 +572,6 @@ export interface ConfigCoupling {
 export interface ConfigMapResponse {
   groups: ConfigEstimandGroup[];
   couplings: ConfigCoupling[];
-  active_count: number;
 }
 export function fetchConfigMap(
   campaignId: string,
@@ -593,7 +591,6 @@ export function fetchConfigMap(
 export interface ChampionCellEffect {
   cell: string;
   mean_d: number;
-  se_d: number;
   n: number;
 }
 export interface ChampionProvenance {
@@ -609,14 +606,11 @@ export interface ChampionCandidate {
   provenance: ChampionProvenance[];
   per_cell_effects: ChampionCellEffect[];
   anchor_effect: number;
-  anchor_se: number;
   ci_lo: number;
   ci_hi: number;
   n_cells: number;
   n_measurements: number;
-  coronation_results: unknown[];
   status: string; // provisional | confirmed | champion
-  measured_at: string;
 }
 export interface ChampionRegistryResponse {
   generated_at: string;

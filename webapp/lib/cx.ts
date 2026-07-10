@@ -8,7 +8,7 @@
 // `cond && "mod"` contributes nothing when `cond` is false. This is the
 // state-class convention for component modules — see webapp/CLAUDE.md.
 
-export type ClassValue = string | false | null | undefined;
+type ClassValue = string | false | null | undefined;
 
 export function cx(...parts: ClassValue[]): string {
   return parts.filter(Boolean).join(" ");

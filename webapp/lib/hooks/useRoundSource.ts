@@ -22,7 +22,7 @@ import { roundOf, type DashboardSnapshot } from "@/lib/poll";
 import { useRoundFile, type UseRoundFileState } from "@/lib/hooks/useRoundFile";
 import type { CyclePath } from "@/lib/ids";
 
-export interface UseRoundSourceState extends UseRoundFileState {
+interface UseRoundSourceState extends UseRoundFileState {
   // True when `round` is the in-flight round — the caller reads live state
   // from `dash`, and `doc` stays null (no fetch was issued).
   isLive: boolean;

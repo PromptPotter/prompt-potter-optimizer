@@ -213,7 +213,7 @@ export interface L1ScoreOutput {
   candidates?: LiveCandidate[];
 }
 
-export interface L1ScoreInput {
+interface L1ScoreInput {
   candidates?: LiveInputCandidate[];
 }
 

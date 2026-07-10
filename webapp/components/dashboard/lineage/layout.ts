@@ -21,7 +21,7 @@ import { rootCycleId } from "@/lib/ids";
 // parent-round where the fork was cut and then run their own rounds.
 export const COL_W = 110;          // width per round-column
 export const LANE_H = 26;          // height per lane-row
-export const STUB = 14;            // horizontal stub before a collapsed round node
+const STUB = 14;            // horizontal stub before a collapsed round node
 export const CAND_STUB = 22;       // horizontal stub before an expanded candidate node
 // Left margin before column 0 — room for round 1's left-anchored stub + label.
 export const LEFT_PAD = 48;
@@ -51,12 +51,12 @@ export const TRIGGER_GLYPH: Record<string, string> = {
 // (source-by-cycle-role — never a per-field merge). The fitness number is a
 // separate live `valueByKey` overlay painted at render, so a per-sample value
 // tick never re-runs the layout memo. Labels are already short ("C1.2") here.
-export interface LaneCandidate {
+interface LaneCandidate {
   candidateId: string;
   label: string;
   isWinner: boolean;
 }
-export interface LaneRound {
+interface LaneRound {
   round: number;
   candidates: LaneCandidate[];
 }
@@ -218,7 +218,7 @@ export interface RoundNodePos {
   // Fork creation trigger — drives the operator_steered provenance glyph.
   trigger: string;
 }
-export interface BranchSeg {
+interface BranchSeg {
   x1: number;
   y1: number;
   x2: number;

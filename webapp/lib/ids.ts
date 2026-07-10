@@ -56,7 +56,7 @@ export function unitKey(campaignId: string, cycleId: string): string {
 //   L5+        → deeper still (the engine's `.inner/<cycle_id>` sandbox is
 //                re-entrant — this mirrors it, "never a depth-1 assumption").
 // The dashboard reads the LEAF hop; chat/selection/dataset read the ROOT hop.
-export interface CycleHop {
+interface CycleHop {
   campaignId: string;
   cycleId: string;
 }

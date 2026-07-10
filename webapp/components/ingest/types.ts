@@ -3,6 +3,6 @@
 // What the ingest flow hands back when it starts a campaign. Every Start goes
 // through `start-checkin`, which returns the (campaign, cycle) synchronously,
 // so the caller can select it at once.
-export type MintedSelection = { campaignId: string; cycleId: string };
+type MintedSelection = { campaignId: string; cycleId: string };
 
 export type OnMinted = (selection: MintedSelection) => void;

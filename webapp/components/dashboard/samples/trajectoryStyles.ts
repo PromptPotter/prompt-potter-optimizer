@@ -10,7 +10,7 @@ export const NEW_COLOR = "#3b82f6";
 export const NEW_BG = "rgba(59, 130, 246, 0.14)";
 export const NEW_BORDER = "rgba(59, 130, 246, 0.42)";
 
-export const SQ_BASE: CSSProperties = {
+const SQ_BASE: CSSProperties = {
   width: 26,
   height: 26,
   display: "inline-flex",

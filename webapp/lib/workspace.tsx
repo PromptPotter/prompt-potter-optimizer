@@ -52,7 +52,7 @@ import { bumpRevalidation, useRevalidation } from "./revalidate";
 import { useAuthGate } from "./auth-context";
 import { isInFlight } from "./run-phase";
 
-export interface WorkspaceState {
+interface WorkspaceState {
   sessionId: string | null;
   activeCycleId: string | null; // server pointer (active_session.json)
   activeCampaignId: string | null; // campaign of the server pointer

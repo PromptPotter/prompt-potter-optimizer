@@ -29,7 +29,7 @@ export function wrappable(col: ColDef): boolean {
   return col.align === "left" && col.id !== "measurements";
 }
 
-export interface HardSamplesTableModelInput {
+interface HardSamplesTableModelInput {
   datasetItems: DatasetItem[];
   perSample?: Map<number, MeasurementDot[]>;
 }

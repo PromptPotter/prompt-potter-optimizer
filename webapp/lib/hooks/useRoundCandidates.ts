@@ -10,7 +10,7 @@ import { useCycleStream } from "@/lib/poll";
 import { roundCandidates, groupByRound } from "@/lib/derivations";
 import type { CandidateRow, RoundCandidates } from "@/lib/types";
 
-export interface RoundCandidatesHookState {
+interface RoundCandidatesHookState {
   all: CandidateRow[];
   byRound: RoundCandidates;
 }

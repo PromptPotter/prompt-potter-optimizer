@@ -50,7 +50,7 @@ function upsert(prev: ActivityItem[], item: ActivityItem): ActivityItem[] {
   return [...prev, item];
 }
 
-export interface CycleEventsState {
+interface CycleEventsState {
   // Combined feed: persistent summaries followed by the current call-trail.
   activity: ActivityItem[];
   // The single transient "scoring i/n" chip — replaced, never appended.

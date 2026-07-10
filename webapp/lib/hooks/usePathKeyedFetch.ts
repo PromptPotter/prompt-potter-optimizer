@@ -19,7 +19,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { CyclePath } from "../ids";
 
-export interface PathKeyed<T> {
+interface PathKeyed<T> {
   value: T;
   loading: boolean;
   error: string | null;

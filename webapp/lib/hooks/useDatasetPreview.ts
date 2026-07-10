@@ -26,7 +26,7 @@ interface ScopeSlice {
   archivePerSample: Map<number, MeasurementDot[]>;
 }
 
-export interface DatasetPreviewState extends ScopeSlice {
+interface DatasetPreviewState extends ScopeSlice {
   splitTest: number | null;
   isStale: boolean;
   // Honest failure signal — set when the dataset-scope fetch (the spine)

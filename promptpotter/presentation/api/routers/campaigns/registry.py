@@ -325,7 +325,6 @@ class ConfigKnob(BaseModel):
     source: str = Field(
         description="Where the value came from: default | campaign (operator-set) | required | constant"
     )
-    estimands: list[str] = Field(description="Statistical estimand(s) this knob moves")
 
 
 class ConfigEstimandGroup(BaseModel):
@@ -362,7 +361,6 @@ class ConfigMapResponse(BaseModel):
 
     groups: list[ConfigEstimandGroup] = Field(description="Estimand groups, in declared order")
     couplings: list[ConfigCoupling] = Field(description="Declared couplings, active ones flagged")
-    active_count: int = Field(description="Number of couplings currently active (violating)")
 
 
 @campaigns_router.get("/campaigns/{campaign_id}/config-map", response_model=ConfigMapResponse)
@@ -385,7 +383,6 @@ def get_campaign_config_map(store: StoreDep, campaign_id: str) -> ConfigMapRespo
             label=knob_label(s.path),
             value=s.value,
             source=s.source,
-            estimands=[e.value for e in s.estimands],
         )
         for s in states
     }
@@ -417,7 +414,7 @@ def get_campaign_config_map(store: StoreDep, campaign_id: str) -> ConfigMapRespo
         )
         for c in COUPLINGS
     ]
-    return ConfigMapResponse(groups=groups, couplings=couplings, active_count=len(active))
+    return ConfigMapResponse(groups=groups, couplings=couplings)
 
 
 def _require_l4_lab(store: Stores) -> None:

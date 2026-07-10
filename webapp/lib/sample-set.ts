@@ -30,7 +30,7 @@ export function measuredUniverse(rounds: RoundSummary[]): number[] {
   return [...set].sort((a, b) => a - b);
 }
 
-export interface RoundMeasuredSet {
+interface RoundMeasuredSet {
   round: number;
   ids: number[];
 }

@@ -2,7 +2,7 @@
 // Inline copy so the panel renders without an API fetch. For the
 // current-cycle live registry, hit `/api/v1/evaluators`.
 
-export interface EvaluatorMeta {
+interface EvaluatorMeta {
   name: string;
   scope: "per_round" | "per_sample";
   direction: "high" | "low";

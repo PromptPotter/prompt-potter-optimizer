@@ -25,7 +25,7 @@ import { fetchCycleFileByPath } from "../api";
 import { encodeCyclePath, type CyclePath } from "../ids";
 import { usePathKeyedFetch } from "./usePathKeyedFetch";
 
-export interface LeafCycleIndex {
+interface LeafCycleIndex {
   datasetName: string | null;
   createdAt: string | null;
 }

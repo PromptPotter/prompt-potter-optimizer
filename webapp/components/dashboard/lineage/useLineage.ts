@@ -80,7 +80,7 @@ function detailFromRows(rows: CandidateRow[]): CycleDetail {
 // Empty-stub cleanup — one campaign-wide modal mutation. Stubs accumulate
 // because fork-creation paths mint the cycle dir BEFORE the first round runs;
 // an interrupt between dir-mint and first-round leaves an empty-row fork.
-export interface LineageCleanup {
+interface LineageCleanup {
   open: boolean;
   error: string | null;
   cleaning: boolean;

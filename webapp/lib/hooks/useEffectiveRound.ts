@@ -14,7 +14,7 @@ import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useSelection } from "@/lib/SelectionContext";
 import { availableRounds } from "@/lib/derivations";
 
-export interface EffectiveRound {
+interface EffectiveRound {
   // The round to display: the explicit pick, else the live in-flight round,
   // else (frozen/completed cycle with nothing in flight) the most recent
   // completed round so the round-scoped surfaces show real data, not a blank.

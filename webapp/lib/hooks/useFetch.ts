@@ -12,7 +12,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-export interface FetchState<T> {
+interface FetchState<T> {
   data: T | null;
   error: string | null;
   loading: boolean;

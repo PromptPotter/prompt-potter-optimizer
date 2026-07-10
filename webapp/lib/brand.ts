@@ -64,7 +64,7 @@ export const BRAND = {
 // in the page <head> (where crawlers/agents read it) AND shown verbatim in the
 // About pane's "View provenance". One builder, so the two never diverge.
 // softwareVersion is intentionally absent — version is live from /health.
-export interface SoftwareApplicationLd {
+interface SoftwareApplicationLd {
   "@context": "https://schema.org";
   "@type": "SoftwareApplication";
   name: string;

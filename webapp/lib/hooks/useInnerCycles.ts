@@ -14,7 +14,7 @@ import { fetchInnerCycles, type CycleListEntry } from "../api";
 import { useAuthGate } from "../auth-context";
 import { usePoll } from "./usePoll";
 
-export interface InnerCyclesState {
+interface InnerCyclesState {
   inner: CycleListEntry[];
   // The inner sandbox's live pointer — the inner loop running right now (marked
   // ● in the sidebar), or null when none is live.

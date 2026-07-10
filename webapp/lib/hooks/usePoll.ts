@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useRef } from "react";
 
-export interface PollOptions {
+interface PollOptions {
   intervalMs: number;
   // Pause the timer (and abort the in-flight tick) while the tab is hidden.
   pauseWhenHidden?: boolean; // default true

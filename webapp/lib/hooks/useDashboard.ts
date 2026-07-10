@@ -12,7 +12,7 @@
 import { useMemo } from "react";
 import { roundOf, useCycleStream, type CycleStreamState } from "@/lib/poll";
 
-export interface DashboardHookState extends CycleStreamState {
+interface DashboardHookState extends CycleStreamState {
   dashRound: number | null;
 }
 

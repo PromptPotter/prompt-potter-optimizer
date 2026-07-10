@@ -12,7 +12,7 @@
 import type { DashboardSnapshot } from "@/lib/poll";
 import type { OriginGateDecision } from "@/lib/api";
 
-export interface DecisionButton {
+interface DecisionButton {
   decision: OriginGateDecision;
   label: string;
   variant: "primary" | "ghost" | "danger";

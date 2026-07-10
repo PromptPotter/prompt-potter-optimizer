@@ -25,7 +25,7 @@ import { plainLanguageRecap } from "@/lib/origin-readiness";
 import type { OnMinted } from "@/components/ingest/types";
 
 // One durable chat message; the conversation renders from a list of these.
-export type ChatMsg =
+type ChatMsg =
   | { id: string; kind: "user-file"; name: string; rows: number | null }
   | { id: string; kind: "user"; text: string }
   | { id: string; kind: "ai"; text: string }
@@ -37,7 +37,7 @@ export type ChatMsg =
 // Transient ingest-pipeline status, separate from the durable thread — it's
 // replaced (not appended) as the pick/drop → context → check-in → ready
 // sequence advances.
-export type IngestPhase =
+type IngestPhase =
   | { stage: "idle" }
   | { stage: "uploading" }
   // Parsed/picked. The chat always surfaces the context box here — prefilled
