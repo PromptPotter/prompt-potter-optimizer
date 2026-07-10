@@ -248,7 +248,7 @@ export function IngestConversation({
 // model drives the search, run bounds) collapse into an optional expander.
 function ReadyBlock({ flow }: { flow: IngestFlow }) {
   if (flow.phase.stage !== "ready") return null;
-  const { draft, resolution, degraded } = flow.phase;
+  const { draft, resolution, raised, degraded } = flow.phase;
   const { complete: ready, gaps } = draft.readiness;
 
   return (
@@ -272,7 +272,12 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
 
       {!ready ? (
         <div className="ingest-gaps">
-          <OriginCheckinPanel draft={draft} lastResolution={resolution} onApply={flow.applyPatch} />
+          <OriginCheckinPanel
+            draft={draft}
+            lastResolution={resolution}
+            raised={raised}
+            onApply={flow.applyPatch}
+          />
           {/* The server gate's open fields, each with its operator-facing hint.
               The resolver panel above only covers gaps it raised a question for
               (answer_format / answer_space it can leave silently empty), so this

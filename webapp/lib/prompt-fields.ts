@@ -15,4 +15,3 @@ export const PROMPT_STRING_FIELDS = [
   "answer_format",
 ] as const;
 
-export type PromptStringField = (typeof PROMPT_STRING_FIELDS)[number];

@@ -19,6 +19,7 @@ import {
   type OriginEntry,
   type OriginLastResolution,
   type OriginDegraded,
+  type RaisedCommand,
 } from "@/lib/api";
 import { plainLanguageRecap } from "@/lib/origin-readiness";
 import type { OnMinted } from "@/components/ingest/types";
@@ -62,6 +63,9 @@ export type IngestPhase =
       stage: "ready";
       draft: DraftCampaignWire;
       resolution: OriginLastResolution | null;
+      // Proposals the resolver left unclicked. The assistant offers them; only
+      // the operator's click fires `edit-draft-campaign`.
+      raised: RaisedCommand[];
       // Non-null when the resolver turn that produced this draft degraded — the
       // ready panel surfaces the warning + a "re-run check-in" affordance.
       degraded: OriginDegraded | null;
@@ -150,12 +154,14 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     setPhase({ stage: "checkin", model: "the check-in model" });
     let resolved = draft;
     let resolution: OriginLastResolution | null = null;
+    let raised: RaisedCommand[] = [];
     let degraded: OriginDegraded | null = null;
     let recap = "";
     try {
       const r = await postResolveOrigin(draft.draft_id);
       resolved = r.draft;
       resolution = r.resolution.last_resolution ?? null;
+      raised = r.resolution.raised ?? [];
       degraded = r.resolution.degraded ?? null;
       recap = resolution?.recap || resolution?.assessment || plainLanguageRecap(resolved);
     } catch (e) {
@@ -194,7 +200,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
         setMinting(false);
       }
     }
-    setPhase({ stage: "ready", draft: resolved, resolution, degraded });
+    setPhase({ stage: "ready", draft: resolved, resolution, raised, degraded });
   };
 
   // After any draft-producing action (drop / pick). If the dataset already
@@ -301,7 +307,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
       return;
     }
     pushAi("Opened the origin — edit anything below, then Start.");
-    setPhase({ stage: "ready", draft, resolution: null, degraded: null });
+    setPhase({ stage: "ready", draft, resolution: null, raised: [], degraded: null });
   };
 
   // Re-open a durable check-in: load its draft + last resolver turn from disk. The
@@ -336,7 +342,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     pushAi("Reopened your check-in — finish the setup below, then Start.");
     // Reopen is not a fresh resolve turn, so there's no live degradation to
     // surface — a re-run from the ready panel re-grades.
-    setPhase({ stage: "ready", draft, resolution: res.resolution, degraded: null });
+    setPhase({ stage: "ready", draft, resolution: res.resolution, raised: res.raised, degraded: null });
   };
 
   const submitContext = async () => {

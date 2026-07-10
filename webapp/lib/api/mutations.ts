@@ -665,6 +665,7 @@ export async function postStartCheckin(
 export interface CheckinReopenResponse {
   draft: DraftCampaignWire;
   resolution: OriginLastResolution | null;
+  raised: RaisedCommand[];
 }
 
 export async function getCampaignCheckin(
@@ -713,12 +714,24 @@ export interface OriginDegraded {
   repair_attempts: number;
 }
 
+// One proposal the resolver left for the operator, already shaped as the command
+// a click would fire. The assistant offers; it never triggers. Derived server-side
+// from the turn's findings, so the model never names a command and every payload
+// is guaranteed to validate.
+export interface RaisedCommand {
+  kind: "edit-draft-campaign";
+  payload: { draft_id: string; patch: DraftPatch };
+  confidence: string;
+  evidence: string;
+}
+
 export interface OriginResolutionBlock {
   complete: boolean;
   provenance: Record<string, string>;
   values: Record<string, unknown>;
   gaps: OriginGap[];
   last_resolution?: OriginLastResolution;
+  raised?: RaisedCommand[];
   degraded?: OriginDegraded;
 }
 

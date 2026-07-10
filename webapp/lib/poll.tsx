@@ -111,7 +111,6 @@ export interface DashboardSnapshot {
   // refreshed per candidate at candidate-start. The dataset table sorts
   // by this when the operator's "sync with live sort" tick is on.
   // ``null`` before the first sorter fit lands.
-  hard_sample_order?: number[] | null;
   // Declared run-limit ceilings, written at INIT.exit from the cycle's
   // OptimizationConfig. Static (unlike the live `patience` "N/max" string) —
   // the operator-facing source the fork reconcile dialog defaults against
