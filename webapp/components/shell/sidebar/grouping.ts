@@ -1,30 +1,22 @@
-// Sidebar data model: the campaign → session → fork-tree grouping logic and
-// the collapsed-node persistence codec. Pure — no React; the Sidebar tree-row
+// Sidebar data model: the campaign → fork-tree grouping logic and the
+// collapsed-node persistence codec. Pure — no React; the Sidebar tree-row
 // components own the rendering.
 
 import type { CampaignSummary, CycleListEntry } from "@/lib/api";
 import { rootCycleId } from "@/lib/ids";
 
-// One session in a campaign's forest: its root cycle + every fork / diag /
-// sweep that descends from it.
-export interface SessionGroup {
-  root: CycleListEntry;
-  branches: CycleListEntry[];
-  // Most-recent updated_at across the session's units.
-  updatedAt: string;
-  // Best fitness across the session's whole fork-tree (root + branches) — the
-  // winner often lives in a fork, so this is NOT just the root's number.
-  bestAccuracy: number | null;
-}
-
-// One campaign's row in the tree: the manifest + its N sessions.
+// One campaign's row in the tree: the manifest, its single root cycle, and
+// every fork / diag / sweep that descends from it. A campaign mints exactly
+// one root (`{dataset}__{rand6}` per `new`), so there is no session tier.
 export interface CampaignGroup {
   campaign: CampaignSummary;
-  sessions: SessionGroup[];
-  // Most-recent updated_at across every session — sorts campaigns so the
-  // one being actively worked on stays at the top.
+  root: CycleListEntry;
+  branches: CycleListEntry[];
+  // Most-recent updated_at across every cycle — sorts campaigns so the one
+  // being actively worked on stays at the top.
   updatedAt: string;
-  // Best fitness across every cycle in the campaign forest.
+  // Best fitness across the whole fork-tree (root + branches) — the winner
+  // often lives in a fork, so this is NOT just the root's number.
   bestAccuracy: number | null;
 }
 
@@ -42,16 +34,7 @@ function bestAccuracyOf(entries: CycleListEntry[]): number | null {
   return best;
 }
 
-// Same null-aware max, over already-derived session bests.
-function maxNullable(values: (number | null)[]): number | null {
-  let best: number | null = null;
-  for (const v of values) {
-    if (v != null && (best == null || v > best)) best = v;
-  }
-  return best;
-}
-
-// One node in a session's fork-tree: a unit plus the units forked off it.
+// One node in a campaign's fork-tree: a unit plus the units forked off it.
 export interface UnitNode {
   unit: CycleListEntry;
   children: UnitNode[];
@@ -60,9 +43,9 @@ export interface UnitNode {
 const byUpdatedDesc = (a: CycleListEntry, b: CycleListEntry) =>
   a.updated_at < b.updated_at ? 1 : -1;
 
-// Build a session's fork-tree from `parent_cycle_id`. The root is the
+// Build a campaign's fork-tree from `parent_cycle_id`. The root is the
 // trunk; every branch nests under its parent. A branch whose parent isn't
-// in the session attaches to the root so it can never vanish.
+// in the campaign attaches to the root so it can never vanish.
 export function buildUnitTree(
   root: CycleListEntry,
   branches: CycleListEntry[],
@@ -91,10 +74,12 @@ export function buildUnitTree(
 }
 
 // Build the flat campaign list. Campaigns are the real manifests from
-// `GET /campaigns`; cycles come from `/cycles`, partitioned per campaign
-// into sessions by their family root (`rootCycleId`). A cycle whose
-// campaign isn't in the campaign list is dropped — the registry is the
-// source of truth for what's a campaign.
+// `GET /campaigns`; cycles come from `/cycles`, split per campaign into its
+// root (`rootCycleId(id) === id`) and the siblings that descend from it. A
+// cycle whose campaign isn't in the campaign list is dropped — the registry
+// is the source of truth for what's a campaign. A campaign whose root cycle
+// dir isn't on disk yet can't be navigated, so it's dropped too rather than
+// rendered as a headless branch list.
 export function groupCampaigns(
   campaigns: CampaignSummary[],
   cycles: CycleListEntry[],
@@ -109,57 +94,30 @@ export function groupCampaigns(
   const groups: CampaignGroup[] = [];
   for (const campaign of campaigns) {
     const own = cyclesByCampaign.get(campaign.campaign_id) ?? [];
-    // Partition the campaign's cycles into sessions by family root.
-    const bySession = new Map<
-      string,
-      { root: CycleListEntry | null; branches: CycleListEntry[] }
-    >();
-    for (const cyc of own) {
-      const sr = rootCycleId(cyc.cycle_id);
-      let s = bySession.get(sr);
-      if (!s) {
-        s = { root: null, branches: [] };
-        bySession.set(sr, s);
-      }
-      if (cyc.cycle_id === sr) s.root = cyc;
-      else s.branches.push(cyc);
-    }
-    const sessions: SessionGroup[] = [];
-    for (const s of bySession.values()) {
-      // A session with no root cycle dir on disk can't be navigated —
-      // skip it rather than render a headless branch list.
-      if (!s.root) continue;
-      s.branches.sort(byUpdatedDesc);
-      const updatedAt = [s.root, ...s.branches].reduce(
-        (m, c) => (c.updated_at > m ? c.updated_at : m),
-        s.root.updated_at,
-      );
-      sessions.push({
-        root: s.root,
-        branches: s.branches,
-        updatedAt,
-        bestAccuracy: bestAccuracyOf([s.root, ...s.branches]),
-      });
-    }
-    sessions.sort((a, b) => (a.root.cycle_id < b.root.cycle_id ? -1 : 1));
-    const updatedAt = sessions.reduce(
-      (m, s) => (s.updatedAt > m ? s.updatedAt : m),
-      campaign.created_at,
-    );
+    const root = own.find((cyc) => rootCycleId(cyc.cycle_id) === cyc.cycle_id);
+    if (!root) continue;
+    const branches = own
+      .filter((cyc) => cyc.cycle_id !== root.cycle_id)
+      .sort(byUpdatedDesc);
+    const all = [root, ...branches];
     groups.push({
       campaign,
-      sessions,
-      updatedAt,
-      bestAccuracy: maxNullable(sessions.map((s) => s.bestAccuracy)),
+      root,
+      branches,
+      updatedAt: all.reduce(
+        (m, c) => (c.updated_at > m ? c.updated_at : m),
+        campaign.created_at,
+      ),
+      bestAccuracy: bestAccuracyOf(all),
     });
   }
   groups.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
   return groups;
 }
 
-// We store the COLLAPSED set, not the expanded one — campaigns + sessions
-// default to expanded, so empty storage = "show everything." Keys are
-// prefixed (`cmp:` / `sess:`) so campaign and session ids never collide.
+// We store the COLLAPSED set, not the expanded one — campaigns default to
+// expanded, so empty storage = "show everything." Keys are prefixed (`cmp:`)
+// so they never collide with another node kind.
 export const COLLAPSED_STORAGE_KEY = "promptpotter.sidebar.collapsedNodes";
 export const EMPTY_COLLAPSED: Set<string> = new Set();
 
@@ -171,6 +129,3 @@ export const collapsedCodec = {
     return new Set(Array.isArray(parsed) ? parsed : []);
   },
 };
-
-export const sessKey = (campaignId: string, rootId: string) =>
-  `sess:${campaignId}::${rootId}`;

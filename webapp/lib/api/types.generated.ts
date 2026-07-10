@@ -263,11 +263,11 @@ export interface CampaignSummary {
   dataset_name: string;
   /** Operator-supplied campaign label */
   label: string;
-  /** Status of the campaign's most-recent session */
+  /** Status of the campaign's run (its root cycle) */
   status: string;
   /** ISO 8601 creation timestamp */
   created_at: string;
-  /** The campaign's first session's root cycle id */
+  /** The campaign's root cycle id */
   root_cycle_id: string;
   /** Backend this campaign optimizes against */
   backend_id: string;
@@ -278,8 +278,6 @@ export interface CampaignSummary {
    * config is gone (a campaign outlives its dataset dir); callers treat empty
    * as 'not self-optimizing'. */
   backend_type: string;
-  /** Number of sessions (re-runs of the declaration) in the campaign */
-  session_count: number;
   /** UserId of the operator who minted the campaign */
   owner_user_id: string;
   /** Operator visibility intent: 'active' (default sidebar), 'archived' (hidden),
@@ -296,22 +294,6 @@ export interface CampaignListResponse {
   campaigns: CampaignSummary[];
   /** Total number of campaigns */
   total: number;
-}
-
-/** One session in a campaign's forest — a root cycle + its forks. */
-export interface SessionSummary {
-  /** The session's root cycle id */
-  root_cycle_id: string;
-  /** Session root cycle status */
-  status: string;
-  /** Rounds completed on the session root cycle */
-  n_rounds: number;
-  /** Best round accuracy */
-  best_accuracy: number | null;
-  /** ISO 8601 session creation timestamp */
-  created_at: string;
-  /** ISO 8601 last write */
-  updated_at: string;
 }
 
 export interface FileEntry {

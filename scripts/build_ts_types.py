@@ -51,7 +51,6 @@ from promptpotter.presentation.api.routers.campaigns.lineage import (
 from promptpotter.presentation.api.routers.campaigns.registry import (
     CampaignListResponse,
     CampaignSummary,
-    SessionSummary,
 )
 from promptpotter.presentation.api.routers.datasets import (
     DatasetItem,
@@ -95,7 +94,6 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     # --- campaigns/registry router ---
     CampaignSummary,
     CampaignListResponse,
-    SessionSummary,
     # --- campaigns/files router ---
     FileEntry,
     FilesResponse,

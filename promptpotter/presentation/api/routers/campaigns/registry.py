@@ -35,9 +35,9 @@ class CampaignSummary(BaseModel):
     campaign_id: str = Field(description="Stable campaign id ({dataset}__{origin hash})")
     dataset_name: str = Field(description="Dataset this campaign optimizes")
     label: str = Field(default="", description="Operator-supplied campaign label")
-    status: str = Field(description="Status of the campaign's most-recent session")
+    status: str = Field(description="Status of the campaign's run (its root cycle)")
     created_at: str = Field(description="ISO 8601 creation timestamp")
-    root_cycle_id: str = Field(description="The campaign's first session's root cycle id")
+    root_cycle_id: str = Field(description="The campaign's root cycle id")
     backend_id: str = Field(default="", description="Backend this campaign optimizes against")
     backend_type: str = Field(
         default="",
@@ -48,9 +48,6 @@ class CampaignSummary(BaseModel):
             "variants on it. Empty when the dataset config is gone (a campaign outlives its "
             "dataset dir); callers treat empty as 'not self-optimizing'."
         ),
-    )
-    session_count: int = Field(
-        default=1, description="Number of sessions (re-runs of the declaration) in the campaign"
     )
     owner_user_id: str = Field(
         default="default", description="UserId of the operator who minted the campaign"
@@ -73,25 +70,11 @@ class CampaignListResponse(BaseModel):
     total: int = Field(description="Total number of campaigns")
 
 
-class SessionSummary(BaseModel):
-    """One session in a campaign's forest — a root cycle + its forks."""
-
-    root_cycle_id: str = Field(description="The session's root cycle id")
-    status: str = Field(default="", description="Session root cycle status")
-    n_rounds: int = Field(default=0, description="Rounds completed on the session root cycle")
-    best_accuracy: float | None = Field(default=None, description="Best round accuracy")
-    created_at: str = Field(default="", description="ISO 8601 session creation timestamp")
-    updated_at: str = Field(default="", description="ISO 8601 last write")
-
-
 class CampaignDetailResponse(CampaignSummary):
     root_content_hash: str = Field(
         default="", description="Content hash of the origin search point — the campaign identity"
     )
     config: dict[str, Any] = Field(description="Frozen CampaignConfig snapshot for this campaign")
-    sessions: list[SessionSummary] = Field(
-        description="Every session in the campaign's forest, ordered by root cycle id"
-    )
 
 
 def _backend_type(store: Stores, dataset_name: str, memo: dict[str, str]) -> str:
@@ -102,9 +85,7 @@ def _backend_type(store: Stores, dataset_name: str, memo: dict[str, str]) -> str
     return memo[dataset_name]
 
 
-def _campaign_summary(
-    campaign: Any, session_count: int, status: str, backend_type: str
-) -> CampaignSummary:
+def _campaign_summary(campaign: Any, status: str, backend_type: str) -> CampaignSummary:
     return CampaignSummary(
         campaign_id=campaign.campaign_id,
         dataset_name=campaign.dataset_name,
@@ -114,32 +95,11 @@ def _campaign_summary(
         root_cycle_id=campaign.root_cycle_id,
         backend_id=campaign.backend_id,
         backend_type=backend_type,
-        session_count=session_count,
         owner_user_id=campaign.owner_user_id,
         lifecycle_status=campaign.lifecycle_status,
         lifecycle_changed_at=campaign.lifecycle_changed_at,
         lifecycle_reason=campaign.lifecycle_reason,
     )
-
-
-def _session_summaries(store: Stores, campaign_id: str) -> list[SessionSummary]:
-    """Build the campaign's session list from its root cycles' index.json."""
-    out: list[SessionSummary] = []
-    for e in store.campaigns.enumerate_cycles():
-        if e["campaign_id"] != campaign_id or not e["is_root"]:
-            continue
-        out.append(
-            SessionSummary(
-                root_cycle_id=e["cycle_id"],
-                status=e["status"],
-                n_rounds=e["n_rounds"],
-                best_accuracy=e["best_accuracy"],
-                created_at=e["created_at"],
-                updated_at=e["updated_at"],
-            )
-        )
-    out.sort(key=lambda s: s.root_cycle_id)
-    return out
 
 
 class MechanismToggle(BaseModel):
@@ -246,8 +206,7 @@ def list_campaigns(
         campaigns=[
             _campaign_summary(
                 c,
-                len(store.campaigns.list_sessions(c.campaign_id)),
-                store.campaigns.latest_session_status(c.campaign_id),
+                store.campaigns.run_status(c.campaign_id, c.root_cycle_id),
                 _backend_type(store, c.dataset_name, memo),
             )
             for c in campaigns
@@ -287,30 +246,27 @@ def get_campaign_checkin(store: StoreDep, campaign_id: str) -> dict[str, Any]:
 
 @campaigns_router.get("/campaigns/{campaign_id}", response_model=CampaignDetailResponse)
 def get_campaign(store: StoreDep, campaign_id: str) -> CampaignDetailResponse:
-    """Campaign manifest detail + its session forest. 404 on cross-user reads."""
+    """Campaign manifest detail. 404 on cross-user reads."""
     campaign = store.campaigns.load_campaign(campaign_id)
     # Cross-user reads return 404 (not 403) — existence leakage is itself a
     # violation.
     if campaign is None or campaign.owner_user_id != str(store.identity.user_id):
         raise NotFoundError(f"Campaign not found: {campaign_id}")
-    sessions = _session_summaries(store, campaign_id)
     return CampaignDetailResponse(
         campaign_id=campaign.campaign_id,
         dataset_name=campaign.dataset_name,
         label=campaign.label,
-        status=sessions[-1].status if sessions else "active",
+        status=store.campaigns.run_status(campaign_id, campaign.root_cycle_id),
         created_at=campaign.created_at,
         root_cycle_id=campaign.root_cycle_id,
         backend_id=campaign.backend_id,
         backend_type=_backend_type(store, campaign.dataset_name, {}),
-        session_count=len(sessions) or 1,
         owner_user_id=campaign.owner_user_id,
         lifecycle_status=campaign.lifecycle_status,
         lifecycle_changed_at=campaign.lifecycle_changed_at,
         lifecycle_reason=campaign.lifecycle_reason,
         root_content_hash=campaign.root_content_hash,
         config=campaign.config,
-        sessions=sessions,
     )
 
 

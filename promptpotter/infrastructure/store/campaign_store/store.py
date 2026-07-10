@@ -388,15 +388,12 @@ class CampaignStore:
             out.append(campaign)
         return out
 
-    def latest_session_status(self, campaign_id: str) -> str:
-        """Status of the campaign's most-recent session, derived from its newest
-        root cycle's ``index.json`` — run state is owned per-cycle; ``campaign.json``
-        carries identity/config + lifecycle intent only. ``"active"`` when the
-        campaign has no session yet (check-in)."""
-        roots = self.list_sessions(campaign_id)
-        if not roots:
-            return "active"
-        index = self.load(campaign_id, roots[-1]) or {}
+    def run_status(self, campaign_id: str, root_cycle_id: str) -> str:
+        """Status of the campaign's run, read off its root cycle's ``index.json`` —
+        run state is owned per-cycle; ``campaign.json`` carries identity/config +
+        lifecycle intent only. ``"active"`` when the cycle has no index yet
+        (check-in). A campaign mints exactly one root cycle, so this is *the* run."""
+        index = self.load(campaign_id, root_cycle_id) or {}
         return str(index.get("status") or "active")
 
     def _is_active_campaign(self, campaign_id: str) -> bool:
@@ -501,17 +498,6 @@ class CampaignStore:
                 if inner_dir.exists():
                     _rmtree_robust(inner_dir)
         return True
-
-    def list_sessions(self, campaign_id: str) -> list[str]:
-        """Session-root cycle ids in the campaign tree, ordered by id."""
-        cycles_dir = self.campaign_root_dir(campaign_id) / "cycles"
-        if not cycles_dir.exists():
-            return []
-        return sorted(
-            p.name
-            for p in cycles_dir.iterdir()
-            if p.is_dir() and (p / "index.json").is_file() and root_cycle_id(p.name) == p.name
-        )
 
     # ------------------------------------------------------------------
     # Per-cycle ``index.json`` CRUD — create, update, rewind, enumerate

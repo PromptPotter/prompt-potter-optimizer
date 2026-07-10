@@ -36,7 +36,6 @@ export type {
   RoundSummary,
   RoundSummaryCandidate,
   SampleSeries,
-  SessionSummary,
   SpendBucket,
   SpendRollup,
 } from "./types.generated";

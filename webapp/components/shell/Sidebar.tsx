@@ -4,7 +4,6 @@ import { useWorkspace } from "@/lib/workspace";
 import { useAuth } from "@/lib/auth-context";
 import { postLogout } from "@/lib/api";
 import { BRAND } from "@/lib/brand";
-import { rootCycleId } from "@/lib/ids";
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { TERMS } from "@/lib/terms";
 import {
@@ -12,7 +11,6 @@ import {
   EMPTY_COLLAPSED,
   collapsedCodec,
   groupCampaigns,
-  sessKey,
 } from "./sidebar/grouping";
 import { SidebarContent } from "./SidebarContent";
 
@@ -100,26 +98,25 @@ export function Sidebar({ onSelectCycle, onNewCycle, collapsed, onToggleCollapse
     [allGroups, datasetFilter],
   );
 
-  // Auto-expand the campaign + session containing the viewed/active cycle
-  // — "where am I?" should be visible without a click. We never
-  // auto-collapse; explicit collapse beats helpfulness.
-  const focusKeys = useMemo(() => {
+  // Auto-expand the campaign containing the viewed/active cycle — "where am
+  // I?" should be visible without a click. We never auto-collapse; explicit
+  // collapse beats helpfulness.
+  const focusKey = useMemo(() => {
     const cmpId = campaignId ?? activeCampaignId;
     const cyId = cycleId ?? activeCycleId;
     if (!cmpId || !cyId) return null;
-    return { cmp: `cmp:${cmpId}`, sess: sessKey(cmpId, rootCycleId(cyId)) };
+    return `cmp:${cmpId}`;
   }, [campaignId, activeCampaignId, cycleId, activeCycleId]);
 
   useEffect(() => {
-    if (!focusKeys) return;
+    if (!focusKey) return;
     setCollapsedNodes((prev) => {
-      if (!prev.has(focusKeys.cmp) && !prev.has(focusKeys.sess)) return prev;
+      if (!prev.has(focusKey)) return prev;
       const next = new Set(prev);
-      next.delete(focusKeys.cmp);
-      next.delete(focusKeys.sess);
+      next.delete(focusKey);
       return next;
     });
-  }, [focusKeys, setCollapsedNodes]);
+  }, [focusKey, setCollapsedNodes]);
 
   const toggleNode = useCallback(
     (key: string) => {

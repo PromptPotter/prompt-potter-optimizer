@@ -495,13 +495,13 @@ export function fetchStorageByDataset(
 }
 
 // Campaign manifest detail — adds `config` (frozen CampaignConfig snapshot) +
-// the session forest to the summary. The MechanismsPanel reads the active
+// `root_content_hash` to the summary. The MechanismsPanel reads the active
 // toggle states off `config.optimization.mechanisms`.
 export interface CampaignDetailResponse {
   campaign_id: string;
   dataset_name: string;
   config: Record<string, unknown>;
-  // …plus every CampaignSummary field + `sessions`; only `config` is consumed here.
+  // …plus every CampaignSummary field; only `config` is consumed here.
 }
 export function fetchCampaignDetail(
   campaignId: string,
