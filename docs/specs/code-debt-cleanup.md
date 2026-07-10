@@ -23,7 +23,11 @@ shape was the old bloat source; readiness buckets replaced it.
 
 ## Ready — no blocker, pick up cold
 
-*(empty — every entry from the 2026-07-03 pass landed or was reclassified; `git log` has what shipped)*
+**Do soon, not now** (surfaced by the 2026-07-10 drift pass; the six fields with *no* reader at all were already deleted):
+
+- **Three wire fields whose only reader is the OpenAPI spec** — `OriginDegraded.repair_attempts` (`m12-api-openapi.yaml:2627`, inside `required`), `ReplaceDatasetResponse.versioned_to` (`:2792`, inside `required`), `OriginLastResolution.findings` + its nested `confidence` (`:2619-2620`). Each is written and serialized; nothing in `promptpotter/` or `webapp/` reads the key back. Deleting them is **spec surgery, not code cleanup** — two sit in `required:` arrays, so the schema must move in the same commit. Verify the `required` arrays before touching. Related: the webapp discards the whole `ReplaceDatasetResponse` (`useIngestFlow.ts:447` calls `postReplaceDataset` without assigning), so `repointed_campaigns` / `restamped_measurements` cross the wire for a Python logger + migration marker only.
+- **52 `export`s re-exported through `export *` barrels** — `lib/api`, `lib/types`, `lib/derivations`, `components/ui`, `components/workflow`. They look local-only to a naive grep; stripping `export` silently narrows each barrel's public surface. The 37 genuinely file-local ones already landed. Action: decide per barrel whether the symbol is meant to be public, then strip or keep — don't script it blind.
+- **Post-flip copilot — deferred on purpose, not forgotten.** The `checkin` node consulting in run mode and raising `pause-cycle` / `change-spend-budget` / `fork-cycle` instead of draft patches. `RaisedCommand` (`datasets/origin_resolve.py`) is already general enough to carry it. Not debt and not now: it is a **new feature**, and the closing-phase directive is no new features until `promptpotter-self` is distributable. Lands with L4, so it belongs to [`l4-outer-loop.md`](l4-outer-loop.md) when it does.
 
 ## Blocked — named blocker
 
