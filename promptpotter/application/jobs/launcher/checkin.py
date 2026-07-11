@@ -46,7 +46,10 @@ from promptpotter.application.jobs.launcher.core import (
 )
 from promptpotter.application.jobs.mint import resolve_cycle_plan
 from promptpotter.application.jobs.quota import check_launch_quotas, effective_spend_cap_usd
-from promptpotter.application.optimization.task_context import load_or_build_task_context
+from promptpotter.application.optimization.task_context import (
+    checkin_call_context,
+    load_or_build_task_context,
+)
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.run_records import CycleSeed
 from promptpotter.infrastructure.store import Stores
@@ -218,7 +221,11 @@ async def prepare_checkin_run(
             CycleSeed(origin_prompt_fields=origin_override, origin_source="campaign_origin"),
         )
 
-    task_context = await load_or_build_task_context(session.dataset_config_dir)
+    task_context = await load_or_build_task_context(
+        session.dataset_config_dir,
+        campaign_id=campaign_id,
+        context=checkin_call_context(stores, campaign_id, cycle_id),
+    )
     return PreparedCheckinRun(
         session=session,
         campaign_config=campaign_config,

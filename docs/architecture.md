@@ -462,11 +462,16 @@ silent additions.
 calls and backend matches emit structured events in
 **Langfuse-compatible shape** (spans / traces / metadata) — wrapped
 via the `observed_node()` context manager. Every optimizer LLM call
-site (`l1_generate`, `l1_critique`, `l2_context`, `l3_plan`) is
-wrapped. Events serialize to local JSONL under
-`langfuse/events.jsonl` (verified path:
-`infrastructure/tracing/file_sink.py:67`) — no Langfuse instance, no
-MLflow server, no external dependency required.
+site is wrapped — all **five** registered nodes (`l1_generate`,
+`l1_critique`, `l2_context`, `l3_plan`, `checkin`), not just the four
+loop layers: `checkin` runs *around* the loop in both its modes
+(`task_context.py::decompose_prompt_fields` for CLI `new`,
+`origin_resolve.py::resolve_origin_turn` for web ingest), and each
+binds a cycle ledger so the call is billed to the campaign it seeds.
+An enumeration that stops at the loop layers is how an unwrapped,
+unbilled call gets written. Events serialize to local JSONL under
+`langfuse/events.jsonl` (`infrastructure/tracing/file_sink.py::_log_event`)
+— no Langfuse instance, no MLflow server, no external dependency required.
 
 **A nexus to the operator's existing observability stack — a core
 capability, not a stub.** Many teams already run an observability

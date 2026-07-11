@@ -249,22 +249,31 @@ async def _checkin_task(
     ``sweep`` read it back; no second check-in call recomputes what ingest already
     decomposed."""
     from promptpotter.application.optimization.task_context import (
+        checkin_call_context,
         decompose_prompt_fields,
         load_or_build_task_context,
     )
     from promptpotter.domain.search_point import TaskDecomposition
+
+    # The campaign + root cycle are already minted (`_mint_fresh_session` /
+    # `_ingest_and_prepare_checkin` run first), so the decomposition bills the
+    # campaign it seeds rather than going unrecorded.
+    campaign_id = session.campaign_id
+    context = checkin_call_context(session.store, campaign_id, session.state.cycle_id or "")
 
     if task_file:
         override: str | None = Path(task_file).read_text(encoding="utf-8")
     else:
         override = task_text
     if override:
-        result = await decompose_prompt_fields(override)
+        result = await decompose_prompt_fields(override, campaign_id=campaign_id, context=context)
         tc_dict = dict(result.get("task_context") or {})
         tc_dict["raw_description"] = override
         task_context = TaskDecomposition.from_dict(tc_dict)
     else:
-        task_context = await load_or_build_task_context(session.dataset_config_dir)
+        task_context = await load_or_build_task_context(
+            session.dataset_config_dir, campaign_id=campaign_id, context=context
+        )
 
     if not task_context:
         checkin_line("task check-in", "no task description — skipped")

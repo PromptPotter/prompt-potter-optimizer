@@ -627,7 +627,10 @@ async def _run_inner_campaign(
         set_optimizer_config_overrides,
         set_optimizer_prompt_overrides,
     )
-    from promptpotter.application.optimization.task_context import load_or_build_task_context
+    from promptpotter.application.optimization.task_context import (
+        checkin_call_context,
+        load_or_build_task_context,
+    )
     from promptpotter.application.run_observers import build_run_observers
     from promptpotter.application.runner import RunMode, run_optimization
     from promptpotter.infrastructure.store import build_stores
@@ -751,7 +754,13 @@ async def _run_inner_campaign(
         cycle_dir_box["dir"] = session.store.campaigns.cycle_dir(
             session.campaign_id, session.state.cycle_id
         )
-    task_context = await load_or_build_task_context(session.dataset_config_dir)
+    task_context = await load_or_build_task_context(
+        session.dataset_config_dir,
+        campaign_id=session.campaign_id,
+        context=checkin_call_context(
+            session.store, session.campaign_id, session.state.cycle_id or ""
+        ),
+    )
     observers = build_run_observers(
         session=session,
         campaign_config=campaign_config,

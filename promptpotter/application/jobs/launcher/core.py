@@ -49,7 +49,10 @@ from promptpotter.application.jobs.quota import (
     effective_spend_cap_usd,
 )
 from promptpotter.application.jobs.registry import Job, JobRegistry, JobStatus, ReserveResult
-from promptpotter.application.optimization.task_context import load_or_build_task_context
+from promptpotter.application.optimization.task_context import (
+    checkin_call_context,
+    load_or_build_task_context,
+)
 from promptpotter.application.runner.entry import RunMode, run_optimization
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
@@ -283,7 +286,11 @@ async def mint_campaign_command(
         # ``task_description.md`` once on first sight. No second LLM call once the
         # file exists; the web mint path previously ran with EMPTY framing.
         _t_framing0 = time.perf_counter()
-        task_context = await load_or_build_task_context(session.dataset_config_dir)
+        task_context = await load_or_build_task_context(
+            session.dataset_config_dir,
+            campaign_id=campaign_id,
+            context=checkin_call_context(stores, campaign_id, cycle_id),
+        )
         logger.info(
             "mint-timing[%s]: task_context=%.2fs (total pre-202=%.2fs)",
             dataset_name,
@@ -454,7 +461,11 @@ async def start_run_command(
         train_data = session.samples or []
         configure_and_apply_pipeline(session, campaign_config, log=lambda *_a, **_k: None)
         _t_framing0 = time.perf_counter()
-        task_context = await load_or_build_task_context(session.dataset_config_dir)
+        task_context = await load_or_build_task_context(
+            session.dataset_config_dir,
+            campaign_id=campaign_id,
+            context=checkin_call_context(stores, campaign_id, cycle_id),
+        )
         logger.info(
             "start-timing[%s]: task_context=%.2fs (total pre-202=%.2fs)",
             dataset_name,

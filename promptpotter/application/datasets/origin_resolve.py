@@ -44,11 +44,10 @@ from promptpotter.application.optimization.dispatch.llm_call import (
     run_optimizer_node,
 )
 from promptpotter.application.optimization.dispatch.schemas import CheckinOutput
+from promptpotter.application.optimization.task_context import checkin_call_context
 from promptpotter.application.scoring.formula.matchers import extraction_note_for_scoring
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
-from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.origin_provenance import Provenance
-from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.models import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.tracing import observed_node
@@ -178,18 +177,17 @@ def build_origin_consultation(draft: DraftCampaign, message: str | None = None) 
     return user_content, consultation_instruction
 
 
-def _checkin_cycle_ledger(stores: Stores, campaign_id: str) -> CycleEventLog:
-    """The check-in campaign's own cycle ledger — the resolver turn's audit home.
+def _checkin_call_context(stores: Stores, campaign_id: str) -> LLMCallContext:
+    """The resolver turn's audit home — the check-in campaign's own cycle ledger.
 
     ``draft_id`` IS the ``campaign_id`` (re-keyed at ``create_checkin_campaign``),
     and the campaign's ``root_cycle_id`` is the ``cycle_chk_*`` minted alongside it.
+    Both check-in modes bill through the one :func:`checkin_call_context`.
     """
     campaign = stores.campaigns.load_campaign(campaign_id)
     if campaign is None:
         raise ValueError(f"check-in campaign {campaign_id!r} not found — cannot resolve its origin")
-    return CycleEventLog.open(
-        CycleDir(stores.campaigns.cycle_dir(campaign_id, campaign.root_cycle_id))
-    )
+    return checkin_call_context(stores, campaign_id, campaign.root_cycle_id)
 
 
 async def resolve_origin_turn(
@@ -207,8 +205,11 @@ async def resolve_origin_turn(
 
     # Bound here as well as in `CommandDispatcher` so the CLI path (`new <file>`,
     # no dispatcher) files its spend on the same cycle the web path does.
-    ledger = _checkin_cycle_ledger(stores, draft.draft_id)
-    token = set_cycle_ledger(ledger)
+    # The consultation is deterministic (no timestamps, no ids), so an unchanged turn
+    # replays free off `archive/optimizer_calls/`; a schema or meta-prompt edit changes
+    # `hash_call` and correctly misses.
+    context = _checkin_call_context(stores, draft.draft_id)
+    token = set_cycle_ledger(context.ledger)
     try:
         async with observed_node(
             "origin_checkin",
@@ -221,10 +222,7 @@ async def resolve_origin_turn(
                 template_name="checkin",
                 prompt_vars={"consultation_instruction": consultation_instruction},
                 user_content=user_content,
-                # The consultation is deterministic (no timestamps, no ids), so an
-                # unchanged turn replays free off `archive/optimizer_calls/`; a schema
-                # or meta-prompt edit changes `hash_call` and correctly misses.
-                context=LLMCallContext(ledger=ledger, round_num=0, cache=stores.optimizer_calls),
+                context=context,
             )
     finally:
         reset_cycle_ledger(token)

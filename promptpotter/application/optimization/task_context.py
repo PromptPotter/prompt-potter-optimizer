@@ -5,6 +5,12 @@ The web ingest path writes that file at commit (from the check-in it already ran
 :func:`load_or_build_task_context` is the single run-start seam that reads it — or
 decomposes a repo benchmark's ``task_description.md`` once on first sight. No second
 check-in call recomputes what ingest already produced.
+
+The call bills the campaign it seeds. :func:`checkin_call_context` names that cycle,
+and *context* is required at both seams precisely so no caller can reach the LLM
+without one: this decomposition ran unbilled and untraced — the ledger binds
+``_CYCLE_LEDGER`` (token/cost, via ``emit_token_usage``) *and* rides ``context``
+(the audit ``LLMCallRecord``), which are two channels, not one.
 """
 
 from __future__ import annotations
@@ -13,22 +19,45 @@ import json
 from pathlib import Path
 from typing import Any
 
-from promptpotter.application.optimization.dispatch.llm_call import run_optimizer_node
+from promptpotter.application.optimization.dispatch.llm_call import (
+    LLMCallContext,
+    run_optimizer_node,
+)
 from promptpotter.application.optimization.dispatch.schemas import CheckinOutput
+from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.llm.models import reset_cycle_ledger, set_cycle_ledger
+from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.io import (
     read_json_optional,
     read_text_optional,
     write_json,
 )
+from promptpotter.infrastructure.tracing import observed_node
 
 __all__ = [
+    "checkin_call_context",
     "decompose_prompt_fields",
     "load_or_build_task_context",
 ]
 
 
-async def decompose_prompt_fields(context_input: Any) -> dict[str, Any]:
+def checkin_call_context(stores: Stores, campaign_id: str, cycle_id: str) -> LLMCallContext:
+    """The check-in call's audit home — the seeded campaign's own cycle ledger.
+
+    The cache is what makes an unchanged decomposition free on replay; omitting it
+    silently re-spends (see :class:`LLMCallContext`)."""
+    return LLMCallContext(
+        ledger=CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(campaign_id, cycle_id))),
+        round_num=0,
+        cache=stores.optimizer_calls,
+    )
+
+
+async def decompose_prompt_fields(
+    context_input: Any, *, campaign_id: str, context: LLMCallContext
+) -> dict[str, Any]:
     """LLM check-in: raw context → Layer 1 prompt fields + task_context sub-dict.
 
     Provider + model come from the ``checkin`` optimizer node config
@@ -51,11 +80,24 @@ async def decompose_prompt_fields(context_input: Any) -> dict[str, Any]:
         "fields that don't apply. Be concise and actionable."
     )
 
-    result, _, _ = await run_optimizer_node(
-        template_name="checkin",
-        prompt_vars={"consultation_instruction": consultation_instruction},
-        user_content=user_content,
-    )
+    token = set_cycle_ledger(context.ledger)
+    try:
+        async with observed_node(
+            "checkin",
+            "llm/meta",
+            obs=None,
+            campaign_id=campaign_id,
+            round_num=0,
+        ):
+            result, _, _ = await run_optimizer_node(
+                template_name="checkin",
+                prompt_vars={"consultation_instruction": consultation_instruction},
+                user_content=user_content,
+                context=context,
+            )
+    finally:
+        reset_cycle_ledger(token)
+
     assert isinstance(result, CheckinOutput), (
         f"checkin must return CheckinOutput, got {type(result).__name__}"
     )
@@ -67,6 +109,9 @@ async def decompose_prompt_fields(context_input: Any) -> dict[str, Any]:
 
 async def load_or_build_task_context(
     dataset_config_dir: Path | None,
+    *,
+    campaign_id: str,
+    context: LLMCallContext,
 ) -> TaskDecomposition:
     """Run-start task framing — read the committed ``{dir}/task_context.json``, or
     decompose ``task_description.md`` once on first sight and persist it.
@@ -86,7 +131,9 @@ async def load_or_build_task_context(
     task_description = read_text_optional(dataset_config_dir / "task_description.md")
     if not task_description:
         return TaskDecomposition()
-    result = await decompose_prompt_fields(task_description)
+    result = await decompose_prompt_fields(
+        task_description, campaign_id=campaign_id, context=context
+    )
     tc_dict = dict(result["task_context"])
     tc_dict["raw_description"] = task_description
     task_context = TaskDecomposition.from_dict(tc_dict)
