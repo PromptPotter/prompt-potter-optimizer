@@ -85,8 +85,8 @@ export function liveObserveConfig(
   nodeId?: string | null,
 ): ObserveConfig | null {
   const candidates = liveL1InputCandidates(dash);
-  if (candidates.length === 0) return null;
   let latest = candidates[0];
+  if (!latest) return null;
   for (const c of candidates) {
     if (Number(c.idx ?? -1) > Number(latest.idx ?? -1)) latest = c;
   }
@@ -117,6 +117,6 @@ export function candidateObserveConfig(
 ): ObserveConfig | null {
   const scores = doc?.candidate_scores;
   if (!Array.isArray(scores) || !candidateId) return null;
-  const row = (scores as LiveInputCandidate[]).find((c) => c && c.candidate_id === candidateId);
+  const row = (scores as LiveInputCandidate[]).find((c) => c.candidate_id === candidateId);
   return rowConfig(row, label, nodeId);
 }

@@ -197,7 +197,8 @@ export function HardSamplesTable({
           >
             {virtualRows.map((vrow) => {
               const idx = vrow.index;
-              const item = byId.get(sortedIds[idx]);
+              const sampleId = sortedIds[idx];
+              const item = sampleId === undefined ? undefined : byId.get(sampleId);
               if (!item) return null;
               const meas = stablePerSample?.get(item.sample_id) ?? [];
               const byOrd = byOrdBySample.get(item.sample_id) ?? EMPTY_BY_ORD;
@@ -210,7 +211,7 @@ export function HardSamplesTable({
               const isRunning =
                 isLive &&
                 dash?.state === "scoring" &&
-                typeof dash?.current_sample_id === "number" &&
+                typeof dash.current_sample_id === "number" &&
                 item.sample_id === dash.current_sample_id;
               return (
                 <div
@@ -273,7 +274,7 @@ export function HardSamplesTable({
                             ? (e) => {
                                 if (e.key === "Enter" || e.key === " ") {
                                   e.preventDefault();
-                                  onClick?.();
+                                  onClick();
                                 }
                               }
                             : undefined

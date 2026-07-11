@@ -138,7 +138,7 @@ export function LimitReconcile({
         />
         <small className="limit-note">
           {typeof rl?.token_budget === "number"
-            ? `parent cap ${fmtTokens(rl?.token_budget)} — blank inherits`
+            ? `parent cap ${fmtTokens(rl.token_budget)} — blank inherits`
             : "parent uncapped — leave blank to inherit"}
         </small>
       </label>

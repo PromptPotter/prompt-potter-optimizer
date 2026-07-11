@@ -134,7 +134,7 @@ function PipelineSetupInner({
             <NodeSurface
               node={llmNode}
               point={searchPoint(draft.origin_prompt_fields, draft.pipeline_overlay)}
-              configSeed={(draft.pipeline_overlay ?? {}) as Record<string, unknown>}
+              configSeed={draft.pipeline_overlay}
               schema={cv.nodeConfigSchema}
               outputSchema={cv.nodeOutputSchema}
               mode="search-space"

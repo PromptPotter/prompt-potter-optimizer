@@ -36,6 +36,11 @@ const PALETTE = [
   "#0d9488",
 ];
 
+// Rank → colour, wrapping the palette. The modulo keeps the index in range.
+function colorAt(rank: number): string {
+  return PALETTE[rank % PALETTE.length]!;
+}
+
 const R = 26;
 const STROKE = 11;
 const C = 2 * Math.PI * R;
@@ -44,18 +49,21 @@ function Cake({
   label,
   field,
   datasets,
-  colors,
 }: {
   label: string;
   field: keyof DatasetStorageEntry;
   datasets: DatasetStorageEntry[];
-  colors: string[];
 }) {
-  const vals = datasets.map((d) => Number(d[field]) || 0);
-  const total = vals.reduce((a, b) => a + b, 0);
+  const total = datasets.reduce((a, d) => a + (Number(d[field]) || 0), 0);
   const denom = total || 1;
-  const segs = vals.map((v) => (v / denom) * C);
-  const offsets = segs.map((_, i) => segs.slice(0, i).reduce((a, b) => a + b, 0));
+  const arcs = datasets.map((d, i) => {
+    const value = Number(d[field]) || 0;
+    return { name: d.dataset_name, value, seg: (value / denom) * C, color: colorAt(i) };
+  });
+  const slices = arcs.map((a, i) => ({
+    ...a,
+    offset: arcs.slice(0, i).reduce((sum, x) => sum + x.seg, 0),
+  }));
   return (
     <figure className="cake">
       <svg viewBox="0 0 72 72" className="cake-svg" role="img" aria-label={`${label} by dataset`}>
@@ -67,20 +75,20 @@ function Cake({
           stroke="var(--color-background-secondary)"
           strokeWidth={STROKE}
         />
-        {datasets.map((d, i) => (
+        {slices.map((s) => (
           <circle
-            key={d.dataset_name}
+            key={s.name}
             cx="36"
             cy="36"
             r={R}
             fill="none"
-            stroke={colors[i]}
+            stroke={s.color}
             strokeWidth={STROKE}
-            strokeDasharray={`${segs[i]} ${C - segs[i]}`}
-            strokeDashoffset={-offsets[i]}
+            strokeDasharray={`${s.seg} ${C - s.seg}`}
+            strokeDashoffset={-s.offset}
             transform="rotate(-90 36 36)"
           >
-            <title>{`${d.dataset_name}: ${fmtBytes(vals[i])}`}</title>
+            <title>{`${s.name}: ${fmtBytes(s.value)}`}</title>
           </circle>
         ))}
         <text x="36" y="34" className="cake-cat" textAnchor="middle">
@@ -98,10 +106,9 @@ export function StorageCakes() {
   const { data, error } = useFetch((signal) => fetchStorageByDataset(signal), []);
   if (error || !data || data.datasets.length === 0) return null;
 
-  // Backend returns datasets fattest-first; pin colours by that rank so a dataset
-  // is the same hue in every cake.
+  // Backend returns datasets fattest-first; `colorAt` pins the hue to that rank
+  // so a dataset is the same colour in every cake.
   const datasets = data.datasets;
-  const colors = datasets.map((_, i) => PALETTE[i % PALETTE.length]);
 
   return (
     <div className="card cakes-card">
@@ -110,7 +117,7 @@ export function StorageCakes() {
         <ul className="cakes-legend">
           {datasets.map((d, i) => (
             <li key={d.dataset_name} title={d.dataset_name}>
-              <span className="cakes-swatch" style={{ background: colors[i] }} aria-hidden="true" />
+              <span className="cakes-swatch" style={{ background: colorAt(i) }} aria-hidden="true" />
               {d.dataset_name}
             </li>
           ))}
@@ -118,13 +125,7 @@ export function StorageCakes() {
       </div>
       <div className="cakes-row">
         {CATEGORIES.map((cat) => (
-          <Cake
-            key={cat.key}
-            label={cat.label}
-            field={cat.key}
-            datasets={datasets}
-            colors={colors}
-          />
+          <Cake key={cat.key} label={cat.label} field={cat.key} datasets={datasets} />
         ))}
       </div>
     </div>

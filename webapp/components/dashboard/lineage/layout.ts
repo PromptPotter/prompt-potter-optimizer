@@ -70,8 +70,7 @@ const EMPTY_DETAIL: CycleDetail = { rounds: [] };
 // The round's elected winner (or first candidate as a fallback) — the node a
 // fork anchors to and the parent of the next round's fan.
 function pickWinner(candidates: LaneCandidate[]): LaneCandidate | null {
-  if (candidates.length === 0) return null;
-  return candidates.find((c) => c.isWinner) ?? candidates[0];
+  return candidates.find((c) => c.isWinner) ?? candidates[0] ?? null;
 }
 
 // Rows an expanded lane occupies — the widest round's candidate count, floored
@@ -252,7 +251,7 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
   for (const l of layouts.values()) {
     const offset = l.cycle.round_column_offset;
     const rounds = [...l.detail.rounds].sort((a, b) => a.round - b.round);
-    const lastRound = rounds.length > 0 ? rounds[rounds.length - 1].round : 0;
+    const lastRound = rounds.at(-1)?.round ?? 0;
     const colX = (round: number): number => LEFT_PAD + (offset + round) * COL_W;
 
     if (!l.expanded) {
@@ -331,6 +330,7 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
       const winner = pickWinner(r.candidates);
       const winnerNode =
         roundNodes.find((nn) => nn.candidateId === winner?.candidateId) ?? roundNodes[0];
+      if (!winnerNode) continue;
       spineByCycleRound.set(`${l.cycle.cycle_id}::r${r.round}`, winnerNode);
       if (r.round === lastRound) winnerNode.isLastInLane = true;
       parent = { x: winnerNode.x, y: winnerNode.y };

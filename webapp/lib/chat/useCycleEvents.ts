@@ -106,7 +106,7 @@ export function useCycleEvents(path: CyclePath | null): CycleEventsState {
         return;
       }
       if (env.kind === "stream_snapshot") {
-        setSummaries(snapshotToActivity(env.payload ?? {}));
+        setSummaries(snapshotToActivity(env.payload));
         setTrail([]);
         setProgress(null);
         return;

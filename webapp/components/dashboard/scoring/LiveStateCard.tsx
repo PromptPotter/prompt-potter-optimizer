@@ -66,8 +66,8 @@ export function LiveStateCard() {
       items.push(["origin_acc", origin]);
       seen.add("origin_acc");
     }
-    const round0 = dash.rounds?.find((r) => r.round === 0);
-    const originSamples = round0?.candidates?.[0]?.scored_samples;
+    const round0 = dash.rounds.find((r) => r.round === 0);
+    const originSamples = round0?.candidates[0]?.scored_samples;
     if (typeof originSamples === "number") {
       items.push(["origin_samples", originSamples]);
       seen.add("origin_samples");

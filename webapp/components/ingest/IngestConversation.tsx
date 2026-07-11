@@ -182,7 +182,7 @@ export function IngestConversation({
         onDrop={(e) => {
           e.preventDefault();
           setDragging(false);
-          const f = e.dataTransfer.files?.[0];
+          const f = e.dataTransfer.files[0];
           if (f) flow.onDatasetFile(f);
         }}
       >

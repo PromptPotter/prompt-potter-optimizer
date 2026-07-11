@@ -48,7 +48,7 @@ export function InnerCampaignRows({
           c.campaign_id === activeInnerCampaignId && c.cycle_id === activeInnerCycleId;
         const selected =
           viewedLeaf?.campaignId === c.campaign_id &&
-          viewedLeaf?.cycleId === c.cycle_id;
+          viewedLeaf.cycleId === c.cycle_id;
         const statusLabel =
           !isLive && c.run_phase === "terminal"
             ? runPhaseLabel(c.run_phase, c.status)

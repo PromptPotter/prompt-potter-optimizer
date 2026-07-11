@@ -39,7 +39,7 @@ export function useEffectiveRound(): EffectiveRound {
   );
   // A frozen/completed cycle has no live round yet carries completed rounds —
   // fall to the latest (axis is ascending) so surfaces don't blank.
-  const lastCompleted = completed.length ? completed[completed.length - 1] : null;
+  const lastCompleted = completed.at(-1) ?? null;
   return {
     round: selectedRound ?? liveRound ?? lastCompleted,
     isLiveView:

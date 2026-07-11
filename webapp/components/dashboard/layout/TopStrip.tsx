@@ -25,16 +25,16 @@ interface QpsState {
 
 function parseProgress(raw: string | undefined): { cur: number; tot: number } | null {
   if (!raw) return null;
-  const m = String(raw).match(/^(\d+)\/(\d+)$/);
-  if (!m) return null;
-  return { cur: parseInt(m[1], 10), tot: parseInt(m[2], 10) };
+  const [, cur, tot] = String(raw).match(/^(\d+)\/(\d+)$/) ?? [];
+  if (cur === undefined || tot === undefined) return null;
+  return { cur: parseInt(cur, 10), tot: parseInt(tot, 10) };
 }
 
 // Rolling qps — EMA over the n/total progress string.
 function estimateQps(state: QpsState, dash: DashboardSnapshot | null): number | null {
-  const m = String((dash as { query?: string } | null)?.query || "").match(/^(\d+)\/(\d+)$/);
-  if (!m) return state.qps;
-  const q = parseInt(m[1], 10);
+  const prog = parseProgress((dash as { query?: string } | null)?.query);
+  if (!prog) return state.qps;
+  const q = prog.cur;
   const now = Date.now();
   if (state.lastQ != null && state.lastT != null && q >= state.lastQ) {
     const dq = q - state.lastQ;
@@ -57,15 +57,17 @@ export const TopStrip = memo(function TopStrip() {
   // Sparkline: running-best composite over rounds, read from the
   // dashboard's per-round summary block.
   const spark = useMemo(() => {
-    const { points, best: ys } = fitnessTrend(dash?.rounds);
-    if (points.length < 2) return null;
+    const { best: ys } = fitnessTrend(dash?.rounds);
+    if (ys.length < 2) return null;
     const W = 120;
     const H = 26;
-    const xs = points.map((_, i) => (i / (points.length - 1)) * W);
     const maxY = Math.max(...ys, 0.01);
+    const toX = (i: number) => (i / (ys.length - 1)) * W;
     const toY = (v: number) => H - 2 - (v / maxY) * (H - 4);
-    const path = xs.map((x, i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${toY(ys[i]).toFixed(1)}`).join("");
-    const area = `${path} L${xs[xs.length - 1].toFixed(1)},${H} L0,${H} Z`;
+    const path = ys
+      .map((y, i) => `${i === 0 ? "M" : "L"}${toX(i).toFixed(1)},${toY(y).toFixed(1)}`)
+      .join("");
+    const area = `${path} L${W},${H} L0,${H} Z`;
     return { path, area, W, H };
   }, [dash?.rounds]);
 
@@ -102,7 +104,7 @@ export const TopStrip = memo(function TopStrip() {
   // from the two orthogonal signals (server `run_phase` + this connection's
   // `isLive`), never a client-synthesized "detached" phase value (I6).
   // A clean terminal (target hit / max rounds, no error record) stays green.
-  const phaseErr = dash?.run_phase === "terminal" && !!dash?.error;
+  const phaseErr = dash?.run_phase === "terminal" && !!dash.error;
   const phaseWarn = dash?.run_phase === "running" && !isLive;
 
   return (

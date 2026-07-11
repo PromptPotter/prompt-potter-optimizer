@@ -56,9 +56,9 @@ describe("degradedRoundNotices", () => {
       ]),
     );
     expect(out).toHaveLength(1);
-    expect(out[0].round).toBe(2);
-    expect(out[0].detail).toContain("web_search");
-    expect(out[0].detail).toContain("25%");
+    expect(out[0]!.round).toBe(2);
+    expect(out[0]!.detail).toContain("web_search");
+    expect(out[0]!.detail).toContain("25%");
   });
 
   it("phrases the under-probed (untested) origin distinctly and sorts by round", () => {
@@ -69,6 +69,6 @@ describe("degradedRoundNotices", () => {
       ]),
     );
     expect(out.map((d) => d.round)).toEqual([0, 2]);
-    expect(out[0].detail).toContain("under-probed");
+    expect(out[0]!.detail).toContain("under-probed");
   });
 });

@@ -110,7 +110,7 @@ interface L1ScoreInput {
 const NO_CANDIDATES: LiveCandidate[] = Object.freeze([] as LiveCandidate[]) as LiveCandidate[];
 
 export function liveL1Candidates(dash: DashboardSnapshot | null): LiveCandidate[] {
-  const nodes = dash?.current_round?.nodes;
+  const nodes = dash?.current_round.nodes;
   if (!nodes || typeof nodes !== "object") return NO_CANDIDATES;
   const l1 = (nodes as Record<string, { output?: L1ScoreOutput }>).l1_score;
   return l1?.output?.candidates ?? NO_CANDIDATES;
@@ -125,7 +125,7 @@ const NO_INPUT_CANDIDATES: LiveInputCandidate[] = Object.freeze(
 export function liveL1InputCandidates(
   dash: DashboardSnapshot | null,
 ): LiveInputCandidate[] {
-  const nodes = dash?.current_round?.nodes;
+  const nodes = dash?.current_round.nodes;
   if (!nodes || typeof nodes !== "object") return NO_INPUT_CANDIDATES;
   const l1 = (nodes as Record<string, { input?: L1ScoreInput }>).l1_score;
   return l1?.input?.candidates ?? NO_INPUT_CANDIDATES;
@@ -223,7 +223,7 @@ export interface BucketResult {
 // before any phase fires. Prefer the nested one, fall through to top-level,
 // return null only when neither is a number.
 export function roundOf(dash: DashboardSnapshot | null): number | null {
-  const r = dash?.current_round?.round ?? dash?.round;
+  const r = dash?.current_round.round ?? dash?.round;
   return typeof r === "number" ? r : null;
 }
 
@@ -419,7 +419,7 @@ function useCycleStreamSource(
       // Stale data never reaches the UI; the next tick retries against the
       // correct unit.
       if (dash.campaign_id !== cmp || dash.cycle_id !== id) {
-        const reported = `(${dash.campaign_id ?? "none"}, ${dash.cycle_id ?? "none"})`;
+        const reported = `(${dash.campaign_id}, ${dash.cycle_id})`;
         const expected = `(${cmp}, ${id})`;
         console.debug(
           `[cycle-stream] dropped dashboard payload — stamp ${reported} != unit ${expected}`,

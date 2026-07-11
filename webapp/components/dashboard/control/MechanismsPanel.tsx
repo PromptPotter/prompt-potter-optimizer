@@ -42,7 +42,7 @@ export function MechanismsPanel({
     return <p className="mech-empty">Select a campaign to see its mechanism toggles.</p>;
   }
 
-  const opt = (detail?.config?.optimization ?? {}) as Record<string, unknown>;
+  const opt = (detail?.config.optimization ?? {}) as Record<string, unknown>;
   const values: MechanismValues | null = editable
     ? (mechanisms ?? null)
     : ((opt.mechanisms as MechanismValues | undefined) ?? null);
@@ -53,10 +53,12 @@ export function MechanismsPanel({
     const full: MechanismValues = {};
     for (const group of schema.groups) {
       full[group.key] = Object.fromEntries(
-        group.toggles.map((t) => [t.key, valueOf(values, group.key, t.key, t.default)]),
+        group.toggles.map((t) => [
+          t.key,
+          group.key === g && t.key === k ? next : valueOf(values, group.key, t.key, t.default),
+        ]),
       );
     }
-    full[g][k] = next;
     onChange!(full);
   };
 

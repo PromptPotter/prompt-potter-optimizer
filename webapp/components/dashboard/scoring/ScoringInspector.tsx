@@ -42,7 +42,7 @@ export function ScoringInspector({ selected, onClose }: Props) {
       if (!c?.stats) return null;
       return { composite: c.stats.composite_fitness, hits: c.stats.hits, total: c.stats.total };
     }
-    const e = doc?.scoreboard?.find((c) => c.candidate_id === selected.candidate_id);
+    const e = doc?.scoreboard.find((c) => c.candidate_id === selected.candidate_id);
     return e ? { composite: e.composite_fitness, hits: e.hits, total: e.total } : null;
   }, [selected, isLive, dash, doc]);
 

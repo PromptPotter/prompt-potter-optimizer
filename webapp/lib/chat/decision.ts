@@ -57,7 +57,7 @@ function str(v: unknown): string | undefined {
 
 function readVerdict(dash: DashboardSnapshot | null): GateVerdict | null {
   const rounds: Record<string, unknown>[] = Array.isArray(dash?.rounds)
-    ? (dash?.rounds as unknown as Record<string, unknown>[])
+    ? (dash.rounds as unknown as Record<string, unknown>[])
     : [];
   const origin = rounds.find((r) => num(r.round) === 0);
   const health = origin ? asRec(origin.health) : null;

@@ -51,8 +51,8 @@ export function RunningJobsButton({ onPicked }: Props) {
     campaigns.find((c) => c.campaign_id === campaignId)?.label || dataset || campaignId;
 
   // Exactly one in flight → the button IS the direct link.
-  if (n === 1) {
-    const c = liveCycles[0];
+  const c = n === 1 ? liveCycles[0] : undefined;
+  if (c) {
     const label = labelFor(c.campaign_id, c.dataset_name);
     return (
       <button

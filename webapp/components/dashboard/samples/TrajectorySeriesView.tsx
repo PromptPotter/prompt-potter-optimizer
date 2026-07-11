@@ -111,10 +111,11 @@ export function SeriesView({
         </div>
         {/* one row per round */}
         {sorted.rounds.map((r, i) => {
-          const pos = sorted.positions[i];
-          const prev = i > 0 ? sorted.positions[i - 1] : null;
-          const everPrev = i > 0 ? everSeen[i - 1] : new Set<number>();
-          const total = (r.selection ?? []).length;
+          // `positions` and `everSeen` are built one-per-round, parallel to `sorted.rounds`.
+          const pos = sorted.positions[i]!;
+          const prev = i > 0 ? sorted.positions[i - 1]! : null;
+          const everPrev = i > 0 ? everSeen[i - 1]! : new Set<number>();
+          const total = r.selection.length;
           return (
             <div key={r.round} style={{ display: "flex", gap: 3 }}>
               <span style={ROW_LABEL}>R{r.round}</span>
@@ -138,7 +139,7 @@ export function SeriesView({
                         : kind === "lost"
                           ? `lost: pos ${pp} → ${p}`
                           : "kept position";
-                  const isHovered = hover?.round === r.round && hover?.sampleId === sid;
+                  const isHovered = hover?.round === r.round && hover.sampleId === sid;
                   return (
                     <span
                       key={sid}
@@ -165,11 +166,11 @@ export function SeriesView({
                         const box = e.currentTarget.getBoundingClientRect();
                         setHover({ round: r.round, sampleId: sid, position: p, total, x: box.right, y: box.bottom });
                       }}
-                      onBlur={() => setHover((h) => (h?.round === r.round && h?.sampleId === sid ? null : h))}
+                      onBlur={() => setHover((h) => (h?.round === r.round && h.sampleId === sid ? null : h))}
                       onClick={() => {
                         const o = orderAtStep(
                           historicalTimeline(doc),
-                          r.selection ?? [],
+                          r.selection,
                           sid,
                           p,
                         );
@@ -178,7 +179,7 @@ export function SeriesView({
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
-                          const o = orderAtStep(historicalTimeline(doc), r.selection ?? [], sid, p);
+                          const o = orderAtStep(historicalTimeline(doc), r.selection, sid, p);
                           setSelectionForSampleSet(seedFromOrder(o, selectMode));
                         }
                       }}

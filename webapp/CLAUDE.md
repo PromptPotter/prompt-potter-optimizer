@@ -113,7 +113,7 @@ Any new chart that consumes `dash` follows the same pattern: `React.memo` wrap, 
 The webapp gate is **compile-time + smoke + a small Vitest scope**, enforced by CI (`.github/workflows/ci.yml`, `webapp` job):
 
 - `npm run lint` — ESLint.
-- `npx tsc --noEmit` — full strict typecheck (`next build` alone does not hard-fail on every type error, so this line is what makes `strict` real).
+- `npx tsc --noEmit` — full strict typecheck (`next build` alone does not hard-fail on every type error, so this line is what makes `strict` real). **`noUncheckedIndexedAccess` is ON**: an index access (`arr[i]`, `rec[k]`, `match[n]`) can miss, so it types as possibly-`undefined`. Without it a *correct* guard reads as dead code (`sample-line.ts` guards regex group 3, which the pattern makes optional) while a *missing* one reads as fine — the type system lied in both directions at once, and "is this `??` redundant?" had no answer. Handle the miss (skip / early-return); `!` only where the line above proves presence; **never `?? <default>` to silence it** — a fabricated number rendered as a measurement is the one thing this app must never do, and `edits[key] ?? r.value` is not `edits[key] !== undefined ? … : …` when the operator clears a field to `""`.
 - `npm run test` — Vitest, scoped to `lib/**/__tests__/` + `components/**/__tests__/` per `webapp/vitest.config.ts`. Reader-side derivations only (pure data → data helpers); display components stay covered by smoke. Cycle fixtures live at `tests/fixtures/cycles/` — recipe at [`docs/developer/cycle-fixtures.md`](../docs/developer/cycle-fixtures.md).
 - `npm run build` — the static export must succeed.
 - Manual smoke at `http://localhost:8001/` after a behavioural change. Two states, two harnesses:

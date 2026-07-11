@@ -61,13 +61,13 @@ export function FileViewer({ campaignId, cycleId, selected }: Props) {
             ready.selected.scope,
             ready.selected.path,
           );
-          const ct = r.content_type ?? "";
-          const meta = `${r.size ?? "?"} B • ${ct || "text"}`;
+          const ct = r.content_type;
+          const meta = `${r.size} B • ${ct}`;
           if (r.content == null) {
             return {
               meta,
               body:
-                (r.size ?? 0) > 2 * 1024 * 1024
+                r.size > 2 * 1024 * 1024
                   ? "(preview truncated — file > 2 MiB)"
                   : "(preview unavailable — binary)",
               contentType: ct,

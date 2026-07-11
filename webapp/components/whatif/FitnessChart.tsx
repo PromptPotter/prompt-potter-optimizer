@@ -178,11 +178,22 @@ const inFlightPulsePlugin: Plugin<"bar", { index: number | null }> = {
         | { getProps?: (p: string[], final: boolean) => Record<string, number> }
         | undefined;
       const p = el?.getProps?.(["x", "y", "base", "width"], true);
-      if (!p || [p.x, p.y, p.base, p.width].some((v) => typeof v !== "number")) return;
-      left = Math.min(left, p.x - p.width / 2);
-      right = Math.max(right, p.x + p.width / 2);
-      top = Math.min(top, p.y);
-      base = Math.max(base, p.base);
+      const x = p?.x;
+      const y = p?.y;
+      const b = p?.base;
+      const width = p?.width;
+      if (
+        typeof x !== "number" ||
+        typeof y !== "number" ||
+        typeof b !== "number" ||
+        typeof width !== "number"
+      ) {
+        return;
+      }
+      left = Math.min(left, x - width / 2);
+      right = Math.max(right, x + width / 2);
+      top = Math.min(top, y);
+      base = Math.max(base, b);
     });
     if ([left, right, top, base].some((v) => !Number.isFinite(v))) {
       cancel();
@@ -341,7 +352,7 @@ export const FitnessChart = memo(function FitnessChart({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bars, selectedKey, themeVersion]);
 
-  const hasVerify = useMemo(() => bars.some((b) => b?.diag != null), [bars]);
+  const hasVerify = useMemo(() => bars.some((b) => b.diag != null), [bars]);
   const data = useMemo<ChartData<"bar">>(() => {
     const seriesCount =
       1 + (showComposite ? 1 : 0) + (showWhatIf ? 1 : 0) + (hasVerify ? 1 : 0);
@@ -445,9 +456,9 @@ export const FitnessChart = memo(function FitnessChart({
     // a single frame; the prior 200 ms tween was visible jank, not polish.
     animation: false,
     onClick: (_evt, elements) => {
-      if (!elements || elements.length === 0) return;
-      const idx = elements[0].index;
-      const bar = bars[idx];
+      const hit = elements?.[0];
+      if (!hit) return;
+      const bar = bars[hit.index];
       if (!bar || !bar.candidateId || bar.round == null) return;     // origin / pre-id'd live bar
       if (bar.key === selectedKey) onSelect(null);
       else onSelect(bar);
@@ -455,8 +466,8 @@ export const FitnessChart = memo(function FitnessChart({
     onHover: (evt, elements) => {
       const target = (evt.native?.target ?? null) as HTMLElement | null;
       if (!target) return;
-      const hit = elements && elements.length > 0;
-      const bar = hit ? bars[elements[0].index] : null;
+      const hit = elements?.[0];
+      const bar = hit ? bars[hit.index] : null;
       target.style.cursor = bar && bar.candidateId && bar.round != null ? "pointer" : "default";
     },
     scales: {

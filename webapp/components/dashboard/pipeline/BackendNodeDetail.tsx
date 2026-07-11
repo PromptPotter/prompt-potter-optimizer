@@ -57,9 +57,10 @@ interface HistTarget {
 // "historical" observe target when the operator hasn't selected a candidate.
 // Round 0 is excluded (it == origin). Null when no such round has closed yet.
 function lastWinner(dash: DashboardSnapshot | null): HistTarget | null {
-  const rounds = sortedRounds(dash).filter((r) => r.round >= 1 && roundHasCandidates(r));
-  for (let i = rounds.length - 1; i >= 0; i--) {
-    const r = rounds[i];
+  const rounds = sortedRounds(dash)
+    .filter((r) => r.round >= 1 && roundHasCandidates(r))
+    .reverse();
+  for (const r of rounds) {
     const idx = r.candidates.findIndex((c) => c.is_winner);
     const w = idx >= 0 ? r.candidates[idx] : null;
     if (w?.candidate_id) {
@@ -122,10 +123,10 @@ export function BackendNodeDetail({ draft, onClose, onPromptApply }: Props) {
       <NodeSurface
         node={node}
         point={{
-          origin_prompt_fields: draft.origin_prompt_fields ?? {},
+          origin_prompt_fields: draft.origin_prompt_fields,
           pipeline_overlay: {},
         }}
-        configSeed={(draft.pipeline_overlay ?? {}) as Record<string, unknown>}
+        configSeed={draft.pipeline_overlay}
         schema={cv.nodeConfigSchema}
         outputSchema={cv.nodeOutputSchema}
         label="draft — setup"
@@ -144,7 +145,7 @@ export function BackendNodeDetail({ draft, onClose, onPromptApply }: Props) {
     return (
       <NodeSurface
         node={null}
-        point={{ origin_prompt_fields: draft.origin_prompt_fields ?? {}, pipeline_overlay: {} }}
+        point={{ origin_prompt_fields: draft.origin_prompt_fields, pipeline_overlay: {} }}
         configSeed={{}}
         schema={cv.nodeConfigSchema}
         outputSchema={cv.nodeOutputSchema}

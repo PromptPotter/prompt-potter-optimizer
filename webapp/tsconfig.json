@@ -5,6 +5,10 @@
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
+    // An index access can miss. Without this, `arr[i]` / `rec[k]` / `match[n]` are
+    // typed as definitely-present, so a correct guard reads as dead code and a
+    // missing one reads as fine — which makes "is this ?? redundant?" unanswerable.
+    "noUncheckedIndexedAccess": true,
     "noEmit": true,
     "esModuleInterop": true,
     "module": "esnext",

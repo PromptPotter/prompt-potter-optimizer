@@ -75,8 +75,9 @@ export function configRows(
   lockModel = false,
 ): ConfigRow[] {
   if (!schema) return [];
-  const entries =
-    node != null ? (node in schema ? ([[node, schema[node]]] as const) : []) : Object.entries(schema);
+  const scoped = node != null ? schema[node] : undefined;
+  const entries: [string, NodeConfigParam[]][] =
+    node != null ? (scoped ? [[node, scoped]] : []) : Object.entries(schema);
   const rows: ConfigRow[] = [];
   for (const [n, params] of entries) {
     const nodeOv = asObj(overlay[n]);
@@ -88,6 +89,7 @@ export function configRows(
     const overlayAllowed = opt?.param_allowed_values ?? {};
     for (const p of params) {
       const baseValue = p.value == null ? "" : String(p.value);
+      const narrowed = overlayAllowed[p.key];
       if (mode === "search-space") {
         const isModel = p.kind === "model";
         const locked = isModel
@@ -103,7 +105,7 @@ export function configRows(
           value: p.key in cfg ? String(cfg[p.key]) : baseValue,
           baseValue,
           locked,
-          allowed: p.key in overlayAllowed ? overlayAllowed[p.key] : p.options,
+          allowed: narrowed ?? p.options,
           fromCandidate: false,
           optimizerLocked: p.optimizer_locked,
           description: p.description,
@@ -142,7 +144,7 @@ export function nodeOverlayPatch(
   node: string,
   rows: ConfigRow[],
 ): DraftPatch {
-  const overlay = JSON.parse(JSON.stringify(base ?? {})) as Record<string, Record<string, unknown>>;
+  const overlay = JSON.parse(JSON.stringify(base)) as Record<string, Record<string, unknown>>;
   const config: Record<string, unknown> = {};
   const paramKeys: string[] = [];
   const allowedValues: Record<string, string[]> = {};
@@ -179,10 +181,9 @@ export function seedOverlayFromRows(
 ): Record<string, Record<string, unknown>> {
   const overlay: Record<string, Record<string, unknown>> = {};
   for (const r of rows) {
-    const key = `${r.node}.${r.key}`;
-    const edited = key in edits;
-    const raw = edited ? edits[key] : r.value;
-    if (!r.fromCandidate && (!edited || raw === r.value)) continue; // inherited + untouched
+    const edit = edits[`${r.node}.${r.key}`];
+    if (!r.fromCandidate && (edit === undefined || edit === r.value)) continue; // inherited + untouched
+    const raw = edit ?? r.value;
     if (raw === "") continue; // empty = drop (inherit)
     (overlay[r.node] ??= {})[r.key] = coerce(r.kind, raw);
   }

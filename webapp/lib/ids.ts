@@ -20,7 +20,9 @@ export function rootCycleId(cycleId: string): string {
 // the full id when the parse fails (e.g. a root passed in by mistake).
 export function shortFamilyTail(cycleId: string): string {
   const m = cycleId.match(SIBLING_LAST_SEP_RE);
-  if (m && m[2]) return `${m[1][0]}·${m[2]}`;
+  const kind = m?.[1];
+  const tail = m?.[2];
+  if (kind && tail) return `${kind.charAt(0)}·${tail}`;
   return cycleId;
 }
 
@@ -85,13 +87,13 @@ export function decodeCyclePath(s: string): CyclePath | null {
 // The root hop — what chat, selection, dataset, and files bind to (the top-level
 // cycle that owns the operator conversation).
 export function pathRoot(path: CyclePath): CycleHop {
-  return path[0];
+  return path[0]!;
 }
 
 // The leaf hop — what the dashboard stream re-roots to (the inner cycle when
 // drilled in, else the root).
 export function pathLeaf(path: CyclePath): CycleHop {
-  return path[path.length - 1];
+  return path[path.length - 1]!;
 }
 
 // The hops BELOW the root, HOP_SEP-joined — the `?descend=` query the dashboard

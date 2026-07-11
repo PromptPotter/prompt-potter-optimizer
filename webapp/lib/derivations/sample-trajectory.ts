@@ -26,7 +26,7 @@ export function unionFirstAppearance(rounds: RoundSummary[]): number[] {
   const out: number[] = [];
   const seen = new Set<number>();
   for (const r of rounds) {
-    for (const sid of r.selection ?? []) {
+    for (const sid of r.selection) {
       if (seen.has(sid)) continue;
       seen.add(sid);
       out.push(sid);
@@ -53,7 +53,7 @@ export function cumulativeEverSeen(rounds: RoundSummary[]): Set<number>[] {
   let seen = new Set<number>();
   for (const r of rounds) {
     seen = new Set(seen);
-    (r.selection ?? []).forEach((s) => seen.add(s));
+    r.selection.forEach((s) => seen.add(s));
     out.push(seen);
   }
   return out;

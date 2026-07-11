@@ -26,7 +26,7 @@ export function toggleInSet(set: number[], sid: number): number[] {
 // order on purpose: a planned-but-unmeasured sample reads 0 on every bar.
 export function measuredUniverse(rounds: RoundSummary[]): number[] {
   const set = new Set<number>();
-  for (const r of rounds) for (const sid of r.selection ?? []) set.add(sid);
+  for (const r of rounds) for (const sid of r.selection) set.add(sid);
   return [...set].sort((a, b) => a - b);
 }
 
@@ -39,6 +39,6 @@ interface RoundMeasuredSet {
 // rounds that measured nothing. The aggregate "pick a round" default selector.
 export function roundMeasuredSets(rounds: RoundSummary[]): RoundMeasuredSet[] {
   return rounds
-    .filter((r) => (r.selection?.length ?? 0) > 0)
-    .map((r) => ({ round: r.round, ids: [...new Set(r.selection ?? [])].sort((a, b) => a - b) }));
+    .filter((r) => r.selection.length > 0)
+    .map((r) => ({ round: r.round, ids: [...new Set(r.selection)].sort((a, b) => a - b) }));
 }

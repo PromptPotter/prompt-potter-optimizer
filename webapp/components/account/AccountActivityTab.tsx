@@ -198,9 +198,8 @@ const _CHART_PALETTE = [
 ];
 
 function _palette(n: number): string[] {
-  if (n <= _CHART_PALETTE.length) return _CHART_PALETTE.slice(0, n);
   // Repeat the palette when there are more labels than colours; rare in practice.
   const out: string[] = [];
-  for (let i = 0; i < n; i += 1) out.push(_CHART_PALETTE[i % _CHART_PALETTE.length]);
+  while (out.length < n) out.push(..._CHART_PALETTE.slice(0, n - out.length));
   return out;
 }

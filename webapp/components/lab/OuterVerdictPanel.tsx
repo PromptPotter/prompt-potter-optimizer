@@ -105,8 +105,8 @@ function ForestPlot({ verdict }: { verdict: OuterVerdict }) {
 function pickVerdict(rounds: { round: number; outer_verdict?: OuterVerdict | null }[]):
   | OuterVerdict
   | null {
-  for (let i = rounds.length - 1; i >= 0; i--) {
-    if (rounds[i].outer_verdict) return rounds[i].outer_verdict as OuterVerdict;
+  for (const r of rounds.slice().reverse()) {
+    if (r.outer_verdict) return r.outer_verdict;
   }
   return null;
 }

@@ -321,11 +321,12 @@ export function useLineage({
   const [cleanupAcked, setCleanupAcked] = useState(false);
 
   const confirmCleanup = useCallback(async () => {
-    if (!campaignId || rootCycleIds.length === 0) return;
+    const rootId = rootCycleIds[0];
+    if (!campaignId || !rootId) return;
     setCleaning(true);
     setCleanupError(null);
     try {
-      await postCleanupEmpty(campaignId, rootCycleIds[0]);
+      await postCleanupEmpty(campaignId, rootId);
       setCleanupAcked(true);
       setCleanupOpen(false);
       bumpRevalidation();

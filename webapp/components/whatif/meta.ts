@@ -57,8 +57,9 @@ export function weightsFromFormula(formula: string | undefined | null): Record<s
   const re = /([0-9]*\.?[0-9]+)\s*\*\s*\(?\s*(?:1\s*-\s*)?([a-zA-Z_][a-zA-Z0-9_]*)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(formula)) !== null) {
-    const name = m[2];
-    if (!(name in out)) out[name] = parseFloat(m[1]);
+    const [, coef, name] = m;
+    if (coef == null || name == null) continue;
+    if (!(name in out)) out[name] = parseFloat(coef);
   }
   return out;
 }

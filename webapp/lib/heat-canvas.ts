@@ -101,10 +101,11 @@ export type Rgb = [number, number, number];
 // "16,185,129" (the --color-*-rgb custom properties) → [16,185,129].
 export function parseRgbTriple(s: string, fallback: Rgb): Rgb {
   const parts = s.split(",").map((p) => Number(p.trim()));
-  if (parts.length === 3 && parts.every((n) => Number.isFinite(n))) {
-    return [parts[0], parts[1], parts[2]];
-  }
-  return fallback;
+  if (parts.length !== 3) return fallback;
+  const [r, g, b] = parts;
+  if (r === undefined || g === undefined || b === undefined) return fallback;
+  if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) return fallback;
+  return [r, g, b];
 }
 
 // Hit ratio → colour: 0 = miss (danger), 1 = hit (success), blended between.

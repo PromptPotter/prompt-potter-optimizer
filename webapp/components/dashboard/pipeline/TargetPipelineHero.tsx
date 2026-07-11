@@ -44,7 +44,7 @@ function liveModelResolver(
   nodeConfigSchema: Record<string, NodeConfigParam[]> | null,
 ): LiveModelFor {
   return (nodeId) => {
-    const nodeCfg = liveCfg?.config?.[nodeId];
+    const nodeCfg = liveCfg?.config[nodeId];
     const m =
       nodeCfg && typeof nodeCfg === "object"
         ? (nodeCfg as Record<string, unknown>).model
@@ -299,6 +299,7 @@ export function TargetPipelineHero({ samplesOpen, onToggle }: Props) {
   const { dash } = useDashboard();
   const selfOpt = isSelfOptimization(cv.backendType);
   const interior = cv.view ? interiorNodes(cv.view) : [];
+  const soleNode = interior.length === 1 ? interior[0] : undefined;
   // The running searchpoint's resolved model when live; static origin otherwise.
   const liveModelFor = liveModelResolver(
     cv.isLive ? liveObserveConfig(dash) : null,
@@ -328,11 +329,11 @@ export function TargetPipelineHero({ samplesOpen, onToggle }: Props) {
         // empty pipeline, or an L4 self-optimization unit with no HTTP pipeline —
         // honest placeholder, never a fabricated node.
         <PipelinePlaceholder selfOpt={selfOpt} />
-      ) : interior.length === 1 ? (
+      ) : soleNode ? (
         // A genuine single-node pipeline (first-class since the is_single_node
         // refactor) — render its REAL node, not a synthesized "LLM" stand-in.
         <SingleNodeChip
-          node={interior[0]}
+          node={soleNode}
           liveModelFor={liveModelFor}
           phase={cv.phase}
           isLive={cv.isLive}

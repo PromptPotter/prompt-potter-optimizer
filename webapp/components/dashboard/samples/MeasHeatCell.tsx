@@ -189,17 +189,18 @@ export function MeasHeatCell({
       }}
       onPointerDown={(e) => {
         const hit = locate(e);
-        if (hit) onSelectOrd(ordCols[hit.idx]);
+        const ord = hit ? ordCols[hit.idx] : null;
+        if (ord != null) onSelectOrd(ord);
       }}
       onPointerMove={(e) => {
         const hit = locate(e);
-        if (!hit) {
+        const ord = hit ? ordCols[hit.idx] : null;
+        if (!hit || ord == null) {
           setHoverIdx(null);
           onHoverEnd();
           return;
         }
         setHoverIdx(hit.discrete ? hit.idx : null);
-        const ord = ordCols[hit.idx];
         const m = byOrd.get(ord);
         onHover(ord, m ? m.hit : null, e.clientX, e.clientY);
       }}

@@ -108,7 +108,7 @@ export function VerifyPane() {
 }
 
 function VerifyRow({ run }: { run: DiagnosticRunRecord }) {
-  const cacheReplays = Math.max(0, run.workspace_n - run.samples_added - (run.source_campaign_n ?? 0));
+  const cacheReplays = Math.max(0, run.workspace_n - run.samples_added - run.source_campaign_n);
   return (
     <tr>
       <td className="verify-source">

@@ -52,7 +52,7 @@ function liveNodeBlock(
   dash: DashboardSnapshot | null,
   id: string,
 ): NodeBlock | null {
-  const liveNodes = dash?.current_round?.nodes as Record<string, NodeBlock> | undefined;
+  const liveNodes = dash?.current_round.nodes as Record<string, NodeBlock> | undefined;
   const block = liveNodes?.[id];
   return block && typeof block === "object" ? block : null;
 }
@@ -259,7 +259,7 @@ export function OptimizerNodeDetail({ id, pipeline, onClose }: Props) {
           <details className="opt-detail-disclosure">
             <summary>configuration</summary>
             <pre className="opt-detail-pre">
-              {fmtVal({ type: cfg?.type, ...cfgInner })}
+              {fmtVal({ type: cfg.type, ...cfgInner })}
             </pre>
           </details>
         )}

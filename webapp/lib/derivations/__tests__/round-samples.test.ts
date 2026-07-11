@@ -50,15 +50,15 @@ describe("samplesForRow — source routing", () => {
   it("an in-flight row reads dash and ignores the round file", () => {
     const out = samplesForRow(row("inflight"), liveDash, historicalDoc);
     expect(out).toHaveLength(1);
-    expect(out[0].sample_id).toBe(2);
-    expect(out[0].status).toBe("MISS");
+    expect(out[0]!.sample_id).toBe(2);
+    expect(out[0]!.status).toBe("MISS");
   });
 
   it("a historical row reads the round file and ignores dash", () => {
     const out = samplesForRow(row("history"), liveDash, historicalDoc);
     expect(out).toHaveLength(1);
-    expect(out[0].sample_id).toBe(1);
-    expect(out[0].status).toBe("HIT");
+    expect(out[0]!.sample_id).toBe(1);
+    expect(out[0]!.status).toBe("HIT");
   });
 
   it("returns empty (never throws) when the row's source has no data", () => {

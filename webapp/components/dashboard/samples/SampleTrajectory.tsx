@@ -55,9 +55,10 @@ export function SampleTrajectoryMiniButton({
     >
       <span className="st-mini" aria-hidden="true">
         {sorted.rounds.map((r, i) => {
-          const pos = sorted.positions[i];
-          const prev = i > 0 ? sorted.positions[i - 1] : null;
-          const everPrev = i > 0 ? everSeen[i - 1] : new Set<number>();
+          // `positions` and `everSeen` are built one-per-round, parallel to `sorted.rounds`.
+          const pos = sorted.positions[i]!;
+          const prev = i > 0 ? sorted.positions[i - 1]! : null;
+          const everPrev = i > 0 ? everSeen[i - 1]! : new Set<number>();
           return columns.map((sid) => {
             const kind = classifyCell(sid, pos, prev, everPrev);
             return <span key={`${r.round}-${sid}`} className={`st-mini-cell ${kind}`} />;
@@ -152,7 +153,7 @@ function DeltaView({ sorted }: { sorted: SortedRounds }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       {sorted.rounds.map((r, i) => {
-        const bank = r.selection ?? [];
+        const bank = r.selection;
         if (i === 0) {
           return (
             <Row key={r.round} label={`R${r.round}`}>
@@ -162,7 +163,7 @@ function DeltaView({ sorted }: { sorted: SortedRounds }) {
             </Row>
           );
         }
-        const prev = new Set(sorted.rounds[i - 1].selection ?? []);
+        const prev = new Set(sorted.rounds[i - 1]!.selection);
         const curr = new Set(bank);
         const drops = [...prev].filter((x) => !curr.has(x));
         const adds = bank.filter((x) => !prev.has(x));

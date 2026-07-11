@@ -39,7 +39,7 @@ export function ConsentGate() {
   const open = status === "authed" && !!me && me.terms_accepted_version !== me.terms_version;
   const cardRef = useDialogA11y(open, NOOP);
 
-  if (!open || !me) return null;
+  if (!open) return null;
 
   const onAccept = async () => {
     setSubmitting(true);

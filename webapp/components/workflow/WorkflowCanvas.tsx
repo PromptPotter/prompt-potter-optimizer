@@ -20,8 +20,14 @@ import type { NodeDataLike, PipelineDoc } from "./types";
 // dasharray, arrowhead marker id) into one row per kind. Add a kind:
 // extend the map, no other site changes.
 type ColorKey = "txt" | "ok" | "acc" | "esc";
-const EDGE_VARIANTS: Record<string, { color: ColorKey; dash: string; marker: string }> = {
-  forward:   { color: "txt", dash: "",    marker: "arrh" },
+interface EdgeVariant {
+  color: ColorKey;
+  dash: string;
+  marker: string;
+}
+const EDGE_FORWARD: EdgeVariant = { color: "txt", dash: "", marker: "arrh" };
+const EDGE_VARIANTS: Record<string, EdgeVariant> = {
+  forward:   EDGE_FORWARD,
   loop:      { color: "ok",  dash: "5 3", marker: "arrh-loop" },
   directive: { color: "acc", dash: "4 3", marker: "arrh-dir" },
   escalate:  { color: "esc", dash: "2 3", marker: "arrh-esc" },
@@ -86,7 +92,7 @@ export function WorkflowCanvas({ pipeline }: Props) {
     );
   }
 
-  const currentNodes = (dash?.current_round?.nodes ?? {}) as Record<string, NodeDataLike>;
+  const currentNodes = (dash?.current_round.nodes ?? {}) as Record<string, NodeDataLike>;
 
   // Node id → label, so a terminal edge (one whose target has no layout
   // position, e.g. `output`) can borrow that node's label ("Best SP")
@@ -141,7 +147,7 @@ export function WorkflowCanvas({ pipeline }: Props) {
             {view.edges.map((e) => {
               const geom = edges[`${e.from}>${e.to}`];
               if (!geom) return null;
-              const v = EDGE_VARIANTS[geom.kind] ?? EDGE_VARIANTS.forward;
+              const v = EDGE_VARIANTS[geom.kind] ?? EDGE_FORWARD;
               const stroke = colors[v.color];
               // Geometry label wins (brief / plan); otherwise, when the
               // target is a node with no dot, fall back to its label so
@@ -182,7 +188,7 @@ export function WorkflowCanvas({ pipeline }: Props) {
                   : n.kind === "measurement"
                     ? "system step"
                     : hasData
-                      ? data?.model || "—"
+                      ? data.model || "—"
                       : "idle";
               const tip = TERMS[`node_${n.id}`] || undefined;
               // Label placement: default is centred below the dot; the

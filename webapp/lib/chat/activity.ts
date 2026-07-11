@@ -160,7 +160,7 @@ export function snapshotToActivity(payload: Record<string, unknown>): ActivityIt
 // carries no running block.
 export function sampleScoredCandidate(env: ProjectionEnvelope): ActivityItem | null {
   if (env.kind !== "snapshot") return null;
-  const p = env.payload ?? {};
+  const p = env.payload;
   if (str(p.event) !== "sample_scored") return null;
   const running = asRec(asRec(asRec(p.payload).result)._running);
   if (Object.keys(running).length === 0) return null;
@@ -170,7 +170,7 @@ export function sampleScoredCandidate(env: ProjectionEnvelope): ActivityItem | n
 // Map one live tailed envelope to at most one item. `null` = a deliberately
 // dropped kind (firehose / non-item). Every `ProjectionKind` is handled.
 export function projectionToActivity(env: ProjectionEnvelope): ActivityItem | null {
-  const p = env.payload ?? {};
+  const p = env.payload;
   const id = `${env.kind}-${env.sequence}`;
   switch (env.kind) {
     case "llm_call_start": {

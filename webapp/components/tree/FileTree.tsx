@@ -32,13 +32,18 @@ function buildTree(entries: FileEntry[]): ScopedTree {
   for (const e of entries) {
     const scope = e.scope === "campaign" ? "campaign" : "cycle";
     const parts = e.path.split("/");
+    // Last segment is the file; anything left is the dir chain. A path with no
+    // trailing segment names no file — nothing to render, so drop it.
+    const name = parts.pop();
+    if (!name) continue;
     let cur = tree[scope];
-    for (let i = 0; i < parts.length - 1; i += 1) {
-      cur.dirs[parts[i]] = cur.dirs[parts[i]] ?? makeNode();
-      cur = cur.dirs[parts[i]];
+    for (const seg of parts) {
+      const child = cur.dirs[seg] ?? makeNode();
+      cur.dirs[seg] = child;
+      cur = child;
     }
     cur.files.push({
-      name: parts[parts.length - 1],
+      name,
       path: e.path,
       scope,
       size: e.size,
@@ -116,7 +121,7 @@ interface DirBlockProps {
 
 function DirBlock({ name, node, scope, selected, onSelect, topLevel }: DirBlockProps) {
   const [collapsed, setCollapsed] = useState(false);
-  const dirs = Object.keys(node.dirs).sort();
+  const dirs = Object.entries(node.dirs).sort(([a], [b]) => a.localeCompare(b));
   const files = node.files.slice().sort((a, b) => a.name.localeCompare(b.name));
   return (
     <div className={`tree-node${collapsed ? " tree-collapsed" : ""}`}>
@@ -130,11 +135,11 @@ function DirBlock({ name, node, scope, selected, onSelect, topLevel }: DirBlockP
         {topLevel ? name : `${name}/`}
       </button>
       <div className="tree-children">
-        {dirs.map((d) => (
-          <DirBlock key={d} name={d} node={node.dirs[d]} scope={scope} selected={selected} onSelect={onSelect} />
+        {dirs.map(([d, child]) => (
+          <DirBlock key={d} name={d} node={child} scope={scope} selected={selected} onSelect={onSelect} />
         ))}
         {files.map((f) => {
-          const isSelected = selected?.scope === f.scope && selected?.path === f.path;
+          const isSelected = selected?.scope === f.scope && selected.path === f.path;
           return (
             <button
               key={f.path}

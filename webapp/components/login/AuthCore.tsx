@@ -45,6 +45,8 @@ function GoogleMark() {
   );
 }
 
+const AUTH_ERROR_FALLBACK = (): string => "Something went wrong during sign-in. Try again.";
+
 const AUTH_ERROR_COPY: Record<string, (email: string | null) => string> = {
   not_allowlisted: (email) =>
     email
@@ -57,11 +59,10 @@ const AUTH_ERROR_COPY: Record<string, (email: string | null) => string> = {
   callback_missing_params: () => "That sign-in link was incomplete. Try again.",
   signin_unavailable: () =>
     "Sign-in is temporarily unavailable. Open a GitHub issue and we'll fix it.",
-  _default: () => "Something went wrong during sign-in. Try again.",
 };
 
 function authErrorMessage(code: string, email: string | null): string {
-  const fn = AUTH_ERROR_COPY[code] ?? AUTH_ERROR_COPY._default;
+  const fn = AUTH_ERROR_COPY[code] ?? AUTH_ERROR_FALLBACK;
   return fn(email);
 }
 

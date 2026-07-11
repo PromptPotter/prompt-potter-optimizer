@@ -39,7 +39,7 @@ export function useLeafCycleIndex(
   // Depth 1 (or no path) — the leaf IS the root; the workspace knows its name and
   // the shell already fetches the root started-at. Null key ⇒ no fetch, no flash.
   const isDeep = !!path && path.length > 1;
-  const key = isDeep && path ? encodeCyclePath(path) : null;
+  const key = isDeep ? encodeCyclePath(path) : null;
 
   const { value } = usePathKeyedFetch<LeafCycleIndex>(
     key,

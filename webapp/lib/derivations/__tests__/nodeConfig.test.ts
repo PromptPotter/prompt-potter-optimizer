@@ -137,12 +137,12 @@ describe("configRows (values mode)", () => {
       "reasoning_effort",
       "temperature",
     ]);
-    expect(byKey.model.kind).toBe("model");
-    expect(byKey.model.options).toEqual(["openai/gpt-oss-120b", "openai/gpt-oss-20b"]);
-    expect(byKey.model.optimizerLocked).toBe(true); // shown, not dropped
-    expect(byKey.reasoning_effort.kind).toBe("enum");
-    expect(byKey.temperature.kind).toBe("number");
-    expect(byKey.max_tokens.value).toBe(""); // declared but unset
+    expect(byKey.model!.kind).toBe("model");
+    expect(byKey.model!.options).toEqual(["openai/gpt-oss-120b", "openai/gpt-oss-20b"]);
+    expect(byKey.model!.optimizerLocked).toBe(true); // shown, not dropped
+    expect(byKey.reasoning_effort!.kind).toBe("enum");
+    expect(byKey.temperature!.kind).toBe("number");
+    expect(byKey.max_tokens!.value).toBe(""); // declared but unset
   });
 
   it("seeds the value from the candidate overlay over the config floor", () => {
@@ -158,7 +158,7 @@ describe("configRows (values mode)", () => {
   });
 
   it("scopes rows to one node when `node` is given (OBSERVE drill-in vs whole-pipeline)", () => {
-    const multi = { web_search: schema.llm_only, llm_only: schema.llm_only };
+    const multi = { web_search: schema.llm_only!, llm_only: schema.llm_only! };
     expect(new Set(configRows(multi, {}, "values", "llm_only").map((r) => r.node))).toEqual(
       new Set(["llm_only"]),
     );
@@ -182,6 +182,6 @@ describe("seedOverlayFromRows (values emit)", () => {
 
   it("lets the operator override the optimizer-locked model", () => {
     const overlay = seedOverlayFromRows(rows, { "llm_only.model": "openai/gpt-oss-20b" });
-    expect(overlay.llm_only.model).toBe("openai/gpt-oss-20b");
+    expect(overlay.llm_only!.model).toBe("openai/gpt-oss-20b");
   });
 });

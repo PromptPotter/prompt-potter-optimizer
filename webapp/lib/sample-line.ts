@@ -28,8 +28,8 @@ export function parseSampleLine(line: string): ParsedSample {
   const m = line.match(SAMPLE_RE);
   if (!m) return { raw: line };
   return {
-    elapsed: parseFloat(m[1]),
-    idx: parseInt(m[2], 10),
+    elapsed: parseFloat(m[1]!),
+    idx: parseInt(m[2]!, 10),
     sampleId: m[3] != null ? parseInt(m[3], 10) : undefined,
     status: m[4] as "HIT" | "MISS",
     scorer: m[5],

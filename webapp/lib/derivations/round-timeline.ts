@@ -39,7 +39,7 @@ export function orderAtStep(
   const step = timeline.find((s) => s.current_sample_id === sampleId);
   const computed = step ? step.computed : selection.slice(0, Math.max(0, position - 1));
   const tail = step ? step.planned : selection.slice(Math.max(0, position - 1));
-  const current = tail.length > 0 ? tail[0] : sampleId;
+  const current = tail[0] ?? sampleId;
   return { computed, current, planned: tail.slice(1) };
 }
 

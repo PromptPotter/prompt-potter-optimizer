@@ -209,7 +209,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
   // straight through to the Start button. Only a context-less drop stops to ask,
   // prefilling the box and waiting for the operator's one message.
   const advance = (draft: DraftCampaignWire) => {
-    if ((draft.raw_task_description ?? "").trim()) {
+    if (draft.raw_task_description.trim()) {
       setInputText("");
       pushAi(`Parsed ${draft.n_samples} rows — task already on file. Checking the setup…`);
       void runCheckin(draft);
@@ -334,7 +334,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
       return;
     }
     const draft = res.draft;
-    if (Object.keys(draft.origin_prompt_fields ?? {}).length === 0) {
+    if (Object.keys(draft.origin_prompt_fields).length === 0) {
       pushAi("Reopened your check-in — picking up where the setup left off.");
       advance(draft);
       return;

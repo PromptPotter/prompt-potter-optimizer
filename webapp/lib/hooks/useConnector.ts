@@ -182,7 +182,7 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
 
   const { dash, isLive } = useDashboard();
   const currentNodes = useMemo(
-    () => (dash?.current_round?.nodes as Record<string, NodeDataLike> | undefined) ?? {},
+    () => (dash?.current_round.nodes as Record<string, NodeDataLike> | undefined) ?? {},
     [dash],
   );
   // Fine-grained activity phase — drives the hero's running/idle indicator.

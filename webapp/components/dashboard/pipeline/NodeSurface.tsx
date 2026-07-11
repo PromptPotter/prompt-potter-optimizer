@@ -75,10 +75,13 @@ export function NodeSurface({
   // chip / steer seed both carry one). Scope the output contract to THIS node, or
   // the full set for the whole-pipeline view.
   const showPrompt = kind === "llm" || node === null;
+  // A node whose id is absent from the served map declares no output contract —
+  // distinct from a declared-but-null one, which renders as such.
+  const ownOutput = node && outputSchema ? outputSchema[node.id] : undefined;
   const nodeOutput = node
-    ? outputSchema && node.id in outputSchema
-      ? { [node.id]: outputSchema[node.id] }
-      : null
+    ? ownOutput === undefined
+      ? null
+      : { [node.id]: ownOutput }
     : outputSchema;
 
   const promptReadOnly = !!readOnly || !onApply;

@@ -120,6 +120,7 @@ function SearchSpaceEditor({
   };
   const toggleChip = (i: number, level: string) => {
     const r = rows[i];
+    if (!r) return;
     const on = r.allowed.includes(level);
     const next = on ? r.allowed.filter((l) => l !== level) : [...r.allowed, level];
     if (next.length === 0) return; // keep at least one value allowed
@@ -233,7 +234,8 @@ function ValuesEditor({
     <div className="config-editor">
       {rows.map((r) => {
         const key = `${r.node}.${r.key}`;
-        const value = key in edits ? edits[key] : r.value;
+        const edit = edits[key];
+        const value = edit !== undefined ? edit : r.value;
         return (
           <ConfigRowView
             key={key}

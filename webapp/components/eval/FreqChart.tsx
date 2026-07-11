@@ -29,7 +29,7 @@ function bucketScores(results: ResultRow[]): number[] {
   results.forEach((r) => {
     const score = typeof r.fitness === "number" ? r.fitness : 0;
     const idx = Math.min(9, Math.max(0, Math.floor(score * 9.999)));
-    buckets[idx] += 1;
+    buckets[idx] = (buckets[idx] ?? 0) + 1;
   });
   return buckets;
 }

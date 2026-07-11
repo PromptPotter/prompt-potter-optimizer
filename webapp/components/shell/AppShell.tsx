@@ -180,7 +180,7 @@ function AppShellInner() {
   // if data somehow existed. The registry fetch only fires when gated in (the route
   // 404s without the capability), so no end-user ever hits it.
   const { me } = useAuth();
-  const showLab = !!me?.capabilities?.includes(L4_LAB_CAP);
+  const showLab = !!me?.capabilities.includes(L4_LAB_CAP);
   const { registry: championRegistry } = useChampionRegistry(showLab);
 
   // Single-ingress dashboard read, kept here only for the status-banner

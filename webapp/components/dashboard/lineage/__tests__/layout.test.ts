@@ -181,7 +181,7 @@ describe("placeNodes", () => {
     expect(maxCol).toBe(3);
     // Band-centered round-1 fan: top candidate above center for span 2.
     const r1 = nodes.filter((n) => n.round === 1).sort((a, b) => a.y - b.y);
-    expect(r1[1].y - r1[0].y).toBe(LANE_H);
+    expect(r1[1]!.y - r1[0]!.y).toBe(LANE_H);
     expect(TOP_PAD).toBeGreaterThan(0);
   });
 });

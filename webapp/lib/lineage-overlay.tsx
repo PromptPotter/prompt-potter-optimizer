@@ -115,7 +115,7 @@ export function LineageOverlayProvider({
   // changes no key, so it makes no request; this provider sits under
   // CycleStreamProvider, so `dash` is available here.
   const { dash, dashRound } = useDashboard();
-  const dashChangeKey = `${dash?.rounds?.length ?? 0}:${dashRound ?? -1}:${dash?.run_phase ?? ""}`;
+  const dashChangeKey = `${dash?.rounds.length ?? 0}:${dashRound ?? -1}:${dash?.run_phase ?? ""}`;
 
   const [data, setData] = useState<CampaignLineageResponse | null>(null);
   // Query identity = campaign + lens + samples. A change is a DIFFERENT served

@@ -132,10 +132,10 @@ export function AccountModal({ open, onClose }: Props) {
             ) : null}
             {me && tab === "profile" ? <AccountProfileTab me={me} /> : null}
             {me && tab === "security" ? <AccountSecurityTab me={me} /> : null}
-            {open && tab === "activity" ? <AccountActivityTab /> : null}
-            {open && tab === "storage" ? <WorkspaceStoragePanel /> : null}
-            {open && tab === "preferences" ? <AccountPreferencesTab /> : null}
-            {open && tab === "about" ? <AboutUnit /> : null}
+            {tab === "activity" ? <AccountActivityTab /> : null}
+            {tab === "storage" ? <WorkspaceStoragePanel /> : null}
+            {tab === "preferences" ? <AccountPreferencesTab /> : null}
+            {tab === "about" ? <AboutUnit /> : null}
           </div>
         </section>
       </div>

@@ -366,7 +366,7 @@ export function WorkspaceProvider({
   // pinned. No-op at depth 1 (and while following — a follow view is always a
   // 1-hop pointer, so there is nothing to pop).
   const backToOuter = useCallback(() => {
-    setPinnedPath((prev) => (prev && prev.length > 1 ? [prev[0]] : prev));
+    setPinnedPath((prev) => (prev && prev.length > 1 ? prev.slice(0, 1) : prev));
   }, []);
 
   const followActive = useCallback(() => {

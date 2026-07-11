@@ -110,11 +110,11 @@ export function HardSamplesHeatmap({
       ms.sort((a, b) => (a.ord < b.ord ? -1 : a.ord > b.ord ? 1 : 0));
       const seen = new Set<string>();
       let w = 0;
-      for (let i = 0; i < ms.length; i++) {
-        const k = `${ms[i].ord}:${ms[i].hit ? 1 : 0}`;
+      for (const m of ms) {
+        const k = `${m.ord}:${m.hit ? 1 : 0}`;
         if (seen.has(k)) continue;
         seen.add(k);
-        ms[w++] = ms[i];
+        ms[w++] = m;
       }
       ms.length = w;
     }
@@ -127,7 +127,7 @@ export function HardSamplesHeatmap({
   // scope the two surfaces disagreed — while this comment claimed they agreed.
   const sortedItems = useMemo(() => {
     const measuredIn = (it: DatasetItem): boolean =>
-      (archivePerSample?.get(it.sample_id)?.length ?? 0) > 0;
+      (archivePerSample.get(it.sample_id)?.length ?? 0) > 0;
     return [...datasetItems].sort((a, b) => compareHardSamples(a, b, measuredIn));
   }, [datasetItems, archivePerSample]);
 

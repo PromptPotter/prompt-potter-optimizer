@@ -91,7 +91,7 @@ export function useHardSamplesTableModel({
 
   const ordIndex = useMemo(() => {
     const m = new Map<string, number>();
-    for (let i = 0; i < ordCols.length; i++) m.set(ordCols[i], i);
+    ordCols.forEach((ord, i) => m.set(ord, i));
     return m;
   }, [ordCols]);
 
@@ -111,7 +111,7 @@ export function useHardSamplesTableModel({
       const i = ordCols.indexOf(selectedOrd);
       const step = e.key === "ArrowRight" ? 1 : -1;
       const next = i < 0 ? 0 : (i + step + ordCols.length) % ordCols.length;
-      setSelectedOrd(ordCols[next]);
+      setSelectedOrd(ordCols[next]!);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -161,7 +161,7 @@ export function useHardSamplesTableModel({
     const sign = dir === "asc" ? 1 : -1;
     const keyOf = (it: DatasetItem): number | string => {
       const v = cellFor(col, it, stablePerSample?.get(it.sample_id) ?? []).raw;
-      if (v === null || v === undefined) return Number.NEGATIVE_INFINITY;
+      if (v === null) return Number.NEGATIVE_INFINITY;
       if (typeof v === "boolean") return v ? 1 : 0;
       return v;
     };
