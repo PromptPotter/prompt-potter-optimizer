@@ -19,36 +19,67 @@
 
 import { fetchCycleFileByPath } from "../api";
 import { encodeCyclePath, type CyclePath } from "../ids";
-import type { RoundFileDoc } from "../poll";
+import type { RoundAuditDoc, RoundResult } from "../types";
 import { usePathKeyedFetch } from "./usePathKeyedFetch";
 
 export interface UseRoundFileState {
-  doc: RoundFileDoc | null;
+  doc: RoundResult | null;
   loading: boolean;
   error: string | null;
 }
 
-function roundKey(path: CyclePath | null, round: number | null): string | null {
+export interface UseRoundAuditState {
+  doc: RoundAuditDoc | null;
+  loading: boolean;
+  error: string | null;
+}
+
+function roundKey(path: CyclePath | null, round: number | null, kind: string): string | null {
   if (!path || round == null) return null;
-  return `${encodeCyclePath(path)}\x1f${round}`;
+  return `${encodeCyclePath(path)}\x1f${kind}\x1f${round}`;
 }
 
-function roundPath(round: number): string {
-  return `rounds/round_${String(round).padStart(4, "0")}.json`;
+function basename(round: number): string {
+  return `round_${String(round).padStart(4, "0")}.json`;
 }
 
-export function useRoundFile(
+function useCycleJson<T>(
   path: CyclePath | null,
   round: number | null,
-): UseRoundFileState {
-  const { value, loading, error } = usePathKeyedFetch<RoundFileDoc | null>(
-    roundKey(path, round),
+  kind: string,
+  relPath: (round: number) => string,
+) {
+  return usePathKeyedFetch<T | null>(
+    roundKey(path, round, kind),
     path,
     null,
     async (p, signal) => {
-      const resp = await fetchCycleFileByPath(p, "cycle", roundPath(round!), signal);
-      return resp.content ? (JSON.parse(resp.content) as RoundFileDoc) : null;
+      const resp = await fetchCycleFileByPath(p, "cycle", relPath(round!), signal);
+      return resp.content ? (JSON.parse(resp.content) as T) : null;
     },
+  );
+}
+
+export function useRoundFile(path: CyclePath | null, round: number | null): UseRoundFileState {
+  const { value, loading, error } = useCycleJson<RoundResult>(
+    path,
+    round,
+    "round",
+    (r) => `rounds/${basename(r)}`,
+  );
+  return { doc: value, loading, error };
+}
+
+// The AUDIT TWIN — same basename, different tree. `rounds/round_NNNN.json` is the round
+// document (`RoundResult`) and carries NO `nodes` block; the per-node LLM I/O lives only
+// here, written by `AuditTrailView`. The node inspector used to read `nodes` off the round
+// document, which meant it rendered nothing for every completed round.
+export function useRoundAudit(path: CyclePath | null, round: number | null): UseRoundAuditState {
+  const { value, loading, error } = useCycleJson<RoundAuditDoc>(
+    path,
+    round,
+    "audit",
+    (r) => `.runtime/cache/rounds/${basename(r)}`,
   );
   return { doc: value, loading, error };
 }

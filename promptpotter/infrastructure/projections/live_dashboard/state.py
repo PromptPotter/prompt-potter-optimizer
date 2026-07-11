@@ -19,7 +19,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from promptpotter.domain.phases import RunPhase
-from promptpotter.domain.results import RoundSummary
+from promptpotter.domain.results import HeadlineMetric, RoundSummary
 
 __all__ = [
     "BackendWarning",
@@ -257,7 +257,9 @@ class LiveDashboardState(BaseModel):
     # surfaces (CampaignConfig.headline_metric). DISPLAY config — the gate is
     # always θ; this only seeds the webapp's client-overridable headline toggle.
     # Stamped at INIT:exit beside run_limits, so a fork carries its own default.
-    headline_metric: str = "accuracy"
+    # The SAME closed set `CampaignConfig.headline_metric` declares — widening it to
+    # `str` here only forced the webapp to re-narrow it by hand.
+    headline_metric: HeadlineMetric = "accuracy"
 
     degraded_count: int = 0
     error_count: int = 0

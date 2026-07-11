@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from promptpotter.config.settings import POBB_DEFAULT_EPSILON, PROMPT_STRING_FIELDS
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
+from promptpotter.domain.results import HeadlineMetric
 from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
@@ -404,7 +405,7 @@ class CampaignConfig(BaseModel):
         "`PipelineSchema.narrow` at pipeline setup.",
     )
     scoring: str | dict[str, str] | None = Field(None)
-    headline_metric: Literal["accuracy", "composite", "ability"] = Field(
+    headline_metric: HeadlineMetric = Field(
         "accuracy",
         description="Which fitness number headlines the operator's text surfaces "
         "(lineage node value, Best tile, sidebar) by default. DISPLAY config, not "

@@ -12,10 +12,10 @@
 import {
   liveCandidate,
   type DashboardSnapshot,
-  type RoundFileDoc,
 } from "@/lib/poll";
 import { parseSampleLine } from "@/lib/sample-line";
 import type { CandidateRow, SampleRow } from "@/lib/types";
+import type { RoundResult } from "@/lib/types";
 
 // Live-mode samples for one candidate in the in-flight round. Reads
 // from `dashboard.json::current_round.nodes.l1_score.output.candidates`
@@ -90,7 +90,7 @@ interface RawHistoricalSample {
 // `roundDoc` is the document already loaded by `useRoundFile`; this
 // function is pure and synchronous.
 function historicalSamplesFor(
-  roundDoc: RoundFileDoc | null,
+  roundDoc: RoundResult | null,
   round: number,
   candidate_id: string,
 ): SampleRow[] {
@@ -136,7 +136,7 @@ function historicalSamplesFor(
 export function samplesForRow(
   row: CandidateRow,
   dash: DashboardSnapshot | null,
-  doc: RoundFileDoc | null,
+  doc: RoundResult | null,
 ): SampleRow[] {
   return row.source === "inflight"
     ? liveSamplesFor(dash, row.round, row.candidate_id)

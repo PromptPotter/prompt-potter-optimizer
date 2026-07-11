@@ -17,145 +17,30 @@ import { fetchDashboardByPath } from "./api";
 import { encodeCyclePath, pathLeaf, type CyclePath } from "./ids";
 import { useAuthGate } from "./auth-context";
 import { ageTextSeconds } from "./format";
-import type { RoundSummary, SpendRollup } from "./api/types";
-import type { SampleOrderStep } from "./types/round";
+import type { LiveDashboardState } from "./api/types";
 import { usePoll } from "./hooks/usePoll";
 
 export type StatusKind = "live" | "stale" | "offline";
 
-export interface DashboardSnapshot {
-  // Loose typing — dashboard.json is operator-facing JSON; we tolerate shape drift
-  // and drill down at the use site.
-  // Self-identity stamp written by LiveDashboardView — the session-family
-  // this file describes. The poll guard (`tick`) drops any payload whose
-  // stamp doesn't match the unit it asked for, so a stale response can
-  // never render under the wrong header.
-  campaign_id?: string;
-  cycle_id?: string;
-  session_id?: string;
-  // Operator deep link to this cycle's Langfuse trace, pre-composed backend-side
-  // (LANGFUSE_HOST is server-only). Null/absent when Langfuse is disabled.
-  langfuse_trace_url?: string | null;
-  // Fine-grained activity (origin / scoring / l1_generate / between_samples / …)
-  // plus the terminal "stopped". Lifted to `phase` for transient gating.
-  state?: string;
-  // The single run-state value (RunPhase), declared by the runner and projected
-  // by LiveDashboardView: running | paused | gate | terminal. The webapp
-  // reads this — it does NOT re-derive "running" from `state` freshness, and
-  // never synthesizes a client-side "detached" for it (I6). The server-side
-  // cycle list is the only place "detached" appears — it derives its own
-  // per-cycle value server-side (`derive_run_phase`), a computation this
-  // single-cycle stream never re-runs; connection loss here is `status`
-  // (live/stale/offline), a presentation signal, not a run phase.
-  run_phase?: "running" | "paused" | "gate" | "terminal";
-  // Terminal reason (raw StopReason value) once run_phase==="terminal".
-  stop_reason?: string;
-  round?: number;
-  // Banked lives ("hearts") when the run is in improvement-banked-budget mode;
-  // absent/null when lives mode is off (the round counter shows instead).
-  hearts?: number | null;
-  // Current candidate being scored, "C3.2/4" form (candidate_label + count).
-  // Set during scoring; stale between rounds, so surface it only while the
-  // active node is l1_score (see `activeNodeId`).
-  candidate?: string;
-  query?: string;
-  best?: number;
-  // Campaign default for which fitness number headlines the operator's text
-  // surfaces (CampaignConfig.headline_metric). Seeds the lineage metric toggle;
-  // the gate is always θ regardless. Absent on old files → "accuracy".
-  headline_metric?: "accuracy" | "composite" | "ability";
-  total_queries_scored?: number;
-  last_query_elapsed_s?: number;
-  wallclock_serialized_at?: string;
-  current_round?: {
-    round?: number;
-    nodes?: Record<string, unknown>;
-    pobb?: {
-      current_id?: string;
-      n_samples?: number;
-      leader_prob?: number;
-      posterior_width?: number;
-      top?: { id: string; p_best: number }[];
-    };
-  };
-  // Completed-round display summaries; sole source of truth for the
-  // FitnessChart, TrendChart, TopStrip sparkline, and LineageTree.
-  // Sorted ascending by `round`; empty until the first round closes.
-  rounds?: RoundSummary[];
-  evaluators?: unknown[];
-  scoring?: unknown;
-  // Two-bucket spend rollup. Always present in a real dashboard.json (the Python
-  // LiveDashboardState.spend has a default_factory); absent only on the
-  // `warming_up` placeholder — hence optional here, firm once present.
-  spend?: SpendRollup;
-  // Set on ``sample_started``, cleared on ``sample_scored``. The dataset
-  // table pulses the row whose ``sample_id`` matches; ``null`` between
-  // samples (no row pulses).
-  current_sample_id?: number | null;
-  // The optimizer LLM call in flight, or null between calls. `node` names the
-  // live optimizer node (l1_generate | l1_critique | l2_context | l3_plan |
-  // checkin) directly — the authoritative "which node is active" signal that
-  // `activeNodeId` reads first. Set on LLMCallStartRecord, cleared on the
-  // paired LLMCallRecord by call_id.
-  in_flight?: {
-    call_id: string;
-    node: string;
-    model?: string | null;
-    round?: number | null;
-    candidate_idx?: number | null;
-    started_at_ms: number;
-  } | null;
-  // The adaptive queue mechanism's expected sample order under the
-  // active objective — descending expected information gain
-  // (``model``) or decision-verdict mutual information (``decision``),
-  // refreshed per candidate at candidate-start. The dataset table sorts
-  // by this when the operator's "sync with live sort" tick is on.
-  // ``null`` before the first sorter fit lands.
-  // Declared run-limit ceilings, written at INIT.exit from the cycle's
-  // OptimizationConfig. Static (unlike the live `patience` "N/max" string) —
-  // the operator-facing source the fork reconcile dialog defaults against
-  // ("3 of 6 rounds left"). A fork re-emits its own reconciled limits here.
-  run_limits?: {
-    max_rounds?: number | null;
-    l1_patience?: number;
-    l2_patience?: number | null;
-    l3_patience?: number | null;
-    pobb_epsilon?: number;
-    spend_budget_usd?: number | null;
-    token_budget?: number | null;
-    // The ♥ bank's declared ceilings — the DENOMINATOR for the live `hearts` count above.
-    // Without `lives_cap` a heart strip is scaleless, and in lives mode `max_rounds` is
-    // null so the round counter it replaced carried the only scale there was.
-    lives_start?: number | null;
-    lives_cap?: number | null;
-  };
-  // Fresh-campaign placeholder — set by the server when `dashboard.json`
-  // hasn't been written yet (origin still running). The companion
-  // `phase_hint` names what's blocking; the rest of the shape is empty.
-  warming_up?: boolean;
-  phase_hint?: string;
-  // Structured crash summary projected from the canonical ``ErrorRecord``
-  // ledger entry. Sole writer: ``LiveDashboardView._handle_error``. Absent
-  // on normal stops; ``RunErrorBanner`` surfaces this above the TopStrip.
-  error?: {
-    kind: string;
-    message: string;
-    stop_reason: string;
-  };
-  // Optimizer-loop degradations the self-healing rails recovered from
-  // (zero-candidate round, L2 framing soft-reject, injection truncation),
-  // projected from the canonical ``RoundWarningRecord``. Sole writer:
-  // ``LiveDashboardView._handle_round_warning``. Rolling + capped; surfaced
-  // by ``RunErrorBanner``'s warnings block, below the crash alert.
-  recent_loop_warnings?: {
-    ts: string;
-    kind: string;
-    severity: "warning" | "error";
-    message: string;
-    round?: number | null;
-    detail?: Record<string, unknown>;
-  }[];
-  [key: string]: unknown;
+// `dashboard.json` IS `LiveDashboardState` — generated from the Pydantic model, not
+// re-declared here. The hand-written version made every field optional and ended with
+// `[key: string]: unknown`, so it typechecked anything (its `run_phase` union was
+// missing two of RunPhase's six members, and nothing caught it).
+//
+// The server's `warming_up` placeholder is a DIFFERENT, 4-key shape — not a sparse
+// dashboard. It is `WarmingSnapshot`, narrowed once in `tick` and never handed to a
+// consumer, so no component has to ask whether its snapshot is real.
+export type DashboardSnapshot = LiveDashboardState;
+
+export interface WarmingSnapshot {
+  warming_up: true;
+  campaign_id: string;
+  cycle_id: string;
+  phase_hint: string;
+}
+
+function isWarming(d: unknown): d is WarmingSnapshot {
+  return !!d && typeof d === "object" && (d as WarmingSnapshot).warming_up === true;
 }
 
 // `current_round.nodes.l1_score.output.candidates[]` shape — the live in-flight
@@ -281,22 +166,6 @@ export const liveInputCandidate = (
 ): LiveInputCandidate | null =>
   matchLiveCandidate(liveL1InputCandidates(dash), round, candidateId);
 
-// Shape-agnostic round-file document. Deep audit consumers (FreqChart,
-// ScoringInspector, OptimizerNodeDetail) fetch one of these lazily via
-// `useRoundFile`; the stream itself no longer maintains a rolling array.
-export interface RoundFileDoc {
-  round?: number;
-  accuracy?: number;
-  composite_fitness?: number;
-  origin_accuracy?: number;
-  scoreboard?: unknown[];
-  results?: unknown[];
-  candidate_scores?: unknown[];
-  all_candidate_results?: Record<string, unknown>;
-  sample_order_timeline?: SampleOrderStep[];
-  [k: string]: unknown;
-}
-
 export interface CycleStreamState {
   dash: DashboardSnapshot | null;
   status: StatusKind;
@@ -360,7 +229,7 @@ export function roundOf(dash: DashboardSnapshot | null): number | null {
 
 // Seconds since the dashboard self-stamped `wallclock_serialized_at`. Sole
 // reader of that field's age — feeds `ageBucket`. Unparseable/missing → null.
-function wallclockAgeS(iso: string | undefined): number | null {
+function wallclockAgeS(iso: string | null | undefined): number | null {
   const wall = Date.parse(iso || "");
   return Number.isFinite(wall) ? (Date.now() - wall) / 1000 : null;
 }
@@ -518,17 +387,16 @@ function useCycleStreamSource(
         return;
       }
 
-      const dash = resp.data as DashboardSnapshot;
-
       // Fresh-campaign warming_up payload (server returns this at 200 when
-      // dashboard.json doesn't exist yet — typically while origin is
-      // running). Distinct user-visible status; no charts to render until
-      // the first real snapshot lands.
-      if (dash.warming_up === true) {
+      // dashboard.json doesn't exist yet — typically while origin is running). It is a
+      // 4-key stub, NOT a sparse dashboard, so it is narrowed off here and never handed
+      // downstream: `dash` stays null and consumers read the phase. No charts to render
+      // until the first real snapshot lands.
+      if (isWarming(resp.data)) {
         stampMismatchRef.current = 0;
         setState((prev) => ({
           ...prev,
-          dash,
+          dash: null,
           status: "stale",
           statusText: "Origin running",
           statusHint:
@@ -540,6 +408,8 @@ function useCycleStreamSource(
         }));
         return;
       }
+
+      const dash = resp.data as unknown as DashboardSnapshot;
 
       // Payload-identity guard: dashboard.json self-stamps the cycle it
       // describes (per-cycle — every cycle owns its own file, stamped with

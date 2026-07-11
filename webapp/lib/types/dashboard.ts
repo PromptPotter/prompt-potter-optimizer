@@ -12,11 +12,11 @@ export type {
   L1ScoreOutput,
   LiveCandidate,
   LiveSample,
-  RoundFileDoc,
   StatusKind,
 } from "@/lib/poll";
 
 export type {
+  LiveDashboardState,
   RoundSummary,
   RoundSummaryCandidate,
 } from "@/lib/api/types";

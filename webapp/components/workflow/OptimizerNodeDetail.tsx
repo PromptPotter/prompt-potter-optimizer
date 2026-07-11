@@ -4,7 +4,8 @@ import type { PipelineDoc } from "./types";
 import { type DashboardSnapshot } from "@/lib/poll";
 import { RoundSamplesView } from "@/components/dashboard/samples/RoundSamplesView";
 import { availableRounds } from "@/lib/derivations";
-import { useRoundSource } from "@/lib/hooks/useRoundSource";
+import { isLiveRound } from "@/lib/hooks/useRoundSource";
+import { useRoundAudit } from "@/lib/hooks/useRoundFile";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
 import { useEffectiveRound } from "@/lib/hooks/useEffectiveRound";
@@ -82,22 +83,17 @@ export function OptimizerNodeDetail({ id, pipeline, onClose }: Props) {
   const completed = availableRounds(dash, isLive).completed;
   const lastFiredRound = completed.at(-1) ?? null;
 
-  // Live round: read inline (no fetch). Historical round: lazy-fetch the
-  // round file; `block` is null until it lands. `useRoundSource` owns the
-  // guard — it idles the fetch on the live round.
+  // Live round: read inline (no fetch). Historical round: lazy-fetch the round's AUDIT
+  // TWIN — the per-node LLM I/O lives there, never on the round document. This used to
+  // read `nodes` off the round document, so it rendered nothing for a completed round.
   const liveBlock = liveNodeBlock(dash, id);
-  const { isLive: activeIsLive, doc: historicalDoc } = useRoundSource(
-    viewedPath,
-    activeRound,
-    dash,
-  );
+  const activeIsLive = isLiveRound(dash, activeRound);
+  const { doc: auditDoc } = useRoundAudit(activeIsLive ? null : viewedPath, activeRound);
   const block: NodeBlock | null = useMemo(() => {
     if (activeRound == null) return null;
     if (activeIsLive) return liveBlock;
-    const nodes = historicalDoc?.nodes as Record<string, NodeBlock> | undefined;
-    const b = nodes?.[id];
-    return b && typeof b === "object" ? b : null;
-  }, [activeRound, activeIsLive, liveBlock, historicalDoc, id]);
+    return auditDoc?.nodes?.[id] ?? null;
+  }, [activeRound, activeIsLive, liveBlock, auditDoc, id]);
   const templateFields = block?.input?.template_fields as
     | Record<string, unknown>
     | undefined;

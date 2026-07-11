@@ -1,27 +1,28 @@
 import { describe, expect, it } from "vitest";
 import { candidateSearchPoint } from "../candidateSearchPoint";
-import type { RoundFileDoc } from "@/lib/poll";
+import type { RoundResult } from "@/lib/types";
+import { roundDoc, scored } from "@/lib/test-fixtures";
 
 // A round file with two candidates, each carrying its own evolved prompt
 // + COMPLETE resolved config — the shape `build_score_report` now persists.
-const doc: RoundFileDoc = {
+const doc: RoundResult = roundDoc({
   round: 2,
   candidate_scores: [
-    {
+    scored({
       candidate_id: "cand-a",
       prompt_fields: { instruction: "evolved A", persona: "solver" },
       resolved_pipeline_params: {
         llm_only: { model: "openai/gpt-oss-120b", reasoning_effort: "high" },
         steps: ["llm_only"],
       },
-    },
-    {
+    }),
+    scored({
       candidate_id: "cand-b",
       prompt_fields: { instruction: "evolved B" },
       resolved_pipeline_params: null,
-    },
+    }),
   ],
-};
+});
 
 describe("candidateSearchPoint", () => {
   it("seeds the fork from the candidate's complete resolved config (steps dropped)", () => {
@@ -43,6 +44,6 @@ describe("candidateSearchPoint", () => {
   it("returns null for an unknown candidate or unloaded doc", () => {
     expect(candidateSearchPoint(doc, "missing")).toBeNull();
     expect(candidateSearchPoint(null, "cand-a")).toBeNull();
-    expect(candidateSearchPoint({ round: 1 }, "cand-a")).toBeNull();
+    expect(candidateSearchPoint(roundDoc({ round: 1 }), "cand-a")).toBeNull();
   });
 });

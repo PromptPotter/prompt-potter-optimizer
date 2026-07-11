@@ -22,9 +22,8 @@ import {
   liveInputCandidate,
   roundOf,
   type DashboardSnapshot,
-  type LiveInputCandidate,
-  type RoundFileDoc,
 } from "@/lib/poll";
+import type { RoundResult } from "@/lib/types";
 
 // The seed-able half of a candidate's searchpoint. `config_overrides` is
 // NOT here — it comes from the reconcile dialog, not the candidate.
@@ -66,18 +65,11 @@ function nodeConfigs(
 // has no entry for `candidateId` — the caller renders the unseeded state
 // rather than a stale or empty editor.
 export function candidateSearchPoint(
-  doc: RoundFileDoc | null,
+  doc: RoundResult | null,
   candidateId: string,
 ): CandidateSearchPoint | null {
   if (!doc || !candidateId) return null;
-  const scores = doc.candidate_scores;
-  if (!Array.isArray(scores)) return null;
-  const entry = scores.find(
-    (c): c is LiveInputCandidate =>
-      !!c &&
-      typeof c === "object" &&
-      (c as LiveInputCandidate).candidate_id === candidateId,
-  );
+  const entry = doc.candidate_scores.find((c) => c.candidate_id === candidateId);
   if (!entry) return null;
   return searchPoint(entry.prompt_fields, nodeConfigs(entry.resolved_pipeline_params));
 }

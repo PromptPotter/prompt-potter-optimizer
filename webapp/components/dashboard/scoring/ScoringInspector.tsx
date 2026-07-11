@@ -4,7 +4,7 @@ import { useRoundSource } from "@/lib/hooks/useRoundSource";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
 import { fmtPct1 } from "@/lib/format";
-import type { CandidateRow, ScoreboardEntry, SelectedCandidate } from "@/lib/types";
+import type { CandidateRow, SelectedCandidate } from "@/lib/types";
 import { liveCandidate } from "@/lib/poll";
 import { samplesForRow } from "@/lib/derivations";
 import { useRoundCandidates } from "@/lib/hooks/useRoundCandidates";
@@ -42,9 +42,8 @@ export function ScoringInspector({ selected, onClose }: Props) {
       if (!c?.stats) return null;
       return { composite: c.stats.composite_fitness, hits: c.stats.hits, total: c.stats.total };
     }
-    const scoreboard = doc?.scoreboard as ScoreboardEntry[] | undefined;
-    const e = scoreboard?.find((c) => (c.candidate_id ?? "") === selected.candidate_id);
-    return e ? { composite: e.composite, hits: e.hits, total: e.total } : null;
+    const e = doc?.scoreboard?.find((c) => c.candidate_id === selected.candidate_id);
+    return e ? { composite: e.composite_fitness, hits: e.hits, total: e.total } : null;
   }, [selected, isLive, dash, doc]);
 
   // The per-sample stream for *just this* searchpoint — the same rows the

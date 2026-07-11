@@ -37,7 +37,7 @@ export function LimitReconcile({
   // steering, but the 2 s poll keeps mutating `dash`; the operator's typed
   // values are the working copy and must not be clobbered by a later tick.
   const [defaults] = useState(() => forkReconcileDefaults(dash));
-  const [rl] = useState(() => dash?.run_limits ?? {});
+  const [rl] = useState(() => dash?.run_limits ?? null);
   const [f, setF] = useState<Fields>(() => ({
     rounds: defaults.roundsRemaining != null ? String(defaults.roundsRemaining) : "",
     spend: defaults.spendRemaining != null ? String(defaults.spendRemaining) : "",
@@ -132,13 +132,13 @@ export function LimitReconcile({
           inputMode="numeric"
           className="limit-input"
           value={f.tokens}
-          placeholder={ph(rl.token_budget, "inherit")}
+          placeholder={ph(rl?.token_budget, "inherit")}
           aria-label="Fork token cap"
           onChange={(e) => set({ ...f, tokens: e.target.value })}
         />
         <small className="limit-note">
-          {typeof rl.token_budget === "number"
-            ? `parent cap ${fmtTokens(rl.token_budget)} — blank inherits`
+          {typeof rl?.token_budget === "number"
+            ? `parent cap ${fmtTokens(rl?.token_budget)} — blank inherits`
             : "parent uncapped — leave blank to inherit"}
         </small>
       </label>
@@ -154,7 +154,7 @@ export function LimitReconcile({
               step={1}
               className="limit-input"
               value={f.l1}
-              placeholder={ph(rl.l1_patience, "inherit")}
+              placeholder={ph(rl?.l1_patience, "inherit")}
               aria-label="Fork L1 patience"
               onChange={(e) => set({ ...f, l1: e.target.value })}
             />
@@ -167,7 +167,7 @@ export function LimitReconcile({
               step={1}
               className="limit-input"
               value={f.l2}
-              placeholder={ph(rl.l2_patience, "inherit")}
+              placeholder={ph(rl?.l2_patience, "inherit")}
               aria-label="Fork L2 patience"
               onChange={(e) => set({ ...f, l2: e.target.value })}
             />
@@ -180,7 +180,7 @@ export function LimitReconcile({
               step={1}
               className="limit-input"
               value={f.l3}
-              placeholder={ph(rl.l3_patience, "inherit")}
+              placeholder={ph(rl?.l3_patience, "inherit")}
               aria-label="Fork L3 patience"
               onChange={(e) => set({ ...f, l3: e.target.value })}
             />
@@ -194,7 +194,7 @@ export function LimitReconcile({
               step={0.01}
               className="limit-input"
               value={f.eps}
-              placeholder={ph(rl.pobb_epsilon, "inherit")}
+              placeholder={ph(rl?.pobb_epsilon, "inherit")}
               aria-label="Fork PoBB elimination epsilon"
               onChange={(e) => set({ ...f, eps: e.target.value })}
             />

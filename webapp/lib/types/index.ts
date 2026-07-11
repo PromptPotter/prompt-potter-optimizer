@@ -14,9 +14,9 @@ export type {
   BucketResult,
   CycleStreamState,
   DashboardSnapshot,
+  LiveDashboardState,
   L1ScoreOutput,
   LiveCandidate,
   LiveSample,
-  RoundFileDoc,
   StatusKind,
 } from "./dashboard";

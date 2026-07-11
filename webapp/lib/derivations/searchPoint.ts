@@ -14,10 +14,10 @@ import {
   roundOf,
   type DashboardSnapshot,
   type LiveInputCandidate,
-  type RoundFileDoc,
 } from "@/lib/poll";
 import { candidateLabel } from "@/lib/candidate-label";
 import { PROMPT_STRING_FIELDS } from "@/lib/prompt-fields";
+import type { RoundResult } from "@/lib/types";
 
 export type ObserveState = "origin" | "live" | "historical";
 
@@ -99,7 +99,7 @@ export function liveObserveConfig(
 // this is what retired the `{}` origin fake that dropped model/provider whenever
 // the overlay file was thin. Null until round 0 has been written.
 export function originObserveConfig(
-  round0: RoundFileDoc | null,
+  round0: RoundResult | null,
   nodeId?: string | null,
 ): ObserveConfig | null {
   const scores = round0?.candidate_scores;
@@ -110,7 +110,7 @@ export function originObserveConfig(
 // Historical: a specific past candidate (the last completed round's winner) out
 // of its lazily-loaded round file, located by `candidate_id`.
 export function candidateObserveConfig(
-  doc: RoundFileDoc | null,
+  doc: RoundResult | null,
   candidateId: string,
   label: string,
   nodeId?: string | null,

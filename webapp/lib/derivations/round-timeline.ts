@@ -4,10 +4,10 @@
 // already loaded by `useRoundFile`. Framework-free so a future surface reuses
 // the same step→order derivation instead of re-deriving it in a component.
 
-import type { RoundFileDoc } from "@/lib/poll";
+import type { RoundResult } from "@/lib/types";
 import type { SampleOrderStep } from "@/lib/types";
 
-export function historicalTimeline(roundDoc: RoundFileDoc | null): SampleOrderStep[] {
+export function historicalTimeline(roundDoc: RoundResult | null): SampleOrderStep[] {
   const t = roundDoc?.sample_order_timeline;
   return Array.isArray(t) ? t : [];
 }

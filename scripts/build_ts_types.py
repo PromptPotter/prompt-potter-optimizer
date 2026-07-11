@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import enum
 import sys
 import textwrap
 import types
@@ -10,21 +11,44 @@ import typing
 from pathlib import Path
 
 from pydantic import BaseModel
-from pydantic.fields import FieldInfo
+from pydantic.fields import ComputedFieldInfo, FieldInfo
 
 # ruff: noqa: E402 -- we import from promptpotter after adjusting sys.path
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO))
 
+from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
+from promptpotter.domain.l1_layout import L1Layout
+from promptpotter.domain.opt_search_point import (
+    EvidenceGrounding,
+    FewShotExample,
+    IndividualLineage,
+    L1SituationalExample,
+    L1SupplementalRule,
+    L2L3Memory,
+    OptSearchPoint,
+    WoundChannels,
+)
 from promptpotter.domain.outer_verdict import OuterCellEffect, OuterVerdict
 from promptpotter.domain.pipeline_schema import NodeConfigParam, NodeOutputSchema
 from promptpotter.domain.results import (
     DegradationHealth,
     DiagnosticRunRecord,
+    RoundResult,
     RoundSummary,
     RoundSummaryCandidate,
+    SampleOrderStep,
+    ScoreboardRow,
+    ScoredCandidate,
 )
 from promptpotter.infrastructure.projections.live_dashboard.state import (
+    BackendWarning,
+    BackfillLogEntry,
+    DashboardError,
+    InFlightCall,
+    LiveDashboardState,
+    LoopWarning,
+    RunLimits,
     SpendBucket,
     SpendRollup,
 )
@@ -70,12 +94,34 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     OuterVerdict,
     RoundSummary,
     DiagnosticRunRecord,
-    # --- spend rollup (the only live-dashboard sub-shapes the webapp reads
-    # strictly; the rest of dashboard.json is consumed loosely via the webapp's
-    # own DashboardSnapshot, so LiveDashboardState + its other nested types are
-    # not generated) ---
+    # --- the round document (`rounds/round_NNNN.json` IS `RoundResult.model_dump()`;
+    # also the `GET /rounds/{n}` response model). Nested graph, dependencies first. ---
+    ValidationFailure,
+    RuntimeFailure,
+    ScoredCandidate,
+    ScoreboardRow,
+    SampleOrderStep,
+    FewShotExample,
+    EvidenceGrounding,
+    IndividualLineage,
+    WoundChannels,
+    L1Layout,
+    L1SupplementalRule,
+    L1SituationalExample,
+    L2L3Memory,
+    OptSearchPoint,
+    RoundResult,
     SpendBucket,
     SpendRollup,
+    # --- dashboard.json IS `LiveDashboardState` (the webapp polls it every 2s). It was
+    # hand-declared webapp-side with an index signature that typechecked anything. ---
+    BackendWarning,
+    LoopWarning,
+    DashboardError,
+    RunLimits,
+    InFlightCall,
+    BackfillLogEntry,
+    LiveDashboardState,
     # --- datasets router ---
     DatasetItem,
     DatasetPreviewResponse,
@@ -127,6 +173,14 @@ def _emit_type(annotation: typing.Any) -> str:
     if _is_none_type(annotation):
         return "null"
 
+    # An enum is its value set. Emitting `unknown` (the old fall-through) let the webapp
+    # hand-write the union instead — and its `run_phase` union was missing two of the six
+    # RunPhase members. A name-set the compiler didn't derive goes stale in silence.
+    if isinstance(annotation, type) and issubclass(annotation, enum.Enum):
+        return " | ".join(
+            repr(m.value) if isinstance(m.value, str) else str(m.value) for m in annotation
+        )
+
     origin = typing.get_origin(annotation)
     args = typing.get_args(annotation)
 
@@ -160,14 +214,46 @@ def _emit_type(annotation: typing.Any) -> str:
     return "unknown"
 
 
-def _emit_field(name: str, info: FieldInfo) -> str:
+def _emit_field(name: str, info: FieldInfo, annotation: typing.Any) -> str:
     # Pydantic serializes defaults on the wire ⇒ no `?` in TS, only `| null` for Optional.
-    annotation = info.annotation
     ts_type = _emit_type(annotation)
     description = info.description
     comment_block = ""
     if description:
         wrapped = textwrap.fill(description, width=78, subsequent_indent="   * ")
+        comment_block = f"  /** {wrapped} */\n"
+    return f"{comment_block}  {name}: {ts_type};"
+
+
+def _resolved_hints(model: type[BaseModel]) -> dict[str, typing.Any]:
+    """Field annotations with forward refs resolved.
+
+    ``model_fields[...].annotation`` can still hold a bare ``ForwardRef`` when the
+    referent is defined below the model in its own module (pydantic resolves it inside
+    the core schema, but never writes it back). Emitting that yields ``unknown``.
+    """
+    return typing.get_type_hints(model)
+
+
+def _computed_return_type(model: type[BaseModel], name: str) -> typing.Any:
+    """A computed field's return type, read off the underlying property.
+
+    ``ComputedFieldInfo.return_type`` is ``PydanticUndefined`` under
+    ``from __future__ import annotations`` (the annotation is still a string), so go to
+    the getter and resolve it there.
+    """
+    prop = getattr(model, name)
+    fget = getattr(prop, "fget", None) or prop
+    return typing.get_type_hints(fget).get("return", typing.Any)
+
+
+def _emit_computed_field(model: type[BaseModel], name: str, info: ComputedFieldInfo) -> str:
+    """A ``@computed_field`` — ``model_dump`` emits it, so it is part of the wire type."""
+    ts_type = _emit_type(_computed_return_type(model, name))
+    doc = (info.description or "").strip()
+    comment_block = ""
+    if doc:
+        wrapped = textwrap.fill(doc, width=78, subsequent_indent="   * ")
         comment_block = f"  /** {wrapped} */\n"
     return f"{comment_block}  {name}: {ts_type};"
 
@@ -190,7 +276,18 @@ def _emit_stop_reason_labels() -> str:
 
 
 def _emit_interface(model: type[BaseModel]) -> str:
-    body_lines = [_emit_field(name, info) for name, info in model.model_fields.items()]
+    hints = _resolved_hints(model)
+    body_lines = [
+        _emit_field(name, info, hints.get(name, info.annotation))
+        for name, info in model.model_fields.items()
+    ]
+    # Computed fields ARE on the wire (``model_dump`` emits them) but live outside
+    # ``model_fields`` — omitting them hands the webapp a type that is missing keys the
+    # server always sends.
+    body_lines += [
+        _emit_computed_field(model, name, info)
+        for name, info in model.model_computed_fields.items()
+    ]
     if model.model_config.get("extra") == "allow":
         body_lines.append("  [key: string]: unknown;")
     doc = (model.__doc__ or "").strip().splitlines()

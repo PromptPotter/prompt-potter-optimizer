@@ -4,7 +4,8 @@ import {
   liveObserveConfig,
   originObserveConfig,
 } from "../searchPoint";
-import type { DashboardSnapshot, RoundFileDoc } from "@/lib/poll";
+import type { DashboardSnapshot } from "@/lib/poll";
+import { dash, roundDoc, scored } from "@/lib/test-fixtures";
 
 type InputCandidate = {
   idx?: number;
@@ -14,9 +15,7 @@ type InputCandidate = {
 };
 
 const liveDash = (candidates: InputCandidate[]): DashboardSnapshot =>
-  ({
-    current_round: { round: 1, nodes: { l1_score: { input: { candidates } } } },
-  }) as DashboardSnapshot;
+  dash({ current_round: { round: 1, nodes: { l1_score: { input: { candidates } } } } });
 
 describe("liveObserveConfig", () => {
   it("returns null with no live candidates", () => {
@@ -45,11 +44,11 @@ describe("liveObserveConfig", () => {
 
 describe("originObserveConfig", () => {
   it("reads the round-0 C0 row (index 0) resolved config", () => {
-    const doc = {
+    const doc = roundDoc({
       candidate_scores: [
-        { candidate_id: "c0", prompt_fields: { instruction: "o" }, resolved_pipeline_params: { llm: { model: "m0" } } },
+        scored({ candidate_id: "c0", prompt_fields: { instruction: "o" }, resolved_pipeline_params: { llm: { model: "m0" } } }),
       ],
-    } as RoundFileDoc;
+    });
     const r = originObserveConfig(doc);
     expect(r?.label).toBe("origin");
     expect(r?.config).toEqual({ llm: { model: "m0" } });
@@ -58,17 +57,17 @@ describe("originObserveConfig", () => {
 
   it("returns null without a round-0 doc / candidate_scores", () => {
     expect(originObserveConfig(null)).toBeNull();
-    expect(originObserveConfig({ round: 0 } as RoundFileDoc)).toBeNull();
+    expect(originObserveConfig(roundDoc({ round: 0 }))).toBeNull();
   });
 });
 
 describe("candidateObserveConfig", () => {
-  const doc = {
+  const doc = roundDoc({
     candidate_scores: [
-      { candidate_id: "cand-a", prompt_fields: { instruction: "a" }, resolved_pipeline_params: { llm: { model: "ma" } } },
-      { candidate_id: "cand-b", prompt_fields: { instruction: "b" }, resolved_pipeline_params: { llm: { model: "mb" } } },
+      scored({ candidate_id: "cand-a", prompt_fields: { instruction: "a" }, resolved_pipeline_params: { llm: { model: "ma" } } }),
+      scored({ candidate_id: "cand-b", prompt_fields: { instruction: "b" }, resolved_pipeline_params: { llm: { model: "mb" } } }),
     ],
-  } as RoundFileDoc;
+  });
 
   it("locates a candidate by id and projects its resolved config", () => {
     const r = candidateObserveConfig(doc, "cand-b", "winner · C2.1");
@@ -80,6 +79,6 @@ describe("candidateObserveConfig", () => {
   it("returns null for a missing id / doc", () => {
     expect(candidateObserveConfig(doc, "missing", "x")).toBeNull();
     expect(candidateObserveConfig(null, "cand-a", "x")).toBeNull();
-    expect(candidateObserveConfig({ round: 1 } as RoundFileDoc, "cand-a", "x")).toBeNull();
+    expect(candidateObserveConfig(roundDoc({ round: 1 }), "cand-a", "x")).toBeNull();
   });
 });

@@ -28,6 +28,7 @@ __all__ = [
     "DegradationHealth",
     "DiagnosticRunRecord",
     "EliminationContext",
+    "HeadlineMetric",
     "PayloadOutcome",
     "RoundOrigin",
     "RoundResult",
@@ -595,6 +596,11 @@ class WarningDict(TypedDict):
 
 
 HealthGrade = Literal["healthy", "degraded", "critical"]
+
+# Which fitness number headlines the operator's surfaces. One owner: `CampaignConfig`
+# declares the campaign default and `LiveDashboardState` serves it, so the two cannot
+# drift into a wide `str` on one side and a closed union on the other.
+HeadlineMetric = Literal["accuracy", "composite", "ability"]
 
 
 class DegradationHealth(BaseModel):

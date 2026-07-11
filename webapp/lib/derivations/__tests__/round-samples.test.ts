@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { samplesForRow } from "../round-samples";
 import type { CandidateRow } from "@/lib/types";
-import type { DashboardSnapshot, RoundFileDoc } from "@/lib/poll";
+import type { DashboardSnapshot } from "@/lib/poll";
+import type { RoundResult } from "@/lib/types";
 
 // `samplesForRow` is the single live-vs-historical source switch every sample
 // surface rides (FitnessPanel bars, RoundSamplesView groups). It SELECTS one
@@ -43,7 +44,7 @@ const liveDash = {
 
 const historicalDoc = {
   all_candidate_results: { r1_0: [{ sample_id: 1, hit: true }] },
-} as unknown as RoundFileDoc;
+} as unknown as RoundResult;
 
 describe("samplesForRow — source routing", () => {
   it("an in-flight row reads dash and ignores the round file", () => {

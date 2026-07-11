@@ -4,41 +4,18 @@
 
 import type { CandidateRow } from "./candidate";
 
-export type { RoundSummary, RoundSummaryCandidate } from "@/lib/api/types";
-
-// `round_NNNN.json::scoreboard[]` entry. Deep-audit surface fetched
-// lazily by ScoringInspector / RoundSamplesView when the operator
-// drills into a specific round. The summary surface
-// (`dash.rounds[].candidates[]`) doesn't carry composite / hits /
-// per_sample — those live here.
-export interface ScoreboardEntry {
-  rank?: number;
-  candidate_id?: string;
-  changes_description?: string;
-  accuracy?: number;
-  composite?: number;
-  hits?: number;
-  total?: number;
-  is_winner?: boolean;
-  per_sample?: Record<string, unknown>[];
-  [k: string]: unknown;
-}
-
-// One measurement step in a round's adaptive sample-selection timeline,
-// from `round_NNNN.json::sample_order_timeline[]` (closed rounds) or
-// reconstructed live from `dashboard.json` for the in-flight round.
-// `computed` = samples already measured (measurement order); `planned` =
-// the picker's intended order for the remaining tail at that step;
-// `current_sample_id` = the one being measured (planned[0], or null at the
-// terminal step). Mirrors the backend `SampleOrderStep`
-// (`promptpotter/domain/results.py`). Each row is a frozen snapshot — the
-// trajectory hover reads one row per step.
-export interface SampleOrderStep {
-  step: number;
-  current_sample_id: number | null;
-  computed: number[];
-  planned: number[];
-}
+// The round document and its rows are GENERATED from the Pydantic models
+// (`RoundResult.model_dump()` IS `rounds/round_NNNN.json`). They were hand-mirrored
+// here three times over, and one copy spelled `composite_fitness` as `composite` — a
+// field the server has never sent.
+export type {
+  RoundResult,
+  RoundSummary,
+  RoundSummaryCandidate,
+  SampleOrderStep,
+  ScoreboardRow,
+  ScoredCandidate,
+} from "@/lib/api/types";
 
 // `round_NNNN.json::results[]` entry. The pre-bucketing per-sample
 // row consumed by FreqChart (in the round-mode path) and the
@@ -53,9 +30,20 @@ export interface RawResultRow {
   fitness?: number;
 }
 
-// `dashboard.json::current_round.nodes[id]` / `round_NNNN.json::nodes[id]`.
-// Both surfaces share this shape — written by AuditTrailView at
-// `promptpotter/infrastructure/projections/audit_trail.py:222-243`.
+// The AUDIT TWIN of a round — `.runtime/cache/rounds/round_NNNN.json`, written by
+// `AuditTrailView`. Same basename as the round document, different tree, different
+// shape: this one carries the per-node LLM I/O, which the round document does NOT.
+// Not generated — the audit trail is written as a plain dict, with no Pydantic model.
+export interface RoundAuditDoc {
+  round?: number;
+  nodes?: Record<string, NodeBlock>;
+  warnings?: unknown[];
+  interrupted?: boolean;
+}
+
+// `dashboard.json::current_round.nodes[id]` / the audit twin's `nodes[id]`.
+// Both surfaces share this shape — written by AuditTrailView
+// (`promptpotter/infrastructure/projections/audit_trail.py`).
 // `input`/`output` are loose dicts whose contents vary by node.
 export interface NodeBlock {
   input?: Record<string, unknown>;

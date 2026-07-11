@@ -75,7 +75,7 @@ export function LiveStateCard() {
     for (const k of KNOWN_ORDER) {
       if (!(k in dash) || seen.has(k)) continue;
       seen.add(k);
-      items.push([k, (dash as Record<string, unknown>)[k]]);
+      items.push([k, (dash as unknown as Record<string, unknown>)[k]]);
     }
     for (const [k, v] of Object.entries(dash)) {
       if (seen.has(k)) continue;

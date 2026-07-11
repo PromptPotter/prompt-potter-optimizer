@@ -98,6 +98,275 @@ export interface DiagnosticRunRecord {
   noise_floor_raw: number[] | null;
 }
 
+/** L1-output parse-time invariant violation; drives synthetic-0 in ``score_search_point``. */
+export interface ValidationFailure {
+  /** The parameter path that failed, ``{node_name}.{param}`` (e.g.
+   * ``llm_only.model``), or a meta-axis on the generator output itself:
+   * ``l1_generate.output`` (parse/shape failures) or ``variant`` (no-op /
+   * duplicate mutations). */
+  axis: string;
+  /** The offending value as rendered for the prompt; truncated to ≤300 chars for
+   * raw LLM output. Always a string — original type is encoded into the
+   * rendering when relevant. */
+  value: string;
+  /** The accept-set the validator checked against. Empty list when the failure is
+   * mode-based (parse error, forbidden axis) rather than membership-based. */
+  allowed: string[];
+  /** Reason code that steers L2's healing direction. One of: ``forbidden_axis``
+   * (operator-locked param touched), ``type_mismatch`` (wrong declared type),
+   * ``not_in_available_models`` / ``not_in_param_allowed_values`` (value
+   * outside schema enum), ``reproposes_known_failing_config`` (matches a
+   * prior ``RuntimeFailure.observed_config`` row),
+   * ``l1_provider_empty_response`` / ``meta_prompt_parse_failure`` /
+   * ``meta_prompt_unexpected_type`` (generator-side failure),
+   * ``no_op_variant`` / ``duplicate_variant`` (invariant-detect),
+   * ``hallucinated_node`` (named a node absent from the schema — NON-fatal:
+   * the phantom edit is stripped, the candidate still scores; routed as
+   * signal, not a synthetic-0). */
+  reason: string;
+}
+
+/** Post-eval degradation evidence, per-candidate. */
+export interface RuntimeFailure {
+  /** Failure family: ``degradation`` (mid-eval DegradationCheck fired on warning-
+   * rate) or ``scoring_error_abort`` (scoring raised mid-eval and the
+   * candidate was retired). */
+  source: string;
+  /** ``{node_name}:{warning_type}`` of the most frequent warning across the
+   * candidate's measurements; the prefix selects the node whose config is
+   * captured in ``observed_config``. */
+  dominant_warning: string;
+  /** Tally of each ``{node}:{warning}`` seen, by occurrence count. */
+  warning_types: Record<string, number>;
+  /** Fraction of scored samples that emitted any pipeline warning. */
+  degraded_rate: number;
+  /** Sample count with at least one warning. */
+  degraded_count: number;
+  /** Sample count actually measured for the candidate. */
+  total_scored: number;
+  /** Snapshot of the failing node's effective config — the (param, value) tuples
+   * the `l1_config_not_in_runtime_failures` validator scans on subsequent
+   * rounds to reject re-proposals. */
+  observed_config: Record<string, unknown>;
+  /** Round number that first recorded this failure (dedup key component). */
+  first_seen_round: number;
+  /** Label of the originating candidate; informational, not a join key. */
+  candidate_label: string;
+  /** Who heals this runtime failure. Defaults to ``L1`` (a rate-based degradation
+   * L1 retunes the node config around); a deterministic-for-config break
+   * whose only fix is a locked surface (schema/model) is stamped ``OPERATOR``
+   * so it escalates instead of churning in-loop. */
+  owner: 'l1' | 'operator';
+}
+
+/** One candidate's L1 score report — the single shape for round-file scores. */
+export interface ScoredCandidate {
+  candidate_id: string;
+  label: string;
+  changes_description: string;
+  accuracy: number;
+  composite_fitness: number;
+  hits: number;
+  total: number;
+  evaluators: Record<string, number>;
+  pipeline_params_override: Record<string, unknown> | null;
+  resolved_pipeline_params: Record<string, unknown> | null;
+  prompt_fields: Record<string, unknown>;
+  escalation_aborted: boolean;
+  elimination_stopped: boolean;
+  scored_samples: number;
+  expected_samples: number;
+  partial_reason: string;
+  invalid: boolean;
+  validation_failures: ValidationFailure[];
+  runtime_failures: RuntimeFailure[];
+  elimination_context: unknown;
+  degradation_context: unknown;
+  matched_origin_accuracy: number;
+  matched_origin_hits: number;
+  matched_origin_composite: number;
+  theta: number | null;
+  theta_se: number | null;
+  composite_ci_lo: number | null;
+  composite_ci_hi: number | null;
+  ci_lo: number;
+  ci_hi: number;
+}
+
+/** One rank-ordered row of ``RoundResult.scoreboard`` — the round file's display table. */
+export interface ScoreboardRow {
+  rank: number;
+  candidate_id: string;
+  changes_description: string;
+  accuracy: number;
+  composite_fitness: number;
+  hits: number;
+  total: number;
+  escalation_aborted: boolean;
+  matched_origin_accuracy: number;
+  matched_origin_hits: number;
+  matched_origin_composite: number;
+  ci_lo: number;
+  ci_hi: number;
+  is_winner: boolean;
+}
+
+/** One measurement step in a round's adaptive sample-selection timeline. */
+export interface SampleOrderStep {
+  step: number;
+  current_sample_id: number | null;
+  computed: number[];
+  planned: number[];
+}
+
+/** An input/output pair used as a few-shot demonstration. */
+export interface FewShotExample {
+  input: string;
+  output: string;
+  explanation: string | null;
+}
+
+/** Panel field + citation L1 declares to justify a mutation. */
+export interface EvidenceGrounding {
+  /** One of EVIDENCE_GROUNDING_FIELDS. */
+  field: string;
+  /** Short string naming the panel entry cited. */
+  citation: string;
+}
+
+/** Identity + provenance — set once at creation, never mutated. */
+export interface IndividualLineage {
+  id: string;
+  parent_id: string | null;
+  changes_description: string;
+  /** 'origin' / 'l1_generate' / 'l2_context' / 'l3_plan' / 'fork_seed' /
+   * 'campaign_origin'. */
+  source: string;
+  evidence_grounding: EvidenceGrounding | null;
+}
+
+/** Four wound streams + sticky L3 note; rendered by dispatch-hub injections. */
+export interface WoundChannels {
+  l3_note: string;
+  validation_failures: ValidationFailure[];
+  runtime_failures: RuntimeFailure[];
+  l2_guard_breaches: unknown[];
+  l3_guard_breaches: unknown[];
+}
+
+/** Per-slot list of placeholder names that the dispatch hub resolves */
+export interface L1Layout {
+  persona: string[];
+  task_intent: string[];
+  problem_description: string[];
+  thinking_style: string[];
+}
+
+/** L2-authored situational rule rendered inline in L1's instruction. */
+export interface L1SupplementalRule {
+  rule_id: string;
+  body: string;
+  citation: string;
+}
+
+/** Worked example pinned to a ``trigger_id`` (auto-trigger or L2-authored rule). */
+export interface L1SituationalExample {
+  trigger_id: string;
+  parent_excerpt: string;
+  rejected: string;
+  accepted: string;
+  why: string;
+}
+
+/** L2/L3-authored state that travels with the candidate. */
+export interface L2L3Memory {
+  /** Four wound streams (validation/runtime/l2-guard/l3-guard) + sticky L3 note.
+   * Rendered by dispatch-hub injections; absorbed by L2 next round. */
+  wounds: WoundChannels;
+  /** L2-authored ordered list of injection slots that ``DispatchHub.fill`` walks to
+   * compose the L1 meta-prompt. L2's primary lever for changing what evidence
+   * L1 sees. */
+  l1_layout: L1Layout;
+  /** Per-individual L1 meta-prompt overrides keyed by the surface field name
+   * (``persona``, ``instruction``, …). L2 writes here to nudge L1 without
+   * rewriting the shared meta-prompt. */
+  l1_overrides: Record<string, unknown>;
+  /** L2-authored situational rules rendered inline in L1's instruction. Cumulative
+   * across rounds; L3 may prune. */
+  l1_supplemental_rules: L1SupplementalRule[];
+  /** Worked examples pinned to a ``trigger_id`` (auto-trigger or L2-authored rule).
+   * Rendered alongside the matching rule. */
+  l1_situational_examples: L1SituationalExample[];
+  /** Persistent task-framing dict refined by ``l2_context`` and spliced around
+   * ``problem_description`` at render time. Accumulative: each L2 fire merges
+   * deltas rather than rewriting wholesale. */
+  task_context: unknown;
+}
+
+/** Optimizer working state: prompt fields + lineage + L2/L3 memory. */
+export interface OptSearchPoint {
+  persona: string;
+  task_intent: string;
+  problem_description: string;
+  instruction: string;
+  thinking_style: string;
+  answer_format: string;
+  few_shot_examples: FewShotExample[];
+  /** Strategic frame written by ``l3_plan`` and read by every layer next round;
+   * persistent until the next L3 fire. Empty until L3 fires for the first
+   * time. */
+  plan: string;
+  lineage: IndividualLineage;
+  memory: L2L3Memory;
+}
+
+/** Per-round outcome — and the round document itself. */
+export interface RoundResult {
+  round: number;
+  label: string;
+  accuracy: number;
+  composite_fitness: number;
+  hits: number;
+  total: number;
+  improved: boolean;
+  p_value: number | null;
+  improved_reason: string | null;
+  degraded_samples: number;
+  deprecated: number;
+  escalation_signal: unknown | null;
+  matched_origin_accuracy: number;
+  matched_origin_hits: number;
+  matched_origin_composite: number;
+  cumulative_accuracy: number;
+  cumulative_theta: number | null;
+  prompt_fields: Record<string, unknown>;
+  winner_task_context: Record<string, string> | null;
+  pipeline_params: Record<string, unknown> | null;
+  origin_accuracy: number;
+  results: Record<string, unknown>[];
+  all_candidate_results: Record<string, Record<string, unknown>[]>;
+  candidates_scored: number;
+  candidate_scores: ScoredCandidate[];
+  decisions: unknown[];
+  evaluators: Record<string, number>;
+  l1_yield: number;
+  l1_n_no_op: number;
+  l1_n_duplicate: number;
+  l1_parse_failure: string | null;
+  sample_order_timeline: SampleOrderStep[];
+  diagnostics: unknown | null;
+  critique: unknown | null;
+  health: DegradationHealth | null;
+  opt_search_point: OptSearchPoint | null;
+  axis_memory_peaked: string[];
+  status: string;
+  round_id: string;
+  /** Rank-ordered display table — composite-first, accuracy-tiebreak; winner
+   * tagged.  Derived, never stored: it cannot drift from `candidate_scores`
+   * the way a hand-built twin could. */
+  scoreboard: ScoreboardRow[];
+}
+
 /** One spend sub-bucket (backend or optimizer-loop). Mutated only by */
 export interface SpendBucket {
   used_usd: number;
@@ -113,6 +382,109 @@ export interface SpendRollup {
   backend: SpendBucket;
   loop: SpendBucket;
   total_used_usd: number;
+}
+
+/** One entry in ``recent_backend_warnings`` — backend transport retry / 429 / 5xx surface. */
+export interface BackendWarning {
+  ts: string;
+  kind: string;
+  attempt: number | null;
+  max_attempts: number | null;
+  wait_s: number | null;
+  error_class: string | null;
+  status_code: number | null;
+  final: boolean;
+  query: string | null;
+}
+
+/** One entry in ``recent_loop_warnings`` — an optimizer-loop degradation the */
+export interface LoopWarning {
+  ts: string;
+  kind: string;
+  severity: string;
+  message: string;
+  round: number | null;
+  detail: Record<string, unknown>;
+}
+
+/** ``dashboard.json::error`` — structured crash summary written by */
+export interface DashboardError {
+  kind: string;
+  message: string;
+  stop_reason: string;
+}
+
+/** ``state.run_limits`` — the cycle's declared run-limit ceilings, written */
+export interface RunLimits {
+  max_rounds: number | null;
+  l1_patience: number;
+  l2_patience: number | null;
+  l3_patience: number | null;
+  pobb_epsilon: number;
+  spend_budget_usd: number | null;
+  token_budget: number | null;
+  lives_start: number | null;
+  lives_cap: number | null;
+}
+
+/** ``state.in_flight`` — the optimizer LLM call currently in progress. */
+export interface InFlightCall {
+  call_id: string;
+  node: string;
+  model: string | null;
+  round: number | null;
+  candidate_idx: number | null;
+  started_at_ms: number;
+}
+
+/** One paired-PoBB backfill event appended by ``LiveDashboardView._append_backfill``. */
+export interface BackfillLogEntry {
+  round: number;
+  candidate_idx: number;
+  candidate_total: number;
+  sample_id: number;
+  prior_ids: string[];
+}
+
+/** ``dashboard.json`` — operator-facing snapshot, polled by the webapp. */
+export interface LiveDashboardState {
+  campaign_id: string;
+  cycle_id: string;
+  session_id: string;
+  langfuse_trace_url: string | null;
+  state: string;
+  state_since: string;
+  run_phase: 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
+  stop_reason: string | null;
+  round: number;
+  candidate: string;
+  query: string;
+  patience: string;
+  hearts: number | null;
+  rounds: RoundSummary[];
+  best: number;
+  current_acc: number;
+  composite_fitness_formula: string | null;
+  headline_metric: 'accuracy' | 'composite' | 'ability';
+  degraded_count: number;
+  error_count: number;
+  backend_retry_count: number;
+  recent_backend_warnings: BackendWarning[];
+  recent_loop_warnings: LoopWarning[];
+  total_queries_scored: number;
+  total_backend_calls: number;
+  current_query_payload: string | null;
+  current_sample_id: number | null;
+  last_query_elapsed_s: number;
+  wallclock_serialized_at: string | null;
+  n_variants: number;
+  sp_budget_ttest: number;
+  run_limits: RunLimits | null;
+  spend: SpendRollup;
+  in_flight: InFlightCall | null;
+  backfill_log: BackfillLogEntry[];
+  current_round: Record<string, unknown>;
+  error: DashboardError | null;
 }
 
 export interface DatasetItem {
