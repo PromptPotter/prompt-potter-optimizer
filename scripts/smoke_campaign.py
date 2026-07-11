@@ -115,9 +115,9 @@ async def _run(args: argparse.Namespace) -> int:
     print(f"[smoke] dataset runs: {project_dir / 'dataset_runs'}", flush=True)
 
     session = await init_notebook_session(
+        dataset_name=args.dataset,
         backend_url=args.backend_url,
         backend_id=args.dataset,
-        dataset_name=args.dataset,
     )
 
     schema = session.pipeline_schema

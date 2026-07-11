@@ -218,7 +218,7 @@ class CommandRecord(BaseModel):
     - Campaign-lifecycle commands (archive / delete / unarchive) ride the
       campaign's root cycle ledger.
     - Workspace-scoped backend commands (register-backend /
-      sync-backend-experiments) ride the workspace ledger at
+      mint-campaign) ride the workspace ledger at
       ``projects/{tenant}/.workspace/events.jsonl`` per the §0 Persistence
       sibling amendment.
 

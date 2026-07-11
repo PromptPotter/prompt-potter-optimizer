@@ -11,10 +11,8 @@ from contextvars import Token
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.bootstrap.session import auto_mint_session
 from promptpotter.application.origin import (
     build_campaign_emitter,
-    resolve_origin_opt_search_point,
 )
 from promptpotter.application.views import ViewContext, from_phase_event
 from promptpotter.domain.cycle_paths import CycleDir
@@ -328,54 +326,17 @@ class ForkInfo:
     parent_cycle_id: str
 
 
-def _ensure_session_minted(
-    session: Session,
-    campaign_config: CampaignConfig,
-    dataset: list[Sample],
-    *,
-    experiment_id: str | None,
-    origin_accuracy: float,
-) -> None:
-    """Auto-mint session+cycle from origin OSP if missing (idempotent)."""
-    from promptpotter.application.runner import build_origin_cycle_id
-
-    # Auto-mint is the genuine `new` flow only (no existing campaign). A
-    # resume/fork launch binds identity before this runs, so either field being
-    # set means the campaign already exists — never re-mint over it.
-    if session.session_id or session.campaign_id:
-        return
-
-    prompt_nodes = session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
-    resolved_origin = resolve_origin_opt_search_point(
-        session.experiment_extract or {},
-        prompt_node_names=prompt_nodes,
-        dataset_dir=session.dataset_config_dir,
-    )
-    auto_mint_session(
-        session,
-        campaign_config,
-        cycle_id=build_origin_cycle_id(
-            resolved_origin, session.pipeline_schema, dataset, session.pipeline_params
-        ),
-        origin_acc=origin_accuracy,
-        origin_prompt_fields=resolved_origin.prompt_field_dict(),
-        dataset_size=len(dataset),
-        experiment_id=experiment_id,
-    )
-
-
 def build_run_observers(
     *,
     session: Session,
     campaign_config: CampaignConfig,
     dataset: list[Sample],
     display: LiveDisplay | None = None,
-    experiment_id: str | None = None,
     resumed_from_round: int | None = None,
     origin_accuracy: float = 0.0,
     fork: ForkInfo | None = None,
 ) -> RunObservers:
-    """Mint session if needed; open ledger; build + bind every observer.
+    """Open the ledger; build + bind every observer. The session MUST already be minted.
 
     ``fork=None`` ⇒ fresh cycle (new dashboard in its own cycle dir).
     ``fork=ForkInfo(...)`` ⇒ fresh per-cycle dashboard for the fork, seeded
@@ -383,18 +344,19 @@ def build_run_observers(
     before this call), and inherit ledger from parent's current offset.
     ``origin_accuracy`` is a seed; real value lands on the next ``INIT/exit``
     event.
-    """
-    if fork is None:
-        _ensure_session_minted(
-            session,
-            campaign_config,
-            dataset,
-            experiment_id=experiment_id,
-            origin_accuracy=origin_accuracy,
-        )
 
+    This used to auto-mint when it found no session — a second mint path beside
+    ``jobs/mint.py::prepare_fresh_cycle``, and a DIVERGENT one: it skipped the pipeline
+    overlay, ``pipeline_params``, ``active_steps`` and the ``CycleSeed`` seam, so the
+    cycle it produced was subtly not the one the real prologue makes. Every caller
+    pre-mints, so it only ever fired as a silent fallback. An unminted session is now a
+    loud programming error.
+    """
     if session.state.cycle_id is None or session.store is None:
-        raise RuntimeError("build_run_observers: session must have cycle_id and store")
+        raise RuntimeError(
+            "build_run_observers: session must already be minted via "
+            "jobs.mint.prepare_fresh_cycle — it needs both cycle_id and store"
+        )
 
     cycle_dir = CycleDir(
         session.store.campaigns.cycle_dir(session.campaign_id, session.state.cycle_id)

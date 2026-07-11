@@ -21,7 +21,6 @@ import argparse
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
-    DEFAULT_EXPERIMENT_ID,
 )
 
 
@@ -114,11 +113,6 @@ def _add_new_args(p_new: argparse.ArgumentParser) -> None:
     p_new.add_argument(
         "--task-text", default=None, help="Override datasets/<name>/task_description.md inline"
     )
-    p_new.add_argument(
-        "--excel-path",
-        default=None,
-        help="Build train/test datasets from an Excel ground-truth file before minting.",
-    )
     # File-ingest form only (ignored for the name form).
     p_new.add_argument(
         "--slug",
@@ -139,7 +133,6 @@ def _add_new_args(p_new: argparse.ArgumentParser) -> None:
     )
     p_new.add_argument("--backend-url", default=DEFAULT_BACKEND_URL)
     p_new.add_argument("--backend-id", default=DEFAULT_BACKEND_ID)
-    p_new.add_argument("--experiment-id", default=DEFAULT_EXPERIMENT_ID)
 
     mode_group = p_new.add_mutually_exclusive_group()
     mode_group.add_argument(

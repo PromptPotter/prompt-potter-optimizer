@@ -44,9 +44,12 @@ def _round(**kw: Any) -> RoundResult:
     )
 
 
-def _prior(query: str, predicted: str = "p", gt: str = "g") -> dict:
+def _prior(sample_id: int, predicted: str = "p", gt: str = "g") -> dict:
+    """A cached measurement. ``sample_id`` IS the cell's identity — the merge keys on it;
+    ``query`` rides along as the human-readable label."""
     return {
-        "query": query,
+        "sample_id": sample_id,
+        "query": f"q{sample_id}",
         "predicted": predicted,
         "ground_truth": gt,
         "error": None,
@@ -289,46 +292,45 @@ def test_merge_with_unprocessed_priors_preserves_full_archive_on_partial_run() -
     Aborted runs must not shrink an already-fuller archive — without this the
     overwrite-on-save ``_persist_fresh`` would grind down the cache file each Ctrl+C.
     """
-    queries = [f"q{i}" for i in range(20)]
-    dataset_queries = set(queries)
-    cached_sample_results = {q: _prior(q) for q in queries}
+    dataset_sample_ids = set(range(20))
+    cached_sample_results = {i: _prior(i) for i in dataset_sample_ids}
     # Simulate a partial run: 6 cache hits + 1 fresh measurement.
-    state_results = [_prior(q) for q in queries[:7]]
+    state_results = [_prior(i) for i in range(7)]
     formula = "exact_match(predicted, ground_truth)"
     merged = merge_with_unprocessed_priors(
         state_results,
         cached_sample_results=cached_sample_results,
-        dataset_queries=dataset_queries,
+        dataset_sample_ids=dataset_sample_ids,
         deprecated_samples={},
         scorer=compile_scorer(formula),
         scorer_id="x",
         scorer_formula=formula,
     )
     assert len(merged) == 20
-    assert {r["query"] for r in merged} == dataset_queries
+    assert {r["sample_id"] for r in merged} == dataset_sample_ids
 
 
 def test_merge_with_unprocessed_priors_filters_off_dataset_and_evicted() -> None:
-    """Only dataset queries get merged; evicted (deprecated) priors are excluded
-    so they re-measure on the next encounter."""
-    dataset_queries = {"q1", "q2"}
+    """Only samples in the current dataset get merged; evicted (deprecated) priors are
+    excluded so they re-measure on the next encounter."""
+    dataset_sample_ids = {1, 2}
     cached_sample_results = {
-        "q1": _prior("q1"),
-        "q2": _prior("q2"),
-        "q_off": _prior("q_off"),  # not in current dataset
+        1: _prior(1),
+        2: _prior(2),
+        99: _prior(99),  # not in the current dataset
     }
-    deprecated = {"q2": _prior("q2")}  # q2 deprecated → must remeasure
+    deprecated = {2: _prior(2)}  # sample 2 deprecated → must remeasure
     formula = "exact_match(predicted, ground_truth)"
     merged = merge_with_unprocessed_priors(
         [],
         cached_sample_results=cached_sample_results,
-        dataset_queries=dataset_queries,
+        dataset_sample_ids=dataset_sample_ids,
         deprecated_samples=deprecated,
         scorer=compile_scorer(formula),
         scorer_id="x",
         scorer_formula=formula,
     )
-    assert {r["query"] for r in merged} == {"q1"}
+    assert {r["sample_id"] for r in merged} == {1}
 
 
 def test_merge_into_cumulative_preserves_prior_on_untouched_samples() -> None:

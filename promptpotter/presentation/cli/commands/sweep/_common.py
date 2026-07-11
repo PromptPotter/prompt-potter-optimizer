@@ -161,7 +161,6 @@ async def _run_sweep_optimize(
         campaign_config,
         session=session,
         observers=observers,
-        experiment_id=ctx.state["experiment_id"],
         task_context=ctx.task_context,
         mode=RunMode(
             resume_from_round_override=getattr(args, "resume_from_round", None),

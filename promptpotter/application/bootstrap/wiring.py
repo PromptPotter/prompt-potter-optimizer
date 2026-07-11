@@ -1,9 +1,9 @@
 """Stores + LLMClient + connector resolution → ``Session``.
 
 ``init_services`` opens stores under the tenant root, applies the tenant-pointer
-guard, resolves the connector, fetches the pipeline schema, registers the
-backend, and either loads the dataset or syncs an experiment from the backend.
-Identity + scoring lifecycle live in ``session`` + ``scoring_context``."""
+guard, resolves the connector, fetches the pipeline schema, registers the backend,
+and loads the dataset. Identity + scoring lifecycle live in ``session`` +
+``scoring_context``."""
 
 from __future__ import annotations
 
@@ -24,10 +24,9 @@ from promptpotter.application.datasets import (
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
-    DEFAULT_EXPERIMENT_ID,
 )
 from promptpotter.domain.backend import BackendConnection
-from promptpotter.domain.pipeline_parsing import parse_pipeline_response
+from promptpotter.domain.pipeline_parsing import merge_node_blocks, parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.infrastructure.backend import BackendClient, build_backend_client
 from promptpotter.infrastructure.store import Stores, build_stores
@@ -45,20 +44,7 @@ def _apply_dataset_overlay(
     out = copy.deepcopy(backend_resp.get("data") or backend_resp)
     if "pipelines" in local_raw:
         out["pipelines"] = local_raw["pipelines"]
-    for node_name, node_def in (local_raw.get("nodes") or {}).items():
-        if not isinstance(node_def, dict):
-            continue
-        out.setdefault("nodes", {}).setdefault(node_name, {})
-        for k, v in node_def.items():
-            # ``config`` and ``optimizer`` shallow-merge onto the backend node so a
-            # partial overlay (e.g. a connector seed narrowing
-            # ``optimizer.param_allowed_values``) augments the live schema instead of
-            # clobbering the backend's ``observation_mappings`` / ``param_keys``. A
-            # full authored block (justlogic) still fully overrides — its keys win.
-            if k in ("config", "optimizer") and isinstance(v, dict):
-                out["nodes"][node_name].setdefault(k, {}).update(v)
-            else:
-                out["nodes"][node_name][k] = v
+    out["nodes"] = merge_node_blocks(out.get("nodes") or {}, local_raw.get("nodes") or {})
     return out
 
 
@@ -294,72 +280,11 @@ def _load_experiment_file_into_session(
     status(f"Experiment: {connector.experiment_file} ({len(queries)} tasks)")
 
 
-async def _sync_and_extract_experiment(
-    session: Session,
-    backend_url: str,
-    experiment_id: str,
-    status: Callable[[str], None],
-) -> None:
-    """Populate queries/index_terms/experiment_extract; auto-sync from backend if missing."""
-    backend_id = session.backend_id
-    extract = session.store.backends.load_sync(backend_id, f"experiments/{experiment_id}.json")
-    has_traces = bool(extract and extract.get("runs") and extract["runs"][0].get("traces"))
-
-    if not extract or not has_traces:
-        reason = "No stored experiment data" if not extract else "Stored data has no traces"
-        logger.info("%s — syncing from %s ...", reason, backend_url)
-        status(f"Syncing experiment {experiment_id} ...")
-        try:
-            extract = await session.backend_client.sync_experiment(
-                session.store, backend_id, experiment_id, include_traces=True
-            )
-            status("Sync complete")
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            raise
-        except Exception as exc:
-            logger.warning("Auto-sync failed: %s", exc)
-            status(f"Sync failed: {exc}")
-
-    if not extract:
-        logger.warning(
-            "No experiment data available. "
-            "Downstream calls will fail until data is synced or datasets are loaded."
-        )
-        status("WARNING: No experiment data available")
-        return
-
-    schema_key = session.pipeline_schema.name.lower() if session.pipeline_schema else ""
-    try:
-        connector = connectors.get(schema_key) if schema_key else None
-    except KeyError:
-        connector = None
-    if connector is not None:
-        queries, index_terms = connector.extract_experiment(extract)
-    else:
-        runs = extract.get("runs", [])
-        queries = []
-        gt_set: set[str] = set()
-        for er in runs[0].get("evaluation_results", []) if runs else []:
-            q, gt = er.get("query", ""), er.get("ground_truth", "")
-            if q and gt:
-                queries.append({"query": q, "ground_truth": gt})
-                gt_set.add(gt)
-        index_terms = sorted(gt_set)
-
-    exp_name = extract.get("experiment", {}).get("name", experiment_id)
-    status(f"Experiment: {exp_name} ({len(queries)} samples, {len(index_terms)} session terms)")
-
-    session.samples = samples_from_dicts(queries)
-    session.experiment_extract = extract
-    session.index_terms = index_terms
-
-
 async def init_services(
+    dataset_name: str,
     backend_url: str = DEFAULT_BACKEND_URL,
     backend_id: str = "",
-    experiment_id: str = DEFAULT_EXPERIMENT_ID,
     project_root: Path | None = None,
-    dataset_name: str | None = None,
     on_status: Callable[[str], None] | None = None,
     identity: IdentityContext | None = None,
     store: Stores | None = None,
@@ -369,6 +294,10 @@ async def init_services(
 
     Preconditions: ``.promptpotter/`` tree + ``datasets/{dataset_name}/pipeline.json``
     declaring ``backend_type``. Returns a wired ``Session`` (no scoring yet).
+    ``dataset_name`` is REQUIRED — the dataset resolves the config dir, which resolves
+    the connector, so there is no session without one. The old ``None`` arm synced an
+    "experiment" from the backend instead, a second way to populate samples that only a
+    notebook ever reached.
     ``identity`` defaults to the Stage-0 single-operator :func:`default_identity`.
     Active-session pointers are per-tenant on disk, so two operators on the
     same machine cannot collide.
@@ -396,9 +325,7 @@ async def init_services(
             resolved_identity, projects_root=project_root / ".promptpotter" / "projects"
         )
 
-    dataset_config_dir = (
-        resolve_dataset_config_dir(store, project_root, dataset_name) if dataset_name else None
-    )
+    dataset_config_dir = resolve_dataset_config_dir(store, project_root, dataset_name)
     backend_type = _read_backend_type(dataset_config_dir, dataset_name)
     connector = connectors.get(backend_type)
     client = build_backend_client(connector, backend_url)
@@ -441,7 +368,6 @@ async def init_services(
     session = Session(
         store=store,
         backend_id=backend_id,
-        experiment_id=experiment_id,
         backend_client=client,
         pipeline_schema=pipeline_schema,
         dataset_name=dataset_name,
@@ -456,10 +382,7 @@ async def init_services(
         langfuse=LangfuseLogger(enabled=enable_tracing),
     )
 
-    if dataset_name:
-        _load_dataset_into_session(session, dataset_name, status, connector=connector)
-    else:
-        await _sync_and_extract_experiment(session, backend_url, experiment_id, status)
+    _load_dataset_into_session(session, dataset_name, status, connector=connector)
     return session
 
 

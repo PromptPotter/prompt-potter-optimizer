@@ -1,7 +1,7 @@
-"""Ground-truth loaders + train/test splitter + dataset registry.
+"""Ground-truth loaders + dataset registry.
 
-Excel + HuggingFace loaders return ``list[Sample]``; ``DATASET_LOADERS`` is the
-name → loader map; ``build_dataset_run_data`` builds the measurement-batch dict."""
+Loaders return ``list[Sample]``; ``DATASET_LOADERS`` is the name → loader map;
+``build_dataset_run_data`` builds the measurement-batch dict."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ import hashlib
 import logging
 import random
 from collections.abc import Callable
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.sample import Sample
@@ -24,131 +23,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Excel sheet name → {"query": col, "gt": col}.
-SHEET_COLUMN_MAP: dict[str, dict[str, str]] = {
-    "Sheet1": {"query": "Material name in BOM", "gt": "Dataset in SP"},
-    "Material": {"query": "Material name in BOM", "gt": "Dataset in SP"},
-    "Processes": {"query": "Ausgangsliste", "gt": "Eintrag aus Zielliste"},
-    "Processing": {"query": "Ausgangsliste", "gt": "Eintrag aus Zielliste"},
-}
-
 
 def samples_from_dicts(items: list[dict[str, Any]]) -> list[Sample]:
     """Convert dicts → Samples; assigns positional ``id`` when missing, ignores extras."""
     return [Sample.from_dict(item, fallback_id=i) for i, item in enumerate(items)]
-
-
-def load_excel_ground_truth(
-    path: str | Path,
-    sheet_column_map: dict[str, dict[str, str]] = SHEET_COLUMN_MAP,
-) -> list[dict[str, str]]:
-    """Read sheets from an Excel file → staging dicts (carry ``source_sheet`` for
-    ``split_train_test`` partitioning; ids assigned at split time for stable global index)."""
-    import openpyxl
-
-    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    rows: list[dict[str, str]] = []
-
-    for sheet_name, col_map in sheet_column_map.items():
-        if sheet_name not in wb.sheetnames:
-            logger.debug("Sheet %r not found in %s, skipping", sheet_name, path)
-            continue
-
-        ws = wb[sheet_name]
-        header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True))
-        headers = [str(h).strip() if h else "" for h in header_row]
-
-        query_col = col_map["query"]
-        gt_col = col_map["gt"]
-
-        if query_col not in headers or gt_col not in headers:
-            logger.warning(
-                "Sheet %r: expected columns %r and %r but found %s",
-                sheet_name,
-                query_col,
-                gt_col,
-                headers,
-            )
-            continue
-
-        qi = headers.index(query_col)
-        gi = headers.index(gt_col)
-
-        for row_vals in ws.iter_rows(min_row=2, values_only=True):
-            query = str(row_vals[qi]).strip() if row_vals[qi] is not None else ""
-            gt = str(row_vals[gi]).strip() if row_vals[gi] is not None else ""
-            if query and gt:
-                rows.append(
-                    {
-                        "query": query,
-                        "ground_truth": gt,
-                        "source_sheet": sheet_name,
-                    }
-                )
-
-    wb.close()
-    logger.info(
-        "Loaded %d ground-truth pairs from %s (%s)",
-        len(rows),
-        path,
-        ", ".join(
-            f"{s}: {sum(1 for r in rows if r['source_sheet'] == s)}"
-            for s in dict.fromkeys(r["source_sheet"] for r in rows)
-        ),
-    )
-    return rows
-
-
-def split_train_test(
-    data: list[dict[str, Any]],
-    test_fraction: float = 0.2,
-    seed: int = 42,
-) -> tuple[list[Sample], dict[str, list[Sample]]]:
-    """Split ground-truth dicts into train + per-domain test Samples.
-    Stable ``id``: assigned sequentially across the full input (pre-shuffle), so a sample's id is split-invariant."""
-    enumerated = [{**row, "id": i} for i, row in enumerate(data)]
-
-    rng = random.Random(seed)
-    _proc_sheets = {"Processes", "Processing"}
-    processes = [r for r in enumerated if r["source_sheet"] in _proc_sheets]
-    material = [r for r in enumerated if r["source_sheet"] not in _proc_sheets]
-
-    def _split(
-        items: list[dict[str, Any]],
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        shuffled = items[:]
-        rng.shuffle(shuffled)
-        n_test = max(1, round(len(shuffled) * test_fraction))
-        return shuffled[n_test:], shuffled[:n_test]
-
-    train_proc, test_proc = _split(processes) if processes else ([], [])
-    train_mat, test_mat = _split(material) if material else ([], [])
-
-    train_dicts = train_proc + train_mat
-
-    test_queries_proc = {r["query"] for r in test_proc}
-    test_queries_mat = {r["query"] for r in test_mat}
-    overlap = test_queries_proc & test_queries_mat
-    if overlap:
-        logger.warning(
-            "Duplicate queries across test sets (%d): %s",
-            len(overlap),
-            list(overlap)[:5],
-        )
-
-    train = [Sample.from_dict(d) for d in train_dicts]
-    test_sets = {
-        "test_processes": [Sample.from_dict(d) for d in test_proc],
-        "test_material": [Sample.from_dict(d) for d in test_mat],
-    }
-
-    logger.info(
-        "Split: %d train, %d test_processes, %d test_material",
-        len(train),
-        len(test_sets["test_processes"]),
-        len(test_sets["test_material"]),
-    )
-    return train, test_sets
 
 
 def sample_dataset(dataset: list[Sample], sample_size: int) -> list[Sample]:
@@ -385,7 +263,6 @@ def build_dataset_run_data(
     *,
     dataset_name: str | None,
     source: str = "",
-    experiment_id: str = "",
     pipeline_schema: PipelineSchema | None = None,
 ) -> dict[str, Any]:
     """Measurement-batch dict ready for ``Stores.archive.save()``.
@@ -416,6 +293,4 @@ def build_dataset_run_data(
         data["node_configs"] = pipeline_schema.node_configs(search_point.pipeline_params)
     if search_point.pipeline_params:
         data["pipeline_params"] = search_point.pipeline_params
-    if experiment_id:
-        data["experiment_id"] = experiment_id
     return data

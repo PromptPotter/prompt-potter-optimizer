@@ -11,19 +11,18 @@ owns its own live telemetry file, stamped with its own ``cycle_id``. The
 per-cycle dashboard route serves the file for the cycle passed in (no
 session-root collapse).
 
-The route surface is split across six submodules, each decorating the
-shared ``campaigns_router``: ``registry`` (campaign list + detail),
-``cycles`` (cycle list/detail, rounds, dashboard), ``ledger`` (log.md,
-ledger stream, decisions, forks, hard samples), ``lineage`` (the
-campaign-wide cladogram), ``files`` (file-tree reads), and ``events``
-(the per-cycle SSE ledger stream).
+The route surface is split across submodules, each decorating the shared
+``campaigns_router``: ``registry`` (campaign list + detail), ``cycles``
+(cycle list/detail, rounds, dashboard), ``lineage`` (the campaign-wide
+cladogram), ``files`` (file-tree reads — every on-disk artifact, ``log.md``
+and ``hard_samples.json`` among them), ``storage``, and ``events`` (the
+per-cycle SSE ledger stream, the one live tail).
 """
 
 from promptpotter.presentation.api.routers.campaigns import (
     cycles,
     events,
     files,
-    ledger,
     lineage,
     registry,
     storage,
@@ -35,7 +34,6 @@ __all__ = [
     "cycles",
     "events",
     "files",
-    "ledger",
     "lineage",
     "registry",
     "storage",

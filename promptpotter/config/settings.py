@@ -21,7 +21,6 @@ TERMS_VERSION: str = "2026-06-21"
 # Defaults for backend connection (not env-driven — override via CLI args)
 DEFAULT_BACKEND_URL = "http://127.0.0.1:8000"
 DEFAULT_BACKEND_ID = "local"
-DEFAULT_EXPERIMENT_ID = "1_production_historical"
 
 DATASET_NAME: str = "ground_truth"
 NO_RESULT: str = "NO_RESULT"
@@ -189,7 +188,6 @@ __all__ = [
     "DEFAULT_BACKEND_ID",
     "DEFAULT_BACKEND_URL",
     "DEFAULT_CONNECTOR_TYPE",
-    "DEFAULT_EXPERIMENT_ID",
     "LOCK_TIMEOUT",
     "NO_RESULT",
     "OPTIMIZER_CALL_DEADLINE_S",

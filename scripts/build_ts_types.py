@@ -275,6 +275,36 @@ def _emit_stop_reason_labels() -> str:
     )
 
 
+def _emit_evaluator_meta() -> str:
+    """Emit the evaluator registry (``application/scoring/evaluators.py``) as a TS const.
+
+    The What-If panel hand-copied it. The copy listed 13 of the registry's 16
+    evaluators and described two of them wrongly — a name-set the compiler didn't
+    derive, gone stale in silence, exactly as the ``run_phase`` union did.
+    """
+    from promptpotter.application.scoring.evaluators import evaluators_meta
+
+    rows = "\n".join(
+        f"  {{ name: {m['name']!r}, scope: {m['scope']!r}, direction: {m['direction']!r},"
+        f" node_type: {repr(m['node_type']) if m['node_type'] else 'null'},"
+        f" description: {m['description']!r} }},"
+        for m in evaluators_meta()
+    )
+    return (
+        "export interface EvaluatorMeta {\n"
+        "  name: string;\n"
+        '  scope: "per_round" | "per_sample";\n'
+        '  direction: "high" | "low";\n'
+        "  node_type: string | null;\n"
+        "  description: string;\n"
+        "}\n\n"
+        "// The evaluator registry, mirrored from application/scoring/evaluators.py.\n"
+        "export const EVALUATOR_META: EvaluatorMeta[] = [\n"
+        f"{rows}\n"
+        "];"
+    )
+
+
 def _emit_interface(model: type[BaseModel]) -> str:
     hints = _resolved_hints(model)
     body_lines = [
@@ -307,6 +337,7 @@ _HEADER = """\
 def main() -> int:
     blocks = [_emit_interface(model) for model in EXPORTED_MODELS]
     blocks.append(_emit_stop_reason_labels())
+    blocks.append(_emit_evaluator_meta())
     content = _HEADER + "\n\n".join(blocks) + "\n"
     _OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     prior = _OUT_PATH.read_text(encoding="utf-8") if _OUT_PATH.is_file() else ""

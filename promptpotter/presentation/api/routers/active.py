@@ -1,13 +1,17 @@
 """Active-session pointer + read-only cycle list + optimizer/registry reads.
 
 Carries the tenant-global read-only surface: the active session
-(``GET /sessions/active``, ``GET /sessions/active/live-state``), the global
-cycle list (``GET /cycles``), and two registry reads
-(``GET /optimizer-pipeline``, ``GET /evaluators``).
-Routes are tagged per-resource for OpenAPI grouping since this router spans
-several resources. Cycle mutations ride the closed-set command highway at
-``POST /api/v1/commands/{kind}`` (``docs/specs/m12-api-openapi.yaml`` for the
-wire contract; ``presentation/api/routers/commands.py`` for the dispatch shell).
+(``GET /sessions/active``), the global cycle list (``GET /cycles``), and the
+optimizer-pipeline read (``GET /optimizer-pipeline``). The evaluator registry is
+NOT served here — it is import-time constant, so it reaches the webapp through
+``scripts/build_ts_types.py`` (CI-gated) rather than a route.
+Live telemetry is NOT served here — a cycle's ``dashboard.json`` is served by
+the per-cycle dashboard route, which the operator reaches by resolving the
+active pointer above. Routes are tagged per-resource for OpenAPI grouping since
+this router spans several resources. Cycle mutations ride the closed-set command
+highway at ``POST /api/v1/commands/{kind}`` (``docs/specs/m12-api-openapi.yaml``
+for the wire contract; ``presentation/api/routers/commands.py`` for the dispatch
+shell).
 """
 
 from __future__ import annotations
@@ -20,18 +24,12 @@ from pydantic import BaseModel, Field
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     OPTIMIZER_PIPELINE_PATH,
 )
-from promptpotter.infrastructure.runtime_flags import is_paused, read_spend_cap
-from promptpotter.infrastructure.store import (
-    cycle_dir_for,
-    read_active_pointer,
-)
-from promptpotter.infrastructure.store.io import read_json, read_json_tolerant
-from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.store import read_active_pointer
+from promptpotter.infrastructure.store.io import read_json
 from promptpotter.presentation.api.deps import (
     IdentityDep,
     JobRegistryDep,
     StoreDep,
-    warming_payload,
 )
 from promptpotter.shared.errors import NotFoundError
 
@@ -66,55 +64,6 @@ def get_active_session(store: StoreDep) -> ActiveSessionResponse:
     )
 
 
-@active_router.get("/sessions/active/live-state", tags=["Sessions"])
-def get_live_state(store: StoreDep) -> dict[str, Any]:
-    """Live state of the caller-tenant's **active** session — the stable
-    surface every new web panel / chat state-read codes against.
-
-    Resolves the active pointer, then returns the active cycle's own live
-    telemetry (the same shape the per-cycle dashboard route serves). Each
-    cycle owns its ``dashboard.json``, so a fork's active view shows the
-    fork's trajectory under the fork's id — not the session root's. Keying
-    on the active pointer means a consumer needs no campaign/cycle ids and no
-    file path; it is insulated from how that telemetry is produced.
-
-    404 when no session is active. While a fresh campaign's origin is still
-    running (no telemetry flushed yet) returns a ``warming_up`` payload at
-    200 so the panel can render an "initialising" placeholder rather than
-    treat the session as offline.
-
-    Beyond the dashboard telemetry, the payload carries two runtime facts the
-    dashboard projection does not track (they are control-flow flags, not
-    ledger events): ``is_paused`` (``.runtime/pause.flag`` present on the
-    active cycle) and ``current_spend_cap_usd`` (the live cap from
-    ``.runtime/spend_cap.json``, or ``null`` when uncapped). The run controls
-    code against these rather than guessing pause-state from telemetry
-    freshness — a paused runner emits no events, so liveness alone is blind.
-    """
-    session_id, campaign_id, cycle_id = read_active_pointer(
-        store.tenant_id, projects_root=store.projects_root
-    )
-    if not session_id:
-        raise NotFoundError("No active session")
-    # Both the dashboard.json and the runtime flags live on the active cycle
-    # dir (which may be a fork): each cycle owns its own live file, and the
-    # runner writes + polls its flags there. Shared readers in
-    # ``infrastructure.runtime_flags`` so this matches the per-cycle dashboard route.
-    cycle_path = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
-    paused = is_paused(cycle_path)
-    current_spend_cap_usd = read_spend_cap(cycle_path)
-
-    path = CycleLayout(cycle_path).dashboard
-    state: dict[str, Any] | None = read_json_tolerant(path) if path.is_file() else None
-    if state is None:
-        # Missing OR corrupt: degrade to the warming placeholder, never 500.
-        state = warming_payload(campaign_id, cycle_id)
-        state["session_id"] = session_id
-    state["is_paused"] = paused
-    state["current_spend_cap_usd"] = current_spend_cap_usd
-    return state
-
-
 class CycleListEntry(BaseModel):
     campaign_id: str = Field(description="Campaign the cycle belongs to")
     cycle_id: str
@@ -138,6 +87,10 @@ class CycleListEntry(BaseModel):
         description="The single run-state value (RunPhase) — checkin (origin still being authored, pre-loop) / running / paused / detached / terminal. Computed once by derive_run_phase from lifecycle + control flags + freshness; every picker dot and badge reads this, none re-derive it. 'checkin' wins first (the campaign hasn't run); 'terminal' pairs with `status` for the reason label.",
     )
     best_accuracy: float | None = None
+    origin_accuracy: float | None = Field(
+        default=None,
+        description="Round 0's accuracy — the origin's measurement, derived from rounds[] (no stored copy). Null until round 0 lands.",
+    )
     n_rounds: int = 0
     created_at: str = ""
     updated_at: str = ""
@@ -222,14 +175,6 @@ def get_optimizer_pipeline() -> dict[str, Any]:
     """Bundled ``datasets/_optimizer/pipeline.json`` — nodes + pipelines + ``view`` topology for the webapp workflow."""
     pipeline: dict[str, Any] = read_json(OPTIMIZER_PIPELINE_PATH)
     return pipeline
-
-
-@active_router.get("/evaluators", tags=["Evaluators"])
-async def get_evaluators_meta() -> list[dict[str, Any]]:
-    """Import-time evaluator registry (name/description/scope/direction/node_type) — feeds the What-If panel even when ``dashboard.json`` lacks ``cycle_info``."""
-    from promptpotter.application.scoring.evaluators import evaluators_meta
-
-    return evaluators_meta()
 
 
 __all__ = [

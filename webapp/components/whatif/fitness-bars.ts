@@ -3,7 +3,7 @@
 // no scoring math here — the value itself is computed server-side over the stored
 // evaluator namespace and served back (lineage `lensValueByCandidate`, R-36).
 
-import { WHATIF_INLINE_META } from "./meta";
+import { EVALUATOR_META } from "@/lib/api/types.generated";
 import type { SampleRow } from "@/lib/types";
 
 // Default weight for a selected evaluator with no parsed composite coefficient
@@ -12,7 +12,7 @@ import type { SampleRow } from "@/lib/types";
 export const DEFAULT_WHATIF_WEIGHT = 0.1;
 
 function isLow(name: string): boolean {
-  return WHATIF_INLINE_META.find((m) => name === m.name || name.endsWith("_" + m.name))
+  return EVALUATOR_META.find((m) => name === m.name || name.endsWith("_" + m.name))
     ?.direction === "low";
 }
 

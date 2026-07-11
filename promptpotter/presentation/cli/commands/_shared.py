@@ -23,7 +23,6 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
-    DEFAULT_EXPERIMENT_ID,
 )
 from promptpotter.infrastructure.store.layout import REPO_ROOT
 from promptpotter.shared.identity import IdentityContext, default_identity
@@ -95,10 +94,9 @@ def campaign_result_human(campaign_dir: Any, *, dataset_name: str, cycle_id: str
 
 
 async def init_services_cli(
+    dataset_name: str,
     backend_url: str = DEFAULT_BACKEND_URL,
     backend_id: str = DEFAULT_BACKEND_ID,
-    experiment_id: str = DEFAULT_EXPERIMENT_ID,
-    dataset_name: str | None = None,
     identity: IdentityContext | None = None,
 ) -> Session:
     """Initialize services for a CLI command (logging style + service init).
@@ -114,7 +112,6 @@ async def init_services_cli(
     return await init_services(
         backend_url=backend_url,
         backend_id=backend_id,
-        experiment_id=experiment_id,
         project_root=project_root,
         dataset_name=dataset_name,
         on_status=lambda msg: logger.info(msg) if _VERBOSE else None,

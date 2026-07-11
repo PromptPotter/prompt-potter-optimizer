@@ -82,7 +82,6 @@ def populate_session_scoring(
     scoring_formula: str | None,
     scoring_round_formula: str | None = None,
     scorer_id: str | None = None,
-    experiment_id: str = "",
     cycle_id: str | None = None,
     source: str = "optimization_loop",
 ) -> None:
@@ -94,9 +93,6 @@ def populate_session_scoring(
         compile_scorer,
     )
 
-    session.experiment_id = experiment_id or (
-        cycle_id.replace("cycle_", "")[:12] if cycle_id else ""
-    )
     session.state.obs = obs
     session.source = source
     session.scoring.scorer = compile_scorer(scoring_formula)
@@ -197,7 +193,6 @@ def _start_observability_and_scoring(
     resolved_cycle_id: str | None,
     started_at: str,
     langfuse_session_id: str | None,
-    experiment_id: str,
     scoring_formula: str | None,
     scoring_round_formula: str | None,
     scorer_id: str,
@@ -220,7 +215,6 @@ def _start_observability_and_scoring(
     populate_session_scoring(
         session,
         obs=obs,
-        experiment_id=experiment_id,
         cycle_id=resolved_cycle_id,
         scoring_formula=scoring_formula,
         scoring_round_formula=scoring_round_formula,
@@ -323,7 +317,6 @@ async def init_optimization_loop(
     langfuse_session_id: str | None,
     cycle_id: str | None,
     resume_from_round_override: int | None,
-    experiment_id: str,
     session: Session,
     started_at: str,
 ) -> Cycle:
@@ -349,7 +342,6 @@ async def init_optimization_loop(
         resolved_cycle_id=resolved_cycle_id,
         started_at=started_at,
         langfuse_session_id=langfuse_session_id,
-        experiment_id=experiment_id,
         scoring_formula=scoring_formula,
         scoring_round_formula=scoring_round_formula,
         scorer_id=scorer_id,

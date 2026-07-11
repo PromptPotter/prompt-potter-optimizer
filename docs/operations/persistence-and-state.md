@@ -259,7 +259,7 @@ Single-operator (auth-off) and hosted-beta (OIDC) share the same on-disk shape. 
 
 Hand-edit to lift/lower caps; checked on every `mint-campaign` and `start-run`. The effective per-cycle spend cap is `min(requested, daily_cap - daily_spent)`.
 
-**Campaign ownership + lifecycle (`campaign.json`).** Each manifest carries `owner_user_id` (cross-user reads return **404, not 403** — existence leakage is itself a violation) and `lifecycle_status: active | archived | deleted` (+ `_changed_at`, `_reason`). The verbs are physical, not soft flags: **`archive`** MOVES the campaign tree into the `archive/{campaign_id}/` recycle bin (restorable by `unarchive`, which moves it back); **`delete`** is destructive (no recovery) — it removes the tree outright, or with `--keep-results` strips the heavy tiers and spares the keepsake (manifest + reports + the shallow langfuse loop trace — the Reports leaf + loop trace of the storage taxonomy, see [`storage-architecture.md`](../specs/storage-architecture.md)), flagging the manifest `deleted`. Archiving or deleting the **active** campaign is refused (switch first). The cross-campaign measurement store (`measurements/`) is never touched, so siblings still cache-hit. Destructive/move ops audit to the workspace ledger (`.workspace/events.jsonl`), since the campaign's own ledger goes with the tree.
+**Campaign ownership + lifecycle (`campaign.json`).** Each manifest carries `owner_user_id` (cross-user reads return **404, not 403** — existence leakage is itself a violation) and `lifecycle_status: active | archived | deleted` (+ `_changed_at`, `_reason`). The verbs are physical, not soft flags: **`archive`** MOVES the campaign tree into the `archive/{campaign_id}/` recycle bin (restorable by `unarchive`, which moves it back); **`delete`** is destructive (no recovery) — it removes the tree outright, or with `--keep-results` strips the heavy tiers and spares the keepsake (manifest + reports + the shallow langfuse loop trace — the Reports leaf + loop trace of the [storage taxonomy](#the-storage-taxonomy--connector--loop--dataset)), flagging the manifest `deleted`. Archiving or deleting the **active** campaign is refused (switch first). The cross-campaign measurement store (`measurements/`) is never touched, so siblings still cache-hit.
 
 ```bash
 python -m promptpotter archive   <campaign_id> [--reason TEXT]
@@ -267,7 +267,24 @@ python -m promptpotter delete    <campaign_id> [--reason TEXT]
 python -m promptpotter unarchive <campaign_id>
 ```
 
-Each is idempotent and writes a `CommandRecord` to the campaign's root-cycle ledger before marking the manifest.
+Each is idempotent, and each — from the terminal exactly as from the web — dispatches through `CommandDispatcher`, which writes a `CommandRecord` to the **workspace** ledger (`.workspace/events.jsonl`) before marking the manifest. The workspace ledger is the audit home because `archive` moves the campaign's own ledger and `delete` removes it, so it cannot record its own disappearance.
+
+## The storage taxonomy — Connector / Loop / Dataset
+
+There is **one** storage vocabulary, the operator's mental model. Every byte in a campaign tree lands in exactly one of six leaves (mutually exclusive, exhaustive — they sum to the on-disk total). The top-level axis is **Connector vs Loop vs Dataset**; **Loop** breaks into four. Classifier + endpoints: `presentation/api/routers/campaigns/storage.py` (`_leaf` / `_campaign_split`) — the code is the source of truth.
+
+| Leaf | Parent | Contents |
+|---|---|---|
+| **Dataset** | — | `langfuse/datasets/` — the ground-truth mirror (input-data copy; usually the biggest chunk) |
+| **Connector** | — | `.runtime/cache/**` + the per-sample `results`/`all_candidate_results` arrays carved from the public `rounds/round_*.json` |
+| **State** | Loop | the resume point — non-array remainder of `rounds/round_*.json` (the read-once cycle seed rides the ledger, so it lands in **History**) |
+| **Trace** | Loop | telemetry — `.runtime/streams/`, `prompts/`, `langfuse/{traces,observations,scores}/` |
+| **History** | Loop | the durable event spine — `.runtime/ledger.jsonl` |
+| **Reports** | Loop | readable output — `campaign.json`, `index.json`, `dashboard.json`, `log.md`, `review.md`, `hard_samples.json` |
+
+**The keepsake is not a leaf.** What `delete --keep-results` spares (Reports + the langfuse loop trace) is a cross-cutting subset, surfaced as a one-line UI note — never a summed figure, so the partition stays MECE. The lifecycle ladder is a plain binary (`keep_results: bool` → `_strip_to_keepsake`), independent of this taxonomy.
+
+**Ledger writers store once.** A cycle's `init` record carries a dataset *reference* (`dataset_size`), never an embedded copy of the rows; round 0's display record drops `round_result`. The bulk of a mature ledger is `snapshot` telemetry (65–77% of bytes), which is the live per-sample stream and is meant to be there.
 
 **Running jobs (`.runtime/jobs/{job_id}.json`).** The browser-launched runner is tracked one file per job (`campaign_id, cycle_id, user_id, status, …`); reads filter by user. Concurrent campaigns are isolated via the per-cycle ledger ContextVar. The Account modal's Security pane surfaces live spend/concurrency/daily-mint counts against their caps.
 

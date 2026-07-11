@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent, RunPhase
-from promptpotter.domain.results import RoundSummary, candidate_label
+from promptpotter.domain.results import candidate_label
 from promptpotter.domain.run_records import (
     CycleRecord,
     ErrorRecord,
@@ -60,14 +60,11 @@ from promptpotter.infrastructure.projections.live_dashboard.state import (
     LiveDashboardState,
     LoopWarning,
     RunLimits,
-    SpendRollup,
 )
 from promptpotter.infrastructure.projections.live_state import (
     LiveStateCore,
     apply_p_best_update,
     apply_phase,
-    backfill_spend_rates,
-    empty_spend,
 )
 from promptpotter.infrastructure.store import (
     cycle_dir_for,
@@ -119,7 +116,7 @@ class LiveDashboardView(DerivedView):
         n_variants: int,
         sp_budget_ttest: int,
         langfuse_trace_url: str | None = None,
-        resume_from: dict[str, Any] | None = None,
+        resume_from: LiveDashboardState | None = None,
         recorder: AuditTrailView | None = None,
         initial_llm_nodes: dict[str, dict[str, Any]] | None = None,
     ) -> None:
@@ -129,34 +126,18 @@ class LiveDashboardView(DerivedView):
         self.session_dir = session_dir
         self._recorder = recorder
         self.patience_max = l1_patience
-        r = resume_from or {}
-        # The schema (LiveDashboardState) IS the on-disk shape — _persist dumps
-        # this instance directly, so every field's presence + type is enforced
-        # at write time. Pass identity + resume-inherited values; schema defaults
-        # supply the rest (run_phase="running", empty lists, None markers). The
-        # view only exists while a run is actively writing, so "running" is the
-        # right default — mark_stopped flips it to terminal, pause/resume declare
-        # transitions; it is never inherited from a resumed terminal/paused snapshot.
-        self.state = LiveDashboardState(
-            # Self-identity stamp — never inherited from resume_from / phase event.
+        # The schema IS the on-disk shape — _persist dumps this instance directly — so
+        # it also owns which of its fields a resume inherits and which this process
+        # stamps fresh. See LiveDashboardState.for_run.
+        self.state = LiveDashboardState.for_run(
+            resume_from,
             campaign_id=campaign_id,
             cycle_id=cycle_id,
             session_id=session_id,
-            langfuse_trace_url=langfuse_trace_url,
-            state=r.get("state", "init"),
-            state_since=utcnow_iso(),
-            stop_reason=r.get("stop_reason"),
-            # Inherit round so re-instantiation doesn't zero the operator-visible pointer.
-            round=int(r.get("round") or 0),
-            patience=f"0/{l1_patience}",
-            rounds=[RoundSummary.model_validate(x) for x in (r.get("rounds") or [])],
-            best=float(r.get("best") or 0.0),
-            composite_fitness_formula=r.get("composite_fitness_formula"),
-            total_queries_scored=int(r.get("total_queries_scored") or 0),
-            total_backend_calls=int(r.get("total_backend_calls") or 0),
+            l1_patience=l1_patience,
             n_variants=n_variants,
             sp_budget_ttest=sp_budget_ttest,
-            spend=SpendRollup.model_validate(backfill_spend_rates(r.get("spend") or empty_spend())),
+            langfuse_trace_url=langfuse_trace_url,
         )
         self.short_formula_template: str | None = None
         self._buffer = RoundBuffer()

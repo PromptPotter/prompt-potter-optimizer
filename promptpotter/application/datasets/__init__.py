@@ -27,17 +27,14 @@ from promptpotter.application.datasets.csv_ingest import (
 )
 from promptpotter.application.datasets.loaders import (
     DATASET_LOADERS,
-    SHEET_COLUMN_MAP,
     build_dataset_run_data,
     load_aime_2025,
     load_bbeh,
-    load_excel_ground_truth,
     load_gsm8k,
     load_justlogic,
     resolve_dataset_items,
     sample_dataset,
     samples_from_dicts,
-    split_train_test,
 )
 from promptpotter.application.datasets.prompts import (
     dataset_prompt_dir,
@@ -52,7 +49,6 @@ from promptpotter.application.datasets.traces import load_potter_traces
 __all__ = [
     "DATASET_LOADERS",
     "MAX_SAMPLES",
-    "SHEET_COLUMN_MAP",
     "AuthoredDataset",
     "IngestError",
     "Table",
@@ -64,7 +60,6 @@ __all__ = [
     "load_bbeh",
     "load_dataset_node_overlay",
     "load_dataset_prompt",
-    "load_excel_ground_truth",
     "load_gsm8k",
     "load_justlogic",
     "load_node_prompt",
@@ -77,5 +72,4 @@ __all__ = [
     "resolve_dataset_items",
     "sample_dataset",
     "samples_from_dicts",
-    "split_train_test",
 ]

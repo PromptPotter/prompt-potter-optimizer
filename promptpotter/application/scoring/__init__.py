@@ -18,8 +18,9 @@ CONCEPT MAP (the gateway's implementation, by module — import from each):
   ``extract_item_label``, ``split_scoring_block``.
 * ``metrics`` — ``compute_composite_fitness``, ``count_degraded_samples``,
   ``find_rank``, ``extract_sample_diagnostics`` (composite-fitness rollups).
+
+Nothing is re-exported here. Every one of ``score_search_point``'s six callers
+already imports it from ``search_point_scorer``, so the re-export was a second
+name for the gateway that no one used — and a second name is exactly what a
+single-ingress rule cannot afford.
 """
-
-from promptpotter.application.scoring.search_point_scorer import score_search_point
-
-__all__ = ["score_search_point"]

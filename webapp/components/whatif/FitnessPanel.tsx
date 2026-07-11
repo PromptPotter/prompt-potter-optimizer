@@ -1,12 +1,12 @@
 "use client";
 import { useEffect, useMemo } from "react";
 import {
-  WHATIF_INLINE_META,
   buildRows,
   whatifIdentifiersInFormula,
   weightsFromFormula,
   type Row,
 } from "./meta";
+import { EVALUATOR_META } from "@/lib/api/types.generated";
 import { FitnessChart } from "./FitnessChart";
 import { AbilityInfo } from "./AbilityInfo";
 import { setFitnessState, useFitnessState } from "./fitness-store";
@@ -69,7 +69,7 @@ export function FitnessPanel() {
   const setWeight = (name: string, w: number) =>
     setFitnessState({ weights: { ...weights, [name]: w } });
 
-  const meta = WHATIF_INLINE_META;
+  const meta = EVALUATOR_META;
 
   // Pipeline shape from the connector view. A single-node (llm_only) pipeline has
   // no candidate_source / ranker / cache node, so the node-type-bound evaluators

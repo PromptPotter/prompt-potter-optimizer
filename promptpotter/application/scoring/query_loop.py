@@ -112,7 +112,7 @@ class QueryLoopState:
 
     search_point: JobSearchPoint
     session: Session
-    cached_sample_results: dict[str, QueryMeasurement]
+    cached_sample_results: dict[int, QueryMeasurement]
     on_sample_scored: Callable[[QueryMeasurement, int, int], None] | None
     axes: AxisIndex | None
     scorer: Scorer  # narrowed from session.scoring.scorer (asserted non-None on construction)
@@ -121,7 +121,7 @@ class QueryLoopState:
     # Queries whose prior-cache entry was a deprecated sample — value is the
     # cached entry itself so display can show the original DEPR row before
     # the retry row is rendered.
-    deprecated_samples: dict[str, QueryMeasurement]
+    deprecated_samples: dict[int, QueryMeasurement]
     # Persist the results-so-far after each fresh measurement. Cache hits do
     # not call this — their on-disk row is unchanged.
     persist_fresh: Callable[[list[QueryMeasurement]], None]
@@ -198,7 +198,7 @@ async def _process_cache_hit(
 ) -> _SampleOutcome:
     """Materialize a prior-cache result, append, and check escalation."""
     cached_r = _materialize_cached(
-        ctx.cached_sample_results[sample.query],
+        ctx.cached_sample_results[sample.id],
         ctx.scorer,
         ctx.scorer_id,
         ctx.scorer_formula,
@@ -228,11 +228,10 @@ async def _process_fresh_sample(
     check_escalation: Callable[[], EscalationSignal | None],
 ) -> _SampleOutcome:
     """Backend-measure one sample; render rescored DEPR row before retry; classify errors."""
-    if (cached_deprecated := ctx.deprecated_samples.get(sample.query)) is not None:
+    if (cached_deprecated := ctx.deprecated_samples.get(sample.id)) is not None:
         display_cached = _materialize_cached(
             cached_deprecated, ctx.scorer, ctx.scorer_id, ctx.scorer_formula
         )
-        display_cached["sample_id"] = sample.id
         if ctx.on_sample_scored is not None:
             ctx.on_sample_scored(display_cached, idx, dataset_len)
         from promptpotter.infrastructure.llm import (
@@ -248,7 +247,7 @@ async def _process_fresh_sample(
         pipeline_params=ctx.search_point.pipeline_params,
     )
     result = await _maybe_recover_degraded(result, sample, ctx)
-    if sample.query in ctx.deprecated_samples:
+    if sample.id in ctx.deprecated_samples:
         cast(dict[str, Any], result)["retry_of_deprecated_cache"] = True
     state.results.append(result)
     ctx.persist_fresh(state.results)
@@ -277,8 +276,8 @@ async def run_query_loop(
     dataset: list[Sample],
     session: Session,
     *,
-    cached_sample_results: dict[str, QueryMeasurement],
-    deprecated_samples: dict[str, QueryMeasurement],
+    cached_sample_results: dict[int, QueryMeasurement],
+    deprecated_samples: dict[int, QueryMeasurement],
     on_sample_scored: Callable[[QueryMeasurement, int, int], None] | None,
     on_sample_starting: Callable[[str, int, int, int], None] | None,
     # ``on_sample_scored`` is required (no default) so every call site
@@ -389,9 +388,7 @@ async def run_query_loop(
                 on_sample_starting(sample.query, i, len(dataset), sample.id)
 
             handler = (
-                _process_cache_hit
-                if sample.query in cached_sample_results
-                else _process_fresh_sample
+                _process_cache_hit if sample.id in cached_sample_results else _process_fresh_sample
             )
             outcome = await handler(sample, i, len(dataset), state, ctx, _check_escalation)
 

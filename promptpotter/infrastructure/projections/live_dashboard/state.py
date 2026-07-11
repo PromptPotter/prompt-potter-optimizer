@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.results import HeadlineMetric, RoundSummary
+from promptpotter.shared.clock import utcnow_iso
 
 __all__ = [
     "BackendWarning",
@@ -301,3 +302,50 @@ class LiveDashboardState(BaseModel):
     # exception class. Absent on normal stops; sole writer is
     # ``LiveDashboardView._handle_error``.
     error: DashboardError | None = None
+
+    @classmethod
+    def for_run(
+        cls,
+        prior: LiveDashboardState | None,
+        *,
+        campaign_id: str,
+        cycle_id: str,
+        session_id: str,
+        l1_patience: int,
+        n_variants: int,
+        sp_budget_ttest: int,
+        langfuse_trace_url: str | None,
+    ) -> LiveDashboardState:
+        """The state a starting run writes — ``prior`` (a resume/fork seed) carried
+        forward wholesale, with only this process's own facts stamped over it.
+
+        The cycle's ACCUMULATED trajectory all carries: rounds, best, current_acc,
+        spend, the four counters, both warning lists, run_limits, headline_metric,
+        hearts, the backfill log. *All* of it, because this model IS the on-disk shape,
+        so a hand-picked subset silently resets whatever it forgets to name — nine
+        fields did exactly that, and the constructor's first flush persisted the zeros.
+
+        What does not carry is everything describing the process that just ended: this
+        run's identity + trace, and the liveness markers that are lies the moment the
+        previous writer died. ``run_phase`` and ``stop_reason`` reset together — a
+        resumed run is RUNNING, and a carried stop reason would contradict the phase
+        printed beside it.
+        """
+        mine: dict[str, Any] = {
+            "campaign_id": campaign_id,
+            "cycle_id": cycle_id,
+            "session_id": session_id,
+            "langfuse_trace_url": langfuse_trace_url,
+            "state_since": utcnow_iso(),
+            "n_variants": n_variants,
+            "sp_budget_ttest": sp_budget_ttest,
+            "patience": f"0/{l1_patience}",
+            "run_phase": RunPhase.RUNNING,
+            "stop_reason": None,
+            "error": None,
+            "in_flight": None,
+            "current_round": {},
+            "current_query_payload": None,
+            "current_sample_id": None,
+        }
+        return prior.model_copy(update=mine) if prior is not None else cls(**mine)

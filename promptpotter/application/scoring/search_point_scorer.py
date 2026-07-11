@@ -37,22 +37,22 @@ __all__ = ["merge_with_unprocessed_priors", "score_search_point"]
 def merge_with_unprocessed_priors(
     results: list[QueryMeasurement],
     *,
-    cached_sample_results: dict[str, QueryMeasurement],
-    dataset_queries: set[str],
-    deprecated_samples: dict[str, QueryMeasurement],
+    cached_sample_results: dict[int, QueryMeasurement],
+    dataset_sample_ids: set[int],
+    deprecated_samples: dict[int, QueryMeasurement],
     scorer: Scorer | None,
     scorer_id: str,
     scorer_formula: str | None,
 ) -> list[QueryMeasurement]:
-    """Union results with cache priors for unprocessed dataset queries; rescore via active scorer.
+    """Union results with cache priors for unprocessed dataset samples; rescore via active scorer.
 
     Without this, partial runs (cache hits + Ctrl+C) shrink the archive on
     overwrite. Evicted (deprecated) priors must re-measure, not re-archive.
     """
-    processed = {r["query"] for r in results}
+    processed = {r["sample_id"] for r in results}
     merged = list(results)
-    for q, prior in cached_sample_results.items():
-        if q not in dataset_queries or q in processed or q in deprecated_samples:
+    for sid, prior in cached_sample_results.items():
+        if sid not in dataset_sample_ids or sid in processed or sid in deprecated_samples:
             continue
         entry = cast(QueryMeasurement, dict(prior))
         if scorer is not None:
@@ -98,13 +98,13 @@ def _build_scoring_error_signal(
 
 
 def _split_off_deprecated_samples(
-    cached_sample_results: dict[str, QueryMeasurement],
-) -> tuple[dict[str, QueryMeasurement], dict[str, QueryMeasurement]]:
+    cached_sample_results: dict[int, QueryMeasurement],
+) -> tuple[dict[int, QueryMeasurement], dict[int, QueryMeasurement]]:
     """Load-side cache split: (kept, deprecated rows that need fresh re-measure)."""
     from promptpotter.application.optimization.pobb.elimination import is_deprecated
 
-    deprecated = {q: r for q, r in cached_sample_results.items() if is_deprecated(r)}
-    kept = {q: r for q, r in cached_sample_results.items() if q not in deprecated}
+    deprecated = {sid: r for sid, r in cached_sample_results.items() if is_deprecated(r)}
+    kept = {sid: r for sid, r in cached_sample_results.items() if sid not in deprecated}
     return kept, deprecated
 
 
@@ -116,25 +116,28 @@ def _resolve_prior_cache(
     pipeline_schema: PipelineSchema,
     force_fresh: bool,
     label: str,
-) -> tuple[dict[str, QueryMeasurement], dict[str, QueryMeasurement], set[str]]:
+) -> tuple[dict[int, QueryMeasurement], dict[int, QueryMeasurement], set[int]]:
     """Load-side cache resolution: the reusable-archive lookup, the deprecated-row
     split, and the cache-vs-fresh preamble log. Returns
-    ``(kept_cache, deprecated_rows, dataset_queries)``. ``force_fresh`` skips reuse.
+    ``(kept_cache, deprecated_rows, dataset_sample_ids)``, all keyed by ``sample_id``.
+    ``force_fresh`` skips reuse; so does a session with no dataset, since ``sample_id``
+    only identifies a sample within one.
     """
     store = session.store
     backend_id = session.backend_id
-    cached_sample_results: dict[str, QueryMeasurement] = {}
-    if store and backend_id and not force_fresh:
+    dataset_name = session.dataset_name
+    cached_sample_results: dict[int, QueryMeasurement] = {}
+    if store and backend_id and dataset_name and not force_fresh:
         from promptpotter.application.optimization.pobb.elimination import is_deprecated
 
         node_configs = pipeline_schema.node_configs(search_point.pipeline_params or {})
         cached_sample_results = cast(
-            "dict[str, QueryMeasurement]",
+            "dict[int, QueryMeasurement]",
             archive_views.reusable_results(
                 store,
                 node_configs,
                 is_fatal=is_deprecated,
-                dataset_name=session.dataset_name,
+                dataset_name=dataset_name,
             ),
         )
 
@@ -145,12 +148,14 @@ def _resolve_prior_cache(
             len(deprecated_samples),
         )
 
-    dataset_queries = {s.query for s in dataset}
+    dataset_sample_ids = {s.id for s in dataset}
     # Preamble: when the JSP-keyed archive already covers some/all of this dataset's
-    # queries, announce the split so the operator sees inline whether the upcoming
+    # samples, announce the split so the operator sees inline whether the upcoming
     # per-sample lines are cache replays vs fresh. Suppressed when no priors match.
     cached_in_dataset = sum(
-        1 for q in cached_sample_results if q in dataset_queries and q not in deprecated_samples
+        1
+        for sid in cached_sample_results
+        if sid in dataset_sample_ids and sid not in deprecated_samples
     )
     if cached_in_dataset:
         total = len(dataset)
@@ -162,7 +167,7 @@ def _resolve_prior_cache(
             cached_in_dataset,
             total - cached_in_dataset,
         )
-    return cached_sample_results, deprecated_samples, dataset_queries
+    return cached_sample_results, deprecated_samples, dataset_sample_ids
 
 
 def _resolve_partial_escalation(
@@ -291,7 +296,7 @@ async def score_search_point(
     safe_label = label.lower().replace(" ", "_")
     run_id = f"{safe_label}_{content_hash[:8]}"
 
-    cached_sample_results, deprecated_samples, dataset_queries = _resolve_prior_cache(
+    cached_sample_results, deprecated_samples, dataset_sample_ids = _resolve_prior_cache(
         search_point,
         dataset,
         session,
@@ -299,13 +304,12 @@ async def score_search_point(
         force_fresh=force_fresh,
         label=label,
     )
-    display_name = f"{session.experiment_id}_{safe_label}" if session.experiment_id else safe_label
 
     def _merged_view(results: list[QueryMeasurement]) -> list[QueryMeasurement]:
         return merge_with_unprocessed_priors(
             results,
             cached_sample_results=cached_sample_results,
-            dataset_queries=dataset_queries,
+            dataset_sample_ids=dataset_sample_ids,
             deprecated_samples=deprecated_samples,
             scorer=session.scoring.scorer,
             scorer_id=session.scoring.scorer_id,
@@ -318,14 +322,13 @@ async def score_search_point(
         merged = _merged_view(results)
         run_data = build_dataset_run_data(
             run_id,
-            display_name,
+            safe_label,
             content_hash,
             search_point,
             scores,
             merged,
             dataset_name=session.dataset_name,
             source=source,
-            experiment_id=session.experiment_id,
             pipeline_schema=pipeline_schema,
         )
         archive_views.record_measurement_run(store, run_id, run_data)

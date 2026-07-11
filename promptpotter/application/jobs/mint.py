@@ -88,7 +88,6 @@ def resolve_cycle_plan(
     schema = session.pipeline_schema
     pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=log or _noop_log)
     origin = resolve_origin_opt_search_point(
-        session.experiment_extract,
         prompt_node_names=schema.prompt_node_names() if schema else [],
         dataset_dir=session.dataset_config_dir,
         seed=_campaign_origin_seed(origin_override),
@@ -151,7 +150,6 @@ def prepare_fresh_cycle(
         cycle_id=plan.cycle_id,
         origin_prompt_fields=plan.origin.prompt_field_dict(),
         dataset_size=len(dataset),
-        experiment_id=session.experiment_id,
         pipeline_params=plan.pipeline_params,
         active_steps=list(plan.pipeline_params.get("steps", [])),
     )

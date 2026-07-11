@@ -1,12 +1,10 @@
 """Backend storage router — GET-only reads over registered backends.
 
-Mutations (``register-backend``, ``sync-backend-experiments``) ride the
-command highway: ``POST /commands/{kind}`` per
-``docs/specs/m12-api-openapi.yaml``. The dispatcher writes a
-``CommandRecord`` to the workspace ledger
-(``projects/{tenant}/.workspace/events.jsonl``) and inline-applies
-through ``CommandDispatcher._apply_register_backend`` /
-``_apply_sync_backend_experiments``.
+Mutations (``register-backend``) ride the command highway:
+``POST /commands/{kind}`` per ``docs/specs/m12-api-openapi.yaml``. The dispatcher
+writes a ``CommandRecord`` to the workspace ledger
+(``projects/{tenant}/.workspace/events.jsonl``) and inline-applies through
+``CommandDispatcher._apply_register_backend``.
 """
 
 from __future__ import annotations
@@ -23,7 +21,6 @@ from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.infrastructure.backend import build_backend_client
 from promptpotter.presentation.api.deps import StoreDep, get_backend_or_404
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import NotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -80,40 +77,6 @@ def get_backend(backend_id: str, store: StoreDep) -> BackendResponse:
         base_url=b.base_url,
         created_at=b.created_at,
     )
-
-
-@backends_router.get("/{backend_id}/experiments")
-def list_experiments(backend_id: str, store: StoreDep) -> dict[str, Any]:
-    """List synced experiments (from local store, native format)."""
-    get_backend_or_404(backend_id, store)
-
-    # First try the experiments list file
-    data: dict[str, Any] | None = store.backends.load_sync(backend_id, "experiments.json")
-    if data:
-        return data
-
-    # Fall back to individual files
-    experiments = store.backends.list_synced_experiments(backend_id)
-    if not experiments:
-        raise NotFoundError(
-            "No synced experiments. Run POST /commands/sync-backend-experiments first."
-        )
-    return {"experiments": experiments}
-
-
-@backends_router.get("/{backend_id}/experiments/{experiment_id}")
-def get_experiment(backend_id: str, experiment_id: str, store: StoreDep) -> dict[str, Any]:
-    """Get a synced experiment in native backend format."""
-    get_backend_or_404(backend_id, store)
-    data: dict[str, Any] | None = store.backends.load_sync(
-        backend_id, f"experiments/{experiment_id}.json"
-    )
-    if not data:
-        raise NotFoundError(
-            f"Experiment '{experiment_id}' not synced. "
-            "Run POST /commands/sync-backend-experiments first."
-        )
-    return data
 
 
 @backends_router.get("/{backend_id}/pipeline", response_model=PipelineViewResponse)

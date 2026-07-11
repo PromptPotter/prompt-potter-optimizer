@@ -532,7 +532,6 @@ async def _run_in_background(
             campaign_config,
             session=session,
             observers=observers,
-            experiment_id=session.experiment_id,
             task_context=task_context,
             mode=RunMode(halt_at_accuracy=halt_at_accuracy),
             spend_budget_usd=spend_budget_usd,

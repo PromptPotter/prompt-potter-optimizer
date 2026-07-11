@@ -133,9 +133,11 @@ def test_provenance_grade_separates_deliberate_from_connector() -> None:
 
 
 def _seed_graded(
-    archive: MeasurementArchive, *, run_id: str, grade: str, terminated_at: str
+    archive: MeasurementArchive, *, run_id: str, grade: str, terminated_at: str, sample_id: int
 ) -> None:
-    """Save one run carrying a provenance grade and a single dataset-tagged sample."""
+    """Save one run carrying a provenance grade and a single sample. The two runs measure
+    DIFFERENT samples — the cache keys on ``sample_id``, so they need distinct ones to
+    coexist (they used to be told apart by query text alone, both stamped sample 7)."""
     provenance: dict[str, Any] = {"grade": grade, "deliberate_source": grade != "C"}
     archive.save(
         run_id,
@@ -152,7 +154,7 @@ def _seed_graded(
             "created_at": "2026-05-19T00:00:00Z",
             "measurements": [
                 {
-                    "sample_id": 7,
+                    "sample_id": sample_id,
                     "query": f"q_{run_id}",
                     "ground_truth": "g",
                     "predicted": "p",
@@ -172,15 +174,18 @@ def test_reusable_results_min_grade_drops_connector_runs(tmp_path: Path) -> None
     silently served as if it were a real evaluation. The default (no floor) keeps
     every run, so ordinary scoring caching is unchanged."""
     archive = MeasurementArchive(tmp_path)
-    _seed_graded(archive, run_id="clean", grade="A", terminated_at="llm_only")
-    _seed_graded(archive, run_id="connector", grade="C", terminated_at="token_matching")
+    _seed_graded(archive, run_id="clean", grade="A", terminated_at="llm_only", sample_id=7)
+    _seed_graded(
+        archive, run_id="connector", grade="C", terminated_at="token_matching", sample_id=8
+    )
     node_configs = [("llm_only", {"model": "X"})]
 
     everything = archive.load_reusable_results(node_configs, dataset_name="aime")
-    assert set(everything) == {"q_clean", "q_connector"}
+    assert set(everything) == {7, 8}
 
     clean_only = archive.load_reusable_results(node_configs, dataset_name="aime", min_grade="A")
-    assert set(clean_only) == {"q_clean"}
+    assert set(clean_only) == {7}
+    assert clean_only[7]["query"] == "q_clean"
 
 
 def test_full_chain_rows_never_replay_on_prefix_match(tmp_path: Path) -> None:
@@ -231,12 +236,15 @@ def test_full_chain_rows_never_replay_on_prefix_match(tmp_path: Path) -> None:
         ("l2_context", {"layout": {"problem_description": ["critique"]}}),
         ("l3_plan", {}),
     ]
+    # Both runs measured the SAME cell (sample 1) — the cache is keyed by sample_id, so
+    # the question is which row wins it, not whether two text-distinct keys coexist.
     cache = archive.load_reusable_results(query_configs, dataset_name="promptpotter-self")
-    assert "q_full_chain" not in cache, (
-        "full-chain row replayed across a later-node config change — fake measurement"
-    )
-    assert "q_short_circuit" in cache, (
+    assert cache[1]["query"] == "q_short_circuit", (
         "a genuine mid-chain short-circuit inside the trusted prefix should still reuse"
+    )
+    assert cache[1]["pipeline_data"]["terminated_at"] == "l1_critique"
+    assert all(r["query"] != "q_full_chain" for r in cache.values()), (
+        "full-chain row replayed across a later-node config change — fake measurement"
     )
 
 
@@ -442,7 +450,13 @@ def test_evidence_channel_clips_are_visible_and_tail_preserving(
 def test_hit_cache_respects_dataset(tmp_path: Path) -> None:
     """``load_reusable_results`` scopes by dataset — identical node-configs and a
     colliding sample_id across datasets must NOT serve one dataset's cached
-    results under the other."""
+    results under the other.
+
+    The cache is keyed by ``sample_id``, so the two datasets' keys COLLIDE by
+    construction (both seed sample 14): the guarantee can only be read off the
+    values. It is `dataset_name` — required, never `None` — that keeps them apart,
+    and each cache must carry its OWN dataset's measurement, hit flag and all.
+    """
     archive = MeasurementArchive(tmp_path)
     _seed_run(archive, run_id="aime_cached", dataset_name="aime", hit=True)
     _seed_run(archive, run_id="just_fresh", dataset_name="justlogic", hit=False)
@@ -451,11 +465,17 @@ def test_hit_cache_respects_dataset(tmp_path: Path) -> None:
     aime_cache = archive.load_reusable_results(node_configs, dataset_name="aime")
     just_cache = archive.load_reusable_results(node_configs, dataset_name="justlogic")
 
-    aime_queries = set(aime_cache.keys())
-    just_queries = set(just_cache.keys())
-    assert aime_queries.isdisjoint(just_queries)
-    assert any("aime" in q for q in aime_queries)
-    assert any("justlogic" in q for q in just_queries)
+    assert set(aime_cache) == {14} and set(just_cache) == {14}
+    assert aime_cache[14]["query"] == "q_aime_14"
+    assert just_cache[14]["query"] == "q_justlogic_14"
+    # The bleed this guards: aime's cached HIT must not be served for justlogic's miss.
+    assert aime_cache[14]["hit"] is True
+    assert just_cache[14]["hit"] is False
+
+    # An unscoped slice would pool both datasets under the one colliding id — so it is
+    # refused outright rather than silently serving whichever run sorted last.
+    with pytest.raises(ValueError, match="dataset_name"):
+        archive.load_reusable_results(node_configs, dataset_name="")
 
 
 def test_schema_description_axis_reaches_the_target_and_cannot_rename_a_field() -> None:

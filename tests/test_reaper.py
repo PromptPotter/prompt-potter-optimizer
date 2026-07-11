@@ -12,8 +12,6 @@ import os
 import time
 from pathlib import Path
 
-import pytest
-
 from promptpotter.application.jobs.reaper import sweep_dead_cycles
 from promptpotter.domain.phases import StopReason
 from promptpotter.infrastructure.store import Stores
@@ -102,13 +100,6 @@ def test_sweep_dead_cycles_spares_a_fresh_cycle(built_stores: Stores) -> None:
     assert reaped == 0
     data = built_stores.campaigns.load(_CAMPAIGN, _CYCLE)
     assert data is not None and "finished_at" not in data
-
-
-def test_sweep_dead_cycles_no_longer_accepts_live_keys(built_stores: Stores) -> None:
-    """``live_keys`` was dead weight (provably empty at every real call site,
-    slice 4) — dropped from the signature entirely."""
-    with pytest.raises(TypeError):
-        sweep_dead_cycles(built_stores.projects_root, live_keys=frozenset())
 
 
 def test_sweep_dead_cycles_reaps_an_inner_sandbox_cycle(built_stores: Stores) -> None:

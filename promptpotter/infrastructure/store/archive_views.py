@@ -142,11 +142,13 @@ def reusable_results(
     node_configs: list[tuple[str, dict[str, Any]]],
     is_fatal: Callable[[dict[str, Any]], bool] | None = None,
     *,
-    dataset_name: str | None = None,
+    dataset_name: str,
     min_grade: str | None = None,
-) -> dict[str, dict[str, Any]]:
-    """Per-sample cache reuse from prior runs sharing *node_configs*; *dataset_name* scopes the slice.
-    *min_grade* drops runs below that provenance grade (clean-substrate reads); default keeps all."""
+) -> dict[int, dict[str, Any]]:
+    """Per-sample cache reuse from prior runs sharing *node_configs*, keyed by ``sample_id``.
+    *dataset_name* is required — it scopes the slice, and ``sample_id`` only identifies a sample
+    within one dataset. *min_grade* drops runs below that provenance grade (clean-substrate
+    reads); default keeps all."""
     return stores.archive.load_reusable_results(
         node_configs,
         is_fatal=is_fatal,

@@ -22,14 +22,12 @@ QUERY_TIMEOUT: float = 120.0  # HTTP timeout for /matches endpoint
 if TYPE_CHECKING:
     from promptpotter.connectors.protocol import Connector, ConnectorExecution, InProcessRun
     from promptpotter.domain.connector import SessionProtocol, WireAdapter
-    from promptpotter.infrastructure.store import Stores
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "BackendClient",
     "build_backend_client",
-    "extract_pipeline_config",
 ]
 
 
@@ -50,24 +48,6 @@ def build_backend_client(connector: Connector, base_url: str) -> BackendClient:
         in_process_run=connector.in_process_run,
         auth_token=connector.auth_token() if connector.auth_token else None,
     )
-
-
-def extract_pipeline_config(experiment_extract: dict[str, Any]) -> dict[str, Any]:
-    """Extract pipeline config (steps + params) from synced experiment data."""
-    runs = experiment_extract.get("runs", [])
-    if not runs:
-        return {"steps": [], "notation": "unknown", "name": "", "version": ""}
-    pipeline = runs[0].get("pipeline", {})
-    config = pipeline.get("config", {})
-    return {
-        "name": config.get("name", ""),
-        "version": config.get("version", ""),
-        "description": config.get("description", ""),
-        "notation": pipeline.get("notation", ""),
-        "config_id": pipeline.get("config_id", ""),
-        "steps": config.get("steps", []),
-        "metadata": config.get("metadata", {}),
-    }
 
 
 def _is_session_error(resp: httpx.Response) -> bool:
@@ -187,23 +167,6 @@ class BackendClient:
     async def fetch_pipeline(self) -> dict[str, Any]:
         """GET /pipeline — full pipeline configuration with registry data."""
         return await self._get_json("/pipeline")
-
-    # -- sync operations (fetch verbatim API responses) -------------------
-
-    async def fetch_experiments(self) -> dict[str, Any]:
-        """GET /experiments — full response verbatim."""
-        return await self._get_json("/experiments")
-
-    async def fetch_experiment(
-        self,
-        experiment_id: str,
-        include_traces: bool = True,
-    ) -> dict[str, Any]:
-        """GET /experiments/{id}/mappings — includes mappings, runs, eval results."""
-        return await self._get_json(
-            f"/experiments/{experiment_id}/mappings",
-            **({"include_traces": "true"} if include_traces else {}),
-        )
 
     # -- replay operations ------------------------------------------------
 
@@ -341,49 +304,3 @@ class BackendClient:
         resp.raise_for_status()
         match_result: dict[str, Any] = resp.json()
         return match_result
-
-    # -- high-level sync --------------------------------------------------
-
-    async def sync_experiments(
-        self,
-        store: Stores,
-        backend_id: str,
-        include_traces: bool = True,
-    ) -> int:
-        """Fetch all experiments and store verbatim. Returns count."""
-        data = await self.fetch_experiments()
-        store.backends.save_sync(backend_id, "experiments.json", data)
-
-        experiments = data.get("experiments", [])
-        for exp in experiments:
-            exp_id = exp["experiment_id"]
-            if exp_id:
-                detail = await self.fetch_experiment(
-                    exp_id,
-                    include_traces=include_traces,
-                )
-                store.backends.save_sync(
-                    backend_id,
-                    f"experiments/{exp_id}.json",
-                    detail,
-                )
-        return len(experiments)
-
-    async def sync_experiment(
-        self,
-        store: Stores,
-        backend_id: str,
-        experiment_id: str,
-        include_traces: bool = True,
-    ) -> dict[str, Any]:
-        """Fetch one experiment and store verbatim."""
-        detail = await self.fetch_experiment(
-            experiment_id,
-            include_traces=include_traces,
-        )
-        store.backends.save_sync(
-            backend_id,
-            f"experiments/{experiment_id}.json",
-            detail,
-        )
-        return detail

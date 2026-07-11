@@ -16,7 +16,6 @@ Wired kinds, by scope:
 * Workspace-backend (no ``Expected-Version``, inline-applied;
   ``CommandRecord`` lands on the workspace ledger at
   ``projects/{tenant}/.workspace/events.jsonl``): ``register-backend``,
-  ``sync-backend-experiments``.
 * Runtime-cooperative cycle commands, writing to the target cycle's
   ``.runtime/`` and re-read at the next checkpoint: ``pause-cycle``
   (``pause.flag``, the single operator-interrupt flag polled by
@@ -104,9 +103,7 @@ _CYCLE_SCOPED_KINDS: frozenset[str] = frozenset(
         "start-run",
     }
 )
-_WORKSPACE_BACKEND_KINDS: frozenset[str] = frozenset(
-    {"register-backend", "sync-backend-experiments", "mint-campaign"}
-)
+_WORKSPACE_BACKEND_KINDS: frozenset[str] = frozenset({"register-backend", "mint-campaign"})
 _WIRED_KINDS: frozenset[str] = _LIFECYCLE_KINDS | _CYCLE_SCOPED_KINDS | _WORKSPACE_BACKEND_KINDS
 
 
@@ -219,12 +216,10 @@ def _build_workspace_payload(kind: str, payload: dict[str, Any]) -> dict[str, An
         if payload.get("id"):
             out["id"] = _require_slug(payload, "id", max_len=64)
         return out
-    if kind == "mint-campaign":
-        mint_out: dict[str, Any] = {"dataset_name": _require_dataset_name(payload)}
-        mint_out.update(_run_limits(payload))
-        return mint_out
-    # sync-backend-experiments
-    return {"backend_id": _require_slug(payload, "backend_id", max_len=64)}
+    # mint-campaign
+    mint_out: dict[str, Any] = {"dataset_name": _require_dataset_name(payload)}
+    mint_out.update(_run_limits(payload))
+    return mint_out
 
 
 class _EditDraftPatch(BaseModel):
@@ -680,32 +675,14 @@ async def post_command(
         # (wire schema: m12-api-openapi.yaml::OperatorForkOverride).
         extras["seed"] = payload.get("seed")
         extras["steered_by"] = _optional_string(payload, "steered_by", max_len=256)
-    elif kind == "change-spend-budget":
-        max_usd_raw = payload.get("max_usd")
-        max_tokens_raw = payload.get("max_tokens")
-        if max_usd_raw is not None:
-            if not isinstance(max_usd_raw, int | float) or max_usd_raw < 0:
-                raise PayloadInvalidError("payload.max_usd must be a non-negative number.")
-            extras["max_usd"] = float(max_usd_raw)
-        if max_tokens_raw is not None:
-            if (
-                not isinstance(max_tokens_raw, int)
-                or isinstance(max_tokens_raw, bool)
-                or max_tokens_raw < 0
-            ):
-                raise PayloadInvalidError("payload.max_tokens must be a non-negative integer.")
-            extras["max_tokens"] = int(max_tokens_raw)
-        if "max_usd" not in extras and "max_tokens" not in extras:
-            raise PayloadInvalidError(
-                "change-spend-budget requires at least one of max_usd / max_tokens."
-            )
-    elif kind == "origin-gate-decision":
-        decision = payload.get("decision")
-        if decision not in ("rescore", "proceed", "abort"):
-            raise PayloadInvalidError(
-                "payload.decision must be one of 'rescore', 'proceed', 'abort'."
-            )
-        extras["decision"] = decision
+    elif kind in ("change-spend-budget", "origin-gate-decision"):
+        # Passed through, NOT validated here: `_build_cycle_applier` validates every
+        # cycle-scoped kind's extras, and it is the seam the CLI reaches too. A second
+        # spelling here re-derived the same rules and disagreed with them — it rejected
+        # a negative max_usd that the dispatcher's `(usd < 0) and (tok < 0)` let through.
+        extras.update(
+            {k: payload[k] for k in ("max_usd", "max_tokens", "decision") if k in payload}
+        )
     elif kind == "start-run":
         kind_raw = payload.get("kind")
         if kind_raw not in ("new", "resume"):

@@ -110,7 +110,7 @@ async def run_bbeh_campaign(
     print(f"GLOBAL OPTIMIZATION ({len(train_norm)} train samples)")
     print("=" * 60)
 
-    session = await init_notebook_session(backend_url=backend_url, dataset_name="bbeh")
+    session = await init_notebook_session(dataset_name="bbeh", backend_url=backend_url)
     try:
         campaign_config = build_campaign_config(
             max_rounds=max_rounds,
@@ -134,7 +134,6 @@ async def run_bbeh_campaign(
             origin,
             campaign_config,
             session=session,
-            experiment_id="",
             task_context={"task_description": BBEH_TASK_DESCRIPTION},
         )
         if cycle_result is None or cycle_result.stop_reason == "interrupted":

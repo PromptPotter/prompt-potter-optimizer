@@ -16,7 +16,6 @@ which is the pure data → text surface shared with the live ingress."""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -44,6 +43,7 @@ from promptpotter.infrastructure.projections.audit_trail import load_round_audit
 from promptpotter.infrastructure.store.campaign_store.store import origin_accuracy_of
 from promptpotter.infrastructure.store.io import read_json_tolerant, write_json, write_text
 from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.store.read_model import iter_jsonl
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -159,27 +159,15 @@ def _load_p_best_trajectory(
     streams_dir: Path | None, round_num: int
 ) -> tuple[dict[str, list[float]], dict[str, int]]:
     """Load per-sample P(best) snapshots from the JSONL stream for a single round."""
-    if streams_dir is None or not streams_dir.is_dir():
-        return {}, {}
-    path = streams_dir / f"round_{round_num:04d}_p_best.jsonl"
-    if not path.is_file():
+    if streams_dir is None:
         return {}, {}
     trajectory: dict[str, list[float]] = {}
     last_seen: dict[str, int] = {}
-    try:
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            try:
-                rec = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            qi = int(rec.get("sample_idx", -1))
-            for cid, prob in (rec.get("p_best") or {}).items():
-                trajectory.setdefault(str(cid), []).append(float(prob))
-                last_seen[str(cid)] = qi
-    except OSError:
-        return {}, {}
+    for rec in iter_jsonl(streams_dir / f"round_{round_num:04d}_p_best.jsonl"):
+        qi = int(rec.get("sample_idx", -1))
+        for cid, prob in (rec.get("p_best") or {}).items():
+            trajectory.setdefault(str(cid), []).append(float(prob))
+            last_seen[str(cid)] = qi
     return trajectory, last_seen
 
 

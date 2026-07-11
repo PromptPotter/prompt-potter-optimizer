@@ -10,7 +10,7 @@ Two newtype guards for ledger / projection write targets:
   the workspace-scoped ``CycleEventLog`` (the Persistence sibling at
   ``projects/{tenant}/.workspace/events.jsonl`` per ``docs/architecture.md``
   §0) — the ledger backend-scoped commands (``register-backend``,
-  ``sync-backend-experiments``) ride. Construct from ``Stores.base_dir``.
+  ``mint-campaign``) ride. Construct from ``Stores.base_dir``.
 
 These types live in :mod:`promptpotter.domain` so both ``application``
 (``CycleEventLog``-side) and ``infrastructure`` (projection-side) can import

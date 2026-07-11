@@ -52,7 +52,6 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 from promptpotter.infrastructure.store.io import (
     read_json,
     read_json_optional,
-    read_json_tolerant,
     validate_path_component,
     write_json,
 )
@@ -691,38 +690,11 @@ class CampaignStore:
                 archive_root,
             )
 
+        # No dashboard.json repair here. `resolve_resume_state` cuts the surviving
+        # trajectory when the resumed run's view is constructed — the one cut, off the
+        # schema. A second writer here re-spelled that rule against the raw dict, with
+        # its own `max(cumulative_accuracy)` fold in place of the domain helper.
         self._rebuild_round_index(campaign_id, cycle_id, survivors)
-        self._rewind_dashboard(layout.cycle_dir, after_round)
-
-    @staticmethod
-    def _rewind_dashboard(cycle_dir: Path, after_round: int) -> None:
-        """Truncate ``dashboard.json`` to the same survivors the index rebuild kept.
-
-        ``LiveDashboardView`` is the sole LIVE writer of ``dashboard.json``, and its
-        ``L1_GENERATE:enter`` clamp would drop the rewound rounds anyway — but only once
-        the resumed run reaches its first generate. Until then the two ``rounds[]``
-        surfaces (``index.json`` via ``get_cycle``, ``dashboard.json`` via ``/lineage``)
-        would disagree. Rewind runs offline (admissibility-gated, pre-resume, no view
-        alive), so this one repair write closes the window using the view's own
-        derivations: rounds ≤ ``after_round`` survive, ``round`` points at the last
-        survivor, ``best`` = max surviving ``cumulative_accuracy`` (mirrors
-        ``_apply_best`` / ``resolve_resume_state``). Missing/corrupt file ⇒ no-op —
-        the resume factory tolerates absence."""
-        path = CycleLayout(cycle_dir).dashboard
-        dash = read_json_tolerant(path)
-        if not isinstance(dash, dict):
-            return
-        survivors = [
-            r
-            for r in dash.get("rounds") or []
-            if isinstance(r, dict) and int(r.get("round") or 0) <= after_round
-        ]
-        dash["rounds"] = survivors
-        dash["round"] = after_round
-        dash["best"] = max(
-            (float(r.get("cumulative_accuracy") or 0.0) for r in survivors), default=0.0
-        )
-        write_json(path, dash)
 
     def _rebuild_round_index(
         self,
@@ -828,79 +800,70 @@ class CampaignStore:
         )
         return True
 
+    def cycle_entry(self, campaign_id: str, cycle_id: str) -> dict[str, Any] | None:
+        """One cycle's served shape (``CycleListEntry``) — ``None`` if it isn't on disk.
+
+        THE decoder of ``index.json`` into the picker/detail shape. The cycle-detail
+        route used to hold a second one, which is how its list twin came to serve
+        ``origin_accuracy`` as structurally null.
+        """
+        index_path = self.cycle_dir(campaign_id, cycle_id) / "index.json"
+        if not index_path.is_file():
+            return None
+        return self._entry_from_index(index_path)
+
+    def _entry_from_index(self, index_path: Path) -> dict[str, Any]:
+        campaign_id, cycle_id = self._ids_from_index_path(index_path)
+        try:
+            data = read_json_optional(index_path)
+        except Exception:
+            data = None
+        kind = sibling_kind(cycle_id)
+        # The single run-phase derivation — running / paused / stopping /
+        # detached / terminal. Lifecycle (terminal) comes from index
+        # ``finished_at``; control + freshness from derive_run_phase. This is
+        # the one computation the picker, both live dots, and the badge all
+        # read — no surface re-derives "running" from its own inputs.
+        is_terminal = isinstance(data, dict) and bool(data.get("finished_at"))
+        run_phase = str(derive_run_phase(index_path.parent, is_terminal=is_terminal))
+        if not isinstance(data, dict):
+            data = {}
+            status = "unreadable"
+        else:
+            status = str(data.get("status", ""))
+        header_raw = data.get("header")
+        header: dict[str, Any] = header_raw if isinstance(header_raw, dict) else {}
+        sk = data.get("sibling_kind", kind)
+        fork_raw = data.get("fork")
+        fork_trigger = fork_raw.get("trigger") if isinstance(fork_raw, dict) else None
+        dataset_name = header.get("dataset_name", "")
+        if not dataset_name:
+            campaign = self.load_campaign(campaign_id)
+            dataset_name = campaign.dataset_name if campaign is not None else ""
+        return {
+            "campaign_id": campaign_id,
+            "cycle_id": cycle_id,
+            "parent_session_id": data.get("parent_session_id", ""),
+            "parent_cycle_id": data.get("parent_cycle_id")
+            or (None if kind == "root" else root_cycle_id(cycle_id)),
+            "dataset_name": dataset_name,
+            "backend_id": header.get("backend_id", ""),
+            "sibling_kind": sk,
+            "unit_kind": _unit_kind(sk, fork_trigger),
+            "is_root": kind == "root",
+            "status": status,
+            "run_phase": run_phase,
+            "best_accuracy": data.get("best_accuracy"),
+            "origin_accuracy": origin_accuracy_of(data),
+            "n_rounds": data.get("n_rounds", 0),
+            "created_at": data.get("created_at", ""),
+            "updated_at": data.get("updated_at", ""),
+            "human_intervened": bool(data.get("human_intervened", False)),
+        }
+
     def enumerate_cycles(self) -> list[dict[str, Any]]:
         """Every cycle on disk in the webapp-picker shape; unreadable → ``status='unreadable'`` stubs."""
-        results: list[dict[str, Any]] = []
-        for index_path in self._index_files():
-            campaign_id, cycle_id = self._ids_from_index_path(index_path)
-            try:
-                data = read_json_optional(index_path)
-            except Exception:
-                data = None
-            kind = sibling_kind(cycle_id)
-            # The single run-phase derivation — running / paused / stopping /
-            # detached / terminal. Lifecycle (terminal) comes from index
-            # ``finished_at``; control + freshness from derive_run_phase. This is
-            # the one computation the picker, both live dots, and the badge all
-            # read — no surface re-derives "running" from its own inputs.
-            cycle_dir = index_path.parent
-            is_terminal = isinstance(data, dict) and bool(data.get("finished_at"))
-            run_phase = str(derive_run_phase(cycle_dir, is_terminal=is_terminal))
-            if not isinstance(data, dict):
-                results.append(
-                    {
-                        "campaign_id": campaign_id,
-                        "cycle_id": cycle_id,
-                        "parent_session_id": "",
-                        "parent_cycle_id": (None if kind == "root" else root_cycle_id(cycle_id)),
-                        "dataset_name": "",
-                        "backend_id": "",
-                        "sibling_kind": kind,
-                        "unit_kind": _unit_kind(kind, None),
-                        "is_root": kind == "root",
-                        "status": "unreadable",
-                        "run_phase": run_phase,
-                        "best_accuracy": None,
-                        "n_rounds": 0,
-                        "created_at": "",
-                        "updated_at": "",
-                        "human_intervened": False,
-                    }
-                )
-                continue
-            header_raw = data.get("header")
-            header: dict[str, Any] = header_raw if isinstance(header_raw, dict) else {}
-            sk = data.get("sibling_kind", kind)
-            fork_raw = data.get("fork")
-            fork_trigger = fork_raw.get("trigger") if isinstance(fork_raw, dict) else None
-            results.append(
-                {
-                    "campaign_id": campaign_id,
-                    "cycle_id": cycle_id,
-                    "parent_session_id": data.get("parent_session_id", ""),
-                    "parent_cycle_id": data.get("parent_cycle_id")
-                    or (None if kind == "root" else root_cycle_id(cycle_id)),
-                    "dataset_name": header.get("dataset_name", ""),
-                    "backend_id": header.get("backend_id", ""),
-                    "sibling_kind": sk,
-                    "unit_kind": _unit_kind(sk, fork_trigger),
-                    "is_root": kind == "root",
-                    "status": data.get("status", ""),
-                    "run_phase": run_phase,
-                    "best_accuracy": data.get("best_accuracy"),
-                    "n_rounds": data.get("n_rounds", 0),
-                    "created_at": data.get("created_at", ""),
-                    "updated_at": data.get("updated_at", ""),
-                    "human_intervened": bool(data.get("human_intervened", False)),
-                }
-            )
-        # Backfill dataset_name onto siblings from their campaign manifest.
-        for e in results:
-            if not e["dataset_name"]:
-                campaign = self.load_campaign(e["campaign_id"])
-                if campaign is not None:
-                    e["dataset_name"] = campaign.dataset_name
-        return results
+        return [self._entry_from_index(p) for p in self._index_files()]
 
     def try_delete_stub_cycle(self, campaign_id: str, cycle_id: str) -> tuple[bool, str]:
         """Delete a stub cycle dir → ``(deleted, reason)``. Guards: ``n_rounds == 0``, not a family root, no children."""

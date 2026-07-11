@@ -86,6 +86,14 @@ jobs:
           uv run python scripts/build_ts_types.py
           git diff --exit-code webapp/lib/api/types.generated.ts
 
+      # Same contract, other generated surface: the optimizer's committed
+      # `resolved_schemas` are derived from OPTIMIZER_RESPONSE_MODELS. Ungated, a
+      # changed response model ships a stale schema the LLM is then asked to fill.
+      - name: Schema contract (Pydantic → optimizer resolved_schemas)
+        run: |
+          uv run python scripts/build_optimizer_schemas.py
+          git diff --exit-code datasets/_optimizer/pipeline.json
+
       - name: Tests
         run: uv run pytest tests/ -q --tb=short --cov=promptpotter --cov-report=term-missing
 

@@ -66,11 +66,9 @@ class CycleSnapshot:
 class Session:
     store: Stores
     backend_id: str
-    experiment_id: str
     backend_client: BackendClient
     pipeline_schema: PipelineSchema | None
     samples: list[Sample] = field(default_factory=list)
-    experiment_extract: dict[str, Any] = field(default_factory=dict)
     index_terms: list[str] = field(default_factory=list)
     identity: IdentityContext = field(default_factory=default_identity)
     dataset_name: str | None = None
@@ -145,7 +143,6 @@ def new_session_state(
         "dataset_count": 0,
         "origin_accuracy": 0.0,
         "task_context": None,
-        "experiment_id": None,
     }
 
 
@@ -174,7 +171,6 @@ def auto_mint_session(
     origin_acc: float = 0.0,
     origin_prompt_fields: dict[str, Any] | None = None,
     dataset_size: int = 0,
-    experiment_id: str | None = None,
     pipeline_params: dict[str, Any] | None = None,
     active_steps: list[str] | None = None,
     label: str = "",
@@ -204,7 +200,6 @@ def auto_mint_session(
         init_params={
             "backend_url": session.backend_client.base_url,
             "backend_id": session.backend_id,
-            "experiment_id": experiment_id,
             "dataset_name": session.dataset_name,
         },
         pipeline_params=pipeline_params or {},
@@ -348,7 +343,6 @@ def finalize_checkin_to_active(
     session_id: str,
     cycle_plan: Any,
     dataset_size: int,
-    experiment_id: str | None = None,
 ) -> None:
     """Flip a ``checkin`` campaign to ``active`` against its EXISTING ids — transition (b).
 
@@ -375,7 +369,6 @@ def finalize_checkin_to_active(
         init_params={
             "backend_url": session.backend_client.base_url,
             "backend_id": session.backend_id,
-            "experiment_id": experiment_id,
             "dataset_name": session.dataset_name,
         },
         pipeline_params=cycle_plan.pipeline_params,

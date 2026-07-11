@@ -11,6 +11,7 @@ from promptpotter.application.bootstrap import (
     init_services as _init_services,
 )
 from promptpotter.application.bootstrap.session import Session
+from promptpotter.application.jobs.mint import prepare_fresh_cycle
 from promptpotter.application.origin import (
     CampaignOrigin,
 )
@@ -29,7 +30,6 @@ from promptpotter.config.logging import setup_logging
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
-    DEFAULT_EXPERIMENT_ID,
 )
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import CycleResult
@@ -140,44 +140,23 @@ def render_completion(
 
 
 async def init_notebook_session(
+    dataset_name: str,
     backend_url: str = DEFAULT_BACKEND_URL,
     backend_id: str = DEFAULT_BACKEND_ID,
-    experiment_id: str = DEFAULT_EXPERIMENT_ID,
-    dataset_name: str | None = None,
 ) -> Session:
     """Init store, client, pipeline schema, scoring data — with notebook-friendly logging."""
     setup_logging()
     project_root = Path(__file__).resolve().parent.parent.parent.parent
 
     session = await _init_services(
+        dataset_name=dataset_name,
         backend_url=backend_url,
         backend_id=backend_id,
-        experiment_id=experiment_id,
         project_root=project_root,
-        dataset_name=dataset_name,
         on_status=print,
     )
-
-    if dataset_name and session.samples:
-        print(f"Dataset    : {dataset_name} ({len(session.samples)} queries)")
-        print(f"Session terms: {len(session.index_terms)}")
-        return session
-
-    if not session.experiment_extract:
-        print(
-            "WARNING: No experiment data available. "
-            "Use prepare_datasets() to load from Excel, "
-            "or sync from backend."
-        )
-        return session
-
-    mappings = session.experiment_extract.get("mappings", [])
-    verified = sum(1 for m in mappings if m.get("dataset_entry", "").strip() not in ("", "--"))
-    print(
-        f"Experiment : {session.experiment_extract.get('experiment', {}).get('name', experiment_id)}"
-    )
-    print(f"Mappings   : {len(mappings)} total, {verified} with verified ground truth")
-    print(f"Samples    : {len(session.samples)}  |  Session terms: {len(session.index_terms)}")
+    print(f"Dataset    : {dataset_name} ({len(session.samples)} queries)")
+    print(f"Session terms: {len(session.index_terms)}")
     return session
 
 
@@ -187,9 +166,12 @@ async def prepare_origin_notebook(
     campaign_config: CampaignConfig,
     *,
     pipeline_params: dict[str, Any] | None = None,
-    experiment_id: str | None = None,
 ) -> tuple[RunObservers, list[Sample], CampaignOrigin]:
-    """Build observers + score origin in a separate notebook cell; auto-mints session + cycle."""
+    """Mint the campaign, build observers, score the origin — one notebook cell.
+
+    Mints through ``prepare_fresh_cycle``, the same prologue ``new`` and the web mint
+    run. ``build_run_observers`` used to auto-mint for this caller alone, on a second
+    code path that skipped the pipeline overlay and the cycle seed."""
     scoring_formula = split_scoring_block(campaign_config.scoring).per_sample
     display = LiveDisplay(
         origin_acc=0.0,
@@ -198,16 +180,17 @@ async def prepare_origin_notebook(
         scoring_formula=scoring_formula,
     )
 
+    if not session.campaign_id:
+        prepare_fresh_cycle(session, campaign_config, train_data)
+
     observers = build_run_observers(
         session=session,
         campaign_config=campaign_config,
         dataset=train_data,
         display=display,
-        experiment_id=experiment_id,
     )
 
     origin, dataset = await _prepare_scoring_context(
-        session.experiment_extract,
         train_data,
         campaign_config,
         pipeline_params=pipeline_params,
@@ -230,7 +213,6 @@ async def run_optimization_notebook(
     *,
     session: Session,
     langfuse_session_id: str | None = None,
-    experiment_id: str | None = None,
     task_context: TaskDecomposition | dict[str, Any] | None = None,
 ) -> CycleResult | None:
     """Run optimization with the observers built in the prior cell."""
@@ -243,7 +225,6 @@ async def run_optimization_notebook(
         session=session,
         observers=observers,
         origin=origin,
-        experiment_id=experiment_id,
         task_context=task_context,
         langfuse_session_id=langfuse_session_id,
     )

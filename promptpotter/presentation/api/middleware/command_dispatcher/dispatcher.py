@@ -20,7 +20,7 @@ Three dispatch shapes:
   parameter component note in ``docs/specs/m12-api-openapi.yaml``).
 
 - ``dispatch_workspace_command`` — workspace-scoped commands (the
-  ``WorkspaceBackendKind`` set: register-backend, sync-backend-experiments,
+  ``WorkspaceBackendKind`` set: register-backend,
   mint-campaign). Target is the tenant workspace, not any cycle;
   ``CommandRecord`` lands on the workspace ledger at
   ``projects/{tenant}/.workspace/events.jsonl`` per the §0 Persistence
@@ -48,10 +48,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from promptpotter import connectors
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
-from promptpotter.infrastructure.backend import build_backend_client
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.models import (
     emit_command,
@@ -98,7 +96,7 @@ CycleScopedKind = Literal[
     "change-spend-budget",
     "start-run",
 ]
-WorkspaceBackendKind = Literal["register-backend", "sync-backend-experiments", "mint-campaign"]
+WorkspaceBackendKind = Literal["register-backend", "mint-campaign"]
 CheckinScopedKind = Literal["edit-draft-campaign", "resolve-origin", "start-checkin"]
 
 Applier = Callable[[], Awaitable[Any]] | Callable[[], Any]
@@ -290,10 +288,6 @@ class CommandDispatcher:
         applier: Applier
         if kind == "register-backend":
             applier = lambda: self._apply_register_backend(payload)  # noqa: E731
-        elif kind == "sync-backend-experiments":
-
-            async def applier() -> None:
-                await self._apply_sync_backend_experiments(payload)
         else:
             assert kind == "mint-campaign"
 
@@ -509,24 +503,25 @@ class CommandDispatcher:
         if kind == "change-spend-budget":
             max_usd = payload_extras.get("max_usd")
             max_tokens = payload_extras.get("max_tokens")
-            # An ABSENT ceiling means "leave it untouched"; a PRESENT-but-non-numeric
-            # one is a typo, not a no-op. Reject it loud — silently coercing it to
+            # An ABSENT ceiling means "leave it untouched"; a PRESENT one that is
+            # non-numeric or negative is a typo, not a no-op. Reject it loud — a
+            # negative cap halts the run at the next checkpoint, and coercing it to
             # None would drop that ceiling while the other one applies, so the
             # operator believes both landed when only one did.
             if max_usd is not None and (
-                not isinstance(max_usd, int | float) or isinstance(max_usd, bool)
+                not isinstance(max_usd, int | float) or isinstance(max_usd, bool) or max_usd < 0
             ):
-                raise PayloadInvalidError("change-spend-budget max_usd must be a number.")
+                raise PayloadInvalidError("change-spend-budget max_usd must be a number >= 0.")
             if max_tokens is not None and (
-                not isinstance(max_tokens, int) or isinstance(max_tokens, bool)
+                not isinstance(max_tokens, int) or isinstance(max_tokens, bool) or max_tokens < 0
             ):
-                raise PayloadInvalidError("change-spend-budget max_tokens must be an integer.")
+                raise PayloadInvalidError("change-spend-budget max_tokens must be an int >= 0.")
+            if max_usd is None and max_tokens is None:
+                raise PayloadInvalidError(
+                    "change-spend-budget requires at least one of max_usd / max_tokens."
+                )
             usd_val = float(max_usd) if max_usd is not None else None
             tok_val = int(max_tokens) if max_tokens is not None else None
-            if (usd_val is None or usd_val < 0) and (tok_val is None or tok_val < 0):
-                raise PayloadInvalidError(
-                    "change-spend-budget requires a non-negative max_usd and/or max_tokens."
-                )
             return lambda: self._apply_change_spend_budget(
                 campaign_id, cycle_id, max_usd=usd_val, max_tokens=tok_val
             )
@@ -591,26 +586,6 @@ class CommandDispatcher:
                 base_url=base_url.rstrip("/"),
             )
         )
-
-    async def _apply_sync_backend_experiments(self, payload: dict[str, Any]) -> None:
-        """Pull experiments from the backend's API into the local store.
-
-        Unknown backend ⇒ 404; upstream failures ⇒ 503 (both ride the central
-        ``PotterError`` rejection path)."""
-        backend_id = str(payload["backend_id"])
-        backend = self._store.backends.get(backend_id)
-        if backend is None:
-            raise NotFoundError(
-                f"Backend '{backend_id}' not registered", code="command_target_not_found"
-            )
-        client = build_backend_client(connectors.get(backend.backend_type), backend.base_url)
-        try:
-            await client.sync_experiments(self._store, backend_id)
-        except Exception as exc:
-            raise ServiceUnavailableError(
-                f"Failed to sync from {backend.base_url}: {exc}", code="backend_sync_failed"
-            ) from exc
-        self._store.backends.update(backend)
 
     def _apply_skip_searchpoint(self, campaign_id: str, cycle_id: str) -> None:
         """Write a one-shot ``.runtime/skip.flag``; ``Session.skip_check`` polls it at

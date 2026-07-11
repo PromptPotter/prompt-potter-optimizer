@@ -22,7 +22,6 @@ draft the first ingest action mints a check-in campaign from.
 
 from __future__ import annotations
 
-import copy
 import uuid
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
@@ -33,6 +32,7 @@ from promptpotter.application.config import MechanismConfig
 from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.domain.identity import TenantId, safe_name
 from promptpotter.domain.origin_provenance import Provenance
+from promptpotter.domain.pipeline_parsing import merge_node_blocks
 from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
@@ -404,22 +404,18 @@ def merge_pipeline_overlay(draft: DraftCampaign, connector: Connector) -> dict[s
     seed (e.g. TermNorm's reasoning clamp + owned model) underneath, operator draft
     edits on top.
 
-    Sub-blocks (``config`` / ``optimizer``) shallow-merge per node so an operator
-    override narrows the seed rather than replacing the whole node. The one place
-    the draft's resolved node config is computed — shared by the committed
-    pipeline.json builder (``draft_build``), the wire-side optimizer-locks block,
-    and the origin readiness model gate — so the three never drift. Pure; the
+    The one place the draft's resolved node config is computed — shared by the
+    committed pipeline.json builder (``draft_build``), the wire-side optimizer-locks
+    block, and the origin readiness model gate — so the three never drift. Pure; the
     ``connector`` is passed in (this module stays connector-registry-free, like
-    :meth:`DraftCampaign.to_wire`)."""
-    nodes: dict[str, Any] = copy.deepcopy(dict(connector.default_node_config))
-    for node_name, node_overlay in (draft.pipeline_overlay or {}).items():
-        dst = nodes.setdefault(node_name, {})
-        for key, val in node_overlay.items():
-            if isinstance(val, dict) and isinstance(dst.get(key), dict):
-                dst[key].update(val)
-            else:
-                dst[key] = val
-    return nodes
+    :meth:`DraftCampaign.to_wire`).
+
+    The layering itself is :func:`merge_node_blocks`, shared with the dataset overlay
+    in ``bootstrap/wiring.py``. This used to spell it a second time, merging dict
+    sub-blocks by TYPE where the other merged by NAME — so an operator's partial
+    ``output_schema`` edit shallow-merged here and could emit a schema whose
+    ``required`` named a field its own ``properties`` no longer had."""
+    return merge_node_blocks(dict(connector.default_node_config), draft.pipeline_overlay or {})
 
 
 def new_draft(

@@ -73,7 +73,6 @@ async def measure_cells(
         cfg = base_config.model_copy(update={"pipeline_overrides": overrides, "sp_budget_ttest": n})
         configure_and_apply_pipeline(session, cfg, log=lambda *_a, **_k: None)
         origin, _ = await prepare_scoring_context(
-            session.experiment_extract,
             samples,
             cfg,
             pipeline_params=session.pipeline_params,

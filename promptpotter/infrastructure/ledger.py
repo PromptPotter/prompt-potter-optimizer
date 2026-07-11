@@ -40,7 +40,7 @@ class CycleEventLog:
     Persistence) lives at ``{workspace_dir}/.workspace/events.jsonl`` and
     is opened via :meth:`open_workspace`. Workspace ledgers carry
     workspace-scoped command audit (`register-backend`,
-    `sync-backend-experiments`); per-cycle ledgers remain canonical for
+    `mint-campaign`); per-cycle ledgers remain canonical for
     cycle-targeted records."""
 
     def __init__(self, path: Path) -> None:

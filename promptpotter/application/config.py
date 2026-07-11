@@ -750,7 +750,7 @@ def apply_node_overlay(
     floor) — one nesting contract, not two.
 
     ``schema`` supplies those declarations; ``None`` (the schema-less
-    ``experiment_extract`` path) declares nothing, so every param stays shallow.
+    backend-default path) declares nothing, so every param stays shallow.
 
     Shared by the dataset/override resolution here, the cycle-seed overlay
     (``runner/entry.py``) and the candidate-override merge
@@ -873,7 +873,6 @@ def missing_template_vars(rendered: str, declared: list[str]) -> list[str]:
 
 def _resolve_active_schema(
     pipeline_schema: PipelineSchema | None,
-    experiment_extract: dict[str, Any],
     *,
     exclude: list[str],
     narrowing: dict[str, NodeSearchNarrowing],
@@ -885,15 +884,8 @@ def _resolve_active_schema(
     ``pipeline_params`` it is the reserved top-level ``list[str]`` of active node
     names (``RESERVED_PIPELINE_PARAM_KEYS``). Hence the ``s["name"]`` below.
     """
-    from promptpotter.infrastructure.backend import extract_pipeline_config
 
-    if pipeline_schema:
-        all_names = list(pipeline_schema.active_steps)
-    elif experiment_extract:
-        pipeline_config = extract_pipeline_config(experiment_extract)
-        all_names = [s["name"] for s in pipeline_config["steps"]]
-    else:
-        all_names = []
+    all_names = list(pipeline_schema.active_steps) if pipeline_schema else []
 
     active = [n for n in all_names if n not in exclude]
 
@@ -1012,7 +1004,6 @@ def configure_and_apply_pipeline(
     exclude = list(campaign_config.exclude_nodes)
     active, filtered = _resolve_active_schema(
         session.pipeline_schema,
-        session.experiment_extract,
         exclude=exclude,
         narrowing=campaign_config.optimizer_narrowing,
     )

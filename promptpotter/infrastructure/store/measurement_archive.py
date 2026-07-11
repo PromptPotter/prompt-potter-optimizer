@@ -34,7 +34,6 @@ def _summary(data: dict[str, Any]) -> dict[str, Any]:
         "run_id": data["run_id"],
         "name": data.get("name", data["run_id"]),
         "dataset_name": data.get("dataset_name"),
-        "experiment_id": data.get("experiment_id", ""),
         "prompt_fields_id": data["prompt_fields_id"],
         "item_count": data["item_count"],
         "scores": data["scores"],
@@ -364,16 +363,24 @@ class MeasurementArchive:
         node_configs: list[tuple[str, dict[str, Any]]],
         is_fatal: Callable[[dict[str, Any]], bool] | None = None,
         *,
-        dataset_name: str | None = None,
+        dataset_name: str,
         min_grade: str | None = None,
-    ) -> dict[str, dict[str, Any]]:
-        """Per-sample cache from prior runs sharing *node_configs*. Exact match → reuse all
-        non-error; partial → prefix-trusted nodes only. `is_fatal` prevents a deprecated archive
-        row shadowing a saved valid retry. *dataset_name* scopes reuse (same sample_id across
-        datasets is a different problem). *min_grade* (`A`/`B`/`C`) drops runs whose provenance
-        grade is below the floor — a clean-substrate read (e.g. the loop-improvement experiment)
-        passes `A` to reuse only deliberately-explored measurements; the default `None` keeps
-        every run, so ordinary scoring caching is unchanged.
+    ) -> dict[int, dict[str, Any]]:
+        """Per-sample cache from prior runs sharing *node_configs*, keyed by ``sample_id``.
+        Exact match → reuse all non-error; partial → prefix-trusted nodes only. `is_fatal`
+        prevents a deprecated archive row shadowing a saved valid retry. *min_grade*
+        (`A`/`B`/`C`) drops runs whose provenance grade is below the floor — a clean-substrate
+        read (e.g. the loop-improvement experiment) passes `A` to reuse only deliberately-
+        explored measurements; the default `None` keeps every run, so ordinary scoring caching
+        is unchanged.
+
+        *dataset_name* is REQUIRED. ``sample_id`` identifies a sample WITHIN a dataset, so a
+        pooled slice (the ``None`` the index treats as forensic/admin) would serve one dataset's
+        measurement under another's sample — the bleed ``test_integrity`` guards. Keying on the
+        raw ``query`` text used to hide that, and bought a different silent collision instead:
+        two samples that phrase the same question shared one cell, and a sample with an empty
+        query was dropped from reuse entirely. The writer stamps ``sample_id`` on every
+        measurement (``sample_measurement.py``), so it is the cell's one identity.
 
         Operating consequence (the answer to "will changing a connector tunable re-score?"):
         `node_configs` carries each node's effective config INCLUDING `model`, so a change at
@@ -382,10 +389,12 @@ class MeasurementArchive:
         prefix node, e.g. cache/fuzzy) replay. So editing a node's model and minting a fresh
         campaign genuinely re-scores the LLM-path samples.
         """
+        if not dataset_name:
+            raise ValueError("load_reusable_results requires a dataset_name — see the docstring")
         if not node_configs:
             return {}
         chain_len = len(node_configs)
-        cache: dict[str, dict[str, Any]] = {}
+        cache: dict[int, dict[str, Any]] = {}
 
         for entry, match_length in self.find_by_node_configs(
             node_configs,
@@ -401,14 +410,14 @@ class MeasurementArchive:
                 set() if is_full_match else {node_configs[i][0] for i in range(match_length)}
             )
             for item in detail.get("measurements", []):
-                q = item.get("query", "")
-                if not q or item.get("predicted") == "ERROR":
+                sid = item.get("sample_id")
+                if not isinstance(sid, int) or item.get("predicted") == "ERROR":
                     continue
                 if not is_full_match:
                     terminated_at = (item.get("pipeline_data") or {}).get("terminated_at", "")
                     if not (terminated_at and terminated_at in trusted_nodes):
                         continue
-                existing = cache.get(q)
+                existing = cache.get(sid)
                 if (
                     existing is not None
                     and is_fatal is not None
@@ -416,7 +425,7 @@ class MeasurementArchive:
                     and not is_fatal(existing)
                 ):
                     continue
-                cache[q] = item
+                cache[sid] = item
         return cache
 
 

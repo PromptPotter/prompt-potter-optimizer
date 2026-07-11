@@ -766,7 +766,6 @@ async def _run_inner_campaign(
             campaign_config,
             session=session,
             observers=observers,
-            experiment_id=session.experiment_id,
             task_context=task_context,
             mode=RunMode(),
             spend_budget_usd=campaign_config.optimization.spend_budget_usd,

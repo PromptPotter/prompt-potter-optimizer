@@ -8,7 +8,7 @@ fork's chart shows the fork's trajectory, not the session root's.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import Query, Request, Response
 from fastapi.responses import JSONResponse
@@ -20,9 +20,7 @@ from promptpotter.infrastructure.store import (
     cycle_dir_for,
     read_active_pointer,
 )
-from promptpotter.infrastructure.store.campaign_store.store import origin_accuracy_of
 from promptpotter.infrastructure.store.io import read_json_tolerant, validate_path_component
-from promptpotter.infrastructure.store.layout import sibling_kind
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.presentation.api.deps import StoreDep, warming_payload
 from promptpotter.presentation.api.routers.active import CycleListEntry, CyclesResponse
@@ -34,24 +32,9 @@ from promptpotter.presentation.api.routers.campaigns._router import campaigns_ro
 from promptpotter.shared.errors import BadRequestError, NotFoundError
 
 
-class CycleSummary(BaseModel):
-    campaign_id: str
-    cycle_id: str
-    sibling_kind: Literal["root", "fork", "diag", "sweep"]
-    is_root: bool
-    parent_cycle_id: str | None = None
-    status: str = ""
-    n_rounds: int = 0
-    best_accuracy: float | None = None
-    origin_accuracy: float | None = None
-    created_at: str = ""
-    updated_at: str = ""
-    human_intervened: bool = False
-
-
 class CampaignCyclesResponse(BaseModel):
     campaign_id: str
-    cycles: list[CycleSummary] = Field(description="Every cycle in the campaign's lineage tree")
+    cycles: list[CycleListEntry] = Field(description="Every cycle in the campaign's lineage tree")
 
 
 class CycleRoundEntry(BaseModel):
@@ -61,8 +44,15 @@ class CycleRoundEntry(BaseModel):
     improved: bool = Field(default=False, description="Whether this round improved over best")
 
 
-class CycleDetailResponse(CycleSummary):
-    backend_id: str = Field(default="", description="Backend this cycle optimizes against")
+class CycleDetailResponse(CycleListEntry):
+    """One cycle in the list shape, plus its round summaries.
+
+    ``CycleListEntry`` IS the cycle's served shape — this route once re-declared a
+    narrower twin of it and hand-copied ``enumerate_cycles()`` field by field, which
+    is how ``origin_accuracy`` came to be structurally null in the list and populated
+    only in the detail.
+    """
+
     rounds: list[CycleRoundEntry] = Field(description="Ordered round summaries")
 
 
@@ -71,24 +61,14 @@ def list_campaign_cycles(store: StoreDep, campaign_id: str) -> CampaignCyclesRes
     """Every cycle in one campaign's lineage tree."""
     if store.campaigns.load_campaign(campaign_id) is None:
         raise NotFoundError(f"Campaign not found: {campaign_id}")
-    cycles = [
-        CycleSummary(
-            campaign_id=e["campaign_id"],
-            cycle_id=e["cycle_id"],
-            sibling_kind=e["sibling_kind"],
-            is_root=e["is_root"],
-            parent_cycle_id=e["parent_cycle_id"],
-            status=e["status"],
-            n_rounds=e["n_rounds"],
-            best_accuracy=e["best_accuracy"],
-            created_at=e["created_at"],
-            updated_at=e["updated_at"],
-            human_intervened=e.get("human_intervened", False),
-        )
-        for e in store.campaigns.enumerate_cycles()
-        if e["campaign_id"] == campaign_id
-    ]
-    return CampaignCyclesResponse(campaign_id=campaign_id, cycles=cycles)
+    return CampaignCyclesResponse(
+        campaign_id=campaign_id,
+        cycles=[
+            CycleListEntry(**e)
+            for e in store.campaigns.enumerate_cycles()
+            if e["campaign_id"] == campaign_id
+        ],
+    )
 
 
 def _round_summaries(index: dict[str, Any]) -> list[CycleRoundEntry]:
@@ -120,29 +100,11 @@ def _round_summaries(index: dict[str, Any]) -> list[CycleRoundEntry]:
 )
 def get_cycle(store: StoreDep, campaign_id: str, cycle_id: str) -> CycleDetailResponse:
     """One cycle's ``index.json`` detail with round summaries."""
+    entry = store.campaigns.cycle_entry(campaign_id, cycle_id)
     index = store.campaigns.load(campaign_id, cycle_id)
-    if index is None:
+    if entry is None or index is None:
         raise NotFoundError(f"Cycle not found: {campaign_id}/{cycle_id}")
-    kind = sibling_kind(cycle_id)
-    return CycleDetailResponse(
-        campaign_id=campaign_id,
-        cycle_id=cycle_id,
-        sibling_kind=index.get("sibling_kind", kind),
-        is_root=kind == "root",
-        parent_cycle_id=index.get("parent_cycle_id"),
-        status=str(index.get("status") or ""),
-        n_rounds=int(index.get("n_rounds", 0)),
-        best_accuracy=(
-            float(index["best_accuracy"])
-            if isinstance(index.get("best_accuracy"), int | float)
-            else None
-        ),
-        origin_accuracy=origin_accuracy_of(index),
-        created_at=str(index.get("created_at") or ""),
-        updated_at=str(index.get("updated_at") or ""),
-        backend_id=str((index.get("header") or {}).get("backend_id") or ""),
-        rounds=_round_summaries(index),
-    )
+    return CycleDetailResponse(**entry, rounds=_round_summaries(index))
 
 
 @campaigns_router.get(

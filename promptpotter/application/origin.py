@@ -20,7 +20,6 @@ if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.run_observers import RunCallbacks
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.infrastructure.store import Stores
 
 
 logger = logging.getLogger(__name__)
@@ -28,10 +27,8 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "ORIGIN_RESOLUTION_PRIORITY",
     "CampaignOrigin",
-    "DatasetSummary",
     "build_campaign_emitter",
     "establish_campaign_origin",
-    "prepare_datasets",
     "prepare_scoring_context",
     "rescore_origin",
     "resolve_origin_opt_search_point",
@@ -240,7 +237,6 @@ def try_inherit_fork_origin(
 
 ORIGIN_RESOLUTION_PRIORITY = (
     "seed",  # operator-steered fork OR campaign-from-origin: the chosen searchpoint IS the origin
-    "experiment",  # experiment_extract dependencies' prompt registry
     "dataset",  # {dataset_dir}/prompts/{node}.json (tenant-first)
     "empty",  # no prompt node active — param-only optimization
 )
@@ -256,22 +252,21 @@ _SEED_ORIGIN_LINEAGE = {
 
 
 def resolve_origin_opt_search_point(
-    experiment_extract: dict[str, Any],
     prompt_node_names: list[str] | None = None,
     dataset_dir: Path | None = None,
     *,
     seed: CycleSeed | None = None,
 ) -> OptSearchPoint:
     """Resolve the origin OptSearchPoint by :data:`ORIGIN_RESOLUTION_PRIORITY`
-    (seed → experiment prompts → {dataset_dir}/prompts → empty).
+    (seed → {dataset_dir}/prompts → empty).
 
     A *seed* with non-empty ``origin_prompt_fields`` wins outright — an
     operator-steered fork's (or a campaign-from-origin's) origin *is* the chosen
     searchpoint, so we build the OSP straight from those fields and short-circuit
-    (no dataset/experiment lookup), stamping the C0 lineage from
-    ``seed.origin_source``. *dataset_dir* is the resolved config dir
-    (``Session.dataset_config_dir``, tenant-first), so an ingested dataset's
-    authored prompts are found the same way a repo benchmark's are."""
+    (no dataset lookup), stamping the C0 lineage from ``seed.origin_source``.
+    *dataset_dir* is the resolved config dir (``Session.dataset_config_dir``,
+    tenant-first), so an ingested dataset's authored prompts are found the same way a
+    repo benchmark's are."""
     if seed is not None and seed.origin_prompt_fields:
         return OptSearchPoint.from_prompt_fields(
             seed.origin_prompt_fields,
@@ -281,34 +276,7 @@ def resolve_origin_opt_search_point(
             ),
         )
 
-    dependencies = experiment_extract.get("dependencies", {})
-    prompts = dependencies.get("prompts", {})
     names = prompt_node_names or []
-
-    matched_prompt = None
-    matched_key = None
-    for node_name in names:
-        for key, prompt_info in prompts.items():
-            if node_name in key:
-                matched_prompt = prompt_info
-                matched_key = key
-                break
-        if matched_prompt:
-            break
-
-    if matched_prompt is None and not names and prompts:
-        matched_key, matched_prompt = next(iter(prompts.items()))
-
-    if matched_prompt is not None:
-        label = names[0] if names else matched_key
-        return OptSearchPoint(
-            instruction=matched_prompt["template"],
-            lineage=IndividualLineage(
-                changes_description=f"Origin prompt from {label} registry",
-                source="origin",
-            ),
-        )
-
     if dataset_dir is not None and names:
         from promptpotter.application.datasets import (
             has_dataset_prompts,
@@ -354,7 +322,6 @@ async def establish_campaign_origin(
     ``prepare_scoring_context``. Both branches share the one resolved OSP, so the origin
     is resolved exactly once and both paths return the same ``CampaignOrigin`` shape."""
     resolved_origin = resolve_origin_opt_search_point(
-        session.experiment_extract,
         prompt_node_names=(
             session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
         ),
@@ -366,7 +333,6 @@ async def establish_campaign_origin(
         return inherited
 
     origin, _ = await prepare_scoring_context(
-        session.experiment_extract,
         dataset,
         campaign_config,
         pipeline_params=session.pipeline_params,
@@ -380,7 +346,6 @@ async def establish_campaign_origin(
 
 
 async def prepare_scoring_context(
-    experiment_extract: dict[str, Any] | None,
     train_data: list[Sample] | None,
     campaign_config: CampaignConfig | None = None,
     *,
@@ -401,7 +366,6 @@ async def prepare_scoring_context(
     if resolved_origin is None:
         prompt_nodes = pipeline_schema.prompt_node_names() if pipeline_schema else []
         resolved_origin = resolve_origin_opt_search_point(
-            experiment_extract or {},
             prompt_node_names=prompt_nodes,
             dataset_dir=getattr(svc, "dataset_config_dir", None),
             seed=seed,
@@ -443,10 +407,7 @@ async def prepare_scoring_context(
     if session.index_terms:
         await session.backend_client.init_session(session.index_terms)
     else:
-        logger.warning(
-            "No session terms available — /matches calls will fail. "
-            "Load datasets first (Excel ground truth → DatasetStore)."
-        )
+        logger.warning("No session terms available — /matches calls will fail.")
 
     if obs:
         with graceful("Dataset registration in origin scoring failed"):
@@ -506,64 +467,4 @@ async def prepare_scoring_context(
             total=scores["total"],
         ),
         dataset,
-    )
-
-
-class DatasetSummary(NamedTuple):
-    """Return from ``prepare_datasets()``."""
-
-    train_data: list[Sample] | None
-    index_terms: list[str]
-    splits: dict[str, list[Sample]]
-    n_unique_samples: int
-
-
-def prepare_datasets(
-    store: Stores,
-    excel_path: str | Path | None = None,
-    *,
-    force: bool = False,
-) -> DatasetSummary:
-    """Load/create datasets + build session terms (pure orchestration)."""
-    from promptpotter.application.datasets import (
-        SHEET_COLUMN_MAP,
-        load_excel_ground_truth,
-        samples_from_dicts,
-        split_train_test,
-    )
-
-    if excel_path:
-        excel_path = Path(excel_path)
-        existing = store.backends.load_dataset("train")
-        needs_create = force or not (existing and existing.get("items"))
-
-        if needs_create:
-            all_rows = load_excel_ground_truth(excel_path, SHEET_COLUMN_MAP)
-            train, test_sets = split_train_test(all_rows)
-            store.backends.save_dataset("train", train, source_file=excel_path.name)
-            for name, items in test_sets.items():
-                store.backends.save_dataset(name, items, source_file=excel_path.name)
-
-    # Single pass per split: samples + GT set (/match index) + unique query set. Test contributes GTs only.
-    splits: dict[str, list[Sample]] = {}
-    gt_set: set[str] = set()
-    all_queries: set[str] = set()
-    for name in ("train", "test_processes", "test_material"):
-        ds = store.backends.load_dataset(name)
-        raw_items = ds["items"] if ds and ds.get("items") else []
-        splits[name] = samples_from_dicts(raw_items)
-        for item in raw_items:
-            gt = item.get("ground_truth", "").strip()
-            if gt:
-                gt_set.add(gt)
-        for s in splits[name]:
-            q = s.query.strip()
-            if q:
-                all_queries.add(q)
-
-    return DatasetSummary(
-        train_data=splits["train"] or None,
-        index_terms=sorted(gt_set),
-        splits=splits,
-        n_unique_samples=len(all_queries),
     )

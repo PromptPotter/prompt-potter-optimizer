@@ -210,7 +210,6 @@ async def prepare_checkin_run(
         session_id=session_id,
         cycle_plan=plan,
         dataset_size=len(train_data),
-        experiment_id=session.experiment_id,
     )
     if origin_override:
         stores.campaigns.write_cycle_seed(

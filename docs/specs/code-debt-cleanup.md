@@ -119,8 +119,8 @@ but `adr/0003-spend-and-tenancy.md`, `developer/concept-map.md`,
 remaining `architecture.md` spots (`:337,367,447`) still say `events.jsonl` for
 the per-cycle ledger. **Verify per-occurrence first** — the *workspace*-level
 ledger (`projects/{tenant}/.workspace/events.jsonl`) is a genuinely different,
-still-correctly-named file (`architecture.md:238`, `persistence-and-state.md`,
-`storage-architecture.md`), so don't blanket-replace.
+still-correctly-named file (`architecture.md:238`, `persistence-and-state.md`),
+so don't blanket-replace.
 
 ## Intentional UI placeholders
 

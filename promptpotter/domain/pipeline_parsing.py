@@ -15,6 +15,7 @@ here. The dataset owns its model in ``nodes.{node}.config.model``.
 
 from __future__ import annotations
 
+import copy
 import logging
 from typing import Any
 
@@ -35,10 +36,44 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "derive_pipeline_view",
+    "merge_node_blocks",
     "parse_pipeline_response",
     "parse_resolved_schema",
     "strip_lone_surrogates",
 ]
+
+# The node-definition sub-blocks a partial overlay AUGMENTS rather than replaces.
+# Every other key in a node block replaces wholesale — `output_schema` above all,
+# because a shallow-merged schema can keep a `required` entry naming a field the
+# incoming `properties` just dropped, and the backend rejects that.
+_MERGED_NODE_SUB_BLOCKS = ("config", "optimizer")
+
+
+def merge_node_blocks(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    """Layer a partial ``nodes`` document over a fuller one → a fresh dict.
+
+    Operates on node DEFINITIONS (``{node: {"config": …, "optimizer": …, …}}``), one
+    level up from :func:`~promptpotter.application.config.apply_node_overlay`, which
+    merges ``pipeline_params`` (``{node: {param: value}}``). Both layerings existed
+    twice — the dataset overlay onto the backend's ``GET /pipeline`` response, and the
+    operator's draft edits onto a connector's node-config seed. One merged its dict
+    sub-blocks by NAME, the other by TYPE, so they disagreed on every dict-valued key
+    outside :data:`_MERGED_NODE_SUB_BLOCKS`.
+
+    A node the base doesn't declare is added; a sub-block outside the merge set wins
+    whole, so a fully-authored node block still fully overrides.
+    """
+    out = copy.deepcopy(base)
+    for node_name, node_def in overlay.items():
+        if not isinstance(node_def, dict):
+            continue
+        dst = out.setdefault(node_name, {})
+        for key, val in node_def.items():
+            if key in _MERGED_NODE_SUB_BLOCKS and isinstance(val, dict):
+                dst.setdefault(key, {}).update(val)
+            else:
+                dst[key] = val
+    return out
 
 
 def strip_lone_surrogates(obj: Any) -> Any:

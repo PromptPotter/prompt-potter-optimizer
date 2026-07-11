@@ -213,7 +213,6 @@ async def _ingest_and_prepare_checkin(
         return await init_services_cli(
             backend_url=args.backend_url,
             backend_id=args.backend_id,
-            experiment_id=args.experiment_id,
             dataset_name=dataset_name,
             identity=identity_from_args(args),
         )
@@ -285,7 +284,6 @@ async def _mint_fresh_session(
     Returns ``(session, campaign_config, dataset_name, session_id)``."""
     from promptpotter.application.config import load_campaign_config as _load_cfg
     from promptpotter.application.datasets import read_campaign_config_file
-    from promptpotter.application.origin import prepare_datasets
 
     # Shared unwrap only — `new` validates AFTER merging with the connector
     # profile ({**profile, **file_config}), a different composition order than
@@ -307,7 +305,6 @@ async def _mint_fresh_session(
     session = await init_services_cli(
         backend_url=args.backend_url,
         backend_id=args.backend_id,
-        experiment_id=args.experiment_id,
         dataset_name=dataset_name,
         identity=identity_from_args(args),
     )
@@ -325,10 +322,7 @@ async def _mint_fresh_session(
     profile = session.store.backends.load_connector_profile(backend_id) or {}
     campaign_config = _load_cfg({**profile, **file_config})
 
-    if args.excel_path:
-        train_data = prepare_datasets(session.store, args.excel_path).train_data or []
-    else:
-        train_data = session.samples or []
+    train_data = session.samples or []
 
     # The one shared mint prologue — same application seam the web mint runs
     # (detached). The CLI keeps only the inline check-in lines + task-context step.
@@ -484,7 +478,6 @@ async def _run_loop(
         campaign_config,
         session=session,
         observers=observers,
-        experiment_id=ctx.state["experiment_id"],
         task_context=ctx.task_context,
         mode=RunMode(
             sweep=getattr(args, "sweep", False),

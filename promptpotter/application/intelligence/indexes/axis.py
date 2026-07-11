@@ -243,8 +243,14 @@ class AxisIndex:
                 fg_lines.append(f"{a.axis} → {', '.join(parts)}")
 
         flips = self.sample_index.flips(limit=50) if rankings5 else []
-        flip_counts = Counter(f["query"] for f in flips)
-        volatile = [(q, n) for q, n in flip_counts.most_common(5) if n >= 2]
+        # Counted by sample_id, the cell's identity — `flips()` already detects them that
+        # way. Bucketing by the raw query text merged two samples that phrase the same
+        # question into one inflated volatility score. The text is the LABEL, not the key.
+        flip_counts = Counter(f["sample_id"] for f in flips)
+        flip_labels = {f["sample_id"]: str(f.get("query", "")) for f in flips}
+        volatile = [
+            (flip_labels.get(sid, ""), n) for sid, n in flip_counts.most_common(5) if n >= 2
+        ]
 
         return _collect(
             ("axis_rankings", _fmt_axis_rankings(rankings5, peaked) if rankings5 else None),

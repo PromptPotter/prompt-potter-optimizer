@@ -1,43 +1,8 @@
-// Mirror of promptpotter/application/scoring/evaluators.py::evaluators_meta().
-// Inline copy so the panel renders without an API fetch. For the
-// current-cycle live registry, hit `/api/v1/evaluators`.
-
-interface EvaluatorMeta {
-  name: string;
-  scope: "per_round" | "per_sample";
-  direction: "high" | "low";
-  node_type: string | null;
-  description: string;
-}
-
-export const WHATIF_INLINE_META: EvaluatorMeta[] = [
-  { name: "accuracy",                 scope: "per_round", direction: "high", node_type: null,
-    description: "Mean per-sample score across the round's result set." },
-  { name: "error_rate",               scope: "per_round", direction: "low",  node_type: null,
-    description: "Fraction of queries that errored (ERROR predicted or exception)." },
-  { name: "degraded_rate",            scope: "per_round", direction: "low",  node_type: null,
-    description: "Fraction of queries that completed with pipeline degradation warnings." },
-  { name: "runtime_failure_rate",     scope: "per_round", direction: "low",  node_type: null,
-    description: "Runtime failure count on OptSP memory, normalized by total queries." },
-  { name: "latency_norm",             scope: "per_round", direction: "high", node_type: null,
-    description: "Mean latency normalized against LATENCY_BUDGET_MS (1.0 = instant, 0.0 = ≥ budget)." },
-  { name: "source_recall",            scope: "per_round", direction: "high", node_type: "candidate_source",
-    description: "Fraction of queries where GT appears in a candidate_source node's output." },
-  { name: "candidate_recall",         scope: "per_round", direction: "high", node_type: "ranker",
-    description: "Fraction of queries where GT appears in a ranker node's final_ranking." },
-  { name: "cache_hit_rate",           scope: "per_round", direction: "high", node_type: "cache",
-    description: "Fraction of queries resolved by a cache node (non-null timing)." },
-  { name: "retrieval_shortfall",      scope: "per_sample", direction: "high", node_type: null,
-    description: "Per-sample min(observed/target, 1.0) across nodes with max_*/num_* limits." },
-  { name: "mean_retrieval_shortfall", scope: "per_round", direction: "high", node_type: null,
-    description: "Mean of retrieval_shortfall across the round's results." },
-  { name: "pipeline_compactness",     scope: "per_round", direction: "low",  node_type: null,
-    description: "1 − (active_steps − 1)/11 — shorter pipelines score higher." },
-  { name: "prompt_compactness",       scope: "per_round", direction: "high", node_type: null,
-    description: "1 − len(rendered_prompt)/PROMPT_BUDGET_CHARS — shorter prompts score higher." },
-  { name: "output_compactness",       scope: "per_round", direction: "high", node_type: null,
-    description: "1 − mean(output_tokens)/OUTPUT_TOKEN_BUDGET — terser (cheaper) generations score higher; the accuracy-vs-cost axis." },
-];
+// The registry itself is generated from application/scoring/evaluators.py
+// (`EVALUATOR_META` in types.generated.ts) — this module owns only the panel's
+// derivations over it. The hand-copy that used to live here listed 13 of the
+// registry's 16 evaluators and described two of them wrongly.
+import type { EvaluatorMeta } from "@/lib/api/types.generated";
 
 export function whatifIdentifiersInFormula(formula: string | undefined | null): Set<string> {
   if (!formula) return new Set();

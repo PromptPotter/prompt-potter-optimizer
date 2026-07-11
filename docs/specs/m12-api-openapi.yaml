@@ -82,7 +82,7 @@ tags:
 #
 # Sources of this draft:
 #   - sanctioned POSTs migrated off active.py / backends.py (fork,
-#     delete, cleanup-empty, register-backend, sync-backend-experiments).
+#     delete, cleanup-empty, register-backend).
 #   - 2 CLI verbs hoisted into the wire surface (mint-campaign = `new`,
 #     start-run = `resume` / launcher per ADR-0001 control plane).
 #   - M12-new commands (pause, step, rewind-to-round, change-spend-budget,
@@ -97,7 +97,7 @@ tags:
 #   - declares `Idempotency-Key` (every command). State-mutating
 #     cycle-scoped commands additionally declare `Expected-Version`.
 #     Workspace-scoped backend commands (register-backend,
-#     sync-backend-experiments) intentionally omit `Expected-Version` —
+#     register-backend) intentionally omit `Expected-Version` —
 #     they do not mutate a specific cycle's ledger offset.
 #   - declares a request body schema that pins `kind` to a const literal
 #     and refers to a per-kind `*Payload` schema in components.schemas.
@@ -883,34 +883,6 @@ paths:
                   properties:
                     kind: { const: register-backend }
                     payload: { $ref: '#/components/schemas/RegisterBackendPayload' }
-      responses:
-        '202': { $ref: '#/components/responses/CommandAccepted' }
-        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
-        '403': { $ref: '#/components/responses/CapabilityDenied' }
-        '422': { $ref: '#/components/responses/PayloadInvalid' }
-
-  /commands/sync-backend-experiments:
-    post:
-      operationId: syncBackendExperiments
-      summary: Pull experiments from a registered backend into the local store.
-      description: |
-        Migrated from `POST /api/v1/backends/{backend_id}/sync` (backends.py:112).
-        Workspace-scoped, no `Expected-Version`.
-      tags: [backends]
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              allOf:
-                - $ref: '#/components/schemas/CommandEnvelope'
-                - type: object
-                  required: [kind, payload]
-                  properties:
-                    kind: { const: sync-backend-experiments }
-                    payload: { $ref: '#/components/schemas/SyncBackendExperimentsPayload' }
       responses:
         '202': { $ref: '#/components/responses/CommandAccepted' }
         '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
@@ -2118,16 +2090,6 @@ components:
           pattern: '^[a-z][a-z0-9-]*$'
           description: 'Custom backend id; auto-derived from `name` when omitted.'
 
-    SyncBackendExperimentsPayload:
-      type: object
-      required: [backend_id]
-      additionalProperties: false
-      properties:
-        backend_id:
-          type: string
-          minLength: 1
-          maxLength: 64
-          pattern: '^[a-z][a-z0-9-]*$'
 
     # ---- Forward-scope payloads (beyond v0; same closed-set policy) ----
 

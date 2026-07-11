@@ -136,7 +136,7 @@ def _dataset_origin_id(store: Stores, dataset_dir: Path, dataset_name: str) -> s
             active, cfg.pipeline_overrides, dataset_dir, schema
         )
         osp = resolve_origin_opt_search_point(
-            {}, prompt_node_names=schema.prompt_node_names(), dataset_dir=dataset_dir
+            prompt_node_names=schema.prompt_node_names(), dataset_dir=dataset_dir
         )
         items = resolve_dataset_items(store, dataset_name)
         if not items:

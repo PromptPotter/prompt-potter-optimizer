@@ -80,13 +80,6 @@ def get_backend_or_404(backend_id: str, store: Stores) -> BackendConnection:
     return backend
 
 
-def read_text_or_404(path: Path, label: str) -> str:
-    """Read *path* as UTF-8 text or raise 404 with *label* in the message."""
-    if not path.exists():
-        raise NotFoundError(f"{label} not found at {path.name}")
-    return path.read_text(encoding="utf-8")
-
-
 def get_cycle_dir_or_404(campaign_id: str, cycle_id: str, store: Stores) -> Path:
     """Resolve the per-cycle dir or raise 404 if it doesn't exist.
 
@@ -138,7 +131,6 @@ __all__ = [
     "get_backend_or_404",
     "get_cycle_dir_or_404",
     "get_job_registry",
-    "read_text_or_404",
     "resolve_identity",
     "warming_payload",
 ]

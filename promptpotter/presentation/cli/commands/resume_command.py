@@ -303,7 +303,6 @@ async def _drive_optimization(
         campaign_config,
         session=session,
         observers=observers,
-        experiment_id=ctx.state["experiment_id"],
         task_context=ctx.task_context,
         mode=RunMode(
             resume_from_round_override=getattr(args, "resume_from_round", None),
@@ -459,10 +458,8 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
             config=None,
             task_file=None,
             task_text=None,
-            excel_path=None,
             backend_url=ctx.init_params.get("backend_url"),
             backend_id=ctx.init_params.get("backend_id"),
-            experiment_id=ctx.init_params.get("experiment_id"),
             sweep=False,
             diag=False,
             halt_at_accuracy=getattr(args, "halt_at_accuracy", None),
