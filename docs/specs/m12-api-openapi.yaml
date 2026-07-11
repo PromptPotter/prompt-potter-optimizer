@@ -6,6 +6,13 @@
 # Drift detection: review + Spectral lint (no `test_contracts.py` — the
 # structural/contract suite was cut to the silent-harm core, see tests/CLAUDE.md).
 #
+# DECLARED != WIRED. Because this file is schema-first, a declared operation may
+# have no handler yet. Those carry `x-status: declared-not-wired`; a POST to one
+# 404s `command_kind_unknown`. The wired set is `commands.py::_WIRED_KINDS` plus
+# the four typed routes (edit-draft-campaign, resolve-origin, start-checkin,
+# replace-dataset). Check it before promising a UI button — chat-foundation.md
+# once advertised `endorse-candidate` as live on the strength of this file alone.
+#
 # Permanent contract: docs/adr/0001-m12-control-plane.md
 # §0 definition: docs/architecture.md (§0 "State + persistence" — Five I/O kinds)
 #
@@ -21,9 +28,10 @@ info:
   description: |
     The HTTP command surface for PromptPotter's interactive control plane.
     Every operation is a Control-remote command: an HTTP-ingressed mutation
-    authored by a signed-in operator or signed-in client, appended to the
-    canonical per-cycle `events.jsonl` as a `CommandRecord` by the sole
-    `CommandDispatcher` at the FastAPI seam.
+    authored by a signed-in operator or signed-in client, appended to its
+    target ledger (the per-cycle `.runtime/ledger.jsonl` or the workspace
+    `.workspace/events.jsonl`, per command scope) as a `CommandRecord` by the
+    sole `CommandDispatcher` at the FastAPI seam.
 
     See `docs/adr/0001-m12-control-plane.md` for the permanent contract, the
     Profile gradient (A-E), and the 20-item security checklist that every
@@ -63,7 +71,7 @@ tags:
   - name: operator-feedback
     description: Operator-authored signals — hard-sample marks, round notes, candidate verdicts.
   - name: backends
-    description: Commands that register or sync external backends.
+    description: Commands that register external backends. (There is no sync verb.)
   - name: datasets
     description: |
       Workspace-scoped dataset ingest. These endpoints mint a durable `checkin`
@@ -212,6 +220,7 @@ paths:
   /commands/step-cycle:
     post:
       operationId: stepCycle
+      x-status: declared-not-wired  # no handler; POST 404s `command_kind_unknown`
       summary: Advance N rounds then auto-pause (default N=1).
       tags: [cycle-control]
       parameters:
@@ -239,6 +248,7 @@ paths:
   /commands/rewind-to-round:
     post:
       operationId: rewindToRound
+      x-status: declared-not-wired  # no handler; POST 404s `command_kind_unknown`
       summary: Rewind a cycle in place to round N, dropping later events.
       description: |
         Operator-initiated in-place rewind (as opposed to `fork-cycle` which
@@ -372,6 +382,7 @@ paths:
   /commands/archive-cycle:
     post:
       operationId: archiveCycle
+      x-status: declared-not-wired  # no handler; POST 404s `command_kind_unknown`
       summary: Mark a non-stub cycle as archived (soft delete; ledger preserved).
       description: |
         Counterpart to `delete-cycle` (which only handles empty stubs).
@@ -596,6 +607,7 @@ paths:
   /commands/change-halt-budget:
     post:
       operationId: changeHaltBudget
+      x-status: declared-not-wired  # no handler; POST 404s `command_kind_unknown`
       summary: Raise or lower a cycle's max-rounds halt cap mid-flight.
       tags: [budget]
       parameters:
@@ -623,6 +635,7 @@ paths:
   /commands/change-sample-budget:
     post:
       operationId: changeSampleBudget
+      x-status: declared-not-wired  # no handler; POST 404s `command_kind_unknown`
       summary: Adjust the per-round PoBB sample budget (`sp_budget_ttest`) mid-flight.
       tags: [budget]
       parameters:
@@ -650,6 +663,7 @@ paths:
   /commands/change-pipeline-param:
     post:
       operationId: changePipelineParam
+      x-status: declared-not-wired  # no handler; POST 404s `command_kind_unknown`
       summary: Overlay a single backend pipeline param on the active cycle.
       description: |
         Writes to `datasets/{name}/pipeline.json::nodes.{node}.config` — the
@@ -681,6 +695,7 @@ paths:
   /commands/reset-pipeline-overlay:
     post:
       operationId: resetPipelineOverlay
+      x-status: declared-not-wired  # no handler; POST 404s `command_kind_unknown`
       summary: Drop every `nodes.{name}.config` overlay; revert to dataset defaults.
       description: |
         Whole-overlay reset — `change-pipeline-param`'s broom counterpart.
@@ -712,6 +727,7 @@ paths:
   /commands/change-scoring-composite:
     post:
       operationId: changeScoringComposite
+      x-status: declared-not-wired  # no handler; POST 404s `command_kind_unknown`
       summary: Hot-swap a cycle's `scoring_steer.json` composite.
       description: |
         Wire form of the existing file-edit interface
@@ -744,6 +760,7 @@ paths:
   /commands/mark-hard-sample:
     post:
       operationId: markHardSample
+      x-status: declared-not-wired  # no handler; POST 404s `command_kind_unknown`
       summary: Promote a sample to the hard-sample queue (operator override).
       description: |
         Operator-authored signal; the L1 signal catalogue picks it up at the
@@ -775,6 +792,7 @@ paths:
   /commands/unmark-hard-sample:
     post:
       operationId: unmarkHardSample
+      x-status: declared-not-wired  # no handler; POST 404s `command_kind_unknown`
       summary: Demote a previously marked sample (clear operator override).
       tags: [operator-feedback]
       parameters:
@@ -802,6 +820,7 @@ paths:
   /commands/annotate-round:
     post:
       operationId: annotateRound
+      x-status: declared-not-wired  # no handler; POST 404s `command_kind_unknown`
       summary: Attach an operator note to a finished round (audit-trail only).
       description: |
         Note appends to `round_NNNN.json::operator_notes[]`. Read-only after
@@ -833,6 +852,7 @@ paths:
   /commands/endorse-candidate:
     post:
       operationId: endorseCandidate
+      x-status: declared-not-wired  # no handler; POST 404s `command_kind_unknown`
       summary: Operator verdict on a candidate (endorsed | rejected).
       description: |
         Verify-tab action (M11 webapp). Verdict appended to the round's audit
@@ -1056,12 +1076,14 @@ paths:
             maxLength: 128
       responses:
         '200':
-          description: The rehydrated draft wire + the last resolver turn (or null).
+          description: |
+            The rehydrated draft wire + the last resolver turn (or null) + any
+            proposals the last turn left unclicked.
           content:
             application/json:
               schema:
                 type: object
-                required: [draft, resolution]
+                required: [draft, resolution, raised]
                 properties:
                   draft: { $ref: '#/components/schemas/DraftCampaign' }
                   resolution:
@@ -1069,6 +1091,13 @@ paths:
                       The last `resolve-origin` turn's output (assessment,
                       findings, next_action, recap), or null when none ran.
                     type: [object, 'null']
+                  raised:
+                    type: array
+                    items: { $ref: '#/components/schemas/RaisedCommand' }
+                    description: |
+                      Proposals the last turn left unclicked. Always present
+                      (`[]` when none) — without them a re-opened check-in would
+                      drop the operator's outstanding actions on the floor.
                     additionalProperties: true
         '404':
           description: No check-in working state for this campaign (or cross-tenant).
@@ -1383,6 +1412,100 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
 
+  /datasets/{name}/draft:
+    post:
+      operationId: draftFromExistingDataset
+      summary: Open an authored dataset as a durable check-in campaign.
+      description: |
+        The direct path behind "open this dataset in the ingest panel" — a demo /
+        benchmark / owned dataset becomes a prefilled check-in (`draft_id` ==
+        `campaign_id`) with no browser-side CSV round-trip. **Mints a campaign**,
+        so it is a state-creating POST, not a read. Identity-gated through the
+        same resolver as the other dataset reads; nothing runs until the operator
+        starts it via `/commands/start-checkin`.
+      tags: [datasets]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The prefilled draft wire (same shape every draft-returning endpoint emits).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DraftCampaign'
+        '401':
+          description: Unauthenticated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '404':
+          description: Unknown dataset, or one outside this tenant (existence-leak gate).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /origins/{origin_id}/draft:
+    post:
+      operationId: draftFromOrigin
+      summary: Open a prior origin as a prefilled check-in campaign ("Reuse an origin").
+      description: |
+        Resolves the origin's EXACT prompt fields: a campaign itself minted from
+        an origin carries those fields on its root-cycle seed, so they are reused
+        verbatim. The draft is marked `reused_origin_id`, so starting it
+        (`/commands/start-checkin`) seeds C0 via `origin_override` and stamps the
+        `campaign_origin` lineage. **Mints a campaign** — a state-creating POST.
+      tags: [origins]
+      parameters:
+        - name: origin_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The prefilled draft wire.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DraftCampaign'
+        '401':
+          description: Unauthenticated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '404':
+          description: Unknown origin, or one outside this tenant.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /machine-status:
+    get:
+      operationId: getMachineStatus
+      summary: Whether another user currently holds the single run slot.
+      description: |
+        The server is single-process and runs campaigns in sequence, so a launch
+        is rejected (409 `machine_busy`) while anyone else's run is live. This
+        read is the poll that lets the webapp surface that state as a
+        critical-alert banner *before* the operator tries — the always-on twin of
+        the 409. Reads the same `JobRegistry.machine_holder` the launch gate
+        uses, so banner and gate can never disagree.
+      tags: [Sessions]
+      responses:
+        '200':
+          description: Current holder of the machine slot, if any.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MachineStatusResponse'
+        '401':
+          description: Unauthenticated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
   /datasets/draft/candidate-library:
     post:
       operationId: uploadCandidateLibrary
@@ -1515,9 +1638,9 @@ components:
       required: true
       description: |
         Client-generated UUID-or-equivalent identifying this command attempt.
-        The dispatcher dedupes by hash lookup against `events.jsonl`; a second
-        POST with the same `Idempotency-Key` returns the original 202 response,
-        not a fresh command.
+        The dispatcher dedupes by hash lookup against the target ledger; a
+        second POST with the same `Idempotency-Key` returns the original 202
+        response, not a fresh command.
       schema:
         type: string
         minLength: 8
@@ -1583,9 +1706,9 @@ components:
         command_id:
           type: string
           description: |
-            Stable id of the `CommandRecord` appended to `events.jsonl`.
-            Clients use this to correlate the eventual `CommandAckRecord`
-            frame on the SSE channel.
+            Stable id of the appended `CommandRecord`. Clients use this to
+            correlate the eventual `CommandAckRecord` frame on the SSE
+            channel.
         correlation_id:
           type: string
           description: |
@@ -2247,6 +2370,53 @@ components:
                 Operator verdict. Stored on the round's audit trail; L2/L3
                 may consume in later profiles (no behavior change in v0).
 
+    OptimizerLocks:
+      type: object
+      additionalProperties: false
+      required: [pipeline, forbidden_axes, nodes]
+      description: |
+        Connector-derived permission surface — what the optimizer is allowed to
+        permute on this draft. Boundary-added by
+        `launcher/draft_build.py::draft_wire_with_locks` (via
+        `derive_optimizer_locks`) onto EVERY draft-returning response, so it is
+        required, not optional. The UI renders a ladder value absent from
+        `param_allowed_values` as crossed-out.
+      properties:
+        pipeline:
+          type: array
+          items: { type: string }
+          description: Connector default pipeline step list, e.g. `["llm_only"]`.
+        forbidden_axes:
+          type: array
+          items: { type: string }
+          description: |
+            Params the optimizer may never permute on any node under
+            `forbidden_axes_strict` (`["model","provider"]`); empty when strict
+            is off. Mirrors `PARAM_FORBIDDEN_KEYS`.
+        nodes:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/OptimizerNodeLocks'
+
+    OptimizerNodeLocks:
+      type: object
+      additionalProperties: false
+      required: [config, param_allowed_values]
+      properties:
+        config:
+          type: object
+          additionalProperties: true
+          description: |
+            Effective per-node config floor (connector seed + overlay) — the
+            active value of each control, e.g.
+            `{ reasoning_effort: "low", temperature: 0 }`.
+        param_allowed_values:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: string }
+          description: Closed set the optimizer may permute per param.
+
     OptimizationOverrides:
       type: object
       additionalProperties: false
@@ -2275,6 +2445,16 @@ components:
             editable in the pipeline-config panel. Commits as
             `campaign.json::optimization.forbidden_axes_strict` and drives the
             derived optimizer-locks permission view.
+        prompt_block_catalogue:
+          type: string
+          enum: [guidance, restrict, off]
+          default: guidance
+          description: |
+            How the reusable prompt building-block library reaches the optimizer:
+            `guidance` (suggest blocks, L1 may still invent), `restrict` (library
+            values only — an off-library value fails `L1_PROMPT_BLOCKS_IN_LIBRARY`
+            and rides the existing forbidden-value wound), `off` (render empty;
+            prompt bit-for-bit identical to a no-library ablation).
         mechanisms:
           type: object
           additionalProperties:
@@ -2513,6 +2693,8 @@ components:
             Per-node structured-output contract (read-only), keyed by node id;
             null per node when it declares none. Boundary-added beside
             `pipeline_view`.
+        optimizer_locks:
+          $ref: '#/components/schemas/OptimizerLocks'
         created_at:
           type: string
           format: date-time
@@ -2542,11 +2724,70 @@ components:
           type: string
           minLength: 8
           maxLength: 128
+          description: The check-in `campaign_id` (the draft's `draft_id`), from `/datasets/ingest`.
         message:
           type: string
           maxLength: 4000
           description: The operator's turn. Omitted or empty on an unprompted turn.
-          description: The check-in `campaign_id` (the draft's `draft_id`), from `/datasets/ingest`.
+
+    MachineHolder:
+      type: object
+      additionalProperties: false
+      required: [user, campaign_id, cycle_id]
+      description: |
+        Who holds the single machine run slot. Cross-user holder info is
+        intentionally exposed — the operator needs to know *someone* is running,
+        and this deployment is an allowlisted beta.
+      properties:
+        user:
+          type: string
+          description: "`user_id` of the operator whose run owns the slot."
+        campaign_id: { type: string }
+        cycle_id: { type: string }
+        started_at:
+          type: [string, 'null']
+          format: date-time
+          description: ISO start time of the holding run; null if still pending.
+
+    MachineStatusResponse:
+      type: object
+      additionalProperties: false
+      required: [busy]
+      properties:
+        busy:
+          type: boolean
+          description: |
+            True iff a *different* user holds a running job (the server runs one
+            campaign at a time).
+        holder:
+          oneOf:
+            - $ref: '#/components/schemas/MachineHolder'
+            - type: 'null'
+          description: Who holds the slot; null when free for this caller.
+
+    RaisedCommand:
+      type: object
+      additionalProperties: false
+      required: [kind, payload, confidence, evidence]
+      description: |
+        A pre-shaped command the copilot offers the operator as a button. The
+        resolver proposes a FIELD; code derives the command — which is why the
+        resolver never has to name one. Surfaced on `OriginResolution.raised`
+        and on the `GET /campaigns/{campaignId}/checkin` response.
+      properties:
+        kind:
+          type: string
+          enum: [edit-draft-campaign]
+        payload:
+          $ref: '#/components/schemas/EditDraftCampaignPayload'
+        confidence:
+          type: string
+          description: |
+            `high` auto-confirms the field (CONFIRMED); `low` lands it PROPOSED
+            and waits for an operator click.
+        evidence:
+          type: string
+          description: The citation backing the proposal. A finding citing no evidence is rejected.
 
     OriginResolution:
       type: object
@@ -2558,6 +2799,10 @@ components:
         resolver's own output (assessment + evidence-cited findings +
         next_action + recap) for the panel and the AI.
       properties:
+        raised:
+          type: array
+          items: { $ref: '#/components/schemas/RaisedCommand' }
+          description: Proposals from the last turn the operator has not yet actioned.
         complete:
           type: boolean
           description: True iff no field still blocks mint (the deterministic gate's verdict).

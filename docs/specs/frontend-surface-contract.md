@@ -171,6 +171,13 @@ controls:
     status: ok   # supportUrl overridable via NEXT_PUBLIC_SUPPORT_URL
   - id: logout
     do: Call the logout endpoint, clear session, return to /login. Rendered ONLY when authed (I4).
+    status: ok   # the same verb also lives in Account → Security (see surface: account)
+  - id: account_button
+    do: Topbar button (aria-label "Open account") opening AccountModal. Rendered ONLY when
+        authed (I4) — see surface: account.
+    status: ok
+  - id: campaign_menu_toggle
+    do: Mobile-only (aria-label "Open campaign menu") — opens the sidebar drawer.
     status: ok
 ```
 
@@ -180,7 +187,9 @@ controls:
 surface: chat
 controls:
   - id: preview.toggle
-    do: Show/hide the pipeline strip (input/connector/node/output). Input+output toggles move together.
+    do: Show/hide the hard-samples project preview (TargetPipelineHero's button,
+        aria-pressed/aria-label "Show|Hide project preview"). The pipeline strip itself is
+        NOT toggleable — it renders unconditionally.
     status: ok
   - id: preview.connector
     do: Resolve to a terminal chip state. No resolved backend (anon / no dataset) → "idle" +
@@ -190,17 +199,51 @@ controls:
     do: Expand to model & params; "declares no configurable params" when none.
     status: ok
   - id: composer.{attach,input,send}
-    do: Enabled only with an active campaign + auth; disabled otherwise.
+    do: Gated on the INGEST FLOW phase, not on campaign+auth. input/send enabled only while
+        flow.awaitingContext (send also needs non-empty text); attach disabled while flow.busy.
+        Chat input is disabled outside ingest — selecting an active campaign does NOT enable it.
     status: ok
-  - id: settings.optimize_switch
-    do: Real toggle for "Optimize prompt while using (Beta)".
-    status: ok
-  - id: settings.{extended_thinking,web_search,code_execution}
+  - id: settings.{extended_thinking,web_search,code_execution,optimize_switch}
     do: Coming-soon features — render as a disabled ui/Switch (role=switch, aria-disabled,
         aria-label "… (coming soon)") + a muted "Soon" pill. Legibly unavailable, not faux-operable.
+    status: ok   # optimize_switch is deliberately locked like its three neighbours —
+                 # do not "restore" it to a live-looking toggle (I3)
+  - id: welcome_illustration
+    do: Empty chat (no thread yet) shows the welcome illustration, not a scripted fake
+        conversation. There is no demo thread.
     status: ok
-  - id: demo_thread
-    do: Static scripted conversation shown in anon to illustrate the product. Clearly non-live.
+```
+
+### Account surface
+
+`components/account/` — opened from the topbar account button. Holds the app's two
+non-campaign mutations, so it is measured against I3/I4 like any other surface.
+
+```yaml
+surface: account
+controls:
+  - id: modal
+    do: AccountModal opens from topbar (aria-label "Open account"); tabbed —
+        Profile / Security / Preferences / Activity / About / Storage. Traps focus,
+        restores on close, closes on ESC. Rendered ONLY when authed (I4).
+    status: ok
+  - id: preferences.demo_mode
+    do: Real toggle — PATCH /auth/user-settings via patchUserSettings({demo_mode_enabled}).
+        Reflect the SERVED value, never optimistic-only; on failure revert + surface the error
+        (I2 — no raw transport string).
+    status: ok
+  - id: security.logout
+    do: POST /auth/logout via postLogout, clear session, return to /login. The account modal's
+        Security tab is the primary affordance; the sidebar carries the same verb (I4 — both
+        rendered ONLY when authed).
+    status: ok
+  - id: about_unit
+    do: Read brand identity from lib/brand.ts; version is SERVER-owned, read live from
+        /api/v1/health — never hardcode it. Provenance renders "self-declared" until a signed
+        credential exists; never render "verified" while BRAND.verification says otherwise.
+    status: ok
+  - id: storage_panel
+    do: WorkspaceStoragePanel — resolve to live | empty | error (I1).
     status: ok
 ```
 
@@ -279,22 +322,10 @@ controls:
 
 ## Coverage
 
-The authenticated + live-campaign surface (dashboard topstrip/fitness/lineage/
-samples, What-If evaluator grid, scoring inspector with `round_NNNN.json`
-drill-in, Verify diagnostic table, Files tree + JSON preview) is **verified** —
-driven via `PROMPTPOTTER_AUTH=off` (`deps.py::resolve_identity` →
-`registered_or_default_identity`, the CLI's resolver) against the operator's
-real on-disk campaigns. Console clean (0 errors) across every tab; the connector
-rests at a terminal `unreachable` when the backend is down; frozen units show
-"UPDATED · Nh ago". No fixtures, no Docker, no spend. **Set `PROMPTPOTTER_ADMIN=1`
-alongside the auth flag when the campaigns under test target install benchmarks**
-(repo `datasets/{name}/` — any CLI `new <benchmark>` campaign): their
-`/datasets/{name}/preview` + `/measurement-series` resolve only for an identity
-holding `BENCHMARKS_READ_CAP`, which the production operator carries (pinned at
-the OIDC seam) but the bare auth-off identity does not — without it those two
-reads 404 and break the console-clean clause, a harness gap rather than a product
-defect (a real operator has the cap; regular tenants never own benchmark
-campaigns).
+The authenticated + live-campaign surface is verified against real on-disk
+campaigns via the faithful harness (`PROMPTPOTTER_AUTH=off` +
+`PROMPTPOTTER_ADMIN=1` for benchmark campaigns — recipe + why the admin flag:
+[`../../webapp/CLAUDE.md`](../../webapp/CLAUDE.md) § Testing posture).
 
 Two states remain **un-exercised** (not contract gaps — just unreached here):
 - `warming` (origin running, `dashboard.json` not yet written) — needs a live

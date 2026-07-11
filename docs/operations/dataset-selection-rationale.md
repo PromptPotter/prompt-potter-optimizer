@@ -18,7 +18,7 @@ A focus dataset for L1 meta-prompt evolution must satisfy:
 
 1. **Origin in band.** `gpt-oss-20b @ low` scores **15–40%** at origin. Below 15% → floor effect (BBEH problem). Above 40% → ceiling effect (no headroom for L1 lift to register against PoBB noise). *Band widened from 15-35% after the 7-dataset recon trail 2026-05-19 — see "Selection trail Round 6" for the systemic finding on projection slop.*
 2. **Reachable ceiling.** Plausible **50–75%** under strong prompt engineering. The origin-to-ceiling gap is what L1 climbs; bigger gap = cleaner signal/noise.
-3. **N ≥ 400, preferably 800+.** For stable cycle-to-cycle verdicts under PoBB (ε=0.05–0.10, n_min=4–6). Smaller N usable with per-subtask stratification.
+3. **N ≥ 400, preferably 800+.** For stable cycle-to-cycle verdicts under PoBB (thresholds: `pobb_epsilon` / `elimination_n_min`, defaults on `OptimizationConfig`). Smaller N usable with per-subtask stratification.
 4. **Multiple distinct subtask categories.** Each subtask is an independent L1 prompt lever (decomposition, scaffolding, role-priming, anti-shortcut framing, format pinning). Single-axis datasets give L1 only one knob to turn.
 5. **Deterministic per-sample grading.** Exact match, MC, F1, regex extraction. **No LLM-judge scoring** (breaks PoBB's per-candidate independence model; cost-prohibitive at cycle scale).
 6. **No mode-collapse on a single gold class.** A dataset where the modal answer covers >40% of the gold set, or where the model collapses 3-class to 2-class (BoardgameQA's missing `disproved`), will be label-bias coasted and produce inflated origin. Stratify by `prop` / `category` / `subtask` to spot the trap before commit.

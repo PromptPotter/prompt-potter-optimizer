@@ -4,7 +4,7 @@
 # Every `ProjectionEnvelope` variant (kind + payload schema) MUST be
 # declared here BEFORE a record class is added to
 # `promptpotter/domain/run_records.py::CycleRecord` or before a projection
-# emits it as an SSE frame from `EventStreamView`.
+# emits it as an SSE frame from `CycleLedgerTail`.
 #
 # Drift detection: review + AsyncAPI Studio CLI lint (no `test_contracts.py` —
 # the structural/contract suite was cut to the silent-harm core, see tests/CLAUDE.md).
@@ -57,9 +57,11 @@ channels:
     address: /campaigns/{campaign_id}/cycles/{cycle_id}/events:subscribe
     title: Cycle event stream
     summary: |
-      SSE stream of every record appended to the canonical per-cycle
-      `events.jsonl`, plus a leading snapshot frame and periodic heartbeats.
-      Sole writer: `EventStreamView` projection (`infrastructure/projections/event_stream/view.py`).
+      SSE stream of every record appended to the canonical per-cycle ledger
+      (`.runtime/ledger.jsonl`), plus a leading snapshot frame and periodic
+      heartbeats. Sole writer: `CycleLedgerTail`
+      (`infrastructure/projections/event_stream/tail.py`) — a cross-process
+      tail of that file, NOT an in-process projection.
     description: |
       Subscription contract (security boxes 13-15):
         1. Snapshot frame first. The first message on the stream is a
@@ -70,12 +72,19 @@ channels:
            projections with strictly-increasing `sequence` (starting at
            `snapshot_at_offset + 1`).
         3. Heartbeat every 15 s during idle so proxies and clients can
-           distinguish "no events" from "stream broken."
+           distinguish "no events" from "stream broken." It is an **SSE
+           comment line** (`: ping`), emitted by `EventSourceResponse`
+           (sse-starlette) — **not** a `heartbeat` event with a JSON payload.
+           `EventSource` clients ignore it automatically; do not wait on it.
         4. Missed frames are detectable via `sequence` gap. Clients SHOULD
            re-subscribe to receive a fresh snapshot if a gap is observed.
-        5. Cycle not running -> 404. The endpoint requires an active
-           `EventStreamView` in the process-wide registry; idle cycles
-           have no live stream to attach to.
+        5. **404 ONLY for an unknown cycle** (the cycle directory does not
+           exist). A *running*, *paused*, and *finished* cycle all subscribe
+           successfully. There is no process-wide registry and no "live stream
+           to attach to": the stream is a **cross-process tail of the on-disk
+           ledger** (`CycleLedgerTail`), so any reader can replay a finished
+           cycle's frames from disk. The chat's snapshot-then-tail paint depends
+           on exactly that.
     parameters:
       campaign_id:
         description: Target campaign id (matches `campaigns/{campaign_id}/`).
@@ -85,21 +94,19 @@ channels:
       http:
         type: response
         method: GET
-        headers:
+        query:
           type: object
           properties:
-            Last-Event-ID:
+            descend:
               type: string
               description: |
-                Optional resume token; client may provide the last
-                `ProjectionEnvelope.sequence` it received to resume from
-                that point. If omitted, the snapshot-then-tail flow runs
-                from the current state.
+                Optional L4 descent. Walks into the `.inner/<spawn cycle id>`
+                sandbox one hop per id, so the chat/dashboard can follow the
+                viewed leaf of a `CyclePath` into an inner campaign. Omitted =
+                the top-level cycle addressed by the path ids.
     messages:
       projectionFrame:
         $ref: '#/components/messages/ProjectionFrame'
-      heartbeatFrame:
-        $ref: '#/components/messages/HeartbeatFrame'
 
 operations:
   subscribeCycleEvents:
@@ -108,11 +115,10 @@ operations:
       $ref: '#/channels/cycleEvents'
     summary: |
       Client subscribes to the cycle's event stream. Sole writer is
-      `EventStreamView`. No multi-writer semantics, no broadcast-shape
+      `CycleLedgerTail`. No multi-writer semantics, no broadcast-shape
       negotiation - the runtime owns the order.
     messages:
       - $ref: '#/channels/cycleEvents/messages/projectionFrame'
-      - $ref: '#/channels/cycleEvents/messages/heartbeatFrame'
 
 components:
   messages:
@@ -126,15 +132,7 @@ components:
       payload:
         $ref: '#/components/schemas/ProjectionEnvelope'
 
-    HeartbeatFrame:
-      name: heartbeatFrame
-      title: Idle-keepalive heartbeat.
-      summary: |
-        Fired every 15 s during idle. `event:` is `heartbeat`; `data:` is the
-        serialized `HeartbeatPayload`. Heartbeats do NOT advance `sequence`.
-      contentType: application/json
-      payload:
-        $ref: '#/components/schemas/HeartbeatPayload'
+    # No HeartbeatFrame message — the keepalive is untyped; channel contract clause 3.
 
   schemas:
     ProjectionEnvelope:
@@ -163,7 +161,7 @@ components:
             - snapshot
             - token_usage
             # Profile A: snapshot-then-tail boundary marker (projection-only,
-            # no underlying record class - synthesized by EventStreamView).
+            # no underlying record class - synthesized by the tail).
             - stream_snapshot
             # Profile B: inbound command + runner ack (added to CycleRecord
             # union when Profile B handlers land).
@@ -273,6 +271,7 @@ components:
           enum:
             - round_winner
             - elimination_cut
+            - margin_cut
             - leader_lock_in
             - l2_escalation_trigger
             - l3_escalation_trigger
@@ -354,7 +353,7 @@ components:
           * `LiveDashboardView._handle_error` — sole writer of
             `dashboard.json::error`. The presentation layer reads this
             block; nothing else writes it.
-          * `EventStreamView` — fans this record to SSE subscribers.
+          * `CycleLedgerTail` — tails this record to SSE subscribers.
           * `JobRegistry.mark_finished` — reads `CycleResult.error.message`
             (the in-process companion of this record) to populate
             `status` + `stop_reason` (replaces the prior
@@ -411,13 +410,17 @@ components:
             `dashboard.json::recent_loop_warnings` (rolling, capped).
           * `AuditTrailView` — accumulates into `round_NNNN.json::warnings`.
           * `LiveDisplay` — prints a one-line CLI/notebook marker.
-          * `EventStreamView` — fans this record to SSE subscribers.
+          * `CycleLedgerTail` — tails this record to SSE subscribers.
       required: [kind, severity, message, timestamp]
       additionalProperties: false
       properties:
         kind:
           type: string
-          enum: [l1_zero_candidates, l2_validator_soft_reject, injection_budget_overrun]
+          enum:
+            - l1_zero_candidates
+            - l2_validator_soft_reject
+            - injection_budget_overrun
+            - layer_parse_failure
           description: Which degradation class this record reports.
         severity:
           type: string
@@ -627,18 +630,3 @@ components:
         timestamp:
           type: string
           format: date-time
-
-    HeartbeatPayload:
-      type: object
-      required: [emitted_at]
-      additionalProperties: false
-      properties:
-        emitted_at:
-          type: string
-          format: date-time
-          description: Server-side wall-clock timestamp of the heartbeat.
-        cycle_id:
-          type: string
-          description: |
-            The cycle this heartbeat belongs to. Lets a client multiplexing
-            multiple subscriptions discriminate them.

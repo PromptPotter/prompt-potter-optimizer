@@ -110,26 +110,12 @@ activity feed is a **browser port of `LiveDisplay`'s handler dispatch**: a clien
 translator from envelope `kind` → `ActivityItem`. Keep it 1:1 with `LiveDisplay` so the two
 surfaces never drift.
 
-**Generic mappings (the reusable core — kept on template extraction):**
-
-| `ProjectionEnvelope.kind` | `LiveDisplay` handler | Activity item |
-|---|---|---|
-| `llm_call_start` | `_handle_llm_call_start` (`↻ optimizer call: …`) | **step (running)** — "{node} · {model}" (oversize → warn) |
-| `llm_call_progress` | `_handle_llm_call_progress` (`· still waiting`) | **progress** — "{node} still running · {N}s" |
-| `llm_call` | `_handle_llm_call` (`✓ … · Ns · tok`) | **step (done)** — "{node} · {N}s · {tok} tok · $" (cached tag) |
-| `round_warning` | `_handle_round_warning` (`⚠`/`✗`) | **warning** — inline alert |
-| `token_usage` | (folded into spend) | feeds the running spend chip, not its own item |
-| `error` | (runner failure) | **error** message item |
-| `command_ack` | — | a **merge** "control applied" item (rejected → warning); §4 |
-| `command`, `decision`, `stream_snapshot` | (subscribe-time / §4) | non-items: backfill (§3) + button state (§4), never free items |
-
-**Optimizer-specific mappings (deleted to de-PromptPotter, §6):**
-
-| `ProjectionEnvelope.kind` | `LiveDisplay` handler | Activity item |
-|---|---|---|
-| `snapshot` (`event=sample_scored`) | `_handle_snapshot` → `on_sample_scored` | **progress** chip — HIT/MISS, "{i}/{n}" |
-| `snapshot` (`candidate_*`, `p_best_update`) | `on_candidate_*` / `on_p_best_update` | **candidate** — scoreboard / PoBB line |
-| `phase` (`phase=round`, `event=display`) | `_handle_phase` → `on_round_complete` | **round** card — round N, leader, fitness, spend |
+The kind-by-kind mapping lives in the translator itself (`webapp/lib/chat/activity.ts`,
+1:1 with `LiveDisplay`'s handlers — read the mapping there, this doc doesn't mirror it).
+The split that survives template extraction: the **generic** mappings (llm-call steps,
+warnings, errors, the `command` merge item + rejected-only `command_ack`) are the reusable
+core; the **optimizer-specific** ones (sample/candidate snapshots, round cards) are the ones
+§6 deletes to de-PromptPotter.
 
 **Tool-use lands as a `step`, not a new item kind.** When backend web-search / MCP / code-exec
 ship (§7), each new `ProjectionKind` maps to a generic **step** via this same translator — the
@@ -140,12 +126,16 @@ State pairs an icon **and** a label (HIT/MISS, running/done) — never color alo
 frontend accessibility invariant.
 
 **The feed is curated, not the firehose** (`webapp/lib/chat/activity.ts`):
-the high-signal kinds above become items; the per-sample `sample_scored` torrent collapses
+high-signal kinds become items; the per-sample `sample_scored` torrent collapses
 into a single replaced **progress chip**; `sample_order_preview` / `pobb_backfill` /
-`llm_call_progress` heartbeats / `token_usage` map to `null`; `command_ack` surfaces as a small
-"control applied" **merge** item (the visible resolution of the parallel chat ↔ trace streams);
-`command` / `decision` / `stream_snapshot` are non-items. Every `ProjectionKind` maps to an
-item or an explicit `null` — no orphan.
+detail-less `llm_call_progress` heartbeats / `token_usage` map to `null` — with the one
+special case that the **L4 inner-campaign** heartbeat *does* carry `detail`
+("inner rX/Y · best Z%") and upserts one stable-id **progress** chip, so the outer chat
+never reads as silent; **`command`** surfaces as the small "control applied" **merge** item
+(the visible resolution of the parallel chat ↔ trace streams), and its **`command_ack`** is
+a non-item *unless rejected* — acking an applied command would print the same fact twice.
+`decision` / `stream_snapshot` are non-items.
+Every `ProjectionKind` maps to an item or an explicit `null` — no orphan.
 
 ## 3. Transport — the first SSE consumer, over a cross-process ledger tail
 
@@ -165,7 +155,7 @@ runner). Codepath: `event_stream/tail.py::CycleLedgerTail` → `events.py::strea
   (`snapshotToActivity`); the tail then begins at `snapshot_at_offset` and each live record
   upserts by stable id (`projectionToActivity`). The ledger is never re-scanned from the top.
 - **Session resolution:** the chat reuses the viewed `(campaign_id, cycle_id)` pair already
-  owned by `useWorkspace()` (`webapp/lib/workspace.tsx`) — no new `live-state` call.
+  owned by `useWorkspace()` (`webapp/lib/workspace.tsx`) — it adds no second identity call.
 
 ## 4. The conversational endpoint + button-gated agency
 
@@ -193,8 +183,14 @@ When a decision is warranted, the copilot emits a **decision item** (a labelled 
 group). Each button is a thin trigger for a command **already in the closed
 `/commands/{kind}` set** (`promptpotter/presentation/api/routers/commands.py`;
 [`m12-api-openapi.yaml`](m12-api-openapi.yaml)) — e.g. `origin-gate-decision`,
-`pause-cycle`, `start-run`, `change-spend-budget`, `endorse-candidate`. **No
-command is added.** The first wirings are the surfaces that already pause the loop for an
+`pause-cycle`, `start-run`, `change-spend-budget`. **No command is added.**
+
+> **"Declared" ≠ "wired".** The openapi declares commands ahead of their handlers
+> by charter; only the kinds in `commands.py::_WIRED_KINDS` (plus the four typed
+> routes) actually resolve — anything else 404s `command_kind_unknown`. Check
+> that set before promising a button. An earlier draft of this spec named
+> `endorse-candidate` here as if it were live; it has no handler. Unwired
+> operations carry `x-status: declared-not-wired` in the yaml. The first wirings are the surfaces that already pause the loop for an
 operator call: the **origin gate** and the **round-1 halt-and-decide** verdict.
 
 ### 4c. Five-I/O mapping
@@ -255,25 +251,14 @@ endpoint (§4a), declared in `m12-api-openapi.yaml` first.
 - Backend (TermNorm) tool activity surfaces in v1 only at the granularity the existing
   `snapshot` / `token_usage` records carry; a dedicated "web search" step is future work.
 
-## 8. Build order + acceptance
+## 8. Build order
 
-**Arc 1 — curated activity + loop control:**
-1. **Translator** (`ProjectionEnvelope → ActivityItem`, `lib/chat/activity.ts`), curated 1:1
-   against `LiveDisplay` handlers — every `kind` maps to an item or an explicit `null`.
-2. **SSE client** (`lib/chat/useCycleEvents.ts`), snapshot-then-tail, reconnect; first consumer.
-3. **One thread** — `LiveSegment` appended into `IngestConversation`'s thread; welcome stub
-   collapses, never renders over live activity. Chrome: job-bar folds into the hero (one anchor).
-4. **Decision buttons** → existing commands, the **origin gate** first (`origin-gate-decision`),
-   folded in from the deleted `OriginGateModal`. No new command. Pause/resume/stop stay on the
-   cross-tab RemoteBar pill.
+**Arc 1 — curated activity + loop control: SHIPPED** (translator, SSE client, one thread,
+decision buttons on existing commands only).
 
 **Arc 2 — conversation (deferred, YAML-first):**
-5. **Openapi-first**: declare the conversation endpoint in `m12-api-openapi.yaml`.
-6. **Conversation endpoint** — a `chat` optimizer node mirroring `checkin` (provider per-node in
-   `datasets/_optimizer/pipeline.json`); no new tools.
-7. **Persistence** extending the check-in thread, campaign-scoped (Arc 1 persists nothing new —
+1. **Openapi-first**: declare the conversation endpoint in `m12-api-openapi.yaml`.
+2. **Conversation endpoint** — served by the `checkin` optimizer node (the check-in copilot IS
+   the conversation surface; no separate `chat` node); no new tools.
+3. **Persistence** extending the check-in thread, campaign-scoped (Arc 1 persists nothing new —
    activity re-derives from the stream, decisions ride the command ledger).
-
-**Acceptance (Arc 1):** every `ProjectionKind` maps to a rendered item or an explicit non-item;
-buttons fire only existing commands; no new command / event / endpoint; the chat core has a
-documented delete-list; copy passes VOICE (anti-jargon, "the Potter", "node"/"origin").

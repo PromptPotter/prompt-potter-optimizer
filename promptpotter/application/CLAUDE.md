@@ -5,7 +5,7 @@ The use-case layer between `domain/` (pure types, frozen models) and
 `runner/` — coordinates everything; subpackages each own a coherent
 slice of orchestration.
 
-## Layer rule (fails loud at import — no standing test; see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md))
+## Layer rule (fails loud at import; see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md))
 
 `application/intelligence/` MUST NOT import from `application/optimization/`.
 The optional sensitivity scan and the optimization loop both *consume*
@@ -22,6 +22,11 @@ intelligence; intelligence does not depend on either.
 | `sweep/` | Sweep-mode siblings — cheap A/B for L1 candidates ahead of full promotion. |
 | `output/` | Operator-facing artifact writers (`write_log_md`, `write_review_md`, `write_hard_samples_artifacts`) + disk-side view reconstruction (`from_disk_log`). Computes artifacts and writes disk (orchestration), so it lives here — not in `presentation/`. Renders through `application/views` (`to_markdown` + typed view models). |
 | `views/` | The **emit contract**: frozen typed View dataclasses (`view_models.py`), the live `PhaseEvent → View` builder (`ingress.py::from_phase_event` — needs same-layer `optimizer_model` + scoring formula evaluators), and markdown rendering (`render/` — `to_markdown` + heatmap + `render_sweep_summary`). Producing these views *is* an orchestration job, so they live here; `presentation/views` imports them upward for terminal (`to_text`) rendering. |
+| `chat/` | Thread + activity-stream server side for the chat front door. Contract: `docs/specs/chat-foundation.md`. |
+| `jobs/` | The launcher + job registry (capacity-1 machine slot), the spend cap, and the liveness reaper. `jobs/launcher/` is the shared mint/start seam CLI `new` and the web Start both funnel through. |
+| `mask/` | The mask projection — record / divergence / invariant-vs-divergent, plus `backprop.py::select_rewind_round` (UCB1 over the lineage tree; the layer decides *whether* to rewind, this decides *where*). **The code SoT** for `docs/specs/mask-projection.md`. |
+| `meta_champion/` | Promotes a winning meta-prompt: writes `datasets/_optimizer_meta/champion.json` and **rewrites `datasets/_optimizer/pipeline.json` in place**. CLI verb `champion`. A live write path into the shared optimizer pipeline — know it exists before you treat that file as frozen. |
+| `resource_matrix/` | The `matrix` verb's cost/latency sweep across model × dataset. |
 
 ## Top-level modules
 
@@ -30,7 +35,8 @@ intelligence; intelligence does not depend on either.
 - `knobs.py` — `KNOBS`, walked off those declarations: the ONE config-leaf taxonomy. Two facets read it — `classify_config_diff` (resume: does this edit fork the data trace?) and `COUPLINGS`/`resolve_knob_states` (which knobs collide, what overwrites what → preflight + `diagnostics/config_map.py` + the webapp config-map panel). One-way import: `knobs` → `config`, never the reverse.
 - `origin.py` — campaign origin scoring + dataset loading. `resolve_origin_opt_search_point` resolves the origin OSP by priority **seed → experiment prompts → dataset prompts → empty**: a `CycleSeed`'s `origin_prompt_fields` (read from the cycle's `CycleSeedRecord` on the ledger) *is* the origin (operator-steered fork or campaign-from-origin; lineage stamped from `seed.origin_source`).
 - `datasets/` — `loaders.py` (dataset loaders + registry + `build_dataset_run_data`), `prompts.py` (per-dataset prompt store + node overlay), `traces.py` (potter-trace loader).
-- `run_observers.py` — `RunCallbacks` typed event constructor over `CycleEventLog.append`.
+- `run_observers.py` — `RunCallbacks` typed event constructor over `CycleEventLog.append`. Also binds the `_CYCLE_LEDGER` ContextVar (`build_run_observers`) — anything reaching an LLM *before* this runs must bind its own ledger or its spend goes unrecorded.
+- `verify.py` (the `verify` verb), `noise_floor.py` (the fenced `noise-floor` diagnostic — never wired into the loop), `run_phase_control.py`.
 
 ## Conventions
 

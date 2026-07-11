@@ -23,9 +23,11 @@ shape was the old bloat source; readiness buckets replaced it.
 
 ## Ready — no blocker, pick up cold
 
+- **The webapp tells the operator the wrong calibration model.** `OptimizationConfig.enable_2pl_graduation` defaults **True** and `cycle.py` calls `exploration.py::graduate_ruler_model` every cycle, so a data-rich dataset genuinely graduates its difficulty ruler from 1PL to 2PL — but the graduated model **serializes nowhere** (`calibration_model` has zero occurrences across `promptpotter/` and `webapp/`), and `webapp/components/whatif/AbilityInfo.tsx` hardcodes `Calibration: 1PL (Rasch)`. So the θ explainer states a fact that is false for exactly the datasets the feature was built for. Root fix is upstream of the component: serve the model on the round/dashboard surface, then read it. `<reach-the-operator>` — the engine changed what it decides; webapp parity is part of done. (Tracked in [`fitness-comparability.md`](fitness-comparability.md) § (iii).)
+
 **Do soon, not now** (surfaced by the 2026-07-10 drift pass; the six fields with *no* reader at all were already deleted):
 
-- **Three wire fields whose only reader is the OpenAPI spec** — `OriginDegraded.repair_attempts` (`m12-api-openapi.yaml:2627`, inside `required`), `ReplaceDatasetResponse.versioned_to` (`:2792`, inside `required`), `OriginLastResolution.findings` + its nested `confidence` (`:2619-2620`). Each is written and serialized; nothing in `promptpotter/` or `webapp/` reads the key back. Deleting them is **spec surgery, not code cleanup** — two sit in `required:` arrays, so the schema must move in the same commit. Verify the `required` arrays before touching. Related: the webapp discards the whole `ReplaceDatasetResponse` (`useIngestFlow.ts:447` calls `postReplaceDataset` without assigning), so `repointed_campaigns` / `restamped_measurements` cross the wire for a Python logger + migration marker only.
+- **Three wire fields whose only reader is the OpenAPI spec** — in `m12-api-openapi.yaml`: `OriginResolution.degraded.repair_attempts` (inside its `required`), `ReplaceDatasetResponse.versioned_to` (inside `required`), and `OriginResolution.last_resolution.findings` + its nested `confidence`. (Note `OriginDegraded` / `OriginLastResolution` are **not** standalone schemas — they are inline sub-objects of `OriginResolution`; an earlier version of this entry named them as schemas and pinned line numbers that have all since drifted.) Each is written and serialized; nothing in `promptpotter/` or `webapp/` reads the key back. Deleting them is **spec surgery, not code cleanup** — two sit in `required:` arrays, so the schema must move in the same commit. Related: the webapp discards the whole `ReplaceDatasetResponse` (`useIngestFlow.ts:447` calls `postReplaceDataset` without assigning), so `repointed_campaigns` / `restamped_measurements` cross the wire for a Python logger + migration marker only.
 - **52 `export`s re-exported through `export *` barrels** — `lib/api`, `lib/types`, `lib/derivations`, `components/ui`, `components/workflow`. They look local-only to a naive grep; stripping `export` silently narrows each barrel's public surface. The 37 genuinely file-local ones already landed. Action: decide per barrel whether the symbol is meant to be public, then strip or keep — don't script it blind.
 - **Post-flip copilot — deferred on purpose, not forgotten.** The `checkin` node consulting in run mode and raising `pause-cycle` / `change-spend-budget` / `fork-cycle` instead of draft patches. `RaisedCommand` (`datasets/origin_resolve.py`) is already general enough to carry it. Not debt and not now: it is a **new feature**, and the closing-phase directive is no new features until `promptpotter-self` is distributable. Lands with L4, so it belongs to [`l4-outer-loop.md`](l4-outer-loop.md) when it does.
 
@@ -60,7 +62,6 @@ shape was the old bloat source; readiness buckets replaced it.
 
 ## Standing — long-lived design holds
 
-- **HITL notebook (`notebooks/optimization_campaign.ipynb`) rotted** against the orchestration API (un-gated, drifted across the ingest/origin unify): wrong tuple arity from `prepare_origin_notebook`, imports a deleted module, treats `CampaignOrigin` as a round list. Rewrite the three cells against the current `notebook_run.py` contract, or retire the notebook (operator's call). Retiring also clears `application/origin.py::DatasetSummary.splits` + `domain/search_point.py::TaskDecomposition.FIELDS` (read only by the notebook). Blocker: needs a live TermNorm backend to verify — dedicated session, not a blind edit.
 - **Optimizer model unreliable on heavy L2/L3 structured output** — `openrouter/gpt-oss-120b` (all optimizer nodes) is slow + schema-noncompliant on the large `L3PlanOutput`/`L2*` shapes, firing the repair retry and sometimes failing it. Swapping it is a per-node overlay edit (`datasets/_optimizer/pipeline.json::nodes.{l2_context,l3_plan}.config.model`), not service code — operator picks a faster/schema-reliable model, or shrink the schema. Needs a live cycle reaching L3 to measure repair-rate.
 - **`RunPhase.STOPPING` thin window for non-paused stops** — declared only at the runner's cooperative checkpoints, so a running stop near a round boundary jumps `running → terminal(interrupted)` with no `stopping` frame. Have `_apply_stop_cycle` (the command applier that writes `stop.flag`) append a `control` `PhaseRecord(event="stopping")` so the projection fires at the instant of intent; the three in-runner `declare_run_phase(STOPPING)` then become redundant. Blocker: confirm the applier runs in-process with the runner's `LiveDashboardView` subscriber; verify the CLI Ctrl+C path keeps its no-`stopping` design.
 - `infrastructure/tracing/replay.py` — `schema` param accepted but not threaded through; dead branches inside. File for a dedicated tracing-cleanup pass.
@@ -72,7 +73,6 @@ shape was the old bloat source; readiness buckets replaced it.
 - **reduced-motion.css barrel position was never an a11y gap** — the filed "five domain files import after it, so their motion rules win" claim was FALSE: `reduced-motion.css` is the only sheet with `!important` on motion properties, and important author declarations beat every normal declaration regardless of source order. The five domain `@import`s were still moved above the a11y tail (2026-07-03) so the barrel matches its own "tail LAST" comment — a zero-computed-style-change reorder, not a fix.
 - **`l2_duplicate_insert` stays a distinct reason id** — verbatim+paraphrase repeat merged into `l2_task_context_stale_repeat` (2026-07-03), but duplicate-insert is deliberately NOT folded in: it's excluded from `firing.py`'s `SOFT_REJECT_IDS`, so a sole breach force-triggers L3 while a sole stale-repeat doesn't. Merging it would change escalation behavior.
 - **`search_point_scorer.py::score_search_point` 3rd return slot** — not an "always-False" bool; it's a live `EscalationSignal | None` consumed by `l1/score/candidate.py` (drives candidate elimination). (Was a stale debt claim.)
-- **`measurement_archive.py::register_alias(*hashes)`** — the variadic isn't dead; the sole caller passes both hashes and the function needs ≥2. (Stale claim.)
 - **`QueryNodeSpan.usage_details` (via `langfuse_sink`)** — read and forwarded to the Langfuse cloud observation. Not dead. (Stale claim.)
 - **`webapp` `hit_rate` cell + `headline-stats.ts::fitnessTrend`** — fold already-served values (per-dot `hit` booleans; cumulative max over served `composite_fitness`); neither reimplements a scorer, so serving them would add wire coupling for identical behaviour (not R-36).
 - **`presentation/views/live/phase.py` recall@k recompute** — the round-stats block recomputes top-1/top-5 recall via `find_rank`/`get_ranked_items` (terminal live readout only; `round_analysis._rank_analysis` owns the equivalent buckets app-side). Serving recall on `RoundResult` would add wire coupling for display-only behaviour — same call as the `hit_rate` entry above, so NOT a forced R-36 fix. The bare `except: pass` that wrapped it WAS the real smell and was fixed (now logs at warning).
@@ -113,14 +113,12 @@ drifted `Field(description=…)` on LLM-facing schemas; INFO/WARN logging nobody
 surfaces; error-raising style diverging by layer (generic `Exception` vs bare
 `raise` vs `HTTPException` for the same failure class — M-sized standardization);
 **wider `events.jsonl` naming drift** — the per-cycle ledger file was renamed to
-`.runtime/ledger.jsonl` (ADR-0001 + `architecture.md` §0/§0.5 fixed this pass),
-but `adr/0003-spend-and-tenancy.md`, `developer/concept-map.md`,
-`developer/stable-api.md`, `glossary.md`, `concepts/campaign-tree.md`, and a few
-remaining `architecture.md` spots (`:337,367,447`) still say `events.jsonl` for
-the per-cycle ledger. **Verify per-occurrence first** — the *workspace*-level
-ledger (`projects/{tenant}/.workspace/events.jsonl`) is a genuinely different,
-still-correctly-named file (`architecture.md:238`, `persistence-and-state.md`),
-so don't blanket-replace.
+`.runtime/ledger.jsonl`; `stable-api.md`, `campaign-tree.md`, `glossary.md`,
+`concept-map.md`, the two m12 YAMLs and `architecture.md` are fixed. Remaining:
+`adr/0003-spend-and-tenancy.md` (`:21,35,117`) still says `events.jsonl` for
+the per-cycle ledger. **Verify per-occurrence first** — the *workspace*-level ledger
+(`projects/{tenant}/.workspace/events.jsonl`) is a genuinely different,
+still-correctly-named file, so don't blanket-replace.
 
 ## Intentional UI placeholders
 

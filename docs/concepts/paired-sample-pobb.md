@@ -135,103 +135,68 @@ discriminating information.
 
 ### 4. Lucky-prefix is self-correcting
 
-Walk through the AIME example with paired-PoBB enabled:
-
-* Round 1: candidate `3b6553…` leader-locks at 8/8 on `{0..7}`. Its
-  sample-keyed history is `{"0": 1, "1": 1, ..., "7": 1}`.
-* Round 2 starts. Candidate C2.0's sample order is `{9, 12, 13, 6,
-  14, 8}` (hard-first).
-* As C2.0 measures each of `{9, 12, 13, 6, 14, 8}`, the query loop
-  fires `backfill_for_sample(sample)` for that sample. The hook walks
-  every prior, finds `3b6553…` missing this sample id, and calls
-  `backfill_fn(3b6553…_sp, [sample])`. Sample 6 is cached; the other
-  five run fresh (or hit cache from a sibling cycle) and almost
-  certainly include several misses — the same prompt family that
-  produces 50% on the full set will miss most of these.
-* `3b6553…`'s history is now `{"0": 1, ..., "7": 1, "8": 0, "9": 0,
-  "12": 0, "13": 1, "14": 0}` — actual coverage of the round's
-  hard samples.
-* PoBB comparison: leader vector on `{9, 12, 13, 6, 14, 8}` is now
-  `[0, 0, 1, 1, 0, 0]` (mean 0.33), candidate vector is `[0, 0, 0,
-  0, 0, 0]`. Candidate still loses, but the comparison is honest —
-  and **the leader's recorded mean dropped from 1.0 to 0.5-ish on
-  its full coverage**, automatically deflating the false-100% floor
-  the sorter had been smashing every candidate against.
-
-No separate "lower the lucky-prefix lock-in threshold" code path. No
-display patch for "100% on n=8". The lucky-prefix inflation is a
-mechanical consequence of unpaired comparison, and paired comparison
-mechanically removes it.
+Re-run the pathology above with pairing on: as round 2's candidate
+measures its hard-first order, backfill forces the locked leader onto
+those same samples — its history gains real hard-sample coverage
+(mostly misses; the same prompt family scores 50% on the full set),
+and its recorded mean deflates from the false 100% toward its true
+rate. The candidate may still lose, but the comparison is honest.
+No separate "lower the lock-in threshold" code path, no display patch
+for "100% on n=8": the inflation was a mechanical consequence of
+unpaired comparison, and paired comparison mechanically removes it.
 
 ## Cost
 
-The backfill runs once per candidate, on the candidate's sample order
-(typically ~6–10 hard samples). Within a round:
-
-* First candidate triggers backfill on every prior over its sample
-  order. Round 2 starting with R1_winner needs ~5 fresh leader
-  measurements.
-* Subsequent candidates' sample orders heavily overlap (same hard
-  samples for the round). Their backfill is mostly cache hits.
-* Across rounds, the leader accumulates measurements — by round 3+
-  the leader has near-full coverage and backfill is free.
-
-Net: roughly one extra "candidate-equivalent" of LLM spend per round,
-amortized across the round. That's the cost of statistical validity.
+Backfill runs per candidate over its sample order (~6–10 hard samples).
+The round's first candidate pays a few fresh leader measurements; later
+candidates' orders overlap heavily (cache hits), and by round 3+ the
+leader has near-full coverage. Net: roughly one extra
+candidate-equivalent of LLM spend per round — the cost of statistical
+validity.
 
 ## On-disk shape and replay
 
 Each `ELIMINATION_CUT` / `LEADER_LOCK_IN` decision record (in
-`campaigns/{cycle}/rounds/round_NNNN.json`) now carries the paired
+`campaigns/{campaign_id}/cycles/{cycle_id}/rounds/round_NNNN.json`) now carries the paired
 snapshot under `data`:
 
 ```json
 {
   "kind": "elimination_cut",
   "outcome": true,
-  "inputs_ref": {
-    "candidate_id": "abc…",
-    "prior_candidate_ids": ["R1_winner"],
-    "queries_scored": 6,
-    "epsilon": 0.05,
-    "n_min": 6,
-    "round_num": 2,
-    "recorded_p_best": 0.0
-  },
   "data": {
     "p_best": 0.0,
     "leader_id": "R1_winner",
-    "p_best_snapshot": { "R1_winner": 1.0, "abc…": 0.0 },
     "candidate_sample_ids": ["9", "12", "13", "6", "14", "8"],
     "prior_histories": {
-      "R1_winner": {
-        "9": false, "12": false, "13": true,
-        "6":  true, "14": false, "8":  false
-      }
+      "R1_winner": { "9": false, "12": false, "13": true,
+                     "6": true, "14": false, "8": false }
     }
   }
 }
 ```
 
+(`inputs_ref` additionally records the gate parameters in force at
+decision time — the live knob values are `optimization.pobb_epsilon` /
+`elimination_n_min` in `CampaignConfig`, not this doc.)
+
 `candidate_sample_ids` is the ordered list of samples the candidate had
 measured at decision time. `prior_histories[cid]` is each prior's **hits**
 restricted to exactly those samples (after backfill).
 
-This makes the divergence replayer self-contained:
+This makes the divergence replayer self-contained
+(`resume_and_fork/replayers.py::_pobb_replay_snapshot`): it rebuilds the
+candidate vector from the rescored results keyed by
+`candidate_sample_ids`, pairs each prior via `prior_histories`, and
+calls the same `elimination_p_best` on the cycle's fixed δ ruler.
 
-```python
-# resume_and_fork/replayers.py::_pobb_replay_snapshot
-candidate_sample_ids = data["candidate_sample_ids"]
-prior_histories      = data["prior_histories"]
-cur_by_sample        = {r["sample_id"]: r["hit"] for r in rescored_results}
-candidate_hits = [cur_by_sample[sid] for sid in candidate_sample_ids]
-paired_prior_hits = {
-    cid: [hist[sid] for sid in candidate_sample_ids]
-    for cid, hist in prior_histories.items()
-}
-# θ on the cycle's fixed δ ruler — keyed by the candidate's real sample_ids, same closed-form rule
-p_best, _ = elimination_p_best(candidate_hits, paired_prior_hits, candidate_sample_ids, delta_scale)
-```
+**Graded, never binarized.** The inputs are the per-sample **graded** fitness ∈ [0,1]
+(`intelligence/exploration.py::graded_response`), not a `hit` boolean. The logistic MAP
+maximizes cross-entropy, which is valid for any `y ∈ [0,1]`, so a binary dataset is
+bit-identical to the old hit path — while a graded backend (TermNorm's reciprocal rank, the
+L4 outer proxy) keeps its gradient instead of collapsing to an all-miss θ where `p_best`
+pins at 0.5 and PoBB never discriminates. Recorded booleans from pre-graded decisions coerce
+to 0.0/1.0, the identical values the live path fed.
 
 No cross-round "find R1_winner in prior rounds" logic, no backfill
 during replay. The decision record is the entire input, and the θ rule is
@@ -241,18 +206,10 @@ scorer differs, the candidate side gets rescored (by `resume.py::_rescore`); the
 prior side stays at the recorded hits (a scorer change that materially shifts
 priors surfaces as divergence via the candidate side).
 
-## Code map
-
-| File | Role |
-|---|---|
-| `promptpotter/application/optimization/pobb/elimination/checks.py::PoBBCheck` | Sample-keyed priors, `backfill_for_sample`, paired `check()` (margin gate + θ ε-gate), `snapshot_priors`, `set_sample_universe` (the margin gate's win-opportunity universe) |
-| `promptpotter/application/intelligence/adaptive_queue_mechanism.py` | `build_round_order` (the shared round order) + between-round CAT primitives (`update_theta_posterior`, `decision_information_gain`, `pick_value`, `expected_order`) |
-| `promptpotter/application/optimization/l1/score/loop.py::score_population` | Builds the `backfill_fn` closure, the shared round order (reorders the dataset once), injects both into PoBB / the query loop |
-| `promptpotter/application/optimization/l1/score/candidate.py::score_one_candidate` | Builds `_backfill_for_sample(sample_id)` closure and passes it as `on_sample_pre_check` — reactive per-sample backfill, no upfront wall |
-| `promptpotter/application/scoring/query_loop.py::run_query_loop` | Walks the (pre-ordered) dataset sequentially + fires `on_sample_pre_check(sample.id)` after each sample lands, before degradation checks read prior coverage |
-| `promptpotter/application/optimization/l1/population.py::pobb_decision_data` | Embeds `candidate_sample_ids` + `prior_histories` into the decision record |
-| `promptpotter/application/scoring/metrics.py::elimination_p_best` | Joint Rasch fit over candidate + paired priors → `p_best = min P(θ_cand > θ_prior)`; the one rule shared by live `check()` and replay |
-| `promptpotter/application/optimization/resume_and_fork/replayers.py::_pobb_replay_snapshot` | Re-fits θ from recorded hits via `elimination_p_best`; no cross-round resolver, no MC |
+Entry points: `optimization/pobb/elimination/checks.py::PoBBCheck` (the
+mechanism), `scoring/metrics.py::elimination_p_best` (the one θ rule
+shared by live `check()` and replay); the closures that wire them are
+named inline above.
 
 ## Sample-selection: the shared round order
 

@@ -1,95 +1,148 @@
 # Verdict-Resolution Adaptive Queue Mechanism
 
-Documents the **live** mechanism: ranking is unified on `decision_information_gain`. Phase 2 (origin-relative observation weighting) is deferred — sketched below.
+Documents the **live** mechanism. There are **two**, and the split is the whole
+point — they answer different questions and only one of them is adaptive:
+
+| | Question | Function | When |
+|---|---|---|---|
+| **Acquisition score** | Which sample is worth measuring at all? | `pick_value = decision_information_gain + delta_learning_gain` | **Between** rounds (`select_round_subset`) + the persisted hard-samples ranking |
+| **Round order** | In what order do we score the round's samples? | `build_round_order` | **Within** a round — one deterministic order, shared by every candidate |
+
+Both live in `application/intelligence/adaptive_queue_mechanism.py`.
+**There is no online per-sample re-fit** — the round order is static by design
+(see § The round order for why adaptivity there made it worse).
 
 ---
 
 ## What this is for
 
-For the candidate we're currently evaluating, pick samples that let us decide as early as possible whether to keep it or abort it against the seed. Most candidates are dead; the adaptive queue mechanism's job is to discover that fact in the fewest measurements possible — ideally 3 to 6 — by always selecting the sample whose outcome would resolve the keep/abort question the most.
+Most candidates are dead. The job is to discover that in the fewest measurements
+possible, by spending each measurement where it most changes what we believe.
 
-This is a sequential-testing problem with a statistical model behind it. The model is what gives us provable efficiency: if the model's prediction for a sample is genuinely uncertain, measuring is informative; if its prediction is confident, measuring is wasted. The adaptive queue mechanism maximizes that information per measurement.
-
----
-
-## The model — one model, conditioning evolves
-
-There is one statistical model. It produces one ranking. The ranking is updated every time we learn something new about the current candidate.
-
-**The prediction layer.** For every sample, the model predicts the probability that the current candidate will hit it. The prediction draws on two sources of data:
-
-- All historical observations on that sample, across the entire dataset-scoped archive — every measurement every candidate has ever made on it.
-- The current candidate's own measurements so far in this run.
-
-Every historical observation counts equally — the population's behaviour on a sample is the prior, regardless of which candidate produced each measurement. As we measure the current candidate, those measurements sharpen the prediction further. The mechanism is a per-candidate ability estimate that folds in observations as they arrive.
-
-**The verdict layer.** Independently, the model tracks our current belief about whether the candidate will beat the seed. Every measurement updates that belief.
-
-**The score per sample.** How much would measuring this sample change our verdict belief? That's the score. It rewards two things at once, both already in the prediction:
-
-- **Predictive uncertainty.** A sample whose outcome the model expects with high confidence is wasted to measure — we'd see the predicted value, learn nothing. A sample whose outcome is a genuine coin flip is gold — either outcome would shift something.
-- **Verdict relevance.** Even an uncertain outcome doesn't help if it can't move the keep/abort verdict. A sample whose outcome (either way) leaves the verdict unchanged is also wasted.
-
-The product of these two — formally the mutual information between the sample's outcome and the verdict — is one number. That number is the score. Highest score wins; that's the next sample to measure.
-
-**The bias toward unsolved samples emerges naturally** from this — it does not need a separate term. If the current candidate's running estimate puts it near the top of the ability range (it has been hitting things), then samples the population almost never solves still carry genuine uncertainty for *this* candidate — and either outcome moves the verdict. If the current candidate looks weak, those same samples have near-zero predicted hit probability — both branches of the expectation collapse to "miss" — and the score drops to zero on its own. No knob, no explicit bias, no headroom filter. The candidate's standing flows through the prediction; the prediction flows through the score.
+That splits cleanly into the two mechanisms above, and conflating them is the
+error this spec exists to prevent: *which samples are informative* is a
+population-level question answered from the archive between rounds; *what order
+to score them in* is a within-round question answered from the seed's own
+outcomes. The second one does **not** need to be adaptive, and making it adaptive
+made it worse.
 
 ---
 
-## How the model evolves over time
+## The acquisition score — `pick_value`, and it has two terms
 
-The ranking is alive. It updates whenever the conditioning changes:
+For the current candidate `c` with 1PL Rasch ability posterior `(μ_c, var_c)`,
+against the seed `(μ_s, var_s)`, on sample `s` with population profile
+`(δ_s, se_δ_s)`:
 
-- At round boundary, the dataset-scoped Rasch fit is refreshed across all archive observations.
-- When the current candidate's evaluation starts, the ranking is computed against the candidate's prior (a mutation of the seed inherits the seed's ability prior).
-- Every time we measure the current candidate on a sample, its ability estimate updates, the prediction over every other sample shifts accordingly, and the ranking re-sorts.
+```
+pick_value(s) = decision_information_gain(s) + delta_learning_gain(s)
+```
 
-The ranking is written to `hard_samples.json` (cycle + campaign scope) after each round boundary. That file is the webapp's read target (the suffixed `hard_samples_{backend}_{dataset}.json` is the separate archive-scope file). Reading it gives the latest serialized state of the same model — not a separate concept, not a frozen snapshot, just the current ranking. The webapp polls it; the live adaptive queue mechanism writes it.
+**Term 1 — `decision_information_gain`: will this sample move the verdict?**
+The mutual information (nats) between the sample's next outcome and the verdict
+`θ_c > θ_s`. It rewards a sample only when the outcome is genuinely uncertain
+*and* either branch would shift the keep/abort belief. In the means-known limit
+it recovers Bernoulli Chernoff information (Garivier–Kaufmann 2016,
+Track-and-Stop).
 
-A fresh mutation is ranked at `μ_c = μ_seed`, so its keep-or-abort prior is 50/50 by construction — correct, because its prior over ability genuinely is centred on the parent. The *expected* information still varies across samples through the prediction layer.
+```
+p0      = Φ((μ_c − μ_s) / √(var_c + var_s))                    # current verdict belief
+μ⁺, v⁺  = update(μ_c, var_c, δ_s, se_δ_s, hit=True)            # posterior after a hit
+μ⁻, v⁻  = update(μ_c, var_c, δ_s, se_δ_s, hit=False)           # posterior after a miss
+p⁺      = Φ((μ⁺ − μ_s) / √(v⁺ + var_s))
+p⁻      = Φ((μ⁻ − μ_s) / √(v⁻ + var_s))
+p̄       = marginal_hit_probability(...)
+
+decision_information_gain(s) = H(p0) − [ p̄ · H(p⁺) + (1 − p̄) · H(p⁻) ]
+```
+
+**Term 2 — `delta_learning_gain`: will this sample teach us the ruler?**
+The expected entropy drop (nats) in the sample's own difficulty `δ_s`. One
+Bernoulli outcome adds Fisher information `p(1−p)/scale²` to the prior
+δ-precision `1/se_δ²`, giving `½·ln(1 + se_δ²·p(1−p)/scale²)` with
+`scale² = 1 + π·se_δ²/8`.
+
+**This second term is not optional, and it is exactly the "bias toward unsolved
+samples":** without `delta_learning_gain` the seed-centred first pick degenerates
+to "prefer lowest `se_δ`" and **starves the unmeasured headroom**. It is largest for
+*under-measured* samples (large `se_δ`) whose outcome is a genuine coin flip
+(`p≈0.5`), and it decays to zero both for well-measured samples and for resolved
+always-hit / always-miss samples (`p(1−p)→0`) — so it explores the unknown
+without re-promoting what the run has already pinned.
+
+**Responses are graded, not Bernoulli.** `Observation.response` is the sample's
+continuous per-sample fitness ∈ [0,1] — the same score `accuracy` and
+`paired_fitness` read — **not** a binarized hit. The logistic MAP maximizes
+cross-entropy `Σ y·log p + (1−y)·log(1−p)`, valid for any `y ∈ [0,1]`, so a
+binary dataset is bit-identical to the old hit path while a continuous-fitness
+backend (reciprocal-rank matching, the L4 outer proxy) keeps its gradient instead
+of collapsing to an all-miss θ.
+
+---
+
+## The round order — `build_round_order`, one static order per round
+
+Within a round there is **one** scoring order, shared by every candidate, and
+nothing re-sorts mid-round (`l1/score/loop.py`: *"The round's frozen plan — a
+single step; there is no per-sample re-rank."*).
+
+It is built by partitioning on the **seed's** per-sample grades:
+
+- **MISS-stratum** — seed grade < 1.0, *or not yet measured by the seed* (an
+  unknown is a potential win, and fronting it warms the per-sample backfill
+  earliest). Ordered by **ascending δ**: easiest win opportunities first — a live
+  candidate proves itself immediately, and a dead one's misses on the easiest
+  wins are the strongest futility evidence.
+- **HIT-stratum** — seed grade ≥ 1.0. Ordered by **descending δ**: likeliest
+  regression points first.
+
+Every 4th position takes the next HIT-stratum sample (the regression probe); all
+other positions take the next MISS-stratum sample; when a stratum runs dry the
+other's remainder follows.
+
+**Why k=4.** Pure miss-first defers all regression evidence past the miss block.
+A proportional interleave spreads the misses so thin that the paired-margin
+gate's deterministic-exhaustion kill lands at the very end. k=4 costs a pure-tie
+kill a handful of extra samples and buys a regression probe inside the first
+`elimination_n_min` window, plus steady loss accrual for regressors.
+
+It is a **pure function** of (seed grades, ruler, sample ids), so a resumed round
+re-derives the identical order with no recorded sidecar.
+
+**Why static beats adaptive here:** an ability re-fit after every measurement
+empirically front-loads the seed's hit set — the zero-information region, where
+every early paired comparison ties, `p_best` pins at 0.5, and the elimination
+gates go blind until the tail. The round's actual decision is "can this candidate
+NET the adoption margin against the seed", and that evidence lives only in
+discordance-potential samples — hence the shared, seed-stratified order.
 
 ---
 
 ## Where it lives in code
 
-- `decision_information_gain` (`adaptive_queue_mechanism.py::decision_information_gain`) computes the mutual information between a Bernoulli outcome and the keep/abort verdict, conditioned on the candidate's current ability posterior.
-- The hierarchical-EB Rasch fit (`exploration.py::fit_rasch`) supplies the per-sample population profile.
-- The per-candidate posterior fold (`loop.py::score_population` → `_next_sample` → `posterior_from_outcomes`) updates the ability estimate after each measurement.
-- The persisted ranking writer (`hard_sample_sorter.py::build_hard_samples_artifact_from_observations`) calls the same scoring path the live queue calls — one function, two trigger points.
+- Acquisition score — `intelligence/adaptive_queue_mechanism.py::pick_value`
+  (with `::decision_information_gain` + `::delta_learning_gain`).
+- Round order — `intelligence/adaptive_queue_mechanism.py::build_round_order`,
+  called once per round at `optimization/l1/score/loop.py::score_population`.
+- Between-round subset pick — `intelligence/exploration.py::select_round_subset`
+  (still fits **1PL** via `::fit_rasch`; see `fitness-comparability.md`).
+- Population profile fit — `intelligence/exploration.py::fit_rasch`.
+- Persisted ranking writer —
+  `intelligence/hard_sample_sorter.py::build_hard_samples_artifact_from_observations`,
+  which calls the same `pick_value` the between-round pick calls: one function,
+  two trigger points.
+
+The ranking is written to `hard_samples.json` (cycle + campaign scope) at each
+round boundary; the webapp polls it. The suffixed
+`archive/measurements/hard_samples_{backend}_{dataset}.json` is the separate
+archive-scope file.
 
 ---
 
-## Math (reference)
+## Phase 2 sketch — origin-relative weighting (not shipped)
 
-Single per-sample score for the current candidate `c` with running ability posterior `(μ_c, var_c)`, against the seed posterior `(μ_s, var_s)`, on sample `s` with population profile `(δ_s, se_δ_s)`:
-
-```
-p0      = Φ((μ_c − μ_s) / √(var_c + var_s))                    # current verdict belief
-μ⁺, v⁺  = update(μ_c, var_c, δ_s, se_δ_s, hit=True)            # candidate posterior after hit
-μ⁻, v⁻  = update(μ_c, var_c, δ_s, se_δ_s, hit=False)           # candidate posterior after miss
-p⁺      = Φ((μ⁺ − μ_s) / √(v⁺ + var_s))
-p⁻      = Φ((μ⁻ − μ_s) / √(v⁻ + var_s))
-p̄       = E[Bernoulli outcome] marginalized over candidate posterior
-
-score(s) = H(p0) − [ p̄ · H(p⁺) + (1 − p̄) · H(p⁻) ]            # mutual info, in nats
-```
-
-Exactly what `decision_information_gain` computes (`adaptive_queue_mechanism.py::decision_information_gain`).
-
----
-
-## Phase 2 sketch — origin-relative weighting
-
-Not shipped. Outlined here so the substrate doesn't paint into a corner.
-
-Today every archive observation contributes equally to a sample's population profile. Phase 2 will weight each observation by how relevant the producing candidate is to the current one — using similarity (lineage distance, prompt distance, or pipeline-config distance — undecided) and recency (older observations weighted lower, because pipeline capability drifts over time). The same scoring framework applies; only the conditioning is richer. The breaking primitive change Phase 2 needs is extending `Observation` (`exploration.py:26-31`) with a timestamp and a lineage hint, or routing those through a sidecar lookup. Open design question: archive-wide capability-drift estimate vs per-pipeline-node capability curve — this determines the `Observation` schema.
-
----
-
-## References
-
-- Adaptive queue mechanism math: `promptpotter/application/intelligence/adaptive_queue_mechanism.py::decision_information_gain`
-- Per-candidate posterior fold: `promptpotter/application/optimization/l1/score/loop.py::score_population`
-- Population profile fit: `promptpotter/application/intelligence/exploration.py::fit_rasch`
-- Observation: `promptpotter/application/intelligence/exploration.py:26-31`
-- Persisted ranking writer: `promptpotter/application/intelligence/hard_sample_sorter.py::build_hard_samples_artifact_from_observations`
+Weight each archive observation by the producing candidate's relevance to the
+current one (similarity + recency) instead of equally; same scoring framework,
+richer conditioning. Needs `Observation` extended with a timestamp + lineage
+hint — the open design question (archive-wide drift estimate vs per-node
+capability curve) determines that schema.

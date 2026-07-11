@@ -190,10 +190,10 @@ Skill = strategist (reads disk, decides, prints the next CLI); `new`/`resume` = 
 | `.promptpotter/meta_campaigns/{prompt_id}/state.json` | every tick |
 | `.promptpotter/meta_campaigns/{prompt_id}/log.jsonl` | every tick (audit) |
 | `.promptpotter/meta_campaigns/{prompt_id}/proposed_edits/*.diff` | pending operator action |
-| `campaigns/{cycle_id}/review.md` | post-cycle behavior + L1Stats |
-| `campaigns/{cycle_id}/index.json` | post-cycle final + `prompt_hashes` |
-| `campaigns/{cycle_id}/.runtime/cache/rounds/round_NNNN.json` | LLM I/O per round |
-| `campaigns/{cycle_id}/.runtime/cache/candidates/round_NNNN.json` | OSPs per round |
+| `campaigns/{campaign_id}/cycles/{cycle_id}/review.md` | post-cycle behavior + L1Stats |
+| `campaigns/{campaign_id}/cycles/{cycle_id}/index.json` | post-cycle final + `prompt_hashes` |
+| `…/cycles/{cycle_id}/.runtime/cache/rounds/round_NNNN.json` | LLM I/O per round |
+| `…/cycles/{cycle_id}/.runtime/cache/candidates/round_NNNN.json` | OSPs per round |
 | `archive/sweeps/{l1_hash}/{dataset}/*.json` | sweep results |
 
 ### Per-phase reference

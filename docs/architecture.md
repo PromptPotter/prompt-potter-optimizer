@@ -10,7 +10,7 @@ roughly one A4 page so you can grab the whole shape quickly, then
 tree**:
 
 - `CLAUDE.md` (root) — onboarding pointers, project conventions,
-  the §6 pre-flight gate. Carries a pointer to this file
+  the pre-flight gate. Carries a pointer to this file
   (`docs/architecture.md`) as the authoritative architecture
   reference.
 - `promptpotter/CLAUDE.md` — package-level orientation.
@@ -134,8 +134,8 @@ plus passage of time over hand-coded recovery logic. The default
 posture is "ignore and continue"; aborting requires evidence.
 
 **Dispatch hub.** Every optimizer LLM call composes its prompt by the
-same path: `build_bundle(cycle) → DispatchHub.fill_*(template, bundle) →
-compile_prompt`. **Injections** are the named placeholder renderers
+same path: `build_bundle(cycle) → DispatchHub.fill(template, layout, bundle)
+→ compile_prompt` — one fill path for every optimizer node. **Injections** are the named placeholder renderers
 (`{{slot}} → renderer(bundle) → str`) — they inject deterministic
 state into a prompt's body. One registry (`dispatch_hub.INJECTIONS`).
 One `validate_template()` at module load that catches typos.
@@ -154,8 +154,9 @@ world is a strict containment hierarchy:
   datasets at `projects/{tenant}/datasets/{slug}/` — the
   Workspace ⊃ Dataset containment, identity-scoped, tenant-private;
   (b) **install-global benchmarks** at repo-root `datasets/{name}/`
-  (today's `aime_2025`, `bbeh`, `gsm8k`, `hotpotqa`, `justlogic`,
-  `lca-termnorm`, `promptpotter-self`, `_optimizer`) — install-scoped,
+  (today's `aime_2025`, `bbeh`, `email-tagging`, `gsm8k`, `hotpotqa`,
+  `justlogic`, `lca-termnorm`, `promptpotter-self`, `_optimizer`,
+  `_optimizer_meta`) — install-scoped,
   read-only, admin-visible only via the `GET /datasets` list endpoint
   identity filter. The two tiers serve different purposes (operator
   benchmarking vs tenant work); both share the `pipeline.json` /
@@ -177,13 +178,7 @@ world is a strict containment hierarchy:
   *properties* on `campaign.json` (`root_content_hash` +
   `optimizer_prompt_hash`) for drift detection on resume, not as the id.
   The dataset is embedded so "campaigns for dataset X" is a prefix scan.
-- **Session** — one run of `new` on a campaign. A campaign holds one
-  session — the `new` invocation that minted it. `resume` extends that
-  session; `resume --fork-on-divergence` adds sibling cycles within it.
-  A session's identity is its `session_id` (`s_xxxx`). Each session is
-  a tree: a root cycle (the bare `cycle_<target_hash>`) plus its fork
-  descendants.
-- **Cycle** — one node in a session's lineage tree: root | fork | diag
+- **Cycle** — one node in a campaign's lineage tree: root | fork | diag
   | sweep. The operator-facing name is **Unit** — one continuous-parameter
   run; `resume` extends the current unit, each fork branches a new one
   (the webapp + docs say "unit", the on-disk / API id stays `cycle_id`).
@@ -191,19 +186,28 @@ world is a strict containment hierarchy:
   for branches) — the *target* content hash, content-addressed. It keeps
   two jobs: archive cache-reuse keying and target-drift detection.
   `cycle_id` is campaign-scoped — all path resolution is
-  `(campaign_id, cycle_id)`. Pre-existing on-disk shape (multi-session forest
-  with `_s{N}` suffixes under one `campaign_id`): see
-  `promptpotter/infrastructure/store/paths.py`.
+  `(campaign_id, cycle_id)`. Path helpers:
+  `promptpotter/infrastructure/store/layout.py`.
 
-The **Session** is a unit of a campaign (its identity is the
-`session_id`). `active_session.json` is the operator's *pointer/lens*
-into the Workspace — which tenant, session, campaign, and cycle are
-live. `new` mints a fresh Campaign + Session + root cycle. `resume`
-follows the pointer into the active session. `fork` mints a new cycle
-**inside the same session**. Two `new` calls on an unchanged
-declaration get distinct `campaign_id`s but share their root cycle id
-(content-addressed) and origin score (the dataset-scoped archive cache-
-hits every sample) — cross-campaign evidence pooling on a declaration
+**A campaign has one root cycle — there is no Session tier.** A campaign
+owns a root cycle plus its fork/diag/sweep descendants, and that is the
+whole containment story: `campaign → cycle → fork` was two tiers wearing
+three names (`list_sessions` was always length 1), so the tier was
+removed. What survives is *not* an entity:
+
+- **`Session`** (`application/bootstrap/session.py`) — the in-process
+  **wiring object**: stores, LLM clients, connectors, the resolved
+  `dataset_config_dir`. It is services + identity, not a persisted tier.
+- **`active_session.json`** — the operator's *pointer/lens* into the
+  Workspace: which tenant, campaign, and cycle are live.
+- **`unit_kind: "session"`** — the sidebar's label for a *root cycle*
+  (`campaign_store/store.py::_unit_kind`). A label, not a container.
+
+`new` mints a fresh Campaign + root cycle; `resume` follows the pointer;
+`fork` mints a sibling cycle inside the same campaign. Two `new` calls on
+an unchanged declaration get distinct `campaign_id`s but share their root
+cycle id (content-addressed) and origin score (the dataset-scoped archive
+cache-hits every sample) — cross-campaign evidence pooling on a declaration
 rides the `archive/measurements/` layer, not campaign identity.
 
 **`unit_kind` taxonomy.** An operator-facing label, computed
@@ -224,7 +228,7 @@ the heatmap artifacts, the `scope` API param, and the webapp toggle,
 so the operator always distinguishes "this campaign" vs "this
 dataset" vs "everything" identically.
 
-**State + persistence.** Three entry points (CLI, notebook, webapp)
+**State + persistence.** The entry points (CLI, webapp; a WIP notebook)
 share **one** orchestration layer and **one** set of data types — no
 per-entry-point copies. **Five I/O kinds** the orchestrator reads or
 writes through, each with its own ingress: (1) **Persistence** — the
@@ -330,13 +334,12 @@ They never become Control-remote commands and never an inbound public
 route — the Purdue/zero-trust rule that a control-plane mutation is not
 reachable from the lowest-trust zone. Permanent contract:
 `docs/adr/0004-operator-admin-channels.md`. Adding a new I/O kind requires
-amending §0 first; the pre-flight gate (CLAUDE.md Q4 sub-rule)
-blocks code that introduces one without §0 backing. Hexagonal layer
-separation is a structural invariant that fails loud at import (a cross-layer
-import breaks the run; the `test_structure` scan was cut to the silent-harm
-core — see `tests/CLAUDE.md`) so data types
-stay free of I/O and the orchestrator can be reused without dragging
-a backend client along. A **concept-first re-hierarchy** (slicing this
+amending §0 first; the pre-flight gate (root `CLAUDE.md` § Pre-flight gate,
+"New I/O kind → amend §0 first") blocks code that introduces one without
+§0 backing. Hexagonal layer
+separation is a structural invariant (fails loud at import; see
+`tests/CLAUDE.md`) so data types stay free of I/O and the orchestrator can be
+reused without dragging a backend client along. A **concept-first re-hierarchy** (slicing this
 layer cut into per-concept vertical packages) was investigated and
 **rejected** (2026-06): the recurring multi-directory fix signature is
 the inherent footprint of changing the central state spine
@@ -351,19 +354,20 @@ mismatch. One per-cycle `CycleEventLog.append` is the sole persistence
 ingress; resume + fork ride dedicated checkpoint records on the
 ledger. Display and observability subscribe to the ledger as
 read-only views — never write campaign artifacts of their own.
-**Single-writer invariant on the ledger** (a structural invariant that
-fails loud — an out-of-allowlist write shows up in the file tree; no standing
-test, see `tests/CLAUDE.md`): any module
-besides the ledger writing to `events.jsonl`, or any projection
-writing outside its declared allowlist, is drift. **The MeasurementArchive (the
-other persistence layer, see "Measurement archive" below) does not
-have this invariant today** — there are 13 raw call sites;
-m10-cleanup §3.7 adds the facade that brings the archive under the
-same single-writer discipline. Together, the §0 single-writer pin
-(here) + §3.7 facade + §3.8 reconstructable-state invariant capture
-event-sourcing's reasoning-clarity gain without the cost of
-replay-on-every-read; see m10-cleanup "Rejected approaches" for why
-we don't go further.
+**Single-writer invariant on the ledger** (fails loud — an out-of-allowlist
+write shows up in the file tree; see `tests/CLAUDE.md`): any module
+besides the ledger writing to the per-cycle `.runtime/ledger.jsonl`, or any
+projection writing outside its declared allowlist, is drift. The
+MeasurementArchive (the other persistence layer, see "Measurement archive"
+below) is under the same discipline via the **`store/archive_views.py`
+facade** — the free-function read/write surface (`measurements_for_sample`,
+`reusable_results`, `record_measurement_run`, `reindex_measurements`, …)
+every consumer goes through. Two raw call sites remain, both narrow
+dataset-lifecycle operations that predate the facade
+(`datasets/dataset_replace.py::restamp_dataset`,
+`output/writers.py::dataset_snapshot_path`); a third consumer is drift.
+Together the two pins capture event-sourcing's reasoning-clarity gain
+without paying replay-on-every-read.
 
 **Everything material lives on disk, in human-readable form.** The
 project file tree IS the operator's primary interface — `campaign.json`,
@@ -384,7 +388,8 @@ carrying now-state; (2) **Settled** — the rest of the cycle-dir top level
 (`index.json` = lean per-round digest + topology, `rounds/round_NNNN.json`
 = deep audit, `log.md` / `review.md` / `hard_samples.json`), written at
 boundaries and stable to read. Everything under **`.runtime/`** (the
-`events.jsonl` ledger SoT, projection caches, PoBB streams, control flags)
+`ledger.jsonl` ledger SoT — `events.jsonl` is the *workspace*-scoped
+sibling only — projection caches, PoBB streams, control flags)
 is the third, **internal** cluster — machinery, not a read-out. The
 live/settled divide is **cadence, not audience**: both the webapp *and* a
 human read across both clusters — the webapp polls `dashboard.json` live
@@ -437,16 +442,15 @@ streams, without descending into per-cycle round detail.
 `archive/` stays a peer of `campaigns/` — dataset-scoped,
 cross-campaign by design (see "Measurement archive" below).
 
-**Entry-point scope rules.** The primary notebook
-(`notebooks/optimization_campaign.ipynb`) is a thin UI shell — every
+**Entry-point scope rules.** A notebook is a thin UI shell — every
 non-display code cell calls into `application/` (no orchestration
 logic, no scoring, no LLM calls authored in the notebook).
 Convention (not CI-enforced — the structural scan was cut; see
 `tests/CLAUDE.md`): notebook cells import from `application/` +
-`presentation/views/` only. Additional notebooks
-(currently `notebooks/bbeh_potter.ipynb`) are **work-in-progress** —
-kept but not part of the documented entry-point surface. Mark them
-WIP in cell-1 markdown so a reader knows status at a glance. The
+`presentation/views/` only. The one surviving notebook
+(`notebooks/bbeh_potter.ipynb`) is **work-in-progress** — kept but not
+part of the documented entry-point surface. Mark it WIP in cell-1
+markdown so a reader knows status at a glance. The
 webapp (`webapp/`) ships — served read-only at the root, chat as the
 first tab — rendering views over `dashboard.json` plus a file-tree
 view; a panel that reads a disk file we don't already commit to
@@ -504,8 +508,8 @@ siloed into a campaign dir. **Cross-cycle, cross-session,
 cross-tenant.** The on-disk format is human-readable
 (operator can `cat` a row); programmatic reads go through two
 retrieval views (`measurements_for_sample()`,
-`measurements_for_config(predicate)`) — both behind the m10-cleanup
-§3.7 facade once it lands. Cache reuse (skip backend calls when a
+`measurements_for_config(predicate)`) — both behind the
+`store/archive_views.py` facade. Cache reuse (skip backend calls when a
 matching content_hash already has measurements) and cross-run LLM
 digests are **derived views over this archive** — same
 single-source-of-truth pattern as ledger → derived views, but at
@@ -550,13 +554,12 @@ the PR description.
 - **`pipeline.json` contract** for connector self-description — the
   backend's API surface to PromptPotter. Don't simplify "because
   TermNorm is the only consumer today."
-- **Hexagonal layer separation** (fails loud at import — no standing test;
-  see `tests/CLAUDE.md`) — without the discipline, the three entry points drift.
+- **Hexagonal layer separation** (fails loud at import; see `tests/CLAUDE.md`)
+  — without the discipline, the three entry points drift.
 - **Resume + fork-on-divergence mechanism** — load-bearing for
-  `--from N` and `--fork-on-divergence`. Today's symbols
-  (`Decision`/`ResumeCheckpointKind`) and the post-cleanup symbols
-  (`ResumeCheckpoint*`) appear in §0's vocabulary table; mechanism
-  stays through the rename.
+  `--from N` and `--fork-on-divergence`. The symbols are
+  `ResumeCheckpointRecord` / `ResumeCheckpointKind` (`domain/run_records.py`);
+  vocabulary lives in `docs/glossary.md`.
 - **Campaign as a first-class entity** —
   `campaign.json` manifest, the `campaigns/{campaign_id}/` directory
   with `log.md` + `hard_samples.json` at its root and
@@ -597,9 +600,9 @@ the PR description.
   discoverability scaffolding: the menu L2 reads to write `l1_layout`,
   the param menu L1 reads, and the reusable prompt-field blocks L1
   recombines (the one channel handing L1 prompt MATERIAL rather than
-  statistics about material), the surface the §6 pre-flight gate's
-  question 1 leans on. Don't drop "because nobody calls it from
-  production code today."
+  statistics about material), the surface the pre-flight gate's
+  reuse-before-adding rule leans on. Don't drop "because nobody calls it
+  from production code today."
 - **The `new` verb + `/potter-run` onboarding flow** — operator's
   first-run path; cruft-audit yes, mechanism delete no.
 - **`new`-verb decomposition into `task_context`** — the one-time
@@ -658,8 +661,8 @@ the PR description.
   actual cross-cycle database. Per §0 it's a separate persistence
   layer from the ledger; never collapse the two.
 - **Per-dataset configs in `datasets/{name}/`** (`pipeline.json`,
-  `campaign.json`, `prompts/{node}.json`, `scan_variants.json`,
-  `dataset.md`, `task_description.md`) — the operator's primary
+  `campaign.json`, `prompts/{node}.json`, `recon_variants.json`,
+  `task_context.json`, `dataset.md`, `task_description.md`) — the operator's primary
   interface for adding a new dataset. Configs are the source of truth —
   no parallel default ladders elsewhere.
   A cleanup PR cannot move a default into PromptPotter code; if a
@@ -726,11 +729,9 @@ the PR description.
   invalidates the claim.
 
 §0.5 is binary: surface is either load-bearing (named above, can't
-be cut) or it isn't. **Items needing a load-bearing-or-drop
-decision** (`refresh_tenant_leaderboards()`, `/datasets/{name}/preview`)
-live in m10-cleanup §1's audit deliverables, not in
-this list. §1 either promotes them into the load-bearing list above
-(in a follow-up PR) or §4 drops them. (The MLflow + Langfuse sinks are
+be cut) or it isn't. Items needing a load-bearing-or-drop decision are
+tracked in `docs/specs/code-debt-cleanup.md`, not in this list.
+(The MLflow + Langfuse sinks are
 **resolved as kept** — the observability-nexus drop-in is a core
 capability, not an audit candidate; see the Tracing paragraph above.)
 

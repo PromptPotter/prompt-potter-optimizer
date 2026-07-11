@@ -65,7 +65,7 @@ expensive mistake is never "couldn't find it" — it is "found the wrong one."
   pipeline_params variants every round. Lives at
   `application/optimization/l1/` (`generate.py`, `score/`,
   `critique.py`, `execute.py`, `resume.py`, `population.py`,
-  `stats.py`). Contract: `promptpotter/CLAUDE.md`.
+  `stats.py`). Contract: `application/optimization/CLAUDE.md`.
 
 - **L2** — `l2_context`: the task-framing refinement layer. Fires on
   L1 stall. Writes `OptSearchPoint.task_context`. Cannot mutate
@@ -131,25 +131,16 @@ The persisted world is a four-entity containment hierarchy
   version-and-repoint contract, not an in-place overwrite (the old data
   is preserved under `{slug}-vN`; orchestration in
   `application/datasets/dataset_replace.py`).
-- **Origin** — the **complete specification the potter loop starts from**:
-  the prompt fields, the per-node pipeline config, the pipeline's
-  **required inputs** (query/target column map, answer space, and any
-  node-type dependency such as a `candidate_source` node's candidate
-  library), and the dataset binding — the *starting program* the optimizer
-  evolves from. **Per-pipeline** and **independent of measurement**: it
-  exists fully formed *before* anything is scored. Resolved by
-  `resolve_origin_opt_search_point` (`application/origin.py`). Reserve this
-  word for that meaning; the data a campaign starts from is a **Dataset**,
-  not an "origin" — historical UI/spec copy that called the dataset an
-  "Origin" was renamed to **Dataset**.
-  - **origin's round-0 score** (`origin_accuracy` / round 0 / **C0**) — the
-    **measurement** produced by scoring the origin, emitted as round 0. It
-    is *downstream of* the origin, **not part of its definition**; say
-    "the origin's round-0 score", never equate it with the origin itself.
-    Scoring step: `establish_campaign_origin` → `emit_origin_round`. Persisted
-    solely as `rounds[0]` — no separate stored field; readers derive it via
-    `origin_accuracy_of` (`campaign_store/store.py`), so a gate rescore that
-    re-emits round 0 can never leave a stale copy behind.
+- **Origin** — the **complete specification the potter loop starts from**
+  (prompt fields + per-node pipeline config + the pipeline's required
+  inputs + dataset binding), fully formed **independent of measurement**.
+  Resolved by `resolve_origin_opt_search_point` (`application/origin.py`);
+  full definition + the two gates: `docs/architecture.md` §0.5. The data a
+  campaign starts from is a **Dataset**, never an "origin".
+  - **origin's round-0 score** (`origin_accuracy` / round 0 / **C0**) —
+    the origin's *measurement*, downstream of its definition, never
+    equated with it. Persisted solely as `rounds[0]`; readers derive it
+    via `origin_accuracy_of` (`campaign_store/store.py`).
 - **Campaign** — one declared optimization effort: a dataset, a
   pipeline origin, context text, and the optimizer meta-prompts it runs
   under. A first-class entity holding one session root + its fork/diag/
@@ -159,14 +150,11 @@ The persisted world is a four-entity containment hierarchy
   a distinct campaign. The declaration (target hash +
   optimizer-prompt hash) is recorded as properties on `campaign.json`
   for drift detection on resume, not as the id. `domain/campaign.py`.
-- **Session** — one run of `new` on a campaign. A campaign holds one
-  session — the `new` invocation that minted it. `resume` extends that
-  session. Identity is the `session_id` (`s_xxxx`). Each session is a
-  tree: a root cycle (bare `cycle_<target_hash>`) plus its fork
-  descendants. `application/bootstrap/session.py`. Pre-existing on-disk shape
-  (multi-session forest with `_s{N}` suffixes): see
-  `promptpotter/infrastructure/store/paths.py`.
-- **Unit** — one continuous-parameter run inside a session. A session
+- **Session** — **not a persisted tier** (`docs/architecture.md` §0 "A
+  campaign has one root cycle"). The surviving `Session`
+  (`application/bootstrap/session.py`) is the in-process **wiring object**;
+  `active_session.json` is the operator's pointer to the live campaign + cycle.
+- **Unit** — one continuous-parameter run inside a campaign. A campaign
   starts with one unit; `resume` extends the current unit; each fork
   (human / L3 / divergence) branches a new unit. The operator-facing
   name for a **Cycle** — the webapp + docs say "unit", the on-disk / API
@@ -192,38 +180,27 @@ The persisted world is a four-entity containment hierarchy
   session**. Three kinds: divergence (operator-chosen), diagnostic,
   and sweep (sweep-toolkit A/B candidates) — all flat under the
   campaign's `cycles/`.
-- **ForkSpec** — the single typed fork record (`domain/run_records.py`),
-  the one writer behind three projections: the parent's `FORK_CUT`
-  ledger entry (SoT), the fork's `index.json::fork` (lineage read), and —
-  when steered — its `CycleSeedRecord` on the ledger (bootstrap read). Carries
-  `{trigger, reason, issued_by, from_round, from_candidate_id, seed}`.
-  Absorbs the old free-dict `index.json::fork` + ledger `ForkPayload`.
+- **ForkSpec** — the single typed fork record (`domain/run_records.py`):
+  one writer behind the parent's `FORK_CUT` ledger entry (SoT), the fork's
+  `index.json::fork` (lineage read), and — when steered — its
+  `CycleSeedRecord` (bootstrap read).
 - **CycleSeed** — the chosen-searchpoint seed a non-root cycle begins from
-  (`domain/run_records.py`):
-  `{origin_prompt_fields, pipeline_overlay, config_overrides, origin_source}`.
-  Carried by every operator-steered fork's `ForkSpec` (the wire
-  `OperatorForkOverride` command payload deserializes into it) AND written by the
-  mint seam for campaign-from-origin. The seed prompt becomes the cycle's origin
-  `OptSearchPoint` (`resolve_origin_opt_search_point`, lineage stamped from
-  `origin_source` — `fork_seed` or `campaign_origin`) and `pipeline_overlay`
-  layers onto the dataset overlay (seed > dataset) for that cycle only. The
-  dataset file stays immutable. Non-operator triggers (sweep / diag / rebase)
-  carry no seed.
+  (`domain/run_records.py`); the seed prompt becomes the cycle's origin
+  `OptSearchPoint` and its `pipeline_overlay` layers onto the dataset
+  overlay for that cycle only. Merge contract:
+  `promptpotter/application/CLAUDE.md` § Cycle-seed overlay. Non-operator
+  triggers (sweep / diag / rebase) carry no seed.
 - **operator_steered** — the `ForkTrigger` for an operator-initiated fork:
-  the operator picks a searchpoint, edits its prompt / node config / run
-  limits, and forks from it (a `CycleSeed` is required). Restarts round
-  numbering at 1. Replaced the free-string `operator_hitl`. Queryable in the
-  lineage tree (`lineage.py`).
-- **Cycle-seed I/O** — `CampaignStore.write_cycle_seed`/`read_cycle_seed`
-  (`store/campaign_store/`) append/scan the **read-once** cycle seed as a
-  `CycleSeedRecord` on the cycle's ledger (a steered fork's / campaign-origin's
-  `CycleSeed`), distinct from `.runtime/{skip,pause,spend_cap}` which are
-  **polled** per round. The seed is a durable ledger fact (recovered by replay),
-  read at the single runner seam (`runner/entry.py::run_optimization`) keyed by
-  the fork `cycle_id`; the pure scan (`ledger_scan.py`) fires no subscribers.
+  pick a searchpoint, edit its prompt / node config / run limits, fork
+  from it (a `CycleSeed` is required). Restarts round numbering at 1.
+  Queryable in the lineage tree (`lineage.py`).
+- **Cycle-seed I/O** — `CampaignStore.write_cycle_seed`/`read_cycle_seed`:
+  the **read-once** `CycleSeedRecord` on the cycle's ledger, distinct from
+  the **polled** `.runtime/{skip,pause,spend_cap}` flags; read at the
+  single runner seam (`runner/entry.py::run_optimization`).
 - **Sibling kind** — `root | fork | diag | sweep`. Recorded in the
   cycle's `index.json` metadata, not derived from a directory path.
-  See `infrastructure/store/paths.py::sibling_kind`.
+  See `infrastructure/store/layout.py::sibling_kind`.
 - **CycleDir** — the domain newtype for a cycle's own dir
   (`campaigns/{campaign_id}/cycles/{cycle_id}`). Both the per-cycle
   `dashboard.json` and the audit tree bind here — every cycle (root, fork,
@@ -270,8 +247,10 @@ The persisted world is a four-entity containment hierarchy
 ## Elimination + ranking
 
 - **PoBB** — Posterior of Being Best. Bayesian round-level elimination
-  rule (ε=0.05, n_min=4). Joint Normal-CLT posterior + Monte Carlo
-  argmax. `application/optimization/pobb/elimination/checks.py`.
+  rule (knobs `optimization.pobb_epsilon` / `elimination_n_min`): paired
+  sample-keyed priors, joint 1PL Rasch fit, closed-form `p_best` —
+  [`concepts/paired-sample-pobb.md`](concepts/paired-sample-pobb.md).
+  `application/optimization/pobb/elimination/checks.py`.
 - **Posterior width** — `1 - max(p_best)`. Operator-visible measure of
   how confidently the leader can be locked in. Surfaced on
   `dashboard.json::current_round.pobb`.
@@ -329,7 +308,6 @@ The persisted world is a four-entity containment hierarchy
   win-opportunity samples first (asc δ), a seed-HIT regression probe
   every 4th slot (desc δ), unknowns riding the miss stratum. Pure
   function of (seed grades, δ ruler, ids) — resume re-derives it.
-  Replaced the online per-candidate CAT re-rank 2026-07-04.
   `application/intelligence/adaptive_queue_mechanism.py`.
 - **Paired-margin gate** — the PoBB futility gate: kill a candidate
   when `P(net ≥ margin wins vs the seed) < ε`, wins/losses counted on
@@ -340,9 +318,8 @@ The persisted world is a four-entity containment hierarchy
   `application/optimization/pobb/elimination/checks.py::_margin_stats`.
 - **pick-value** — the between-round CAT acquisition objective:
   `decision_information_gain + delta_learning_gain` (in nats). Drives
-  `select_round_subset` ranking and the `pick_score` snapshot. (The
-  earlier blended `+ explore_weight · model_information_gain` term was
-  dropped 2026-05; see [`specs/verdict-resolution.md`](specs/verdict-resolution.md).)
+  `select_round_subset` ranking and the `pick_score` snapshot.
+  Contract: [`specs/verdict-resolution.md`](specs/verdict-resolution.md).
 - **Decision information gain** — the pick-value objective: the
   mutual information between the next outcome and
   the keep/abort verdict `θ_c > θ_s` against the seed. The
@@ -406,8 +383,10 @@ The persisted world is a four-entity containment hierarchy
   evolves: `datasets/{name}/prompts/{node}.json`. The **optimizer's** meta-prompts
   (install-global): `datasets/_optimizer/pipeline.json::resolved_prompts` — keyed
   `{node}/{n}`, so check-in's second mode lives at `resolved_prompts.checkin/2`. The
-  **outer** L4 meta-prompts: `datasets/_optimizer_meta/`. A per-node **overlay**
-  (`pipeline.json::nodes.{name}.config.prompt`) is a fourth, and is a tunable, not a home.
+  **outer** L4 meta-prompts: `datasets/_optimizer_meta/prompts.json` (prompt fields only,
+  deliberately no `pipeline.json`; selected per-cycle by `OptimizationConfig.optimizer_set`).
+  A per-node **overlay** (`pipeline.json::nodes.{name}.config.prompt`) is a fourth, and is
+  a tunable, not a home.
 - **L4** — PromptPotter optimizing its own meta-prompts: an outer cycle whose backend
   is an inner cycle. **Recursion, not a fourth layer** — the ladder is closed at
   L1/L2/L3 and there is no `l4_*.py`. Lives at the connector seam
@@ -420,8 +399,7 @@ The persisted world is a four-entity containment hierarchy
   levers are names, order, `description=`. `docs/concepts/structured-output.md`.
 - **Shape-determinism** — a schema guarantees a parseable object with the fields
   you named, never the content in them. `docs/concepts/structured-output.md`.
-- **checkin** — the fifth optimizer node (**renamed from `restructure`**,
-  commit `269e9b87` — that old name is gone from the code). One node, two
+- **checkin** — the fifth optimizer node. One node, two
   modes sharing `CheckinOutput`
   (`application/optimization/dispatch/schemas.py`): **task decomposition**
   (raw `task_description` → the 8-field prompt; CLI `new`,

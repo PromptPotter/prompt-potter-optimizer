@@ -12,8 +12,8 @@ Eight router objects mounted at ``/api/v1`` from ``main.py``:
    ledger reads + filtered views (decisions, forks, files).
 
 3. **Active-session + global reads** (``active_router``) — active session
-   (``/sessions/active`` + ``/sessions/active/live-state``), global cycle
-   list (``/cycles``), and the optimizer-pipeline / evaluators registry
+   (``/sessions/active``), global cycle list (``/cycles``),
+   ``/machine-status``, and the optimizer-pipeline / evaluators registry
    reads. Per-route tags since it spans several resources.
 
 4. **Datasets** (``datasets_router``) — campaign-sourced dataset preview

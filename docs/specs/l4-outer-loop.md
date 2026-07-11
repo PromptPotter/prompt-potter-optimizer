@@ -2,6 +2,20 @@
 
 > The real L4 recursion runs end-to-end (`new promptpotter-self` mints + runs real inner campaigns). Slices 3 + 4 + the distributable config remain; this doc is the **living finish-line plan** for them (see § Finish line below).
 >
+> ## ⚠️ EVERY MEASUREMENT BELOW IS VOID — DO NOT CITE ONE
+>
+> On **2026-07-10** all 169 dev campaigns and the measurement cache were deleted on purpose.
+> Every origin score, noise band, CI, per-inner cost, wall-clock and meta-campaign winner in
+> this document predates that reset and is **void**. Re-measure before acting on any of them.
+>
+> The `justlogic` numbers are void **twice over**: `_step_llm_only` dropped `seed`, so justlogic
+> was **never seed-deterministic** — its ≈0.44 origin and the noise band around it were never
+> reproducible measurements at all. (Fixed since; proven at temp 1.0.)
+>
+> The *reasoning* below is kept because it is why the knobs are what they are. The *numbers* are
+> kept only so a re-measurement has something to compare against. They are marked ~~struck~~ or
+> **[VOID]** where they appear.
+>
 > **Scope:** CLI / headless only — no webapp surface yet (that's a later lane). The outer loop is a normal `python -m promptpotter new promptpotter-self` invocation.
 >
 > **Prerequisite:** [`fitness-comparability.md`](fitness-comparability.md) — the outer fitness reads inner-campaign improvement, which must be subset-invariant (θ-based).
@@ -10,12 +24,14 @@
 
 **The goal is no longer "make L4 run" (done) — it is "ship a `promptpotter-self` an operator can `new` and watch the optimizer improve its OWN meta-prompts, at bounded cost, with spend visible."** Every remaining slice is judged against that. The AI agent owns L4 end-to-end and drives it autonomously (commit small green arcs); escalate to the operator only for genuine actions — real spend approval on a multi-campaign run, a provider/account change, or a compaction handoff. Definition of done:
 
-1. **An inner benchmark with real headroom.** gsm8k is RETIRED as the inner benchmark — its origin already aces the target (3/3 → 1.0 ≥ 0.80), so the inner loop has nothing to climb and every outer candidate scores the identical "already-at-target" composite. The inner benchmark MUST have **origin clearly below target** (room for the inner loop to improve, so the proxies vary across outer candidates). **Chosen: `justlogic` at high depth** (origin ≈ 0.44 per the meta-campaign signal — clear headroom toward 0.80, a reasoning task where meta-prompt quality plausibly moves the needle). `inner_tasks.json` is rewritten to point at it.
+1. **An inner benchmark with real headroom.** gsm8k is RETIRED as the inner benchmark — its origin already aces the target, so the inner loop has nothing to climb and every outer candidate scores the identical "already-at-target" composite. The inner benchmark MUST have **origin clearly below target** (room for the inner loop to improve, so the proxies vary across outer candidates). **Chosen: `justlogic` at high depth** — a reasoning task where meta-prompt quality plausibly moves the needle. `inner_tasks.json` points at it (`justlogic-d67`, target 0.60).
+
+   > **[VOID] The headroom is UNMEASURED.** The ~~origin ≈ 0.44~~ that justified this choice came from the pre-reset meta-campaign AND from a run where justlogic was not seed-deterministic. **Re-measure the origin before trusting that headroom exists** — this is finish-line item 1's actual open work, and `inner_tasks.json`'s own description still quotes the void number. `noise-floor --k 3` is the cheap way to re-establish it.
 2. **Outer mutations actually reach the inner meta-prompts (slice 3).** With the standard `_optimizer/` outer prompts, the outer L1 emits FLAT single-prompt field edits, which do **not** map to per-node `meta_prompt_overrides` — so candidates run identical inner cycles and the loop optimizes noise. Slice 3 (the specialized outer prompt set emitting per-node `PromptTemplate` edits) is therefore **REQUIRED for any signal**, not optional polish. This is the gating slice.
 3. **Spend is visible (slice 4 rollup).** Inner LLM cost currently lands in the sandbox ledger, invisible to the outer dashboard. For a distributable product "spend is the headline" — the inner-campaign cost MUST roll up to the outer cycle's spend. Build this with slice 4's fitness work.
 4. **A bounded, cheap default config.** The committed `inner_tasks.json` + `campaign.json` must let `new promptpotter-self` complete at a cost an evaluator will tolerate. Cost is **geometric** (one outer round = n_variants × n_inner_tasks inner campaigns, each a full inner campaign) AND each inner optimizer call is slow (~176 s on openrouter/gpt-oss-120b). So: few inner tasks, few samples, few inner rounds, low outer `max_rounds`/`n_variants` by default — and consider pinning the inner+outer optimizer to a faster provider (groq) in the shipped config. Document the cost shape for the operator.
 5. **A run that demonstrably improves.** The validation gate (`proxy_lift_corr ≥ 0.6` over ≥4 paired branches) PLUS at least one real `new promptpotter-self` whose outer best beats its outer origin — the proof the cheap proxy predicts real lift and the loop climbs.
-6. **The loop owns its own information flow (§6 — REQUIRED, not polish).** A distributable `promptpotter-self` must let the optimizer improve *how its meta-prompts are built*, not only their prose. Which signals each inner node sees (the per-node injection set) is the higher-value, dataset-agnostic axis — but today it is hand-tuned in `default_l1_layout()` + the `{{token}}` template strings and frozen. While that holds, the shipped config's information routing is *our* one-time guess and "improve its own meta-prompts" is only half-true (prose yes, structure no). §6 makes the per-node injection set a **searched axis with a minimal mandatory guard-rail floor**, so the loop converges to the high-value signals itself. Without it the distributable claim is incomplete — this is a definition-of-done item, sequenced alongside 3–5, not a deferrable extra.
+6. **The loop owns its own information flow (§6). [MECHANISM BUILT — Arcs 1+2+3. Open: the validating data run.]** A distributable `promptpotter-self` must let the optimizer improve *how its meta-prompts are built*, not only their prose. Which signals each inner node sees (the per-node injection set) is the higher-value, dataset-agnostic axis. It **is now a searched axis** with a mandatory guard-rail floor: every optimizer node owns a `NodeLayoutSpec` in `NODE_LAYOUTS` (`domain/l1_layout.py`), and the L4 layout edit is wired for the three `editor == "l4"` nodes. What remains is **validation, not construction** — a full-signal run showing outer candidates that differ by inner-node *layout* (not only prose), with the winner's layout captured. Sequenced alongside 3–5 on the same run.
 
 ## Running & supervising a live `promptpotter-self`
 
@@ -62,294 +78,194 @@ any optimizer call > 2 min; a headline Δ that disagrees with `matched_origin_*`
 
 - **Absolute outer numbers NEVER travel across runs.** Only a candidate's delta against ITS OWN
   run's origin is meaningful (same discipline as "verdicts compare lift-over-reference per model").
-- Within a run, comparisons are **paired by seed** (each candidate runs the same 8
-  `inner_dataset_seed`-pinned banks) — draw difficulty cancels; trust the paired PoBB/θ reads.
+- Within a run, comparisons are **paired by seed** (each candidate runs the same
+  `inner_dataset_seed`-pinned banks, per `datasets/promptpotter-self/inner_tasks.json`) — draw
+  difficulty cancels; trust the paired PoBB/θ reads.
 - The `inner_origin` identity fingerprint partitions runs into same-origin families; an
   origin edit = a NEW family. Never pool or compare across families.
-- Residual cross-run noise = inner-process stochasticity (inner optimizer LLM at temp 0.7,
-  adaptive subset picks). Quantify it before trusting cross-run deltas — see the noise-floor
-  item in the next-run settings below.
+- Residual cross-run noise = inner-process stochasticity (inner optimizer sampling, adaptive
+  subset picks). Quantify it before trusting cross-run deltas (`noise-floor --k N`).
 
-### Next `promptpotter-self` run — settings queue (LANDED 2026-07-03, pre-mint batch)
+### The shipped ladder — read it off the files, not off this prose
 
-Queued from live supervision 2026-07-02; landed as the 2026-07-03 screening-geometry batch
-(the rule stands: none of these may land mid-run — JSON baselines are read per inner mint, so a
-mid-run edit splits the run into two fingerprint families). Alongside the queue, the geometry
-itself was rebalanced toward outer breadth: outer `max_rounds` 1→2 + `n_variants` 2→3 (+probe),
-`inner_n_variants` 2, let the graded ε-gate cut losers early. Inner `max_inner_rounds` stays **2**
-— a 2→1 cut was tried and reverted 2026-07-03: at 1 round the inner `levels` trajectory is
-length-1, so `after_N_rounds_delta` equals `first_round_delta` byte-for-byte and the formula's
-two 0.5 delta terms silently double-count one number; 2 rounds keep the two live deltas independent
-(and the outer spend cap is sized to the ~2× inner cost). `rounds_to_N` and the per-seed cost
-multiplier were both **retired from the scoring formula 2026-07-04** (dead + anti-signal — see the
-composite-fitness section below); `rounds_to_N` is still computed for the inner narrative.
+**The config IS the source of truth** (`datasets/promptpotter-self/inner_tasks.json` +
+`campaign.json`) — read every knob value there, never off this doc. The rules that stand:
 
-1. ~~`sample_transcripts` char_cap 6000 → 7000~~ **DONE** (`panels.py`).
-2. ~~Meta `l1_generate` answer_format nudge~~ **DONE** — `variant_name`/`changes_description`
-   marked REQUIRED-non-empty in `_optimizer_meta/prompts.json`.
-3. ~~Off-enum `evidence_grounding.field`~~ **DONE** — enum line tightened ("EXACTLY one of …;
-   any other value, e.g. 'failure', is invalid").
-4. ~~Noise floor NO-OP candidate~~ **REVERTED 2026-07-05** — the in-loop `noop_probe` arm
-   backfired: at n=1 a same-config inner swing read as a real win (C1.3), and it contaminated
-   `detect_invariants`/L1 injection with a probe-only exemption. Deleted end-to-end (no config
-   is ever re-measured mid-run; an origin-identical candidate is now illegal → `no_op_variant` →
-   L2 heals). The noise-floor *capability* survives as an on-demand debug diagnostic
-   (`python -m promptpotter noise-floor --k N`, re-scores the cached origin `--k` times with
-   `force_fresh`) — Claude-Code-invoked, never wired into the loop. The actual variance fix is
-   (a) CRN — pin a per-cell inner LLM seed shared by origin + every variant so common noise
-   cancels in the paired diff (`runner/inner_recursion.py`), and (b) an always-on composite CI
-   per candidate (`mean_ci`) so no point estimate stands alone. The per-round verdict
-   (`domain/outer_verdict.py::compute_outer_verdict`) now pairs the round's variant against the
-   **cached round-0 origin**, not a re-measured probe.
-5. Inner-optimizer determinism clamp — **TAKEN 2026-07-05 (identity-joined).**
-   `inner_tasks.json::inner_benchmark_config.inner_optimizer_temperature` (pp-self = 0.0) pins the
-   inner OPTIMIZER's sampling temperature for L4 inner campaigns via a per-run ContextVar
-   (`set_optimizer_config_overrides`, set inside the inner asyncio task; clamped LAST in `llm_call`
-   so it beats `l1_generate`'s per-call creativity temp — the dominant same-config swing source),
-   the outer optimizer untouched. The deferral's blocker is closed: the knob now JOINS the
-   inner-baseline measurement-identity fingerprint (`connectors/promptpotter.py::_identity_config`
-   folds the whole `inner_benchmark_config`), so changing it invalidates stale outer-sample rows
-   instead of reusing them. Complements the CRN target seed (item 4) — CRN pairs the inner
-   TARGET's sampling; this pins the inner OPTIMIZER's. Validate on the next run: the cached-origin
-   paired swing collapses toward the provider floor while the inner best-beats-origin rate holds.
-6. Seeds 8 → 12 — **NOT taken this run**: the same spend went to outer breadth instead (the
-   geometry above). Revisit if the floor says candidate deltas are real but crowning starves.
-7. ~~`plan` cap 800 vs 2.8k plans~~ **DONE, both sides** — cap 800→2000 (`layer_state.py`) AND
-   `l3_plan` answer_format states the 2000-char budget so the writer targets the cap.
-8. ~~Meta `l1_critique` steer vocabulary~~ **DONE** — `priority_fix`/`suggested_axes` must name
-   `<inner_node>.<field>` verbatim from the catalogue; invented names called out as invalid.
-9. (New, observed live) L2-authored `task_context` fields truncated at the 300-char render cap —
-   **DONE** upstream: the base `l2_context` answer_format now states the per-field ≤300c budget.
-10. **Successive-halving replication — OPT-IN, dev-stage (2026-07-05).** `OptimizationConfig.replicate_survivors:
-   int = 0` (default off = the distributable default). When `>0`, after a round's scoring pass each
-   SURVIVING candidate (reached the coverage floor, not PoBB-eliminated) is re-measured
-   `replicate_survivors` more times with `force_fresh` (independent inner draws, cache bypassed;
-   `l1/score/loop.py::replicate_survivors_pass`, wired in `winner.py::l1_score` before the estimators
-   run). The replicate rows are APPENDED to `all_candidate_results`; the estimators average per cell
-   (`paired_fitness` / `outer_verdict.cell_fitness`) and the Rasch θ fit consumes them natively
-   (repeated `sample_id` → more item responses → tighter θ = inverse-variance pooling), while the 2PL
-   ruler's per-item discrimination down-weights flat cells — so the replicates make BOTH the pooling
-   and the information-weighting estimable without new estimator code. **Why it's a complement to CRN,
-   not a substitute:** CRN (item 4a) pins a shared inner seed so *common-input* noise cancels in the
-   paired diff — but the DOMINANT discovered-level noise rides the *diverging* inner-prompt path (each
-   outer meta-prompt makes inner-L1 generate different inner prompts, so the search noise is not common
-   and a shared seed can't cancel it). Replication averages that idiosyncratic single-run draw out
-   directly (the empirically-observed `C1.2 / seed-3` collapse 0.427→0.082 was one unlucky inner
-   campaign). Only survivors pay the k-times spend (losers already PoBB-dropped) — this IS the halving's
-   "extra lives." **It is a DEV-STAGE tool: keep it 0 in the distributable** — an extra measurement pass
-   adds cost and cognitive surface, and the shipped optimizer should stay simple; turn it on only to
-   tighten a development read. **The ORIGIN reference is replicated too** (`k` extra `force_fresh`
-   `rescore_origin` draws): origin is the shared comparison anchor, so its single-draw noise was the
-   correlated term flooding every candidate's diff (the ~0.808 the variance read found). Its replicate
-   draws thread ONLY into the decision estimators (`origin_election_results` → `elect_round_winner` /
-   `paired_fitness` / the `delta_ok` gate), leaving the base single draw as the matched-origin DISPLAY
-   floor so its cell count stays honest. A replicated candidate's displayed composite + accuracy are
-   recomputed over ALL its rows (`winner.py`), so the shown point matches what the θ election read.
-   Coverage counts DISTINCT cells (`_distinct_valid_cells`), so replicates never falsely satisfy the
-   floor. Probe rounds keep their own re-scope and are not replicated.
+- **No knob changes mid-run** — the JSON baselines are read per inner mint, so a mid-run edit
+  splits the run into two fingerprint families.
+- **`max_inner_rounds` ≥ 2** — at 1 the inner `levels` trajectory is length-1, so
+  `after_N_rounds_delta` equals `first_round_delta` byte-for-byte and the formula's two delta
+  terms silently double-count one number.
+- **`elimination_n_min` is the panel-size floor** — keep the inner-task count at least one
+  above it, or crowning starves.
+- **`replicate_survivors` stays 0 in the distributable** (opt-in dev-stage successive-halving
+  replication on `OptimizationConfig`). It complements CRN, not substitutes: CRN (a per-cell
+  inner LLM seed shared by origin + every variant, `runner/inner_recursion.py`) cancels
+  *common-input* noise in the paired diff; replication averages out the idiosyncratic
+  single-run draw on the *diverging* inner-prompt path, replicating the ORIGIN reference too
+  (its extra draws thread only into the decision estimators, the base draw stays the display
+  floor). Coverage counts distinct cells, so replicates never falsely satisfy the floor.
+- `rounds_to_N` and the per-seed cost multiplier are retired from the scoring formula (no
+  candidate gradient — see §4's governing law); `rounds_to_N` is still computed for the inner
+  narrative.
 
-**Also verified 2026-07-03 (don't re-chase): candidate-arm inner round-0 is NOT re-measured.**
-Same-seed round-0 accuracies are byte-identical across the origin arm, every C1.1 arm, and the
-C1.2 arm of run `7113ca` — the tenant-global `measurements/` store under the shared
-`.inner/<cycle>/` sandbox + content-addressed reuse already replays the origin-arm's rows into
-candidate arms. A "share the origin across arms" fix is unnecessary by construction.
+Open knobs to validate on the next supervised run:
+
+- **Inner-optimizer determinism clamp** (`inner_benchmark_config.inner_optimizer_temperature`,
+  identity-joined via `connectors/promptpotter.py::_identity_config`): confirm the
+  cached-origin paired swing collapses toward the provider floor while the inner
+  best-beats-origin rate holds.
+- **Seed count** — widening the seed panel was deferred in favor of outer breadth; revisit if
+  the noise floor says candidate deltas are real but crowning starves.
+
+Standing invariants (verified — don't re-chase):
+
+- **No config is ever re-measured mid-run**; an origin-identical candidate is illegal
+  (`no_op_variant` → L2 heals). The noise-floor capability is the on-demand
+  `python -m promptpotter noise-floor --k N` diagnostic, never wired into the loop. The
+  per-round verdict (`domain/outer_verdict.py::compute_outer_verdict`) pairs the round's
+  variant against the **cached round-0 origin**.
+- **Candidate-arm inner round-0 is NOT re-measured** — the tenant-global `measurements/`
+  store under the shared `.inner/<cycle>/` sandbox + content-addressed reuse replays the
+  origin-arm's rows into candidate arms by construction; a "share the origin across arms"
+  fix is unnecessary.
 
 ## Live-run learnings — bake these in, don't re-discover
 
-- **Inner sandbox is a FLAT registry, not physical nesting.** Inner campaigns live at `<workspace>/.inner/<spawn_cycle_id>/` (sibling of `projects/`), NOT nested under the deep outer cycle dir. Physical nesting (`…/.runtime/inner/…/.runtime/inner/…`) blows past Windows' 260-char `MAX_PATH` **at depth 1** and is hopeless by L5; a flat registry named-by-but-not-under the spawning cycle stays shallow at every depth, so the re-entrancy invariant holds without the path trap. (`runner/inner_recursion.py::InnerSpawnContext`.) The earlier spec language "rooted at the spawning cycle's `.runtime/inner/`" is superseded by this.
-- **`in_process` connectors must NOT fetch a remote pipeline schema.** `init_services` now skips the backend `GET /pipeline` for `in_process` execution and uses the local `pipeline.json` alone — otherwise it hits `backend_url` (TermNorm) and merges an unrelated backend's nodes under the dataset overlay, corrupting the outer schema.
-- **L4 datasets carry their "samples" on disk, not as a CSV.** The outer "samples" ARE the inner tasks; `Connector.experiment_file` (`"inner_tasks.json"`) loads them through `extract_experiment` at bootstrap, so `new promptpotter-self` works through the normal dataset path.
-- **An inner failure must degrade, not propagate.** `run_inner_cycle` catches any inner exception and returns a zero-improvement proxy, so a bad outer candidate scores poorly instead of killing the outer cycle. (This is also what masked the MAX_PATH crash as "0.0 composites" — keep the fallback, but a *clean* origin-gate halt should return real proxies, not the exception sentinel; verify on the justlogic run.)
-- **Inner mints must NOT clobber the outer's active-pointer.** `save_active_pointer` defaults to `DEFAULT_PROJECTS_ROOT`; the two mint sites (`bootstrap/session.py`) didn't pass `projects_root`, so a sandboxed inner mint stamped the REAL tenant `active_session.json` pointing at a campaign that lives under `.inner/…` — which the webapp (reads the default root) can't find → **blank webapp**. Fix: thread `projects_root=session.store.projects_root` at both sites, so an inner cycle stamps its own sandbox workspace. Same latent class in `sweep_runner.py` + `fork_siblings.py` (not hit by the inner default loop; left).
-- **The meta prompts must be TIGHT — gpt-oss-120b returns empty content on a verbose meta-prompt.** The first `optimizer_set='meta'` run's outer `l1_generate` returned `raw_chars: 0` (`l1_provider_empty_response`): the long, multi-paragraph meta instruction made the model over-reason and blow its output budget before emitting content. Halving the meta-prompt length fixed it. Do NOT fix this by touching the global `_optimizer/` node config (shared with every inner cycle) — it's a prompt-length lever. Keep `datasets/_optimizer_meta/prompts.json` terse.
-- **The winner election was blind to a continuous outer proxy.** L4 winner capture (`best_sp` / `winner_pipeline_params` populated) needed two structural fixes, both required, neither sufficient alone: **(A)** the θ ability fit binarized outcomes (`Observation.hit = fitness ≥ 1.0`), but the outer proxy fitness (~0.09) never reaches 1.0 → every inner obs is all-miss → θ-lift ≡ 0 → `elect_round_winner` never crowns, **at any n**. Fix = `Observation.response: float` carrying graded per-sample `fitness` (the value `accuracy = mean fitness` and `paired_fitness` already read); the logistic MAP is cross-entropy `Σ y·log p + (1−y)·log(1−p)`, valid ∀ y∈[0,1] → **bit-identical for binary datasets**, non-degenerate for a continuous backend. **(B)** `prepare_scoring_context` (`origin.py`) gated origin scoring on a *shape guess* (`has_program` = non-empty prose OR a dict-valued pipeline_param). Both are empty for an L4 origin — prose injects via `_optimizer_meta`, and node configs are `{}` because its program IS the inner recursion — so round 0 ran zero inner cycles → no baseline. The guess was the wrong tool (it silently skipped, indistinguishable downstream from a crash). Fix = **delete the shape guess**; score the origin in any live run and let the round-0 origin gate catch a genuinely-unscoreable one LOUD (shipped; the origin-params-consolidation spec is done and removed — `git log` recovers it). **(C) is NOT a bug:** with A+B, n=2 tasks is under-probed — θ_se (~1.08) exceeds the point-lift, so the LCB election correctly refuses to crown on noise. Offline replay of the real round: 2 tasks → no winner, **6 → winner elected**, 8/12 → stable. So the outer panel needs **≥6 inner tasks** for a capture, matching the composite-fitness panel goal (§4). A's graded θ also upgrades TermNorm's reciprocal-rank election to use its rank gradient — an improvement to validate on a live TermNorm run.
-- **A zero-candidate round wastes the rest of its budget (not yet fixed).** The empty-content failure of line 27 isn't only an outer/meta hazard — it hits *inner* `l1_generate` too (justlogic inner round 2: `l1_provider_empty_response`, `raw_chars:0` after retry → `return []`). Nothing gates on an empty candidate list, so `execute_round` still runs `l1_critique` + `l2_context` (they key off the origin's non-empty results), burning tokens on a round that can propose nothing; the wasted generate call isn't itemized in spend, and the only signal is one `l1_zero_candidates` warning. A zero-candidate round should short-circuit (skip downstream nodes) and route to L2 as a stall, not proceed as a normal round. Distinct from the crowning-conservatism of the next bullet — this is lost spend, not a soft signal.
-- **A healthy L4 outer round looks DEAD to the webapp (FIXED — outer heartbeat).** The outer ledger used to go silent for the whole multi-minute inner campaign; the outer cycle now heartbeats its OWN ledger while awaiting each inner run, carrying live inner progress ("inner rX/Y · best Z%") — `dispatch/llm_call/heartbeat.py` + `inner_recursion.py` (commit `1a4f550d`). The chat maps the detailed heartbeat to one upserted progress chip.
-- **An L4 outer sample must stamp `terminated_at` = the LAST outer node (`l3_plan`), never a mid-chain one.** `terminated_at` is the archive's reuse contract ("outcome depends on config only up to here"); an inner campaign consumes the ENTIRE meta-config at once. The old `l1_critique` stamp let the prefix-trust replay serve the ORIGIN's rows to any candidate editing a later node — run b786e9's C1.3 (`l2_context.layout`) "led" at +0.3% on 8/8 fake 0.0s replays. Fixed in `inner_recursion.py` + `test_full_chain_rows_never_replay_on_prefix_match`; old archive rows migrated 2026-07-03. Consequence: **every pre-fix layout-axis result (slice-6 "goal-1") was never honestly measured** — re-validate on a post-fix run.
-- **A NO-OP probe's save REPLACES the origin's archive slot — by design, don't re-diagnose.** `MeasurementArchive.save` dedups on `content_hash` (newest wins, old detail file unlinked); the probe is origin-identical by construction, so its rows take over the origin's entry (`origin_<id>.json` vanishes mid-run, a `candidate_N_<id>` appears in its slot). Reuse stays correct (the probe IS a fresh same-config measurement); forensic origin rows live on in `round_0000.json` + the ledger. Side effect of the same dedup: index entries whose detail file was replaced dangle harmlessly (`load_by_id` → None → skipped).
-- **Neither "stall" was a stall — triage from the ledger, not from mtimes.** Control flags (`pause.flag`) are consumed at the next per-SAMPLE checkpoint, not the round close: a mid-candidate pause stops the run within seconds, writes a `(phase=control, event=paused)` ledger record, projects `run_phase: paused` — and looks like a freeze to an mtime-watcher. The optimizer-call path already has a hard wall-clock (`_chat_under_deadline`, 180 s × 2 round-trips, one retry → `OPTIMIZER_TIMEOUT`). Overnight deaths with no terminal record (7113ca) are machine-sleep/session-end class, not code. Hang triage order: ledger tail → `dashboard.json::run_phase` → `.runtime/` flags → process table by command line → only then mtime freshness.
-- **The default `token_budget` (210 000) strangles an L4 run far below its USD budget.** `token_budget` is a normal-campaign safety rail on optimizer token spend — but the inner-spend rollup (slice 4) rolls each inner campaign's **tokens** onto the outer ledger as backend cost (~109k tok/inner campaign), so the 210k default trips after ~2 inner campaigns. A live `promptpotter-self` stopped on `token_budget` at **$0.109 of a $1.00** USD budget after only 6 of 24 inner campaigns → the 8-task panel was never probed → both candidates tied "DEGRADED — under-probed (CI 0%–66%)", no winner. For L4 the **USD budget is the meaningful cap** and the token cap is a redundant, mis-scaled second limiter; `datasets/promptpotter-self/campaign.json` sets `token_budget: null` so `spend_budget_usd` governs. (Root is L4's scale, not the rollup — the rollup correctly reports real tokens; don't uncount them.)
+- **Inner sandbox is a FLAT registry, not physical nesting.** Inner campaigns live at `<workspace>/.inner/<spawn_cycle_id>/` (sibling of `projects/`), NOT nested under the deep outer cycle dir — physical nesting blows Windows' 260-char `MAX_PATH` at depth 1; a flat registry named-by-but-not-under the spawning cycle stays shallow at every depth, so the re-entrancy invariant holds. (`runner/inner_recursion.py::InnerSpawnContext`.)
+- **`in_process` connectors must NOT fetch a remote pipeline schema.** `init_services` skips the backend `GET /pipeline` for `in_process` execution and uses the local `pipeline.json` alone — otherwise it merges an unrelated backend's nodes under the dataset overlay.
+- **L4 datasets carry their "samples" on disk, not as a CSV.** The outer "samples" ARE the inner tasks; `Connector.experiment_file` (`"inner_tasks.json"`) loads them through `extract_experiment` at bootstrap.
+- **An inner failure must degrade, not propagate.** `run_inner_cycle` catches any inner exception and returns a zero-improvement proxy, so a bad outer candidate scores poorly instead of killing the outer cycle. Keep the fallback — but a *clean* origin-gate halt should return real proxies, not the exception sentinel; verify on the justlogic run.
+- **Inner mints must NOT clobber the outer's active-pointer.** Every mint site threads `projects_root=session.store.projects_root` so a sandboxed inner mint stamps its own workspace, never the real tenant `active_session.json`. Same latent class in `sweep_runner.py` + `fork_siblings.py` (not hit by the inner loop; left).
+- **The meta prompts must be TIGHT — gpt-oss-120b returns empty content on a verbose meta-prompt** (`raw_chars: 0`, `l1_provider_empty_response`). Keep `datasets/_optimizer_meta/prompts.json` terse; never fix this by touching the global `_optimizer/` node config (shared with every inner cycle).
+- **The θ election needs graded outcomes, a scored origin, and ≥6 inner tasks.** `Observation.response` carries the graded per-sample fitness (the logistic MAP is valid ∀ y∈[0,1] — bit-identical for binary datasets); the origin is scored in every live run (no shape guess — the round-0 origin gate catches a genuinely-unscoreable origin LOUD); and offline replay shows the LCB election needs **≥6 inner tasks** to crown (at 2, θ_se exceeds the point-lift and it correctly refuses to crown on noise) — matching the composite-fitness panel goal (§4).
+- **A zero-candidate round heals immediately.** `l1_zero_candidates` is folded into the existing `l1_generate_unusable` structural-breach rule (one widened predicate, `escalation_rules` stays 6) and fires L2 straight away instead of burning `l1_patience` dead rounds; the empty call is itemized in spend. Still measure on the supervised run how often the empty-content path fires and whether the L2 reframe recovers it.
+- **The outer cycle heartbeats its OWN ledger while awaiting each inner run** ("inner rX/Y · best Z%") — `dispatch/llm_call/heartbeat.py` + `inner_recursion.py`; the chat maps the heartbeat to one upserted progress chip. Without it a healthy outer round looks dead for the whole multi-minute inner campaign.
+- **An L4 outer sample must stamp `terminated_at` = the LAST outer node (`l3_plan`), never a mid-chain one.** `terminated_at` is the archive's reuse contract; an inner campaign consumes the ENTIRE meta-config at once, so a mid-chain stamp lets prefix-trust replay serve the ORIGIN's rows to any candidate editing a later node (fake 0.0s replays). Consequence: **every pre-fix layout-axis result was never honestly measured** — re-validate on a post-fix run.
+- **A NO-OP probe's save REPLACES the origin's archive slot — by design, don't re-diagnose.** `MeasurementArchive.save` dedups on `content_hash` (newest wins); reuse stays correct, forensic origin rows live on in `round_0000.json` + the ledger, and index entries whose detail file was replaced dangle harmlessly.
+- **Hang triage order: ledger tail → `dashboard.json::run_phase` → `.runtime/` flags → process table by command line → only then mtimes.** Control flags (`pause.flag`) are consumed at the next per-SAMPLE checkpoint — a mid-candidate pause stops within seconds and looks like a freeze to an mtime-watcher. The optimizer-call path already has a hard wall-clock (`_chat_under_deadline` → `OPTIMIZER_TIMEOUT`); overnight deaths with no terminal record are machine-sleep/session-end class, not code.
+- **`token_budget` stays `null` for L4** (`datasets/promptpotter-self/campaign.json`) — the inner-spend rollup lands each inner campaign's tokens on the outer ledger as backend cost, so the normal-campaign default trips after a couple of inner campaigns while the USD budget sits nearly untouched. For L4 `spend_budget_usd` is the meaningful cap. (Root is L4's scale, not the rollup — the rollup correctly reports real tokens; don't uncount them.)
 
-## Graded-θ migration in PoBB elimination — FIXED 2026-07-02 (kept for the record)
+## 1. The shared in-process execution seam — SHIPPED
 
-**Scope corrected against the record (2026-07-02):** the "θ ability fit binarizes outcomes" defect was already fixed *for the election* — `candidate_abilities` → `elect_round_winner` builds `Observation(response=graded_response(r))` (continuous `fitness`), and the δ ruler grades too (learning line 28-A). What was **missed** is the **PoBB ε-gate**: `elimination_p_best` (`application/scoring/metrics.py:445`) still fits θ from the **binary** hit vector `candidate_hits`, built in `PoBBCheck` from `bool(r.get("hit"))` (`pobb/elimination/checks.py:302` + `priors_by_sample` at `:231-237`, `:265`). On a graded backend (the L4 outer, where `hit = fitness ≥ 1.0` is always False, and TermNorm reciprocal-rank) the vector is all-0 → θ identical across arms → **`p_best = 0.5`, PoBB never discriminates or early-stops**. `graded_response`'s own docstring says it replaces the `bool(result.get("hit"))` binarization "at every Observation build site" — this is the one it didn't reach.
+`Connector.execution == "in_process"` dispatches `run_query` to a connector-supplied
+`Connector.in_process_run(query, payload)` returning the result shape the scorer already
+consumes; the HTTP arm is unchanged, and dispatch stays on the declared mode, never the
+connector name (`connectors/CLAUDE.md`). Two connectors ride the one seam: **`llm_only`**
+(`connectors/llm_only.py` — calls the LLM client directly on the rendered prompt; six
+committed datasets declare it, so the basic case needs no server — only `lca-termnorm`
+still does) and **`promptpotter`** (delegates to the inner-cycle runner, §2).
 
-**Honest severity: MINOR, not the readiness blocker.** This is *elimination efficiency* (no early-stop of clearly-worse candidates on a graded backend), not election. The flat outer *signal* (best == origin) rooted deeper than θ-LCB conservatism: `discovered_level_trajectory` measured the origin and the candidates on **mismatched estimators** (raw: origin point-accuracy vs candidate Wilson-LB; ability: θ-less candidates — the common case — silently skipped → trajectory collapses to origin), capping every proxy delta non-positive *by construction*, so cf7024de's θ-discount was inert for justlogic. FIXED (`exploration.py`): origin scored on the SAME Wilson-LB / θ-LCB as candidates, space chosen by candidate-θ coverage so a θ-less candidate is never skipped (demotes the whole trajectory to raw instead). Don't conflate with the ε-gate above; that fix doesn't touch the proxy scale.
+## 2. In-process recursion isolation — SHIPPED; keep it depth-agnostic
 
-**The fix (SHIPPED — option (i) below; counting gates stay binary via `grade >= 1.0`):**
-- Feed the **graded** per-sample fitness to the θ ε-gate. `elimination_p_best` accepts continuous responses already (same cross-entropy MAP as `candidate_abilities`, valid ∀ y∈[0,1] → **bit-identical for binary datasets** where `fitness ∈ {0,1} = hit`).
-- **Do NOT** change the dominance + equivalence gates — they count hits toward a bar (integer arithmetic) and are *supposed* to be binary; on a graded/0-hit backend dominance never fires and the equivalence gate already self-disables via its Laplace smoothing (the 6c0ff555 fix). That behavior is correct; leave it.
-- **The one real decision:** `PoBBCheck.priors_by_sample` + `candidate_hits` serve BOTH the θ ε-gate (wants graded) AND the counting gates (want binary). Options: (i) store graded floats and derive the binary hit for counting as `grade ≥ 1.0` (consistent with `rescore.py:27`'s own hit definition — one source of truth), or (ii) store both. Prefer (i).
+`run_inner_cycle` (`application/runner/inner_recursion.py`) mints + runs each inner campaign
+via `run_optimization` in its **own `asyncio.Task`** (fresh per-task ContextVar copies:
+`_CYCLE_LEDGER` / `_CURRENT_ROUND` / `_ABORT_CHECK`) under **sandboxed stores** at the flat
+`<workspace>/.inner/<spawn_cycle_id>/` registry. The re-entrancy invariant that makes L5+
+come free: the sandbox is named by *this* cycle (never a global path or a baked-in
+outer-vs-inner split) and the fresh-task spawn happens at *every* level — never assume
+depth 1. The real recursion ceiling is **economic and statistical, not architectural**
+(geometric cost; `proxy_lift_corr` decays with depth), which is the right place for the
+limit to live. Known forward item: the process-global rate limiter is shared, so inner spend
+competes with outer for TPM/RPM. Execution home is CLI/headless (`new`/`resume`); the
+read-only uvicorn app *observes* outer + inner cycles via the file tree — no second
+optimizer process, no HTTP self-call.
 
-**Seams to touch (verified):** `pobb/elimination/checks.py` (`register_completed` `:231-237`, `backfill_for_sample` `:265`, `candidate_hits` `:302`, `snapshot_priors` `:261`); `scoring/metrics.py::elimination_p_best` `:445` (signature: `candidate_hits: list[bool]` → graded floats); the resume replayer `resume_and_fork/replayers.py::_pobb_replay_snapshot` `:171` (re-derives from recorded hits → must record + re-derive graded, or AB-replay diverges on graded cuts). Coherence anchor: `docs/specs/fitness-comparability.md` (θ-always, graded is the same MAP).
+## 3. Specialized outer meta-prompt set — SHIPPED (lighter than specced)
 
-**Verification:** (1) numerics test — graded per-sample fitness (0.46 vs 0.40) → distinct θ → `p_best ≠ 0.5`; a binary fixture → `p_best` bit-identical to today (regression guard). (2) `python -m promptpotter ab` on a graded cycle → equivalence AND ε cuts re-derive with zero divergence. (3) re-run/replay an L4 outer round → PoBB discriminates the two candidates instead of `p_best=0.5`. Green chain + ledger flat.
+The outer optimizer mutates whole meta-prompt templates, judged by meta-evidence
+(mode-collapse, parse-fail rate, candidate stratification, proxy-lift), so it gets its own
+prompt set: **`datasets/_optimizer_meta/prompts.json`** — prompt *fields* only. There is
+deliberately **NO `_optimizer_meta/pipeline.json`** and `OPTIMIZER_PIPELINE_PATH` stays a
+module constant: per-campaign pipeline *resolution* was not built because it would fork the
+~600-line schema blob. The set is selected per-cycle by `OptimizationConfig.optimizer_set`
+and applied through the **existing** per-node override channel
+(`load_optimizer_set_overrides` → `set_optimizer_prompt_overrides` →
+`_apply_prompt_override`) — the same channel the inner runner uses for its mutations, so
+outer=meta / inner=default isolate by task with zero new ContextVar. The outer L1's per-node
+edits ride the existing `L1Variant.pipeline_params_override` slot (no new
+`OPTIMIZER_RESPONSE_MODELS` entry), and the meta-evidence panels are the existing
+round-trace signals surfaced as outer injections, not re-derived.
 
-## Why
+## 4. Outer composite fitness — per-sample core SHIPPED; cross-sample terms open
 
-L4 — PromptPotter optimizing its own meta-prompts — has been a deliberate skeleton: the `promptpotter` connector, `datasets/promptpotter-self/`, the `Connector.execution` enum, and `concepts/optimizer-of-the-optimizer.md` all exist, but the inner-cycle run raises `NotImplementedError` (`infrastructure/backend.py::BackendClient.run_query`, the `_execution != "remote_http"` arm). C3 left three things open: **how** `in_process` executes (localhost vs in-process), **what** the outer optimizer prompts are, and **which** value the outer composite fitness uses. This spec decides all three, and folds in a second feature that rides the same seam.
+Proxies are computed in-memory by `runner/inner_recursion.py::_compute_proxies` from the
+returned `CycleResult` (no disk read; **there is no `outer_fitness` module**); the formula
+lives in `datasets/promptpotter-self/campaign.json::scoring`, composing **lift core**
+(`first_round_delta` + normalized `headroom_lift`) × **bounded quality**
+(`cleanliness · diversity_health`, floored 0.6 — a broken campaign is discounted, never
+sign-flipped) × **efficiency** (`delta_per_dollar`, floored 0.7), times a worst-offender
+token clip so a fat inner meta-prompt layout demotes (gate ≡ 1.0 for normal cost; missing
+token data → vacuous 1.0; threshold deliberately high — tune down once a real run shows the
+cost distribution). **Governing law: every term carries a candidate gradient** — terms
+without one stay out (`rounds_to_N`; the per-seed cost multiplier). Held
+emitted-but-out-of-formula pending the validation read: `rounds_improved_frac`,
+`delta_per_candidate`, `delta_per_second`.
 
-The decisions:
+Still to layer — the cross-sample terms (the P3 post-aggregate formula, above the
+per-sample primitives):
 
-1. **In-process recursion, one process, zero networking.** The outer loop runs inner campaigns as direct `run_optimization(...)` calls — never a second PromptPotter server, never an HTTP self-call.
-2. **One seam, two features.** The same `in_process` arm powers both the `promptpotter` connector (inner-cycle recursion) **and** a new in-process `llm_only` connector, so the basic LLM-only case no longer needs the TermNorm server downloaded/running.
-3. **Specialized outer prompts.** The outer optimizer gets its own meta-aware prompt set that emits `PromptTemplate` edits, not the standard task-tuned loop.
-4. **A cleverer outer fitness** than "delta within budget."
-5. **Depth-agnostic recursion — L5+ comes free if built right.** Because L4 is recursion *through the connector*, not a hardcoded fourth driver, there is no architectural ceiling: an inner cycle that itself uses the `promptpotter` connector *is* L5 (optimizing the optimizer-of-the-optimizer), and so on. This costs nothing extra **provided** the seam is built depth-agnostic from the start — the re-entrancy invariant in §2. Depth then becomes a config/prompt choice, never a build; the only real limit is cost + signal, not code.
+- **Area-under-lift-vs-budget** — rewards climb-fast-then-plateau over crawl. Per-round
+  spend is not materialized; reconstruct cumulative-spend-by-round from
+  `TokenUsageRecord.round` on the cycle ledger (a dashboard per-round spend rollup is the
+  durable follow-up, not required here).
+- **Panel aggregation** `mean lift − λ·std` across the inner-task panel. **Critical:** the
+  `std` is cross-seed **outcome dispersion**, NOT the θ estimation SE — penalizing `theta_se`
+  resurrects the "wide posterior discards good candidates" pathology. Route through the P3
+  post-aggregate formula, never the election rank key.
+- **PoBB-decisive promotion** — at the outer level, keep topping up inner campaigns until
+  the meta-prompt config *ranking* is statistically decisive, built on
+  `metrics.py::elimination_p_best` over inner-campaign arms.
 
-## 1. The shared in-process execution seam — one seam, two features
-
-`Connector.execution` (`connectors/protocol.py`, `Literal["remote_http", "in_process"]`) already dispatches in `run_query`; today the non-HTTP arm raises. Replace the raise with a dispatch to a **connector-supplied in-process runner** — `Connector.in_process_run(query, payload) -> dict[str, Any]` returning the result shape the scorer (`application/scoring/sample_measurement.py`) already consumes (`predicted` + `pipeline_data`). The HTTP arm is unchanged. This keeps the rule the boundary already follows: **dispatch on the declared mode, never the connector name** (`connectors/CLAUDE.md`).
-
-Two connectors implement that runner:
-
-### Feature A — in-process `llm_only` connector (drop the TermNorm dependency)
-A new connector (`connectors/llm_only.py`) whose runner calls the optimizer LLM client directly with the rendered prompt and returns `{predicted, pipeline_data: {terminated_at: "llm_only"}}`. No `/matches`, no session, no second server. This **deliberately re-introduces** the in-process LLM-only execution that `LLMOnlyAdapter` (deleted) once did — but as a first-class connector on the canonical `execution` seam, not a sidecar adapter routed around the backend. The reversal is justified by distribution comfort: the whitelabeled app ships runnable for the basic case with nothing to download. It also directly serves the prompt-iteration exit gate, which already requires `rounds_to_95 ≤ 5` **on `llm_only`** AND TermNorm under the same `l1_generate_hash` (`roadmap.md` § Prompt-iteration framework) — that gate presumes a runnable `llm_only`.
-
-### Feature B — `promptpotter` connector inner-cycle runner (L4)
-The same seam, but the runner runs a full inner campaign (§2) and returns the composed proxy vector (§4: lift core + quality + efficiency) in the result `pipeline_data`. The wire shapes already exist: `promptpotter_wire_adapter` produces `{query, meta_prompt_overrides}`; `PromptPotterSession` no-ops the session; `_extract_experiment` reads the `tasks` list. Only the runner is new.
-
-**Reuse:** `connectors/protocol.py::Connector`, the `CONNECTORS` data-row registry (`connectors/__init__.py`, no `register()`), the existing `promptpotter.py` hooks. Adding `llm_only` is one new file + one registry row + an `in_process_run` field on the protocol.
-
-## 2. In-process recursion isolation (the hazards the skeleton doesn't address)
-
-`run_optimization` (`application/runner/entry.py`) is a plain async function already called from many sites; calling it for an inner campaign in one process is feasible but **not free**. Two isolations are mandatory:
-
-- **Each inner cycle runs in its own `asyncio.Task`.** Three ContextVars isolate **per task, not per call** — `_CYCLE_LEDGER` and `_CURRENT_ROUND` (`infrastructure/llm/models.py`) and `_ABORT_CHECK` (`infrastructure/llm/rate_limit.py`). A naïvely-nested `await run_optimization(...)` in the outer's own task would `set`/`reset` these and clobber the outer's ledger binding, round stamp, and abort predicate. The runner already binds them — `build_run_observers` (set) / `drain_all` (reset) in `run_observers.py`, and `set_abort_check` (defined in `rate_limit.py`, called from `entry.py`); the connector runner MUST spawn the inner cycle in a fresh task so each gets its own ContextVar copy.
-- **Isolated stores under `.runtime/inner/`.** Inner mints must not write the outer's `active_session.json` pointer or trip the capacity-1 `JobRegistry`. The inner cycle gets a sandboxed `build_stores(...)` rooted at the outer cycle's `.runtime/inner/`, so its `cycles/` tree, ledger, and dashboards are self-contained and don't pollute the outer campaign's listing or the SSE stream.
-
-The process-global rate limiter is shared — acceptable, but inner spend competes with outer for TPM/RPM (flagged, not blocked; `RateLimiter` per-cycle isolation is a known forward item).
-
-**Invariant — build the seam depth-agnostic; L5+ then comes free.** Because L4 is recursion through the `promptpotter` connector rather than a hardcoded fourth driver, there is no architectural ceiling: an inner cycle that itself uses the `promptpotter` connector *is* L5, and the next level L6, indefinitely. This stays free **iff the two isolations above are written re-entrantly** — and writing them re-entrantly is no harder than writing them at all, so the cost is only paid if someone bakes in a depth-1 assumption:
-
-- **Store sandbox roots at *this* cycle's own dir** (`<cycle>/.runtime/inner/`), never a global path or a baked-in "outer vs inner" split — so sandboxes nest (`…/.runtime/inner/…/.runtime/inner/…`) by construction.
-- **The fresh-`asyncio.Task` spawn happens at *every* level**, so each level gets its own ContextVar copies (`_CYCLE_LEDGER` / `_CURRENT_ROUND` / `_ABORT_CHECK`). Never assume depth 1.
-
-The meta-prompt set (§3) is the other free-or-bounded fork: a **self-similar** `_optimizer_meta/` that reasons about improving *any* PromptPotter loop recurses at every level for free; a per-level set makes each level bounded work. The per-campaign optimizer-pipeline selection (§3) supports either — so depth is a prompt choice, not a code change.
-
-The real ceiling is **economic and statistical, not architectural**: one L5 searchpoint = N L4 campaigns = N×M inner campaigns (geometric cost), and `proxy_lift_corr` (the C3 validation gate) decays with depth — a proxy-of-a-proxy is noisier each level. Recursion depth is therefore **spend- and signal-gated**, which is the right place for the limit to live. The code imposes none; building the seam depth-agnostic now is what keeps that true.
-
-**Execution home.** The outer loop is a CLI/headless `new`/`resume` invocation. It is **not** hosted in the read-only uvicorn app (`promptpotter.main:app`), which is capacity-1 by design. The existing uvicorn on `:8001` *observes* both the outer cycle and the sandboxed inner cycles via the file tree (`dashboard.json`) — no second optimizer process, no HTTP self-call. This is the resolution of C3's "localhost endpoint vs in-process dispatch" fork: **in-process dispatch under `.runtime/inner/`.** (The localhost-endpoint option is retained only as the future hosted/multi-tenant worker mode — a new `execution` value, no core-loop edit.)
-
-## 3. Specialized outer meta-prompt set
-
-The outer cycle is a PromptPotter cycle, but its optimizer reasons about a *different* object than the inner: it mutates whole meta-prompt templates, judged by meta-evidence (mode-collapse, parse-fail rate, candidate stratification, proxy-lift), not task answers. So it gets its **own** prompt set rather than the standard task-tuned loop.
-
-- **New optimizer prompts** (meta-aware): `l1_generate`, `l1_critique`, `l2_context` first; `l3_plan` and `checkin` lag (same evidence-gated scoping the inner loop uses). The outer `l1_generate` emits a **`PromptTemplate` edit** — the six prose fields keyed by inner node (`l1_generate`/`l1_critique`/`l2_context`/`l3_plan`, the four nodes in `datasets/promptpotter-self/pipeline.json`) — with its own output schema registered in `dispatch/schemas.py::OPTIMIZER_RESPONSE_MODELS`.
-- **Mechanism — per-campaign optimizer-pipeline selection.** Today the optimizer prompt set is global: `OPTIMIZER_PIPELINE_PATH` is a module constant in `dispatch/llm_call/prompts.py` whose manifest loader (`_load_optimizer_manifest`) is `lru_cache`-d. The outer campaign instead resolves a **new `datasets/_optimizer_meta/pipeline.json`** (the inner keeps `datasets/_optimizer/`). This mirrors how datasets already own their overlays — the optimizer pipeline becomes a per-campaign resolution (carried on the campaign/session, defaulting to `_optimizer/`), not a global constant. Cache-invalidation: the lru-cache keys on the resolved path, so two pipelines coexist without cross-talk.
-- The meta-evidence panels the outer `l1_generate`/`l1_critique` read are the existing round-trace signals (parse-fail rate, candidate stratification/entropy, per-candidate deltas) already computed by the sweep/round machinery — surfaced as outer injections, not re-derived.
-
-## 4. Outer composite fitness — the "much cleverer" score
-
-The landed proxies stay the raw observations. The shipped `datasets/promptpotter-self/campaign.json::scoring` now composes a **vector** (SHIPPED 2026-07-04, `inner_recursion._compute_proxies` from the in-memory `CycleResult`): **lift core** (`first_round_delta` + normalized `headroom_lift`) **× bounded quality modulator** (`cleanliness · diversity_health`, floored 0.6 so a broken campaign is discounted ≤40%, never sign-flipped) **× efficiency** (`delta_per_dollar`, floored 0.7). It supersedes the old two-delta formula (origin-strength biased, endpoint-blind, quality-blind). **Governing law:** every term carries a candidate gradient — the two retired terms didn't, and stay out: `rounds_to_N` (constant `len(levels)+1` while the target sits above 2-round reach — pure election offset; still narrated) and the per-seed cost multiplier `min(1.0, DIVISOR/tokens)` (token count is a SEED property, ~equal across candidates → no gradient; `spend_budget_usd` is the real cost control). Efficiency's `delta_per_dollar` carries a gradient where the retired multiplier didn't — its numerator is candidate-specific. Held emitted-but-out-of-formula pending the validation read (candidate-gradient check): `rounds_improved_frac`, `delta_per_candidate`, `delta_per_second`. Still to layer (the cross-sample terms, above the per-sample formula):
-
-- **[LANDED, per-sample core] Normalized headroom lift** — `(best − origin) / (target − origin)`, clamped, with per-task `target` (`0.60`). Removes origin-strength bias so a config compares across inner tasks of different difficulty.
-- **Area-under-lift-vs-budget** — rewards a config that climbs fast then plateaus over one that crawls; captures the trajectory finesse a two-endpoint delta discards. **Data-shape gap (must resolve):** per-round spend is *not* materialized — `index.json` carries no spend; `dashboard.json::spend` is a single cycle-total. Per-round (hence cumulative-by-round) spend IS reconstructible from the cycle ledger: `TokenUsageRecord` carries a `round` field in `.runtime/ledger.jsonl`. **Decision:** the fitness reads the ledger to build cumulative-spend-by-round for the AUC; a per-round spend rollup on the dashboard projection is the durable follow-up (not required for C3).
-- **Panel aggregation** — `mean lift − λ·std` across the inner-task panel (the `justlogic-d67/seed-*`, sized to the θ election's `elimination_n_min` floor). Rewards generalization, penalizes a config that wins one seed and loses another. **Critical:** the `std` is cross-seed **outcome (per-seed lift) dispersion** — NOT the θ estimation SE (`theta_se`). θ_se is the LCB-shrink term deleted from `elect_round_winner` (2026-07-04, point-estimate lift); penalizing it again resurrects the "wide posterior discards good candidates" pathology. Route through the P3 post-aggregate formula, never the election rank key, so point-estimate crowning stays intact.
-- **PoBB-decisive promotion** — at the **outer** level, keep topping up inner campaigns (one more inner run) until the *ranking* of meta-prompt configs is statistically decisive, not just the point score. This is the finesse the budget cap otherwise throws away — confidence, not a single noisy number. (A cross-cycle `elevate_to_decisive` once prototyped exactly this but was deleted as dead; the outer mechanism is to be built on the same θ rule — `metrics.py::elimination_p_best` on a fixed ruler — over inner-campaign arms.)
-- **Subset-invariant, grade-A inner signal** — the proxies measure the inner loop's **θ-based** improvement (per [`fitness-comparability.md`](fitness-comparability.md)), not raw accuracy on a drifting subset, so `best − origin` is comparable across inner tasks; and they read deliberate, grade-A measurements (the provenance grade, `domain/measurement_provenance.py`), never connector noise. The outer loop inherits the inner's comparable, clean-measurement guarantee — which is why comparability is a prerequisite.
-
-The per-sample composed vector (lift core + quality + efficiency) is SHIPPED in `_compute_proxies` (in-memory `CycleResult`, no disk read). Still mapping to the roadmap composite-fitness phases: **P2** (per-candidate rollup + scatter) and **P3** (`compile_post_aggregate_fitness(formula)` + `campaign.json::scoring_post_aggregate`). The cross-sample terms — normalized-AUC-vs-budget (needs ledger-reconstructed per-round spend), panel `mean − λ·std` (cross-seed dispersion, see caveat) — are the post-aggregate formula, computed above the per-sample primitives.
+The proxies read the inner loop's **θ-based**, grade-A improvement
+([`fitness-comparability.md`](fitness-comparability.md)) — subset-invariant and
+clean-measurement by inheritance, which is why comparability is the prerequisite.
 
 ## 5. Non-goals + validation
 
-**Non-goals (this spec):** any webapp surface (CLI/headless only); competitor/publication numbers; mutating the inner `checkin` (off the operator surface — deferred). The full inner-cycle code lands in C3; this spec defines it.
+**Non-goals (this spec):** any webapp surface (CLI/headless only); competitor/publication
+numbers; mutating the inner `checkin` (off the operator surface — deferred).
 
-**Validation gate** (C3 exit, `roadmap.md`): `proxy_lift_corr ≥ 0.6` over ≥4 paired branches — the empirical proof the cheap proxy predicts real lift. The `outer_fitness` module is the artifact that computes it. The `llm_only` connector additionally unblocks the prompt-iteration exit gate's `llm_only`-side `rounds_to_95 ≤ 5`.
+**Validation gate** (C3 exit, `roadmap.md`): `proxy_lift_corr ≥ 0.6` over ≥4 paired
+branches — the empirical proof the cheap proxy predicts real lift. **Still open, and it is a
+measurement to run, not a module to write.**
 
 ## Implementation order
 
-Sequenced by dependency and standalone value — each slice ships something usable before the next starts.
+1. **Shared `in_process` seam + `llm_only` connector — SHIPPED** (§1).
+2. **`promptpotter` inner-cycle runner + isolation — SHIPPED & live-validated** (§2).
+3. **[GATING] Inner benchmark with headroom + specialized outer prompt set — MECHANISM SHIPPED; full-signal data run open.** `inner_tasks.json` → `justlogic` (target 0.60 — the origin headroom is **[VOID]/unmeasured**, finish-line item 1) + the `_optimizer_meta` set (§3), live-validated to emit per-node edits of the INNER meta-prompts. **Done when:** a real `new promptpotter-self` shows outer candidates with DIFFERENT proxies and outer best > outer origin.
+4. **Enriched outer fitness + inner-spend rollup — rollup, per-sample composed fitness, and delta-led display SHIPPED; cross-sample terms remain** (§4). Each inner cycle's spend returns as the outer sample's `step_tokens`, fanning onto the outer ledger via the existing backend-cost channel. **Done when:** `proxy_lift_corr ≥ 0.6` over ≥4 paired branches.
+5. **Distributable config + cost realism.** Tune the committed `inner_tasks.json` + `campaign.json` (and the shipped optimizer provider) so `new promptpotter-self` completes at evaluator-tolerable cost. The cost shape (geometric; wall-clock dominated by optimizer-call tails) is documented operator-facing in `dataset.md` § Cost shape — keep it there, not here. Default small; consider pinning groq.
 
-1. **Shared `in_process` seam + `llm_only` connector (independent feature, ship first). [SHIPPED — connector + seam.]** `Connector.in_process_run` added (`protocol.py`); `run_query`'s raise replaced with a dispatch to it (`backend.py`); the registry guard (`connectors/__init__.py`) enforces the `in_process` ↔ `in_process_run` pairing (`promptpotter`'s arm delegates to the inner-cycle runner — slice 2, now SHIPPED). `connectors/llm_only.py` runs `get_llm_client(provider).chat(...)` on the rendered prompt and projects the answer onto `final_ranking` + `step_tokens`/`step_timings` — the same `{"data": …}` shape `measure_sample` parses; registered. Threaded `in_process_run` at all four `BackendClient` construction sites. **Verified** end-to-end with a stubbed client: in-process result flows through `run_query` → `terminal_ranking` → `extract_item_label` identically to a remote `/matches` body. **Remaining for the full "no-server campaign" claim:** a committed `datasets/{name}/` (pipeline.json declaring the one `llm_only` ranker node + node-config model/provider; campaign.json; data) so `new <llm_only-dataset>` runs end-to-end — the schema resolves from disk (`_resolve_pipeline_schema` falls back to the local `pipeline.json` when the backend is unreachable), so this is dataset authoring, not more wiring. A broken in-process result shape breaks **loud** (origin gate halts on all-`NO_RESULT`), so per the test charter no standing test was added. This slice carries zero L4 risk.
-2. **`promptpotter` inner-cycle runner + isolation. [SHIPPED & live-validated.]** The recursion lives in `application/runner/inner_recursion.py` (the connector's `in_process_run` is a thin delegate). `run_inner_cycle` mints + runs an inner campaign via `run_optimization` in its **own `asyncio.Task`** (ContextVar isolation — `_CYCLE_LEDGER` / `_CURRENT_ROUND` / `_ABORT_CHECK` get their own copies per level) under a **sandboxed `build_stores(projects_root=<workspace>/.inner/<spawn_cycle_id>)`** (`init_services` gained a `store=` injection; flat registry, see Live-run learnings — NOT `.runtime/inner`; the sandbox reads the inner benchmark from the repo `datasets/` but writes campaign state into the sandbox, so the outer's active-pointer is untouched). Re-entrant: the sandbox is named by the *spawning* cycle (published via `publish_inner_spawn_context`, every cycle) and the fresh task spawns at every level — so L5+ stays shallow + isolated. Outer mutations (`payload["meta_prompt_overrides"]`) apply to the inner `_optimizer/` prompts through a per-run ContextVar (`set_optimizer_prompt_overrides`, read in `load_optimizer_prompt`), set inside the inner task (no leak). The 3 proxies project onto `{"data": {…}}`; `datasets/promptpotter-self/pipeline.json::l1_critique` declares them (+ `final_ranking`) as `observation_mappings` → reach the outer scoring-formula namespace. Also fixed for the live run: `in_process` skips the remote `GET /pipeline` (else it merged TermNorm's schema); `Connector.experiment_file="inner_tasks.json"` loads the outer "samples" via `extract_experiment`. **Live-validated** `new promptpotter-self` end-to-end: inner gsm8k campaigns minted + ran real rounds (origin 1.0) under `.inner/<cycle>/`, proxies scored the outer loop, L1→L2 escalation fired — after the MAX_PATH flat-registry fix.
-3. **[GATING] Inner benchmark with headroom + specialized outer prompt set (§3). [MECHANISM SHIPPED; full-signal data run in progress.]** Two coupled pieces: **(a)** `inner_tasks.json` → `justlogic` d6/7 (origin ≈0.44 < target 0.60; target 0.60 not 0.80 so `rounds_to_N` varies rather than saturating). **(b)** the specialized meta-prompt set — but built **lighter than originally specced**: NOT a duplicated `_optimizer_meta/pipeline.json` (that would fork the 600-line schema blob — surface-ledger drift). Instead a small **`datasets/_optimizer_meta/prompts.json`** (only the rewritten `l1_generate`/`l1_critique`/`l2_context` fields) selected per-cycle via **`OptimizationConfig.optimizer_set='meta'`** and applied through the **existing per-node override channel** (`load_optimizer_set_overrides` → `set_optimizer_prompt_overrides` → `_apply_prompt_override`) — the SAME channel the inner runner uses for mutations, so outer=meta / inner=default isolate by task with zero new ContextVar, no cache refactor, no schema copy, no new `OPTIMIZER_RESPONSE_MODELS` (the existing `L1Variant.pipeline_params_override` slot already carries per-node edits). **Live-validated:** with the meta set, the outer L1 emits per-node `pp_override` editing the INNER meta-prompts (a candidate produced `l1_critique.instruction: "…definitive TRUE or FALSE… Do not use 'Uncertain'…"` — an on-target hedge-break) instead of the old flat `prompt_fields`. **Done when:** a real `new promptpotter-self` shows outer candidates with DIFFERENT proxies and outer best > outer origin (data run underway).
-4. **Enriched outer fitness + inner-spend rollup (§4). [Spend rollup + per-sample composed fitness + delta display SHIPPED; cross-sample terms remain.]** **Inner-spend rollup DONE:** each inner cycle's total spend returns as this outer sample's `step_tokens` (read from `CycleResult.spend`), fanning onto the outer ledger via the existing backend-cost channel — no new mechanism, no double-count. **Per-sample composed fitness DONE (2026-07-04):** `_compute_proxies` emits normalized headroom + quality (cleanliness/diversity) + efficiency (`delta_per_dollar`/`_candidate`/`_second`); `campaign.json::scoring` composes lift × quality × efficiency (§4). **Delta-led display DONE:** the chat job-bar + L4 heartbeat lead with lift-over-origin; the log stays absolute. **Remaining (cross-sample, above the per-sample formula):** AUC-vs-budget (ledger-reconstructed per-round spend), panel `mean − λ·std` (cross-seed dispersion — NOT θ_se), PoBB-decisive top-up on `elimination_p_best` over inner-campaign arms, wired as the P3 post-aggregate formula. **Done when:** `proxy_lift_corr ≥ 0.6` over ≥4 paired branches.
-5. **Distributable config + cost realism.** Tune the committed `inner_tasks.json` + `campaign.json` (and the shipped optimizer provider) so `new promptpotter-self` completes at evaluator-tolerable cost — cost is geometric (n_variants × n_inner_tasks inner campaigns/round) and each inner optimizer call is ~176 s on openrouter, so default small + consider groq. Document the cost shape in `dataset.md`. **Empirical anchor:** one inner justlogic campaign (16 samples × 2 inner rounds) ≈ **176–325 s, ~77k in / ~32k out tok, ~$0.023**; the shipped default (2 variants × 8 tasks ⇒ `(1+2)×8 = 24` inner campaigns) ≈ **~2 h wall-clock, ~$0.5**, wall-clock dominated by the openrouter `gpt-oss-120b` optimizer tails not tokens. **Done when:** a fresh clone can `new promptpotter-self` and watch self-improvement at bounded, disclosed cost.
+   > **[VOID] Every cost anchor this item used to quote is unusable** — measured on an inner ladder that no longer exists and on deleted campaigns. **Re-measure before quoting a price to anyone.** Until then, `spend_budget_usd` in `campaign.json` is the only honest bound: it is a *cap*, not an estimate.
 
-6. **Per-node prompt layout — L4's information-flow axis (§6). [BUILT — Arcs 1+2+3; full-signal data run pending.]** Generalize `l1_layout` to every optimizer node so the outer loop can insert/excise which signals reach each inner meta-prompt, not just its prose — the higher-value, dataset-agnostic axis, and the half of "improve its own meta-prompts" that was otherwise frozen at our hand-tuned guess (see Finish-line item 6). All three arcs built (§6): Arc 1 generalize + collapse `fill_fixed`; Arc 2 guard-rail floors; **Arc 3 wires the L4 layout edit for the three `editor == "l4"` nodes** (l1_critique/l2_context/l3_plan — the context-blowup targets; l1_generate's L4 floor-edit deferred, it's L2-edited in-campaign). **Done when:** the full-signal `new promptpotter-self` run shows outer candidates that differ by inner-node *layout* (not only prose) and the winner's layout is captured — validate alongside slices 3–5 on the same run.
+   **Done when:** a fresh clone can `new promptpotter-self` and watch self-improvement at bounded, disclosed cost.
+6. **Per-node prompt layout — BUILT (Arcs 1+2+3); full-signal data run pending** (§6). **Done when:** the run shows outer candidates that differ by inner-node *layout* (not only prose) and the winner's layout is captured in `winner_pipeline_params` — validate alongside slices 3–5 on the same run.
 
-Slices 1 + 2 SHIPPED. 3 is the gating slice (no real signal without it); 4 + 5 make the result trustworthy + shippable; 6 (the information-flow axis) is required for the distributable claim and sequences after 3. The agent drives 3→6 autonomously, escalating only for real spend approval / provider change / compaction.
+Slices 1 + 2 shipped. 3 is the gating slice (no real signal without it); 4 + 5 make the result trustworthy + shippable; 6 (the information-flow axis) is required for the distributable claim and sequences after 3. The agent drives 3→6 autonomously, escalating only for real spend approval / provider change / compaction.
 
-## 6. Per-node prompt layout — L4's information-flow axis (design)
+## 6. Per-node prompt layout — the searched information-flow axis
 
-**The problem this closes.** Today L4 can only mutate meta-prompt *prose*. But the highest-value, most *distributable* lever over the inner loop is not wording — it is **which signals flow into each inner meta-prompt** (does `l1_critique` see `rare_hit_samples`? does `l1_generate` keep `origin_strengths`?). That decision is currently *hardcoded in two places* — `default_l1_layout()` (Python) and the `{{token}}` strings in `datasets/_optimizer/pipeline.json` — and hand-tuned by human+AI. Hand-tuning the information flow is exactly the job L4 exists to automate. So: make the per-node injection set a **searchable axis**, and let the outer loop converge to the high-value signals from a sensible floor.
+**BUILT (Arcs 1+2+3); `NODE_LAYOUTS` (`domain/l1_layout.py`) is the SoT — read the search
+space off the code, not off this doc.** Which signals reach each inner meta-prompt is a
+searched axis, not a hand-tuned constant: every optimizer node owns a `NodeLayoutSpec`
+(`editor` / `possible` / `mandatory` — the guard rail, never excised / `floor` — the good
+default every normal campaign runs on), and one `DispatchHub.fill` serves every node. The L4
+layout edit rides the existing `L1Variant.pipeline_params_override` slot for the three
+`editor == "l4"` nodes (`l1_critique` / `l2_context` / `l3_plan`);
+`resolve_node_layout` (`dispatch/llm_call/prompts.py`) partial-merges the edit onto the floor
+and **rolls back to the floor on any hard failure** — creative within guard rails by
+construction, and a rolled-back edit simply scores as no-improvement. Convergence is
+self-correcting: a layout that starves a node loses on the same proxy as everything else, so
+`mandatory` stays deliberately minimal.
 
-**The asymmetry that is the root cause.** Two fill paths in the dispatch hub (`dispatch/hub/facade.py`): `fill_l1` resolves the **L2-authored `l1_layout`** — a per-slot placeholder list L2 adds/removes from, validated against a catalogue with a mandatory floor (`validate_l1_layout`). `fill_fixed` gives **every other optimizer node** its injection set by scanning the `{{tokens}}` hardcoded in its template text. So only `l1_generate` has a dynamic, editable information-flow lever; `l1_critique` / `l2_context` / `l3_plan` have theirs frozen in prose.
+Deliberately deferred: `l1_generate`'s L4 floor-edit (its layout is L2-edited in-campaign via
+`opt_sp.memory.l1_layout`; an L4 edit needs the seed-the-inner-origin seam, and a fill-time
+apply would clobber the inner L2's live edits — excluded from the schema graft so nothing is
+silently dropped). Watch item: `prompt_block_catalogue` is `char_cap=None` and renders the
+whole block library on `l1_generate`'s floor — the one uncapped blowup vector.
 
-**The generalization (reuse `l1_layout`, don't add a mechanism).** Lift L1's property to every node: each optimizer node owns a `NodeLayout` (the existing 4-slot `L1Layout` shape) plus a per-node spec declaring `editor` / `possible` / `mandatory` / `floor`. `fill_fixed` **collapses into** the layout path (every node fills from its effective layout) — a code-path *removal*, a ledger win. **Who edits a node's layout = the layer above it:** `l1_generate` → **L2** (in-campaign, dynamic, as today) and **L4** (across the recursion, edits the floor); `l1_critique`/`l2_context`/`l3_plan` → **L4 only** (in a normal campaign nothing sits above them, so their floor *is* their layout until an outer loop mutates it). L4's mutation surface (`meta_prompt_overrides`, already per-node) gains a per-node `layout` edit alongside the existing prose edits, validated against that node's `possible`/`mandatory` sets.
-
-**Two checklist tables — the systematic "add a new injectable value" surface (for researchers/developers).**
-
-*Table 1 — the injection catalogue (EXISTS via `@signal`).* One row = one injectable value = one `@signal`-decorated `_r_*` renderer. Columns: `name` · `kind` (`DERIVED`/`MEASUREMENT`/`TRACE`/`DIRECTIVE`) · `description` · `char_cap` · renderer file. Adding a value is already systematic: write one decorated renderer; the import-time guards (`registry.py`) fail loud on an orphan or a name/key drift. **This is "what the value is + where it's computed."**
-
-*Table 2 — the node-availability matrix (NEW — this slice adds it).* One row = (value × node). Columns: `value` (→ Table 1) · `inserted-by` (editor: L2 / L4 / static) · `inserted-into` (node + slot; slot defaults to `problem_description`, with `task_context`→`task_intent` and `plan` front-of-mind as the standing exceptions) · `required?` (`mandatory` = guard rail, may never be excised; `optional` = in the search space). **This is "who may insert which value, where, and is it a guard rail."** A researcher adds a value to Table 1, then adds its rows to Table 2 to say which nodes may use it and who may insert it — a pure declaration, no dispatch-hub edit.
-
-**Guard-rail floors — AS BUILT (Arc 2, committed).** `mandatory` = the guard rail (L4 may never excise). `floor` = the good default the node runs on when unedited. `possible − mandatory` = L4's search space (it may excise a non-mandatory floor signal or insert an off-floor `possible` one). **Refinement vs. the pre-compaction draft:** these floors govern *every* normal campaign's inner prompts, not only L4 runs — and a normal campaign has no outer loop to reconverge — so the floor must be a *good default*, not merely "not-terrible." Therefore Arc 2 did **not** shrink any floor below prior behavior (the draft's move of `rendered_prompt`/`archive_top_runs`/`rare_hit_samples` off `l2_context`'s floor was dropped); the only floor change is `l1_generate` regaining `origin_strengths`. Off-floor `possible` signals are the room L4 has to *add*; non-mandatory floor signals are the room it has to *excise*.
-
-| Node | editor | mandatory (guard rail — never excised) | floor (default, = prior behavior) | possible adds (off-floor; L4 may insert) |
-|---|---|---|---|---|
-| `l1_generate` | L2 + L4 | `plan`, `task_context`, `rendered_prompt`, `pipeline_param_catalogue`, `critique` | mandatory + `prompt_block_catalogue`, `sample_transcripts`, `l1_wounds`, `escalation_panel`, **`origin_strengths`** | `diagnostics`, `axis_memory`, `archive_top_runs`, `rare_hit_samples`, `intractable_samples` (= `L1_POSSIBLE`) |
-| `l1_critique` | L4 | `diagnostics` (its raw input — the distiller must see it) | `evidence_health`, `diagnostics`, `l1_wounds`, `rare_hit_samples` | `axis_memory`, `archive_top_runs`, `origin_strengths` |
-| `l2_context` | L4 | `task_context`, `critique`, `l1_signal_catalogue`, `diagnostics` | mandatory + `plan`, `l3_to_l2_note`, `rendered_prompt`, `evidence_health`, `guard_breaches`, `axis_memory`, `archive_top_runs`, `rare_hit_samples`, `l1_overrides`, `l1_supplemental_rules`, `l1_situational_examples` (all 15, unchanged) | — (floor already spans `possible`) |
-| `l3_plan` | L4 | `plan`, `task_context`, `diagnostics` | mandatory + `l1_wounds`, `axis_memory`, `guard_breaches`, `critique` | `evidence_health`, `archive_top_runs` |
-| `checkin` | — (non-goal, §5) | — | — (runs around the loop; no round injections) | — |
-
-Rationale for the two deliberate calls: `l1_critique` is the ONE node where a raw `diagnostics` dump is *justified* (it is the distiller — everything downstream reads its compression, so it must read the raw source); and `l1_generate` keeps **`origin_strengths`** on the floor as the guard against regressing already-passing samples that `critique` (failure-focused) does not carry — the exact concern from the layout-trim review.
-
-**Arc-3 search-space reference — the budget map (char_cap ceilings, ~tok = cap/4).** What L4 is trading when it edits a node's layout. Per fill:
-
-| node | floor budget | mandatory (pinned) | trimmable | fattest optional levers |
-|---|---|---|---|---|
-| l1_generate | ~3125 t | ~2400 t | ~725 t (23%) | l1_wounds 625, escalation 100 |
-| l1_critique | ~1250 t | ~500 t | ~750 t (60%) | l1_wounds 625, evidence_health 125 |
-| **l2_context** | ~4025 t | ~700 t | **~3325 t (83%)** | rendered_prompt 2000, axis_memory 300, +2 uncapped panels |
-| l3_plan | ~1925 t | ~700 t | ~1225 t (64%) | l1_wounds 625, axis_memory 300 |
-
-Two structural facts this surfaces: **(1)** the pinned floor is tiny (~4.3k tok/fill-set across all nodes; ~58% of the capped budget is trimmable), so an aggressive token cut is *reachable without breaching a guard rail* — the headroom L4 searches. **(2)** `rendered_prompt` (2000 t) is **mandatory for l1_generate but optional for l2_context** — the exact per-node distinction a uniform prose-trim can't express and the layout axis can. `l2_context` is the prime target (83% trimmable). Caveat: these are char_cap *ceilings*, not realized tokens, and the uncapped-but-self-bounded panels (`origin_strengths` one-liner, `archive_top_runs` top-3, `rare_hit_samples` [:6]) are already row-limited in their renderers — they are **not** blowup vectors, so adding char_caps to them would be a redundant second bound (verified, not done).
-
-**The fitness gap this exposed — now closed by a worst-offender clip. [BUILT 2026-07-01.]** The outer fitness was `0.4·((first_round_delta+1)/2) + 0.4·((after_N_rounds_delta+1)/2) + 0.2·(1/rounds_to_N)` — pure inner-improvement + speed, **no cost term**. So a candidate reaching the same inner improvement with a leaner layout scored *identically* to the fat one: Arc 3 gave L4 the lever to trim, but the fitness was indifferent to pulling it, so the search wouldn't *converge* to lean. Fix (operator steer: "flow into the composite, just to remove the worst offenders"): the outer `scoring` formula is multiplied by a **worst-offender clip** `min(1.0, 180000 / max(input_tokens + output_tokens, 1))`. `input_tokens`/`output_tokens` are already in the per-sample formula namespace (`formula/compiler.py::_build_namespace`, summed from `step_tokens`), and on the outer cycle `step_tokens` = the inner campaign's rolled-up spend (`inner_recursion.py`) — so a fat inner meta-prompt layout inflates it and gets demoted, with **no new evaluator, no budget-constant change, no plumbing**. Shape is deliberate: gate ≡ 1.0 (identical to today) for every candidate under ~180k total inner tokens — normal cost is *untouched*, the improvement ranking is fully preserved there, and only ballooning candidates ramp down (210k→×0.86, 420k→×0.43). Erring the threshold HIGH is the safe direction (a too-high clip is merely inert, never degrading), so it "removes the worst offenders" without risking the load-bearing-signal stripping the operator is cautious about. Missing token data → gate 1.0 (vacuous, no fake penalty). The 180k threshold is a first-pass value to tune down once the first real run reveals the cost distribution. (The registered `output_compactness` evaluator was the other candidate lever but `OUTPUT_TOKEN_BUDGET=12_000` vs ~32k inner output saturates it to 0.0 — the inline namespace clip avoids that scaling trap entirely.)
-
-**How L4 converges (why this is self-correcting, not a new place to be wrong).** The layout axis is scored by the same proxy as everything else: a candidate that starves an inner node (excises a genuinely high-value signal) produces worse inner cycles → worse `first_round_delta`/`after_N_rounds_delta` → that candidate loses; a layout that adds a real signal wins. So the floor only needs to be *not-terrible*; the loop finds the high-value set empirically. The mandatory set is the only hardcoded judgment, and it is deliberately minimal (each node's can't-function-without inputs).
-
-**Executable plan — three green arcs (subtractive net; this section is the compaction-proof spec the implementing agent follows verbatim).**
-
-Shared invariant to preserve throughout: **the mandatory set is the guard rail** — every node's effective layout (floor ± L4 edits) MUST contain its `mandatory` set; the validator rolls back an edit that drops one, so the loop is "creative within guard rails" by construction.
-
-*Arc 1 — Generalize `l1_layout` → per-node layout + collapse `fill_fixed` (BEHAVIOR-PRESERVING refactor).* Note vs. the plan below: no standing parity test (the tests charter gives loud-breaking shape changes no test — verified once via a scratch string-parity check instead); the ledger's counted dimensions didn't move (NodeLayoutSpec/NODE_LAYOUTS aren't a counted dimension, `fill` isn't a module), so no baseline edit; `fill_l1`+`fill_fixed` collapsed into one `fill` returning `(filled_template, injection_vars)` rather than deleting only `fill_fixed`.
-- `domain/l1_layout.py`: add frozen `NodeLayoutSpec {editor: Literal["l2_l4","l4","static"]; possible: frozenset[str]; mandatory: frozenset[str]; floor: L1Layout}` and `NODE_LAYOUTS: dict[str, NodeLayoutSpec]` for `l1_generate`/`l1_critique`/`l2_context`/`l3_plan` (`checkin` excluded — §5 non-goal). **Arc-1 floors = each node's EXACT current injection set** (l1_generate = today's `default_l1_layout()` incl. the uncommitted trim; l1_critique/l2_context/l3_plan = the `{{token}}` sets in `datasets/_optimizer/pipeline.json` lines 870/878/886). Fold `default_l1_layout()` into `NODE_LAYOUTS["l1_generate"].floor` (remove the standalone body — one source). Generalize `validate_l1_layout(layout, *, spec)` to take a `NodeLayoutSpec` (its `possible`/`mandatory`) instead of the module-global `L1_MANDATORY`/`L1_POSSIBLE`; keep `L1_MANDATORY`/`L1_POSSIBLE` as `NODE_LAYOUTS["l1_generate"]` aliases so L2's call site is untouched.
-- Import-time invariants (pure set-algebra, mirror `l1_layout.py:120`) per spec: `mandatory ⊆ possible`, `floor.all_placeholders() ⊆ possible`, `floor.placeholders ⊇ mandatory`. The **INJECTIONS-membership** check stays in `dispatch/hub/injections/registry.py` (domain must not import application — layer rule): widen the existing `set(INJECTIONS) >= L1_POSSIBLE` guard to `>= ⋃ spec.possible`.
-- `dispatch/hub/facade.py`: **delete `fill_fixed`**; route every optimizer node through the layout fill. The four meta-prompt `problem_description` strings in `datasets/_optimizer/pipeline.json` lose their inline `{{tokens}}` (moved into the floor lists, same order); `l1_critique`/`l2_context`/`l3_plan` now fill from `NODE_LAYOUTS[node].floor` exactly as L1 fills from its (L2-authored) layout. **Rendering-parity is the one risk:** `fill_fixed` substitutes `{{tokens}}` inline; `fill_l1` appends to static slot text. Preserve order by keeping the floor list in the templates' current token order and moving any static prose that surrounded tokens into the slot's static text.
-- Tests: one **byte-identical parity test** — for a fixture cycle, each node's rendered optimizer prompt is unchanged pre/post arc. Adjust any test asserting `default_l1_layout()` shape. **Ledger:** −`fill_fixed` −4 `{{token}}` template blobs +`NodeLayoutSpec`+`NODE_LAYOUTS` ⇒ net ≤ 0; update `tests/test_complexity_ledger.py` baseline DOWN to lock it.
-- Done: gate green (`ruff` + `mypy` + `pytest`), parity test passes, ledger not raised.
-
-*Arc 2 — Set the guard-rail floors + mandatory/optional split (§6 matrix; small behavior change).*
-- Applied: `l1_generate.floor += origin_strengths` (the review restore); each node's `mandatory` set to its minimal can't-function inputs; `possible` widened to the L4 search space (`l1_critique` += `axis_memory`/`archive_top_runs`/`origin_strengths`; `l3_plan` += `evidence_health`/`archive_top_runs`). **Refined from the draft:** floors were NOT shrunk (see the AS-BUILT matrix rationale above) — the only rendered-prompt change is `l1_generate` gaining `origin_strengths`; every other node's prompt is byte-identical to Arc 1. `mandatory`/`possible` only gate the (not-yet-existing) L4 edits, so they are inert until Arc 3.
-- Done: gate green (ruff + mypy + pytest); import-time set-algebra invariants validate every node.
-
-*Arc 3 — Wire L4's layout edit (the new capability).*
-- **Schema (AS BUILT — no new `OPTIMIZER_RESPONSE_MODELS`).** The layout edit rides the EXISTING `L1Variant.pipeline_params_override` slot (`dict[str, dict[str, Any]]` already permits a nested value) — the same slot slice 3 uses for prose edits, so no schema-model fork. `build_l1_response_schema` (`validators/l1_strict.py`) grafts a `layout` param — `{slot: [enum of `possible`]}` — into a node's param object **only when the node is in `NODE_LAYOUTS` AND `editor == "l4"`** (l1_critique/l2_context/l3_plan). Inert for every normal campaign (backend nodes absent from `NODE_LAYOUTS`) and for `l1_generate` (excluded — see scoping below), so the schema never offers an unwired edit. Verified on the real `promptpotter-self` schema: layout grafted for the 3 l4-nodes (enum 7/15/9 = their `possible`), absent for l1_generate.
-- **Apply — `resolve_node_layout(node)` (`dispatch/llm_call/prompts.py`).** Reads the per-node `layout` off the SAME override ContextVar the prose edits use (`_apply_prompt_override`'s structural peer), PARTIAL-merges it onto the node's floor (a named slot replaces, an omitted slot keeps the floor), validates via `validate_l1_layout(..., spec=NODE_LAYOUTS[node])`, and **rolls back to the floor on any HARD failure (dropped-mandatory / unknown / dup) — the guard rail**. The three L4-only fill sites (`l1/critique.py`, `escalation/firing.py` for l2_context+l3_plan) now fill from `resolve_node_layout(node)` instead of `NODE_LAYOUTS[node].floor`. Also fixed: `detect_invariants` canon switched to `json.dumps(sort_keys=True)` so a nested `layout` dict stays hashable in the dedup sig.
-- **Menu surfaced two ways:** the schema's `layout` enum IS the machine-readable per-node vocabulary; a terse note in `datasets/_optimizer_meta/prompts.json::l1_generate` teaches the outer LLM the lever exists + that a mandatory signal can't be excised (kept short — the empty-response lever).
-- **Scoping (deliberate).** Arc 3 wires the three **`editor == "l4"`** nodes — exactly the context-blowup targets (l2_context's 15 signals, l1_critique the distiller). `l1_generate`'s L4 floor-edit is DEFERRED: its layout is L2-edited in-campaign (rides `opt_sp.memory.l1_layout`, seeded from the floor at inner-origin), so an L4 edit there needs a different seam (seed the inner-origin OSP inside the inner task) than the fill-site swap the l4-only nodes use — and applying it at fill time would clobber the inner L2's live edits every round. Excluded from the schema graft so nothing is silently dropped. The "surface as an L4 wound" half is also deferred: a rolled-back edit logs + runs the inner cycle on the floor, so the bad edit scores as no-improvement (the proxy penalizes it) rather than needing inner→outer wound plumbing.
-- Tests: `test_resolve_node_layout_l4_edit_and_guard_rail` (no-override→floor, valid edit→merge, mandatory-drop→rollback). Done-when the full-signal data run confirms a `new promptpotter-self` candidate differing from origin by an inner-node **layout** and the winner's layout captured in `winner_pipeline_params` (validate on the same run as slices 3–5).
-
-**Operator-facing surface (reach-the-operator).** The §6 Table-2 matrix is generated into ONE researcher doc from `NODE_LAYOUTS` (single corpus — don't fork the prose); the webapp change is deferred with the rest of the L4 UI lane (CLI/headless scope, §5 non-goals) but noted here so it is not silently dropped.
-
-## Named seams (for the implementing PR; not edited by this spec)
-
-| Concern | File |
-|---|---|
-| `in_process` dispatch (replace the raise) | `promptpotter/infrastructure/backend.py::BackendClient.run_query` |
-| `in_process_run` on the protocol | `promptpotter/connectors/protocol.py` |
-| New `llm_only` connector + registry row | `promptpotter/connectors/llm_only.py`, `connectors/__init__.py` |
-| `promptpotter` inner-cycle runner | `promptpotter/connectors/promptpotter.py` |
-| Recursion entry + task isolation + spawn-context publish | `application/runner/entry.py::run_optimization`, ContextVars in `infrastructure/llm/models.py` + `rate_limit.py`; `runner/inner_recursion.py::publish_inner_spawn_context` |
-| Sandboxed inner stores (FLAT registry) | `runner/inner_recursion.py` → `build_stores(projects_root=<workspace>/.inner/<cycle_id>)` via `init_services(store=…)` — NOT `.runtime/inner` (Windows MAX_PATH) |
-| in_process skips remote schema + on-disk experiment file | `application/bootstrap/wiring.py::_resolve_pipeline_schema(in_process=…)` + `_load_experiment_file_into_session`; `Connector.experiment_file` |
-| Per-run inner optimizer-prompt override | `dispatch/llm_call/prompts.py::set_optimizer_prompt_overrides` + `_apply_prompt_override` |
-| Inner benchmark (headroom) | `datasets/promptpotter-self/inner_tasks.json` → `justlogic` high-depth (slice 3a) |
-| Per-campaign optimizer pipeline + per-node edits | `application/optimization/dispatch/llm_call/prompts.py` (`OPTIMIZER_PIPELINE_PATH` → resolved), new `datasets/_optimizer_meta/pipeline.json` (slice 3b) |
-| Meta output schema(s) | `application/optimization/dispatch/schemas.py::OPTIMIZER_RESPONSE_MODELS` (slice 3b) |
-| Outer fitness + inner-spend rollup | new `outer_fitness` module; decisive-compare on `metrics.py::elimination_p_best`; reads inner `index.json` + sandbox `ledger.jsonl`; roll inner spend onto the outer dashboard (slice 4) |
-| Per-node layout matrix + fill collapse | `domain/l1_layout.py` (generalize to `NodeLayoutSpec`/`NODE_LAYOUTS` + import-time invariants); `dispatch/hub/facade.py::fill_fixed` → collapsed into the layout path; `dispatch/schemas.py` (per-node `layout` edit in the meta output schema); `dispatch/llm_call/prompts.py::set_optimizer_prompt_overrides` (carry the layout edit) (slice 6) |
+**Open: the validating data run** (slice 6). The operator-facing layout matrix (generate it
+from `NODE_LAYOUTS` into one researcher doc — don't fork the prose) and any webapp surface
+stay deferred with the L4 UI lane.

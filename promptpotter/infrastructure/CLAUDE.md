@@ -32,7 +32,7 @@ follow the same pattern.
 | `PoBBStreamView` | per cycle | `.runtime/streams/round_NNNN_p_best.jsonl` | Per-sample P(best) trajectory for post-hoc posterior analysis. Operator-tailable; webapp does not consume it. |
 
 The **Profile A outbound SSE highway is NOT a projection/subscriber** — it is
-served by *tailing* the on-disk ledger (`event_stream/tail.py::CycleLedgerTail`)
+served by *tailing* the on-disk ledger (`projections/event_stream/tail.py::CycleLedgerTail`)
 over `GET /campaigns/{c}/cycles/{cy}/events:subscribe`, **cross-process**: any
 reader (the API server, the CLI, a future MCP client) tails the cycle's
 `.runtime/ledger.jsonl` directly, so the stream no longer depends on the run
@@ -46,9 +46,9 @@ contract: [`docs/developer/event-stream.md`](../../docs/developer/event-stream.m
 owns its live stream, stamped with its own `cycle_id`. A fork's view can't
 surface the parent's id; a fork seeds its prior trajectory from the parent's
 on-disk `dashboard.json` (via `for_session(seed_from_cycle_id=…)`). The write
-target is the `CycleDir` newtype (`domain/cycle_paths.py`); the three read sites
-(`/api/v1/sessions/active/live-state`, the per-cycle `dashboard` route, the SSE
-ledger-tail's snapshot frame) serve the viewed cycle's own file — no `root_cycle_id` collapse. Run-state rides
+target is the `CycleDir` newtype (`domain/cycle_paths.py`); the read sites
+(the per-cycle `dashboard` route, the SSE ledger-tail's snapshot frame) serve
+the viewed cycle's own file — no `root_cycle_id` collapse. Run-state rides
 `dashboard.json::run_phase` (declared by the runner, projected by
 `LiveDashboardView`); the old non-cached `/runstate` probe is gone — its
 freshness-based "running" was the symptom that run-state was never owned state.
@@ -56,9 +56,9 @@ freshness-based "running" was the symptom that run-state was never owned state.
 `DerivedView.on_record` (`projections/base.py`) owns the
 `isinstance(record, …)` dispatch; subclasses override hooks. There's no
 second dispatch path because the base class is the only one. Subscribers
-MUST NOT write campaign artifacts beyond their declared allowlist. This is
-a structural invariant that fails loud (an out-of-allowlist write shows up
-in the file tree) — no standing test; see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md).
+MUST NOT write campaign artifacts beyond their declared allowlist (fails
+loud — an out-of-allowlist write shows up in the file tree; see
+[`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).
 
 `DerivedView.drain()` is the runner's teardown seam: `_finalize_run` calls
 `RunObservers.drain_all()` on every stop reason so buffered projection
@@ -90,13 +90,17 @@ cache keyed by content hash. `identity` is the
 Stage-0 `IdentityContext` (`shared/identity.py`); `Stores.identity` is
 the sole source of tenant scope, with `Stores.tenant_id` a derived
 `@property` returning the `TenantId` newtype (identity-foundation
-no-drift gate #4 — never an independent field). Composite over focused
-leaf stores (`BackendStore`, `CampaignStore` (`store/campaign_store/`),
-`DatasetRunStore`, `PlanStore`, `SessionStore`). Shared I/O in
-`store/io.py`. Path helpers in `store/paths.py`; the
-`CycleDir` / `WorkspaceDir` write-target newtypes in
+no-drift gate #4 — never an independent field). Composite over ten focused
+leaf stores: `backends` (`BackendStore`), `tenant_datasets`, `sessions`,
+`campaigns` (`store/campaign_store/`), `checkin` (`CheckinDraftStore`),
+`sweeps`, `archive` (`MeasurementArchive`), `optimizer_calls`
+(`OptimizerCallCache`), `diagnostic_runs`, `users`. Shared I/O in
+`store/io.py`; path helpers in `store/layout.py`; derived reads are free
+functions in view modules (`store/archive_views.py` is the template — it is
+also the archive's single-writer facade). The
+`CycleDir` / `WorkspaceDir` write-target newtypes live in
 `domain/cycle_paths.py` — projections and stores accept these newtypes,
-not raw `str`/`Path`. `archive/` is cross-cycle/session/tenant;
+not raw `str`/`Path`. `archive/` is cross-cycle/cross-tenant;
 `MeasurementArchive` is the DB core.
 
 `CampaignStore` (`store/campaign_store/store.py`) exposes

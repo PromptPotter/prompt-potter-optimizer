@@ -2,13 +2,7 @@
 
 > **Audience:** Developer reference. Operators see [`../manual/`](../manual/) for usage docs.
 
-A **Campaign** is one declared optimization effort — a **dataset**, a **pipeline origin**, the **context text**, and the **optimizer meta-prompts** it runs under. It owns `campaigns/{campaign_id}/`, a `campaign.json` manifest, a campaign-wide `log.md`, and `hard_samples.json`.
-
-`campaign_id = {dataset}__{rand6_hex}` — minted fresh per `new` invocation. Each `python -m promptpotter new <dataset>` produces a distinct campaign. The declaration (target hash + optimizer-prompt hash) is recorded as properties on `campaign.json` (`root_content_hash`, `optimizer_prompt_hash`) and used by resume to warn on drift, not to derive the id. Cross-campaign evidence pooling on the same declaration rides the dataset-scoped `archive/measurements/`.
-
-A **Session** is one `new` invocation. A campaign holds one session — the `new` that minted it. `resume` extends it; `resume --fork-on-divergence` adds sibling cycles. Each session is itself a tree: a root cycle (`cycle_<target_hash>`) plus its fork descendants. The four-entity hierarchy: **Workspace → Dataset → Campaign → Cycle**, with **Session** a unit of a campaign.
-
-> **Pre-existing on-disk shape.** Campaigns minted under the previous content-addressed scheme (`{dataset}__{declaration_hash}`, find-or-create on duplicate) carry multiple session roots — `cycle_<hash>` for session 1, `cycle_<hash>_s{N}` for session N — under one `campaign_id`. Readers still parse them; the `_s{N}` suffix is no longer written. See `promptpotter/infrastructure/store/paths.py` for the canonical reader.
+A **Campaign** owns `campaigns/{campaign_id}/`: a `campaign.json` manifest, a campaign-wide `log.md`, `hard_samples.json`, and one root cycle plus its fork descendants under `cycles/`. Entity definitions (Campaign / Cycle / the no-Session-tier rule / `campaign_id` minting) are [`../architecture.md`](../architecture.md) §0's and [`../glossary.md`](../glossary.md)'s — this page owns only the tree mechanics. One id-parsing fact lives here: a cycle's family is parsed purely from its id — `infrastructure/store/layout.py::root_cycle_id` / `::sibling_kind` know exactly three separators (`_fork_`, `_diag_`, `_sweep_`).
 
 ## Primitive
 
@@ -19,19 +13,19 @@ campaigns/justlogic__a1b2c3/        # one Campaign
   campaign.json                     # manifest
   log.md                            # campaign digest
   cycles/
-    cycle_abc123/                   # session root (no parent_cycle_id)
+    cycle_abc123/                   # root (no parent_cycle_id)
       dashboard.json                # this cycle's own live telemetry
       index.json                    # sibling_kind: root
-      ledger (events.jsonl)         # …, FORK_CUT → fork_x, …
+      .runtime/ledger.jsonl         # …, FORK_CUT → fork_x, …
     cycle_abc123_fork_x/            # branch — flat alongside the root
       dashboard.json                # the fork's OWN telemetry (seeded from parent at the cut)
       index.json                    # parent_cycle_id: cycle_abc123, sibling_kind: fork
-      ledger                        # inherit_from(parent, offset_at_cut)
+      .runtime/ledger.jsonl         # inherit_from(parent, offset_at_cut)
 ```
 
 Forks land flat under `cycles/`. The tree is reconstructed from `parent_cycle_id` metadata, not directory nesting. `dashboard.json` is per-cycle — every cycle owns its own, stamped with its own `cycle_id`.
 
-**`unit_kind` (webapp sidebar label):** `session` (root, `resume`-extended) · `divergent_resume` (a `resume --fork-on-divergence` branch) · `user_fork` (HITL fork / diagnostic / sweep, all one kind) · `auto_rebase` (an automatic L2/L3-rebase branch; fork trigger `l2_rebase` / `l3_rebase`).
+**`unit_kind`** is the webapp sidebar label derived from `(sibling_kind, fork_trigger)` — the four values are enumerated in [`../glossary.md`](../glossary.md).
 
 ## Three callers, one primitive
 

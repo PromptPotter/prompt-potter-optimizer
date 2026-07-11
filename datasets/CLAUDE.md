@@ -30,29 +30,21 @@ Optional:
 
 ## Registered datasets
 
-| Name | Backend connector | Headline use |
-|---|---|---|
-| `lca-termnorm` | `termnorm` | Production TermNorm benchmark; M11 publication target. |
-| `bbeh` | `termnorm` | BBEH (M11 headline benchmark). |
-| `gsm8k` | `termnorm` (llm_only mode) | Reasoning baseline; meta-campaign proxy benchmark. |
-| `hotpotqa` | `termnorm` | Multi-hop QA benchmark. |
-| `aime_2025` | `termnorm` (OpenRouter+Mistral overlay) | AIME competition math; overlay routes off Groq default. |
-| `justlogic` | `termnorm` | Logic reasoning at variable depth. |
-| `email-tagging` | `termnorm` | Built-in try-and-learn demo (n8n inbox email-classification); surfaced while `User.demo_mode_enabled`. |
-| `promptpotter-self` | `promptpotter` | **The one L4 dataset.** Optimizer-of-the-optimizer; outer cycle whose backend is the optimizer itself. See [§ L4 below](#l4--promptpotter-self). |
-| `_optimizer/` | n/a | The optimizer's own `pipeline.json` + prompt variants — same shape as a target backend's pipeline.json (per §0 self-optimization commitment). |
+The roster is the directory listing; each dataset's connector is read off its own `pipeline.json::nodes` — don't mirror either here. The special cases worth knowing:
+
+- **`lca-termnorm`** (`termnorm`) — the **only** dataset that still needs a TermNorm server; every other benchmark declares a single `llm_only` node and runs fully in-process.
+- **`aime_2025`** — its overlay routes to OpenRouter+Mistral, off the Groq default.
+- **`email-tagging`** — the built-in try-and-learn demo, surfaced while `User.demo_mode_enabled`.
+- **`justlogic`** — the L4 inner benchmark; **`promptpotter-self`** (`promptpotter` connector) — the one L4 dataset ([§ L4 below](#l4--promptpotter-self)).
+- **`_optimizer/` + `_optimizer_meta/`** — not datasets: the optimizer's own prompt homes. Which prompts live where → [`../docs/glossary.md`](../docs/glossary.md) **Prompt homes**; the `champion` write path → [`../promptpotter/application/CLAUDE.md`](../promptpotter/application/CLAUDE.md) `meta_champion/`.
 
 ## L4 — `promptpotter-self`
 
 `datasets/promptpotter-self/` is the **recursive case**: the outer cycle's mutation surface is the inner cycle's meta-prompt template fields (`l1_generate` / `l1_critique` / `l2_context` / `l3_plan`), exposed via `pipeline.json::nodes.{node}.optimizer.param_keys`.
 
-L4 is **not** a 4th `LayerStrategy` inside `promptpotter/application/optimization/`. It is the same PromptPotter applied to itself via the `promptpotter` connector (`../promptpotter/connectors/promptpotter.py`). Conceptually L2 / L3 / L4 are the same family — each mutates a slower-changing surface of the level below (L2 → `task_context`; L3 → `plan`; L4 → meta-prompt templates) — but structurally L4 is a recursion, not a new layer driver.
+L4 is **not** a 4th `LayerStrategy` — it is the same PromptPotter applied to itself via the `promptpotter` connector, a recursion, not a new layer driver (full statement: [`../promptpotter/application/optimization/CLAUDE.md`](../promptpotter/application/optimization/CLAUDE.md)).
 
-**Status:** inner-cycle execution **SHIPPED & live-validated** (l4-outer-loop slice 2) — `new promptpotter-self` runs the real recursion: each outer query (`inner_tasks.json`) mints + runs a sandboxed inner campaign in its own asyncio task (`promptpotter/application/runner/inner_recursion.py`) under a **flat `<workspace>/.inner/<cycle_id>/` registry** (NOT `.runtime/inner` — Windows MAX_PATH), and a **composed fitness vector** (lift core × quality × efficiency; `_compute_proxies`) flows into the outer scoring formula (`l1_critique.observation_mappings`).
-
-**Finishing L4 (the agent drives this — [`../docs/specs/l4-outer-loop.md`](../docs/specs/l4-outer-loop.md) § Finish line):** the goal is a **distributable** `promptpotter-self`. Two live-run learnings reshape the remaining work: **(1) gsm8k is RETIRED as the inner benchmark** — its origin aces the target (1.0 ≥ 0.80), zero headroom, so every outer candidate scores identically; the inner benchmark must have **origin < target** (chosen: `justlogic` high-depth, ~0.44). **(2) Slice 3 (specialized `_optimizer_meta/` outer prompts emitting per-node `PromptTemplate` edits) is REQUIRED for any signal** — the standard `_optimizer/` loop emits flat prompt edits that don't reach the inner per-node meta-prompts. Then slice 4 (enriched fitness + inner-spend rollup) + a bounded cheap default config.
-
-Concept doc: [`../docs/concepts/optimizer-of-the-optimizer.md`](../docs/concepts/optimizer-of-the-optimizer.md).
+Status + the remaining work live in ONE place — [`../docs/specs/l4-outer-loop.md`](../docs/specs/l4-outer-loop.md) § Finish line (don't restate it here; it re-goes-stale every slice). Concept doc: [`../docs/concepts/optimizer-of-the-optimizer.md`](../docs/concepts/optimizer-of-the-optimizer.md).
 
 ## Reference points — consult on every dataset question
 
@@ -64,7 +56,7 @@ Source of truth for wire / reject rationale, projection-bias findings, per-datas
 
 ## Conventions
 
-- **Origin = conservative floor.** Overlay starts at the floor of each tunable (`reasoning_effort: "low"`, low temperature, minimal thinking_budget). L1 expands upward from there when sibling-yield or stall evidence supports it. See [`../promptpotter/application/optimization/CLAUDE.md`](../promptpotter/application/optimization/CLAUDE.md).
+- **Origin = conservative floor** — the overlay starts at each tunable's floor; contract in [`../promptpotter/application/optimization/CLAUDE.md`](../promptpotter/application/optimization/CLAUDE.md).
 - **Don't hand-edit `cache.json`.** It's written by the origin scoring path.
 - **`task_description.md` is L1's framing input** — written for the LLM that will generate candidates, not for human readers (though it should be readable).
 - **`dataset.md` is operator-facing** — describes source, split, sample shape; cite the canonical evaluation protocol.

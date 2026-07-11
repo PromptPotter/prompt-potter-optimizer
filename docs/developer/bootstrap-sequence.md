@@ -60,7 +60,7 @@ calling them out-of-order leaves the session under-wired.
 |---|---|---|
 | `init_services` | `datasets/{name}/pipeline.json`, `.env` (provider keys), backend `/pipeline` | `Session.{store, backend_client, pipeline_schema, samples, index_terms, tenant, langfuse}` |
 | `populate_session_scoring` | `CampaignConfig.scoring`, `cycle_id` | `Session.{scoring, state.obs, experiment_id, source}` |
-| `bootstrap_cycle` | `Session.{store, backend_id, samples}`, `origin_jsp` | `store.campaigns/{cycle_id}/` directory; returns `(cycle_id, resumed_from_round)` |
+| `bootstrap_cycle` | `Session.{store, backend_id, samples}`, `origin_jsp` | the cycle's `campaigns/{campaign_id}/cycles/{cycle_id}/` directory; returns `(cycle_id, resumed_from_round)` |
 | `init_optimization_loop` | everything above + `origin_accuracy` | `Cycle.{ledger, escalation, opt_sp, tracking, axes}`; emits INIT.exit |
 
 ## The line between bootstrap and runner

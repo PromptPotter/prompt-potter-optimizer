@@ -7,9 +7,12 @@ Next.js 16.2.7 + React 19.2.4 + TypeScript, static export at `out/` mounted at t
 What each user-facing control **must do**, per auth/data state, lives in
 [`../docs/specs/frontend-surface-contract.md`](../docs/specs/frontend-surface-contract.md).
 This file owns *implementation* invariants; that one owns *behavior* — read it
-before changing any control's states. Its five invariants (state-completeness,
-no-raw-transport-errors, affordance-honesty, auth-coherence, console-hygiene)
-are the bar for user-facing PRs. Drive the surface against it with the
+before changing any control's states. Its **six** invariants — `I1_state_complete`,
+`I2_no_raw_transport`, `I3_affordance_honest`, `I4_auth_coherent`,
+`I5_no_anon_noise` (anon fires no auth-gated request — don't fire it, not merely
+"keep the console clean"), `I6_run_state_server_owned` (`run_phase` has ONE
+server-owned answer; `IN_FLIGHT_PHASES` in `lib/run-phase.ts`) — are the bar for
+user-facing PRs. Drive the surface against it with the
 two-harness recipe in § Testing posture below (anon = `:8001`; authed+live =
 `PROMPTPOTTER_AUTH=off`).
 
@@ -53,8 +56,8 @@ Next.js 16 has breaking changes from prior versions — APIs, file conventions, 
 Three guarantees the writer side MUST hold:
 
 1. **Always on disk.** `dashboard.json` exists after any ledger event in a cycle. Sole writer: `LiveDashboardView` (`promptpotter/infrastructure/projections/live_dashboard/view.py`). Sole writer of `rounds/round_NNNN.json`: `CampaignStore.save_round_file`, which persists `RoundResult.model_dump()` — the model **is** the round document. (The `.runtime/cache/rounds/round_NNNN.json` *audit twin* is a different file with the same basename, written by `AuditTrailView`; the webapp does not fetch it.) All use atomic-swap (tmp + rename) — never partial-write, never torn read.
-2. **Settles within `_DASHBOARD_DEBOUNCE_S` (0.25 s) of the last event.** The writer debounces high-frequency events (sample-scored, token-usage, LLM-call progress) to coalesce bursts, but converges to current state at most 250 ms behind real-time. Constant at `view.py:88`; flush plumbing at `_schedule_persist()` (`view.py:448`).
-3. **Immediate (no debounce) at round boundaries.** `PhaseRecord("round"|"origin", "complete"|"exit")` and `mark_stopped` flush synchronously via `_flush_pending_persist()` (`view.py:472`). When a round ends, its file is current before the next round begins. **Do not remove these flushes.** Do not relax atomic-swap. Do not introduce a path that lets `dashboard.json` lag past a completed round.
+2. **Settles within `_DASHBOARD_DEBOUNCE_S` (0.25 s) of the last event.** The writer debounces high-frequency events (sample-scored, token-usage, LLM-call progress) to coalesce bursts, but converges to current state at most 250 ms behind real-time. Constant `_DASHBOARD_DEBOUNCE_S`; flush plumbing at `view.py::_schedule_persist`.
+3. **Immediate (no debounce) at round boundaries.** `PhaseRecord("round"|"origin", "complete"|"exit")` and `mark_stopped` flush synchronously via `view.py::_flush_pending_persist`. When a round ends, its file is current before the next round begins. **Do not remove these flushes.** Do not relax atomic-swap. Do not introduce a path that lets `dashboard.json` lag past a completed round.
 
 If a future change wants to defer or skip a write, the question to answer first is: *can an operator who alt-tabs to the file tree right now still see the truth?* If no, the change is wrong.
 
@@ -118,7 +121,7 @@ The webapp gate is **compile-time + smoke + a small Vitest scope**, enforced by 
 - `npm run build` — the static export must succeed.
 - Manual smoke at `http://localhost:8001/` after a behavioural change. Two states, two harnesses:
   - **anon** — open `:8001` as-is (no flag); drives the public-preview surface.
-  - **authed + live** — relaunch the server with `PROMPTPOTTER_AUTH=off`: `deps.py::resolve_identity` short-circuits to `registered_or_default_identity` (the CLI's resolver), so `/auth/me` returns 200 and every auth-gated read resolves to your **real on-disk campaigns** (zero spend, pure reads). This is the cheap way to exercise the contract's `live`/`warming` clauses — no Docker, no fixtures. **Add `PROMPTPOTTER_ADMIN=1` to faithfully reproduce the operator's production view**: install benchmarks (repo `datasets/{name}/` — every CLI `new <benchmark>` campaign: justlogic, aime_2025, musr, …) resolve only for an identity holding `BENCHMARKS_READ_CAP`, which the registered operator carries in production (pinned at the OIDC seam, `oidc.py`) but the bare auth-off identity does **not**. Without the flag, those campaigns' `/datasets/{name}/preview` + `/measurement-series` 404 in the console — a harness gap, not a product bug (a real operator has the cap; regular users never own benchmark campaigns). Reserve the Dex harness ([`dev/oidc-local/`](../dev/oidc-local/), [`docs/developer/local-oidc.md`](../docs/developer/local-oidc.md)) for the one thing the flag can't reach: the real Google OIDC login round-trip.
+  - **authed + live** — relaunch the server with `PROMPTPOTTER_AUTH=off`: `deps.py::resolve_identity` short-circuits to `registered_or_default_identity` (the CLI's resolver), so `/auth/me` returns 200 and every auth-gated read resolves to your **real on-disk campaigns** (zero spend, pure reads). This is the cheap way to exercise the contract's `live`/`warming` clauses — no Docker, no fixtures. **Add `PROMPTPOTTER_ADMIN=1` to faithfully reproduce the operator's production view**: install benchmarks (repo `datasets/{name}/` — every CLI `new <benchmark>` campaign: justlogic, aime_2025, bbeh, gsm8k, hotpotqa, email-tagging, …) resolve only for an identity holding `BENCHMARKS_READ_CAP`, which the registered operator carries in production (pinned at the OIDC seam, `oidc.py`) but the bare auth-off identity does **not**. Without the flag, those campaigns' `/datasets/{name}/preview` + `/measurement-series` 404 in the console — a harness gap, not a product bug (a real operator has the cap; regular users never own benchmark campaigns). Reserve the Dex harness ([`dev/oidc-local/`](../dev/oidc-local/), [`docs/developer/local-oidc.md`](../docs/developer/local-oidc.md)) for the one thing the flag can't reach: the real Google OIDC login round-trip.
 
 When to reach for a component-render test (`@testing-library/react`): pick a regression class that compile + smoke + the derivation tests can't catch — today's bug classes are reader-side and ride the existing Vitest scope.
 

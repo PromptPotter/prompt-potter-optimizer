@@ -78,21 +78,14 @@ Campaign knobs + scoring + optimizer LLM. Validated by `application/config.py::C
 
 **Top-level keys.** `dataset_name`, `scoring`, `sp_budget_ttest`, `exclude_nodes` (drop pipeline nodes by name), `pipeline_overrides` (per-node config overlay), `optimization`. (The optimizer LLM is install-global — `datasets/_optimizer/pipeline.json` — not a campaign key.)
 
-**`optimization` knobs:**
-
-| Key | Default | What it does |
-|---|---|---|
-| `improvement_threshold` | — *required* | Min accuracy delta a round must beat to count as improved. |
-| `degradation_threshold` | — *required* | Mid-eval abort threshold (0 disables). |
-| `max_rounds` | 50 | Cycle round budget (None = unlimited, up to the `HARD_CAP=100` floor). |
-| `l1_patience` | 3 | Stalled-rounds before L2 fires. Set to 0 for "fire L2 every round" cadence. |
-| `l2_patience` | 2 | L2 fires before L3 takes over. |
-| `l3_patience` | 1 | L3 fires before stop. |
-| `n_variants` | 5 | Candidates per round (L2 can override via `l1_overrides.n_variants`). |
-| `elimination_n_min` | 6 | Minimum queries before PoBB elimination fires. |
-| `pobb_epsilon` | 0.15 | Stop a candidate when P(best) < ε. |
-| `forbidden_axes_strict` | True | Reject L1 candidates that mutate operator-fixed axes (`model`, `provider`). |
-| `seed_heatmap_from_archive` | False | Round-end hard-sample Rasch fit folds in prior archive observations (cross-cycle δ_s ordering). |
+**`optimization` knobs:** the stable contract is the mechanism, not a
+frozen key/default table (same rule as §4). Every knob is a
+self-describing field on `OptimizationConfig` in
+`application/config.py` — `Annotated[T, Knob(scope, *estimands)]` plus a
+`Field(description=…)` — and `application/knobs.py::KNOBS` is the walked
+taxonomy. Only `improvement_threshold` and `degradation_threshold` are
+required; everything else defaults. Read defaults off the fields, never
+off a doc.
 
 **Optimizer LLM:** install-global, **not** in `campaign.json`. Provider, model, temperature, `reasoning_effort`, and `max_tokens` are per-node config in `datasets/_optimizer/pipeline.json` (`nodes.{l1_generate|l1_critique|l2_context|l3_plan|checkin}.config`), resolved inside `llm_call` like any other node tunable. One file configures the optimizer for every campaign.
 
@@ -105,7 +98,8 @@ The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no 
 - **`prompts/{node}.json`** — 8-field `PromptTemplate` JSON per node. Schema: `domain/opt_search_point.py::PromptTemplate`. Loaded by `application/datasets/prompts.py::load_node_prompt`.
 - **`task_description.md`** — free-form markdown; decomposed at `init` into the `task_context` dict on `OptSearchPoint`.
 - **`dataset.md`** — operator guide; free-form, not parsed.
-- **`scan_variants.json`** *(optional)* — per-dataset axis-mutation library for sensitivity scans.
+- **`recon_variants.json`** *(optional)* — per-dataset axis-mutation library: the pre-computed L1 sweep variants a recon run reads.
+- **`task_context.json`** — the committed task framing; written once by the `checkin` decomposition (or by web ingest at commit) and read free on every later run. See `application/optimization/task_context.py::load_or_build_task_context`.
 
 ---
 
@@ -143,26 +137,25 @@ Other subcommands (`sweep`, plus the maintenance verbs) have their own flag sets
 
 ## 6. Ledger event types
 
-Typed records in `events.jsonl` from `domain/run_records.py`:
+Typed records on the per-cycle ledger (`.runtime/ledger.jsonl` — the
+workspace-scoped sibling at `.workspace/events.jsonl` carries workspace
+lifecycle, not cycle records). The record family — `PhaseRecord`,
+`SnapshotRecord`, `ResumeCheckpointRecord`, `TokenUsageRecord`,
+`LLMCallStartRecord`/`LLMCallRecord` — is the discriminated union in
+`domain/run_records.py`; each record's fields are its dataclass, read
+them there.
 
-- **`PhaseRecord`** — phase enter/exit + round-boundary events. Fields: `record_type="phase"`, `phase`, `event`, `round`, `payload`.
-- **`SnapshotRecord`** — per-sample / per-candidate snapshots inside a round. Fields: `record_type="snapshot"`, `event`, `round`, `candidate_idx`, `candidate_total`, `sample_idx`, `sample_total`, `payload`.
-- **`ResumeCheckpointRecord`** — replayed-vs-archival decision rows feeding resume divergence checks. Fields: `record_type="decision"`, `round`, `kind` (`ResumeCheckpointKind`), `payload`.
-- **`TokenUsageRecord`** — optimizer LLM token rollups for spend. Fields: `record_type="token_usage"`, `model`, `provider`, `input_tokens`, `output_tokens`, `usd_cost`, `round`, `node`.
-- **`LLMCallStartRecord`** — paired in-flight marker for live `dashboard.json::in_flight`. Fields: `record_type="llm_call_start"`, `call_id`, `node`, `model`, `round`, `candidate_idx`, `started_at_ms`.
-- **`LLMCallRecord`** — paired LLM-call audit record. Fields: `record_type="llm_call"`, `call_id`, `node`, `model`, `round`, `prompt`, `response`, `parsed`, `usage`, `latency_ms`.
+Forks within a family share one event stream via `CycleEventLog.inherit_from(parent_offset)`. The forked cycle's ledger starts with the parent's records up to `parent_offset` plus a `ResumeCheckpointRecord` of kind `FORK_CUT`.
 
-Forks within a family share one event stream via `CycleEventLog.inherit_from(parent_offset)`. The forked cycle's `events.jsonl` starts with the parent's records up to `parent_offset` plus a `ResumeCheckpointRecord` of kind `FORK_CUT`.
-
-Subscribers read via `DerivedView.on_record(record)` and MUST NOT write any campaign artifact beyond their declared allowlist — a structural invariant that fails loud (an out-of-allowlist write shows up in the file tree); no standing test, see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md).
+Subscribers read via `DerivedView.on_record(record)` and MUST NOT write any campaign artifact beyond their declared allowlist (fails loud; see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).
 
 ## 7. Per-cycle artifact paths
 
-Operator-visible files inside `campaigns/{cycle_id}/`. Webapp + downstream tooling read these directly — they are contract.
+Operator-visible files inside `campaigns/{campaign_id}/cycles/{cycle_id}/`. Webapp + downstream tooling read these directly — they are contract.
 
 | Path | Writer | Description |
 |---|---|---|
-| `index.json` | `CampaignStore.create` / `update` | Campaign metadata: id, parent_session_id, dataset_name, backend_id, n_rounds, best_accuracy, rounds[]. Top-level summary. |
+| `index.json` | `CampaignStore.create` / `update` | Per-cycle summary: header (dataset, lineage), rounds[], best. |
 | `log.md` | `application/output/writers.py::write_log_md` | Markdown digest of every closed round + forks + hard samples + final winner. |
 | `review.md` | `application/output/writers.py::write_review_md` | Per-round behavior-check + L1Stats narrative. |
 | `rounds/round_NNNN.json` | `CampaignStore.save_round_file` | Full per-round detail: candidate scores, evaluators, prompt_fields, pipeline_params, OSP snapshot, decisions. |
