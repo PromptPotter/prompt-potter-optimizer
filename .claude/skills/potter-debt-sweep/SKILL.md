@@ -1,6 +1,6 @@
 ---
 name: potter-debt-sweep
-description: The daily automated code-hygiene sweep for PromptPotter. Runs a five-lens verification audit (dead code / fallbacks+hidden-defaults / structural / webapp R-36 / doc-drift), verifies every finding before touching anything, applies only the gate-safe fixes, reconciles the debt backlog, and appends to one rolling PR. Use on the daily schedule, before any release, or whenever the operator says "run the debt sweep" / "do the daily cleanup" / "sweep for untracked debt". Edits code autonomously — so the verify-before-act discipline and the gate are non-negotiable. Distinct from potter-dev (the imprinted playbook this skill loads) and spec-buddy (spec docs, not code).
+description: The daily automated code-hygiene sweep for PromptPotter. Runs a five-lens verification audit (dead code / fallbacks+hidden-defaults / structural / webapp R-36 / doc-drift), verifies every finding before touching anything, applies only the gate-safe fixes, reconciles the debt backlog, and appends to one rolling PR. Use on the daily schedule, before any release, or whenever the operator says "run the debt sweep" / "do the daily cleanup" / "sweep for untracked debt". Edits code autonomously — so the verify-before-act discipline and the gate are non-negotiable. Distinct from spec-buddy (spec docs, not code).
 model: opus
 ---
 
@@ -45,7 +45,10 @@ directly and NEVER touches a sibling repo (TermNorm, marketing).
 
 ## Phase 1 — Baseline
 
-- Invoke **potter-dev APPLY** (loads `rules.md` + the seams/conventions). Honor every rule.
+- Read **`docs/developer/conventions.md`** (the style + code-shape + git rules) and the per-layer
+  `promptpotter/*/CLAUDE.md` for the seams you touch. Honor every convention. (Legacy `R-NN` tags below
+  are shorthand for the named conventions in that file — e.g. "No data deletion", "~2 coherent commits",
+  R-36 "scoring authority is backend-served"; map by name, there is no numbered-rule registry.)
 - Read `docs/specs/code-debt-cleanup.md` end to end. Everything already tracked there
   (Active backlog, the held tiers, "Considered not debt", M13 placeholders, the
   anti-patterns-to-skip list) is the **exclusion set** — do NOT re-report it.

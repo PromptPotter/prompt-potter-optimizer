@@ -829,27 +829,6 @@ class CampaignStore:
         )
         return True
 
-    def list_all(self) -> list[dict[str, Any]]:
-        results = []
-        for index_path in self._index_files():
-            data = read_json(index_path)
-            campaign_id, cycle_id = self._ids_from_index_path(index_path)
-            results.append(
-                {
-                    "campaign_id": campaign_id,
-                    "cycle_id": cycle_id,
-                    "name": data.get("name", ""),
-                    "status": data["status"],
-                    "n_rounds": data["n_rounds"],
-                    "best_accuracy": data["best_accuracy"],
-                    "origin_accuracy": origin_accuracy_of(data),
-                    "created_at": data["created_at"],
-                    "updated_at": data["updated_at"],
-                    "parent_session_id": data.get("parent_session_id", ""),
-                }
-            )
-        return results
-
     def enumerate_cycles(self) -> list[dict[str, Any]]:
         """Every cycle on disk in the webapp-picker shape; unreadable → ``status='unreadable'`` stubs."""
         results: list[dict[str, Any]] = []
