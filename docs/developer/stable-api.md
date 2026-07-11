@@ -84,17 +84,15 @@ Campaign knobs + scoring + optimizer LLM. Validated by `application/config.py::C
 |---|---|---|
 | `improvement_threshold` | — *required* | Min accuracy delta a round must beat to count as improved. |
 | `degradation_threshold` | — *required* | Mid-eval abort threshold (0 disables). |
-| `max_rounds` | 10 | Cycle round budget (None = unlimited, up to the `HARD_CAP=100` floor). |
+| `max_rounds` | 50 | Cycle round budget (None = unlimited, up to the `HARD_CAP=100` floor). |
 | `l1_patience` | 3 | Stalled-rounds before L2 fires. Set to 0 for "fire L2 every round" cadence. |
 | `l2_patience` | 2 | L2 fires before L3 takes over. |
 | `l3_patience` | 1 | L3 fires before stop. |
 | `n_variants` | 5 | Candidates per round (L2 can override via `l1_overrides.n_variants`). |
 | `elimination_n_min` | 6 | Minimum queries before PoBB elimination fires. |
-| `pobb_epsilon` | 0.05 | Stop a candidate when P(best) < ε. |
-| `improvement_significance` | 1.0 | Significance gate (disabled by default; <1.0 requires p < this). |
+| `pobb_epsilon` | 0.15 | Stop a candidate when P(best) < ε. |
 | `forbidden_axes_strict` | True | Reject L1 candidates that mutate operator-fixed axes (`model`, `provider`). |
 | `seed_heatmap_from_archive` | False | Round-end hard-sample Rasch fit folds in prior archive observations (cross-cycle δ_s ordering). |
-| `exploration.heatmap_show_archive_candidates` | False | When seeding from archive: also show archive candidate IDs on the heatmap Y-axis (else hidden from display). |
 
 **Optimizer LLM:** install-global, **not** in `campaign.json`. Provider, model, temperature, `reasoning_effort`, and `max_tokens` are per-node config in `datasets/_optimizer/pipeline.json` (`nodes.{l1_generate|l1_critique|l2_context|l3_plan|checkin}.config`), resolved inside `llm_call` like any other node tunable. One file configures the optimizer for every campaign.
 

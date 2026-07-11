@@ -174,22 +174,6 @@ L2_DUPLICATE_INSERT: LLMOutputValidator = LLMOutputValidator(
 )
 
 
-# Canonical auto-trigger IDs the dispatch hub emits when their evidence
-# fires. L2's situational examples must pin to one of these or to a
-# currently-authored rule_id; L2's supplemental rules must not duplicate
-# the auto-trigger registry's rule bodies.
-_AUTO_TRIGGER_IDS: frozenset[str] = frozenset(
-    {
-        "peaked_axis",
-        "runtime_failure",
-        "continuous_envelope",
-        "chain_bind",
-        "latex_repair",
-        "l2_stall_diversity",
-    }
-)
-
-
 def _check_supplemental_rule_dup_id(
     source_output: Mapping[str, Any],
     *,
@@ -240,6 +224,8 @@ def _check_situational_example_dangling_trigger(
     # Allowed trigger IDs include auto-triggers + currently-authored rule_ids
     # (either the rule layer L2 just proposed, or the carried-over layer on
     # opt_sp if L2 didn't propose this fire).
+    from promptpotter.application.optimization.dispatch.hub.auto_rules import AUTO_RULES
+
     rules_proposed = source_output.get("l1_supplemental_rules_proposed")
     if isinstance(rules_proposed, list) and rules_proposed:
         rule_ids = {r.rule_id for r in rules_proposed}
@@ -247,7 +233,7 @@ def _check_situational_example_dangling_trigger(
         rule_ids = {r.rule_id for r in opt_sp.memory.l1_supplemental_rules}
     else:
         rule_ids = set()
-    allowed: set[str] = set(_AUTO_TRIGGER_IDS) | rule_ids
+    allowed: set[str] = set(AUTO_RULES) | rule_ids
     dangling: list[str] = []
     for entry in proposed:
         tid = entry.trigger_id

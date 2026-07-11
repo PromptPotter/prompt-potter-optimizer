@@ -123,15 +123,17 @@ def load_optimizer_set_overrides(opt_set: str) -> dict[str, dict[str, Any]]:
     ``datasets/_optimizer/``. Empty ``opt_set`` or a missing file → ``{}``.
 
     Non-dict top-level entries (e.g. a ``_doc`` note) are dropped — only real
-    per-node field maps are returned."""
+    per-node field maps are returned.
+
+    A named set whose file is missing RAISES. ``optimizer_set`` is an
+    ``Estimand.SEARCH`` axis, so falling back to the default set would run the inner
+    prompts while the campaign records that it ran the named one — a measurement
+    attributed to a prompt set it never used."""
     if not opt_set:
         return {}
     path = REPO_ROOT / "datasets" / f"_optimizer_{opt_set}" / "prompts.json"
     if not path.exists():
-        logger.warning(
-            "optimizer_set %r: no prompts at %s — falling back to the default set", opt_set, path
-        )
-        return {}
+        raise FileNotFoundError(f"optimizer_set {opt_set!r}: no prompt set at {path}")
     data = json.loads(path.read_text(encoding="utf-8"))
     return {k: v for k, v in data.items() if isinstance(v, dict)}
 
@@ -211,10 +213,6 @@ def optimizer_model(node: str = "l1_generate") -> str:
     return str(optimizer_node_config(node)["model"])
 
 
-_LANGFUSE_PREFIX = "optimizer_"
-_LANGFUSE_CACHE_TTL = 300  # seconds
-
-
 def _resolved_prompt_for_node(name: str) -> dict[str, Any] | None:
     """Look up a node's prompt body in ``resolved_prompts``.
 
@@ -243,43 +241,8 @@ def _load_local(name: str) -> PromptTemplate:
     return PromptTemplate(**body)
 
 
-@functools.cache
-def _prompt_langfuse() -> Any:
-    """Process-wide LangfuseLogger for optimizer prompt fetch/push (separate from trace logger)."""
-    from promptpotter.infrastructure.tracing import LangfuseLogger
-
-    return LangfuseLogger()
-
-
-def _try_langfuse(name: str) -> PromptTemplate | None:
-    """Fetch prompt from Langfuse 'production' label (None on any failure)."""
-    try:
-        from promptpotter.config.settings import settings
-
-        if not settings.LANGFUSE_PROMPTS_ENABLED:
-            return None
-
-        lf = _prompt_langfuse()
-        if not lf.enabled or not lf.client:
-            return None
-
-        prompt_client = lf.client.get_prompt(
-            name=f"{_LANGFUSE_PREFIX}{name}",
-            label="production",
-            cache_ttl_seconds=_LANGFUSE_CACHE_TTL,
-        )
-        config = getattr(prompt_client, "config", None)
-        if not config or not isinstance(config, dict):
-            return None
-
-        return PromptTemplate(**config)
-    except Exception:
-        logger.debug("Langfuse prompt fetch failed for %s", name, exc_info=True)
-        return None
-
-
 def load_optimizer_prompt(name: str) -> PromptTemplate:
-    """Load optimizer prompt: Langfuse production → manifest registry fallback.
+    """Load an optimizer prompt from the manifest registry.
 
     Every load runs through :func:`dispatch_hub.validate_template`, so a
     template that references a slot not in
@@ -288,9 +251,7 @@ def load_optimizer_prompt(name: str) -> PromptTemplate:
     """
     from promptpotter.application.optimization.dispatch.hub import validate_template
 
-    lf_prompt = _try_langfuse(name)
-    template = lf_prompt or _load_local(name)
-    template = _apply_prompt_override(name, template)
+    template = _apply_prompt_override(name, _load_local(name))
     validate_template(name, template)
     return template
 

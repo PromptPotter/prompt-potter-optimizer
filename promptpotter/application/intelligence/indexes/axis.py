@@ -400,14 +400,17 @@ class AxisIndex:
             total = scores.get("total") or 0
             if total != modal_total:
                 continue
+            # An absence is not a measurement: a row that recorded no accuracy must not
+            # enter the leaderboard as a 0% run (the rule `noise_floor.py` already states).
+            if "accuracy" not in scores:
+                continue
+            accuracy = float(scores["accuracy"])
             run_id = entry.get("run_id", "")
             rec = RunRecord(
                 run_id=run_id,
                 name=entry.get("name", ""),
-                accuracy=scores.get("accuracy", 0.0),
-                composite=display_fitness(
-                    scores.get("composite_fitness"), scores.get("accuracy", 0.0)
-                ),
+                accuracy=accuracy,
+                composite=display_fitness(scores.get("composite_fitness"), accuracy),
                 hits=scores.get("hits", 0),
                 total=total,
             )
@@ -467,8 +470,16 @@ class AxisIndex:
         *,
         touched_axes: set[str] | None = None,
     ) -> None:
-        """Fold one entry into ``axis_values``; ``touched_axes`` records the delta for cache invalidation."""
-        accuracy = entry.get("scores", {}).get("accuracy", 0.0)
+        """Fold one entry into ``axis_values``; ``touched_axes`` records the delta for cache invalidation.
+
+        An entry that recorded no accuracy is skipped, not folded as ``0.0``: a fabricated
+        zero arm manufactures ``effect_size`` against every real arm on the same axis, and
+        that number is both L1's ``axis_memory`` panel and the ``l2_axis_yield_drought`` gate.
+        """
+        scores = entry.get("scores") or {}
+        if "accuracy" not in scores:
+            return
+        accuracy = float(scores["accuracy"])
         for node_name, node_config in (entry.get("pipeline_params") or {}).items():
             if isinstance(node_config, dict):
                 for param, value in node_config.items():

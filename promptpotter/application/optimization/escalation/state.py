@@ -316,10 +316,14 @@ class EscalationFSM:
 
     @classmethod
     def from_ledger(
-        cls, ledger: CycleEventLog | None, *, lives: LivesConfig | None = None
+        cls, ledger: CycleEventLog | None, *, lives: LivesConfig | None
     ) -> EscalationFSM:
         """Rebuild state by folding every record in ``ledger``. ``None`` ⇒ fresh state.
-        Pass ``lives`` to reconstruct the banked-lives accumulator on resume."""
+
+        ``lives`` is required (pass the campaign's config, or ``None`` when the campaign
+        runs without a life bank): defaulting it silently rebuilt the accumulator empty,
+        handing a cycle one stall from ``LIVES_EXHAUSTED`` its whole bank back.
+        """
         s = cls()
         if ledger is None:
             return s

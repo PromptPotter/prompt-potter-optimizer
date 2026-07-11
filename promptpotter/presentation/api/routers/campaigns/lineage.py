@@ -25,19 +25,15 @@ from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.mask.record import MaskRecord
 from promptpotter.application.scoring.formula import compile_round_scorer
 from promptpotter.application.scoring.metrics import value_with_mask_applied
-from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.rendering import display_fitness
 from promptpotter.domain.run_records import (
     UNATTRIBUTED_OPERATOR,
     ForkTrigger,
-    ResumeCheckpointKind,
-    ResumeCheckpointRecord,
 )
 from promptpotter.domain.scoring import RoundScorer
-from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store import cycle_dir_for
 from promptpotter.infrastructure.store.io import read_json_optional
-from promptpotter.infrastructure.store.layout import CycleLayout, sibling_kind
+from promptpotter.infrastructure.store.layout import sibling_kind
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._conditional import (
     client_seen_at_or_after,
@@ -318,31 +314,6 @@ def _rounds_from_dashboard(
     return out
 
 
-def _fork_from_round_from_ledger(parent_dir: Path, child_cycle_id: str) -> int | None:
-    """Find the FORK_CUT record in *parent_dir* whose outcome is *child_cycle_id*.
-
-    Final fallback when index.json::fork::from_round doesn't carry the
-    value. Returns None if the parent's ledger is missing or the record
-    isn't there.
-    """
-    if not CycleLayout(parent_dir).ledger.is_file():
-        return None
-    try:
-        ledger = CycleEventLog.open(CycleDir(parent_dir))
-    except Exception:
-        return None
-    for rec in ledger.iter():
-        if (
-            isinstance(rec, ResumeCheckpointRecord)
-            and rec.kind is ResumeCheckpointKind.FORK_CUT
-            and str(rec.outcome) == child_cycle_id
-        ):
-            v = rec.inputs_ref.get("from_round")
-            if isinstance(v, int):
-                return v
-    return None
-
-
 def _filter_post_divergence_rounds(
     rounds: list[CampaignLineageRound], trigger: str, fork_from_round: int | None
 ) -> list[CampaignLineageRound]:
@@ -573,17 +544,8 @@ def get_campaign_lineage(
         fork_block: dict[str, Any] = _fork if isinstance(_fork, dict) else {}
         trigger = str(fork_block.get("trigger") or "")
 
-        # Two sources for fork_from_round, tried in this order:
-        #   1. index.json::fork::from_round
-        #   2. parent ledger's FORK_CUT record (last-resort scan)
-        from_round: int | None = None
         block_fr = fork_block.get("from_round")
-        if isinstance(block_fr, int):
-            from_round = block_fr
-        elif immediate_parent:
-            from_round = _fork_from_round_from_ledger(
-                cycle_dir_for(store.base_dir, campaign_id, immediate_parent), cid
-            )
+        from_round: int | None = block_fr if isinstance(block_fr, int) else None
 
         from_candidate = fork_block.get("from_candidate_id")
         from_candidate_str = (

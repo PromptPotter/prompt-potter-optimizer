@@ -129,21 +129,20 @@ def cell_fitness(rows: list[dict[str, Any]]) -> dict[str, float]:
     return {cell: sum(v) / len(v) for cell, v in acc.items()}
 
 
-def _pick_variant(candidates: list[CandidateInfo], winner_label: str) -> CandidateInfo | None:
-    """The variant the verdict scores: the round winner, else the strongest candidate by
-    composite (so a round that crowned nothing still reports its best arm's verdict)."""
-    if not candidates:
-        return None
-    winners = [c for c in candidates if c.is_winner]
-    if winners:
-        return winners[0]
-    return max(candidates, key=lambda c: c.composite_fitness)
+def _pick_variant(candidates: list[CandidateInfo]) -> CandidateInfo | None:
+    """The variant the verdict scores: the round's elected winner, or nothing.
+
+    It used to fall back to ``max(composite_fitness)`` when no candidate was crowned — so
+    ``OuterVerdict.decision`` could read ``adopt`` for an arm the θ election specifically
+    declined, on the very surface the operator reads to judge a meta-prompt edit. A round
+    that crowned nothing has no verdict; ``None`` is already a legal return.
+    """
+    return next((c for c in candidates if c.is_winner), None)
 
 
 def compute_outer_verdict(
     all_candidate_results: dict[str, list[dict[str, Any]]],
     candidates: list[CandidateInfo],
-    winner_label: str,
     origin_cells: dict[str, float],
 ) -> OuterVerdict | None:
     """The round's blocked-paired verdict against the **cached round-0 origin**
@@ -152,7 +151,7 @@ def compute_outer_verdict(
     the origin is the control, not a verdict subject)."""
     if not origin_cells:
         return None
-    variant = _pick_variant(candidates, winner_label)
+    variant = _pick_variant(candidates)
     if variant is None:
         return None
     var_cells = cell_fitness(all_candidate_results.get(variant.candidate_id, []))

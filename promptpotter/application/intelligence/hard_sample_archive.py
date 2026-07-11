@@ -22,26 +22,29 @@ __all__ = [
 
 CANDIDATE_HASH_LEN = 12
 
+# The one provenance grade every δ fit is built from — deliberate, full-LLM-path
+# measurements, not connector noise. The ruler PoBB kills candidates with and the
+# heatmap the operator reads must be the same scale, so this is not a knob.
+_RULER_GRADE = "A"
+
 
 def build_archive_observations(
     stores: Stores,
     *,
     dataset_name: str | None,
-    min_grade: str | None = None,
 ) -> list[Observation]:
     """Walk the measurement store → ``Observation(content_hash[:12], sample_id, response)`` triples.
 
     ``dataset_name=None`` is admin/forensic only — prevents cross-dataset ``sample_id`` pollution.
 
-    ``min_grade`` (``"A"``/``"B"``/``"C"``) filters to runs at least that provenance
-    grade — the same de-biasing the AxisIndex digest applies. The δ-ruler calibration
-    (slice 2 of fitness-comparability) passes ``"A"`` so the fixed difficulty scale is
-    built only from deliberate, full-LLM-path measurements, not connector noise. ``None``
-    (default) keeps every grade — the hard-samples display path's prior behavior.
+    Grade A only, always. This used to be an optional ``min_grade``: the δ-ruler passed
+    ``"A"`` while the two display callers omitted it and got A+B+C, so one dataset carried
+    TWO difficulty scales — the grade-A δ that decides which candidates PoBB kills, and an
+    A+B+C δ the operator reads off the heatmap. One substrate, by construction.
     """
     obs: list[Observation] = []
     for entry in archive_views.list_runs(stores, dataset_name=dataset_name):
-        if min_grade is not None and not meets_grade(entry_grade(entry), min_grade):
+        if not meets_grade(entry_grade(entry), _RULER_GRADE):
             continue
         content_hash = (entry.get("content_hash") or "").strip()
         if not content_hash:

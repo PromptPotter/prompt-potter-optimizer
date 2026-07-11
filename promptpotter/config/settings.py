@@ -151,7 +151,6 @@ class Settings(BaseSettings):
     LANGFUSE_SECRET_KEY: str = ""
     LANGFUSE_HOST: str = "https://cloud.langfuse.com"
     LANGFUSE_ENABLED: bool = True
-    LANGFUSE_PROMPTS_ENABLED: bool = False
 
     # Security posture. When True, binary/Office uploads (.xlsx) are rejected at
     # ingest rather than parsed — xlsx is a macro / zip-bomb / XXE vector. Default

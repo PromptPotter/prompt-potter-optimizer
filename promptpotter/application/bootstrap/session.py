@@ -91,6 +91,24 @@ class Session:
 
     source: str = ""
 
+    def llm_node_name(self) -> str:
+        """The dataset's prompt-bearing LLM node — the override target for a per-cell
+        seed / model pin.
+
+        Derived from the pipeline schema, never a literal. The L4 inner runner used to
+        hardcode ``"llm_only"``: an inner dataset naming its node anything else had the CRN
+        seed written under a key that did not exist, so the seed never landed and the outer
+        paired (variant − origin) diff silently lost its variance cancellation. Raises rather
+        than guessing — a missing schema means the caller ran before bootstrap.
+        """
+        names = self.pipeline_schema.prompt_node_names() if self.pipeline_schema else []
+        if not names:
+            raise ValueError(
+                f"dataset {self.dataset_name!r} declares no prompt-bearing node — "
+                "cannot target a per-cell seed / model override"
+            )
+        return names[0]
+
     # `pause_check` returns True while the operator has requested a pause
     # (`.runtime/pause.flag` present — the single operator-interrupt flag). The
     # loop checkpoints poll it and, when set, declare PAUSED and exit cleanly:

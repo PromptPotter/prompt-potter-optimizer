@@ -100,16 +100,28 @@ def composite_ci(results: list[QueryMeasurement]) -> tuple[float | None, float |
     whisker every scored candidate carries so no composite point estimate stands alone.
 
     The **single home** for the CI idiom: every stamping site (``l1_score`` for L1
-    candidates, ``emit_origin_round`` for C0) routes through here. It reads the per-sample
-    ``fitness`` through the SAME ``_mean_fitness_by_cell`` the decision metrics use (θ /
-    ``paired_fitness``), so the CI and the decision can never disagree on what a scoreless
-    row is worth (both: 0.0) — and replicate draws of one cell collapse to that cell's mean,
-    so the CI's independent unit is the sample, not the re-draw (identity at the ``rep_k=0``
-    default). ``(None, None)`` when no cell was measured — nothing to bracket.
+    candidates, ``emit_origin_round`` for C0) routes through here.
+
+    It brackets the population ``compute_accuracy`` averages — **non-deprecated cells** —
+    because that is the number it is drawn beside. It used to read every row through the
+    bare ``_mean_fitness_by_cell`` (deprecated rows entering at 0.0) while
+    ``composite_fitness`` averaged only the valid ones, so a single deprecated sample pulled
+    the whisker's centre off the bar it brackets. That is *not* a reason to filter
+    ``_mean_fitness_by_cell`` itself: ``paired_fitness`` needs the un-predicated version —
+    ``elect_round_winner``'s origin-**overlap** guard deliberately grades an errored row as a
+    0.0 cell so an all-errored origin still yields overlap (``theta_lift_over_origin`` is the
+    guard for the ability itself).
+
+    Replicate draws of one cell collapse to that cell's mean, so the CI's independent unit is
+    the sample, not the re-draw (identity at the ``rep_k=0`` default). ``(None, None)`` when
+    no cell was measured — nothing to bracket.
     """
+    # Lazy: scoring → optimization circular.
+    from promptpotter.application.optimization.pobb.elimination import is_deprecated
     from promptpotter.shared.statistics import mean_ci
 
-    per_cell = list(_mean_fitness_by_cell(results).values())
+    valid = [r for r in results if not is_deprecated(r)]
+    per_cell = list(_mean_fitness_by_cell(valid).values())
     if not per_cell:
         return (None, None)
     _, ci_lo, ci_hi = mean_ci(per_cell)
@@ -363,6 +375,11 @@ def _mean_fitness_by_cell(rows: list[QueryMeasurement]) -> dict[Any, float]:
     ``sample_id``, multiple measurements under ``replicate_survivors``) to their per-cell
     mean. At the n=1 default this is the identity — one row per cell. A degraded sample
     with no recorded fitness contributes 0 (the score it earned), not a dropped row.
+
+    **Un-predicated on purpose** — it is the origin-overlap population, not the display one.
+    ``elect_round_winner`` relies on an errored row counting as a 0.0 cell (see its docstring).
+    Callers that need the population ``composite_fitness`` averages must drop deprecated rows
+    first, as ``composite_ci`` does; do not add the filter here.
     """
     acc: dict[Any, list[float]] = {}
     for r in rows:

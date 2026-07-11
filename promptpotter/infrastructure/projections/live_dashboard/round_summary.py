@@ -116,7 +116,6 @@ def build_round_summary(rr: RoundResult, origin_cells: dict[str, float]) -> Roun
                 )
                 for c in rr.candidate_scores
             ],
-            winner_label,
             origin_cells,
         )
     )

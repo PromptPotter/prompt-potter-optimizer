@@ -163,5 +163,7 @@ def resume_with_divergence_check(
             )
 
     cycle.replay_priors(prior)
-    cycle.escalation = EscalationFSM.from_ledger(session.state.ledger)
+    cycle.escalation = EscalationFSM.from_ledger(
+        session.state.ledger, lives=cycle.config.optimization.lives
+    )
     return None

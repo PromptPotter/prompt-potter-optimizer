@@ -171,6 +171,37 @@ def _require_dataset_name(payload: dict[str, Any], key: str = "dataset_name") ->
     return raw
 
 
+def _optional_bounded_float(
+    payload: dict[str, Any], key: str, *, lo: float, hi: float | None = None
+) -> float | None:
+    """``payload[key]`` as a float within ``[lo, hi]``, or ``None`` when absent.
+
+    Out of range is a 422, never a silent omission: dropping the key let a run start
+    with no spend cap and no halt threshold while the client got a 202.
+    """
+    raw = payload.get(key)
+    if raw is None:
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, int | float):
+        raise PayloadInvalidError(f"payload.{key} must be a number")
+    if raw < lo or (hi is not None and raw > hi):
+        bound = f"between {lo} and {hi}" if hi is not None else f"at least {lo}"
+        raise PayloadInvalidError(f"payload.{key} must be {bound}")
+    return float(raw)
+
+
+def _run_limits(payload: dict[str, Any]) -> dict[str, float]:
+    """The two operator-set run limits, shared by ``mint-campaign`` and ``start-run``."""
+    limits: dict[str, float] = {}
+    halt = _optional_bounded_float(payload, "halt_at_accuracy", lo=0.0, hi=1.0)
+    if halt is not None:
+        limits["halt_at_accuracy"] = halt
+    spend = _optional_bounded_float(payload, "spend_budget_usd", lo=0.0)
+    if spend is not None:
+        limits["spend_budget_usd"] = spend
+    return limits
+
+
 def _build_workspace_payload(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Validate + project the workspace payload per the YAML schema.
 
@@ -190,12 +221,7 @@ def _build_workspace_payload(kind: str, payload: dict[str, Any]) -> dict[str, An
         return out
     if kind == "mint-campaign":
         mint_out: dict[str, Any] = {"dataset_name": _require_dataset_name(payload)}
-        halt = payload.get("halt_at_accuracy")
-        if isinstance(halt, int | float) and 0.0 <= halt <= 1.0:
-            mint_out["halt_at_accuracy"] = float(halt)
-        spend = payload.get("spend_budget_usd")
-        if isinstance(spend, int | float) and spend >= 0.0:
-            mint_out["spend_budget_usd"] = float(spend)
+        mint_out.update(_run_limits(payload))
         return mint_out
     # sync-backend-experiments
     return {"backend_id": _require_slug(payload, "backend_id", max_len=64)}
@@ -685,12 +711,7 @@ async def post_command(
         if kind_raw not in ("new", "resume"):
             raise PayloadInvalidError("payload.kind must be 'new' or 'resume'.")
         extras["kind"] = kind_raw
-        halt = payload.get("halt_at_accuracy")
-        if isinstance(halt, int | float) and 0.0 <= halt <= 1.0:
-            extras["halt_at_accuracy"] = float(halt)
-        spend = payload.get("spend_budget_usd")
-        if isinstance(spend, int | float) and spend >= 0.0:
-            extras["spend_budget_usd"] = float(spend)
+        extras.update(_run_limits(payload))
 
     cycle_kind: CycleScopedKind = kind  # type: ignore[assignment]
     cycle_outcome = await dispatcher.dispatch_cycle_command(

@@ -23,16 +23,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger("promptpotter.resource_matrix")
 
 
-def _llm_node(session: Session) -> str:
-    """The dataset's single-call LLM node key (the override target). All in-band
-    panel cells are single-call reasoning datasets, so this is ``llm_only``."""
-    if session.pipeline_schema is not None:
-        names = session.pipeline_schema.prompt_node_names()
-        if names:
-            return names[0]
-    return "llm_only"
-
-
 def _base_config(session: Session) -> CampaignConfig:
     """Load the dataset's own ``campaign.json`` config (connector profile + file)."""
     from promptpotter.application.config import load_campaign_config
@@ -69,7 +59,7 @@ async def measure_cells(
         return [_error_cell(dataset, m, provider, "backend unreachable") for m in models]
 
     base_config = _base_config(session)
-    node = _llm_node(session)
+    node = session.llm_node_name()
     samples = session.samples or []
     out: list[CellVerdict] = []
 

@@ -218,7 +218,7 @@ class OptimizationConfig(BaseModel):
     pobb_epsilon: float = Field(
         POBB_DEFAULT_EPSILON,
         description="Stop a candidate when its posterior probability of being the "
-        "round's best drops below this threshold. Default 5%; smaller → fewer stops.",
+        "round's best drops below this threshold. Default 15%; smaller → fewer stops.",
     )
     pobb_lock_in: float = Field(
         0.95,

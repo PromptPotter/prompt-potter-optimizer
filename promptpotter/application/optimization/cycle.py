@@ -249,7 +249,6 @@ def _calibrate_delta_ruler(
     archive_obs = build_archive_observations(
         session.store,
         dataset_name=session.dataset_name,
-        min_grade="A",
     )
     origin_obs = [
         Observation(ORIGIN_ABILITY_ID, int(sid), graded_response(r))

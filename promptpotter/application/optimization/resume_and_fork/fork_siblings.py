@@ -169,7 +169,13 @@ def _mint_fork(
     from the parent's persisted rounds if the caller omits them.
     ``OPERATOR_SWEEP`` requires ``sweep_batch_id`` + ``sweep_source_file``.
     ``OPERATOR_DIAG`` takes neither.
+
+    The seam stamps ``from_round`` onto the spec: only ``mint_operator_fork`` used to
+    set it, so five of six triggers wrote ``index.json::fork.from_round = null`` — and
+    the two readers disagreed about the cut (the lineage tree fell back to scanning the
+    parent ledger; the mask projection had no fallback and silently read ``None``).
     """
+    payload = payload.model_copy(update={"from_round": fork_from_round})
     if payload.trigger in _REBASE_TRIGGERS:
         if payload.trigger is ForkTrigger.SCORING_DIVERGENCE and surviving_rounds is None:
             raise ValueError("_mint_fork(SCORING_DIVERGENCE) requires surviving_rounds")

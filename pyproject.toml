@@ -96,7 +96,6 @@ pythonpath = ["tests"]
 # `conftest.py` (fixtures, not test fns) is excluded by the underscore prefix.
 addopts = "-q --tb=short --no-header"
 filterwarnings = ["ignore::RuntimeWarning"]
-markers = ["slow: orchestrator integration tests (>1s each)"]
 
 [tool.mypy]
 python_version = "3.13"
