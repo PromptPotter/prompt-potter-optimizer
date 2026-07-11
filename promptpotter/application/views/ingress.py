@@ -31,8 +31,6 @@ from promptpotter.application.views.view_models import (
     L2RefineExitView,
     PlanEnterView,
     PlanExitView,
-    ProbeEnterView,
-    ProbeExitView,
     RoundCompleteView,
     RoundStartView,
     ScoreEntry,
@@ -309,21 +307,6 @@ def _refine_exit(d: dict[str, Any], ctx: ViewContext) -> L2RefineExitView:
     )
 
 
-def _probe_enter(d: dict[str, Any], ctx: ViewContext) -> ProbeEnterView:
-    queries = list(d.get("probe_queries") or [])
-    return ProbeEnterView(
-        n_probe_samples=d.get("n_probe_samples", len(queries)),
-        probe_queries=tuple(queries),
-    )
-
-
-def _probe_exit(d: dict[str, Any], ctx: ViewContext) -> ProbeExitView:
-    return ProbeExitView(
-        n_probed=d.get("n_probed", 0),
-        probe_hits=d.get("probe_hits", 0),
-    )
-
-
 def _plan_enter(d: dict[str, Any], ctx: ViewContext) -> PlanEnterView:
     return PlanEnterView(
         l3_round=d.get("l3_round", "?"),
@@ -351,8 +334,6 @@ _BUILDERS: dict[str, Any] = {
     "modify_plan:exit": _plan_exit,
     "escalation:enter": _escalation_enter,
     "escalation:exit": _escalation_exit,
-    "probe_round:enter": _probe_enter,
-    "probe_round:exit": _probe_exit,
 }
 
 

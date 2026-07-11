@@ -115,10 +115,9 @@ reconstructor to keep in sync** — that synchronized third edit is gone.
    `application/views/render/` (`to_markdown`) and/or
    read it where the fact is surfaced — `LiveDashboardView._apply_phase` reads
    the typed view by attribute (`getattr`, presentation-agnostic).
-4. If the field also appears in post-hoc `log.md`, set it in `from_disk_round` /
-   `from_disk_log` (`application/output/writers.py`) — this builder reads on-disk
-   `round_NNNN.json` for **cross-cycle** rendering and is a genuinely separate
-   source, not a roundtrip shim.
+4. If the field also appears in post-hoc `log.md`, set it in `from_disk_log`
+   (`application/output/writers.py`) — that builder reads on-disk `index.json` for
+   **cross-cycle** rendering and is a genuinely separate source, not a roundtrip shim.
 
 **Guard:** the two-factories-onto-one-View correctness invariant — the live
 builder and the disk builder must produce an equal `RoundCompleteView`. No

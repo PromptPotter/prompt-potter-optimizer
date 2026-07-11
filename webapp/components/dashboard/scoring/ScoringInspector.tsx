@@ -63,11 +63,6 @@ export function ScoringInspector({ selected, onClose }: Props) {
     return samplesForRow(row, dash, doc);
   }, [row, dash, doc]);
 
-  const tally = useMemo(() => {
-    const hits = samples.reduce((n, s) => n + (s.status === "HIT" ? 1 : 0), 0);
-    return { hits, misses: samples.length - hits };
-  }, [samples]);
-
   if (!selected) return null;
 
   return (
@@ -133,10 +128,15 @@ export function ScoringInspector({ selected, onClose }: Props) {
         <div className="inspector-samples">
           <div className="rsv-group-head" aria-hidden>
             <span className="rsv-cand-label">{selected.label} · samples</span>
-            <span className="rsv-tally">
-              <span className="tag-hit">HIT {tally.hits}</span>
-              <span className="tag-miss">MISS {tally.misses}</span>
-            </span>
+            {/* Served counts, not a tally over the rendered rows: the two disagreed
+                whenever this list was capped or still filling. R-36 — the backend
+                computes, the webapp never recomputes. */}
+            {data && typeof data.hits === "number" && typeof data.total === "number" && (
+              <span className="rsv-tally">
+                <span className="tag-hit">HIT {data.hits}</span>
+                <span className="tag-miss">MISS {data.total - data.hits}</span>
+              </span>
+            )}
           </div>
           <div className="rsv-rows">
             {samples.slice(0, SAMPLE_CAP).map((s) => (

@@ -17,8 +17,6 @@ from promptpotter.application.views.view_models import (
     L2RefineExitView,
     PlanEnterView,
     PlanExitView,
-    ProbeEnterView,
-    ProbeExitView,
     RoundCompleteView,
     RoundStartView,
 )
@@ -276,26 +274,6 @@ def _render_l2_refine_exit(v: L2RefineExitView) -> str:
     return "\n".join(out)
 
 
-def _render_probe_enter(v: ProbeEnterView) -> str:
-    extras = [f"  {q[:70]}" for q in v.probe_queries[:5]]
-    if len(v.probe_queries) > 5:
-        extras.append(f"  ... +{len(v.probe_queries) - 5} more")
-    return "\n" + _node_block(
-        "PROBE ROUND",
-        "Testing warned samples with new settings...",
-        *extras,
-        label_right=f"{v.n_probe_samples} samples",
-    )
-
-
-def _render_probe_exit(v: ProbeExitView) -> str:
-    if not v.n_probed:
-        return f"  {YELLOW}⚡ Probe: no matching samples found{RESET}"
-    rate = v.probe_hits / v.n_probed
-    color = GREEN if rate > 0.5 else YELLOW
-    return f"  {color}⚡ Probe: {v.probe_hits}/{v.n_probed} hits ({rate:.0%}){RESET}"
-
-
 def _render_plan_enter(v: PlanEnterView) -> str:
     plan = v.current_plan_preview
     plan = plan if len(plan) <= 55 else plan[:52] + "..."
@@ -339,10 +317,6 @@ def to_text(view: AnyView) -> str:
             return _render_l2_refine_enter(view)
         case L2RefineExitView():
             return _render_l2_refine_exit(view)
-        case ProbeEnterView():
-            return _render_probe_enter(view)
-        case ProbeExitView():
-            return _render_probe_exit(view)
         case PlanEnterView():
             return _render_plan_enter(view)
         case PlanExitView():

@@ -10,18 +10,6 @@
 // already single-source — not re-declared here.
 
 /**
- * Composite-or-accuracy: the active-formula composite when present, else accuracy.
- * The backend already resolves this server-side, so this only covers in-flight rows
- * minted before the composite field lands. Mirror of `display_fitness`.
- */
-export function resolveComposite(
-  composite: number | null | undefined,
-  accuracy: number | null | undefined,
-): number | null {
-  return composite ?? accuracy ?? null;
-}
-
-/**
  * A candidate's painted value under the accuracy basis: the round winner shows the
  * cumulative frontier (the cross-round-comparable lineage spine), a loser its own
  * per-round subset accuracy.

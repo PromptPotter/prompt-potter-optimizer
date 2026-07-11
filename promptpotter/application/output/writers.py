@@ -4,9 +4,9 @@ Called from runner milestones (not RunCallbacks — those stay display-only).
 Two log.md tiers: per-cycle (``cycles/{cycle_id}/log.md``) + campaign
 digest (``campaigns/{campaign_id}/log.md``).
 
-Owns disk-side view reconstruction (``from_disk_round``/``from_disk_log``):
-persisted ``round_NNNN.json`` + ``index.json`` → same ``RoundCompleteView`` /
-``LogMdView`` shapes the live ingress emits, so ``to_markdown`` has one schema.
+Owns disk-side view reconstruction (``from_disk_log``): a persisted ``index.json``
+→ the same ``LogMdView`` shape the live ingress emits, so ``to_markdown`` has one
+schema. (The round twin, ``from_disk_round``, had no callers and is deleted.)
 
 This is an **orchestrator** (computes artifacts + writes disk), so it lives in
 ``application/`` next to the runner that calls it — not in ``presentation/``,
@@ -35,9 +35,7 @@ from promptpotter.application.views import (
     ForkSummaryView,
     HardSamplesView,
     LogMdView,
-    RoundCompleteView,
     RoundDigestView,
-    score_entry_from_dict,
     to_markdown,
 )
 from promptpotter.domain.rendering import format_l1_critique_for_prompt
@@ -54,7 +52,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "from_disk_log",
-    "from_disk_round",
     "write_hard_samples_artifacts",
     "write_log_md",
     "write_review_md",
@@ -155,52 +152,6 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict[str, An
         write_json(tenant_path, archive_artifact)
 
     return campaign_artifact if opt_cfg.seed_heatmap_from_archive else cycle_artifact
-
-
-def from_disk_round(
-    round_data: dict[str, Any],
-    *,
-    composite_fitness_formula: str | None = None,
-    composite_fitness_formula_short: str | None = None,
-    origin_composite_fitness: float | None = None,
-) -> RoundCompleteView:
-    """Reconstruct a ``RoundCompleteView`` from a persisted ``round_NNNN.json``."""
-    score_entries = [score_entry_from_dict(s) for s in round_data.get("candidate_scores") or []]
-
-    # The round file already records the elected winner's identity (`label`, the
-    # `elect_round_winner` pick) alongside its hits/total/accuracy — read it
-    # directly, don't re-elect by point estimate (which can pick another row).
-    winner_label = str(round_data.get("label", "") or "")
-
-    winner_acc = float(round_data.get("accuracy", 0.0))
-    origin_acc = float(round_data.get("origin_accuracy", 0.0))
-    matched_origin_acc = float(round_data.get("matched_origin_accuracy", origin_acc))
-    matched_origin_hits = int(round_data.get("matched_origin_hits", 0))
-    matched_origin_composite = round_data.get("matched_origin_composite")
-    improved = bool(round_data.get("improved", False))
-    return RoundCompleteView(
-        round=int(round_data.get("round", 0)),
-        origin_acc=origin_acc,
-        scores=tuple(score_entries),
-        winner_label=winner_label,
-        winner_accuracy=winner_acc,
-        winner_composite_fitness=round_data.get("composite_fitness"),
-        winner_evaluators=dict(round_data.get("evaluators") or {}),
-        winner_hits=int(round_data.get("hits", 0)),
-        winner_total=int(round_data.get("total", 0)),
-        improved=improved,
-        delta=winner_acc - matched_origin_acc,
-        p_value=round_data.get("p_value"),
-        improved_reason=round_data.get("improved_reason"),
-        next_action=str(round_data.get("next_action", "")),
-        l1_critique_text=format_l1_critique_for_prompt(round_data.get("critique")),
-        composite_fitness_formula=composite_fitness_formula,
-        composite_fitness_formula_short=composite_fitness_formula_short,
-        origin_composite_fitness=origin_composite_fitness,
-        matched_origin_accuracy=matched_origin_acc,
-        matched_origin_hits=matched_origin_hits,
-        matched_origin_composite=matched_origin_composite,
-    )
 
 
 def _load_p_best_trajectory(

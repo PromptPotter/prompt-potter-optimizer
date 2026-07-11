@@ -1,5 +1,4 @@
 import { type BarSlot } from "./FitnessChart";
-import { resolveComposite } from "@/lib/fitness";
 import { fmtNum } from "@/lib/format";
 
 // 1-based rank of each line by value descending; lines with a null value
@@ -53,7 +52,7 @@ export function FitnessRankSummary({
   const lines = bars.map((b) => ({
     key: b.key,
     label: b.label,
-    actual: resolveComposite(b.composite, b.accuracy),
+    actual: b.composite ?? null,
     whatif: b.whatif,
   }));
   const rankActual = ranks(lines.map((l) => ({ key: l.key, v: l.actual })));

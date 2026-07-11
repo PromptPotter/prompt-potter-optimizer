@@ -18,7 +18,7 @@ import { useCallback, useMemo, useState } from "react";
 import { postCleanupEmpty } from "@/lib/api";
 import type { CampaignLineageCycle } from "@/lib/api";
 import { candidateLabel, liveCandidateId } from "@/lib/candidate-label";
-import { accuracyBasisValue, resolveComposite } from "@/lib/fitness";
+import { accuracyBasisValue } from "@/lib/fitness";
 import {
   groupByRound,
   roundCandidates,
@@ -239,7 +239,7 @@ export function useLineage({
         r.candidates.forEach((cand, i) => {
           const id = cand.candidate_id || liveCandidateId(r.round, i);
           const value = usesComposite
-            ? resolveComposite(cand.composite_fitness, cand.accuracy)
+            ? cand.composite_fitness ?? null
             : accuracyBasisValue(cand.is_winner, r.cumulative_accuracy, cand.accuracy);
           m.set(`${c.cycle_id}::${id}`, value);
         });
@@ -248,7 +248,7 @@ export function useLineage({
     if (cycleId && dash) {
       for (const row of liveRows) {
         const value = usesComposite
-          ? resolveComposite(row.composite, row.accuracy)
+          ? row.composite ?? null
           : accuracyBasisValue(row.is_winner, row.cumulative_accuracy, row.accuracy);
         m.set(`${cycleId}::${row.candidate_id}`, value);
       }

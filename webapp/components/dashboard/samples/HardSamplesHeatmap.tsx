@@ -12,6 +12,7 @@ import { HardSamplesTable } from "./HardSamplesTable";
 import { SampleTrajectory, SampleTrajectoryMiniButton } from "./SampleTrajectory";
 import { type MeasurementDot } from "./columns";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
+import { compareHardSamples } from "./hard-sample-order";
 
 interface Props {
   datasetName: string | null;
@@ -120,22 +121,15 @@ export function HardSamplesHeatmap({
     return out;
   }, [archivePerSample, dash, dashRound]);
 
-  // Tile order — rank by Info gain (pick_score) descending, the same key
-  // the hard-samples table sorts on, so the heatmap and table agree.
-  // Contested samples first; always-hit / always-miss last; unmeasured
-  // rows (null pick_score) last of all, in sample_id order.
+  // Tile order — the shared hard-sample ranking (`compareHardSamples`), the same
+  // comparator the table sorts on. This used to be a second sort that sank rows on
+  // `pick_score === null` while the table sank them on dot-presence, so under campaign
+  // scope the two surfaces disagreed — while this comment claimed they agreed.
   const sortedItems = useMemo(() => {
-    return [...datasetItems].sort((a, b) => {
-      const pa = a.pick_score;
-      const pb = b.pick_score;
-      if (pa === null || pb === null) {
-        if (pa === pb) return a.sample_id - b.sample_id;
-        return pa === null ? 1 : -1;
-      }
-      if (pa !== pb) return pb - pa;
-      return a.sample_id - b.sample_id;
-    });
-  }, [datasetItems]);
+    const measuredIn = (it: DatasetItem): boolean =>
+      (archivePerSample?.get(it.sample_id)?.length ?? 0) > 0;
+    return [...datasetItems].sort((a, b) => compareHardSamples(a, b, measuredIn));
+  }, [datasetItems, archivePerSample]);
 
   if (datasetItems.length === 0) return null;
 

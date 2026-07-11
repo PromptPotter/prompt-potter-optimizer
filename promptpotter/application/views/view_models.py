@@ -4,11 +4,10 @@ Producers: ``application.views.ingress`` (live PhaseEvents) + ``application.outp
 (post-hoc disk round_data). Consumers: ``render`` (``to_text``/``to_markdown``).
 Pure data — no I/O, no methods that emit text.
 
-Round-trip invariant (no standing test — a broken round-trip surfaces as a
-wrong/empty dashboard; see ``tests/CLAUDE.md``):
-``from_phase_event(e) == from_disk_round(write_then_load(e))`` on
-``RoundCompleteView`` — the one event that lands on disk. Live-only events
-(refine/probe/plan/escalation) have no disk counterpart.
+``RoundCompleteView`` is the one event that lands on disk; live-only events
+(refine/plan/escalation) have no disk counterpart. There used to be a round-trip
+invariant here against ``from_disk_round`` — an untested invariant over a function
+nothing called. Both are gone.
 """
 
 from __future__ import annotations
@@ -32,8 +31,6 @@ __all__ = [
     "LogMdView",
     "PlanEnterView",
     "PlanExitView",
-    "ProbeEnterView",
-    "ProbeExitView",
     "RoundCompleteView",
     "RoundDigestView",
     "RoundStartView",
@@ -254,18 +251,6 @@ class L2RefineExitView:
 
 
 @dataclass(frozen=True)
-class ProbeEnterView:
-    n_probe_samples: int
-    probe_queries: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class ProbeExitView:
-    n_probed: int
-    probe_hits: int
-
-
-@dataclass(frozen=True)
 class PlanEnterView:
     l3_round: Any
     l2_stall_count: Any
@@ -400,8 +385,6 @@ AnyView = (
     | EscalationExitView
     | L2RefineEnterView
     | L2RefineExitView
-    | ProbeEnterView
-    | ProbeExitView
     | PlanEnterView
     | PlanExitView
     | LogMdView

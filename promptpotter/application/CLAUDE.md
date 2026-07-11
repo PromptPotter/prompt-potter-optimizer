@@ -20,7 +20,7 @@ intelligence; intelligence does not depend on either.
 | `intelligence/` | Materialized views over the MeasurementArchive: `AxisIndex` (axis-keyed digest), `SampleIndex` (per-sample state), Rasch exploration, hard-sample sorter + archive. Shared by scan and loop. |
 | `scoring/` | The `score_search_point()` gateway plus formula compilation, evaluators, sample measurement, composite-fitness metrics. Per CLAUDE.md: gateway is canonical; everything else is implementation detail. |
 | `sweep/` | Sweep-mode siblings — cheap A/B for L1 candidates ahead of full promotion. |
-| `output/` | Operator-facing artifact writers (`write_log_md`, `write_review_md`, `write_hard_samples_artifacts`) + disk-side view reconstruction (`from_disk_round`, `from_disk_log`). Computes artifacts and writes disk (orchestration), so it lives here — not in `presentation/`. Renders through `application/views` (`to_markdown` + typed view models). |
+| `output/` | Operator-facing artifact writers (`write_log_md`, `write_review_md`, `write_hard_samples_artifacts`) + disk-side view reconstruction (`from_disk_log`). Computes artifacts and writes disk (orchestration), so it lives here — not in `presentation/`. Renders through `application/views` (`to_markdown` + typed view models). |
 | `views/` | The **emit contract**: frozen typed View dataclasses (`view_models.py`), the live `PhaseEvent → View` builder (`ingress.py::from_phase_event` — needs same-layer `optimizer_model` + scoring formula evaluators), and markdown rendering (`render/` — `to_markdown` + heatmap + `render_sweep_summary`). Producing these views *is* an orchestration job, so they live here; `presentation/views` imports them upward for terminal (`to_text`) rendering. |
 
 ## Top-level modules

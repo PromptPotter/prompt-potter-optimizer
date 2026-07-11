@@ -58,7 +58,7 @@ Three guarantees the writer side MUST hold:
 
 If a future change wants to defer or skip a write, the question to answer first is: *can an operator who alt-tabs to the file tree right now still see the truth?* If no, the change is wrong.
 
-**The rule above is the writer side; the recipe is [`../docs/developer/adding-a-surface.md`](../docs/developer/adding-a-surface.md) § 3** (a dashboard / view field: `view_models.py` → `ingress.py` → renderers, plus `from_disk_round` when the field also lands in `log.md`). Surfacing a new value in the webapp starts there, not in a component — a panel reading a field no writer sets is the half-wiring this contract exists to prevent.
+**The rule above is the writer side; the recipe is [`../docs/developer/adding-a-surface.md`](../docs/developer/adding-a-surface.md) § 3** (a dashboard / view field: `view_models.py` → `ingress.py` → renderers, plus `from_disk_log` when the field also lands in `log.md`). Surfacing a new value in the webapp starts there, not in a component — a panel reading a field no writer sets is the half-wiring this contract exists to prevent.
 
 ## Display-data sources
 

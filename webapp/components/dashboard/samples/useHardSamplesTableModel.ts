@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useState, type PointerEvent } from "react";
 import { type DatasetItem } from "@/lib/api";
 import { useStableContent } from "@/lib/stable";
+import { compareHardSamples } from "./hard-sample-order";
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import {
   autoWidthFor,
@@ -144,27 +145,15 @@ export function useHardSamplesTableModel({
     return w;
   }, [items, columns, stablePerSample, ordCols.length]);
 
-  // Live-sort ("Auto-sort"): rank by Info gain (pick_score) descending. Rows
-  // without any actual measurement in this scope sink last in sample_id
-  // order. Dot-presence is the "measured-in-scope" signal — `pick_score !==
-  // null` is non-null on prior-only rows too, so it overcounts under
-  // campaign scope.
+  // Live-sort ("Auto-sort"): the shared hard-sample ranking (`compareHardSamples`) —
+  // the same comparator the heatmap uses, so the two surfaces cannot disagree.
   const liveSortActive = persisted.syncLive;
   const sortedIds = useMemo<number[]>(() => {
     const measuredIn = (it: DatasetItem): boolean =>
       (stablePerSample?.get(it.sample_id)?.length ?? 0) > 0;
     if (liveSortActive) {
       return [...items]
-        .sort((a, b) => {
-          const ma = measuredIn(a);
-          const mb = measuredIn(b);
-          if (ma !== mb) return ma ? -1 : 1;
-          if (!ma) return a.sample_id - b.sample_id;
-          const pa = a.pick_score ?? Number.NEGATIVE_INFINITY;
-          const pb = b.pick_score ?? Number.NEGATIVE_INFINITY;
-          if (pa !== pb) return pb - pa;
-          return a.sample_id - b.sample_id;
-        })
+        .sort((a, b) => compareHardSamples(a, b, measuredIn))
         .map((it) => it.sample_id);
     }
     if (!sortBy) return items.map((it) => it.sample_id);
