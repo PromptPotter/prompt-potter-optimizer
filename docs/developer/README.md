@@ -111,13 +111,13 @@ ON DISK (the database)                IN MEMORY (rebuilt from disk)
 archive/                            MeasurementArchive
   measurements/                                      │
     {run_id}.json     ← one batch          ┌────────┼────────┐
-  measurements_index.json                  ▼        ▼        ▼
+  index.jsonl       ← append-only          ▼        ▼        ▼
   prompt_aliases.json                  SampleIdx  CfgIdx  AxisIdx
                                        (per       (per     (folds
                                         sample)    config)  both)
 ```
 
-**Write path:** `score_search_point()` → `build_dataset_run_data()` (`application/datasets/loaders.py:368`) → `archive.save(run_id, data)` (`infrastructure/store/measurement_archive.py:101`) → `AxisIndex.refresh()` (`application/intelligence/indexes/axis.py:283`) pulls via `archive.load_since()`.
+**Write path:** `score_search_point()` → `build_dataset_run_data()` (`application/datasets/loaders.py:368`) → `archive.save(run_id, data)` — one appended `index.jsonl` line, last-wins by `content_hash` (`store/read_model.py`), no read/rewrite — → `AxisIndex.refresh()` (`application/intelligence/indexes/axis.py:283`) pulls via `archive.load_since()`. `reindex` rebuilds `index.jsonl` from the detail files.
 
 **Read paths** (both return `list[Measurement]`):
 

@@ -165,9 +165,13 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # 20+ consumers already imports from the leaf; the shim had zero callers.
 # ``settings_const`` 16->15 — ``FAILURE_WARNING_PREVIEW`` was referenced nowhere, not even
 # inside its own module. Both subtractions, so the baseline falls.
+# 2026-07-11 storage Arc 3 (measurement index → append-only): ``modules`` 311->313 — two
+# genuine additions: ``store/read_model.py`` (the append-only JSONL primitives that retire
+# read-whole/O(n)-scan/rewrite-whole — save at n=1000 dropped 88ms->2.6ms) and
+# ``cli/commands/reindex.py`` (the on-demand index-rebuild verb). Both earn their line.
 
 LEDGER_BASELINE = {
-    "modules": 311,
+    "modules": 313,
     "init_files": 58,
     "reexport_shims": 44,
     "config_leaf_fields": 38,

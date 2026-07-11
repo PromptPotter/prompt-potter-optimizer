@@ -652,6 +652,13 @@ def build_parser() -> argparse.ArgumentParser:
         )
     )
 
+    sub.add_parser(
+        "reindex",
+        help="Rebuild the measurement index (measurements/index.jsonl) from the detail "
+        "files and GC orphaned runs. The index is derived, so this loses nothing — use "
+        "after a crash mid-append or to reclaim orphaned bytes. Pure disk work, zero spend.",
+    )
+
     _add_noise_floor_args(
         sub.add_parser(
             "noise-floor",

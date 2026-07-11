@@ -3,6 +3,10 @@
 Two views: by sample (`measurements_for_sample`) and by config (`measurements_for_config`).
 Cache reuse → positional prefix-exact; discovery → `_matches_subset`. Sole source of truth —
 derived views (AxisIndex, SampleIndex) refresh from `list_all`, not a parallel stream.
+
+The index is `measurements/index.jsonl` (`store/read_model.py`): a save is one appended
+line, last-wins by `content_hash`; a read folds the file once. `reindex` rebuilds it from
+the detail files (and GCs orphaned ones). No read-whole / O(n)-scan / rewrite-whole per save.
 """
 
 from __future__ import annotations
@@ -13,22 +17,41 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
-from filelock import FileLock
-
-from promptpotter.config.settings import (
-    DEFAULT_CONNECTOR_TYPE,
-    LOCK_TIMEOUT,
-)
+from promptpotter.config.settings import DEFAULT_CONNECTOR_TYPE
 from promptpotter.domain.measurement_provenance import entry_grade, meets_grade
 from promptpotter.domain.sample import Measurement
 from promptpotter.infrastructure.store.io import (
-    read_json,
     read_json_optional,
     write_json,
+    write_jsonl,
 )
+from promptpotter.infrastructure.store.read_model import append_row, compact, fold_jsonl
 from promptpotter.shared.hashing import HASH_TRUNCATE
 
 logger = logging.getLogger(__name__)
+
+
+def _summary(data: dict[str, Any]) -> dict[str, Any]:
+    """Project a full run-detail dict onto the index summary line (the fields readers
+    need without opening the detail file). Shared by :meth:`MeasurementArchive.save`
+    and :meth:`MeasurementArchive.reindex` so the two can never drift."""
+    return {
+        "run_id": data["run_id"],
+        "name": data.get("name", data["run_id"]),
+        "dataset_name": data.get("dataset_name"),
+        "experiment_id": data.get("experiment_id", ""),
+        "prompt_fields_id": data["prompt_fields_id"],
+        "item_count": data["item_count"],
+        "scores": data["scores"],
+        "content_hash": data["content_hash"],
+        "rendered_prompt_hash": data.get("rendered_prompt_hash", ""),
+        "node_configs": data.get("node_configs"),
+        "pipeline_params": data.get("pipeline_params"),
+        "source": data.get("source", ""),
+        "provenance": data.get("provenance"),
+        "connector_type": data.get("connector_type", DEFAULT_CONNECTOR_TYPE),
+        "created_at": data["created_at"],
+    }
 
 
 def _matches_subset(
@@ -74,12 +97,12 @@ class MeasurementArchive:
     """File I/O for the measurement store — the DB core, NOT the recycle bin.
 
     Tenant-global, self-contained under `measurements/`: run-detail files
-    `measurements/{run_id}.json`, the index `measurements/measurements_index.json`,
+    `measurements/{run_id}.json`, the append-only index `measurements/index.jsonl`,
     and the alias groups `measurements/prompt_aliases.json` all live together. It
     sits beside `campaigns/` and `archive/` (the recycle bin), never inside
     `archive/` — it is a cross-campaign cache, not trash. Run files are reached by
-    explicit `run_id` (`load_by_id`) or via the index (`list_all`); nothing globs
-    the dir, so the index + alias files share it safely.
+    explicit `run_id` (`load_by_id`) or via the index (`list_all`); only `reindex`
+    globs the dir, so the index + alias files share it safely.
 
     **Identity does not include the execution path.** A measurement is keyed by
     `content_hash(prompt, dataset, pipeline_params)` and reused by
@@ -101,7 +124,7 @@ class MeasurementArchive:
         return self._base_dir / "measurements"
 
     def _index_path(self) -> Path:
-        return self._store_dir() / "measurements_index.json"
+        return self._store_dir() / "index.jsonl"
 
     def dataset_snapshot_path(self, backend_id: str, dataset_name: str) -> Path:
         """Path of the per-(backend, dataset) hard-samples snapshot — the store owns
@@ -115,56 +138,22 @@ class MeasurementArchive:
         run_id: str,
         data: dict[str, Any],
     ) -> Path:
-        """Write detail + upsert index. *data* needs `run_id`, `content_hash`, `scores`.
-        Detail = atomic write; index = `filelock`-protected against concurrent writers.
+        """Write detail + append the index summary. *data* needs `run_id`, `content_hash`,
+        `scores`. Detail = atomic write; index = one appended line (last-wins by
+        `content_hash`) — no read, no rewrite, no fold.
+
+        A re-measure of the same `content_hash` under a *different* `run_id` orphans the
+        old detail file (the index row is superseded, so no read ever reaches it); `reindex`
+        GCs those. The common case — same `run_id` (same label) — overwrites the detail file
+        in place, so nothing orphans.
+
+        The save path never folds — compaction (dropping superseded lines) is on-demand via
+        `reindex`, not paid per write.
         """
         detail_path = self._store_dir() / f"{run_id}.json"
         write_json(detail_path, data)
 
-        summary = {
-            "run_id": data["run_id"],
-            "name": data.get("name", run_id),
-            "dataset_name": data.get("dataset_name"),
-            "experiment_id": data.get("experiment_id", ""),
-            "prompt_fields_id": data["prompt_fields_id"],
-            "item_count": data["item_count"],
-            "scores": data["scores"],
-            "content_hash": data["content_hash"],
-            "rendered_prompt_hash": data.get("rendered_prompt_hash", ""),
-            "node_configs": data.get("node_configs"),
-            "pipeline_params": data.get("pipeline_params"),
-            "source": data.get("source", ""),
-            "provenance": data.get("provenance"),
-            "connector_type": data.get("connector_type", DEFAULT_CONNECTOR_TYPE),
-            "created_at": data["created_at"],
-        }
-
-        index_path = self._index_path()
-        lock_path = index_path.with_suffix(".json.lock")
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
-
-        with FileLock(lock_path, timeout=LOCK_TIMEOUT):
-            if index_path.exists():
-                index = read_json(index_path)
-            else:
-                index = {"measurements": [], "total": 0}
-
-            content_hash_val = data.get("content_hash", "")
-            entries = index["measurements"]
-            replaced = False
-            for i, entry in enumerate(entries):
-                if entry.get("content_hash") == content_hash_val:
-                    old_run_id = entry.get("run_id", "")
-                    entries[i] = summary
-                    replaced = True
-                    if old_run_id and old_run_id != run_id:
-                        (self._store_dir() / f"{old_run_id}.json").unlink(missing_ok=True)
-                    break
-            if not replaced:
-                entries.append(summary)
-
-            index["total"] = len(entries)
-            write_json(index_path, index)
+        append_row(self._index_path(), _summary(data))
 
         return detail_path
 
@@ -181,29 +170,24 @@ class MeasurementArchive:
         archived under a ``-vN`` name, its prior campaigns' measurements move with
         it so dataset-scoped reuse + filtering stay truthful. Idempotent — only
         entries still stamped *old_name* are touched, so a re-run after a crash is
-        a no-op. Index write is ``filelock``-protected against a concurrent writer,
-        mirroring :meth:`save`.
+        a no-op. Each rename is one appended index row (last-wins by
+        ``content_hash``), then a single compaction, mirroring :meth:`save`.
         """
         index_path = self._index_path()
-        if not index_path.exists():
-            return 0
-        lock_path = index_path.with_suffix(".json.lock")
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
         count = 0
-        with FileLock(lock_path, timeout=LOCK_TIMEOUT):
-            index = read_json(index_path)
-            for entry in index.get("measurements", []):
-                if entry.get("dataset_name") != old_name:
-                    continue
-                entry["dataset_name"] = new_name
-                count += 1
-                run_id = entry.get("run_id", "")
-                detail = self.load_by_id(run_id) if run_id else None
-                if detail is not None and detail.get("dataset_name") == old_name:
-                    detail["dataset_name"] = new_name
-                    write_json(self._store_dir() / f"{run_id}.json", detail)
-            if count:
-                write_json(index_path, index)
+        for entry in list(fold_jsonl(index_path, "content_hash").values()):
+            if entry.get("dataset_name") != old_name:
+                continue
+            renamed = {**entry, "dataset_name": new_name}
+            append_row(index_path, renamed)
+            count += 1
+            run_id = entry.get("run_id", "")
+            detail = self.load_by_id(run_id) if run_id else None
+            if detail is not None and detail.get("dataset_name") == old_name:
+                detail["dataset_name"] = new_name
+                write_json(self._store_dir() / f"{run_id}.json", detail)
+        if count:
+            compact(index_path, "content_hash")
         return count
 
     def list_all(
@@ -211,15 +195,60 @@ class MeasurementArchive:
         *,
         dataset_name: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Index entries (summaries). *dataset_name* scopes to one dataset (None = forensic/admin)."""
-        index = read_json_optional(self._index_path()) or {
-            "measurements": [],
-            "total": 0,
-        }
-        entries: list[dict[str, Any]] = index.get("measurements", [])
+        """Index entries (summaries), one fold of ``index.jsonl`` (last-wins by
+        ``content_hash``). *dataset_name* scopes to one dataset (None = forensic/admin)."""
+        entries = list(fold_jsonl(self._index_path(), "content_hash").values())
         if dataset_name is None:
             return entries
         return [e for e in entries if _entry_matches_dataset(e, dataset_name)]
+
+    def reindex(self) -> dict[str, int]:
+        """Rebuild ``index.jsonl`` from the detail files and GC orphans — the append-only
+        log's on-demand repair. Reads every ``{run_id}.json``, keeps the latest by
+        ``created_at`` per ``content_hash``, rewrites a compacted index, then deletes the
+        *superseded* detail files (a re-measure under a new ``run_id`` orphans the old one).
+        Returns ``{indexed, orphans_removed, details_scanned}``. Losing the index loses
+        nothing — this reproduces it.
+
+        GC is positive-identification-only: a file is deleted only if it parsed as a
+        measurement detail (carried a ``content_hash``) and lost to a newer run for that
+        hash. A file it cannot read as a detail is left untouched — reindex never removes a
+        path it can't explain.
+        """
+        store = self._store_dir()
+        reserved = {self._index_path().name, self._alias_path().name}
+        candidates = [
+            p
+            for p in store.glob("*.json")
+            if p.name not in reserved and not p.name.startswith("hard_samples_")
+        ]
+        parsed: list[tuple[Path, dict[str, Any]]] = []
+        for path in candidates:
+            data = read_json_optional(path)
+            if isinstance(data, dict) and "content_hash" in data:
+                parsed.append((path, data))
+
+        winners: dict[str, tuple[Path, dict[str, Any]]] = {}
+        for path, data in parsed:
+            ch = data["content_hash"]
+            prev = winners.get(ch)
+            if prev is None or str(data.get("created_at", "")) >= str(
+                prev[1].get("created_at", "")
+            ):
+                winners[ch] = (path, data)
+
+        write_jsonl(self._index_path(), [_summary(d) for _, d in winners.values()])
+        winner_paths = {path for path, _ in winners.values()}
+        orphans = 0
+        for path, _ in parsed:
+            if path not in winner_paths:
+                path.unlink(missing_ok=True)
+                orphans += 1
+        return {
+            "indexed": len(winners),
+            "orphans_removed": orphans,
+            "details_scanned": len(parsed),
+        }
 
     def load_since(
         self,

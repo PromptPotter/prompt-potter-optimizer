@@ -115,7 +115,7 @@ projects/{tenant}/
         streams/round_NNNN_p_best.jsonl               # PoBB telemetry
   archive/{campaign_id}/             # RECYCLE BIN — `archive` verb moves trees here, `unarchive` restores
   measurements/{run_id}.json         # content-addressed cross-campaign cache (was archive/measurements/)
-    measurements.json  prompt_aliases.json
+    index.jsonl  prompt_aliases.json # index.jsonl append-only, last-wins by content_hash; `reindex` rebuilds it
   sessions/{session_id}/session.json
   .workspace/events.jsonl            # workspace ledger — home for destructive-op audit records
 ```

@@ -6,7 +6,7 @@ import os
 import re
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import IO, Any
 
@@ -153,6 +153,18 @@ def append_jsonl(path: Path, item: dict[str, Any]) -> Path:
     return path
 
 
+def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
+    """Atomically (re)write a JSONL file — one compact object per line.
+
+    The whole-file peer of :func:`append_jsonl`, used by compaction / reindex to
+    replace a log with its live rows via the temp-file + atomic-replace path.
+    """
+    _atomic_write(
+        path,
+        lambda f: f.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
+    )
+
+
 __all__ = [
     "append_jsonl",
     "ensure_parent_dir",
@@ -162,5 +174,6 @@ __all__ = [
     "read_text_optional",
     "validate_path_component",
     "write_json",
+    "write_jsonl",
     "write_text",
 ]

@@ -530,3 +530,48 @@ def test_cycle_seed_ledger_roundtrip(built_stores: Stores) -> None:
     got = stores.campaigns.read_cycle_seed(_CAMPAIGN, cyc)
     assert got == final_seed
     assert got is not None and got.origin_source == "campaign_origin"
+
+
+def _archive_run(archive: object, *, run_id: str, content_hash: str) -> None:
+    """Minimal ``MeasurementArchive.save`` envelope — one dataset-tagged sample."""
+    archive.save(  # type: ignore[attr-defined]
+        run_id,
+        {
+            "run_id": run_id,
+            "name": run_id,
+            "content_hash": content_hash,
+            "prompt_fields_id": "pf",
+            "item_count": 1,
+            "scores": {"accuracy": 1.0, "total": 1},
+            "node_configs": [("llm_only", {"model": "X"})],
+            "created_at": f"2026-05-19T00:00:{run_id[-2:]}Z",
+            "measurements": [{"sample_id": 1, "query": f"q_{run_id}", "hit": True}],
+            "dataset_name": "reidx",
+        },
+    )
+
+
+def test_reindex_rebuilds_index_and_gcs_orphans_without_shrinking(built_stores: Stores) -> None:
+    """The measurement index is an append-only JSONL fold (last-wins by ``content_hash``);
+    ``reindex`` rebuilds it from the detail files and GCs orphans. Two silent harms it must
+    not commit: (1) a re-measure of the same hash under a NEW run_id must last-win, never
+    serve the stale row; (2) reindex must delete ONLY the orphaned detail file, never a live
+    winner — an over-eager GC silently shrinks an irreplaceable archive."""
+    archive = built_stores.archive
+    _archive_run(archive, run_id="run_10", content_hash="h_a")
+    _archive_run(archive, run_id="run_11", content_hash="h_b")
+    # Re-measure h_a under a DIFFERENT run_id → the old detail (run_10) is now an orphan.
+    _archive_run(archive, run_id="run_12", content_hash="h_a")
+
+    rows = {e["content_hash"]: e["run_id"] for e in archive.list_all(dataset_name="reidx")}
+    assert rows == {"h_a": "run_12", "h_b": "run_11"}  # last-wins fold
+
+    counts = archive.reindex()
+    assert counts["indexed"] == 2  # two live hashes
+    assert counts["orphans_removed"] == 1  # run_10's detail
+
+    after = {e["content_hash"]: e["run_id"] for e in archive.list_all(dataset_name="reidx")}
+    assert after == rows  # reindex reproduces the fold, doesn't shrink it
+    assert archive.load_by_id("run_12") is not None  # winners survive
+    assert archive.load_by_id("run_11") is not None
+    assert archive.load_by_id("run_10") is None  # orphan GC'd

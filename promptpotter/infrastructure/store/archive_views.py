@@ -33,6 +33,7 @@ __all__ = [
     "measurements_for_sample",
     "record_measurement_run",
     "register_prompt_alias",
+    "reindex_measurements",
     "resolve_aliases",
     "reusable_results",
     "runs_since",
@@ -171,6 +172,12 @@ def record_measurement_run(
 ) -> Path:
     """Sole write entry point — persist one measurement-batch detail + index upsert."""
     return stores.archive.save(run_id, data)
+
+
+def reindex_measurements(stores: Stores) -> dict[str, int]:
+    """Rebuild the append-only measurement index from the detail files and GC orphans.
+    A maintenance verb — the index is derived, so this loses nothing; returns counts."""
+    return stores.archive.reindex()
 
 
 def register_prompt_alias(
