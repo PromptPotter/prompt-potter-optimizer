@@ -62,7 +62,7 @@ def _prepare_cycle_for_resume(
     TTY pivot offered when ``pivot_prompt=True``, sweep callers pass False).
 
     Second check: optimizer-prompt drift halts resume with a pointer to ``new``."""
-    from promptpotter.application.config_diff import DiffScope, classify_config_diff
+    from promptpotter.application.knobs import DiffScope, classify_config_diff
     from promptpotter.application.optimization.dispatch.llm_call import (
         combined_optimizer_prompt_hash,
     )

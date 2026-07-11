@@ -11,16 +11,19 @@ from promptpotter.application.bootstrap.wiring import (
     backend_type_of_dataset,
     resolve_dataset_config_dir,
 )
-from promptpotter.application.config import CampaignConfig, MechanismConfig
-from promptpotter.application.config_coupling import (
-    COUPLINGS,
+from promptpotter.application.config import (
+    CampaignConfig,
     Estimand,
-    check_couplings,
+    MechanismConfig,
     estimand_doc,
     knob_label,
-    resolve_knob_states,
 )
 from promptpotter.application.jobs.launcher import draft_wire_with_locks, load_checkin_draft
+from promptpotter.application.knobs import (
+    COUPLINGS,
+    check_couplings,
+    resolve_knob_states,
+)
 from promptpotter.application.meta_champion import ChampionRegistry, reduce_corpus
 from promptpotter.application.resource_matrix import ResourceMatrix, read_matrix
 from promptpotter.infrastructure.store import Stores
@@ -308,9 +311,9 @@ class ConfigMapResponse(BaseModel):
     estimand it moves (with effective value + source layer), plus every declared
     coupling flagged active/inactive against this campaign's frozen config.
 
-    Server-authored from the single ``application.config_coupling`` registry — the
-    same source the CLI ``config_map`` diagnostic and the pre-run preflight warning
-    read, so the webapp panel never disagrees with the engine on which knobs collide.
+    Server-authored from the single ``application.knobs`` registry — the same source
+    the CLI ``config_map`` diagnostic and the pre-run preflight warning read, so the
+    webapp panel never disagrees with the engine on which knobs collide.
     """
 
     groups: list[ConfigEstimandGroup] = Field(description="Estimand groups, in declared order")
@@ -323,7 +326,7 @@ def get_campaign_config_map(store: StoreDep, campaign_id: str) -> ConfigMapRespo
     statistical estimand, what overwrites what, and which knobs currently collide.
 
     Read-only: resolves the frozen ``CampaignConfig`` snapshot against the declared
-    ``config_coupling`` registry. 404 on cross-user reads.
+    ``knobs`` registry. 404 on cross-user reads.
     """
     campaign = store.campaigns.load_campaign(campaign_id)
     if campaign is None or campaign.owner_user_id != str(store.identity.user_id):

@@ -461,7 +461,7 @@ def test_a_campaign_frozen_before_todays_config_still_loads(built_stores: Stores
     from pathlib import Path
 
     from promptpotter.application.config import apply_inherited_overlay, load_campaign_config
-    from promptpotter.application.config_diff import DiffScope, classify_config_diff
+    from promptpotter.application.knobs import DiffScope, classify_config_diff
 
     fixture = Path(__file__).parent / "fixtures" / "cycles" / "frozen_campaign" / "campaign.json"
     manifest = json.loads(fixture.read_text(encoding="utf-8"))

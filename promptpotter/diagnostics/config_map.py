@@ -4,7 +4,7 @@
 The optimization knobs are not independent: several co-determine the same
 statistical estimand (the scored subset, the difficulty ruler δ, the ability θ,
 the gate), so a knob flipped in isolation can quietly make another ill-defined.
-This diagnostic prints, from the one declared registry (``application.config_coupling``):
+This diagnostic prints, from the one declared registry (``application.knobs``):
 
 - every knob grouped by the **estimand** it moves, with its effective value and
   the **layer that value came from** (operator-set vs default vs hardcoded
@@ -28,17 +28,20 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from promptpotter.application.config import CampaignConfig, OptimizationConfig
-from promptpotter.application.config_coupling import (
-    COUPLINGS,
+from promptpotter.application.config import (
+    CampaignConfig,
     Estimand,
-    KnobState,
-    check_couplings,
+    OptimizationConfig,
     estimand_doc,
     knob_label,
-    resolve_knob_states,
 )
 from promptpotter.application.datasets.authored import read_campaign_config_file
+from promptpotter.application.knobs import (
+    COUPLINGS,
+    KnobState,
+    check_couplings,
+    resolve_knob_states,
+)
 
 
 def _load_config(arg: str) -> CampaignConfig:

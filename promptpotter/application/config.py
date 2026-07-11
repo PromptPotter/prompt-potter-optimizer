@@ -11,7 +11,8 @@ import logging
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from enum import StrEnum
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -32,16 +33,115 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "CampaignConfig",
+    "Estimand",
+    "Knob",
     "OptimizationConfig",
     "PreflightWarning",
+    "Scope",
     "apply_inherited_overlay",
     "apply_node_overlay",
     "configure_and_apply_pipeline",
+    "estimand_doc",
     "freeze_campaign_config",
+    "knob_label",
     "load_campaign_config",
     "resolve_pipeline_config_params",
     "run_preflight_checks",
 ]
+
+
+class Scope(StrEnum):
+    """What a knob shapes — the question resume asks of every config edit.
+
+    - ``POLICY``: a decision knob (patience, thresholds, ε, n_variants). Past
+      measurements and candidates stay valid; the new policy governs unevaluated rounds.
+    - ``DATA``: the knob shapes the data trace itself (JobSearchPoint inputs, scoring,
+      the dataset binding). Cached measurements may not apply — resume runs divergence
+      detection.
+    """
+
+    POLICY = "policy"
+    DATA = "data"
+
+
+class Estimand(StrEnum):
+    """The statistical quantity a knob moves — the axis a statistician groups by.
+
+    A knob may touch more than one. Couplings are *between knobs that share an
+    estimand*: that shared quantity is what goes ill-defined when they disagree.
+
+    **Declaration order IS presentation order.** Both the CLI config map and the
+    webapp's config panel iterate this enum directly. Never copy these members into
+    an ordering tuple: two such copies existed, both silently omitted
+    ``DISCRIMINATION``, and its group vanished from both surfaces.
+    """
+
+    SELECTION = "selection"
+    DIFFICULTY = "difficulty"
+    DISCRIMINATION = "discrimination"
+    ABILITY = "ability"
+    GATE = "gate"
+    STOPPING = "stopping"
+    ESCALATION = "escalation"
+    SEARCH = "search"
+    SPEND = "spend"
+    DISPLAY = "display"
+
+
+_ESTIMAND_DOC: dict[Estimand, str] = {
+    Estimand.SELECTION: "Which samples get scored each round — the subset the fitness is measured over.",
+    Estimand.DIFFICULTY: "The per-sample difficulty ruler δ (1PL Rasch) used to difficulty-adjust scores.",
+    Estimand.DISCRIMINATION: "The per-sample discrimination aₛ (2PL) — how sharply a sample separates able from unable candidates; only estimated where a data-rich dataset graduates.",
+    Estimand.ABILITY: "The candidate ability θ — difficulty-adjusted skill, the metric the gate compares.",
+    Estimand.GATE: "The round-promotion / improvement gate — what counts as 'better' and is kept.",
+    Estimand.STOPPING: "The early-abort / elimination rules that stop measuring a candidate before budget.",
+    Estimand.ESCALATION: "The L1/L2/L3 patience ladder — when the loop escalates strategy or halts.",
+    Estimand.SEARCH: "The optimizer search space + data binding the loop explores.",
+    Estimand.SPEND: "The budget ceilings (USD / tokens) that halt the cycle.",
+    Estimand.DISPLAY: "What number the operator reads — no effect on the data or the decision.",
+}
+
+
+def estimand_doc(estimand: Estimand) -> str:
+    """Plain-language one-liner for an estimand (teach, don't dump)."""
+    return _ESTIMAND_DOC[estimand]
+
+
+def knob_label(path: str) -> str:
+    """Short display name for a knob — drops the ``optimization.`` /
+    ``optimization.mechanisms.<group>.`` prefix. Shared by the CLI diagnostic and
+    the webapp config-map so both name a knob identically."""
+    short = path.removeprefix("optimization.")
+    if short.startswith("mechanisms."):
+        short = short.split(".", 2)[-1]
+    return short
+
+
+@dataclass(frozen=True, init=False)
+class Knob:
+    """A config field's self-description — what it shapes (:class:`Scope`) and which
+    statistical quantities it moves (:class:`Estimand`). Rides the field as
+    ``Annotated`` metadata, so a knob is declared exactly ONCE, where it is defined::
+
+        pobb_epsilon: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(...)
+
+    A field carrying a ``Knob`` is a **leaf** of the config tree whatever its shape —
+    ``dataset_split`` is one knob, not two. A field without one whose annotation is a
+    nested model is descended into; a field without one that is *not* a model is an
+    undeclared knob and fails the walk in :mod:`promptpotter.application.knobs`.
+
+    Scope and estimands used to live in two name-keyed side tables beside the model,
+    each with its own walker and its own import guard — and they drifted exactly as a
+    hand-written name-set does, disagreeing on whether ``lives`` was one leaf or two.
+    Metadata on the field cannot go stale against the field.
+    """
+
+    scope: Scope
+    estimands: tuple[Estimand, ...]
+
+    def __init__(self, scope: Scope, *estimands: Estimand) -> None:
+        object.__setattr__(self, "scope", scope)
+        object.__setattr__(self, "estimands", estimands)
 
 
 class SelectionMechanisms(BaseModel):
@@ -51,20 +151,22 @@ class SelectionMechanisms(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    per_round_resubset: bool = Field(
-        True,
-        description=(
-            "Re-pick the most-informative scoring subset every round from the "
-            "train bank (adaptive Rasch selection). On (default) — safe because "
-            "every cross-round comparator (election, PoBB, c0_ok, the stall ladder) "
-            "measures on one fixed θ ruler, so a shifting per-round subset stays "
-            "comparable — but it is warm-gated: while the δ ruler is still cold (a "
-            "fresh dataset's early rounds) the subset stays FROZEN to the campaign-start "
-            "selection, so those rounds are comparable AND concentrate measurements to "
-            "warm the ruler fastest; it thaws to adaptive once the ruler locks. Off → "
-            "the campaign-start selection (deterministic bank prefix) for every round, "
-            "the whole campaign."
-        ),
+    per_round_resubset: Annotated[bool, Knob(Scope.POLICY, Estimand.SELECTION, Estimand.GATE)] = (
+        Field(
+            True,
+            description=(
+                "Re-pick the most-informative scoring subset every round from the "
+                "train bank (adaptive Rasch selection). On (default) — safe because "
+                "every cross-round comparator (election, PoBB, c0_ok, the stall ladder) "
+                "measures on one fixed θ ruler, so a shifting per-round subset stays "
+                "comparable — but it is warm-gated: while the δ ruler is still cold (a "
+                "fresh dataset's early rounds) the subset stays FROZEN to the campaign-start "
+                "selection, so those rounds are comparable AND concentrate measurements to "
+                "warm the ruler fastest; it thaws to adaptive once the ruler locks. Off → "
+                "the campaign-start selection (deterministic bank prefix) for every round, "
+                "the whole campaign."
+            ),
+        )
     )
 
 
@@ -76,14 +178,14 @@ class EliminationMechanisms(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    epsilon_elimination: bool = Field(
+    epsilon_elimination: Annotated[bool, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
         True,
         description=(
             "PoBB ε-stop: drop a candidate once its posterior probability of being "
             "the round's best falls below `pobb_epsilon`. The main loser-elimination rule."
         ),
     )
-    margin_elimination: bool = Field(
+    margin_elimination: Annotated[bool, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
         True,
         description=(
             "Arms the paired-margin gate: abort a candidate once it cannot, or probably "
@@ -97,7 +199,7 @@ class EliminationMechanisms(BaseModel):
             "whole panel is wasted spend. Off = no margin gate, ε-stop only."
         ),
     )
-    degradation_fatal_fastpath: bool = Field(
+    degradation_fatal_fastpath: Annotated[bool, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
         True,
         description=(
             "End a candidate at the first FATAL sample (empty response, "
@@ -107,7 +209,7 @@ class EliminationMechanisms(BaseModel):
             "that threshold."
         ),
     )
-    leader_lock_in: bool = Field(
+    leader_lock_in: Annotated[bool, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
         False,
         description=(
             "Crown a decisive leader EARLY: stop measuring a candidate as the winner "
@@ -143,12 +245,12 @@ class LivesConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    start: int = Field(
+    start: Annotated[int, Knob(Scope.POLICY, Estimand.ESCALATION, Estimand.SPEND)] = Field(
         2,
         ge=1,
         description="Lives a run starts with (a fully-stalling run does exactly this many L1 rounds).",
     )
-    cap: int = Field(
+    cap: Annotated[int, Knob(Scope.POLICY, Estimand.ESCALATION, Estimand.SPEND)] = Field(
         4,
         ge=1,
         description="Bank ceiling — lives never exceed this no matter how long the improving streak runs.",
@@ -160,7 +262,10 @@ class OptimizationConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    max_rounds: int | None = Field(50, description="Max rounds (None = unlimited)")
+    max_rounds: Annotated[int | None, Knob(Scope.POLICY, Estimand.ESCALATION, Estimand.SPEND)] = (
+        Field(50, description="Max rounds (None = unlimited)")
+    )
+    # No `Knob` — the walk descends into LivesConfig, so `start` + `cap` are the knobs.
     lives: LivesConfig | None = Field(
         None,
         description=(
@@ -171,11 +276,17 @@ class OptimizationConfig(BaseModel):
             "above, so a lives run wanting the full bank sets ``max_rounds: null``."
         ),
     )
-    l1_patience: int = Field(3, description="Stop after N consecutive non-improving L1 rounds")
-    n_variants: int = Field(5, description="Candidates per round")
-    improvement_threshold: float = Field(..., description="Min accuracy delta")
+    l1_patience: Annotated[int, Knob(Scope.POLICY, Estimand.ESCALATION)] = Field(
+        3, description="Stop after N consecutive non-improving L1 rounds"
+    )
+    n_variants: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+        5, description="Candidates per round"
+    )
+    improvement_threshold: Annotated[float, Knob(Scope.POLICY, Estimand.GATE)] = Field(
+        ..., description="Min accuracy delta"
+    )
 
-    optimizer_set: str = Field(
+    optimizer_set: Annotated[str, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
         "",
         description=(
             "Which optimizer meta-prompt set this cycle uses. Empty (default) → the "
@@ -189,53 +300,57 @@ class OptimizationConfig(BaseModel):
         ),
     )
 
-    replicate_survivors: int = Field(
-        0,
-        description=(
-            "OPT-IN successive-halving replication (0 = off; the distributable default). "
-            "When >0, after a round's scoring pass each SURVIVING candidate (reached the "
-            "coverage floor, not PoBB-eliminated) is re-measured `replicate_survivors` more "
-            "times with `force_fresh` (independent draws, cache bypassed); the estimators "
-            "average the replicate rows per cell (`paired_fitness`/`cell_fitness`) and the "
-            "Rasch θ fit consumes them natively (more item responses → tighter θ). Kills the "
-            "idiosyncratic single-run inner-campaign draw that CRN cannot (the treatment "
-            "changes the inner-prompt path, so its search noise is not common) — complementary "
-            "to CRN, not a substitute. The origin reference is replicated too (its draws thread "
-            "only into the decision estimators, not the display floor). Spends k times the "
-            "survivor+origin budget, so it rides the elimination floor (losers already dropped). "
-            "A DEV-STAGE tool: off in the distributable to keep it simple. See l4-outer-loop.md."
-        ),
+    replicate_survivors: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH, Estimand.SPEND)] = (
+        Field(
+            0,
+            description=(
+                "OPT-IN successive-halving replication (0 = off; the distributable default). "
+                "When >0, after a round's scoring pass each SURVIVING candidate (reached the "
+                "coverage floor, not PoBB-eliminated) is re-measured `replicate_survivors` more "
+                "times with `force_fresh` (independent draws, cache bypassed); the estimators "
+                "average the replicate rows per cell (`paired_fitness`/`cell_fitness`) and the "
+                "Rasch θ fit consumes them natively (more item responses → tighter θ). Kills the "
+                "idiosyncratic single-run inner-campaign draw that CRN cannot (the treatment "
+                "changes the inner-prompt path, so its search noise is not common) — complementary "
+                "to CRN, not a substitute. The origin reference is replicated too (its draws thread "
+                "only into the decision estimators, not the display floor). Spends k times the "
+                "survivor+origin budget, so it rides the elimination floor (losers already dropped). "
+                "A DEV-STAGE tool: off in the distributable to keep it simple. See l4-outer-loop.md."
+            ),
+        )
     )
 
-    l2_patience: int | None = Field(2)
-    l3_patience: int | None = Field(1)
-    degradation_threshold: float = Field(...)
+    l2_patience: Annotated[int | None, Knob(Scope.POLICY, Estimand.ESCALATION)] = Field(2)
+    l3_patience: Annotated[int | None, Knob(Scope.POLICY, Estimand.ESCALATION)] = Field(1)
+    degradation_threshold: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(...)
 
-    elimination_n_min: int = Field(
+    elimination_n_min: Annotated[
+        int, Knob(Scope.POLICY, Estimand.STOPPING, Estimand.ABILITY, Estimand.DIFFICULTY)
+    ] = Field(
         6,
         description="Minimum samples before PoBB starts firing (floor on n for "
         "the Normal-CLT posterior to be meaningful).",
     )
-    pobb_epsilon: float = Field(
+    pobb_epsilon: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
         POBB_DEFAULT_EPSILON,
         description="Stop a candidate when its posterior probability of being the "
         "round's best drops below this threshold. Default 15%; smaller → fewer stops.",
     )
-    pobb_lock_in: float = Field(
+    pobb_lock_in: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
         0.95,
         description="Leader lock-in threshold — the P(best) at which a leading "
         "candidate is crowned early and stops measuring. Applies only when "
         "`mechanisms.elimination.leader_lock_in` is on (that bool owns the on/off); "
         "this is purely the threshold. Lower = lock in sooner on less evidence.",
     )
-    pobb_lock_in_n_min: int = Field(
+    pobb_lock_in_n_min: Annotated[int, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
         8,
         description="Samples-floor for lock-in — a leader can only lock in after at "
         "least this many measurements. Applies only when "
         "`mechanisms.elimination.leader_lock_in` is on.",
     )
 
-    spend_budget_usd: float | None = Field(
+    spend_budget_usd: Annotated[float | None, Knob(Scope.POLICY, Estimand.SPEND)] = Field(
         0.025,
         description=(
             "Halt this cycle when cumulative spend (optimizer + backend) ≥ this "
@@ -248,7 +363,7 @@ class OptimizationConfig(BaseModel):
         ),
     )
 
-    token_budget: int | None = Field(
+    token_budget: Annotated[int | None, Knob(Scope.POLICY, Estimand.SPEND)] = Field(
         210_000,
         description=(
             "Halt this cycle when cumulative tokens (optimizer + backend, input + "
@@ -260,7 +375,9 @@ class OptimizationConfig(BaseModel):
         ),
     )
 
-    origin_gate: Literal["strict", "critical_only", "off"] = Field(
+    origin_gate: Annotated[
+        Literal["strict", "critical_only", "off"], Knob(Scope.POLICY, Estimand.GATE)
+    ] = Field(
         "strict",
         description=(
             "Halt after round 0 when the origin's degradation verdict is "
@@ -274,7 +391,7 @@ class OptimizationConfig(BaseModel):
         ),
     )
 
-    forbidden_axes_strict: bool = Field(
+    forbidden_axes_strict: Annotated[bool, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
         True,
         description=(
             "The single model-optimizability bit. When on (default), the "
@@ -294,7 +411,7 @@ class OptimizationConfig(BaseModel):
         ),
     )
 
-    schema_field_rename: bool = Field(
+    schema_field_rename: Annotated[bool, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
         False,
         description=(
             "Whether THIS campaign's L1 may PROPOSE renaming a field on the inner "
@@ -314,7 +431,7 @@ class OptimizationConfig(BaseModel):
         ),
     )
 
-    rebase_capability: bool = Field(
+    rebase_capability: Annotated[bool, Knob(Scope.POLICY, Estimand.ESCALATION)] = Field(
         True,
         description=(
             "L2/L3 fork_proposal emission. When True, the ``rebase_capability`` "
@@ -330,7 +447,7 @@ class OptimizationConfig(BaseModel):
         ),
     )
 
-    terminate_capability: bool = Field(
+    terminate_capability: Annotated[bool, Knob(Scope.POLICY, Estimand.ESCALATION)] = Field(
         True,
         description=(
             "L2/L3 terminate_proposal emission. When True, the "
@@ -350,7 +467,7 @@ class OptimizationConfig(BaseModel):
 
     # Round-level Rasch IRT — one posterior fit per round drives `select_round_subset`
     # + the heatmap.
-    seed_heatmap_from_archive: bool = Field(
+    seed_heatmap_from_archive: Annotated[bool, Knob(Scope.POLICY, Estimand.DIFFICULTY)] = Field(
         False,
         description=(
             "Round-end hard-sample artifact's Rasch fit folds in archive "
@@ -358,7 +475,10 @@ class OptimizationConfig(BaseModel):
             "cross-cycle evidence."
         ),
     )
-    enable_2pl_graduation: bool = Field(
+    enable_2pl_graduation: Annotated[
+        bool,
+        Knob(Scope.POLICY, Estimand.DISCRIMINATION, Estimand.DIFFICULTY, Estimand.ABILITY),
+    ] = Field(
         True,
         description=(
             "Allow the per-cycle difficulty ruler to graduate from 1PL (difficulty "
@@ -386,17 +506,23 @@ class CampaignConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    dataset_name: str = Field("")
-    sp_budget_ttest: int = Field(
+    dataset_name: Annotated[str, Knob(Scope.DATA, Estimand.SEARCH)] = Field("")
+    sp_budget_ttest: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
         20,
         description="Per-round eval budget — how many samples each candidate is "
         "scored on per round. The full train split is the bank; each round the "
         "adaptive queue mechanism (`select_round_subset`) selects this many "
         "informative samples from it. Not the dataset/pool size.",
     )
-    exclude_nodes: list[str] = Field(default_factory=list)
-    pipeline_overrides: dict[str, Any] = Field(default_factory=dict)
-    optimizer_narrowing: dict[str, NodeSearchNarrowing] = Field(
+    exclude_nodes: Annotated[list[str], Knob(Scope.DATA, Estimand.SEARCH)] = Field(
+        default_factory=list
+    )
+    pipeline_overrides: Annotated[dict[str, Any], Knob(Scope.DATA, Estimand.SEARCH)] = Field(
+        default_factory=dict
+    )
+    optimizer_narrowing: Annotated[
+        dict[str, NodeSearchNarrowing], Knob(Scope.DATA, Estimand.SEARCH)
+    ] = Field(
         default_factory=dict,
         description="Per-node narrowing of the dataset-declared optimizer search "
         "space — the per-campaign param-lock + allowed-values lever beside "
@@ -404,8 +530,8 @@ class CampaignConfig(BaseModel):
         "(model/provider). Subsets only; applied onto the schema by "
         "`PipelineSchema.narrow` at pipeline setup.",
     )
-    scoring: str | dict[str, str] | None = Field(None)
-    headline_metric: HeadlineMetric = Field(
+    scoring: Annotated[str | dict[str, str] | None, Knob(Scope.DATA, Estimand.GATE)] = Field(None)
+    headline_metric: Annotated[HeadlineMetric, Knob(Scope.POLICY, Estimand.DISPLAY)] = Field(
         "accuracy",
         description="Which fitness number headlines the operator's text surfaces "
         "(lineage node value, Best tile, sidebar) by default. DISPLAY config, not "
@@ -415,12 +541,14 @@ class CampaignConfig(BaseModel):
         "an operator who didn't ask for it. Rides the `composite_fitness_formula` "
         "serve path to `dashboard.json::headline_metric`; never on `OptSearchPoint`.",
     )
-    dataset_split: DatasetSplit | None = Field(
+    # Carries a `Knob`, so the walk STOPS here: the split is one knob, not two.
+    dataset_split: Annotated[DatasetSplit | None, Knob(Scope.POLICY, Estimand.DISPLAY)] = Field(
         None,
         description="Canonical train/test fold sizes for the dashboard footer. "
         "None when the dataset declares no split.",
     )
 
+    # No `Knob` — the walk descends into OptimizationConfig.
     optimization: OptimizationConfig
 
 
@@ -562,12 +690,11 @@ def _check_optimizer_below_target(target_models: tuple[str, ...]) -> PreflightWa
 
 def _check_config_couplings(config: CampaignConfig) -> list[PreflightWarning]:
     """Knob-collision warnings — config combinations where one knob makes another
-    statistical quantity ill-defined or inert. The declared map lives in
-    ``config_coupling`` (the single source of truth, also read by the
-    ``config_map`` diagnostic + the webapp config-map endpoint); this is its
-    pre-run CLI leg. Imported lazily to keep the statistical-constant imports off
-    ``config``'s module-load path."""
-    from promptpotter.application.config_coupling import check_couplings
+    statistical quantity ill-defined or inert. The declared map lives in ``knobs``
+    (also read by the ``config_map`` diagnostic + the webapp config-map endpoint);
+    this is its pre-run CLI leg. Imported lazily to keep the statistical-constant
+    imports off ``config``'s module-load path."""
+    from promptpotter.application.knobs import check_couplings
 
     return [
         PreflightWarning(

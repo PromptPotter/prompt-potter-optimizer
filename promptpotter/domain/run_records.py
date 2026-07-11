@@ -363,8 +363,8 @@ class ConfigOverrides(BaseModel):
     - **Search-space policy** (`schema_field_rename`) — unlocks the field-NAME
       lever on the inner `l1_generate`'s output schema.
 
-    The two policy knobs ride here for the same reason: `config_diff` classifies
-    each `policy` and `config_coupling` binds each to `Estimand.SEARCH`, so
+    The two policy knobs ride here for the same reason: each declares itself
+    `Knob(Scope.POLICY, Estimand.SEARCH)` on its `CampaignConfig` field, so
     changing one invalidates search comparability and MUST mint a sibling cycle
     rather than mutate the running one (the operator's "behaviour-knob change →
     sibling cycle" workflow). `schema_field_rename`'s two writers are that

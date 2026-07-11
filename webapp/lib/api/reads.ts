@@ -543,7 +543,7 @@ export function fetchMechanismsSchema(
 // moves (with effective value + the layer that value came from), plus the
 // declared couplings between knobs flagged active when this campaign's config
 // sits in their violating combination. Answers "what overwrites what" and "what
-// clashes with what". Server-authored from the one `config_coupling` registry —
+// clashes with what". Server-authored from the one `application/knobs` registry —
 // the same source the CLI `config_map` diagnostic + the pre-run preflight warning
 // read, so the panel never disagrees with the engine. Wire: `GET
 // /campaigns/{id}/config-map`.

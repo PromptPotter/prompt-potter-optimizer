@@ -308,11 +308,16 @@ The persisted world is a four-entity containment hierarchy
   knob *moves*: the scored subset, the difficulty ruler δ, the ability θ,
   the gate, the stopping rule, … The axis the config map groups knobs by;
   knobs sharing an estimand are the ones that can collide.
-  `application/config_coupling.py::Estimand`.
+  `application/config.py::Estimand`.
+- **knob** — one leaf of `CampaignConfig`, declaring on its own field (as
+  `Annotated[..., Knob(scope, *estimands)]`) both what it shapes — `Scope.POLICY`
+  (a decision knob; resume keeps the data trace) vs `Scope.DATA` (resume runs
+  divergence detection) — and which estimand(s) it moves. `application/knobs.py::KNOBS`
+  walks the model for them; it is the leaf taxonomy every other surface reads.
 - **config coupling / config map** — the declared registry of which knob
   moves which estimand and which knobs *clash* (a combination that makes a
   shared estimand ill-defined or a tuned knob inert). One source of truth
-  (`application/config_coupling.py`), read by the pre-run preflight warning,
+  (`application/knobs.py`), read by the pre-run preflight warning,
   the `python -m promptpotter.diagnostics.config_map` table, and the webapp
   Config-map panel. Answers "what overwrites what" (provenance: effective
   value + source layer per knob) and "what clashes with what" (the active

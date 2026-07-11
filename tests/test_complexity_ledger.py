@@ -169,12 +169,21 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # genuine additions: ``store/read_model.py`` (the append-only JSONL primitives that retire
 # read-whole/O(n)-scan/rewrite-whole — save at n=1000 dropped 88ms->2.6ms) and
 # ``cli/commands/reindex.py`` (the on-demand index-rebuild verb). Both earn their line.
+# 2026-07-11 the knob declares itself: ``modules`` 313->312 and ``config_leaf_fields``
+# 38->37. A config leaf was declared three times — the Pydantic field, ``config_diff``'s
+# ``_FIELD_SCOPES``, ``config_coupling``'s ``_KNOB_ESTIMANDS`` — and walked four times, by
+# walkers that disagreed (``lives`` was one leaf or two depending who asked). Scope +
+# estimands now ride the field as ``Knob`` metadata, so the two side tables (and their two
+# walkers + two import guards) collapse into one derived registry in ``application/knobs.py``,
+# which replaces both modules. ``config_leaf_fields`` is now ``len(KNOBS)``: the registry IS
+# the taxonomy, so the ledger stops carrying a fourth opinion (it counted ``dataset_split``
+# as two leaves; the knob is one). Subtraction, so both baselines fall.
 
 LEDGER_BASELINE = {
-    "modules": 313,
+    "modules": 312,
     "init_files": 58,
     "reexport_shims": 44,
-    "config_leaf_fields": 38,
+    "config_leaf_fields": 37,
     "settings_env": 17,
     "settings_const": 15,
     "opt_search_point_fields": 27,

@@ -21,7 +21,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.config import freeze_campaign_config
-from promptpotter.application.config_diff import DiffScope, classify_config_diff
+from promptpotter.application.knobs import DiffScope, classify_config_diff
 
 # Leaf import (not the package surface): rebuilding the foundational FSM via
 # escalation/__init__ would load the firing driver, which imports resume_and_fork
@@ -64,7 +64,7 @@ def resume_with_divergence_check(
     :attr:`DiffScope.NONE` or :attr:`DiffScope.POLICY_ONLY`: the parent's
     data trace is fully valid, past decisions stay as the audit record, and
     the active policy governs unevaluated rounds. No fork, no divergence
-    walk. See :func:`promptpotter.application.config_diff.classify_config_diff`.
+    walk. See :func:`promptpotter.application.knobs.classify_config_diff`.
     """
     sc = session.scoring
     scorer = sc.scorer

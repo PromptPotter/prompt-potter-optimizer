@@ -20,9 +20,9 @@ the same number:
 - ``reexport_shims`` — ``__init__.py`` files that BOTH declare ``__all__`` AND
   contain an import statement (i.e. they re-export, so a reader must hop through
   them). Empty namespace-marker ``__init__`` files are excluded.
-- ``config_leaf_fields`` — recursive leaf count of ``CampaignConfig`` (a field
-  whose annotation is a ``BaseModel`` recurses; everything else, including
-  ``list[Model]`` / ``dict``, counts as one leaf).
+- ``config_leaf_fields`` — ``len(KNOBS)``, the knob registry walked off
+  ``CampaignConfig``'s own ``Knob`` metadata. The registry IS the leaf taxonomy, so
+  the ledger reads it rather than carrying a fourth opinion on what a config leaf is.
 - ``settings_env`` — ``len(Settings.model_fields)``.
 - ``settings_const`` — module-level constants exported by ``settings`` (the
   upper-case names in its ``__all__``; excludes the ``Settings`` class + instance).
@@ -81,7 +81,7 @@ def _is_reexport_shim(init_file: Path) -> bool:
 
 def compute_ledger() -> dict[str, int]:
     """Return the current surface count for every tracked dimension."""
-    from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.knobs import KNOBS
     from promptpotter.application.optimization.dispatch.hub.injections.registry import (
         INJECTIONS,
     )
@@ -99,7 +99,7 @@ def compute_ledger() -> dict[str, int]:
         "modules": len(py_files),
         "init_files": len(init_files),
         "reexport_shims": sum(1 for p in init_files if _is_reexport_shim(p)),
-        "config_leaf_fields": _count_leaves(CampaignConfig),
+        "config_leaf_fields": len(KNOBS),
         "settings_env": len(Settings.model_fields),
         "settings_const": sum(1 for name in settings_mod.__all__ if name.isupper()),
         "opt_search_point_fields": _count_leaves(OptSearchPoint),

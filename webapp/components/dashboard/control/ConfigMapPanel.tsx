@@ -3,7 +3,7 @@
 // the coupling registry: which knob moves which statistical estimand, what
 // overwrites what, and which knobs currently CLASH. Read-only: self-fetches the
 // in-view campaign's `GET /campaigns/{id}/config-map`, server-authored from the
-// one `config_coupling` registry (same source as the CLI diagnostic + the
+// one `application/knobs` registry (same source as the CLI diagnostic + the
 // pre-run preflight warning), so this panel never disagrees with the engine on
 // which knobs collide.
 
