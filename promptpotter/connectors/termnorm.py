@@ -260,6 +260,20 @@ async def _termnorm_version_check(
 _EXPECTED_REVISION: str | None = None
 
 
+# ---------------------------------------------------------------------------
+# Wire credential
+# ---------------------------------------------------------------------------
+
+
+def _termnorm_auth_token() -> str | None:
+    """TermNorm's bearer token. Read per client construction, so an env change
+    lands without a reimport; TermNorm gates it behind its own
+    ``TERMNORM_REQUIRE_AUTH`` flag, so an unset token is the normal local posture."""
+    from promptpotter.config.settings import settings
+
+    return settings.TERMNORM_TOKEN or None
+
+
 CONNECTOR = Connector(
     name="termnorm",
     wire_adapter=termnorm_wire_adapter,
@@ -268,6 +282,7 @@ CONNECTOR = Connector(
     expected_revision=_EXPECTED_REVISION,
     version_check=_termnorm_version_check,
     preflight=_termnorm_preflight,
+    auth_token=_termnorm_auth_token,
     # First-tenant default — skip the heavy retrieval/scoring nodes (R4).
     # The production-benchmark pipeline includes them; a fresh CSV upload
     # should not pay Brave Search billing + multi-second latency on round 1.

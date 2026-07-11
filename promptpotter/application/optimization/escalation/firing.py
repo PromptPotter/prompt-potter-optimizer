@@ -735,7 +735,9 @@ async def escalate_l2(
         )
         return None
 
-    return StopReason.L3_PATIENCE
+    # STOP_L3_PATIENCE — the reason rides the event (``_NEXT_ACTION_TO_STOP``), the one
+    # NextAction→StopReason table; re-spelling it here is how the two drift apart.
+    return event.stop_reason
 
 
 __all__ = [

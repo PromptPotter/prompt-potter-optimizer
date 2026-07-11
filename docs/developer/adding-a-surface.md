@@ -173,12 +173,20 @@ or `infrastructure/backend.py`.**
    No `register()` call, no import side effects.
 4. Optional: set `expected_revision` + a `version_check` hook for cross-repo
    drift warnings at bootstrap.
+5. If the backend needs a credential, declare an `auth_token: () -> str | None` hook.
+   **A credential is a per-backend fact and belongs on the connector**, never read at
+   the construction site — `build_backend_client` (`infrastructure/backend.py`) is the
+   one place a `BackendClient` is built, and it takes the token off the connector it
+   was handed. Four sites once passed `settings.TERMNORM_TOKEN` to whatever connector
+   had been resolved, so registering a second `remote_http` backend would have POSTed
+   TermNorm's bearer token to that third-party host.
 
 **Guard (import-time, no standing test):** the registry guard at the bottom of
 `connectors/__init__.py` raises at import if any row is half-wired — registry key ≠
 `name`, a non-callable hook, an `execution` outside `ConnectorExecution`, an
-`in_process` connector without `in_process_run` (or a `remote_http` one with it), or
-a `DEFAULT_CONNECTOR` naming an unregistered backend. An unknown connector raises
+`in_process` connector without `in_process_run` (or a `remote_http` one with it), an
+`in_process` connector carrying an `auth_token` (no wire to send it over), or a
+`DEFAULT_CONNECTOR` naming an unregistered backend. An unknown connector raises
 `KeyError` at `get()`.
 
 **The `in_process` arm is SHIPPED**, and two connectors ride it: `llm_only` (one

@@ -140,10 +140,11 @@ class Settings(BaseSettings):
     # 8000 tokens/min for gpt-oss-120b): RATE_LIMITS='{"groq": [5, 8000]}'
     RATE_LIMITS: dict[str, list[int | None]] = {}
 
-    # Wire-level auth for backend connectors. Sent as
-    # ``Authorization: Bearer <TERMNORM_TOKEN>`` on every BackendClient
-    # request when non-empty. TermNorm side gates this behind its own
-    # ``TERMNORM_REQUIRE_AUTH`` flag (see backend-api/config/middleware.py).
+    # The TermNorm backend's bearer token — TermNorm's credential, nobody else's.
+    # Read ONLY by the termnorm connector's ``auth_token`` hook, so it can only ever
+    # ride a request to TermNorm; a second remote backend declares its own or gets no
+    # auth header. TermNorm gates it behind its own ``TERMNORM_REQUIRE_AUTH`` flag
+    # (see backend-api/config/middleware.py), so unset is the normal local posture.
     TERMNORM_TOKEN: str = ""
 
     # Langfuse Observability (cloud.langfuse.com)

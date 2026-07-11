@@ -192,47 +192,6 @@ def test_margin_cut_replay_rederives_and_flags_flip() -> None:
     assert div.recorded_outcome is True and div.current_outcome is False
 
 
-def test_stall_replay_uses_theta_not_composite_under_warm_ruler() -> None:
-    """A warm δ ruler makes the L2/L3-trigger replay derive stall on difficulty-adjusted θ —
-    the same comparator the live ``EscalationFSM`` used — instead of subset-relative composite.
-
-    The silent harm guarded: once per-round subsets drift, raw per-round composite is no longer
-    cross-round comparable, so a resumed run that re-derives the stall on composite can flip an
-    L2/L3 trigger and **fork the lineage off the recorded path with no error**. Here the cumulative
-    frontier is held CONSTANT after entry (each later round only re-measures already-frontier
-    samples with the same hit), so the frontier θ is flat for *any* δ → genuine stall. But the
-    per-round composite spikes (a single re-measured hit reads as mean 1.0), so the old composite
-    replay would see 'improved → not stalled' and diverge. The θ replay matches the recorded
-    outcome; the cold (composite) replay does not."""
-
-    def _m(sid: int, hit: bool) -> dict:
-        return {**_r(1.0 if hit else 0.0), "sample_id": sid, "hit": hit}
-
-    # Frontier after entry stays {0:hit, 1:miss}; per-round composite = 0.5, 1.0, 0.0.
-    prior = [
-        _round(round=0, results=[_m(0, True), _m(1, False)], composite_fitness=0.5),
-        _round(round=1, results=[_m(0, True)], composite_fitness=1.0),  # spikes composite only
-        _round(round=2, results=[_m(1, False)], composite_fitness=0.0),
-    ]
-    # Live FSM (θ on the warm ruler) saw a flat frontier → stalled → L2 did NOT fire.
-    round_data = _round(
-        round=3,
-        decisions=[
-            {
-                "kind": "l2_escalation_trigger",
-                "inputs_ref": {"round_num": 2, "l2_patience": 2, "entry_round": 0},
-                "outcome": False,
-                "data": {},
-            }
-        ],
-    )
-    warm = {0: 0.5, 1: -0.5}  # θ is constant regardless of these values; the point is "warm"
-    assert replay_decisions(round_data, prior_rounds=prior, delta_scale=warm) is None
-    # Cold ruler falls back to composite — the spike reads as improvement → spurious divergence.
-    div = replay_decisions(round_data, prior_rounds=prior, delta_scale=None)
-    assert div is not None and div.kind == "l2_escalation_trigger"
-
-
 def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Stores) -> None:
     """A no-modification operator fork inherits its branch-point candidate's RECORDED
     accuracy as C0 (no re-score under a nondeterministic backend); an edited prompt

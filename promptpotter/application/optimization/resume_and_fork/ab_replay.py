@@ -134,14 +134,9 @@ def ab_replay_cycle(
     delta_scale, _ = _calibrate_delta_ruler(session, origin_results, n_min, enable_2pl=enable_2pl)
 
     divergences: list[Divergence] = []
-    for i, t in enumerate(rounds):
+    for t in rounds:
         divergences.extend(
-            replay_all_divergences(
-                t,
-                prior_rounds=rounds[:i],
-                origin_results=origin_frontier,
-                delta_scale=delta_scale,
-            )
+            replay_all_divergences(t, origin_results=origin_frontier, delta_scale=delta_scale)
         )
     logger.info(
         "A/B replay: cycle %s, %d rounds, %d divergence(s)", cycle_id, len(rounds), len(divergences)

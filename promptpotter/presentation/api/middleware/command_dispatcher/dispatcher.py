@@ -49,10 +49,9 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from promptpotter import connectors
-from promptpotter.config.settings import settings
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
-from promptpotter.infrastructure.backend import BackendClient
+from promptpotter.infrastructure.backend import build_backend_client
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.models import (
     emit_command,
@@ -604,15 +603,7 @@ class CommandDispatcher:
             raise NotFoundError(
                 f"Backend '{backend_id}' not registered", code="command_target_not_found"
             )
-        connector = connectors.get(backend.backend_type)
-        client = BackendClient(
-            backend.base_url,
-            wire_adapter=connector.wire_adapter,
-            session=connector.session_factory(),
-            execution=connector.execution,
-            in_process_run=connector.in_process_run,
-            auth_token=settings.TERMNORM_TOKEN or None,
-        )
+        client = build_backend_client(connectors.get(backend.backend_type), backend.base_url)
         try:
             await client.sync_experiments(self._store, backend_id)
         except Exception as exc:

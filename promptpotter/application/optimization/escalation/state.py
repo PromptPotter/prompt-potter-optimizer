@@ -96,10 +96,18 @@ class EscalationFSM:
     @staticmethod
     def _bank_life(current: int | None, improved: bool, lives: LivesConfig) -> int:
         """Bank the round's ``improved`` verdict: +1 if improved, -1 if not, seeded
-        from ``start`` on the first round, clamped to ``[0, cap]``. Used identically by
-        the live ``observe_round`` and the resume ``fold`` so the two never diverge."""
+        from ``start`` on the first round, clamped to ``[0, cap]``."""
         base = lives.start if current is None else current
         return max(0, min(lives.cap, base + (1 if improved else -1)))
+
+    def _bank_round(self, improved: bool, lives: LivesConfig | None) -> None:
+        """Advance the L1 accumulators from one round's ``improved`` verdict — the stall
+        counter and (when enabled) the life bank, which read the SAME bit. The live
+        ``observe_round`` and the resume ``fold`` both land here, so a run and its
+        replay cannot bank the round differently."""
+        self._l1_stall_count = 0 if improved else self._l1_stall_count + 1
+        if lives is not None:
+            self._lives = self._bank_life(self._lives, improved, lives)
 
     def would_exhaust_lives(self, improved: bool, lives: LivesConfig | None) -> bool:
         """Would banking this round's verdict empty the bank (i.e. stop the loop)?
@@ -185,9 +193,7 @@ class EscalationFSM:
             decide_escalation,
         )
 
-        self._l1_stall_count = 0 if improved else self._l1_stall_count + 1
-        if lives is not None:
-            self._lives = self._bank_life(self._lives, improved, lives)
+        self._bank_round(improved, lives)
 
         inputs = EscalationInputs(
             current_accuracy=current_accuracy,
@@ -284,10 +290,7 @@ class EscalationFSM:
             # emit "complete" so display + audit see them, but they aren't L1 progress evidence.
             if record.payload.get("is_probe"):
                 return
-            improved = bool(record.payload["improved"])
-            self._l1_stall_count = 0 if improved else self._l1_stall_count + 1
-            if lives is not None:
-                self._lives = self._bank_life(self._lives, improved, lives)
+            self._bank_round(bool(record.payload["improved"]), lives)
         elif record.phase == "l2_context" and record.event == "exit":
             escalation_state = record.payload["data"]
             self._l1_stall_count = 0

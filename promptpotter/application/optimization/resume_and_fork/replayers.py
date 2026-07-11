@@ -52,19 +52,19 @@ class Divergence(NamedTuple):
 
 
 class ReplayContext(NamedTuple):
-    """Context passed to replayers — round_data + prior_rounds + origin_results all rescored.
+    """Context passed to replayers — one round's measurements + the origin, all rescored.
+
+    This is the whole substrate: a replayer re-derives its decision from the round it was
+    taken in, and nothing else. A decision that needs the cycle's *history* to re-derive
+    (the L2/L3 layer triggers — a fold whose counters reset on each fire) is not
+    expressible here and is ``ARCHIVAL``, not ``REPLAYED``.
 
     ``delta_scale`` is the cycle's FIXED difficulty ruler (``cycle.delta_scale``,
-    calibrated once at ``Cycle.start``). When present the stall replayer derives the
-    layer-trigger boolean on difficulty-adjusted ability θ — the same scale the live
-    ``EscalationFSM._improved`` compares — so the replay stays exact once per-round
-    subsets drift (``per_round_resubset`` ON), where raw composite is subset-relative.
-    ``None`` ⇒ cold ruler, the replayer falls back to composite (identical to the live
-    cold-ruler branch).
+    calibrated once at ``Cycle.start``) — the same scale the live election and PoBB gates
+    fit θ on, so replay re-derives them bit-for-bit. ``None`` ⇒ cold ruler.
     """
 
     round_data: RoundResult
-    prior_rounds: list[RoundResult]
     origin_results: list[dict[str, Any]]
     delta_scale: dict[int, RulerEntry] | None
 
@@ -110,13 +110,11 @@ def _iter_divergences(ctx: ReplayContext) -> Iterator[Divergence]:
 
 def _replay_context(
     round_data: RoundResult,
-    prior_rounds: list[RoundResult] | None,
     origin_results: list[dict[str, Any]] | None,
     delta_scale: dict[int, RulerEntry] | None,
 ) -> ReplayContext:
     return ReplayContext(
         round_data=round_data,
-        prior_rounds=list(prior_rounds or []),
         origin_results=list(origin_results or []),
         delta_scale=delta_scale,
     )
@@ -124,32 +122,23 @@ def _replay_context(
 
 def replay_decisions(
     round_data: RoundResult,
-    prior_rounds: list[RoundResult] | None = None,
     origin_results: list[dict[str, Any]] | None = None,
     delta_scale: dict[int, RulerEntry] | None = None,
 ) -> Divergence | None:
     """Walk ``round_data.decisions`` in order; return the FIRST mismatch (resume's halt seam)."""
-    ctx = _replay_context(round_data, prior_rounds, origin_results, delta_scale)
+    ctx = _replay_context(round_data, origin_results, delta_scale)
     return next(_iter_divergences(ctx), None)
 
 
 def replay_all_divergences(
     round_data: RoundResult,
-    prior_rounds: list[RoundResult] | None = None,
     origin_results: list[dict[str, Any]] | None = None,
     delta_scale: dict[int, RulerEntry] | None = None,
 ) -> list[Divergence]:
     """Every decision in this round that re-derives differently — the A/B engine's per-round
     diff (collect-all, where ``replay_decisions`` short-circuits at the first)."""
-    ctx = _replay_context(round_data, prior_rounds, origin_results, delta_scale)
+    ctx = _replay_context(round_data, origin_results, delta_scale)
     return list(_iter_divergences(ctx))
-
-
-def _mean_score(results: list[dict[str, Any]]) -> float:
-    """Mean of rescored ``score`` projection."""
-    if not results:
-        return 0.0
-    return sum(float(r.get("fitness", 0.0)) for r in results) / len(results)
 
 
 def _replay_round_winner(
@@ -293,125 +282,6 @@ def _replay_leader_lock_in(
     return float(snapshot[candidate_id]) >= float(inputs_ref["lock_in"])
 
 
-_FRONTIER_ID = "_frontier"
-
-
-def _composite_by_round(sorted_trials: list[RoundResult], this_round: int) -> dict[int, float]:
-    """Per-round composite score — the cold-ruler comparator (raw rate). Mirrors the live
-    composite fallback in ``EscalationFSM._improved`` for a cold δ ruler."""
-    out: dict[int, float] = {}
-    for t in sorted_trials:
-        if t.round > this_round:
-            continue
-        out[t.round] = _mean_score(t.results) if t.results else t.composite_fitness
-    return out
-
-
-def _frontier_theta_by_round(
-    sorted_trials: list[RoundResult], this_round: int, delta_scale: dict[int, RulerEntry]
-) -> dict[int, float]:
-    """Per-round cumulative-frontier ability θ on the FIXED ruler — the θ-space peer of the
-    live ``cycle.tracking.best_theta`` accumulation (``cycle.py::_cumulative_theta`` over the
-    sample-keyed cumulative frontier). Each round merges its winner ``results`` into a
-    non-shrinking frontier (later samples overwrite earlier — ``_merge_into_cumulative``),
-    then θ is the frontier's ability against the fixed δ. A round with no banked overlap
-    carries the prior θ forward (no improvement recorded), matching the FSM where ``best_theta``
-    holds when ``_cumulative_theta`` returns ``None``."""
-    from promptpotter.application.intelligence.exploration import (
-        Observation,
-        fit_theta_given_delta,
-        graded_response,
-    )
-    from promptpotter.shared.errors import is_error_result
-
-    frontier: dict[Any, dict[str, Any]] = {}
-    out: dict[int, float] = {}
-    last: float | None = None
-    for t in sorted_trials:
-        if t.round > this_round:
-            continue
-        for res in t.results:
-            sid = res.get("sample_id")
-            if sid is not None:
-                frontier[sid] = res
-        obs = [
-            Observation(_FRONTIER_ID, int(sid), graded_response(res))
-            for res in frontier.values()
-            if (sid := res.get("sample_id")) is not None and not is_error_result(res)
-        ]
-        fit = fit_theta_given_delta(obs, delta_scale)
-        row = fit.get(_FRONTIER_ID)
-        if row is not None:
-            last = row[0]
-        if last is not None:
-            out[t.round] = last
-    return out
-
-
-def _stall_from_scores(score_by_round: dict[int, float], entry_round: int, this_round: int) -> int:
-    """Stall count = rounds since ``entry_round`` whose running-max score never beat the
-    entry-round running max. The shared core: the cold path feeds composite, the warm path
-    feeds frontier θ — same monotone running-max-vs-entry comparison the FSM runs."""
-    running_max: float | None = None
-    origin: float | None = None
-    rounds_after = 0
-    for r in sorted(score_by_round):
-        if r > this_round:
-            continue
-        v = score_by_round[r]
-        running_max = v if running_max is None else max(running_max, v)
-        if r <= entry_round:
-            if r == entry_round:
-                origin = running_max
-            continue
-        rounds_after += 1
-        if origin is not None and running_max > origin:
-            return 0
-    return rounds_after if origin is not None else 0
-
-
-def _derive_stall_count(
-    prior_rounds: list[RoundResult],
-    entry_round: int,
-    this_round: int,
-    delta_scale: dict[int, RulerEntry] | None,
-) -> int:
-    """Reconstruct stall_count at end of this_round on the same comparator the live
-    ``EscalationFSM`` used: difficulty-adjusted ability θ on the fixed ruler when it is warm,
-    else composite. θ stays cross-round comparable once per-round subsets drift."""
-    if entry_round < 0:
-        return 0
-    sorted_trials = sorted(prior_rounds, key=lambda t: t.round)
-    scores = (
-        _frontier_theta_by_round(sorted_trials, this_round, delta_scale)
-        if delta_scale is not None
-        else _composite_by_round(sorted_trials, this_round)
-    )
-    return _stall_from_scores(scores, entry_round, this_round)
-
-
-def _replay_layer_trigger(patience_key: str) -> Replayer:
-    """Build a replayer that re-derives `triggered = stalls < patience` from prior rounds."""
-
-    def _replay(ctx: ReplayContext, inputs_ref: dict[str, Any], _data: dict[str, Any]) -> bool:
-        patience = inputs_ref.get(patience_key)
-        if patience is None:
-            return True
-        stalls = _derive_stall_count(
-            ctx.prior_rounds,
-            int(inputs_ref.get("entry_round", -1)),
-            int(inputs_ref.get("round_num", -1)),
-            ctx.delta_scale,
-        )
-        return stalls < int(patience)
-
-    return _replay
-
-
-_replay_l2_trigger = _replay_layer_trigger("l2_patience")
-_replay_l3_trigger = _replay_layer_trigger("l3_patience")
-
-
 # ``RESUME_CHECKPOINT_GATING`` enumerates the kinds; the assertion below
 # fails import if any REPLAYED kind has no replayer here.
 REPLAYERS: dict[ResumeCheckpointKind, Replayer] = {
@@ -419,8 +289,6 @@ REPLAYERS: dict[ResumeCheckpointKind, Replayer] = {
     ResumeCheckpointKind.ELIMINATION_CUT: _replay_elimination_cut,
     ResumeCheckpointKind.MARGIN_CUT: _replay_margin_cut,
     ResumeCheckpointKind.LEADER_LOCK_IN: _replay_leader_lock_in,
-    ResumeCheckpointKind.L2_ESCALATION_TRIGGER: _replay_l2_trigger,
-    ResumeCheckpointKind.L3_ESCALATION_TRIGGER: _replay_l3_trigger,
 }
 
 # REPLAYERS must register a replayer for exactly the REPLAYED kinds — both

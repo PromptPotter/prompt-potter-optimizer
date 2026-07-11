@@ -18,10 +18,9 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from promptpotter import connectors
-from promptpotter.config.settings import settings
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.infrastructure.backend import BackendClient
+from promptpotter.infrastructure.backend import build_backend_client
 from promptpotter.presentation.api.deps import StoreDep, get_backend_or_404
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import NotFoundError
@@ -121,15 +120,7 @@ def get_experiment(backend_id: str, experiment_id: str, store: StoreDep) -> dict
 async def get_pipeline(backend_id: str, store: StoreDep) -> PipelineViewResponse:
     """Dynamic pipeline view from the backend."""
     backend = get_backend_or_404(backend_id, store)
-    connector = connectors.get(backend.backend_type)
-    client = BackendClient(
-        backend.base_url,
-        wire_adapter=connector.wire_adapter,
-        session=connector.session_factory(),
-        execution=connector.execution,
-        in_process_run=connector.in_process_run,
-        auth_token=settings.TERMNORM_TOKEN or None,
-    )
+    client = build_backend_client(connectors.get(backend.backend_type), backend.base_url)
 
     try:
         raw: dict[str, Any] | None = await client.fetch_pipeline()
@@ -161,15 +152,7 @@ async def get_backend_health(backend_id: str, store: StoreDep) -> BackendHealthR
     backend; only a genuinely missing ``backend_id`` 404s (via ``get_backend_or_404``).
     """
     backend = get_backend_or_404(backend_id, store)
-    connector = connectors.get(backend.backend_type)
-    client = BackendClient(
-        backend.base_url,
-        wire_adapter=connector.wire_adapter,
-        session=connector.session_factory(),
-        execution=connector.execution,
-        in_process_run=connector.in_process_run,
-        auth_token=settings.TERMNORM_TOKEN or None,
-    )
+    client = build_backend_client(connectors.get(backend.backend_type), backend.base_url)
     try:
         probe = await client.check_status()
     finally:

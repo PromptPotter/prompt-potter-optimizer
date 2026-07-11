@@ -91,3 +91,13 @@ the same shape the scorer parses from an HTTP `/matches` body. The registry guar
   pre-flight gate Q6 extended to debug state — cross-repo dependency
   drift becomes visible at session start, not weeks later in spend
   accounting. The same shape works for any future connector.
+- **The credential rides the connector.** `Connector.auth_token() -> str | None`
+  is the ONLY route by which a bearer token reaches the wire, and
+  `build_backend_client(connector, base_url)`
+  (`infrastructure/backend.py`) is the ONLY place a `BackendClient` is
+  constructed — it reads the token off the connector it was handed. Never name a
+  credential at a construction site: four sites once passed
+  `settings.TERMNORM_TOKEN` to whatever connector had been resolved, so a second
+  `remote_http` backend would have had TermNorm's secret POSTed to its host. An
+  `in_process` connector has no wire, so declaring a token on one fails the
+  registry guard at import.

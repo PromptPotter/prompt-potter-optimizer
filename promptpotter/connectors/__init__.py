@@ -55,6 +55,12 @@ for _key, _c in CONNECTORS.items():
             f"CONNECTORS[{_key!r}]: execution={_c.execution!r} requires "
             f"in_process_run {'set' if _c.execution == 'in_process' else 'unset'}."
         )
+    # A credential only means something over a wire. An ``in_process`` connector has
+    # none, so a token declared on it is dead config that reads as protection.
+    if _c.execution == "in_process" and _c.auth_token is not None:
+        raise RuntimeError(
+            f"CONNECTORS[{_key!r}]: execution='in_process' has no wire — drop auth_token."
+        )
 del _valid_execution, _key, _c, _hook
 
 if DEFAULT_CONNECTOR not in CONNECTORS:

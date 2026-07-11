@@ -61,6 +61,10 @@ VersionCheck = Callable[["httpx.AsyncClient", str], Awaitable[str | None]]
 # its backend is down.
 PreflightFn = Callable[[str], Awaitable[None]]
 
+# The connector's wire credential, read at client-construction time (not at import,
+# so an env change lands without a reimport). ``None`` return = send no auth header.
+AuthTokenFn = Callable[[], str | None]
+
 
 class BackendUnreachableError(PotterError):
     """Raised by ``Connector.preflight`` when the configured backend isn't
@@ -138,6 +142,16 @@ class Connector:
     is down. ``None`` opts the connector out (in-process backends like
     ``promptpotter`` have nothing to probe)."""
 
+    auth_token: AuthTokenFn | None = None
+    """``() -> str | None`` — the bearer credential for THIS backend, sent as
+    ``Authorization: Bearer …`` by ``build_backend_client``. A credential is a
+    per-backend fact, so it is declared here beside the other per-backend facts
+    rather than read at the construction site: read there, every connector got
+    whichever token the site happened to name, and a second ``remote_http``
+    backend would have had the first one's secret POSTed to its host. ``None``
+    (default) = send no auth header — the right answer for an ``in_process``
+    connector, which has no wire at all (the registry guard enforces that)."""
+
     identity_config: Callable[[Path], dict[str, dict[str, Any]]] | None = None
     """Per-node config entries that are part of MEASUREMENT IDENTITY but not
     wire tunables — folded into ``resolve_pipeline_config_params`` so the
@@ -203,6 +217,7 @@ class Connector:
 
 
 __all__ = [
+    "AuthTokenFn",
     "BackendUnreachableError",
     "Connector",
     "ConnectorExecution",

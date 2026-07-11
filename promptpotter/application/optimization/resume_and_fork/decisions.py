@@ -55,8 +55,17 @@ RESUME_CHECKPOINT_GATING: dict[ResumeCheckpointKind, GatingMode] = {
     ResumeCheckpointKind.ELIMINATION_CUT: GatingMode.REPLAYED,
     ResumeCheckpointKind.MARGIN_CUT: GatingMode.REPLAYED,
     ResumeCheckpointKind.LEADER_LOCK_IN: GatingMode.REPLAYED,
-    ResumeCheckpointKind.L2_ESCALATION_TRIGGER: GatingMode.REPLAYED,
-    ResumeCheckpointKind.L3_ESCALATION_TRIGGER: GatingMode.REPLAYED,
+    # A layer trigger is a FOLD over the cycle's escalation history, not a function of
+    # one round's measurements — the counter bumps once per escalation *request*, resets
+    # on every fire, and compares against the best-at-entry snapshot taken at the last
+    # fire (`EscalationFSM.observe_l2_escalation`). A replayer is pure over
+    # `ReplayContext` (one round + the origin), so that fold is not expressible there;
+    # declaring these REPLAYED once forced a re-derivation on a substrate the loop never
+    # ran. Their scorer-dependence is entirely mediated by `improved`, hence by the round
+    # measurements — which ARE replayed above, so a scorer change that would move a
+    # trigger already shows up as a winner/cut divergence in the same round.
+    ResumeCheckpointKind.L2_ESCALATION_TRIGGER: GatingMode.ARCHIVAL,
+    ResumeCheckpointKind.L3_ESCALATION_TRIGGER: GatingMode.ARCHIVAL,
     ResumeCheckpointKind.PROBE_ROUND_COMMITMENT: GatingMode.ARCHIVAL,
     # Fork is observable from the parent's history (the FORK_CUT record in
     # the parent ledger names the new cycle id and the offset that the

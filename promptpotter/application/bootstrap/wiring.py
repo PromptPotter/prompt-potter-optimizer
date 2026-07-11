@@ -25,12 +25,11 @@ from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
     DEFAULT_EXPERIMENT_ID,
-    settings,
 )
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.infrastructure.backend import BackendClient
+from promptpotter.infrastructure.backend import BackendClient, build_backend_client
 from promptpotter.infrastructure.store import Stores, build_stores
 from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.shared.identity import IdentityContext, default_identity
@@ -402,14 +401,7 @@ async def init_services(
     )
     backend_type = _read_backend_type(dataset_config_dir, dataset_name)
     connector = connectors.get(backend_type)
-    client = BackendClient(
-        backend_url,
-        wire_adapter=connector.wire_adapter,
-        session=connector.session_factory(),
-        execution=connector.execution,
-        in_process_run=connector.in_process_run,
-        auth_token=settings.TERMNORM_TOKEN or None,
-    )
+    client = build_backend_client(connector, backend_url)
     status(f"Backend: {backend_url}")
 
     pipeline_schema = await _resolve_pipeline_schema(

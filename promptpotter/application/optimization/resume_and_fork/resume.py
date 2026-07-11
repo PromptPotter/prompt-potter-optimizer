@@ -112,7 +112,6 @@ def resume_with_divergence_check(
         for i, t in enumerate(prior):
             div = replay_decisions(
                 t,
-                prior_rounds=prior[:i],
                 origin_results=origin_results_rescored,
                 delta_scale=cycle.delta_scale,
             )

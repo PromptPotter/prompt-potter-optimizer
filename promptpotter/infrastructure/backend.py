@@ -20,7 +20,7 @@ from promptpotter.infrastructure.llm import (
 QUERY_TIMEOUT: float = 120.0  # HTTP timeout for /matches endpoint
 
 if TYPE_CHECKING:
-    from promptpotter.connectors.protocol import ConnectorExecution, InProcessRun
+    from promptpotter.connectors.protocol import Connector, ConnectorExecution, InProcessRun
     from promptpotter.domain.connector import SessionProtocol, WireAdapter
     from promptpotter.infrastructure.store import Stores
 
@@ -28,8 +28,28 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "BackendClient",
+    "build_backend_client",
     "extract_pipeline_config",
 ]
+
+
+def build_backend_client(connector: Connector, base_url: str) -> BackendClient:
+    """The ONE ``BackendClient`` construction — every wire fact comes off the connector.
+
+    Transport, payload shape, session AND credential are per-backend facts, so they are
+    all read from the one place that declares them. Constructing the client by hand
+    instead let the credential be named at the call site, where four sites each passed
+    TermNorm's bearer token to whatever connector had been resolved — a second
+    ``remote_http`` backend would have received it.
+    """
+    return BackendClient(
+        base_url,
+        wire_adapter=connector.wire_adapter,
+        session=connector.session_factory(),
+        execution=connector.execution,
+        in_process_run=connector.in_process_run,
+        auth_token=connector.auth_token() if connector.auth_token else None,
+    )
 
 
 def extract_pipeline_config(experiment_extract: dict[str, Any]) -> dict[str, Any]:
