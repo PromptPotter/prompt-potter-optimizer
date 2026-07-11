@@ -128,26 +128,17 @@ async def verify_candidate(
     round_file = stores.campaigns.load_round_file(campaign_id, cycle_id, round_num)
     if round_file is None:
         raise VerifyError(f"round_{round_num:04d}.json missing in {campaign_id}/{cycle_id}.")
-    cand_scores: list[dict[str, Any]] = round_file.get("candidate_scores") or []
-    cand_score = next((c for c in cand_scores if c.get("label") == label), None)
+    cand_scores = round_file.candidate_scores
+    cand_score = next((c for c in cand_scores if c.label == label), None)
     if cand_score is None:
         raise VerifyError(
             f"round_{round_num:04d}.json carries labels "
-            f"{[c.get('label') for c in cand_scores]} — none match {label!r}."
+            f"{[c.label for c in cand_scores]} — none match {label!r}."
         )
-    # `verify` exists to compare the recorded score against a fresh one. A candidate row with no
-    # recorded accuracy has nothing to compare; read as 0.0 it fabricates a full-scale regression.
-    if cand_score.get("accuracy") is None:
-        raise VerifyError(
-            f"round_{round_num:04d}.json candidate {label!r} records no accuracy — there is no "
-            "source measurement to verify against."
-        )
-    source_campaign_accuracy = float(cand_score["accuracy"])
-    source_campaign_composite = display_fitness(
-        cand_score.get("composite_fitness"), source_campaign_accuracy
-    )
-    source_campaign_n = int(cand_score.get("scored_samples") or 0)
-    source_candidate_id = str(cand_score.get("candidate_id") or "")
+    source_campaign_accuracy = cand_score.accuracy
+    source_campaign_composite = cand_score.composite_fitness
+    source_campaign_n = cand_score.scored_samples
+    source_candidate_id = cand_score.candidate_id
 
     session = await init_services(
         backend_id=campaign.backend_id or campaign.dataset_name,

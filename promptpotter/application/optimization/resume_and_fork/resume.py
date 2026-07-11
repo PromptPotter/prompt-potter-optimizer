@@ -77,8 +77,8 @@ def resume_with_divergence_check(
         return out
 
     for t in prior:
-        _rescore(t.get("results"))
-        for items in (t.get("all_candidate_results") or {}).values():
+        _rescore(t.results)
+        for items in t.all_candidate_results.values():
             _rescore(items)
 
     origin_results_rescored = _rescore(cycle.tracking.current_results)

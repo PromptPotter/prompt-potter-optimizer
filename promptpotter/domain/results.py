@@ -34,6 +34,7 @@ __all__ = [
     "RoundSummary",
     "RoundSummaryCandidate",
     "SampleOrderStep",
+    "ScoreboardRow",
     "ScoredCandidate",
     "SweepBatchResult",
     "WarningDict",
@@ -129,7 +130,7 @@ def best_round_by_cumulative_accuracy(
 def is_round_winner(changes_description: str | None, winner_label: str) -> bool:
     """The round winner is the candidate whose diff description equals the round's
     elected label. Sole definition of the rule — the round-file scoreboard
-    (`_build_scoreboard`) and the dashboard round summary (`build_round_summary`)
+    (`RoundResult.scoreboard`) and the dashboard round summary (`build_round_summary`)
     both call this so the operator-visible winner flag can't diverge between the
     two surfaces."""
     return bool(changes_description) and changes_description == winner_label
@@ -215,6 +216,48 @@ class ScoredCandidate(BaseModel):
         return wilson_ci(self.hits, self.total)[1]
 
 
+# ``ScoredCandidate``'s display subset, spelled once. Deliberately narrower than the full
+# ``candidate_scores`` dump beside it in the same file (no θ / composite_ci): scoreboard =
+# the display table, candidate_scores = the complete record. The mutation text rides
+# ``changes_description`` (its real name) — the dashboard's ``label`` (the C{r}.{i} id) is a
+# different field, so the two never collide.
+_SCOREBOARD_INCLUDE: set[str] = {
+    "candidate_id",
+    "changes_description",
+    "accuracy",
+    "composite_fitness",
+    "hits",
+    "total",
+    "ci_lo",
+    "ci_hi",
+    "escalation_aborted",
+    "matched_origin_accuracy",
+    "matched_origin_hits",
+    "matched_origin_composite",
+}
+
+
+class ScoreboardRow(BaseModel):
+    """One rank-ordered row of ``RoundResult.scoreboard`` — the round file's display table."""
+
+    model_config = ConfigDict(frozen=True)
+
+    rank: int
+    candidate_id: str
+    changes_description: str
+    accuracy: float
+    composite_fitness: float
+    hits: int
+    total: int
+    escalation_aborted: bool
+    matched_origin_accuracy: float
+    matched_origin_hits: int
+    matched_origin_composite: float
+    ci_lo: float
+    ci_hi: float
+    is_winner: bool
+
+
 class CandidateProposal(BaseModel):
     """LLM-proposed candidate — OSP + nested pipeline-params override, persisted across generate→score for resume replay."""
 
@@ -272,13 +315,19 @@ L1_PARSE_FAILURE_TOOLING = "l1_provider_empty_response"
 
 
 class RoundResult(BaseModel):
-    """Per-round outcome — the flat wire shape persisted to `index.json`.
+    """Per-round outcome — and the round document itself.
 
-    Two field groups: checkpoint-critical scalars (the resume/diff surface) and the
-    raw payload (per-candidate detail for replay, audit, full rendering). They were
-    once two base classes; flattened here because nothing instantiated either half
-    on its own. `diagnostics`/`critique`/`health` are computed post-scoring; read by
-    dispatch's `diagnostics`/`critique` signals and rendered by every health surface.
+    ``model_dump()`` IS ``rounds/round_NNNN.json``; ``model_validate()`` reads it back.
+    There is no second, hand-mirrored payload dict: a new field here reaches disk, the
+    `GET /rounds/{n}` route, and every reader by declaring it, not by being copied into
+    a builder that can forget it (it did — twelve fields were computed, dropped at the
+    disk edge, and silently reconstructed as defaults on resume).
+
+    Three field groups: checkpoint-critical scalars (the resume/diff surface), the raw
+    payload (per-candidate detail for replay, audit, full rendering), and the fields
+    stamped as the round closes. `diagnostics`/`critique`/`health` are computed
+    post-scoring; read by dispatch's `diagnostics`/`critique` signals and rendered by
+    every health surface.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -353,6 +402,47 @@ class RoundResult(BaseModel):
     # Context-aware degradation verdict, stamped at round close (sole compute
     # site); every surface (dashboard summary, CLI, round file) renders this.
     health: DegradationHealth | None = None
+    # --- stamped as the round closes (the document's own fields) ---
+    # The cycle's working searchpoint at close. Resume rebuilds `Cycle.opt_sp` from it,
+    # and review/stats/sibling-wounds read its lineage — so it is round state, not a
+    # rendering detail. None only on a round that never closed.
+    opt_search_point: OptSearchPoint | None = None
+    # AxisIndex's peaked set at close. Persisted because `review.py`'s
+    # `evidence_grounding_present` check needs it and AxisIndex is not reconstructable
+    # from the round file alone.
+    axis_memory_peaked: list[str] = Field(default_factory=list)
+    # "generation_only" for a sweep round (L1 variants generated, never scored — every
+    # scoring scalar below is a structural zero, not a measurement); "" for a scored round.
+    status: str = ""
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def round_id(self) -> str:
+        return f"round_{self.round}"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def scoreboard(self) -> list[ScoreboardRow]:
+        """Rank-ordered display table — composite-first, accuracy-tiebreak; winner tagged.
+
+        Derived, never stored: it cannot drift from `candidate_scores` the way a
+        hand-built twin could.
+        """
+        from promptpotter.domain.rendering import round_winner_key
+
+        ranked = sorted(
+            self.candidate_scores,
+            key=lambda c: round_winner_key(c.composite_fitness, c.accuracy),
+            reverse=True,
+        )
+        return [
+            ScoreboardRow(
+                rank=i,
+                is_winner=is_round_winner(c.changes_description, self.label),
+                **c.model_dump(include=_SCOREBOARD_INCLUDE),
+            )
+            for i, c in enumerate(ranked, start=1)
+        ]
 
 
 class CycleSpend(BaseModel):

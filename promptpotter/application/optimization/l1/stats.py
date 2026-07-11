@@ -7,9 +7,9 @@ Headline `rounds_to_95` (first round ≥ 0.95). `round_1_verdict` is the gate th
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from promptpotter.application.optimization.validators.l1_behavior import CheckResult
+from promptpotter.domain.results import RoundResult
 
 __all__ = ["L1Stats", "compute_l1_stats"]
 
@@ -37,13 +37,13 @@ class L1Stats:
 
 
 def compute_l1_stats(
-    rounds: list[dict[str, Any]],
+    rounds: list[RoundResult],
     *,
     origin_composite_fitness: float,
     behavior_results: list[list[CheckResult]],
     l2_behavior_results: list[list[CheckResult]] | None = None,
 ) -> L1Stats:
-    """Aggregate round_data + behaviour checks → L1Stats."""
+    """Aggregate rounds + behaviour checks → L1Stats."""
     rounds_to_95 = _first_round_at_threshold(rounds, HEADLINE_ACC)
     yield_rate = _mean_yield_rate(rounds)
     top_lifts = _top_lifts(rounds, origin_composite_fitness)
@@ -69,7 +69,7 @@ def compute_l1_stats(
 
 
 def _compute_round_1_verdict(
-    rounds: list[dict[str, Any]],
+    rounds: list[RoundResult],
     *,
     round_1_behavior: list[CheckResult],
 ) -> str:
@@ -94,49 +94,27 @@ def _compute_round_1_verdict(
 # --- aggregation helpers ---------------------------------------------------
 
 
-def _measured(round_data: dict[str, Any], key: str) -> float | None:
-    """A round's *measured* value at *key*, or ``None``. A round that carries no number for a
-    metric did not score zero on it — the registry omits an evaluator's key when it had nothing
-    to measure. Folding the absence in as 0.0 is what deflates every mean below."""
-    value = round_data.get(key)
-    return None if value is None else float(value)
+def _first_round_at_threshold(rounds: list[RoundResult], threshold: float) -> int | None:
+    return next((r.round for r in rounds if r.accuracy >= threshold), None)
 
 
-def _first_round_at_threshold(rounds: list[dict[str, Any]], threshold: float) -> int | None:
-    for r in rounds:
-        accuracy = _measured(r, "accuracy")
-        if accuracy is not None and accuracy >= threshold:
-            round_num = r.get("round")
-            return int(round_num) if isinstance(round_num, (int, float)) else None
-    return None
-
-
-def _mean_yield_rate(rounds: list[dict[str, Any]]) -> float | None:
+def _mean_yield_rate(rounds: list[RoundResult]) -> float | None:
     """Mean of per-round l1_yield (variants beating parent / variants generated).
-    ``None`` when no round measured one — a cycle that generated nothing had no yield to fall
-    short of, and a round that never recorded a yield must not drag the mean toward zero."""
-    yields = [y for r in rounds if (y := _measured(r, "l1_yield")) is not None]
-    if not yields:
+    ``None`` when the cycle ran no round — a cycle that generated nothing had no yield to
+    fall short of."""
+    if not rounds:
         return None
-    return sum(yields) / len(yields)
+    return sum(r.l1_yield for r in rounds) / len(rounds)
 
 
-def _top_lifts(rounds: list[dict[str, Any]], origin_composite_fitness: float) -> list[float]:
+def _top_lifts(rounds: list[RoundResult], origin_composite_fitness: float) -> list[float]:
     """Per-round (best variant composite_fitness − parent composite_fitness). Round 0's parent
-    is the origin composite_fitness; subsequent rounds inherit the prior round's.
-
-    A round with no recorded composite_fitness contributes no lift and does not become the next
-    round's parent. Reading it as 0.0 charged that round a lift of ``−parent`` and then re-based
-    every later round on zero — one unscored round, and ``stagnation_max`` reports a stall streak
-    that never happened."""
+    is the origin composite_fitness; subsequent rounds inherit the prior round's."""
     lifts: list[float] = []
     parent = origin_composite_fitness
     for r in rounds:
-        composite_fitness = _measured(r, "composite_fitness")
-        if composite_fitness is None:
-            continue
-        lifts.append(composite_fitness - parent)
-        parent = composite_fitness
+        lifts.append(r.composite_fitness - parent)
+        parent = r.composite_fitness
     return lifts
 
 
@@ -160,8 +138,6 @@ def _behavior_pass_rate(behavior_results: list[list[CheckResult]]) -> float | No
     return passed / total
 
 
-def _round_source(round_dict: dict[str, Any]) -> str:
-    """Pull the lineage source ('l1_generate' / 'l2_context' / ...) off a round_data."""
-    osp = round_dict.get("opt_search_point") or {}
-    lineage = osp.get("lineage") or {}
-    return str(lineage.get("source") or "")
+def _round_source(rr: RoundResult) -> str:
+    """Pull the lineage source ('l1_generate' / 'l2_context' / ...) off a round."""
+    return rr.opt_search_point.lineage.source if rr.opt_search_point else ""

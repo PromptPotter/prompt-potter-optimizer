@@ -11,9 +11,12 @@ and fix it.
 
 from __future__ import annotations
 
+from typing import Any
+
 from promptpotter.application.optimization.resume_and_fork import replay_decisions
 from promptpotter.application.scoring.formula import compile_scorer, rescore_results
 from promptpotter.application.scoring.search_point_scorer import merge_with_unprocessed_priors
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import CycleSeed
 from promptpotter.infrastructure.store import Stores
 
@@ -23,6 +26,22 @@ _CAMPAIGN = "testds__20260101-000000"
 
 def _r(score: float) -> dict:
     return {"query": "q", "predicted": "p", "ground_truth": "g", "fitness": score, "hit": False}
+
+
+def _round(**kw: Any) -> RoundResult:
+    """A round carrying only what the replayers read; the scoring scalars are inert."""
+    return RoundResult.model_validate(
+        {
+            "label": "C0",
+            "accuracy": 0.0,
+            "hits": 0,
+            "total": 0,
+            "improved": False,
+            "prompt_fields": {},
+            "candidates_scored": 0,
+            **kw,
+        }
+    )
 
 
 def _prior(query: str, predicted: str = "p", gt: str = "g") -> dict:
@@ -70,13 +89,13 @@ def test_round_winner_replay_uses_rescored_origin() -> None:
     def _m(sid: int, hit: bool) -> dict:
         return {**_r(1.0 if hit else 0.0), "sample_id": sid, "hit": hit}
 
-    round_data = {
-        "round": 0,
-        "all_candidate_results": {
+    round_data = _round(
+        round=0,
+        all_candidate_results={
             "c1": [_m(i, i < 5) for i in range(6)],  # 5/6 — clears the hard tail
             "c2": [_m(i, i < 1) for i in range(6)],  # 1/6 — below the origin
         },
-        "decisions": [
+        decisions=[
             {
                 "kind": "round_winner",
                 "inputs_ref": {
@@ -88,7 +107,7 @@ def test_round_winner_replay_uses_rescored_origin() -> None:
                 "data": {"current_best_accuracy_at_record": 0.8},  # stale, never read
             }
         ],
-    }
+    )
     # Origin hits only the two easiest samples → c1's wins on the rest are real lift, c2's are not.
     assert replay_decisions(round_data, origin_results=[_m(i, i < 2) for i in range(6)]) is None
 
@@ -96,10 +115,10 @@ def test_round_winner_replay_uses_rescored_origin() -> None:
 def test_elimination_cut_replay_flags_divergence_when_scores_flip() -> None:
     priors = [_r(1.0)] * 10
     current = [_r(1.0)] * 6  # rescored: now ties with priors
-    round_data = {
-        "round": 2,
-        "all_candidate_results": {"c0": priors, "c1": priors, "c2": current},
-        "decisions": [
+    round_data = _round(
+        round=2,
+        all_candidate_results={"c0": priors, "c1": priors, "c2": current},
+        decisions=[
             {
                 "kind": "elimination_cut",
                 "inputs_ref": {
@@ -114,7 +133,7 @@ def test_elimination_cut_replay_flags_divergence_when_scores_flip() -> None:
                 "data": {},
             }
         ],
-    }
+    )
     div = replay_decisions(round_data)
     assert div is not None
     assert div.kind == "elimination_cut"
@@ -131,11 +150,11 @@ def test_margin_cut_replay_rederives_and_flags_flip() -> None:
     def _m(sid: int, hit: bool) -> dict:
         return {**_r(1.0 if hit else 0.0), "sample_id": sid, "hit": hit}
 
-    def _round_data(candidate_results: list[dict]) -> dict:
-        return {
-            "round": 1,
-            "all_candidate_results": {"c2": candidate_results},
-            "decisions": [
+    def _round_data(candidate_results: list[dict]) -> RoundResult:
+        return _round(
+            round=1,
+            all_candidate_results={"c2": candidate_results},
+            decisions=[
                 {
                     "kind": "margin_cut",
                     "inputs_ref": {
@@ -157,7 +176,7 @@ def test_margin_cut_replay_rederives_and_flags_flip() -> None:
                     "data": {"candidate_sample_ids": ["3", "4", "5", "6", "7"]},
                 }
             ],
-        }
+        )
 
     # Unchanged scorer: every seed-miss attempted and unwon → need 1 > 0 left,
     # the deterministic corner re-derives the cut → no divergence.
@@ -191,14 +210,14 @@ def test_stall_replay_uses_theta_not_composite_under_warm_ruler() -> None:
 
     # Frontier after entry stays {0:hit, 1:miss}; per-round composite = 0.5, 1.0, 0.0.
     prior = [
-        {"round": 0, "results": [_m(0, True), _m(1, False)], "composite_fitness": 0.5},
-        {"round": 1, "results": [_m(0, True)], "composite_fitness": 1.0},  # spikes composite only
-        {"round": 2, "results": [_m(1, False)], "composite_fitness": 0.0},
+        _round(round=0, results=[_m(0, True), _m(1, False)], composite_fitness=0.5),
+        _round(round=1, results=[_m(0, True)], composite_fitness=1.0),  # spikes composite only
+        _round(round=2, results=[_m(1, False)], composite_fitness=0.0),
     ]
     # Live FSM (θ on the warm ruler) saw a flat frontier → stalled → L2 did NOT fire.
-    round_data = {
-        "round": 3,
-        "decisions": [
+    round_data = _round(
+        round=3,
+        decisions=[
             {
                 "kind": "l2_escalation_trigger",
                 "inputs_ref": {"round_num": 2, "l2_patience": 2, "entry_round": 0},
@@ -206,7 +225,7 @@ def test_stall_replay_uses_theta_not_composite_under_warm_ruler() -> None:
                 "data": {},
             }
         ],
-    }
+    )
     warm = {0: 0.5, 1: -0.5}  # θ is constant regardless of these values; the point is "warm"
     assert replay_decisions(round_data, prior_rounds=prior, delta_scale=warm) is None
     # Cold ruler falls back to composite — the spike reads as improvement → spurious divergence.
@@ -235,19 +254,26 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
     stores.campaigns.save_round_file(
         _CAMPAIGN,
         parent,
-        {
-            "round_id": "round_1",
-            "round": 1,
-            "label": "C1.1",
-            "accuracy": 0.4,
-            "cumulative_accuracy": 0.4,
-            "hits": 4,
-            "total": 10,
-            "improved": True,
-            "candidate_scores": [
-                {"candidate_id": "c1", "prompt_fields": prompt, "accuracy": 0.2},
+        _round(
+            round=1,
+            label="C1.1",
+            accuracy=0.4,
+            cumulative_accuracy=0.4,
+            hits=4,
+            total=10,
+            improved=True,
+            candidate_scores=[
+                {
+                    "candidate_id": "c1",
+                    "label": "C1.1",
+                    "prompt_fields": prompt,
+                    "accuracy": 0.2,
+                    "composite_fitness": 0.2,
+                    "hits": 2,
+                    "total": 10,
+                },
             ],
-        },
+        ),
     )
     stores.campaigns.create(
         _CAMPAIGN,

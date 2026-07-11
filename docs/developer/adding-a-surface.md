@@ -119,6 +119,13 @@ reconstructor to keep in sync** — that synchronized third edit is gone.
    (`application/output/writers.py`) — that builder reads on-disk `index.json` for
    **cross-cycle** rendering and is a genuinely separate source, not a roundtrip shim.
 
+**A field on the ROUND document is not this recipe — it is one edit.** Declare it on
+`RoundResult` (`domain/results.py`) and it reaches `rounds/round_NNNN.json`,
+`GET /rounds/{n}`, and every reader, because the model IS the document
+(`save_round_file` persists `model_dump()`; `load_round_file` validates it back). There
+is no payload builder to mirror it into — the one that existed hand-wrote 24 of the
+model's fields and silently dropped the other twelve.
+
 **Guard:** the two-factories-onto-one-View correctness invariant — the live
 builder and the disk builder must produce an equal `RoundCompleteView`. No
 standing test (a broken round-trip surfaces as a wrong/empty dashboard; the

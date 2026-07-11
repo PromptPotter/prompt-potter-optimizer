@@ -77,10 +77,9 @@ def build_round_summary(rr: RoundResult, origin_cells: dict[str, float]) -> Roun
     """One :class:`RoundSummary` from a closed-round :class:`RoundResult`.
 
     Winner detection rides the shared ``is_round_winner`` rule (also used by
-    ``_build_scoreboard`` in ``application/optimization/cycle.py``): the
-    candidate whose ``changes_description`` matches the round's elected label
-    is the winner. This builder is the sole writer of the persisted
-    ``is_winner`` flag on the summary row.
+    ``RoundResult.scoreboard``): the candidate whose ``changes_description``
+    matches the round's elected label is the winner. This builder is the sole
+    writer of the persisted ``is_winner`` flag on the summary row.
 
     ``health`` is copied straight from ``rr.health`` (stamped once at round close
     by ``compute_round_health``) — the projection renders the served verdict, it

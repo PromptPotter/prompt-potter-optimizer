@@ -14,6 +14,7 @@ from itertools import pairwise
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.results import RoundResult
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store import Stores
@@ -46,29 +47,27 @@ def _rehydrate(fields: dict[str, Any]) -> OptSearchPoint:
 
 def _build_row(
     cycle_id: str,
-    prev_round: dict[str, Any],
-    next_round: dict[str, Any],
+    prev_round: RoundResult,
+    next_round: RoundResult,
 ) -> dict[str, Any]:
-    prev_fields = prev_round["prompt_fields"]
-    next_fields = next_round["prompt_fields"]
+    prev_fields = prev_round.prompt_fields
     prev_osp = _rehydrate(prev_fields)
-    next_osp = _rehydrate(next_fields)
+    next_osp = _rehydrate(next_round.prompt_fields)
 
-    prev_round_num = int(prev_round["round"])
-    prev_accuracy = float(prev_round["accuracy"])
-    score_delta = float(next_round["accuracy"]) - prev_accuracy
+    prev_accuracy = prev_round.accuracy
+    score_delta = next_round.accuracy - prev_accuracy
 
     round_context = {
         "opt_search_point": prev_fields,
-        "critique": prev_round.get("critique") or {},
+        "critique": prev_round.critique or {},
         "task_context": prev_osp.memory.task_context.to_dict(),
         "l1_overrides": dict(prev_osp.memory.l1_overrides),
         "prev_accuracy": prev_accuracy,
     }
 
     return {
-        "query": f"{cycle_id}:round_{prev_round_num}",
-        "ground_truth": next_osp.lineage.changes_description or next_round["label"],
+        "query": f"{cycle_id}:round_{prev_round.round}",
+        "ground_truth": next_osp.lineage.changes_description or next_round.label,
         "round_context": round_context,
         "score_delta": score_delta,
         "prev_prompt": prev_osp.render(),
@@ -112,7 +111,7 @@ def load_potter_traces(
         if len(round_summaries) < 2:
             continue
 
-        rounds: list[dict[str, Any]] = []
+        rounds: list[RoundResult] = []
         for summary in round_summaries:
             detail = store.campaigns.load_round_file(
                 campaign_id,

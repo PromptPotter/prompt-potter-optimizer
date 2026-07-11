@@ -41,7 +41,7 @@ from promptpotter.config.settings import DEFAULT_CONNECTOR_TYPE
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.phases import StopReason
-from promptpotter.domain.results import best_round_by_cumulative_accuracy
+from promptpotter.domain.results import RoundResult, best_round_by_cumulative_accuracy
 from promptpotter.domain.run_records import CycleSeed, CycleSeedRecord
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.runtime_flags import derive_run_phase, is_checkin
@@ -71,21 +71,18 @@ from promptpotter.shared.errors import BadRequestError, ConflictError, NotFoundE
 logger = logging.getLogger(__name__)
 
 
-def round_summary(round_data: dict[str, Any]) -> dict[str, Any]:
-    """Projection of round detail into the ``index.json::rounds`` shape.
-
-    Both writers — the scored ``_build_round_payload`` and the sparse
-    ``generation_only`` sweep dict — guarantee every key read here, so they're
-    read directly (a missing key is a corrupt round file, not a default case)."""
+def round_summary(rr: RoundResult) -> dict[str, Any]:
+    """Projection of a round into the ``index.json::rounds`` shape."""
     return {
-        "round_id": round_data["round_id"],
-        "round": round_data["round"],
-        "label": round_data["label"],
-        "accuracy": round_data["accuracy"],
-        "cumulative_accuracy": round_data["cumulative_accuracy"],
-        "hits": round_data["hits"],
-        "total": round_data["total"],
-        "improved": round_data["improved"],
+        "round_id": rr.round_id,
+        "round": rr.round,
+        "label": rr.label,
+        "accuracy": rr.accuracy,
+        "cumulative_accuracy": rr.cumulative_accuracy,
+        "hits": rr.hits,
+        "total": rr.total,
+        "improved": rr.improved,
+        "status": rr.status,
     }
 
 
@@ -736,7 +733,9 @@ class CampaignStore:
         index_path = self._index_path(campaign_id, cycle_id)
         data = read_json(index_path)
 
-        data["rounds"] = [round_summary(read_json(p)) for p in sorted(survivors)]
+        data["rounds"] = [
+            round_summary(RoundResult.model_validate(read_json(p))) for p in sorted(survivors)
+        ]
         data["n_rounds"] = len(data["rounds"])
         _apply_best(data)
         data["updated_at"] = utcnow_iso()
@@ -962,7 +961,7 @@ class CampaignStore:
         *,
         forked_at: str,
         forked_from_round: int,
-        surviving_rounds: list[dict[str, Any]],
+        surviving_rounds: list[RoundResult],
     ) -> Path:
         """Mid-cycle fork inheriting parent state up to ``forked_from_round``.
 
@@ -970,6 +969,10 @@ class CampaignStore:
         (``SCORING_DIVERGENCE``, ``L2_REBASE``, ``L3_REBASE``,
         ``OPERATOR_REWIND``). The issuer is recorded on the FORK_CUT
         ledger record via ``ForkSpec.trigger``.
+
+        ``rounds[]`` is the index SUMMARY shape, projected here — the divergence path
+        used to hand whole round documents straight through, burying every per-sample
+        row in ``index.json``.
         """
         parent_index = read_json_optional(self._index_path(campaign_id, parent_cycle_id)) or {}
         index = {
@@ -978,7 +981,7 @@ class CampaignStore:
             "sibling_kind": "fork",
             "forked_from_round": forked_from_round,
             "forked_at": forked_at,
-            "rounds": list(surviving_rounds),
+            "rounds": [round_summary(rr) for rr in surviving_rounds],
             "n_rounds": len(surviving_rounds),
             "status": "resumed",
             "updated_at": forked_at,
@@ -1035,21 +1038,23 @@ class CampaignStore:
         self,
         campaign_id: str,
         cycle_id: str,
-        round_data: dict[str, Any],
+        rr: RoundResult,
     ) -> Path:
-        """Persist a round detail file and update the cycle index."""
-        round_id = round_data["round_id"]
-        validate_path_component(round_id)
-        round_num = round_data["round"]
+        """Persist a round detail file and update the cycle index.
 
-        detail_path = self._layout(campaign_id, cycle_id).round_file(round_num)
-        write_json(detail_path, round_data)
+        ``rr.model_dump()`` IS the file — there is no payload dict between the round
+        and the disk, so a field cannot be computed and then dropped on the way out.
+        """
+        validate_path_component(rr.round_id)
+
+        detail_path = self._layout(campaign_id, cycle_id).round_file(rr.round)
+        write_json(detail_path, rr.model_dump(mode="json"))
 
         index_path = self._index_path(campaign_id, cycle_id)
         data = read_json(index_path)
 
-        data["rounds"] = [t for t in data["rounds"] if t.get("round") != round_num]
-        data["rounds"].append(round_summary(round_data))
+        data["rounds"] = [t for t in data["rounds"] if t.get("round") != rr.round]
+        data["rounds"].append(round_summary(rr))
         data["n_rounds"] = len(data["rounds"])
         _apply_best(data)
         data["updated_at"] = utcnow_iso()
@@ -1062,8 +1067,11 @@ class CampaignStore:
         campaign_id: str,
         cycle_id: str,
         round_num: int,
-    ) -> dict[str, Any] | None:
-        return read_json_optional(self._layout(campaign_id, cycle_id).round_file(round_num))
+    ) -> RoundResult | None:
+        """The sole typed read of a round document. A round file that fails validation is
+        corrupt — it raises rather than degrading into a dict of defaults."""
+        raw = read_json_optional(self._layout(campaign_id, cycle_id).round_file(round_num))
+        return None if raw is None else RoundResult.model_validate(raw)
 
     def load_rounds_range(
         self,
@@ -1071,13 +1079,13 @@ class CampaignStore:
         cycle_id: str,
         start: int,
         end: int,
-    ) -> list[dict[str, Any]]:
+    ) -> list[RoundResult]:
         """Load rounds ``start..end`` inclusive. Missing rounds skipped."""
-        out: list[dict[str, Any]] = []
+        out: list[RoundResult] = []
         for r in range(start, end + 1):
-            round_data = self.load_round_file(campaign_id, cycle_id, r)
-            if round_data is not None:
-                out.append(round_data)
+            rr = self.load_round_file(campaign_id, cycle_id, r)
+            if rr is not None:
+                out.append(rr)
         return out
 
     def save_round_candidates(

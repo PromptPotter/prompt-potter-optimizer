@@ -14,6 +14,7 @@ from fastapi import Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from promptpotter.domain.results import RoundResult
 from promptpotter.infrastructure.store import (
     build_stores,
     cycle_dir_for,
@@ -146,14 +147,14 @@ def get_cycle(store: StoreDep, campaign_id: str, cycle_id: str) -> CycleDetailRe
 
 @campaigns_router.get(
     "/campaigns/{campaign_id}/cycles/{cycle_id}/rounds/{round_num}",
-    response_model=dict[str, Any],
+    response_model=RoundResult,
 )
-def get_round(store: StoreDep, campaign_id: str, cycle_id: str, round_num: int) -> dict[str, Any]:
+def get_round(store: StoreDep, campaign_id: str, cycle_id: str, round_num: int) -> RoundResult:
     """Full round detail for one round of one cycle."""
-    round_data = store.campaigns.load_round_file(campaign_id, cycle_id, round_num)
-    if round_data is None:
+    rr = store.campaigns.load_round_file(campaign_id, cycle_id, round_num)
+    if rr is None:
         raise NotFoundError(f"Round {round_num} not found")
-    return round_data
+    return rr
 
 
 def serve_dashboard_response(

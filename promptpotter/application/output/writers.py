@@ -39,6 +39,7 @@ from promptpotter.application.views import (
     to_markdown,
 )
 from promptpotter.domain.rendering import format_l1_critique_for_prompt
+from promptpotter.domain.results import RoundResult
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
 from promptpotter.infrastructure.store.campaign_store.store import origin_accuracy_of
 from promptpotter.infrastructure.store.io import read_json_tolerant, write_json, write_text
@@ -184,21 +185,20 @@ def _load_p_best_trajectory(
 
 def from_disk_log(
     index: dict[str, Any],
-    rounds: list[dict[str, Any]],
+    rounds: list[RoundResult],
     *,
     hard_samples_artifact: dict[str, Any] | None = None,
     sample_query_lookup: dict[int, str] | None = None,
     streams_dir: Path | None = None,
     fork_indices: list[dict[str, Any]] | None = None,
 ) -> LogMdView:
-    """Build a ``log.md`` view from ``index.json`` + a list of round_data dicts.
+    """Build a ``log.md`` view from ``index.json`` + the cycle's rounds.
 
     ``fork_indices`` is the list of sibling-cycle ``index.json`` blobs;
     rendered as the ``## Cycles`` section on the campaign digest. The
     per-cycle log.md passes ``None``.
     """
     final = index.get("final") or {}
-    gen_only = sum(1 for t in rounds if str(t.get("status") or "") == "generation_only")
     status = DigestStatusView(
         campaign_id=str(index.get("cycle_id") or ""),
         parent_session_id=index.get("parent_session_id"),
@@ -210,32 +210,29 @@ def from_disk_log(
         rounds_completed=int(index.get("n_rounds", 0)),
         started_at=final.get("started_at"),
         finished_at=final.get("finished_at"),
-        gen_only_rounds=gen_only,
+        gen_only_rounds=sum(1 for t in rounds if t.status == "generation_only"),
     )
 
     round_views: list[RoundDigestView] = []
     for t in rounds:
-        osp = t.get("opt_search_point") or {}
-        lineage = osp.get("lineage") or {}
-        rnd_raw = t.get("round")
-        rnd = rnd_raw if isinstance(rnd_raw, int) else 0
-        traj, _ = _load_p_best_trajectory(streams_dir, rnd)
+        traj, _ = _load_p_best_trajectory(streams_dir, t.round)
+        lineage = t.opt_search_point.lineage if t.opt_search_point else None
         round_views.append(
             RoundDigestView(
-                round=rnd,
-                label=str(t.get("label") or "").strip() or f"round_{rnd}",
-                accuracy=float(t.get("accuracy", 0.0)),
-                improved=bool(t.get("improved", False)),
-                hits=int(t.get("hits", 0)),
-                total=int(t.get("total", 0)),
-                composite_fitness=float(t.get("composite_fitness", 0.0)),
-                changes_description=(lineage.get("changes_description") or "").strip(),
-                l1_critique_text=format_l1_critique_for_prompt(t.get("critique")),
-                l1_yield=float(t.get("l1_yield", 1.0)),
-                l1_n_no_op=int(t.get("l1_n_no_op", 0)),
-                l1_n_duplicate=int(t.get("l1_n_duplicate", 0)),
-                candidates_scored=int(t.get("candidates_scored", 0)),
-                evaluators=dict(t.get("evaluators") or {}),
+                round=t.round,
+                label=t.label.strip() or t.round_id,
+                accuracy=t.accuracy,
+                improved=t.improved,
+                hits=t.hits,
+                total=t.total,
+                composite_fitness=t.composite_fitness,
+                changes_description=(lineage.changes_description if lineage else "").strip(),
+                l1_critique_text=format_l1_critique_for_prompt(t.critique),
+                l1_yield=t.l1_yield,
+                l1_n_no_op=t.l1_n_no_op,
+                l1_n_duplicate=t.l1_n_duplicate,
+                candidates_scored=t.candidates_scored,
+                evaluators=dict(t.evaluators),
                 p_best_trajectory=traj,
             )
         )
@@ -398,7 +395,7 @@ def write_review_md(session: Session, cycle: Cycle) -> None:
         n_rounds = int(index.get("n_rounds", 0) or 0)
         rounds = store.load_rounds_range(campaign_id, cycle_id, 0, n_rounds - 1) if n_rounds else []
         cycle_dir = store.cycle_dir(campaign_id, cycle_id)
-        round_audits = load_round_audits(cycle_dir, rounds)
+        round_audits = load_round_audits(cycle_dir, [r.round for r in rounds])
         td = cycle.opt_sp.memory.task_context
         context_object = [
             td.pipeline_purpose,

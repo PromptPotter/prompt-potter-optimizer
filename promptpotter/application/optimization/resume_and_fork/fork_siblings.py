@@ -34,6 +34,7 @@ from promptpotter.application.optimization.resume_and_fork.decisions import (
 )
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.identity import TenantId
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import UNATTRIBUTED_OPERATOR, ForkSpec, ForkTrigger
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store import (
@@ -156,7 +157,7 @@ def _mint_fork(
     fork_from_round: int,
     payload: ForkSpec,
     *,
-    surviving_rounds: list[dict[str, Any]] | None = None,
+    surviving_rounds: list[RoundResult] | None = None,
     sweep_batch_id: str | None = None,
     sweep_source_file: str | None = None,
     projects_root: Path | None = None,
@@ -181,14 +182,10 @@ def _mint_fork(
             raise ValueError("_mint_fork(SCORING_DIVERGENCE) requires surviving_rounds")
         if surviving_rounds is None:
             # L2_REBASE / L3_REBASE / OPERATOR_REWIND: lift rounds 0..fork_from_round-1
-            # from the parent index.json.
-            from promptpotter.infrastructure.store.io import read_json_optional
-
-            parent_index = (
-                read_json_optional(campaign_store._index_path(campaign_id, parent_cycle_id)) or {}
+            # from the parent's round files.
+            surviving_rounds = campaign_store.load_rounds_range(
+                campaign_id, parent_cycle_id, 0, fork_from_round - 1
             )
-            all_rounds = parent_index.get("rounds") or []
-            surviving_rounds = [t for t in all_rounds if int(t.get("round", -1)) < fork_from_round]
         ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         suffix = hashlib.sha256(f"{parent_cycle_id}|{ts}".encode()).hexdigest()[:8]
         new_cycle_id = f"{parent_cycle_id}_fork_{suffix}"

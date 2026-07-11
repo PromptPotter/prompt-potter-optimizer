@@ -14,6 +14,7 @@ from promptpotter.application.output import (
     write_review_md,
 )
 from promptpotter.application.run_observers import RunCallbacks
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import PhaseRecord
 from promptpotter.shared.errors import graceful
 
@@ -42,39 +43,29 @@ async def run_sweep_generation_only(
 
     if session.state.cycle_id:
         with graceful("Sweep generation-only round_data write failed"):
-            # NOT routed through ``build_round_payload`` — that serializer is for a
-            # SCORED ``RoundResult`` (scoreboard, per-sample results, matched-origin,
-            # critique, and the ``health`` verdict stamped at ``close_round``). A
-            # generation-only round has no measurement: no RoundResult, no scoring,
-            # and — by design — NO ``health`` (a degradation verdict needs scored
-            # samples). It is a deliberately distinct artifact keyed by
-            # ``status: generation_only`` and carries its own ``l1_*`` yield fields
-            # that a scored round lacks. Forcing it through the scored serializer
-            # would fabricate zero-valued scoring fields and still couldn't express
-            # these — so this stays a hand-built dict, not a hand-MIRRORED one.
+            # A generation-only round IS a round — same document, `status` telling every
+            # reader it was never scored. The scoring scalars below are structural zeros
+            # (no measurement happened), not measurements of zero; `health` stays None
+            # because a degradation verdict needs scored samples.
             session.store.campaigns.save_round_file(
                 session.campaign_id,
                 session.state.cycle_id,
-                {
-                    "round_id": f"round_{round_num}",
-                    "round": round_num,
-                    "label": label,
-                    "status": "generation_only",
-                    "accuracy": 0.0,
-                    "cumulative_accuracy": 0.0,
-                    "composite_fitness": 0.0,
-                    "hits": 0,
-                    "total": 0,
-                    "improved": False,
-                    "candidates_scored": 0,
-                    "candidate_scores": [],
-                    "decisions": [],
-                    "evaluators": {},
-                    "l1_yield": yield_stats.l1_yield,
-                    "l1_n_no_op": yield_stats.l1_n_no_op,
-                    "l1_n_duplicate": yield_stats.l1_n_duplicate,
-                    "opt_search_point": cycle.opt_sp.model_dump(),
-                },
+                RoundResult(
+                    round=round_num,
+                    label=label,
+                    status="generation_only",
+                    accuracy=0.0,
+                    composite_fitness=0.0,
+                    hits=0,
+                    total=0,
+                    improved=False,
+                    prompt_fields=cycle.opt_sp.prompt_field_dict(),
+                    candidates_scored=0,
+                    l1_yield=yield_stats.l1_yield,
+                    l1_n_no_op=yield_stats.l1_n_no_op,
+                    l1_n_duplicate=yield_stats.l1_n_duplicate,
+                    opt_search_point=cycle.opt_sp,
+                ),
             )
         hard_samples_artifact = write_hard_samples_artifacts(session, cycle)
         write_log_md(session, hard_samples_artifact=hard_samples_artifact)

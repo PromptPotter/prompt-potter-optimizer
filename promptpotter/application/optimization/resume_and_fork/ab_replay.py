@@ -119,8 +119,8 @@ def ab_replay_cycle(
         rescore_results(list(items or []), scorer, sc.scorer_id, sc.scorer_formula)
 
     for t in rounds:
-        _rescore(t.get("results"))
-        for items in (t.get("all_candidate_results") or {}).values():
+        _rescore(t.results)
+        for items in t.all_candidate_results.values():
             _rescore(items)
 
     # Cumulative winner frontier — the same sample-keyed fold the live loop keeps in
@@ -128,9 +128,9 @@ def ab_replay_cycle(
     # agree by construction rather than by two hand-copied merges.
     origin_frontier: list[dict[str, Any]] = []
     for t in rounds:
-        origin_frontier = _merge_into_cumulative(origin_frontier, t.get("results") or [])
+        origin_frontier = _merge_into_cumulative(origin_frontier, t.results)
     # Round 0 = the origin scored; its results calibrate the ruler, exactly as Cycle.start did.
-    origin_results = rounds[0].get("results") or [] if rounds else []
+    origin_results = rounds[0].results if rounds else []
     delta_scale, _ = _calibrate_delta_ruler(session, origin_results, n_min, enable_2pl=enable_2pl)
 
     divergences: list[Divergence] = []

@@ -227,27 +227,21 @@ def try_inherit_fork_origin(
         return None
 
     parent_round = store.load_round_file(session.campaign_id, parent, from_round)
-    if not isinstance(parent_round, dict):
-        return None
-    scores = parent_round.get("candidate_scores")
-    if not isinstance(scores, list):
+    if parent_round is None:
         return None
     cand = next(
-        (c for c in scores if isinstance(c, dict) and c.get("candidate_id") == from_candidate_id),
+        (c for c in parent_round.candidate_scores if c.candidate_id == from_candidate_id),
         None,
     )
-    if cand is None or not isinstance(cand.get("accuracy"), int | float):
-        return None
-    cand_fields = cand.get("prompt_fields")
-    if not isinstance(cand_fields, dict):
+    if cand is None:
         return None
 
     # Identity gate: the fork origin's prompt must render identically to the
     # branch-point candidate's. An operator edit changes the render → re-score.
-    if resolved_origin.render() != OptSearchPoint.from_prompt_fields(cand_fields).render():
+    if resolved_origin.render() != OptSearchPoint.from_prompt_fields(cand.prompt_fields).render():
         return None
 
-    origin_acc = float(cand["accuracy"])
+    origin_acc = cand.accuracy
     logger.info(
         "Fork %s: inheriting C0 from branch-point candidate %s (parent %s round %d) "
         "acc=%.4f — skipping origin re-score, straight to L1",

@@ -40,14 +40,11 @@ def audit_rounds_dir(cycle_dir: Path) -> Path:
     return CycleLayout(cycle_dir).audit_rounds
 
 
-def load_round_audits(cycle_dir: Path, rounds: list[dict[str, Any]]) -> list[dict[str, Any] | None]:
-    """Load round_NNNN.json parallel to *rounds*; missing/corrupt → None (render degrades gracefully)."""
+def load_round_audits(cycle_dir: Path, round_nums: list[int]) -> list[dict[str, Any] | None]:
+    """Load the audit twin of each round in *round_nums*, in order; missing/corrupt → None
+    (render degrades gracefully)."""
     layout = CycleLayout(cycle_dir)
-    out: list[dict[str, Any] | None] = []
-    for round_data in rounds:
-        round_num = int(round_data.get("round") or 0)
-        out.append(read_json_tolerant(layout.audit_round_file(round_num)))
-    return out
+    return [read_json_tolerant(layout.audit_round_file(n)) for n in round_nums]
 
 
 def build_node_block(record: LLMCallRecord) -> dict[str, Any]:

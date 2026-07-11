@@ -6,11 +6,11 @@ The ledger is the sole persistence ingress; display projections subscribe to it
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.config import CampaignConfig
-from promptpotter.application.optimization.cycle import Cycle, build_round_payload
+from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.escalation import NextAction, escalate_l2
 from promptpotter.application.optimization.l1.critique import run_l1_critique
 from promptpotter.application.optimization.round_analysis import compute_round_diagnostics
@@ -153,8 +153,8 @@ async def emit_origin_round(
             round_result.critique = critique_result
             cycle.origin_critique = critique_result
 
-    round_payload = build_round_payload(round_result, 0, osp)
-    await close_round(cycle, round_result, round_payload, 0, session, cb)
+    round_result.opt_search_point = osp
+    await close_round(cycle, round_result, 0, session, cb)
 
 
 async def escalate_or_stop(
@@ -181,7 +181,6 @@ async def escalate_or_stop(
 def persist_round(
     cycle: Cycle,
     round_result: RoundResult,
-    round_payload: dict[str, Any],
     round_num: int,
     session: Session,
     *,
@@ -195,12 +194,9 @@ def persist_round(
         flushed = list(cycle.pending_decisions)
         cycle.pending_decisions.clear()
         round_result.decisions.extend(d.to_dict() for d in flushed)
-        round_payload["decisions"] = list(round_result.decisions)
 
-    # Persist axis-memory peaked set on the round dict — review.py's
-    # ``evidence_grounding_present`` check needs it (AxisIndex isn't reconstructable from round_NNNN.json alone).
     if cycle.axes is not None:
-        round_payload["axis_memory_peaked"] = sorted(cycle.axes.peaked_axes())
+        round_result.axis_memory_peaked = sorted(cycle.axes.peaked_axes())
 
     if (ledger := session.state.ledger) is not None:
         for d in flushed:
@@ -225,7 +221,7 @@ def persist_round(
             session.store.campaigns.save_round_file(
                 session.campaign_id,
                 session.state.cycle_id,
-                round_payload,
+                round_result,
             )
         hard_samples_artifact = write_hard_samples_artifacts(session, cycle)
         write_log_md(session, hard_samples_artifact=hard_samples_artifact)
@@ -247,7 +243,6 @@ def count_positive_yield_axes(cycle: Cycle) -> int | None:
 async def close_round(
     cycle: Cycle,
     round_result: RoundResult,
-    round_payload: dict[str, Any],
     round_num: int,
     session: Session,
     cb: RunCallbacks,
@@ -259,9 +254,9 @@ async def close_round(
     writes ``round_NNNN.json``, refreshes axis memory. Independent of whether the round feeds escalation.
 
     SINGLE degradation-verdict compute site (origin + L1 both funnel here): stamp
-    ``round_result.health`` and mirror it onto ``round_payload`` BEFORE the dashboard emit
-    (``cb.on_round_complete`` reads ``rr.health``) and the round-file write (``persist_round``),
-    so the verdict reaches every surface in one shape.
+    ``round_result.health`` BEFORE the dashboard emit (``cb.on_round_complete`` reads
+    ``rr.health``) and the round-file write (``persist_round``), so the verdict reaches
+    every surface in one shape.
 
     Track record = prior rounds' verdicts: the origin (round 0) first, then the prior
     L1 rounds. The origin lives on ``cycle.origin_health`` (``cycle.rounds`` is the
@@ -283,11 +278,8 @@ async def close_round(
         )
         if round_num == 0:
             cycle.origin_health = round_result.health
-    round_payload["health"] = (
-        round_result.health.model_dump() if round_result.health is not None else None
-    )
     cb.on_round_complete(round_result, cycle.escalation.l1_stall_count, cycle.escalation.lives)
-    persist_round(cycle, round_result, round_payload, round_num, session, is_probe=is_probe)
+    persist_round(cycle, round_result, round_num, session, is_probe=is_probe)
     if cycle.axes and session.store:
         cycle.axes.refresh(
             session.store,
@@ -301,7 +293,6 @@ async def close_round(
 async def post_round(
     cycle: Cycle,
     round_result: RoundResult,
-    round_payload: dict[str, Any],
     round_num: int,
     config: CampaignConfig,
     session: Session,
@@ -342,7 +333,7 @@ async def post_round(
         evidence_starved=evidence_starved,
     )
 
-    await close_round(cycle, round_result, round_payload, round_num, session, cb)
+    await close_round(cycle, round_result, round_num, session, cb)
 
     if event.stop_reason is not None:
         raise StopLoop(event.stop_reason)

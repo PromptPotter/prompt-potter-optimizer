@@ -52,13 +52,13 @@ Next.js 16 has breaking changes from prior versions — APIs, file conventions, 
 
 Three guarantees the writer side MUST hold:
 
-1. **Always on disk.** `dashboard.json` exists after any ledger event in a cycle. Sole writer: `LiveDashboardView` (`promptpotter/infrastructure/projections/live_dashboard/view.py`). Sole writer of `round_NNNN.json`: `AuditTrailView` (`promptpotter/infrastructure/projections/audit_trail.py`). Both use atomic-swap (tmp + rename) — never partial-write, never torn read.
+1. **Always on disk.** `dashboard.json` exists after any ledger event in a cycle. Sole writer: `LiveDashboardView` (`promptpotter/infrastructure/projections/live_dashboard/view.py`). Sole writer of `rounds/round_NNNN.json`: `CampaignStore.save_round_file`, which persists `RoundResult.model_dump()` — the model **is** the round document. (The `.runtime/cache/rounds/round_NNNN.json` *audit twin* is a different file with the same basename, written by `AuditTrailView`; the webapp does not fetch it.) All use atomic-swap (tmp + rename) — never partial-write, never torn read.
 2. **Settles within `_DASHBOARD_DEBOUNCE_S` (0.25 s) of the last event.** The writer debounces high-frequency events (sample-scored, token-usage, LLM-call progress) to coalesce bursts, but converges to current state at most 250 ms behind real-time. Constant at `view.py:88`; flush plumbing at `_schedule_persist()` (`view.py:448`).
 3. **Immediate (no debounce) at round boundaries.** `PhaseRecord("round"|"origin", "complete"|"exit")` and `mark_stopped` flush synchronously via `_flush_pending_persist()` (`view.py:472`). When a round ends, its file is current before the next round begins. **Do not remove these flushes.** Do not relax atomic-swap. Do not introduce a path that lets `dashboard.json` lag past a completed round.
 
 If a future change wants to defer or skip a write, the question to answer first is: *can an operator who alt-tabs to the file tree right now still see the truth?* If no, the change is wrong.
 
-**The rule above is the writer side; the recipe is [`../docs/developer/adding-a-surface.md`](../docs/developer/adding-a-surface.md) § 3** (a dashboard / view field: `view_models.py` → `ingress.py` → renderers, plus `from_disk_log` when the field also lands in `log.md`). Surfacing a new value in the webapp starts there, not in a component — a panel reading a field no writer sets is the half-wiring this contract exists to prevent.
+**The rule above is the writer side; the recipe is [`../docs/developer/adding-a-surface.md`](../docs/developer/adding-a-surface.md) § 3** (a dashboard / view field: `view_models.py` → `ingress.py` → renderers). A field on the ROUND document needs no wiring at all — declare it on `RoundResult` and it reaches disk, `GET /rounds/{n}`, and every reader. Surfacing a new value in the webapp starts there, not in a component — a panel reading a field no writer sets is the half-wiring this contract exists to prevent.
 
 ## Display-data sources
 
@@ -66,7 +66,7 @@ Two on-disk surfaces back the dashboard. Read from the right one:
 
 - **`dashboard.json`** (polled every 2 s by `lib/poll.tsx` → `useCycleStream()`) — in-flight `current_round` and the `rounds[]` array of completed-round summaries (**round 0 = origin**, a one-candidate round labelled "C0"; there is no separate origin block). **Sole source** for the FitnessChart, TrendChart, TopStrip sparkline. Don't stitch in `round_NNNN.json` for chart data.
 - **The LineageTree is NOT one of them.** `useLineage.ts` builds the tree from the separate `/lineage` endpoint (`lib/lineage-overlay.tsx` → `campaigns/lineage.py`); only the *active* cycle's node reads `dashboard.json`. Cross-cycle structure and every sibling's fitness come from `/lineage`, so the two must move in lockstep.
-- **`round_NNNN.json`** (lazy, fetched via `lib/hooks/useRoundFile.ts`) — deep audit per round: full LLM I/O, per-sample results, scoreboard with `per_sample`. Reach for it only when the operator drills into a specific round (FreqChart distribution, ScoringInspector composite/hits, OptimizerNodeDetail node-by-node inspection).
+- **`rounds/round_NNNN.json`** (lazy, fetched via `lib/hooks/useRoundFile.ts`) — the round document, i.e. a serialized `RoundResult`: per-sample `results`, `all_candidate_results`, `candidate_scores`, the derived `scoreboard`, and the closing `opt_search_point` / `health`. Reach for it only when the operator drills into a specific round (FreqChart distribution, ScoringInspector composite/hits). The live node-by-node LLM I/O the OptimizerNodeDetail renders comes from `dashboard.json::current_round.nodes`, not from here.
 
 If you find yourself adding a "merge in-flight with historical" or "fall back to round-file when dashboard hasn't written X yet" branch, you're re-introducing the stitch pattern the display-source unification collapsed. Pick one source per data class.
 

@@ -161,16 +161,14 @@ async def run_round_loop(
                 skip_critique=sweep,
                 is_final_round=is_final_round,
             )
-            round_payload = cycle.absorb_round(round_result, round_num)
+            cycle.absorb_round(round_result, round_num)
 
             if cycle.axes and len(cycle.rounds) >= 2:
                 cycle.axes.record_flips_from_rounds(cycle.rounds, round_num)
 
             if is_probe:
                 cycle.probe_next_round = False
-                await close_round(
-                    cycle, round_result, round_payload, round_num, session, cb, is_probe=True
-                )
+                await close_round(cycle, round_result, round_num, session, cb, is_probe=True)
                 await escalate_or_stop(cycle, config, session, round_num, cb)
                 round_num += 1
                 clean_rounds += 1
@@ -188,7 +186,7 @@ async def run_round_loop(
                     degraded_rate=signal.check_result.get("degraded_rate"),
                     warning_types=signal.check_result.get("warning_types"),
                 )
-                await close_round(cycle, round_result, round_payload, round_num, session, cb)
+                await close_round(cycle, round_result, round_num, session, cb)
                 if backend_unreachable_tripped(round_result.health) is not None:
                     return StopReason.BACKEND_UNREACHABLE, None
                 if session.state.cycle_id:
@@ -204,7 +202,6 @@ async def run_round_loop(
             await post_round(
                 cycle,
                 round_result,
-                round_payload,
                 round_num,
                 config,
                 session,

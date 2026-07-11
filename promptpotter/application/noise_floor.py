@@ -78,18 +78,16 @@ async def measure_noise_floor(
         raise NoiseFloorError(
             f"round_0000.json missing in {campaign_id}/{cycle_id} — the origin was never scored."
         )
-    all_candidate_results = round_file.get("all_candidate_results") or {}
-    if not all_candidate_results:
+    if not round_file.all_candidate_results:
         raise NoiseFloorError(f"round_0000.json in {campaign_id}/{cycle_id} carries no origin arm.")
-    origin_id = next(iter(all_candidate_results))
-    origin_rows = all_candidate_results[origin_id]
+    origin_id = next(iter(round_file.all_candidate_results))
+    origin_rows = round_file.all_candidate_results[origin_id]
     sample_ids = {int(r["sample_id"]) for r in origin_rows if r.get("sample_id") is not None}
     if not sample_ids:
         raise NoiseFloorError(
             f"origin arm in {campaign_id}/{cycle_id} round 0 carries no scored samples."
         )
-    prompt_fields = round_file.get("prompt_fields") or {}
-    osp = OptSearchPoint.from_prompt_fields(prompt_fields)
+    osp = OptSearchPoint.from_prompt_fields(round_file.prompt_fields)
 
     session = await init_services(
         backend_id=campaign.backend_id or campaign.dataset_name,
@@ -161,14 +159,7 @@ async def measure_noise_floor(
 
     mean_composite, ci_lo, ci_hi = mean_ci(composites)
 
-    # The record's whole point is source-vs-workspace. A round file with no recorded accuracy has
-    # no source number, and reading it as 0.0 manufactures a 100%-drift the operator will chase.
-    if round_file.get("accuracy") is None:
-        raise NoiseFloorError(
-            f"round_0000.json in {campaign_id}/{cycle_id} records no accuracy — there is no "
-            "source measurement to compare this noise band against."
-        )
-    source_accuracy = float(round_file["accuracy"])
+    source_accuracy = round_file.accuracy
 
     record = DiagnosticRunRecord(
         ts=utcnow_iso(),
@@ -184,10 +175,8 @@ async def measure_noise_floor(
         workspace_accuracy=sum(accuracies) / len(accuracies),
         workspace_composite=mean_composite,
         source_campaign_accuracy=source_accuracy,
-        source_campaign_composite=display_fitness(
-            round_file.get("composite_fitness"), source_accuracy
-        ),
-        source_campaign_n=int(round_file.get("total") or 0),
+        source_campaign_composite=round_file.composite_fitness,
+        source_campaign_n=round_file.total,
         noise_floor_k=k,
         noise_floor_mean=mean_composite,
         noise_floor_ci_lo=ci_lo,

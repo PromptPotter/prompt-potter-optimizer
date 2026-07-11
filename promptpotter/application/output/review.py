@@ -21,13 +21,14 @@ from promptpotter.application.optimization.validators.l1_behavior import (
 from promptpotter.application.optimization.validators.l2_behavior import run_all_l2_checks
 from promptpotter.domain.escalation_signals import exploration_budget
 from promptpotter.domain.phases import StopReason
+from promptpotter.domain.results import DegradationHealth, RoundResult
 
 __all__ = ["render_review_md"]
 
 
 def render_review_md(
     index: dict[str, Any],
-    rounds: list[dict[str, Any]],
+    rounds: list[RoundResult],
     *,
     round_audits: list[dict[str, Any] | None] | None = None,
     context_object: list[str] | None = None,
@@ -104,7 +105,7 @@ def _optimizer_call_count(audit: dict[str, Any] | None) -> int:
 
 
 def _compute_behavior_per_round(
-    rounds: list[dict[str, Any]],
+    rounds: list[RoundResult],
     audits: list[dict[str, Any] | None],
     context_object: list[str],
     l1_patience: int,
@@ -120,24 +121,23 @@ def _compute_behavior_per_round(
     # the update so each round's exploration_budget matches what its L1 generation saw.
     stall = 0
     for i, round_data in enumerate(rounds):
-        round_num = int(round_data.get("round") or i)
+        round_num = round_data.round
         budget = exploration_budget(stall, l1_patience).value if round_num >= 1 else None
         audit = audits[i] if i < len(audits) else None
         if round_num >= 1:
-            stall = 0 if round_data.get("improved") else stall + 1
+            stall = 0 if round_data.improved else stall + 1
         if audit is None:
             l1_out.append([])
             l2_out.append([])
             continue
-        peaked_raw = round_data.get("axis_memory_peaked") or []
-        peaked_axes = frozenset(str(a) for a in peaked_raw if isinstance(a, str))
+        osp = round_data.opt_search_point
         ctx = ValidatorContext(
             round_num=round_num,
             prior_rounds=list(prior_audits),
-            opt_search_point=dict(round_data.get("opt_search_point") or {}),
+            opt_search_point=osp.model_dump() if osp else {},
             context_object=context_object,
             exploration_budget=budget,
-            peaked_axes=peaked_axes,
+            peaked_axes=frozenset(round_data.axis_memory_peaked),
         )
         l1_out.append(run_all_checks(audit, ctx))
         l2_out.append(run_all_l2_checks(audit, ctx))
@@ -148,7 +148,7 @@ def _compute_behavior_per_round(
 # --- rendering helpers ----------------------------------------------------
 
 
-def _halt_info(index: dict[str, Any], rounds: list[dict[str, Any]]) -> dict[str, str] | None:
+def _halt_info(index: dict[str, Any], rounds: list[RoundResult]) -> dict[str, str] | None:
     """The cycle's terminal health story, or ``None`` when it ended cleanly.
 
     Reads the cycle ``stop_reason`` + the round ``health`` (both already on disk).
@@ -170,31 +170,29 @@ def _halt_info(index: dict[str, Any], rounds: list[dict[str, Any]]) -> dict[str,
     (``stop_reason == escalation_abort``), else ``""``."""
     stop_reason = (index.get("stop_reason") or "").strip()
     terminated = "yes" if stop_reason == StopReason.ABORT else ""
-    last_health: dict[str, Any] | None = None
-    last_critical: dict[str, Any] | None = None
+    last_health: DegradationHealth | None = None
+    last_critical: DegradationHealth | None = None
     for r in rounds:
-        h = r.get("health")
-        if isinstance(h, dict):
-            last_health = h  # ends as the last GRADED round (probes carry None)
-            if h.get("grade") == "critical":
-                last_critical = h
-    ended_critical = last_health is not None and last_health.get("grade") == "critical"
+        if r.health is not None:
+            last_health = r.health  # ends as the last GRADED round (probes carry None)
+            if r.health.grade == "critical":
+                last_critical = r.health
+    ended_critical = last_health is not None and last_health.grade == "critical"
     if not ended_critical and not terminated:
         return None
     # The terminate-triggering round is the last completed (critical) round; reuse it
     # to name the dead node (the ended-critical path uses the same round).
     if last_critical is not None:
-        critical = last_critical
-        reasons = critical.get("reasons") or []
+        reasons = last_critical.reasons
         tag = (
             "evidence_starved"
             if "evidence_starved" in reasons
             else (reasons[0] if reasons else "critical")
         )
         return {
-            "tag": str(tag),
-            "node": str(critical.get("dominant_node") or ""),
-            "action": str(critical.get("suggested_action") or "").strip(),
+            "tag": tag,
+            "node": last_critical.dominant_node or "",
+            "action": (last_critical.suggested_action or "").strip(),
             "terminated": terminated,
         }
     return {"tag": "terminate_proposal", "node": "", "action": "", "terminated": terminated}
@@ -291,26 +289,25 @@ def _render_behavior_summary(
 
 
 def _render_round(
-    round_data: dict[str, Any],
+    round_data: RoundResult,
     audit: dict[str, Any] | None,
     checks: list[CheckResult],
     *,
     is_peek: bool,
     schema_repair_retries: int = 0,
 ) -> list[str]:
-    round_num = round_data.get("round", "?")
-    osp = round_data.get("opt_search_point") or {}
+    osp = round_data.opt_search_point.model_dump() if round_data.opt_search_point else {}
     lineage = osp.get("lineage") or {}
     suffix = " (next-gen peek)" if is_peek else ""
     parts: list[str] = [
-        f"### Round {round_num}{suffix}",
+        f"### Round {round_data.round}{suffix}",
         "",
     ]
     if not is_peek:
         parts += [
-            f"- accuracy: {float(round_data.get('accuracy', 0.0) or 0.0):.1%}",
-            f"- composite_fitness: `{float(round_data.get('composite_fitness', 0.0) or 0.0):.4f}`",
-            f"- improved: **{'yes' if round_data.get('improved') else 'no'}**",
+            f"- accuracy: {round_data.accuracy:.1%}",
+            f"- composite_fitness: `{round_data.composite_fitness:.4f}`",
+            f"- improved: **{'yes' if round_data.improved else 'no'}**",
         ]
     if schema_repair_retries:
         parts.append(f"- schema_repair_retries: {schema_repair_retries}")
@@ -394,15 +391,15 @@ def _fmt_evidence_cell(raw: object) -> str:
     return f"`{field_name}` _(no citation)_"
 
 
-def _render_critique(round_data: dict[str, Any]) -> list[str]:
+def _render_critique(round_data: RoundResult) -> list[str]:
     from promptpotter.domain.rendering import format_l1_critique_for_prompt
 
-    critique = format_l1_critique_for_prompt(round_data.get("critique")).strip()
+    critique = format_l1_critique_for_prompt(round_data.critique).strip()
     if not critique:
         return []
     quoted = critique.replace("\n", "\n> ")
     return ["**Critique**", "", f"> {quoted}", ""]
 
 
-def _is_generation_only(round_data: dict[str, Any]) -> bool:
-    return str(round_data.get("status") or "").strip() == "generation_only"
+def _is_generation_only(round_data: RoundResult) -> bool:
+    return round_data.status == "generation_only"

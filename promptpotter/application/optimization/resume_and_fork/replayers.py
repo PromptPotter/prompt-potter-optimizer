@@ -23,6 +23,7 @@ from promptpotter.application.scoring.metrics import (
     elect_round_winner,
     elimination_p_best,
 )
+from promptpotter.domain.results import RoundResult
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.exploration import RulerEntry
@@ -62,8 +63,8 @@ class ReplayContext(NamedTuple):
     cold-ruler branch).
     """
 
-    round_data: dict[str, Any]
-    prior_rounds: list[dict[str, Any]]
+    round_data: RoundResult
+    prior_rounds: list[RoundResult]
     origin_results: list[dict[str, Any]]
     delta_scale: dict[int, RulerEntry] | None
 
@@ -75,9 +76,9 @@ def _iter_divergences(ctx: ReplayContext) -> Iterator[Divergence]:
     """Yield every recorded decision in ``ctx.round_data`` whose replayer re-derives a
     different outcome under the active scorer/engine — in record order."""
     round_data = ctx.round_data
-    for rec in round_data.get("decisions") or []:
+    for rec in round_data.decisions:
         try:
-            kind = ResumeCheckpointKind(rec.get("kind", ""))
+            kind = ResumeCheckpointKind(rec["kind"])
         except ValueError:
             # Not a known checkpoint kind — corrupt/foreign decision record; skip (not a divergence).
             continue
@@ -86,7 +87,7 @@ def _iter_divergences(ctx: ReplayContext) -> Iterator[Divergence]:
             continue  # valid kind, but ARCHIVAL gating — recorded, never replayed
 
         try:
-            current = fn(ctx, rec.get("inputs_ref") or {}, rec.get("data") or {})
+            current = fn(ctx, rec["inputs_ref"], rec["data"])
         except Exception:
             # Non-divergence on replayer crash, but surface — silent skip hides scorer drift.
             logger.warning(
@@ -96,20 +97,20 @@ def _iter_divergences(ctx: ReplayContext) -> Iterator[Divergence]:
                 exc_info=True,
             )
             continue
-        recorded = rec.get("outcome")
+        recorded = rec["outcome"]
         if current != recorded:
             yield Divergence(
-                round_num=int(round_data.get("round", -1)),
+                round_num=round_data.round,
                 kind=kind,
                 recorded_outcome=recorded,
                 current_outcome=current,
-                inputs_ref=dict(rec.get("inputs_ref") or {}),
+                inputs_ref=dict(rec["inputs_ref"]),
             )
 
 
 def _replay_context(
-    round_data: dict[str, Any],
-    prior_rounds: list[dict[str, Any]] | None,
+    round_data: RoundResult,
+    prior_rounds: list[RoundResult] | None,
     origin_results: list[dict[str, Any]] | None,
     delta_scale: dict[int, RulerEntry] | None,
 ) -> ReplayContext:
@@ -122,19 +123,19 @@ def _replay_context(
 
 
 def replay_decisions(
-    round_data: dict[str, Any],
-    prior_rounds: list[dict[str, Any]] | None = None,
+    round_data: RoundResult,
+    prior_rounds: list[RoundResult] | None = None,
     origin_results: list[dict[str, Any]] | None = None,
     delta_scale: dict[int, RulerEntry] | None = None,
 ) -> Divergence | None:
-    """Walk ``round_data['decisions']`` in order; return the FIRST mismatch (resume's halt seam)."""
+    """Walk ``round_data.decisions`` in order; return the FIRST mismatch (resume's halt seam)."""
     ctx = _replay_context(round_data, prior_rounds, origin_results, delta_scale)
     return next(_iter_divergences(ctx), None)
 
 
 def replay_all_divergences(
-    round_data: dict[str, Any],
-    prior_rounds: list[dict[str, Any]] | None = None,
+    round_data: RoundResult,
+    prior_rounds: list[RoundResult] | None = None,
     origin_results: list[dict[str, Any]] | None = None,
     delta_scale: dict[int, RulerEntry] | None = None,
 ) -> list[Divergence]:
@@ -160,7 +161,7 @@ def _replay_round_winner(
     can diverge. ``coverage_floor`` rides the recorded inputs (defaulting to 0 for pre-floor
     records — most permissive, so it never rejects a candidate the live path kept).
     """
-    all_results: dict[str, list[dict[str, Any]]] = ctx.round_data.get("all_candidate_results") or {}
+    all_results = ctx.round_data.all_candidate_results
     candidate_ids = [str(c) for c in (inputs_ref.get("candidate_ids") or [])]
     coverage_floor = int(inputs_ref.get("coverage_floor", 0))
     winner_id, _ = elect_round_winner(
@@ -192,7 +193,7 @@ def _pobb_replay_snapshot(
     if not candidate_sample_ids or not prior_histories:
         return None
 
-    all_results: dict[str, list[dict[str, Any]]] = ctx.round_data.get("all_candidate_results") or {}
+    all_results = ctx.round_data.all_candidate_results
     cur_results = all_results.get(candidate_id) or []
     cur_by_sample = {
         str(r.get("sample_id")): graded_response(r)
@@ -254,7 +255,7 @@ def _replay_margin_cut(
     if not universe_ids or not candidate_sample_ids:
         return False
     candidate_id = str(inputs_ref.get("candidate_id", ""))
-    all_results: dict[str, list[dict[str, Any]]] = ctx.round_data.get("all_candidate_results") or {}
+    all_results = ctx.round_data.all_candidate_results
     cur_by_sample = {
         str(r.get("sample_id")): bool(r.get("hit"))
         for r in (all_results.get(candidate_id) or [])
@@ -295,21 +296,19 @@ def _replay_leader_lock_in(
 _FRONTIER_ID = "_frontier"
 
 
-def _composite_by_round(sorted_trials: list[dict[str, Any]], this_round: int) -> dict[int, float]:
+def _composite_by_round(sorted_trials: list[RoundResult], this_round: int) -> dict[int, float]:
     """Per-round composite score — the cold-ruler comparator (raw rate). Mirrors the live
     composite fallback in ``EscalationFSM._improved`` for a cold δ ruler."""
     out: dict[int, float] = {}
     for t in sorted_trials:
-        r = int(t.get("round", -1))
-        if r < 0 or r > this_round:
+        if t.round > this_round:
             continue
-        winner_results = t.get("results") or []
-        out[r] = _mean_score(winner_results) if winner_results else float(t["composite_fitness"])
+        out[t.round] = _mean_score(t.results) if t.results else t.composite_fitness
     return out
 
 
 def _frontier_theta_by_round(
-    sorted_trials: list[dict[str, Any]], this_round: int, delta_scale: dict[int, RulerEntry]
+    sorted_trials: list[RoundResult], this_round: int, delta_scale: dict[int, RulerEntry]
 ) -> dict[int, float]:
     """Per-round cumulative-frontier ability θ on the FIXED ruler — the θ-space peer of the
     live ``cycle.tracking.best_theta`` accumulation (``cycle.py::_cumulative_theta`` over the
@@ -329,10 +328,9 @@ def _frontier_theta_by_round(
     out: dict[int, float] = {}
     last: float | None = None
     for t in sorted_trials:
-        r = int(t.get("round", -1))
-        if r < 0 or r > this_round:
+        if t.round > this_round:
             continue
-        for res in t.get("results") or []:
+        for res in t.results:
             sid = res.get("sample_id")
             if sid is not None:
                 frontier[sid] = res
@@ -346,7 +344,7 @@ def _frontier_theta_by_round(
         if row is not None:
             last = row[0]
         if last is not None:
-            out[r] = last
+            out[t.round] = last
     return out
 
 
@@ -373,7 +371,7 @@ def _stall_from_scores(score_by_round: dict[int, float], entry_round: int, this_
 
 
 def _derive_stall_count(
-    prior_rounds: list[dict[str, Any]],
+    prior_rounds: list[RoundResult],
     entry_round: int,
     this_round: int,
     delta_scale: dict[int, RulerEntry] | None,
@@ -383,7 +381,7 @@ def _derive_stall_count(
     else composite. θ stays cross-round comparable once per-round subsets drift."""
     if entry_round < 0:
         return 0
-    sorted_trials = sorted(prior_rounds, key=lambda t: int(t.get("round", -1)))
+    sorted_trials = sorted(prior_rounds, key=lambda t: t.round)
     scores = (
         _frontier_theta_by_round(sorted_trials, this_round, delta_scale)
         if delta_scale is not None

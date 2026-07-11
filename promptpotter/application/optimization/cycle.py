@@ -24,14 +24,12 @@ from promptpotter.application.optimization.pobb.elimination import extract_warni
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.opt_search_point import OptSearchPoint, node_config_items
-from promptpotter.domain.rendering import display_fitness, round_winner_key
+from promptpotter.domain.rendering import display_fitness
 from promptpotter.domain.results import (
     CritiqueReadout,
     DegradationHealth,
     RoundOrigin,
     RoundResult,
-    ScoredCandidate,
-    is_round_winner,
 )
 from promptpotter.domain.run_records import RebaseRequest, ResumeCheckpointRecord
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
@@ -49,89 +47,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = ["Cycle", "CycleRoundState"]
-
-
-# The ranked round-file table subset (round_NNNN.json::scoreboard). A projection of
-# ScoredCandidate — its fields spelled once as an include-set, plus the derived rank +
-# is_winner. Deliberately narrower than the full ``candidate_scores`` dump beside it in the
-# same file (no θ / composite_ci): scoreboard = the display table, candidate_scores = the
-# complete record. The mutation text rides ``changes_description`` (its real name) — the
-# dashboard's ``label`` (the C{r}.{i} id) is a different field, so the two never collide.
-_SCOREBOARD_INCLUDE: set[str] = {
-    "candidate_id",
-    "changes_description",
-    "accuracy",
-    "composite_fitness",
-    "hits",
-    "total",
-    "ci_lo",
-    "ci_hi",
-    "escalation_aborted",
-    "matched_origin_accuracy",
-    "matched_origin_hits",
-    "matched_origin_composite",
-}
-
-
-def _build_scoreboard(
-    candidate_scores: list[ScoredCandidate], winner_label: str
-) -> list[dict[str, Any]]:
-    """Trial-JSON `scoreboard`: rank by `round_winner_key` (composite-first) desc; tag winner."""
-    ranked = sorted(
-        candidate_scores,
-        key=lambda c: round_winner_key(c.composite_fitness, c.accuracy),
-        reverse=True,
-    )
-    return [
-        {
-            "rank": i,
-            **c.model_dump(include=_SCOREBOARD_INCLUDE),
-            "is_winner": is_round_winner(c.changes_description, winner_label),
-        }
-        for i, c in enumerate(ranked, start=1)
-    ]
-
-
-def build_round_payload(
-    rr: RoundResult,
-    round_num: int,
-    opt_sp: OptSearchPoint,
-) -> dict[str, Any]:
-    """Serialize a closed ``RoundResult`` to the persisted round-file dict — the
-    SINGLE round-payload builder both the origin path (``emit_origin_round``) and
-    the L1 path (``absorb_round``) build through. Every field is derived from
-    ``rr``, so a new ``RoundResult`` field reaches ``rounds/round_NNNN.json`` in one
-    place instead of silently dropping out of two hand-mirrored dicts.
-
-    ``health`` is NOT set here — it's stamped + injected once at ``close_round``
-    (which runs after this builder, after the cycle's track record is settled)."""
-    return {
-        "round_id": f"round_{round_num}",
-        "round": round_num,
-        "label": rr.label,
-        "accuracy": rr.accuracy,
-        "composite_fitness": rr.composite_fitness,
-        "hits": rr.hits,
-        "total": rr.total,
-        "improved": rr.improved,
-        "p_value": rr.p_value,
-        "origin_accuracy": rr.origin_accuracy,
-        "matched_origin_accuracy": rr.matched_origin_accuracy,
-        "matched_origin_hits": rr.matched_origin_hits,
-        "matched_origin_composite": rr.matched_origin_composite,
-        "cumulative_accuracy": rr.cumulative_accuracy,
-        "scoreboard": _build_scoreboard(rr.candidate_scores, rr.label),
-        "prompt_fields": rr.prompt_fields,
-        "results": rr.results,
-        "all_candidate_results": dict(rr.all_candidate_results),
-        "sample_order_timeline": [s.model_dump() for s in rr.sample_order_timeline],
-        "candidates_scored": rr.candidates_scored,
-        "candidate_scores": [c.model_dump() for c in rr.candidate_scores],
-        "decisions": list(rr.decisions),
-        "evaluators": dict(rr.evaluators),
-        "critique": rr.critique,
-        "opt_search_point": opt_sp.model_dump(),
-    }
 
 
 def _rf_dedup_key(rf_dict: dict[str, Any]) -> tuple[str, str, str]:
@@ -492,7 +407,7 @@ class Cycle:
         )
         return scores["accuracy"], scores["composite_fitness"]
 
-    def replay_priors(self, priors: list[dict[str, Any]]) -> None:
+    def replay_priors(self, priors: list[RoundResult]) -> None:
         """Reconstruct round-loop state from persisted prior rounds (in-place).
 
         ``EscalationFSM`` is NOT touched — caller rebuilds via ``from_ledger``.
@@ -510,35 +425,39 @@ class Cycle:
         schema = self.session.pipeline_schema
         tr = self.tracking
         origin_results: list[dict[str, Any]] = []
-        l1_priors: list[dict[str, Any]] = []
-        for round_data in priors:
-            rr = RoundResult.model_validate(round_data)
+        l1_rounds: list[RoundResult] = []
+        for rr in priors:
             if rr.round == 0:
                 self.origin_health = rr.health
                 self.origin_critique = rr.critique
                 origin_results = list(rr.results or [])
             else:
                 self.rounds.append(rr)
-                l1_priors.append(round_data)
+                l1_rounds.append(rr)
             for r in rr.results or []:
                 if extract_warning_types(r) and (q := r.get("query")):
                     self.warned_queries.add(q)
-        if not l1_priors:
+        if not l1_rounds:
             # Resumed right after origin — no L1 trajectory to replay; the origin
             # floor was already seeded by Cycle.start (its verdict captured above).
             return
-        last = l1_priors[-1]
-        self.opt_sp = OptSearchPoint(**last["opt_search_point"])
-        last_rr = self.rounds[-1]
+        last_rr = l1_rounds[-1]
+        if last_rr.opt_search_point is None or last_rr.pipeline_params is None:
+            raise ValueError(
+                f"round {last_rr.round} closed without an opt_search_point / pipeline_params — "
+                "the round file cannot seed a resume."
+            )
+        # Deep copy: the cycle mutates its working OSP (wounds, memory), and the round
+        # is a record of what ran, not a scratchpad.
+        self.opt_sp = last_rr.opt_search_point.model_copy(deep=True)
         for f in PROMPT_STRING_FIELDS:
             setattr(self.opt_sp, f, last_rr.prompt_fields.get(f, ""))
-        assert tr.current_sp is not None
-        last_pp = (
-            last_rr.pipeline_params
-            if last_rr.pipeline_params is not None
-            else tr.current_sp.pipeline_params
+        # The winner's OWN resolved params — not the origin's. Reading them off the round
+        # is only possible because the round file records them; while it didn't, resume
+        # reverted every config axis L1 had won back to the origin floor.
+        tr.current_sp = self.opt_sp.to_job_search_point(
+            base_pipeline_params=last_rr.pipeline_params, schema=schema
         )
-        tr.current_sp = self.opt_sp.to_job_search_point(base_pipeline_params=last_pp, schema=schema)
         # best_round = cumulative-state high-water-mark over the L1 trajectory,
         # seeded from the origin floor (mirrors absorb_round). best_round is the
         # round NUMBER, not a positional index — origin sits outside cycle.rounds, so
@@ -559,7 +478,7 @@ class Cycle:
                     update={f: rr.prompt_fields.get(f, "") for f in PROMPT_STRING_FIELDS}
                 )
                 tr.best_sp = best_osp.to_job_search_point(
-                    base_pipeline_params=(rr.pipeline_params or last_pp), schema=schema
+                    base_pipeline_params=rr.pipeline_params, schema=schema
                 )
             # best_theta is a running max over the same cumulative frontier as
             # best_composite — re-maxed here so a resumed cycle reconstructs exactly
@@ -601,8 +520,8 @@ class Cycle:
         self,
         rr: RoundResult,
         round_num: int,
-    ) -> dict[str, Any]:
-        """Sole sink for a finished L1 round; returns the trial dict for ``save_round_file``."""
+    ) -> RoundResult:
+        """Sole sink for a finished L1 round; returns the round, stamped for ``save_round_file``."""
         schema = self.session.pipeline_schema
         tr = self.tracking
 
@@ -651,8 +570,8 @@ class Cycle:
 
         rr.cumulative_accuracy = tr.current_accuracy
         rr.cumulative_theta = cur_theta
-
-        return build_round_payload(rr, round_num, self.opt_sp)
+        rr.opt_search_point = self.opt_sp
+        return rr
 
     def origin_for_round(self, scoring_set: list[Sample], round_num: int) -> RoundOrigin:
         """Build round origin; on probe rounds, rescore over the probe subset."""
