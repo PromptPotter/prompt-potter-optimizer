@@ -41,7 +41,6 @@ from promptpotter.application.optimization.resume_and_fork import (
     record_decision,
 )
 from promptpotter.application.optimization.validators.l2_output import (
-    L2_SITUATIONAL_EXAMPLE_DANGLING_TRIGGER,
     L2_TASK_CONTEXT_STALE_REPEAT,
     run_l2_output_validators,
 )
@@ -52,11 +51,7 @@ from promptpotter.domain.l1_layout import (
     coerce_l1_layout,
     validate_l1_layout,
 )
-from promptpotter.domain.opt_search_point import (
-    L1SituationalExample,
-    L1SupplementalRule,
-    OptSearchPoint,
-)
+from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent, StopLoop, StopReason, emit_phase
 from promptpotter.domain.run_records import (
     ConfigOverrides,
@@ -90,7 +85,6 @@ logger = logging.getLogger(__name__)
 _L2_SOFT_REJECT_VALIDATOR_IDS: frozenset[str] = frozenset(
     {
         L2_TASK_CONTEXT_STALE_REPEAT.id,  # no-op / paraphrase merge — prior framing kept
-        L2_SITUATIONAL_EXAMPLE_DANGLING_TRIGGER.id,  # example dropped by renderer (layer_state.py) — inert
     }
 )
 
@@ -124,9 +118,6 @@ class TransitionResult:
     action: OptimizerAction = "normal_round"
     axis_targeted: str = ""
     l1_layout: L1Layout | None = None
-    # ``None`` ⇒ keep current; any list (incl. ``[]``) ⇒ full-replace.
-    l1_supplemental_rules: list[L1SupplementalRule] | None = None
-    l1_situational_examples: list[L1SituationalExample] | None = None
     l2_guard_breaches: list[ValidatorOutcome] = field(default_factory=list)
     l3_guard_breaches: list[ValidatorOutcome] = field(default_factory=list)
     fork_proposal: ForkProposal | None = None
@@ -190,16 +181,10 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, prompt: str) -> Tran
         if layout_result.is_valid:
             accepted_layout = proposed_layout
 
-    # Supplemental rules + situational examples: full-replace; non-empty ⇒ replace L2-authored layer; empty ⇒ keep current.
-    new_supplemental = list(raw.l1_supplemental_rules) if raw.l1_supplemental_rules else None
-    new_examples = list(raw.l1_situational_examples) if raw.l1_situational_examples else None
-
     failures = run_l2_output_validators(
         {
             "task_context_proposed": proposed_tc,
             "task_context_applied": new_task_context,
-            "l1_supplemental_rules_proposed": new_supplemental,
-            "l1_situational_examples_proposed": new_examples,
         },
         opt_sp,
     )
@@ -227,8 +212,6 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, prompt: str) -> Tran
         action=raw.action,
         axis_targeted=raw.axis_targeted,
         l1_layout=accepted_layout,
-        l1_supplemental_rules=new_supplemental,
-        l1_situational_examples=new_examples,
         l2_guard_breaches=failures,
         fork_proposal=raw.fork_proposal,
         terminate_proposal=raw.terminate_proposal,
@@ -243,10 +226,6 @@ def _apply_l2(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
         osp.memory.task_context = result.task_context
     if result.l1_layout is not None:
         osp.memory.l1_layout = result.l1_layout
-    if result.l1_supplemental_rules is not None:
-        osp.memory.l1_supplemental_rules = result.l1_supplemental_rules
-    if result.l1_situational_examples is not None:
-        osp.memory.l1_situational_examples = result.l1_situational_examples
     osp.memory.wounds.l2_guard_breaches = list(result.l2_guard_breaches)
     cycle.escalation.record_l2_fired(
         best_composite_fitness=cycle.tracking.best_composite_fitness,
@@ -294,14 +273,6 @@ def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
         "param_changes_count": len(result.opt_search_point.memory.l1_overrides),
         "task_context_changed": result.task_context is not None,
         "l1_layout_changed": result.l1_layout is not None,
-        "l1_supplemental_rules_n": (
-            len(result.l1_supplemental_rules) if result.l1_supplemental_rules is not None else None
-        ),
-        "l1_situational_examples_n": (
-            len(result.l1_situational_examples)
-            if result.l1_situational_examples is not None
-            else None
-        ),
         "changes_description": result.opt_search_point.lineage.changes_description or "",
         "action": result.action,
         "axis_targeted": result.axis_targeted,
@@ -705,9 +676,8 @@ async def escalate_l2(
         # Wound 4: post-L2 validator failure → L3 force-trigger. Deterministic from L2 output,
         # so resume reproduces without a separate decision record.
         # Exception: when EVERY breach is a soft-reject (self-correcting — the validator already
-        # discarded the output: a stale task_context repeat kept the prior framing; a dangling
-        # situational example was dropped by the renderer), L3 is skipped. See
-        # _L2_SOFT_REJECT_VALIDATOR_IDS — forcing L3 on an inert breach only layers escalations.
+        # discarded the output: a stale task_context repeat kept the prior framing), L3 is skipped.
+        # See _L2_SOFT_REJECT_VALIDATOR_IDS — forcing L3 on an inert breach only layers escalations.
         breaches = cycle.opt_sp.memory.wounds.l2_guard_breaches
         if breaches and not all(b.validator_id in _L2_SOFT_REJECT_VALIDATOR_IDS for b in breaches):
             logger.warning(

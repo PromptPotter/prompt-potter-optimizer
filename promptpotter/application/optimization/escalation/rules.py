@@ -30,7 +30,9 @@ class EscalationRule:
 
 
 # perfect_accuracy preempts so a perfect-fit round terminates instead of firing L2;
-# l1_mandatory_breach preempts patience — a dropped backend placeholder is structural, heal L2 now;
+# l1_generate_unusable preempts patience — l1_generate's output is structurally unusable this
+#   round (a dropped mandatory placeholder OR zero parseable candidates), a fault no amount of
+#   patience fixes because the identical meta-prompt reproduces it; heal L2 now;
 # l1_evidence_starved preempts patience — a node starved across ~all samples is accumulated
 #   evidence of a systemic fault no L1 param move can fix; bring L2 in to diagnose (it never stops);
 # l2_axis_yield_drought preempts patience when AxisIndex shows no productive axes;
@@ -43,8 +45,8 @@ DEFAULT_ESCALATION_RULES: list[EscalationRule] = [
         priority=100,
     ),
     EscalationRule(
-        name="l1_mandatory_breach",
-        when=lambda s: s.l1_mandatory_breach,
+        name="l1_generate_unusable",
+        when=lambda s: s.l1_mandatory_breach or s.l1_zero_candidates,
         fire=NextAction.FIRE_L2,
         priority=70,
     ),

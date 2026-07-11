@@ -11,7 +11,6 @@ import re
 from typing import Any
 
 from promptpotter.application.optimization.dispatch.hub.bundle import (
-    INTRACTABLE_SAMPLES_RENDER_CAP,
     NEAR_MISS_RENDER_CAP,
     NODE_FAILURE_RENDER_CAP,
     SAMPLE_RENDER_CAP,
@@ -405,35 +404,6 @@ def _r_origin_strengths(b: InjectionBundle) -> str:
         f"ORIGIN STRENGTHS: {len(hits)}/{len(rows)} samples solved by origin "
         "— preserve the parent scaffolding earning these."
     )
-
-
-@signal(
-    "intractable_samples",
-    kind=InjectionKind.MEASUREMENT,
-    description="Cumulative cycle-wide miss set — samples no candidate has solved yet this cycle.",
-    char_cap=None,
-)
-def _r_intractable_samples(b: InjectionBundle) -> str:
-    """Cumulative-best misses from `current_results` — the cluster L1 must attack next.
-    Mutations that don't address any of them are unlikely to break the plateau. Fenced.
-    """
-    rows = b.trajectory_misses
-    if not rows:
-        return ""
-    shown = rows[:INTRACTABLE_SAMPLES_RENDER_CAP]
-    lines = [
-        f"INTRACTABLE SAMPLES ({len(rows)} samples the trajectory still misses — "
-        "the cluster the next mutation must attack):"
-    ]
-    for r in shown:
-        sid = r.get("sample_id")
-        gt = (r.get("ground_truth") or "")[:30]
-        lines.append(f"  [#{sid}] {_query_stem(r)} → GT: {gt}")
-    if len(rows) > INTRACTABLE_SAMPLES_RENDER_CAP:
-        lines.append(
-            f"  … +{len(rows) - INTRACTABLE_SAMPLES_RENDER_CAP} more trajectory misses not shown."
-        )
-    return fence_untrusted("\n".join(lines))
 
 
 @signal(

@@ -38,8 +38,6 @@ TRANSCRIPT_PREDICTED_CAP = 200
 # Worst-N nodes the evidence_health panel lists — enough to show a dead enricher
 # plus a couple of collateral nodes, never a full pipeline dump.
 NODE_FAILURE_RENDER_CAP = 3
-# Two pointers suffice to signal a cluster (~110 chars each); larger campaigns can't bloat L1.
-INTRACTABLE_SAMPLES_RENDER_CAP = 2
 # L2-authored framing strings; overrun is healed (truncated + warned), not raised.
 TASK_CONTEXT_VALUE_CAP = 300
 # `runtime_failures` signal only emits first-seen failures in the last K rounds; older entries
@@ -126,7 +124,7 @@ class RoundDigest:
 class InjectionBundle:
     """State container per optimizer LLM call — every signal renderer reads off this.
     ``origin_per_sample`` (frozen round-0 snapshot) drives ``origin_strengths`` (preserve hit-scaffolding);
-    ``trajectory_misses`` (live cumulative misses) drives ``intractable_samples``."""
+    ``trajectory_misses`` (live cumulative misses) drives ``sample_transcripts``."""
 
     opt_sp: OptSearchPoint
     pipeline_schema: PipelineSchema | None
@@ -191,7 +189,6 @@ def injection_registry() -> dict[str, _Injection]:
 
 __all__ = [
     "AXES_ENUM_PREVIEW",
-    "INTRACTABLE_SAMPLES_RENDER_CAP",
     "NEAR_MISS_RENDER_CAP",
     "NODE_FAILURE_RENDER_CAP",
     "RUNTIME_FAILURE_RECENCY_WINDOW",

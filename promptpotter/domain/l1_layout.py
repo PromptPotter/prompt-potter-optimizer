@@ -43,7 +43,6 @@ L1_POSSIBLE: frozenset[str] = frozenset(
         "critique",
         "axis_memory",
         "origin_strengths",
-        "intractable_samples",
         "archive_top_runs",
         "rare_hit_samples",
         "sample_transcripts",
@@ -133,14 +132,13 @@ class NodeLayoutSpec(BaseModel):
 NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
     # `task_context` sits in `task_intent` (LLM front-of-mind); `problem_description`
     # carries the mandatory structural state + the DISTILLED failure signal (`critique`)
-    # + a bounded slice of RAW evidence (`sample_transcripts`: full query + the model's own
-    # reasoning for the worst misses) + L1's own `l1_wounds` + `escalation_panel` +
-    # `origin_strengths` (regression guard). `sample_transcripts` rides the floor because the
-    # critique's distillation is lossy for reasoning-MECHANISM errors (it can collapse to a
-    # label-distribution steer); the generator needs to SEE where a deduction actually broke,
-    # not only the distiller's summary of it. Render is capped (bundle.py::TRANSCRIPT_RENDER_CAP)
-    # so this is a couple of complete cases, not a dump. Raw `diagnostics` and the cross-run
-    # panels stay off the floor; L2 adds them on stall via its layout edit, L4 optimises that.
+    # + L1's own `l1_wounds` + `escalation_panel` + `origin_strengths` (regression guard).
+    # `sample_transcripts` (the RAW misses) is OFF this floor: the `critique` is already its
+    # compression, so the generator reading both duplicated a ~10k-char payload every round.
+    # It stays in `L1_POSSIBLE` (and on `l1_critique`'s floor, the distiller's raw source), so
+    # L2 re-adds it on stall — when the distillation proves lossy for a reasoning-MECHANISM
+    # error — and L4 can search it back in. Raw `diagnostics` and the cross-run panels stay off
+    # the floor for the same reason; L2 adds them on stall via its layout edit, L4 optimises that.
     "l1_generate": NodeLayoutSpec(
         editor="l2_l4",
         possible=L1_POSSIBLE,
@@ -153,7 +151,6 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "prompt_block_catalogue",
                 "plan",
                 "critique",
-                "sample_transcripts",
                 "l1_wounds",
                 "escalation_panel",
                 "origin_strengths",
@@ -211,8 +208,6 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "l1_overrides",
                 "task_context",
                 "l1_signal_catalogue",
-                "l1_supplemental_rules",
-                "l1_situational_examples",
             }
         ),
         mandatory=frozenset({"task_context", "critique", "l1_signal_catalogue", "diagnostics"}),
@@ -231,8 +226,6 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "l1_overrides",
                 "task_context",
                 "l1_signal_catalogue",
-                "l1_supplemental_rules",
-                "l1_situational_examples",
             ],
         ),
     ),

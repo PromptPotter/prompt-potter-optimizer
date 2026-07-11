@@ -12,9 +12,6 @@
   Deliberately NOT part of the stale-repeat reason: a sole
   duplicate-insert breach force-triggers L3 (see ``firing.py``'s
   ``SOFT_REJECT_IDS``), a sole stale-repeat does not.
-* :data:`L2_SUPPLEMENTAL_RULE_DUP_ID` / :data:`L2_SITUATIONAL_EXAMPLE_DANGLING_TRIGGER` /
-  :data:`L2_SUPPLEMENTAL_RULE_DUPLICATES_AUTO_TRIGGER` — rule/example
-  authoring guards.
 
 Outcomes append to ``opt_sp.l2_guard_breaches`` and surface to L3's next
 fire as self-healing evidence via the ``l2_guard_breaches`` dispatch-hub
@@ -174,141 +171,9 @@ L2_DUPLICATE_INSERT: LLMOutputValidator = LLMOutputValidator(
 )
 
 
-def _check_supplemental_rule_dup_id(
-    source_output: Mapping[str, Any],
-    *,
-    opt_sp: OptSearchPoint | None = None,
-    **_: Any,
-) -> ValidatorOutcome | None:
-    """Fire when two L2-authored supplemental rules share a ``rule_id``.
-
-    Duplicate rule_ids confuse the situational-examples filter (it can't
-    decide which body to render). The renderer would silently emit both,
-    bloating L1's prompt with paraphrases.
-    """
-    proposed = source_output.get("l1_supplemental_rules_proposed")
-    if not isinstance(proposed, list) or len(proposed) < 2:
-        return None
-    seen: set[str] = set()
-    dups: list[str] = []
-    for entry in proposed:
-        rid = entry.rule_id
-        if rid in seen:
-            dups.append(rid)
-        else:
-            seen.add(rid)
-    if not dups:
-        return None
-    return ValidatorOutcome(
-        validator_id=L2_SUPPLEMENTAL_RULE_DUP_ID.id,
-        evidence={"duplicate_rule_ids": sorted(set(dups))},
-    )
-
-
-def _check_situational_example_dangling_trigger(
-    source_output: Mapping[str, Any],
-    *,
-    opt_sp: OptSearchPoint | None = None,
-    **_: Any,
-) -> ValidatorOutcome | None:
-    """Fire when a proposed example's ``trigger_id`` matches neither an
-    auto-trigger nor a currently-authored rule_id.
-
-    Dangling triggers are silently filtered by the renderer — the
-    operator never sees the example. Surface as evidence so L2 either
-    fixes the trigger_id or removes the example.
-    """
-    proposed = source_output.get("l1_situational_examples_proposed")
-    if not isinstance(proposed, list) or not proposed:
-        return None
-    # Allowed trigger IDs include auto-triggers + currently-authored rule_ids
-    # (either the rule layer L2 just proposed, or the carried-over layer on
-    # opt_sp if L2 didn't propose this fire).
-    from promptpotter.application.optimization.dispatch.hub.auto_rules import AUTO_RULES
-
-    rules_proposed = source_output.get("l1_supplemental_rules_proposed")
-    if isinstance(rules_proposed, list) and rules_proposed:
-        rule_ids = {r.rule_id for r in rules_proposed}
-    elif opt_sp is not None:
-        rule_ids = {r.rule_id for r in opt_sp.memory.l1_supplemental_rules}
-    else:
-        rule_ids = set()
-    allowed: set[str] = set(AUTO_RULES) | rule_ids
-    dangling: list[str] = []
-    for entry in proposed:
-        tid = entry.trigger_id
-        if tid not in allowed:
-            dangling.append(tid)
-    if not dangling:
-        return None
-    return ValidatorOutcome(
-        validator_id=L2_SITUATIONAL_EXAMPLE_DANGLING_TRIGGER.id,
-        evidence={"dangling_trigger_ids": sorted(set(dangling)), "allowed": sorted(allowed)},
-    )
-
-
-def _check_supplemental_rule_duplicates_auto_trigger(
-    source_output: Mapping[str, Any],
-    *,
-    opt_sp: OptSearchPoint | None = None,
-    **_: Any,
-) -> ValidatorOutcome | None:
-    """Fire when an L2-authored rule body paraphrases a canonical auto-rule.
-
-    Token-set Jaccard ≥ :data:`PARAPHRASE_REPEAT_JACCARD_THRESHOLD` (0.5)
-    against any entry in ``AUTO_RULES`` means L2 is re-asserting a rule
-    the dispatch hub already injects automatically. The L2 slot is wasted.
-    """
-    # Local import — avoid pulling the auto-rules registry at module-load.
-    from promptpotter.application.optimization.dispatch.hub.auto_rules import AUTO_RULES
-
-    proposed = source_output.get("l1_supplemental_rules_proposed")
-    if not isinstance(proposed, list) or not proposed:
-        return None
-    offenders: list[tuple[str, str, float]] = []
-    for entry in proposed:
-        for auto_id, auto_body in AUTO_RULES.items():
-            overlap = word_set_jaccard(entry.body, auto_body)
-            if overlap >= PARAPHRASE_REPEAT_JACCARD_THRESHOLD:
-                offenders.append((entry.rule_id, auto_id, round(overlap, 3)))
-                break
-    if not offenders:
-        return None
-    return ValidatorOutcome(
-        validator_id=L2_SUPPLEMENTAL_RULE_DUPLICATES_AUTO_TRIGGER.id,
-        evidence={
-            "duplicates": [
-                {"rule_id": rid, "auto_trigger": atid, "jaccard": j} for rid, atid, j in offenders
-            ],
-            "threshold": PARAPHRASE_REPEAT_JACCARD_THRESHOLD,
-        },
-    )
-
-
-L2_SUPPLEMENTAL_RULE_DUP_ID: LLMOutputValidator = LLMOutputValidator(
-    id="l2_supplemental_rule_dup_id",
-    check=_check_supplemental_rule_dup_id,
-)
-
-
-L2_SITUATIONAL_EXAMPLE_DANGLING_TRIGGER: LLMOutputValidator = LLMOutputValidator(
-    id="l2_situational_example_dangling_trigger",
-    check=_check_situational_example_dangling_trigger,
-)
-
-
-L2_SUPPLEMENTAL_RULE_DUPLICATES_AUTO_TRIGGER: LLMOutputValidator = LLMOutputValidator(
-    id="l2_supplemental_rule_duplicates_auto_trigger",
-    check=_check_supplemental_rule_duplicates_auto_trigger,
-)
-
-
 L2_OUTPUT_VALIDATORS: tuple[LLMOutputValidator, ...] = (
     L2_TASK_CONTEXT_STALE_REPEAT,
     L2_DUPLICATE_INSERT,
-    L2_SUPPLEMENTAL_RULE_DUP_ID,
-    L2_SITUATIONAL_EXAMPLE_DANGLING_TRIGGER,
-    L2_SUPPLEMENTAL_RULE_DUPLICATES_AUTO_TRIGGER,
 )
 
 
@@ -324,9 +189,6 @@ __all__ = [
     "DUPLICATE_INSERT_LINE_THRESHOLD",
     "L2_DUPLICATE_INSERT",
     "L2_OUTPUT_VALIDATORS",
-    "L2_SITUATIONAL_EXAMPLE_DANGLING_TRIGGER",
-    "L2_SUPPLEMENTAL_RULE_DUPLICATES_AUTO_TRIGGER",
-    "L2_SUPPLEMENTAL_RULE_DUP_ID",
     "L2_TASK_CONTEXT_STALE_REPEAT",
     "PARAPHRASE_REPEAT_JACCARD_THRESHOLD",
     "run_l2_output_validators",

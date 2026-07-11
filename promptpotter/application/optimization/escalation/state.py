@@ -181,6 +181,7 @@ class EscalationFSM:
         lives: LivesConfig | None = None,
         axes_with_positive_yield: int | None = None,
         l1_mandatory_breach: bool = False,
+        l1_zero_candidates: bool = False,
         evidence_starved: bool = False,
     ) -> EscalationEvent:
         """L1 round outcome — bumps stall (+ banks lives when enabled), delegates routing
@@ -201,6 +202,7 @@ class EscalationFSM:
             l1_patience=l1_patience,
             axes_with_positive_yield=axes_with_positive_yield,
             l1_mandatory_breach=l1_mandatory_breach,
+            l1_zero_candidates=l1_zero_candidates,
             evidence_starved=evidence_starved,
         )
         event = decide_escalation(inputs)

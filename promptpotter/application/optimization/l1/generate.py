@@ -102,8 +102,7 @@ async def l1_generate(
     tracing_campaign_id = cycle.session.state.tracing_campaign_id
 
     bundle = build_bundle(cycle)
-    # L2-authored layout rides the OSP; `fill` also resolves the `instruction`-slot
-    # injections (`l1_supplemental_rules` / `l1_situational_examples`) into `injection_vars`.
+    # L2-authored layout rides the OSP; `fill` resolves each slot's injections into `injection_vars`.
     template, injection_vars = DispatchHub.fill(
         load_optimizer_prompt("l1_generate"), opt_sp.memory.l1_layout, bundle
     )

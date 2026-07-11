@@ -150,28 +150,6 @@ class EvidenceGrounding(BaseModel):
     citation: str = Field(description="Short string naming the panel entry cited.")
 
 
-class L1SupplementalRule(BaseModel):
-    """L2-authored situational rule rendered inline in L1's instruction."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    rule_id: str = Field(min_length=1, max_length=40)
-    body: str = Field(min_length=20, max_length=400)
-    citation: str = Field(min_length=1, max_length=200)
-
-
-class L1SituationalExample(BaseModel):
-    """Worked example pinned to a ``trigger_id`` (auto-trigger or L2-authored rule)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    trigger_id: str = Field(min_length=1, max_length=40)
-    parent_excerpt: str = Field(default="", max_length=300)
-    rejected: str = Field(default="", max_length=300)
-    accepted: str = Field(default="", max_length=300)
-    why: str = Field(default="", max_length=200)
-
-
 class WoundChannels(BaseModel):
     """Four wound streams + sticky L3 note; rendered by dispatch-hub injections."""
 
@@ -202,12 +180,12 @@ class IndividualLineage(BaseModel):
 class L2L3Memory(BaseModel):
     """L2/L3-authored state that travels with the candidate.
 
-    Bundled together because all six are authored by the escalation layers
+    Bundled together because all four are authored by the escalation layers
     (L2 writes most; L3 writes ``wounds.l3_note`` + ``wounds.l3_guard_breaches``)
     and consumed by the dispatch-hub injections that compose the four
     optimizer prompts. ``OptSearchPoint.copy_memory_to`` deep-copies the
     whole bundle on L2/L3 adopt; ``OptSearchPoint.mutate`` (L1 child)
-    inherits ``task_context`` + ``l1_overrides`` and resets the other four
+    inherits ``task_context`` + ``l1_overrides`` and resets the other two
     to defaults — the propagation asymmetry lives in those two methods.
     """
 
@@ -235,20 +213,6 @@ class L2L3Memory(BaseModel):
             "Per-individual L1 meta-prompt overrides keyed by the surface "
             "field name (``persona``, ``instruction``, …). L2 writes here "
             "to nudge L1 without rewriting the shared meta-prompt."
-        ),
-    )
-    l1_supplemental_rules: list[L1SupplementalRule] = Field(
-        default_factory=list,
-        description=(
-            "L2-authored situational rules rendered inline in L1's "
-            "instruction. Cumulative across rounds; L3 may prune."
-        ),
-    )
-    l1_situational_examples: list[L1SituationalExample] = Field(
-        default_factory=list,
-        description=(
-            "Worked examples pinned to a ``trigger_id`` (auto-trigger or "
-            "L2-authored rule). Rendered alongside the matching rule."
         ),
     )
     task_context: TaskDecomposition = Field(
@@ -328,9 +292,8 @@ class OptSearchPoint(PromptTemplate):
 
     def mutate(self, **changes: Any) -> OptSearchPoint:
         """Child OSP: prompt fields + ``task_context`` + ``l1_overrides`` inherit
-        from parent; ``wounds``/``l1_layout``/``l1_supplemental_rules``/
-        ``l1_situational_examples`` reset to defaults. The reset four flow on
-        L2/L3 adopt via ``copy_memory_to`` instead."""
+        from parent; ``wounds``/``l1_layout`` reset to defaults. The reset two flow
+        on L2/L3 adopt via ``copy_memory_to`` instead."""
         data: dict[str, Any] = {}
         for f in PROMPT_STRING_FIELDS:
             data[f] = changes.pop(f, getattr(self, f))
@@ -504,8 +467,6 @@ __all__ = [
     "EvidenceGrounding",
     "FewShotExample",
     "IndividualLineage",
-    "L1SituationalExample",
-    "L1SupplementalRule",
     "L2L3Memory",
     "OptSearchPoint",
     "PromptTemplate",

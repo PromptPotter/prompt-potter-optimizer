@@ -129,8 +129,8 @@ def _check_task_context_not_verbatim(
 
 def _check_targets_l1_surface(round_dict: dict[str, Any], ctx: ValidatorContext) -> CheckResult:
     """An L2 fire must change *something* L1 reads — ``task_context``,
-    ``l1_layout``, ``l1_overrides``, or a supplemental rule / situational
-    example. A fire that changes nothing is a wasted escalation."""
+    ``l1_layout``, or ``l1_overrides``. A fire that changes nothing is a
+    wasted escalation."""
     out = extract_l2_output(round_dict)
     if not out:
         return CheckResult("l2_targets_l1_surface", True, "L2 did not fire")
@@ -140,8 +140,6 @@ def _check_targets_l1_surface(round_dict: dict[str, Any], ctx: ValidatorContext)
             "task_context",
             "l1_layout",
             "l1_overrides",
-            "l1_supplemental_rules",
-            "l1_situational_examples",
         )
         if out.get(name)
     ]

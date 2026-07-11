@@ -262,22 +262,6 @@ export interface L1Layout {
   thinking_style: string[];
 }
 
-/** L2-authored situational rule rendered inline in L1's instruction. */
-export interface L1SupplementalRule {
-  rule_id: string;
-  body: string;
-  citation: string;
-}
-
-/** Worked example pinned to a ``trigger_id`` (auto-trigger or L2-authored rule). */
-export interface L1SituationalExample {
-  trigger_id: string;
-  parent_excerpt: string;
-  rejected: string;
-  accepted: string;
-  why: string;
-}
-
 /** L2/L3-authored state that travels with the candidate. */
 export interface L2L3Memory {
   /** Four wound streams (validation/runtime/l2-guard/l3-guard) + sticky L3 note.
@@ -291,12 +275,6 @@ export interface L2L3Memory {
    * (``persona``, ``instruction``, …). L2 writes here to nudge L1 without
    * rewriting the shared meta-prompt. */
   l1_overrides: Record<string, unknown>;
-  /** L2-authored situational rules rendered inline in L1's instruction. Cumulative
-   * across rounds; L3 may prune. */
-  l1_supplemental_rules: L1SupplementalRule[];
-  /** Worked examples pinned to a ``trigger_id`` (auto-trigger or L2-authored rule).
-   * Rendered alongside the matching rule. */
-  l1_situational_examples: L1SituationalExample[];
   /** Persistent task-framing dict refined by ``l2_context`` and spliced around
    * ``problem_description`` at render time. Accumulative: each L2 fire merges
    * deltas rather than rewriting wholesale. */

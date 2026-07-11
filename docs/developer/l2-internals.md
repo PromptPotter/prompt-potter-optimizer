@@ -17,7 +17,7 @@ Trigger gate: `escalation.escalate_l2`; the decision is recorded as `ResumeCheck
 
 ## Inputs — via the hub
 
-L2's injection set (`plan`, `l3_to_l2_note`, `rendered_prompt`, `diagnostics`, `evidence_health`, `guard_breaches`, `axis_memory`, `archive_top_runs`, `rare_hit_samples`, `critique`, `l1_overrides`, `task_context`, `l1_signal_catalogue`, `l1_supplemental_rules`, `l1_situational_examples`) lives in `NODE_LAYOUTS["l2_context"].floor` (`domain/l1_layout.py`), not as `{{tokens}}` in the template — its `l2_context/1` `problem_description` body is now empty. `DispatchHub.fill(template, floor, bundle)` fills them in one pass. No L2-only surface object exists — L2 is just one consumer of the global `INJECTIONS` registry. L2 does not see `l2_guard_breaches` / `l3_guard_breaches` — when those appear, Wound 4 fires L3 immediately, so by L2's next fire L3 has already replanned and L2 reads the new `plan`.
+L2's injection set (`plan`, `l3_to_l2_note`, `rendered_prompt`, `diagnostics`, `evidence_health`, `guard_breaches`, `axis_memory`, `archive_top_runs`, `rare_hit_samples`, `critique`, `l1_overrides`, `task_context`, `l1_signal_catalogue`) lives in `NODE_LAYOUTS["l2_context"].floor` (`domain/l1_layout.py`), not as `{{tokens}}` in the template — its `l2_context/1` `problem_description` body is now empty. `DispatchHub.fill(template, floor, bundle)` fills them in one pass. No L2-only surface object exists — L2 is just one consumer of the global `INJECTIONS` registry. L2 does not see `l2_guard_breaches` / `l3_guard_breaches` — when those appear, Wound 4 fires L3 immediately, so by L2's next fire L3 has already replanned and L2 reads the new `plan`.
 
 One injection is L2-only: `l1_signal_catalogue` — the menu of names L2 may put in `l1_layout`. Absent from `L1_POSSIBLE` so L2 cannot accidentally inject its own catalogue into L1.
 
@@ -73,7 +73,7 @@ if action == "probe_round":
     cycle.probe_next_round = True
 ```
 
-The OSP is mutable Pydantic; writes happen in place. `l1_layout` lives on `OptSearchPoint.memory` (an `L2L3Memory` bundle), so L3-spawned children inherit in-flight L2 edits via `copy_memory_to`. `task_context` is on the same `memory` bundle and is forwarded by `mutate()` to L1 children (along with `l1_overrides`); the other four memory fields (`wounds`, `l1_layout`, `l1_supplemental_rules`, `l1_situational_examples`) reset to defaults in `mutate()` and only flow on L2/L3 adopt.
+The OSP is mutable Pydantic; writes happen in place. `l1_layout` lives on `OptSearchPoint.memory` (an `L2L3Memory` bundle), so L3-spawned children inherit in-flight L2 edits via `copy_memory_to`. `task_context` is on the same `memory` bundle and is forwarded by `mutate()` to L1 children (along with `l1_overrides`); the other two memory fields (`wounds`, `l1_layout`) reset to defaults in `mutate()` and only flow on L2/L3 adopt.
 
 The single decision recorded per L2 fire is `PROBE_ROUND_COMMITMENT` — outcome `True` if probe, else `False`. Layout / framing-refinement content are not separate decisions; they ride on the round file.
 

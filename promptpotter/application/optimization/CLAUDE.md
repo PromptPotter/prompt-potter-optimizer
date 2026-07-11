@@ -80,7 +80,7 @@ Fires only on L2-layer stall (L2 patience exceeded). Receives the evidence panel
 
 The L3-layer also **heals the L2-layer** on validator outcomes:
 
-- `l2_task_context_stale_repeat` or `l2_situational_example_dangling_trigger` when combined with a non-soft breach (each is a soft-reject — `_L2_SOFT_REJECT_VALIDATOR_IDS`; a breach set that is *all* soft-reject skips the L3 fire, since the output was already discarded),
+- `l2_task_context_stale_repeat` when combined with a non-soft breach (it is a soft-reject — `_L2_SOFT_REJECT_VALIDATOR_IDS`; a breach set that is *all* soft-reject skips the L3 fire, since the output was already discarded),
 - L1 layout HARD-validator failures (mandatory placeholder missing, unknown name, dup within slot), or
 - repeated cross-field issues that the framing refinement surface can't resolve.
 

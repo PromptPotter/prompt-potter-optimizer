@@ -1684,8 +1684,6 @@ def _osp(**kwargs) -> OptSearchPoint:
         "wounds",
         "l1_layout",
         "l1_overrides",
-        "l1_supplemental_rules",
-        "l1_situational_examples",
         "task_context",
     }
     if "memory" not in kwargs and (

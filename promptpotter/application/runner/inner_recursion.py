@@ -98,6 +98,15 @@ INNER_RESULT_KEY = "final_ranking"
 # still finishes its declared rounds rather than tripping the cost stop mid-budget.
 INNER_SPEND_PER_ROUND_USD = 0.012
 
+# Token twin of the spend allowance above. `token_budget` counts backend + optimizer tokens and,
+# on a cheap/free backend, is the ceiling that trips first. It MUST scale off the round budget for
+# the same reason the spend cap does — a flat constant the round budget can outgrow silently
+# reconverts a ROUND budget into a TOKEN budget, halting a deep inner run mid-rounds. The flat
+# `CampaignConfig` default is 210k ≈ a 5-round run (~42k/round); sized to 52k/round here so a
+# 7-round inner run gets ~2x that (the `429eea` starvation halted every inner campaign at ~210k
+# with rounds still in hand), with the same headroom rationale.
+INNER_TOKENS_PER_ROUND = 52_000
+
 # Per-round wall-clock allowance for ONE outer sample, sized like the spend cap above. Every
 # individual await inside an inner campaign is already bounded (optimizer 180s x2, backend 120s,
 # MAX_429_ATTEMPTS, rounds <= HARD_CAP) — but nothing bounded their SUM, so sustained 429
@@ -705,7 +714,17 @@ async def _run_inner_campaign(
         campaign_config.optimization.spend_budget_usd or 0.0,
         INNER_SPEND_PER_ROUND_USD * (spec.n_rounds + 1),
     )
-    opt_update: dict[str, Any] = {"max_rounds": spec.n_rounds, "spend_budget_usd": inner_spend_cap}
+    # Same round-budget sizing for the token ceiling — see INNER_TOKENS_PER_ROUND. Without this the
+    # inner cycle inherits the flat 5-round default and token-starves a 7-round run mid-rounds.
+    inner_token_cap = max(
+        campaign_config.optimization.token_budget or 0,
+        INNER_TOKENS_PER_ROUND * (spec.n_rounds + 1),
+    )
+    opt_update: dict[str, Any] = {
+        "max_rounds": spec.n_rounds,
+        "spend_budget_usd": inner_spend_cap,
+        "token_budget": inner_token_cap,
+    }
     if spec.n_variants is not None:
         # inner_n_variants (inner_tasks.json) — the outer task spec owns the inner
         # search width, same as it owns the round cap; the inner dataset's own

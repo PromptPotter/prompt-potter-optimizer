@@ -199,17 +199,21 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # The three FALLS below are the knob-registry refactor's, banked here rather than left
 # loose: a baseline above actual is a ratchet that has stopped ratcheting, and would
 # silently re-admit the two shims it already paid to delete.
+# then FALLS from deleting the dead void-writer (L2 authored ``l1_supplemental_rules`` /
+# ``l1_situational_examples`` into a channel ``l1_generate`` never rendered) + the dead
+# ``intractable_samples`` panel: ``injections`` 24->21, ``opt_search_point_fields`` 27->25,
+# ``modules`` 313->312 (``auto_rules.py`` deleted).
 
 LEDGER_BASELINE = {
-    "modules": 313,
+    "modules": 312,
     "init_files": 58,
     "reexport_shims": 42,
     "config_leaf_fields": 38,
     "settings_env": 16,
     "settings_const": 14,
-    "opt_search_point_fields": 27,
+    "opt_search_point_fields": 25,
     "prompt_string_fields": 6,
-    "injections": 24,
+    "injections": 21,
     "escalation_rules": 6,
     "claude_md": 7,
 }

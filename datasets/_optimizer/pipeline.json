@@ -390,8 +390,6 @@
         "axis_targeted",
         "l1_layout",
         "l1_overrides",
-        "l1_supplemental_rules",
-        "l1_situational_examples",
         "rationale",
         "fork_proposal",
         "terminate_proposal"
@@ -403,12 +401,8 @@
           "$defs": {
             "ForkProposal": {
               "additionalProperties": false,
-              "description": "L2/L3-emitted proposal to rewind the search to an earlier round.\n\n``round_offset`` is relative to the current round and typically\nnegative (rewind). When set, the runner mints a sibling cycle via\n``_mint_fork(L{2,3}_REBASE, fork_from_round=current + round_offset)``,\nexits the current cycle with ``StopReason.REBASED``, and\nauto-continues optimization on the new fork (capped at\n``MAX_AUTO_REBASES`` per CLI invocation).\n\n``unlock_schema_field_rename`` is the layer's one search-policy request. It is\na bool and not a ``ConfigOverrides`` object on purpose: handed the whole delta\nthe layer could move its own spend ceiling. Unlocking widens the search space,\nwhich is why it can only ride a rewind \u2014 the parent cycle keeps its frozen\nconfig, so its measurements stay comparable.",
+              "description": "L2/L3-emitted proposal to rewind the search to an earlier round.\n\n**The layer decides WHETHER; UCB decides WHERE.** There is deliberately no\n``round_offset`` here. The rewind target is selected by\n``mask/backprop.py::select_rewind_round`` \u2014 UCB1 over the backpropagated lineage\n(each ancestor's mean \u03b8, traded off against how little it has been explored). The\nlayer supplies the one judgment a rule makes badly (\"this subtree is spent\") and is\nrelieved of the one it made blindly: no panel ever enumerated the ancestor rounds\nand their fitness, so a free-form offset was an unanchored guess carrying the most\nexpensive decision in the loop.\n\nWhen emitted, the runner mints a sibling via ``_mint_fork(L{2,3}_REBASE,\nfork_from_round=<UCB pick>)``, exits with ``StopReason.REBASED``, and auto-continues\non the new fork (capped at ``MAX_AUTO_REBASES`` per CLI invocation).\n\n``unlock_schema_field_rename`` is the layer's one search-policy request. It is\na bool and not a ``ConfigOverrides`` object on purpose: handed the whole delta\nthe layer could move its own spend ceiling. Unlocking widens the search space,\nwhich is why it can only ride a rewind \u2014 the parent cycle keeps its frozen\nconfig, so its measurements stay comparable.",
               "properties": {
-                "round_offset": {
-                  "title": "Round Offset",
-                  "type": "integer"
-                },
                 "reason": {
                   "default": "",
                   "title": "Reason",
@@ -421,82 +415,7 @@
                   "type": "boolean"
                 }
               },
-              "required": [
-                "round_offset"
-              ],
               "title": "ForkProposal",
-              "type": "object"
-            },
-            "L1SituationalExample": {
-              "additionalProperties": false,
-              "description": "Worked example pinned to a ``trigger_id`` (auto-trigger or L2-authored rule).",
-              "properties": {
-                "trigger_id": {
-                  "maxLength": 40,
-                  "minLength": 1,
-                  "title": "Trigger Id",
-                  "type": "string"
-                },
-                "parent_excerpt": {
-                  "default": "",
-                  "maxLength": 300,
-                  "title": "Parent Excerpt",
-                  "type": "string"
-                },
-                "rejected": {
-                  "default": "",
-                  "maxLength": 300,
-                  "title": "Rejected",
-                  "type": "string"
-                },
-                "accepted": {
-                  "default": "",
-                  "maxLength": 300,
-                  "title": "Accepted",
-                  "type": "string"
-                },
-                "why": {
-                  "default": "",
-                  "maxLength": 200,
-                  "title": "Why",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "trigger_id"
-              ],
-              "title": "L1SituationalExample",
-              "type": "object"
-            },
-            "L1SupplementalRule": {
-              "additionalProperties": false,
-              "description": "L2-authored situational rule rendered inline in L1's instruction.",
-              "properties": {
-                "rule_id": {
-                  "maxLength": 40,
-                  "minLength": 1,
-                  "title": "Rule Id",
-                  "type": "string"
-                },
-                "body": {
-                  "maxLength": 400,
-                  "minLength": 20,
-                  "title": "Body",
-                  "type": "string"
-                },
-                "citation": {
-                  "maxLength": 200,
-                  "minLength": 1,
-                  "title": "Citation",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "rule_id",
-                "body",
-                "citation"
-              ],
-              "title": "L1SupplementalRule",
               "type": "object"
             },
             "TerminateProposal": {
@@ -514,7 +433,7 @@
             }
           },
           "additionalProperties": false,
-          "description": "L2 refinement. All fields optional \u2014 the LLM sets only what it\nwants to change.\n\n``task_context`` is a free-form refinement dict (keys: domain,\npipeline_purpose, data_characteristics, optimization_goals,\nkey_challenges) \u2014 left as ``dict[str, Any]`` because the cycle's\n:class:`TaskDecomposition` owns the precise key set and merges via\n:meth:`TaskDecomposition.merge`. ``l1_layout`` is a similarly\nflexible ``{slot: [placeholder, ...]}`` map validated downstream by\n:func:`validate_l1_layout`.\n\n``l1_supplemental_rules`` + ``l1_situational_examples`` are\nfull-replace layers that L2 re-authors every fire. Auto-triggered\nrules (PEAKED, runtime_failure, chain_bind, continuous_envelope,\nlatex_repair, l2_stall_diversity) render independently via the\ndispatch hub's auto-rules registry \u2014 L2 only adds rules that\nauto-triggers don't already cover.",
+          "description": "L2 refinement. All fields optional \u2014 the LLM sets only what it\nwants to change.\n\n``task_context`` is a free-form refinement dict (keys: domain,\npipeline_purpose, data_characteristics, optimization_goals,\nkey_challenges) \u2014 left as ``dict[str, Any]`` because the cycle's\n:class:`TaskDecomposition` owns the precise key set and merges via\n:meth:`TaskDecomposition.merge`. ``l1_layout`` is a similarly\nflexible ``{slot: [placeholder, ...]}`` map validated downstream by\n:func:`validate_l1_layout`.",
           "properties": {
             "task_context": {
               "additionalProperties": true,
@@ -549,22 +468,6 @@
               "additionalProperties": true,
               "title": "L1 Overrides",
               "type": "object"
-            },
-            "l1_supplemental_rules": {
-              "items": {
-                "$ref": "#/$defs/L1SupplementalRule"
-              },
-              "maxItems": 4,
-              "title": "L1 Supplemental Rules",
-              "type": "array"
-            },
-            "l1_situational_examples": {
-              "items": {
-                "$ref": "#/$defs/L1SituationalExample"
-              },
-              "maxItems": 4,
-              "title": "L1 Situational Examples",
-              "type": "array"
             },
             "rationale": {
               "default": "",
@@ -614,12 +517,8 @@
           "$defs": {
             "ForkProposal": {
               "additionalProperties": false,
-              "description": "L2/L3-emitted proposal to rewind the search to an earlier round.\n\n``round_offset`` is relative to the current round and typically\nnegative (rewind). When set, the runner mints a sibling cycle via\n``_mint_fork(L{2,3}_REBASE, fork_from_round=current + round_offset)``,\nexits the current cycle with ``StopReason.REBASED``, and\nauto-continues optimization on the new fork (capped at\n``MAX_AUTO_REBASES`` per CLI invocation).\n\n``unlock_schema_field_rename`` is the layer's one search-policy request. It is\na bool and not a ``ConfigOverrides`` object on purpose: handed the whole delta\nthe layer could move its own spend ceiling. Unlocking widens the search space,\nwhich is why it can only ride a rewind \u2014 the parent cycle keeps its frozen\nconfig, so its measurements stay comparable.",
+              "description": "L2/L3-emitted proposal to rewind the search to an earlier round.\n\n**The layer decides WHETHER; UCB decides WHERE.** There is deliberately no\n``round_offset`` here. The rewind target is selected by\n``mask/backprop.py::select_rewind_round`` \u2014 UCB1 over the backpropagated lineage\n(each ancestor's mean \u03b8, traded off against how little it has been explored). The\nlayer supplies the one judgment a rule makes badly (\"this subtree is spent\") and is\nrelieved of the one it made blindly: no panel ever enumerated the ancestor rounds\nand their fitness, so a free-form offset was an unanchored guess carrying the most\nexpensive decision in the loop.\n\nWhen emitted, the runner mints a sibling via ``_mint_fork(L{2,3}_REBASE,\nfork_from_round=<UCB pick>)``, exits with ``StopReason.REBASED``, and auto-continues\non the new fork (capped at ``MAX_AUTO_REBASES`` per CLI invocation).\n\n``unlock_schema_field_rename`` is the layer's one search-policy request. It is\na bool and not a ``ConfigOverrides`` object on purpose: handed the whole delta\nthe layer could move its own spend ceiling. Unlocking widens the search space,\nwhich is why it can only ride a rewind \u2014 the parent cycle keeps its frozen\nconfig, so its measurements stay comparable.",
               "properties": {
-                "round_offset": {
-                  "title": "Round Offset",
-                  "type": "integer"
-                },
                 "reason": {
                   "default": "",
                   "title": "Reason",
@@ -632,9 +531,6 @@
                   "type": "boolean"
                 }
               },
-              "required": [
-                "round_offset"
-              ],
               "title": "ForkProposal",
               "type": "object"
             },
@@ -929,11 +825,11 @@
     },
     "l2_context/1": {
       "persona": "You are L2, the framing layer. You refine task_context \u2014 the 5-field steering dict every layer (L1, L1_CRITIQUE, L2, L3) reads next round. You do not author candidate prompts.",
-      "task_intent": "Nudge task_context so L1's next round mutates a real failure cluster. Optionally add a supplemental rule, pin a worked example, or restructure L1's layout. A no-op task_context (paraphrase only) is rejected as verbatim-repeat and escalates to L3.",
+      "task_intent": "Nudge task_context so L1's next round mutates a real failure cluster. Optionally restructure L1's layout. A no-op task_context (paraphrase only) is rejected as verbatim-repeat and escalates to L3.",
       "problem_description": "",
-      "instruction": "STARVATION GATE (evaluate FIRST, before any refinement below). If the EVIDENCE STARVED panel above names a node, this round is UNRELIABLE and its failure clusters \u2014 including critique.failure_highlights and the axis-memory cluster, often a downstream matcher such as token_matching \u2014 are CASCADE NOISE from that dead node, not real targets. Do NOT refine task_context to chase them. Instead emit terminate_proposal naming the starved node and what the operator must fix, and STOP. Proceed to the steps below ONLY when no node is evidence-starved.\n\nPRIMARY: refine task_context \u2014 emit ONLY the fields you change this fire; the merge retains the rest, so re-emitting an unchanged framing field verbatim is a stale-repeat no-op. Always advance key_challenges; touch a framing field (domain, pipeline_purpose, data_characteristics, optimization_goals) only when a data point actually shifts it. Each change is nudged from one data point (a paraphrase-only change is a no-op and escalates to L3).\n  domain, pipeline_purpose, data_characteristics, optimization_goals \u2014 1-2 sentences each, framing only; write tight.\n  key_challenges \u2014 the chain-bind, three parts; NEVER write the bare axis word as any part: (a) the failure cluster from critique described as a failure MODE in words (not the axis name), (b) the literal phrase \"targeting L1 axis '<axis_name>'\", (c) the concrete change. If critique.failure_highlights is empty, name the cluster from the sample diagnostics rather than echoing the axis. That phrase appears HERE ONLY.\n\nAfter an improving round, reinforce \u2014 tighten key_challenges around the cluster the last winner converted so L1 presses the same direction; do not reframe. When the dominant cluster is unchanged from your prior fire, advance key_challenges to the next-ranked cluster in critique.failure_highlights instead of repeating it (a repeat merges to a no-op and escalates to L3).\n\nAXIS PICK: a semantic failure (wrong reasoning, missed case, refusal) routes to a prompt-field axis; a quantitative failure with a runtime_failures signature routes to a param axis. Before writing, scan CURRENT PROMPT \u2014 if your change is already there, switch axis or write it STRICTER.\n\nOPTIONAL (skip unless the evidence warrants it; all full-replace): l1_supplemental_rules for a failure mode not auto-covered (peaked_axis, runtime_failure, continuous_envelope, chain_bind, latex_repair, l2_stall_diversity); l1_situational_examples pinned to an active trigger; l1_layout (default omit); action=probe_round for one narrow failure with a named axis hypothesis; l1_overrides (rare; creativity/n_variants only).\n\n{{rebase_capability}}\n\n{{terminate_capability}}\n\nL3 NOTE (if present): a sticky pointer \u2014 honor it unless the data contradicts it.",
+      "instruction": "STARVATION GATE (evaluate FIRST, before any refinement below). If the EVIDENCE STARVED panel above names a node, this round is UNRELIABLE and its failure clusters \u2014 including critique.failure_highlights and the axis-memory cluster, often a downstream matcher such as token_matching \u2014 are CASCADE NOISE from that dead node, not real targets. Do NOT refine task_context to chase them. Instead emit terminate_proposal naming the starved node and what the operator must fix, and STOP. Proceed to the steps below ONLY when no node is evidence-starved.\n\nPRIMARY: refine task_context \u2014 emit ONLY the fields you change this fire; the merge retains the rest, so re-emitting an unchanged framing field verbatim is a stale-repeat no-op. Always advance key_challenges; touch a framing field (domain, pipeline_purpose, data_characteristics, optimization_goals) only when a data point actually shifts it. Each change is nudged from one data point (a paraphrase-only change is a no-op and escalates to L3).\n  domain, pipeline_purpose, data_characteristics, optimization_goals \u2014 1-2 sentences each, framing only; write tight.\n  key_challenges \u2014 the chain-bind, three parts; NEVER write the bare axis word as any part: (a) the failure cluster from critique described as a failure MODE in words (not the axis name), (b) the literal phrase \"targeting L1 axis '<axis_name>'\", (c) the concrete change. If critique.failure_highlights is empty, name the cluster from the sample diagnostics rather than echoing the axis. That phrase appears HERE ONLY.\n\nAfter an improving round, reinforce \u2014 tighten key_challenges around the cluster the last winner converted so L1 presses the same direction; do not reframe. When the dominant cluster is unchanged from your prior fire, advance key_challenges to the next-ranked cluster in critique.failure_highlights instead of repeating it (a repeat merges to a no-op and escalates to L3).\n\nAXIS PICK: a semantic failure (wrong reasoning, missed case, refusal) routes to a prompt-field axis; a quantitative failure with a runtime_failures signature routes to a param axis. Before writing, scan CURRENT PROMPT \u2014 if your change is already there, switch axis or write it STRICTER.\n\nOPTIONAL (skip unless the evidence warrants it): l1_layout (default omit); action=probe_round for one narrow failure with a named axis hypothesis; l1_overrides (rare; creativity/n_variants only).\n\n{{rebase_capability}}\n\n{{terminate_capability}}\n\nL3 NOTE (if present): a sticky pointer \u2014 honor it unless the data contradicts it.",
       "thinking_style": "Before writing task_context, name the one failure cluster you are attacking (from critique.failure_highlights) and the L1 axis you will route it to. Before adding any optional rule or example, name the panel evidence showing the auto-triggers do not already cover it \u2014 if you cannot, skip it.",
-      "answer_format": "Return JSON; set only what you change.\n{\n  \"task_context\": {\"domain\": ..., \"pipeline_purpose\": ..., \"data_characteristics\": ..., \"optimization_goals\": ..., \"key_challenges\": ...},   // each value <=300c \u2014 the render caps per-field at 300; overflow is cut mid-sentence and never reaches the LLM\n  \"l1_supplemental_rules\": [{\"rule_id\": ..., \"body\": ..., \"citation\": ...}],   // <=3; rule_id <=40c, body 20-300c, citation <=200c\n  \"l1_situational_examples\": [{\"trigger_id\": ..., \"parent_excerpt\": ..., \"rejected\": ..., \"accepted\": ..., \"why\": ...}],   // <=3; trigger_id MUST be an active auto-trigger (peaked_axis, runtime_failure, continuous_envelope, chain_bind, latex_repair, l2_stall_diversity) or a rule_id you emit in l1_supplemental_rules THIS fire; any other trigger_id is silently dropped\n  \"l1_layout\": {\"<slot>\": [\"<placeholder>\", ...]},   // if set, all 5 mandatory placeholders must appear\n  \"l1_overrides\": {...},\n  \"action\": \"normal_round\" | \"probe_round\",\n  \"axis_targeted\": \"<short>\",   // required only when probe_round\n  \"rationale\": \"1-2 sentences\"\n}\nL1 owns pipeline_params \u2014 your output is framing plus optional rules/examples/layout, never candidate values."
+      "answer_format": "Return JSON; set only what you change.\n{\n  \"task_context\": {\"domain\": ..., \"pipeline_purpose\": ..., \"data_characteristics\": ..., \"optimization_goals\": ..., \"key_challenges\": ...},   // each value <=300c \u2014 the render caps per-field at 300; overflow is cut mid-sentence and never reaches the LLM\n  \"l1_layout\": {\"<slot>\": [\"<placeholder>\", ...]},   // if set, all 5 mandatory placeholders must appear\n  \"l1_overrides\": {...},\n  \"action\": \"normal_round\" | \"probe_round\",\n  \"axis_targeted\": \"<short>\",   // required only when probe_round\n  \"rationale\": \"1-2 sentences\"\n}\nL1 owns pipeline_params \u2014 your output is framing plus optional layout, never candidate values."
     },
     "l3_plan/1": {
       "persona": "You are an expert optimization strategist.",

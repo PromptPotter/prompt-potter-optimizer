@@ -1,19 +1,12 @@
-"""Narrative-state + supplemental-rule renderers — persistent state from prior LLM calls
-(L3 plan, L2 task_context + L3→L2 note, current prompt, L1 critique) plus auto-triggered +
-L2-authored rules/examples appended to L1's instruction.
+"""Narrative-state renderers — persistent state from prior LLM calls
+(L3 plan, L2 task_context + L3→L2 note, current prompt, L1 critique).
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import re
-from typing import Any
 
-from promptpotter.application.optimization.dispatch.hub.auto_rules import (
-    AUTO_RULES,
-    BUILTIN_EXAMPLES,
-)
 from promptpotter.application.optimization.dispatch.hub.bundle import (
     TASK_CONTEXT_VALUE_CAP,
     InjectionBundle,
@@ -22,14 +15,9 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
 )
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM
 from promptpotter.domain.rendering import format_l1_critique_for_prompt
-from promptpotter.domain.search_point import PARAM_SCOPE_KEYS
 from promptpotter.infrastructure.llm.models import emit_round_warning
 
 logger = logging.getLogger(__name__)
-
-# LaTeX corruption — match `oxed{` not preceded by `\b` (skips legit `\boxed{`) OR `athematical`
-# at a word boundary not preceded by `m` (skips `mathematical`).
-_LATEX_CORRUPTION_RE = re.compile(r"(?<!\\b)oxed\{|(?<![a-zA-Z])athematical")
 
 
 @signal(
@@ -239,103 +227,3 @@ def _r_terminate_capability(b: InjectionBundle) -> str:
     if not b.terminate_capability:
         return ""
     return _TERMINATE_CAPABILITY_TEXT
-
-
-def _detect_auto_triggers(b: InjectionBundle) -> list[str]:
-    """Walk auto-trigger conditions in fixed order — also the render order in L1's prompt."""
-    triggers: list[str] = []
-    if b.axes is not None and b.axes.peaked_axes():
-        triggers.append("peaked_axis")
-    if b.opt_sp.memory.wounds.runtime_failures:
-        triggers.append("runtime_failure")
-    crit = b.digest.critique
-    sa = (crit.get("suggested_axes") if crit else None) or []
-    if any(a in PARAM_SCOPE_KEYS for a in sa):
-        triggers.append("continuous_envelope")
-    key_challenges = b.opt_sp.memory.task_context.key_challenges
-    if "targeting L1 axis" in key_challenges:
-        triggers.append("chain_bind")
-    if b.opt_sp.memory.wounds.l2_guard_breaches:
-        triggers.append("l2_stall_diversity")
-    if _LATEX_CORRUPTION_RE.search(b.opt_sp.render()):
-        triggers.append("latex_repair")
-    if any(vf.reason == "forbidden_axis" for vf in b.opt_sp.memory.wounds.validation_failures):
-        triggers.append("forbidden_axis_attempted")
-    return triggers
-
-
-@signal(
-    "l1_supplemental_rules",
-    kind=InjectionKind.DIRECTIVE,
-    description=(
-        "Situational rules appended to L1's instruction — auto-triggered from "
-        "bundle state (PEAKED axes, runtime failures, chain-bind, continuous-axis, "
-        "L2 stall, LaTeX corruption) plus L2-authored entries on opt_sp."
-    ),
-    char_cap=1000,
-)
-def _r_l1_supplemental_rules(b: InjectionBundle) -> str:
-    """Auto-triggered rules (from `AUTO_RULES`) + L2-authored ones (cited). Empty → L1 omits the block."""
-    rendered: list[tuple[str, str]] = []
-    for trigger_id in _detect_auto_triggers(b):
-        body = AUTO_RULES.get(trigger_id)
-        if body:
-            rendered.append((trigger_id, body))
-    for rule in b.opt_sp.memory.l1_supplemental_rules:
-        body = f"{rule.body} [citation: {rule.citation}]"
-        rendered.append((rule.rule_id, body))
-    if not rendered:
-        return ""
-    lines = ["SITUATIONAL RULES (apply only when the cited evidence is present):"]
-    for trigger_id, body in rendered:
-        lines.append(f"  • [{trigger_id}] {body}")
-    return "\n".join(lines)
-
-
-@signal(
-    "l1_situational_examples",
-    kind=InjectionKind.DIRECTIVE,
-    description=(
-        "Worked examples pinned to currently-active triggers — built-ins shipped "
-        "in auto_rules.py plus L2-authored entries on opt_sp. Examples whose "
-        "trigger is not active this round are silently filtered."
-    ),
-    char_cap=1000,
-)
-def _r_l1_situational_examples(b: InjectionBundle) -> str:
-    """Worked examples for currently-active triggers. L2-authored examples without a matching
-    active trigger filter out (would orphan from the rule). L2 entry overrides matching built-in.
-    """
-    auto_triggers = _detect_auto_triggers(b)
-    l2_rule_ids = {r.rule_id for r in b.opt_sp.memory.l1_supplemental_rules}
-    active = set(auto_triggers) | l2_rule_ids
-    l2_example_triggers = {ex.trigger_id for ex in b.opt_sp.memory.l1_situational_examples}
-
-    blocks: list[str] = []
-    for trigger_id in auto_triggers:
-        if trigger_id in l2_example_triggers:
-            continue  # L2's entry overrides the built-in
-        builtin = BUILTIN_EXAMPLES.get(trigger_id)
-        if builtin:
-            blocks.append(_format_example(trigger_id, builtin))
-    for l2_ex in b.opt_sp.memory.l1_situational_examples:
-        if l2_ex.trigger_id not in active:
-            continue
-        blocks.append(_format_example(l2_ex.trigger_id, l2_ex.model_dump()))
-    if not blocks:
-        return ""
-    return "WORKED EXAMPLES:\n" + "\n".join(blocks)
-
-
-def _format_example(trigger_id: str, ex: dict[str, Any]) -> str:
-    """Worked-example block: trigger header + ✗/✓/→ lines. Parent excerpt dropped (duplicates the
-    rule body rendered just above); ✗/✓/→ symbols replace verbose labels for small-model legibility.
-    """
-    lines = [f"  [{trigger_id}]"]
-    if rej := (ex.get("rejected") or "").strip():
-        lines.append(f"    ✗ {rej}")
-    if acc := (ex.get("accepted") or "").strip():
-        lines.append(f"    ✓ {acc}")
-    if why := (ex.get("why") or "").strip():
-        lines.append(f"    → {why}")
-    return "\n".join(lines)
