@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { DatasetIndexEntry, OriginEntry } from "@/lib/api";
 import type { IngestFlow } from "@/lib/hooks/useIngestFlow";
 import { cx } from "@/lib/cx";
+import { ChoiceField } from "@/components/forms/ChoiceField";
 import { NumberField } from "@/components/forms/NumberField";
 import { SlugField } from "@/components/forms/SlugField";
 import { MechanismsPanel } from "@/components/dashboard/control/MechanismsPanel";
@@ -326,6 +327,19 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
             max={100}
             onApply={(max_rounds) =>
               flow.applyPatch({ optimization_overrides: { max_rounds } })
+            }
+          />
+          <ChoiceField
+            label="Prompt block library"
+            value={draft.optimization_overrides.prompt_block_catalogue}
+            options={[
+              { value: "guidance", label: "Suggest (reuse or invent)" },
+              { value: "restrict", label: "Library only" },
+              { value: "off", label: "Off" },
+            ]}
+            hint="Proven persona / thinking-style / answer-format blocks the optimizer can draw on."
+            onApply={(prompt_block_catalogue) =>
+              flow.applyPatch({ optimization_overrides: { prompt_block_catalogue } })
             }
           />
           <SlugField slug={draft.slug} onApply={(slug) => flow.applyPatch({ slug })} />

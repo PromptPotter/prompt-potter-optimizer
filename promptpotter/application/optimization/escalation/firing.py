@@ -16,6 +16,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
+from promptpotter.application.mask.backprop import select_rewind_round
+from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.optimization.dispatch.hub import (
     DispatchHub,
     build_bundle,
@@ -555,57 +557,79 @@ async def _run_transition(
         raise StopLoop(StopReason.ABORT)
 
     if result.fork_proposal is not None:
-        if int(result.fork_proposal.round_offset) >= 0:
-            # round_offset MUST be negative (a rewind); 0/positive would mint a
-            # phantom fork at the current/future round. The autonomous L2/L3 path
-            # has no schema-level guard (operator `--rewind` does) — reject the
-            # malformed proposal here: log and continue, never fork.
+        if not cycle.config.optimization.rebase_capability:
+            # The capability is OFF, so the prompt carried no fork guidance — but a
+            # model can still volunteer the field. Without this the gate would be
+            # prompt-side only: a no-rebase ablation run could silently fork anyway,
+            # and its whole point is that it cannot.
             logger.warning(
-                "%s fork_proposal ignored: round_offset must be negative, got %d",
+                "%s emitted fork_proposal while rebase_capability is off — ignored",
                 transition.layer_id,
-                result.fork_proposal.round_offset,
             )
-        else:
-            _stash_rebase_request(cycle, transition.layer_id, result.fork_proposal, round_num)
+        elif _stash_rebase_request(cycle, transition.layer_id, result.fork_proposal, round_num):
             raise StopLoop(StopReason.REBASED)
 
 
-def _stash_rebase_request(cycle: Cycle, layer_id: str, proposal: Any, round_num: int) -> None:
-    """Stash an L2/L3 fork_proposal as a Cycle.rebase_request.
+def _stash_rebase_request(cycle: Cycle, layer_id: str, proposal: Any, round_num: int) -> bool:
+    """Stash an L2/L3 fork_proposal as a Cycle.rebase_request. False ⇒ do not fork.
 
-    The runner resolves the request post-finalize: ``_mint_fork`` then
-    rebuilds observers around the new fork's ledger and re-enters the
-    optimize loop (capped at ``MAX_AUTO_REBASES`` per CLI invocation).
-    Stashing here keeps the old cycle's finalize using the un-retargeted
-    ``session.state.cycle_id`` — a crash mid-finalize leaves the old
-    cycle clean and the rebase un-minted, which the operator can
+    **The layer decides WHETHER to rewind; UCB decides WHERE.** The layer sees that its
+    subtree is exhausted — a judgment no rule makes well — and says so. Which ancestor
+    to re-expand from is then a statistical question with a right answer, and it is
+    answered by :func:`select_rewind_round`: UCB1 over the backpropagated lineage,
+    balancing each ancestor's mean θ against how little it has been explored. That the
+    layer no longer names a round is the point: it never had the evidence to. No panel
+    ever enumerated the ancestors and their fitness, so a free-form ``round_offset`` was
+    an unanchored guess wearing the costliest decision in the loop.
+
+    The runner resolves the request post-finalize: ``_mint_fork`` then rebuilds observers
+    around the new fork's ledger and re-enters the optimize loop (capped at
+    ``MAX_AUTO_REBASES`` per CLI invocation). Stashing here keeps the old cycle's
+    finalize using the un-retargeted ``session.state.cycle_id`` — a crash mid-finalize
+    leaves the old cycle clean and the rebase un-minted, which the operator can
     re-trigger by re-invoking ``resume``.
 
-    An ``unlock_schema_field_rename`` request widens into the fork's
-    ``ConfigOverrides`` here — the unlock rides the rewind and cannot travel
-    without it, so the parent keeps its frozen config and its comparability.
-    Re-requesting a lock that is already open is dropped: it would change nothing
-    and still cost a whole sibling cycle.
+    An ``unlock_schema_field_rename`` request widens into the fork's ``ConfigOverrides``
+    here — the unlock rides the rewind and cannot travel without it, so the parent keeps
+    its frozen config and its comparability. Re-requesting a lock that is already open is
+    dropped: it would change nothing and still cost a whole sibling cycle.
     """
+    session = cycle.session
+    record = load_mask_record(session.store, session.campaign_id)
+    target_round = select_rewind_round(
+        record, cycle_id=session.state.cycle_id or "", current_round=round_num
+    )
+    if target_round is None:
+        # Nothing above the current node (round 0 of a root). A rewind to nowhere would
+        # mint a duplicate of this cycle and burn a whole run, so decline the fork and
+        # let the loop stop on its own terms.
+        logger.warning(
+            "%s emitted fork_proposal at round %d but no ancestor is available to rewind to — ignored",
+            layer_id,
+            round_num,
+        )
+        return False
+
     trigger = ForkTrigger.L2_REBASE if layer_id == "L2" else ForkTrigger.L3_REBASE
-    target_round = max(0, round_num + int(proposal.round_offset))
     unlock = bool(proposal.unlock_schema_field_rename) and not (
         cycle.config.optimization.schema_field_rename
     )
     cycle.rebase_request = RebaseRequest(
         fork_from_round=target_round,
         trigger=trigger,
-        reason=str(proposal.reason or f"{layer_id} fork_proposal: rewind {proposal.round_offset}"),
+        reason=str(proposal.reason or f"{layer_id} fork_proposal"),
         issued_by=f"{layer_id}/round_{round_num}",
         config_overrides=ConfigOverrides(schema_field_rename=True) if unlock else None,
     )
     logger.info(
-        "%s emitted fork_proposal: rewind to round %d (offset=%d)%s — cycle will exit with REBASED",
+        "%s emitted fork_proposal; UCB selected round %d of %d as the rewind target%s "
+        "— cycle will exit with REBASED",
         layer_id,
         target_round,
-        proposal.round_offset,
+        round_num,
         ", unlocking schema_field_rename" if unlock else "",
     )
+    return True
 
 
 def _trigger_payload(

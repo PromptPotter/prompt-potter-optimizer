@@ -233,6 +233,7 @@ def _build_default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:
     # The operator's model-lock choice overrides the connector default —
     # mirrors derive_optimizer_locks so the committed campaign matches the panel.
     optimization["forbidden_axes_strict"] = overrides["lock_model"]
+    optimization["prompt_block_catalogue"] = overrides["prompt_block_catalogue"]
     # The operator's mechanism-toggle choices ride straight onto the committed
     # campaign.json (sorting/selection + early-abort groups), like max_rounds.
     optimization["mechanisms"] = dict(overrides["mechanisms"])

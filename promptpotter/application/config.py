@@ -391,6 +391,24 @@ class OptimizationConfig(BaseModel):
         ),
     )
 
+    prompt_block_catalogue: Annotated[
+        Literal["guidance", "restrict", "off"], Knob(Scope.POLICY, Estimand.SEARCH)
+    ] = Field(
+        "guidance",
+        description=(
+            "How the prompt building-block library (``promptpotter/config/"
+            "prompt_variants.json`` — reusable ``persona`` / ``task_intent`` / "
+            "``thinking_style`` / ``answer_format`` values adopted from PromptWizard "
+            "and PromptPotter's own runs) is offered to ``l1_generate``. ``guidance`` "
+            "(default) shows the library and L1 may reuse a block verbatim, adapt one, "
+            "or write its own. ``restrict`` narrows the field's value space to the "
+            "library — an off-library value is a forbidden value, rejected by "
+            "``validate_overrides`` exactly as a forbidden axis is (synthetic-0, no "
+            "backend spend, healed via the L2 wound). ``off`` renders nothing, so the "
+            "prompt is bit-for-bit identical to a no-library ablation run."
+        ),
+    )
+
     forbidden_axes_strict: Annotated[bool, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
         True,
         description=(

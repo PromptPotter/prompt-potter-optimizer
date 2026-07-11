@@ -214,6 +214,12 @@ def _mint_fork(
             new_cycle_id,
             before_round=fork_from_round,
         )
+        if payload.seed is not None:
+            # An L2/L3 rebase carrying a config unlock writes its seed like any other
+            # seeded cycle. `read_cycle_seed` scans THIS cycle's own ledger, so without
+            # the record the unlock would live only in memory: it would hold for the
+            # in-process run and silently re-lock on the first `resume` of the fork.
+            campaign_store.write_cycle_seed(campaign_id, new_cycle_id, payload.seed)
     elif payload.trigger is ForkTrigger.OPERATOR_DIAG:
         if fork_from_round != 0:
             raise ValueError(

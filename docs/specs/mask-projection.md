@@ -124,8 +124,11 @@ measured** fork the operator chose to run — never a stored forecast tail.
   `cycle:round:write_point[:i[:j]]`) + decision-replay forking at the first
   mismatch. All branches real; nothing counterfactual stored — the same honesty
   the mask must keep.
-- **MCTS over the lineage** (far horizon) — backprop reuses the re-evaluation
-  face; UCB re-selection reuses the divergence machinery.
+- **MCTS over the lineage** — SHIPPED, and it landed here as predicted: `backprop.py`
+  is a second fold over the same `MaskRecord`, reusing the forest, the tree walk, and
+  `node_key`. `accumulate_node_stats` rolls each round's θ up to its ancestors;
+  `select_rewind_round` is the UCB1 pick an exhausted L2/L3 rewinds to. No new store,
+  no new record, no second tree.
 
 ## Invariants
 

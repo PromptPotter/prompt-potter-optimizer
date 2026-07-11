@@ -10,6 +10,7 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
     InjectionKind,
     signal,
 )
+from promptpotter.config.prompt_blocks import prompt_blocks
 from promptpotter.domain.l1_layout import L1_POSSIBLE
 from promptpotter.domain.pipeline_schema import SCHEMA_DESCRIPTIONS_PARAM, PipelineNode
 
@@ -78,6 +79,39 @@ def _r_pipeline_param_catalogue(b: InjectionBundle) -> str:
         lines.append(f"  {node_name}: {', '.join(bits)}")
         if SCHEMA_DESCRIPTIONS_PARAM in params:
             lines.extend(_schema_description_block(node))
+    return "\n".join(lines)
+
+
+# The two modes that render. `off` is absent by construction: no header ⇒ no text ⇒ the
+# slot is bit-for-bit identical to a no-library ablation run (facade.py drops empty renders).
+_BLOCK_LIBRARY_HEADERS: dict[str, str] = {
+    "guidance": (
+        "PROMPT BLOCK LIBRARY — field values that have earned their keep "
+        "(reuse one verbatim, adapt one, or write your own):"
+    ),
+    "restrict": ("PROMPT BLOCK LIBRARY (use only these — do not invent):"),
+}
+
+
+@signal(
+    "prompt_block_catalogue",
+    kind=InjectionKind.DERIVED,
+    description="Reusable prompt-field blocks (persona / task_intent / thinking_style / answer_format) L1 recombines.",
+    char_cap=None,
+)
+def _r_prompt_block_catalogue(b: InjectionBundle) -> str:
+    """The building-block library — what L1 picks from for `prompt_fields_override`.
+
+    Symmetric with `pipeline_param_catalogue` (the param menu): one names the value space
+    of a pipeline param, this one the value space of a prompt field.
+    """
+    header = _BLOCK_LIBRARY_HEADERS.get(b.prompt_block_catalogue)
+    if header is None:
+        return ""
+    lines = [header]
+    for field, blocks in prompt_blocks().items():
+        lines.append(f"  {field}:")
+        lines.extend(f"    - {text}" for text in blocks)
     return "\n".join(lines)
 
 

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -67,6 +67,12 @@ class OptimizationOverrides(BaseModel):
         True,
         description="Bar the optimizer from mutating model/provider campaign-wide "
         "(commits as ``forbidden_axes_strict``).",
+    )
+    prompt_block_catalogue: Literal["guidance", "restrict", "off"] = Field(
+        "guidance",
+        description="How the reusable prompt building-block library reaches the "
+        "optimizer: ``guidance`` (suggest blocks, it may still invent), "
+        "``restrict`` (blocks only), ``off`` (no library).",
     )
     mechanisms: MechanismConfig = Field(
         default_factory=MechanismConfig,

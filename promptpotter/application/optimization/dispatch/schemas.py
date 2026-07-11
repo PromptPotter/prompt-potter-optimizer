@@ -239,10 +239,7 @@ def _build_l1_response_model(items: tuple[tuple[str, str], ...]) -> type[L1Gener
     return create_model(
         f"L1GenerateOutput__{suffix}",
         __base__=L1GenerateOutput,
-        # `variant` is a class built at runtime, so it is a *variable* to mypy, not a type name.
-        # Pydantic resolves it fine; only the static checker can't. The subscript is evaluated
-        # eagerly here (not a string annotation), so this is the narrowest possible silence.
-        variants=(list[variant], ...),  # type: ignore[valid-type]
+        variants=(list[variant], ...),
     )
 
 
@@ -291,12 +288,18 @@ class L1CritiqueOutput(BaseModel):
 class ForkProposal(BaseModel):
     """L2/L3-emitted proposal to rewind the search to an earlier round.
 
-    ``round_offset`` is relative to the current round and typically
-    negative (rewind). When set, the runner mints a sibling cycle via
-    ``_mint_fork(L{2,3}_REBASE, fork_from_round=current + round_offset)``,
-    exits the current cycle with ``StopReason.REBASED``, and
-    auto-continues optimization on the new fork (capped at
-    ``MAX_AUTO_REBASES`` per CLI invocation).
+    **The layer decides WHETHER; UCB decides WHERE.** There is deliberately no
+    ``round_offset`` here. The rewind target is selected by
+    ``mask/backprop.py::select_rewind_round`` — UCB1 over the backpropagated lineage
+    (each ancestor's mean θ, traded off against how little it has been explored). The
+    layer supplies the one judgment a rule makes badly ("this subtree is spent") and is
+    relieved of the one it made blindly: no panel ever enumerated the ancestor rounds
+    and their fitness, so a free-form offset was an unanchored guess carrying the most
+    expensive decision in the loop.
+
+    When emitted, the runner mints a sibling via ``_mint_fork(L{2,3}_REBASE,
+    fork_from_round=<UCB pick>)``, exits with ``StopReason.REBASED``, and auto-continues
+    on the new fork (capped at ``MAX_AUTO_REBASES`` per CLI invocation).
 
     ``unlock_schema_field_rename`` is the layer's one search-policy request. It is
     a bool and not a ``ConfigOverrides`` object on purpose: handed the whole delta
@@ -307,7 +310,6 @@ class ForkProposal(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    round_offset: int
     reason: str = ""
     unlock_schema_field_rename: bool = Field(
         False,

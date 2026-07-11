@@ -23,9 +23,8 @@ from promptpotter.application.mask.record import (
     MaskRecord,
     MaskRound,
 )
-from promptpotter.application.optimization.l1.score.winner import is_leader_eligible
 from promptpotter.application.scoring.evaluators import materialize_row_derivable
-from promptpotter.domain.results import ScoredCandidate
+from promptpotter.domain.results import ScoredCandidate, is_leader_eligible
 from promptpotter.infrastructure.store import cycle_dir_for
 from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.infrastructure.store.stores import Stores
@@ -174,6 +173,7 @@ def load_mask_record(
         rounds: list[MaskRound] = []
         for rn in sorted(files[cid]):
             candidates = _candidates(files[cid][rn], samples)
+            theta = files[cid][rn].get("cumulative_theta")
             rounds.append(
                 MaskRound(
                     cycle_id=cid,
@@ -181,6 +181,7 @@ def load_mask_record(
                     candidates=candidates,
                     anchor_evaluators=carried[0],
                     anchor_accuracy=carried[1],
+                    cumulative_theta=float(theta) if isinstance(theta, int | float) else 0.0,
                 )
             )
             winner = next((c for c in candidates if c.is_winner and c.evaluators), None)

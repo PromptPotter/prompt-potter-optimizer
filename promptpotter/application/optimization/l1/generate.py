@@ -258,6 +258,7 @@ async def l1_generate(
             CandidateProposal(
                 osp=child,
                 pipeline_params_override=pipeline_params_override,
+                prompt_fields_override=prompt_changes,
             )
         )
 

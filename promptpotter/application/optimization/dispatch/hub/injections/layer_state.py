@@ -148,14 +148,14 @@ def _r_critique(b: InjectionBundle) -> str:
 
 _REBASE_CAPABILITY_TEXT = (
     "FORK PROPOSAL (rare escape hatch). If the current subtree is genuinely "
-    "exhausted — multiple stall rounds in this lineage with no lift, AND the "
-    "panels point to a specific deferred ancestor round worth re-expanding — you "
-    'may emit fork_proposal = {"round_offset": -N, "reason": "<1-2 sentences>"}. '
-    "round_offset MUST be a negative integer (the rewind distance from the "
-    "current round). The runner mints a sibling cycle at current+round_offset and "
-    "auto-continues optimization there. Capped at 10 rebases per session. "
-    "Default: omit. Prefer continuing the current strategy; fork only when "
-    "refining this trajectory cannot recover."
+    "exhausted — multiple stall rounds in this lineage with no lift, and refining "
+    "this trajectory cannot recover — you may emit "
+    'fork_proposal = {"reason": "<1-2 sentences>"}. '
+    "You judge WHETHER to rewind, not where to: the engine selects the ancestor "
+    "round by UCB over the lineage statistics (each ancestor's mean ability against "
+    "how little it has been explored), then mints a sibling cycle there and "
+    "auto-continues optimization. Capped at 10 rebases per session. Default: omit — "
+    "a fork costs a whole cycle."
 )
 
 # Rendered only where the unlock would change something — see `_r_rebase_capability`.

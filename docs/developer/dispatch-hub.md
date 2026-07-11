@@ -35,6 +35,7 @@ flowchart LR
   %% Loop-Settings — read-only loop-time constants
   subgraph LS["Loop-Settings"]
     TUN[pipeline_param_catalogue⁹]:::det
+    BLK[prompt_block_catalogue¹³]:::det
     CAT[l1_signal_catalogue¹]:::det
   end
   style LS fill:none,stroke:#888,stroke-dasharray: 5 5
@@ -172,6 +173,7 @@ This is where the reader's mental model of a round usually starts: candidates we
   - 8-field `PromptTemplate` compiled to one string
   - Structurally L1_SCORE's output: each round's winner becomes next round's `opt_sp`, so its render is the next parent prompt. The cycle lives in orchestration, not the diagram.
 - ⁹ **`pipeline_param_catalogue`** ← attributes on `pipeline_schema`: `node_param_keys`🧩, `param_allowed_values`🧩, `param_descriptions`🧩, `available_models`🧩
+- ¹³ **`prompt_block_catalogue`** ← `config/prompt_variants.json` (`prompt_blocks()`), gated by `OptimizationConfig.prompt_block_catalogue`. The value space of a prompt FIELD, as `pipeline_param_catalogue` is the value space of a pipeline PARAM. `guidance` (default) offers the blocks as reusable material L1 may adapt or ignore; `restrict` closes the field to the library (an off-library value fails `L1_PROMPT_BLOCKS_IN_LIBRARY` → synthetic-0 → L2 wound, the same shape as a forbidden axis); `off` renders empty, leaving the prompt bit-for-bit identical to a no-library ablation.
   - ≤4 enum values per param, ≤40-char description fallback, ≤8 models
 - **`l1_overrides`** ← `opt_sp.l1_overrides`
   - Bundles two L2_CONTEXT-set knobs that govern *how L1_GENERATE runs*, not what L1_GENERATE puts in candidates: `n_variants`🧩, `creativity`🧩
@@ -219,7 +221,7 @@ L1_GENERATE's prompt is composed by walking a per-slot list of **injection names
 
 `L1Layout` (`promptpotter/domain/l1_layout.py`) is a Pydantic model with one list per addressable slot: `persona`, `task_intent`, `problem_description`, `thinking_style` (all L2-mutable). `answer_format` is omitted on purpose — it carries L1's output JSON schema (a code contract), not L2's call. Static text in each slot stays; the layout's injection renderings are appended. Renderers are layer-agnostic — the same `plan` renderer feeds L1, L2, and L3; if an injection needs to differ per layer, that's two injections.
 
-**Default floor** (`default_l1_layout` = `NODE_LAYOUTS["l1_generate"].floor`): `task_context` in `task_intent`; `rendered_prompt`, `pipeline_param_catalogue`, `plan`, `critique`, `l1_wounds`, `escalation_panel`, `origin_strengths` in `problem_description`. Raw `diagnostics` and the cross-run panels stay off the floor (critique distils them); L2 adds them on stall via its layout edit, and L4 optimises that authoring. Most L2 fires don't touch the layout.
+**Default floor** (`default_l1_layout` = `NODE_LAYOUTS["l1_generate"].floor`): `task_context` in `task_intent`; `rendered_prompt`, `pipeline_param_catalogue`, `prompt_block_catalogue`, `plan`, `critique`, `sample_transcripts`, `l1_wounds`, `escalation_panel`, `origin_strengths` in `problem_description`. Raw `diagnostics` and the cross-run panels stay off the floor (critique distils them); L2 adds them on stall via its layout edit, and L4 optimises that authoring. Most L2 fires don't touch the layout.
 
 **Validation — split HARD / SOFT.** `validate_l1_layout(layout, *, spec, prior_layout)` enforces against the node's `NodeLayoutSpec` (`spec.mandatory`/`spec.possible`):
 

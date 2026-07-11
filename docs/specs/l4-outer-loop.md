@@ -289,7 +289,7 @@ Slices 1 + 2 SHIPPED. 3 is the gating slice (no real signal without it); 4 + 5 m
 
 | Node | editor | mandatory (guard rail — never excised) | floor (default, = prior behavior) | possible adds (off-floor; L4 may insert) |
 |---|---|---|---|---|
-| `l1_generate` | L2 + L4 | `plan`, `task_context`, `rendered_prompt`, `pipeline_param_catalogue`, `critique` | mandatory + `l1_wounds`, `escalation_panel`, **`origin_strengths`** | `diagnostics`, `axis_memory`, `archive_top_runs`, `rare_hit_samples`, `intractable_samples` (= `L1_POSSIBLE`) |
+| `l1_generate` | L2 + L4 | `plan`, `task_context`, `rendered_prompt`, `pipeline_param_catalogue`, `critique` | mandatory + `prompt_block_catalogue`, `sample_transcripts`, `l1_wounds`, `escalation_panel`, **`origin_strengths`** | `diagnostics`, `axis_memory`, `archive_top_runs`, `rare_hit_samples`, `intractable_samples` (= `L1_POSSIBLE`) |
 | `l1_critique` | L4 | `diagnostics` (its raw input — the distiller must see it) | `evidence_health`, `diagnostics`, `l1_wounds`, `rare_hit_samples` | `axis_memory`, `archive_top_runs`, `origin_strengths` |
 | `l2_context` | L4 | `task_context`, `critique`, `l1_signal_catalogue`, `diagnostics` | mandatory + `plan`, `l3_to_l2_note`, `rendered_prompt`, `evidence_health`, `guard_breaches`, `axis_memory`, `archive_top_runs`, `rare_hit_samples`, `l1_overrides`, `l1_supplemental_rules`, `l1_situational_examples` (all 15, unchanged) | — (floor already spans `possible`) |
 | `l3_plan` | L4 | `plan`, `task_context`, `diagnostics` | mandatory + `l1_wounds`, `axis_memory`, `guard_breaches`, `critique` | `evidence_health`, `archive_top_runs` |

@@ -16,52 +16,62 @@ Describe your 1️⃣ **task**, drop in a labeled 2️⃣ **dataset**, and 3️�
 
 > [!IMPORTANT]
 > **New here?** Start with [`docs/manual/`](docs/manual/README.md) — six chapters covering install → first run → reading output → troubleshooting.
->
-> **Five ways to run it:** 1) `/potter-run` Claude Code skill · 2) CLI · 3) Python / Jupyter notebook · 4) REST API · 5) WebApp (localhost)
 
-## Chat-first
+## ⭐ Features
 
-The front door is a chat. You talk to the Potter and watch it work inline, Perplexity-style — the searches it runs, the tools it calls, what it's scoring, how each round landed — and it hands you a button whenever a decision is yours. PromptPotter also ships as a **canonical chat-app template**: the chat core (thread model + a generic agent-activity stream + transport) is built to be kept, with the optimizer-specific panes deletable, so you can build your own agent chat on top. Design: [`docs/specs/chat-foundation.md`](docs/specs/chat-foundation.md).
+Every measurement costs money, so the whole design is **most fitness per dollar**. The capabilities PromptPotter shares with the rest of the field are in the [comparison table](#scientific-framing) below; these are the ones it doesn't:
 
-Install → first run → reading output is the [`docs/manual/`](docs/manual/README.md) walkthrough.
+- **💬 Chat-first** — talk to the Potter and watch it work inline, Perplexity-style: the searches, the tool calls, each round as it lands, and a button whenever a decision is yours. Ships as a reusable **chat-app template** — keep the chat core, delete the optimizer panes. [spec](docs/specs/chat-foundation.md)
+- **Recovers from dead ends** — when a branch is spent the search rewinds to a better ancestor instead of stalling there. Most evolutionary search is one-armed: it only ever expands the latest winner.
+- **Hard-sample leaderboard** — score preferentially on the samples that actually separate variants; the ones everyone aces or fails are noise.
+- **Optimizes itself** — point the optimizer at its own meta-prompts. [L4](docs/concepts/optimizer-of-the-optimizer.md)
+- **Pick your block library mode** — proven personas, thinking styles and answer formats (from PromptWizard and the *Self-Discover* modules it draws on, plus what our own runs turned up). Let the optimizer suggest from the library, restrict it to the library, or switch it off.
 
-## Why PromptPotter?
+## Peer systems
 
-Manual prompt tuning is slow, inconsistent, and doesn't compound. PromptPotter automates the loop: it tries variations, measures what works, and remembers across runs. Every measurement costs money, so the design is built to **maximize fitness, minimize spend**:
+PromptPotter belongs to the **LLM-driven evolution** family: an LLM proposes variants, an evaluator scores them, and the winners breed. The peer systems — full comparison + benchmark notes in [`docs/research/related-work.md`](docs/research/related-work.md#eight-systems-under-the-umbrella):
 
-- **Search-only-with-evidence.** Variants default to a small budget (~3–5 samples) and only get extended when there's statistical evidence they have a chance.
-- **Hard-sample leaderboard.** Score preferentially on samples that actually separate variants — samples everyone aces or fails are noise.
-- **Cross-run memory.** Every datapoint is stored; the optimizer carries what it learned into the next run.
+- **Code evolution** — [AlphaEvolve](docs/research/related-work.md#eight-systems-under-the-umbrella) · [OpenEvolve](docs/research/related-work.md#eight-systems-under-the-umbrella) · [AlgoTuner](docs/research/related-work.md#eight-systems-under-the-umbrella) · [AutoResearch](docs/research/related-work.md#eight-systems-under-the-umbrella)
+- **Prompt evolution** — [PromptWizard](docs/research/related-work.md#eight-systems-under-the-umbrella) · [MIPROv2](docs/research/related-work.md#eight-systems-under-the-umbrella) · [GEPA](docs/research/related-work.md#eight-systems-under-the-umbrella) · **PromptPotter**
 
-# How It Works
+The code-evolution systems mutate source; the prompt-evolution systems mutate a prompt. PromptPotter evolves **both the prompt and the pipeline parameters around it**, jointly.
 
-## The Optimization Loop
+*Background: Asankhaya Sharma on [OpenEvolve](https://www.youtube.com/watch?v=mWBT-szUutI) (talk).*
 
-PromptPotter is a **critique-guided feedback cycle** for prompt and pipeline tuning. Each round generates candidates, scores them against your dataset, and critiques the results to steer the next round.
+## Scientific framing
 
-**One round:**
-- generate
-- score
-- critique
+PromptPotter is a **tree search over prompt programs** — precisely, **AlphaZero-shaped MCTS over the lineage**: [PoBB](docs/research/related-work.md#best-arm-identification--sequential-testing) prunes losers *within* a round, each round's ability backpropagates to its ancestors, and a UCB rule picks the ancestor to re-expand once a branch is spent. Rollouts give way to deterministic evaluation on your dataset, as in AlphaZero. [Comparison](docs/research/related-work.md#comparison-to-mcts).
 
-When the inner layer stalls, an outer layer steps in to redirect — see [the-loop.md](docs/concepts/the-loop.md) for the full mechanics.
+**AlphaEvolve** is the closest published peer — same loop, same memory across runs — but it evolves *source code* where PromptPotter evolves *the prompts and pipeline parameters around it*. A different target, not a missing feature: read row one as scope, the rest as capability.
+
+| | AlphaEvolve | PromptPotter |
+|---|---|---|
+| **What it evolves** | Source code | Prompts **and** pipeline parameters, jointly |
+
+| Capability | AlphaEvolve | PromptPotter |
+|---|:--:|:--:|
+| **Evolutionary search** — a population breeds, the weak die | 🟢 | 🟢 |
+| **Automatic scoring** — define the formula once; it wires itself into every eval path, no glue code | 🟢 | 🟢 |
+| **Statistical pruning** — drop losers after a handful of queries, not the full budget ([PoBB](docs/methods/candidate-elimination.md)) | 🟢 | 🟢 |
+| **Memory across runs** — parameter impact, query difficulty and failure patterns carry into the next run | 🟢 | 🟢 |
+| **A library of building blocks** — proven personas, thinking styles and answer formats, reused and recombined | 🟢 | 🟢 |
+| **Multi-step pipelines** — tune a chain of calls, not a single one | 🟡 | 🟢 |
+| **Self-healing** — an invalid proposal is caught and taught, not just discarded ([internals](docs/developer/self-healing-internals.md)) | 🟡 | 🟢 |
+| **Runs in your editor** — drive a whole campaign from the terminal (`/potter-run`) | 🔴 | 🟢 |
+
+The one place AlphaEvolve is unambiguously stronger is **code optimization** — its search reaches into source, which is not what PromptPotter is pointed at. The 🟡s are partial versions of the same capability. Full grading, including the prompt-tooling neighbours: [`related-work.md`](docs/research/related-work.md#feature-highlights).
+
+## The loop
+
+Each round is **generate → score → critique**: L1 proposes candidates, they're scored against your dataset, and the critique steers the next round. When the inner layer stalls, an outer layer (L2, then L3) redirects it; when the branch itself is spent, the search rewinds. Full mechanics: [the-loop.md](docs/concepts/the-loop.md).
 
 ## Common questions
 
 - **What does L1 actually mutate?** The prompt template's fields (persona, task instruction, …) plus whatever your `pipeline.json` declares as tunable. See [`state-record.md`](docs/concepts/state-record.md).
 - **Where do I get a starting prompt?** Bring one with your dataset (`datasets/{name}/prompts/{node}.json`). Walkthrough: [manual ch. 03](docs/manual/03-first-campaign.md).
-- **How do I watch a run?** Open `dashboard.json` in an auto-reload editor + watch the CLI terminal. Full guide: [Watching a run](#watching-a-run) above.
+- **How do I watch a run?** Open `dashboard.json` in an auto-reload editor + watch the CLI terminal. Full guide: [Watching a run](#watching-a-run).
 - **My scoring formula was wrong — did I lose results?** No. Traces are facts; scores are policy. The optimizer rescores on load and replays decisions; on divergence, fork. See [`scoring-and-memory.md`](docs/concepts/scoring-and-memory.md).
 - **What if it stalls?** Stall and failure are different triggers. Failures route back to the proposing layer ([self-healing](docs/developer/self-healing-internals.md)); stalls escalate L1 → L2 → L3 ([the-loop](docs/concepts/the-loop.md)). Stuck for other reasons: [troubleshooting](docs/manual/05-troubleshooting.md).
-
-## ⭐ Features
-
-- **Prompt + pipeline optimization:** **LLM-driven program evolution** over your prompt AND your pipeline parameters jointly. Most tools optimize one or the other. Head-to-head: [related-work.md](docs/research/related-work.md).
-- **Auto-injected scoring:** define your scoring formula once in `campaign.json`. It's wired into every evaluation path automatically. No glue code.
-- **IDE-native operation:** drive a full optimization campaign from your terminal via the `/potter-run` Claude Code skill. No notebook required.
-- **🔁 Self-healing optimization:** when a proposed setting isn't valid for your task workflow, the verification harness catches it (deterministic) and tells the strategy layer (L2 or L3) what went wrong, which in turn updates the prompt of the model that proposed the invalid setting. Full architecture: [self-healing-internals.md](docs/developer/self-healing-internals.md).
-- **Statistical early-stopping:** unfit candidates are eliminated after a handful of queries — population-aware joint posterior, stop when `P(c is best) < ε` — instead of burning the full budget (*Posterior-of-Being-Best, PoBB*). Methods: [candidate-elimination.md](docs/methods/candidate-elimination.md).
-- **Cross-run learning:** every fitness measurement flows into a shared memory store. Parameter impact, query difficulty, and failure patterns are remembered. The optimizer carries what it learned into the next run.
 
 ## Limitations
 
@@ -76,8 +86,6 @@ When the inner layer stalls, an outer layer steps in to redirect — see [the-lo
 [![CAPO](https://img.shields.io/badge/compared_against-CAPO-orange)](https://arxiv.org/abs/2504.16005)
 
 Head-to-head comparison on the *BIG-Bench Extra Hard (BBEH)* benchmark against DSPy optimizers (GEPA, MIPROv2, BootstrapFewShot) and CAPO. Same model (`gpt-oss-120b`), same dataset splits, same scoring, no cross-paper number mixing. See [`docs/research/benchmarks.md`](docs/research/benchmarks.md) for results and [`docs/research/bbeh-comparison/`](docs/research/bbeh-comparison/) for reproducible Colab notebooks.
-
-Compared head-to-head with DSPy (GEPA, MIPROv2, BootstrapFewShot), CAPO, and PromptWizard. See [related work](docs/research/related-work.md).
 
 ## Documentation
 
@@ -118,32 +126,13 @@ PromptPotter's inner **generate → score → critique** loop mirrors the classi
 > 
 > </details>
 
-## Scientific framing
+# Five ways to run it
 
-PromptPotter is a **tree search over prompt programs**: an LLM proposes prompt variants, your evaluator scores them, and weak branches get pruned early. Algorithmically, it is evolutionary search with [Bayesian best-arm-identification](docs/research/related-work.md#best-arm-identification--sequential-testing) pruning (PoBB) — the same *statistical-confidence-guided tree-search* family as MCTS, but deterministic evaluation in place of random rollouts. Comparison: [`docs/research/related-work.md`](docs/research/related-work.md#comparison-to-mcts).
-
-**Structurally closest peer: AlphaEvolve.** Of the published systems in the LLM-driven-evolution family, **AlphaEvolve** is what PromptPotter sits closest to structurally — same generate → evaluate → select loop with cross-iteration memory, applied to prompts + pipeline parameters instead of source code. Attribute-by-attribute:
-
-| AlphaEvolve attribute | In PromptPotter | How |
-|---|:--:|---|
-| **Evolutionary search** | 🟢 shipped | Generate / score / select / mutate over a candidate population; explicit `population` + `individual` + `generation` vocabulary throughout the codebase. |
-| **Automated evaluation** | 🟢 shipped | `score_search_point()` is the single scoring gateway; per-dataset scoring formula in `campaign.json` is compiled once and injected into every eval path. No human-in-the-loop scoring. |
-| **Library learning** | 🟡 partial | PromptPotter's "library" is the cross-cycle **MeasurementArchive** (`archive/measurements/`) + `AxisIndex` / `SampleIndex` digests — a *measurement* library, not the *program* library AlphaEvolve carries. Informs every L1 mutation via `cycle.axes.digest()` + `sibling_yield`. |
-| **Meta-learning** | 🟡 partial | The optimizer can be pointed at its own meta-prompts (L4 outer loop) — concept: [`optimizer-of-the-optimizer.md`](docs/concepts/optimizer-of-the-optimizer.md); the `potter-l1-meta-campaign` skill ships the state machine that evolves `l1_generate` / `l1_critique` / `l2_context` / `l3_plan` over assess → screen → promote cycles. The full L4 loop is planned. |
-| **MCTS** | 🟡 selection-signal shipped | L3 emits an observation-only `fork_proposal` ({round_offset, reason}) when it judges the current subtree exhausted; the operator forks manually. Backprop up the lineage + UCB-style ancestor selection + auto-fork are planned (see Aspiration below). |
-
-Full capability table including AlphaEvolve and the prompt-tooling neighbors: [`docs/research/related-work.md`](docs/research/related-work.md) § Feature matrix.
-
-**Aspiration — towards AlphaZero-shaped MCTS.** L3 (the strategic replan layer) is gaining MCTS-style selection in three steps. **Step 1 — shipped:** L3 may now emit an observation-only `fork_proposal` (`{round_offset, reason}`) alongside its `plan` rewrite when it judges the current subtree exhausted and a deferred ancestor more promising. The proposal lands in `round_NNNN.json::nodes[l3_plan].exit.fork_proposal`; the operator reads it and forks manually via `resume --from N` if they agree. **Step 2 — planned:** propagate round outcomes as node statistics up the lineage tree. **Step 3 — planned:** UCB-style ancestor-selection rule for automatic L3 forking. The three together = AlphaZero-shaped MCTS, categorically capable of *recovering from dead-end branches* that today the loop can only stall on. Backlog: [`docs/specs/roadmap.md`](docs/specs/roadmap.md) § Plus-backlog.
-
-[![OpenEvolve: Towards Open Evolutionary Agents](https://img.youtube.com/vi/mWBT-szUutI/hqdefault.jpg)](https://www.youtube.com/watch?v=mWBT-szUutI)
-
-*Background — Asankhaya Sharma on [OpenEvolve](https://www.youtube.com/watch?v=mWBT-szUutI).*
-
-Peer systems in the same family — full comparison + benchmark notes in [`docs/research/related-work.md`](docs/research/related-work.md#eight-systems-under-the-umbrella):
-
-- Code evolution: [AlphaEvolve](docs/research/related-work.md#eight-systems-under-the-umbrella) · [OpenEvolve](docs/research/related-work.md#eight-systems-under-the-umbrella) · [AlgoTuner](docs/research/related-work.md#eight-systems-under-the-umbrella) · [AutoResearch](docs/research/related-work.md#eight-systems-under-the-umbrella)
-- Prompt evolution: [PromptWizard](docs/research/related-work.md#eight-systems-under-the-umbrella) · [MIPROv2](docs/research/related-work.md#eight-systems-under-the-umbrella) · [GEPA](docs/research/related-work.md#eight-systems-under-the-umbrella)
+1. **`/potter-run` Claude Code skill** — drive a full campaign from your editor.
+2. **CLI** — `python -m promptpotter new <name>` / `resume`.
+3. **Python / Jupyter notebook**.
+4. **REST API**.
+5. **WebApp** — read-only dashboard at `http://localhost:8001/`.
 
 # Roadmap
 

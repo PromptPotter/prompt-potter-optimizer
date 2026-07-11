@@ -41,6 +41,7 @@ __all__ = [
     "WarningDict",
     "best_round_by_cumulative_accuracy",
     "candidate_label",
+    "is_leader_eligible",
     "is_round_winner",
 ]
 
@@ -217,6 +218,29 @@ class ScoredCandidate(BaseModel):
         return wilson_ci(self.hits, self.total)[1]
 
 
+def is_leader_eligible(cs: ScoredCandidate) -> bool:
+    """Eligibility for round-leader election. Disqualifies (a) escalation-aborted-without-PoBB
+    (mid-run failure outside measured-comparison), (b) degradation/scoring_error_abort
+    (partial subset accuracy can fake-inflate above origin), and (c) a true PoBB *loss* — the
+    eliminator's own verdict that this candidate is not the round's best. A LEADER_LOCKED stop
+    (the candidate that locked the lead) is the opposite verdict and stays eligible.
+
+    Lives beside the model it judges, not in the L1 scoring module: it is a pure predicate
+    over recorded facts, and every reader of a recorded round needs it — the live election,
+    the mask read-model, the lineage backprop. Filed under the loop, it dragged the whole
+    optimization package into any module that merely wanted to read a candidate's fate.
+    """
+    if cs.escalation_aborted and not cs.elimination_stopped:
+        return False
+    if cs.degradation_context:
+        return False
+    ec = cs.elimination_context
+    # elim_context is populated only for the "elimination" check, carrying the candidate's own
+    # P(best) and epsilon; a loss is p_best < epsilon with the lead NOT locked. Honoring it stops
+    # a PoBB-eliminated candidate (p_best below epsilon on a thin subset) from winning the round.
+    return not (ec and not ec["leader_locked"] and ec["p_best"] < ec["epsilon"])
+
+
 # ``ScoredCandidate``'s display subset, spelled once. Deliberately narrower than the full
 # ``candidate_scores`` dump beside it in the same file (no θ / composite_ci): scoreboard =
 # the display table, candidate_scores = the complete record. The mutation text rides
@@ -260,12 +284,18 @@ class ScoreboardRow(BaseModel):
 
 
 class CandidateProposal(BaseModel):
-    """LLM-proposed candidate — OSP + nested pipeline-params override, persisted across generate→score for resume replay."""
+    """LLM-proposed candidate — OSP + the two override deltas, persisted across generate→score for resume replay.
+
+    Both deltas ride here, not just the merged result: the OSP carries the *resulting*
+    prompt fields (parent's, plus whatever L1 changed), which cannot answer "what did L1
+    actually propose this round" — the question `prompt_block_catalogue="restrict"` asks.
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     osp: OptSearchPoint
     pipeline_params_override: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    prompt_fields_override: dict[str, str] = Field(default_factory=dict)
 
 
 class RoundOrigin(BaseModel):

@@ -33,7 +33,7 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import (
     CandidateProposal,
     RoundResult,
-    ScoredCandidate,
+    is_leader_eligible,
 )
 from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.validators import StopRule
@@ -48,24 +48,6 @@ if TYPE_CHECKING:
 # ``improvement_threshold`` into θ-logits (``delta_ok``). Caps how large the logit
 # threshold grows near the accuracy extremes (p→0 or 1), where p(1−p)→0 would blow it up.
 _GATE_SLOPE_FLOOR = 0.05
-
-
-def is_leader_eligible(cs: ScoredCandidate) -> bool:
-    """Eligibility for round-leader election. Disqualifies (a) escalation-aborted-without-PoBB
-    (mid-run failure outside measured-comparison), (b) degradation/scoring_error_abort
-    (partial subset accuracy can fake-inflate above origin), and (c) a true PoBB *loss* — the
-    eliminator's own verdict that this candidate is not the round's best. A LEADER_LOCKED stop
-    (the candidate that locked the lead) is the opposite verdict and stays eligible.
-    """
-    if cs.escalation_aborted and not cs.elimination_stopped:
-        return False
-    if cs.degradation_context:
-        return False
-    ec = cs.elimination_context
-    # elim_context is populated only for the "elimination" check, carrying the candidate's own
-    # P(best) and epsilon; a loss is p_best < epsilon with the lead NOT locked. Honoring it stops
-    # a PoBB-eliminated candidate (p_best below epsilon on a thin subset) from winning the round.
-    return not (ec and not ec["leader_locked"] and ec["p_best"] < ec["epsilon"])
 
 
 async def l1_score(
@@ -93,6 +75,7 @@ async def l1_score(
         pipeline_params,
         schema,
         forbidden_axes_strict=cycle.config.optimization.forbidden_axes_strict,
+        prompt_block_catalogue=cycle.config.optimization.prompt_block_catalogue,
     )
     # Resolve the winner's merged pipeline_params by identity, not position: `scored`
     # below is filtered (drops no-result / leader-ineligible candidates), so its index
@@ -419,4 +402,4 @@ async def l1_score(
     return round_result, best_osp
 
 
-__all__ = ["is_leader_eligible", "l1_score"]
+__all__ = ["l1_score"]

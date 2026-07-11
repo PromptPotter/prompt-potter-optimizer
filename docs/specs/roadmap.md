@@ -41,7 +41,7 @@ Sequenced into lanes by dependency, not milestone number. **Front priority = Lan
 
 **Parallel lane — publication (front, concurrent with Lane A).** Engine exit gate (`rounds_to_95`) shipped → this is *running experiments + write-up*: BBEH primary (headroom on `gpt-oss-120b`), HotPotQA pending a saturation probe, GSM8K/AIME deprioritized; 3 seeds + Wilson CIs + McNemar vs CAPO/DSPy; ablation rows L1 / L1+L2 / full · scan · SearchMemory · critique · zero-signal-filter. Competitor + L4 numbers wait on C3. **Verify the [BBEH score anomaly](../research/) before publishing.** Endpoint hardening P0 (auth dep on every router, pinned `ALLOWED_ORIGINS`, `extra=forbid` on request models, poll rate-limit) lands before any non-localhost open.
 
-**Far-horizon (unscheduled).** Synthetic dataset from one hold-out question (removes the dataset-provision requirement; the real metric is synthetic→real transfer of *optimizer lift*, anchored on the single genuine hold-out) · AlphaEvolve code-harness · L3 fork authority → AlphaZero-shaped MCTS over the lineage.
+**Far-horizon (unscheduled).** Synthetic dataset from one hold-out question (removes the dataset-provision requirement; the real metric is synthetic→real transfer of *optimizer lift*, anchored on the single genuine hold-out) · AlphaEvolve code-harness.
 
 ## Permanent contracts (constitutions, not steps)
 

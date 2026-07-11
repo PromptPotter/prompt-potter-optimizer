@@ -586,10 +586,13 @@ the PR description.
 - **Hard-sample sorter (Rasch)**
   (`application/intelligence/hard_sample_sorter.py`) + the leaderboard
   it powers — first-class per §0.
-- **`l1_signal_catalogue` + `pipeline_param_catalogue` injections**
+- **`l1_signal_catalogue` + `pipeline_param_catalogue` + `prompt_block_catalogue`
+  injections**
   (`application/optimization/dispatch/hub/injections/catalogues.py`) — the
-  discoverability scaffolding: the menu L2 reads to write `l1_layout`
-  and the param menu L1 reads, the surface the §6 pre-flight gate's
+  discoverability scaffolding: the menu L2 reads to write `l1_layout`,
+  the param menu L1 reads, and the reusable prompt-field blocks L1
+  recombines (the one channel handing L1 prompt MATERIAL rather than
+  statistics about material), the surface the §6 pre-flight gate's
   question 1 leans on. Don't drop "because nobody calls it from
   production code today."
 - **The `new` verb + `/potter-run` onboarding flow** — operator's

@@ -28,6 +28,7 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     resolve_node_schema_field_names,
 )
 from promptpotter.application.optimization.dispatch.schemas import L1GenerateOutput, L1Variant
+from promptpotter.config.prompt_blocks import prompt_blocks
 from promptpotter.config.settings import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVERRIDES
 from promptpotter.domain.escalation_signals import ValidationFailure
 from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, NODE_LAYOUTS
@@ -49,6 +50,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "DROPPED_MANDATORY_PLACEHOLDER",
     "L1_CONFIG_NOT_IN_RUNTIME_FAILURES",
+    "L1_PROMPT_BLOCKS_IN_LIBRARY",
     "L1_PROMPT_PLACEHOLDERS_INTACT",
     "L1_SCHEMA_COMPLIANCE",
     "L1YieldStats",
@@ -482,6 +484,53 @@ def _check_l1_schema_compliance(
 L1_SCHEMA_COMPLIANCE: LLMOutputValidator = LLMOutputValidator(
     id="l1_schema_compliance",
     check=_check_l1_schema_compliance,
+)
+
+
+def _check_l1_prompt_blocks_in_library(
+    source_output: Any,
+    *,
+    prompt_block_catalogue: str = "guidance",
+    **_: Any,
+) -> ValidatorOutcome | None:
+    """Under ``restrict``, a prompt-field value L1 PROPOSES must come from the block library.
+
+    Reads the round's ``prompt_fields_override`` — the delta, not the resulting OSP. The
+    parent's fields are the dataset's authored origin and are not in the library by
+    construction; checking the merged result would reject every candidate on round 1 for a
+    field nobody touched. Only ``guidance`` (the default) and ``off`` render nothing here —
+    they leave the value space open, so there is nothing to violate.
+
+    A field with no library entries (``problem_description`` — task-specific by nature) is
+    unrestricted: ``restrict`` narrows a declared value space, it does not close an
+    undeclared one.
+    """
+    if prompt_block_catalogue != "restrict" or not source_output:
+        return None
+    library = prompt_blocks()
+    failures = [
+        ValidationFailure(
+            axis=field,
+            value=str(value),
+            allowed=list(blocks),
+            reason="not_in_prompt_block_library",
+        )
+        for field, value in source_output.items()
+        if (blocks := library.get(field))
+        and str(value).strip()
+        and str(value).strip() not in blocks
+    ]
+    if not failures:
+        return None
+    return ValidatorOutcome(
+        validator_id=L1_PROMPT_BLOCKS_IN_LIBRARY.id,
+        evidence={"failures": failures},
+    )
+
+
+L1_PROMPT_BLOCKS_IN_LIBRARY: LLMOutputValidator = LLMOutputValidator(
+    id="l1_prompt_blocks_in_library",
+    check=_check_l1_prompt_blocks_in_library,
 )
 
 

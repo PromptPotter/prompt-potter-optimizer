@@ -179,16 +179,37 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # the taxonomy, so the ledger stops carrying a fourth opinion (it counted ``dataset_split``
 # as two leaves; the knob is one). Subtraction, so both baselines fall.
 
+# 2026-07-11 prompt building-block library: ``config_leaf_fields`` 37->38 \ ``injections``
+# 23->24 — the catalogue of reusable prompt-field values (``config/prompt_variants.json``:
+# 42 thinking styles + personas + task intents + answer formats, adopted from
+# PromptWizard/Self-Discover and our own runs) reaches L1 again. It shipped as data, its
+# loader was deleted as an orphan, and nothing had read it since. One knob
+# (``OptimizationConfig.prompt_block_catalogue``: guidance | restrict | off), one injection
+# (``prompt_block_catalogue``), one loader module. This is the only channel that hands L1
+# reusable prompt MATERIAL rather than statistics about material — every other cross-run
+# panel carries numbers. A feature, justified, so the baseline rises.
+# 2026-07-11 MCTS over the lineage: ``settings_const`` +1 (``UCB_EXPLORATION_C``) — the
+# backprop fold + UCB rewind rule (``application/mask/backprop.py``) that close the last
+# two of MCTS's four phases. Deliberately NOT a config leaf: one rewind costs a whole
+# cycle, so the exploration weight is a property of the search, not a per-run dial. The
+# ``ForkProposal.round_offset`` field is DELETED in the same pass (the layer no longer
+# picks the target, UCB does), and ``is_leader_eligible`` moved down to ``domain/results``
+# — a pure predicate that had been filing the whole optimization package into every
+# module that merely wanted to read a candidate's fate.
+# The three FALLS below are the knob-registry refactor's, banked here rather than left
+# loose: a baseline above actual is a ratchet that has stopped ratcheting, and would
+# silently re-admit the two shims it already paid to delete.
+
 LEDGER_BASELINE = {
-    "modules": 312,
+    "modules": 313,
     "init_files": 58,
-    "reexport_shims": 44,
-    "config_leaf_fields": 37,
-    "settings_env": 17,
-    "settings_const": 15,
+    "reexport_shims": 42,
+    "config_leaf_fields": 38,
+    "settings_env": 16,
+    "settings_const": 14,
     "opt_search_point_fields": 27,
     "prompt_string_fields": 6,
-    "injections": 23,
+    "injections": 24,
     "escalation_rules": 6,
     "claude_md": 7,
 }

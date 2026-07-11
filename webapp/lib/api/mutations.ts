@@ -309,6 +309,9 @@ export interface OptimizationOverridesWire {
   // Whether the optimizer is barred from changing model/provider campaign-wide.
   // Default true (locked); toggled in the pipeline-config control panel.
   lock_model: boolean;
+  // How the reusable prompt building-block library reaches the optimizer:
+  // suggest-but-may-invent (default), library-only, or no library at all.
+  prompt_block_catalogue: "guidance" | "restrict" | "off";
   // Pluggable orchestration mechanism toggles (sorting/selection + early-abort
   // groups). Nested {group:{toggle:bool}}; seeded with the stock defaults.
   mechanisms: Record<string, Record<string, boolean>>;

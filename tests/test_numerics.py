@@ -37,9 +37,11 @@ from promptpotter.application.mask import (
     MaskCycle,
     MaskRecord,
     MaskRound,
+    accumulate_node_stats,
     find_divergences,
     make_abort_verdict,
     make_scoring_verdict,
+    select_rewind_round,
 )
 from promptpotter.application.optimization.pobb.elimination import terminal_ranking
 from promptpotter.application.scoring.evaluators import all_evaluators, materialize_round_values
@@ -500,6 +502,73 @@ def test_mask_scoring_divergence_self_consistency_and_eligibility():
         ("cyc::r1", "B")
     ]
     assert swapped.divergent == ["cyc::r2"]
+
+
+def _theta_round(cycle_id: str, rnd: int, theta: float) -> MaskRound:
+    return MaskRound(cycle_id=cycle_id, round=rnd, cumulative_theta=theta)
+
+
+def test_mcts_backprop_does_not_double_count_a_fork_inherited_prefix():
+    """The silent number: a fork's copied rounds are the SAME logical node as the parent's.
+
+    Forking at round 2 physically copies parent rounds 0..1 into the child's dir. Counted
+    naively, root r0 would see those copies as fresh descendants and its visit count would
+    inflate — worse the deeper the lineage, and invisibly: the fold still returns a
+    plausible number, UCB still picks *a* round, and the run still completes. Only the
+    rewind is wrong.
+
+    Tree here (canonical nodes only):
+        root r0 → r1 → r2 → r3          (root's own spine)
+                     ↘ fork r2 → r3      (child, cut at 2; its r0/r1 are copies)
+    So r1 has 5 descendants-plus-self, and r0 has 6 — NOT 8, which is what counting the
+    child's inherited r0/r1 copies would give.
+    """
+    root = MaskCycle(
+        cycle_id="root",
+        rounds=[_theta_round("root", r, t) for r, t in [(0, 0.0), (1, 0.5), (2, 0.4), (3, 0.3)]],
+    )
+    fork = MaskCycle(
+        cycle_id="fork",
+        parent_cycle_id="root",
+        fork_from_round=2,
+        # r0/r1 are byte-copies of root's, carried forward by the mint.
+        rounds=[_theta_round("fork", r, t) for r, t in [(0, 0.0), (1, 0.5), (2, 2.0), (3, 2.4)]],
+    )
+    stats = accumulate_node_stats(MaskRecord(cycles=[root, fork]))
+
+    # Only the child's OWN rounds are nodes; its inherited prefix is not re-counted.
+    assert ("fork", 0) not in stats
+    assert ("fork", 1) not in stats
+    assert stats[("root", 0)].visits == 6  # itself + r1,r2,r3 + fork r2,r3
+    assert stats[("root", 1)].visits == 5
+    assert stats[("root", 2)].visits == 2  # itself + root r3 only
+    assert stats[("fork", 2)].visits == 2  # itself + fork r3
+
+    # Q is the subtree's mean θ. The fork branch is where the ability actually went.
+    assert stats[("fork", 2)].q == pytest.approx((2.0 + 2.4) / 2)
+    assert stats[("root", 2)].q == pytest.approx((0.4 + 0.3) / 2)
+    # r1's subtree spans BOTH branches — that is what backprop is for: the parent learns
+    # from a descendant it never ran itself.
+    assert stats[("root", 1)].q == pytest.approx((0.5 + 0.4 + 0.3 + 2.0 + 2.4) / 5)
+
+
+def test_mcts_ucb_rewinds_to_the_ancestor_whose_subtree_paid_off():
+    """UCB picks the ancestor to re-expand; a root's round 0 has nowhere to go.
+
+    root r0 → r1(θ high) → r2 → r3, and the θ collapses after r1. Stalled at r3, the
+    rewind target must be r1 — the ancestor whose subtree carries the ability — not the
+    adjacent r2 that merely happens to be nearest.
+    """
+    root = MaskCycle(
+        cycle_id="root",
+        rounds=[_theta_round("root", r, t) for r, t in [(0, 0.0), (1, 2.0), (2, 0.1), (3, 0.0)]],
+    )
+    record = MaskRecord(cycles=[root])
+    assert select_rewind_round(record, cycle_id="root", current_round=3) == 1
+
+    # Nothing above round 0 — the caller must NOT fork (a rewind to nowhere would mint a
+    # duplicate cycle and burn a whole run).
+    assert select_rewind_round(record, cycle_id="root", current_round=0) is None
 
 
 def test_mask_abort_verdict_rides_the_same_fold():
@@ -1420,7 +1489,6 @@ def test_classify_result_routes_structural_warning_to_fatal() -> None:
 
 scipy = pytest.importorskip("scipy")  # transitively required by the PoBB math
 
-from promptpotter.application.optimization.l1.score.winner import is_leader_eligible  # noqa: E402
 from promptpotter.application.optimization.pobb.elimination import (  # noqa: E402
     PoBBCheck,
     PoBBConfig,
@@ -1448,7 +1516,11 @@ from promptpotter.domain.l1_layout import (  # noqa: E402
     validate_l1_layout,
 )
 from promptpotter.domain.opt_search_point import OptSearchPoint  # noqa: E402
-from promptpotter.domain.results import CandidateProposal, ScoredCandidate  # noqa: E402
+from promptpotter.domain.results import (  # noqa: E402
+    CandidateProposal,
+    ScoredCandidate,
+    is_leader_eligible,
+)
 from promptpotter.domain.search_point import TaskDecomposition  # noqa: E402
 
 # ===========================================================================

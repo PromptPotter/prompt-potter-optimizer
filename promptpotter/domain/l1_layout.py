@@ -35,6 +35,7 @@ L1_POSSIBLE: frozenset[str] = frozenset(
         "plan",
         "rendered_prompt",
         "pipeline_param_catalogue",
+        "prompt_block_catalogue",
         "diagnostics",
         "escalation_panel",
         "l1_wounds",
@@ -149,6 +150,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
             problem_description=[
                 "rendered_prompt",
                 "pipeline_param_catalogue",
+                "prompt_block_catalogue",
                 "plan",
                 "critique",
                 "sample_transcripts",

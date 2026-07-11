@@ -6,6 +6,8 @@ below are static and serve as the single source of truth for prompt field
 lists, persistence versioning, and service-level defaults.
 """
 
+import math
+
 from pydantic_settings import BaseSettings
 
 APP_VERSION: str = "0.8.2"
@@ -104,6 +106,14 @@ OPTIMIZER_PROMPT_WARN_CHARS: int = 8_000
 # most aggressive threshold before false-cuts of true winners climb (≈2% at
 # 0.15 vs ≈9% at 0.20, measured on the archived round corpus).
 POBB_DEFAULT_EPSILON: float = 0.15
+
+# UCB1 exploration weight for the lineage rewind pick
+# (``application/mask/backprop.py::select_rewind_round``). sqrt(2) is UCB1's
+# regret-optimal constant for rewards in [0, 1] — which the θ values are
+# min-max normalized into, so the constant means what the literature says it
+# means. Deliberately NOT a campaign knob: one rewind costs a whole cycle, so
+# this is a property of the search, not a per-run dial.
+UCB_EXPLORATION_C: float = math.sqrt(2)
 
 
 class Settings(BaseSettings):

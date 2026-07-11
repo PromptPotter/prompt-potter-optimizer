@@ -235,6 +235,7 @@ def build_bundle(
         origin_per_sample=origin_per_sample,
         trajectory_misses=trajectory_misses,
         forbidden_axes_strict=cycle.config.optimization.forbidden_axes_strict,
+        prompt_block_catalogue=cycle.config.optimization.prompt_block_catalogue,
         rebase_capability=cycle.config.optimization.rebase_capability,
         terminate_capability=cycle.config.optimization.terminate_capability,
         schema_field_rename=cycle.config.optimization.schema_field_rename,

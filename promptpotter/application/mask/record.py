@@ -74,6 +74,11 @@ class MaskRound(BaseModel):
     candidates: list[MaskCandidate] = Field(default_factory=list)
     anchor_evaluators: dict[str, float] = Field(default_factory=dict)
     anchor_accuracy: float = 0.0
+    # The round's Rasch ability frontier (``RoundResult.cumulative_theta``) — the
+    # backprop fold's value signal. Subset-invariant BY CONSTRUCTION, which is what
+    # makes it the only honest thing to average up a lineage whose rounds scored
+    # different sample subsets; accuracy is subset-relative and would drift.
+    cumulative_theta: float = 0.0
 
     @property
     def node_key(self) -> str:
