@@ -11,8 +11,6 @@ the detail files (and GCs orphaned ones). No read-whole / O(n)-scan / rewrite-wh
 
 from __future__ import annotations
 
-import hashlib
-import logging
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -26,9 +24,6 @@ from promptpotter.infrastructure.store.io import (
     write_jsonl,
 )
 from promptpotter.infrastructure.store.read_model import append_row, compact, fold_jsonl
-from promptpotter.shared.hashing import HASH_TRUNCATE
-
-logger = logging.getLogger(__name__)
 
 
 def _summary(data: dict[str, Any]) -> dict[str, Any]:
@@ -97,12 +92,11 @@ class MeasurementArchive:
     """File I/O for the measurement store — the DB core, NOT the recycle bin.
 
     Tenant-global, self-contained under `measurements/`: run-detail files
-    `measurements/{run_id}.json`, the append-only index `measurements/index.jsonl`,
-    and the alias groups `measurements/prompt_aliases.json` all live together. It
-    sits beside `campaigns/` and `archive/` (the recycle bin), never inside
-    `archive/` — it is a cross-campaign cache, not trash. Run files are reached by
-    explicit `run_id` (`load_by_id`) or via the index (`list_all`); only `reindex`
-    globs the dir, so the index + alias files share it safely.
+    `measurements/{run_id}.json` and the append-only index `measurements/index.jsonl`
+    live together. It sits beside `campaigns/` and `archive/` (the recycle bin),
+    never inside `archive/` — it is a cross-campaign cache, not trash. Run files are
+    reached by explicit `run_id` (`load_by_id`) or via the index (`list_all`); only
+    `reindex` globs the dir, so the index shares it safely.
 
     **Identity does not include the execution path.** A measurement is keyed by
     `content_hash(prompt, dataset, pipeline_params)` and reused by
@@ -216,12 +210,9 @@ class MeasurementArchive:
         path it can't explain.
         """
         store = self._store_dir()
-        reserved = {self._index_path().name, self._alias_path().name}
-        candidates = [
-            p
-            for p in store.glob("*.json")
-            if p.name not in reserved and not p.name.startswith("hard_samples_")
-        ]
+        # ``glob("*.json")`` never matches the ``.jsonl`` index; the positive-ID pass below
+        # skips any other non-detail file (no ``content_hash``), so no name allowlist is needed.
+        candidates = [p for p in store.glob("*.json") if not p.name.startswith("hard_samples_")]
         parsed: list[tuple[Path, dict[str, Any]]] = []
         for path in candidates:
             data = read_json_optional(path)
@@ -427,61 +418,6 @@ class MeasurementArchive:
                     continue
                 cache[q] = item
         return cache
-
-    # -- prompt alias groups ---------------------------------------------------
-
-    def _alias_path(self) -> Path:
-        return self._store_dir() / "prompt_aliases.json"
-
-    def register_alias(self, *hashes: str) -> None:
-        """Link rendered_prompt_hashes as semantically equivalent; new hashes merge into any group
-        that overlaps theirs.
-        """
-        hashes_set = {h for h in hashes if h}
-        if len(hashes_set) < 2:
-            return
-
-        path = self._alias_path()
-        data = read_json_optional(path) or {"groups": []}
-        groups: list[list[str]] = data["groups"]
-
-        merged: set[str] = set(hashes_set)
-        remaining: list[list[str]] = []
-        for group in groups:
-            if merged & set(group):
-                merged |= set(group)
-            else:
-                remaining.append(group)
-
-        remaining.append(sorted(merged))
-        data["groups"] = remaining
-        path.parent.mkdir(parents=True, exist_ok=True)
-        write_json(path, data)
-
-    def register_prompt_alias(
-        self,
-        raw_text: str,
-        canonical_text: str,
-    ) -> None:
-        """Hash both sides → `register_alias`. No-op when either side is empty or hashes match."""
-        if not (raw_text and canonical_text):
-            return
-        raw_hash = hashlib.sha256(raw_text.encode()).hexdigest()[:HASH_TRUNCATE]
-        canonical_hash = hashlib.sha256(canonical_text.encode()).hexdigest()[:HASH_TRUNCATE]
-        if raw_hash == canonical_hash:
-            return
-        self.register_alias(raw_hash, canonical_hash)
-        logger.info("Registered prompt alias: %s ↔ %s", raw_hash[:8], canonical_hash[:8])
-
-    def resolve_aliases(self, rp_hash: str) -> set[str]:
-        """Return all hashes equivalent to *rp_hash* (including itself)."""
-        if not rp_hash:
-            return set()
-        data = read_json_optional(self._alias_path()) or {"groups": []}
-        for group in data.get("groups", []):
-            if rp_hash in group:
-                return set(group)
-        return {rp_hash}
 
 
 def _to_measurement(

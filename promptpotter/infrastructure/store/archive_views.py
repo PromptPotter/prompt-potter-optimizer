@@ -32,9 +32,7 @@ __all__ = [
     "measurements_for_config",
     "measurements_for_sample",
     "record_measurement_run",
-    "register_prompt_alias",
     "reindex_measurements",
-    "resolve_aliases",
     "reusable_results",
     "runs_since",
 ]
@@ -157,11 +155,6 @@ def reusable_results(
     )
 
 
-def resolve_aliases(stores: Stores, rp_hash: str) -> set[str]:
-    """All ``rendered_prompt_hash`` values equivalent to *rp_hash* (including itself)."""
-    return stores.archive.resolve_aliases(rp_hash)
-
-
 # -- writes -------------------------------------------------------------------
 
 
@@ -178,12 +171,3 @@ def reindex_measurements(stores: Stores) -> dict[str, int]:
     """Rebuild the append-only measurement index from the detail files and GC orphans.
     A maintenance verb — the index is derived, so this loses nothing; returns counts."""
     return stores.archive.reindex()
-
-
-def register_prompt_alias(
-    stores: Stores,
-    raw_text: str,
-    canonical_text: str,
-) -> None:
-    """Alias a raw prompt string to its canonical form (no-op if either is empty / equal)."""
-    stores.archive.register_prompt_alias(raw_text, canonical_text)

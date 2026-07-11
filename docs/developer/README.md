@@ -111,8 +111,8 @@ ON DISK (the database)                IN MEMORY (rebuilt from disk)
 archive/                            MeasurementArchive
   measurements/                                      │
     {run_id}.json     ← one batch          ┌────────┼────────┐
-  index.jsonl       ← append-only          ▼        ▼        ▼
-  prompt_aliases.json                  SampleIdx  CfgIdx  AxisIdx
+    index.jsonl       ← append-only         ▼        ▼        ▼
+                                        SampleIdx  CfgIdx  AxisIdx
                                        (per       (per     (folds
                                         sample)    config)  both)
 ```

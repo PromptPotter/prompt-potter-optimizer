@@ -51,7 +51,7 @@ Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [o
           cache/rounds|candidates/     # per-round node I/O + pre-scoring checkpoint
           archived/resumed_at_{ts}/    # mid-cycle rewind sweepup (--from)
     measurements/                       # measurement store (DB core) — cross-cycle/session/tenant, peer of campaigns/
-      {run_id}.json  index.jsonl  prompt_aliases.json   # index.jsonl append-only, last-wins by content_hash; `reindex` rebuilds it
+      {run_id}.json  index.jsonl   # index.jsonl append-only, last-wins by content_hash; `reindex` rebuilds it
     archive/{campaign_id}/              # recycle bin — `archive` MOVES a campaign tree here; `unarchive` moves it back
 ```
 

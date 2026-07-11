@@ -11,8 +11,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bootstrap.session import Session
-from promptpotter.domain.opt_search_point import OptSearchPoint, node_config_items
-from promptpotter.infrastructure.store import archive_views
+from promptpotter.domain.opt_search_point import node_config_items
 
 if TYPE_CHECKING:
     from promptpotter.application.config import CampaignConfig
@@ -148,7 +147,7 @@ def _build_cycle_and_bootstrap(
     dataset: list[Sample],
     cycle_id: str | None,
     resume_from_round_override: int | None,
-) -> tuple[Cycle, OptSearchPoint, str | None, int]:
+) -> tuple[Cycle, str | None, int]:
     """Build origin OSP + Cycle.start + bootstrap storage; raise on missing resolved_origin."""
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.scoring.formula import compile_round_scorer
@@ -186,7 +185,7 @@ def _build_cycle_and_bootstrap(
         cycle_id,
         resume_from_round_override=resume_from_round_override,
     )
-    return cycle, resolved_origin, resolved_cycle_id, resumed_from_round
+    return cycle, resolved_cycle_id, resumed_from_round
 
 
 def _start_observability_and_scoring(
@@ -233,15 +232,13 @@ def _start_observability_and_scoring(
 def _apply_resume_fork(
     session: Session,
     cycle: Cycle,
-    origin: CampaignOrigin,
-    resolved_origin: OptSearchPoint,
     resolved_cycle_id: str | None,
     resumed_from_round: int,
     *,
     no_divergence_check: bool,
     fork_on_divergence: bool,
 ) -> tuple[str | None, int]:
-    """Replay decisions; fork on divergence; register origin alias. Returns possibly-rebound (id, round)."""
+    """Replay decisions; fork on divergence. Returns possibly-rebound (id, round)."""
     from promptpotter.application.optimization.resume_and_fork import (
         resume_with_divergence_check,
     )
@@ -261,10 +258,6 @@ def _apply_resume_fork(
         if fork_result is not None:
             resolved_cycle_id = fork_result.new_cycle_id
             resumed_from_round = fork_result.new_resumed_from_round
-    if session.store:
-        archive_views.register_prompt_alias(
-            session.store, origin.instruction, resolved_origin.render()
-        )
     return resolved_cycle_id, resumed_from_round
 
 
@@ -337,7 +330,7 @@ async def init_optimization_loop(
     """Build Cycle + attach loop infra: origin, resume/fork, obs, scoring, axes."""
     await _emit_preflight_and_init_session(config, dataset, cb, session)
 
-    cycle, resolved_origin, resolved_cycle_id, resumed_from_round = _build_cycle_and_bootstrap(
+    cycle, resolved_cycle_id, resumed_from_round = _build_cycle_and_bootstrap(
         origin,
         task_context,
         scoring_round_formula,
@@ -365,8 +358,6 @@ async def init_optimization_loop(
     resolved_cycle_id, resumed_from_round = _apply_resume_fork(
         session,
         cycle,
-        origin,
-        resolved_origin,
         resolved_cycle_id,
         resumed_from_round,
         no_divergence_check=no_divergence_check,
