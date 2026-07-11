@@ -15,6 +15,7 @@ from typing import Any
 
 from promptpotter.domain.results import best_round_by_cumulative_accuracy
 from promptpotter.infrastructure.store.io import read_json_tolerant
+from promptpotter.infrastructure.store.layout import CycleLayout
 
 
 def _max_round_on_disk(rounds_dir: Path) -> int:
@@ -57,11 +58,11 @@ def resolve_resume_state(
     don't back the headline. The stale ``round`` pointer is self-healed in the
     same pass.
     """
-    resume_from = read_json_tolerant(seed_dir / "dashboard.json")
+    resume_from = read_json_tolerant(CycleLayout(seed_dir).dashboard)
     if not isinstance(resume_from, dict):
         return None
 
-    disk_round = _max_round_on_disk(active_cycle_dir / "rounds")
+    disk_round = _max_round_on_disk(CycleLayout(active_cycle_dir).rounds)
     if disk_round > int(resume_from.get("round") or 0):
         resume_from["round"] = disk_round
     surviving = [

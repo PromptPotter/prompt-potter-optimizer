@@ -28,6 +28,7 @@ from typing import Any, cast, get_args
 
 from promptpotter.domain.projection_envelope import ProjectionEnvelope, ProjectionKind
 from promptpotter.infrastructure.store.io import read_json_optional
+from promptpotter.infrastructure.store.layout import CycleLayout
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +46,9 @@ class CycleLedgerTail:
     """
 
     def __init__(self, cycle_dir: Path, cycle_id: str) -> None:
-        self._cycle_dir = cycle_dir
+        self._layout = CycleLayout(cycle_dir)
         self._cycle_id = cycle_id
-        self._ledger_path = cycle_dir / ".runtime" / "ledger.jsonl"
+        self._ledger_path = self._layout.ledger
         self._byte_pos = 0
         self._line_index = 0
 
@@ -92,7 +93,7 @@ class CycleLedgerTail:
     # ---- internals ----
 
     def _read_dashboard(self) -> dict[str, Any]:
-        dashboard = self._cycle_dir / "dashboard.json"
+        dashboard = self._layout.dashboard
         try:
             body = read_json_optional(dashboard)
         except json.JSONDecodeError:

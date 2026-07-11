@@ -34,6 +34,7 @@ from promptpotter.application.runner.round import emit_origin_round
 from promptpotter.application.runner.termination import OriginGateMode, origin_gate_tripped
 from promptpotter.domain.phases import RunPhase, StopReason
 from promptpotter.infrastructure.store.io import read_json_tolerant
+from promptpotter.infrastructure.store.layout import CycleLayout
 
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
@@ -51,7 +52,6 @@ __all__ = ["run_origin_gate"]
 # within ~1 s.
 _GATE_POLL_S = 1.0
 
-_DECISION_FILE = "gate_decision.json"
 _DECISIONS = ("rescore", "proceed", "abort")
 
 GateDecision = Literal["rescore", "proceed", "abort"]
@@ -180,7 +180,7 @@ async def _rescore_and_reemit(
 
 def _decision_path(session: Session):  # type: ignore[no-untyped-def]
     cycle_dir = session.store.campaigns.cycle_dir(session.campaign_id, session.state.cycle_id)
-    return cycle_dir / ".runtime" / _DECISION_FILE
+    return CycleLayout(cycle_dir).gate_decision
 
 
 def _read_decision_file(path) -> GateDecision | None:  # type: ignore[no-untyped-def]

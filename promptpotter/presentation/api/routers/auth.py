@@ -49,7 +49,7 @@ from promptpotter.infrastructure.identity.google import (
 from promptpotter.infrastructure.identity.migration import maybe_claim_default
 from promptpotter.infrastructure.identity.user import derive_user_id
 from promptpotter.infrastructure.identity.verifier import IDTokenInvalidError
-from promptpotter.infrastructure.store.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.infrastructure.store.layout import DEFAULT_PROJECTS_ROOT
 from promptpotter.infrastructure.store.user_store import ConsentRecord
 from promptpotter.presentation.api.deps import IdentityDep, StoreDep
 from promptpotter.presentation.api.middleware import SESSION_COOKIE_NAME

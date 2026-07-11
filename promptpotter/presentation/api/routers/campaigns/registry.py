@@ -24,7 +24,7 @@ from promptpotter.application.jobs.launcher import draft_wire_with_locks, load_c
 from promptpotter.application.meta_champion import ChampionRegistry, reduce_corpus
 from promptpotter.application.resource_matrix import ResourceMatrix, read_matrix
 from promptpotter.infrastructure.store import Stores
-from promptpotter.infrastructure.store.paths import REPO_ROOT
+from promptpotter.infrastructure.store.layout import REPO_ROOT
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError

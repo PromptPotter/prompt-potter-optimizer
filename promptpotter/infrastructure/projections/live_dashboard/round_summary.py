@@ -20,6 +20,7 @@ from promptpotter.domain.results import (
     RoundSummaryCandidate,
     is_round_winner,
 )
+from promptpotter.infrastructure.store.layout import CycleLayout
 
 # The ``ScoredCandidate`` fields each display model copies verbatim — its own field list
 # minus the derived ``is_winner``. Deriving from ``model_fields`` keeps the copy set in
@@ -33,7 +34,7 @@ def origin_cells_from_disk(cycle_dir: Path) -> dict[str, float]:
     the un-edited-meta-prompt control every later round's outer verdict pairs against. The
     sole reader of this file for this purpose; ``application/meta_champion/reducer.py``
     reuses it instead of keeping its own copy."""
-    origin_file = Path(cycle_dir) / "rounds" / "round_0000.json"
+    origin_file = CycleLayout(Path(cycle_dir)).round_file(0)
     if not origin_file.is_file():
         return {}
     try:

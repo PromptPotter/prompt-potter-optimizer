@@ -26,6 +26,7 @@ from promptpotter.infrastructure.store import (
     read_active_pointer,
 )
 from promptpotter.infrastructure.store.io import read_json, read_json_tolerant
+from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.presentation.api.deps import (
     IdentityDep,
     JobRegistryDep,
@@ -100,11 +101,10 @@ def get_live_state(store: StoreDep) -> dict[str, Any]:
     # runner writes + polls its flags there. Shared readers in
     # ``infrastructure.runtime_flags`` so this matches the per-cycle dashboard route.
     cycle_path = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
-    runtime_dir = cycle_path / ".runtime"
-    paused = is_paused(runtime_dir)
-    current_spend_cap_usd = read_spend_cap(runtime_dir)
+    paused = is_paused(cycle_path)
+    current_spend_cap_usd = read_spend_cap(cycle_path)
 
-    path = cycle_path / "dashboard.json"
+    path = CycleLayout(cycle_path).dashboard
     state: dict[str, Any] | None = read_json_tolerant(path) if path.is_file() else None
     if state is None:
         # Missing OR corrupt: degrade to the warming placeholder, never 500.

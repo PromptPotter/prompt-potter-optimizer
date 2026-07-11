@@ -18,6 +18,7 @@ from promptpotter.infrastructure.store import (
     save_active_pointer,
 )
 from promptpotter.infrastructure.store.io import validate_path_component
+from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.identity import IdentityContext, default_identity
 
 if TYPE_CHECKING:
@@ -310,9 +311,9 @@ def mint_checkin_skeleton(stores: Stores, *, slug: str) -> tuple[str, str, str]:
     # session between skeleton and Start; finalize overwrites it with the run state.
     stores.sessions.create(session_id, {"phase": "checkin", "dataset_name": slug})
 
-    cycle_dir = stores.campaigns.cycle_dir(campaign_id, cycle_id)
-    (cycle_dir / ".runtime").mkdir(parents=True, exist_ok=True)
-    (cycle_dir / ".runtime" / "checkin.flag").write_text("", encoding="utf-8")
+    checkin_flag = CycleLayout(stores.campaigns.cycle_dir(campaign_id, cycle_id)).checkin_flag
+    checkin_flag.parent.mkdir(parents=True, exist_ok=True)
+    checkin_flag.write_text("", encoding="utf-8")
 
     logger.info(
         "Minted check-in campaign %s — session %s, cycle %s", campaign_id, session_id, cycle_id
@@ -408,7 +409,7 @@ def finalize_checkin_to_active(
     )
 
     cycle_dir = session.store.campaigns.cycle_dir(campaign_id, cycle_id)
-    (cycle_dir / ".runtime" / "checkin.flag").unlink(missing_ok=True)
+    CycleLayout(cycle_dir).checkin_flag.unlink(missing_ok=True)
 
     from promptpotter.application.origin import build_campaign_emitter
     from promptpotter.shared.errors import graceful

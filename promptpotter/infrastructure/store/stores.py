@@ -22,11 +22,11 @@ from promptpotter.infrastructure.store.io import (
     read_json_optional,
     write_json,
 )
-from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
-from promptpotter.infrastructure.store.paths import (
+from promptpotter.infrastructure.store.layout import (
     DEFAULT_DATASETS_ROOT,
     DEFAULT_PROJECTS_ROOT,
 )
+from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
 from promptpotter.infrastructure.store.session_store import SessionStore
 from promptpotter.infrastructure.store.sweep_store import SweepStore
 from promptpotter.infrastructure.store.tenant_dataset_store import TenantDatasetStore

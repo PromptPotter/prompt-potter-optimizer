@@ -10,7 +10,7 @@ from promptpotter.infrastructure.store.io import (
     read_json_optional,
     write_json,
 )
-from promptpotter.infrastructure.store.paths import session_dir_for
+from promptpotter.infrastructure.store.layout import session_dir_for
 from promptpotter.shared.clock import utcnow_iso
 
 

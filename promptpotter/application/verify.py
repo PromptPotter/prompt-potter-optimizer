@@ -20,7 +20,7 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.rendering import display_fitness
 from promptpotter.domain.results import DiagnosticRunRecord
 from promptpotter.infrastructure.store import archive_views
-from promptpotter.infrastructure.store.paths import REPO_ROOT
+from promptpotter.infrastructure.store.layout import REPO_ROOT
 from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:

@@ -19,6 +19,7 @@ from promptpotter.domain.phases import StopReason
 from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.io import write_json
+from promptpotter.infrastructure.store.layout import CycleLayout
 
 _CAMPAIGN = "testds__20260101-000000"
 _CYCLE = "cycle-0"
@@ -29,12 +30,12 @@ def _mint(
 ) -> Path:
     stores.campaigns.create(_CAMPAIGN, _CYCLE, {})
     cycle_dir = stores.campaigns.cycle_dir(_CAMPAIGN, _CYCLE)
-    runtime = cycle_dir / ".runtime"
-    runtime.mkdir(parents=True, exist_ok=True)
+    layout = CycleLayout(cycle_dir)
+    layout.runtime.mkdir(parents=True, exist_ok=True)
     if checkin:
-        (runtime / "checkin.flag").touch()
+        layout.checkin_flag.touch()
     if paused:
-        (runtime / "pause.flag").touch()
+        layout.pause_flag.touch()
     if dashboard:
         write_json(cycle_dir / "dashboard.json", {"run_phase": "running"})
     return cycle_dir

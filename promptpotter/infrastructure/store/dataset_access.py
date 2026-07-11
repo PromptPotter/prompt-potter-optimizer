@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from promptpotter.infrastructure.store.io import read_json_tolerant
-from promptpotter.infrastructure.store.paths import validate_dataset_name
+from promptpotter.infrastructure.store.layout import validate_dataset_name
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.identity import BENCHMARKS_READ_CAP
 

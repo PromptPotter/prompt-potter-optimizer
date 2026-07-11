@@ -30,31 +30,17 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from promptpotter.infrastructure.store.layout import FileKind, classify
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import NotFoundError
 
-# Readable-output files (anywhere in the tree) → the ``reports`` leaf.
-_REPORT_NAMES = frozenset(
-    {"campaign.json", "dashboard.json", "index.json", "review.md", "log.md", "hard_samples.json"}
-)
 # Per-sample arrays inside a public round file that the backend produced → ``connector``.
 _CONNECTOR_ROUND_KEYS = ("results", "all_candidate_results")
 
 # Loop's four leaves, then the full six (top-level Connector / Loop / Dataset flattened).
 _LOOP_LEAVES = ("state", "trace", "history", "reports")
 _LEAVES = ("dataset", "connector", *_LOOP_LEAVES)
-
-
-def _is_public_round(rel: Path) -> bool:
-    """True for ``cycles/{cid}/rounds/round_*.json`` — the resume file (not the
-    ``.runtime/cache`` audit copy). The lone intra-file straddler."""
-    return (
-        ".runtime" not in rel.parts
-        and "rounds" in rel.parts
-        and rel.name.startswith("round_")
-        and rel.suffix == ".json"
-    )
 
 
 def _round_connector_bytes(path: Path) -> int:
@@ -68,38 +54,12 @@ def _round_connector_bytes(path: Path) -> int:
     return sum(len(json.dumps(doc[k])) for k in _CONNECTOR_ROUND_KEYS if k in doc)
 
 
-def _leaf(rel: Path) -> str:
-    """Classify one file (path relative to the campaign root) into its MECE leaf.
-
-    First match wins; the final ``else`` makes the partition exhaustive. Public round
-    files are handled by the caller (their connector arrays split out, remainder ``state``)
-    and never reach here.
-    """
-    parts = rel.parts
-    if "langfuse" in parts:
-        i = parts.index("langfuse")
-        sub = parts[i + 1] if i + 1 < len(parts) else ""
-        return "dataset" if sub == "datasets" else "trace"
-    if ".runtime" in parts:
-        j = parts.index(".runtime")
-        sub = parts[j + 1] if j + 1 < len(parts) else ""
-        if sub == "cache":
-            return "connector"
-        if rel.name == "ledger.jsonl":
-            return "history"
-        return "trace"  # streams/ + anything else under .runtime → loop telemetry
-    if rel.name in _REPORT_NAMES:
-        return "reports"
-    if ".overrides" in parts:
-        return "state"
-    return "trace"  # prompts/, sweeps/, residual → loop telemetry
-
-
 def _campaign_split(root: Path) -> dict[str, int]:
     """One walk of a campaign tree → ``{leaf: bytes}`` over the six MECE leaves.
 
-    The six values sum exactly to the tree's on-disk total (the public round file's
-    connector arrays go to ``connector``, its remainder to ``state``).
+    Each file's leaf comes from the single :func:`classify` taxonomy; the six values
+    sum exactly to the tree's on-disk total. ``ROUND_PUBLIC`` is the lone straddler —
+    its backend arrays go to ``connector``, its searchpoint remainder to ``state``.
     """
     acc = dict.fromkeys(_LEAVES, 0)
     if not root.is_dir():
@@ -111,13 +71,13 @@ def _campaign_split(root: Path) -> dict[str, int]:
             size = p.stat().st_size
         except OSError:
             continue
-        rel = p.relative_to(root)
-        if _is_public_round(rel):
+        kind = classify(p.relative_to(root))
+        if kind is FileKind.ROUND_PUBLIC:
             conn = min(_round_connector_bytes(p), size)
             acc["connector"] += conn
             acc["state"] += size - conn
         else:
-            acc[_leaf(rel)] += size
+            acc[kind.leaf] += size
     return acc
 
 

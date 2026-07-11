@@ -23,7 +23,7 @@ from promptpotter.infrastructure.identity import (
     build_identity_bundle,
     default_identity_paths,
 )
-from promptpotter.infrastructure.store.paths import DEFAULT_PROJECTS_ROOT, REPO_ROOT
+from promptpotter.infrastructure.store.layout import DEFAULT_PROJECTS_ROOT, REPO_ROOT
 from promptpotter.presentation import api
 from promptpotter.presentation.api.middleware import install_oidc_middleware
 from promptpotter.shared.clock import utcnow_iso

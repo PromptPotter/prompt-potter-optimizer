@@ -65,7 +65,7 @@ from promptpotter.infrastructure.store import (
     read_active_pointer,
 )
 from promptpotter.infrastructure.store.io import read_json_tolerant, write_json
-from promptpotter.infrastructure.store.paths import root_cycle_id
+from promptpotter.infrastructure.store.layout import CycleLayout, root_cycle_id
 from promptpotter.presentation.api.middleware.command_dispatcher.helpers import (
     _DeleteCycleRejectedError,
     _find_idempotent_command,
@@ -626,10 +626,8 @@ class CommandDispatcher:
         the next per-sample checkpoint, accepts the partial searchpoint, consumes the
         flag, and the cycle keeps running. A manual skip is a human intervention — the
         cycle is marked ``human_intervened`` (no longer purely reproducible)."""
-        cycle_dir = self._store.campaigns.cycle_dir(campaign_id, cycle_id)
-        runtime_dir = cycle_dir / ".runtime"
-        runtime_dir.mkdir(parents=True, exist_ok=True)
-        flag = runtime_dir / "skip.flag"
+        flag = CycleLayout(self._store.campaigns.cycle_dir(campaign_id, cycle_id)).skip_flag
+        flag.parent.mkdir(parents=True, exist_ok=True)
         flag.write_text(f"requested_at={utcnow_iso()}\n", encoding="utf-8")
         self._store.campaigns.mark_human_intervened(
             campaign_id, cycle_id, kind="skip", at=utcnow_iso()
@@ -642,10 +640,8 @@ class CommandDispatcher:
         terminal marking on ``StopReason.PAUSED``). Resuming is the ``start-run``
         / ``resume`` launcher relaunching from the last completed round — not an
         in-place flag delete, since the worker is gone. Idempotent."""
-        cycle_dir = self._store.campaigns.cycle_dir(campaign_id, cycle_id)
-        runtime_dir = cycle_dir / ".runtime"
-        runtime_dir.mkdir(parents=True, exist_ok=True)
-        flag = runtime_dir / "pause.flag"
+        flag = CycleLayout(self._store.campaigns.cycle_dir(campaign_id, cycle_id)).pause_flag
+        flag.parent.mkdir(parents=True, exist_ok=True)
         flag.write_text(f"requested_at={utcnow_iso()}\n", encoding="utf-8")
 
     def _apply_origin_gate_decision(self, campaign_id: str, cycle_id: str, decision: str) -> None:
@@ -655,10 +651,11 @@ class CommandDispatcher:
         L1, ``abort`` ends the cycle with ``StopReason.ORIGIN_GATE``. The one
         decision channel all three surfaces write; the runner clears the file after
         consuming it. Last write wins."""
-        cycle_dir = self._store.campaigns.cycle_dir(campaign_id, cycle_id)
-        runtime_dir = cycle_dir / ".runtime"
-        runtime_dir.mkdir(parents=True, exist_ok=True)
-        write_json(runtime_dir / "gate_decision.json", {"decision": decision})
+        gate_path = CycleLayout(
+            self._store.campaigns.cycle_dir(campaign_id, cycle_id)
+        ).gate_decision
+        gate_path.parent.mkdir(parents=True, exist_ok=True)
+        write_json(gate_path, {"decision": decision})
 
     def _apply_change_spend_budget(
         self,
@@ -673,10 +670,8 @@ class CommandDispatcher:
         leaves that ceiling untouched (merge into the existing file). Setting a
         ceiling to ``0`` halts at the next round boundary; raising above current
         usage releases."""
-        cycle_dir = self._store.campaigns.cycle_dir(campaign_id, cycle_id)
-        runtime_dir = cycle_dir / ".runtime"
-        runtime_dir.mkdir(parents=True, exist_ok=True)
-        cap_path = runtime_dir / "spend_cap.json"
+        cap_path = CycleLayout(self._store.campaigns.cycle_dir(campaign_id, cycle_id)).spend_cap
+        cap_path.parent.mkdir(parents=True, exist_ok=True)
         caps: dict[str, float | int] = {}
         existing = read_json_tolerant(cap_path, {})  # missing/malformed → start clean
         if isinstance(existing, dict):

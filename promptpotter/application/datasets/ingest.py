@@ -43,7 +43,7 @@ from promptpotter.application.datasets.prompts import (
 from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.infrastructure.store import Stores
-from promptpotter.infrastructure.store.paths import validate_dataset_name
+from promptpotter.infrastructure.store.layout import validate_dataset_name
 
 # Per-file upload cap. 25 MB comfortably holds ``MAX_SAMPLES`` 500-byte rows
 # plus headroom; rejects the obvious DOS shapes (multi-hundred-MB blobs) before

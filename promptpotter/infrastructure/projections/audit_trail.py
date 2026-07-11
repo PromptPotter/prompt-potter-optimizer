@@ -19,6 +19,7 @@ from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import LLMCallRecord, PhaseRecord, RoundWarningRecord
 from promptpotter.infrastructure.projections.base import DerivedView
 from promptpotter.infrastructure.store.io import read_json_tolerant, write_json
+from promptpotter.infrastructure.store.layout import CycleLayout, round_basename
 
 logger = logging.getLogger(__name__)
 
@@ -36,17 +37,16 @@ _ROUNDS_SUBPATH = (".runtime", "cache", "rounds")
 
 def audit_rounds_dir(cycle_dir: Path) -> Path:
     """``{cycle_dir}/.runtime/cache/rounds`` — per-round audit folder."""
-    return cycle_dir.joinpath(*_ROUNDS_SUBPATH)
+    return CycleLayout(cycle_dir).audit_rounds
 
 
 def load_round_audits(cycle_dir: Path, rounds: list[dict[str, Any]]) -> list[dict[str, Any] | None]:
     """Load round_NNNN.json parallel to *rounds*; missing/corrupt → None (render degrades gracefully)."""
-    rd = audit_rounds_dir(cycle_dir)
+    layout = CycleLayout(cycle_dir)
     out: list[dict[str, Any] | None] = []
     for round_data in rounds:
         round_num = int(round_data.get("round") or 0)
-        path = rd / f"round_{round_num:04d}.json"
-        out.append(read_json_tolerant(path))
+        out.append(read_json_tolerant(layout.audit_round_file(round_num)))
     return out
 
 
@@ -161,7 +161,7 @@ class AuditTrailView(DerivedView):
     @classmethod
     def from_cycle_dir(cls, cycle_dir: CycleDir) -> AuditTrailView:
         """Build a projection rooted at ``{cycle_dir}/.runtime/cache/rounds``."""
-        return cls(Path(cycle_dir).joinpath(*_ROUNDS_SUBPATH))
+        return cls(CycleLayout(Path(cycle_dir)).audit_rounds)
 
     def begin_round(self, round_num: int, started_at: str = "") -> None:
         """Start a new round; flush pending state first so L2/L3 calls that arrived between
@@ -219,7 +219,7 @@ class AuditTrailView(DerivedView):
             return None
 
         self.rounds_dir.mkdir(parents=True, exist_ok=True)
-        path = self.rounds_dir / f"round_{self._current_round:04d}.json"
+        path = self.rounds_dir / round_basename(self._current_round)
 
         prior = read_json_tolerant(path, {})
         existing_nodes = dict(prior.get("nodes") or {})

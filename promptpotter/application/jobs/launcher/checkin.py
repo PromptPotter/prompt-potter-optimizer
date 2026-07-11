@@ -50,7 +50,7 @@ from promptpotter.application.optimization.task_context import load_or_build_tas
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.run_records import CycleSeed
 from promptpotter.infrastructure.store import Stores
-from promptpotter.infrastructure.store.paths import REPO_ROOT
+from promptpotter.infrastructure.store.layout import REPO_ROOT
 from promptpotter.shared.identity import claim_email
 
 if TYPE_CHECKING:

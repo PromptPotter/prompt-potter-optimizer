@@ -74,6 +74,7 @@ from promptpotter.infrastructure.store import (
     session_dir_for,
     write_json,
 )
+from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import has_pipeline_warnings
 from promptpotter.shared.spend import compute_usd
@@ -124,7 +125,7 @@ class LiveDashboardView(DerivedView):
     ) -> None:
         cycle_path = Path(cycle_dir)
         self.cycle_dir = cycle_path
-        self.state_path = cycle_path / "dashboard.json"
+        self.state_path = CycleLayout(cycle_path).dashboard
         self.session_dir = session_dir
         self._recorder = recorder
         self.patience_max = l1_patience

@@ -53,6 +53,7 @@ from promptpotter.infrastructure.llm import set_abort_check
 from promptpotter.infrastructure.llm.models import emit_error_record
 from promptpotter.infrastructure.runtime_flags import clear_run_control_flags
 from promptpotter.infrastructure.store.io import read_json_tolerant
+from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ResumeDivergenceError
 
@@ -111,7 +112,7 @@ def _build_budget_gate(
     if usd_cap is None and token_cap is None:
         return None
     dashboard = observers.dashboard
-    cap_path = cycle_dir / ".runtime" / "spend_cap.json"
+    cap_path = CycleLayout(cycle_dir).spend_cap
 
     def _saved_caps() -> dict[str, Any]:
         data = read_json_tolerant(cap_path, {})
@@ -234,7 +235,6 @@ async def _prepare_run(
     if session.state.cycle_id:
         clear_run_control_flags(
             session.store.campaigns.cycle_dir(session.campaign_id, session.state.cycle_id)
-            / ".runtime"
         )
 
     # Cycle seed: the chosen searchpoint, declared at mint, lives at
@@ -469,9 +469,9 @@ async def _run_single_cycle(
         # tracks a fork's own cycle dir (the entry-point version bound once
         # and went stale across forks).
         if session.state.cycle_id:
-            runtime_dir = cycle_dir_for_probe / ".runtime"
-            skip_flag = runtime_dir / "skip.flag"
-            session.pause_check = (runtime_dir / "pause.flag").is_file
+            layout = CycleLayout(cycle_dir_for_probe)
+            skip_flag = layout.skip_flag
+            session.pause_check = layout.pause_flag.is_file
             # Let a pause break a long rate-limit countdown mid-wait — the one
             # blocking seam that otherwise ignores the pause channel. Same
             # predicate, bound into the per-task ContextVar the wait polls.

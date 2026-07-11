@@ -24,6 +24,7 @@ seam (campaign-from-origin).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -51,9 +52,11 @@ from promptpotter.infrastructure.store.io import (
     validate_path_component,
     write_json,
 )
-from promptpotter.infrastructure.store.paths import (
+from promptpotter.infrastructure.store.layout import (
+    CycleLayout,
     archive_root_dir_for,
     campaign_root_dir_for,
+    classify,
     cycle_dir_under,
     root_cycle_id,
     sibling_kind,
@@ -171,30 +174,50 @@ def _rmtree_robust(path: Path) -> None:
             time.sleep(0.1 * (attempt + 1))
 
 
-# Heavy per-cycle subtrees dropped by ``delete --keep-results`` (Resume + Audit
-# tiers): the resume state, the audit cache + ledger + PoBB streams, the read-once
-# cycle seed, and the rendered optimizer prompts. The Mirror tier
-# (``langfuse/datasets/``) is dropped sibling-selectively below so the keepsake
-# ``langfuse/{traces,observations,scores}`` loop trace survives.
-_HEAVY_CYCLE_SUBDIRS = ("rounds", ".runtime", ".overrides", "prompts")
+def _unlink_robust(path: Path) -> None:
+    """``Path.unlink`` with the Windows read-only chmod dance ``_rmtree_robust`` uses."""
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+    except PermissionError:
+        os.chmod(path, stat.S_IWRITE)
+        path.unlink()
+
+
+def _prune_empty_dirs(root: Path) -> None:
+    """``rmdir`` every now-empty directory under *root*, deepest first (a dir holding a
+    keepsake file keeps its ancestors alive)."""
+    for d in sorted(
+        (p for p in root.rglob("*") if p.is_dir()), key=lambda p: len(p.parts), reverse=True
+    ):
+        with contextlib.suppress(OSError):  # non-empty (holds keepsake) or already gone
+            d.rmdir()
 
 
 def _strip_to_keepsake(campaign_dir: Path) -> None:
-    """Remove the heavy tiers in place, sparing the keepsake (``campaign.json`` +
-    reports + per-cycle ``index.json`` / ``dashboard.json`` / ``log.md`` /
-    ``review.md`` + the shallow ``langfuse/{traces,observations,scores}`` trace)."""
+    """Drop every non-keepsake file in each cycle tree in place, sparing what
+    ``delete --keep-results`` preserves — the manifest, the per-cycle reports
+    (``index.json`` / ``dashboard.json`` / ``log.md`` / ``review.md`` /
+    ``hard_samples.json``), and the shallow ``langfuse/{traces,observations,scores}``
+    loop trace. Keepsake is the single ``FileKind.keepsake`` predicate
+    (``store/layout.py``) — the same taxonomy the storage rollup rolls into leaves —
+    so the heavy tiers (resume state, audit cache, ledger, streams, prompts, the
+    langfuse dataset mirror) drop without a hand-maintained subdir list; emptied dirs
+    are pruned after. ``sweeps/`` is a batch-diagnostic tree with no keepsake and no
+    cycle, so it drops wholesale."""
     cycles_dir = campaign_dir / "cycles"
     if cycles_dir.is_dir():
         for cdir in cycles_dir.iterdir():
             if not cdir.is_dir():
                 continue
-            for sub in _HEAVY_CYCLE_SUBDIRS:
-                target = cdir / sub
-                if target.exists():
-                    _rmtree_robust(target)
-            mirror = cdir / "langfuse" / "datasets"
-            if mirror.exists():
-                _rmtree_robust(mirror)
+            for p in [
+                f
+                for f in cdir.rglob("*")
+                if f.is_file() and not classify(f.relative_to(campaign_dir)).keepsake
+            ]:
+                _unlink_robust(p)
+            _prune_empty_dirs(cdir)
     sweeps = campaign_dir / "sweeps"
     if sweeps.exists():
         _rmtree_robust(sweeps)
@@ -252,17 +275,21 @@ class CampaignStore:
     def _manifest_path(self, campaign_id: str) -> Path:
         return self.campaign_root_dir(campaign_id) / "campaign.json"
 
+    def _layout(self, campaign_id: str, cycle_id: str) -> CycleLayout:
+        """The per-cycle path owner (archive-aware root — ``self.cycle_dir``)."""
+        return CycleLayout(self.cycle_dir(campaign_id, cycle_id))
+
     def _index_path(self, campaign_id: str, cycle_id: str) -> Path:
-        return self.cycle_dir(campaign_id, cycle_id) / "index.json"
+        return self._layout(campaign_id, cycle_id).manifest
 
     def _rounds_dir(self, campaign_id: str, cycle_id: str) -> Path:
-        return self.cycle_dir(campaign_id, cycle_id) / "rounds"
+        return self._layout(campaign_id, cycle_id).rounds
 
     def _candidates_dir(self, campaign_id: str, cycle_id: str) -> Path:
-        return self.cycle_dir(campaign_id, cycle_id) / ".runtime" / "cache" / "candidates"
+        return self._layout(campaign_id, cycle_id).candidates_cache
 
     def _overrides_dir(self, campaign_id: str, cycle_id: str) -> Path:
-        return self.cycle_dir(campaign_id, cycle_id) / ".overrides"
+        return self._layout(campaign_id, cycle_id).overrides
 
     def load_campaign(self, campaign_id: str) -> Campaign | None:
         data = read_json_optional(self._manifest_path(campaign_id))
@@ -601,11 +628,11 @@ class CampaignStore:
         after_round: int,
     ) -> None:
         """Archive round + candidate files for rounds > ``after_round`` into ``.runtime/archived/resumed_at_<ts>/``; rebuild the round index. Ledger-admissibility-gated."""
-        cycle_dir = self.cycle_dir(campaign_id, cycle_id)
-        rounds_dir = self._rounds_dir(campaign_id, cycle_id)
-        candidates_dir = self._candidates_dir(campaign_id, cycle_id)
+        layout = self._layout(campaign_id, cycle_id)
+        rounds_dir = layout.rounds
+        candidates_dir = layout.candidates_cache
 
-        ledger_path = cycle_dir / ".runtime" / "ledger.jsonl"
+        ledger_path = layout.ledger
         if not ledger_path.exists():
             raise NotFoundError(f"cycle {cycle_id!r} has no ledger on disk")
         max_complete = scan_ledger_max_round_complete(ledger_path)
@@ -620,7 +647,7 @@ class CampaignStore:
                     f"cycle {cycle_id!r}: ledger has rounds 0..{max_complete} but "
                     f"{rounds_dir} is missing — projection cache out of sync with ledger"
                 )
-            target = rounds_dir / f"round_{after_round:04d}.json"
+            target = layout.round_file(after_round)
             if not target.exists():
                 raise NotFoundError(
                     f"--from {after_round}: round_{after_round:04d}.json not found in "
@@ -649,7 +676,7 @@ class CampaignStore:
         archived_count = len(to_archive_rounds) + len(to_archive_candidates)
         if archived_count:
             ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-            archive_root = cycle_dir / ".runtime" / "archived" / f"resumed_at_{ts}"
+            archive_root = layout.rewind_archive(ts)
             if to_archive_rounds:
                 (archive_root / "rounds").mkdir(parents=True, exist_ok=True)
                 for p in to_archive_rounds:
@@ -667,7 +694,7 @@ class CampaignStore:
             )
 
         self._rebuild_round_index(campaign_id, cycle_id, survivors)
-        self._rewind_dashboard(cycle_dir, after_round)
+        self._rewind_dashboard(layout.cycle_dir, after_round)
 
     @staticmethod
     def _rewind_dashboard(cycle_dir: Path, after_round: int) -> None:
@@ -683,7 +710,7 @@ class CampaignStore:
         survivor, ``best`` = max surviving ``cumulative_accuracy`` (mirrors
         ``_apply_best`` / ``resolve_resume_state``). Missing/corrupt file ⇒ no-op —
         the resume factory tolerates absence."""
-        path = cycle_dir / "dashboard.json"
+        path = CycleLayout(cycle_dir).dashboard
         dash = read_json_tolerant(path)
         if not isinstance(dash, dict):
             return
@@ -784,8 +811,8 @@ class CampaignStore:
         a dead producer, and both reaper paths defer to these two invariants here
         (not just the sweep's staleness gate). A paused cycle stays a suspended
         unit until the operator resumes or archives it."""
-        runtime = self.cycle_dir(campaign_id, cycle_id) / ".runtime"
-        if (runtime / "pause.flag").is_file() or is_checkin(runtime):
+        cycle_dir = self.cycle_dir(campaign_id, cycle_id)
+        if CycleLayout(cycle_dir).pause_flag.is_file() or is_checkin(cycle_dir):
             return False
         index_path = self._index_path(campaign_id, cycle_id)
         data = read_json_optional(index_path)
@@ -1035,7 +1062,7 @@ class CampaignStore:
         validate_path_component(round_id)
         round_num = round_data["round"]
 
-        detail_path = self._rounds_dir(campaign_id, cycle_id) / f"round_{round_num:04d}.json"
+        detail_path = self._layout(campaign_id, cycle_id).round_file(round_num)
         write_json(detail_path, round_data)
 
         index_path = self._index_path(campaign_id, cycle_id)
@@ -1056,9 +1083,7 @@ class CampaignStore:
         cycle_id: str,
         round_num: int,
     ) -> dict[str, Any] | None:
-        return read_json_optional(
-            self._rounds_dir(campaign_id, cycle_id) / f"round_{round_num:04d}.json",
-        )
+        return read_json_optional(self._layout(campaign_id, cycle_id).round_file(round_num))
 
     def load_rounds_range(
         self,
@@ -1083,7 +1108,7 @@ class CampaignStore:
         candidates: list[dict[str, Any]],
     ) -> None:
         """Persist generated candidates before scoring."""
-        path = self._candidates_dir(campaign_id, cycle_id) / f"round_{round_num:04d}.json"
+        path = self._layout(campaign_id, cycle_id).candidate_file(round_num)
         write_json(path, candidates)
         logger.debug("Saved %d candidates for round %d → %s", len(candidates), round_num, path.name)
 
@@ -1093,9 +1118,7 @@ class CampaignStore:
         cycle_id: str,
         round_num: int,
     ) -> list[dict[str, Any]] | None:
-        return read_json_optional(
-            self._candidates_dir(campaign_id, cycle_id) / f"round_{round_num:04d}.json",
-        )
+        return read_json_optional(self._layout(campaign_id, cycle_id).candidate_file(round_num))
 
     def delete_round_candidates(
         self,
@@ -1104,7 +1127,7 @@ class CampaignStore:
         round_num: int,
     ) -> None:
         """Delete cached candidates (forces fresh generation)."""
-        path = self._candidates_dir(campaign_id, cycle_id) / f"round_{round_num:04d}.json"
+        path = self._layout(campaign_id, cycle_id).candidate_file(round_num)
         if path.exists():
             path.unlink()
             logger.debug(
@@ -1117,13 +1140,13 @@ class CampaignStore:
 
     def write_cycle_seed(self, campaign_id: str, cycle_id: str, seed: CycleSeed) -> Path:
         """Persist the cycle seed (read once at bootstrap)."""
-        path = self._overrides_dir(campaign_id, cycle_id) / "seed.json"
+        path = self._layout(campaign_id, cycle_id).seed
         write_json(path, seed.model_dump(mode="json"))
         return path
 
     def read_cycle_seed(self, campaign_id: str, cycle_id: str) -> CycleSeed | None:
         """Load the cycle seed, or ``None`` when this cycle wasn't seeded."""
-        data = read_json_optional(self._overrides_dir(campaign_id, cycle_id) / "seed.json")
+        data = read_json_optional(self._layout(campaign_id, cycle_id).seed)
         if data is None:
             return None
         return CycleSeed.model_validate(data)

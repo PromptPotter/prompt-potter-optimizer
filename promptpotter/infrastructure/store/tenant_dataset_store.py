@@ -25,7 +25,7 @@ from promptpotter.infrastructure.store.io import (
     write_json,
     write_text,
 )
-from promptpotter.infrastructure.store.paths import validate_dataset_name
+from promptpotter.infrastructure.store.layout import validate_dataset_name
 from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:

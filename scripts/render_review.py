@@ -10,6 +10,8 @@ from pathlib import Path
 
 from promptpotter.application.review import render_review_md
 
+from promptpotter.infrastructure.store.layout import CycleLayout
+
 
 def _load_rounds(cycle_dir: Path) -> list[dict]:
     rounds_dir = cycle_dir / "rounds"
@@ -43,7 +45,7 @@ def main(argv: list[str]) -> int:
 
     index = json.loads((cycle_dir / "index.json").read_text(encoding="utf-8"))
     rounds = _load_rounds(cycle_dir)
-    audit_dir = (args.audit_dir or (cycle_dir / ".runtime" / "cache" / "rounds")).resolve()
+    audit_dir = (args.audit_dir or CycleLayout(cycle_dir).audit_rounds).resolve()
     audits = _load_audits(audit_dir, len(rounds)) if audit_dir.exists() else [None] * len(rounds)
 
     ctx: list[str] = []

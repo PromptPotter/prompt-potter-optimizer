@@ -19,6 +19,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from promptpotter.domain.cycle_paths import CycleDir, Projection, WorkspaceDir
 from promptpotter.domain.run_records import CycleRecord
+from promptpotter.infrastructure.store.layout import CycleLayout
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +58,9 @@ class CycleEventLog:
     @classmethod
     def open(cls, cycle_dir: CycleDir) -> CycleEventLog:
         """Open (creating if absent) the ledger at ``{cycle_dir}/.runtime/ledger.jsonl``."""
-        runtime_dir = Path(cycle_dir) / ".runtime"
-        runtime_dir.mkdir(parents=True, exist_ok=True)
-        return cls(runtime_dir / "ledger.jsonl")
+        ledger_path = CycleLayout(Path(cycle_dir)).ledger
+        ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        return cls(ledger_path)
 
     @classmethod
     def open_workspace(cls, workspace_dir: WorkspaceDir) -> CycleEventLog:

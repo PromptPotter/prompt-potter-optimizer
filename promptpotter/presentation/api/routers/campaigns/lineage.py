@@ -37,7 +37,7 @@ from promptpotter.domain.scoring import RoundScorer
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store import cycle_dir_for
 from promptpotter.infrastructure.store.io import read_json_optional
-from promptpotter.infrastructure.store.paths import sibling_kind
+from promptpotter.infrastructure.store.layout import CycleLayout, sibling_kind
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._conditional import (
     client_seen_at_or_after,
@@ -325,7 +325,7 @@ def _fork_from_round_from_ledger(parent_dir: Path, child_cycle_id: str) -> int |
     value. Returns None if the parent's ledger is missing or the record
     isn't there.
     """
-    if not (parent_dir / ".runtime" / "ledger.jsonl").is_file():
+    if not CycleLayout(parent_dir).ledger.is_file():
         return None
     try:
         ledger = CycleEventLog.open(CycleDir(parent_dir))

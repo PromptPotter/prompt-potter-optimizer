@@ -54,8 +54,7 @@ from promptpotter.infrastructure.store.io import (
     validate_path_component,
     write_json,
 )
-from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
-from promptpotter.infrastructure.store.paths import (
+from promptpotter.infrastructure.store.layout import (
     DEFAULT_PROJECTS_ROOT,
     campaign_root_dir_for,
     cycle_dir_for,
@@ -63,6 +62,7 @@ from promptpotter.infrastructure.store.paths import (
     session_dir_for,
     sibling_kind,
 )
+from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
 from promptpotter.infrastructure.store.session_store import SessionStore
 from promptpotter.infrastructure.store.stores import OptimizerCallCache, Stores, build_stores
 from promptpotter.infrastructure.store.sweep_store import SweepStore

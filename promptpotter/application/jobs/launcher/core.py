@@ -56,7 +56,7 @@ from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.io import read_json_optional
-from promptpotter.infrastructure.store.paths import REPO_ROOT
+from promptpotter.infrastructure.store.layout import REPO_ROOT
 from promptpotter.shared.errors import MachineBusyError, PayloadInvalidError
 from promptpotter.shared.identity import claim_email
 

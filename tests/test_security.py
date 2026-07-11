@@ -15,7 +15,7 @@ import pytest
 
 
 def test_path_builders_reject_traversal(tmp_path: Path) -> None:
-    from promptpotter.infrastructure.store.paths import (
+    from promptpotter.infrastructure.store.layout import (
         campaign_root_dir_for,
         cycle_dir_for,
         sweep_batch_dir_for,

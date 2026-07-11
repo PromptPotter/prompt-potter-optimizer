@@ -35,7 +35,7 @@ async def _cmd_matrix_measure(args: argparse.Namespace) -> CommandResult:
         upsert_cells,
         write_matrix,
     )
-    from promptpotter.infrastructure.store.paths import REPO_ROOT
+    from promptpotter.infrastructure.store.layout import REPO_ROOT
 
     identity = identity_from_args(args)
     session = await init_services_cli(dataset_name=args.dataset, identity=identity)

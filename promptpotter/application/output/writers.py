@@ -44,6 +44,7 @@ from promptpotter.domain.rendering import format_l1_critique_for_prompt
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
 from promptpotter.infrastructure.store.campaign_store.store import origin_accuracy_of
 from promptpotter.infrastructure.store.io import read_json_tolerant, write_json, write_text
+from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -136,7 +137,7 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict[str, An
         campaign_artifact = _filter_artifact_to_live_candidates(campaign_artifact, live_cids)
 
     with graceful("cycle hard_samples.json write failed"):
-        write_json(cycle_dir / "hard_samples.json", cycle_artifact)
+        write_json(CycleLayout(cycle_dir).hard_samples, cycle_artifact)
     with graceful("campaign hard_samples.json write failed"):
         write_json(campaign_dir / "hard_samples.json", campaign_artifact)
 
@@ -372,18 +373,17 @@ def _render_cycle_log_md(
         return
     n_rounds = int(index.get("n_rounds", 0) or 0)
     rounds = store.load_rounds_range(campaign_id, cycle_id, 0, n_rounds - 1) if n_rounds else []
-    cycle_dir = store.cycle_dir(campaign_id, cycle_id)
-    streams_dir = cycle_dir / ".runtime" / "streams"
+    layout = CycleLayout(store.cycle_dir(campaign_id, cycle_id))
     content = to_markdown(
         from_disk_log(
             index,
             rounds,
             hard_samples_artifact=hard_samples_artifact,
-            streams_dir=streams_dir,
+            streams_dir=layout.streams,
             fork_indices=None,
         )
     )
-    write_text(cycle_dir / "log.md", content)
+    write_text(layout.log_md, content)
 
 
 def _render_campaign_log_md(store: CampaignStore, campaign_id: str) -> None:
@@ -401,8 +401,7 @@ def _render_campaign_log_md(store: CampaignStore, campaign_id: str) -> None:
         return
     n_rounds = int(index.get("n_rounds", 0) or 0)
     rounds = store.load_rounds_range(campaign_id, root_id, 0, n_rounds - 1) if n_rounds else []
-    cycle_dir = store.cycle_dir(campaign_id, root_id)
-    streams_dir = cycle_dir / ".runtime" / "streams"
+    streams_dir = CycleLayout(store.cycle_dir(campaign_id, root_id)).streams
     fork_indices = _load_sibling_indices(store, campaign_id, exclude=root_id)
     content = to_markdown(
         from_disk_log(
@@ -426,7 +425,7 @@ def _load_sibling_indices(
     for cycle_dir in sorted(cycles_dir.iterdir()):
         if not cycle_dir.is_dir() or cycle_dir.name == exclude:
             continue
-        blob = read_json_tolerant(cycle_dir / "index.json")
+        blob = read_json_tolerant(CycleLayout(cycle_dir).manifest)
         if not isinstance(blob, dict):
             continue
         blob["cycle_id"] = cycle_dir.name
@@ -462,4 +461,4 @@ def write_review_md(session: Session, cycle: Cycle) -> None:
             context_object=context_object,
             l1_patience=cycle.config.optimization.l1_patience,
         )
-        write_text(cycle_dir / "review.md", content)
+        write_text(CycleLayout(cycle_dir).review_md, content)

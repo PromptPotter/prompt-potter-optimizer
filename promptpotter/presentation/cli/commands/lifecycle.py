@@ -15,7 +15,7 @@ import argparse
 import logging
 
 from promptpotter.infrastructure.store import Stores, build_stores
-from promptpotter.infrastructure.store.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.infrastructure.store.layout import DEFAULT_PROJECTS_ROOT
 from promptpotter.presentation.cli.commands._shared import CommandResult, identity_from_args
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError

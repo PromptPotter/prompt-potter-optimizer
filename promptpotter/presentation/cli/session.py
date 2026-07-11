@@ -56,7 +56,7 @@ class SessionCtx:
             load_campaign_config as validate_campaign_config,
         )
         from promptpotter.application.datasets import read_campaign_config_file
-        from promptpotter.infrastructure.store.paths import REPO_ROOT
+        from promptpotter.infrastructure.store.layout import REPO_ROOT
 
         dataset_name = self.init_params.get("dataset_name") or ""
         raw: dict[str, Any] = {}

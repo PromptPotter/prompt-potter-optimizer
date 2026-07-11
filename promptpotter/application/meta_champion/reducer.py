@@ -30,7 +30,7 @@ from promptpotter.domain.outer_verdict import cell_fitness
 from promptpotter.infrastructure.projections.live_dashboard.round_summary import (
     origin_cells_from_disk,
 )
-from promptpotter.infrastructure.store.paths import REPO_ROOT
+from promptpotter.infrastructure.store.layout import REPO_ROOT
 from promptpotter.shared.statistics import paired_diff_posterior
 
 if TYPE_CHECKING:
@@ -97,7 +97,7 @@ def registry_path(base_dir: Path) -> Path:
 
 def champion_pointer_path() -> Path:
     """The committed reigning-champion pointer (shared across tenants)."""
-    from promptpotter.infrastructure.store.paths import REPO_ROOT
+    from promptpotter.infrastructure.store.layout import REPO_ROOT
 
     return REPO_ROOT / "datasets" / "_optimizer_meta" / "champion.json"
 

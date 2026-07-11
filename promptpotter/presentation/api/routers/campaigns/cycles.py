@@ -21,7 +21,7 @@ from promptpotter.infrastructure.store import (
 )
 from promptpotter.infrastructure.store.campaign_store.store import origin_accuracy_of
 from promptpotter.infrastructure.store.io import read_json_tolerant, validate_path_component
-from promptpotter.infrastructure.store.paths import sibling_kind
+from promptpotter.infrastructure.store.layout import sibling_kind
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.presentation.api.deps import StoreDep, warming_payload
 from promptpotter.presentation.api.routers.active import CycleListEntry, CyclesResponse

@@ -67,10 +67,11 @@ def existing_fork_source_files(
     from promptpotter.domain.cycle_paths import CycleDir
     from promptpotter.domain.run_records import ResumeCheckpointKind, ResumeCheckpointRecord
     from promptpotter.infrastructure.ledger import CycleEventLog
+    from promptpotter.infrastructure.store.layout import CycleLayout
 
     out: dict[str, str] = {}
     parent_dir = store.campaigns.cycle_dir(campaign_id, parent_cycle_id)
-    if not (parent_dir / ".runtime" / "ledger.jsonl").exists():
+    if not CycleLayout(parent_dir).ledger.exists():
         return out
     ledger = CycleEventLog.open(CycleDir(parent_dir))
     for record in ledger.iter():

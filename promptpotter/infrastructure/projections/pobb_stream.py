@@ -21,6 +21,7 @@ from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import SnapshotRecord
 from promptpotter.infrastructure.projections.base import DerivedView
 from promptpotter.infrastructure.store.io import append_jsonl
+from promptpotter.infrastructure.store.layout import CycleLayout
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ class PoBBStreamView(DerivedView):
     @classmethod
     def from_cycle_dir(cls, cycle_dir: CycleDir) -> PoBBStreamView:
         """Build a projection rooted at ``{cycle_dir}/.runtime/streams``."""
-        return cls(Path(cycle_dir).joinpath(*_STREAMS_SUBPATH))
+        return cls(CycleLayout(Path(cycle_dir)).streams)
 
     def _handle_snapshot(self, record: SnapshotRecord) -> None:
         if record.event != "p_best_update":

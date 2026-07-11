@@ -27,7 +27,7 @@ from promptpotter.domain.l1_layout import (
 )
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.infrastructure.store.paths import REPO_ROOT
+from promptpotter.infrastructure.store.layout import REPO_ROOT
 
 logger = logging.getLogger(__name__)
 

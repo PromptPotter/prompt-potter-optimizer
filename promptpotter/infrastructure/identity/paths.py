@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from promptpotter.infrastructure.store.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.infrastructure.store.layout import DEFAULT_PROJECTS_ROOT
 
 
 @dataclass(frozen=True)

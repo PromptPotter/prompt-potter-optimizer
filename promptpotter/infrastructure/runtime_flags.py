@@ -21,23 +21,24 @@ from pathlib import Path
 
 from promptpotter.domain.phases import RunPhase
 from promptpotter.infrastructure.store.io import read_json_tolerant
+from promptpotter.infrastructure.store.layout import CycleLayout
 
 
-def is_paused(runtime_dir: Path) -> bool:
+def is_paused(cycle_dir: Path) -> bool:
     """``.runtime/pause.flag`` present — the operator paused; the loop exits
     cleanly at the next checkpoint and the cycle stays resumable (non-terminal).
     The single operator-interrupt flag (no separate ``stop.flag``)."""
-    return (runtime_dir / "pause.flag").is_file()
+    return CycleLayout(cycle_dir).pause_flag.is_file()
 
 
-def is_checkin(runtime_dir: Path) -> bool:
+def is_checkin(cycle_dir: Path) -> bool:
     """``.runtime/checkin.flag`` present — the campaign is still authoring its origin
     (pre-loop), not running. Dropped at skeleton creation, cleared at Start when the
     campaign flips ``checkin`` → ``active``."""
-    return (runtime_dir / "checkin.flag").is_file()
+    return CycleLayout(cycle_dir).checkin_flag.is_file()
 
 
-def clear_run_control_flags(runtime_dir: Path) -> None:
+def clear_run_control_flags(cycle_dir: Path) -> None:
     """Drop any consumed ``pause.flag`` / ``skip.flag`` left by a prior run.
 
     A fresh launch through the runner seam IS the operator's intent to run, so it
@@ -45,13 +46,14 @@ def clear_run_control_flags(runtime_dir: Path) -> None:
     persistent state — once the loop that they targeted has exited they are stale,
     and a stale ``pause.flag`` would otherwise pause the very next resume on its
     first poll (a paused cycle could never be resumed). Idempotent."""
-    (runtime_dir / "pause.flag").unlink(missing_ok=True)
-    (runtime_dir / "skip.flag").unlink(missing_ok=True)
+    layout = CycleLayout(cycle_dir)
+    layout.pause_flag.unlink(missing_ok=True)
+    layout.skip_flag.unlink(missing_ok=True)
 
 
-def read_spend_cap(runtime_dir: Path) -> float | None:
+def read_spend_cap(cycle_dir: Path) -> float | None:
     """Live USD cap from ``spend_cap.json::max_usd``; ``None`` when absent/unreadable."""
-    data = read_json_tolerant(runtime_dir / "spend_cap.json")
+    data = read_json_tolerant(CycleLayout(cycle_dir).spend_cap)
     value = data.get("max_usd") if isinstance(data, dict) else None
     return float(value) if isinstance(value, int | float) else None
 
@@ -74,12 +76,13 @@ def _producer_fresh(cycle_dir: Path, *, fresh_s: float) -> bool:
     fall back to ``index.json``'s mtime, so a just-minted cycle reads
     ``running`` instead of ``detached`` before its first dashboard write
     lands."""
+    layout = CycleLayout(cycle_dir)
     try:
-        return (time.time() - (cycle_dir / "dashboard.json").stat().st_mtime) < fresh_s
+        return (time.time() - layout.dashboard.stat().st_mtime) < fresh_s
     except OSError:
         pass
     try:
-        return (time.time() - (cycle_dir / "index.json").stat().st_mtime) < fresh_s
+        return (time.time() - layout.manifest.stat().st_mtime) < fresh_s
     except OSError:
         return False
 
@@ -111,12 +114,11 @@ def derive_run_phase(
     cycle list/picker and the reaper's staleness sweep (``_is_dead``) both
     call this — no second "is it running?" computation.
     """
-    runtime = cycle_dir / ".runtime"
-    if is_checkin(runtime):
+    if is_checkin(cycle_dir):
         return RunPhase.CHECKIN
     if is_terminal:
         return RunPhase.TERMINAL
-    if is_paused(runtime):
+    if is_paused(cycle_dir):
         return RunPhase.PAUSED
     if _producer_fresh(cycle_dir, fresh_s=fresh_s):
         return RunPhase.RUNNING
