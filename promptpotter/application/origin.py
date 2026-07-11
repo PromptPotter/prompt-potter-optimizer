@@ -31,7 +31,6 @@ __all__ = [
     "DatasetSummary",
     "build_campaign_emitter",
     "establish_campaign_origin",
-    "extract_campaign_origin",
     "prepare_datasets",
     "prepare_scoring_context",
     "rescore_origin",
@@ -144,47 +143,22 @@ def build_campaign_emitter(
 
 
 class CampaignOrigin(NamedTuple):
-    """Extracted origin state. ``resolved_origin`` is the origin OptSearchPoint —
+    """The scored origin. ``resolved_origin`` is the origin OptSearchPoint —
     carrying its full lineage/memory, not just prompt strings — so the C0
-    individual keeps its ``source`` marker (e.g. ``fork_seed``) downstream."""
+    individual keeps its ``source`` marker (e.g. ``fork_seed``) downstream.
+
+    ``prepare_scoring_context`` returns this directly. It used to hand back a
+    one-element list of round-shaped dicts, which a second function then walked
+    (in reverse, with two fallbacks) to rebuild exactly this tuple — over a list
+    that could never hold more than one entry.
+    """
 
     resolved_origin: OptSearchPoint | None
     origin_acc: float
     origin_results: list[Any] | None
     instruction: str
-
-
-def extract_campaign_origin(campaign_rounds: list[dict[str, Any]]) -> CampaignOrigin:
-    """Origin prompt state, accuracy, results from campaign rounds.
-    Walks reversed rounds for the last with scoring results; the origin OSP rides
-    the tip's ``origin_search_point`` slot."""
-    if not campaign_rounds:
-        return CampaignOrigin(
-            resolved_origin=OptSearchPoint(instruction=""),
-            origin_acc=0.0,
-            origin_results=None,
-            instruction="",
-        )
-
-    tip = campaign_rounds[-1]
-
-    # Prefer accuracy from last round with scoring results; fall back to tip (scan winner: acc but no results).
-    origin_acc = tip.get("accuracy", 0.0)
-    origin_results: list[Any] = []
-    for rd in reversed(campaign_rounds):
-        if rd.get("results"):
-            origin_acc = rd.get("accuracy", origin_acc)
-            origin_results = rd["results"]
-            break
-
-    tip_ps = tip["origin_search_point"]
-
-    return CampaignOrigin(
-        resolved_origin=tip_ps,
-        origin_acc=origin_acc,
-        origin_results=origin_results,
-        instruction=tip_ps.instruction,
-    )
+    hits: int = 0
+    total: int = 0
 
 
 def try_inherit_fork_origin(
@@ -391,7 +365,7 @@ async def establish_campaign_origin(
     if inherited is not None:
         return inherited
 
-    _, _, campaign_rounds, _ = await prepare_scoring_context(
+    origin, _ = await prepare_scoring_context(
         session.experiment_extract,
         dataset,
         campaign_config,
@@ -402,7 +376,7 @@ async def establish_campaign_origin(
         seed=seed,
         resolved_origin=resolved_origin,
     )
-    return extract_campaign_origin(campaign_rounds)
+    return origin
 
 
 async def prepare_scoring_context(
@@ -417,8 +391,8 @@ async def prepare_scoring_context(
     obs: Any | None = None,
     seed: CycleSeed | None = None,
     resolved_origin: OptSearchPoint | None = None,
-) -> tuple[OptSearchPoint, list[Sample], list[dict[str, Any]], list[Any]]:
-    """Resolve origin (fork-seed wins), set dataset, produce a populated ``campaign_rounds[0]``.
+) -> tuple[CampaignOrigin, list[Sample]]:
+    """Resolve the origin (fork-seed wins), set the dataset, score the origin.
 
     *resolved_origin* lets the caller pass an already-resolved origin OSP (so it isn't
     resolved twice on the runner path); when ``None`` it's resolved here (the notebook path)."""
@@ -434,8 +408,6 @@ async def prepare_scoring_context(
         )
     dataset = train_data or []
 
-    campaign_rounds: list[dict[str, Any]] = []
-    origin_results: list[Any] = []
     # Score the origin whenever there is a live run to score it in (session + config +
     # dataset). We deliberately do NOT sniff the searchpoint shape to guess "is there a
     # program here?" — that guess (non-empty prose OR a dict-valued pipeline_param)
@@ -446,7 +418,17 @@ async def prepare_scoring_context(
     # critical → halt-and-decide), never hidden here. The remaining guard is the
     # no-session notebook/test path, which has nothing to score.
     if not (campaign_config is not None and svc is not None and dataset):
-        return resolved_origin, dataset, campaign_rounds, origin_results
+        # Nothing to score. The resolved origin still travels — the old empty-list branch
+        # dropped it and handed back a blank OptSearchPoint(instruction="").
+        return (
+            CampaignOrigin(
+                resolved_origin=resolved_origin,
+                origin_acc=0.0,
+                origin_results=None,
+                instruction=resolved_origin.instruction,
+            ),
+            dataset,
+        )
 
     from promptpotter.application.scoring.formula import split_scoring_block
     from promptpotter.application.scoring.search_point_scorer import score_search_point
@@ -514,19 +496,17 @@ async def prepare_scoring_context(
             emit_phase(listener.on_phase, CampaignPhase.ORIGIN, "exit", round=0)
         session.pipeline_schema = prior_schema
 
-    campaign_rounds = [
-        {
-            "round": 0,
-            "label": "origin",
-            "origin_search_point": resolved_origin,
-            "accuracy": scores["accuracy"],
-            "hits": scores["hits"],
-            "total": scores["total"],
-            "results": origin_results,
-        }
-    ]
-
-    return resolved_origin, dataset, campaign_rounds, origin_results
+    return (
+        CampaignOrigin(
+            resolved_origin=resolved_origin,
+            origin_acc=scores["accuracy"],
+            origin_results=origin_results,
+            instruction=resolved_origin.instruction,
+            hits=scores["hits"],
+            total=scores["total"],
+        ),
+        dataset,
+    )
 
 
 class DatasetSummary(NamedTuple):

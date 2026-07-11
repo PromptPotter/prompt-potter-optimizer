@@ -72,7 +72,7 @@ async def measure_cells(
         overrides[node] = node_ov
         cfg = base_config.model_copy(update={"pipeline_overrides": overrides, "sp_budget_ttest": n})
         configure_and_apply_pipeline(session, cfg, log=lambda *_a, **_k: None)
-        _, _, rounds, _ = await prepare_scoring_context(
+        origin, _ = await prepare_scoring_context(
             session.experiment_extract,
             samples,
             cfg,
@@ -80,13 +80,8 @@ async def measure_cells(
             pipeline_schema=session.pipeline_schema,
             svc=session,
         )
-        if not rounds:
-            out.append(_error_cell(dataset, model, provider, "origin produced no round"))
-            continue
-        row = rounds[0]
-        acc = float(row.get("accuracy", 0.0) or 0.0)
-        hits = int(row.get("hits", 0) or 0)
-        total = int(row.get("total", 0) or 0)
+        acc = origin.origin_acc
+        hits, total = origin.hits, origin.total
         lo, hi = wilson_ci(hits, total)
         out.append(
             CellVerdict(

@@ -13,7 +13,6 @@ from promptpotter.application.bootstrap import (
 from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.origin import (
     CampaignOrigin,
-    extract_campaign_origin,
 )
 from promptpotter.application.origin import (
     prepare_scoring_context as _prepare_scoring_context,
@@ -207,7 +206,7 @@ async def prepare_origin_notebook(
         experiment_id=experiment_id,
     )
 
-    _resolved_origin, dataset, campaign_rounds, _results = await _prepare_scoring_context(
+    origin, dataset = await _prepare_scoring_context(
         session.experiment_extract,
         train_data,
         campaign_config,
@@ -216,7 +215,6 @@ async def prepare_origin_notebook(
         svc=session,
         listener=observers.callbacks,
     )
-    origin = extract_campaign_origin(campaign_rounds)
     if hasattr(display, "set_origin"):
         display.set_origin(origin.origin_acc)
 

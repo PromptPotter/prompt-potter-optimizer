@@ -23,7 +23,7 @@ from promptpotter.domain.sample import Sample
 from promptpotter.presentation.views.display import set_display_tags
 from promptpotter.presentation.views.notebook_run import (
     init_notebook_session,
-    prepare_scoring_context_notebook,
+    prepare_origin_notebook,
     run_optimization_notebook,
 )
 
@@ -120,17 +120,18 @@ async def run_bbeh_campaign(
         pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=print)
         set_display_tags(session.pipeline_schema)
 
-        _, dataset_obj, campaign_rounds, _ = await prepare_scoring_context_notebook(
+        observers, dataset_obj, origin = await prepare_origin_notebook(
             session,
             train_norm,
             campaign_config,
             pipeline_params=pipeline_params,
         )
-        origin_train_acc = campaign_rounds[0]["accuracy"] if campaign_rounds else 0.0
+        origin_train_acc = origin.origin_acc
 
-        campaign_rounds, cycle_result = await run_optimization_notebook(
-            campaign_rounds,
+        cycle_result = await run_optimization_notebook(
+            observers,
             dataset_obj,
+            origin,
             campaign_config,
             session=session,
             experiment_id="",
@@ -183,7 +184,7 @@ async def run_bbeh_campaign(
                 "n_train": len(train_pool),
                 "train_accuracy": round(train_acc, 4),
                 "origin_train_accuracy": round(origin_train_acc, 4),
-                "rounds": len(campaign_rounds),
+                "rounds": cycle_result.n_l1_rounds,
                 "methodology": (
                     "Single global prompt optimized on 460 mini-BBEH examples pooled "
                     "across 23 tasks; evaluated on all non-mini examples (~4,060). "

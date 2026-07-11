@@ -33,7 +33,7 @@ from promptpotter.application.datasets import DATASET_LOADERS  # noqa: E402
 from promptpotter.presentation.views.display import set_display_tags  # noqa: E402
 from promptpotter.presentation.views.notebook_run import (  # noqa: E402
     init_notebook_session,
-    prepare_scoring_context_notebook,
+    prepare_origin_notebook,
     run_optimization_notebook,
 )
 
@@ -149,28 +149,28 @@ async def _run(args: argparse.Namespace) -> int:
         print("[smoke] ERROR: dataset loader returned no items", file=sys.stderr)
         return 3
 
-    _origin_sp, dataset_obj, campaign_rounds, _ = await prepare_scoring_context_notebook(
+    observers, dataset_obj, origin = await prepare_origin_notebook(
         session,
         train_slice,
         campaign_config,
         pipeline_params=pipeline_params,
     )
+    print(f"[smoke] origin: {origin.origin_acc:.3f} ({origin.hits}/{origin.total})", flush=True)
 
-    campaign_rounds, result = await run_optimization_notebook(
-        campaign_rounds,
+    result = await run_optimization_notebook(
+        observers,
         dataset_obj,
+        origin,
         campaign_config,
         session=session,
     )
 
-    cycle_id = getattr(result, "cycle_id", "") or ""
+    cycle_id = result.cycle_id or "" if result is not None else ""
     cycle_dir = (
-        _REPO_ROOT / ".promptpotter" / "projects" / args.dataset / "campaigns" / cycle_id
-        if cycle_id
-        else None
+        project_dir / "campaigns" / session.campaign_id / "cycles" / cycle_id if cycle_id else None
     )
 
-    if not campaign_rounds:
+    if result is None or not result.rounds:
         print(
             f"\n[smoke] dataset={args.dataset} "
             f"rounds=0 "
@@ -179,26 +179,18 @@ async def _run(args: argparse.Namespace) -> int:
             flush=True,
         )
     else:
-        best = max(campaign_rounds, key=lambda r: r.get("accuracy", 0.0) or 0.0)
         print(
             f"\n[smoke] dataset={args.dataset} "
-            f"rounds={len(campaign_rounds)} "
-            f"best_acc={best.get('accuracy', 0.0):.3f} "
+            f"rounds={result.n_l1_rounds} "
+            f"best_acc={result.best_accuracy:.3f} (round {result.best_round}) "
             f"cycle={cycle_id or 'unknown'} "
+            f"stop={result.stop_reason} "
             f"status=ok",
             flush=True,
         )
 
     if cycle_dir is not None:
         print(f"[smoke] cycle dir: {cycle_dir}", flush=True)
-
-    session_id = getattr(result, "session_id", "") or ""
-    if session_id:
-        session_dir = (
-            _REPO_ROOT / ".promptpotter" / "projects" / args.dataset / "sessions" / session_id
-        )
-        print(f"[smoke] session:     {session_id}", flush=True)
-        print(f"[smoke] session dir: {session_dir}", flush=True)
 
     await session.backend_client.aclose()
     return 0
