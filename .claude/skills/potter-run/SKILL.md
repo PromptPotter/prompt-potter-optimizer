@@ -40,15 +40,8 @@ The seam lives in `promptpotter/application/datasets/` (`ingest.py`, `origin_res
 When the operator says their dataset is ready ("my data's there", "just set it up", names a file or dataset) **and it loads cleanly**, Claude sets the whole origin up itself — **simulating the check-in node** instead of spending the LLM call.
 
 1. **Test the load first.** Registered name → confirm it's in `DATASET_LOADERS` (`application/datasets/loaders.py`). Raw file → ingest-parse it (`POST /datasets/ingest`) or open a registered dataset as a draft (`POST /datasets/{name}/draft`). A clean parse + a sample preview = green. **If the load fails, do NOT simulate** — fall back to the normal flow (operator writes the context, the real `checkin` node resolves).
-2. **Author the origin (this is the simulation).** Read the sample rows + answer space and write what the `checkin` node would: the six Layer-1 prompt fields, the 7-field `task_context`, the `column_query`/`column_ground_truth` map, and a plain `task_description`. Apply them via `POST /commands/edit-draft-campaign` (confirming columns + framing opens the readiness gate). The closed-label answer space stays **code-owned** — never hand-list it.
-3. **Stamp the metadata — MANDATORY.** A simulated origin must never be mistaken for an LLM-resolved one. In the same `edit-draft-campaign` patch set:
-   ```json
-   "simulated_checkin": {"by": "potter-run", "model": "<your model id>", "at": "<YYYY-MM-DD>"}
-   ```
-   It persists to the draft resolution block (`cache.json::simulated_checkin`). **Empty = the real `checkin` node resolved it; populated = Claude authored it.** Skipping this is a hard error — the metadata is what keeps the LLM-call-for-authorship trade honest and reproducible.
-4. **Gate, then start.** `origin_readiness` must be `complete` (query + ground_truth + framing + answer-space all CONFIRMED). Then `POST /commands/start-checkin` (payload `{campaign_id}`) → the origin lands as round 0 (C0) and appears in the frontend for the operator to review, modify, and Start.
-
-Code: the marker is `DraftCampaign.simulated_checkin` (`application/datasets/draft_campaign.py`), threaded through the `edit-draft-campaign` patch (`presentation/api/routers/commands.py`) into `resolution_block` (`application/datasets/origin_readiness.py`).
+2. **Author the origin (this is the simulation).** Read the sample rows + answer space and write what the `checkin` node would: the six Layer-1 prompt fields, the 7-field `task_context`, the `column_query`/`column_ground_truth` map, and a plain `task_description`. Apply them via `POST /commands/edit-draft-campaign` (confirming columns + framing opens the readiness gate). The closed-label answer space stays **code-owned** — never hand-list it. Every edit lands as a `CommandRecord` on the check-in ledger, so who authored the origin is already on disk.
+3. **Gate, then start.** `origin_readiness` must be `complete` (query + ground_truth + framing + answer-space all CONFIRMED). Then `POST /commands/start-checkin` (payload `{campaign_id}`) → the origin lands as round 0 (C0) and appears in the frontend for the operator to review, modify, and Start.
 
 ---
 

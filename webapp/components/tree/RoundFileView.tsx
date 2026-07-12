@@ -10,27 +10,25 @@ interface ScoreboardEntry {
   changes_description?: string;
   accuracy?: number;
   composite_fitness?: number;
-  hits?: number;
-  total?: number;
+  hits: number;
+  total: number;
   is_winner?: boolean;
 }
 
 interface ResultRow {
   sample_id?: string | number;
-  id?: string | number;
   query?: string;
   predicted?: string;
   ground_truth?: string;
   hit?: boolean;
-  cached?: boolean;
 }
 
 export interface RoundDoc {
   round?: number;
   accuracy?: number;
   composite_fitness?: number;
-  hits?: number;
-  total?: number;
+  hits: number;
+  total: number;
   origin_accuracy?: number;
   improved?: boolean;
   p_value?: number;
@@ -47,8 +45,6 @@ export function RoundFileView({ doc, raw }: Props) {
   const [showRaw, setShowRaw] = useState(false);
   const results = doc.results ?? [];
   const scoreboard = doc.scoreboard ?? [];
-  const hits = doc.hits ?? results.filter((r) => r.hit).length;
-  const total = doc.total ?? results.length;
 
   return (
     <RotatePrompt surfaceName="The round file view">
@@ -58,7 +54,7 @@ export function RoundFileView({ doc, raw }: Props) {
           <Badge>round {doc.round ?? "—"}</Badge>
           <span>accuracy {fmtPct1(doc.accuracy)} {typeof doc.origin_accuracy === "number" && (<span style={{ color: "var(--color-text-tertiary)" }}>(origin {fmtPct1(doc.origin_accuracy)})</span>)}</span>
           <span>composite {fmtNum(doc.composite_fitness)}</span>
-          <span>{hits}/{total} hits</span>
+          <span>{doc.hits}/{doc.total} hits</span>
           {typeof doc.p_value === "number" && <span>p {fmtNum(doc.p_value, 3)}</span>}
           {doc.improved ? <span className="pass">improved</span> : <span style={{ color: "var(--color-text-tertiary)" }}>no improvement</span>}
         </div>
@@ -91,7 +87,7 @@ export function RoundFileView({ doc, raw }: Props) {
                     </td>
                     <td>{fmtPct1(s.accuracy)}</td>
                     <td>{fmtNum(s.composite_fitness)}</td>
-                    <td>{s.hits ?? "—"}/{s.total ?? "—"}</td>
+                    <td>{s.hits}/{s.total}</td>
                     <td>{s.is_winner ? <span className="pass">win</span> : ""}</td>
                   </tr>
                 ))}
@@ -121,7 +117,7 @@ export function RoundFileView({ doc, raw }: Props) {
               <tbody>
                 {results.map((r, i) => {
                   const hit = r.hit ?? false;
-                  const id = r.sample_id ?? r.id ?? i;
+                  const id = r.sample_id ?? i;
                   return (
                     <tr key={String(id)}>
                       <td>{String(id)}</td>

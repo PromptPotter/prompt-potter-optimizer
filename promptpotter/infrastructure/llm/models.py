@@ -146,9 +146,7 @@ def emit_command(
     kind: str,
     payload: dict[str, Any],
     idempotency_key: str,
-    expected_version: int | None = None,
     issued_by_user_id: str = "",
-    client_metadata: dict[str, Any] | None = None,
 ) -> int | None:
     """Append a ``CommandRecord`` to the active cycle ledger.
 
@@ -163,9 +161,7 @@ def emit_command(
             kind=kind,
             payload=dict(payload),
             idempotency_key=idempotency_key,
-            expected_version=expected_version,
             issued_by_user_id=issued_by_user_id,
-            client_metadata=dict(client_metadata or {}),
         )
     )
 

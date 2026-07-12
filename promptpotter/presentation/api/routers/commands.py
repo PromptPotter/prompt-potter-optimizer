@@ -114,7 +114,6 @@ class CommandEnvelope(BaseModel):
 
     kind: str = Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9-]*$")
     payload: dict[str, Any] = Field(default_factory=dict)
-    client_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 def ensure_idempotency_key(header_value: str | None) -> str:
@@ -249,11 +248,6 @@ class _EditDraftPatch(BaseModel):
     # against OptimizationOverrides — so the editor can send one knob (e.g.
     # {"max_rounds": 8}) or several, and a nested `mechanisms` replaces wholesale.
     optimization_overrides: dict[str, Any] | None = None
-    # Audit marker stamped when an agent simulates the check-in node (authors the
-    # origin decomposition by hand instead of spending the LLM call) — see
-    # `DraftCampaign.simulated_checkin`. Free dict `{by, model, at}`; lands in the
-    # resolution block. Empty/absent on a real check-in.
-    simulated_checkin: dict[str, Any] | None = None
     # The origin's target library. Set from the operator's upload or derived from one
     # of the draft's own columns (`routers/datasets.py`); both ride this patch.
     candidate_library: list[str] | None = Field(default=None, min_length=1)
@@ -313,7 +307,6 @@ async def dispatch_draft_patch(
     draft_id: str,
     patch_raw: dict[str, Any],
     idempotency_key: str,
-    client_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Validate a sparse draft patch, apply it through `CommandDispatcher`, return
     the post-mutation draft wire.
@@ -346,7 +339,6 @@ async def dispatch_draft_patch(
         (patch.scoring_composite, "scoring_composite"),
         (patch.pipeline_overlay, "pipeline_overlay"),
         (patch.origin_prompt_fields, "origin_prompt_fields"),
-        (patch.simulated_checkin, "simulated_checkin"),
         (patch.pipeline_steps, "pipeline_steps"),
         (patch.candidate_library, "candidate_library"),
     ):
@@ -401,7 +393,6 @@ async def dispatch_draft_patch(
         applier=_apply,
         on_replay=lambda: _reread_draft_wire(store, draft_id),
         effect_fn=lambda: _origin_effect(store, draft_id, before),
-        client_metadata=client_metadata,
     )
     return cast("dict[str, Any]", outcome.result)
 
@@ -429,7 +420,6 @@ async def edit_draft_campaign(
         draft_id=draft_id,
         patch_raw=patch_raw,
         idempotency_key=idemp,
-        client_metadata=envelope.client_metadata,
     )
 
 
@@ -490,7 +480,6 @@ async def resolve_origin(
         applier=_apply,
         on_replay=_on_replay,
         effect_fn=lambda: _origin_effect(store, draft_id, before),
-        client_metadata=envelope.client_metadata,
     )
     return cast("dict[str, Any]", outcome.result)
 
@@ -566,7 +555,6 @@ async def start_checkin(
         # the `checkin → active` flip is already the retry guard (second Start →
         # LaunchError → 422).
         dedupe=False,
-        client_metadata=envelope.client_metadata,
     )
     return cast("dict[str, Any]", outcome.result)
 
@@ -637,7 +625,6 @@ async def post_command(
             kind=workspace_kind,
             payload=workspace_payload,
             idempotency_key=idemp,
-            client_metadata=envelope.client_metadata,
         )
         return workspace_outcome.accepted
 
@@ -653,7 +640,6 @@ async def post_command(
             campaign_id=campaign_id,
             reason=reason,
             idempotency_key=idemp,
-            client_metadata=envelope.client_metadata,
             keep_results=keep_results,
         )
         return lifecycle_outcome.accepted
@@ -698,7 +684,6 @@ async def post_command(
         payload_extras=extras,
         idempotency_key=idemp,
         expected_version=expected_version,
-        client_metadata=envelope.client_metadata,
     )
     return cycle_outcome.accepted
 

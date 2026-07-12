@@ -1690,13 +1690,6 @@ components:
             envelope only guarantees the field is present.
           type: object
           additionalProperties: true
-        client_metadata:
-          type: object
-          description: |
-            Optional client-supplied metadata (e.g. UI surface that issued
-            the command, user-agent build id). Stored on the `CommandRecord`
-            for debugging; never used for authorization.
-          additionalProperties: true
 
     CommandAcceptedBody:
       type: object
@@ -2943,12 +2936,6 @@ components:
               description: |
                 The active pipeline step list (`["llm_only"]` vs the full
                 cache_lookup→…→token_matching). The setup-panel mode toggle writes it.
-            simulated_checkin:
-              type: object
-              additionalProperties: true
-              description: |
-                Audit marker `{by, model, at}` stamped when an agent authors the origin
-                decomposition by hand instead of spending the check-in LLM call.
             candidate_library:
               type: array
               minItems: 1

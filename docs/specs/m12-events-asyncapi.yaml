@@ -560,9 +560,8 @@ components:
       type: object
       description: |
         Projection of `CommandRecord` (Profile B Phase 2a). Carries the
-        inbound command kind, payload, and the trust-boundary headers the
-        dispatcher captured (`idempotency_key`, optional `expected_version`)
-        plus identity context.
+        inbound command kind, payload, the dispatcher-captured
+        `idempotency_key`, and identity context.
       required: [command_id, kind, payload, idempotency_key, timestamp]
       additionalProperties: false
       properties:
@@ -579,13 +578,7 @@ components:
           type: string
           minLength: 8
           maxLength: 128
-        expected_version:
-          type: [integer, 'null']
-          minimum: 0
         issued_by_user_id: { type: string }
-        client_metadata:
-          type: object
-          additionalProperties: true
         timestamp:
           type: string
           format: date-time

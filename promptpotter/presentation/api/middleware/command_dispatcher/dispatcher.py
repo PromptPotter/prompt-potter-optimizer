@@ -148,7 +148,6 @@ class CommandDispatcher:
         campaign_id: str,
         reason: str,
         idempotency_key: str,
-        client_metadata: dict[str, Any] | None = None,
         keep_results: bool = False,
     ) -> CommandOutcome:
         """Workspace-scoped inline-apply dispatch for campaign lifecycle commands.
@@ -175,7 +174,6 @@ class CommandDispatcher:
             kind=kind,
             payload={"campaign_id": campaign_id, "reason": reason, "keep_results": keep_results},
             idempotency_key=idempotency_key,
-            client_metadata=client_metadata,
             applier=lambda: self._apply_lifecycle(kind, campaign_id, reason, keep_results),
         )
 
@@ -191,7 +189,6 @@ class CommandDispatcher:
         payload_extras: dict[str, Any],
         idempotency_key: str,
         expected_version: int | None,
-        client_metadata: dict[str, Any] | None = None,
     ) -> CommandOutcome:
         """Cycle-scoped inline-apply dispatch. ``Expected-Version`` validated
         when present; absent header skips the check (v0 relaxation)."""
@@ -222,7 +219,6 @@ class CommandDispatcher:
                 campaign_id=campaign_id,
                 cycle_id=cycle_id,
                 idempotency_key=idempotency_key,
-                client_metadata=client_metadata,
             )
 
         applier = self._build_cycle_applier(kind, campaign, campaign_id, cycle_id, payload_extras)
@@ -231,7 +227,6 @@ class CommandDispatcher:
             kind=kind,
             payload={"campaign_id": campaign_id, "cycle_id": cycle_id, **payload_extras},
             idempotency_key=idempotency_key,
-            client_metadata=client_metadata,
             applier=applier,
         )
 
@@ -242,7 +237,6 @@ class CommandDispatcher:
         campaign_id: str,
         cycle_id: str,
         idempotency_key: str,
-        client_metadata: dict[str, Any] | None,
     ) -> CommandOutcome:
         """delete-cycle writes its audit trail on the campaign's root cycle
         ledger — the target cycle's own ledger goes away as part of the apply."""
@@ -265,7 +259,6 @@ class CommandDispatcher:
             kind="delete-cycle",
             payload={"campaign_id": campaign_id, "cycle_id": cycle_id},
             idempotency_key=idempotency_key,
-            client_metadata=client_metadata,
             applier=_apply,
         )
 
@@ -278,7 +271,6 @@ class CommandDispatcher:
         kind: WorkspaceBackendKind,
         payload: dict[str, Any],
         idempotency_key: str,
-        client_metadata: dict[str, Any] | None = None,
     ) -> CommandOutcome:
         """Tenant-scoped inline-apply dispatch — backend-registry mutations
         that have no cycle target. ``CommandRecord`` lands on the workspace
@@ -299,7 +291,6 @@ class CommandDispatcher:
             kind=kind,
             payload=payload,
             idempotency_key=idempotency_key,
-            client_metadata=client_metadata,
             applier=applier,
         )
 
@@ -317,7 +308,6 @@ class CommandDispatcher:
         on_replay: Callable[[], Any] | None = None,
         dedupe: bool = True,
         effect_fn: Callable[[], dict[str, Any]] | None = None,
-        client_metadata: dict[str, Any] | None = None,
     ) -> CommandOutcome:
         """Inline-apply dispatch for the three commands that author an origin.
 
@@ -345,7 +335,6 @@ class CommandDispatcher:
             kind=kind,
             payload=payload,
             idempotency_key=idempotency_key,
-            client_metadata=client_metadata,
             applier=applier,
             on_replay=on_replay,
             dedupe=dedupe,
@@ -362,7 +351,6 @@ class CommandDispatcher:
         kind: str,
         payload: dict[str, Any],
         idempotency_key: str,
-        client_metadata: dict[str, Any] | None,
         applier: Applier,
         on_replay: Callable[[], Any] | None = None,
         dedupe: bool = True,
@@ -393,7 +381,6 @@ class CommandDispatcher:
                 payload=payload,
                 idempotency_key=idempotency_key,
                 issued_by_user_id=str(self._store.identity.user_id),
-                client_metadata=client_metadata or {},
             )
             ack_status: Literal["applied", "rejected"] = "applied"
             ack_detail = ""

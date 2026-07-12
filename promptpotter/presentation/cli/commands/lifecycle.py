@@ -48,7 +48,6 @@ async def _dispatch(args: argparse.Namespace, kind: LifecycleKind) -> CommandRes
             campaign_id=campaign_id,
             reason=getattr(args, "reason", None) or "",
             idempotency_key=uuid.uuid4().hex,
-            client_metadata={"surface": "cli"},
             keep_results=bool(getattr(args, "keep_results", False)),
         )
     except NotFoundError:

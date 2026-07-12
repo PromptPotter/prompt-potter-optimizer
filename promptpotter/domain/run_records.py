@@ -233,9 +233,7 @@ class CommandRecord(BaseModel):
     kind: str
     payload: dict[str, Any] = Field(default_factory=dict)
     idempotency_key: str
-    expected_version: int | None = None
     issued_by_user_id: str = ""
-    client_metadata: dict[str, Any] = Field(default_factory=dict)
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
