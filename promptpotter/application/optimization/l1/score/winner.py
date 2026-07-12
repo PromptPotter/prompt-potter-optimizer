@@ -159,10 +159,25 @@ async def l1_score(
             origin_election_results.extend(cast("list[QueryMeasurement]", extra.results))
     # Full-set origin stats — fallback for `matched_origin` when every candidate ran every sample.
     origin_base = _compute_accuracy(cast("list[QueryMeasurement]", origin.results))
-    best_acc = origin.accuracy
-    best_comp = origin.composite_fitness
+    # No-winner headline = the RETAINED incumbent's standing (the cumulative frontier the cycle
+    # already tracks), NOT the incumbent re-scored on this round's hard touched subset
+    # (`origin.accuracy`). That subset re-score is the election's matched floor (kept below); leaking
+    # it into the round headline deflates a HELD round — e.g. 20% shown for a prompt truly at 42%,
+    # because the touched subset is the incumbent's own hard failures. `results`/`hits`/`total` source
+    # from the SAME frontier so they stay mutually consistent (round-health Wilson CI + the
+    # evidence-starved→L2 rate both pair `total` with `results`). All nine are overwritten when a
+    # winner is elected, so this only shapes the no-winner round record.
+    tr = cycle.tracking
+    best_acc = tr.current_accuracy
+    best_comp = tr.current_composite_fitness
+    # The origin reference shown beside the headline must share its sample basis, or a held
+    # round renders "accuracy 58% (origin 18%)" — a phantom lift. No winner ⇒ both are the
+    # incumbent's standing (lift 0); a winner keeps the touched matched reference (set below).
+    best_origin_accuracy = tr.current_accuracy
     best_osp: OptSearchPoint = origin.osp
-    best_results: list[QueryMeasurement] = list(cast("list[QueryMeasurement]", origin.results))
+    best_results: list[QueryMeasurement] = list(
+        cast("list[QueryMeasurement]", tr.current_results or origin.results)
+    )
     best_label = origin.label
     best_scores: dict[str, float] = dict(origin.evaluators)
     best_matched_origin_acc = origin.accuracy
@@ -276,6 +291,7 @@ async def l1_score(
         matched = matched_by_id[winner_id]
         best_acc = winner_cs.accuracy
         best_comp = winner_cs.composite_fitness
+        best_origin_accuracy = origin.accuracy
         best_osp = winner_ind
         best_results = list(all_candidate_results[winner_id])
         best_label = winner_ind.lineage.changes_description or winner_ind.lineage.id[:12]
@@ -370,7 +386,7 @@ async def l1_score(
         improved=improved,
         p_value=p_value,
         improved_reason=improved_reason,
-        origin_accuracy=origin.accuracy,
+        origin_accuracy=best_origin_accuracy,
         matched_origin_accuracy=best_matched_origin_acc,
         matched_origin_hits=best_matched_origin_hits,
         matched_origin_composite=best_matched_origin_composite,

@@ -60,6 +60,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.config import LivesConfig
+from promptpotter.domain.escalation_signals import NurseOwner
 from promptpotter.domain.outer_verdict import OUTER_PROXY_KEYS, OuterSampleProxies
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.results import L1_PARSE_FAILURE_TOOLING
@@ -350,12 +351,36 @@ def _is_evidential(rnd: RoundResult) -> bool:
     return rnd.l1_parse_failure != L1_PARSE_FAILURE_TOOLING
 
 
+def _self_heal_rate(rnd: RoundResult) -> float:
+    """Share of the round's candidates that tripped the inner self-healing machinery for a
+    META-PROMPT-owned reason ∈ [0,1]: a malformed L1 variant (any ``ValidationFailure`` —
+    e.g. a hallucinated node key) or an operator-terminal ``RuntimeFailure`` (a config-
+    deterministic break). A transient-transport ``RuntimeFailure`` is ``owner=L1`` (provider
+    noise, not the meta-prompt's fault — see ``signal_effect._abort_is_config_break``) and is
+    excluded, the same reason a TOOLING round is not scored dirty.
+
+    The general L4 principle: whatever the inner loop had to self-heal is evidence about the
+    meta-prompt under test, so it rides the ``cleanliness`` penalty to the outer optimizer.
+    The weight is provisional (a per-candidate share folded 1:1); tuning it is deferred."""
+    cands = rnd.candidate_scores
+    if not cands:
+        return 0.0
+    healed = sum(
+        1
+        for c in cands
+        if c.validation_failures
+        or any(rf.owner is NurseOwner.OPERATOR for rf in c.runtime_failures)
+    )
+    return healed / len(cands)
+
+
 def _round_problem_rate(rnd: RoundResult) -> float:
-    """Per-round dirtiness ∈ [0,1] for an EVIDENTIAL round (see ``_is_evidential``): inner
-    samples that degraded or came back unscoreable (``health``), or a round the outer
-    meta-prompt made unparseable outright. Both are candidate-controlled — a meta-prompt
-    that makes the inner loop emit unscoreable predictions, or no candidates at all,
-    scores dirtier.
+    """Per-round dirtiness ∈ [0,1] for an EVIDENTIAL round (see ``_is_evidential``), three
+    disjoint candidate-controlled signals: inner samples that degraded or came back
+    unscoreable (``health``), the meta-fault self-heal load (``_self_heal_rate`` — malformed
+    variants + config breaks the inner loop had to heal), or a round the outer meta-prompt
+    made unparseable outright. A meta-prompt that makes the inner loop emit unscoreable
+    predictions, need healing, or yield no candidates at all scores dirtier.
 
     A parse failure is charged to the ROUND, not to a candidate. It cannot be read off
     ``candidate_scores``: ``l1_generate`` returns zero candidates in exactly that case, so
@@ -368,6 +393,7 @@ def _round_problem_rate(rnd: RoundResult) -> float:
     struct = 0.0
     if health and health.samples:
         struct = health.degraded_rate + health.no_result_count / health.samples
+    struct += _self_heal_rate(rnd)
     return _clamp(struct, 0.0, 1.0)
 
 

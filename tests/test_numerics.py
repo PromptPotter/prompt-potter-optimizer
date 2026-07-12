@@ -430,6 +430,18 @@ def test_matched_origin_stats_restricts_to_candidate_subset():
     assert full["hits"] == 10
     assert full["total"] == 20
     assert full["accuracy"] == pytest.approx(0.5)
+    # DISJOINT subset (per_round_resubset can hand a candidate samples the origin never
+    # measured): restricting yields [], which scores no `accuracy` term. This must NOT crash
+    # the campaign (round scorer refuses an empty set) and must NOT invent a fake 0.0 floor
+    # (which would credit improvement over an unmeasured floor). It falls back to origin's
+    # FULL measured floor — a real number.
+    disjoint_candidate = [
+        {**_eval_result(hit=True, score=1.0), "sample_id": i} for i in range(100, 108)
+    ]
+    disjoint = matched_origin_stats(origin_results, disjoint_candidate, schema)
+    assert disjoint["hits"] == 10
+    assert disjoint["total"] == 20
+    assert disjoint["accuracy"] == pytest.approx(0.5)
 
 
 def test_value_with_mask_applied_reproduces_the_retired_client_whatif_math():
@@ -887,7 +899,8 @@ def _fake_inner_round(
         ),
         candidates_scored=candidates_scored,
         candidate_scores=[
-            SimpleNamespace(validation_failures=[]) for _ in range(candidates_scored)
+            SimpleNamespace(validation_failures=[], runtime_failures=[])
+            for _ in range(candidates_scored)
         ],
         l1_n_no_op=no_op,
         l1_n_duplicate=dup,

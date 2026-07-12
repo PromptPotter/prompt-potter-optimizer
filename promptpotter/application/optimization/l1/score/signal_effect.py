@@ -21,6 +21,39 @@ from promptpotter.domain.escalation_signals import (
     RuntimeFailure,
 )
 from promptpotter.domain.results import DegradationContext, EliminationContext
+from promptpotter.shared.errors import ErrorCategory
+
+# A scoring-error abort is a broken-for-all-queries fault the operator must fix
+# ONLY when it is config-deterministic — dominated by CLIENT (4xx / bad schema)
+# or PIPELINE (node ERROR). A transport-dominated abort (CONNECTION timeouts,
+# SERVER 5xx) is a transient provider hiccup, not a broken program.
+_CONFIG_DETERMINISTIC_ABORT = frozenset({ErrorCategory.CLIENT.value, ErrorCategory.PIPELINE.value})
+
+
+def is_transient_scoring_abort(signal: EscalationSignal | None) -> bool:
+    """True when a scoring signal is a scoring-error abort dominated by transient transport
+    (CONNECTION/SERVER — a provider blip) rather than a config-deterministic break. The
+    origin path reads this to refuse banking a floor a transient hiccup corrupted."""
+    if signal is None or signal.check_name != "scoring_error_abort":
+        return False
+    return not _abort_is_config_break(signal.check_result)
+
+
+def _abort_is_config_break(cr: dict[str, Any]) -> bool:
+    """True when a scoring-error abort is an operator-fixable config break.
+
+    Reads the abort's warning histogram: dominant CLIENT/PIPELINE ⇒ the
+    candidate's config is broken for all queries (operator-terminal). A
+    transport-dominated abort (CONNECTION/SERVER — the endpoint blipped) is
+    transient infrastructure, not a program fault — treating it as terminal
+    would blame a blip on the config and can escalate a hiccup to the HITL
+    terminate path. Empty histogram ⇒ transient (never halt on ambiguity).
+    """
+    wt = cr.get("warning_types") or {}
+    if not wt:
+        return False
+    dominant_cat = max(wt.items(), key=lambda kv: kv[1])[0]
+    return str(dominant_cat) in _CONFIG_DETERMINISTIC_ABORT
 
 
 class CandidateOutcome(StrEnum):
@@ -105,14 +138,19 @@ def decode_signal_effect(
         rf_kind = None
     if rf_kind is not None:
         # Stamp who owns the fix. A DETERMINISTIC-for-config break (DegradationCheck
-        # fatal fast-path, ``cr["fatal"]``) or a scoring-error abort is one the in-loop
-        # param retune cannot be relied on to fix — the backend eliminated the candidate
-        # as broken-for-all-queries — so it escalates to the OPERATOR (trim the
-        # schema/prompt, change the model). The canonical case is the token blowout
-        # (output exceeds the provider ceiling on a locked schema). A RATE-based
-        # degradation is partial noise L1 can retune around → owner L1. The render + the
-        # L1 directive read this so L1 never burns a variant "fixing" an operator-bound break.
-        operator_terminal = bool(cr.get("fatal")) or rf_kind == "scoring_error_abort"
+        # fatal fast-path, ``cr["fatal"]``) or a CONFIG-deterministic scoring-error abort
+        # (CLIENT/PIPELINE dominant) is one the in-loop param retune cannot be relied on
+        # to fix — the backend eliminated the candidate as broken-for-all-queries — so it
+        # escalates to the OPERATOR (trim the schema/prompt, change the model). The
+        # canonical case is the token blowout (output exceeds the provider ceiling on a
+        # locked schema). A RATE-based degradation, OR a TRANSPORT-dominated abort
+        # (CONNECTION/SERVER — a transient provider hiccup, not a broken program), is
+        # partial noise L1 can retune around → owner L1: a blip must not be blamed on the
+        # config nor routed to the HITL terminate path. The render + the L1 directive read
+        # this so L1 never burns a variant "fixing" an operator-bound break.
+        operator_terminal = bool(cr.get("fatal")) or (
+            rf_kind == "scoring_error_abort" and _abort_is_config_break(cr)
+        )
         new_rf = RuntimeFailure(
             source=rf_kind,
             dominant_warning=dominant,

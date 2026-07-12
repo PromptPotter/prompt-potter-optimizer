@@ -434,19 +434,34 @@ async def prepare_scoring_context(
     if listener is not None:
         emit_phase(listener.on_phase, CampaignPhase.ORIGIN, "enter", round=0)
 
+    from promptpotter.application.optimization.l1.score.signal_effect import (
+        is_transient_scoring_abort,
+    )
+
     try:
-        origin_results, scores, _ = await score_search_point(
-            sp,
-            scoring_set,
-            session,
-            label="Origin",
-            on_sample_starting=(
-                partial(listener.on_sample_started, 0, 1) if listener is not None else None
-            ),
-            on_sample_scored=(
-                partial(listener.on_sample_scored, 0, 1) if listener is not None else None
-            ),
-        )
+        # The origin is the campaign's whole reference — a transient-transport scoring abort
+        # (a provider blip) must not bank a corrupted floor. Re-score once fresh if the first
+        # pass aborted transiently; the blip usually passes. A config-deterministic abort is
+        # NOT retried — it's a real fault the operator must fix.
+        for attempt in range(2):
+            origin_results, scores, signal = await score_search_point(
+                sp,
+                scoring_set,
+                session,
+                label="Origin",
+                force_fresh=attempt > 0,
+                on_sample_starting=(
+                    partial(listener.on_sample_started, 0, 1) if listener is not None else None
+                ),
+                on_sample_scored=(
+                    partial(listener.on_sample_scored, 0, 1) if listener is not None else None
+                ),
+            )
+            if not is_transient_scoring_abort(signal):
+                break
+            logger.warning(
+                "Origin scoring hit a transient transport abort — re-scoring once fresh."
+            )
         # Origin is candidate 0 of round 0 — deposit its aggregate score so the live
         # round buffer (→ round_0000.json node block) carries the same stats every
         # round's candidates do.
