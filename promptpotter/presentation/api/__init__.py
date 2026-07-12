@@ -30,8 +30,8 @@ Eight router objects mounted at ``/api/v1`` from ``main.py``:
    derived view over ``list_campaigns()`` deduped by ``root_content_hash``.
 
 8. **Auth** (``auth_router``) — Stage-1 OIDC sign-in surface (Google +
-   GitHub). ``/auth/providers``, ``/auth/login/{provider}``,
-   ``/auth/callback/{provider}``, ``/auth/logout``, ``/auth/me``.
+   GitHub). ``/auth/login/{provider}``, ``/auth/callback/{provider}``,
+   ``/auth/logout``, ``/auth/me``.
    Runs pre-auth; populates the opaque session cookie consumed by the
    OIDC middleware.
 

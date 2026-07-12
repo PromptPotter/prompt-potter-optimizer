@@ -1,11 +1,9 @@
 "use client";
 // The inner-loop fan-out of one L4 (`promptpotter-self`) outer cycle, rendered
-// as sidebar rows nested under the outer campaign. Self-fetches via
-// useInnerCycles (only mounted while the outer row's inner disclosure is open)
-// and reads the workspace's `viewedPath` + `selectCyclePath` directly, so the
-// change stays local to the sidebar. Selecting a row pins the 2-hop path
-// [outer, inner]: the dashboard re-roots to that inner cycle while chat and
-// selection stay on the outer (root) thread.
+// as sidebar rows under the outer campaign (mounted only while its `↻ inner`
+// chip is open). Rows are numbered in launch order. Selecting one pins the
+// 2-hop path [outer, inner]: the dashboard re-roots to that inner cycle while
+// chat and selection stay on the outer (root) thread.
 
 import { useInnerCycles } from "@/lib/hooks/useInnerCycles";
 import { useWorkspace } from "@/lib/workspace";
@@ -41,9 +39,11 @@ export function InnerCampaignRows({
     return <li className="inner-library-empty">No inner campaigns yet</li>;
   }
 
+  const rows = [...inner].sort((a, b) => (a.created_at < b.created_at ? -1 : 1));
+
   return (
     <>
-      {inner.map((c) => {
+      {rows.map((c, i) => {
         const isLive =
           c.campaign_id === activeInnerCampaignId && c.cycle_id === activeInnerCycleId;
         const selected =
@@ -55,42 +55,38 @@ export function InnerCampaignRows({
             : null;
         return (
           <li key={`${c.campaign_id}\x1f${c.cycle_id}`}>
-            <div className={cx("unit-library-family", selected && "selected")}>
-              <span className="unit-library-twist" aria-hidden="true" />
-              <button
-                type="button"
-                className="unit-library-item"
-                onClick={() =>
-                  selectCyclePath([
-                    { campaignId: outerCampaignId, cycleId: outerCycleId },
-                    { campaignId: c.campaign_id, cycleId: c.cycle_id },
-                  ])
-                }
-                aria-current={selected ? "true" : undefined}
-                title={`inner: ${c.campaign_id} · ${c.cycle_id}`}
-              >
-                <span className="unit-library-mark">{isLive ? "●" : ""}</span>
-                <span className="unit-library-row">
-                  <span className="unit-library-name">
-                    {c.campaign_id}
-                    {isLive && (
-                      <span className="unit-library-live" title="Inner loop running">
-                        ●
-                      </span>
-                    )}
-                  </span>
-                  <span className="unit-library-meta">
-                    {statusLabel && (
-                      <>
-                        <span className="unit-library-status">{statusLabel}</span>
-                        {" · "}
-                      </>
-                    )}
-                    {fmtPct0(c.best_accuracy)}
-                  </span>
+            <button
+              type="button"
+              className={cx("unit-library-item", "unit-library-child", selected && "selected")}
+              onClick={() =>
+                selectCyclePath([
+                  { campaignId: outerCampaignId, cycleId: outerCycleId },
+                  { campaignId: c.campaign_id, cycleId: c.cycle_id },
+                ])
+              }
+              aria-current={selected ? "true" : undefined}
+              title={`inner: ${c.campaign_id} · ${c.cycle_id}`}
+            >
+              <span className="unit-library-row">
+                <span className="unit-library-name">
+                  run {i + 1}
+                  {isLive && (
+                    <span className="unit-library-live" title="Inner loop running">
+                      ●
+                    </span>
+                  )}
                 </span>
-              </button>
-            </div>
+                <span className="unit-library-meta">
+                  {statusLabel && (
+                    <>
+                      <span className="unit-library-status">{statusLabel}</span>
+                      {" · "}
+                    </>
+                  )}
+                  {fmtPct0(c.best_accuracy)}
+                </span>
+              </span>
+            </button>
           </li>
         );
       })}

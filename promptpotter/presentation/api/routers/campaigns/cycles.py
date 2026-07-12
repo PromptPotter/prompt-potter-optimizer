@@ -1,4 +1,4 @@
-"""Per-cycle reads — cycle list, cycle detail, rounds, dashboard.
+"""Per-cycle reads — the live dashboard and an L4 cycle's inner fan-out.
 
 All routes carry ``(campaign_id, cycle_id)``. ``dashboard.json`` is
 per-cycle — the dashboard route serves the viewed cycle's own file, so a
@@ -8,13 +8,10 @@ fork's chart shows the fork's trajectory, not the session root's.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from fastapi import Query, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
 
-from promptpotter.domain.results import RoundResult
 from promptpotter.infrastructure.store import (
     build_stores,
     cycle_dir_for,
@@ -30,93 +27,6 @@ from promptpotter.presentation.api.routers.campaigns._conditional import (
 )
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import BadRequestError, NotFoundError
-
-
-class CampaignCyclesResponse(BaseModel):
-    campaign_id: str
-    cycles: list[CycleListEntry] = Field(description="Every cycle in the campaign's lineage tree")
-
-
-class CycleRoundEntry(BaseModel):
-    round: int = Field(description="Round number within the cycle")
-    label: str = Field(description="Human-readable label (winner's L1 description)")
-    accuracy: float | None = Field(default=None, description="Round-level accuracy (winner)")
-    improved: bool = Field(default=False, description="Whether this round improved over best")
-
-
-class CycleDetailResponse(CycleListEntry):
-    """One cycle in the list shape, plus its round summaries.
-
-    ``CycleListEntry`` IS the cycle's served shape — this route once re-declared a
-    narrower twin of it and hand-copied ``enumerate_cycles()`` field by field, which
-    is how ``origin_accuracy`` came to be structurally null in the list and populated
-    only in the detail.
-    """
-
-    rounds: list[CycleRoundEntry] = Field(description="Ordered round summaries")
-
-
-@campaigns_router.get("/campaigns/{campaign_id}/cycles", response_model=CampaignCyclesResponse)
-def list_campaign_cycles(store: StoreDep, campaign_id: str) -> CampaignCyclesResponse:
-    """Every cycle in one campaign's lineage tree."""
-    if store.campaigns.load_campaign(campaign_id) is None:
-        raise NotFoundError(f"Campaign not found: {campaign_id}")
-    return CampaignCyclesResponse(
-        campaign_id=campaign_id,
-        cycles=[
-            CycleListEntry(**e)
-            for e in store.campaigns.enumerate_cycles()
-            if e["campaign_id"] == campaign_id
-        ],
-    )
-
-
-def _round_summaries(index: dict[str, Any]) -> list[CycleRoundEntry]:
-    out: list[CycleRoundEntry] = []
-    rounds_raw = index.get("rounds")
-    if not isinstance(rounds_raw, list):
-        return out
-    for r in rounds_raw:
-        if not isinstance(r, dict):
-            continue
-        rn = r.get("round")
-        if not isinstance(rn, int):
-            continue
-        out.append(
-            CycleRoundEntry(
-                round=rn,
-                label=str(r.get("label") or ""),
-                accuracy=(
-                    float(r["accuracy"]) if isinstance(r.get("accuracy"), int | float) else None
-                ),
-                improved=bool(r.get("improved", False)),
-            )
-        )
-    return out
-
-
-@campaigns_router.get(
-    "/campaigns/{campaign_id}/cycles/{cycle_id}", response_model=CycleDetailResponse
-)
-def get_cycle(store: StoreDep, campaign_id: str, cycle_id: str) -> CycleDetailResponse:
-    """One cycle's ``index.json`` detail with round summaries."""
-    entry = store.campaigns.cycle_entry(campaign_id, cycle_id)
-    index = store.campaigns.load(campaign_id, cycle_id)
-    if entry is None or index is None:
-        raise NotFoundError(f"Cycle not found: {campaign_id}/{cycle_id}")
-    return CycleDetailResponse(**entry, rounds=_round_summaries(index))
-
-
-@campaigns_router.get(
-    "/campaigns/{campaign_id}/cycles/{cycle_id}/rounds/{round_num}",
-    response_model=RoundResult,
-)
-def get_round(store: StoreDep, campaign_id: str, cycle_id: str, round_num: int) -> RoundResult:
-    """Full round detail for one round of one cycle."""
-    rr = store.campaigns.load_round_file(campaign_id, cycle_id, round_num)
-    if rr is None:
-        raise NotFoundError(f"Round {round_num} not found")
-    return rr
 
 
 def serve_dashboard_response(

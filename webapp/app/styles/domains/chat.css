@@ -47,7 +47,6 @@
 .spend-control-note{color:var(--color-success);font-size:11px}
 @media (prefers-reduced-motion:reduce){.chat-job-toggle .chev{transition:none}}
 .wf-hero{position:relative;padding:24px 16px 42px;max-width:980px;margin:0 auto;width:100%}
-.wf-hero-tools{display:flex;justify-content:flex-end}
 .wf-hero-flow{display:flex;align-items:center;justify-content:center;gap:0;padding:18px 0 8px}
 .wf-hero-node{background:var(--color-background-secondary);border:1px solid var(--color-border);border-radius:10px;padding:14px 22px;text-align:left;min-width:140px;display:flex;flex-direction:row;align-items:center;gap:12px;position:relative;z-index:2}
 .wf-hero-node .ico{color:var(--color-text-tertiary);display:flex;align-items:center;justify-content:center;flex-shrink:0}
@@ -310,7 +309,6 @@
 .toggle-row.wand-row .row-icon{color:var(--color-accent);width:34px;height:34px}
 .toggle-row.wand-row .row-icon svg{width:32px;height:32px}
 .toggle-row.wand-row .name{white-space:nowrap}
-.toggle-row.wand-row .beta-tag{margin-left:6px}
 .toggle-row.wand-row .desc{max-width:180px}
 /* Position, phase and size are per-sparkle data (ChatPane's `SPARKLES`); one rule
    animates all eight. */
@@ -340,7 +338,6 @@
 .toggle.on{background:var(--color-accent)}
 .toggle.on::after{left:16px;background:var(--color-text-on-accent)}
 .toggle.locked{cursor:not-allowed;opacity:.4;pointer-events:none}
-.beta-tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.08em;padding:1px 6px;border-radius:4px;background:var(--color-accent);color:var(--color-text-on-accent);margin-left:8px;text-transform:uppercase;vertical-align:middle}
 /* Coming-soon marker on locked feature rows — muted, not accent, so it reads
    "later" rather than "new" (frontend-surface-contract.md § I3). */
 .soon-tag{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.08em;padding:1px 6px;border-radius:4px;background:var(--color-border);color:var(--color-text-tertiary);margin-left:8px;text-transform:uppercase;vertical-align:middle}

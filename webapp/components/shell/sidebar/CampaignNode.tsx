@@ -3,7 +3,6 @@ import { useCallback, useState } from "react";
 import { postUnarchiveCampaign } from "@/lib/api";
 import { bumpRevalidation } from "@/lib/revalidate";
 import { cx } from "@/lib/cx";
-import { campaignOriginHash } from "@/lib/ids";
 import { campaignDisplayName } from "@/lib/names";
 import { fmtPct0 } from "@/lib/format";
 import { runPhaseLabel } from "@/lib/run-phase";
@@ -43,8 +42,7 @@ export function CampaignNode({
   const onToggle = () => toggleNode(cmpKey);
   const hasBranches = branches.length > 0;
   // L4: this campaign optimizes the meta-prompts, so its root cycle spawned a
-  // fan-out of inner campaigns. Show them as a separate disclosure (the fork
-  // twist above is a different axis; most L4 cycles have no forks).
+  // fan-out of inner campaigns — reachable from the `↻ inner` chip.
   // Keyed on the connector KIND, never on a dataset name: ANY dataset whose
   // `pipeline.json::backend_type` is `promptpotter` recurses, including an
   // operator's own pp-self variant. Same predicate the panels branch on.
@@ -93,17 +91,18 @@ export function CampaignNode({
     <>
       <CampaignSizeHover campaignId={cid}>
         <div className={cx("unit-library-family", selected && "selected", archived && "archived")}>
-          <button
-            type="button"
-            className="unit-library-twist"
-            onClick={onToggle}
-            aria-label={open ? "Collapse" : "Expand"}
-            aria-expanded={open}
-            disabled={!hasBranches}
-            tabIndex={-1}
-          >
-            {!hasBranches ? "" : open ? "▼" : "▶"}
-          </button>
+          {hasBranches && (
+            <button
+              type="button"
+              className="unit-library-twist"
+              onClick={onToggle}
+              aria-label={open ? "Collapse" : "Expand"}
+              aria-expanded={open}
+              tabIndex={-1}
+            >
+              {open ? "▼" : "▶"}
+            </button>
+          )}
           <button
             type="button"
             className="unit-library-item"
@@ -112,20 +111,18 @@ export function CampaignNode({
             title={archived ? "Archived — click to restore" : cid}
             disabled={restoring}
           >
-            <span className="unit-library-mark">{active ? "●" : ""}</span>
             <span className="unit-library-row">
               <span className="unit-library-name">
                 {campaignDisplayName(campaign)}
-                {!campaign.label && (
-                  <span className="unit-library-hash" title={cid}>
-                    #{campaignOriginHash(cid).slice(0, 6)}
-                  </span>
-                )}
-                {live && (
+                {live ? (
                   <span className="unit-library-live" title="Status is running">
                     ●
                   </span>
-                )}
+                ) : active ? (
+                  <span className="unit-library-live active" title="Dashboard follows this run">
+                    ●
+                  </span>
+                ) : null}
               </span>
               <span className="unit-library-meta">
                 {archived ? (
@@ -146,7 +143,7 @@ export function CampaignNode({
               </span>
             </span>
           </button>
-          {chips.length > 0 && (
+          {(chips.length > 0 || isL4) && (
             <span className="unit-library-chips">
               {chips.map((chip) => (
                 <button
@@ -164,6 +161,20 @@ export function CampaignNode({
                   <span className="unit-library-chip-count">{chip.count}</span>
                 </button>
               ))}
+              {isL4 && (
+                <button
+                  type="button"
+                  className={cx("unit-library-chip", innerOpen && "open")}
+                  onClick={() => setInnerOpen((o) => !o)}
+                  aria-expanded={innerOpen}
+                  title="Inner campaigns this L4 cycle ran (one per candidate)"
+                >
+                  <span className="unit-library-chip-glyph" aria-hidden="true">
+                    ↻
+                  </span>
+                  <span className="unit-library-chip-count">inner</span>
+                </button>
+              )}
             </span>
           )}
           <CampaignMenu campaign={campaign} />
@@ -181,38 +192,9 @@ export function CampaignNode({
           />
         </ul>
       )}
-      {isL4 && (
-        <ul className="unit-library-children">
-          <li>
-            <div className="unit-library-family inner-disclosure">
-              <button
-                type="button"
-                className="unit-library-twist"
-                onClick={() => setInnerOpen((o) => !o)}
-                aria-label={innerOpen ? "Collapse inner loops" : "Expand inner loops"}
-                aria-expanded={innerOpen}
-                tabIndex={-1}
-              >
-                {innerOpen ? "▼" : "▶"}
-              </button>
-              <button
-                type="button"
-                className="unit-library-item"
-                onClick={() => setInnerOpen((o) => !o)}
-                title="Inner campaigns this L4 cycle ran (one per candidate)"
-              >
-                <span className="unit-library-mark" />
-                <span className="unit-library-row">
-                  <span className="unit-library-name">inner loops</span>
-                </span>
-              </button>
-            </div>
-            {innerOpen && (
-              <ul className="unit-library-children inner-library">
-                <InnerCampaignRows outerCampaignId={cid} outerCycleId={root.cycle_id} />
-              </ul>
-            )}
-          </li>
+      {isL4 && innerOpen && (
+        <ul className="unit-library-children inner-library">
+          <InnerCampaignRows outerCampaignId={cid} outerCycleId={root.cycle_id} />
         </ul>
       )}
     </>

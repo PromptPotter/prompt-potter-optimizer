@@ -29,9 +29,6 @@
 .run-ctl-primary:hover:not(:disabled){border-color:var(--color-accent)}
 .run-ctl-primary:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
 .run-ctl-primary:disabled{opacity:0.5;cursor:not-allowed}
-.run-ctl-fork{display:inline-flex;align-items:center;justify-content:center;width:20px;height:22px;padding:0;border:0;background:transparent;color:var(--color-text-tertiary);opacity:0.5;cursor:pointer;transition:opacity .12s,color .12s}
-.run-ctl-fork:hover:not(:disabled){opacity:1;color:var(--color-accent)}
-.run-ctl-fork:disabled{opacity:0.3;cursor:not-allowed}
 .run-ctl-err{color:var(--color-danger);font-size:11px;max-width:160px}
 /* Pause-pending hint — shown between the click and the run declaring `paused`,
    explaining the graceful wait. Warn-toned to match the pause icon. */

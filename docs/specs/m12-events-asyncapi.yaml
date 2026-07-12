@@ -220,12 +220,6 @@ components:
             - $ref: '#/components/schemas/CommandAckPayload'
             - $ref: '#/components/schemas/ErrorPayload'
             - $ref: '#/components/schemas/RoundWarningPayload'
-        emitted_at:
-          type: string
-          format: date-time
-          description: |
-            Server-side wall-clock at envelope mint time. Debugging only —
-            never load-bearing for ordering. Ordering is by `sequence`.
 
     # ---- Profile A: projection-synthesized payload ----
 

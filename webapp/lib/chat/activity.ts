@@ -28,7 +28,6 @@ export interface ProjectionEnvelope {
   cycle_id: string;
   sequence: number;
   payload: Record<string, unknown>;
-  emitted_at?: string;
 }
 
 // State pairs an icon AND a label (never colour alone) per the frontend

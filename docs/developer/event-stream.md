@@ -22,7 +22,7 @@ Every non-heartbeat frame is one of these:
 
 ```json
 data: {"kind": "phase", "version": 1, "cycle_id": "cycle_abc123",
-       "sequence": 42, "payload": {...}, "emitted_at": "2026-05-26T12:00:00Z"}
+       "sequence": 42, "payload": {...}}
 ```
 
 | Field | Type | Notes |
@@ -32,7 +32,6 @@ data: {"kind": "phase", "version": 1, "cycle_id": "cycle_abc123",
 | `cycle_id` | string | Target cycle. Redundant with the URL path, stamped per-frame so multi-cycle clients can demultiplex a fan-in subscription. |
 | `sequence` | integer | Ledger offset. Snapshot frame carries the high-water mark the snapshot reflects; live tail strictly greater. Gap = missed frames. |
 | `payload` | object | Per-kind body. For record-derived kinds, the record's `model_dump` content; for `stream_snapshot`, `dashboard.json` + `snapshot_at_offset`. |
-| `emitted_at` | string | Server wall-clock at envelope mint. Debugging only — never load-bearing for ordering. |
 
 Adding a new kind requires updating [`m12-events-asyncapi.yaml`](../specs/m12-events-asyncapi.yaml) **first** (closed-set policy — security box 1), then `ProjectionKind` in [`promptpotter/domain/projection_envelope.py`](../../promptpotter/domain/projection_envelope.py), then the record class on `CycleRecord` (or the `_PROJECTION_ONLY_KINDS` allowlist in [`projection_envelope.py`](../../promptpotter/domain/projection_envelope.py)). Keep the YAML enum and the Python Literal in sync by hand — drift fails loud (an unknown kind raises on dispatch); no standing test (see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).
 

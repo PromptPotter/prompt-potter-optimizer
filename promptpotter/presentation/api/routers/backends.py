@@ -9,20 +9,13 @@ writes a ``CommandRecord`` to the workspace ledger
 
 from __future__ import annotations
 
-import logging
-from typing import Any
-
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from promptpotter import connectors
-from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.infrastructure.backend import build_backend_client
 from promptpotter.presentation.api.deps import StoreDep, get_backend_or_404
 from promptpotter.shared.clock import utcnow_iso
-
-logger = logging.getLogger(__name__)
 
 backends_router = APIRouter(prefix="/backends", tags=["Backends"])
 
@@ -33,14 +26,6 @@ class BackendResponse(BaseModel):
     backend_type: str = Field(description="Backend type (e.g. 'default')")
     base_url: str = Field(description="Backend API base URL")
     created_at: str = Field(description="ISO 8601 creation timestamp")
-
-
-class PipelineViewResponse(BaseModel):
-    backend_id: str = Field(description="Backend identifier")
-    backend_pipeline: dict[str, Any] = Field(description="Full PipelineSchema as dict")
-    computed_nodes: list[dict[str, Any]] = Field(description="Computed PipelineNode dicts")
-    fetched_at: str = Field(description="ISO 8601 fetch timestamp")
-    source: str = Field(description="Pipeline source: 'live', 'cached', or 'default'")
 
 
 class BackendHealthResponse(BaseModel):
@@ -64,44 +49,6 @@ def list_backends(store: StoreDep) -> list[BackendResponse]:
         )
         for b in store.backends.list_all()
     ]
-
-
-@backends_router.get("/{backend_id}", response_model=BackendResponse)
-def get_backend(backend_id: str, store: StoreDep) -> BackendResponse:
-    """Get backend details."""
-    b = get_backend_or_404(backend_id, store)
-    return BackendResponse(
-        id=b.id,
-        name=b.name,
-        backend_type=b.backend_type,
-        base_url=b.base_url,
-        created_at=b.created_at,
-    )
-
-
-@backends_router.get("/{backend_id}/pipeline", response_model=PipelineViewResponse)
-async def get_pipeline(backend_id: str, store: StoreDep) -> PipelineViewResponse:
-    """Dynamic pipeline view from the backend."""
-    backend = get_backend_or_404(backend_id, store)
-    client = build_backend_client(connectors.get(backend.backend_type), backend.base_url)
-
-    try:
-        raw: dict[str, Any] | None = await client.fetch_pipeline()
-        source = "live"
-    except Exception:
-        logger.warning("Backend unreachable at %s; returning empty schema", client.base_url)
-        raw = None
-        source = "default"
-
-    schema = parse_pipeline_response(raw) if raw is not None else PipelineSchema()
-
-    return PipelineViewResponse(
-        backend_id=backend_id,
-        backend_pipeline=schema.model_dump(),
-        computed_nodes=[s.model_dump() for s in schema.nodes],
-        fetched_at=utcnow_iso(),
-        source=source,
-    )
 
 
 @backends_router.get("/{backend_id}/health", response_model=BackendHealthResponse)
@@ -139,6 +86,5 @@ async def get_backend_health(backend_id: str, store: StoreDep) -> BackendHealthR
 __all__ = [
     "BackendHealthResponse",
     "BackendResponse",
-    "PipelineViewResponse",
     "backends_router",
 ]

@@ -49,7 +49,6 @@ Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [o
           ledger.jsonl                 # append-only Decision/Phase/Snapshot/LLMCall/TokenUsage spine
           streams/round_NNNN_p_best.jsonl   # PoBB telemetry (sparkline in log.md)
           cache/rounds|candidates/     # per-round node I/O + pre-scoring checkpoint
-          archived/resumed_at_{ts}/    # mid-cycle rewind sweepup (--from)
     measurements/                       # measurement store (DB core) — cross-cycle/session/tenant, peer of campaigns/
       {run_id}.json  index.jsonl   # index.jsonl append-only, last-wins by content_hash; `reindex` rebuilds it
     archive/{campaign_id}/              # recycle bin — `archive` MOVES a campaign tree here; `unarchive` moves it back
@@ -90,7 +89,7 @@ Three workflows over one fork primitive (conceptual picture: [`../concepts/campa
 
 ### Rewind — `resume --from N`
 
-Use when the active cycle went somewhere you don't want (a bad L3 replan, or you edited config and want to re-explore from a round). `cycle_id` stays; you roll history back inside it. Rounds after N are moved into `.runtime/archived/resumed_at_<ts>/` (not deleted), state is restored from round N, and the run resumes at N+1. The measurement archive is preserved — per-sample results replay without backend calls.
+Use when the active cycle went somewhere you don't want (a bad L3 replan, or you edited config and want to re-explore from a round). `cycle_id` stays; you roll history back inside it. Rounds after N are deleted, state is restored from round N, and the run resumes at N+1. The measurement archive is preserved — per-sample results replay without backend calls.
 
 **Partial rounds.** Ctrl+C (a resumable pause, `StopReason.PAUSED`) mid-round leaves ledger events but no `round:complete`; the public `rounds/round_NNNN.json` stays absent (the audit cache carries the partial with `"interrupted": true`) and the cycle stays non-terminal and resumable — no `finished_at`. `--from M` is admissible only if round `M` has a closing event — so after a pause mid-round-1, `--from 1` refuses and `--from 0` resumes cleanly. A plain `resume` (no `--from`) continues from the last completed round.
 

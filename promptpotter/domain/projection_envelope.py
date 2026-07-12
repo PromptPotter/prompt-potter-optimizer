@@ -18,8 +18,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from promptpotter.shared.clock import utcnow_iso
-
 __all__ = ["ProjectionEnvelope", "ProjectionKind"]
 
 
@@ -73,8 +71,4 @@ class ProjectionEnvelope(BaseModel):
     payload: dict[str, Any] = Field(
         default_factory=dict,
         description="Per-kind body. For record-derived kinds, the record's model_dump; for stream_snapshot, the dashboard.json content + snapshot_at_offset.",
-    )
-    emitted_at: str = Field(
-        default_factory=utcnow_iso,
-        description="ISO-8601 wall-clock at the moment the envelope was minted; for debugging only — never load-bearing for ordering.",
     )

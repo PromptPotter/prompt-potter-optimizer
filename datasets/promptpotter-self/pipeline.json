@@ -101,9 +101,5 @@
   },
   "pipelines": {
     "default": ["l1_generate", "l1_critique", "l2_context", "l3_plan"]
-  },
-  "llm_defaults": {
-    "provider": "groq",
-    "model": "openai/gpt-oss-120b"
   }
 }

@@ -29,7 +29,6 @@ rejection and content-hash sensitivity by
 | `available_models` | optional | `list[str]` | Models the connector exposes — surfaced into `PipelineSchema.available_models`. |
 | `backend_name` | optional | `str` | Human label for the backend. |
 | `backend_type` | **required** | `str` | The connector KIND (`termnorm` / `promptpotter` / …). Picks the connector at bootstrap (`wiring._read_backend_type` raises when absent), and is served on `CampaignSummary.backend_type` — the ONE test for a self-optimizing (L4) campaign, which the webapp branches on (`isSelfOptimization`). Never a `PipelineSchema` field: the parser drops it, so readers take it off the raw overlay. |
-| `llm_defaults` | optional | `dict` | Default LLM provider/model bundle. Read by bootstrap, not by the parser. |
 | `resolved_prompts` | optional | `dict[str, ResolvedPrompt]` | Prompt registry keyed by `"{family}/{version}"`. Each node references its prompt via `config.prompt_family` + `config.prompt_version`. |
 | `resolved_schemas` | optional | `dict[str, ResolvedSchema]` | Output-schema registry keyed by `"{family}/{version}"`. Each node references its schema via `config.schema_family` + `config.schema_version`. |
 | `view` | optional | `dict` | Diagram metadata for the webapp; ignored by the parser. |
@@ -130,8 +129,7 @@ A minimal one — the GSM8K single-LLM-node pipeline — at
       }
     }
   },
-  "pipelines": {"default": ["llm_only"]},
-  "llm_defaults": {"provider": "openrouter", "model": "openai/gpt-oss-20b"}
+  "pipelines": {"default": ["llm_only"]}
 }
 ```
 

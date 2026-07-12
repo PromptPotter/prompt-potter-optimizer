@@ -1,6 +1,5 @@
 """``/auth/*`` — OIDC sign-in + per-user identity surface.
 
-* ``GET /auth/providers`` — list configured providers (drives the login page).
 * ``GET /auth/login/{provider}`` — issue a state token, redirect to the provider's consent screen.
 * ``GET /auth/callback/{provider}`` — verify the auth code, mint a server-side session, set the opaque cookie, redirect to ``/``.
 * ``POST /auth/logout`` — delete the session + clear the cookie.
@@ -13,8 +12,8 @@
 The auth router is the Identity I/O kind (ADR-0002), not the ``/commands``
 highway — its per-user mutations (``user-settings``, ``accept-terms``) ride it
 directly. It intentionally does NOT use ``IdentityDep`` for the login / callback
-/ providers / logout routes — those run pre-auth. The identity-gated routes use
-the dep, and 401 is the expected pre-sign-in answer.
+/ logout routes — those run pre-auth. The identity-gated routes use the dep, and
+401 is the expected pre-sign-in answer.
 """
 
 from __future__ import annotations
@@ -66,12 +65,6 @@ logger = logging.getLogger(__name__)
 auth_router = APIRouter(prefix="/auth", tags=["Auth"])
 
 _SUPPORTED_PROVIDERS = frozenset({"google", "github"})
-
-
-class ProvidersResponse(BaseModel):
-    """Which providers the operator has configured. Drives the login page."""
-
-    providers: list[str]
 
 
 class ConnectedAccount(BaseModel):
@@ -209,12 +202,6 @@ def _redirect_with_error(code: str, *, email: str | None = None) -> RedirectResp
     if email:
         qs += f"&email={quote_plus(email)}"
     return RedirectResponse(url=f"/?{qs}", status_code=303)
-
-
-@auth_router.get("/providers", response_model=ProvidersResponse)
-async def list_providers(request: Request) -> ProvidersResponse:
-    bundle = _require_bundle(request)
-    return ProvidersResponse(providers=list(bundle.config.configured))
 
 
 @auth_router.get("/login/{provider}")
@@ -599,7 +586,6 @@ __all__ = [
     "ActivityResponse",
     "ConnectedAccount",
     "MeResponse",
-    "ProvidersResponse",
     "QuotaStatus",
     "auth_router",
 ]

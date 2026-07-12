@@ -69,7 +69,6 @@ Connector-described pipeline (the shape `GET /pipeline` exposes, plus an operato
 - `nodes` — node graph. Per-node: `runtime` (`python`/`llm`/`cache`/`network`) · `short_circuit` (bool) · `node_type` (`candidate_source`/`ranker`/`enricher`/`cache`/`""`) · `optimizer.param_keys` (list — operator-tunable knobs) · `optimizer.observation_mappings` (wire-name → optimizer-name) · `optimizer.langfuse_type` · `config` (per-dataset overlay merged onto the wire payload).
 - `pipelines` — named pipeline variants.
 - `available_models` — model menu shown to L1.
-- `llm_defaults` — snapshot of `GET /pipeline` defaults. Informational; do not repurpose.
 - `resolved_schemas`, `resolved_prompts` — JSON-Schema and prompt-template maps keyed by version.
 
 ### `campaign.json`
@@ -167,7 +166,6 @@ Operator-visible files inside `campaigns/{campaign_id}/cycles/{cycle_id}/`. Weba
 | `.runtime/cache/candidates/round_NNNN.json` | `CampaignStore.save_round_candidates` | Mid-round candidates checkpoint (deleted after L1 score on escalation). |
 | `.runtime/streams/round_NNNN_p_best.jsonl` | `PoBBStreamView._handle_snapshot` | Per-sample P(best) trajectory. |
 | `.runtime/pause.flag` | `api/middleware/command_dispatcher.py` (`POST /commands/{kind}`, kind=`pause-cycle`) | Single operator-interrupt signal; consumed by `session.pause_check`. Worker exits clean, cycle stays resumable (no separate `stop.flag`). |
-| `.runtime/archived/resumed_at_<ts>/` | `CampaignStore.rewind_to_round` | Rewound rounds + candidates moved here on `--from N`. |
 
 Sibling cycles (forks, diag, sweeps) live flat under `cycles/` alongside the root. Each carries its own per-cycle artifacts, including its own `dashboard.json` (a fork's is seeded from its parent at the cut). `.runtime/` shapes may change between minor versions — the public `rounds/round_NNNN.json` tree + `index.json` + `log.md` are the contract for any tool reading per-cycle results.
 

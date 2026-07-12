@@ -33,7 +33,6 @@ import shutil
 import stat
 import time
 from collections.abc import Callable, Sequence
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -617,7 +616,7 @@ class CampaignStore:
         cycle_id: str,
         after_round: int,
     ) -> None:
-        """Archive round + candidate files for rounds > ``after_round`` into ``.runtime/archived/resumed_at_<ts>/``; rebuild the round index. Ledger-admissibility-gated."""
+        """Delete round + candidate files for rounds > ``after_round``; rebuild the round index. Ledger-admissibility-gated."""
         layout = self._layout(campaign_id, cycle_id)
         rounds_dir = layout.rounds
         candidates_dir = layout.candidates_cache
@@ -646,14 +645,13 @@ class CampaignStore:
                 )
 
         survivors: list[Path] = []
-        to_archive_rounds: list[Path] = []
-        to_archive_candidates: list[Path] = []
+        displaced: list[Path] = []
         for p in sorted(rounds_dir.glob("round_*.json")):
             try:
                 n = int(p.stem.removeprefix("round_"))
             except ValueError:
                 continue
-            (to_archive_rounds if n > after_round else survivors).append(p)
+            (displaced if n > after_round else survivors).append(p)
         if candidates_dir.exists():
             for p in sorted(candidates_dir.glob("round_*.json")):
                 try:
@@ -661,26 +659,16 @@ class CampaignStore:
                 except ValueError:
                     continue
                 if n > after_round:
-                    to_archive_candidates.append(p)
+                    displaced.append(p)
 
-        archived_count = len(to_archive_rounds) + len(to_archive_candidates)
-        if archived_count:
-            ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-            archive_root = layout.rewind_archive(ts)
-            if to_archive_rounds:
-                (archive_root / "rounds").mkdir(parents=True, exist_ok=True)
-                for p in to_archive_rounds:
-                    p.rename(archive_root / "rounds" / p.name)
-            if to_archive_candidates:
-                (archive_root / "candidates").mkdir(parents=True, exist_ok=True)
-                for p in to_archive_candidates:
-                    p.rename(archive_root / "candidates" / p.name)
+        if displaced:
+            for p in displaced:
+                _unlink_robust(p)
             logger.info(
-                "Rewind cycle %s to round %d: archived %d file(s) → %s",
+                "Rewind cycle %s to round %d: deleted %d displaced file(s)",
                 cycle_id,
                 after_round,
-                archived_count,
-                archive_root,
+                len(displaced),
             )
 
         # No dashboard.json repair here. `resolve_resume_state` cuts the surviving

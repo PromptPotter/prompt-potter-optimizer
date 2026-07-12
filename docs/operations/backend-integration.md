@@ -50,9 +50,8 @@ existing display and self-healing keep working. Backend rationale:
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /api/v1/backends` · `…/backends/{id}` | List / detail |
+| `GET /api/v1/backends` | List registered backends |
 | `GET …/backends/{id}/experiments` · `…/experiments/{exp_id}` | Backend experiments |
-| `GET …/backends/{id}/pipeline` | Pipeline view (30 s cache) |
 | `GET …/backends/{id}/health` | Backend health |
 | `GET …/campaigns` · `…/campaigns/{id}` | List / detail |
 | `GET …/health` | Service health |

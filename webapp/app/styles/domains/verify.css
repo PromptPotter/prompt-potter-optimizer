@@ -1,7 +1,7 @@
-/* Verify panel — workspace-scope diagnostic-run table.
-   Mirrors .leverage-* styles. The two-segment trend bar is the panel's
-   distinguishing visual: grey strip = source-campaign composite, red
-   overlay = workspace composite (held = green-tinted, dropped = red). */
+/* Verify panel — workspace-scope diagnostic-run table. The two-segment trend
+   bar is the panel's distinguishing visual: grey strip = source-campaign
+   composite, red overlay = workspace composite (held = green-tinted,
+   dropped = red). */
 .verify-pane{padding:24px 32px;overflow-y:auto;flex:1;min-height:0}
 .verify-header{margin-bottom:18px}
 .verify-header h2{margin:0 0 6px;font-size:18px;font-weight:600;color:var(--color-text-primary)}

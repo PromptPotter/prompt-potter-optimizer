@@ -109,9 +109,6 @@
 .unit-library-filter-chip{padding:1px 8px;background:transparent;border:1px solid var(--color-border);border-radius:10px;cursor:pointer;font-family:inherit;font-size:11px;color:var(--color-text-tertiary);line-height:1.5}
 .unit-library-filter-chip:hover{color:var(--color-text-primary);border-color:var(--color-text-secondary)}
 .unit-library-filter-chip.active{background:var(--color-background-tint-active);border-color:var(--color-accent);color:var(--color-accent);font-weight:500}
-/* Dim origin-hash tail next to an unlabelled campaign name — disambiguates
-   two campaigns on the same dataset without stealing focus from the name. */
-.unit-library-hash{margin-left:6px;font-size:10px;color:var(--color-text-tertiary);font-variant-numeric:tabular-nums}
 .unit-library-list{list-style:none;margin:0;padding:0;overflow-y:auto;flex:1}
 .unit-library-item{display:flex;align-items:flex-start;gap:6px;padding:6px 8px;background:transparent;border:0;border-radius:6px;cursor:pointer;width:100%;text-align:left;font-family:inherit;color:var(--color-text-secondary);font-size:13px}
 .unit-library-item:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
@@ -121,6 +118,7 @@
 .unit-library-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .unit-library-meta{font-size:11px;color:var(--color-text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .unit-library-live{color:var(--color-success);margin-left:4px;font-size:8px;vertical-align:middle}
+.unit-library-live.active{color:var(--color-accent)}
 /* Terminal run-state on a non-running unit row — distinguishes a stopped/aborted
    campaign from the live one (CLI↔webapp parity). The reason word carries the
    meaning; a terminal run's status reads as stale, not done. */
@@ -140,6 +138,7 @@
    color + 1px border + secondary text + min-width gives a clear silhouette. */
 .unit-library-chip{display:inline-flex;align-items:center;justify-content:center;gap:3px;min-width:28px;padding:1px 5px;background:var(--color-background-secondary);border:1px solid var(--color-border);border-radius:4px;cursor:pointer;font-family:inherit;color:var(--color-text-secondary);font-size:11px;font-weight:500;line-height:1.3}
 .unit-library-chip:hover{background:var(--color-background-tint-active);color:var(--color-accent);border-color:var(--color-accent)}
+.unit-library-chip.open{background:var(--color-background-tint-active);border-color:var(--color-accent);color:var(--color-accent)}
 .unit-library-chip-glyph{font-weight:600;opacity:0.75}
 .unit-library-chip-count{font-variant-numeric:tabular-nums}
 /* Family row = chevron + clickable label + count chips. Hover is unified
@@ -186,10 +185,9 @@
    CLI's active campaign. */
 .follow-active-btn{display:inline-flex;align-items:center;gap:4px;margin-left:8px;padding:2px 8px;border-radius:10px;background:var(--color-background-secondary);border:0.5px solid var(--color-border);color:var(--color-text-secondary);font-family:inherit;font-size:11px;cursor:pointer;transition:color .15s,border-color .15s}
 .follow-active-btn:hover{color:var(--color-accent);border-color:var(--color-accent)}
-/* L4 inner-loop disclosure — the "inner loops" toggle row under an
-   L4 outer campaign, its nested inner-campaign list, and the
-   breadcrumb shown while the dashboard is re-rooted to an inner loop. */
-.inner-disclosure .unit-library-name{font-style:italic;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.04em;font-size:11px}
+/* L4 inner loops — the inner-campaign list under an L4 outer campaign (opened
+   by its `↻ inner` chip), and the breadcrumb shown while the dashboard is
+   re-rooted to an inner loop. */
 .inner-library-empty{padding:2px 4px 2px 16px;font-size:11px;color:var(--color-text-tertiary);font-style:italic}
 .inner-breadcrumb{display:inline-flex;align-items:center;gap:6px;margin-left:8px}
 .inner-breadcrumb-sep{color:var(--color-text-tertiary)}

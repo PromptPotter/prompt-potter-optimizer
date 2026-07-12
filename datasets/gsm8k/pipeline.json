@@ -35,9 +35,5 @@
   },
   "pipelines": {
     "default": ["llm_only"]
-  },
-  "llm_defaults": {
-    "provider": "groq",
-    "model": "openai/gpt-oss-120b"
   }
 }

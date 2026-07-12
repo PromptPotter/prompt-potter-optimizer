@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, fields
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, field_validator
 
@@ -156,16 +156,6 @@ class TaskDecomposition:
     upstream_context: str = ""
     downstream_context: str = ""
     raw_description: str = ""
-
-    FIELDS: ClassVar[tuple[str, ...]] = (
-        "domain",
-        "pipeline_purpose",
-        "data_characteristics",
-        "optimization_goals",
-        "key_challenges",
-        "upstream_context",
-        "downstream_context",
-    )
 
     def to_dict(self) -> dict[str, str]:
         return asdict(self)

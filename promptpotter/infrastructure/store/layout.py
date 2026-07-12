@@ -183,10 +183,6 @@ class CycleLayout:
     def candidate_file(self, round_num: int) -> Path:
         return self.candidates_cache / round_basename(round_num)
 
-    def rewind_archive(self, stamp: str) -> Path:
-        """Archival home for files displaced by ``resume --from N`` (never replayed)."""
-        return self.runtime / "archived" / f"resumed_at_{stamp}"
-
     # --- control-local flags (polled per checkpoint; transient) ---
     @property
     def pause_flag(self) -> Path:
