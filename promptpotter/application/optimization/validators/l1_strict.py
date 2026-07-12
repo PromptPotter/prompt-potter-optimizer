@@ -21,7 +21,7 @@ import copy
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from promptpotter.application.config import missing_template_vars
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
@@ -223,9 +223,11 @@ def build_l1_response_schema(
       :data:`TASK_CONTEXT_OVERRIDES`, each ``{"type": "string"}``;
       ``additionalProperties: false``.
 
-    Returns the ``{"name", "schema", "strict"}`` envelope chat() consumes
-    via ``response_schema``. ``strict`` stays False — flipping it on is a
-    follow-up after multi-provider testing.
+    Returns the BARE JSON Schema. ``chat()``'s ``response_schema`` *is* the wire
+    schema (``llm/base.py``); the client owns the ``{name, schema, strict}`` provider
+    envelope. Returning an envelope here nests the real schema one level down, where
+    the provider reads a top-level object with no ``type`` and no ``properties`` —
+    every constraint below inert.
     """
     raw_schema = L1GenerateOutput.model_json_schema()
     defs = raw_schema.pop("$defs", {})
@@ -307,7 +309,7 @@ def build_l1_response_schema(
     if field_names:
         _rename_variant_schema(inlined["properties"]["variants"]["items"], field_names)
 
-    return {"name": "l1_variants", "schema": inlined, "strict": False}
+    return cast("dict[str, Any]", inlined)
 
 
 _JSON_TYPE_TO_PY: dict[str, tuple[type, ...]] = {
@@ -376,17 +378,15 @@ def validate_overrides(
             continue
         node = pipeline_schema.get_node(node_name)
         if node is None:
-            # Hallucinated node: L1 named a node absent from the active schema. The
-            # JSON-schema node-name enum is advisory (``build_l1_response_schema`` emits
-            # ``strict=False``, so a weakly-conformant provider slips a phantom key past
-            # ``additionalProperties: false``). The phantom edit is stripped from the wire
-            # downstream (``merge_pipeline_params`` drops nodes outside ``active_steps``),
-            # so recording it here ROUTES the signal without changing what runs — and it is
-            # NON-FATAL (the reason-aware synthetic-0 gate in ``l1/score/candidate.py`` lets
-            # the candidate's real edits score). It flows through the existing channel:
-            # ``l1_wounds`` (next-round self-correction) + the ``validation_failure_rate``
-            # evaluator (L4 meta-analyses hallucination-rate as a meta-prompt quality axis).
-            # This is the node-name twin of ``validate_l1_layout``'s unknown-placeholder wound.
+            # L1 named a node absent from the active schema. The wire schema declares the
+            # node-name properties + ``additionalProperties: false``, but the client sends
+            # ``strict=False``, so the provider is never FORCED to honour them — this is the
+            # deterministic backstop. ``merge_pipeline_params`` drops nodes outside
+            # ``active_steps``, so recording it ROUTES the signal without changing what runs,
+            # and it is NON-FATAL (the reason-aware synthetic-0 gate in
+            # ``l1/score/candidate.py`` lets the candidate's real edits score): ``l1_wounds``
+            # + the ``validation_failure_rate`` evaluator. The node-name twin of
+            # ``validate_l1_layout``'s unknown-placeholder wound.
             failures.append(
                 ValidationFailure(
                     axis=node_name,

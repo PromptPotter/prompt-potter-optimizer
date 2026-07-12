@@ -12,7 +12,7 @@
       "l1_patience": 2,
       "max_rounds": null,
       "lives": { "start": 2, "cap": 4 },
-      "n_variants": 2,
+      "n_variants": 3,
       "improvement_threshold": 0.02,
       "degradation_threshold": 0.4,
       "l2_patience": 2,

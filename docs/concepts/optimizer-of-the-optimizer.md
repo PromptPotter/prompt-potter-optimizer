@@ -66,14 +66,12 @@ Each outer sample is at minimum a partial inner cycle. Cost compounds:
 outer_cost ≈ outer_n_samples × outer_n_candidates × inner_n_samples × inner_n_rounds × per_call_cost
 ```
 
-For the demo dataset's defaults (`n_variants: 3`, `sp_budget_ttest: 4`,
-`n_samples_per_inner_round: 10`, `max_inner_rounds: 3`), one outer round is
-roughly 360 inner candidate-evaluations. Plan accordingly:
-
-- Development: `inner_n_rounds: 1`, `first_round_delta` only — minutes
-  per outer round.
-- Calibration: `inner_n_rounds: 3`, full composed fitness — tens of minutes.
-- Publication: `inner_n_rounds: 5`, target benchmark — hours.
+Every factor is a live config value — read them off `datasets/promptpotter-self/campaign.json`
+(`n_variants`, `spend_budget_usd`) and `inner_tasks.json::inner_benchmark_config`
+(`n_samples_per_inner_round`, `max_inner_rounds`, which must stay ≥ 2), never off this page.
+Size a run before launching: one outer round is `(1 origin + n_variants) × n_inner_tasks` fresh
+inner campaigns, and `spend_budget_usd` is the hard ceiling that halts it. A cap too small to
+finish a round buys nothing — it stops mid-round, and an unclosed round scores no candidate.
 
 Outer dashboard's `dashboard.json::spend` block (see
 [`../adr/0003-spend-and-tenancy.md`](../adr/0003-spend-and-tenancy.md))

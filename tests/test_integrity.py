@@ -40,7 +40,7 @@ def _pipeline_schema(dataset: str) -> PipelineSchema:
 
 def _emittable_l1_params(schema: dict[str, Any], node: str = "l1_generate") -> set[str]:
     """The param keys an L1 variant may emit for *node* under *schema*."""
-    variants = schema["schema"]["properties"]["variants"]["items"]["properties"]
+    variants = schema["properties"]["variants"]["items"]["properties"]
     node_props = variants["pipeline_params_override"]["properties"].get(node, {})
     return set(node_props.get("properties", {}))
 
@@ -503,11 +503,9 @@ def test_schema_description_axis_reaches_the_target_and_cannot_rename_a_field() 
     # EMIT: the lever is handed to L1, keyed by the target node's OWN fields, schema-driven.
     emitted = _emittable_l1_params(build_l1_response_schema(schema), node="llm_only")
     assert "output_schema_descriptions" in emitted
-    describable = build_l1_response_schema(schema)["schema"]["properties"]["variants"]["items"][
-        "properties"
-    ]["pipeline_params_override"]["properties"]["llm_only"]["properties"][
-        "output_schema_descriptions"
-    ]
+    describable = build_l1_response_schema(schema)["properties"]["variants"]["items"]["properties"][
+        "pipeline_params_override"
+    ]["properties"]["llm_only"]["properties"]["output_schema_descriptions"]
     assert set(describable["properties"]) == set(fields)
 
     # A description edit is a valid `object` override (declared, type-checked).
@@ -557,9 +555,9 @@ def test_emittable_params_are_declared_and_an_invented_one_is_rejected() -> None
     )
 
     schema = _pipeline_schema("promptpotter-self")
-    emitted = build_l1_response_schema(schema)["schema"]["properties"]["variants"]["items"][
-        "properties"
-    ]["pipeline_params_override"]["properties"]
+    emitted = build_l1_response_schema(schema)["properties"]["variants"]["items"]["properties"][
+        "pipeline_params_override"
+    ]["properties"]
     for node, keys in schema.node_param_keys().items():
         assert set(emitted[node]["properties"]) <= keys, (
             f"{node}: the schema declares a key `validate_overrides` rejects as unknown_param"
@@ -747,7 +745,7 @@ def test_schema_field_rename_is_locked_by_default_and_never_silently_half_applie
         # The inner cycle applies a bound rename even though its OWN knob is off (default).
         set_optimizer_prompt_overrides({"l1_generate": {"output_schema_field_names": rename}})
         assert effective_l1_field_names() == rename
-        variant = build_l1_response_schema(inner)["schema"]["properties"]["variants"]["items"]
+        variant = build_l1_response_schema(inner)["properties"]["variants"]["items"]
         assert "mutation_rationale" in variant["properties"]
         assert "changes_description" not in variant["properties"]
         assert "mutation_rationale" in variant["required"]
