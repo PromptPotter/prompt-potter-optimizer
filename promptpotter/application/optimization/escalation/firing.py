@@ -490,9 +490,12 @@ async def _run_transition(
             )
             return
 
+    # Same adoption seam as an L1 win: identity advances (new_opt carries a fresh
+    # lineage, parent = the outgoing incumbent) and the persistent memory carries
+    # forward. The frame surfaces L2/L3 own (task_context / l1_layout) are then
+    # installed by `transition.apply` below, so no `advanced` overlay is passed here.
     new_opt = result.opt_search_point
-    cycle.opt_sp.copy_memory_to(new_opt)
-    cycle.opt_sp = new_opt
+    cycle.adopt(new_opt, advanced={})
     cycle.tracking.current_sp = new_opt.to_job_search_point(
         base_pipeline_params=current_pp, schema=pipeline_schema
     )

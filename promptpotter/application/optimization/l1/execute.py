@@ -136,6 +136,11 @@ async def execute_round(
             round_num=round_num,
             yield_stats=yield_stats,
         )
+        # The elected winner IS the round's resulting incumbent — and on a HELD round
+        # (no candidate cleared the floor) l1_score returns the retained incumbent itself
+        # (origin.osp), so the ids match and absorb_round adopts nothing. absorb reads
+        # this to advance the cycle's identity to the winner on an advancing round.
+        round_result.opt_search_point = winner_osp
         if obs and round_result.candidate_scores:
             with graceful("RoundWinnerChosen emit failed"):
                 obs.emit_write_point(

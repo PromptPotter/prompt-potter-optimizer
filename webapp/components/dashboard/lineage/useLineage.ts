@@ -49,6 +49,7 @@ function detailFromLineage(c: CampaignLineageCycle): CycleDetail {
   return {
     rounds: c.rounds.map((r) => ({
       round: r.round,
+      advanced: r.advanced,
       candidates: r.candidates.map((cand, i) => ({
         candidateId: cand.candidate_id || liveCandidateId(r.round, i),
         label: candidateLabel(r.round, i),
@@ -68,6 +69,10 @@ function detailFromRows(rows: CandidateRow[]): CycleDetail {
       .sort((a, b) => a[0] - b[0])
       .map(([round, cands]) => ({
         round,
+        // A live round has advanced once a candidate is flagged winner; the
+        // in-flight (not-yet-elected) round reads as not-yet-advanced, which is
+        // correct — it's the lane's last round, so it never mischains a successor.
+        advanced: cands.some((c) => c.is_winner),
         candidates: cands.map((c) => ({
           candidateId: c.candidate_id,
           label: c.label,

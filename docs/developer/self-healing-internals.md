@@ -144,7 +144,7 @@ Fields on `OptSearchPoint.memory` (the `L2L3Memory` sub-model in `domain/opt_sea
 | `wounds.runtime_failures` | per-candidate + cumulative outer-memory mirror | Wound 2 + 3 |
 | `wounds.l2_guard_breaches` | per-round, set by L2 post-parse | Wound 4 — L3 reads |
 | `wounds.l3_guard_breaches` | per-round, set by L3 post-parse | L3 self-heal |
-| `wounds.l3_note` | sticky free-text; set by L3, survives the L2-fire OSP swap via `copy_memory_to` | L3→L2 steer (not a failure record) |
+| `wounds.l3_note` | sticky free-text; set by L3, survives every incumbent swap (L1 win + L2/L3 transition) via the `Cycle.adopt` seam's `copy_memory_to` | L3→L2 steer (not a failure record) |
 
 The L1 critique itself lives on `RoundResult.critique` (a dict, not on `L2L3Memory`); the dispatch hub's `critique` injection reads it from `cycle.latest_round.critique`. Per-round trajectory + cumulative warned-query subset (probe-round source) live on `Cycle` (`Cycle.rounds`, `Cycle.warned_queries`), not OSP.
 

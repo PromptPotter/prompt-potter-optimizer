@@ -58,6 +58,11 @@ interface LaneCandidate {
 }
 interface LaneRound {
   round: number;
+  // Did a candidate WIN and advance the incumbent this round? false = a "held"
+  // round: the incumbent is unchanged, so the spine mints no new winner node and
+  // the NEXT round chains from the last real winner — never from an eliminated
+  // candidate (the pre-fix misdraw).
+  advanced: boolean;
   candidates: LaneCandidate[];
 }
 export interface CycleDetail {
@@ -67,10 +72,12 @@ export type DetailByCycle = Map<string, CycleDetail>;
 
 const EMPTY_DETAIL: CycleDetail = { rounds: [] };
 
-// The round's elected winner (or first candidate as a fallback) — the node a
-// fork anchors to and the parent of the next round's fan.
+// The round's elected winner, or null on a held round (no candidate advanced the
+// incumbent). NO first-candidate fallback: crowning an eliminated candidate is the
+// exact misdraw this fix removes — a held round has no winner node, and the spine
+// carries the last real winner forward instead.
 function pickWinner(candidates: LaneCandidate[]): LaneCandidate | null {
-  return candidates.find((c) => c.isWinner) ?? candidates[0] ?? null;
+  return candidates.find((c) => c.isWinner) ?? null;
 }
 
 // Rows an expanded lane occupies — the widest round's candidate count, floored
@@ -268,7 +275,9 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
           y,
           candidateLabel: winner?.label ?? "",
           candidateId: winner?.candidateId ?? "",
-          isWinner: true,
+          // A held round is a real round on the positional spine, but it crowned
+          // no winner — mark it so, so the node renders held (not a false win).
+          isWinner: r.advanced,
           isExpanded: false,
           isLastInLane: r.round === lastRound,
           sibling_kind: l.cycle.sibling_kind,
@@ -290,8 +299,12 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
 
     // Expanded: the full intra-cycle candidate cladogram. Round 1 has no
     // parent node (the origin trunk was removed) — its candidates draw only
-    // their own stub; each later round chains from the prior round's winner.
+    // their own stub; each later round chains from the last WINNING round's
+    // winner. A held round (no winner) advances nothing: its candidates still
+    // fan from the retained incumbent, but the incumbent stays the parent of the
+    // following round — a held round never becomes a parent.
     let parent: { x: number; y: number } | null = null;
+    let lastWinnerNode: RoundNodePos | null = null;
 
     for (const r of rounds) {
       const n = r.candidates.length;
@@ -328,12 +341,23 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
         }
       });
       const winner = pickWinner(r.candidates);
-      const winnerNode =
-        roundNodes.find((nn) => nn.candidateId === winner?.candidateId) ?? roundNodes[0];
-      if (!winnerNode) continue;
-      spineByCycleRound.set(`${l.cycle.cycle_id}::r${r.round}`, winnerNode);
-      if (r.round === lastRound) winnerNode.isLastInLane = true;
-      parent = { x: winnerNode.x, y: winnerNode.y };
+      const winnerNode = winner
+        ? roundNodes.find((nn) => nn.candidateId === winner.candidateId) ?? null
+        : null;
+      if (winnerNode) {
+        // Advancing round: this winner becomes the spine node and the parent of
+        // the next round's fan.
+        spineByCycleRound.set(`${l.cycle.cycle_id}::r${r.round}`, winnerNode);
+        if (r.round === lastRound) winnerNode.isLastInLane = true;
+        parent = { x: winnerNode.x, y: winnerNode.y };
+        lastWinnerNode = winnerNode;
+      } else if (lastWinnerNode) {
+        // Held round: no new winner. Anchor any fork cut here to the retained
+        // incumbent, and leave `parent` on the last real winner so the next
+        // round fans from it — the held round contributes no spine node.
+        spineByCycleRound.set(`${l.cycle.cycle_id}::r${r.round}`, lastWinnerNode);
+        if (r.round === lastRound) lastWinnerNode.isLastInLane = true;
+      }
     }
   }
 

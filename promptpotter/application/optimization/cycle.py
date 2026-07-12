@@ -516,6 +516,20 @@ class Cycle:
             self.delta_scale = delta_scale
             self.tracking.origin_theta = origin_theta
 
+    def adopt(self, new_incumbent: OptSearchPoint, *, advanced: dict[str, Any]) -> None:
+        """Make ``new_incumbent`` the cycle's searchpoint — the ONE adoption seam for
+        an L1 win and an L2/L3 transition alike. Identity advances: ``new_incumbent``
+        already carries its own lineage (parent = the outgoing incumbent). The
+        persistent L2/L3 memory (wounds, l1_layout, l1_overrides, task_context) carries
+        forward from the outgoing incumbent via ``copy_memory_to``; only the surfaces in
+        ``advanced`` are then taken from ``new_incumbent`` — the layer that owns them
+        (L1 → task_context; L2 → task_context/l1_layout). The differentiated carry lives
+        here, not in two hand-coded call sites."""
+        self.opt_sp.copy_memory_to(new_incumbent)
+        for surface, val in advanced.items():
+            setattr(new_incumbent.memory, surface, val)
+        self.opt_sp = new_incumbent
+
     def absorb_round(
         self,
         rr: RoundResult,
@@ -542,14 +556,17 @@ class Cycle:
 
         self.rounds.append(rr)
         self._maybe_warm_ruler()
-        for f in PROMPT_STRING_FIELDS:
-            setattr(self.opt_sp, f, rr.prompt_fields.get(f, ""))
-        # Adopt the elected winner's task_context too — an L1 child can win on a
-        # task_context override (its 3rd mutation slot), and without this the
-        # winning delta would evaporate next round (only the string fields above
-        # were carried). Absent ⇒ winner had no framing; leave the cycle's as-is.
-        if rr.winner_task_context is not None:
-            self.opt_sp.memory.task_context = TaskDecomposition.from_dict(rr.winner_task_context)
+        # Advance the incumbent to the elected winner. The winner OSP already carries
+        # its own lineage (parent = this incumbent), so identity — not just the six
+        # prompt strings — moves forward, and next round's candidates descend from the
+        # winner. A HELD round returns the incumbent itself as the "winner" (origin.osp),
+        # so the lineage ids match and nothing is adopted: the incumbent is unchanged and
+        # mints no node. The winner's task_context (an L1 child can win on a framing
+        # override, its 3rd mutation slot) rides along; wounds + l1_layout carry from the
+        # outgoing incumbent — all through the single `adopt` seam.
+        winner_osp = rr.opt_search_point
+        if winner_osp is not None and winner_osp.lineage.id != self.opt_sp.lineage.id:
+            self.adopt(winner_osp, advanced={"task_context": winner_osp.memory.task_context})
         assert tr.current_sp is not None
         _pp = (
             rr.pipeline_params if rr.pipeline_params is not None else tr.current_sp.pipeline_params

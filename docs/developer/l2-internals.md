@@ -73,7 +73,7 @@ if action == "probe_round":
     cycle.probe_next_round = True
 ```
 
-The OSP is mutable Pydantic; writes happen in place. `l1_layout` lives on `OptSearchPoint.memory` (an `L2L3Memory` bundle), so L3-spawned children inherit in-flight L2 edits via `copy_memory_to`. `task_context` is on the same `memory` bundle and is forwarded by `mutate()` to L1 children (along with `l1_overrides`); the other two memory fields (`wounds`, `l1_layout`) reset to defaults in `mutate()` and only flow on L2/L3 adopt.
+The OSP is mutable Pydantic; writes happen in place. `l1_layout` lives on `OptSearchPoint.memory` (an `L2L3Memory` bundle), so L3-spawned children inherit in-flight L2 edits via `copy_memory_to`. `task_context` is on the same `memory` bundle and is forwarded by `mutate()` to L1 children (along with `l1_overrides`); the other two memory fields (`wounds`, `l1_layout`) reset to defaults in `mutate()` and instead carry forward when a child is **adopted** as the cycle's incumbent — the one `Cycle.adopt` seam (an L1 win and an L2/L3 transition alike) runs `copy_memory_to` from the outgoing incumbent, then overlays only the surface the adoption owns.
 
 The single decision recorded per L2 fire is `PROBE_ROUND_COMMITMENT` — outcome `True` if probe, else `False`. Layout / framing-refinement content are not separate decisions; they ride on the round file.
 

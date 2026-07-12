@@ -793,3 +793,37 @@ def test_schema_field_rename_is_locked_by_default_and_never_silently_half_applie
         assert build_l1_response_model(effective_l1_field_names()) is L1GenerateOutput
     finally:
         set_optimizer_prompt_overrides(None)
+
+
+def test_adopt_advances_identity_and_carries_the_wound_ledger():
+    """The single adoption seam (``Cycle.adopt``) — used for an L1 win and an L2/L3
+    transition alike — must ADVANCE lineage to the new incumbent (parent = the outgoing
+    one) while CARRYING the outgoing incumbent's persistent memory: the wound ledger and
+    L2's l1_layout. ``mutate`` deliberately resets those two on a child, so a seam that
+    forgets to carry them silently drops the failures the search already paid to discover
+    — no error, the next round just re-invites the mistake. The surface the adoption
+    OWNS (here task_context) must instead come from the new incumbent.
+    """
+    from promptpotter.application.optimization.cycle import Cycle
+
+    incumbent = OptSearchPoint(persona="Expert", instruction="Rank.")
+    incumbent.memory.wounds.l3_note = "prior failure ledger"
+    # An L1 winner is a `mutate` child: it inherits task_context but resets wounds.
+    winner = incumbent.mutate(
+        source="l1_generate", changes_description="try X", task_context={"domain": "biotech"}
+    )
+    assert winner.memory.wounds.l3_note == ""  # the reset adopt must repair
+    prior_id = incumbent.lineage.id
+
+    cyc = object.__new__(Cycle)
+    cyc.opt_sp = incumbent
+    cyc.adopt(winner, advanced={"task_context": winner.memory.task_context})
+
+    # Identity advanced to the winner, parented on the outgoing incumbent.
+    assert cyc.opt_sp is winner
+    assert cyc.opt_sp.lineage.id == winner.lineage.id
+    assert cyc.opt_sp.lineage.parent_id == prior_id
+    # The wound ledger carried forward (would be silently lost without copy_memory_to).
+    assert cyc.opt_sp.memory.wounds.l3_note == "prior failure ledger"
+    # The OWNED surface came from the new incumbent, not the carried memory.
+    assert cyc.opt_sp.memory.task_context.domain == "biotech"

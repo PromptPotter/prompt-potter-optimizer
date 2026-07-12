@@ -39,16 +39,34 @@ function cycle(
 }
 
 // `counts` is one entry per round (round number is the index + 1); each value
-// is the candidate count for that round. The last candidate is the winner.
+// is the candidate count for that round. The last candidate is the winner, so
+// every round here advances the incumbent.
 function detail(counts: number[]): CycleDetail {
   return {
     rounds: counts.map((n, ri) => ({
       round: ri + 1,
+      advanced: n > 0,
       candidates: Array.from({ length: n }, (_, i) => ({
         candidateId: `c${ri + 1}_${i}`,
         label: `C${ri + 1}.${i + 1}`,
         accuracy: 0.5,
         isWinner: i === n - 1,
+      })),
+    })),
+  };
+}
+
+// Per-round builder that can mark a round "held" — it has candidates but crowned
+// no winner (advanced=false, no isWinner candidate).
+function detailH(rounds: { n: number; held?: boolean }[]): CycleDetail {
+  return {
+    rounds: rounds.map((r, ri) => ({
+      round: ri + 1,
+      advanced: !r.held && r.n > 0,
+      candidates: Array.from({ length: r.n }, (_, i) => ({
+        candidateId: `c${ri + 1}_${i}`,
+        label: `C${ri + 1}.${i + 1}`,
+        isWinner: !r.held && i === r.n - 1,
       })),
     })),
   };
@@ -165,6 +183,55 @@ describe("placeNodes", () => {
       (s) => s.variant === "fork" && s.x1 === parentR2Winner.x && s.y1 === parentR2Winner.y,
     );
     expect(forkStem).toBeTruthy();
+  });
+
+  it("expanded: a held round advances nothing; the next round chains from the last winner", () => {
+    const cycles = [cycle("cycle_a")];
+    const tree = buildTree("cycle_a", cycles)!;
+    // R1 wins, R2 is held (no winner), R3 wins.
+    const detailByCycle: DetailByCycle = new Map([
+      ["cycle_a", detailH([{ n: 2 }, { n: 2, held: true }, { n: 2 }])],
+    ]);
+    const { laneByCycle } = layout(tree, detailByCycle, new Set(["cycle_a"]));
+    const { nodes, segs, spineByCycleRound } = placeNodes(laneByCycle);
+
+    const r1winner = spineByCycleRound.get("cycle_a::r1")!;
+    // A held round mints NO new spine node — its spine entry is the retained
+    // incumbent (round 1's winner), so a fork cut here still anchors correctly.
+    expect(spineByCycleRound.get("cycle_a::r2")).toBe(r1winner);
+    // No round-2 candidate is crowned.
+    expect(nodes.filter((n) => n.round === 2 && n.isWinner)).toHaveLength(0);
+
+    // Round 3's candidates chain from round 1's winner (the last REAL winner),
+    // never from a held round-2 candidate — the pre-fix misdraw.
+    const r2xs = new Set(nodes.filter((n) => n.round === 2).map((n) => n.x));
+    for (const child of nodes.filter((n) => n.round === 3)) {
+      const fromWinner = segs.find(
+        (s) =>
+          s.variant === "chain" &&
+          s.x1 === r1winner.x &&
+          s.y1 === r1winner.y &&
+          s.y2 === child.y,
+      );
+      expect(fromWinner).toBeTruthy();
+      const fromHeld = segs.find(
+        (s) => s.variant === "chain" && r2xs.has(s.x1) && s.y2 === child.y,
+      );
+      expect(fromHeld).toBeFalsy();
+    }
+  });
+
+  it("collapsed: a held round's summary node is marked not-won", () => {
+    const cycles = [cycle("cycle_a")];
+    const tree = buildTree("cycle_a", cycles)!;
+    const detailByCycle: DetailByCycle = new Map([
+      ["cycle_a", detailH([{ n: 2 }, { n: 2, held: true }])],
+    ]);
+    const { laneByCycle } = layout(tree, detailByCycle, new Set());
+    const { nodes } = placeNodes(laneByCycle);
+    const summary = nodes.filter((n) => !n.isExpanded);
+    expect(summary.find((n) => n.round === 1)!.isWinner).toBe(true);
+    expect(summary.find((n) => n.round === 2)!.isWinner).toBe(false);
   });
 
   it("single expanded cycle reproduces the intraloop spine (the 'cool one')", () => {

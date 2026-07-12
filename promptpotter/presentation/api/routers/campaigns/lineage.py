@@ -95,6 +95,13 @@ class CampaignLineageCandidate(BaseModel):
 class CampaignLineageRound(BaseModel):
     round: int = Field(description="Round number within the cycle (1-indexed)")
     label: str = Field(default="", description="Round label — winner's L1 description")
+    advanced: bool = Field(
+        default=True,
+        description="Did a candidate WIN and advance the incumbent this round? False = a "
+        "'held' round (no winner): the incumbent is unchanged and the spine must chain the "
+        "NEXT round from the last real winner, not from an eliminated candidate. The webapp "
+        "reads this rather than re-inferring a winner from the candidate list.",
+    )
     accuracy: float | None = Field(default=None, description="Round-level accuracy (winner)")
     cumulative_accuracy: float | None = Field(
         default=None,
@@ -305,6 +312,7 @@ def _rounds_from_dashboard(
                 CampaignLineageRound(
                     round=rn,
                     label=str(winner.get("changes_description") or "") if winner else "",
+                    advanced=winner is not None,
                     accuracy=float(acc) if isinstance(acc, int | float) else None,
                     cumulative_accuracy=float(cum) if isinstance(cum, int | float) else None,
                     candidates=_summary_candidates(raw_cands, criterion),

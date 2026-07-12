@@ -318,7 +318,6 @@ export interface RoundResult {
   cumulative_accuracy: number;
   cumulative_theta: number | null;
   prompt_fields: Record<string, unknown>;
-  winner_task_context: Record<string, string> | null;
   pipeline_params: Record<string, unknown> | null;
   origin_accuracy: number;
   results: Record<string, unknown>[];
@@ -722,6 +721,12 @@ export interface CampaignLineageRound {
   round: number;
   /** Round label — winner's L1 description */
   label: string;
+  /** Did a candidate WIN and advance the incumbent this round? False = a 'held'
+   * round (no winner): the incumbent is unchanged and the spine must chain
+   * the NEXT round from the last real winner, not from an eliminated
+   * candidate. The webapp reads this rather than re-inferring a winner from
+   * the candidate list. */
+  advanced: boolean;
   /** Round-level accuracy (winner) */
   accuracy: number | null;
   /** The adopted lineage rescored over EVERY sample probed so far — the cross-
