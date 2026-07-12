@@ -7,9 +7,6 @@ One-shot, atomic, irreversible. When the first OIDC user signs in:
   ``campaign.json::owner_user_id`` field from ``"default"`` to the new
   user_id (so the API's owner-gated reads return them), then write the
   claim marker.
-* if the claim marker is already present → ensure the ownership
-  rewrite has applied (idempotent; covers users who migrated under
-  earlier rename-only code).
 * if `projects/default/` doesn't exist → still write the marker so the
   next user doesn't try to claim a half-state.
 
@@ -39,12 +36,7 @@ def maybe_claim_default(
     user_id: str,
     marker_path: Path,
 ) -> bool:
-    """Run the one-shot rebind. Returns True iff a directory rename happened.
-
-    Ownership rewrite runs on every call (cheap; idempotent) — this catches
-    users who signed in under an earlier rename-only build and ended up
-    with their campaigns still owned by ``"default"``.
-    """
+    """Run the one-shot rebind. Returns True iff a directory rename happened."""
     user_dir = projects_root / user_id
     default_dir = projects_root / "default"
     renamed = False
@@ -61,9 +53,8 @@ def maybe_claim_default(
             marker_path,
             {"user_id": user_id, "claimed_at": utcnow_iso(), "renamed": renamed},
         )
-
-    if user_dir.is_dir():
-        _rewrite_campaign_ownership(user_dir / "campaigns", user_id)
+        if user_dir.is_dir():
+            _rewrite_campaign_ownership(user_dir / "campaigns", user_id)
     return renamed
 
 

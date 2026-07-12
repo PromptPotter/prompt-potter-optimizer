@@ -57,7 +57,7 @@ def _prepare_cycle_for_resume(
     """Apply pipeline to session + verify the campaign config still matches.
 
     Drift = recomputed hash vs stored ``campaign.json::root_content_hash``:
-    empty stored ⇒ backfill; match ⇒ resume; differ ⇒ classify
+    empty stored ⇒ unstarted check-in, refuse; match ⇒ resume; differ ⇒ classify
     POLICY_ONLY (safe) vs DATA_AFFECTING (recommend fork or fresh ``new``;
     TTY pivot offered when ``pivot_prompt=True``, sweep callers pass False).
 
@@ -83,30 +83,16 @@ def _prepare_cycle_for_resume(
         )
 
     if campaign.root_content_hash == "":
-        # Migrated campaign — no backfilled hash. Backfill so future resumes have a baseline.
-        session.store.campaigns.update_campaign(
-            ctx.campaign_id, {"root_content_hash": current_hash}
+        # Only an unstarted check-in campaign carries an empty hash — both mint
+        # seams stamp it (auto_mint at mint, finalize_checkin at Start).
+        raise SystemExit(
+            f"ERROR: campaign {ctx.campaign_id} has no stamped identity — an "
+            "unstarted check-in can't be resumed. Start it first."
         )
-        logger.info(
-            "Resume: backfilled root_content_hash=%s on campaign %s",
-            current_hash,
-            ctx.campaign_id,
-        )
-    elif campaign.root_content_hash == current_hash:
+    if campaign.root_content_hash == current_hash:
         print(f"config: unchanged (content hash {current_hash})")
-    elif (drift := classify_config_diff(campaign_config, campaign.config))[0] is DiffScope.NONE:
-        # Hash differs but the config is byte-identical — an identity-formula change
-        # (the old config-blind hash vs the new config-aware one), NOT an operator edit.
-        # Re-stamp the fingerprint and resume in place; the stored cycle_id (read from
-        # active_session.json) already resolves the dir, so nothing else moves.
-        session.store.campaigns.update_campaign(
-            ctx.campaign_id, {"root_content_hash": current_hash}
-        )
-        print(
-            f"config: unchanged (identity re-stamped {campaign.root_content_hash} → {current_hash})"
-        )
     else:
-        scope, diffed = drift
+        scope, diffed = classify_config_diff(campaign_config, campaign.config)
         dataset_name = ctx.init_params.get("dataset_name") or "<dataset>"
         print()
         print("Config changed since the campaign was minted.")
@@ -151,16 +137,7 @@ def _prepare_cycle_for_resume(
 
     # Optimizer-prompt drift — campaign identity folds in datasets/_optimizer/; editing them is data-affecting (``new`` is the fix).
     current_optimizer_hash = combined_optimizer_prompt_hash()
-    if campaign.optimizer_prompt_hash == "":
-        session.store.campaigns.update_campaign(
-            ctx.campaign_id, {"optimizer_prompt_hash": current_optimizer_hash}
-        )
-        logger.info(
-            "Resume: backfilled optimizer_prompt_hash=%s on campaign %s",
-            current_optimizer_hash,
-            ctx.campaign_id,
-        )
-    elif campaign.optimizer_prompt_hash != current_optimizer_hash:
+    if campaign.optimizer_prompt_hash != current_optimizer_hash:
         dataset_name = ctx.init_params.get("dataset_name") or "<dataset>"
         raise SystemExit(
             f"ERROR: the optimizer meta-prompts changed since campaign "

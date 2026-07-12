@@ -544,11 +544,6 @@ class CampaignStore:
         """Create/augment cycle ``index.json``; replay merges keys without clobbering rounds/best."""
         path = self._index_path(campaign_id, cycle_id)
         existing = read_json_optional(path) or {}
-        # Identity is the directory name, never a stored field. Strip both
-        # ids on every write so the dir name stays the sole source of truth
-        # (self-heals any index.json minted under an older scheme).
-        existing.pop("cycle_id", None)
-        existing.pop("campaign_id", None)
         now = utcnow_iso()
         defaults: dict[str, Any] = {
             "created_at": existing.get("created_at", now),
@@ -606,15 +601,13 @@ class CampaignStore:
         Written the moment the operator intervenes (e.g. skip-searchpoint), not at
         teardown — a still-running babysat cycle must already be distinguishable
         from a pure/reproducible one. Idempotent on the boolean; the log grows by
-        one per gesture. Tolerates an index minted before this field existed."""
+        one per gesture."""
         path = self._index_path(campaign_id, cycle_id)
         data = read_json(path)
         data["human_intervened"] = True
-        log = data.get("interventions")
-        if not isinstance(log, list):
-            log = []
-        log.append({"kind": kind, "at": at, "round": round, "candidate": candidate})
-        data["interventions"] = log
+        data["interventions"].append(
+            {"kind": kind, "at": at, "round": round, "candidate": candidate}
+        )
         data["updated_at"] = utcnow_iso()
         write_json(path, data)
 
@@ -950,9 +943,6 @@ class CampaignStore:
             "updated_at": forked_at,
         }
         _apply_best(index)
-        # Identity is the directory name — never inherit a stored id from the parent.
-        index.pop("cycle_id", None)
-        index.pop("campaign_id", None)
         path = self._index_path(campaign_id, new_cycle_id)
         write_json(path, index)
         return path
