@@ -170,7 +170,7 @@ def _extract_experiment(
 
         {
           "tasks": [
-            {"id": "justlogic-d67/seed-0", "target_score": 0.60, "n_inner_rounds": 2},
+            {"id": "justlogic-d67/seed-0", "inner_dataset_seed": 0},
             ...
           ]
         }
@@ -194,13 +194,7 @@ def _extract_experiment(
         tid = t.get("id")
         if not tid:
             continue
-        queries.append(
-            {
-                "query": tid,
-                "ground_truth": f"inner:{tid}",
-                "n_inner_rounds": int(t.get("n_inner_rounds", 3)),
-            }
-        )
+        queries.append({"query": tid, "ground_truth": f"inner:{tid}"})
     return queries, []
 
 

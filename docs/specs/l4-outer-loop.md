@@ -24,9 +24,9 @@
 
 **The goal is no longer "make L4 run" (done) — it is "ship a `promptpotter-self` an operator can `new` and watch the optimizer improve its OWN meta-prompts, at bounded cost, with spend visible."** Every remaining slice is judged against that. The AI agent owns L4 end-to-end and drives it autonomously (commit small green arcs); escalate to the operator only for genuine actions — real spend approval on a multi-campaign run, a provider/account change, or a compaction handoff. Definition of done:
 
-1. **An inner benchmark with real headroom.** gsm8k is RETIRED as the inner benchmark — its origin already aces the target, so the inner loop has nothing to climb and every outer candidate scores the identical "already-at-target" composite. The inner benchmark MUST have **origin clearly below target** (room for the inner loop to improve, so the proxies vary across outer candidates). **Chosen: `justlogic` at high depth** — a reasoning task where meta-prompt quality plausibly moves the needle. `inner_tasks.json` points at it (`justlogic-d67`, target 0.60).
+1. **An inner benchmark with real headroom.** gsm8k is RETIRED as the inner benchmark — its origin already aces the target, so the inner loop has nothing to climb and every outer candidate scores the identical "already-at-target" composite. The inner benchmark MUST have **origin clearly below target** (room for the inner loop to improve, so the proxies vary across outer candidates). **Chosen: `justlogic` at high depth** — a reasoning task where meta-prompt quality plausibly moves the needle. `inner_tasks.json` points at it (`justlogic-d67`; the numeric target lives only in that file — the goal is to improve, not to hit a number).
 
-   > **[VOID] The headroom is UNMEASURED.** The ~~origin ≈ 0.44~~ that justified this choice came from the pre-reset meta-campaign AND from a run where justlogic was not seed-deterministic. **Re-measure the origin before trusting that headroom exists** — this is finish-line item 1's actual open work, and `inner_tasks.json`'s own description still quotes the void number. `noise-floor --k 3` is the cheap way to re-establish it.
+   > **[VOID] The headroom is UNMEASURED.** The ~~origin ≈ 0.44~~ that justified this choice came from the pre-reset meta-campaign AND from a run where justlogic was not seed-deterministic. **Re-measure the origin before trusting that headroom exists** — this is finish-line item 1's actual open work. `noise-floor --k 3` is the cheap way to re-establish it. (Numeric targets/origins are config and measurement values — dataset prose no longer quotes them.)
 2. **Outer mutations actually reach the inner meta-prompts (slice 3).** With the standard `_optimizer/` outer prompts, the outer L1 emits FLAT single-prompt field edits, which do **not** map to per-node `meta_prompt_overrides` — so candidates run identical inner cycles and the loop optimizes noise. Slice 3 (the specialized outer prompt set emitting per-node `PromptTemplate` edits) is therefore **REQUIRED for any signal**, not optional polish. This is the gating slice.
 3. **Spend is visible (slice 4 rollup).** Inner LLM cost currently lands in the sandbox ledger, invisible to the outer dashboard. For a distributable product "spend is the headline" — the inner-campaign cost MUST roll up to the outer cycle's spend. Build this with slice 4's fitness work.
 4. **A bounded, cheap default config.** The committed `inner_tasks.json` + `campaign.json` must let `new promptpotter-self` complete at a cost an evaluator will tolerate. Cost is **geometric** (one outer round = n_variants × n_inner_tasks inner campaigns, each a full inner campaign) AND each inner optimizer call is slow (~176 s on openrouter/gpt-oss-120b). So: few inner tasks, few samples, few inner rounds, low outer `max_rounds`/`n_variants` by default — and consider pinning the inner+outer optimizer to a faster provider (groq) in the shipped config. Document the cost shape for the operator.
@@ -192,7 +192,7 @@ round-trace signals surfaced as outer injections, not re-derived.
 Proxies are computed in-memory by `runner/inner_recursion.py::_compute_proxies` from the
 returned `CycleResult` (no disk read; **there is no `outer_fitness` module**); the formula
 lives in `datasets/promptpotter-self/campaign.json::scoring`, composing **lift core**
-(`first_round_delta` + normalized `headroom_lift`) × **bounded quality**
+(normalized `headroom_lift`) × **bounded quality**
 (`cleanliness · diversity_health`, floored 0.6 — a broken campaign is discounted, never
 sign-flipped) × **efficiency** (`delta_per_dollar`, floored 0.7), times a worst-offender
 token clip so a fat inner meta-prompt layout demotes (gate ≡ 1.0 for normal cost; missing
@@ -200,7 +200,8 @@ token data → vacuous 1.0; threshold deliberately high — tune down once a rea
 cost distribution). **Governing law: every term carries a candidate gradient** — terms
 without one stay out (`rounds_to_N`; the per-seed cost multiplier). Held
 emitted-but-out-of-formula pending the validation read: `rounds_improved_frac`,
-`delta_per_candidate`, `delta_per_second`.
+`delta_per_candidate`, `delta_per_second`, `first_round_delta` (collinear with
+`headroom_lift` — `max(levels)` includes `levels[0]`).
 
 Still to layer — the cross-sample terms (the P3 post-aggregate formula, above the
 per-sample primitives):
@@ -234,7 +235,7 @@ measurement to run, not a module to write.**
 
 1. **Shared `in_process` seam + `llm_only` connector — SHIPPED** (§1).
 2. **`promptpotter` inner-cycle runner + isolation — SHIPPED & live-validated** (§2).
-3. **[GATING] Inner benchmark with headroom + specialized outer prompt set — MECHANISM SHIPPED; full-signal data run open.** `inner_tasks.json` → `justlogic` (target 0.60 — the origin headroom is **[VOID]/unmeasured**, finish-line item 1) + the `_optimizer_meta` set (§3), live-validated to emit per-node edits of the INNER meta-prompts. **Done when:** a real `new promptpotter-self` shows outer candidates with DIFFERENT proxies and outer best > outer origin.
+3. **[GATING] Inner benchmark with headroom + specialized outer prompt set — MECHANISM SHIPPED; full-signal data run open.** `inner_tasks.json` → `justlogic` (the origin headroom is **[VOID]/unmeasured**, finish-line item 1) + the `_optimizer_meta` set (§3), live-validated to emit per-node edits of the INNER meta-prompts. **Done when:** a real `new promptpotter-self` shows outer candidates with DIFFERENT proxies and outer best > outer origin.
 4. **Enriched outer fitness + inner-spend rollup — rollup, per-sample composed fitness, and delta-led display SHIPPED; cross-sample terms remain** (§4). Each inner cycle's spend returns as the outer sample's `step_tokens`, fanning onto the outer ledger via the existing backend-cost channel. **Done when:** `proxy_lift_corr ≥ 0.6` over ≥4 paired branches.
 5. **Distributable config + cost realism.** Tune the committed `inner_tasks.json` + `campaign.json` (and the shipped optimizer provider) so `new promptpotter-self` completes at evaluator-tolerable cost. The cost shape (geometric; wall-clock dominated by optimizer-call tails) is documented operator-facing in `dataset.md` § Cost shape — keep it there, not here. Default small; consider pinning groq.
 

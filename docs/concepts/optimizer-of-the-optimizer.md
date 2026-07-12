@@ -35,9 +35,9 @@ connector reports a **vector** of bounded, subset-invariant signals per inner cy
 signal-rich campaign is never distilled to one number — **lift core × quality modulator ×
 efficiency**:
 
-- **Lift core** — `first_round_delta` (early speed) + `headroom_lift` (best discovered depth
-  normalized by the task's own `(target − origin)`, removing origin-strength bias). Each
-  recentred `(x+1)/2` so regression < no-op < improvement stay distinct.
+- **Lift core** — `headroom_lift` (best discovered depth normalized by the task's own
+  `(target − origin)`, removing origin-strength bias), recentred `(x+1)/2` so
+  regression < no-op < improvement stay distinct.
 - **Quality modulator** — `cleanliness · diversity_health`, floored at 0.6: discounts a
   campaign with unscoreable/degraded inner samples, malformed candidate output, or mode
   collapse — **without** diluting the lift core (a floor, not an additive term).
@@ -51,7 +51,9 @@ cost multiplier measured the *seed*, not the candidate. Efficiency's `delta_per_
 the law precisely because its numerator is candidate-specific — a verbose meta-prompt burns more
 for the same lift. Emitted but held out of the formula until a validation run confirms their
 gradient here: `rounds_improved_frac`, `delta_per_candidate`, `delta_per_second`,
-`after_N_rounds_delta`.
+`after_N_rounds_delta`, and `first_round_delta` (collinear with `headroom_lift` — `max(levels)`
+includes `levels[0]`, so whenever round 1 is the best round the two terms double-count one
+number).
 
 Acceptance is empirical: the composed fitness must hold `proxy_lift_corr ≥ 0.6` — a term that
 degrades it is cut, not kept for tidiness.

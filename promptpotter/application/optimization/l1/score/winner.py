@@ -56,7 +56,7 @@ async def l1_score(
     dataset: list[Sample],
     *,
     pipeline_params: dict[str, Any] | None = None,
-    improvement_threshold: float = 0.01,
+    improvement_threshold: float,
     callbacks: RunCallbacks,
     degradation_checks: list[StopRule] | None = None,
     pobb_config: PoBBConfig,

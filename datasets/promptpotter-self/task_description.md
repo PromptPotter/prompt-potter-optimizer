@@ -10,7 +10,8 @@ The inner benchmark is **justlogic, depth-6/7 deductive reasoning** (NOT
 arithmetic). Each inner sample is a set of premises plus a candidate conclusion;
 the inner model must answer **TRUE / FALSE / Uncertain** — TRUE/FALSE when the
 premises strictly determine the conclusion, `Uncertain` only when they are
-genuinely indeterminate. Origin ≈ 0.44, target 0.60, paper ceiling ≈ 0.81.
+genuinely indeterminate. The origin sits well below what the inner model can
+reach — real headroom. The goal is to improve, not to hit a number.
 
 Do NOT assume a failure mode — read one from the evidence. The critique and
 sample transcripts show what the inner loop actually did (which candidates it
@@ -23,13 +24,16 @@ finding the discipline; do not hard-code task answers into it.
 
 ## Fitness
 
-Composite formula in ``campaign.json::scoring`` — three proxies:
+Composite formula in ``campaign.json::scoring`` — lift × quality × efficiency:
 
-- ``first_round_delta`` — inner-round-1 score minus inner origin (cheap signal)
-- ``after_N_rounds_delta`` — inner-round-N score minus origin (workhorse)
-- ``rounds_to_N`` — rounds to hit ``inner_tasks.json::target_score`` (0.60), capped at ``max_inner_rounds``
+- ``headroom_lift`` — best-discovered inner depth over the task's own
+  ``(target − origin)`` headroom (the lift core)
+- ``cleanliness × diversity_health`` — bounded quality modulator
+- ``delta_per_dollar`` — efficiency modulator
 
-Better = higher delta after N AND/OR fewer rounds to target.
+Better = deeper best-discovered lift, cleanly and cheaply won.
+(``first_round_delta`` / ``after_N_rounds_delta`` / ``rounds_to_N`` are emitted
+as raw observations but held out of the formula.)
 
 ## Mutation surface
 
@@ -57,8 +61,8 @@ Better = higher delta after N AND/OR fewer rounds to target.
 
 ## Proxy realism
 
-The committed inner config (``inner_tasks.json``: ``n_samples_per_inner_round:
-24``, ``max_inner_rounds: 2``, eight seeds) keeps each outer "sample" at
+The committed inner config (``inner_tasks.json`` — the source of truth for the
+inner geometry; don't restate its numbers here) keeps each outer "sample" at
 order-of-minutes. Trade-off is signal quality — bump sample count + rounds before
 publication runs. Cost shape + the finish-line plan:
 ``docs/specs/l4-outer-loop.md`` § Finish line.

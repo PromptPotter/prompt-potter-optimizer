@@ -1029,9 +1029,11 @@ def test_compute_proxies_excludes_tooling_failures_from_cleanliness() -> None:
     )
     assert _compute_proxies(malformed, target=0.60, elapsed=100.0).cleanliness < 1.0
 
-    # Every L1 round tooling-failed → the cycle carries no evidence. It must be EXCLUDED as an
-    # outer sample, not scored: `_mean([])` is 0.0, so a naive filter would report the
-    # most-broken possible cycle as PERFECTLY clean (cleanliness 1.0) — inverting the truth.
+    # Every L1 round tooling-failed → meta-prompt-OWNED: under the inner determinism clamp a
+    # systematic all-rounds-empty is the documented verbose-meta-prompt failure mode, not a
+    # provider blip. It scores the FLOOR (composed fitness exactly 0.0) — excluding it let a
+    # candidate that breaks its own measurement escape penalty and, at the panel's coverage
+    # floor, park as an un-crownable, un-eliminable zombie arm. `_mean([])` never runs.
     all_tooling = _fake_inner_result(
         [0.40],
         0.30,
@@ -1040,8 +1042,27 @@ def test_compute_proxies_excludes_tooling_failures_from_cleanliness() -> None:
             _fake_inner_round(2, parse_failure="l1_provider_empty_response"),
         ],
     )
-    with pytest.raises(InnerCycleUnscoreableError):
-        _compute_proxies(all_tooling, target=0.60, elapsed=100.0)
+    floor = _compute_proxies(all_tooling, target=0.60, elapsed=100.0).model_dump()
+    assert floor["headroom_lift"] == -1.0
+    assert floor["cleanliness"] == 0.0
+
+    import json
+    from pathlib import Path
+
+    cfg = json.loads(Path("datasets/promptpotter-self/campaign.json").read_text(encoding="utf-8"))
+    score = compile_scorer(cfg["campaign_config"]["scoring"])
+    assert score({"pipeline_data": floor}) == pytest.approx(0.0)
+    assert score({"pipeline_data": floor}) < score({"pipeline_data": px})
+
+    # ...but a FAILED cycle with the same all-empty rounds is tooling-owned → still EXCLUDED.
+    failed_tooling = _fake_inner_result(
+        [0.40],
+        0.30,
+        [_fake_inner_round(1, parse_failure="l1_provider_empty_response")],
+        stop_reason=StopReason.CRASHED,
+    )
+    with pytest.raises(InnerCycleUnscoreableError, match="failed as tooling"):
+        _compute_proxies(failed_tooling, target=0.60, elapsed=100.0)
 
 
 def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
@@ -1132,11 +1153,12 @@ def test_unmeasured_spend_never_scores_as_maximal_efficiency() -> None:
 
 
 def test_pp_self_scoring_composed_and_gradient_bearing() -> None:
-    # SILENT wrong-score: the composed formula must (a) still ignore the retired flat proxies
-    # (rounds_to_N, raw token count, the held-out after_N_rounds_delta), (b) stay monotone in the
-    # lift core, (c) let quality penalties modulate DOWN — but (d) FLOOR the quality factor at
-    # 0.6 so a broken campaign is discounted, never sign-flipped into a false floor. Any of these
-    # wrong scores every candidate subtly, with no error.
+    # SILENT wrong-score: the composed formula must (a) still ignore the retired/held-out
+    # proxies (rounds_to_N, raw token count, after_N_rounds_delta, and first_round_delta —
+    # collinear with headroom_lift, whose max(levels) includes levels[0]), (b) stay monotone in
+    # the lift core, (c) let quality penalties modulate DOWN — but (d) FLOOR the quality factor
+    # at 0.6 so a broken campaign is discounted, never sign-flipped into a false floor. Any of
+    # these wrong scores every candidate subtly, with no error.
     import json
     from pathlib import Path
 
@@ -1157,7 +1179,7 @@ def test_pp_self_scoring_composed_and_gradient_bearing() -> None:
     base = s()
     assert s(rounds_to_N=99) == base  # retired constant does not reach the score
     assert s(after_N_rounds_delta=0.9) == base  # superseded by headroom_lift, held out of formula
-    assert s(first_round_delta=0.3) > base  # monotone in early speed
+    assert s(first_round_delta=0.3) == base  # collinear early-speed term held out of formula
     assert s(headroom_lift=0.9) > base  # monotone in normalized depth
     assert s(cleanliness=0.4) < base  # quality penalty modulates down
     assert s(diversity_health=0.4) < base  # mode-collapse penalty modulates down

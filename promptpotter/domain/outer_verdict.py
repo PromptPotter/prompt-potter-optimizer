@@ -20,7 +20,11 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from promptpotter.shared.statistics import min_detectable_effect, paired_diff_posterior
+from promptpotter.shared.statistics import (
+    min_detectable_effect,
+    paired_diff_posterior,
+    t_critical,
+)
 
 DECISION_ADOPT = "adopt"
 DECISION_REJECT = "reject"
@@ -171,7 +175,10 @@ def compute_outer_verdict(
     effect, se, n = paired_diff_posterior(
         [var_cells[c] for c in shared], [origin_cells[c] for c in shared]
     )
-    ci_lo, ci_hi = effect - 1.96 * se, effect + 1.96 * se
+    # Student-t, not z: the SE is estimated from the same ~7 paired cells it widens. At a
+    # single shared cell there is no df — treat as df=1, which is already indecisive.
+    crit = t_critical(max(n - 1, 1))
+    ci_lo, ci_hi = effect - crit * se, effect + crit * se
     if ci_lo > 0:
         decision = DECISION_ADOPT
     elif ci_hi < 0:

@@ -18,8 +18,9 @@ measurements (`domain/outer_verdict.py::OuterSampleProxies`) — among them
 `diversity_health` health terms.
 
 The outer scoring formula in `campaign.json::scoring` composes a weighted subset
-(currently `first_round_delta` + `headroom_lift`, gated by `cleanliness × diversity`
-and scaled by `delta_per_dollar`). Operators iterate on the formula as evidence
+(currently `headroom_lift` alone as the lift core — `first_round_delta` is held out
+as collinear with it — gated by `cleanliness × diversity` and scaled by
+`delta_per_dollar`). Operators iterate on the formula as evidence
 accumulates — there's no single "right" weighting; the proxies serve different
 stages of the development → calibration → publication arc.
 
@@ -76,7 +77,7 @@ USD budget remains (see l4-outer-loop § Live-run learnings).
 
 **An absolute dollar total is not quotable yet.** How many inner rounds each
 campaign actually runs depends on the `justlogic` inner origin→target gap, and that
-origin is currently **unmeasured** on this engine (the prior ≈0.44 reading is void —
+origin is currently **unmeasured** on this engine (the prior reading is void —
 pre-2026-07-10-reset and pre-seed-determinism). Re-measure it (`noise-floor --k 3`)
 before sizing a real run.
 

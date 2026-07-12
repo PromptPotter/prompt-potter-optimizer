@@ -29,6 +29,18 @@ def wilson_ci(hits: int, total: int, alpha: float = 0.05) -> tuple[float, float]
     return (max(0.0, center - margin), min(1.0, center + margin))
 
 
+def t_critical(df: int, alpha: float = 0.05) -> float:
+    """Two-sided Student-t critical value ``t_{df, 1-alpha/2}`` for a mean whose SE was
+    estimated from the same few observations — the normal quantile understates the interval
+    at the panel sizes the paired verdicts run on (≈7 cells → 2.45 vs 1.96)."""
+    if df < 1:
+        raise ValueError(f"t_critical: df must be >= 1, got {df}")
+
+    from scipy.stats import t
+
+    return float(t.ppf(1 - alpha / 2, df))
+
+
 def min_detectable_effect(n: int, alpha: float = 0.05, power: float = 0.8) -> float:
     """Minimum detectable effect size for a given sample size.
 
@@ -112,5 +124,6 @@ __all__ = [
     "mean_ci",
     "min_detectable_effect",
     "paired_diff_posterior",
+    "t_critical",
     "wilson_ci",
 ]
