@@ -125,6 +125,7 @@ async def emit_origin_round(
         # Round 0's frontier θ is the origin's θ (what ``best_theta`` seeds to), the θ-peer of
         # ``cumulative_accuracy=origin_accuracy`` — so the trend line starts on the θ scale too.
         cumulative_theta=tr.origin_theta,
+        calibration_model=cycle.calibration_model,
         evaluators=dict(tr.origin_evaluators),
     )
     # Seed round 1's L1 with a critique over the origin's misses. The loop runs

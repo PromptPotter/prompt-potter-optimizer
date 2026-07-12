@@ -68,6 +68,7 @@ export interface RoundSummary {
   composite_fitness: number;
   cumulative_accuracy: number;
   cumulative_theta: number | null;
+  calibration_model: '1PL' | '2PL' | null;
   candidates: RoundSummaryCandidate[];
   selection: number[];
   health: DegradationHealth | null;
@@ -317,6 +318,7 @@ export interface RoundResult {
   matched_origin_composite: number;
   cumulative_accuracy: number;
   cumulative_theta: number | null;
+  calibration_model: '1PL' | '2PL' | null;
   prompt_fields: Record<string, unknown>;
   pipeline_params: Record<string, unknown> | null;
   origin_accuracy: number;

@@ -131,7 +131,9 @@ def ab_replay_cycle(
         origin_frontier = _merge_into_cumulative(origin_frontier, t.results)
     # Round 0 = the origin scored; its results calibrate the ruler, exactly as Cycle.start did.
     origin_results = rounds[0].results if rounds else []
-    delta_scale, _ = _calibrate_delta_ruler(session, origin_results, n_min, enable_2pl=enable_2pl)
+    delta_scale, _, _ = _calibrate_delta_ruler(
+        session, origin_results, n_min, enable_2pl=enable_2pl
+    )
 
     divergences: list[Divergence] = []
     for t in rounds:

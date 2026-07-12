@@ -1,7 +1,5 @@
 "use client";
-import { useCallback, useState } from "react";
-import { postUnarchiveCampaign } from "@/lib/api";
-import { bumpRevalidation } from "@/lib/revalidate";
+import { useState } from "react";
 import { cx } from "@/lib/cx";
 import { campaignDisplayName } from "@/lib/names";
 import { fmtPct0 } from "@/lib/format";
@@ -12,6 +10,14 @@ import { UnitBranchRows } from "./UnitBranchRows";
 import { CampaignMenu } from "./CampaignMenu";
 import { CampaignSizeHover } from "./CampaignSizeHover";
 import { InnerCampaignRows } from "./InnerCampaignRows";
+
+// A chip's tooltip has to say what the branch IS — "2 diags" only decodes the glyph
+// for someone who already knows the vocabulary, which a first-time operator doesn't.
+const CHIP_HELP: Record<string, string> = {
+  fork: "a sibling run branched off this one to try a different course",
+  sweep: "a cheap A/B of candidate prompts, run before committing to one",
+  diag: "a diagnostic re-run: replays the same work to check the result holds",
+};
 
 // One campaign in the flat list: its row + (when expanded) its fork-tree.
 // The campaign row IS its root cycle — a campaign mints exactly one — so the
@@ -49,20 +55,11 @@ export function CampaignNode({
   const isL4 = isSelfOptimization(campaign.backend_type);
   const [innerOpen, setInnerOpen] = useState(false);
   const selected = cid === campaignId && root.cycle_id === cycleId;
-  // Archived campaigns live in the archive/ recycle bin — inert to browse (their
-  // detail routes 404 until restored). So an archived campaign row's primary
-  // action is RESTORE, not open: clicking it moves the tree back to campaigns/.
+  // Archived campaigns live in the archive/ recycle bin — inert to browse (their detail
+  // routes 404 until restored), so the row is inert too. Restoring is a lifecycle verb and
+  // the ⋯ menu owns those (it already offers Unarchive beside Archive + Delete) — a bare
+  // row click firing an unconfirmed, undoable mutation was a second path to the same call.
   const archived = campaign.lifecycle_status === "archived";
-  const [restoring, setRestoring] = useState(false);
-  const runRestore = useCallback(async () => {
-    setRestoring(true);
-    try {
-      await postUnarchiveCampaign(cid);
-      bumpRevalidation();
-    } finally {
-      setRestoring(false);
-    }
-  }, [cid]);
   // A check-in isn't a run, so it never wears the active-pointer ●, even if a stale
   // pointer still names it (it claimed the pointer under the old mint code before the
   // claim moved to Start). The ● tracks the running/last-started cycle the dashboard
@@ -106,10 +103,10 @@ export function CampaignNode({
           <button
             type="button"
             className="unit-library-item"
-            onClick={() => (archived ? void runRestore() : onSelectCycle(cid, root.cycle_id))}
+            onClick={() => onSelectCycle(cid, root.cycle_id)}
             aria-current={selected ? "true" : undefined}
-            title={archived ? "Archived — click to restore" : cid}
-            disabled={restoring}
+            title={archived ? "Archived — restore it from the ⋯ menu to open" : cid}
+            disabled={archived}
           >
             <span className="unit-library-row">
               <span className="unit-library-name">
@@ -126,9 +123,7 @@ export function CampaignNode({
               </span>
               <span className="unit-library-meta">
                 {archived ? (
-                  <span className="unit-library-status">
-                    {restoring ? "Restoring…" : "Archived · restore"}
-                  </span>
+                  <span className="unit-library-status">Archived</span>
                 ) : (
                   <>
                     {statusLabel && (
@@ -151,7 +146,7 @@ export function CampaignNode({
                   type="button"
                   className="unit-library-chip"
                   onClick={onToggle}
-                  title={`${chip.count} ${chip.kind}${chip.count === 1 ? "" : "s"}`}
+                  title={`${chip.count} ${chip.kind}${chip.count === 1 ? "" : "s"} — ${CHIP_HELP[chip.kind]}`}
                   aria-label={`${chip.count} ${chip.kind}`}
                   tabIndex={-1}
                 >

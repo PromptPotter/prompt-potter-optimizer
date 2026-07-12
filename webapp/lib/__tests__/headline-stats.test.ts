@@ -14,6 +14,7 @@ const round = (
     composite_fitness,
     cumulative_accuracy,
     cumulative_theta: null,
+    calibration_model: null,
     outer_verdict: null,
     candidates: [],
     selection: [],

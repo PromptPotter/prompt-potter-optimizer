@@ -17,9 +17,15 @@ from promptpotter.domain.phases import StopReason
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.run_records import DecisionRecord, ErrorRecord
 
+# Which IRT model a cycle's δ ruler was fitted under. The absence of a member is the third,
+# real state: a cold ruler is FLAT, so θ degenerates to logit-accuracy — neither 1PL nor 2PL.
+# Carried as `None` on the models below; never collapse it into "1PL".
+CalibrationModel = Literal["1PL", "2PL"]
+
 __all__ = [
     "L1_PARSE_FAILURE_MALFORMED",
     "L1_PARSE_FAILURE_TOOLING",
+    "CalibrationModel",
     "CandidateProposal",
     "CritiqueReadout",
     "CycleResult",
@@ -390,6 +396,10 @@ class RoundResult(BaseModel):
     # fixed δ ruler (subset-invariant). None when the ruler is cold. Feeds the L4 outer
     # proxy so a drifting per-round subset can't inflate the meta-fitness signal.
     cumulative_theta: float | None = None
+    # Which IRT model the δ ruler above was fitted under ("1PL" | "2PL"), so the operator
+    # reads the model the engine chose. None = the ruler is cold (flat δ) and θ is plain
+    # logit-accuracy — neither model, and the state a hardcoded "1PL" used to misreport.
+    calibration_model: CalibrationModel | None = None
     # --- raw payload ---
     prompt_fields: dict[str, Any]
     pipeline_params: dict[str, Any] | None = None
@@ -690,6 +700,8 @@ class RoundSummary(BaseModel):
     # θ-peer of `cumulative_accuracy` — ability of the cumulative frontier on the cycle's
     # fixed δ ruler (subset-invariant). None when the ruler is cold (thin inner-budget banks).
     cumulative_theta: float | None = None
+    # Mirrors `RoundResult.calibration_model` — the model the webapp's ability popover reads.
+    calibration_model: CalibrationModel | None = None
     candidates: list[RoundSummaryCandidate] = Field(default_factory=list)
     # Per-round selection from the adaptive queue mechanism — sample ids
     # in measurement order (longest candidate sequence carries the full

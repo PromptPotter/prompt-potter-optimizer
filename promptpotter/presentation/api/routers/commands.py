@@ -582,12 +582,10 @@ async def replace_dataset(
         raise ConflictError(
             str(exc), code="nothing_to_replace", details={"slug": exc.slug}
         ) from exc
-    return {
-        "slug": result.slug,
-        "versioned_to": result.versioned_to,
-        "repointed_campaigns": result.repointed_campaigns,
-        "restamped_measurements": result.restamped_measurements,
-    }
+    # Echo the subject, nothing more: the migration's counts + the versioned slug are
+    # recorded by `version_and_repoint` itself (its log line + the on-disk marker), and
+    # no caller ever read them off the wire.
+    return {"slug": result.slug}
 
 
 @commands_router.post("/{kind}", response_model=CommandAcceptedBody, status_code=202)

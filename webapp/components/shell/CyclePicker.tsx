@@ -3,13 +3,13 @@ import { memo, useMemo } from "react";
 import { useWorkspace } from "@/lib/workspace";
 import { useAuth } from "@/lib/auth-context";
 import type { CycleListEntry } from "@/lib/api";
-import { campaignOriginHash, pathLeaf, unitKey, UNIT_SEP } from "@/lib/ids";
-import { unitDisplayName } from "@/lib/names";
+import { pathLeaf, unitKey, UNIT_SEP } from "@/lib/ids";
+import { campaignDisplayName, unitDisplayName } from "@/lib/names";
 import { runPhaseLabel } from "@/lib/run-phase";
 import { fmtPct0 } from "@/lib/format";
 
-// Inline unit picker. Single label scheme — optgroup `${dataset} ·
-// ${shortHash}`, option `${unit} · best X · status`. The `variant` prop
+// Inline unit picker. Single label scheme — optgroup = the campaign's display
+// name, option `${unit} · best X · status`. The `variant` prop
 // only switches the wrapper CSS class (and the empty-state copy) so the
 // chat header can size the trigger differently from the dashboard
 // breadcrumb; the labels themselves are identical in both contexts.
@@ -45,8 +45,16 @@ export const CyclePicker = memo(function CyclePicker({
     followActive,
     viewedPath,
     backToOuter,
+    campaigns,
   } = useWorkspace();
   const { status } = useAuth();
+
+  // Group labels resolve through the same rename seam the sidebar uses, so a renamed
+  // campaign reads the same in both. No hash: an id fragment is not a name.
+  const campaignById = useMemo(
+    () => new Map(campaigns.map((c) => [c.campaign_id, c])),
+    [campaigns],
+  );
 
   const standalone = variant === "standalone";
   // Depth > 1 ⇒ viewing an inner descendant (an L4 inner loop). The picker's
@@ -116,8 +124,10 @@ export const CyclePicker = memo(function CyclePicker({
         )}
         {groupKeys.map((cid) => {
           const entries = groups.get(cid)!;
-          const dataset = entries[0]?.dataset_name || "(unknown)";
-          const groupLabel = `${dataset} · ${campaignOriginHash(cid).slice(0, 6)}`;
+          const campaign = campaignById.get(cid);
+          const groupLabel = campaign
+            ? campaignDisplayName(campaign)
+            : entries[0]?.dataset_name || "(unknown)";
           return (
             <optgroup key={cid} label={groupLabel}>
               {entries.map((c) => {

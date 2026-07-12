@@ -89,10 +89,12 @@ class RaisedCommand:
     evidence: str
 
     def to_wire(self, draft_id: str) -> dict[str, Any]:
+        # No `confidence`: a high-confidence proposal is applied CONFIRMED inside the turn
+        # and filtered out of `raised`, so every proposal that reaches the wire is a
+        # low-confidence one — the field would be a constant.
         return {
             "kind": "edit-draft-campaign",
             "payload": {"draft_id": draft_id, "patch": {self.patch_key: self.value}},
-            "confidence": self.confidence,
             "evidence": self.evidence,
         }
 
@@ -273,7 +275,7 @@ def _grade_resolution(
     *, output: CheckinOutput, applied: bool, repair_attempts: int
 ) -> dict[str, Any] | None:
     """Grade one resolver turn for degradation. ``None`` when healthy, else
-    ``{grade, reasons, repair_attempts}`` with ``grade ∈ {"degraded", "critical"}``.
+    ``{grade, reasons}`` with ``grade ∈ {"degraded", "critical"}``.
 
     Mirrors the ``healthy|degraded|critical`` vocabulary of
     :class:`~promptpotter.domain.results_health.DegradationHealth` (which is
@@ -294,7 +296,7 @@ def _grade_resolution(
             reasons.append(
                 "the retry after the empty/truncated first response also failed to recover"
             )
-        return {"grade": "critical", "reasons": reasons, "repair_attempts": repair_attempts}
+        return {"grade": "critical", "reasons": reasons}
     if repair_attempts > 0:
         return {
             "grade": "degraded",
@@ -302,7 +304,6 @@ def _grade_resolution(
                 "the model's first response was empty or truncated and was retried "
                 "(~2x cost and latency); the resulting setup may be thin"
             ],
-            "repair_attempts": repair_attempts,
         }
     return None
 
@@ -395,18 +396,14 @@ def _coerce(field_key: str, proposed: str, draft: DraftCampaign) -> Any | None:
 
 
 def _resolution_wire(output: CheckinOutput) -> dict[str, Any]:
-    """The resolver turn's output, persisted to ``cache.json`` for the panel + AI."""
+    """The resolver turn's output, persisted to ``cache.json`` for the panel + AI.
+
+    Carries what a reader consumes, not everything the turn produced: the findings ride
+    ``block["raised"]`` as clickable proposals (``raised_commands``), so mirroring them
+    here too would serve the same fact twice.
+    """
     return {
         "assessment": output.assessment,
-        "findings": [
-            {
-                "field": f.field,
-                "proposed_value": f.proposed_value,
-                "confidence": f.confidence,
-                "evidence": f.evidence,
-            }
-            for f in output.findings
-        ],
         "next_action": {
             "kind": output.next_action.kind,
             "questions": [

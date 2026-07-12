@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from promptpotter.application.intelligence.exploration import Observation, RulerEntry
     from promptpotter.application.intelligence.indexes import AxisIndex
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.results import CalibrationModel
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement
     from promptpotter.domain.search_point import TaskDecomposition
@@ -124,7 +125,7 @@ def _calibrate_delta_ruler(
     *,
     enable_2pl: bool,
     extra_obs: list[Observation] | None = None,
-) -> tuple[dict[int, RulerEntry], float | None]:
+) -> tuple[dict[int, RulerEntry], float | None, CalibrationModel | None]:
     """Calibrate the per-cycle FIXED difficulty ruler + read the origin's θ on it.
 
     The cross-round comparability anchor (slice 2 of fitness-comparability). Every
@@ -145,7 +146,10 @@ def _calibrate_delta_ruler(
 
     The model is chosen by ``graduate_ruler_model`` (slice 3): the bank uses 1PL until a
     data-rich, genuinely-discriminating dataset wins held-out cross-validation, then the
-    ruler carries per-sample discrimination ``(δ, a)``. Gated by ``enable_2pl``
+    ruler carries per-sample discrimination ``(δ, a)``. Returned as the third element so
+    the operator reads the model actually fitted; a cold ruler is **neither** 1PL nor 2PL
+    (it is flat), so it returns ``None`` rather than the name the graduation would have
+    picked had the fit been adopted. Gated by ``enable_2pl``
     (``optimization.enable_2pl_graduation``). The switch is invisible above the
     seam — ``ruler()`` folds δ + a into the one mapping every θ consumer already reads.
     """
@@ -176,15 +180,15 @@ def _calibrate_delta_ruler(
     # once the cold rounds freeze onto one subset.
     obs = archive_obs + origin_obs + list(extra_obs or [])
     if not obs:
-        return {}, None
+        return {}, None, None
     model, post = graduate_ruler_model(obs, enable=enable_2pl)
     if len(post.delta) >= n_min:
         if model == "2PL":
             logger.info("δ ruler graduated to 2PL (%d samples discrimination-fit)", len(post.delta))
-        return post.ruler(), post.theta.get(ORIGIN_ABILITY_ID)
+        return post.ruler(), post.theta.get(ORIGIN_ABILITY_ID), model
     # Cold: too few banked samples to trust a fitted ruler → flat ruler; origin θ = logit-accuracy.
     origin_row = fit_theta_given_delta(origin_obs, {}).get(ORIGIN_ABILITY_ID)
-    return {}, (origin_row[0] if origin_row is not None else None)
+    return {}, (origin_row[0] if origin_row is not None else None), None
 
 
 _FRONTIER_ABILITY_ID = "_frontier"
@@ -319,6 +323,9 @@ class Cycle:
     # cross-round θ readout (``c0_ok``, the stall ladder) lands on one scale via
     # ``fit_theta_given_delta``. Empty {} = still cold → gates degenerate to θ==logit-accuracy.
     delta_scale: dict[int, RulerEntry] | None = None
+    # Which model the ruler above was fitted under, for the operator's readout. None while
+    # the ruler is cold — a flat ruler is neither 1PL nor 2PL, so naming one would lie.
+    calibration_model: CalibrationModel | None = None
     # Stashed by L2/L3 rebase emission; runner.entry resolves it post-finalize
     # into _mint_fork + observer rebuild + loop re-entry on the new fork.
     rebase_request: RebaseRequest | None = None
@@ -356,7 +363,7 @@ class Cycle:
         )
         _assert_overlay_preserved(sp, session.pipeline_params)
         _inherit_sibling_runtime_failures(opt_sp, session)
-        delta_scale, origin_theta = _calibrate_delta_ruler(
+        delta_scale, origin_theta, calibration_model = _calibrate_delta_ruler(
             session,
             origin_results,
             config.optimization.elimination_n_min,
@@ -383,6 +390,7 @@ class Cycle:
             opt_sp=opt_sp,
             archive_observations=_load_archive_observations(session),
             delta_scale=delta_scale,
+            calibration_model=calibration_model,
         )
 
     def _cumulative_scores(
@@ -505,7 +513,7 @@ class Cycle:
 
         if self.delta_scale:
             return
-        delta_scale, origin_theta = _calibrate_delta_ruler(
+        delta_scale, origin_theta, calibration_model = _calibrate_delta_ruler(
             self.session,
             self.tracking.origin_per_sample_results,
             self.config.optimization.elimination_n_min,
@@ -514,6 +522,7 @@ class Cycle:
         )
         if delta_scale:  # warmed — lock the ruler + re-read origin θ on it
             self.delta_scale = delta_scale
+            self.calibration_model = calibration_model
             self.tracking.origin_theta = origin_theta
 
     def adopt(self, new_incumbent: OptSearchPoint, *, advanced: dict[str, Any]) -> None:
@@ -587,6 +596,7 @@ class Cycle:
 
         rr.cumulative_accuracy = tr.current_accuracy
         rr.cumulative_theta = cur_theta
+        rr.calibration_model = self.calibration_model
         rr.opt_search_point = self.opt_sp
         return rr
 

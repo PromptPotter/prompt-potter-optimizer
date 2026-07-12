@@ -148,8 +148,8 @@ export function Sidebar({ onSelectCycle, onNewCycle, collapsed, onToggleCollapse
         {collapsed ? "›" : "‹"}
       </button>
       <div className="brand">
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
-          <div style={{ width: 22, height: 22, background: "var(--color-accent)", borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div className="brand-lockup">
+          <div className="brand-mark">
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
               <rect x="1" y="1" width="4" height="4" rx="1" fill="white" />
               <rect x="7" y="1" width="4" height="4" rx="1" fill="white" opacity=".7" />

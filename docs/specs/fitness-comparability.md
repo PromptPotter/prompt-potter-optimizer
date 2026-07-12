@@ -1,6 +1,6 @@
 # Fitness comparability — collapse the θ/accuracy boundary
 
-> **Status:** slices 1–3 SHIPPED (θ gates on one fixed ruler; resubset ON; 2PL graduation live). Open: slice 4 webapp parity, incl. the served-nowhere `calibration_model` (⚠️ box below), and feeding graduated discrimination into selection (slice 3 nuance). **Prerequisite to [`l4-outer-loop.md`](l4-outer-loop.md)** — the L4 outer fitness reads inner-campaign improvement, which is only comparable because this shipped.
+> **Status:** slices 1–3 SHIPPED (θ gates on one fixed ruler; resubset ON; 2PL graduation live). Slice 4 is shipped except the cross-round headline surfaces + the lineage `/N` badge (below); the calibration model is now served and read. Open: feeding graduated discrimination into selection (slice 3 nuance). **Prerequisite to [`l4-outer-loop.md`](l4-outer-loop.md)** — the L4 outer fitness reads inner-campaign improvement, which is only comparable because this shipped.
 
 ## Why — one quality number, accidentally split into two
 
@@ -54,9 +54,9 @@ Per-round resubset can turn back **ON** once fitness is θ, because θ makes the
    - **`mode: measured` vs `all` — reuse, don't add.** The subset basis the number was measured over is **already served**: `scored_samples`/`expected_samples` on `RoundSummaryCandidate` (dashboard) and `n_samples`/`n_expected` on the webapp `CandidateRow`. No new enum field (it would raise the ledger for a fact already on the wire — surface-ledger rule). Badging it as a `/N` on the lineage node still needs `scored_samples` threaded onto `CampaignLineageCandidate` (it carries θ but not the count yet) — small follow-up.
    - **Remainder (documented, not built):** (a) extend the toggle to the **cross-round** surfaces (the "Best" tile, the TopStrip sparkline, the sidebar `best_accuracy`), which compute a cross-round aggregate; their θ readout **waits on slice 2's stable δ bank** (until then a cross-round θ compares different per-round anchors), so they stay subset-relative composite/accuracy with an annotation rather than claim a cross-round θ — the accuracy↔composite half could apply there sooner. (b) the lineage subset `/N` badge.
 
-   **(iii) Teach θ / 1PL / 2PL.** `docs/glossary.md` θ/δ/1PL/2PL/specific-objectivity entries (AI/dev corpus) + `webapp/components/whatif/AbilityInfo.tsx` Popover on the fitness panel ("why a lower-accuracy candidate can win" + calibration model).
+   **(iii) Teach θ / 1PL / 2PL — SHIPPED.** `docs/glossary.md` θ/δ/1PL/2PL/specific-objectivity entries (AI/dev corpus) + `webapp/components/whatif/AbilityInfo.tsx` Popover on the fitness panel ("why a lower-accuracy candidate can win" + calibration model). `_calibrate_delta_ruler` returns the fitted model, which rides the `cumulative_theta` path (`RoundResult` → `RoundSummary` → `dashboard.json`) to the popover.
 
-   > ⚠️ **OPEN — the webapp lies about the calibration model.** Slice 3 landed (`exploration.py::graduate_ruler_model` is called per-cycle from `cycle.py`, and `OptimizationConfig.enable_2pl_graduation` defaults **True**), so a data-rich dataset *does* graduate to 2PL — but **`calibration_model` is served nowhere** (zero occurrences in `promptpotter/` or `webapp/`), and `AbilityInfo.tsx` still hardcodes `Calibration: 1PL (Rasch)`. A 2PL-graduated dataset is displayed to the operator as 1PL. Root cause is one line up: the graduated model **serializes nowhere**. Serve it, then read it. This is the `<reach-the-operator>` rule — the engine changed what it decides, so webapp parity is part of done.
+   > **The ruler has THREE states, not two.** A cold ruler is **flat** — θ degenerates to logit-accuracy — so it is neither 1PL nor 2PL; `calibration_model` is `None` there, and the popover says *not yet calibrated*. Naming it "1PL" claims a fitted difficulty ruler where none exists: that is the same class of falsehood the hardcoded string used to tell, so never collapse the third state into the first.
 
    **Done when:** the operator can pick which metric headlines the lineage node values (seeded from the campaign default). Remaining: the cross-round readouts ("Best" tile, sparkline, sidebar) follow the toggle too — their θ readout waits on slice 2's stable δ bank (annotate as subset-relative meanwhile); and the lineage subset `/N` badge.
 
@@ -66,7 +66,6 @@ Per-round resubset can turn back **ON** once fitness is θ, because θ makes the
 |---|---|
 | Feed aₛ into selection (slice 3 follow-up) | `exploration.py::select_round_subset` + `hard_sample_sorter.py` — still fit 1PL for the selection/heatmap δ; the acquisition term should weight by the graduated discrimination |
 | Selectable headline metric — cross-round remainder | the "Best" tile, TopStrip sparkline, sidebar `best_accuracy` follow the toggle; their θ readout waits on a *stable cross-cycle* δ bank (annotate as subset-relative meanwhile). Plus the lineage subset `/N` badge (`scored_samples` onto `CampaignLineageCandidate`) |
-| Calibration-model serve (slice 4 iii) | the graduated model serializes **nowhere**; `webapp/components/whatif/AbilityInfo.tsx` hardcodes `Calibration: 1PL (Rasch)` — serve it, then read it |
 
 ## Non-goals + validation
 

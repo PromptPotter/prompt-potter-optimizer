@@ -28,6 +28,8 @@
 .shell.sidebar-collapsed .sidebar > .unit-library,
 .shell.sidebar-collapsed .sidebar > .sidebar-footer{display:none}
 .brand{padding:8px 16px 20px;border-bottom:0.5px solid var(--color-border);margin-bottom:8px}
+.brand-lockup{display:flex;align-items:center;gap:8px;margin-bottom:2px}
+.brand-mark{width:22px;height:22px;background:var(--color-accent);border-radius:4px;display:flex;align-items:center;justify-content:center}
 .brand-name{font-size:16px;font-weight:500}
 .brand-sub{font-size:11px;letter-spacing:.1em;color:var(--color-text-tertiary)}
 .nav-item{display:flex;align-items:center;gap:8px;padding:8px 16px;cursor:pointer;color:var(--color-text-secondary);font-size:14px;transition:background .1s;background:none;border:none;width:100%;text-align:left;font-family:inherit}
@@ -80,10 +82,6 @@
 .unit-library-empty{padding:12px 10px;display:flex;flex-direction:column;gap:6px}
 .unit-library-empty .empty-headline{font-size:13px;font-weight:500;color:var(--color-text-secondary)}
 .unit-library-empty .empty-body{font-size:12px;color:var(--color-text-tertiary)}
-.unit-library-empty .empty-cmd{margin:2px 0;padding:6px 8px;background:var(--color-background-tint);border:0.5px solid var(--color-border);border-radius:4px;font-size:11px;overflow-x:auto;white-space:nowrap}
-.unit-library-empty .empty-cmd code{font-family:var(--font-mono);color:var(--color-text-secondary)}
-.unit-library-empty .empty-hint{font-size:11px;color:var(--color-text-tertiary)}
-.unit-library-empty .empty-hint code{font-size:11px}
 /* Lifecycle tabs — Active / Archived. Deleted is hidden from the UI;
    reach for the file tree by campaign id to recover one. */
 .unit-library-tabs{display:flex;gap:4px;padding:4px 8px 6px;border-bottom:0.5px solid var(--color-border)}
@@ -161,7 +159,11 @@
 .unit-library-twist{flex:0 0 18px;background:transparent;border:0;color:var(--color-text-secondary);cursor:pointer;font-size:9px;padding:0;line-height:1;display:flex;align-items:center;justify-content:center;border-radius:4px}
 .unit-library-twist:hover:not(:disabled){background:var(--color-background-hover);color:var(--color-text-primary)}
 .unit-library-twist:disabled{cursor:default;visibility:hidden}
-.unit-library-children{list-style:none;margin:2px 0 4px 14px;padding:0;border-left:1px solid var(--color-border)}
+/* The rail owns the whole indent — margin sets the rail's offset, padding the gap
+   between rail and text. The child rows add none of their own; two rules each adding
+   depth stacked to 25px a level and read as a double indent. */
+.unit-library-children{list-style:none;margin:2px 0 4px 12px;padding:0 0 0 8px;border-left:1px solid var(--color-border)}
+.unit-library-child{font-size:12px}
 /* Campaign on-disk size hover card. position:fixed (set inline from the row
    rect) escapes sidebar overflow clipping. */
 .csize-wrap{display:block}
@@ -170,7 +172,6 @@
 .csize-val{justify-self:end;font-size:13px;font-weight:700;color:var(--color-text-primary);font-variant-numeric:tabular-nums}
 .csize-label[data-indent]{padding-left:12px;text-transform:none;letter-spacing:0.02em}
 .csize-note{grid-column:1 / -1;margin-top:2px;font-size:9px;letter-spacing:0.02em;color:var(--color-text-tertiary);opacity:0.8}
-.unit-library-child{padding-left:10px;font-size:12px}
 /* Run-phase chip — a status dot paired with the phase word (never colour
    alone), shared by the RemoteBar and the topbar active-jobs list so a run's
    phase reads identically wherever it surfaces. */

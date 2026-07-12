@@ -2761,23 +2761,22 @@ components:
     RaisedCommand:
       type: object
       additionalProperties: false
-      required: [kind, payload, confidence, evidence]
+      required: [kind, payload, evidence]
       description: |
         A pre-shaped command the copilot offers the operator as a button. The
         resolver proposes a FIELD; code derives the command — which is why the
         resolver never has to name one. Surfaced on `OriginResolution.raised`
         and on the `GET /campaigns/{campaignId}/checkin` response.
+
+        Every command here is awaiting a click: a high-confidence finding is
+        auto-confirmed (CONFIRMED) inside the resolver turn and never raised, so
+        the model's `confidence` is a server-side policy input, not a wire field.
       properties:
         kind:
           type: string
           enum: [edit-draft-campaign]
         payload:
           $ref: '#/components/schemas/EditDraftCampaignPayload'
-        confidence:
-          type: string
-          description: |
-            `high` auto-confirms the field (CONFIRMED); `low` lands it PROPOSED
-            and waits for an operator click.
         evidence:
           type: string
           description: The citation backing the proposal. A finding citing no evidence is rejected.
@@ -2824,24 +2823,23 @@ components:
           type: object
           additionalProperties: true
           description: |
-            The resolver turn's own output — `assessment`, `findings`
-            (`{field, proposed_value, confidence, evidence}`), `next_action`
+            The resolver turn's own output — `assessment`, `next_action`
             (`{kind, questions}` where each question is
             `{field, prompt, options}` — `field` names the checklist gap the
             answer resolves so the panel applies it as a confirmed patch), and
-            `recap` (set only on a `ready` turn).
+            `recap` (set only on a `ready` turn). The turn's findings are NOT
+            mirrored here: they ride `raised` above as clickable commands.
         degraded:
           type: object
-          required: [grade, reasons, repair_attempts]
+          required: [grade, reasons]
           additionalProperties: false
           properties:
             grade: { type: string, enum: [degraded, critical] }
             reasons: { type: array, items: { type: string } }
-            repair_attempts: { type: integer }
           description: |
             Present only when the resolver turn degraded — the check-in model
-            returned an empty/truncated response that forced a paid repair retry
-            (`repair_attempts > 0`), or produced nothing usable. A `critical` turn
+            returned an empty/truncated response that forced a paid repair retry,
+            or produced nothing usable. A `critical` turn
             raises instead (502 `resolver_failed`); `degraded` rides here so the
             check-in panel warns + offers a re-run rather than minting a thin origin.
 
@@ -3012,24 +3010,16 @@ components:
 
     ReplaceDatasetResponse:
       type: object
-      required: [slug, versioned_to, repointed_campaigns, restamped_measurements]
+      required: [slug]
       additionalProperties: false
-      description: Outcome of one version-and-repoint migration.
+      description: |
+        Outcome of one version-and-repoint migration. A bare acknowledgement: the
+        archival name and the repointed/re-stamped counts are recorded by the
+        migration itself (log line + on-disk marker), not read back off the wire.
       properties:
         slug:
           type: string
           description: The name that was freed (the request's `slug`).
-        versioned_to:
-          type: string
-          description: 'Archival name the old data moved to (`{slug}-v{n}`).'
-        repointed_campaigns:
-          type: integer
-          minimum: 0
-          description: Campaigns whose pin (+ cycle headers) moved with the data.
-        restamped_measurements:
-          type: integer
-          minimum: 0
-          description: Measurement-archive entries re-stamped onto `versioned_to`.
 
     DatasetIndexEntry:
       type: object

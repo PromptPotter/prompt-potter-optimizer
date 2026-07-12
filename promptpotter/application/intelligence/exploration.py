@@ -12,7 +12,7 @@ from promptpotter.application.intelligence.adaptive_queue_mechanism import expec
 from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
-    from promptpotter.domain.results import RoundResult
+    from promptpotter.domain.results import CalibrationModel, RoundResult
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement
 
@@ -616,7 +616,7 @@ def graduate_ruler_model(
     enable: bool = True,
     margin: float = 0.01,
     n_folds: int = 5,
-) -> tuple[str, RaschPosterior]:
+) -> tuple[CalibrationModel, RaschPosterior]:
     """Decide per-dataset whether the difficulty bank uses 1PL or 2PL, and return
     ``(model_name, posterior)`` — the chosen fit, whose ``ruler()`` the cycle reads.
 

@@ -124,6 +124,7 @@ def build_round_summary(rr: RoundResult, origin_cells: dict[str, float]) -> Roun
         composite_fitness=float(rr.composite_fitness),
         cumulative_accuracy=float(rr.cumulative_accuracy),
         cumulative_theta=rr.cumulative_theta,
+        calibration_model=rr.calibration_model,
         candidates=candidates,
         selection=selection,
         health=rr.health,

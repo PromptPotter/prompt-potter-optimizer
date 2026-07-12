@@ -574,11 +574,10 @@ export async function postDraftFromOrigin(originId: string): Promise<DraftCampai
 // campaign's results are preserved under `{slug}-vN` (never overwritten); the
 // freed name is then re-ingested via `postIngestDataset(file, slug)`. Wire
 // contract: `docs/specs/m12-api-openapi.yaml::replaceDataset`.
+// A bare acknowledgement — the archival name and the repointed/re-stamped counts are
+// recorded by the migration itself (log + on-disk marker); no client reads them back.
 export interface ReplaceDatasetResponse {
   slug: string;
-  versioned_to: string;
-  repointed_campaigns: number;
-  restamped_measurements: number;
 }
 
 export async function postReplaceDataset(slug: string): Promise<ReplaceDatasetResponse> {
@@ -699,14 +698,9 @@ export interface OriginQuestion {
 // The resolver turn's own output, persisted to the draft `cache.json` and
 // echoed on the `resolve-origin` response. Drives the check-in panel's
 // assessment line, operator questions, and the ready-turn recap.
+// The turn's findings are not mirrored here — they ride `raised` as clickable commands.
 export interface OriginLastResolution {
   assessment: string;
-  findings: Array<{
-    field: string;
-    proposed_value: string;
-    confidence: string;
-    evidence: string;
-  }>;
   next_action: { kind: string; questions: OriginQuestion[] };
   recap: string;
 }
@@ -718,17 +712,16 @@ export interface OriginLastResolution {
 export interface OriginDegraded {
   grade: "degraded" | "critical";
   reasons: string[];
-  repair_attempts: number;
 }
 
 // One proposal the resolver left for the operator, already shaped as the command
 // a click would fire. The assistant offers; it never triggers. Derived server-side
 // from the turn's findings, so the model never names a command and every payload
-// is guaranteed to validate.
+// is guaranteed to validate. Everything here awaits a click: a high-confidence finding
+// is auto-confirmed inside the turn and never raised, so `confidence` stays server-side.
 export interface RaisedCommand {
   kind: "edit-draft-campaign";
   payload: { draft_id: string; patch: DraftPatch };
-  confidence: string;
   evidence: string;
 }
 

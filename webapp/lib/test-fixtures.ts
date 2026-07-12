@@ -62,6 +62,7 @@ export function roundDoc(over: Partial<RoundResult> = {}): RoundResult {
     matched_origin_composite: 0,
     cumulative_accuracy: 0,
     cumulative_theta: null,
+    calibration_model: null,
     prompt_fields: {},
     pipeline_params: null,
     origin_accuracy: 0,

@@ -462,13 +462,10 @@ class DatasetItem(BaseModel):
 class DatasetPreviewResponse(BaseModel):
     name: str
     row_count: int
-    split_train: int | None = Field(
-        default=None,
-        description="Declared training-bank fold size from `campaign.json::dataset_split`.",
-    )
     split_test: int | None = Field(
         default=None,
-        description="Declared held-out test fold size (not materialized).",
+        description="Declared held-out test fold size (not materialized). The training-bank "
+        "size is `row_count` above — the bank IS the preview, so a second field restated it.",
     )
     items: list[DatasetItem]
 
@@ -578,21 +575,20 @@ def get_dataset_preview(
         for sid in trimmed_order[:limit]
     ]
 
-    # Train/test split from campaign config — display-only; held-out test never materialized.
-    split_train: int | None = None
-    split_test: int | None = None
+    # Held-out test fold from campaign config — display-only; never materialized. Read off
+    # the typed knob (`CampaignConfig.dataset_split`), not a raw-dict re-parse: one field,
+    # one reader, one shape.
     campaign_path = dataset_dir / "campaign.json"
-    if campaign_path.is_file():
-        declared = read_campaign_config_file(campaign_path).get("dataset_split")
-        if isinstance(declared, dict):
-            split_train = declared.get("train")
-            split_test = declared.get("test")
+    declared = (
+        load_campaign_config(read_campaign_config_file(campaign_path)).dataset_split
+        if campaign_path.is_file()
+        else None
+    )
 
     return DatasetPreviewResponse(
         name=raw["name"],
         row_count=len(sample_lookup),
-        split_train=split_train,
-        split_test=split_test,
+        split_test=declared.test if declared else None,
         items=items,
     )
 

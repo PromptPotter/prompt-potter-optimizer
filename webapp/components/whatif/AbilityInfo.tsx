@@ -1,6 +1,7 @@
 "use client";
 
 import { Popover } from "@/components/ui";
+import type { RoundSummary } from "@/lib/api/types.generated";
 
 // Teaches the one piece of vocabulary the fitness surface can't show as a bar:
 // difficulty-adjusted ability θ, the metric the round winner is actually elected
@@ -9,10 +10,9 @@ import { Popover } from "@/components/ui";
 // glossary entry (docs/glossary.md) + methods/exploration-exploitation.md — one
 // corpus, two audiences; don't fork the explanation, keep them in step.
 //
-// The calibration line is hardcoded "1PL (Rasch)" because that is the only model
-// in use today; when 2PL graduates per-dataset (slice 3 of
-// docs/specs/fitness-comparability.md) this reads a served calibration field.
-export function AbilityInfo() {
+// `model` is null while the ruler is cold — a flat ruler is neither 1PL nor 2PL, so the
+// third string is a real state, not a placeholder. Never collapse it into "1PL".
+export function AbilityInfo({ model }: { model: RoundSummary["calibration_model"] }) {
   return (
     <Popover
       align="right"
@@ -44,8 +44,25 @@ export function AbilityInfo() {
             inspector.
           </p>
           <p className="ability-help-calib">
-            Calibration: <strong>1PL (Rasch)</strong> — difficulty only. (2PL, which also weighs how
-            much signal each sample carries, graduates per dataset once the data supports it.)
+            {model === "2PL" ? (
+              <>
+                Calibration: <strong>2PL</strong> — this dataset graduated: θ weighs sample
+                difficulty <em>and</em> how much signal each sample carries, so a sample that
+                separates good candidates from bad counts for more.
+              </>
+            ) : model === "1PL" ? (
+              <>
+                Calibration: <strong>1PL (Rasch)</strong> — difficulty only. (2PL, which also weighs
+                how much signal each sample carries, graduates per dataset once the data supports
+                it.)
+              </>
+            ) : (
+              <>
+                Calibration: <strong>not yet calibrated</strong> — too few banked samples to fit a
+                difficulty ruler, so θ is plain accuracy on the logit scale. It calibrates itself as
+                rounds bank samples.
+              </>
+            )}
           </p>
         </div>
       )}

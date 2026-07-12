@@ -343,7 +343,8 @@ export function FitnessPanel() {
           >
             Sample set{sampleSet ? ` · ${sampleSet.length}` : ""}
           </button>
-          <AbilityInfo />
+          {/* The ruler locks once warm, so the latest round carries the cycle's model. */}
+          <AbilityInfo model={history.at(-1)?.calibration_model ?? null} />
           <CopyButton data={bars} title="Copy all candidate fitness as JSON" />
         </div>
       }

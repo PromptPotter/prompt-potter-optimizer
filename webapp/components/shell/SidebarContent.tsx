@@ -104,13 +104,12 @@ export function SidebarContent({
       )}
       {loaded && groups.length === 0 && lifecycleFilter !== "archived" && (
         <div className="unit-library-empty">
+          {/* Points at the CTA already on screen (Sidebar's `+ New campaign`) rather than
+              sending a browser user to a terminal and a repo path they can't open. */}
           <div className="empty-headline">No campaigns yet</div>
           <div className="empty-body">
-            Start your first campaign from a terminal:
-          </div>
-          <pre className="empty-cmd"><code>python -m promptpotter new &lt;dataset&gt;</code></pre>
-          <div className="empty-hint">
-            See <code>docs/manual/</code> for the quickstart.
+            Hit <strong>+ New campaign</strong> above. Bring the data your pipeline gets
+            wrong — the Potter reads it, sets up the first run, and starts improving.
           </div>
         </div>
       )}
