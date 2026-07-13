@@ -145,10 +145,10 @@ def _check_context_object_honored(round_dict: dict[str, Any], ctx: ValidatorCont
 
     item_seeds = [_key_phrases(item) for item in items]
     misses: list[str] = []
-    for v in variants:
+    for i, v in enumerate(variants):
         blob = _variant_text_blob(v)
         if not any(any(seed in blob for seed in seeds) for seeds in item_seeds if seeds):
-            misses.append(str(v.get("variant_name") or "?"))
+            misses.append(f"C{i + 1}")
     if misses:
         return CheckResult(
             "context_object_honored",
@@ -178,10 +178,10 @@ def _check_param_scope_discipline(round_dict: dict[str, Any], ctx: ValidatorCont
         )
 
     offenders: list[str] = []
-    for v in variants:
+    for i, v in enumerate(variants):
         pp = v.get("pipeline_params_override") or {}
         if _touches_param_scope(pp):
-            offenders.append(str(v.get("variant_name") or "?"))
+            offenders.append(f"C{i + 1}")
     if offenders:
         reason = (
             f"round < {PARAM_UNLOCK_ROUND}"
@@ -219,8 +219,8 @@ def _check_evidence_grounding_present(
         return CheckResult("evidence_grounding_present", True, "no variants emitted")
 
     offenders: list[tuple[str, str]] = []
-    for v in variants:
-        label = str(v.get("variant_name") or "?")
+    for i, v in enumerate(variants):
+        label = f"C{i + 1}"
         eg = v.get("evidence_grounding")
         if not isinstance(eg, dict):
             offenders.append((label, "missing"))
@@ -288,7 +288,20 @@ CHECK_REGISTRY: dict[str, CheckFn] = {
 
 
 def run_all_checks(round_dict: dict[str, Any], ctx: ValidatorContext) -> list[CheckResult]:
-    """Run every registered check against one round, in registry order."""
+    """Run every registered check against one round, in registry order.
+
+    **Empty list when L1 emitted NO variants** — there is nothing to score, and an absent
+    yield must not count as a conformance PASS. Every check short-circuits to
+    ``passed=True`` ("no variants emitted") on an empty variant list, so running them anyway
+    scored 4/4 and turned the worst L1 outcome — a meta-prompt that makes its own children
+    unreadable (``RoundResult.l1_parse_failure``) — into a perfect ``behavior_pass_rate`` of
+    1.0 and a ``healthy`` round-1 verdict, which is the gate that authorises another round of
+    real spend. "Nothing to check" is not "nothing wrong".
+
+    Mirrors :func:`run_all_l2_checks`, which has always gated on whether L2 actually fired.
+    """
+    if not extract_l1_variants(round_dict):
+        return []
     return [fn(round_dict, ctx) for fn in CHECK_REGISTRY.values()]
 
 

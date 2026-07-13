@@ -6,10 +6,9 @@ PromptPotter cycle's meta-prompts (``l1_generate`` / ``l1_critique`` /
 cheap proxy benchmark; the outer L1's mutation surface is the inner
 meta-prompt template fields, exposed via ``pipeline_params``.
 
-See ``docs/specs/roadmap.md`` for the full design —
-five-hook contract, three composable inner-cycle proxies
-(``first_round_delta`` / ``after_N_rounds_delta`` / ``rounds_to_N``), inner
-isolation under ``.runtime/inner/``, cost-realism warning.
+See ``docs/specs/roadmap.md`` for the full design — five-hook contract, the composed
+inner-cycle proxy vector (:class:`~promptpotter.domain.outer_verdict.OuterSampleProxies`),
+inner isolation under ``.runtime/inner/``, cost-realism warning.
 
 The five hooks are wired to the protocol; ``promptpotter_wire_adapter`` shapes
 the inner-cycle payload; ``PromptPotterSession`` is the in-process noop session.
@@ -180,13 +179,13 @@ def _extract_experiment(
     correct answer. So ``ground_truth`` is the inner-result token PREFIX the
     runner emits (``inner:{query}``, ``runner/inner_recursion.py::run_inner_cycle``
     — which appends a compact outcome suffix to its prediction; keep the prefix
-    in sync), NOT the target score. Nothing matches predicted against
-    ground_truth at the outer level (hit is ``fitness >= 1.0`` from the proxy
-    formula) — the token exists so the outer optimizer stops reading every
-    sample as a label-miss ("node fails 100% — reduce parsing errors"), which
-    is false evidence for a proxy-scored sample. ``target_score`` stays in
-    ``inner_tasks.json`` for the runner (proxy ``rounds_to_N``); it is not a
-    matchable ground truth here.
+    in sync). Nothing matches predicted against ground_truth at the outer level
+    (hit is ``fitness >= 1.0`` from the proxy formula) — the token exists so the
+    outer optimizer stops reading every sample as a label-miss ("node fails 100%
+    — reduce parsing errors"), which is false evidence for a proxy-scored sample.
+
+    There is no target score to match against either: ``inner_tasks.json`` declares
+    what an inner cycle may SPEND, never what it is expected to REACH.
     """
     tasks = experiment_data.get("tasks", [])
     queries: list[dict[str, Any]] = []

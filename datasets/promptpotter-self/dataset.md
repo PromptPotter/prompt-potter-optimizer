@@ -10,8 +10,10 @@ Concept: [`docs/concepts/optimizer-of-the-optimizer.md`](../../docs/concepts/opt
 
 Each outer "sample" is one entry in `inner_tasks.json`: it mints and runs a full
 inner PromptPotter campaign on **`justlogic`** (high-depth logic reasoning — chosen
-because its origin sits below target, so the inner loop has headroom to climb and
-outer candidates score differently). Each inner run reports a vector of proxy
+because the inner model is far from what prompting can get out of it there, so the
+inner loop has room to climb and outer candidates score differently. No target
+score is declared: the panel says what an inner cycle may SPEND, never what it is
+expected to REACH). Each inner run reports a vector of proxy
 measurements (`domain/outer_verdict.py::OuterSampleProxies`) — among them
 `first_round_delta`, `normalized_gain` (best inner depth as a fraction of the room
 available to move it, `after_n / max(origin, 1 − origin)`), `delta_per_dollar`, and

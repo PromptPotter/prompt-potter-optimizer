@@ -135,13 +135,27 @@ def best_round_by_cumulative_accuracy(
     return (float(best["cumulative_accuracy"]), best.get("round"))
 
 
-def is_round_winner(changes_description: str | None, winner_label: str) -> bool:
-    """The round winner is the candidate whose diff description equals the round's
-    elected label. Sole definition of the rule — the round-file scoreboard
-    (`RoundResult.scoreboard`) and the dashboard round summary (`build_round_summary`)
-    both call this so the operator-visible winner flag can't diverge between the
-    two surfaces."""
-    return bool(changes_description) and changes_description == winner_label
+def is_round_winner(candidate_id: str, winner_id: str) -> bool:
+    """The round winner is the candidate the election ELECTED — matched by identity.
+
+    Sole definition of the rule; the round-file scoreboard (`RoundResult.scoreboard`), the
+    dashboard round summary (`build_round_summary`) and the terminal readout all call this,
+    so the operator-visible winner flag can't diverge between surfaces.
+
+    **It used to compare `changes_description` — LLM-authored prose — against the round's
+    label, and that broke two ways.** The label is `lineage.changes_description or
+    lineage.id[:12]` (`l1/score/winner.py`), and the `or` fallback exists precisely because
+    the description can be EMPTY: when it was, the label became the id, the prose comparison
+    matched nothing, and **no row at all** was flagged winner. `mask/verdicts.py` reads its
+    `recorded_winner` from this flag and reports `diverged = leader_id != recorded_winner`,
+    so every such round was reported as a divergence — on the surface that feeds the UCB
+    rewind. Conversely, two candidates can carry IDENTICAL descriptions (`detect_invariants`
+    dedups on the mutation SIGNATURE, not the prose), and then both were flagged winner and
+    the consumer's `next(...)` could pick the wrong one.
+
+    The elected id is already on disk in two places — the `ROUND_WINNER` decision record and
+    `RoundResult.prompt_fields["lineage"]["id"]`. Ask it; don't re-derive it from prose."""
+    return bool(winner_id) and candidate_id == winner_id
 
 
 class ScoredCandidate(BaseModel):
@@ -473,11 +487,20 @@ class RoundResult(BaseModel):
         return [
             ScoreboardRow(
                 rank=i,
-                is_winner=is_round_winner(c.changes_description, self.label),
+                is_winner=is_round_winner(c.candidate_id, self.winner_id),
                 **c.model_dump(include=_SCOREBOARD_INCLUDE),
             )
             for i, c in enumerate(ranked, start=1)
         ]
+
+    @property
+    def winner_id(self) -> str:
+        """The elected winner's lineage id, read off the id `l1/score/winner.py` stamped
+        onto ``prompt_fields`` when it built this round (round 0 stamps the origin's own).
+        Empty only when no candidate was crowned — and then no row is a winner, which is
+        the honest answer rather than a prose match that happens to hit."""
+        lineage = self.prompt_fields.get("lineage")
+        return str(lineage.get("id", "")) if isinstance(lineage, dict) else ""
 
 
 class CycleSpend(BaseModel):

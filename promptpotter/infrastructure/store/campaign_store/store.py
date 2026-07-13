@@ -592,21 +592,24 @@ class CampaignStore:
         *,
         kind: str,
         at: str,
-        round: int | None = None,
-        candidate: str | None = None,
     ) -> None:
         """Mark the cycle babysat and append one entry to its intervention log.
 
         Written the moment the operator intervenes (e.g. skip-searchpoint), not at
         teardown — a still-running babysat cycle must already be distinguishable
         from a pure/reproducible one. Idempotent on the boolean; the log grows by
-        one per gesture."""
+        one per gesture.
+
+        No ``round`` / ``candidate``: both were declared, both defaulted to ``None``, and the
+        sole caller could not have filled them if it tried — ``_apply_skip_searchpoint`` writes
+        a one-shot ``skip.flag`` that the RUNNER consumes at some later per-sample checkpoint,
+        so at write time nobody knows which round or candidate will pick it up. Every entry
+        therefore carried ``"round": None, "candidate": None``. A signature asking its caller
+        for information the caller structurally cannot have is not an unwired feature."""
         path = self._index_path(campaign_id, cycle_id)
         data = read_json(path)
         data["human_intervened"] = True
-        data["interventions"].append(
-            {"kind": kind, "at": at, "round": round, "candidate": candidate}
-        )
+        data["interventions"].append({"kind": kind, "at": at})
         data["updated_at"] = utcnow_iso()
         write_json(path, data)
 

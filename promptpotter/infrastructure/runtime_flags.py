@@ -51,11 +51,24 @@ def clear_run_control_flags(cycle_dir: Path) -> None:
     layout.skip_flag.unlink(missing_ok=True)
 
 
-def read_spend_cap(cycle_dir: Path) -> float | None:
-    """Live USD cap from ``spend_cap.json::max_usd``; ``None`` when absent/unreadable."""
+def read_spend_caps(cycle_dir: Path) -> tuple[float | None, int | None]:
+    """Live ``(usd, tokens)`` ceilings from ``spend_cap.json``; ``None`` per key when
+    absent / unreadable / the wrong type.
+
+    **The one place that knows this file's shape.** Its predecessor read only ``max_usd``
+    and had zero callers, while the runner hand-rolled its own inline reader of the SAME
+    file for both keys — so the module docstring's "single read surface" claim was false,
+    and a key rename in the ``change-spend-budget`` applier would have had to be chased
+    into two readers, one of which nothing exercised."""
     data = read_json_tolerant(CycleLayout(cycle_dir).spend_cap)
-    value = data.get("max_usd") if isinstance(data, dict) else None
-    return float(value) if isinstance(value, int | float) else None
+    if not isinstance(data, dict):
+        return None, None
+    usd = data.get("max_usd")
+    tokens = data.get("max_tokens")
+    return (
+        float(usd) if isinstance(usd, int | float) and not isinstance(usd, bool) else None,
+        int(tokens) if isinstance(tokens, int) and not isinstance(tokens, bool) else None,
+    )
 
 
 # dashboard.json untouched for longer than this ⇒ an active cycle's producer is
@@ -131,5 +144,5 @@ __all__ = [
     "derive_run_phase",
     "is_checkin",
     "is_paused",
-    "read_spend_cap",
+    "read_spend_caps",
 ]

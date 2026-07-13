@@ -20,30 +20,9 @@ __all__ = [
     "apply_p_best_update",
     "apply_phase",
     "backfill_spend_rates",
-    "empty_bucket",
-    "empty_spend",
     "roll_p_best_at_round_complete",
     "top_n_p_best",
 ]
-
-
-def empty_bucket() -> dict[str, Any]:
-    """One ``state["spend"]`` sub-bucket — backend or loop."""
-    return {
-        "used_usd": 0.0,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "rate_known": False,
-        "model": None,
-    }
-
-
-def empty_spend() -> dict[str, Any]:
-    return {
-        "backend": empty_bucket(),
-        "loop": empty_bucket(),
-        "total_used_usd": 0.0,
-    }
 
 
 def backfill_spend_rates(spend: dict[str, Any]) -> dict[str, Any]:

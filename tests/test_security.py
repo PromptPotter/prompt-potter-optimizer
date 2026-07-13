@@ -241,7 +241,6 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
             "inner_benchmark_config": {
                 "n_samples_per_inner_round": 24,
                 "max_inner_rounds": 7,
-                "target_score": 0.6,
             },
             "tasks": [{"id": "justlogic-d67/seed-0", "inner_dataset_seed": 0}],
         },

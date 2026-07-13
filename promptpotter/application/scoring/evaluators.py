@@ -19,7 +19,6 @@ if TYPE_CHECKING:
 
 
 Scope = Literal["per_sample", "per_round"]
-DataType = Literal["NUMERIC", "BOOLEAN"]
 
 
 # Cost/latency yardsticks for the cost-shaped evaluators. Intentionally fixed
@@ -312,7 +311,6 @@ class Evaluator:
     # empty-collection default here used to read as PERFECT — no errors, no latency, maximal
     # compactness — precisely inverted for a health term a formula reads as a positive signal.
     compute: Callable[..., float | None]
-    data_type: DataType = "NUMERIC"
     # `high` = larger is better; `low` = larger is worse (webapp What-If panel direction-corrects).
     direction: Literal["high", "low"] = "high"
     node_type: str | None = None
@@ -449,7 +447,6 @@ def evaluators_meta() -> list[dict[str, Any]]:
             "name": ev.name,
             "description": ev.description,
             "scope": ev.scope,
-            "data_type": ev.data_type,
             "direction": ev.direction,
             "node_type": ev.node_type,
         }

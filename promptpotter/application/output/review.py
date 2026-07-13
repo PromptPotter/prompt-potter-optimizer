@@ -360,20 +360,18 @@ def _render_variants_table(audit: dict[str, Any] | None, *, scored: bool) -> lis
         # Without per-variant scores in the audit dict the table degrades to
         # changes_description only — full per-variant scoring lives on the
         # round_data dict's candidate_scores array, surfaced when available.
-        for v in variants:
-            name = str(v.get("variant_name") or "?")
+        for i, v in enumerate(variants):
             changes = (v.get("changes_description") or "").replace("|", "\\|").strip()[:80]
             evidence = _fmt_evidence_cell(v.get("evidence_grounding"))
-            parts.append(f"| `{name}` | — | — | — | — | — | {evidence} | {changes} |")
+            parts.append(f"| `C{i + 1}` | — | — | — | — | — | {evidence} | {changes} |")
     else:
         parts.append("| cand_id | changes | derived_axes | evidence |")
         parts.append("|---|---|---|---|")
-        for v in variants:
-            name = str(v.get("variant_name") or "?")
+        for i, v in enumerate(variants):
             changes = (v.get("changes_description") or "").replace("|", "\\|").strip()[:80]
             axes = ", ".join(sorted((v.get("pipeline_params_override") or {}).keys()))
             evidence = _fmt_evidence_cell(v.get("evidence_grounding"))
-            parts.append(f"| `{name}` | {changes} | {axes} | {evidence} |")
+            parts.append(f"| `C{i + 1}` | {changes} | {axes} | {evidence} |")
     parts.append("")
     return parts
 

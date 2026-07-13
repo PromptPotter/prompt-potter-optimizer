@@ -233,7 +233,6 @@ def render_composite_fitness_block(
     *,
     origin: float | None = None,
     use_short_names: bool = False,
-    legend: str | None = None,
 ) -> list[str]:
     """3-line round-level composite_fitness block.
 
@@ -243,9 +242,6 @@ def render_composite_fitness_block(
         line 3: ``name1=val  name2=val  ...``  (named evaluators present in
                  the formula, full names by default; short codes when
                  ``use_short_names`` is set)
-
-    *legend* (optional) appends a 4th line ``  legend: <text>`` so callers
-    can name the abbreviations they used in *formula*. Skipped when None.
 
     Falls back to a single line ``composite_fitness=0.6042 (formula unavailable)``
     when *formula* is None / empty.
@@ -269,7 +265,7 @@ def render_composite_fitness_block(
     else:
         line2 = f"formula:  {formula}"
 
-    # Line 3 (+ optional legend): named evaluator values.
+    # Line 3: named evaluator values.
     #
     # Full-names mode: list evaluators that literally appear in the formula
     # text (so a custom formula's namespace gets displayed).
@@ -277,7 +273,9 @@ def render_composite_fitness_block(
     # Short-names mode: the formula carries codes (``acc``, ``H``, ``R``)
     # that don't match registry full names — list every evaluator from the
     # dict with its short code. Operator sees the full input vector; the
-    # formula text above tells them which codes apply.
+    # formula text above tells them which codes apply. Line 2 inlines each
+    # code's resolved value, which is why there is no legend line: the
+    # abbreviations are already reconciled where they are used.
     if not evaluators:
         return [line1, line2]
 
@@ -289,8 +287,4 @@ def render_composite_fitness_block(
     if not names:
         return [line1, line2]
 
-    line3 = f"  {_pairs_line(names, evaluators, use_short_names=use_short_names)}"
-    out = [line1, line2, line3]
-    if legend:
-        out.append(f"  legend: {legend}")
-    return out
+    return [line1, line2, f"  {_pairs_line(names, evaluators, use_short_names=use_short_names)}"]

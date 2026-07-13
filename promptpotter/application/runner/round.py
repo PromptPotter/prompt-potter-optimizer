@@ -83,9 +83,11 @@ async def emit_origin_round(
     sc = ScoredCandidate(
         candidate_id=osp.lineage.id,
         label=label,
-        # changes_description == round label ⇒ ``is_round_winner`` marks the sole
-        # origin candidate the winner, same rule every round's winner uses.
-        changes_description=label,
+        # The origin changed nothing, so it describes no change. This used to be coaxed to
+        # equal the round label, purely so the old prose-matching ``is_round_winner`` would
+        # flag C0 as its own round's winner; that rule is now identity on ``candidate_id``
+        # (both this row and the round stamp ``osp.lineage.id``), so the coaxing is gone.
+        changes_description="",
         accuracy=tr.origin_accuracy,
         composite_fitness=tr.origin_composite_fitness,
         composite_ci_lo=ci_lo,

@@ -38,7 +38,10 @@ TRANSCRIPT_PREDICTED_CAP = 200
 # Worst-N nodes the evidence_health panel lists — enough to show a dead enricher
 # plus a couple of collateral nodes, never a full pipeline dump.
 NODE_FAILURE_RENDER_CAP = 3
-# L2-authored framing strings; overrun is healed (truncated + warned), not raised.
+# L2-authored framing strings; overrun is healed (truncated + warned), not raised. A RAIL:
+# l2_context's answer_format asks for at most 2 sentences per field, which the writer can
+# honour — the char figure it used to quote instead could not be, and every round paid a
+# mid-sentence clip for it.
 TASK_CONTEXT_VALUE_CAP = 300
 # `runtime_failures` signal only emits first-seen failures in the last K rounds; older entries
 # collapse to a suppression line so long campaigns + small models stay within budget.

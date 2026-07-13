@@ -9,7 +9,7 @@ from itertools import combinations, pairwise
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
-from promptpotter.application.scoring.formula import rescore_results
+from promptpotter.application.scoring.formula import ScoringFormulaError, rescore_results
 from promptpotter.domain.measurement_provenance import entry_grade
 from promptpotter.domain.rendering import display_fitness
 from promptpotter.domain.scoring import Scorer
@@ -343,16 +343,55 @@ class AxisIndex:
         *,
         dataset_name: str | None,
     ) -> None:
-        """Incremental archive refresh, dataset-scoped (required) to prevent cross-dataset pollution."""
+        """Incremental archive refresh, dataset-scoped (required) to prevent cross-dataset pollution.
+
+        **A historical run this formula cannot score is SKIPPED, never fatal.** The archive is
+        cross-run and long-lived, so it holds rows written under an OLDER observation vocabulary:
+        `promptpotter-self` runs from before ``normalized_gain`` replaced ``headroom_lift`` still
+        carry the old key, and today's formula names the new one. ``rescore_results`` is
+        deliberately fail-loud — for the LIVE scorer that is exactly right, because there the
+        namespace is materialized fresh and a missing name IS a broken formula. Here it is not:
+        it is a row from another era, and letting it raise killed the whole cycle.
+
+        That is not hypothetical. It is why **no `promptpotter-self` origin had ever completed
+        round 0**: the origin scored all 11 cells (3.5 h, $0.29), then this refresh hit one
+        stale-epoch row and crashed the run *after* the measurement was already paid for, before
+        ``round_0000.json`` was ever written.
+
+        Skips are COUNTED and LOGGED, never silent and never scored 0.0 — a fake zero would
+        poison the very digest the L1/L2/L3 prompts read. The run is still marked seen, so a
+        permanently-unscoreable row is not re-tried (and re-logged) on every refresh."""
         added = 0
+        skipped: list[str] = []
         for run_id, detail in archive_views.runs_since(
             store, self.sample_index._seen_runs, dataset_name=dataset_name
         ):
             if scorer is not None:
-                rescore_results(detail.get("measurements") or [], scorer, scorer_id, scorer_formula)
+                try:
+                    rescore_results(
+                        detail.get("measurements") or [], scorer, scorer_id, scorer_formula
+                    )
+                except ScoringFormulaError as exc:
+                    skipped.append(run_id)
+                    self.sample_index.mark_seen(run_id)
+                    logger.warning(
+                        "axis refresh: archived run %r is unscoreable under the active formula "
+                        "— skipping it (it predates the current observation vocabulary). %s",
+                        run_id,
+                        exc,
+                    )
+                    continue
             self.sample_index.ingest_run(detail)
             self.sample_index.mark_seen(run_id)
             added += 1
+        if skipped:
+            logger.warning(
+                "axis refresh: %d archived run(s) skipped as unscoreable under the active "
+                "formula (%s) — the digest is built from the %d that scored.",
+                len(skipped),
+                ", ".join(skipped[:5]),
+                added,
+            )
 
         # Track touched axes to invalidate exactly those impact-cache slots.
         # Grade-C runs (incidental connector-retrieval short-circuits) are dropped

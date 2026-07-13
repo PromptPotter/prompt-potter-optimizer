@@ -171,12 +171,28 @@ def _load_p_best_trajectory(
     return trajectory, last_seen
 
 
+def _sample_queries(rounds: list[RoundResult]) -> dict[int, str]:
+    """``{sample_id: query}`` harvested from the rounds already in hand.
+
+    This used to be a ``sample_query_lookup`` PARAMETER, and neither caller of
+    :func:`from_disk_log` passed it — so ``HardSamplesView.sample_query_lookup`` was
+    permanently ``{}`` and the ``query`` column of the hardness leaderboard rendered BLANK in
+    every ``log.md`` ever written. Asking the caller for data the function is already holding
+    is what let that go unnoticed: the rounds carry every sample's ``query``, so derive it."""
+    out: dict[int, str] = {}
+    for rr in rounds:
+        for row in rr.results:
+            sid, query = row.get("sample_id"), row.get("query")
+            if isinstance(sid, int) and isinstance(query, str) and sid not in out:
+                out[sid] = query
+    return out
+
+
 def from_disk_log(
     index: dict[str, Any],
     rounds: list[RoundResult],
     *,
     hard_samples_artifact: dict[str, Any] | None = None,
-    sample_query_lookup: dict[int, str] | None = None,
     streams_dir: Path | None = None,
     fork_indices: list[dict[str, Any]] | None = None,
 ) -> LogMdView:
@@ -236,7 +252,7 @@ def from_disk_log(
     hard = (
         HardSamplesView(
             artifact=dict(hard_samples_artifact),
-            sample_query_lookup=dict(sample_query_lookup or {}),
+            sample_query_lookup=_sample_queries(rounds),
         )
         if hard_samples_artifact
         else None

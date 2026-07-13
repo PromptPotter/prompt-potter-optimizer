@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.optimization.validators.l1_strict import INVARIANT_REASONS
 from promptpotter.domain.opt_search_point import node_config_items
 from promptpotter.domain.rendering import display_fitness, round_winner_key
 
@@ -217,13 +218,10 @@ def _scoreboard(
     column compares against origin on that same subset; otherwise the full-set
     ``origin_accuracy`` fallback applies. Returns multi-line string ready to print.
     """
-    # Filter synthetic-zeroed variants (no_op / duplicate) — they did not
-    # burn an LLM call and ranking them as 0.0% delta distorts the verdict.
-    scored = [
-        s
-        for s in candidate_scores
-        if s.invalid_reason not in ("no_op_variant", "duplicate_variant")
-    ]
+    # Filter synthetic-zeroed variants (no_op / duplicate) — they did not burn an LLM call
+    # and ranking them as 0.0% delta distorts the verdict. The set is imported, never
+    # re-spelled: it belongs to the validator that EMITS these reasons.
+    scored = [s for s in candidate_scores if s.invalid_reason not in INVARIANT_REASONS]
     if not scored:
         return ""
 

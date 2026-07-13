@@ -292,9 +292,7 @@ def test_inner_narrative_carries_evidence_within_budget() -> None:
     )
     from promptpotter.domain.results import CycleResult, RoundResult, ScoredCandidate
 
-    spec = _InnerTaskSpec(
-        inner_dataset="justlogic", seed=3, n_samples=24, n_rounds=2, target=0.6, n_variants=2
-    )
+    spec = _InnerTaskSpec(inner_dataset="justlogic", seed=3, n_samples=24, n_rounds=2, n_variants=2)
 
     def _round(n: int, desc: str, fix: str, highlights: list[str]) -> RoundResult:
         return RoundResult(
@@ -756,7 +754,6 @@ def test_schema_field_rename_is_locked_by_default_and_never_silently_half_applie
             {
                 "variants": [
                     {
-                        "variant_name": "v",
                         "mutation_rationale": "r",
                         "prompt_fields_override": {"persona": "p"},
                     }
@@ -772,7 +769,6 @@ def test_schema_field_rename_is_locked_by_default_and_never_silently_half_applie
                 {
                     "variants": [
                         {
-                            "variant_name": "v",
                             "changes_description": "r",
                             "prompt_fields_override": {"persona": "p"},
                         }
@@ -782,7 +778,11 @@ def test_schema_field_rename_is_locked_by_default_and_never_silently_half_applie
 
         # An ambiguous rename onto a surviving field is dropped, not applied.
         set_optimizer_prompt_overrides(
-            {"l1_generate": {"output_schema_field_names": {"changes_description": "variant_name"}}}
+            {
+                "l1_generate": {
+                    "output_schema_field_names": {"changes_description": "prompt_fields_override"}
+                }
+            }
         )
         assert effective_l1_field_names() == {}
 

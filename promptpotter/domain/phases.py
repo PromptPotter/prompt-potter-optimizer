@@ -150,36 +150,86 @@ class StopOutcome(enum.StrEnum):
 
 
 class StopReasonInfo(NamedTuple):
-    """One row of the canonical :class:`StopReason` classification table."""
+    """One row of the canonical :class:`StopReason` classification table.
+
+    ``halts_mid_round`` — the cycle stopped PARTWAY through a round, so the round
+    left on disk is **partial**: fewer samples scored than the dataset holds. Every
+    reader of a round file (the resume replayer, the mask, the L4 proxy trajectory)
+    needs this, because a partial round that reads as complete carries a fitness
+    computed over a handful of samples as if it were the whole bank.
+
+    ``has_traceback`` — the stop stashed a formatted traceback to surface.
+
+    **No defaults, on purpose.** A new ``StopReason`` must state both facts, and the
+    exhaustiveness raise below is what forces it. This is exactly the fail-open that
+    bit us: ``_finalize_run`` used to re-derive "did this halt mid-round?" as a private
+    ``or``-chain of four reasons, with no exhaustiveness check — so when the budget gate
+    learned to stop INSIDE the per-sample loop (``scoring/query_loop.py``, carrying
+    SPEND_BUDGET / TOKEN_BUDGET), neither reason was in the chain. A budget-halted round
+    that scored 1 of 20 samples was written to ``round_NNNN.json`` with no ``interrupted``
+    marker and no ``index.json::interrupted_round`` — indistinguishable from a full one.
+    Observed live on ``justlogic__b2529a`` before this was folded in.
+    """
 
     label: str
     outcome: StopOutcome
+    halts_mid_round: bool
+    has_traceback: bool
 
 
 # The single source of truth mapping each terminal reason to its operator-facing
-# label + outcome class. Exhaustiveness is checked at import time below — adding a
-# StopReason without a row here raises before the module loads.
+# label + outcome class + partial-round/traceback facts. Exhaustiveness is checked at
+# import time below — adding a StopReason without a row here raises before the module loads.
+#
+# Mid-round is decided by WHERE the stop is raised, not by how bad it sounds:
+#   - `scoring/query_loop.py` raises inside the per-sample loop -> SPEND_BUDGET, TOKEN_BUDGET.
+#   - a pause returns from that same loop between samples -> PAUSED.
+#   - CRASHED / RENDER_ERROR / OPTIMIZER_TIMEOUT are exceptions from anywhere, round included.
+#   - everything else fires at a round BOUNDARY: `runner/round.py` raises only after
+#     `close_round`, escalation's ABORT/REBASED ride the post-round transition seam,
+#     ORIGIN_GATE runs once round 0 is scored, BACKEND_UNREACHABLE reads a CLOSED round's
+#     verdict, and DIVERGED is decided at resume before any round starts.
 STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
-    StopReason.PERFECT: StopReasonInfo("Perfect score", StopOutcome.SUCCESS),
-    StopReason.TARGET_HIT: StopReasonInfo("Target reached", StopOutcome.SUCCESS),
-    StopReason.MAX_ROUNDS: StopReasonInfo("Max rounds", StopOutcome.SUCCESS),
-    StopReason.LIVES_EXHAUSTED: StopReasonInfo("Out of lives", StopOutcome.SUCCESS),
-    StopReason.HARD_CAP: StopReasonInfo("Round cap", StopOutcome.SUCCESS),
-    StopReason.SWEEP_COMPLETE: StopReasonInfo("Sweep complete", StopOutcome.SUCCESS),
-    StopReason.DIAG_COMPLETE: StopReasonInfo("Diagnostic complete", StopOutcome.SUCCESS),
-    StopReason.L3_PATIENCE: StopReasonInfo("Converged (L3 patience)", StopOutcome.SUCCESS),
-    StopReason.REBASED: StopReasonInfo("Rebased to fork", StopOutcome.SUCCESS),
-    StopReason.PAUSED: StopReasonInfo("Paused", StopOutcome.PAUSED),
-    StopReason.ABORT: StopReasonInfo("Escalation abort", StopOutcome.HALTED),
-    StopReason.SPEND_BUDGET: StopReasonInfo("Spend budget reached", StopOutcome.HALTED),
-    StopReason.TOKEN_BUDGET: StopReasonInfo("Token budget reached", StopOutcome.HALTED),
-    StopReason.ORIGIN_GATE: StopReasonInfo("Origin gate (unhealthy origin)", StopOutcome.HALTED),
-    StopReason.BACKEND_UNREACHABLE: StopReasonInfo("Backend unreachable", StopOutcome.HALTED),
-    StopReason.CRASHED: StopReasonInfo("Crashed", StopOutcome.FAILED),
-    StopReason.PRODUCER_VANISHED: StopReasonInfo("Producer vanished", StopOutcome.FAILED),
-    StopReason.RENDER_ERROR: StopReasonInfo("Render error", StopOutcome.FAILED),
-    StopReason.DIVERGED: StopReasonInfo("Diverged", StopOutcome.FAILED),
-    StopReason.OPTIMIZER_TIMEOUT: StopReasonInfo("Optimizer timeout", StopOutcome.FAILED),
+    StopReason.PERFECT: StopReasonInfo("Perfect score", StopOutcome.SUCCESS, False, False),
+    StopReason.TARGET_HIT: StopReasonInfo("Target reached", StopOutcome.SUCCESS, False, False),
+    StopReason.MAX_ROUNDS: StopReasonInfo("Max rounds", StopOutcome.SUCCESS, False, False),
+    StopReason.LIVES_EXHAUSTED: StopReasonInfo("Out of lives", StopOutcome.SUCCESS, False, False),
+    StopReason.HARD_CAP: StopReasonInfo("Round cap", StopOutcome.SUCCESS, False, False),
+    StopReason.SWEEP_COMPLETE: StopReasonInfo("Sweep complete", StopOutcome.SUCCESS, False, False),
+    StopReason.DIAG_COMPLETE: StopReasonInfo(
+        "Diagnostic complete", StopOutcome.SUCCESS, False, False
+    ),
+    StopReason.L3_PATIENCE: StopReasonInfo(
+        "Converged (L3 patience)", StopOutcome.SUCCESS, False, False
+    ),
+    StopReason.REBASED: StopReasonInfo("Rebased to fork", StopOutcome.SUCCESS, False, False),
+    StopReason.PAUSED: StopReasonInfo("Paused", StopOutcome.PAUSED, True, False),
+    StopReason.ABORT: StopReasonInfo("Escalation abort", StopOutcome.HALTED, False, False),
+    # The two the private or-chain missed: the budget gate stops INSIDE the sample loop.
+    StopReason.SPEND_BUDGET: StopReasonInfo(
+        "Spend budget reached", StopOutcome.HALTED, True, False
+    ),
+    StopReason.TOKEN_BUDGET: StopReasonInfo(
+        "Token budget reached", StopOutcome.HALTED, True, False
+    ),
+    StopReason.ORIGIN_GATE: StopReasonInfo(
+        "Origin gate (unhealthy origin)", StopOutcome.HALTED, False, False
+    ),
+    StopReason.BACKEND_UNREACHABLE: StopReasonInfo(
+        "Backend unreachable", StopOutcome.HALTED, False, False
+    ),
+    StopReason.CRASHED: StopReasonInfo("Crashed", StopOutcome.FAILED, True, True),
+    # Written by the REAPER straight onto index.json — the producer is already gone, so
+    # `_finalize_run` never runs and never reads this row. True is the honest value: a
+    # vanished process died at an arbitrary point, so whatever round was open is partial.
+    StopReason.PRODUCER_VANISHED: StopReasonInfo(
+        "Producer vanished", StopOutcome.FAILED, True, False
+    ),
+    StopReason.RENDER_ERROR: StopReasonInfo("Render error", StopOutcome.FAILED, True, True),
+    StopReason.DIVERGED: StopReasonInfo("Diverged", StopOutcome.FAILED, False, False),
+    StopReason.OPTIMIZER_TIMEOUT: StopReasonInfo(
+        "Optimizer timeout", StopOutcome.FAILED, True, False
+    ),
 }
 
 _missing_stop_info = set(StopReason) - set(STOP_REASON_INFO)

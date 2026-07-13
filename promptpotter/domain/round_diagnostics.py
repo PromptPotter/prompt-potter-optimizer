@@ -14,7 +14,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-TrajectoryClass = Literal["healthy", "oscillating", "plateau", "regressing", "ceiling"]
+# No "regressing": `round_analysis._trajectory` is the sole producer and never returns it
+# (it computes a `regressions` counter, but only as an input to the OSCILLATING test).
+TrajectoryClass = Literal["healthy", "oscillating", "plateau", "ceiling"]
 
 
 @dataclass(frozen=True)

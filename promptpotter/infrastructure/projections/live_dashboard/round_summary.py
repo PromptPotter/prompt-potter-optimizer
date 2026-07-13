@@ -89,7 +89,6 @@ def build_round_summary(rr: RoundResult, origin_cells: dict[str, float]) -> Roun
     L4 round, or when summarizing round 0 itself — the origin is the control, never a
     verdict subject).
     """
-    winner_label = rr.label
     # Both display models are strict name-subsets of ``ScoredCandidate`` plus a derived
     # ``is_winner`` — so each is a ``model_dump(include=…)`` projection, not a hand-copy.
     # The include-set is the target model's OWN field list minus ``is_winner``: a field
@@ -98,7 +97,7 @@ def build_round_summary(rr: RoundResult, origin_cells: dict[str, float]) -> Roun
     candidates = [
         RoundSummaryCandidate(
             **c.model_dump(include=_SUMMARY_INCLUDE),
-            is_winner=is_round_winner(c.changes_description, winner_label),
+            is_winner=is_round_winner(c.candidate_id, rr.winner_id),
         )
         for c in rr.candidate_scores
     ]
@@ -111,7 +110,7 @@ def build_round_summary(rr: RoundResult, origin_cells: dict[str, float]) -> Roun
             [
                 CandidateInfo(
                     **c.model_dump(include=_CANDIDATE_INFO_INCLUDE),
-                    is_winner=is_round_winner(c.changes_description, winner_label),
+                    is_winner=is_round_winner(c.candidate_id, rr.winner_id),
                 )
                 for c in rr.candidate_scores
             ],

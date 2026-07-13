@@ -56,11 +56,18 @@ class OuterSampleProxies(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    # `after_N_rounds_delta` / `rounds_to_N` are wire keys: they name the pipeline_data
-    # observation the outer scoring formula reads, so their spelling is not ours to normalize.
+    # `after_N_rounds_delta` is a wire key: it names the pipeline_data observation the outer
+    # scoring formula reads, so its spelling is not ours to normalize.
+    #
+    # There is deliberately NO `rounds_to_N`, and no *target* anywhere in this vector. Counting
+    # rounds-to-a-threshold requires declaring the threshold, i.e. asserting up front how much
+    # room the inner benchmark has — and that assumption was both unused (the term carried no
+    # candidate gradient and was retired from the scoring formula) and wrong to make: a task the
+    # inner model looks bad at is a task it has not been tuned for yet, not a task with no
+    # headroom. `normalized_gain` divides the move by the room to the REAL ceiling
+    # (`max(origin, 1−origin)`), which needs no such declaration.
     first_round_delta: float = Field(allow_inf_nan=False)
     after_N_rounds_delta: float = Field(allow_inf_nan=False)  # noqa: N815
-    rounds_to_N: int = Field(ge=0)  # noqa: N815
     normalized_gain: float = Field(ge=-1.0, le=1.0)
     cleanliness: float = Field(ge=0.0, le=1.0)
     diversity_health: float = Field(ge=0.0, le=1.0)

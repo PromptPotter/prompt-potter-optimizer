@@ -10,8 +10,11 @@ The inner benchmark is **justlogic, depth-6/7 deductive reasoning** (NOT
 arithmetic). Each inner sample is a set of premises plus a candidate conclusion;
 the inner model must answer **TRUE / FALSE / Uncertain** — TRUE/FALSE when the
 premises strictly determine the conclusion, `Uncertain` only when they are
-genuinely indeterminate. The origin sits well below what the inner model can
-reach — real headroom. The goal is to improve, not to hit a number.
+genuinely indeterminate. The task is hard for the inner model *as currently
+prompted*, which is the point: a task it looks bad at is a task it has not been
+tuned for yet, not a task with a low ceiling. Assume the room to improve is
+large. The goal is to improve, not to reach any particular number — there is no
+target score, and nothing here counts rounds to one.
 
 Do NOT assume a failure mode — read one from the evidence. The critique and
 sample transcripts show what the inner loop actually did (which candidates it
@@ -34,8 +37,8 @@ Composite formula in ``campaign.json::scoring`` — lift × quality × efficienc
 - ``delta_per_dollar`` — efficiency modulator
 
 Better = deeper best-discovered lift, cleanly and cheaply won.
-(``first_round_delta`` / ``after_N_rounds_delta`` / ``rounds_to_N`` are emitted
-as raw observations but held out of the formula.)
+(``first_round_delta`` / ``after_N_rounds_delta`` are emitted as raw observations
+but held out of the formula — both are collinear with ``normalized_gain``.)
 
 ## Mutation surface
 

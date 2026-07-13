@@ -105,7 +105,7 @@ class NodeLayoutSpec(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    editor: Literal["l2_l4", "l4", "static"]
+    editor: Literal["l2_l4", "l4"]
     possible: frozenset[str]
     mandatory: frozenset[str]
     floor: L1Layout

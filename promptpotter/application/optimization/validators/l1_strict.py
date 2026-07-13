@@ -49,6 +49,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "DROPPED_MANDATORY_PLACEHOLDER",
+    "INVARIANT_REASONS",
     "L1_CONFIG_NOT_IN_RUNTIME_FAILURES",
     "L1_PROMPT_BLOCKS_IN_LIBRARY",
     "L1_PROMPT_PLACEHOLDERS_INTACT",
@@ -103,7 +104,7 @@ def effective_l1_field_names() -> dict[str, str]:
 
     Empty on every normal, non-L4 cycle (no override bound). A proposed rename is dropped when
     its target collides with a field that is not itself being renamed away
-    (`{changes_description: variant_name}` would make the response ambiguous).
+    (`{changes_description: prompt_fields_override}` would make the response ambiguous).
     """
     proposed = resolve_node_schema_field_names("l1_generate")
     if not proposed:
@@ -657,7 +658,13 @@ class L1YieldStats:
     l1_parse_failure: str | None = None
 
 
-_INVARIANT_REASONS = frozenset({"no_op_variant", "duplicate_variant"})
+# The two reasons `detect_invariants` emits — a synthetic-0 candidate that never burned an
+# LLM call. PUBLIC because `presentation/views/display.py` must filter on exactly this set
+# when it ranks candidates, and the private name forced it to hand-copy the strings; a
+# third invariant reason would then have been stripped from the wound list here while the
+# display kept ranking it as a real 0.0 candidate — the very distortion its comment says
+# it is preventing.
+INVARIANT_REASONS = frozenset({"no_op_variant", "duplicate_variant"})
 
 
 def _parent_value(parent_cfg: dict[str, Any], param: str, proposed: Any) -> Any:
@@ -700,7 +707,7 @@ def detect_invariants(
         cp.osp.memory.wounds.validation_failures = [
             vf
             for vf in cp.osp.memory.wounds.validation_failures
-            if vf.reason not in _INVARIANT_REASONS
+            if vf.reason not in INVARIANT_REASONS
         ]
     seen: dict[tuple[Any, ...], int] = {}
     n_no_op = 0

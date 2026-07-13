@@ -105,17 +105,17 @@ def _resolve_round_order(
     return build_round_order(best_grades, posterior.delta, sorted(posterior.delta.keys()))
 
 
-def empty_artifact(
-    *,
-    cycle_id: str | None = None,
-    disabled: bool = False,
-) -> dict[str, Any]:
-    """Schema-valid stub for zero-obs / disabled campaigns; renderers short-circuit on ``n_observations == 0``."""
+def empty_artifact(*, cycle_id: str | None = None) -> dict[str, Any]:
+    """Schema-valid stub for a zero-observation campaign; renderers short-circuit on
+    ``n_observations == 0``.
+
+    No ``disabled`` flag: it defaulted to False, the sole caller omitted it, and the other
+    producer hardcoded False — so the field was a constant, and the ``artifact.get("disabled")``
+    arm of the heatmap guard could never fire. ``n_observations == 0`` is the one real check."""
     return {
         "schema_version": ARTIFACT_SCHEMA_VERSION,
         "cycle_id": cycle_id,
         "generated_at": utcnow_iso(),
-        "disabled": disabled,
         "truncated": False,
         "total_candidates": 0,
         "total_samples": 0,
@@ -228,7 +228,6 @@ def build_hard_samples_artifact_from_observations(
         "schema_version": ARTIFACT_SCHEMA_VERSION,
         "cycle_id": cycle_id,
         "generated_at": utcnow_iso(),
-        "disabled": False,
         "truncated": truncated,
         "total_candidates": total_candidates,
         "total_samples": total_samples,

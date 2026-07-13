@@ -40,7 +40,7 @@ shape was the old bloat source; readiness buckets replaced it.
 - **`*_override → *_updates` L1 delta-key rename** (+ webapp searchpoint-projection collapse). `prompt_fields_override` / `task_context_override` / `pipeline_params_override` / `pp_override` are merges, not replacements, but named "override." **Decision (settle first):** unify the pipeline delta to the glossary word **`pipeline_overlay`** everywhere (kills the short/long two-name tax); the prompt/context deltas become `*_updates`. Rename writer→reader in one commit (schema `dispatch/schemas.py::L1Variant` is the source of truth — the LLM contract auto-propagates), collapse the two webapp readers (`searchPoint.ts` + `candidateSearchPoint.ts`) into one `wireToCandidateSearchPoint(wire)` helper. Full site map: grep `*_override`. **Blocker:** invalidates on-disk cycles (round-file key + optimizer structured-output contract) — verify against a FRESH cycle that completes round 1, not a resume.
 
 **Operator decision:**
-- `shared/composite.py:204::legend: str | None = None` — never overridden (zero non-`None` callers); the body does use it (appends a 4th line). Drop the param if the feature is dead, or add a caller.
+- (`shared/composite.py::legend` — **DONE**, deleted. Verified all three `render_composite_fitness_block` call sites (`views/render/markdown.py`, `views/live/display.py`, `views/render/text.py`); none passed it, so the param was always `None` and the `if legend:` branch was unreachable. Short-names mode already inlines each code's resolved value into the formula line, so the abbreviations are reconciled where they're used — the legend line had nothing left to do.)
 - (`origin_gate` was paired here — **dropped**, verified live: the `strict`/`critical_only`/`off` literal is branched in `termination.py::origin_gate_tripped` and tested in `test_numerics.py`, not vestigial.)
 
 **Security posture / migration:**
@@ -61,7 +61,7 @@ shape was the old bloat source; readiness buckets replaced it.
 
 - **Optimizer model unreliable on heavy L2/L3 structured output** — `openrouter/gpt-oss-120b` (all optimizer nodes) is slow + schema-noncompliant on the large `L3PlanOutput`/`L2*` shapes, firing the repair retry and sometimes failing it. Swapping it is a per-node overlay edit (`datasets/_optimizer/pipeline.json::nodes.{l2_context,l3_plan}.config.model`), not service code — operator picks a faster/schema-reliable model, or shrink the schema. Needs a live cycle reaching L3 to measure repair-rate.
 - **`RunPhase.STOPPING` thin window for non-paused stops** — declared only at the runner's cooperative checkpoints, so a running stop near a round boundary jumps `running → terminal(interrupted)` with no `stopping` frame. Have `_apply_stop_cycle` (the command applier that writes `stop.flag`) append a `control` `PhaseRecord(event="stopping")` so the projection fires at the instant of intent; the three in-runner `declare_run_phase(STOPPING)` then become redundant. Blocker: confirm the applier runs in-process with the runner's `LiveDashboardView` subscriber; verify the CLI Ctrl+C path keeps its no-`stopping` design.
-- `infrastructure/tracing/replay.py` — `schema` param accepted but not threaded through; dead branches inside. File for a dedicated tracing-cleanup pass.
+- (`infrastructure/tracing/replay.py` `schema` param — **entry was WRONG, dropped.** Verified: `schema` IS threaded and read — `extract_pipeline_nodes` calls `schema.node_param_keys()` and iterates `schema.nodes`; `_replay_run` reads `schema.name` and passes it down. Nothing dead. A dedicated tracing-cleanup pass may still be worth it, but not for this reason.)
 
 ## Considered, not debt — don't re-open
 
@@ -109,13 +109,12 @@ private helpers used by one caller **in the same file**.
 drifted `Field(description=…)` on LLM-facing schemas; INFO/WARN logging nobody
 surfaces; error-raising style diverging by layer (generic `Exception` vs bare
 `raise` vs `HTTPException` for the same failure class — M-sized standardization);
-**wider `events.jsonl` naming drift** — the per-cycle ledger file was renamed to
-`.runtime/ledger.jsonl`; `stable-api.md`, `campaign-tree.md`, `glossary.md`,
-`concept-map.md`, the two m12 YAMLs and `architecture.md` are fixed. Remaining:
-`adr/0003-spend-and-tenancy.md` (`:21,35,117`) still says `events.jsonl` for
-the per-cycle ledger. **Verify per-occurrence first** — the *workspace*-level ledger
-(`projects/{tenant}/.workspace/events.jsonl`) is a genuinely different,
-still-correctly-named file, so don't blanket-replace.
+(**`events.jsonl` naming drift — DONE.** The per-cycle ledger was renamed to
+`.runtime/ledger.jsonl`; `adr/0003-spend-and-tenancy.md` was the last holdout and is
+fixed — five occurrences, not the three filed, found by verifying per-occurrence
+rather than trusting the entry. The *workspace*-level ledger
+`projects/{tenant}/.workspace/events.jsonl` is a genuinely different, correctly-named
+file and was correctly left alone — `jobs/spend.py:34` states that split outright.)
 
 ## Intentional UI placeholders
 

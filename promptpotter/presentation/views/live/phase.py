@@ -100,7 +100,7 @@ def render_round_stats(
             (
                 s
                 for s in round_result.candidate_scores
-                if is_round_winner(s.changes_description, round_result.label)
+                if is_round_winner(s.candidate_id, round_result.winner_id)
             ),
             max(
                 round_result.candidate_scores,

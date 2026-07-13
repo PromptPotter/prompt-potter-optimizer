@@ -43,19 +43,32 @@ efficiency**:
   *toward zero*; on a strong-origin seed a mild regression therefore saturated a `-1` clamp,
   and because the lift core is multiplicative that zeroed the whole cell — quality and
   efficiency signal with it. Those cells scored 0.0 for every meta-prompt: holes in the panel,
-  not measurements. `target_score` no longer reaches the lift core; it survives only as the
-  `rounds_to_N` threshold.
+  not measurements. **There is no `target_score` any more, anywhere** — see *No declared
+  headroom*, below.
 - **Quality modulator** — `cleanliness · diversity_health`, floored at 0.6: discounts a
   campaign with unscoreable/degraded inner samples, malformed candidate output, or mode
   collapse — **without** diluting the lift core (a floor, not an additive term).
 - **Efficiency** — `delta_per_dollar`, floored at 0.7: rewards cheap lift.
 
+**No declared headroom.** The system holds **no target score, and no expectation of how much
+room a benchmark has.** It used to: `target_score` sat in `inner_tasks.json`, and a
+`rounds_to_N` proxy counted rounds to reach it. Both are deleted. The concept was wrong twice
+over. Mechanically it was dead weight — `rounds_to_N` carried no candidate gradient (it was the
+constant `len(levels)+1` whenever the target sat beyond round-budget reach), so it cancelled in
+the election and reached no decision; the scoring formula had already dropped it. And
+epistemically it was backwards: **a task the inner model looks bad at is a task it has not been
+tuned for yet, not a task with a low ceiling.** Declaring a target bakes a pessimistic guess
+about the ceiling into config and then measures against the guess. The default assumption is
+that the room is large; evidence has to be unambiguous to say otherwise. `normalized_gain`
+already divides by the room to the *real* ceiling (`max(origin, 1 − origin)`), which needs no
+declaration — so nothing was lost by deleting the target, and one whole class of assumption
+went with it.
+
 **Governing law — every term must carry a candidate gradient** (vary across the meta-prompt
-candidates being compared). Two terms were retired for lacking one: `rounds_to_N` is a constant
-(`len(levels)+1`) when the inner target sits above round-budget reach, so it cancels in the
-candidate election (still narrated; re-add once the target is reachable); and a raw per-seed
-cost multiplier measured the *seed*, not the candidate. Efficiency's `delta_per_dollar` passes
-the law precisely because its numerator is candidate-specific — a verbose meta-prompt burns more
+candidates being compared). Two terms were retired for lacking one: the rounds-to-target counter
+above; and a raw per-seed cost multiplier, which measured the *seed*, not the candidate.
+Efficiency's `delta_per_dollar` passes the law precisely because its numerator is
+candidate-specific — a verbose meta-prompt burns more
 for the same lift. Emitted but held out of the formula until a validation run confirms their
 gradient here: `rounds_improved_frac`, `delta_per_candidate`, `delta_per_second`,
 `after_N_rounds_delta`, and `first_round_delta` (collinear with `normalized_gain` — `max(levels)`

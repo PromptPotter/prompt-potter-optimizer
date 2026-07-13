@@ -96,7 +96,7 @@ def measurement_series_for_samples(
     stores: Stores,
     sample_ids: list[int],
     *,
-    dataset_name: str | None = None,
+    dataset_name: str,
 ) -> dict[int, list[dict[str, Any]]]:
     """Per-sample chronological series, one archive walk for the whole set.
 
@@ -104,7 +104,14 @@ def measurement_series_for_samples(
     ``ord`` = ``created_at``/``run_id``/item-index. Errored items dropped
     (matches ``build_archive_observations``'s Rasch-fit filter so the
     dashboard hit-rate column and δ_s estimate see the same observations).
-    Powers the ``/datasets/{name}/measurement-series`` endpoint."""
+    Powers the ``/datasets/{name}/measurement-series`` endpoint.
+
+    *dataset_name* is REQUIRED, exactly as on :func:`reusable_results`: **a ``sample_id``
+    only identifies a sample within one dataset.** It was `str | None = None`, and the one
+    caller — the dataset-scope arm of that endpoint, the arm that most needs the scope —
+    omitted it, so the walk crossed EVERY dataset's archive and spliced another dataset's
+    sample-14 measurements into this dataset's sample-14 series. No default, so the next
+    caller cannot forget it either; that optional-with-a-None-default WAS the bug."""
     wanted = set(sample_ids)
     out: dict[int, list[dict[str, Any]]] = {sid: [] for sid in wanted}
     for entry in stores.archive.list_all(dataset_name=dataset_name):

@@ -44,7 +44,7 @@ import functools
 from collections.abc import Callable, Mapping
 from typing import Annotated, Any, Literal, cast
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, create_model
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, create_model, model_validator
 
 from promptpotter.domain.opt_search_point import EVIDENCE_GROUNDING_FIELDS
 
@@ -144,23 +144,26 @@ class L1Variant(BaseModel):
       ``{field_name: string}``. Keys constrained to ``TASK_CONTEXT_OVERRIDES``
       by the runtime-built JSON Schema.
 
-    At least one of the three must be non-empty — an all-empty variant is
-    a no-op and is rejected by :func:`detect_invariants` downstream with
-    ``reason="no_op_variant"``.
+    At least one of the three must be non-empty — enforced HERE, at parse
+    (:meth:`_reject_empty_mutation`), so an all-empty variant re-asks the provider
+    (`openai_compat`'s one-shot schema repair, which feeds the error text back) instead
+    of costing a candidate slot. :func:`detect_invariants` keeps the parent-RELATIVE
+    check — a variant whose overrides merely restate the parent's own values — which
+    this model cannot see.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    variant_name: str
-    # FIELD ORDER IS GENERATION ORDER — evidence precedes every decision it justifies.
-    # `variant_name` is an identifier, not a choice, so it may lead. `changes_description`
-    # already names "the concrete change", so it IS a decision: emitted before the citation,
-    # the citation could only rationalise a mutation already committed to. Optional at parse
-    # time so a provider omitting it on one variant doesn't crash the round — the
-    # ``evidence_grounding_present`` behavior check is the canonical enforcement point and
-    # records missing/malformed entries as wounds without burning the LLM call.
+    # FIELD ORDER IS GENERATION ORDER — evidence precedes the decision it justifies, and the
+    # decision is the MUTATION, not the prose about it. `changes_description` trails the three
+    # override slots so it can only ever REPORT a mutation already emitted. Ahead of them it was
+    # a promise the model could make and then break, and it did: the required set asked for a
+    # name and a paragraph while marking the payload optional, so ~10% of live variants arrived
+    # narrated-but-empty, each one a no-op candidate that dragged the round's diversity and
+    # cleanliness down. `evidence_grounding` stays optional at parse time so a provider omitting
+    # the citation on one variant doesn't crash the round — `evidence_grounding_present` is its
+    # canonical enforcement point and records misses as wounds without burning an LLM call.
     evidence_grounding: VariantEvidenceGrounding | None = None
-    changes_description: str
     pipeline_params_override: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
         description=(
@@ -182,6 +185,22 @@ class L1Variant(BaseModel):
             "Pipeline-context strings; keys must be one of {upstream_context, downstream_context}."
         ),
     )
+    changes_description: str
+
+    @model_validator(mode="after")
+    def _reject_empty_mutation(self) -> L1Variant:
+        if not (
+            self.pipeline_params_override
+            or self.prompt_fields_override
+            or self.task_context_override
+        ):
+            raise ValueError(
+                "this variant mutates nothing: at least one of pipeline_params_override, "
+                "prompt_fields_override or task_context_override must be non-empty. "
+                "Describing a change in changes_description is not making one — emit the "
+                "override that carries it."
+            )
+        return self
 
 
 class L1GenerateOutput(BaseModel):
@@ -233,7 +252,7 @@ def _build_l1_response_model(items: tuple[tuple[str, str], ...]) -> type[L1Gener
     return create_model(
         f"L1GenerateOutput__{suffix}",
         __base__=L1GenerateOutput,
-        variants=(list[variant], ...),  # type: ignore[valid-type]
+        variants=(list[variant], ...),
     )
 
 

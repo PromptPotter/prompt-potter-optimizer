@@ -75,12 +75,28 @@ def _compute_round_1_verdict(
 ) -> str:
     """Conformance-only round-1 verdict (yield/lift/regression are dataset-headroom-confounded).
 
-    - `healthy` — zero conformance ✗.
+    - `healthy` — the checks RAN and zero failed.
     - `degraded` — exactly one ✗.
-    - `broken` — ≥ 2 ✗.
-    - `unknown` — no round 1 yet.
+    - `broken` — ≥ 2 ✗, **or L1 emitted no variants at all**.
+    - `unknown` — no round 1 yet, or its checks never ran.
+
+    The two guards below are not defensive padding — each closes a path that used to reach
+    the ``failed_total == 0`` branch and report ``healthy``:
+
+    1. **L1 yielded nothing.** Zero variants is the WORST L1 outcome, not the cleanest — the
+       meta-prompt made its own children unreadable. It scored ``healthy`` because each check
+       short-circuits to ``passed=True`` on an empty variant list. ``run_all_checks`` now
+       returns ``[]`` there, which lands in guard 2, so this reads the round's own signal.
+    2. **The checks never ran** (empty list — L1 yielded nothing, or the round's audit dict was
+       missing entirely). Zero failures out of zero checks is not a clean bill of health; the
+       same rule ``L1Stats`` states for every rate it carries.
     """
     if not rounds:
+        return "unknown"
+
+    if rounds[0].l1_parse_failure is not None:
+        return "broken"
+    if not round_1_behavior:
         return "unknown"
 
     failed_total = sum(1 for c in round_1_behavior if not c.passed)

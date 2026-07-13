@@ -232,7 +232,6 @@ class _InnerTaskSpec:
     seed: int
     n_samples: int
     n_rounds: int
-    target: float
     n_variants: int | None  # inner_n_variants — None keeps the inner dataset's own value
     # ``inner_lives`` — the improvement-banked round budget for the inner cycle. ``n_rounds``
     # is the CEILING a compounding inner campaign is allowed to reach; ``lives`` is what makes
@@ -256,7 +255,7 @@ class _InnerTaskSpec:
     inner_optimizer_temperature: float | None = None
 
 
-_REQUIRED_BENCH_KEYS = ("n_samples_per_inner_round", "max_inner_rounds", "target_score")
+_REQUIRED_BENCH_KEYS = ("n_samples_per_inner_round", "max_inner_rounds")
 
 
 def _resolve_inner_task(ctx: InnerSpawnContext, query: str) -> _InnerTaskSpec:
@@ -264,25 +263,26 @@ def _resolve_inner_task(ctx: InnerSpawnContext, query: str) -> _InnerTaskSpec:
 
     Reads the spawning dataset's ``inner_tasks.json`` — top-level
     ``inner_benchmark`` + ``inner_benchmark_config`` (the inner dataset + sample
-    count + round cap + target), overlaid by the matching ``tasks[]`` entry
-    (per-task seed / round cap / target, and — for a multi-cell panel — per-task
+    count + round cap), overlaid by the matching ``tasks[]`` entry
+    (per-task seed / round cap, and — for a multi-cell panel — per-task
     ``inner_dataset`` / ``inner_model`` / ``inner_provider``). A task that omits
     those inherits the single top-level benchmark + the dataset's own model,
     so a single-cell panel needs no per-task overrides.
 
-    **The config is the source of truth; there is no default ladder here.** ``target_score`` is
-    the threshold ``rounds_to_N`` counts to — it no longer divides the lift core, which
-    normalizes to the real ceiling (:func:`_compute_proxies`) — and the round cap and sample
-    count set what the inner cycle is even allowed to discover. Defaulting them in code silently
-    rescales every meta-prompt candidate's fitness against a benchmark nobody declared — and the
-    defaults this used to carry (``justlogic``/10/3/0.8) had already drifted from the shipped
-    config on three of four values, with nothing to reveal it."""
+    **The config is the source of truth; there is no default ladder here.** The round cap and
+    sample count set what the inner cycle is even allowed to discover. Defaulting them in code
+    silently rescales every meta-prompt candidate's fitness against a benchmark nobody declared
+    — and the defaults this used to carry (``justlogic``/10/3) had already drifted from the
+    shipped config on three of four values, with nothing to reveal it.
+
+    **No target score.** The panel declares what the inner cycle may SPEND, never what it is
+    expected to REACH — see :class:`~promptpotter.domain.outer_verdict.OuterSampleProxies`."""
     path = ctx.dataset_config_dir / "inner_tasks.json"
     cfg = read_json_optional(path)
     if not isinstance(cfg, dict):
         raise InnerCycleUnscoreableError(
-            f"{path} is missing or is not an object — the inner benchmark, its sample count, "
-            "round cap and target score are all declared there. There is no default to run."
+            f"{path} is missing or is not an object — the inner benchmark, its sample count "
+            "and round cap are all declared there. There is no default to run."
         )
     bench = str(cfg.get("inner_benchmark") or "")
     bench_cfg = cfg.get("inner_benchmark_config") or {}
@@ -295,7 +295,6 @@ def _resolve_inner_task(ctx: InnerSpawnContext, query: str) -> _InnerTaskSpec:
         )
     n_samples = int(bench_cfg["n_samples_per_inner_round"])
     n_rounds = int(bench_cfg["max_inner_rounds"])
-    target = float(bench_cfg["target_score"])
     raw_variants = bench_cfg.get("inner_n_variants")
     n_variants = int(raw_variants) if raw_variants is not None else None
     raw_lives = bench_cfg.get("inner_lives")
@@ -309,7 +308,6 @@ def _resolve_inner_task(ctx: InnerSpawnContext, query: str) -> _InnerTaskSpec:
         if isinstance(task, dict) and task.get("id") == query:
             seed = int(task.get("inner_dataset_seed", 0))
             n_rounds = int(task.get("n_inner_rounds", n_rounds))
-            target = float(task.get("target_score", target))
             bench = str(task.get("inner_dataset") or bench)
             im = task.get("inner_model")
             inner_model = str(im) if im else None
@@ -321,7 +319,6 @@ def _resolve_inner_task(ctx: InnerSpawnContext, query: str) -> _InnerTaskSpec:
         seed=seed,
         n_samples=n_samples,
         n_rounds=n_rounds,
-        target=target,
         n_variants=n_variants,
         lives=lives,
         inner_model=inner_model,
@@ -479,18 +476,17 @@ def _floor_reason(result: CycleResult) -> str | None:
     return None
 
 
-def _floor_proxies(n_rounds: int) -> OuterSampleProxies:
+def _floor_proxies() -> OuterSampleProxies:
     """The worst measurable verdict — ASSIGNED (not measured) to a meta-prompt-owned failure
     (:func:`_floor_reason`). ``normalized_gain=-1`` zeroes the formula's lift core and the
     quality/efficiency modulators sit at their floors, so the composed fitness is exactly
-    0.0; the deltas read 0.0 (no lift demonstrated) and ``rounds_to_N`` the never-reached
-    convention. This is now the ONLY route to a zeroed cell — a *measured* cycle reaches
-    ``-1`` only by collapsing the inner ability to nothing, so a zero means "the meta-prompt
-    broke its own measurement", never "this seed drew a strong origin"."""
+    0.0; the deltas read 0.0 (no lift demonstrated). This is now the ONLY route to a zeroed
+    cell — a *measured* cycle reaches ``-1`` only by collapsing the inner ability to nothing,
+    so a zero means "the meta-prompt broke its own measurement", never "this seed drew a
+    strong origin"."""
     return OuterSampleProxies(
         first_round_delta=0.0,
         after_N_rounds_delta=0.0,
-        rounds_to_N=n_rounds + 1,
         normalized_gain=-1.0,
         cleanliness=0.0,
         diversity_health=0.0,
@@ -510,29 +506,29 @@ def _round_mode_collapse_rate(rnd: RoundResult) -> float:
     return collapsed / generated if generated else 0.0
 
 
-def _compute_proxies(result: CycleResult, target: float, elapsed: float) -> OuterSampleProxies:
+def _compute_proxies(result: CycleResult, elapsed: float) -> OuterSampleProxies:
     """Composed outer fitness — a vector of subset-invariant, bounded raw signals from a
     finished inner cycle, combined by ``campaign.json::scoring`` (the backend never hides
     the composite; every term stays a re-weightable observation).
 
     Endpoint deltas (kept — early speed + best depth): ``first_round_delta`` = round-1
-    discovered lift over origin; ``after_N_rounds_delta`` = best discovered lift over origin;
-    ``rounds_to_N`` = rounds to first reach *target*. These difference the single-scale θ-LCB
-    trajectory (``origin_level`` / ``round_discovered_levels``, built upstream in
-    ``discovered_level_trajectory``) — no mixed-space subtraction, no crowned-frontier blindness.
+    discovered lift over origin; ``after_N_rounds_delta`` = best discovered lift over origin.
+    These difference the single-scale θ-LCB trajectory (``origin_level`` /
+    ``round_discovered_levels``, built upstream in ``discovered_level_trajectory``) — no
+    mixed-space subtraction, no crowned-frontier blindness.
 
     Composed terms (each carries a candidate gradient — the retired proxies died for lacking
     one, so a flat term earns nothing and gets cut in tuning):
     - ``normalized_gain`` — best depth as a fraction of the room available to move, i.e.
       ``after_n / max(origin, 1−origin)``. Difficulty-normalized, so a meta-prompt compares
       across inner benchmarks of different origin strength; below the half-way origin (the
-      regime a usable inner benchmark sits in — gsm8k was retired for acing its target) the
-      denominator IS ``1−origin``, the classical normalized gain. It normalizes by the room to
-      the real CEILING, never by ``target``: dividing by ``(target−origin)`` measured an
-      UPWARD room but a regression falls toward zero, so a mild regression on a strong-origin
-      seed detonated to the −1 clamp and — the lift core being multiplicative — zeroed the
-      whole cell, quality and efficiency signal with it. Such a cell then reported 0.0 for
-      every meta-prompt: not a measurement, a hole in the panel.
+      regime a usable inner benchmark sits in) the denominator IS ``1−origin``, the classical
+      normalized gain. It normalizes by the room to the **real ceiling** — never by a declared
+      target, and there is no longer a target to declare. Dividing by ``(target−origin)``
+      measured an UPWARD room while a regression falls toward zero, so a mild regression on a
+      strong-origin seed detonated to the −1 clamp and — the lift core being multiplicative —
+      zeroed the whole cell, quality and efficiency signal with it. Such a cell then reported
+      0.0 for every meta-prompt: not a measurement, a hole in the panel.
     - ``cleanliness`` / ``diversity_health`` — bounded quality: 1 − mean per-round problem /
       mode-collapse rate; the scoring formula uses them as a modulator that discounts a
       warning-riddled or collapsing campaign without diluting the lift core.
@@ -553,7 +549,7 @@ def _compute_proxies(result: CycleResult, target: float, elapsed: float) -> Oute
     be scored on."""
     if (floor := _floor_reason(result)) is not None:
         logger.warning("inner cycle scored at the floor: %s", floor)
-        return _floor_proxies(len(result.rounds))
+        return _floor_proxies()
     if (reason := _no_evidence_reason(result)) is not None:
         # Loud, never silent: this drops a panel cell, and a dropped cell that reads as
         # "covered" is worse than no cell at all.
@@ -565,13 +561,6 @@ def _compute_proxies(result: CycleResult, target: float, elapsed: float) -> Oute
     levels = result.round_discovered_levels
     first = levels[0] - origin
     after_n = max(levels) - origin
-    if origin >= target:
-        rounds_to_n = 0
-    else:
-        rounds_to_n = next(
-            (i + 1 for i, lvl in enumerate(levels) if lvl >= target),
-            len(levels) + 1,
-        )
 
     # Normalized gain: the move as a fraction of the room available to make it. Levels are in
     # [0,1], so `max(origin, 1-origin) >= 0.5` and this is bounded in [-1,1] BY CONSTRUCTION —
@@ -600,7 +589,6 @@ def _compute_proxies(result: CycleResult, target: float, elapsed: float) -> Oute
     return OuterSampleProxies(
         first_round_delta=first,
         after_N_rounds_delta=after_n,
-        rounds_to_N=rounds_to_n,
         normalized_gain=normalized_gain,
         cleanliness=cleanliness,
         diversity_health=diversity_health,
@@ -1062,7 +1050,7 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
     # No exclusion decision here: `_compute_proxies` asks `_no_evidence_reason` and raises
     # `InnerCycleUnscoreableError`, which `measure_sample`'s catch-all turns into this sample's
     # EXCLUDED row. The row already names the sample, so the message carries only the reason.
-    proxies = _compute_proxies(result, spec.target, elapsed)
+    proxies = _compute_proxies(result, elapsed)
 
     data: dict[str, Any] = {
         # Terminal-ranker head = the inner-result token (`inner:{query}` — the
@@ -1074,7 +1062,7 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
         # `fitness >= 1.0`), and the round-0 health gate only needs a
         # non-empty, non-NO_RESULT prediction.
         INNER_RESULT_KEY: [
-            f"inner:{query} D{proxies.after_N_rounds_delta:+.3f}/r{proxies.rounds_to_N}"
+            f"inner:{query} D{proxies.after_N_rounds_delta:+.3f}/g{proxies.normalized_gain:+.3f}"
         ],
         # The outer loop's raw evidence: a <=1150c narrative of what the inner
         # search tried, what steered it, and what moved — rendered as MODEL

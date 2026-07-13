@@ -24,9 +24,12 @@ logger = logging.getLogger(__name__)
     "plan",
     kind=InjectionKind.TRACE,
     description="L3's strategic plan text. Persistent until next L3 fire.",
-    # 2000 not 800: live L3 plans run ~2.8k chars and the plan is a strategic frame
-    # every prompt reads — an 800 cut silently dropped the strategy's back half.
-    # l3_plan's answer_format states the 2000 budget so the writer targets the cap.
+    # A RAIL, not a budget the writer honours. Stating the char budget in l3_plan's
+    # answer_format did not work and could not: a model cannot count the characters it is
+    # emitting, so "<=2000 chars" was an instruction it had no way to comply with — live
+    # plans arrived at ~3.2k and the rail silently dropped the strategy's back five
+    # sections, on most rounds. The budget is now expressed where the writer CAN honour it
+    # (at most 6 one-sentence bullets); this only catches a genuine runaway.
     char_cap=2000,
 )
 def _r_plan(b: InjectionBundle) -> str:

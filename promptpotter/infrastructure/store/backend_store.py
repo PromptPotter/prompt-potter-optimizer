@@ -78,17 +78,18 @@ class BackendStore:
         self,
         name: str,
         items: Sequence[Sample | dict[str, Any]],
-        *,
-        source_file: str = "",
     ) -> Path:
-        """Write a named dataset to disk; ``Sample`` items serialized via ``model_dump()``."""
+        """Write a named dataset to disk; ``Sample`` items serialized via ``model_dump()``.
+
+        No ``source_file``: it defaulted to "", the sole caller omitted it, and nothing ever read
+        `cache.json::source_file` back — every real `source_file` reader belongs to a different
+        store (the draft, sweep and tenant-dataset ones)."""
         from promptpotter.domain.sample import Sample
 
         serialized = [item.model_dump() if isinstance(item, Sample) else item for item in items]
         data: dict[str, Any] = {
             "name": name,
             "created_at": utcnow_iso(),
-            "source_file": source_file,
             "row_count": len(serialized),
             "items": serialized,
         }

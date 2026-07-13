@@ -675,7 +675,7 @@ def get_dataset_measurement_series(
         assert art_campaign is not None  # checked in resolver
         series = campaign_measurement_series(art_store, art_campaign, selected_set)
     else:
-        raw_series = measurement_series_for_samples(art_store, selected)
+        raw_series = measurement_series_for_samples(art_store, selected, dataset_name=name)
         # Dataset-scope ord carries ts/run/idx; label = first 8 chars of run_id for tooltips.
         series = {
             sid: [

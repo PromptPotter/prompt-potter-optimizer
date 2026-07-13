@@ -46,7 +46,6 @@
           {"pipeline_key": "final_ranking"},
           {"pipeline_key": "first_round_delta"},
           {"pipeline_key": "after_N_rounds_delta"},
-          {"pipeline_key": "rounds_to_N"},
           {"pipeline_key": "normalized_gain"},
           {"pipeline_key": "cleanliness"},
           {"pipeline_key": "diversity_health"},

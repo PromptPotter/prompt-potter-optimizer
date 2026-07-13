@@ -208,8 +208,8 @@ Skill = strategist (reads disk, decides, prints the next CLI); `new`/`resume` = 
 ### Sweep verbs
 
 ```bash
-python -m promptpotter sweep time-to 66 --l1-prompt datasets/_optimizer/variants/l1_v3.json --dataset aime --max-rounds 10
-python -m promptpotter sweep round1     --l1-prompts datasets/_optimizer/variants/l1_v3.json,datasets/_optimizer/variants/l1_v4.json --dataset aime --panel-size 6
+python -m promptpotter sweep time-to 66 --l1-prompt datasets/_optimizer/variants/proposed/01_x.json --dataset aime --max-rounds 10
+python -m promptpotter sweep round1     --l1-prompts datasets/_optimizer/variants/proposed/01_x.json,datasets/_optimizer/variants/proposed/02_y.json --dataset aime --panel-size 6
 python -m promptpotter sweep round2     --from-sweep <sweep_id> --top 3
 python -m promptpotter sweep rank       --dataset aime --by round1_accuracy --last 10
 ```

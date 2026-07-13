@@ -37,7 +37,7 @@ from promptpotter.application.runner.inner_recursion import publish_inner_spawn_
 from promptpotter.application.runner.loop import run_round_loop
 from promptpotter.application.runner.termination import BudgetGate
 from promptpotter.application.scoring.formula import split_scoring_block
-from promptpotter.domain.phases import StopReason
+from promptpotter.domain.phases import STOP_REASON_INFO, StopOutcome, StopReason
 from promptpotter.domain.results import CycleResult, CycleSpend
 from promptpotter.domain.run_records import (
     ConfigOverrides,
@@ -51,8 +51,7 @@ from promptpotter.domain.scoring import ScoringSpec
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.llm import set_abort_check
 from promptpotter.infrastructure.llm.models import emit_error_record
-from promptpotter.infrastructure.runtime_flags import clear_run_control_flags
-from promptpotter.infrastructure.store.io import read_json_tolerant
+from promptpotter.infrastructure.runtime_flags import clear_run_control_flags, read_spend_caps
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ResumeDivergenceError
@@ -112,19 +111,14 @@ def _build_budget_gate(
     if usd_cap is None and token_cap is None:
         return None
     dashboard = observers.dashboard
-    cap_path = CycleLayout(cycle_dir).spend_cap
-
-    def _saved_caps() -> dict[str, Any]:
-        data = read_json_tolerant(cap_path, {})
-        return data if isinstance(data, dict) else {}
 
     def _usd_cap() -> float | None:
-        value = _saved_caps().get("max_usd")
-        return float(value) if isinstance(value, int | float) else usd_cap
+        saved, _ = read_spend_caps(cycle_dir)
+        return saved if saved is not None else usd_cap
 
     def _token_cap() -> int | None:
-        value = _saved_caps().get("max_tokens")
-        return int(value) if isinstance(value, int) else token_cap
+        _, saved = read_spend_caps(cycle_dir)
+        return saved if saved is not None else token_cap
 
     return BudgetGate(
         usd_spent=(lambda: dashboard.spend_total_used_usd) if usd_cap is not None else None,
@@ -734,15 +728,14 @@ def _finalize_run(
     no tracing bridge is active) so the caller can stamp it onto the returned ``CycleResult``.
     """
     stop_reason = cycle_result.stop_reason
-    is_paused = stop_reason == StopReason.PAUSED
-    is_crashed = stop_reason == StopReason.CRASHED
-    is_render_error = stop_reason == StopReason.RENDER_ERROR
-    is_optimizer_timeout = stop_reason == StopReason.OPTIMIZER_TIMEOUT
-    # All four reasons leave the round partial. Render-error stashes a traceback like crash does;
-    # optimizer-timeout is graceful (cause is in the log); a pause exits mid-round but the cycle
-    # stays non-terminal and resumable.
-    halted_mid_round = is_paused or is_crashed or is_render_error or is_optimizer_timeout
-    has_traceback = is_crashed or is_render_error
+    # Read off the canonical table, never re-derived here. The private or-chain this replaces
+    # listed four reasons and had no exhaustiveness check, so it silently missed the two the
+    # budget gate raises from INSIDE the per-sample loop — a spend/token halt wrote its partial
+    # round to disk with no `interrupted` marker at all (`domain/phases.py::StopReasonInfo`).
+    info = STOP_REASON_INFO[StopReason(stop_reason)]
+    is_paused = info.outcome is StopOutcome.PAUSED
+    halted_mid_round = info.halts_mid_round
+    has_traceback = info.has_traceback
     emitter = observers.dashboard
     # A pause is an operator interrupt that exits the worker but leaves the cycle ACTIVE and
     # resumable — NOT terminal. Skip every terminal-marking write (mark_finished /
