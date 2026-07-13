@@ -106,24 +106,13 @@ def _assert_overlay_preserved(
         )
 
 
-def _load_archive_observations(session: Session) -> list[Observation]:
-    """Per-dataset prior-measurement observations for the intelligence layer."""
-    from promptpotter.application.intelligence.hard_sample_archive import (
-        build_archive_observations,
-    )
-
-    return build_archive_observations(
-        session.store,
-        dataset_name=session.dataset_name,
-    )
-
-
 def _calibrate_delta_ruler(
     session: Session,
     origin_results: list[dict[str, Any]] | None,
     n_min: int,
     *,
     enable_2pl: bool,
+    archive_obs: list[Observation],
     extra_obs: list[Observation] | None = None,
 ) -> tuple[dict[int, RulerEntry], float | None, CalibrationModel | None]:
     """Calibrate the per-cycle FIXED difficulty ruler + read the origin's θ on it.
@@ -160,15 +149,8 @@ def _calibrate_delta_ruler(
         graded_response,
         graduate_ruler_model,
     )
-    from promptpotter.application.intelligence.hard_sample_archive import (
-        build_archive_observations,
-    )
     from promptpotter.shared.errors import is_error_result
 
-    archive_obs = build_archive_observations(
-        session.store,
-        dataset_name=session.dataset_name,
-    )
     origin_obs = [
         Observation(ORIGIN_ABILITY_ID, int(sid), graded_response(r))
         for r in origin_results or []
@@ -181,6 +163,15 @@ def _calibrate_delta_ruler(
     obs = archive_obs + origin_obs + list(extra_obs or [])
     if not obs:
         return {}, None, None
+    # Both fits key δ on ``sorted({o.sample_id})``, so the adoption test below is a
+    # statement about the DISTINCT-sample count — knowable without fitting. Below the
+    # floor the fit is discarded unread (the cold branch reads only ``origin_obs``), so
+    # skip it: a cold ruler re-attempts every round and an L4 inner cycle never clears
+    # the floor at all, which had it paying a 1PL + 2PL + 5-fold-CV storm each round to
+    # throw the result away.
+    if len({o.sample_id for o in obs}) < n_min:
+        origin_row = fit_theta_given_delta(origin_obs, {}).get(ORIGIN_ABILITY_ID)
+        return {}, (origin_row[0] if origin_row is not None else None), None
     model, post = graduate_ruler_model(obs, enable=enable_2pl)
     if len(post.delta) >= n_min:
         if model == "2PL":
@@ -315,7 +306,6 @@ class Cycle:
     axes: AxisIndex | None = None
     escalation: EscalationFSM = field(default_factory=EscalationFSM)
     pending_decisions: list[ResumeCheckpointRecord] = field(default_factory=list)
-    last_rasch_posterior: Any = None
     archive_observations: list[Observation] = field(default_factory=list)
     # The cycle's δ ruler (sample_id → difficulty), from the grade-A archive + origin
     # (slice 2). Calibrated at start; a cold start (empty) re-warms from round data and
@@ -363,11 +353,20 @@ class Cycle:
         )
         _assert_overlay_preserved(sp, session.pipeline_params)
         _inherit_sibling_runtime_failures(opt_sp, session)
+        from promptpotter.application.intelligence.hard_sample_archive import (
+            build_archive_observations,
+        )
+
+        # ONE archive walk, both consumers. The ruler and the intelligence layer asked for
+        # the same observations at the same moment and each loaded them — a full fold plus
+        # a detail read per grade-A run, done twice.
+        archive_obs = build_archive_observations(session.store, dataset_name=session.dataset_name)
         delta_scale, origin_theta, calibration_model = _calibrate_delta_ruler(
             session,
             origin_results,
             config.optimization.elimination_n_min,
             enable_2pl=config.optimization.enable_2pl_graduation,
+            archive_obs=archive_obs,
         )
         return cls(
             session=session,
@@ -388,7 +387,7 @@ class Cycle:
                 best_theta=origin_theta,
             ),
             opt_sp=opt_sp,
-            archive_observations=_load_archive_observations(session),
+            archive_observations=archive_obs,
             delta_scale=delta_scale,
             calibration_model=calibration_model,
         )
@@ -510,6 +509,9 @@ class Cycle:
         L4 inner cycles stay thin, never clear the floor, and stay frozen — all correct.
         """
         from promptpotter.application.intelligence.exploration import build_observations
+        from promptpotter.application.intelligence.hard_sample_archive import (
+            build_archive_observations,
+        )
 
         if self.delta_scale:
             return
@@ -518,6 +520,9 @@ class Cycle:
             self.tracking.origin_per_sample_results,
             self.config.optimization.elimination_n_min,
             enable_2pl=self.config.optimization.enable_2pl_graduation,
+            archive_obs=build_archive_observations(
+                self.session.store, dataset_name=self.session.dataset_name
+            ),
             extra_obs=build_observations(self.rounds),
         )
         if delta_scale:  # warmed — lock the ruler + re-read origin θ on it

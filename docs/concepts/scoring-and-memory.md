@@ -5,7 +5,7 @@
 A trace records what the pipeline did (query, prediction, ground truth, node rankings, timeouts). A score judges *over* a trace; the answer changes with what you're optimizing for. Traces are written once and never edited; scores are a view produced by applying the active policy on demand.
 
 ```
-MeasurementArchive   ← facts (append-only, persisted at archive/measurements/{run_id}.json)
+MeasurementArchive   ← facts (append-only, persisted at measurements/runs/{run_id}.jsonl)
    │
    ├── SampleIndex   ← per-sample derived view (in-memory; rebuilt every refresh)
    └── AxisIndex     ← axis-keyed derived view (in-memory; rebuilt every refresh)

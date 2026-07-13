@@ -32,6 +32,7 @@ from promptpotter.infrastructure.backend import BackendClient, build_backend_cli
 from promptpotter.infrastructure.store import Stores, build_stores
 from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.shared.identity import IdentityContext, default_identity
+from promptpotter.shared.instrument import instrument_mode
 
 logger = logging.getLogger(__name__)
 
@@ -324,6 +325,11 @@ async def init_services(
         store = build_stores(
             resolved_identity, projects_root=project_root / ".promptpotter" / "projects"
         )
+
+    # An instrument cycle is a measurement, not a campaign — it must not mutate
+    # tenant-global storage; the outer campaign that spawned it already did this.
+    if instrument_mode() is None:
+        store.archive.maintain_index()
 
     dataset_config_dir = resolve_dataset_config_dir(store, project_root, dataset_name)
     backend_type = _read_backend_type(dataset_config_dir, dataset_name)

@@ -497,8 +497,9 @@ become load-bearing for the loop.
 
 **Measurement archive (the actual database).** Beyond the per-cycle
 ledger, a cross-cycle persistence layer lives at
-`archive/measurements/{run_id}.json` — content-addressed by
-`JobSearchPoint.content_hash`, indexed by `archive/measurements.json`.
+`measurements/runs/{run_id}.jsonl` — an append-only log per run,
+content-addressed by `JobSearchPoint.content_hash`, indexed by
+`measurements/index.jsonl`.
 Each row is `(sample × config → outcome)`, stamped with
 `dataset_name` and `campaign_id` so the store answers all three data
 scopes from one query path: **campaign** (`campaign_id=…`),
@@ -655,8 +656,8 @@ the PR description.
     resolver+gate that produces a complete one; round 0 / C0 is its
     measurement, downstream and separate.** Forward plan:
     [`specs/roadmap.md`](specs/roadmap.md) § Origin-resolution check-in.
-- **`MeasurementArchive` (`archive/measurements/{run_id}.json` +
-  `archive/measurements.json` index + retrieval views
+- **`MeasurementArchive` (`measurements/runs/{run_id}.jsonl` +
+  `measurements/index.jsonl` index + retrieval views
   `measurements_for_sample()` / `measurements_for_config()`)** — the
   actual cross-cycle database. Per §0 it's a separate persistence
   layer from the ledger; never collapse the two.

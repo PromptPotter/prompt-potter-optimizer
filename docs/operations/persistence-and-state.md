@@ -50,7 +50,8 @@ Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [o
           streams/round_NNNN_p_best.jsonl   # PoBB telemetry (sparkline in log.md)
           cache/rounds|candidates/     # per-round node I/O + pre-scoring checkpoint
     measurements/                       # measurement store (DB core) — cross-cycle/session/tenant, peer of campaigns/
-      {run_id}.json  index.jsonl   # index.jsonl append-only, last-wins by content_hash; `reindex` rebuilds it
+      index.jsonl                  # append-only, last-wins by content_hash; `reindex` rebuilds it from runs/
+      runs/{run_id}.jsonl          # one append-only log per run: a `k:"run"` header row + a `k:"m:{sample_id}"` row each
     archive/{campaign_id}/              # recycle bin — `archive` MOVES a campaign tree here; `unarchive` moves it back
 ```
 

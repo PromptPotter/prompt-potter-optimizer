@@ -8,8 +8,14 @@ superseded lines only when it has grown past a factor of the live set
 single fold instead of hand-rolling upsert semantics over a whole-file scan.
 
 These are the ONLY primitives for derived-index persistence. A second mechanism
-doing the same job is a bug — fold it into these. (The registry read model in
-Arc 4 layers a generation-counter memo on top of the same three functions.)
+doing the same job is a bug — fold it into these.
+
+A reader that folds the same log many times per round tails it instead
+(`fold_jsonl_from`): re-fold only the bytes appended since the last read, keyed
+off the file's `(mtime_ns, size)`. Two `MeasurementArchive` instances share one
+file — an L4 inner cycle runs in-process with its own `Stores` over the same
+`measurements/` dir — so a memo that trusts its own writes alone would go blind
+to the sibling's appends. The stat check is what makes the memo safe.
 """
 
 from __future__ import annotations
@@ -60,6 +66,42 @@ def fold_jsonl(path: Path, key: str) -> dict[str, dict[str, Any]]:
     return out
 
 
+def fold_jsonl_from(path: Path, key: str, offset: int) -> tuple[dict[str, dict[str, Any]], int]:
+    """Fold only the bytes of *path* from *offset* on: ``({row[key]: row}, new_offset)``.
+
+    The caller merges the returned rows onto its memo (last-wins, same semantics as
+    :func:`fold_jsonl`) and keeps *new_offset* for the next tail. Reading stops at the
+    last complete line, so *new_offset* never lands mid-record and a crash-truncated
+    trailing line is simply re-read next tick rather than silently dropped — the same
+    tolerance :func:`iter_jsonl` gives a whole-file fold.
+
+    A newline cannot occur inside a multi-byte UTF-8 sequence, so cutting the byte
+    buffer at the last ``\\n`` is always a safe decode boundary.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(offset)
+            buf = fh.read()
+    except FileNotFoundError:
+        return out, offset
+    cut = buf.rfind(b"\n")
+    if cut < 0:
+        return out, offset
+    for line in buf[: cut + 1].decode("utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        k = row.get(key)
+        if isinstance(row, dict) and isinstance(k, str):
+            out[k] = row
+    return out, offset + cut + 1
+
+
 def _lock_for(path: Path) -> FileLock:
     """The append/compact interlock for one log: ``<path>.lock``, parent ensured."""
     lock_path = path.with_suffix(path.suffix + ".lock")
@@ -93,4 +135,4 @@ def compact(path: Path, key: str, *, factor: int = 2) -> bool:
         return True
 
 
-__all__ = ["append_row", "compact", "fold_jsonl", "iter_jsonl"]
+__all__ = ["append_row", "compact", "fold_jsonl", "fold_jsonl_from", "iter_jsonl"]

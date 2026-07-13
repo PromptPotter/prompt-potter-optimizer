@@ -96,6 +96,9 @@ def ab_replay_cycle(
     calibration gate the live cycle ran, so the reconstructed ruler matches its model."""
     # Lazy import: cycle.py is a sibling in this layer and pulls the whole loop; importing it
     # at module load would risk an import cycle through resume_and_fork/__init__.
+    from promptpotter.application.intelligence.hard_sample_archive import (
+        build_archive_observations,
+    )
     from promptpotter.application.optimization.cycle import (
         _calibrate_delta_ruler,
         _merge_into_cumulative,
@@ -132,7 +135,11 @@ def ab_replay_cycle(
     # Round 0 = the origin scored; its results calibrate the ruler, exactly as Cycle.start did.
     origin_results = rounds[0].results if rounds else []
     delta_scale, _, _ = _calibrate_delta_ruler(
-        session, origin_results, n_min, enable_2pl=enable_2pl
+        session,
+        origin_results,
+        n_min,
+        enable_2pl=enable_2pl,
+        archive_obs=build_archive_observations(session.store, dataset_name=session.dataset_name),
     )
 
     divergences: list[Divergence] = []

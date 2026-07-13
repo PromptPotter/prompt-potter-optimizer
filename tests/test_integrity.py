@@ -74,10 +74,16 @@ def test_render_does_not_leak_l3_plan_into_target_prompt() -> None:
     assert sentinel not in osp.render()
 
 
+def _archive(archive: MeasurementArchive, run_id: str, data: dict[str, Any]) -> None:
+    """Seed one complete run — the whole measurement set is what is new."""
+    archive.append_run(run_id, data, data["measurements"])
+
+
 def _seed_run(archive: MeasurementArchive, *, run_id: str, dataset_name: str, hit: bool) -> None:
-    """Minimal ``MeasurementArchive.save`` envelope — one sample whose query text
-    is dataset-tagged, so a cross-dataset bleed is detectable by query overlap."""
-    archive.save(
+    """Minimal run envelope — one sample whose query text is dataset-tagged, so a
+    cross-dataset bleed is detectable by query overlap."""
+    _archive(
+        archive,
         run_id,
         {
             "run_id": run_id,
@@ -139,7 +145,8 @@ def _seed_graded(
     DIFFERENT samples — the cache keys on ``sample_id``, so they need distinct ones to
     coexist (they used to be told apart by query text alone, both stamped sample 7)."""
     provenance: dict[str, Any] = {"grade": grade, "deliberate_source": grade != "C"}
-    archive.save(
+    _archive(
+        archive,
         run_id,
         {
             "run_id": run_id,
@@ -199,7 +206,8 @@ def test_full_chain_rows_never_replay_on_prefix_match(tmp_path: Path) -> None:
     chain = ["l1_generate", "l1_critique", "l2_context", "l3_plan"]
 
     def _seed_chain(run_id: str, terminated_at: str) -> None:
-        archive.save(
+        _archive(
+            archive,
             run_id,
             {
                 "run_id": run_id,

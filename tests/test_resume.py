@@ -15,7 +15,10 @@ from typing import Any
 
 from promptpotter.application.optimization.resume_and_fork import replay_decisions
 from promptpotter.application.scoring.formula import compile_scorer, rescore_results
-from promptpotter.application.scoring.search_point_scorer import merge_with_unprocessed_priors
+from promptpotter.application.scoring.search_point_scorer import (
+    merge_with_unprocessed_priors,
+    rescored_prior_tail,
+)
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import CycleSeed
 from promptpotter.infrastructure.store import Stores
@@ -286,51 +289,47 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
 
 
 def test_merge_with_unprocessed_priors_preserves_full_archive_on_partial_run() -> None:
-    """The load-bearing invariant: a partial state.results merged with cached_sample_results
+    """The load-bearing invariant: a partial state.results merged with the prior tail
     yields back every dataset query the archive already covered.
 
-    Aborted runs must not shrink an already-fuller archive — without this the
-    overwrite-on-save ``_persist_fresh`` would grind down the cache file each Ctrl+C.
+    Aborted runs must not shrink an already-fuller archive — without this a Ctrl+C would
+    record the run as having measured only what the walk reached, and the run's derived
+    fields (scores, provenance, item_count) would be computed off that short set.
     """
     dataset_sample_ids = set(range(20))
-    cached_sample_results = {i: _prior(i) for i in dataset_sample_ids}
-    # Simulate a partial run: 6 cache hits + 1 fresh measurement.
-    state_results = [_prior(i) for i in range(7)]
     formula = "exact_match(predicted, ground_truth)"
-    merged = merge_with_unprocessed_priors(
-        state_results,
-        cached_sample_results=cached_sample_results,
+    prior_tail = rescored_prior_tail(
+        cached_sample_results={i: _prior(i) for i in dataset_sample_ids},
         dataset_sample_ids=dataset_sample_ids,
         deprecated_samples={},
         scorer=compile_scorer(formula),
         scorer_id="x",
         scorer_formula=formula,
     )
+    # Simulate a partial run: 6 cache hits + 1 fresh measurement.
+    merged = merge_with_unprocessed_priors([_prior(i) for i in range(7)], prior_tail)
     assert len(merged) == 20
     assert {r["sample_id"] for r in merged} == dataset_sample_ids
 
 
-def test_merge_with_unprocessed_priors_filters_off_dataset_and_evicted() -> None:
-    """Only samples in the current dataset get merged; evicted (deprecated) priors are
-    excluded so they re-measure on the next encounter."""
-    dataset_sample_ids = {1, 2}
-    cached_sample_results = {
-        1: _prior(1),
-        2: _prior(2),
-        99: _prior(99),  # not in the current dataset
-    }
-    deprecated = {2: _prior(2)}  # sample 2 deprecated → must remeasure
+def test_rescored_prior_tail_filters_off_dataset_and_evicted() -> None:
+    """Only samples in the current dataset are archivable without re-measuring; evicted
+    (deprecated) priors are excluded so they re-measure on the next encounter."""
     formula = "exact_match(predicted, ground_truth)"
-    merged = merge_with_unprocessed_priors(
-        [],
-        cached_sample_results=cached_sample_results,
-        dataset_sample_ids=dataset_sample_ids,
-        deprecated_samples=deprecated,
+    tail = rescored_prior_tail(
+        cached_sample_results={
+            1: _prior(1),
+            2: _prior(2),
+            99: _prior(99),  # not in the current dataset
+        },
+        dataset_sample_ids={1, 2},
+        deprecated_samples={2: _prior(2)},  # sample 2 deprecated → must remeasure
         scorer=compile_scorer(formula),
         scorer_id="x",
         scorer_formula=formula,
     )
-    assert {r["sample_id"] for r in merged} == {1}
+    assert set(tail) == {1}
+    assert {r["sample_id"] for r in merge_with_unprocessed_priors([], tail)} == {1}
 
 
 def test_merge_into_cumulative_preserves_prior_on_untouched_samples() -> None:
@@ -519,23 +518,74 @@ def test_cycle_seed_ledger_roundtrip(built_stores: Stores) -> None:
     assert got is not None and got.origin_source == "campaign_origin"
 
 
-def _archive_run(archive: object, *, run_id: str, content_hash: str) -> None:
-    """Minimal ``MeasurementArchive.save`` envelope — one dataset-tagged sample."""
-    archive.save(  # type: ignore[attr-defined]
+def _archive_run(
+    archive: object,
+    *,
+    run_id: str,
+    content_hash: str,
+    measurements: list[dict[str, object]] | None = None,
+) -> None:
+    """Minimal ``MeasurementArchive.append_run`` envelope — one dataset-tagged sample."""
+    items = measurements or [{"sample_id": 1, "query": f"q_{run_id}", "hit": True}]
+    archive.append_run(  # type: ignore[attr-defined]
         run_id,
         {
             "run_id": run_id,
             "name": run_id,
             "content_hash": content_hash,
             "prompt_fields_id": "pf",
-            "item_count": 1,
-            "scores": {"accuracy": 1.0, "total": 1},
+            "item_count": len(items),
+            "scores": {"accuracy": 1.0, "total": len(items)},
             "node_configs": [("llm_only", {"model": "X"})],
             "created_at": f"2026-05-19T00:00:{run_id[-2:]}Z",
-            "measurements": [{"sample_id": 1, "query": f"q_{run_id}", "hit": True}],
+            "measurements": items,
             "dataset_name": "reidx",
         },
+        items,
     )
+
+
+def test_partial_walk_log_folds_to_the_full_record(built_stores: Stores) -> None:
+    """The run detail is an append-only log: a save writes only the NEW rows, so a walk that
+    dies mid-dataset must still fold back to everything already paid for — and a re-walk of
+    the same run must supersede a sample in place, never duplicate it and never shrink.
+
+    This is the archive's half of the aborted-run invariant (the merge's half is above): the
+    silent harm is an interrupted run whose log reads back short, quietly dropping
+    measurements nothing will ever pay for again."""
+    archive = built_stores.archive
+    # Two saves, as the scoring walk makes them: sample 1, then sample 2 appended.
+    _archive_run(archive, run_id="r_a", content_hash="h", measurements=[{"sample_id": 1}])
+    _archive_run(
+        archive,
+        run_id="r_a",
+        content_hash="h",
+        measurements=[{"sample_id": 2, "hit": True}],
+    )
+    detail = archive.load_by_id("r_a")
+    assert detail is not None
+    assert [m["sample_id"] for m in detail["measurements"]] == [1, 2]
+
+    # A re-measure of sample 1 supersedes in place — last-wins by sample_id.
+    _archive_run(
+        archive,
+        run_id="r_a",
+        content_hash="h",
+        measurements=[{"sample_id": 1, "hit": True}],
+    )
+    detail = archive.load_by_id("r_a")
+    assert detail is not None
+    assert [m["sample_id"] for m in detail["measurements"]] == [1, 2]
+    assert detail["measurements"][0]["hit"] is True
+
+    # Compaction drops the superseded rows without losing a measurement.
+    archive.compact_run("r_a")
+    compacted = archive.load_by_id("r_a")
+    assert compacted == detail
+
+    # force_fresh REPLACES: an append-only log has to be told to forget.
+    archive.reset_run("r_a")
+    assert archive.load_by_id("r_a") is None
 
 
 def test_reindex_rebuilds_index_and_gcs_orphans_without_shrinking(built_stores: Stores) -> None:

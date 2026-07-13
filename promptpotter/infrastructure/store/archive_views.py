@@ -9,12 +9,12 @@ it) outside this file is drift, enforced by
 
 Placement in ``infrastructure/store/`` (not ``application/scoring/``) because
 ``tracing/replay.py`` is a consumer and ``infrastructure → application`` is
-forbidden. ``record_measurement_run`` is the sole write — any new write means
-a new function here, not a sidecar."""
+forbidden. The three writes below (append / compact / reset) are the whole write
+surface — any new one means a new function here, not a sidecar."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.shared.errors import is_error_result
@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "capture_evidence_epoch",
+    "compact_measurement_run",
     "list_runs",
     "load_run",
     "measurement_series_for_samples",
@@ -35,6 +36,7 @@ __all__ = [
     "measurements_for_sample",
     "record_measurement_run",
     "reindex_measurements",
+    "reset_measurement_run",
     "reusable_results",
     "runs_since",
 ]
@@ -161,6 +163,11 @@ def load_run(stores: Stores, run_id: str) -> dict[str, Any] | None:
     return stores.archive.load_by_id(run_id)
 
 
+def run_signatures(stores: Stores) -> dict[str, tuple[int, int]]:
+    """Change-tokens for every run detail, one scan — see `MeasurementArchive.detail_signatures`."""
+    return stores.archive.detail_signatures()
+
+
 def list_runs(
     stores: Stores,
     *,
@@ -216,9 +223,24 @@ def record_measurement_run(
     stores: Stores,
     run_id: str,
     data: dict[str, Any],
+    new_measurements: Iterable[dict[str, Any]],
 ) -> Path:
-    """Sole write entry point — persist one measurement-batch detail + index upsert."""
-    return stores.archive.save(run_id, data)
+    """Sole write entry point — append the rows the caller has not persisted yet, a fresh
+    header, and the index upsert. *new_measurements* is what is NEW: the detail log is
+    append-only, so the rows already on disk are never rewritten."""
+    return stores.archive.append_run(run_id, data, new_measurements)
+
+
+def compact_measurement_run(stores: Stores, run_id: str) -> bool:
+    """Drop the run's superseded rows (dead headers, re-measured samples). Self-limiting —
+    a no-op on a log that is already tight."""
+    return stores.archive.compact_run(run_id)
+
+
+def reset_measurement_run(stores: Stores, run_id: str) -> None:
+    """Discard the run's detail log — a ``force_fresh`` pass REPLACES its rows, and an
+    append-only log does not overwrite. See :meth:`MeasurementArchive.reset_run`."""
+    stores.archive.reset_run(run_id)
 
 
 def reindex_measurements(stores: Stores) -> dict[str, int]:

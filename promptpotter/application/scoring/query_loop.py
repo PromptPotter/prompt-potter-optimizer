@@ -122,13 +122,17 @@ class QueryLoopState:
     # cached entry itself so display can show the original DEPR row before
     # the retry row is rendered.
     deprecated_samples: dict[int, QueryMeasurement]
-    # Persist the results-so-far after each fresh measurement. Cache hits do
-    # not call this — their on-disk row is unchanged.
-    persist_fresh: Callable[[list[QueryMeasurement]], None]
+    # Persist the results-so-far after each fresh measurement, and return the candidate's
+    # running fitness over them. Cache hits do not call this — the next fresh sample's save
+    # sweeps their rows up. It fires BEFORE the error-abort return and before
+    # ``on_sample_pre_check`` (which can re-enter the gateway and be Ctrl+C'd), so it must
+    # stay its own call site: a sample we have paid for is on disk before the next await.
+    persist_fresh: Callable[[list[QueryMeasurement]], dict[str, Any]]
     # The in-flight candidate's running fitness over results-so-far (same shape
     # as the final scores). Computed per scored sample and ridden out on the
     # sample snapshot (``result["_running"]``) so the live dashboard + chat show
     # a candidate fitness that moves in real time instead of sitting at 0.
+    # A fresh sample reads it off ``persist_fresh``'s return instead of folding twice.
     running_scores: Callable[[list[QueryMeasurement]], dict[str, Any]]
     # Async hook fired after each sample lands, before degradation checks
     # read prior coverage. The candidate loop uses it to catch PoBB priors
@@ -250,7 +254,7 @@ async def _process_fresh_sample(
     if sample.id in ctx.deprecated_samples:
         cast(dict[str, Any], result)["retry_of_deprecated_cache"] = True
     state.results.append(result)
-    ctx.persist_fresh(state.results)
+    running = ctx.persist_fresh(state.results)
 
     if is_error_result(result):
         abort_reason = _classify_abort(result, state)
@@ -260,9 +264,7 @@ async def _process_fresh_sample(
         state.consecutive_errors = 0
 
     if ctx.on_sample_scored is not None:
-        ctx.on_sample_scored(
-            _with_running(result, ctx.running_scores(state.results)), idx, dataset_len
-        )
+        ctx.on_sample_scored(_with_running(result, running), idx, dataset_len)
 
     if ctx.on_sample_pre_check is not None:
         await ctx.on_sample_pre_check(sample)
@@ -287,7 +289,7 @@ async def run_query_loop(
     candidate_idx: int,
     n_total_candidates: int,
     axes: AxisIndex | None,
-    persist_fresh: Callable[[list[QueryMeasurement]], None],
+    persist_fresh: Callable[[list[QueryMeasurement]], dict[str, Any]],
     running_scores: Callable[[list[QueryMeasurement]], dict[str, Any]],
     on_sample_pre_check: Callable[[Sample], Awaitable[None]] | None = None,
 ) -> QueryLoopResult:

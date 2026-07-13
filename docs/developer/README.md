@@ -108,16 +108,18 @@ It's the **bridge between optimizer and target system**. Everything above it gen
 ```
 ON DISK (the database)                IN MEMORY (rebuilt from disk)
 ──────────────────────────            ─────────────────────────────
-archive/                            MeasurementArchive
-  measurements/                                      │
-    {run_id}.json     ← one batch          ┌────────┼────────┐
-    index.jsonl       ← append-only         ▼        ▼        ▼
+measurements/                       MeasurementArchive
+  index.jsonl        ← append-only                   │
+  runs/                                     ┌────────┼────────┐
+    {run_id}.jsonl   ← one run's log         ▼        ▼        ▼
                                         SampleIdx  CfgIdx  AxisIdx
                                        (per       (per     (folds
                                         sample)    config)  both)
 ```
 
-**Write path:** `score_search_point()` → `build_dataset_run_data()` (`application/datasets/loaders.py:368`) → `archive.save(run_id, data)` — one appended `index.jsonl` line, last-wins by `content_hash` (`store/read_model.py`), no read/rewrite — → `AxisIndex.refresh()` (`application/intelligence/indexes/axis.py:283`) pulls via `archive.load_since()`. `reindex` rebuilds `index.jsonl` from the detail files.
+Both files are append-only logs folded last-wins (`store/read_model.py`). The index keys on `content_hash`; a run's log keys on `k` — one `"run"` header row (rewritten whole per save; it is the commit marker) and one `"m:{sample_id}"` row per measurement.
+
+**Write path:** `score_search_point()` → `build_dataset_run_data()` (`application/datasets/loaders.py`) → `archive.append_run(run_id, data, new_measurements)` — the rows already on disk are never rewritten, so a walk of S samples costs O(S) bytes, not O(S²) — → `AxisIndex.refresh()` (`application/intelligence/indexes/axis.py`) pulls via `archive.load_since()`. `compact_run` drops superseded rows at the walk boundary; `reset_run` truncates (a `force_fresh` pass REPLACES its rows, and append-only does not overwrite); `reindex` rebuilds `index.jsonl` from `runs/`.
 
 **Read paths** (both return `list[Measurement]`):
 

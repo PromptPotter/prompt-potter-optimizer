@@ -109,7 +109,7 @@ Trigger if any of: `.env` missing, backend `/status` unreachable, or requested d
 
 **Print only if** no dataset arg, dataset not implemented (scorer in `promptpotter/application/scoring/formula/matchers.py::SCORING_FUNCTIONS`, loader in `promptpotter/application/datasets/loaders.py::DATASET_LOADERS`), or an anomaly from the allowlist below fires.
 
-If `datasets/{name}/` has never produced a measurement (`measurements/{run_id}.json`), suggest (don't auto-run): `python scripts/smoke_campaign.py --dataset {name}` (~90s).
+If `datasets/{name}/` has never produced a measurement (`measurements/runs/{run_id}.jsonl`), suggest (don't auto-run): `python scripts/smoke_campaign.py --dataset {name}` (~90s).
 
 ## Phase 0.7: Outlook
 
@@ -125,7 +125,7 @@ If the user's intent is genuinely ambiguous ("should I resume or start over?"), 
 
 - Backend `/status` non-200 or connection refused
 - Active-session pointer points at a different dataset than requested
-- Recent measurements (`measurements/{run_id}.json`) show empty `predicted` strings (BBEH regression)
+- Recent measurements (`measurements/runs/{run_id}.jsonl`) show empty `predicted` strings (BBEH regression)
 
 Surface anomalies as a one-line flag at the top, then the normal outlook. Never warn about documented config (notebook-driven datasets, `campaign.json` ↔ notebook drift, BBEH inline `task_context`, data volume) — that's expected state.
 
@@ -160,7 +160,7 @@ NEXT:     {continue L1 / escalate to L2 / etc.}
 
 **Monitor actively — the ~2-minute interval is for fanning out and researching, not pausing.** Each tick, fan out parallel searches over the fresh round output and chase the newest anomaly; don't check once and wait idle until the next tick. **Monitor** by tailing `.promptpotter/projects/{tenant_id}/campaigns/{campaign_id}/dashboard.json` (active campaign + cycle ids in `projects/{tenant_id}/.workspace/active_session.json`). Surface the full path in your reply so the operator can open it directly. Also recommend the **webapp preview**: in a separate terminal `python -m uvicorn promptpotter.main:app --port 8001`, then <http://127.0.0.1:8001/> — polls `dashboard.json` every 2 s; reload the page after a fresh `new <name>` mint. Diagnose via `rounds/round_NNNN.json` (round summary + L1 critique), `.runtime/cache/rounds/round_NNNN.json` (per-round node I/O — internal), and `output.log` (per-sample HIT/MISS). Stop with Ctrl+C — first finishes in-flight, second force-quits. Re-run `resume` to continue.
 
-**Incremental persistence.** Every query lands in the measurements store (`measurements/{run_id}.json`, indexed append-only in `measurements/index.jsonl`) immediately — hard kills lose zero work, resume auto cache-hits prior results.
+**Incremental persistence.** Every query lands in the measurements store (appended to `measurements/runs/{run_id}.jsonl`, indexed append-only in `measurements/index.jsonl`) immediately — hard kills lose zero work, resume auto cache-hits prior results.
 
 Escalation model: `reference/optimization-layers.md`, `docs/concepts/the-loop.md`, `docs/developer/self-healing-internals.md`.
 

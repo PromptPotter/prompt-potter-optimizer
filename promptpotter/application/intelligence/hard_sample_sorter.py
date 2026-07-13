@@ -136,7 +136,6 @@ def build_hard_samples_artifact(
     cycle_id: str | None = None,
     top_k_candidates: int | None = 40,
     top_k_samples: int | None = 40,
-    posterior: RaschPosterior | None = None,
 ) -> dict[str, Any]:
     """Thin wrapper — projects ``rounds`` to observations then delegates. Pure."""
     return build_hard_samples_artifact_from_observations(
@@ -144,7 +143,6 @@ def build_hard_samples_artifact(
         cycle_id=cycle_id,
         top_k_candidates=top_k_candidates,
         top_k_samples=top_k_samples,
-        posterior=posterior,
     )
 
 
@@ -154,14 +152,12 @@ def build_hard_samples_artifact_from_observations(
     cycle_id: str | None = None,
     top_k_candidates: int | None = 40,
     top_k_samples: int | None = 40,
-    posterior: RaschPosterior | None = None,
 ) -> dict[str, Any]:
-    """Pre-built-observations variant; fits Rasch when ``posterior`` absent, truncates to top-K."""
+    """Pre-built-observations variant; fits Rasch over *observations*, truncates to top-K."""
     if not observations:
         return empty_artifact(cycle_id=cycle_id)
 
-    if posterior is None:
-        posterior = fit_rasch(observations)
+    posterior = fit_rasch(observations)
     hit_rates = _candidate_hit_rates(observations)
     miss_rates = _sample_miss_rates(observations)
     best_cid: str | None = None

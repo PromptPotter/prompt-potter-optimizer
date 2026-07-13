@@ -31,11 +31,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["merge_with_unprocessed_priors", "score_search_point"]
+__all__ = ["merge_with_unprocessed_priors", "rescored_prior_tail", "score_search_point"]
 
 
-def merge_with_unprocessed_priors(
-    results: list[QueryMeasurement],
+def rescored_prior_tail(
     *,
     cached_sample_results: dict[int, QueryMeasurement],
     dataset_sample_ids: set[int],
@@ -43,22 +42,41 @@ def merge_with_unprocessed_priors(
     scorer: Scorer | None,
     scorer_id: str,
     scorer_formula: str | None,
-) -> list[QueryMeasurement]:
-    """Union results with cache priors for unprocessed dataset samples; rescore via active scorer.
+) -> dict[int, QueryMeasurement]:
+    """The cache priors this run may archive without re-measuring, rescored ONCE.
 
-    Without this, partial runs (cache hits + Ctrl+C) shrink the archive on
-    overwrite. Evicted (deprecated) priors must re-measure, not re-archive.
+    In-dataset and not evicted (a deprecated prior must re-measure, not re-archive). The
+    active scorer is fixed for the duration of one ``score_search_point``, so rescoring here
+    — before the walk — is exactly equivalent to rescoring inside
+    :func:`merge_with_unprocessed_priors`, which did it for every prior on every sample:
+    O(samples²) rescores for one run's worth of answers.
     """
-    processed = {r["sample_id"] for r in results}
-    merged = list(results)
+    tail: dict[int, QueryMeasurement] = {}
     for sid, prior in cached_sample_results.items():
-        if sid not in dataset_sample_ids or sid in processed or sid in deprecated_samples:
+        if sid not in dataset_sample_ids or sid in deprecated_samples:
             continue
         entry = cast(QueryMeasurement, dict(prior))
         if scorer is not None:
             rescore_results([cast("dict[str, Any]", entry)], scorer, scorer_id, scorer_formula)
-        merged.append(entry)
-    return merged
+        tail[sid] = entry
+    return tail
+
+
+def merge_with_unprocessed_priors(
+    results: list[QueryMeasurement],
+    prior_tail: dict[int, QueryMeasurement],
+) -> list[QueryMeasurement]:
+    """Union results with the priors for samples the walk has not reached.
+
+    Without this, partial runs (cache hits + Ctrl+C) shrink the archive's record of this
+    run. The archive log is append-only and last-wins by ``sample_id``, so a prior already
+    on disk is superseded the moment its sample is walked — but the run's *derived* fields
+    (scores, provenance, item_count) are computed off this merged view, so it stays.
+    """
+    if not prior_tail:
+        return results
+    processed = {r["sample_id"] for r in results}
+    return results + [p for sid, p in prior_tail.items() if sid not in processed]
 
 
 def _build_scoring_error_signal(
@@ -267,8 +285,10 @@ async def score_search_point(
     backend-code fix (a connector bug, a schema bound) is invisible to it — a
     re-run would silently replay the broken measurement. ``force_fresh`` is the
     escape hatch for exactly that: re-score an origin after fixing the connector
-    and see the new result. Fresh measurements still persist to the archive
-    normally, overwriting the stale rows.
+    and see the new result. Its run's detail log is TRUNCATED first, because an
+    append-only log does not overwrite: without that, an interrupted force-fresh pass
+    would leave a franken-run — post-fix rows for the samples it reached, pre-fix rows
+    for the rest, under one header, and nothing would error.
 
     ``opt_sp`` is the candidate's ``OptSearchPoint``; threading it makes the
     composite the gateway computes (and archives) opt_sp-aware — so the archived
@@ -305,21 +325,41 @@ async def score_search_point(
         label=label,
     )
 
-    def _merged_view(results: list[QueryMeasurement]) -> list[QueryMeasurement]:
-        return merge_with_unprocessed_priors(
-            results,
-            cached_sample_results=cached_sample_results,
-            dataset_sample_ids=dataset_sample_ids,
-            deprecated_samples=deprecated_samples,
-            scorer=session.scoring.scorer,
-            scorer_id=session.scoring.scorer_id,
-            scorer_formula=session.scoring.scorer_formula,
+    prior_tail = rescored_prior_tail(
+        cached_sample_results=cached_sample_results,
+        dataset_sample_ids=dataset_sample_ids,
+        deprecated_samples=deprecated_samples,
+        scorer=session.scoring.scorer,
+        scorer_id=session.scoring.scorer_id,
+        scorer_formula=session.scoring.scorer_formula,
+    )
+    if force_fresh and store:
+        # An append-only log does not overwrite: force_fresh means REPLACE these rows.
+        archive_views.reset_measurement_run(store, run_id)
+    elif store:
+        # Drop a previous walk's dead header rows before appending more (a no-op on a log
+        # that closed cleanly — the end-of-walk compaction already tightened it).
+        archive_views.compact_measurement_run(store, run_id)
+
+    # How many of ``results`` are already appended to the run's log, and whether the priors
+    # have been. The log is append-only, so each save writes only what is new.
+    appended = 0
+    priors_appended = not prior_tail
+
+    def _composite(rows: list[QueryMeasurement]) -> dict[str, Any]:
+        return compute_composite_fitness(
+            rows,
+            pipeline_schema,
+            opt_sp=opt_sp,
+            round_scorer=session.scoring.round_scorer,
+            l1_diversity=l1_diversity,
         )
 
     def _save_run(results: list[QueryMeasurement], scores: dict[str, Any]) -> None:
+        nonlocal appended, priors_appended
         if not (store and backend_id):
             return
-        merged = _merged_view(results)
+        merged = merge_with_unprocessed_priors(results, prior_tail)
         run_data = build_dataset_run_data(
             run_id,
             safe_label,
@@ -331,20 +371,36 @@ async def score_search_point(
             source=source,
             pipeline_schema=pipeline_schema,
         )
-        archive_views.record_measurement_run(store, run_id, run_data)
-
-    def _persist_fresh(results: list[QueryMeasurement]) -> None:
-        if not (store and backend_id):
-            return
-        merged = _merged_view(results)
-        scores = compute_composite_fitness(
-            merged,
-            pipeline_schema,
-            opt_sp=opt_sp,
-            round_scorer=session.scoring.round_scorer,
-            l1_diversity=l1_diversity,
+        # The cursor is over ``results``, not "the last row": a cache hit appends a
+        # MATERIALIZED row (rescored, recovered — which can cost real backend calls) without
+        # persisting, so a save has to sweep up everything the walk has produced since the
+        # last one. The priors go down once — ``merged[len(results):]`` is exactly the ones
+        # the walk has not reached; a sample walked later supersedes its own prior by
+        # ``sample_id``, which is what makes an append-only log safe to re-walk.
+        new_rows: list[QueryMeasurement] = []
+        if not priors_appended:
+            new_rows.extend(merged[len(results) :])
+            priors_appended = True
+        new_rows.extend(results[appended:])
+        appended = len(results)
+        archive_views.record_measurement_run(
+            store, run_id, run_data, cast("list[dict[str, Any]]", new_rows)
         )
-        _save_run(results, scores)
+
+    def _persist_fresh(results: list[QueryMeasurement]) -> dict[str, Any]:
+        """Persist the walk's new rows; return the candidate's running fitness.
+
+        The archived score is the MERGED one (results + not-yet-walked priors), the running
+        one is over ``results`` alone — the candidate's own fitness, which is what the
+        gateway returns and PoBB reads. When there are no priors the two are the same fold,
+        so it is computed once and reused (the common case: 512 of 752 archived runs are
+        all-fresh)."""
+        running = _composite(results)
+        if not (store and backend_id):
+            return running
+        merged = merge_with_unprocessed_priors(results, prior_tail)
+        _save_run(results, running if merged is results else _composite(merged))
+        return running
 
     def _running_scores(results: list[QueryMeasurement]) -> dict[str, Any]:
         """The in-flight candidate's fitness over results-so-far — the SAME shape
@@ -352,13 +408,7 @@ async def score_search_point(
         out on the sample snapshot so ``dashboard.json`` carries a live composite
         that converges to the final one: a file-tree reader (no browser) sees the
         candidate's fitness move in real time, not sit at 0 until it completes."""
-        return compute_composite_fitness(
-            results,
-            pipeline_schema,
-            opt_sp=opt_sp,
-            round_scorer=session.scoring.round_scorer,
-            l1_diversity=l1_diversity,
-        )
+        return _composite(results)
 
     # Pre-register Samples so the SampleIndex carries primitives for any
     # query that lands. ``Sample.run_ids`` accumulates later, when
@@ -404,6 +454,8 @@ async def score_search_point(
         scores["partial_reason"] = "skip"
 
     _save_run(results, scores)
+    if store:
+        archive_views.compact_measurement_run(store, run_id)
     _emit_dataset_run(
         session,
         run_id=run_id,

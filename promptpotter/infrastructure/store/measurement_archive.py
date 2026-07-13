@@ -4,26 +4,65 @@ Two views: by sample (`measurements_for_sample`) and by config (`measurements_fo
 Cache reuse → positional prefix-exact; discovery → `_matches_subset`. Sole source of truth —
 derived views (AxisIndex, SampleIndex) refresh from `list_all`, not a parallel stream.
 
-The index is `measurements/index.jsonl` (`store/read_model.py`): a save is one appended
-line, last-wins by `content_hash`; a read folds the file once. `reindex` rebuilds it from
-the detail files (and GCs orphaned ones). No read-whole / O(n)-scan / rewrite-whole per save.
+**Both files are append-only logs over `store/read_model.py`, folded last-wins.** The index
+is `measurements/index.jsonl`, keyed by `content_hash`; each run's detail is
+`measurements/runs/{run_id}.jsonl`, keyed by `k` — one `"run"` header row (rewritten whole
+per save, so the fold always serves the latest) and one `"m:{sample_id}"` row per
+measurement. A save appends only what is new: the scoring walk re-saves after every sample,
+and rewriting the whole detail each time cost O(samples²) bytes (measured: 90 MB of archive
+took 839 MB of writes; 67× worse at 200 samples).
+
+No read-whole / O(n)-scan / rewrite-whole per save — and, since the loop reads the index
+many times per round, none per READ either: `_live_rows` keeps the fold in memory and tails
+only the bytes appended since the last read, re-folding whole only when the file shrinks or
+is rewritten under it. Correctness rides on stat-ing the file every read, never on trusting
+our own writes — see `_live_rows`.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+import hashlib
+import json
+import logging
+import os
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
 from promptpotter.config.settings import DEFAULT_CONNECTOR_TYPE
 from promptpotter.domain.measurement_provenance import entry_grade, meets_grade
 from promptpotter.domain.sample import Measurement
-from promptpotter.infrastructure.store.io import (
-    read_json_optional,
-    write_json,
-    write_jsonl,
+from promptpotter.infrastructure.store.io import write_jsonl
+from promptpotter.infrastructure.store.read_model import (
+    append_row,
+    compact,
+    fold_jsonl,
+    fold_jsonl_from,
 )
-from promptpotter.infrastructure.store.read_model import append_row, compact, fold_jsonl
+
+logger = logging.getLogger(__name__)
+
+# The detail log's fold key, and the one row that is not a measurement.
+_FOLD_KEY = "k"
+_HEADER_KEY = "run"
+_DETAIL_SUFFIX = ".jsonl"
+
+
+def _measurement_key(item: dict[str, Any]) -> str:
+    """Fold key of one measurement row — its ``sample_id``, the cell's one identity.
+
+    A row without one is a writer bug (every writer stamps it), but the archive is paid LLM
+    spend: keying it by its own content keeps it in the log rather than dropping it, and it
+    cannot collide with a real sample's key.
+    """
+    sid = item.get("sample_id")
+    if isinstance(sid, int):
+        return f"m:{sid}"
+    digest = hashlib.blake2b(
+        json.dumps(item, sort_keys=True, default=str).encode(), digest_size=8
+    ).hexdigest()
+    logger.warning("Measurement row without an int sample_id — keying by content (%s).", digest)
+    return f"m:!{digest}"
 
 
 def _summary(data: dict[str, Any]) -> dict[str, Any]:
@@ -90,12 +129,18 @@ def _entry_matches_dataset(entry: dict[str, Any], dataset_name: str | None) -> b
 class MeasurementArchive:
     """File I/O for the measurement store — the DB core, NOT the recycle bin.
 
-    Tenant-global, self-contained under `measurements/`: run-detail files
-    `measurements/{run_id}.json` and the append-only index `measurements/index.jsonl`
-    live together. It sits beside `campaigns/` and `archive/` (the recycle bin),
-    never inside `archive/` — it is a cross-campaign cache, not trash. Run files are
-    reached by explicit `run_id` (`load_by_id`) or via the index (`list_all`); only
+    Tenant-global, self-contained under `measurements/`: the append-only index
+    `measurements/index.jsonl` beside a `measurements/runs/` dir holding one
+    `{run_id}.jsonl` detail log each. It sits beside `campaigns/` and `archive/` (the
+    recycle bin), never inside `archive/` — it is a cross-campaign cache, not trash. Run
+    logs are reached by explicit `run_id` (`load_by_id`) or via the index (`list_all`); only
     `reindex` globs the dir, so the index shares it safely.
+
+    **`runs/` is load-bearing, not cosmetic.** The details used to sit directly in
+    `measurements/`, so every scan of them carried a name filter (`.json` suffix AND a
+    `hard_samples_` prefix blocklist) — and the only reason it did not also swallow
+    `index.jsonl` was the accident that `".jsonl".endswith(".json")` is False. A dir holding
+    nothing but detail logs retires the whole membership test for one suffix check.
 
     **Identity does not include the execution path.** A measurement is keyed by
     `content_hash(prompt, dataset, pipeline_params)` and reused by
@@ -110,14 +155,70 @@ class MeasurementArchive:
 
     def __init__(self, base_dir: Path):
         self._base_dir = base_dir
+        self._rows: dict[str, dict[str, Any]] | None = None
+        self._stat: tuple[int, int] | None = None
+        self._offset = 0
 
     # -- path helpers ---------------------------------------------------------
+
+    @property
+    def base_dir(self) -> Path:
+        """The archive's root — its identity. A memo over archive-derived data keys on
+        this: run_ids are content-addressed, but an L4 inner cycle runs in-process over a
+        SANDBOXED archive, so run_id alone is not a unique key across live instances."""
+        return self._base_dir
 
     def _store_dir(self) -> Path:
         return self._base_dir / "measurements"
 
     def _index_path(self) -> Path:
         return self._store_dir() / "index.jsonl"
+
+    def _runs_dir(self) -> Path:
+        return self._store_dir() / "runs"
+
+    def _detail_path(self, run_id: str) -> Path:
+        return self._runs_dir() / f"{run_id}{_DETAIL_SUFFIX}"
+
+    # -- index read model -----------------------------------------------------
+
+    def _invalidate(self) -> None:
+        """Drop the memo — for the two ops that rewrite the index wholesale."""
+        self._rows = None
+        self._stat = None
+        self._offset = 0
+
+    def _live_rows(self) -> dict[str, dict[str, Any]]:
+        """The folded index (last-wins by ``content_hash``), tailed rather than re-folded.
+
+        Every read stats the file first. Unchanged ``(mtime_ns, size)`` serves the memo;
+        a file that GREW is tailed from the last offset and merged (last-wins, so an
+        appended row supersedes in place); anything else — shrunk, or same size with a
+        new mtime, i.e. a `compact`/`reindex`/`write_jsonl` rewrote it — re-folds whole.
+
+        The stat is what makes this safe across instances: an L4 inner cycle runs
+        in-process with its own ``Stores`` over the same ``measurements/`` dir, so a memo
+        trusting only its own writes would go blind to the sibling's appends.
+        """
+        path = self._index_path()
+        try:
+            st = path.stat()
+        except FileNotFoundError:
+            self._invalidate()
+            return {}
+        sig = (st.st_mtime_ns, st.st_size)
+        if self._rows is not None and sig == self._stat:
+            return self._rows
+        if self._rows is not None and st.st_size > self._offset:
+            fresh, self._offset = fold_jsonl_from(path, "content_hash", self._offset)
+            self._rows.update(fresh)
+        else:
+            # Fold from 0 through the same primitive: it returns the newline-aligned
+            # offset, so a crash-truncated trailing line stays pending instead of being
+            # skipped forever once the writer completes it.
+            self._rows, self._offset = fold_jsonl_from(path, "content_hash", 0)
+        self._stat = sig
+        return self._rows
 
     def dataset_snapshot_path(self, backend_id: str, dataset_name: str) -> Path:
         """Path of the per-(backend, dataset) hard-samples snapshot — the store owns
@@ -126,61 +227,130 @@ class MeasurementArchive:
 
     # -- complete runs --------------------------------------------------------
 
-    def save(
+    def append_run(
         self,
         run_id: str,
         data: dict[str, Any],
+        new_measurements: Iterable[dict[str, Any]],
     ) -> Path:
-        """Write detail + append the index summary. *data* needs `run_id`, `content_hash`,
-        `scores`. Detail = atomic write; index = one appended line (last-wins by
-        `content_hash`) — no read, no rewrite, no fold.
+        """Append *new_measurements* + a fresh header row to the run's detail log, and one
+        index summary. *data* is the full run dict (`build_dataset_run_data`); its
+        ``measurements`` key is the merged view, used for the header's derived fields
+        (scores, provenance, item_count) and dropped from the row itself.
 
-        A re-measure of the same `content_hash` under a *different* `run_id` orphans the
-        old detail file (the index row is superseded, so no read ever reaches it); `reindex`
-        GCs those. The common case — same `run_id` (same label) — overwrites the detail file
-        in place, so nothing orphans.
+        The caller passes ONLY the rows it has not appended yet. The measurement rows
+        already on disk are not rewritten — that is the whole point: the scoring walk calls
+        this once per sample, and rewriting the accumulated detail each time is what cost
+        O(samples²) bytes.
 
-        The save path never folds — compaction (dropping superseded lines) is on-demand via
-        `reindex`, not paid per write.
+        Measurements land before the header, so the header is the commit marker: a crash
+        mid-save leaves rows the old header does not yet count, never a header promising
+        rows that are not there.
+
+        A re-measure of the same `content_hash` under a *different* `run_id` orphans the old
+        log (the index row is superseded, so no read ever reaches it); `reindex` GCs those.
+        The common case — same `run_id` (same label) — appends into the same log, where
+        last-wins by ``sample_id`` supersedes in place.
         """
-        detail_path = self._store_dir() / f"{run_id}.json"
-        write_json(detail_path, data)
+        detail_path = self._detail_path(run_id)
+        for item in new_measurements:
+            append_row(detail_path, {_FOLD_KEY: _measurement_key(item), **item})
+        header = {_FOLD_KEY: _HEADER_KEY, **{k: v for k, v in data.items() if k != "measurements"}}
+        append_row(detail_path, header)
 
         append_row(self._index_path(), _summary(data))
 
         return detail_path
 
+    def compact_run(self, run_id: str) -> bool:
+        """Drop the run's superseded rows (dead headers, re-measured samples).
+
+        ``factor=1`` is required, not a tuning choice: a walk of S samples leaves S header
+        rows against ONE live one, so the default ``factor=2`` guard (rewrite only past 2× the
+        live set) would never fire on a log whose live set is ``1 + S``.
+        """
+        return compact(self._detail_path(run_id), _FOLD_KEY, factor=1)
+
+    def reset_run(self, run_id: str) -> None:
+        """Discard the run's log entirely — the ``force_fresh`` truncation.
+
+        Append-only does not overwrite, so a re-measure that means to REPLACE the stale rows
+        (a connector fix the content hash cannot see) has to say so. Without this, an
+        interrupted force-fresh pass leaves a franken-run: post-fix rows for the samples it
+        reached, pre-fix rows for the rest, under one header, and nothing errors.
+        """
+        self._detail_path(run_id).unlink(missing_ok=True)
+
+    def maintain_index(self) -> bool:
+        """Drop superseded rows from the index when they've grown past the live set.
+
+        `save` appends one summary row per call, and the scoring walk saves after every
+        sample — so a run of S samples leaves S rows for one live entry. On the live
+        archive that is 7909 rows for 688 runs: 91% dead weight, re-read by every cold
+        fold. Compaction is the append-only log's own answer to that (`read_model`), it
+        just had no caller on the loop path. Self-limiting: `compact` no-ops on a tight
+        log, so calling this every run costs one fold and usually rewrites nothing.
+        """
+        if compact(self._index_path(), "content_hash"):
+            self._invalidate()
+            return True
+        return False
+
     def load_by_id(self, run_id: str) -> dict[str, Any] | None:
-        """Load a run detail file directly by run_id (no index scan)."""
-        return read_json_optional(self._store_dir() / f"{run_id}.json")
+        """Fold a run's detail log into the full run dict (no index scan); ``None`` if the log
+        is absent or carries no header row yet."""
+        return _fold_detail(self._detail_path(run_id))
+
+    def detail_signatures(self) -> dict[str, tuple[int, int]]:
+        """``{run_id: (mtime_ns, size)}`` for every run detail, in ONE directory scan.
+
+        Lets a caller memoize a DERIVATION of the details (cheap to hold) instead of the
+        details themselves (90 MB across 676 runs — caching those is what starves memory).
+        A run_id is NOT immutable content: the scoring walk appends to the same log after
+        every sample, so it grows under a reader, and anything cached off it must be
+        revalidated. `scandir` carries the stat data from the directory read, so asking
+        once for all of them beats a `stat` per run by an order of magnitude.
+        """
+        out: dict[str, tuple[int, int]] = {}
+        try:
+            with os.scandir(self._runs_dir()) as it:
+                for e in it:
+                    if not e.name.endswith(_DETAIL_SUFFIX):
+                        continue
+                    st = e.stat()
+                    out[e.name[: -len(_DETAIL_SUFFIX)]] = (st.st_mtime_ns, st.st_size)
+        except OSError:
+            return out
+        return out
 
     def restamp_dataset(self, old_name: str, new_name: str) -> int:
         """Rewrite every archive entry stamped *old_name* → *new_name* (index summary
-        + the matching detail file's ``dataset_name``). Returns the count restamped.
+        + the matching detail log's ``dataset_name``). Returns the count restamped.
 
         The measurement half of the dataset version-and-repoint migration
         (``application/datasets/dataset_replace.py``): when a dataset's data is
         archived under a ``-vN`` name, its prior campaigns' measurements move with
         it so dataset-scoped reuse + filtering stay truthful. Idempotent — only
         entries still stamped *old_name* are touched, so a re-run after a crash is
-        a no-op. Each rename is one appended index row (last-wins by
-        ``content_hash``), then a single compaction, mirroring :meth:`save`.
+        a no-op. Each rename is one appended index row + one appended header row
+        (last-wins on both logs) — no measurement is rewritten.
         """
         index_path = self._index_path()
         count = 0
         for entry in list(fold_jsonl(index_path, "content_hash").values()):
             if entry.get("dataset_name") != old_name:
                 continue
-            renamed = {**entry, "dataset_name": new_name}
-            append_row(index_path, renamed)
             count += 1
             run_id = entry.get("run_id", "")
             detail = self.load_by_id(run_id) if run_id else None
-            if detail is not None and detail.get("dataset_name") == old_name:
-                detail["dataset_name"] = new_name
-                write_json(self._store_dir() / f"{run_id}.json", detail)
+            if detail is not None:
+                # Appends the restamped header AND its index summary — one write path.
+                self.append_run(run_id, {**detail, "dataset_name": new_name}, [])
+            else:
+                append_row(index_path, {**entry, "dataset_name": new_name})
         if count:
             compact(index_path, "content_hash")
+            self._invalidate()
         return count
 
     def list_all(
@@ -190,32 +360,28 @@ class MeasurementArchive:
     ) -> list[dict[str, Any]]:
         """Index entries (summaries), one fold of ``index.jsonl`` (last-wins by
         ``content_hash``). *dataset_name* scopes to one dataset (None = forensic/admin)."""
-        entries = list(fold_jsonl(self._index_path(), "content_hash").values())
+        entries = list(self._live_rows().values())
         if dataset_name is None:
             return entries
         return [e for e in entries if _entry_matches_dataset(e, dataset_name)]
 
     def reindex(self) -> dict[str, int]:
-        """Rebuild ``index.jsonl`` from the detail files and GC orphans — the append-only
-        log's on-demand repair. Reads every ``{run_id}.json``, keeps the latest by
+        """Rebuild ``index.jsonl`` from the detail logs and GC orphans — the append-only
+        log's on-demand repair. Folds every ``runs/{run_id}.jsonl``, keeps the latest by
         ``created_at`` per ``content_hash``, rewrites a compacted index, then deletes the
-        *superseded* detail files (a re-measure under a new ``run_id`` orphans the old one).
+        *superseded* logs (a re-measure under a new ``run_id`` orphans the old one).
         Returns ``{indexed, orphans_removed, details_scanned}``. Losing the index loses
         nothing — this reproduces it.
 
-        GC is positive-identification-only: a file is deleted only if it parsed as a
+        GC is positive-identification-only: a log is deleted only if it folded to a
         measurement detail (carried a ``content_hash``) and lost to a newer run for that
-        hash. A file it cannot read as a detail is left untouched — reindex never removes a
+        hash. A path it cannot read as a detail is left untouched — reindex never removes a
         path it can't explain.
         """
-        store = self._store_dir()
-        # ``glob("*.json")`` never matches the ``.jsonl`` index; the positive-ID pass below
-        # skips any other non-detail file (no ``content_hash``), so no name allowlist is needed.
-        candidates = [p for p in store.glob("*.json") if not p.name.startswith("hard_samples_")]
         parsed: list[tuple[Path, dict[str, Any]]] = []
-        for path in candidates:
-            data = read_json_optional(path)
-            if isinstance(data, dict) and "content_hash" in data:
+        for path in self._runs_dir().glob(f"*{_DETAIL_SUFFIX}"):
+            data = _fold_detail(path)
+            if data is not None and "content_hash" in data:
                 parsed.append((path, data))
 
         winners: dict[str, tuple[Path, dict[str, Any]]] = {}
@@ -228,11 +394,13 @@ class MeasurementArchive:
                 winners[ch] = (path, data)
 
         write_jsonl(self._index_path(), [_summary(d) for _, d in winners.values()])
+        self._invalidate()
         winner_paths = {path for path, _ in winners.values()}
         orphans = 0
         for path, _ in parsed:
             if path not in winner_paths:
                 path.unlink(missing_ok=True)
+                path.with_suffix(path.suffix + ".lock").unlink(missing_ok=True)
                 orphans += 1
         return {
             "indexed": len(winners),
@@ -427,6 +595,25 @@ class MeasurementArchive:
                     continue
                 cache[sid] = item
         return cache
+
+
+def _fold_detail(path: Path) -> dict[str, Any] | None:
+    """Fold one detail log back into the run dict its writer built.
+
+    Last-wins per ``k``: the newest header row, and the newest row per ``sample_id`` in
+    first-seen order. ``None`` when the log is absent or has no header yet — a headerless
+    log is a walk that appended measurements and died before its first commit, and it must
+    not read as a run (it has no scores).
+    """
+    rows = fold_jsonl(path, _FOLD_KEY)
+    header = rows.pop(_HEADER_KEY, None)
+    if header is None:
+        return None
+    data = {k: v for k, v in header.items() if k != _FOLD_KEY}
+    data["measurements"] = [
+        {k: v for k, v in row.items() if k != _FOLD_KEY} for row in rows.values()
+    ]
+    return data
 
 
 def _to_measurement(

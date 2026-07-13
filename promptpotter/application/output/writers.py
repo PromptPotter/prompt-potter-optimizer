@@ -115,7 +115,6 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict[str, An
         cycle_id=cycle_id,
         top_k_candidates=None,
         top_k_samples=None,
-        posterior=cycle.last_rasch_posterior,
     )
 
     live_obs = build_observations(cycle.rounds)
