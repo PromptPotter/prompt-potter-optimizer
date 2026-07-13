@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -39,6 +40,7 @@ __all__ = [
     "build_observations",
     "candidate_abilities",
     "candidate_lcb_ability",
+    "dedup_observations",
     "discovered_level_trajectory",
     "fit_rasch",
     "fit_rasch_2pl",
@@ -574,19 +576,36 @@ def _full_loglik(observations: list[Observation], post: RaschPosterior) -> float
     )
 
 
+def _fold_of(o: Observation, n_folds: int) -> int:
+    """Which CV fold an observation belongs to — a stable hash of its OWN identity.
+
+    Never its position in the list. Stride folds (``observations[i::n_folds]``) made the
+    graduation verdict a function of the order the archive happened to be walked in, so a
+    ``reindex`` could flip 1PL↔2PL, hence δ, hence which candidates PoBB kills. Worse, they
+    collapse outright on a sorted stream: with the observations grouped by candidate and
+    sorted by sample, a stride index becomes a bijection onto the sample, so fold *k* holds
+    a fixed sample partition whose samples are never in training and EVERY held-out response
+    is dropped (``n_eval == 0`` ⇒ 1PL forced) — for any dataset size divisible by ``n_folds``.
+    """
+    digest = hashlib.blake2b(f"{o.candidate_id}\x00{o.sample_id}".encode(), digest_size=8).digest()
+    return int.from_bytes(digest, "big") % n_folds
+
+
 def _cv_loglik(observations: list[Observation], n_folds: int) -> tuple[float, float] | None:
     """Cross-validated held-out total log-likelihood ``(ll_1pl, ll_2pl)``.
 
-    Deterministic stride folds (no RNG). For each held-out fold both models are
-    refit on the rest and scored on the fold — but only on responses whose
-    candidate *and* sample were seen in training (an unseen one has no estimate).
-    ``None`` when too sparse to evaluate either model. This is the primary
+    Deterministic hash folds (no RNG, no positional dependence — see :func:`_fold_of`).
+    For each held-out fold both models are refit on the rest and scored on the fold — but
+    only on responses whose candidate *and* sample were seen in training (an unseen one has
+    no estimate). ``None`` when too sparse to evaluate either model. This is the primary
     graduation test: held-out fit can't reward 2PL for overfitting in-sample.
     """
     n = len(observations)
     if n < n_folds * 4:
         return None
-    folds = [observations[i::n_folds] for i in range(n_folds)]
+    folds: list[list[Observation]] = [[] for _ in range(n_folds)]
+    for o in observations:
+        folds[_fold_of(o, n_folds)].append(o)
     ll_1, ll_2, n_eval = 0.0, 0.0, 0
     for k in range(n_folds):
         test = folds[k]
@@ -668,6 +687,22 @@ def build_observations(rounds: list[RoundResult]) -> list[Observation]:
                     Observation(candidate_id=cid, sample_id=int(sid), response=graded_response(r))
                 )
     return obs
+
+
+def dedup_observations(*groups: Sequence[Observation]) -> list[Observation]:
+    """Collapse ``groups`` onto one observation per ``(candidate, sample)`` cell, LAST wins.
+
+    A cell measured twice is not two pieces of evidence — the second is almost always a cache
+    replay of the first (a re-scored origin under a new round subset), and letting it through
+    weights that sample in δ by how often it happened to be replayed. Newest-wins is the same
+    rule ``load_reusable_results`` resolves the identical collision with, so pass groups
+    oldest-first.
+    """
+    cells: dict[tuple[str, int], Observation] = {}
+    for group in groups:
+        for o in group:
+            cells[(o.candidate_id, o.sample_id)] = o
+    return list(cells.values())
 
 
 def candidate_abilities(

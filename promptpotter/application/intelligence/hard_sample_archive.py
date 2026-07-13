@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.intelligence.exploration import Observation, graded_response
+from promptpotter.application.intelligence.exploration import (
+    ORIGIN_ABILITY_ID,
+    Observation,
+    dedup_observations,
+    graded_response,
+)
 from promptpotter.application.intelligence.hard_sample_sorter import (
     build_hard_samples_artifact_from_observations,
 )
@@ -19,8 +24,6 @@ __all__ = [
     "build_archive_hard_samples_artifact",
     "build_archive_observations",
 ]
-
-CANDIDATE_HASH_LEN = 12
 
 # The one provenance grade every δ fit is built from — deliberate, full-LLM-path
 # measurements, not connector noise. The ruler PoBB kills candidates with and the
@@ -38,49 +41,56 @@ _RULER_GRADE = "A"
 # tenant-scoped and an L4 inner cycle runs in-process over a sandboxed one, so the dir has
 # to be in the key. The signature is what makes it correct: the scoring walk re-saves the
 # same run_id after every sample, so a run's detail GROWS under us.
-_OBS: dict[tuple[str, str], tuple[tuple[int, int], tuple[Observation, ...]]] = {}
-_OBS_MAX = 4096
+#
+# Cells, not Observations: the candidate a run belongs to is decided by the caller (the
+# origin alias below), so baking it into the memo would serve one caller's naming to another.
+_CELLS: dict[tuple[str, str], tuple[tuple[int, int], tuple[tuple[int, float], ...]]] = {}
+_CELLS_MAX = 4096
 
 
-def _run_observations(
+def _run_cells(
     stores: Stores,
     run_id: str,
-    candidate_id: str,
     sig: tuple[int, int] | None,
-) -> tuple[Observation, ...]:
-    """This run's observation triples, re-derived only when its detail file has changed."""
+) -> tuple[tuple[int, float], ...]:
+    """This run's ``(sample_id, response)`` pairs, re-derived only when its detail changed."""
     if sig is None:
         return ()
     key = (str(stores.archive.base_dir), run_id)
-    hit = _OBS.get(key)
+    hit = _CELLS.get(key)
     if hit is not None and hit[0] == sig:
         return hit[1]
     detail = archive_views.load_run(stores, run_id)
     if detail is None:
         return ()
-    obs = tuple(
-        Observation(
-            candidate_id=candidate_id,
-            sample_id=int(sid),
-            response=graded_response(item),
-        )
+    cells = tuple(
+        (int(sid), graded_response(item))
         for item in detail.get("measurements", [])
         if (sid := item.get("sample_id")) is not None and not is_error_result(item)
     )
-    if len(_OBS) >= _OBS_MAX:
-        _OBS.clear()
-    _OBS[key] = (sig, obs)
-    return obs
+    if len(_CELLS) >= _CELLS_MAX:
+        _CELLS.clear()
+    _CELLS[key] = (sig, cells)
+    return cells
 
 
 def build_archive_observations(
     stores: Stores,
     *,
     dataset_name: str | None,
+    origin_sp_hash: str | None = None,
 ) -> list[Observation]:
-    """Walk the measurement store → ``Observation(content_hash[:12], sample_id, response)`` triples.
+    """Walk the measurement store → ``Observation(prompt_fields_id, sample_id, response)`` triples.
 
     ``dataset_name=None`` is admin/forensic only — prevents cross-dataset ``sample_id`` pollution.
+
+    **The candidate is the searchpoint, not the run.** ``prompt_fields_id`` (= ``sp_hash``) is
+    prompt-inclusive and dataset-independent; ``content_hash`` folds in the sample subset, so
+    keying on it made one prompt re-scored against N round subsets into N "candidates" — up to
+    29 phantom copies of a single origin, each weighting its samples again in δ.
+
+    ``origin_sp_hash`` renames that candidate to ``ORIGIN_ABILITY_ID`` so the archive's copy of
+    the origin and the caller's own ``origin_obs`` are one candidate with one θ, not two.
 
     Grade A only, always. This used to be an optional ``min_grade``: the δ-ruler passed
     ``"A"`` while the two display callers omitted it and got A+B+C, so one dataset carried
@@ -89,19 +99,21 @@ def build_archive_observations(
     """
     obs: list[Observation] = []
     sigs = archive_views.run_signatures(stores)
-    for entry in archive_views.list_runs(stores, dataset_name=dataset_name):
+    entries = archive_views.list_runs(stores, dataset_name=dataset_name)
+    for entry in sorted(entries, key=lambda e: (e.get("created_at") or "", e.get("run_id") or "")):
         if not meets_grade(entry_grade(entry), _RULER_GRADE):
             continue
-        content_hash = (entry.get("content_hash") or "").strip()
-        if not content_hash:
-            continue
+        candidate_id = (entry.get("prompt_fields_id") or "").strip()
         run_id = entry.get("run_id")
-        if not run_id:
+        if not candidate_id or not run_id:
             continue
+        if origin_sp_hash and candidate_id == origin_sp_hash:
+            candidate_id = ORIGIN_ABILITY_ID
         obs.extend(
-            _run_observations(stores, run_id, content_hash[:CANDIDATE_HASH_LEN], sigs.get(run_id))
+            Observation(candidate_id, sample_id, response)
+            for sample_id, response in _run_cells(stores, run_id, sigs.get(run_id))
         )
-    return obs
+    return dedup_observations(obs)
 
 
 def build_archive_hard_samples_artifact(

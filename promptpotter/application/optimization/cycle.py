@@ -113,7 +113,6 @@ def _calibrate_delta_ruler(
     *,
     enable_2pl: bool,
     archive_obs: list[Observation],
-    extra_obs: list[Observation] | None = None,
 ) -> tuple[dict[int, RulerEntry], float | None, CalibrationModel | None]:
     """Calibrate the per-cycle FIXED difficulty ruler + read the origin's θ on it.
 
@@ -145,6 +144,7 @@ def _calibrate_delta_ruler(
     from promptpotter.application.intelligence.exploration import (
         ORIGIN_ABILITY_ID,
         Observation,
+        dedup_observations,
         fit_theta_given_delta,
         graded_response,
         graduate_ruler_model,
@@ -156,11 +156,11 @@ def _calibrate_delta_ruler(
         for r in origin_results or []
         if (sid := r.get("sample_id")) is not None and not is_error_result(r)
     ]
-    # ``extra_obs`` carries the in-cycle round observations on a cold-start re-warm
-    # (``Cycle._maybe_warm_ruler``): a fresh dataset has no grade-A archive, so the
-    # ruler stays flat until enough banked samples accumulate — which they do fast
-    # once the cold rounds freeze onto one subset.
-    obs = archive_obs + origin_obs + list(extra_obs or [])
+    # ``archive_obs`` already carries the origin under ``ORIGIN_ABILITY_ID`` (the caller passes
+    # its sp_hash) whenever the archive has banked it. ``origin_obs`` is still the guaranteed,
+    # freshest source — an L4 inner cycle that cache-replays its origin banked that run INSIDE
+    # its own evidence epoch, so the archive read cannot see it — and it wins the cells both hold.
+    obs = dedup_observations(archive_obs, origin_obs)
     if not obs:
         return {}, None, None
     # Both fits key δ on ``sorted({o.sample_id})``, so the adoption test below is a
@@ -307,6 +307,11 @@ class Cycle:
     escalation: EscalationFSM = field(default_factory=EscalationFSM)
     pending_decisions: list[ResumeCheckpointRecord] = field(default_factory=list)
     archive_observations: list[Observation] = field(default_factory=list)
+    # The origin's searchpoint identity (``prompt_fields_id`` = ``sp_hash``), captured at
+    # ``start`` because ``opt_sp`` advances on ``adopt``. The δ fit renames the archive
+    # candidate carrying it to ``ORIGIN_ABILITY_ID``, so the origin is ONE candidate with one θ
+    # instead of one per round subset it was ever re-scored against.
+    origin_sp_hash: str = ""
     # The cycle's δ ruler (sample_id → difficulty), from the grade-A archive + origin
     # (slice 2). Calibrated at start; a cold start (empty) re-warms from round data and
     # LOCKS on the first warm fit (``_maybe_warm_ruler``), then held constant — so every
@@ -360,7 +365,12 @@ class Cycle:
         # ONE archive walk, both consumers. The ruler and the intelligence layer asked for
         # the same observations at the same moment and each loaded them — a full fold plus
         # a detail read per grade-A run, done twice.
-        archive_obs = build_archive_observations(session.store, dataset_name=session.dataset_name)
+        origin_sp_hash = sp.sp_hash(schema)
+        archive_obs = build_archive_observations(
+            session.store,
+            dataset_name=session.dataset_name,
+            origin_sp_hash=origin_sp_hash,
+        )
         delta_scale, origin_theta, calibration_model = _calibrate_delta_ruler(
             session,
             origin_results,
@@ -388,6 +398,7 @@ class Cycle:
             ),
             opt_sp=opt_sp,
             archive_observations=archive_obs,
+            origin_sp_hash=origin_sp_hash,
             delta_scale=delta_scale,
             calibration_model=calibration_model,
         )
@@ -507,8 +518,13 @@ class Cycle:
         that preceded it already compared on the frozen subset's raw accuracy. Repeat/
         reference-backed campaigns start warm at ``Cycle.start`` and skip this entirely;
         L4 inner cycles stay thin, never clear the floor, and stay frozen — all correct.
+
+        Re-reading the archive is what re-warms it: this fires from ``absorb_round`` *after* the
+        round closed, so every candidate it scored is already banked grade-A — under its own
+        searchpoint identity. Feeding the in-cycle rounds in beside the archive read (they used to
+        arrive as ``extra_obs``, keyed on the cycle-local ``lineage.id``) only re-entered the same
+        measurements under a second name.
         """
-        from promptpotter.application.intelligence.exploration import build_observations
         from promptpotter.application.intelligence.hard_sample_archive import (
             build_archive_observations,
         )
@@ -521,9 +537,10 @@ class Cycle:
             self.config.optimization.elimination_n_min,
             enable_2pl=self.config.optimization.enable_2pl_graduation,
             archive_obs=build_archive_observations(
-                self.session.store, dataset_name=self.session.dataset_name
+                self.session.store,
+                dataset_name=self.session.dataset_name,
+                origin_sp_hash=self.origin_sp_hash,
             ),
-            extra_obs=build_observations(self.rounds),
         )
         if delta_scale:  # warmed — lock the ruler + re-read origin θ on it
             self.delta_scale = delta_scale

@@ -31,6 +31,7 @@ from promptpotter.application.optimization.resume_and_fork.replayers import (
     replay_all_divergences,
 )
 from promptpotter.application.scoring.formula import rescore_results
+from promptpotter.domain.search_point import JobSearchPoint
 
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
@@ -132,14 +133,25 @@ def ab_replay_cycle(
     origin_frontier: list[dict[str, Any]] = []
     for t in rounds:
         origin_frontier = _merge_into_cumulative(origin_frontier, t.results)
-    # Round 0 = the origin scored; its results calibrate the ruler, exactly as Cycle.start did.
+    # Round 0 = the origin scored; its results calibrate the ruler, exactly as Cycle.start did —
+    # including its searchpoint identity, which folds the archive's copies of the origin into the
+    # one ``ORIGIN_ABILITY_ID`` candidate the live ruler saw.
     origin_results = rounds[0].results if rounds else []
+    origin_sp_hash = (
+        JobSearchPoint(pipeline_params=rounds[0].pipeline_params).sp_hash(session.pipeline_schema)
+        if rounds
+        else ""
+    )
     delta_scale, _, _ = _calibrate_delta_ruler(
         session,
         origin_results,
         n_min,
         enable_2pl=enable_2pl,
-        archive_obs=build_archive_observations(session.store, dataset_name=session.dataset_name),
+        archive_obs=build_archive_observations(
+            session.store,
+            dataset_name=session.dataset_name,
+            origin_sp_hash=origin_sp_hash,
+        ),
     )
 
     divergences: list[Divergence] = []
