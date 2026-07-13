@@ -56,6 +56,14 @@ class SpendBucket(BaseModel):
     """One spend sub-bucket (backend or optimizer-loop). Mutated only by
     :meth:`LiveDashboardView._handle_token_usage` — the sole writer for
     ``dashboard.json::spend`` after the canonical-ledger collapse.
+
+    Two costs, deliberately not one. ``used_usd`` is the BILL — money that left the
+    account, so cache hits contribute nothing. ``incurred_usd`` is what this search
+    would cost to run cold, cache hits priced from the tokens they recorded. The bill
+    is the headline and the budget gate; the incurred cost is what a *measurement* of a
+    candidate has to divide by, because it must not depend on what we already happen to
+    have in the cache. They coincide exactly on a cold cache — which is why this was
+    invisible until an L4 arm replayed a prior run and read as free.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -69,6 +77,12 @@ class SpendBucket(BaseModel):
     # cost AND no rate on file). >0 means the USD cap is blind to real spend here —
     # the dashboard surfaces a "USD cap inactive" warning; the token cap backstops.
     unpriced_tokens: int = 0
+
+    incurred_usd: float = 0.0
+    # The incurred-side twin of ``unpriced_tokens``: >0 ⇒ ``incurred_usd`` UNDERSTATES
+    # what this search costs, so anything dividing by it would read cheapness that never
+    # happened. The L4 no-evidence guard refuses such a cell rather than score it fitter.
+    incurred_unpriced_tokens: int = 0
 
 
 class SpendRollup(BaseModel):
@@ -84,11 +98,14 @@ class SpendRollup(BaseModel):
     backend: SpendBucket = Field(default_factory=SpendBucket)
     loop: SpendBucket = Field(default_factory=SpendBucket)
     total_used_usd: float = 0.0
+    total_incurred_usd: float = 0.0
 
     @property
     def total_tokens_used(self) -> int:
-        """Cumulative tokens across both buckets (input + output) — the token
-        halt probe's source, mirroring ``total_used_usd`` for the USD gate."""
+        """Cumulative BILLED tokens across both buckets (input + output) — the token
+        halt probe's source, mirroring ``total_used_usd`` for the USD gate. Cache hits
+        are excluded for the same reason they are excluded from the bill: a cap exists
+        to bound what the run spends, not what it would have spent."""
         return (
             self.backend.input_tokens
             + self.backend.output_tokens

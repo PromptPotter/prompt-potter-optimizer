@@ -9,7 +9,7 @@ from itertools import combinations, pairwise
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
-from promptpotter.application.scoring.formula import ScoringFormulaError, rescore_results
+from promptpotter.application.scoring.formula import ScoringTermMissingError, rescore_results
 from promptpotter.domain.measurement_provenance import entry_grade
 from promptpotter.domain.rendering import display_fitness
 from promptpotter.domain.scoring import Scorer
@@ -139,6 +139,9 @@ class AxisIndex:
             lambda: defaultdict(list),
         )
         self._axis_seen_runs: set[str] = set()
+        # Archived runs this formula cannot score (they predate a term it names). Bound once,
+        # read by BOTH halves of `refresh` — the per-sample ingest and the axis fold.
+        self._unscoreable_runs: set[str] = set()
         self._axis_failure_group_deltas: dict[str, dict[str, float]] = {}
         self._top_runs: list[RunRecord] = []
 
@@ -346,21 +349,24 @@ class AxisIndex:
         """Incremental archive refresh, dataset-scoped (required) to prevent cross-dataset pollution.
 
         **A historical run this formula cannot score is SKIPPED, never fatal.** The archive is
-        cross-run and long-lived, so it holds rows written under an OLDER observation vocabulary:
-        `promptpotter-self` runs from before ``normalized_gain`` replaced ``headroom_lift`` still
-        carry the old key, and today's formula names the new one. ``rescore_results`` is
-        deliberately fail-loud — for the LIVE scorer that is exactly right, because there the
-        namespace is materialized fresh and a missing name IS a broken formula. Here it is not:
-        it is a row from another era, and letting it raise killed the whole cycle.
+        cross-run and long-lived, so it holds rows written under an OLDER observation vocabulary —
+        the formula names a term they predate. ``rescore_results`` is deliberately fail-loud, and
+        for the LIVE scorer that is exactly right: there the namespace is materialized fresh, so a
+        missing name IS a broken formula. Here it is not — it is a row from another era, and
+        letting it raise killed the cycle *after* its measurement had already been paid for.
 
-        That is not hypothetical. It is why **no `promptpotter-self` origin had ever completed
-        round 0**: the origin scored all 11 cells (3.5 h, $0.29), then this refresh hit one
-        stale-epoch row and crashed the run *after* the measurement was already paid for, before
-        ``round_0000.json`` was ever written.
+        Only a MISSING TERM is skipped (``ScoringTermMissingError``). A divide-by-zero or a
+        non-numeric result is a broken formula wherever it fires, and stays fatal — catching the
+        parent here would have swallowed a typo made five minutes ago.
 
         Skips are COUNTED and LOGGED, never silent and never scored 0.0 — a fake zero would
         poison the very digest the L1/L2/L3 prompts read. The run is still marked seen, so a
-        permanently-unscoreable row is not re-tried (and re-logged) on every refresh."""
+        permanently-unscoreable row is not re-tried (and re-logged) on every refresh. **And the
+        skip binds BOTH halves of the refresh:** the axis fold below reads the same skip set, so
+        a run this formula cannot score reaches neither the per-sample index nor the axis
+        rankings and the top-runs leaderboard. It used to reach the latter two — ranked by
+        composite fitness computed under a formula from another era — while the summary below
+        claimed the digest was built only from the runs that scored."""
         added = 0
         skipped: list[str] = []
         for run_id, detail in archive_views.runs_since(
@@ -371,8 +377,9 @@ class AxisIndex:
                     rescore_results(
                         detail.get("measurements") or [], scorer, scorer_id, scorer_formula
                     )
-                except ScoringFormulaError as exc:
+                except ScoringTermMissingError as exc:
                     skipped.append(run_id)
+                    self._unscoreable_runs.add(run_id)
                     self.sample_index.mark_seen(run_id)
                     logger.warning(
                         "axis refresh: archived run %r is unscoreable under the active formula "
@@ -393,20 +400,19 @@ class AxisIndex:
                 added,
             )
 
-        # Track touched axes to invalidate exactly those impact-cache slots.
-        # Grade-C runs (incidental connector-retrieval short-circuits) are dropped
-        # here so the cross-cycle digest the L1/L2/L3 prompts read reflects the
-        # deliberately-explored datapoints, not whichever connector replayed most.
-        touched_axes: set[str] = set()
+        # Grade-C runs (incidental connector-retrieval short-circuits) are dropped here so the
+        # cross-cycle digest the L1/L2/L3 prompts read reflects the deliberately-explored
+        # datapoints, not whichever connector replayed most. Unscoreable runs are dropped for the
+        # same reason: a fitness from a dead vocabulary is not comparable to one from this run's.
         all_entries: list[dict[str, Any]] = []
         for entry in archive_views.list_runs(store, dataset_name=dataset_name):
-            if entry_grade(entry) == "C":
+            run_id = entry.get("run_id", "")
+            if entry_grade(entry) == "C" or run_id in self._unscoreable_runs:
                 continue
             all_entries.append(entry)
-            run_id = entry.get("run_id", "")
             if not run_id or run_id in self._axis_seen_runs:
                 continue
-            self._fold_entry(self._axis_values, entry, touched_axes=touched_axes)
+            self._fold_entry(self._axis_values, entry)
             self._axis_seen_runs.add(run_id)
         self._recompute_failure_group_correlations()
         self._refresh_top_runs(all_entries)
@@ -512,10 +518,8 @@ class AxisIndex:
     def _fold_entry(
         axis_values: dict[str, dict[str, list[float]]],
         entry: dict[str, Any],
-        *,
-        touched_axes: set[str] | None = None,
     ) -> None:
-        """Fold one entry into ``axis_values``; ``touched_axes`` records the delta for cache invalidation.
+        """Fold one entry into ``axis_values``.
 
         An entry that recorded no accuracy is skipped, not folded as ``0.0``: a fabricated
         zero arm manufactures ``effect_size`` against every real arm on the same axis, and
@@ -530,12 +534,8 @@ class AxisIndex:
                 for param, value in node_config.items():
                     axis = f"{node_name}.{param}" if node_name else param
                     axis_values[axis][_value_preview(value)].append(accuracy)
-                    if touched_axes is not None:
-                        touched_axes.add(axis)
             else:
                 axis_values[node_name][_value_preview(node_config)].append(accuracy)
-                if touched_axes is not None:
-                    touched_axes.add(node_name)
 
     def _compute_axis_impact(
         self,

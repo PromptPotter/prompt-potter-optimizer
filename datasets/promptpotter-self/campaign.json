@@ -1,16 +1,16 @@
 {
   "campaign_config": {
     "dataset_name": "promptpotter-self",
-    "scoring": "((normalized_gain + 1) / 2) * max(0.6, cleanliness * diversity_health) * (0.7 + 0.3 * max(0.0, min(1.0, delta_per_dollar / 6.0)))",
+    "scoring": "((after_N_rounds_delta + 1) / 2) * max(0.6, cleanliness * diversity_health) * (0.7 + 0.3 * max(0.0, min(1.0, delta_per_dollar / 6.0)))",
     "headline_metric": "ability",
-    "sp_budget_ttest": 11,
+    "sp_budget_ttest": 7,
     "exclude_nodes": [],
     "pipeline_overrides": {},
     "optimization": {
       "optimizer_set": "meta",
       "replicate_survivors": 0,
       "l1_patience": 2,
-      "max_rounds": null,
+      "max_rounds": 1,
       "lives": {
         "start": 2,
         "cap": 4
@@ -20,7 +20,7 @@
       "degradation_threshold": 0.4,
       "l2_patience": 2,
       "l3_patience": 1,
-      "elimination_n_min": 6,
+      "elimination_n_min": 4,
       "spend_budget_usd": 1.75,
       "token_budget": null
     }

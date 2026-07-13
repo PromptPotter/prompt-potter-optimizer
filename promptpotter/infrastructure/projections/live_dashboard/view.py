@@ -535,25 +535,39 @@ class LiveDashboardView(DerivedView):
         circuits the rate-table when present; absent ⇒ ``compute_usd`` rate-
         tables the tokens. Per-record write keeps the projection self-contained:
         no parallel writer, no helper chain.
+
+        EVERY call lands in ``incurred``. Only a call that reached the wire
+        (``record.cached`` false) lands in the bill — the tokens, the USD, and the
+        unpriced counter that arms the "USD cap inactive" warning. A cached call spent
+        no money, so billing it would make the budget gate halt a run that cost nothing.
         """
         spend = self.state.spend
         bucket = spend.loop if record.kind == "optimizer" else spend.backend
         in_tok = int(record.input_tokens)
         out_tok = int(record.output_tokens)
-        bucket.input_tokens += in_tok
-        bucket.output_tokens += out_tok
         if record.model and not bucket.model:
             bucket.model = record.model
         usd = compute_usd(record.model, in_tok, out_tok, override_usd=record.cost_usd)
+
         if usd is not None:
-            bucket.used_usd = round(bucket.used_usd + usd, 6)
-            bucket.rate_known = True
+            bucket.incurred_usd = round(bucket.incurred_usd + usd, 6)
         elif in_tok or out_tok:
-            # Real tokens billed but no resolvable cost (provider returned no wire
-            # cost AND the model isn't in the rate table) — the USD cap can't see
-            # this spend. Track it so the dashboard flags the cap as inactive.
-            bucket.unpriced_tokens += in_tok + out_tok
+            bucket.incurred_unpriced_tokens += in_tok + out_tok
+
+        if not record.cached:
+            bucket.input_tokens += in_tok
+            bucket.output_tokens += out_tok
+            if usd is not None:
+                bucket.used_usd = round(bucket.used_usd + usd, 6)
+                bucket.rate_known = True
+            elif in_tok or out_tok:
+                # Real tokens billed but no resolvable cost (provider returned no wire
+                # cost AND the model isn't in the rate table) — the USD cap can't see
+                # this spend. Track it so the dashboard flags the cap as inactive.
+                bucket.unpriced_tokens += in_tok + out_tok
+
         spend.total_used_usd = round(spend.backend.used_usd + spend.loop.used_usd, 6)
+        spend.total_incurred_usd = round(spend.backend.incurred_usd + spend.loop.incurred_usd, 6)
         self._schedule_persist()
 
     @property

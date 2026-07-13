@@ -36,14 +36,41 @@ class OuterSampleProxies(BaseModel):
     """One outer sample's observation vector — what a finished inner cycle says about the
     meta-prompt that ran it. **This type is the governing law**; nothing restates it.
 
-    Bounds are carried where they are provable. ``normalized_gain`` divides a move by the room
-    available to make it (``max(origin, 1−origin) ≥ 0.5``), so ``[-1, 1]`` holds by construction
-    and the ``ge``/``le`` states a fact rather than clamping one. The quality terms are
-    ``1 − mean(rate ∈ [0,1])`` and ``rounds_improved_frac`` is a share. The endpoint deltas and
-    the efficiency ratios are genuinely unbounded — a regressing meta-prompt goes negative, and
-    lift-per-dollar has no ceiling — so they carry the one bound that always holds: finite.
-    ``allow_inf_nan=False`` keeps a ``0/0`` from reaching the scoring clamp, where
-    ``min(1.0, nan)`` short-circuits to ``1.0`` and a sample that measured nothing scores perfect.
+    **The lift core is ``after_N_rounds_delta``, and it needs no denominator.** Every level is an
+    ability on the cycle's fixed δ ruler — ``ruler_expected_accuracy`` is a mean of logistic
+    sigmoids, so it lands in (0,1) — and the delta is one level minus another. It is therefore
+    bounded in (−1, 1) BY CONSTRUCTION, and ``ge``/``le`` below state that fact rather than
+    clamping toward it.
+
+    It used to be divided by ``max(origin, 1−origin)`` ("the room available to move"). That term
+    is gone. It could not do the one job it claimed — the bound already held without it — and it
+    carried no information: the divisor lies in [0.5, 1.0], so the quotient was this same delta
+    rescaled by a per-cell factor in [1, 2]. What it *did* do was mis-scale: above a half-way
+    origin the divisor is the DOWNWARD room, so a strong-origin cell's improvement was divided by
+    room it was not moving into. Per-cell difficulty is already modelled where it belongs — the
+    round-winner election and PoBB elimination fit a Rasch θ with an explicit per-cell δ, and the
+    outer verdict pairs within-cell against the cached origin. A room-heuristic beside a
+    purpose-built estimator is a second mechanism doing the same kind of work, done worse.
+
+    The quality terms are ``1 − mean(rate ∈ [0,1])`` and ``rounds_improved_frac`` is a share. The
+    efficiency ratios are genuinely unbounded — lift-per-dollar has no ceiling — so they carry the
+    one bound that always holds: finite. ``allow_inf_nan=False`` keeps a ``0/0`` from reaching the
+    scoring clamp, where ``min(1.0, nan)`` short-circuits to ``1.0`` and a sample that measured
+    nothing scores perfect.
+
+    ``delta_per_dollar`` divides by ``CycleSpend.incurred_usd`` — what the search would cost
+    cold — and NOT by the bill. The two differ because the caches are tenant-global: replaying a
+    cycle we already ran bills nothing while doing identical work. That gap is not random. The
+    origin arm is the one that replays (a variant meta-prompt writes different prompts, so its
+    every content hash is new), so a bill-denominated efficiency term would reward the origin for
+    our own measurement history on precisely the cells we know best.
+
+    There is deliberately no ``delta_per_second``. Wall-clock cannot be made cache-invariant the
+    way cost can — a replayed cycle really did take four seconds instead of five minutes, and
+    there is no "notional" elapsed time to recover. A per-second term therefore measured our cache
+    rather than the meta-prompt, and unlike cost there is nothing to divide by instead. Lift per
+    unit of *work* survives as ``delta_per_candidate``, which counts candidates and so is
+    cache-invariant by construction.
 
     Every field is a measurement, and none may be defaulted: the absence of a measurement is not
     a value. A cycle that cannot fill this in is excluded or floored, never scored on zeros.
@@ -61,15 +88,13 @@ class OuterSampleProxies(BaseModel):
 
     # `after_N_rounds_delta` is a wire key naming the pipeline_data observation the outer
     # scoring formula reads, so its spelling is not ours to normalize.
-    first_round_delta: float = Field(allow_inf_nan=False)
-    after_N_rounds_delta: float = Field(allow_inf_nan=False)  # noqa: N815
-    normalized_gain: float = Field(ge=-1.0, le=1.0)
+    first_round_delta: float = Field(ge=-1.0, le=1.0)
+    after_N_rounds_delta: float = Field(ge=-1.0, le=1.0)  # noqa: N815
     cleanliness: float = Field(ge=0.0, le=1.0)
     diversity_health: float = Field(ge=0.0, le=1.0)
     rounds_improved_frac: float = Field(ge=0.0, le=1.0)
     delta_per_dollar: float = Field(allow_inf_nan=False)
     delta_per_candidate: float = Field(allow_inf_nan=False)
-    delta_per_second: float = Field(allow_inf_nan=False)
 
 
 # The observation keys one outer sample emits — DERIVED from the model, never hand-listed.
@@ -177,16 +202,22 @@ def no_evidence_reason(result: CycleResult) -> str | None:
         return "its origin was never scored, so there is no floor to difference its rounds against"
     if not result.round_discovered_levels:
         return "it discovered no levels to difference against its origin"
-    # Unmeasured spend is not cheap spend. `delta_per_dollar` divides by cost, so a cost of 0.0
-    # pins efficiency to its MAXIMUM — under-reporting spend would make a run score fitter, which
-    # is the incentive exactly backwards. Unpriced tokens are the same harm partially applied.
+    # Unmeasured cost is not cheap cost. `delta_per_dollar` divides by it, so a cost of 0.0 pins
+    # efficiency to its MAXIMUM — under-reporting would make a run score fitter, which is the
+    # incentive exactly backwards. Unpriced tokens are the same harm partially applied.
+    #
+    # The divisor is INCURRED cost, never the bill. The caches are tenant-global, so an arm that
+    # replays a cycle we already ran bills $0 while doing identical work — and it is always the
+    # ORIGIN arm that replays (a variant meta-prompt writes new prompts, so every hash is new).
+    # Billing the divisor would hand the origin infinite efficiency on exactly the cells we have
+    # measured before: a bias, not noise.
     spend = result.spend
-    if spend is None or spend.cost_usd <= 0.0:
-        return "it recorded no spend, so its cost-efficiency cannot be measured"
-    if spend.unpriced_tokens > 0:
+    if spend is None or spend.incurred_usd <= 0.0:
+        return "it recorded no LLM calls, so its cost-efficiency cannot be measured"
+    if spend.incurred_unpriced_tokens > 0:
         return (
-            f"{spend.unpriced_tokens} of its tokens have no USD rate on file, so its recorded "
-            f"cost (${spend.cost_usd:.4f}) understates real spend"
+            f"{spend.incurred_unpriced_tokens} of its tokens have no USD rate on file, so its "
+            f"incurred cost (${spend.incurred_usd:.4f}) understates what the search costs"
         )
     return None
 
@@ -214,46 +245,45 @@ def floor_reason(result: CycleResult) -> str | None:
 
 def _floor_proxies() -> OuterSampleProxies:
     """The worst measurable verdict — ASSIGNED (not measured) to a meta-prompt-owned failure.
-    ``normalized_gain=-1`` zeroes the formula's lift core and the modulators sit at their floors,
-    so the composed fitness is exactly 0.0. This is the ONLY route to a zeroed cell: a *measured*
-    cycle reaches −1 only by collapsing the inner ability to nothing, so a zero means "the
-    meta-prompt broke its own measurement", never "this seed drew a strong origin"."""
+
+    ``after_N_rounds_delta = -1`` zeroes the formula's lift core and the modulators sit at their
+    floors, so the composed fitness is exactly 0.0. The floor rides the LIFT CORE, whichever field
+    that is: it used to sit on ``normalized_gain`` while the delta was pinned at 0.0, so promoting
+    the delta without moving the −1 with it would have scored a floored cell 0.21 and quietly
+    retired the penalty.
+
+    This is the ONLY route to a zeroed cell: a *measured* cycle reaches −1 only by collapsing the
+    inner ability to nothing, so a zero means "the meta-prompt broke its own measurement", never
+    "this seed drew a strong origin"."""
     return OuterSampleProxies(
-        first_round_delta=0.0,
-        after_N_rounds_delta=0.0,
-        normalized_gain=-1.0,
+        first_round_delta=-1.0,
+        after_N_rounds_delta=-1.0,
         cleanliness=0.0,
         diversity_health=0.0,
         rounds_improved_frac=0.0,
         delta_per_dollar=0.0,
         delta_per_candidate=0.0,
-        delta_per_second=0.0,
     )
 
 
-def compute_outer_proxies(result: CycleResult, elapsed: float) -> OuterSampleProxies:
+def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
     """The composed outer signal from a finished inner cycle — subset-invariant, bounded raw
     terms the outer scoring formula re-weights (the backend never hides the composite).
 
-    Endpoint deltas: ``first_round_delta`` = round-1 discovered lift over origin;
-    ``after_N_rounds_delta`` = best discovered lift over origin. Both difference the single-scale
-    θ-LCB trajectory (``origin_level`` / ``round_discovered_levels``, built upstream in
-    ``discovered_level_trajectory``) — one estimator, so no delta ever subtracts across scales.
-
-    Composed terms, each carrying a candidate gradient (a flat term earns nothing and gets cut):
-
-    - ``normalized_gain`` — best depth as a fraction of the room available to move,
-      ``after_n / max(origin, 1−origin)``. Normalized by the room to the REAL ceiling, never by a
-      declared target. Dividing by ``(target−origin)`` measured an UPWARD room while a regression
-      falls toward zero, so a mild regression on a strong-origin seed detonated to the −1 clamp
-      and — the lift core being multiplicative — zeroed the whole cell.
+    - ``after_N_rounds_delta`` — **the lift core.** Best discovered level minus origin level, on
+      the single-scale θ-LCB trajectory (``origin_level`` / ``round_discovered_levels``, built
+      upstream in ``discovered_level_trajectory``). One estimator, so no delta ever subtracts
+      across scales, and both terms sit in (0,1) — the difference is bounded with no denominator.
+    - ``first_round_delta`` — the same, for round 1 alone: early speed rather than best depth.
     - ``cleanliness`` / ``diversity_health`` — bounded quality: ``1 − mean`` per-round problem /
       mode-collapse rate. The formula uses them as a modulator that discounts a warning-riddled
       or collapsing campaign without diluting the lift core.
     - ``rounds_improved_frac`` — share of L1 rounds that beat their predecessor.
-    - ``delta_per_dollar`` / ``delta_per_candidate`` / ``delta_per_second`` — efficiency: best
-      depth over spend / candidates / wall-time. A verbose meta-prompt burns more for the same
-      lift and scores lower.
+    - ``delta_per_dollar`` / ``delta_per_candidate`` — efficiency: best depth over incurred cost /
+      over candidates burned. A verbose meta-prompt pays more for the same lift and scores lower.
+      Both divisors are cache-invariant; wall-time is not, which is why there is no per-second twin.
+
+    Each composed term must carry a candidate gradient; a flat term earns nothing and gets cut.
 
     Deltas may be negative on a regressing meta-prompt (levels are not floored at origin), so the
     efficiency ratios can be negative too; the formula recentres and clamps those.
@@ -273,12 +303,10 @@ def compute_outer_proxies(result: CycleResult, elapsed: float) -> OuterSamplePro
     assert result.origin_level is not None  # guaranteed by no_evidence_reason
     origin = result.origin_level
     levels = result.round_discovered_levels
+    # Both levels are abilities on the fixed ruler, so each is in (0,1) and each delta is in
+    # (-1,1) BY CONSTRUCTION — structural, so there is no clamp and nothing to divide by.
     first = levels[0] - origin
     after_n = max(levels) - origin
-
-    # Levels are in [0,1], so `max(origin, 1-origin) >= 0.5` and this is bounded in [-1,1] BY
-    # CONSTRUCTION — structural, so there is no clamp and no degenerate denominator.
-    normalized_gain = after_n / max(origin, 1.0 - origin)
 
     # Rounds carrying no evidence are dropped, not scored — an all-tooling cycle already left via
     # `no_evidence_reason`, so `evidential` is non-empty here.
@@ -287,28 +315,25 @@ def compute_outer_proxies(result: CycleResult, elapsed: float) -> OuterSamplePro
     diversity_health = 1.0 - _mean([_round_mode_collapse_rate(r) for r in evidential])
     rounds_improved_frac = _mean([1.0 if r.improved else 0.0 for r in evidential])
 
-    # No `max(cost, eps)` floor: `no_evidence_reason` already refused a cycle whose spend is zero
-    # or under-priced, so the divisor is a real, fully-priced cost.
+    # No `max(cost, eps)` floor: `no_evidence_reason` already refused a cycle whose incurred cost
+    # is zero or under-priced, so the divisor is a real, fully-priced cost.
     assert result.spend is not None  # guaranteed by no_evidence_reason
-    cost = result.spend.cost_usd
+    cost = result.spend.incurred_usd
     n_cand = sum(r.candidates_scored for r in result.rounds)
     delta_per_dollar = after_n / cost
     # n_cand == 0 only when no candidate was ever scored — and then the trajectory never rose
     # above origin, so `after_n` is 0.0 and this is 0/0. Say 0.0 outright instead of letting a
     # `max(n_cand, 1)` divisor pretend one candidate existed.
     delta_per_candidate = after_n / n_cand if n_cand else 0.0
-    delta_per_second = after_n / max(elapsed, 1e-6)
 
     return OuterSampleProxies(
         first_round_delta=first,
         after_N_rounds_delta=after_n,
-        normalized_gain=normalized_gain,
         cleanliness=cleanliness,
         diversity_health=diversity_health,
         rounds_improved_frac=rounds_improved_frac,
         delta_per_dollar=delta_per_dollar,
         delta_per_candidate=delta_per_candidate,
-        delta_per_second=delta_per_second,
     )
 
 

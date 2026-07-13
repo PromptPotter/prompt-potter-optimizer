@@ -1,25 +1,44 @@
 {
   "name": "PromptPotter-self",
   "version": "v0.1",
-  "description": "Optimizer-of-the-optimizer — outer PromptPotter cycle mutates inner PromptPotter's L1/L1_CRITIQUE/L2/L3 meta-prompts. Each outer 'sample' runs an inner cycle on a cheap proxy benchmark (configured per inner_tasks.json). See docs/specs/l4-outer-loop.md.",
+  "description": "Optimizer-of-the-optimizer \u2014 outer PromptPotter cycle mutates inner PromptPotter's L1/L1_CRITIQUE/L2/L3 meta-prompts. Each outer 'sample' runs an inner cycle on a cheap proxy benchmark (configured per inner_tasks.json). See docs/specs/l4-outer-loop.md.",
   "backend_name": "PromptPotter",
   "backend_type": "promptpotter",
-  "available_models": ["openai/gpt-oss-120b"],
+  "available_models": [
+    "openai/gpt-oss-120b"
+  ],
   "nodes": {
     "l1_generate": {
       "type": "meta_prompt",
       "runtime": "in_process",
       "node_role": "candidate_source",
-      "description": "Inner cycle's L1-generate meta-prompt — produces inner candidate variants from inner panels (critique, escalation_panel, axis_memory, origin_strengths).",
+      "description": "Inner cycle's L1-generate meta-prompt \u2014 produces inner candidate variants from inner panels (critique, escalation_panel, axis_memory, origin_strengths).",
       "config": {},
       "prompt_info": {
         "family": "l1_generate",
-        "template_variables": ["persona", "task_intent", "problem_description", "instruction", "thinking_style", "answer_format"],
-        "description": "Six-field PromptTemplate scheme — outer L1 mutates these to evolve the inner L1's behavior."
+        "template_variables": [
+          "persona",
+          "task_intent",
+          "problem_description",
+          "instruction",
+          "thinking_style",
+          "answer_format"
+        ],
+        "description": "Six-field PromptTemplate scheme \u2014 outer L1 mutates these to evolve the inner L1's behavior."
       },
       "optimizer": {
-        "param_keys": ["persona", "task_intent", "problem_description", "instruction", "thinking_style", "answer_format", "output_schema_field_names"],
-        "param_types": {"output_schema_field_names": "object"},
+        "param_keys": [
+          "persona",
+          "task_intent",
+          "problem_description",
+          "instruction",
+          "thinking_style",
+          "answer_format",
+          "output_schema_field_names"
+        ],
+        "param_types": {
+          "output_schema_field_names": "object"
+        },
         "param_allowed_values": {},
         "observation_name": "l1_generate",
         "observation_mappings": [],
@@ -30,29 +49,60 @@
       "type": "meta_prompt",
       "runtime": "in_process",
       "node_role": "ranker",
-      "description": "Inner cycle's L1-critique meta-prompt — narrates score deltas and proposes negative_critique + suggested_axes.",
+      "description": "Inner cycle's L1-critique meta-prompt \u2014 narrates score deltas and proposes negative_critique + suggested_axes.",
       "config": {},
       "prompt_info": {
         "family": "l1_critique",
-        "template_variables": ["persona", "task_intent", "problem_description", "instruction", "thinking_style", "answer_format"],
+        "template_variables": [
+          "persona",
+          "task_intent",
+          "problem_description",
+          "instruction",
+          "thinking_style",
+          "answer_format"
+        ],
         "description": "Critique framing controls how the inner L1 rewards or penalizes specific axes."
       },
       "optimizer": {
-        "param_keys": ["persona", "task_intent", "problem_description", "instruction", "thinking_style", "answer_format", "layout"],
-        "param_types": {"layout": "object"},
+        "param_keys": [
+          "persona",
+          "task_intent",
+          "problem_description",
+          "instruction",
+          "thinking_style",
+          "answer_format",
+          "layout"
+        ],
+        "param_types": {
+          "layout": "object"
+        },
         "param_allowed_values": {},
         "observation_name": "l1_critique",
         "observation_mappings": [
-          {"pipeline_key": "final_ranking"},
-          {"pipeline_key": "first_round_delta"},
-          {"pipeline_key": "after_N_rounds_delta"},
-          {"pipeline_key": "normalized_gain"},
-          {"pipeline_key": "cleanliness"},
-          {"pipeline_key": "diversity_health"},
-          {"pipeline_key": "rounds_improved_frac"},
-          {"pipeline_key": "delta_per_dollar"},
-          {"pipeline_key": "delta_per_candidate"},
-          {"pipeline_key": "delta_per_second"}
+          {
+            "pipeline_key": "final_ranking"
+          },
+          {
+            "pipeline_key": "first_round_delta"
+          },
+          {
+            "pipeline_key": "after_N_rounds_delta"
+          },
+          {
+            "pipeline_key": "cleanliness"
+          },
+          {
+            "pipeline_key": "diversity_health"
+          },
+          {
+            "pipeline_key": "rounds_improved_frac"
+          },
+          {
+            "pipeline_key": "delta_per_dollar"
+          },
+          {
+            "pipeline_key": "delta_per_candidate"
+          }
         ],
         "langfuse_type": "generation"
       }
@@ -61,16 +111,33 @@
       "type": "meta_prompt",
       "runtime": "in_process",
       "node_role": "enricher",
-      "description": "Inner cycle's L2 meta-prompt — refines task_context on inner-L1 stall.",
+      "description": "Inner cycle's L2 meta-prompt \u2014 refines task_context on inner-L1 stall.",
       "config": {},
       "prompt_info": {
         "family": "l2_context",
-        "template_variables": ["persona", "task_intent", "problem_description", "instruction", "thinking_style", "answer_format"],
-        "description": "L2 refinement framing — outer L1 mutates how the inner L2 shapes task_context."
+        "template_variables": [
+          "persona",
+          "task_intent",
+          "problem_description",
+          "instruction",
+          "thinking_style",
+          "answer_format"
+        ],
+        "description": "L2 refinement framing \u2014 outer L1 mutates how the inner L2 shapes task_context."
       },
       "optimizer": {
-        "param_keys": ["persona", "task_intent", "problem_description", "instruction", "thinking_style", "answer_format", "layout"],
-        "param_types": {"layout": "object"},
+        "param_keys": [
+          "persona",
+          "task_intent",
+          "problem_description",
+          "instruction",
+          "thinking_style",
+          "answer_format",
+          "layout"
+        ],
+        "param_types": {
+          "layout": "object"
+        },
         "param_allowed_values": {},
         "observation_name": "l2_context",
         "observation_mappings": [],
@@ -81,16 +148,33 @@
       "type": "meta_prompt",
       "runtime": "in_process",
       "node_role": "enricher",
-      "description": "Inner cycle's L3 meta-prompt — replans strategy on inner-L2 stall.",
+      "description": "Inner cycle's L3 meta-prompt \u2014 replans strategy on inner-L2 stall.",
       "config": {},
       "prompt_info": {
         "family": "l3_plan",
-        "template_variables": ["persona", "task_intent", "problem_description", "instruction", "thinking_style", "answer_format"],
-        "description": "L3 replan framing — outer L1 mutates how the inner L3 rewrites the plan-space."
+        "template_variables": [
+          "persona",
+          "task_intent",
+          "problem_description",
+          "instruction",
+          "thinking_style",
+          "answer_format"
+        ],
+        "description": "L3 replan framing \u2014 outer L1 mutates how the inner L3 rewrites the plan-space."
       },
       "optimizer": {
-        "param_keys": ["persona", "task_intent", "problem_description", "instruction", "thinking_style", "answer_format", "layout"],
-        "param_types": {"layout": "object"},
+        "param_keys": [
+          "persona",
+          "task_intent",
+          "problem_description",
+          "instruction",
+          "thinking_style",
+          "answer_format",
+          "layout"
+        ],
+        "param_types": {
+          "layout": "object"
+        },
         "param_allowed_values": {},
         "observation_name": "l3_plan",
         "observation_mappings": [],
@@ -99,6 +183,11 @@
     }
   },
   "pipelines": {
-    "default": ["l1_generate", "l1_critique", "l2_context", "l3_plan"]
+    "default": [
+      "l1_generate",
+      "l1_critique",
+      "l2_context",
+      "l3_plan"
+    ]
   }
 }

@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
@@ -104,6 +104,33 @@ def _materialize_cached(
                 scorer_id,
             )
     return cast(QueryMeasurement, r)
+
+
+def _emit_cached_step_tokens(row: QueryMeasurement) -> None:
+    """Meter a measurement-cache hit from the tokens the archived row already carries.
+
+    ``_materialize_cached`` copies ``pipeline_data`` through, so the original call's
+    per-node ``step_tokens`` (input/output/model, and the wire ``cost_usd`` when the
+    provider gave one) are sitting right there. Replaying them costs nothing, but the
+    search still made the call — see ``TokenUsageRecord`` for why the ledger has to say so.
+    """
+    from promptpotter.application.scoring.sample_measurement import (
+        StepTokenUsage,
+        emit_step_token_usage,
+    )
+
+    pd = row.get("pipeline_data")
+    if not isinstance(pd, dict):
+        return
+    step_tokens = pd.get("step_tokens")
+    if not isinstance(step_tokens, dict) or not step_tokens:
+        return
+    step_timings = pd.get("step_timings")
+    emit_step_token_usage(
+        cast("Mapping[str, StepTokenUsage]", step_tokens),
+        step_timings if isinstance(step_timings, dict) else {},
+        cached=True,
+    )
 
 
 @dataclass
@@ -208,6 +235,11 @@ async def _process_cache_hit(
         ctx.scorer_formula,
     )
     cached_r = await _maybe_recover_degraded(cached_r, sample, ctx)
+    # Meter the replayed call — but only if it STAYED a replay. The stale-data protocol
+    # above may have re-measured this sample for real, and that path already emitted its
+    # own fresh records; metering here too would double-count it.
+    if cached_r.get("cached"):
+        _emit_cached_step_tokens(cached_r)
     # Overlay current-run sample_id — archived traces may predate the field.
     cached_r["sample_id"] = sample.id
     state.results.append(cached_r)

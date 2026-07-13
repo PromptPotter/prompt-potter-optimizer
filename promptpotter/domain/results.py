@@ -203,11 +203,16 @@ class ScoredCandidate(BaseModel):
     runtime_failures: list[RuntimeFailure] = Field(default_factory=list)
     elimination_context: EliminationContext = Field(default_factory=EliminationContext)
     degradation_context: DegradationContext = Field(default_factory=DegradationContext)
-    # Origin restricted to this candidate's measured samples — apples-to-apples
-    # when PoBB locks mid-budget; equals full-set origin when fully scored.
-    matched_origin_accuracy: float = 0.0
-    matched_origin_hits: int = 0
-    matched_origin_composite: float = 0.0
+    # Origin restricted to this candidate's measured samples — apples-to-apples when PoBB locks
+    # mid-budget; equals full-set origin when fully scored. ``None`` for candidates outside the
+    # election fit (eliminated / under the coverage floor) — the same population ``theta`` is
+    # ``None`` for, and for the same reason: nothing matched them, so there is no comparison.
+    # These MUST NOT default to 0.0. An unstamped 0.0 is indistinguishable from a real origin
+    # that scored nothing, and it reads as "this candidate beat the origin by its whole accuracy"
+    # — which is what the inner narrative told the outer optimizer, on every eliminated arm.
+    matched_origin_accuracy: float | None = None
+    matched_origin_hits: int | None = None
+    matched_origin_composite: float | None = None
     # Difficulty-adjusted Rasch ability (+ Laplace SE) on the round's joint-fit scale — the
     # subset-invariant metric the winner election ranks by (`elect_round_winner`), stamped from
     # that single fit. Distinct from subset-relative `accuracy`: it discounts for *which* samples
@@ -295,9 +300,12 @@ class ScoreboardRow(BaseModel):
     hits: int
     total: int
     escalation_aborted: bool
-    matched_origin_accuracy: float
-    matched_origin_hits: int
-    matched_origin_composite: float
+    # ``None`` for a row nothing was matched to (eliminated / under the coverage floor) — see
+    # ``ScoredCandidate``. The round file carries the absence rather than a 0.0 that reads as a
+    # verdict the origin never gave.
+    matched_origin_accuracy: float | None
+    matched_origin_hits: int | None
+    matched_origin_composite: float | None
     ci_lo: float
     ci_hi: float
     is_winner: bool
@@ -510,16 +518,30 @@ class CycleSpend(BaseModel):
     Read from the run's **in-memory** dashboard state at finalize, so a consumer
     (notably the L4 outer loop rolling an inner campaign's spend up onto its own
     backend-cost channel) gets the true total without racing the debounced
-    ``dashboard.json`` projection file."""
+    ``dashboard.json`` projection file.
+
+    Two costs, and picking the wrong one is a live bug class:
+
+    - ``cost_usd`` / ``input_tokens`` / ``output_tokens`` — the BILL. Money that left
+      the account. What rolls up onto an outer campaign's spend and what a budget caps.
+    - ``incurred_usd`` — what this cycle would cost to run against a cold cache. The
+      only honest divisor for a *measurement of the search*, because the caches are
+      tenant-global: replay a cycle we already ran and the bill is $0 while the search
+      did exactly the same work. On a cold cache the two are equal."""
 
     input_tokens: int = 0
     output_tokens: int = 0
     cost_usd: float = 0.0
     # Tokens billed with no resolvable USD rate, summed across both buckets. >0 means
-    # ``cost_usd`` UNDERSTATES real spend — it is a floor, not the total. Carried up from
-    # ``SpendBucket`` because a consumer that divides by cost (the L4 efficiency proxy) would
-    # otherwise read cheapness that never happened, and score the run fitter for it.
+    # ``cost_usd`` UNDERSTATES real spend — it is a floor, not the total.
     unpriced_tokens: int = 0
+
+    incurred_usd: float = 0.0
+    # Incurred-side twin of ``unpriced_tokens``. >0 ⇒ ``incurred_usd`` understates what the
+    # search costs, so a consumer that divides by it (the L4 efficiency proxy) would read
+    # cheapness that never happened and score the run fitter for it. Such a cell is refused,
+    # not scored.
+    incurred_unpriced_tokens: int = 0
 
 
 class CycleResult(BaseModel):

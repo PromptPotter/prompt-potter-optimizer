@@ -26,12 +26,12 @@
 
 1. **An inner benchmark the inner loop can still climb.** gsm8k is RETIRED — the inner model already aces it, so the loop has nothing to find and every outer candidate scores the identical composite. **Chosen: `justlogic` at high depth** — a reasoning task where meta-prompt quality plausibly moves the needle. `inner_tasks.json` points at it (`justlogic-d67`).
 
-   > **There is no declared target, and no *expected* headroom — deliberately.** `target_score` and the `rounds_to_N` proxy are DELETED (2026-07-12). Declaring a target asserts up front how much room the benchmark has; that assumption reached no decision (the counter had no candidate gradient and the scoring formula already ignored it) and it was epistemically backwards. **A task the inner model looks bad at is a task it has not been TUNED for yet, not a task with a low ceiling** — gpt-oss-20b can be prompted a long way up on justlogic. The default posture is *optimistic*: assume the room is large unless the evidence is unambiguous. `normalized_gain` divides by the room to the REAL ceiling (`max(origin, 1 − origin)`), which needs no declaration.
+   > **There is no declared target, and no *expected* headroom — deliberately.** `target_score` and the `rounds_to_N` proxy are DELETED (2026-07-12). Declaring a target asserts up front how much room the benchmark has; that assumption reached no decision (the counter had no candidate gradient and the scoring formula already ignored it) and it was epistemically backwards. **A task the inner model looks bad at is a task it has not been TUNED for yet, not a task with a low ceiling** — gpt-oss-20b can be prompted a long way up on justlogic. The default posture is *optimistic*: assume the room is large unless the evidence is unambiguous. The lift core is the raw climb on the ability ruler and divides by nothing — not by a declared target, and (since 2026-07-13) not by an inferred "room" either.
    >
-   > What this does NOT excuse: **improvement on justlogic is real but INFREQUENT.** A seed that fails to move under one meta-prompt is weak evidence, not proof the seed is flat — do not read a quiet panel as "no headroom", and do not retire the benchmark on one run. The panel is wide (11 seeds) precisely because the per-cell signal is noisy.
+   > What this does NOT excuse: **improvement on justlogic is real but INFREQUENT.** A seed that fails to move under one meta-prompt is weak evidence, not proof the seed is flat — do not read a quiet panel as "no headroom", and do not retire the benchmark on one run. The panel spans a *range* of seed difficulty (weakest to strongest origin) rather than a wide count, precisely because the per-cell signal is noisy and duplicated difficulty buys nothing — see [`../concepts/optimizer-of-the-optimizer.md`](../concepts/optimizer-of-the-optimizer.md) § Sizing the panel for how it is sized and how to re-derive it.
 2. **Outer mutations actually reach the inner meta-prompts (slice 3).** With the standard `_optimizer/` outer prompts, the outer L1 emits FLAT single-prompt field edits, which do **not** map to per-node `meta_prompt_overrides` — so candidates run identical inner cycles and the loop optimizes noise. Slice 3 (the specialized outer prompt set emitting per-node `PromptTemplate` edits) is therefore **REQUIRED for any signal**, not optional polish. This is the gating slice.
 3. **Spend is visible (slice 4 rollup). [SHIPPED.]** Each inner campaign's total rides its `CycleResult.spend` (read from the inner run's live dashboard state at finalize, never the debounced `dashboard.json`, which would race the read) and is returned as that outer sample's `step_tokens` — so it fans onto the outer ledger through the existing backend-cost channel (`sample_measurement`), keyed by the terminal node. The inner cost IS the outer sample's backend cost, so "spend is the headline" holds at the outer level without a second mechanism. `runner/inner/cycle.py::run_inner_cycle`. Unmeasured or unpriced inner spend is not "cheap" spend: it EXCLUDES the cell (`no_evidence_reason`), because `delta_per_dollar` divides by cost and a zero cost would pin efficiency to its maximum — under-reporting spend must never score a run fitter.
-4. **A bounded, cheap default config.** The committed `inner_tasks.json` + `campaign.json` must let `new promptpotter-self` complete at a cost an evaluator will tolerate. Cost is **geometric** (one outer round = n_variants × n_inner_tasks inner campaigns, each a full inner campaign) AND each inner optimizer call is slow (~176 s on openrouter/gpt-oss-120b). So: few inner tasks, few samples, few inner rounds, low outer `max_rounds`/`n_variants` by default — and consider pinning the inner+outer optimizer to a faster provider (groq) in the shipped config. Document the cost shape for the operator. The **stall brake** is what keeps the geometry honest: `inner_lives` (+1 per improving round, −1 per stall, stop at 0 → `LIVES_EXHAUSTED`) ends a stalling inner campaign early, so a dead meta-prompt is cheap and only a compounding one buys depth. **INVARIANT: `lives.start` must sit well below `max_inner_rounds`.** Set near it, the bank cannot drain before the calendar cap — every inner then runs full-length regardless of quality, and that *also* flattens `delta_per_dollar`, since a meta-prompt that finds nothing burns the same rounds as one that compounds (a term with no candidate gradient earns nothing — see the governing law in `inner_tasks.json`).
+4. **A bounded, cheap default config.** The committed `inner_tasks.json` + `campaign.json` must let `new promptpotter-self` complete at a cost an evaluator will tolerate. Cost is **geometric** (one outer round = n_variants × n_inner_tasks inner campaigns, each a full inner campaign) AND each inner optimizer call is slow (~176 s on openrouter/gpt-oss-120b). So: few inner tasks, few samples, few inner rounds, low outer `max_rounds`/`n_variants` by default — and consider pinning the inner+outer optimizer to a faster provider (groq) in the shipped config. Document the cost shape for the operator. The **stall brake** is what keeps the geometry honest: `inner_lives` (+1 per improving round, −1 per stall, stop at 0 → `LIVES_EXHAUSTED`) ends a stalling inner campaign early, so a dead meta-prompt is cheap and only a compounding one buys depth. **INVARIANT: `lives.start` must sit well below `max_inner_rounds`.** Set near it, the bank cannot drain before the calendar cap — every inner then runs full-length regardless of quality, and that *also* flattens `delta_per_dollar`, since a meta-prompt that finds nothing burns the same rounds as one that compounds (a term with no candidate gradient earns nothing — the governing law is the type, `domain/l4/proxies.py::OuterSampleProxies`; `inner_tasks.json` is a typed declaration now, not a place to write prose). How the panel and the round cap are sized, and how to re-derive them: [`../concepts/optimizer-of-the-optimizer.md`](../concepts/optimizer-of-the-optimizer.md) § Sizing the panel.
 5. **A run that demonstrably improves.** The validation gate (`proxy_lift_corr ≥ 0.6` over ≥4 paired branches) PLUS at least one real `new promptpotter-self` whose outer best beats its outer origin — the proof the cheap proxy predicts real lift and the loop climbs.
 6. **The loop owns its own information flow (§6). [MECHANISM BUILT — Arcs 1+2+3. Open: the validating data run.]** A distributable `promptpotter-self` must let the optimizer improve *how its meta-prompts are built*, not only their prose. Which signals each inner node sees (the per-node injection set) is the higher-value, dataset-agnostic axis. It **is now a searched axis** with a mandatory guard-rail floor: every optimizer node owns a `NodeLayoutSpec` in `NODE_LAYOUTS` (`domain/l1_layout.py`), and the L4 layout edit is wired for the three `editor == "l4"` nodes. What remains is **validation, not construction** — a full-signal run showing outer candidates that differ by inner-node *layout* (not only prose), with the winner's layout captured. Sequenced alongside 3–5 on the same run.
 
@@ -203,16 +203,43 @@ concept doc, and in an 8k-char JSON blob, and the four copies drifted.
 
 What lives HERE is the composition, because that is `campaign.json`'s fact, not the type's: the
 formula in `datasets/promptpotter-self/campaign.json::scoring` composes **lift core**
-(`normalized_gain`) × **bounded quality**
-(`cleanliness · diversity_health`, floored 0.6 — a broken campaign is discounted, never
-sign-flipped) × **efficiency** (`delta_per_dollar`, floored 0.7), times a worst-offender
-token clip so a fat inner meta-prompt layout demotes (gate ≡ 1.0 for normal cost; missing
-token data → vacuous 1.0; threshold deliberately high — tune down once a real run shows the
-cost distribution). **Governing law: every term carries a candidate gradient** — terms
-without one stay out (the deleted rounds-to-target counter; the per-seed cost multiplier). Held
-emitted-but-out-of-formula pending the validation read: `rounds_improved_frac`,
-`delta_per_candidate`, `delta_per_second`, `first_round_delta` (collinear with
-`normalized_gain` — `max(levels)` includes `levels[0]`).
+(`after_N_rounds_delta`, recentred `(x+1)/2` so regression < no-op < improvement stay distinct)
+× **bounded quality** (`cleanliness · diversity_health`, floored 0.6 — a broken campaign is
+discounted, never sign-flipped) × **efficiency** (`delta_per_dollar`, floored 0.7).
+
+**Governing law: every term carries a candidate gradient** — terms without one stay out (the
+deleted rounds-to-target counter; the per-seed cost multiplier; and now the `normalized_gain`
+divisor, which was the lift core rescaled by a per-cell factor in [1,2] and carried no
+information the delta did not already have). Held emitted-but-out-of-formula pending the
+validation read: `rounds_improved_frac`, `delta_per_candidate`, `first_round_delta` (largely
+collinear with the lift core — `max(levels)` includes `levels[0]`, so whenever round 1 is the best
+round the two double-count one number).
+
+**A term must also be blind to our measurement history, and one was not.** The measurement and
+optimizer-call caches are tenant-global and content-addressed, so an inner cycle we have run
+before *replays*: identical work, identical trajectory, nothing billed. That is not spread evenly
+across the arms. The **origin** arm is the one that replays — a variant meta-prompt writes
+different prompts, so its every content hash is new and it pays full freight — so any term
+denominated in the **bill** rewards the incumbent for cells we happen to have measured already.
+It is a bias toward the origin, not noise, and it is invisible: the cell either scores as
+absurdly efficient or, at the limit, records `$0.00` and is excluded outright. Live on
+2026-07-13: seed-0 ran three inner rounds in four seconds and dropped out of the panel.
+
+The resolution is that **cost and the bill are two different quantities**, and only one of them is
+a property of the candidate:
+
+- **The bill** (`CycleSpend.cost_usd`, `dashboard.json::spend.*.used_usd`) — money that left the
+  account. Cache hits contribute nothing. This is the headline and what `spend_budget_usd` gates,
+  and it must stay that way: billing a replay would halt a run that cost nothing.
+- **The incurred cost** (`CycleSpend.incurred_usd`) — what the search would cost against a cold
+  cache, with cache hits priced from the tokens they recorded. This is what a *measurement* of a
+  candidate divides by. On a cold cache the two are identical, which is why the gap stayed hidden.
+
+`delta_per_dollar` divides by the incurred cost. There is deliberately no `delta_per_second`:
+wall-clock cannot be recovered the way cost can — a replayed cycle *really did* take four seconds
+instead of five minutes, and there is no notional elapsed time to substitute — so a per-second term
+measures the cache rather than the meta-prompt. Lift-per-unit-of-work survives as
+`delta_per_candidate`, which counts candidates and is cache-invariant by construction.
 
 Still to layer — the cross-sample terms (the P3 post-aggregate formula, above the
 per-sample primitives):

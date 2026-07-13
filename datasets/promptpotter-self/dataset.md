@@ -15,13 +15,13 @@ inner loop has room to climb and outer candidates score differently. No target
 score is declared: the panel says what an inner cycle may SPEND, never what it is
 expected to REACH). Each inner run reports a vector of proxy
 measurements (`domain/l4/proxies.py::OuterSampleProxies`) — among them
-`first_round_delta`, `normalized_gain` (best inner depth as a fraction of the room
-available to move it, `after_n / max(origin, 1 − origin)`), `delta_per_dollar`, and
+`after_N_rounds_delta` (how far the inner search climbed above where it started, on
+one difficulty-adjusted ability ruler), `first_round_delta`, `delta_per_dollar`, and
 the `cleanliness` / `diversity_health` health terms.
 
 The outer scoring formula in `campaign.json::scoring` composes a weighted subset
-(currently `normalized_gain` alone as the lift core — `first_round_delta` is held out
-as collinear with it — gated by `cleanliness × diversity` and scaled by
+(currently `after_N_rounds_delta` alone as the lift core — `first_round_delta` is held
+out as largely collinear with it — gated by `cleanliness × diversity` and scaled by
 `delta_per_dollar`). Operators iterate on the formula as evidence
 accumulates — there's no single "right" weighting; the proxies serve different
 stages of the development → calibration → publication arc.

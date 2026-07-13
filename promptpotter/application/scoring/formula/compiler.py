@@ -181,6 +181,15 @@ def compile_scorer(formula: str | None) -> Callable[[dict[str, Any]], float]:
         query = str(result.get("query", "?"))[:80]
         try:
             raw = eval(code, _SAFE_BUILTINS, ns)
+        except NameError as exc:
+            # The one failure a HISTORY reader must tell apart from a broken formula: the record
+            # predates the term. `round_scorer` already draws this line; the per-sample scorer
+            # collapsed it, so `AxisIndex.refresh` could only catch the parent and had to swallow
+            # a live divide-by-zero to survive a stale archived row.
+            raise ScoringTermMissingError(
+                f"Scoring formula {formula!r} names a term query {query!r} does not carry: "
+                f"{exc}. Either the formula is wrong, or this record predates the term."
+            ) from exc
         except Exception as exc:
             raise ScoringFormulaError(
                 f"Scoring formula {formula!r} raised on query {query!r}: "

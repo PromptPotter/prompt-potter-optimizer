@@ -29,16 +29,15 @@ finding the discipline; do not hard-code task answers into it.
 
 Composite formula in ``campaign.json::scoring`` — lift × quality × efficiency:
 
-- ``normalized_gain`` — best-discovered inner depth as a fraction of the room
-  available to move it, ``after_n / max(origin, 1 − origin)`` (the lift core).
-  Difficulty-normalized, so it compares across inner benchmarks of different
-  origin strength, and bounded in ``[-1, 1]`` by construction
+- ``after_N_rounds_delta`` — the lift core: how far the inner search climbed above
+  where it started, measured on one difficulty-adjusted ability ruler
 - ``cleanliness × diversity_health`` — bounded quality modulator
 - ``delta_per_dollar`` — efficiency modulator
 
 Better = deeper best-discovered lift, cleanly and cheaply won.
-(``first_round_delta`` / ``after_N_rounds_delta`` are emitted as raw observations
-but held out of the formula — both are collinear with ``normalized_gain``.)
+(``first_round_delta`` measures the same climb after round 1 alone — early speed
+rather than best depth. It is emitted but held out of the formula, being largely
+collinear with the lift core.)
 
 ## Mutation surface
 

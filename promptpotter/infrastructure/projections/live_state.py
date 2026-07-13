@@ -27,9 +27,12 @@ __all__ = [
 
 def backfill_spend_rates(spend: dict[str, Any]) -> dict[str, Any]:
     """Recompute ``used_usd`` on buckets whose rate now resolves.
-    Optimizer cache hits short-circuit ``emit_token_usage`` so a re-run never
-    fires fresh ``TokenUsageRecord`` for the loop bucket; this pass re-resolves
-    the rate on load (per-event historical drift accepted vs replaying the ledger)."""
+
+    Covers a bucket whose model had no rate on file when it was written (a new model,
+    a stale rate table). Re-resolves on load rather than replaying the ledger —
+    per-event historical drift accepted. Touches the BILL only; ``incurred_usd`` carries
+    no ``rate_known`` flag, and an unpriced incurred cost is surfaced by
+    ``incurred_unpriced_tokens`` instead of silently back-filled."""
     for b in spend.values():
         if not isinstance(b, dict):
             continue

@@ -118,6 +118,7 @@ def emit_token_usage(
     duration_s: float,
     model: str | None = None,
     cost_usd: float | None = None,
+    cached: bool = False,
 ) -> None:
     """Build ``TokenUsageRecord`` and append it to the active cycle ledger.
 
@@ -125,7 +126,11 @@ def emit_token_usage(
     concurrent cycles for M12+ just work). The overlong-prompt signal is the
     char gate at the pre-call site (``OPTIMIZER_PROMPT_WARN_CHARS``), which
     fires before the call on the composed prompt — the duplicate post-call
-    token gate that could never fire first is gone."""
+    token gate that could never fire first is gone.
+
+    ``cached`` marks a call served from a content-addressed cache: it consumed the
+    recorded tokens but spent no money. See ``TokenUsageRecord`` for why the ledger
+    carries both and the rollup keeps them apart."""
     _append_record(
         TokenUsageRecord(
             kind=kind,
@@ -135,6 +140,7 @@ def emit_token_usage(
             output_tokens=int(output_tokens),
             duration_s=float(duration_s),
             cost_usd=cost_usd,
+            cached=cached,
             round=_CURRENT_ROUND.get(),
         )
     )

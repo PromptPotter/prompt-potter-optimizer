@@ -241,12 +241,14 @@ def _scoreboard(
         label = (s.label or "")[:8]
         acc = s.accuracy
         ci_str = fmt_ci(s.ci_lo, s.ci_hi)
-        # Per-row matched-pair origin: a non-zero value compares this candidate's
-        # accuracy against origin on the *same samples this candidate ran*
-        # (PoBB-locked rows). Falls back to the full-set origin for rows the
-        # winner-selection loop never backfilled (escalation-aborted /
-        # fatal-degradation candidates not in ``scored``), which carry 0.0.
-        row_origin = s.matched_origin_accuracy or origin_accuracy
+        # Per-row matched-pair origin: compares this candidate's accuracy against origin on
+        # the *same samples this candidate ran* (PoBB-locked rows). ``None`` for rows nothing
+        # was matched to (eliminated / under the coverage floor) — those fall back to the
+        # full-set origin. A row whose matched origin genuinely scored 0.0 keeps its 0.0;
+        # the old `or` could not tell the two apart and silently understated its lift.
+        row_origin = (
+            s.matched_origin_accuracy if s.matched_origin_accuracy is not None else origin_accuracy
+        )
         delta = acc - row_origin
         delta_str = f"{delta:+.1%}" if abs(delta) >= 0.001 else "---"
         aborted = s.escalation_aborted

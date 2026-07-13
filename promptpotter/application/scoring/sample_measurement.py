@@ -148,6 +148,41 @@ class StepTokenUsage(TypedDict):
     reasoning: NotRequired[int]
 
 
+def emit_step_token_usage(
+    step_tokens: Mapping[str, StepTokenUsage],
+    step_timings: Mapping[str, Any],
+    *,
+    cached: bool,
+) -> None:
+    """Fan one sample's per-node backend token usage onto the canonical ledger.
+
+    Called on BOTH measurement paths: a fresh backend call (``cached=False``) and a
+    measurement-cache hit (``cached=True``, metered from the archived row's own
+    ``step_tokens``, which survive ``_materialize_cached`` intact). A hit spent no
+    money but the search still made the call, and only metering the misses would make
+    an outer arm's cost depend on our cache history rather than on the arm.
+    """
+    for node_name, entry in step_tokens.items():
+        in_tok = entry["input"]
+        out_tok = entry["output"]
+        cost_usd = entry.get("cost_usd")
+        # Skip a wholly-empty step, but never one that still carries a fixed/per-call
+        # cost (spend is the headline) — that would silently drop cost from the ledger.
+        if in_tok == 0 and out_tok == 0 and not cost_usd:
+            continue
+        raw_dur = step_timings.get(node_name)
+        emit_token_usage(
+            node=str(node_name),
+            kind="backend",
+            input_tokens=in_tok,
+            output_tokens=out_tok,
+            duration_s=float(raw_dur) if isinstance(raw_dur, (int, float)) else 0.0,
+            model=entry.get("model"),
+            cost_usd=cost_usd,
+            cached=cached,
+        )
+
+
 def _compute_step_tokens(
     resp_data: dict[str, Any],
     pipeline_schema: Any,
@@ -436,32 +471,10 @@ async def measure_sample(
         step_tokens = _compute_step_tokens(data, pipeline_schema, wire_params)
         if step_tokens:
             pd["step_tokens"] = step_tokens
-            # Fan backend cost onto the same canonical ledger optimizer cost
-            # rides — one TokenUsageRecord per pipeline node per uncached
-            # sample. measure_sample only reaches here for fresh backend
-            # calls (cache hits return early), so this never double-counts.
-            step_timings = data.get("step_timings") or {}
-            for node_name, entry in step_tokens.items():
-                in_tok = entry["input"]
-                out_tok = entry["output"]
-                cost_usd = entry.get("cost_usd")
-                # Skip a wholly-empty step, but never one that still carries a
-                # fixed/per-call cost (spend is the headline) — that would silently
-                # drop billed cost from the canonical ledger.
-                if in_tok == 0 and out_tok == 0 and not cost_usd:
-                    continue
-                raw_dur = step_timings.get(node_name)
-                duration_s: float
-                duration_s = float(raw_dur) if isinstance(raw_dur, (int, float)) else 0.0
-                emit_token_usage(
-                    node=str(node_name),
-                    kind="backend",
-                    input_tokens=in_tok,
-                    output_tokens=out_tok,
-                    duration_s=duration_s,
-                    model=entry.get("model"),
-                    cost_usd=cost_usd,
-                )
+            # measure_sample only reaches here for fresh backend calls (cache hits
+            # return early and meter themselves from the archived row), so this
+            # never double-counts.
+            emit_step_token_usage(step_tokens, data.get("step_timings") or {}, cached=False)
 
         result: dict[str, Any] = {
             "sample_id": sample.id,

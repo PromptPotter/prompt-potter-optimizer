@@ -278,18 +278,31 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
             parts.append(f"steer: {_clip(prior.critique['priority_fix'], 130)}")
         scored = [c for c in rnd.candidate_scores if not c.invalid]
         if scored:
+            # Rank by lift over the MATCHED origin where there is one, and never invent the
+            # comparison where there is not: an eliminated arm carries no matched origin, so
+            # `accuracy - 0.0` would have handed it its whole accuracy as lift and floated it
+            # to the top of exactly the sentence the outer optimizer learns from.
             top = max(
                 scored,
-                key=lambda c: (c.accuracy - c.matched_origin_accuracy, c.composite_fitness),
+                key=lambda c: (
+                    c.accuracy - c.matched_origin_accuracy
+                    if c.matched_origin_accuracy is not None
+                    else float("-inf"),
+                    c.composite_fitness,
+                ),
             )
             theta = (
                 f", th {top.theta:.2f}+/-{top.theta_se:.2f}"
                 if top.theta is not None and top.theta_se is not None
                 else ""
             )
+            versus = (
+                f" vs matched-origin {top.matched_origin_accuracy:.3f}"
+                if top.matched_origin_accuracy is not None
+                else " (eliminated before the origin could be matched to its samples)"
+            )
             parts.append(
-                f"tried {top.label} (acc {top.accuracy:.3f} vs matched-origin "
-                f"{top.matched_origin_accuracy:.3f}{theta}): "
+                f"tried {top.label} (acc {top.accuracy:.3f}{versus}{theta}): "
                 f"{_clip(top.changes_description, 100)}"
             )
         else:
@@ -461,6 +474,15 @@ async def _run_inner_campaign(
     # and cancels in the (variant − origin) paired outer diff — for zero extra spend.
     # Rides the same sanctioned pipeline_overrides channel as the model override
     # below (merge, don't clobber, any dataset-level overrides).
+    #
+    # THE CANCELLATION IS CONDITIONAL ON THE INNER DATASET'S ROUTING, and today's is not
+    # eligible: a seed is only meaningful inside ONE inference stack, and `justlogic` pins
+    # `:nitro`, which sends each call to whichever upstream is fastest right now (deliberate
+    # — without it the backend was 83% of the outer round's wall-clock). So the seed is set
+    # and carried, but under a nitro-routed model it buys nothing: the two arms draw
+    # independently and the outer verdict clears a higher noise floor, bought back with panel
+    # cells. Drop `:nitro` from the inner dataset and this becomes a real variance reduction
+    # again — the mechanism is correct, its precondition is a config choice.
     #
     # The node is ASKED, never assumed: a hardcoded `llm_only` wrote both overrides
     # under a nonexistent key on any inner dataset that named its node otherwise —
@@ -666,7 +688,7 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
     # No exclusion decision here: `compute_outer_proxies` asks `no_evidence_reason` and raises
     # `InnerCycleUnscoreableError`, which `measure_sample`'s catch-all turns into this sample's
     # EXCLUDED row. The row already names the sample, so the message carries only the reason.
-    proxies = compute_outer_proxies(result, elapsed)
+    proxies = compute_outer_proxies(result)
 
     data: dict[str, Any] = {
         # Terminal-ranker head = the inner-result token (`inner:{query}` — the
@@ -677,9 +699,7 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
         # consumer matches predicted against ground_truth (outer hit is
         # `fitness >= 1.0`), and the round-0 health gate only needs a
         # non-empty, non-NO_RESULT prediction.
-        INNER_RESULT_KEY: [
-            f"inner:{query} D{proxies.after_N_rounds_delta:+.3f}/g{proxies.normalized_gain:+.3f}"
-        ],
+        INNER_RESULT_KEY: [f"inner:{query} D{proxies.after_N_rounds_delta:+.3f}"],
         # The outer loop's raw evidence: a <=1150c narrative of what the inner
         # search tried, what steered it, and what moved — rendered as MODEL
         # REASONING in the outer sample_transcripts panel.

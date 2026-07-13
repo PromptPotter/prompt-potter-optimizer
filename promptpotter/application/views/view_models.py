@@ -182,9 +182,10 @@ class ScoreEntry:
     # First-validation-failure reason for synthetic-zeroed variants (e.g. ``no_op_variant``);
     # scoreboard suppresses these rows so ranking reflects mutated candidates only.
     invalid_reason: str | None = None
-    # Origin restricted to this row's measured samples — apples-to-apples Δ
-    # when PoBB leader-locked early; equals full-set origin when fully scored.
-    matched_origin_accuracy: float = 0.0
+    # Origin restricted to this row's measured samples — apples-to-apples Δ when PoBB
+    # leader-locked early; equals full-set origin when fully scored. ``None`` when nothing
+    # was matched (eliminated / under the coverage floor), which is NOT the same as 0.0.
+    matched_origin_accuracy: float | None = None
     matched_origin_composite: float | None = None
 
 

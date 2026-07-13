@@ -4,19 +4,18 @@
   "description": "JustLogic deductive-reasoning benchmark (Chen 2025), depths 6-7 only. 3-class TRUE/FALSE/Uncertain claim evaluation against premises. Routes through TermNorm /matches with the llm_only pipeline.",
   "backend_name": "TermNorm",
   "backend_type": "termnorm",
-  "available_models": ["openai/gpt-oss-20b"],
+  "available_models": ["openai/gpt-oss-20b:nitro", "openai/gpt-oss-20b"],
   "nodes": {
     "llm_only": {
       "type": "generation",
       "runtime": "backend",
       "node_role": "ranker",
-      "description": "Direct LLM generation on the TermNorm backend. No dataset-side max_tokens cap — provider ceiling applies. reasoning_effort=low is the conservative-floor origin. The model carries NO ':nitro' suffix: nitro routes each call to whichever upstream provider is fastest right now, and a `seed` is only meaningful within ONE inference stack — so under nitro the seed below cannot deliver the common-random-numbers variance cancellation it exists for, and two calls on identical config can land on different upstreams (different kernels/quantization → different answers even at temperature 0). This dataset is L4's inner measurement instrument; its run-to-run noise is the floor every meta-prompt verdict must clear.",
+      "description": "Direct LLM generation on the TermNorm backend. No dataset-side max_tokens cap — provider ceiling applies. reasoning_effort=low is the conservative-floor origin. The model carries ':nitro': OpenRouter routes each call to whichever upstream is fastest, which is what makes this dataset usable as L4's inner instrument at all — without it the backend ran ~10.8s per sample and was 83% of the outer round's wall-clock (ledger, 2026-07-13). The cost is reproducibility: a `seed` is only meaningful within ONE inference stack, so under nitro it buys nothing and is not set. Two calls on identical config can land on different upstreams (different kernels/quantization → different answers even at temperature 0). The inner run's noise is therefore drawn fresh per arm rather than cancelled by common random numbers, and the outer paired verdict has to clear a higher floor — pay for that with panel cells, which the speed now affords.",
       "config": {
         "provider": "openrouter",
-        "model": "openai/gpt-oss-20b",
+        "model": "openai/gpt-oss-20b:nitro",
         "temperature": 0.0,
         "reasoning_effort": "low",
-        "seed": 0,
         "output_schema": {
           "type": "object",
           "properties": {

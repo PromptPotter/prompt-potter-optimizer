@@ -135,6 +135,20 @@ class TokenUsageRecord(BaseModel):
     `kind` splits `backend` (pipeline) vs `loop` (optimizer) for the
     "Backend $X • Loop $Y" line. `cost_usd` from provider wire (OpenRouter
     `usage.cost`) or `shared/spend.py` rate table; tokens always present for fallback.
+
+    EVERY call the search makes emits one of these, whether it reached the wire or
+    was served from a content-addressed cache. `cached` splits the two, because the
+    two questions they answer are different and only one of them is the bill:
+
+    - **billed** (`cached=False` only) — money that left the account. The headline,
+      and what `spend_budget_usd` gates.
+    - **incurred** (all records) — what this search would cost to run cold. A property
+      of the *candidate*, invariant to what we happened to have measured last week.
+
+    Collapsing them is not free: the L4 efficiency proxy divides by cost, and the caches
+    are tenant-global, so an outer arm that replays a prior run bills $0 and reads as
+    infinitely efficient — while a novel arm pays. That confound points one way (the
+    origin is always the warmest arm), so it is a bias, not noise.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -147,6 +161,7 @@ class TokenUsageRecord(BaseModel):
     output_tokens: int
     duration_s: float = 0.0
     cost_usd: float | None = None
+    cached: bool = False
     round: int | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 

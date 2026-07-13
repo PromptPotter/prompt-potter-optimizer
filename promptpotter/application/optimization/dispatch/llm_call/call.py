@@ -241,6 +241,21 @@ async def llm_call(
             response.parsed = response_model.model_validate(response.parsed)
         duration_s = round(time.monotonic() - _t0, 2)
         logger.debug("OptimizerCallCache hit for %s (%s)", node or "llm_call", cache_key)
+        # A hit spends nothing but the search still MADE this call, and the cached
+        # payload carries the tokens + model it cost. Meter it — flagged — so the
+        # search's incurred cost stays invariant to our cache history. Without this
+        # the L4 origin arm (always the warmest) reads as free.
+        cost_raw = response.usage.get("cost") or response.usage.get("total_cost")
+        emit_token_usage(
+            node=node or "llm_call",
+            kind="optimizer",
+            input_tokens=response.usage.get("prompt_tokens", 0),
+            output_tokens=response.usage.get("completion_tokens", 0),
+            duration_s=duration_s,
+            model=response.model,
+            cost_usd=float(cost_raw) if cost_raw is not None else None,
+            cached=True,
+        )
     else:
         prompt_chars = sum(len(m.get("content") or "") for m in messages)
         if context.ledger is not None:

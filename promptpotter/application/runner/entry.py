@@ -286,6 +286,10 @@ def _cycle_spend(observers: RunObservers) -> CycleSpend:
         output_tokens=sp.backend.output_tokens + sp.loop.output_tokens,
         cost_usd=sp.total_used_usd,
         unpriced_tokens=sp.backend.unpriced_tokens + sp.loop.unpriced_tokens,
+        incurred_usd=sp.total_incurred_usd,
+        incurred_unpriced_tokens=(
+            sp.backend.incurred_unpriced_tokens + sp.loop.incurred_unpriced_tokens
+        ),
     )
 
 

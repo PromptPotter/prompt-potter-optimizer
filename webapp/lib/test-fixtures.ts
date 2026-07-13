@@ -126,9 +126,10 @@ export function dash(over: Partial<LiveDashboardState> = {}): LiveDashboardState
     sp_budget_ttest: 0,
     run_limits: null,
     spend: {
-      backend: { used_usd: 0, input_tokens: 0, output_tokens: 0, rate_known: false, model: null, unpriced_tokens: 0 },
-      loop: { used_usd: 0, input_tokens: 0, output_tokens: 0, rate_known: false, model: null, unpriced_tokens: 0 },
+      backend: { used_usd: 0, input_tokens: 0, output_tokens: 0, rate_known: false, model: null, unpriced_tokens: 0, incurred_usd: 0, incurred_unpriced_tokens: 0 },
+      loop: { used_usd: 0, input_tokens: 0, output_tokens: 0, rate_known: false, model: null, unpriced_tokens: 0, incurred_usd: 0, incurred_unpriced_tokens: 0 },
       total_used_usd: 0,
+      total_incurred_usd: 0,
     },
     in_flight: null,
     backfill_log: [],

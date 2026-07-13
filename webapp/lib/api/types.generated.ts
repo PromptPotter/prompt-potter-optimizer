@@ -183,9 +183,9 @@ export interface ScoredCandidate {
   runtime_failures: RuntimeFailure[];
   elimination_context: unknown;
   degradation_context: unknown;
-  matched_origin_accuracy: number;
-  matched_origin_hits: number;
-  matched_origin_composite: number;
+  matched_origin_accuracy: number | null;
+  matched_origin_hits: number | null;
+  matched_origin_composite: number | null;
   theta: number | null;
   theta_se: number | null;
   composite_ci_lo: number | null;
@@ -204,9 +204,9 @@ export interface ScoreboardRow {
   hits: number;
   total: number;
   escalation_aborted: boolean;
-  matched_origin_accuracy: number;
-  matched_origin_hits: number;
-  matched_origin_composite: number;
+  matched_origin_accuracy: number | null;
+  matched_origin_hits: number | null;
+  matched_origin_composite: number | null;
   ci_lo: number;
   ci_hi: number;
   is_winner: boolean;
@@ -354,6 +354,8 @@ export interface SpendBucket {
   rate_known: boolean;
   model: string | null;
   unpriced_tokens: number;
+  incurred_usd: number;
+  incurred_unpriced_tokens: number;
 }
 
 /** ``state.spend`` — two-bucket spend rollup + total. */
@@ -361,6 +363,7 @@ export interface SpendRollup {
   backend: SpendBucket;
   loop: SpendBucket;
   total_used_usd: number;
+  total_incurred_usd: number;
 }
 
 /** One entry in ``recent_backend_warnings`` — backend transport retry / 429 / 5xx surface. */
@@ -490,9 +493,9 @@ export interface DatasetItem {
 export interface DatasetPreviewResponse {
   name: string;
   row_count: number;
-  /** Declared training-bank fold size from `campaign.json::dataset_split`. */
-  split_train: number | null;
-  /** Declared held-out test fold size (not materialized). */
+  /** Declared held-out test fold size (not materialized). The training-bank size is
+   * `row_count` above — the bank IS the preview, so a second field restated
+   * it. */
   split_test: number | null;
   items: DatasetItem[];
 }

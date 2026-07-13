@@ -92,17 +92,27 @@ this directly.
 ## Pipeline Notes
 
 - Single `llm_only` node — prompt flows through `pipeline_params.llm_only.prompt`.
-- Default target: `openai/gpt-oss-20b` via OpenRouter — same
-  model+effort as the recon. **No `:nitro` suffix** (2026-07-12),
-  though it is faster: nitro routes each call to whichever upstream
-  provider is quickest right now, and a `seed` only means anything
-  within ONE inference stack. Under nitro the node's seed could not
-  deliver the common-random-numbers variance cancellation it exists
-  for, and two calls on identical config could land on different
-  upstreams — different kernels/quantization, so different answers
-  even at temperature 0. This dataset is L4's inner measurement
-  instrument: its run-to-run noise is the floor every meta-prompt
-  verdict has to clear, so reproducibility outranks latency here.
+- Default target: `openai/gpt-oss-20b:nitro` via OpenRouter — same
+  model+effort as the recon.
+- **The `:nitro` suffix is a deliberate trade, made twice.** It was
+  removed on 2026-07-12 for reproducibility and restored on
+  2026-07-13 for speed, once the ledger showed what the first choice
+  actually cost: without nitro the backend ran ~10.8s per sample and
+  was **83% of the entire outer round's wall-clock**, against ~0.3s
+  per sample with it. That is the difference between an L4 round you
+  can iterate on and one you cannot run.
+- **What it costs.** Nitro routes each call to whichever upstream is
+  quickest right now, and a `seed` only means anything within ONE
+  inference stack — so under nitro a seed buys nothing and is not
+  set. Two calls on identical config can land on different upstreams
+  (different kernels/quantization → different answers even at
+  temperature 0). This dataset is L4's inner measurement instrument,
+  so the consequence is concrete: the inner run's noise is drawn
+  fresh per arm instead of cancelling as common random numbers in the
+  paired (variant − origin) outer diff, and every meta-prompt verdict
+  now has to clear a higher floor. Panel size is the lever that buys
+  a minimum detectable effect back, if a verdict ever comes out
+  inconclusive for want of one.
   Dropping the suffix narrows the spread but does not fully close it
   — OpenRouter still load-balances the base model across providers.
   A true pin needs either OpenRouter provider-routing pass-through
