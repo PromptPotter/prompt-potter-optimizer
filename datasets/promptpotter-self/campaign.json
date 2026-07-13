@@ -10,12 +10,12 @@
       "optimizer_set": "meta",
       "replicate_survivors": 0,
       "l1_patience": 2,
-      "max_rounds": 1,
+      "max_rounds": 0,
       "lives": {
         "start": 2,
         "cap": 4
       },
-      "n_variants": 3,
+      "n_variants": 1,
       "improvement_threshold": 0.02,
       "degradation_threshold": 0.4,
       "l2_patience": 2,

@@ -40,15 +40,11 @@ _OPENAI_COMPAT_SPECS: dict[str, ProviderSpec] = {
         "OpenAI",
         "OPENAI_API_KEY",
     ),
-    # `:nitro` asks OpenRouter for the fastest provider, and it is where we WANT every node to
-    # end up — measured 13x on the optimizer nodes, which are over half this system's wall-clock.
-    # The catch is that the fastest provider need not implement `response_format`, and OpenRouter
-    # drops the parameter rather than refusing the route. Measured 2026-07-13:
-    # `openai/gpt-oss-120b:nitro` lands on Cerebras and, at today's prompt length, intermittently
-    # returns the SCHEMA ITSELF instead of an instance — valid JSON, finish_reason=stop, no
-    # payload. So the optimizer nodes run plain FOR NOW (see `datasets/_optimizer/pipeline.json`):
-    # shorten the prompts, re-probe, then turn :nitro on. Free-text / backend target nodes carry it
-    # already. Rule: never flip a schema-bearing node to :nitro without re-running the schema probe
+    # `:nitro` asks OpenRouter for the fastest provider. The catch is that the fastest provider
+    # need not implement `response_format`, and OpenRouter drops the parameter rather than refusing
+    # the route: `openai/gpt-oss-120b:nitro` lands on Cerebras, which intermittently returns the
+    # SCHEMA ITSELF instead of an instance — valid JSON, finish_reason=stop, no payload. Rule:
+    # never point a schema-bearing node at a new :nitro route without re-running the schema probe
     # — the failure corrupts the search silently instead of erroring.
     "openrouter": ProviderSpec(
         "OpenRouter",

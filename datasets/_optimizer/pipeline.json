@@ -19,9 +19,9 @@
         "reasoning_effort": "medium",
         "max_tokens": 12000,
         "provider": "openrouter",
-        "model": "openai/gpt-oss-120b"
+        "model": "deepseek/deepseek-v4-flash:nitro"
       },
-      "description": "':nitro' IS THE GOAL HERE, AND IT IS TEMPORARILY OFF — not forbidden. Measured 2026-07-13: `openai/gpt-oss-120b:nitro` routes to Cerebras and is a genuine 13x faster (1.9s vs 26s), which matters because the optimizer nodes are over HALF this system's wall-clock. It is off only because at today's prompt length Cerebras intermittently returns the JSON SCHEMA itself instead of an instance of it (finish_reason=stop, valid JSON, no `variants`) — roughly half of calls. That is a stability problem in what we send, not a verdict on the route. THE PLAN: shorten and stabilise the optimizer prompts, re-probe schema obedience on :nitro, and turn it back on once it holds. Do not treat the plain slug as permanent, and do not flip it to :nitro without re-running the schema probe first — the failure is silent and it corrupts the search rather than erroring. Plain routing baseline: 99/100 calls need zero schema repair."
+      "description": "':nitro' — OpenRouter's fastest-provider routing — is ON here, and the model is what made that safe. On `openai/gpt-oss-120b:nitro` the route lands on Cerebras, which at our prompt length intermittently returns the JSON SCHEMA itself instead of an instance of it (valid JSON, finish_reason=stop, no `variants`): it corrupts the search silently rather than raising. `deepseek/deepseek-v4-flash:nitro` was the one route that cleared speed, cost AND schema obedience together, and it reasons better than the 120b it replaces. Rule: never point a schema-bearing node at a new :nitro route without re-running the schema probe first — this failure mode does not error."
     },
     "l1_score": {
       "type": "measurement",
@@ -42,9 +42,9 @@
         "reasoning_effort": "medium",
         "max_tokens": 4000,
         "provider": "openrouter",
-        "model": "openai/gpt-oss-120b"
+        "model": "deepseek/deepseek-v4-flash:nitro"
       },
-      "description": "':nitro' IS THE GOAL HERE, AND IT IS TEMPORARILY OFF — not forbidden. Measured 2026-07-13: `openai/gpt-oss-120b:nitro` routes to Cerebras and is a genuine 13x faster (1.9s vs 26s), which matters because the optimizer nodes are over HALF this system's wall-clock. It is off only because at today's prompt length Cerebras intermittently returns the JSON SCHEMA itself instead of an instance of it (finish_reason=stop, valid JSON, no `variants`) — roughly half of calls. That is a stability problem in what we send, not a verdict on the route. THE PLAN: shorten and stabilise the optimizer prompts, re-probe schema obedience on :nitro, and turn it back on once it holds. Do not treat the plain slug as permanent, and do not flip it to :nitro without re-running the schema probe first — the failure is silent and it corrupts the search rather than erroring. Plain routing baseline: 99/100 calls need zero schema repair."
+      "description": "':nitro' — OpenRouter's fastest-provider routing — is ON here, and the model is what made that safe. On `openai/gpt-oss-120b:nitro` the route lands on Cerebras, which at our prompt length intermittently returns the JSON SCHEMA itself instead of an instance of it (valid JSON, finish_reason=stop, no `variants`): it corrupts the search silently rather than raising. `deepseek/deepseek-v4-flash:nitro` was the one route that cleared speed, cost AND schema obedience together, and it reasons better than the 120b it replaces. Rule: never point a schema-bearing node at a new :nitro route without re-running the schema probe first — this failure mode does not error."
     },
     "l2_context": {
       "type": "llm/meta",
@@ -61,9 +61,9 @@
         "reasoning_effort": "medium",
         "max_tokens": 8000,
         "provider": "openrouter",
-        "model": "openai/gpt-oss-120b"
+        "model": "deepseek/deepseek-v4-flash:nitro"
       },
-      "description": "':nitro' IS THE GOAL HERE, AND IT IS TEMPORARILY OFF — not forbidden. Measured 2026-07-13: `openai/gpt-oss-120b:nitro` routes to Cerebras and is a genuine 13x faster (1.9s vs 26s), which matters because the optimizer nodes are over HALF this system's wall-clock. It is off only because at today's prompt length Cerebras intermittently returns the JSON SCHEMA itself instead of an instance of it (finish_reason=stop, valid JSON, no `variants`) — roughly half of calls. That is a stability problem in what we send, not a verdict on the route. THE PLAN: shorten and stabilise the optimizer prompts, re-probe schema obedience on :nitro, and turn it back on once it holds. Do not treat the plain slug as permanent, and do not flip it to :nitro without re-running the schema probe first — the failure is silent and it corrupts the search rather than erroring. Plain routing baseline: 99/100 calls need zero schema repair."
+      "description": "':nitro' — OpenRouter's fastest-provider routing — is ON here, and the model is what made that safe. On `openai/gpt-oss-120b:nitro` the route lands on Cerebras, which at our prompt length intermittently returns the JSON SCHEMA itself instead of an instance of it (valid JSON, finish_reason=stop, no `variants`): it corrupts the search silently rather than raising. `deepseek/deepseek-v4-flash:nitro` was the one route that cleared speed, cost AND schema obedience together, and it reasons better than the 120b it replaces. Rule: never point a schema-bearing node at a new :nitro route without re-running the schema probe first — this failure mode does not error."
     },
     "l3_plan": {
       "type": "llm/meta",
@@ -81,9 +81,9 @@
         "reasoning_effort": "medium",
         "max_tokens": 8000,
         "provider": "openrouter",
-        "model": "openai/gpt-oss-120b"
+        "model": "deepseek/deepseek-v4-flash:nitro"
       },
-      "description": "':nitro' IS THE GOAL HERE, AND IT IS TEMPORARILY OFF — not forbidden. Measured 2026-07-13: `openai/gpt-oss-120b:nitro` routes to Cerebras and is a genuine 13x faster (1.9s vs 26s), which matters because the optimizer nodes are over HALF this system's wall-clock. It is off only because at today's prompt length Cerebras intermittently returns the JSON SCHEMA itself instead of an instance of it (finish_reason=stop, valid JSON, no `variants`) — roughly half of calls. That is a stability problem in what we send, not a verdict on the route. THE PLAN: shorten and stabilise the optimizer prompts, re-probe schema obedience on :nitro, and turn it back on once it holds. Do not treat the plain slug as permanent, and do not flip it to :nitro without re-running the schema probe first — the failure is silent and it corrupts the search rather than erroring. Plain routing baseline: 99/100 calls need zero schema repair."
+      "description": "':nitro' — OpenRouter's fastest-provider routing — is ON here, and the model is what made that safe. On `openai/gpt-oss-120b:nitro` the route lands on Cerebras, which at our prompt length intermittently returns the JSON SCHEMA itself instead of an instance of it (valid JSON, finish_reason=stop, no `variants`): it corrupts the search silently rather than raising. `deepseek/deepseek-v4-flash:nitro` was the one route that cleared speed, cost AND schema obedience together, and it reasons better than the 120b it replaces. Rule: never point a schema-bearing node at a new :nitro route without re-running the schema probe first — this failure mode does not error."
     },
     "checkin": {
       "type": "llm/meta",
@@ -95,9 +95,9 @@
         "reasoning_effort": "high",
         "max_tokens": 10000,
         "provider": "openrouter",
-        "model": "openai/gpt-oss-120b"
+        "model": "deepseek/deepseek-v4-flash:nitro"
       },
-      "description": "':nitro' IS THE GOAL HERE, AND IT IS TEMPORARILY OFF — not forbidden. Measured 2026-07-13: `openai/gpt-oss-120b:nitro` routes to Cerebras and is a genuine 13x faster (1.9s vs 26s), which matters because the optimizer nodes are over HALF this system's wall-clock. It is off only because at today's prompt length Cerebras intermittently returns the JSON SCHEMA itself instead of an instance of it (finish_reason=stop, valid JSON, no `variants`) — roughly half of calls. That is a stability problem in what we send, not a verdict on the route. THE PLAN: shorten and stabilise the optimizer prompts, re-probe schema obedience on :nitro, and turn it back on once it holds. Do not treat the plain slug as permanent, and do not flip it to :nitro without re-running the schema probe first — the failure is silent and it corrupts the search rather than erroring. Plain routing baseline: 99/100 calls need zero schema repair."
+      "description": "':nitro' — OpenRouter's fastest-provider routing — is ON here, and the model is what made that safe. On `openai/gpt-oss-120b:nitro` the route lands on Cerebras, which at our prompt length intermittently returns the JSON SCHEMA itself instead of an instance of it (valid JSON, finish_reason=stop, no `variants`): it corrupts the search silently rather than raising. `deepseek/deepseek-v4-flash:nitro` was the one route that cleared speed, cost AND schema obedience together, and it reasons better than the 120b it replaces. Rule: never point a schema-bearing node at a new :nitro route without re-running the schema probe first — this failure mode does not error."
     }
   },
   "pipelines": {
