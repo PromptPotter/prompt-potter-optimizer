@@ -36,7 +36,9 @@ class OuterSampleProxies(BaseModel):
     meta-prompt that ran it. The type IS the governing law that used to be prose in
     ``datasets/promptpotter-self/inner_tasks.json::description``.
 
-    **Bounded** is enforced where it is provable: ``headroom_lift`` is clamped at the ratio,
+    **Bounded** is enforced where it is provable: ``normalized_gain`` divides a move by the
+    room available to make it (``max(origin, 1−origin) ≥ 0.5``), so ``[-1, 1]`` holds by
+    construction and the ``ge``/``le`` below is a statement of fact rather than a clamp;
     the two quality terms are ``1 − mean(rate ∈ [0,1])``, and ``rounds_improved_frac`` is a
     share. The endpoint deltas and the three efficiency ratios are genuinely unbounded —
     a regressing meta-prompt goes negative, and lift-per-dollar has no natural ceiling — so
@@ -59,7 +61,7 @@ class OuterSampleProxies(BaseModel):
     first_round_delta: float = Field(allow_inf_nan=False)
     after_N_rounds_delta: float = Field(allow_inf_nan=False)  # noqa: N815
     rounds_to_N: int = Field(ge=0)  # noqa: N815
-    headroom_lift: float = Field(ge=-1.0, le=1.0)
+    normalized_gain: float = Field(ge=-1.0, le=1.0)
     cleanliness: float = Field(ge=0.0, le=1.0)
     diversity_health: float = Field(ge=0.0, le=1.0)
     rounds_improved_frac: float = Field(ge=0.0, le=1.0)

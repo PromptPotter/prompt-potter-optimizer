@@ -205,7 +205,15 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # ``modules`` 313->312 (``auto_rules.py`` deleted).
 
 LEDGER_BASELINE = {
-    "modules": 312,
+    # 312 -> 313: `shared/instrument.py`. Raised DELIBERATELY, and it is the honest number to
+    # argue about: the pass it pays for removed three ambient ContextVars and three public
+    # setters (`_INNER_DEPTH`/`MAX_INNER_DEPTH`, `_OPTIMIZER_CONFIG_OVERRIDES` +
+    # `set_optimizer_config_overrides`, `_EVIDENCE_EPOCH` + `set_evidence_epoch`) spread across
+    # three layers, and replaced them with ONE declared mode — a cycle either IS a measurement
+    # instrument, with every hermetic property bound together, or it is not. The ledger counts
+    # modules, not ambient globals, so it can see only the file that appeared. It cannot be
+    # folded into an existing `shared/` module without making that module mean two things.
+    "modules": 313,
     "init_files": 58,
     "reexport_shims": 42,
     "config_leaf_fields": 38,

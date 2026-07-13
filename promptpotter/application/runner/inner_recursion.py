@@ -27,6 +27,14 @@ construction — never a depth-1 assumption):
   ``MAX_PATH`` at depth 1 and is hopeless by L5. A flat registry stays shallow at
   EVERY depth, so the re-entrancy invariant holds without the path-length trap.
 
+What makes the inner cycle a *measurement* rather than a campaign is declared in ONE place —
+:func:`~promptpotter.shared.instrument.enter_instrument_mode`, called inside the inner task.
+It binds recursion depth, the evidence epoch (the archive stays shared as a content-addressed
+CACHE, but is hidden as cross-run MEMORY, so the instrument does not depend on how often it has
+been used) and the optimizer decoding clamp, together. Read that module before changing any of
+them: they used to be three independent ambient toggles set by hand here, and forgetting any one
+silently reintroduced the leak — the resulting number still looked like a measurement.
+
 The spawning cycle publishes its context (:func:`publish_inner_spawn_context`,
 called from ``runner/entry.py::run_optimization`` for every cycle) so the
 connector — which only receives ``(query, payload)`` — can find where to sandbox
@@ -34,7 +42,8 @@ and which inner benchmark to run. The outer L1's meta-prompt mutations ride
 ``payload["meta_prompt_overrides"]`` and are applied to the inner cycle's
 ``_optimizer/`` prompts via the per-run override ContextVar
 (``dispatch/llm_call/prompts.py``), set inside the inner task so it can't leak to
-the outer.
+the outer. Those are the SPECIMEN under test, not part of the instrument — the same
+channel carries a normal outer cycle's own meta-prompt set.
 
 The process-global rate limiter is shared: inner spend competes with the outer
 for TPM/RPM (flagged, not blocked). Inner LLM cost (optimizer + backend) is
@@ -65,6 +74,7 @@ from promptpotter.domain.outer_verdict import OUTER_PROXY_KEYS, OuterSampleProxi
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.results import L1_PARSE_FAILURE_TOOLING
 from promptpotter.infrastructure.store.io import read_json_optional
+from promptpotter.shared.instrument import MAX_INSTRUMENT_DEPTH, instrument_depth
 
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
@@ -93,23 +103,26 @@ class InnerCycleUnscoreableError(RuntimeError):
 # `pipeline_data` and the formula namespace (`scoring/formula/compiler.py`).
 INNER_RESULT_KEY = "final_ranking"
 
-# Per-round inner spend allowance, used to size an inner cycle's `spend_budget_usd` from its
-# round budget. Measured on the L4 inner benchmark (justlogic, 24-sample bank, 2 inner
-# variants, gpt-oss-120b optimizer + gpt-oss-20b target): the origin round costs ~$0.006 and
-# each L1 round ~$0.006 (optimizer + backend). Doubled, so a pricier model or a wider bank
-# still finishes its declared rounds rather than tripping the cost stop mid-budget.
-INNER_SPEND_PER_ROUND_USD = 0.012
+# An inner cycle's budget is its ROUND budget — `max_rounds` (the ceiling a compounding run may
+# reach) and `lives` (what stops a stalling one early). Both are DETERMINISTIC, and the outer
+# proxies are defined over exactly them.
+#
+# It deliberately carries no spend or token cap. Those trip on MEASURED token counts, which jitter
+# run to run (reasoning tokens are not reproducible) — so the same meta-prompt halted at a
+# different round on different runs, and the resulting truncated trajectory is indistinguishable
+# from "this meta-prompt found nothing". That made provider mood a fitness signal, and it was a
+# second budget doing the same kind of work as the round budget, only nondeterministically.
+# Measured on the inner cycles then on disk: 3 of 36 tripped `token_budget`, two of them
+# truncating at rounds 4-5 of a 7-round budget, and every one was scored as a verdict.
+#
+# What still bounds an inner cycle: the round budget above; every individual await inside it
+# (optimizer 180s x2, backend 120s, MAX_429_ATTEMPTS, rounds <= HARD_CAP); the wall-clock deadline
+# below, which is the genuine runaway guard and EXCLUDES rather than scoring; and — for the
+# operator's actual cost ceiling — the OUTER campaign's own spend budget, which every inner
+# dollar rolls up onto. The cap belongs at the level where the operator set one, not inside the
+# instrument.
 
-# Token twin of the spend allowance above. `token_budget` counts backend + optimizer tokens and,
-# on a cheap/free backend, is the ceiling that trips first. It MUST scale off the round budget for
-# the same reason the spend cap does — a flat constant the round budget can outgrow silently
-# reconverts a ROUND budget into a TOKEN budget, halting a deep inner run mid-rounds. The flat
-# `CampaignConfig` default is 210k ≈ a 5-round run (~42k/round); sized to 52k/round here so a
-# 7-round inner run gets ~2x that (the `429eea` starvation halted every inner campaign at ~210k
-# with rounds still in hand), with the same headroom rationale.
-INNER_TOKENS_PER_ROUND = 52_000
-
-# Per-round wall-clock allowance for ONE outer sample, sized like the spend cap above. Every
+# Per-round wall-clock allowance for ONE outer sample. Every
 # individual await inside an inner campaign is already bounded (optimizer 180s x2, backend 120s,
 # MAX_429_ATTEMPTS, rounds <= HARD_CAP) — but nothing bounded their SUM, so sustained 429
 # throttling could stretch one sample across tens of minutes inside every one of those bounds,
@@ -117,15 +130,6 @@ INNER_TOKENS_PER_ROUND = 52_000
 # disk that ran to a SUCCESS outcome: per-round p50 81s, p90 116s, max 245s. At 300s none of
 # them would have tripped, so the deadline catches only a genuinely stuck sample.
 OUTER_SAMPLE_WALL_S_PER_ROUND = 300.0
-
-# How deep the recursion may nest. L4 (an outer campaign scoring inner campaigns) is depth 1;
-# the module is written to re-enter, so L5+ nests by construction and nothing stopped it. Depth
-# is carried on a ContextVar rather than the spawn context because `create_task` copies the
-# context into the inner campaign, so each level reads exactly its parent's value.
-MAX_INNER_DEPTH = 2
-_INNER_DEPTH: contextvars.ContextVar[int] = contextvars.ContextVar(
-    "promptpotter_inner_depth", default=0
-)
 
 
 @dataclass(frozen=True)
@@ -267,11 +271,12 @@ def _resolve_inner_task(ctx: InnerSpawnContext, query: str) -> _InnerTaskSpec:
     so a single-cell panel needs no per-task overrides.
 
     **The config is the source of truth; there is no default ladder here.** ``target_score`` is
-    the denominator of ``headroom_lift``, a proxy the outer L4 formula scores on, and the round
-    cap and sample count set what the inner cycle is even allowed to discover. Defaulting them in
-    code silently rescales every meta-prompt candidate's fitness against a benchmark nobody
-    declared — and the defaults this used to carry (``justlogic``/10/3/0.8) had already drifted
-    from the shipped config (24/7/0.6) on three of four values, with nothing to reveal it."""
+    the threshold ``rounds_to_N`` counts to — it no longer divides the lift core, which
+    normalizes to the real ceiling (:func:`_compute_proxies`) — and the round cap and sample
+    count set what the inner cycle is even allowed to discover. Defaulting them in code silently
+    rescales every meta-prompt candidate's fitness against a benchmark nobody declared — and the
+    defaults this used to carry (``justlogic``/10/3/0.8) had already drifted from the shipped
+    config on three of four values, with nothing to reveal it."""
     path = ctx.dataset_config_dir / "inner_tasks.json"
     cfg = read_json_optional(path)
     if not isinstance(cfg, dict):
@@ -409,9 +414,27 @@ def _no_evidence_reason(result: CycleResult) -> str | None:
     measurement, the same class of harm as scoring a crash as a bad mutation.
 
     ``result.rounds`` holds L1 rounds only (``Cycle.absorb_round`` is their sole sink; resume
-    peels round 0 off), and ``round_discovered_levels`` carries one level per such round."""
-    if stop_reason_outcome(result.stop_reason) is StopOutcome.FAILED:
-        return f"it failed as tooling (stop_reason={result.stop_reason})"
+    peels round 0 off), and ``round_discovered_levels`` carries one level per such round.
+
+    **Only a SUCCESS outcome is a measurement.** :class:`StopOutcome` already draws exactly the
+    line this needs — SUCCESS means the cycle ended on its own terms (round cap, lives, target,
+    L3 convergence), while HALTED/FAILED/PAUSED all mean something *outside the search* stopped
+    it: a safety rail tripped, an upstream fault aborted it, the operator interrupted. Such a
+    trajectory is **truncated**, and a truncated trajectory is indistinguishable from "this
+    meta-prompt found nothing" — so scoring one lets provider mood, a backend outage, or a
+    Ctrl+C masquerade as meta-prompt quality. It is missing data, and the rail firing must be a
+    DISTINGUISHABLE OUTCOME rather than a corrupted number. Read off the typed table, never a
+    hand-written reason set (``promptpotter/CLAUDE.md``: a membership test over NAMES is a bug).
+
+    Deliberately NOT routed to :func:`_floor_proxies`: the floor is ``normalized_gain = -1``,
+    which zeroes the cell — punishing the meta-prompt for a slow provider, which is the
+    dead-cell bug in a new costume."""
+    outcome = stop_reason_outcome(result.stop_reason)
+    if outcome is not StopOutcome.SUCCESS:
+        return (
+            f"it did not end on its own terms — {outcome} (stop_reason={result.stop_reason}); "
+            "its trajectory was cut short by something the meta-prompt does not own"
+        )
     if not result.rounds:
         return f"it ran no L1 rounds (stop_reason={result.stop_reason})"
     if result.origin_level is None:
@@ -443,10 +466,10 @@ def _floor_reason(result: CycleResult) -> str | None:
     ``raw_chars: 0`` on a bloated meta-prompt), reproducible under the inner determinism
     clamp — so it IS evidence about the meta-prompt. Excluding it let a candidate that breaks
     its own measurement escape penalty and, at the panel's coverage floor, left an
-    un-crownable, un-eliminable zombie arm burning budget every remaining round. A FAILED
-    cycle stays excluded — that class (optimizer timeout, backend down, crash) is
-    tooling-owned."""
-    if stop_reason_outcome(result.stop_reason) is StopOutcome.FAILED:
+    un-crownable, un-eliminable zombie arm burning budget every remaining round. Only a cycle
+    that ended on its OWN terms can be floored — anything else was cut short by a rail (see
+    :func:`_no_evidence_reason`), so its empty rounds may just be the ones it got to run."""
+    if stop_reason_outcome(result.stop_reason) is not StopOutcome.SUCCESS:
         return None
     if result.rounds and not any(_is_evidential(r) for r in result.rounds):
         return (
@@ -458,15 +481,17 @@ def _floor_reason(result: CycleResult) -> str | None:
 
 def _floor_proxies(n_rounds: int) -> OuterSampleProxies:
     """The worst measurable verdict — ASSIGNED (not measured) to a meta-prompt-owned failure
-    (:func:`_floor_reason`). ``headroom_lift=-1`` zeroes the formula's lift core and the
+    (:func:`_floor_reason`). ``normalized_gain=-1`` zeroes the formula's lift core and the
     quality/efficiency modulators sit at their floors, so the composed fitness is exactly
     0.0; the deltas read 0.0 (no lift demonstrated) and ``rounds_to_N`` the never-reached
-    convention."""
+    convention. This is now the ONLY route to a zeroed cell — a *measured* cycle reaches
+    ``-1`` only by collapsing the inner ability to nothing, so a zero means "the meta-prompt
+    broke its own measurement", never "this seed drew a strong origin"."""
     return OuterSampleProxies(
         first_round_delta=0.0,
         after_N_rounds_delta=0.0,
         rounds_to_N=n_rounds + 1,
-        headroom_lift=-1.0,
+        normalized_gain=-1.0,
         cleanliness=0.0,
         diversity_health=0.0,
         rounds_improved_frac=0.0,
@@ -498,8 +523,16 @@ def _compute_proxies(result: CycleResult, target: float, elapsed: float) -> Oute
 
     Composed terms (each carries a candidate gradient — the retired proxies died for lacking
     one, so a flat term earns nothing and gets cut in tuning):
-    - ``headroom_lift`` — best depth normalized by the task's own headroom ``(target−origin)``,
-      so a config compares across inner tasks of different origin strength.
+    - ``normalized_gain`` — best depth as a fraction of the room available to move, i.e.
+      ``after_n / max(origin, 1−origin)``. Difficulty-normalized, so a meta-prompt compares
+      across inner benchmarks of different origin strength; below the half-way origin (the
+      regime a usable inner benchmark sits in — gsm8k was retired for acing its target) the
+      denominator IS ``1−origin``, the classical normalized gain. It normalizes by the room to
+      the real CEILING, never by ``target``: dividing by ``(target−origin)`` measured an
+      UPWARD room but a regression falls toward zero, so a mild regression on a strong-origin
+      seed detonated to the −1 clamp and — the lift core being multiplicative — zeroed the
+      whole cell, quality and efficiency signal with it. Such a cell then reported 0.0 for
+      every meta-prompt: not a measurement, a hole in the panel.
     - ``cleanliness`` / ``diversity_health`` — bounded quality: 1 − mean per-round problem /
       mode-collapse rate; the scoring formula uses them as a modulator that discounts a
       warning-riddled or collapsing campaign without diluting the lift core.
@@ -510,7 +543,7 @@ def _compute_proxies(result: CycleResult, target: float, elapsed: float) -> Oute
       more for the same lift and scores lower.
 
     Deltas may be negative on a regressing meta-prompt (levels are not floored at origin), so
-    the efficiency ratios can be negative too; the formula recentres / clamps.
+    the efficiency ratios can be negative too; the formula recentres / clamps those.
 
     Raises :class:`InnerCycleUnscoreableError` when the cycle carries no evidence for a
     no-fault reason; a meta-prompt-OWNED evidence kill returns the floor instead
@@ -522,6 +555,9 @@ def _compute_proxies(result: CycleResult, target: float, elapsed: float) -> Oute
         logger.warning("inner cycle scored at the floor: %s", floor)
         return _floor_proxies(len(result.rounds))
     if (reason := _no_evidence_reason(result)) is not None:
+        # Loud, never silent: this drops a panel cell, and a dropped cell that reads as
+        # "covered" is worse than no cell at all.
+        logger.warning("inner cycle EXCLUDED (no evidence about the meta-prompt): %s", reason)
         raise InnerCycleUnscoreableError(reason)
 
     assert result.origin_level is not None  # guaranteed by _no_evidence_reason
@@ -537,10 +573,10 @@ def _compute_proxies(result: CycleResult, target: float, elapsed: float) -> Oute
             len(levels) + 1,
         )
 
-    headroom = target - origin
-    headroom_lift = (
-        _clamp(after_n / headroom, -1.0, 1.0) if headroom > 1e-9 else float(after_n >= 0) * 2 - 1
-    )
+    # Normalized gain: the move as a fraction of the room available to make it. Levels are in
+    # [0,1], so `max(origin, 1-origin) >= 0.5` and this is bounded in [-1,1] BY CONSTRUCTION —
+    # the bound is structural, not policed, so there is no clamp and no degenerate denominator.
+    normalized_gain = after_n / max(origin, 1.0 - origin)
 
     # Individual rounds that carry no evidence are dropped, not scored — an all-tooling cycle
     # already left via `_no_evidence_reason`, so `evidential` is non-empty here.
@@ -565,7 +601,7 @@ def _compute_proxies(result: CycleResult, target: float, elapsed: float) -> Oute
         first_round_delta=first,
         after_N_rounds_delta=after_n,
         rounds_to_N=rounds_to_n,
-        headroom_lift=headroom_lift,
+        normalized_gain=normalized_gain,
         cleanliness=cleanliness,
         diversity_health=diversity_health,
         rounds_improved_frac=rounds_improved_frac,
@@ -708,7 +744,6 @@ async def _run_inner_campaign(
     from promptpotter.application.datasets import read_campaign_config_file
     from promptpotter.application.jobs.mint import prepare_fresh_cycle
     from promptpotter.application.optimization.dispatch.llm_call import (
-        set_optimizer_config_overrides,
         set_optimizer_prompt_overrides,
     )
     from promptpotter.application.optimization.task_context import (
@@ -718,19 +753,14 @@ async def _run_inner_campaign(
     from promptpotter.application.run_observers import build_run_observers
     from promptpotter.application.runner import RunMode, run_optimization
     from promptpotter.infrastructure.store import build_stores
+    from promptpotter.infrastructure.store.archive_views import capture_evidence_epoch
+    from promptpotter.shared.instrument import enter_instrument_mode
 
-    # One level deeper, recorded in THIS task's context copy only — so a campaign nested inside
-    # this one reads its parent's depth, and the outer cycle's own depth is untouched.
-    _INNER_DEPTH.set(_INNER_DEPTH.get() + 1)
-    # Apply the outer L1's meta-prompt mutations to the inner optimizer prompts —
-    # set in THIS task's context copy, so it can't reach the outer's optimizer.
+    # Apply the outer L1's meta-prompt mutations to the inner optimizer prompts — set in THIS
+    # task's context copy, so they can't reach the outer's optimizer. This is the SPECIMEN under
+    # test, not part of the instrument: the same channel also carries a normal outer cycle's own
+    # meta-prompt SET (`optimizer_set`, bound at the runner seam), so it is not mode-gated.
     set_optimizer_prompt_overrides(meta_prompt_overrides or None)
-    # Clamp the inner optimizer's sampling temperature (determinism for measurement)
-    # in THIS task only — so the inner campaign is a near-deterministic function of
-    # its meta-prompt and the outer optimizer's own temperature is untouched. None
-    # (unset in inner_tasks.json) leaves the optimizer's file temperature in place.
-    if spec.inner_optimizer_temperature is not None:
-        set_optimizer_config_overrides({"temperature": spec.inner_optimizer_temperature})
 
     # Sandbox: the inner tenant tree roots at the spawning cycle's flat, shallow
     # `<workspace>/.inner/<cycle_id>` home (re-entrant + Windows MAX_PATH-safe; see
@@ -744,6 +774,25 @@ async def _run_inner_campaign(
         ctx.identity,
         projects_root=ctx.inner_sandbox_root,
         shared_root=ctx.shared_root,
+    )
+
+    # THE declaration: this cycle is a measurement instrument, not a campaign. One call binds
+    # every hermetic property together (recursion depth, the evidence epoch, the optimizer
+    # decoding clamp) in THIS task's context copy, so none of it reaches the outer cycle and
+    # none of it can be forgotten piecemeal by a future code path. `inner_optimizer_temperature`
+    # unset (inner_tasks.json) leaves the optimizer's file decoding alone; the seed is the
+    # cell's, matching the target model's (`pipeline_overrides` below), so every candidate for a
+    # cell shares one random stream (CRN). See `shared/instrument.py` for why each one is load-
+    # bearing — in particular why the archive stays shared as a CACHE while being hidden as
+    # MEMORY.
+    clamp = (
+        None
+        if spec.inner_optimizer_temperature is None
+        else {"temperature": spec.inner_optimizer_temperature, "seed": spec.seed}
+    )
+    enter_instrument_mode(
+        evidence_epoch=capture_evidence_epoch(store),
+        optimizer_clamp=clamp,
     )
 
     # enable_tracing=False: inner campaigns are ephemeral fitness measurements —
@@ -778,27 +827,13 @@ async def _run_inner_campaign(
     # fully scored just widens the LCB and starves the outer signal (the inner draw and the
     # inner measurement must be the same size — anything less is wasted samples).
     #
-    # The inner spend cap is sized off ``spec.n_rounds`` (+1 for the origin round), NOT pinned
-    # to a constant. A constant cap that the round budget can outgrow silently converts the
-    # ROUND budget into a COST budget — and because a verbose meta-prompt burns more per round,
-    # it binds EARLIER for exactly the candidates ``delta_per_dollar`` exists to penalise, so
-    # the confound gets scored as the signal. Sizing off ``n_rounds`` keeps the cap identical
-    # across every candidate in an outer round. A None (unlimited) inner budget is still BOUNDED
-    # here — an inner cycle must never run open-ended.
-    inner_spend_cap = max(
-        campaign_config.optimization.spend_budget_usd or 0.0,
-        INNER_SPEND_PER_ROUND_USD * (spec.n_rounds + 1),
-    )
-    # Same round-budget sizing for the token ceiling — see INNER_TOKENS_PER_ROUND. Without this the
-    # inner cycle inherits the flat 5-round default and token-starves a 7-round run mid-rounds.
-    inner_token_cap = max(
-        campaign_config.optimization.token_budget or 0,
-        INNER_TOKENS_PER_ROUND * (spec.n_rounds + 1),
-    )
+    # The spend + token caps the inner dataset carries for its STANDALONE life are cleared: an
+    # instrument's budget is its ROUND budget, and a cap that trips on measured tokens truncates
+    # the trajectory nondeterministically. See the module note above the wall-clock deadline.
     opt_update: dict[str, Any] = {
         "max_rounds": spec.n_rounds,
-        "spend_budget_usd": inner_spend_cap,
-        "token_budget": inner_token_cap,
+        "spend_budget_usd": None,
+        "token_budget": None,
     }
     if spec.n_variants is not None:
         # inner_n_variants (inner_tasks.json) — the outer task spec owns the inner
@@ -921,13 +956,13 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
             "promptpotter connector: no inner-spawn context published — "
             "run_optimization must call publish_inner_spawn_context first."
         )
-    depth = _INNER_DEPTH.get()
-    if depth >= MAX_INNER_DEPTH:
+    depth = instrument_depth()
+    if depth >= MAX_INSTRUMENT_DEPTH:
         raise RuntimeError(
             f"promptpotter connector: inner recursion is already {depth} level(s) deep "
-            f"(MAX_INNER_DEPTH={MAX_INNER_DEPTH}); refusing to spawn another inner campaign. "
-            "An inner dataset whose own backend_type is 'promptpotter' recurses without bound — "
-            "check the inner_benchmark named in inner_tasks.json."
+            f"(MAX_INSTRUMENT_DEPTH={MAX_INSTRUMENT_DEPTH}); refusing to spawn another inner "
+            "campaign. An inner dataset whose own backend_type is 'promptpotter' recurses "
+            "without bound — check the inner_benchmark named in inner_tasks.json."
         )
     spec = _resolve_inner_task(ctx, query)
     overrides = payload.get("meta_prompt_overrides") or {}

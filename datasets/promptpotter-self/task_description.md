@@ -26,8 +26,10 @@ finding the discipline; do not hard-code task answers into it.
 
 Composite formula in ``campaign.json::scoring`` — lift × quality × efficiency:
 
-- ``headroom_lift`` — best-discovered inner depth over the task's own
-  ``(target − origin)`` headroom (the lift core)
+- ``normalized_gain`` — best-discovered inner depth as a fraction of the room
+  available to move it, ``after_n / max(origin, 1 − origin)`` (the lift core).
+  Difficulty-normalized, so it compares across inner benchmarks of different
+  origin strength, and bounded in ``[-1, 1]`` by construction
 - ``cleanliness × diversity_health`` — bounded quality modulator
 - ``delta_per_dollar`` — efficiency modulator
 

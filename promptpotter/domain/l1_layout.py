@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from promptpotter.domain.validators import ValidatorOutcome
 
@@ -109,6 +109,14 @@ class NodeLayoutSpec(BaseModel):
     possible: frozenset[str]
     mandatory: frozenset[str]
     floor: L1Layout
+
+    @field_serializer("possible", "mandatory")
+    def _sorted_names(self, names: frozenset[str]) -> list[str]:
+        # Pydantic dumps a frozenset in ITERATION order, which for str is
+        # PYTHONHASHSEED-randomized — so an unsorted dump differs every process.
+        # `_identity_config` hashes this dump, so that made the L4 measurement
+        # identity non-deterministic and no cached origin could ever be reused.
+        return sorted(names)
 
 
 # The per-node layout registry — L4's information-flow surface. Each optimizer node

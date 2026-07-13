@@ -92,10 +92,22 @@ this directly.
 ## Pipeline Notes
 
 - Single `llm_only` node — prompt flows through `pipeline_params.llm_only.prompt`.
-- Default target: `openai/gpt-oss-20b:nitro` via OpenRouter — same
-  model+effort as the recon, `:nitro` for the fastest routing
-  (per the AIME experience: 3-10s tail on most providers, dominant
-  speed on `:nitro`).
+- Default target: `openai/gpt-oss-20b` via OpenRouter — same
+  model+effort as the recon. **No `:nitro` suffix** (2026-07-12),
+  though it is faster: nitro routes each call to whichever upstream
+  provider is quickest right now, and a `seed` only means anything
+  within ONE inference stack. Under nitro the node's seed could not
+  deliver the common-random-numbers variance cancellation it exists
+  for, and two calls on identical config could land on different
+  upstreams — different kernels/quantization, so different answers
+  even at temperature 0. This dataset is L4's inner measurement
+  instrument: its run-to-run noise is the floor every meta-prompt
+  verdict has to clear, so reproducibility outranks latency here.
+  Dropping the suffix narrows the spread but does not fully close it
+  — OpenRouter still load-balances the base model across providers.
+  A true pin needs either OpenRouter provider-routing pass-through
+  (new config key + a TermNorm-side change) or a direct single-stack
+  provider; both are operator calls, not loop decisions.
 - `reasoning_effort: low` — locked. Pinned to `low` for this campaign
   via `param_allowed_values`; `medium`/`high` are invalid — a proposal
   is rejected and self-healed, never executed. The hedge bias is a
@@ -113,7 +125,7 @@ this directly.
 ## Pinning
 
 - `model` / `provider` are NOT in `optimizer.param_keys` for this
-  dataset's pipeline — pinned to `openai/gpt-oss-20b:nitro` on
+  dataset's pipeline — pinned to `openai/gpt-oss-20b` on
   OpenRouter. Operator commitment 2026-05-19: gpt-oss-20b is the
   meta-campaign model (leading open-source, fast, cheap). Swap via
   the `nodes.llm_only.config` overlay, never via L1 mutation.

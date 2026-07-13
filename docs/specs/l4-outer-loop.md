@@ -192,7 +192,8 @@ round-trace signals surfaced as outer injections, not re-derived.
 Proxies are computed in-memory by `runner/inner_recursion.py::_compute_proxies` from the
 returned `CycleResult` (no disk read; **there is no `outer_fitness` module**); the formula
 lives in `datasets/promptpotter-self/campaign.json::scoring`, composing **lift core**
-(normalized `headroom_lift`) × **bounded quality**
+(`normalized_gain` = `after_n / max(origin, 1 − origin)` — the move over the room available to
+make it; bounded `[-1, 1]` by construction, so no clamp and no dead cells) × **bounded quality**
 (`cleanliness · diversity_health`, floored 0.6 — a broken campaign is discounted, never
 sign-flipped) × **efficiency** (`delta_per_dollar`, floored 0.7), times a worst-offender
 token clip so a fat inner meta-prompt layout demotes (gate ≡ 1.0 for normal cost; missing
@@ -201,7 +202,7 @@ cost distribution). **Governing law: every term carries a candidate gradient** �
 without one stay out (`rounds_to_N`; the per-seed cost multiplier). Held
 emitted-but-out-of-formula pending the validation read: `rounds_improved_frac`,
 `delta_per_candidate`, `delta_per_second`, `first_round_delta` (collinear with
-`headroom_lift` — `max(levels)` includes `levels[0]`).
+`normalized_gain` — `max(levels)` includes `levels[0]`).
 
 Still to layer — the cross-sample terms (the P3 post-aggregate formula, above the
 per-sample primitives):

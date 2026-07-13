@@ -18,6 +18,7 @@ from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.shared.errors import is_error_result
+from promptpotter.shared.instrument import instrument_mode
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
 
 __all__ = [
+    "capture_evidence_epoch",
     "list_runs",
     "load_run",
     "measurement_series_for_samples",
@@ -36,6 +38,40 @@ __all__ = [
     "reusable_results",
     "runs_since",
 ]
+
+
+# -- CACHE vs MEMORY ----------------------------------------------------------
+#
+# The archive plays two roles that were never named apart, and conflating them is
+# what made an L4 inner cycle unreproducible:
+#
+#   CACHE  — content-addressed replay of raw grades (`reusable_results`). Keyed by
+#            content hash, so a hit IS the same measurement. Must stay tenant-global:
+#            it is what lets an inner origin replay instead of being re-paid and
+#            re-drawn. NEVER filtered.
+#   MEMORY — cross-run evidence: the δ ruler (`build_archive_observations`) and the
+#            `AxisIndex` panels (`axis_memory` / `archive_top_runs` / `rare_hit_samples`).
+#            Read through `list_runs` / `runs_since`, and invisible behind the caller's
+#            evidence epoch (`shared/instrument.py`, which is where the WHY lives).
+#
+# For a normal campaign no mode is bound, the epoch is empty, and MEMORY over the tenant's
+# whole archive is the feature.
+
+
+def _evidence_epoch() -> frozenset[str]:
+    """Runs this task must not see as evidence — empty for a normal campaign."""
+    mode = instrument_mode()
+    return mode.evidence_epoch if mode is not None else frozenset()
+
+
+def capture_evidence_epoch(stores: Stores) -> frozenset[str]:
+    """Every run-id banked right now — the epoch an instrument-mode cycle hides.
+
+    Reads the RAW index, deliberately NOT `list_runs`: that one is already filtered by the
+    *caller's* epoch, so a nested instrument would capture only what its parent could see
+    and would then treat its grandparent's runs as its own evidence. An epoch has to be
+    absolute, not relative to whoever is asking."""
+    return frozenset(e["run_id"] for e in stores.archive.list_all())
 
 
 # -- reads --------------------------------------------------------------------
@@ -123,8 +159,13 @@ def list_runs(
     *,
     dataset_name: str | None = None,
 ) -> list[dict[str, Any]]:
-    """All run-summary entries from the archive index, scoped to ``dataset_name``."""
-    return stores.archive.list_all(dataset_name=dataset_name)
+    """Run-summary entries from the archive index, scoped to ``dataset_name`` — an
+    EVIDENCE read, so runs behind the evidence epoch are invisible."""
+    epoch = _evidence_epoch()
+    entries = stores.archive.list_all(dataset_name=dataset_name)
+    if not epoch:
+        return entries
+    return [e for e in entries if e.get("run_id") not in epoch]
 
 
 def runs_since(
@@ -133,8 +174,12 @@ def runs_since(
     *,
     dataset_name: str | None = None,
 ) -> Iterator[tuple[str, dict[str, Any]]]:
-    """Yield ``(run_id, detail)`` for runs not in *seen_ids*; missing details skipped."""
-    return stores.archive.load_since(seen_ids, dataset_name=dataset_name)
+    """Yield ``(run_id, detail)`` for runs not in *seen_ids*; missing details skipped.
+    An EVIDENCE read — runs behind the evidence epoch are invisible."""
+    return stores.archive.load_since(
+        seen_ids | _evidence_epoch(),
+        dataset_name=dataset_name,
+    )
 
 
 def reusable_results(

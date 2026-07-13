@@ -10,7 +10,7 @@ import math
 
 from pydantic_settings import BaseSettings
 
-APP_VERSION: str = "0.8.2"
+APP_VERSION: str = "0.8.5"
 
 # Current legal-terms version the consent gate requires. Date-stamped: bumping it
 # (when the Terms / Privacy text on the marketing site materially changes)

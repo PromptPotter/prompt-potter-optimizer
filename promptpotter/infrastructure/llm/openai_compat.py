@@ -100,6 +100,7 @@ class OpenAICompatibleClient(LLMClientBase):
         response_model: type[BaseModel] | None = None,
         response_schema: dict[str, Any] | None = None,
         reasoning_effort: str | None = None,
+        seed: int | None = None,
         **kwargs: Any,
     ) -> LLMResponse:
         client = self._ensure_client()
@@ -116,6 +117,10 @@ class OpenAICompatibleClient(LLMClientBase):
         # when unset so a provider that doesn't accept it never sees a null.
         if reasoning_effort is not None:
             request_params["reasoning_effort"] = reasoning_effort
+        # Temperature 0 pins the distribution, not the draw — without a seed the provider is
+        # still free to sample differently on identical input. Omitted when unset, same as above.
+        if seed is not None:
+            request_params["seed"] = seed
 
         wire_schema = response_schema or (
             response_model.model_json_schema() if response_model else None

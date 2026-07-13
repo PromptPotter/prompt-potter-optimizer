@@ -45,11 +45,13 @@ def hash_call(
     temperature: float,
     json_schema: dict[str, Any] | None,
     response_model: str | None = None,
+    seed: int | None = None,
 ) -> str:
     """SHA-256 (24 hex) of byte-identical LLM-call inputs.
 
     ``response_model`` (Pydantic ``__name__``) in the key lets typed + dict
-    responses cohabit without colliding.
+    responses cohabit without colliding. ``seed`` is a decoding input like
+    ``temperature`` — omitting it would serve one seed's answer to another.
     """
     blob = json.dumps(
         {
@@ -59,6 +61,7 @@ def hash_call(
             "temperature": temperature,
             "json_schema": json_schema,
             "response_model": response_model,
+            "seed": seed,
         },
         sort_keys=True,
     )

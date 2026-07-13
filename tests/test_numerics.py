@@ -184,9 +184,9 @@ def test_scorer_rejects_non_finite_instead_of_scoring_it_perfect() -> None:
 
     # The reachable shape: a non-finite value arriving through `pipeline_data` — how an L4
     # proxy would deliver one — not a literal a human would notice in the formula string.
-    result = _result_min("a", "a") | {"pipeline_data": {"headroom_lift": float("nan")}}
+    result = _result_min("a", "a") | {"pipeline_data": {"normalized_gain": float("nan")}}
     with pytest.raises(ScoringFormulaError, match="non-finite"):
-        compile_scorer("headroom_lift")(result)
+        compile_scorer("normalized_gain")(result)
 
     # The per-ROUND scorer clamps identically and was the twin hole: the fix to the per-sample
     # clamp above left the composite one wide open, so a NaN evaluator scored a perfect ROUND.
@@ -941,7 +941,10 @@ def test_compute_proxies_composed_fitness_discriminates() -> None:
     px = _compute_proxies(clean, target=0.60, elapsed=100.0).model_dump()
     assert px["first_round_delta"] == pytest.approx(0.10)
     assert px["after_N_rounds_delta"] == pytest.approx(0.25)
-    assert px["headroom_lift"] == pytest.approx(0.25 / 0.30)  # depth over (target-origin)
+    # Depth over the room available to move it: max(origin, 1-origin) = max(0.30, 0.70).
+    # NOT over (target - origin) — that divided an upward move by an upward room, so a
+    # regression on a strong-origin seed saturated the old clamp and zeroed the whole cell.
+    assert px["normalized_gain"] == pytest.approx(0.25 / 0.70)
     assert px["cleanliness"] == pytest.approx(1.0)
     assert px["diversity_health"] == pytest.approx(1.0)
     assert px["rounds_improved_frac"] == pytest.approx(1.0)
@@ -1043,7 +1046,7 @@ def test_compute_proxies_excludes_tooling_failures_from_cleanliness() -> None:
         ],
     )
     floor = _compute_proxies(all_tooling, target=0.60, elapsed=100.0).model_dump()
-    assert floor["headroom_lift"] == -1.0
+    assert floor["normalized_gain"] == -1.0
     assert floor["cleanliness"] == 0.0
 
     import json
@@ -1061,7 +1064,7 @@ def test_compute_proxies_excludes_tooling_failures_from_cleanliness() -> None:
         [_fake_inner_round(1, parse_failure="l1_provider_empty_response")],
         stop_reason=StopReason.CRASHED,
     )
-    with pytest.raises(InnerCycleUnscoreableError, match="failed as tooling"):
+    with pytest.raises(InnerCycleUnscoreableError, match="did not end on its own terms"):
         _compute_proxies(failed_tooling, target=0.60, elapsed=100.0)
 
 
@@ -1069,27 +1072,57 @@ def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
     # SILENT wrong-score. Every aggregate here is TOTAL on an empty input (`_mean([])` is 0.0),
     # so a cycle that never ran an L1 round scores `cleanliness = diversity_health = 1.0` — an
     # unexercised meta-prompt reported as flawless, and a *high* outer fitness. Nothing errors.
-    # Six non-FAILED stop reasons reach here, including an operator's Ctrl+C (`paused`) and the
-    # inner spend cap (`spend_budget`), which binds EARLIEST for the verbose candidates whose
-    # efficiency term it then inflates. The exclusion predicate must ask "produced evidence?",
-    # not "failed?" — the two answers differ on exactly these rows.
+    # The exclusion predicate must ask "produced evidence?", not "failed?" — the two answers
+    # differ on every row below.
     from promptpotter.application.runner.inner_recursion import (
         InnerCycleUnscoreableError,
         _compute_proxies,
     )
 
-    # Zero L1 rounds, reached by a SUCCESS, a HALTED and a PAUSED stop reason alike.
-    for stop in (StopReason.TARGET_HIT, StopReason.SPEND_BUDGET, StopReason.PAUSED):
-        empty = _fake_inner_result([], 0.30, [], stop_reason=stop)
-        with pytest.raises(InnerCycleUnscoreableError, match="no L1 rounds"):
-            _compute_proxies(empty, target=0.60, elapsed=100.0)
+    # Zero L1 rounds, on a cycle that DID end on its own terms.
+    empty = _fake_inner_result([], 0.30, [], stop_reason=StopReason.TARGET_HIT)
+    with pytest.raises(InnerCycleUnscoreableError, match="no L1 rounds"):
+        _compute_proxies(empty, target=0.60, elapsed=100.0)
 
-    # A crash is the SAME fact — missing data — and rides the same exception, not a rival one.
-    crashed = _fake_inner_result(
-        [0.40], 0.30, [_fake_inner_round(1)], stop_reason=StopReason.OPTIMIZER_TIMEOUT
+    # ONLY A SUCCESS OUTCOME IS A MEASUREMENT. The dangerous rows are the ones with rounds on
+    # the board: a rail-truncated cycle looks exactly like a completed one, so every aggregate
+    # below computes happily and reports a TRUNCATED trajectory as the meta-prompt's verdict —
+    # "it stopped improving" is indistinguishable from "we cut it off". That let provider mood
+    # (a slow backend, a spend cap tripping on jittery reasoning-token counts, an operator's
+    # Ctrl+C) masquerade as meta-prompt quality. Measured before the fix: 3 of 36 inner cycles
+    # on disk tripped `token_budget`, two truncating at rounds 4-5 of a 7-round budget, and
+    # every one was scored. Read the verdict off the typed StopOutcome table, never a
+    # hand-written reason set.
+    for stop in (
+        StopReason.SPEND_BUDGET,
+        StopReason.TOKEN_BUDGET,
+        StopReason.BACKEND_UNREACHABLE,
+        StopReason.ABORT,
+        StopReason.PAUSED,
+        StopReason.OPTIMIZER_TIMEOUT,
+        StopReason.CRASHED,
+    ):
+        truncated = _fake_inner_result(
+            [0.40, 0.55],
+            0.30,
+            [_fake_inner_round(1), _fake_inner_round(2)],
+            stop_reason=stop,
+        )
+        with pytest.raises(InnerCycleUnscoreableError, match="did not end on its own terms"):
+            _compute_proxies(truncated, target=0.60, elapsed=100.0)
+
+    # ...and it is EXCLUDED, never floored: the floor is `normalized_gain = -1`, which zeroes the
+    # cell (the lift core is multiplicative) — punishing the meta-prompt for a slow provider,
+    # which is the dead-cell bug in a new costume. An all-tooling-rounds cycle that would
+    # otherwise floor (see the test above) is excluded once a rail truncated it.
+    railed_and_empty = _fake_inner_result(
+        [0.40],
+        0.30,
+        [_fake_inner_round(1, parse_failure="l1_provider_empty_response")],
+        stop_reason=StopReason.TOKEN_BUDGET,
     )
-    with pytest.raises(InnerCycleUnscoreableError, match="failed as tooling"):
-        _compute_proxies(crashed, target=0.60, elapsed=100.0)
+    with pytest.raises(InnerCycleUnscoreableError, match="did not end on its own terms"):
+        _compute_proxies(railed_and_empty, target=0.60, elapsed=100.0)
 
     # Rounds ran, but the trajectory is empty → nothing to difference against origin. Without
     # the guard `first`/`after_N_rounds_delta` would both read a flat 0.0: "no lift" is a
@@ -1155,7 +1188,7 @@ def test_unmeasured_spend_never_scores_as_maximal_efficiency() -> None:
 def test_pp_self_scoring_composed_and_gradient_bearing() -> None:
     # SILENT wrong-score: the composed formula must (a) still ignore the retired/held-out
     # proxies (rounds_to_N, raw token count, after_N_rounds_delta, and first_round_delta —
-    # collinear with headroom_lift, whose max(levels) includes levels[0]), (b) stay monotone in
+    # collinear with normalized_gain, whose max(levels) includes levels[0]), (b) stay monotone in
     # the lift core, (c) let quality penalties modulate DOWN — but (d) FLOOR the quality factor
     # at 0.6 so a broken campaign is discounted, never sign-flipped into a false floor. Any of
     # these wrong scores every candidate subtly, with no error.
@@ -1168,7 +1201,7 @@ def test_pp_self_scoring_composed_and_gradient_bearing() -> None:
     def s(**kw: float) -> float:
         pd: dict[str, float] = {
             "first_round_delta": 0.1,
-            "headroom_lift": 0.5,
+            "normalized_gain": 0.5,
             "cleanliness": 0.9,
             "diversity_health": 0.9,
             "delta_per_dollar": 6.0,
@@ -1178,9 +1211,9 @@ def test_pp_self_scoring_composed_and_gradient_bearing() -> None:
 
     base = s()
     assert s(rounds_to_N=99) == base  # retired constant does not reach the score
-    assert s(after_N_rounds_delta=0.9) == base  # superseded by headroom_lift, held out of formula
+    assert s(after_N_rounds_delta=0.9) == base  # superseded by normalized_gain, held out of formula
     assert s(first_round_delta=0.3) == base  # collinear early-speed term held out of formula
-    assert s(headroom_lift=0.9) > base  # monotone in normalized depth
+    assert s(normalized_gain=0.9) > base  # monotone in normalized depth
     assert s(cleanliness=0.4) < base  # quality penalty modulates down
     assert s(diversity_health=0.4) < base  # mode-collapse penalty modulates down
     assert s(delta_per_dollar=0.5) < base  # efficiency rewards cheap lift

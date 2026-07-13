@@ -218,6 +218,7 @@ async def llm_call(
             temperature=merged["temperature"],
             json_schema=response_schema,
             response_model=response_model.__name__ if response_model else None,
+            seed=merged.get("seed"),
         )
         cached_payload = context.cache.load(cache_key)
 
@@ -299,6 +300,7 @@ async def llm_call(
                         response_model=response_model,
                         response_schema=response_schema,
                         reasoning_effort=merged.get("reasoning_effort"),
+                        seed=merged.get("seed"),
                     )
                     break
                 except Exception as exc:

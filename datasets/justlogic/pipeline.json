@@ -10,10 +10,10 @@
       "type": "generation",
       "runtime": "backend",
       "node_role": "ranker",
-      "description": "Direct LLM generation on the TermNorm backend. No dataset-side max_tokens cap — provider ceiling applies. reasoning_effort=low is the conservative-floor origin; recon-measured at ~44% on the depth-6,7 stratum 2026-05-19.",
+      "description": "Direct LLM generation on the TermNorm backend. No dataset-side max_tokens cap — provider ceiling applies. reasoning_effort=low is the conservative-floor origin. The model carries NO ':nitro' suffix: nitro routes each call to whichever upstream provider is fastest right now, and a `seed` is only meaningful within ONE inference stack — so under nitro the seed below cannot deliver the common-random-numbers variance cancellation it exists for, and two calls on identical config can land on different upstreams (different kernels/quantization → different answers even at temperature 0). This dataset is L4's inner measurement instrument; its run-to-run noise is the floor every meta-prompt verdict must clear.",
       "config": {
         "provider": "openrouter",
-        "model": "openai/gpt-oss-20b:nitro",
+        "model": "openai/gpt-oss-20b",
         "temperature": 0.0,
         "reasoning_effort": "low",
         "seed": 0,

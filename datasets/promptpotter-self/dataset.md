@@ -13,12 +13,12 @@ inner PromptPotter campaign on **`justlogic`** (high-depth logic reasoning — c
 because its origin sits below target, so the inner loop has headroom to climb and
 outer candidates score differently). Each inner run reports a vector of proxy
 measurements (`domain/outer_verdict.py::OuterSampleProxies`) — among them
-`first_round_delta`, `headroom_lift` (best inner depth over the task's own
-`(target − origin)` headroom), `delta_per_dollar`, and the `cleanliness` /
-`diversity_health` health terms.
+`first_round_delta`, `normalized_gain` (best inner depth as a fraction of the room
+available to move it, `after_n / max(origin, 1 − origin)`), `delta_per_dollar`, and
+the `cleanliness` / `diversity_health` health terms.
 
 The outer scoring formula in `campaign.json::scoring` composes a weighted subset
-(currently `headroom_lift` alone as the lift core — `first_round_delta` is held out
+(currently `normalized_gain` alone as the lift core — `first_round_delta` is held out
 as collinear with it — gated by `cleanliness × diversity` and scaled by
 `delta_per_dollar`). Operators iterate on the formula as evidence
 accumulates — there's no single "right" weighting; the proxies serve different
