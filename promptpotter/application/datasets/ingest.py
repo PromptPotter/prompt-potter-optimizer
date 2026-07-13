@@ -173,7 +173,12 @@ def draft_from_dataset(
     cc = authored.campaign_config
     task = authored.task_description
     scoring = str(cc.scoring or "").split("(", 1)[0].strip() or DEFAULT_SCORING_COMPOSITE
-    max_rounds = cc.optimization.max_rounds or DEFAULT_MAX_ROUNDS
+    # `is not None`, never `or`: 0 is a MEANINGFUL value here — "measure the origin and stop" —
+    # and `or` would silently promote it to the default, handing the operator unbounded rounds
+    # when they asked for none. `None` (authored as unlimited) has no draft representation, so it
+    # takes the default; that is a deliberate draft starting point, not a coerced answer.
+    authored_rounds = cc.optimization.max_rounds
+    max_rounds = authored_rounds if authored_rounds is not None else DEFAULT_MAX_ROUNDS
     connector = authored.backend_type or DEFAULT_CONNECTOR
     pipeline_overlay = authored.pipeline_nodes
 

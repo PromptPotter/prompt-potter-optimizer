@@ -45,8 +45,11 @@ export function questionPatch(field: string, answer: string): DraftPatch | null 
     case ORIGIN_KEY.scoringComposite:
       return { scoring_composite: value };
     case ORIGIN_KEY.maxRounds: {
+      // 0 is legal and load-bearing — "measure the origin and stop" (server: ge=0). A `>= 1`
+      // guard silently dropped the patch, so the draft kept its previous ceiling and the
+      // operator who asked for zero rounds got the default number of them.
       const n = Number(value);
-      return Number.isInteger(n) && n >= 1 && n <= 100
+      return Number.isInteger(n) && n >= 0 && n <= 100
         ? { optimization_overrides: { max_rounds: n } }
         : null;
     }

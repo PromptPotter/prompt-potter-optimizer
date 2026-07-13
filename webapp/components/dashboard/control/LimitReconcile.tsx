@@ -51,21 +51,25 @@ export function LimitReconcile({
   const set = (next: Fields) => {
     setF(next);
     const limits: ConfigOverrides = {};
-    const intGte1 = (s: string) => {
+    // 0 is meaningful on every one of these, so the floor is 0, not 1. `max_rounds: 0` means
+    // "measure the origin and stop"; `l1_patience: 0` is what the CLI sweep sets to make L1
+    // stall after round 1. A `>= 1` floor did not reject those — it dropped the key, so the
+    // fork silently INHERITED the parent's value instead.
+    const intGte0 = (s: string) => {
       const n = Number.parseInt(s, 10);
-      return s.trim() !== "" && Number.isInteger(n) && n >= 1 ? n : null;
+      return s.trim() !== "" && Number.isInteger(n) && n >= 0 ? n : null;
     };
-    const r = intGte1(next.rounds);
+    const r = intGte0(next.rounds);
     if (r != null) limits.max_rounds = r;
     const s = Number.parseFloat(next.spend);
     if (next.spend.trim() !== "" && Number.isFinite(s) && s >= 0) limits.spend_budget_usd = s;
     const tk = Number.parseInt(next.tokens, 10);
     if (next.tokens.trim() !== "" && Number.isInteger(tk) && tk >= 0) limits.token_budget = tk;
-    const l1 = intGte1(next.l1);
+    const l1 = intGte0(next.l1);
     if (l1 != null) limits.l1_patience = l1;
-    const l2 = intGte1(next.l2);
+    const l2 = intGte0(next.l2);
     if (l2 != null) limits.l2_patience = l2;
-    const l3 = intGte1(next.l3);
+    const l3 = intGte0(next.l3);
     if (l3 != null) limits.l3_patience = l3;
     const eps = Number.parseFloat(next.eps);
     if (next.eps.trim() !== "" && Number.isFinite(eps) && eps >= 0 && eps <= 1)

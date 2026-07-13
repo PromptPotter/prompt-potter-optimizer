@@ -2027,9 +2027,10 @@ components:
       properties:
         max_rounds:
           type: integer
-          minimum: 1
+          minimum: 0
           maximum: 100
-          description: Absolute L1-round ceiling for the fork.
+          description: |
+            Absolute L1-round ceiling for the fork. `0` measures the origin and stops.
         spend_budget_usd:
           type: number
           minimum: 0
@@ -2423,11 +2424,12 @@ components:
       properties:
         max_rounds:
           type: integer
-          minimum: 1
+          minimum: 0
           maximum: 100
           default: 5
           description: |
-            Round ceiling. Smart-default `5` (matches the M10 prompt-iteration
+            Round ceiling; `0` measures the origin and stops. Smart-default `5`
+            (matches the M10 prompt-iteration
             framework default). Operator-editable.
         lock_model:
           type: boolean

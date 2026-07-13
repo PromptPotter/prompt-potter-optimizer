@@ -323,7 +323,7 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
           <NumberField
             label="Max rounds"
             value={draft.optimization_overrides.max_rounds}
-            min={1}
+            min={0}
             max={100}
             onApply={(max_rounds) =>
               flow.applyPatch({ optimization_overrides: { max_rounds } })
