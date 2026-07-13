@@ -31,9 +31,30 @@ from promptpotter.application.optimization.dispatch.hub.injections import (
     panels,
     wounds,
 )
-from promptpotter.domain.l1_layout import NODE_LAYOUTS
+from promptpotter.domain.escalation_signals import ExplorationBudget
+from promptpotter.domain.l1_layout import NODE_LAYOUTS, L1Layout
 
 INJECTIONS: dict[str, _Injection] = injection_registry()
+
+# The one name in an `evidence_grounding` citation that is NOT a panel: the escape hatch a
+# measured stall licenses ("no panel points anywhere — explore"). Offered only when the
+# escalation panel's budget has widened past `tight`.
+STALL_EXPLORATION = "stall_exploration"
+
+
+def citable_fields(layout: L1Layout, *, exploration_budget: str | None = None) -> tuple[str, ...]:
+    """What an ``l1_generate`` variant may cite THIS round: the evidence-bearing panels the
+    layout actually renders into its prompt, plus the stall escape hatch when licensed.
+
+    Derived, never declared. A citable panel must be renderable into L1's prompt or the
+    contract invites fabricated citations — so citability is the layout, filtered by
+    ``_Injection.citable``, and the same call feeds the prompt's menu, the wire schema's
+    enum, and the behaviour check. ``exploration_budget=None`` (the wiring layer couldn't
+    determine it) offers the hatch — fail open, as the check has always done."""
+    names = [n for n in layout.all_placeholders() if INJECTIONS[n].citable]
+    if exploration_budget != ExplorationBudget.TIGHT:
+        names.append(STALL_EXPLORATION)
+    return tuple(sorted(names))
 
 
 # Fail import if a slot's name drifts from its key, or a ``_r_*`` renderer is
@@ -67,4 +88,15 @@ if not set(INJECTIONS) >= _all_possible:
         f"{sorted(_all_possible - set(INJECTIONS))}"
     )
 del _all_possible
+
+# The citation contract must be satisfiable from the GUARD RAIL alone. `l1_generate` is
+# required to cite an evidence panel, and L2/L4 may excise anything outside `mandatory` —
+# so if no mandatory placeholder were citable, a legal layout edit could leave every variant
+# with nothing to cite and fail the whole round's `evidence_grounding_present`.
+if not any(INJECTIONS[n].citable for n in NODE_LAYOUTS["l1_generate"].mandatory):
+    raise RuntimeError(
+        "l1_generate's mandatory placeholders render no citable panel — the "
+        "evidence_grounding contract would be unsatisfiable under a legal layout edit."
+    )
+
 del _wired, _key, _inj, _orphans

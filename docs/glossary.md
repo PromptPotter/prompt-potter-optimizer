@@ -375,7 +375,9 @@ The persisted world is a four-entity containment hierarchy
   `domain/l1_layout.py`.
 - **Evidence grounding** — every L1 variant declares an
   `evidence_grounding: {field, citation}` naming the panel entry that
-  justifies the mutation. Validated by
+  justifies the mutation. The citable panels are derived per round from
+  the node's live layout (`citable_fields`, `dispatch/hub/injections/
+  registry.py`), so a panel L1 was not shown cannot be cited. Validated by
   `application/optimization/validators/l1_behavior.py`.
 - **Meta-prompt** — synonym for "optimizer prompt" (L1/L2/L3/Critique
   LLM template). Field-standard from PromptWizard / DSPy / OPRO.

@@ -96,6 +96,7 @@ def _runtime_block(b: InjectionBundle) -> str:
     # already window-bounded ("… N older suppressed"). Truncating runtime mid-list
     # would invite L1 to re-propose a dropped config (the validator still blocks it).
     char_cap=2500,
+    citable=True,
 )
 def _r_l1_wounds(b: InjectionBundle) -> str:
     """The two L1-owned wound streams in one block — validation + runtime. Fenced."""
@@ -119,6 +120,7 @@ def _render_guard_breaches(outcomes: list[ValidatorOutcome], layer: str) -> str:
     kind=InjectionKind.MEASUREMENT,
     description="Post-parse guard breaches on L2 + L3 output — both owner=L3 (replan). Plain ids.",
     char_cap=400,
+    citable=True,
 )
 def _r_guard_breaches(b: InjectionBundle) -> str:
     """L2 + L3 post-parse guard outcomes in one block — both route to L3 (`PLAN`): L3 replans,

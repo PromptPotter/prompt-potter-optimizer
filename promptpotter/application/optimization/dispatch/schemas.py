@@ -42,11 +42,9 @@ from __future__ import annotations
 
 import functools
 from collections.abc import Callable, Mapping
-from typing import Annotated, Any, Literal, cast
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, create_model, model_validator
-
-from promptpotter.domain.opt_search_point import EVIDENCE_GROUNDING_FIELDS
 
 
 def _truncate(max_len: int) -> Callable[[Any], Any]:
@@ -104,25 +102,21 @@ __all__ = [
 class VariantEvidenceGrounding(BaseModel):
     """One row of evidence justifying a variant's chosen mutation.
 
-    ``field`` names the panel entry the LLM is grounding on. The JSON
-    Schema exported to the provider lists the allowed values as an
-    ``enum`` hint so structured-output-aware models stay in-set, but the
-    parse boundary is permissive — providers like Groq don't honor the
-    enum and a single off-script value would otherwise crash the round.
-    The canonical enforcement is the ``evidence_grounding_present``
-    behavior check (see :mod:`l1_behavior`); ``stall_exploration`` is the
-    escape hatch and is only valid when
-    ``escalation_panel.exploration_budget`` is ``normal`` or ``wide``.
+    ``field`` names the panel entry the LLM is grounding on. The allowed values are
+    per-round — the evidence panels the node's live layout renders, plus the stall
+    escape hatch — so the ``enum`` is grafted onto the wire schema at build time by
+    :func:`l1_strict.build_l1_response_schema` from ``registry.citable_fields``, not
+    frozen here. A model-level enum could only restate a set this model cannot see, and
+    would go stale the moment a layout edit changed what L1 is shown.
+
+    The parse boundary stays permissive — providers like Groq don't honor the enum and a
+    single off-script value would otherwise crash the round. The canonical enforcement is
+    the ``evidence_grounding_present`` behavior check (see :mod:`l1_behavior`).
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    field: str = Field(
-        description="One of EVIDENCE_GROUNDING_FIELDS — panel entry cited.",
-        # dict[str, Any]: json_schema_extra is freeform schema, not a strict
-        # JsonValue tree, and a bare list[str] literal trips list-invariance.
-        json_schema_extra=cast("dict[str, Any]", {"enum": sorted(EVIDENCE_GROUNDING_FIELDS)}),
-    )
+    field: str = Field(description="A citable panel named in the prompt, or stall_exploration.")
     citation: str
 
 

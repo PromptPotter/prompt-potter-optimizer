@@ -51,10 +51,15 @@ from promptpotter.application.optimization.dispatch.hub.facade import (
     build_bundle,
     validate_template,
 )
-from promptpotter.application.optimization.dispatch.hub.injections.registry import INJECTIONS
+from promptpotter.application.optimization.dispatch.hub.injections.registry import (
+    INJECTIONS,
+    STALL_EXPLORATION,
+    citable_fields,
+)
 
 __all__ = [
     "INJECTIONS",
+    "STALL_EXPLORATION",
     "CycleSlice",
     "DispatchHub",
     "InjectionBundle",
@@ -62,5 +67,6 @@ __all__ = [
     "InjectionRenderError",
     "RoundDigest",
     "build_bundle",
+    "citable_fields",
     "validate_template",
 ]

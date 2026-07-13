@@ -68,7 +68,7 @@ class InjectionRenderError(Exception):
 # Caller-supplied `compile_prompt` extras (not signals). Anything outside `INJECTIONS ∪ extras`
 # in a template body is a typo — `validate_template` raises rather than silently dropping it.
 _TEMPLATE_EXTRAS: dict[str, set[str]] = {
-    "l1_generate": {"n_variants"},
+    "l1_generate": {"n_variants", "citable_fields"},
     "l1_critique": set(),
     "l2_context": set(),
     "l3_plan": set(),

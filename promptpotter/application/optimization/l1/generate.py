@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.dispatch.hub import DispatchHub, build_bundle
+from promptpotter.application.optimization.dispatch.hub import (
+    DispatchHub,
+    build_bundle,
+    citable_fields,
+)
 from promptpotter.application.optimization.dispatch.llm_call import (
     LLMCallContext,
     load_optimizer_prompt,
@@ -106,12 +110,22 @@ async def l1_generate(
     template, injection_vars = DispatchHub.fill(
         load_optimizer_prompt("l1_generate"), opt_sp.memory.l1_layout, bundle
     )
-    prompt_vars: dict[str, str] = {"n_variants": str(n_variants), **injection_vars}
+    # What L1 may cite IS what L1 was shown — one derivation, feeding the prompt's menu and
+    # the wire schema's enum, so the two can't disagree about which panels exist this round.
+    citable = citable_fields(
+        opt_sp.memory.l1_layout, exploration_budget=bundle.cycle_slice.exploration_budget
+    )
+    prompt_vars: dict[str, str] = {
+        "n_variants": str(n_variants),
+        "citable_fields": ", ".join(citable),
+        **injection_vars,
+    }
 
     schema_field_rename = cycle.config.optimization.schema_field_rename
     output_schema = (
         build_l1_response_schema(
             pipeline_schema,
+            citable_fields=citable,
             forbidden_axes_strict=cycle.config.optimization.forbidden_axes_strict,
             schema_field_rename=schema_field_rename,
         )

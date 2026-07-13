@@ -18,8 +18,13 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from promptpotter.application.optimization.dispatch.hub import (
+    INJECTIONS,
+    STALL_EXPLORATION,
+    citable_fields,
+)
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
-from promptpotter.domain.opt_search_point import EVIDENCE_GROUNDING_FIELDS
+from promptpotter.domain.l1_layout import coerce_l1_layout
 from promptpotter.domain.search_point import PARAM_SCOPE_KEYS
 
 # Rounds before this one keep param-scope locked so prompt-field exploration
@@ -209,15 +214,19 @@ def _check_evidence_grounding_present(
     ⇒ do not gamble*. Fails when:
 
     - ``evidence_grounding`` is missing / not a dict, or
-    - ``field`` is empty / not in :data:`EVIDENCE_GROUNDING_FIELDS`, or
-    - ``citation`` is empty / whitespace, or
-    - ``field == "stall_exploration"`` while
-      ``ctx.exploration_budget == "tight"`` (escape hatch disallowed).
-    """
+    - ``field`` names a panel this round's prompt did not render (including
+      ``stall_exploration`` under a ``tight`` budget), or
+    - ``citation`` is empty / whitespace.
+
+    The citable set is re-derived from the round-start layout — the same
+    :func:`citable_fields` call that built the prompt's menu. Membership in a
+    hand-maintained list was checkable while the panel was absent from the prompt, which
+    is the shape of a fabricated citation the check exists to catch."""
     variants = extract_l1_variants(round_dict)
     if not variants:
         return CheckResult("evidence_grounding_present", True, "no variants emitted")
 
+    citable = _round_citable_fields(ctx)
     offenders: list[tuple[str, str]] = []
     for i, v in enumerate(variants):
         label = f"C{i + 1}"
@@ -227,14 +236,11 @@ def _check_evidence_grounding_present(
             continue
         field_name = str(eg.get("field") or "").strip()
         citation = str(eg.get("citation") or "").strip()
-        if field_name not in EVIDENCE_GROUNDING_FIELDS:
-            offenders.append((label, f"bad_field={field_name!r}" if field_name else "no_field"))
+        if field_name not in citable:
+            offenders.append((label, _uncitable_reason(field_name, ctx)))
             continue
         if not citation:
             offenders.append((label, "empty_citation"))
-            continue
-        if field_name == "stall_exploration" and ctx.exploration_budget == "tight":
-            offenders.append((label, "stall_exploration_when_tight"))
             continue
         peaked_hit = _cited_peaked_axis(v, citation, field_name, ctx)
         if peaked_hit and not _has_peaked_rebut(v, citation, ctx):
@@ -306,6 +312,36 @@ def run_all_checks(round_dict: dict[str, Any], ctx: ValidatorContext) -> list[Ch
 
 
 # --- support helpers used by checks ---------------------------------------
+
+
+def _round_citable_fields(ctx: ValidatorContext) -> tuple[str, ...]:
+    """The panels this round's l1_generate prompt rendered — the same derivation that built
+    its citation menu, replayed off the round-start OSP snapshot.
+
+    Falls open to every citable panel when the snapshot carries no layout (an older round
+    file, or a wiring layer that couldn't supply one): a missing snapshot must not fail
+    every variant in the round."""
+    memory = ctx.opt_search_point.get("memory") or {}
+    layout = coerce_l1_layout(memory.get("l1_layout") if isinstance(memory, dict) else None)
+    if layout is None:
+        return tuple(sorted([n for n, i in INJECTIONS.items() if i.citable] + [STALL_EXPLORATION]))
+    return citable_fields(layout, exploration_budget=ctx.exploration_budget)
+
+
+def _uncitable_reason(field_name: str, ctx: ValidatorContext) -> str:
+    """Why this citation is not admissible — the three cases read very differently."""
+    if not field_name:
+        return "no_field"
+    if field_name == STALL_EXPLORATION:
+        return "stall_exploration_when_tight"
+    injection = INJECTIONS.get(field_name)
+    if injection is None:
+        return f"bad_field={field_name!r}"
+    if not injection.citable:
+        return f"not_evidence={field_name!r}"
+    # A real evidence panel — just not one L1 was shown this round. The fabricated citation
+    # the old set-membership check waved through.
+    return f"panel_not_in_prompt={field_name!r}"
 
 
 _REBUT_SIGNALS: tuple[str, ...] = (

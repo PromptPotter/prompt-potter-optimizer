@@ -42,6 +42,8 @@ def _schema_description_block(node: PipelineNode) -> list[str]:
     kind=InjectionKind.DERIVED,
     description="Pipeline-param menu: name + ≤4-value enum hint per node, plus available models.",
     char_cap=None,
+    # A value-space menu is what a mutation may SAY, never why it should be made.
+    citable=False,
 )
 def _r_pipeline_param_catalogue(b: InjectionBundle) -> str:
     """Pipeline-param menu (name + ≤4-value enum hint) — what L1 picks from for `pipeline_params_override`.
@@ -98,6 +100,7 @@ _BLOCK_LIBRARY_HEADERS: dict[str, str] = {
     kind=InjectionKind.DERIVED,
     description="Reusable prompt-field blocks (persona / task_intent / thinking_style / answer_format) L1 recombines.",
     char_cap=None,
+    citable=False,
 )
 def _r_prompt_block_catalogue(b: InjectionBundle) -> str:
     """The building-block library — what L1 picks from for `prompt_fields_override`.
@@ -120,6 +123,7 @@ def _r_prompt_block_catalogue(b: InjectionBundle) -> str:
     kind=InjectionKind.DERIVED,
     description="L1 SIGNAL MENU: sorted L1_POSSIBLE placeholder names L2 may use in l1_layout.",
     char_cap=None,
+    citable=False,
 )
 def _r_l1_signal_catalogue(b: InjectionBundle) -> str:
     """Names only — sorted ``L1_POSSIBLE``. L2 may pick from this menu."""

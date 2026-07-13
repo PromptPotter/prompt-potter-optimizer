@@ -128,6 +128,9 @@ quote from the named `field`, not a hallucination.
   appears in the rendered critique block.
 - `field=stall_exploration` ⇒ valid only when
   `escalation_panel.exploration_budget ∈ {normal, wide}` — verify.
+- Any `field` ⇒ the panel must be one the round's layout actually
+  rendered (`citable_fields`). A citation naming an absent panel is a
+  fabrication, and the prompt no longer offers it as an option.
 
 Not enforced as a strict citation-match validator (per the operator's
 direction: the LLM is free to interpret all input as evidence; don't

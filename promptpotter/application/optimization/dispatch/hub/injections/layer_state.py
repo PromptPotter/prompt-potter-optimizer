@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
     # sections, on most rounds. The budget is now expressed where the writer CAN honour it
     # (at most 6 one-sentence bullets); this only catches a genuine runaway.
     char_cap=2000,
+    citable=True,
 )
 def _r_plan(b: InjectionBundle) -> str:
     """L3's strategic plan text — read by every prompt; persistent until next L3 fire."""
@@ -43,6 +44,7 @@ def _r_plan(b: InjectionBundle) -> str:
     kind=InjectionKind.DIRECTIVE,
     description="Sticky L3→L2 pointer. Mounted only in L2's template; absent from L1.",
     char_cap=400,
+    citable=False,
 )
 def _r_l3_to_l2_note(b: InjectionBundle) -> str:
     """Sticky L3→L2 directive — mounted only in L2's template, absent from L1."""
@@ -60,6 +62,8 @@ def _r_l3_to_l2_note(b: InjectionBundle) -> str:
     # complex prompt (the 8-field scheme + situational rules for a hard task like
     # entity-linking, which overran the old 2500 at 2766); only true runaway trips.
     char_cap=8000,
+    # The prompt under edit is the SUBJECT of a mutation, never its evidence.
+    citable=False,
 )
 def _r_rendered_prompt(b: InjectionBundle) -> str:
     """Current best searchpoint's compiled prompt body."""
@@ -72,6 +76,7 @@ def _r_rendered_prompt(b: InjectionBundle) -> str:
     kind=InjectionKind.TRACE,
     description="Current L1 runtime knobs (creativity, n_variants, etc.) as JSON.",
     char_cap=None,
+    citable=False,
 )
 def _r_l1_overrides(b: InjectionBundle) -> str:
     """Current L1 runtime knobs (creativity, n_variants, …) as JSON."""
@@ -84,6 +89,7 @@ def _r_l1_overrides(b: InjectionBundle) -> str:
     kind=InjectionKind.TRACE,
     description="Persistent task framing dict refined by L2; broadcast to all four prompts.",
     char_cap=None,  # _r_task_context caps each field at TASK_CONTEXT_VALUE_CAP
+    citable=True,  # the CHAIN-BIND rule requires citing it
 )
 def _r_task_context(b: InjectionBundle) -> str:
     tc = b.opt_sp.memory.task_context
@@ -131,6 +137,7 @@ def _r_task_context(b: InjectionBundle) -> str:
     # Sized for failure_highlights <=3x320c + priority_fix 320c + axes — the
     # distiller's whole output quota; an 800 cap silently re-truncated it.
     char_cap=2000,
+    citable=True,
 )
 def _r_critique(b: InjectionBundle) -> str:
     """Compact view of the most recent L1_CRITIQUE output dict."""
@@ -173,6 +180,7 @@ _SCHEMA_RENAME_UNLOCK_TEXT = (
         "ablation so the input distribution doesn't drift on prompt text."
     ),
     char_cap=None,
+    citable=False,
 )
 def _r_rebase_capability(b: InjectionBundle) -> str:
     """Render the fork_proposal escape-hatch instruction, gated by
@@ -222,6 +230,7 @@ _TERMINATE_CAPABILITY_TEXT = (
         "prompt body bit-for-bit identical to an ablation run without it."
     ),
     char_cap=None,
+    citable=False,
 )
 def _r_terminate_capability(b: InjectionBundle) -> str:
     """Render the terminate_proposal instruction, gated by

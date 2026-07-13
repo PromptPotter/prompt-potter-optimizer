@@ -33,6 +33,7 @@ from promptpotter.domain.results_health import EVIDENCE_STARVED_RATE
     kind=InjectionKind.DERIVED,
     description="L1 stall depth + exploration_budget — gates the stall_exploration citation and PEAKED-axis rebut.",
     char_cap=400,
+    citable=True,
 )
 def _r_escalation_panel(b: InjectionBundle) -> str:
     """The exploration-budget signal l1_generate's supplemental rules cite. Widens
@@ -55,6 +56,7 @@ def _r_escalation_panel(b: InjectionBundle) -> str:
     description="Round-level per-node failure rates; flags an evidence-starved enricher (a node "
     "failing across the round) so the critique names the dead node instead of chasing a param.",
     char_cap=500,
+    citable=True,
 )
 def _r_evidence_health(b: InjectionBundle) -> str:
     """Surface the round-level node-failure rates (``compute_node_failure_rates``) so the
@@ -89,6 +91,7 @@ def _r_evidence_health(b: InjectionBundle) -> str:
     kind=InjectionKind.DERIVED,
     description="Layer-agnostic round readout: STATUS header + RoundDiagnostics body.",
     char_cap=2000,
+    citable=True,
 )
 def _r_diagnostics(b: InjectionBundle) -> str:
     """Round readout: plain STATUS (cycle counters, renders even pre-R1) + fenced RoundDiagnostics
@@ -260,6 +263,7 @@ def _filter_axis_rankings_to_prompt(value: str) -> str:
         "failure clusters, value trends, exhausted axes."
     ),
     char_cap=1200,  # digest() already caps to top-5 axes; this is the hard backstop.
+    citable=True,
 )
 def _r_axis_memory(b: InjectionBundle) -> str:
     """Cross-cycle axis/sample memory from the MeasurementArchive via `AxisIndex.digest`.
@@ -347,6 +351,7 @@ def _edges_at_line(text: str, cap: int, head_frac: float = 0.55) -> str:
     # justlogic); worst case (~3.8k each) degrades by section-drop of the whole
     # 3rd transcript — today's behavior, never a severed fence.
     char_cap=10000,
+    citable=True,
 )
 def _r_sample_transcripts(b: InjectionBundle) -> str:
     """The distiller's raw source: up to ``TRANSCRIPT_RENDER_CAP`` current misses shown
@@ -389,6 +394,7 @@ def _r_sample_transcripts(b: InjectionBundle) -> str:
     kind=InjectionKind.MEASUREMENT,
     description="Round-0 origin's per-sample hits — the floor variants must preserve.",
     char_cap=None,
+    citable=True,
 )
 def _r_origin_strengths(b: InjectionBundle) -> str:
     """One-line hit count — actionable signal ("don't strip scaffolding"). Enumerating samples
@@ -414,6 +420,7 @@ def _r_origin_strengths(b: InjectionBundle) -> str:
         "against the best composite ever scored instead of re-discovering it."
     ),
     char_cap=None,
+    citable=True,
 )
 def _r_archive_top_runs(b: InjectionBundle) -> str:
     """Top historical runs — anchor "beat run X (acc=Y%, comp=Z)" instead of re-discovering a
@@ -441,6 +448,7 @@ def _r_archive_top_runs(b: InjectionBundle) -> str:
         "(recipe pointers). Zero-hit samples surface as capacity-bound."
     ),
     char_cap=None,
+    citable=True,
 )
 def _r_rare_hit_samples(b: InjectionBundle) -> str:
     """Samples cracked by ≤3 of ≥10 attempts — unlock-pattern pointers. Zero-hit samples surface

@@ -75,17 +75,26 @@ class InjectionKind(enum.StrEnum):
 
 @dataclass(frozen=True)
 class _Injection:
-    """One INJECTIONS entry — kind + renderer + per-injection ``char_cap``.
+    """One INJECTIONS entry — kind + renderer + per-injection ``char_cap`` + ``citable``.
 
     ``char_cap`` has no default (omitting it = TypeError; coding mistakes fail loud,
     not silently uncapped). Bounds LLM-authored text; ``None`` for
-    *_RENDER_CAP-bounded derived/measurement renderers."""
+    *_RENDER_CAP-bounded derived/measurement renderers.
+
+    ``citable`` — may an ``l1_generate`` variant name this panel in
+    ``evidence_grounding``? True for panels REPORTING something (what was measured,
+    what failed, what the layers steered); False for the value-space menus and the
+    prompt under edit — citing those grounds a mutation in its own subject. Also no
+    default: a new signal must decide. Citability for a given round is this flag
+    intersected with the node's live layout (``registry.citable_fields``), so a panel
+    that was never rendered can never be cited."""
 
     name: str
     kind: InjectionKind
     render: Callable[[InjectionBundle], str]
     description: str
     char_cap: int | None
+    citable: bool
 
 
 @dataclass(frozen=True)
@@ -165,6 +174,7 @@ def signal(
     kind: InjectionKind,
     description: str,
     char_cap: int | None,
+    citable: bool,
 ) -> Callable[[Renderer], Renderer]:
     """Register a renderer into the injection registry at its definition site.
 
@@ -177,7 +187,7 @@ def signal(
     def deco(fn: Renderer) -> Renderer:
         if name in _REGISTRY:
             raise ValueError(f"duplicate injection signal {name!r}")
-        _REGISTRY[name] = _Injection(name, kind, fn, description, char_cap)
+        _REGISTRY[name] = _Injection(name, kind, fn, description, char_cap, citable)
         return fn
 
     return deco

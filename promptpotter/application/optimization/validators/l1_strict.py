@@ -20,6 +20,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -194,10 +195,15 @@ def _nested_param_property(node: PipelineNode, param: str) -> dict[str, Any] | N
 def build_l1_response_schema(
     pipeline_schema: PipelineSchema,
     *,
+    citable_fields: Sequence[str],
     forbidden_axes_strict: bool = True,
     schema_field_rename: bool = False,
 ) -> dict[str, Any]:
     """l1_generate response_schema — three constrained slots per variant.
+
+    ``citable_fields`` is this round's ``evidence_grounding.field`` enum — the evidence
+    panels the live layout renders (``registry.citable_fields``). Grafted here rather than
+    frozen on the model: what L1 may cite is what L1 was shown, and a layout edit changes it.
 
     The base shape comes from :class:`L1GenerateOutput` (the Pydantic SoT
     for l1_generate's response); we then constrain each of the three
@@ -302,7 +308,14 @@ def build_l1_response_schema(
     }
     tc_override["additionalProperties"] = False
 
-    # 4. Rename LAST. `build_l1_response_model` aliases the same map back so no downstream
+    # 4. evidence_grounding.field — the panels THIS round's prompt renders. The optional
+    # slot inlines as `anyOf: [<object>, null]`, so find the object arm.
+    for arm in variant_props["evidence_grounding"].get("anyOf", []):
+        eg_field = arm.get("properties", {}).get("field")
+        if eg_field is not None:
+            eg_field["enum"] = list(citable_fields)
+
+    # 5. Rename LAST. `build_l1_response_model` aliases the same map back so no downstream
     # reader observes the wire name. (The `description` lever no longer touches THIS schema:
     # it rewrites each TARGET node's own `output_schema` at the wire seam
     # `OptSearchPoint.to_job_search_point`, keyed by that node's fields — the core case.)

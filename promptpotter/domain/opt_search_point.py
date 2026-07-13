@@ -117,36 +117,16 @@ class PromptTemplate(SearchPoint):
         return cls(few_shot_examples=fse, **fields, **kwargs)
 
 
-# Panel names an L1 variant may cite in ``EvidenceGrounding.field`` to justify a mutation.
-# Every name except the sentinel is a DispatchHub injection slot of the same name, rendered by
-# ``application/optimization/dispatch/hub/injections/`` (``@signal`` decorator) — a citable
-# panel MUST be renderable into L1's prompt, or the contract invites fabricated citations.
-#   • stall_exploration — not a panel: the escape-hatch sentinel, valid only when
-#     ``escalation_panel.exploration_budget`` ∈ {normal, wide} (enforced in ``validators/l1_behavior.py``).
-EVIDENCE_GROUNDING_FIELDS: frozenset[str] = frozenset(
-    {
-        "axis_memory",
-        "task_context",
-        "plan",
-        "critique",
-        "archive_top_runs",
-        "rare_hit_samples",
-        "escalation_panel",
-        # raw evidence: complete failing samples incl. the model's own reasoning —
-        # the one panel that shows WHERE a deduction broke, not a distillation of it
-        "sample_transcripts",
-        # escape-hatch sentinel (gated on escalation_panel.exploration_budget)
-        "stall_exploration",
-    }
-)
-
-
 class EvidenceGrounding(BaseModel):
-    """Panel field + citation L1 declares to justify a mutation."""
+    """Panel field + citation L1 declares to justify a mutation.
+
+    The set of citable panels is not declared anywhere: it is DERIVED per round from the
+    node's live layout (``dispatch.hub.injections.registry.citable_fields``), so L1 can only
+    cite a panel it was actually shown."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    field: str = Field(description="One of EVIDENCE_GROUNDING_FIELDS.")
+    field: str = Field(description="A citable panel named in the prompt, or stall_exploration.")
     citation: str = Field(description="Short string naming the panel entry cited.")
 
 
@@ -463,7 +443,6 @@ def group_diff_keys(
 
 
 __all__ = [
-    "EVIDENCE_GROUNDING_FIELDS",
     "EvidenceGrounding",
     "FewShotExample",
     "IndividualLineage",
