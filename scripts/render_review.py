@@ -1,5 +1,6 @@
-"""Render ``review.md`` for any cycle dir, on demand. Wraps
-``promptpotter.application.review.render_review_md``."""
+"""Render ``review.md`` for any finished cycle dir, on demand — the offline twin of
+``application/output/writers.py::write_review_md``: same renderer, same typed round
+shape, same frozen config snapshot, so a backfilled review.md agrees with a live one."""
 
 from __future__ import annotations
 
@@ -8,34 +9,15 @@ import json
 import sys
 from pathlib import Path
 
-from promptpotter.application.review import render_review_md
-
-from promptpotter.infrastructure.store.layout import CycleLayout
-
-
-def _load_rounds(cycle_dir: Path) -> list[dict]:
-    rounds_dir = cycle_dir / "rounds"
-    if not rounds_dir.exists():
-        return []
-    files = sorted(rounds_dir.glob("round_*.json"))
-    return [json.loads(f.read_text(encoding="utf-8")) for f in files]
-
-
-def _load_audits(audit_dir: Path, n_rounds: int) -> list[dict | None]:
-    out: list[dict | None] = []
-    for i in range(1, n_rounds + 1):
-        f = audit_dir / f"round_{i:04d}.json"
-        if f.exists():
-            out.append(json.loads(f.read_text(encoding="utf-8")))
-        else:
-            out.append(None)
-    return out
+from promptpotter.application.config import load_campaign_config
+from promptpotter.application.output.review import render_review_md
+from promptpotter.domain.results import RoundResult
+from promptpotter.infrastructure.projections.audit_trail import load_round_audits
 
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("cycle_dir", type=Path)
-    parser.add_argument("--audit-dir", type=Path, default=None)
+    parser.add_argument("cycle_dir", type=Path, help="campaigns/{campaign_id}/cycles/{cycle_id}")
     args = parser.parse_args(argv)
 
     cycle_dir: Path = args.cycle_dir.resolve()
@@ -44,27 +26,32 @@ def main(argv: list[str]) -> int:
         return 2
 
     index = json.loads((cycle_dir / "index.json").read_text(encoding="utf-8"))
-    rounds = _load_rounds(cycle_dir)
-    audit_dir = (args.audit_dir or CycleLayout(cycle_dir).audit_rounds).resolve()
-    audits = _load_audits(audit_dir, len(rounds)) if audit_dir.exists() else [None] * len(rounds)
+    rounds = [
+        RoundResult.model_validate(json.loads(f.read_text(encoding="utf-8")))
+        for f in sorted((cycle_dir / "rounds").glob("round_*.json"))
+    ]
+    audits = load_round_audits(cycle_dir, [r.round for r in rounds])
 
-    ctx: list[str] = []
-    # Best-effort task_context — pull from last round's opt_search_point when present.
-    if rounds:
-        tc = (rounds[-1].get("opt_search_point") or {}).get("task_context") or {}
-        if isinstance(tc, dict):
-            for key in ("pipeline_purpose", "optimization_goals", "key_challenges"):
-                val = tc.get(key)
-                if isinstance(val, str) and val.strip():
-                    ctx.append(val)
-                elif isinstance(val, list):
-                    ctx.extend(str(v) for v in val if v)
+    # The task-context strings ride the last persisted OptSearchPoint — the offline
+    # stand-in for the live path's ``cycle.opt_sp.memory.task_context``.
+    context_object: list[str] = []
+    for r in reversed(rounds):
+        if r.opt_search_point is not None:
+            td = r.opt_search_point.memory.task_context
+            context_object = [td.pipeline_purpose, td.optimization_goals, td.key_challenges]
+            break
+
+    # The SAME frozen snapshot the live renderer reads (``cycle.config``). Fails loud
+    # when the cycle dir sits outside a campaign tree — that input is unsupported.
+    manifest = json.loads((cycle_dir.parent.parent / "campaign.json").read_text(encoding="utf-8"))
+    l1_patience = load_campaign_config(manifest["config"]).optimization.l1_patience
 
     content = render_review_md(
         index,
         rounds,
         round_audits=audits,
-        context_object=ctx,
+        context_object=context_object,
+        l1_patience=l1_patience,
     )
     out_path = cycle_dir / "review.md"
     out_path.write_text(content, encoding="utf-8")

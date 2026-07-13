@@ -784,19 +784,12 @@ class CampaignStore:
         )
         return True
 
-    def cycle_entry(self, campaign_id: str, cycle_id: str) -> dict[str, Any] | None:
-        """One cycle's served shape (``CycleListEntry``) — ``None`` if it isn't on disk.
-
-        THE decoder of ``index.json`` into the picker/detail shape. The cycle-detail
-        route used to hold a second one, which is how its list twin came to serve
-        ``origin_accuracy`` as structurally null.
-        """
-        index_path = self.cycle_dir(campaign_id, cycle_id) / "index.json"
-        if not index_path.is_file():
-            return None
-        return self._entry_from_index(index_path)
-
     def _entry_from_index(self, index_path: Path) -> dict[str, Any]:
+        """THE decoder of ``index.json`` into the served ``CycleListEntry`` shape.
+
+        The cycle-detail route used to hold a second one, which is how its list
+        twin came to serve ``origin_accuracy`` as structurally null.
+        """
         campaign_id, cycle_id = self._ids_from_index_path(index_path)
         try:
             data = read_json_optional(index_path)

@@ -71,7 +71,7 @@ def bootstrap_cycle(
         # No origin_accuracy stamp here — the index derives it from rounds[0]
         # (`origin_accuracy_of`); any re-measure re-emits round 0 through
         # emit_origin_round → save_round_file, so the row is always fresh.
-        return resolved, next_resume_round(existing.get("rounds", []))
+        return resolved, next_resume_round(existing["rounds"])
     return resolved, 1
 
 

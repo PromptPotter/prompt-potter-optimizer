@@ -263,7 +263,14 @@ class OptimizationConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     max_rounds: Annotated[int | None, Knob(Scope.POLICY, Estimand.ESCALATION, Estimand.SPEND)] = (
-        Field(50, description="Max rounds (None = unlimited)")
+        Field(
+            50,
+            ge=0,
+            description=(
+                "Max L1 rounds. 0 = measure the origin (round 0) and stop — the "
+                "origin-only run; None = unlimited, bounded only by ``HARD_CAP``."
+            ),
+        )
     )
     # No `Knob` — the walk descends into LivesConfig, so `start` + `cap` are the knobs.
     lives: LivesConfig | None = Field(

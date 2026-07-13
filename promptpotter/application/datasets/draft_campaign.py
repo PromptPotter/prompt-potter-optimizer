@@ -61,7 +61,10 @@ class OptimizationOverrides(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     max_rounds: int = Field(
-        DEFAULT_MAX_ROUNDS, ge=1, le=100, description="Round ceiling for the campaign."
+        DEFAULT_MAX_ROUNDS,
+        ge=0,
+        le=100,
+        description="Round ceiling for the campaign. 0 = measure the origin and stop.",
     )
     lock_model: bool = Field(
         True,

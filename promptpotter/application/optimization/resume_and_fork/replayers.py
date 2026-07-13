@@ -147,12 +147,11 @@ def _replay_round_winner(
     """Re-derive the round winner under the canonical paired-LCB election — the SAME
     ``elect_round_winner`` the live scorer ran (``l1/score/winner.py``), not a parallel rule. An
     unchanged scorer therefore re-elects the recorded winner exactly; only a genuine scorer change
-    can diverge. ``coverage_floor`` rides the recorded inputs (defaulting to 0 for pre-floor
-    records — most permissive, so it never rejects a candidate the live path kept).
+    can diverge. ``coverage_floor`` rides the recorded inputs.
     """
     all_results = ctx.round_data.all_candidate_results
     candidate_ids = [str(c) for c in (inputs_ref.get("candidate_ids") or [])]
-    coverage_floor = int(inputs_ref.get("coverage_floor", 0))
+    coverage_floor = int(inputs_ref["coverage_floor"])
     winner_id, _ = elect_round_winner(
         candidate_ids,
         cast("dict[str, list[QueryMeasurement]]", all_results),

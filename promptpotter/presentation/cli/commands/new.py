@@ -11,6 +11,9 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
+from pydantic import ValidationError
+
+from promptpotter.application.datasets.draft_campaign import OptimizationOverrides
 from promptpotter.application.jobs.mint import prepare_fresh_cycle
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.presentation.cli.commands._shared import (
@@ -52,21 +55,32 @@ _SET_ATTR: dict[str, str] = {
     "task_description": "raw_task_description",
     "connector": "connector",
     "scoring_composite": "scoring_composite",
-    "max_rounds": "max_rounds",
 }
 
+# The campaign-config knobs are NOT draft attributes — they ride the draft's one
+# ``optimization_overrides`` dict, so a ``--set`` on them merges + validates through
+# ``OptimizationOverrides`` exactly as the web Advanced block does
+# (``routers/commands.py::dispatch_draft_patch``). Derived from the model, never
+# hand-listed. ``mechanisms`` is nested and has no flat string form.
+_SET_KNOBS: frozenset[str] = frozenset(OptimizationOverrides.model_fields) - {"mechanisms"}
 
-def _coerce_set(field: str, raw: str) -> Any:
-    """Coerce a ``--set`` string to the field's type; raise ``SystemExit`` on bad input."""
-    if field == "max_rounds":
-        try:
-            n = int(raw)
-        except ValueError:
-            raise SystemExit(f"ERROR: --set max_rounds={raw!r} is not an integer.") from None
-        if not 1 <= n <= 100:
-            raise SystemExit(f"ERROR: --set max_rounds={n} out of range (1-100).")
-        return n
-    return raw
+
+def _settable() -> str:
+    return ", ".join(sorted({*_SET_ATTR, *_SET_KNOBS, "column.query", "column.ground_truth"}))
+
+
+def _set_knob(draft: DraftCampaign, field: str, raw: str) -> DraftCampaign:
+    """Merge one ``--set`` knob onto the draft's overrides, validated by the model.
+
+    Pydantic coerces the raw CLI string to the leaf's type and enforces its bounds,
+    so there is no second range check to drift from the model's own."""
+    merged = {**draft.optimization_overrides, field: raw}
+    try:
+        knobs = OptimizationOverrides.model_validate(merged)
+    except ValidationError as exc:
+        detail = exc.errors()[0].get("msg", "invalid value")
+        raise SystemExit(f"ERROR: --set {field}={raw!r} rejected: {detail}") from None
+    return draft.apply_resolution(values={"optimization_overrides": knobs.model_dump(mode="json")})
 
 
 def _apply_sets(draft: DraftCampaign, sets: list[str]) -> DraftCampaign:
@@ -85,21 +99,22 @@ def _apply_sets(draft: DraftCampaign, sets: list[str]) -> DraftCampaign:
             kwarg = "query_col" if field == "column.query" else "ground_truth_col"
             draft = draft.confirm_columns(**{kwarg: raw})
             continue
+        if field in _SET_KNOBS:
+            draft = _set_knob(draft, field, raw)
+            continue
         attr = _SET_ATTR.get(field)
         if attr is None:
             raise SystemExit(
-                f"ERROR: --set field {field!r} is not settable. One of: "
-                f"{', '.join(sorted({*_SET_ATTR, 'column.query', 'column.ground_truth'}))}."
+                f"ERROR: --set field {field!r} is not settable. One of: {_settable()}."
             )
-        value = _coerce_set(field, raw)
         if field == "task_description":
             # Gated — confirming the framing opens the origin-readiness gate.
             draft = draft.apply_resolution(
-                values={attr: value}, provenance={field: Provenance.CONFIRMED}
+                values={attr: raw}, provenance={field: Provenance.CONFIRMED}
             )
         else:
             # Config — not gated, just set the value (parity with the web Advanced block).
-            draft = draft.apply_resolution(values={attr: value})
+            draft = draft.apply_resolution(values={attr: raw})
     return draft
 
 

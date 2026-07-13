@@ -68,8 +68,7 @@ def resolve_resume_state(
 
     # An optimizer cache hit short-circuits ``emit_token_usage``, so a re-run never
     # re-fires the loop bucket's TokenUsageRecords — re-resolve any rate that now prices.
-    if isinstance(spend := raw.get("spend"), dict):
-        backfill_spend_rates(spend)
+    backfill_spend_rates(raw["spend"])
 
     prior = LiveDashboardState.model_validate(raw)
     surviving = [
