@@ -146,6 +146,7 @@ def compute_degradation_health(
     *,
     hits: int,
     total: int,
+    attempted: int,
     structural_count: int,
     transient_count: int,
     prior_clean_rounds: int,
@@ -158,11 +159,15 @@ def compute_degradation_health(
     is_origin: bool = False,
 ) -> DegradationHealth | None:
     """Grade a round's degradation health from its winner's per-sample outcomes
-    plus the cycle's track record. Returns ``None`` when nothing was measured
-    (``total <= 0``) — genuinely no verdict, not a fabricated clean one — EXCEPT
+    plus the cycle's track record. Two denominators, two meanings: every failure
+    RATE is over ``attempted`` (all rows the round ran — health grades the round's
+    work, and an errored row is exactly the evidence health exists to count), while
+    the Wilson CI keeps ``hits``/``total`` (the EVIDENCE basis — the same scoreable
+    population the accuracy beside it averages). Returns ``None`` when nothing was
+    attempted — genuinely no verdict, not a fabricated clean one — EXCEPT
     the origin: a round-0 result only exists once scoring was attempted (the
-    ``has_program`` gate), so a ``total == 0`` origin measured *nothing* where it
-    was expected to, which is a broken floor (``critical`` / ``origin_unmeasured``),
+    ``has_program`` gate), so an ``attempted == 0`` origin measured *nothing* where
+    it was expected to, which is a broken floor (``critical`` / ``origin_unmeasured``),
     not an abstention — candidates would otherwise be elected against no baseline.
 
     Precedence (first match wins), thresholds = the module constants:
@@ -183,7 +188,7 @@ def compute_degradation_health(
     L2 (via the ``l1_evidence_starved`` escalation rule) but NEVER stops the loop
     (R-48). L2 reads this verdict, then self-heals or emits ``terminate_proposal`` —
     the stop authority stays with the intelligent tier, never this deterministic grade."""
-    if total <= 0:
+    if attempted <= 0:
         if is_origin:
             return DegradationHealth(
                 grade="critical",
@@ -208,9 +213,9 @@ def compute_degradation_health(
     from promptpotter.shared.statistics import wilson_ci
 
     ci_lo, ci_hi = wilson_ci(hits, total)
-    structural_rate = structural_count / total
-    no_result_rate = no_result_count / total
-    degraded_rate = (structural_count + transient_count) / total
+    structural_rate = structural_count / attempted
+    no_result_rate = no_result_count / attempted
+    degraded_rate = (structural_count + transient_count) / attempted
     untested = prior_clean_rounds == 0
 
     # The most-failed enricher at/above the starvation threshold — the systemic
@@ -224,7 +229,7 @@ def compute_degradation_health(
     reasons: list[str] = []
     # Backend-down outranks every other verdict: an unreachable backend isn't a
     # pipeline problem the optimizer can move, it's a halt-and-restart condition.
-    if unreachable_count / total >= BACKEND_UNREACHABLE_RATE:
+    if unreachable_count / attempted >= BACKEND_UNREACHABLE_RATE:
         grade, reasons = "critical", ["backend_unreachable"]
     elif structural_rate >= STRUCTURAL_FLAG_RATE:
         grade, reasons = "critical", ["structural"]
@@ -264,7 +269,7 @@ def compute_degradation_health(
     if grade == "critical":
         where = f"{dominant_node} " if dominant_node else ""
         if "backend_unreachable" in reasons:
-            pct = round(unreachable_count / total * 100)
+            pct = round(unreachable_count / attempted * 100)
             suggested_action = (
                 f"backend unreachable on {pct}% of samples — it is down or overloaded, "
                 "not a pipeline fault; restart the backend and `resume`."
@@ -302,7 +307,7 @@ def compute_degradation_health(
     return DegradationHealth(
         grade=grade,
         reasons=reasons,
-        samples=total,
+        samples=attempted,
         structural_count=structural_count,
         transient_count=transient_count,
         no_result_count=no_result_count,
@@ -338,9 +343,11 @@ def assemble_prior_healths(
     return prior
 
 
-def compute_node_failure_rates(results: list[dict[str, Any]], total: int) -> dict[str, float]:
-    """Per-NODE round-level failure rate: the fraction of a round's samples in which
-    each node failed (hard ``failed`` status OR a failure warning of either kind).
+def compute_node_failure_rates(results: list[dict[str, Any]]) -> dict[str, float]:
+    """Per-NODE round-level failure rate: the fraction of a round's ATTEMPTED samples
+    in which each node failed (hard ``failed`` status OR a failure warning of either
+    kind); the denominator is derived here (``len(results)``) so no caller can pass a
+    diverging one.
 
     Distinct from :func:`classify_sample_failure`, which attributes ONE node per sample:
     a node failing *transiently* across many samples (e.g. an enricher whose search
@@ -348,8 +355,9 @@ def compute_node_failure_rates(results: list[dict[str, Any]], total: int) -> dic
     is individually recoverable. That round-level rate is the ``evidence_starved`` signal
     (R-48) — both :func:`compute_degradation_health` (the grade) and the L1-critique panel
     read THIS helper, so the verdict and the surface never diverge. Backend-down samples
-    carry no diagnostics, so they contribute nothing; the denominator is still ``total``.
+    carry no diagnostics, so they contribute nothing to the numerators.
     Counts each failed node at most once per sample, so the value is a fraction-of-samples."""
+    total = len(results or [])
     if total <= 0:
         return {}
     counts: dict[str, int] = {}
@@ -407,7 +415,8 @@ def compute_round_health(
     recomputes (R-36). Counts structural/transient over the winner's per-sample
     rows (``results``) via the backend's ``step_statuses``, derives the track
     record (clean rounds + consecutive degraded run) from prior rounds' verdicts,
-    then grades via :func:`compute_degradation_health`."""
+    then grades via :func:`compute_degradation_health` — failure rates over the
+    ATTEMPTED rows (``len(results)``), the Wilson CI over the evidence ``total``."""
     from promptpotter.shared.errors import ErrorCategory, error_category
 
     structural = transient = unreachable = no_result = 0
@@ -447,7 +456,7 @@ def compute_round_health(
     # Per-node round-level failure rate (the systemic evidence-starvation signal) is a
     # separate aggregate over the raw statuses/warnings — same pure helper the critique
     # panel reads, so the grade and the surface never diverge.
-    node_failure_rates = compute_node_failure_rates(results, total)
+    node_failure_rates = compute_node_failure_rates(results)
     # The verbatim reasons behind those rates — forwarded into the verdict so the
     # operator-facing banner names the connector's real error, not a generic guess.
     node_warnings = collect_node_warnings(results)
@@ -473,6 +482,7 @@ def compute_round_health(
     return compute_degradation_health(
         hits=hits,
         total=total,
+        attempted=len(results or []),
         structural_count=structural,
         transient_count=transient,
         prior_clean_rounds=prior_clean,

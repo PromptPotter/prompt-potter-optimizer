@@ -164,8 +164,9 @@ async def l1_score(
     # (`origin.accuracy`). That subset re-score is the election's matched floor (kept below); leaking
     # it into the round headline deflates a HELD round — e.g. 20% shown for a prompt truly at 42%,
     # because the touched subset is the incumbent's own hard failures. `results`/`hits`/`total` source
-    # from the SAME frontier so they stay mutually consistent (round-health Wilson CI + the
-    # evidence-starved→L2 rate both pair `total` with `results`). All nine are overwritten when a
+    # from the SAME frontier so they stay mutually consistent (the round-health Wilson CI pairs
+    # `hits` with `total`; the health failure rates + the evidence-starved→L2 rate denominate over
+    # `results` — the attempted rows — internally). All nine are overwritten when a
     # winner is elected, so this only shapes the no-winner round record.
     tr = cycle.tracking
     best_acc = tr.current_accuracy

@@ -226,9 +226,7 @@ def build_bundle(
             diagnostics=latest_diag,
             critique=latest_crit,
             node_failure_rates=(
-                compute_node_failure_rates(latest_round.results, latest_round.total)
-                if latest_round
-                else {}
+                compute_node_failure_rates(latest_round.results) if latest_round else {}
             ),
         ),
         axes=cycle.axes,

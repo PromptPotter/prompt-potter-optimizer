@@ -69,10 +69,12 @@ def find_rank(items: list[Any], ground_truth: str) -> int | None:
 def _compute_accuracy(results: list[QueryMeasurement]) -> dict[str, Any]:
     """Base scalars: hits, total, accuracy, errors, deprecated.
 
-    Deprecated samples (those whose ``classify_result()`` returns any fatal
-    code) are not valid measurements and are excluded from ``hits``,
-    ``total``, ``errors``, and the accuracy denominator. Their count
-    surfaces as ``deprecated`` for operator transparency.
+    ``total`` is the EVIDENCE denominator — scoreable rows only (not deprecated,
+    not errored): the same population ``compute_accuracy`` averages, the Wilson-CI
+    denominator, and what ``coverage_floor`` counts. Deprecated rows (fatal
+    ``classify_result()`` code) surface as ``deprecated``; errored rows (the
+    measurement never happened) surface as ``errors``. Neither carries a verdict,
+    so neither belongs in the denominator a rate is read against.
 
     Kept as a thin function (not part of the registry) because several
     consumers read ``hits`` / ``total`` directly.
@@ -81,10 +83,11 @@ def _compute_accuracy(results: list[QueryMeasurement]) -> dict[str, Any]:
 
     deprecated = sum(1 for r in results if is_deprecated(r))
     valid = [r for r in results if not is_deprecated(r)]
-    total = len(valid)
-    hits = sum(1 for r in valid if r.get("hit"))
     errors = sum(1 for r in valid if is_error_result(r))
-    # Single source for the mean-fitness-over-non-deprecated formula.
+    scoreable = [r for r in valid if not is_error_result(r)]
+    total = len(scoreable)
+    hits = sum(1 for r in scoreable if r.get("hit"))
+    # Single source for the mean-fitness-over-scoreable formula.
     accuracy = compute_accuracy(results=results)
     return {
         "hits": hits,
@@ -102,15 +105,15 @@ def composite_ci(results: list[QueryMeasurement]) -> tuple[float | None, float |
     The **single home** for the CI idiom: every stamping site (``l1_score`` for L1
     candidates, ``emit_origin_round`` for C0) routes through here.
 
-    It brackets the population ``compute_accuracy`` averages — **non-deprecated cells** —
-    because that is the number it is drawn beside. It used to read every row through the
-    bare ``_mean_fitness_by_cell`` (deprecated rows entering at 0.0) while
-    ``composite_fitness`` averaged only the valid ones, so a single deprecated sample pulled
-    the whisker's centre off the bar it brackets. That is *not* a reason to filter
-    ``_mean_fitness_by_cell`` itself: ``paired_fitness`` needs the un-predicated version —
-    ``elect_round_winner``'s origin-**overlap** guard deliberately grades an errored row as a
-    0.0 cell so an all-errored origin still yields overlap (``theta_lift_over_origin`` is the
-    guard for the ability itself).
+    It brackets the population ``compute_accuracy`` averages — **scoreable cells**
+    (non-deprecated AND non-errored) — because that is the number it is drawn beside. It
+    used to read every row through the bare ``_mean_fitness_by_cell`` (deprecated/errored
+    rows entering at 0.0) while ``composite_fitness`` averaged only the scoreable ones, so a
+    single such sample pulled the whisker's centre off the bar it brackets. That is *not* a
+    reason to filter ``_mean_fitness_by_cell`` itself: ``paired_fitness`` needs the
+    un-predicated version — ``elect_round_winner``'s origin-**overlap** guard deliberately
+    grades an errored row as a 0.0 cell so an all-errored origin still yields overlap
+    (``theta_lift_over_origin`` is the guard for the ability itself).
 
     Replicate draws of one cell collapse to that cell's mean, so the CI's independent unit is
     the sample, not the re-draw (identity at the ``rep_k=0`` default). ``(None, None)`` when
@@ -120,8 +123,8 @@ def composite_ci(results: list[QueryMeasurement]) -> tuple[float | None, float |
     from promptpotter.application.optimization.pobb.elimination import is_deprecated
     from promptpotter.shared.statistics import mean_ci
 
-    valid = [r for r in results if not is_deprecated(r)]
-    per_cell = list(_mean_fitness_by_cell(valid).values())
+    scoreable = [r for r in results if not is_deprecated(r) and not is_error_result(r)]
+    per_cell = list(_mean_fitness_by_cell(scoreable).values())
     if not per_cell:
         return (None, None)
     _, ci_lo, ci_hi = mean_ci(per_cell)
@@ -388,8 +391,9 @@ def _mean_fitness_by_cell(rows: list[QueryMeasurement]) -> dict[Any, float]:
     with no recorded fitness contributes 0 (the score it earned), not a dropped row.
 
     **Un-predicated on purpose** — it is the origin-overlap population, not the display one.
-    ``elect_round_winner`` relies on an errored row counting as a 0.0 cell (see its docstring).
-    Callers that need the population ``composite_fitness`` averages must drop deprecated rows
+    ``elect_round_winner`` relies on an errored row counting as a 0.0 cell (see its docstring):
+    overlap guard + non-gating p_value diagnostic only, never the rank key. Callers that need
+    the population ``composite_fitness`` averages must drop deprecated AND errored rows
     first, as ``composite_ci`` does; do not add the filter here.
     """
     acc: dict[Any, list[float]] = {}
@@ -401,9 +405,13 @@ def _mean_fitness_by_cell(rows: list[QueryMeasurement]) -> dict[Any, float]:
 
 
 def _distinct_valid_cells(results: list[QueryMeasurement]) -> int:
-    """Distinct non-deprecated cells (``sample_id``) a candidate was measured on — the
-    coverage notion under ``replicate_survivors``: k replicates of one cell count once, so
-    replication can never falsely satisfy ``coverage_floor``. Identity with row count at n=1.
+    """Distinct cells (``sample_id``) carrying real evidence — non-deprecated AND
+    non-errored, the same rows the election θ fit consumes (``candidate_abilities``
+    drops ``is_error_result`` rows), so coverage can never be satisfied by cells the
+    fit throws away. The coverage notion under ``replicate_survivors``: k replicates
+    of one cell count once, so replication can never falsely satisfy
+    ``coverage_floor``; a cell with one errored and one clean replicate still counts
+    (the clean row carries the evidence). Identity with row count at n=1.
     """
     from promptpotter.application.optimization.pobb.elimination import is_deprecated
 
@@ -411,7 +419,7 @@ def _distinct_valid_cells(results: list[QueryMeasurement]) -> int:
         {
             r.get("sample_id")
             for r in results
-            if not is_deprecated(r) and r.get("sample_id") is not None
+            if not is_deprecated(r) and not is_error_result(r) and r.get("sample_id") is not None
         }
     )
 
@@ -470,8 +478,11 @@ def elect_round_winner(
     rows the incumbent never ran. It does *not* guard the origin's ability, because it grades an
     errored row as a 0.0 cell while the θ fit drops that row entirely — so an all-errored origin
     still yields overlap. ``theta_lift_over_origin`` is the guard for that: no fitted origin θ,
-    no lift, no winner. Pure + deterministic in its inputs, so the resume replayer re-elects the
-    same winner under an unchanged scorer.
+    no lift, no winner. And ``coverage_floor`` counts only θ-visible cells
+    (``_distinct_valid_cells`` excludes errored rows the same way the fit does), so an
+    error-flooded candidate cannot pass the floor on cells the fit discarded. Pure +
+    deterministic in its inputs, so the resume replayer re-elects the same winner under an
+    unchanged scorer.
     """
     from promptpotter.application.intelligence.exploration import (
         candidate_abilities,
@@ -502,6 +513,8 @@ def elect_round_winner(
         # candidate. Under-probing is already guarded independently by `coverage_floor` above
         # (a candidate below it never reaches here), so dropping the SE shrink cannot let a thin
         # fluke win — only fully-probed candidates compete, best point-estimate θ takes it.
+        # The floor counts EVIDENCE cells (non-errored, the θ fit's own population), not
+        # attempted cells — that is what licenses the no-SE-margin rank.
         # `None` = this candidate or the origin was never fit; there is no lift to rank on.
         lift = theta_lift_over_origin(abilities, cid)
         if lift is None:

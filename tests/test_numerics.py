@@ -70,7 +70,7 @@ from promptpotter.domain.pipeline_schema import (
 from promptpotter.domain.rendering import display_fitness, extract_display_answer
 from promptpotter.domain.sample import Sample
 from promptpotter.shared import extract_gsm8k_number
-from promptpotter.shared.statistics import mean_ci, wilson_ci
+from promptpotter.shared.statistics import mean_ci
 
 # ===========================================================================
 # 1. Scorer matcher formulas — one parametrized family
@@ -223,6 +223,16 @@ def test_an_unmeasured_term_is_never_scored_as_zero() -> None:
     # All samples measured, all fatally deprecated → a verdict of 0.0, not an absence.
     deprecated = _result_min("q", "a") | {"error": "SCHEMA_VALIDATION_FAILED", "fitness": 0.0}
     assert compute_accuracy(results=[deprecated]) == 0.0
+
+    # An errored row is the ABSENCE of a verdict — excluded from the mean, never a silent
+    # 0.0 dragging a real score down (an L4 inner campaign dying of a timeout must not
+    # halve its meta-prompt's accuracy)...
+    scored = _result_min("q", "a") | {"hit": True, "fitness": 1.0}
+    errored = _result_min("ERROR", "a") | {"error": "boom", "error_category": "UNKNOWN"}
+    del errored["fitness"], errored["hit"]  # real error rows carry neither
+    assert compute_accuracy(results=[scored, errored]) == 1.0
+    # ...while it still surfaces on the error channel, counted over ALL rows.
+    assert compute_error_rate(results=[scored, errored]) == 0.5
 
     # The default composite (`accuracy`) refuses a round it cannot score, rather than 0.0.
     with pytest.raises(ScoringTermMissingError, match="accuracy"):
@@ -805,24 +815,24 @@ def test_discovered_level_trajectory_is_honest_single_scale() -> None:
 
     # F4 — discovery, not crowning: a round with a strong low-SE candidate lifts the level
     # ABOVE origin even though the function never sees (needs) a crowned-winner flag.
-    o_lvl, levels = discovered_level_trajectory(
-        origin_theta, 0.44, [[(0.0, 0.2, 0.5), (1.2, 0.2, 0.6)]], ruler
-    )
-    assert abs(o_lvl - origin_ability) < 1e-9 and levels[0] > o_lvl
+    o_lvl, levels = discovered_level_trajectory(origin_theta, [[(0.0, 0.2), (1.2, 0.2)]], ruler)
+    assert o_lvl is not None and abs(o_lvl - origin_ability) < 1e-9 and levels[0] > o_lvl
 
-    # F1 — no-skip / estimator consistency: a single θ-less candidate demotes the WHOLE
-    # trajectory to raw space (origin + candidates both accuracy Wilson-LB) instead of the
-    # candidate being silently dropped and the round collapsing to the origin level. The old
-    # bug read lv2 == [origin_ability]; the fix reads the candidate's ci_lo on one raw scale.
-    # SILENT: the outer optimized a floored-to-origin 0 for every θ-less candidate (the common
-    # case — inner candidate θ only populates on full-bank coverage).
-    o2, lv2 = discovered_level_trajectory(origin_theta, 0.44, [[(None, None, 0.99)]], ruler)
-    assert abs(o2 - 0.44) < 1e-9 and abs(lv2[0] - 0.99) < 1e-9
+    # SUBSET-INVARIANCE — the whole reason nothing here reads raw accuracy. θ is stamped onto
+    # ELECTABLE candidates only, so a θ-less arm is one PoBB eliminated on a SHORT subset.
+    # Reading its raw Wilson-LB instead put origin (full bank, n=24) and candidate (n=5) on
+    # bounds whose WIDTH differs, so a candidate that merely MATCHED origin scored ~-0.1..-0.3
+    # — a regression nobody committed, live on 4 of 11 real L4 cells. A θ-less candidate is
+    # skipped; a round of only such candidates discovered nothing and carries the prior level.
+    # SILENT: the outer optimizer steers away from meta-prompts that never regressed, and
+    # toward whichever ones happened to survive elimination long enough to be scored.
+    o2, lv2 = discovered_level_trajectory(origin_theta, [[(None, None)]], ruler)
+    assert o2 is not None and lv2 == [o2]  # no evidence ⇒ no movement, NOT a phantom negative
 
     # F5 — regression preserved: a round whose only candidates are worse-than-origin yields a
     # level BELOW origin (a negative delta the outer steers away from), NOT floored at origin.
-    o3, lv3 = discovered_level_trajectory(origin_theta, 0.44, [[(-2.0, 0.2, 0.1)]], ruler)
-    assert lv3[0] < o3
+    o3, lv3 = discovered_level_trajectory(origin_theta, [[(-2.0, 0.2)]], ruler)
+    assert o3 is not None and lv3[0] < o3
 
     # Thin-inner-budget signal survival (the identical-θ degeneracy fix). At production-scale
     # θ_se≈0.6 a REAL inner lift (θ=0.4) is SMALLER than a full SE, so the old full-θ_se haircut
@@ -831,43 +841,22 @@ def test_discovered_level_trajectory_is_honest_single_scale() -> None:
     # lift ABOVE origin so a genuine signal survives to be pooled (the guard is the outer
     # election, not this thin per-inner-campaign proxy). SILENT: the outer optimizes a floored 0.
     assert ruler_expected_accuracy(0.4 - 0.6, ruler) < origin_ability  # what a FULL SE floored to
-    _, lv6 = discovered_level_trajectory(origin_theta, 0.44, [[(0.4, 0.6, 0.5)]], ruler)
+    _, lv6 = discovered_level_trajectory(origin_theta, [[(0.4, 0.6)]], ruler)
     assert lv6[0] > origin_ability  # fix: the below-SE lift now clears origin
     below_point = candidate_lcb_ability(0.4, 0.6, ruler)
     point_04 = ruler_expected_accuracy(0.4, ruler)
     assert below_point is not None and point_04 is not None and below_point < point_04
 
     # Cumulative / monotone: a strong round then a weak round keeps the best DISCOVERED so far.
-    _, lv4 = discovered_level_trajectory(
-        origin_theta, 0.44, [[(1.2, 0.2, 0.6)], [(-2.0, 0.2, 0.1)]], ruler
-    )
+    _, lv4 = discovered_level_trajectory(origin_theta, [[(1.2, 0.2)], [(-2.0, 0.2)]], ruler)
     assert lv4[1] == lv4[0] > origin_ability
 
-    # Cold ruler ⇒ raw space end-to-end: origin level is its own Wilson-LB, candidate levels
-    # read the accuracy Wilson-LB — same single-scale discipline, no θ/raw mixing.
-    o5, lv5 = discovered_level_trajectory(None, 0.44, [[(None, None, 0.30)]], {})
-    assert abs(o5 - 0.44) < 1e-9 and abs(lv5[0] - 0.30) < 1e-9
-
-    # Estimator consistency at production scale (n≈24) — the raw branch is the PRIMARY path
-    # (inner candidates are θ-less in the common case). Origin and candidates must be measured
-    # on the SAME Wilson-LB, so a candidate that MATCHES origin accuracy scores ~0, not the
-    # ~−0.17 the old point-vs-LB bug produced (which capped every proxy delta non-positive).
-    o_lb = wilson_ci(10, 24)[0]  # origin 10/24, its own lower bound
-    o_pt = 10 / 24  # what the OLD bug used for origin (a point estimate)
-    _, lv_match = discovered_level_trajectory(
-        None, o_lb, [[(None, None, wilson_ci(10, 24)[0])]], {}
-    )
-    assert abs(lv_match[0] - o_lb) < 1e-9  # match → delta ≈ 0
-    assert (wilson_ci(10, 24)[0] - o_pt) < -0.15  # regression guard: the old bug's ~−0.17 floor
-
-    # Raw-space real gain → POSITIVE: a genuinely better inner meta-prompt (16/24) must be
-    # visible as a positive delta — the whole point of the fix.
-    _, lv_gain = discovered_level_trajectory(None, o_lb, [[(None, None, wilson_ci(16, 24)[0])]], {})
-    assert lv_gain[0] - o_lb > 0.05
-
-    # F5 in raw space: a regressing inner meta-prompt (5/24) still goes negative (steer-away).
-    _, lv_reg = discovered_level_trajectory(None, o_lb, [[(None, None, wilson_ci(5, 24)[0])]], {})
-    assert lv_reg[0] - o_lb < 0
+    # An origin with NO ability on the ruler (every row errored, or a cold ruler) is a floor
+    # nobody measured. Standing its Wilson-LB over zero hits (0.0) in its place read every round
+    # as an enormous lift over nothing; `None` makes the caller EXCLUDE the cycle instead
+    # (`_no_evidence_reason`). SILENT: a dead inner campaign crowned as the round's best.
+    assert discovered_level_trajectory(None, [[(1.0, 0.2)]], ruler) == (None, [])
+    assert discovered_level_trajectory(origin_theta, [[(1.0, 0.2)]], {}) == (None, [])
 
 
 def _fake_inner_round(
@@ -1412,6 +1401,45 @@ def test_an_origin_that_never_scored_is_no_floor_to_beat() -> None:
     lift = theta_lift_over_origin(scored_abilities, "c1")
     assert lift is not None and lift > 0.0
     assert elect_round_winner(["c1"], {"c1": candidate}, scored_origin, 1, {})[0] == "c1"
+
+
+def test_errored_cells_never_satisfy_coverage_floor() -> None:
+    """``coverage_floor`` must count the same cells the θ fit consumes.
+
+    The floor is the SOLE under-probing guard — the election ranks by θ point estimate
+    with no SE margin *because* only fully-probed candidates compete. Errored rows
+    (CONNECTION/UNKNOWN — e.g. an L4 inner campaign dying of a timeout) are not fatal-
+    classified, so a deprecation-only coverage count includes them while the θ fit drops
+    them: a candidate whose cells mostly died as tooling errors passed the floor on
+    "coverage" the fit never saw and won the round on its few lucky survivors.
+
+    Silent harm: provider noise laundered into a round winner — the thin fluke becomes
+    the next generation's parent with no error and a plausible-looking dashboard.
+    """
+    from promptpotter.application.scoring.metrics import (
+        _distinct_valid_cells,
+        elect_round_winner,
+    )
+
+    def clean(sid: int, fitness: float) -> dict:
+        return {"sample_id": sid, "hit": fitness > 0.5, "fitness": fitness}
+
+    def errored(sid: int) -> dict:
+        # Real error rows (`_error_result`) carry no hit/fitness — only the category.
+        return {"sample_id": sid, "error_category": "unknown"}
+
+    origin = [clean(i, 0.0) for i in range(7)]
+    # 7 cells attempted, 5 died as tooling errors — only 2 carry evidence.
+    thin = [clean(0, 1.0), clean(1, 1.0)] + [errored(i) for i in range(2, 7)]
+
+    # The lift is real (floor 2 elects it) — only coverage may stop it...
+    assert elect_round_winner(["thin"], {"thin": thin}, origin, 2, {})[0] == "thin"
+    # ...and at floor 6 it must: 2 evidence cells, not 7 attempted ones.
+    assert elect_round_winner(["thin"], {"thin": thin}, origin, 6, {})[0] == ""
+
+    # Replicates: an errored replicate adds no coverage, a clean one carries the cell.
+    replicated = [clean(0, 1.0), clean(1, 1.0), errored(0), errored(1)]
+    assert _distinct_valid_cells(replicated) == 2
 
 
 # ===========================================================================
@@ -2683,6 +2711,7 @@ def test_degradation_health_is_context_aware(
     h = compute_degradation_health(
         hits=hits,
         total=total,
+        attempted=total,
         structural_count=structural,
         transient_count=transient,
         prior_clean_rounds=prior_clean,
@@ -2714,6 +2743,7 @@ def test_origin_verdict_is_first_in_the_l1_track_record():
         return compute_degradation_health(
             hits=15,
             total=20,
+            attempted=20,
             structural_count=(0 if grade == "healthy" else 5),
             transient_count=0,
             prior_clean_rounds=(5 if grade != "critical" else 0),
@@ -2767,6 +2797,7 @@ def test_ungraded_prior_round_is_transparent_to_the_track_record():
     degraded = compute_degradation_health(
         hits=15,
         total=20,
+        attempted=20,
         structural_count=0,
         transient_count=5,
         prior_clean_rounds=5,
@@ -2786,6 +2817,23 @@ def test_ungraded_prior_round_is_transparent_to_the_track_record():
     assert h is not None and h.grade == "critical" and "persistent" in h.reasons
 
 
+def test_all_errored_round_is_critical_not_unmeasured() -> None:
+    """An all-errored round ATTEMPTED work — it must grade critical/backend_unreachable,
+    not slip through as "nothing measured" (None) now that ``total`` counts only
+    evidence rows. Silent harm: a dead backend would produce rounds with no health
+    banner and no suggested_action — the loop burns rounds against an outage nobody
+    is told about."""
+    from promptpotter.domain.results_health import compute_round_health
+
+    rows = [
+        {"error": "connect timeout", "error_category": "CONNECTION", "pipeline_data": None}
+        for _ in range(10)
+    ]
+    h = compute_round_health(hits=0, total=0, results=rows, prior_healths=[])
+    assert h is not None and h.grade == "critical" and "backend_unreachable" in h.reasons
+    assert h.samples == 10 and h.suggested_action is not None
+
+
 def test_degradation_health_none_when_unmeasured():
     """Zero samples ⇒ no verdict (None), not a fabricated healthy grade."""
     from promptpotter.domain.results_health import compute_degradation_health
@@ -2794,6 +2842,7 @@ def test_degradation_health_none_when_unmeasured():
         compute_degradation_health(
             hits=0,
             total=0,
+            attempted=0,
             structural_count=0,
             transient_count=0,
             prior_clean_rounds=0,

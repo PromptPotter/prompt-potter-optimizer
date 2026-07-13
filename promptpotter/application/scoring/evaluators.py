@@ -50,20 +50,28 @@ __all__ = [
 
 
 def compute_accuracy(*, results: list[QueryMeasurement], **_: Any) -> float | None:
-    """Mean fitness over non-deprecated samples (deprecated already penalized via runtime_failure_rate).
+    """Mean fitness over SCOREABLE samples. Three row classes, three treatments:
 
-    ``None`` when the round scored no samples at all. All-deprecated is different — the round
-    *did* measure, and every sample was fatal: that is a verdict of 0.0, and the candidate
-    deserves to lose on it."""
+    - **scoreable** (not deprecated, not errored) — carries a verdict; averaged.
+    - **deprecated** (fatal-classified) — a verdict-of-0-class failure, already penalized
+      via ``runtime_failure_rate``; excluded from the mean.
+    - **error** (``is_error_result`` — the measurement never happened) — the ABSENCE of a
+      verdict, not a zero; excluded from the mean and surfaced via ``compute_error_rate``.
+
+    ``None`` when the round scored no samples at all. No-scoreable-rows returns 0.0 — for
+    all-deprecated that is the honest verdict (every sample measured and fatally failed);
+    for all-errored the honest value is ``None``, but that Optional must propagate through
+    ``materialize_round_values`` → ``compute_composite_fitness`` without
+    ``ScoringTermMissingError`` first (see ``docs/specs/code-debt-cleanup.md``)."""
     # Lazy: scoring → optimization circular.
     from promptpotter.application.optimization.pobb.elimination import is_deprecated
 
     if not results:
         return None
-    valid = [r for r in results if not is_deprecated(r)]
-    if not valid:
+    scoreable = [r for r in results if not is_deprecated(r) and not is_error_result(r)]
+    if not scoreable:
         return 0.0
-    return sum(r.get("fitness", 0.0) for r in valid) / len(valid)
+    return sum(r.get("fitness", 0.0) for r in scoreable) / len(scoreable)
 
 
 def compute_error_rate(*, results: list[QueryMeasurement], **_: Any) -> float | None:

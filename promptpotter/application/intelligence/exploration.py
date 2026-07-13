@@ -130,52 +130,53 @@ def candidate_lcb_ability(
 
 def discovered_level_trajectory(
     origin_theta: float | None,
-    origin_ci_lo: float,
-    rounds: Sequence[Sequence[tuple[float | None, float | None, float]]],
+    rounds: Sequence[Sequence[tuple[float | None, float | None]]],
     delta_scale: Ruler | None,
-) -> tuple[float, list[float]]:
+) -> tuple[float | None, list[float]]:
     """Origin level + per-round **cumulative best-discovered** conservative level — the
     honest, single-scale signal an outer L4 cycle scores inner search quality by.
 
-    Each inner candidate is ``(θ, θ_se, accuracy_ci_lo)``. The whole trajectory is
-    computed in ONE space so **origin and candidates are measured on the same estimator**
-    — no delta ever subtracts across scales (the mixed-space bug that floored the signal):
+    Every level is an **ability on the cycle's fixed δ ruler**, the one estimator that is
+    subset-invariant. Origin level is ``ruler_expected_accuracy(origin_theta, ·)``; each
+    candidate's is its :func:`candidate_lcb_ability`.
 
-    - **Ability space** — used only when the origin's θ projects onto the ruler AND
-      *every* scored candidate across all rounds carries θ. Origin level is
-      ``ruler_expected_accuracy(origin_theta, ·)``; each candidate's is its
-      :func:`candidate_lcb_ability`. Requiring full candidate-θ coverage is what makes
-      the ``lvl is None`` line below a pure type-guard, never a data-dropping skip: a
-      single θ-less candidate demotes the whole trajectory to raw space instead of being
-      silently collapsed to the origin level.
-    - **Raw space** — cold/unfit origin θ *or* any θ-less candidate. Origin level is its
-      OWN accuracy Wilson lower bound (``origin_ci_lo``, passed in), and each candidate's
-      is its ``accuracy_ci_lo`` — both the same raw-space Wilson-LB estimator, so a
-      candidate that merely matches origin accuracy scores ~0, not ~−(LB width).
+    **Why nothing here reads raw accuracy.** Each round scores its candidates on a different
+    signal-chased subset, and a Wilson bound over raw accuracy moves with the subset's SIZE as
+    much as with the candidate's skill: the origin runs the full bank while an eliminated arm
+    may carry five samples, and at *identical* accuracy the shorter arm's bound sits ~0.1–0.2
+    lower. Differencing those two bounds reports a regression no candidate ever committed, and
+    rewards the meta-prompts whose candidates merely survived long enough to be scored. The
+    election already rejects raw subset accuracy for exactly this reason
+    (``elect_round_winner``); the proxy that *grades* the election must not be laxer than it.
 
-    ``running`` is the cumulative max of discovered levels — the best the inner search has
-    found *through* round i, noise-discounted. It is **not** floored at the origin: a round
-    whose search only surfaced worse-than-origin candidates yields a level *below* origin, so
-    ``first_round_delta`` / ``after_N_rounds_delta`` stay negative on a regressing meta-prompt
-    (the gradient the outer optimizer needs to *avoid* bad mutations). A round that discovered
-    nothing measurable carries the prior running value (or the origin level, neutral, before
-    any discovery). Returns ``(origin_level, per_round_levels)``."""
-    origin_ability = ruler_expected_accuracy(origin_theta, delta_scale)
-    ability_space = origin_ability is not None and all(
-        theta is not None and theta_se is not None
-        for cands in rounds
-        for theta, theta_se, _ in cands
-    )
-    origin_level = origin_ability if ability_space else origin_ci_lo
-    assert origin_level is not None  # ability_space ⇒ not None; else origin_ci_lo (float)
+    A candidate with **no fitted θ is skipped**. That is not data-dropping: θ is stamped onto
+    exactly the *electable* candidates (``l1/score/winner.py``), so a θ-less arm is one PoBB
+    already eliminated or held under the coverage floor — one the loop itself judged to carry no
+    reliable measurement. Runner-ups the election declined to crown keep their θ, so the
+    sub-crowning signal this proxy exists to recover survives. A round whose candidates were all
+    eliminated discovered nothing, and carries the prior level.
+
+    ``running`` is the cumulative max of discovered levels — the best the inner search has found
+    *through* round i, noise-discounted. It is **not** floored at the origin: a round that
+    surfaced only worse-than-origin candidates yields a level *below* origin, so the deltas stay
+    negative on a genuinely regressing meta-prompt (the gradient the outer optimizer needs to
+    *avoid* bad mutations).
+
+    ``(None, [])`` when the origin has no ability on the ruler — an origin whose rows all errored
+    is a floor nobody measured, and standing its Wilson bound over zero hits (0.0) in its place
+    reported every round as an enormous lift over nothing. The caller excludes the cycle instead
+    (``_no_evidence_reason``)."""
+    origin_level = ruler_expected_accuracy(origin_theta, delta_scale)
+    if origin_level is None:
+        return None, []
     running: float | None = None
     out: list[float] = []
     for cands in rounds:
         round_best: float | None = None
-        for theta, theta_se, ci_lo in cands:
-            lvl = candidate_lcb_ability(theta, theta_se, delta_scale) if ability_space else ci_lo
+        for theta, theta_se in cands:
+            lvl = candidate_lcb_ability(theta, theta_se, delta_scale)
             if lvl is None:
-                continue  # unreachable under ability_space's full-θ invariant — type-guard only
+                continue  # eliminated / under the coverage floor — no comparable evidence
             round_best = lvl if round_best is None else max(round_best, lvl)
         if round_best is not None:
             running = round_best if running is None else max(running, round_best)

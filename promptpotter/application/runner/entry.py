@@ -13,7 +13,7 @@ import traceback
 from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any
 
 from promptpotter.application.bootstrap import init_optimization_loop
 from promptpotter.application.bootstrap.session import Session
@@ -55,9 +55,6 @@ from promptpotter.infrastructure.runtime_flags import clear_run_control_flags, r
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ResumeDivergenceError
-
-if TYPE_CHECKING:
-    from promptpotter.domain.scoring import QueryMeasurement
 
 logger = logging.getLogger(__name__)
 
@@ -312,32 +309,23 @@ def _build_cycle_result(
     overwritten each round by absorb_round, so reading prompts off it would pair the
     best params with the last round's text."""
     best_sp = cycle.tracking.best_sp if cycle is not None else None
-    # The L4 outer proxy's single-scale inner-search signal: origin level + per-round
-    # cumulative best-DISCOVERED conservative (θ-LCB) level, all in one space (ability where
-    # the ruler is warm, else raw accuracy) so no proxy delta subtracts across scales, and
-    # read off candidates the inner search *found* rather than the frontier it *crowned*.
+    # The L4 outer proxy's single-scale inner-search signal: origin level + per-round cumulative
+    # best-DISCOVERED conservative (θ-LCB) level, every one of them an ability on the cycle's
+    # fixed δ ruler — the only subset-invariant estimator — read off the candidates the inner
+    # search *found* rather than the frontier it *crowned*. An origin with no ability on that
+    # ruler (every row errored) is a floor nobody measured: it yields `None`, and the cycle is
+    # excluded as an outer sample rather than differenced against an invented floor.
     from promptpotter.application.intelligence.exploration import discovered_level_trajectory
-    from promptpotter.application.scoring.metrics import _compute_accuracy
-    from promptpotter.shared.statistics import wilson_ci
 
     cycle_rounds = cycle.rounds if cycle is not None else []
     ds = cycle.delta_scale if cycle is not None else None
     tr = cycle.tracking if cycle is not None else None
-    # The trajectory needs the origin's OWN Wilson lower bound, computed with the SAME
-    # hits/total definition (deprecated-excluded) that each candidate's ci_lo uses — so
-    # raw-space deltas subtract like-for-like. With no origin rows there IS no lower bound:
-    # `origin.origin_acc` is a POINT estimate, and it is 0.0 when nothing was ever scored, so
-    # standing it in here floored the trajectory at zero and reported every round's discovered
-    # level as an enormous lift over nothing. An unmeasured origin has no level; the cycle is
-    # then excluded as an outer sample rather than differenced against an invented floor.
     origin_level: float | None = None
     round_levels: list[float] = []
-    if tr is not None and tr.origin_per_sample_results:
-        base = _compute_accuracy(cast("list[QueryMeasurement]", tr.origin_per_sample_results))
+    if tr is not None:
         origin_level, round_levels = discovered_level_trajectory(
             tr.origin_theta,
-            wilson_ci(base["hits"], base["total"])[0],
-            [[(c.theta, c.theta_se, c.ci_lo) for c in rr.candidate_scores] for rr in cycle_rounds],
+            [[(c.theta, c.theta_se) for c in rr.candidate_scores] for rr in cycle_rounds],
             ds,
         )
     return CycleResult(
