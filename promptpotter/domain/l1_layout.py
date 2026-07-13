@@ -41,6 +41,9 @@ L1_POSSIBLE: frozenset[str] = frozenset(
         "l1_wounds",
         "task_context",
         "critique",
+        "answer_distribution",
+        "failing_samples",
+        "mutation_memory",
         "axis_memory",
         "origin_strengths",
         "archive_top_runs",
@@ -139,14 +142,21 @@ class NodeLayoutSpec(BaseModel):
 # does not carry (the layout-trim review's one restore).
 NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
     # `task_context` sits in `task_intent` (LLM front-of-mind); `problem_description`
-    # carries the mandatory structural state + the DISTILLED failure signal (`critique`)
-    # + L1's own `l1_wounds` + `escalation_panel` + `origin_strengths` (regression guard).
-    # `sample_transcripts` (the RAW misses) is OFF this floor: the `critique` is already its
-    # compression, so the generator reading both duplicated a ~10k-char payload every round.
-    # It stays in `L1_POSSIBLE` (and on `l1_critique`'s floor, the distiller's raw source), so
-    # L2 re-adds it on stall — when the distillation proves lossy for a reasoning-MECHANISM
-    # error — and L4 can search it back in. Raw `diagnostics` and the cross-run panels stay off
-    # the floor for the same reason; L2 adds them on stall via its layout edit, L4 optimises that.
+    # carries the mandatory structural state, then the evidence: WHAT THE PIPELINE ANSWERS
+    # (`answer_distribution` — first, because it frames everything after it: a pipeline that
+    # has collapsed onto one label needs that break, not a better-argued instruction, and no
+    # other panel can say so), the DISTILLED failure signal (`critique`), the misses themselves
+    # (`failing_samples`, one line each, ordered by difficulty — the evidence sits beside its
+    # own compression, so the generator can check one against the other), what it has ALREADY
+    # tried (`mutation_memory` — without it, round 4 re-proposes round 1's measured failure and
+    # nothing objects) + L1's own `l1_wounds` + `escalation_panel` + `origin_strengths`.
+    # `sample_transcripts` (the RAW misses, three shown COMPLETE) stays OFF this
+    # floor: it is the same evidence at ~5x the bytes, and the generator reading it alongside
+    # the critique duplicated a ~10k-char payload every round. It stays in `L1_POSSIBLE` (and
+    # on `l1_critique`'s floor, the distiller's raw source), so L2 re-adds it on stall — when
+    # a reasoning-MECHANISM error needs the model's own trace, which no one-liner can carry —
+    # and L4 can search it back in. Raw `diagnostics` and the cross-run panels stay off the
+    # floor for the same reason; L2 adds them on stall via its layout edit, L4 optimises that.
     "l1_generate": NodeLayoutSpec(
         editor="l2_l4",
         possible=L1_POSSIBLE,
@@ -158,7 +168,10 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "pipeline_param_catalogue",
                 "prompt_block_catalogue",
                 "plan",
+                "answer_distribution",
                 "critique",
+                "failing_samples",
+                "mutation_memory",
                 "l1_wounds",
                 "escalation_panel",
                 "origin_strengths",

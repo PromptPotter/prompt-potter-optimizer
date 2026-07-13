@@ -228,6 +228,25 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # measure) and `verdict` (what a round of them says about a variant) — in the layer that
 # structurally forbids the I/O the law must never grow. One concept, one home; the module count
 # is the price of making it findable.
+# 2026-07-13 feed the generator: ``injections`` 21->23 — ``failing_samples`` + ``mutation_memory``
+# on `l1_generate`'s floor. Raised DELIBERATELY, and paid for in the same pass:
+# `prompt_block_catalogue` under `guidance` now renders only the blocks adopted from our own runs
+# (`restrict` still renders the whole library, because there it IS the value space), which cuts
+# ~4.9k chars — more than the two panels cost. The ledger cannot see that trade; it counts panels,
+# not bytes. They exist because the generator was blind in two ways no amount of tuning fixes: it
+# could not see a single failing sample (it read a prose compression of the misses and had no way
+# to check it, nor to know WHICH misses were winnable — ordering them on the cycle's locked δ ruler
+# is the one thing in that panel L1 cannot compute for itself), and it had no record of its own
+# prior attempts, so a later round could re-propose a mutation already measured and lost.
+# 2026-07-13 the collapse detector: ``injections`` 23->24 — ``answer_distribution`` on
+# `l1_generate`'s floor. Raised DELIBERATELY. Measured: the inner justlogic pipeline answers
+# "Uncertain" to 80-96% of samples, and its accuracy TIES the score a constant "Uncertain" would
+# earn — it had degenerated into a stub, and every panel we already had said only that accuracy
+# was low. The generator's response, round after round, was to rewrite the anti-hedging sentence
+# that was already verbatim in the origin schema, louder. No amount of better failure evidence
+# fixes that, because the missing fact is not in the failures: it is in the HITS, in the shape of
+# the answer set as a whole. This panel is ~250 chars, renders empty on free-text answer spaces,
+# and is the only thing in the prompt that can tell a pipeline that reasons from one that gave up.
 LEDGER_BASELINE = {
     # 312 -> 313: `shared/instrument.py`. Raised DELIBERATELY, and it is the honest number to
     # argue about: the pass it pays for removed three ambient ContextVars and three public
@@ -245,7 +264,7 @@ LEDGER_BASELINE = {
     "settings_const": 14,
     "opt_search_point_fields": 25,
     "prompt_string_fields": 6,
-    "injections": 21,
+    "injections": 24,
     "escalation_rules": 6,
     "claude_md": 7,
 }

@@ -15,9 +15,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.intelligence.exploration import RulerEntry
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.domain.results import CritiqueReadout
+from promptpotter.domain.results import CritiqueReadout, RoundResult
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 
 if TYPE_CHECKING:
@@ -35,6 +36,25 @@ TRANSCRIPT_RENDER_CAP = 3
 TRANSCRIPT_QUERY_CAP = 2200
 TRANSCRIPT_REASONING_CAP = 1200
 TRANSCRIPT_PREDICTED_CAP = 200
+# Rows the `failing_samples` panel shows — the DENSE peer of the transcripts above:
+# one line per miss, so the generator can see the shape of what it is failing (the
+# same wrong label on the easy ones) rather than three failures in full.
+MISS_RENDER_CAP = 10
+MISS_QUERY_CAP = 100
+MISS_PREDICTED_CAP = 60
+MISS_GT_CAP = 40
+# `mutation_memory` — how many prior rounds L1 sees itself in, and how much of each
+# mutated value. The value STEM, not the LLM's own `changes_description`: the prose is
+# optional, can be empty, and two candidates can carry the same words for different
+# mutations. What was actually changed is a fact; what it was called is not.
+MEMORY_ROUND_CAP = 4
+MEMORY_FIELD_CAP = 2
+MEMORY_VALUE_CAP = 90
+# `answer_distribution` only means anything on a SMALL, enumerable answer space: "you answer
+# one label for everything" is not a statement you can make about free-text outputs, where
+# every prediction is its own bucket. Above this many distinct ground truths the panel is
+# not applicable and renders empty rather than dumping a histogram of unique strings.
+ANSWER_SPACE_CAP = 10
 # Worst-N nodes the evidence_health panel lists — enough to show a dead enricher
 # plus a couple of collateral nodes, never a full pipeline dump.
 NODE_FAILURE_RENDER_CAP = 3
@@ -136,7 +156,7 @@ class RoundDigest:
 class InjectionBundle:
     """State container per optimizer LLM call — every signal renderer reads off this.
     ``origin_per_sample`` (frozen round-0 snapshot) drives ``origin_strengths`` (preserve hit-scaffolding);
-    ``trajectory_misses`` (live cumulative misses) drives ``sample_transcripts``."""
+    ``trajectory_results`` (live cumulative per-sample results) drives the failure panels."""
 
     opt_sp: OptSearchPoint
     pipeline_schema: PipelineSchema | None
@@ -144,7 +164,20 @@ class InjectionBundle:
     digest: RoundDigest
     axes: AxisIndex | None
     origin_per_sample: list[dict[str, Any]] = field(default_factory=list)
-    trajectory_misses: list[dict[str, Any]] = field(default_factory=list)
+    # The live cumulative winner frontier (``Cycle.tracking.current_results``) — EVERY
+    # scored sample, hits included, not just the misses. The failure panels filter it;
+    # ``answer_distribution`` needs the hits too, because a pipeline that has collapsed
+    # onto one label is only visible against the labels it is NOT emitting.
+    trajectory_results: list[dict[str, Any]] = field(default_factory=list)
+    # The cycle's LOCKED δ ruler (``Cycle.delta_scale``) — sample_id → difficulty. The one
+    # scale every θ readout lands on, so it is the only per-sample difficulty a panel may
+    # quote: `hard_samples.json`'s δ is re-fitted (and re-anchored) on every regeneration
+    # and moves under the reader. ``None``/empty while the ruler is still cold.
+    delta_scale: dict[int, RulerEntry] | None = None
+    # Completed rounds of THIS cycle (``Cycle.rounds``) — what `mutation_memory` reads.
+    # Each round already carries its parent prompt + every candidate's evolved one, so
+    # "what was tried, and how did it score" is a diff away and needs no new state.
+    prior_rounds: list[RoundResult] = field(default_factory=list)
     # Mirrors OptimizationConfig.forbidden_axes_strict; gates locked-axis catalogue advertising.
     forbidden_axes_strict: bool = True
     # Mirrors OptimizationConfig.prompt_block_catalogue; picks the block-library header
@@ -201,7 +234,15 @@ def injection_registry() -> dict[str, _Injection]:
 
 
 __all__ = [
+    "ANSWER_SPACE_CAP",
     "AXES_ENUM_PREVIEW",
+    "MEMORY_FIELD_CAP",
+    "MEMORY_ROUND_CAP",
+    "MEMORY_VALUE_CAP",
+    "MISS_GT_CAP",
+    "MISS_PREDICTED_CAP",
+    "MISS_QUERY_CAP",
+    "MISS_RENDER_CAP",
     "NEAR_MISS_RENDER_CAP",
     "NODE_FAILURE_RENDER_CAP",
     "RUNTIME_FAILURE_RECENCY_WINDOW",

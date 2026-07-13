@@ -48,7 +48,10 @@ async def _cmd_matrix_measure(args: argparse.Namespace) -> CommandResult:
     matrix = upsert_cells(pp_self_dir, cells)
     path = write_matrix(pp_self_dir, matrix)
 
-    header = f"{'band':<10} {'origin':>7}  {'95% CI':>16}  {'n':>4}  model  ({args.dataset})"
+    header = (
+        f"{'band':<10} {'origin':>7} {'constant':>9} {'top-ans':>8}  {'95% CI':>16}  "
+        f"{'n':>4}  model  ({args.dataset})"
+    )
     lines = [
         f"Resource matrix — measured {len(cells)} cell(s) on {args.dataset}; "
         f"matrix now {len(matrix.cells)} cell(s). Artifact: {path}",
@@ -59,5 +62,14 @@ async def _cmd_matrix_measure(args: argparse.Namespace) -> CommandResult:
         acc = "—" if c.origin_accuracy is None else f"{c.origin_accuracy:.3f}"
         ci = f"[{c.wilson_lo:.3f}, {c.wilson_hi:.3f}]"
         note = f"  ({c.note})" if c.note else ""
-        lines.append(f"{c.band:<10} {acc:>7}  {ci:>16}  {c.n:>4}  {c.target_model}{note}")
+        lines.append(
+            f"{c.band:<10} {acc:>7} {c.constant_floor:>9.3f} {c.predicted_share:>8.3f}  "
+            f"{ci:>16}  {c.n:>4}  {c.target_model}{note}"
+        )
+    lines.append(
+        "'constant' = what a single-label stub scores here; 'top-ans' = the share of answers "
+        "the pipeline gave to its commonest label. An origin that fails to clear the constant, "
+        "or that is far more single-minded than the truth, is 'floor' — no signal to optimize, "
+        "whatever the absolute number."
+    )
     return CommandResult(data=matrix.model_dump(), human="\n".join(lines))

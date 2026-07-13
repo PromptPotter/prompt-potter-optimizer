@@ -50,7 +50,7 @@ def _aime_match(predicted: str, ground_truth: str) -> float:
 ### Shared infrastructure (already built, no per-dataset work)
 
 - **Backend `llm_only` step** — the backend's `/matches` endpoint accepts `steps=["llm_only"]` with `node_config` for the system prompt. This is the default evaluation path for all datasets.
-- **`prompt_variants.json`** — the shared prompt building-block library (persona, task_intent, thinking_style, answer_format), adopted from PromptWizard/Self-Discover and our own runs. Reaches `l1_generate` as the `prompt_block_catalogue` injection; `OptimizationConfig.prompt_block_catalogue` picks the mode — `guidance` (default: reuse a block or invent), `restrict` (library only; an off-library value is a validation wound), `off`.
+- **`prompt_variants.json`** — the shared prompt building-block library (persona, task_intent, thinking_style, answer_format), adopted from PromptWizard/Self-Discover and our own runs. Reaches `l1_generate` as the `prompt_block_catalogue` injection; `OptimizationConfig.prompt_block_catalogue` picks the mode — `guidance` (default: reuse a block or invent, and only the blocks adopted from our own runs are shown, since an open value space makes the imported tail a menu), `restrict` (the whole library, rendered in full because it *is* the value space; an off-library value is a validation wound), `off`.
 - **`compile_scorer()`** — compiles any formula from `campaign.json` into a callable, auto-injects all `SCORING_FUNCTIONS`.
 - **`load_dataset(name)`** — dispatches to the right loader from `DATASET_LOADERS`.
 

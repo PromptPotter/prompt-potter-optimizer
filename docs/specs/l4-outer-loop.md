@@ -302,8 +302,10 @@ self-correcting: a layout that starves a node loses on the same proxy as everyth
 Deliberately deferred: `l1_generate`'s L4 floor-edit (its layout is L2-edited in-campaign via
 `opt_sp.memory.l1_layout`; an L4 edit needs the seed-the-inner-origin seam, and a fill-time
 apply would clobber the inner L2's live edits — excluded from the schema graft so nothing is
-silently dropped). Watch item: `prompt_block_catalogue` is `char_cap=None` and renders the
-whole block library on `l1_generate`'s floor — the one uncapped blowup vector.
+silently dropped). Watch item: `prompt_block_catalogue` is `char_cap=None`. Under `restrict`
+that is deliberate — the panel *is* the value space and a truncated one would reject blocks it
+never offered — but it makes `restrict` the one uncapped blowup vector, and it grows with the
+library.
 
 **Open: the validating data run** (slice 6). The operator-facing layout matrix (generate it
 from `NODE_LAYOUTS` into one researcher doc — don't fork the prose) and any webapp surface

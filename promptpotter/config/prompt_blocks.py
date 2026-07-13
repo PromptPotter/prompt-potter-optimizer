@@ -15,15 +15,27 @@ from pathlib import Path
 
 BUNDLED_PATH = Path(__file__).parent / "prompt_variants.json"
 
+HOUSE_SOURCE = "PromptPotter"
+
 
 @cache
-def prompt_blocks() -> dict[str, tuple[str, ...]]:
-    """Field name → its reusable block texts, in authored order."""
+def prompt_blocks(source: str | None = None) -> dict[str, tuple[str, ...]]:
+    """Field name → its reusable block texts, in authored order.
+
+    Unfiltered, this is the library's *declared value space* — what ``restrict`` admits.
+    Filtered to ``HOUSE_SOURCE``, it is the far smaller set adopted from this project's own
+    runs — what ``guidance`` recommends, where the value space stays open anyway and the
+    imported long tail is a menu rather than evidence.
+    """
     raw: dict[str, list[dict[str, str]]] = json.loads(BUNDLED_PATH.read_text(encoding="utf-8"))[
         "prompt_fields"
     ]
     blocks = {
-        field: tuple(text for v in variants if (text := v["text"].strip()))
+        field: tuple(
+            text
+            for v in variants
+            if (source is None or v["source"] == source) and (text := v["text"].strip())
+        )
         for field, variants in raw.items()
     }
     return {field: texts for field, texts in blocks.items() if texts}

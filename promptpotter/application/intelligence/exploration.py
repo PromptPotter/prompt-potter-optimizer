@@ -47,6 +47,7 @@ __all__ = [
     "fit_theta_given_delta",
     "graded_response",
     "graduate_ruler_model",
+    "ruler_entry",
     "ruler_expected_accuracy",
     "select_round_subset",
     "theta_lift_over_origin",
@@ -75,7 +76,7 @@ def graded_response(result: Mapping[str, Any]) -> float:
     return min(max(float(result.get("fitness", 0.0) or 0.0), 0.0), 1.0)
 
 
-def _ruler_entry(value: RulerEntry) -> tuple[float, float]:
+def ruler_entry(value: RulerEntry) -> tuple[float, float]:
     """Split a ruler entry into ``(δ, a)``; a bare float is 1PL (a≡1)."""
     if isinstance(value, tuple):
         return float(value[0]), float(value[1])
@@ -92,7 +93,7 @@ def ruler_expected_accuracy(theta: float | None, delta_scale: Ruler | None) -> f
     callers fall back to raw accuracy."""
     if theta is None or not delta_scale:
         return None
-    etas = np.array([a * (theta - d) for d, a in (_ruler_entry(v) for v in delta_scale.values())])
+    etas = np.array([a * (theta - d) for d, a in (ruler_entry(v) for v in delta_scale.values())])
     return float(np.mean(1.0 / (1.0 + np.exp(-np.clip(etas, -50, 50)))))
 
 
@@ -405,7 +406,7 @@ def fit_theta_given_delta(
     """
     by_c: dict[str, list[tuple[float, float, float]]] = {}
     for o in observations:
-        d, a = _ruler_entry(delta.get(o.sample_id, 0.0))
+        d, a = ruler_entry(delta.get(o.sample_id, 0.0))
         by_c.setdefault(o.candidate_id, []).append((d, a, o.response))
 
     out: dict[str, tuple[float, float]] = {}
@@ -734,7 +735,7 @@ def candidate_abilities(
                 Observation(candidate_id=cid, sample_id=int(sid), response=graded_response(r))
             )
     fit = fit_theta_given_delta(obs, delta_scale)
-    split = {int(sid): _ruler_entry(v) for sid, v in delta_scale.items()}
+    split = {int(sid): ruler_entry(v) for sid, v in delta_scale.items()}
     return RaschPosterior(
         theta={cid: t for cid, (t, _) in fit.items()},
         theta_se={cid: se for cid, (_, se) in fit.items()},

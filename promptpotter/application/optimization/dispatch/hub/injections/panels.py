@@ -8,9 +8,19 @@ via `AxisIndex` (rankings, top runs, rare hits, intractable clusters). Uniform
 from __future__ import annotations
 
 import re
+from collections import Counter
 from typing import Any
 
+from promptpotter.application.intelligence.exploration import ruler_entry
 from promptpotter.application.optimization.dispatch.hub.bundle import (
+    ANSWER_SPACE_CAP,
+    MEMORY_FIELD_CAP,
+    MEMORY_ROUND_CAP,
+    MEMORY_VALUE_CAP,
+    MISS_GT_CAP,
+    MISS_PREDICTED_CAP,
+    MISS_QUERY_CAP,
+    MISS_RENDER_CAP,
     NEAR_MISS_RENDER_CAP,
     NODE_FAILURE_RENDER_CAP,
     SAMPLE_RENDER_CAP,
@@ -24,7 +34,8 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
     signal,
 )
 from promptpotter.domain.escalation_signals import ExplorationBudget
-from promptpotter.domain.results import CritiqueReadout
+from promptpotter.domain.opt_search_point import flatten_sp_summary
+from promptpotter.domain.results import CritiqueReadout, ScoredCandidate
 from promptpotter.domain.results_health import EVIDENCE_STARVED_RATE
 
 
@@ -362,7 +373,7 @@ def _r_sample_transcripts(b: InjectionBundle) -> str:
     Each transcript is its own fenced ``\\n\\n`` section, so the façade's section-aware
     truncation drops a whole trailing transcript — never mid-premise, never a severed fence.
     """
-    rows = b.trajectory_misses
+    rows = _misses(b)
     if not rows:
         return ""
     shown = rows[:TRANSCRIPT_RENDER_CAP]
@@ -387,6 +398,225 @@ def _r_sample_transcripts(b: InjectionBundle) -> str:
         parts.append(f"PREDICTED: {predicted}\nGROUND TRUTH: {gt}")
         sections.append(fence_untrusted("\n".join(parts)))
     return "\n\n".join(sections)
+
+
+def _misses(b: InjectionBundle) -> list[dict[str, Any]]:
+    """The current misses out of the live frontier — the one place that filter is spelled."""
+    return [r for r in b.trajectory_results if not r.get("hit")]
+
+
+def _label_counts(rows: list[dict[str, Any]], key: str) -> Counter[str]:
+    """Count non-empty ``key`` values across *rows*, as strings."""
+    return Counter(str(v) for r in rows if (v := r.get(key)) not in (None, ""))
+
+
+def _tally(counts: Counter[str], total: int) -> str:
+    """``LABEL n (p%)`` rows, commonest first."""
+    return " | ".join(f"{lbl} {n} ({100 * n / total:.0f}%)" for lbl, n in counts.most_common())
+
+
+@signal(
+    "answer_distribution",
+    kind=InjectionKind.MEASUREMENT,
+    description=(
+        "What the pipeline actually ANSWERS versus what is true, as label tallies, plus "
+        "the score a constant single-label answer would earn. Exposes a pipeline that has "
+        "collapsed onto one label — an accuracy that merely ties the constant is not a "
+        "measurement. Empty on free-text answer spaces."
+    ),
+    char_cap=700,
+    citable=True,
+)
+def _r_answer_distribution(b: InjectionBundle) -> str:
+    """The collapse detector, and the cheapest panel here by a wide margin.
+
+    Accuracy alone cannot distinguish a pipeline that reasons from one that has given up and
+    emits the same label every time — on a skewed label set the constant answer *is* a
+    respectable-looking score. Nothing else in the prompt carries that fact, so a generator
+    reading only accuracy and a prose critique will keep rewriting the instruction it is
+    already being denied, more emphatically each round, and never learn that the model is
+    not listening.
+
+    Only meaningful where the answer space is small and enumerable (``ANSWER_SPACE_CAP``);
+    on free-text outputs every prediction is its own bucket and the panel renders empty.
+    """
+    rows = [r for r in b.trajectory_results if r.get("ground_truth") not in (None, "")]
+    if not rows:
+        return ""
+    truth = _label_counts(rows, "ground_truth")
+    if len(truth) > ANSWER_SPACE_CAP:
+        return ""
+    said = _label_counts(rows, "predicted")
+    n = len(rows)
+
+    top_label, top_n = truth.most_common(1)[0]
+    constant = top_n / n
+    scored = sum(1 for r in rows if r.get("hit"))
+
+    lines = [
+        f"ANSWER DISTRIBUTION (over the {n} samples scored so far):",
+        f"  you answer : {_tally(said, n) if said else '(nothing parsed)'}",
+        f"  the truth  : {_tally(truth, n)}",
+        f'  Answering "{top_label}" to EVERY sample would score {constant:.2f}. '
+        f"You score {scored / n:.2f}.",
+    ]
+    return fence_untrusted("\n".join(lines))
+
+
+def _miss_difficulty(b: InjectionBundle, row: dict[str, Any]) -> float | None:
+    """This miss's δ on the cycle's locked ruler — ``None`` while the ruler is cold or the
+    sample is off it. A 2PL entry carries ``(δ, a)``; only δ is a difficulty."""
+    ruler = b.delta_scale
+    sid = row.get("sample_id")
+    if not ruler or sid is None:
+        return None
+    entry = ruler.get(int(sid))
+    if entry is None:
+        return None
+    return ruler_entry(entry)[0]
+
+
+@signal(
+    "failing_samples",
+    kind=InjectionKind.MEASUREMENT,
+    description=(
+        "Every current miss, one line each, ordered EASIEST-FIRST on the cycle's fixed "
+        "δ ruler: which samples are still failing, how hard each is, what was answered "
+        "vs what was true."
+    ),
+    char_cap=2400,
+    citable=True,
+)
+def _r_failing_samples(b: InjectionBundle) -> str:
+    """The dense peer of ``sample_transcripts``: not three failures in full, but all of them
+    in one line each — so the generator can see the SHAPE of what it is failing (the same
+    wrong label recurring, the easy ones going down) instead of inferring it from a prose
+    compression it cannot check.
+
+    Ordered easiest-first because that ordering is the only thing here L1 cannot compute
+    for itself: a miss on a low-δ sample is a winnable one, and a miss on the hardest sample
+    in the set is where effort goes to die. δ comes from ``Cycle.delta_scale``, the ruler the
+    cycle locks on its first warm fit — a cold ruler simply renders the misses unordered
+    rather than quoting a difficulty that would move next round.
+    """
+    rows = _misses(b)
+    if not rows:
+        return ""
+    scored = [(_miss_difficulty(b, r), r) for r in rows]
+    graded = [(d, r) for d, r in scored if d is not None]
+    ungraded = [r for d, r in scored if d is None]
+    graded.sort(key=lambda dr: dr[0])
+    ordered: list[tuple[float | None, dict[str, Any]]] = [
+        *graded,
+        *((None, r) for r in ungraded),
+    ]
+    shown = ordered[:MISS_RENDER_CAP]
+
+    ruled = "difficulty δ from the cycle's fixed ruler; easiest first — the top rows are the "
+    cold = "the difficulty ruler is still cold, so these are unordered"
+    header = (
+        f"FAILING SAMPLES ({len(shown)}/{len(rows)} current misses — "
+        + (f"{ruled}winnable ones" if graded else cold)
+        + "):"
+    )
+    lines = [header]
+    for delta, r in shown:
+        d_str = f"δ={delta:+.2f}" if delta is not None else "δ=?"
+        lines.append(
+            f"  [#{r.get('sample_id')}] {d_str} | {_query_stem(r, MISS_QUERY_CAP)}"
+            f" | said: {str(r.get('predicted') or '')[:MISS_PREDICTED_CAP]}"
+            f" | true: {str(r.get('ground_truth') or '')[:MISS_GT_CAP]}"
+        )
+    if len(ordered) > len(shown):
+        lines.append(f"  (+{len(ordered) - len(shown)} harder misses not shown)")
+    return fence_untrusted("\n".join(lines))
+
+
+def _candidate_mutation(cand: ScoredCandidate, parent: dict[str, Any]) -> list[str]:
+    """What this candidate actually changed, as ``field: "new value stem"`` rows.
+
+    Derived from the payload, never from ``changes_description``: a candidate's
+    ``prompt_fields`` is its evolved prompt in full, and the round's own ``prompt_fields``
+    is the parent every candidate in that round was mutated from — so the fields that
+    differ ARE the mutation. Param overrides are already a sparse delta and need no diff.
+    """
+    rows = [
+        f'{key}: "{str(value)[:MEMORY_VALUE_CAP]}"'
+        for key, value in flatten_sp_summary(cand.pipeline_params_override or {}).items()
+    ]
+    rows += [
+        f'{field}: "{str(value)[:MEMORY_VALUE_CAP]}"'
+        for field, value in (cand.prompt_fields or {}).items()
+        if value and str(value) != str(parent.get(field, ""))
+    ]
+    return rows[:MEMORY_FIELD_CAP]
+
+
+def _candidate_fate(cand: ScoredCandidate) -> str:
+    """How this candidate ended — the recorded outcome, not the prose.
+
+    An eliminated candidate has no ``matched_origin_accuracy`` (it left the election fit), so
+    its raw partial accuracy is unpaired and must never be quoted as a comparison — that is
+    precisely the reading that told the outer optimizer a cut candidate had crushed the
+    origin. The **margin** cut, though, already carries a paired one: ``wins`` / ``losses``
+    are the discordant pairs against the seed, so it can say WHY without inventing anything.
+    Not keyed on ``partial_reason``: its documented ``"pobb"`` arm is dead — nothing writes
+    it — so every eliminated candidate on disk carries the empty string.
+    """
+    if cand.invalid:
+        return "invalid — rejected before it cost a sample"
+    if cand.elimination_stopped:
+        ctx = cand.elimination_context
+        cut = f"cut at {cand.scored_samples}/{cand.expected_samples} samples"
+        if ctx.get("gate") == "margin":
+            return (
+                f"{cut} — {ctx.get('wins', 0)} won / {ctx.get('losses', 0)} lost against the "
+                f"seed on the samples they split, and it could no longer net the adoption margin"
+            )
+        return f"{cut} — P(best) fell below ε"
+    if cand.escalation_aborted:
+        return "aborted mid-run"
+    return "scored in full"
+
+
+@signal(
+    "mutation_memory",
+    kind=InjectionKind.DERIVED,
+    description=(
+        "What this cycle has ALREADY tried, per round: the changed field and its value, "
+        "what it scored against its own matched origin, and how it ended."
+    ),
+    char_cap=1800,
+    citable=True,
+)
+def _r_mutation_memory(b: InjectionBundle) -> str:
+    """L1's own record of itself. Without it the generator re-proposes a mutation that has
+    already been measured and lost — it has never been shown one of its prior attempts.
+
+    An accuracy is only quoted against ``matched_origin_accuracy``, the origin restricted to
+    the samples that candidate actually saw. An eliminated candidate has none (it is `None`,
+    deliberately, and must never read 0.0 — that reads as "beat the origin by its whole
+    accuracy"), so its row reports where it was cut instead of inventing a comparison.
+    """
+    rounds = [r for r in b.prior_rounds if r.candidate_scores][-MEMORY_ROUND_CAP:]
+    if not rounds:
+        return ""
+    lines = [
+        "ALREADY TRIED (this cycle — a mutation measured and lost here does not improve by "
+        "being proposed again):"
+    ]
+    for rr in rounds:
+        parent = rr.prompt_fields or {}
+        for cand in rr.candidate_scores:
+            mutation = _candidate_mutation(cand, parent) or ["(no change recorded)"]
+            scored = (
+                f"{cand.accuracy:.0%} vs origin {cand.matched_origin_accuracy:.0%} on its samples"
+                if cand.matched_origin_accuracy is not None
+                else _candidate_fate(cand)
+            )
+            lines.append(f"  round {rr.round} — {scored}")
+            lines.extend(f"      {row}" for row in mutation)
+    return fence_untrusted("\n".join(lines))
 
 
 @signal(

@@ -214,9 +214,11 @@ def build_bundle(
         pipeline_params=dict(current_pp) if current_pp else {},
     )
 
-    # Trajectory pair: frozen origin hits + live cumulative misses (the cluster nothing has solved).
+    # Trajectory pair: frozen origin hits + the live cumulative frontier. The frontier ships
+    # WHOLE — the failure panels take the misses out of it themselves, and `answer_distribution`
+    # needs the hits to see a pipeline that has collapsed onto a single label.
     origin_per_sample = list(cycle.tracking.origin_per_sample_results)
-    trajectory_misses = [r for r in cycle.tracking.current_results if not r.get("hit")]
+    trajectory_results = list(cycle.tracking.current_results)
 
     return InjectionBundle(
         opt_sp=cycle.opt_sp,
@@ -231,7 +233,9 @@ def build_bundle(
         ),
         axes=cycle.axes,
         origin_per_sample=origin_per_sample,
-        trajectory_misses=trajectory_misses,
+        trajectory_results=trajectory_results,
+        delta_scale=cycle.delta_scale,
+        prior_rounds=list(cycle.rounds),
         forbidden_axes_strict=cycle.config.optimization.forbidden_axes_strict,
         prompt_block_catalogue=cycle.config.optimization.prompt_block_catalogue,
         rebase_capability=cycle.config.optimization.rebase_capability,

@@ -130,7 +130,31 @@ def load_bbeh(sample_size: int = 0, seed: int = 42) -> list[Sample]:
 
 
 _JUSTLOGIC_DEPTHS: tuple[int, ...] = (6, 7)
+# The live cut. Measured 2026-07-13 (n=96/depth, `gpt-oss-20b:nitro @ low`): the model's
+# capability wall on JustLogic sits between depth 2 and depth 3. Past it, it stops deriving and
+# emits "Uncertain" — 75% of answers at d3, 96% at d7 — so accuracy ties what a constant would
+# score and there is nothing to optimize. d2 is healthy (top answer 57%, all three labels live);
+# d3 is the frontier itself, collapsed but only just. The union is in-band with a +0.188 margin
+# over its constant floor, and its collapse excess (+0.271) sits right under the line — so
+# penetrating d3 moves the whole bank away from collapse, and a regression tips it over. That is
+# the point of including d3: it makes progress detectable in BOTH directions.
+_JUSTLOGIC_D23_DEPTHS: tuple[int, ...] = (2, 3)
 _JUSTLOGIC_TRAIN_PER_DEPTH: int = 200
+
+
+def load_justlogic_d23(
+    split: str = "train",
+    sample_size: int = 0,
+    seed: int = 42,
+) -> list[Sample]:
+    """JustLogic at depths 2-3 — the live inner instrument. See ``_JUSTLOGIC_D23_DEPTHS``.
+
+    A SEPARATE dataset name from ``justlogic``, never a re-cut of it: the measurement archive
+    keys a cell by ``(dataset_name, node_configs, sample_id)`` and the query text is NOT in that
+    key. Re-cutting in place would leave sample_id 0..N pointing at new queries while the archive
+    still held the d6-7 rows under those keys, and it would serve them.
+    """
+    return _load_justlogic(_JUSTLOGIC_D23_DEPTHS, split, sample_size, seed)
 
 
 def load_justlogic(
@@ -139,6 +163,10 @@ def load_justlogic(
     seed: int = 42,
 ) -> list[Sample]:
     """Load JustLogic (`michaelchenkj/JustLogic`) at reasoning depths 6-7.
+
+    **DEAD as an instrument** (measured 2026-07-13): at these depths the target model answers
+    "Uncertain" on 80-96% of samples and its accuracy ties the constant-answer floor. Kept only
+    so its banked measurements stay addressable; new work uses ``load_justlogic_d23``.
 
     Authors (Chen 2025, arXiv 2501.14851) ship one HF split (`train`,
     4,900 rows, 700 per depth × 7 depths). The canonical test set is
@@ -162,8 +190,18 @@ def load_justlogic(
     existing ``exact_match`` scorer + the BBEH-style ``**X**`` answer
     convention in ``prompts/default.json``.
     """
+    return _load_justlogic(_JUSTLOGIC_DEPTHS, split, sample_size, seed)
+
+
+def _load_justlogic(
+    depths: tuple[int, ...],
+    split: str,
+    sample_size: int,
+    seed: int,
+) -> list[Sample]:
+    """Shared body: filter to *depths*, deterministic per-depth train/test split, format queries."""
     if split not in ("train", "test"):
-        raise ValueError(f"load_justlogic split must be 'train' or 'test', got {split!r}")
+        raise ValueError(f"JustLogic split must be 'train' or 'test', got {split!r}")
     try:
         from datasets import load_dataset
     except ModuleNotFoundError:
@@ -176,30 +214,39 @@ def load_justlogic(
     ds = load_dataset("michaelchenkj/JustLogic", split="train")
     by_depth: dict[int, list[Any]] = defaultdict(list)
     for row in ds:
-        if row["depth"] in _JUSTLOGIC_DEPTHS:
+        if row["depth"] in depths:
             by_depth[row["depth"]].append(row)
 
-    samples: list[Sample] = []
+    picked_rows: list[Any] = []
     for depth in sorted(by_depth):
         rows = by_depth[depth]
         indices = list(range(len(rows)))
         random.Random(seed).shuffle(indices)
         cut = _JUSTLOGIC_TRAIN_PER_DEPTH
         picked = indices[:cut] if split == "train" else indices[cut:]
-        for src_idx in picked:
-            row = rows[src_idx]
-            query = (
+        picked_rows.extend(rows[i] for i in picked)
+
+    # Interleave the depths before numbering. `sample_dataset` takes a PREFIX of the bank
+    # (`dataset[:sp_budget]`), so a depth-ordered bank hands every campaign a scoring subset
+    # drawn entirely from the shallowest depth — the deeper half is loaded, indexed, and never
+    # scored. That is what the depth-6/7 cut did for its whole life (every subset was depth 6),
+    # and it is why a d2-3 campaign's origin came in near saturation while the full bank sat far
+    # below it. Shuffling once, deterministically, makes any prefix a stratified draw — and the
+    # same prefix every time, so origin and later rounds score the same samples.
+    random.Random(seed).shuffle(picked_rows)
+
+    samples: list[Sample] = [
+        Sample(
+            id=i,
+            query=(
                 f"Premises:\n{row['paragraph']}\n\n"
                 f"Claim: {row['question']}\n\n"
                 f"Is the claim TRUE, FALSE, or Uncertain given the premises?"
-            )
-            samples.append(
-                Sample(
-                    id=len(samples),
-                    query=query,
-                    ground_truth=str(row["label"]),
-                )
-            )
+            ),
+            ground_truth=str(row["label"]),
+        )
+        for i, row in enumerate(picked_rows)
+    ]
 
     if sample_size > 0 and len(samples) > sample_size:
         samples = random.Random(seed).sample(samples, sample_size)
@@ -219,6 +266,7 @@ DATASET_LOADERS: dict[str, Callable[..., list[Sample]]] = {
     "aime_2025": load_aime_2025,
     "bbeh": load_bbeh,
     "justlogic": load_justlogic,
+    "justlogic-d23": load_justlogic_d23,
 }
 """Map dataset name → loader. ``load_potter_traces`` (prior-run replay) ships
 extra non-Sample fields and is direct-import only, not registry-routed."""

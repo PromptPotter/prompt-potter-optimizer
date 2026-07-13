@@ -177,11 +177,21 @@ def try_inherit_fork_origin(
     *resolved_origin* is the already-resolved fork origin (resolved once by
     ``establish_campaign_origin``). Returns the inherited :class:`CampaignOrigin` only
     when this is an operator-steered fork whose origin renders identically to the
-    ``from_candidate_id`` candidate in the parent's recorded round. Any miss (non-fork,
-    missing coords, edited prompt → different render) returns ``None`` and the caller
-    re-scores as before.
+    ``from_candidate_id`` candidate in the parent's recorded round AND runs under the
+    same pipeline config. Any miss (non-fork, missing coords, edited prompt → different
+    render, edited config) returns ``None`` and the caller re-scores as before.
     """
     if seed is None or not seed.origin_prompt_fields:
+        return None
+    # Config gate. `render()` below compares the PROMPT; it says nothing about the
+    # pipeline. A fork carries a `pipeline_overlay` — the webapp's node-config editor sits
+    # beside Steer & fork — which `runner/entry.py` layers on top of the dataset config, so
+    # the fork RUNS under different params (a different model, even) while this path would
+    # hand it `cand.accuracy`, measured under the parent's. That is the stale-vs-fresh
+    # comparison `_identity_config` exists to prevent, arriving through a door it does not
+    # watch: the inherit path reads the parent's round file directly and never consults the
+    # measurement identity. An overlaid fork re-scores.
+    if seed.pipeline_overlay:
         return None
 
     store = session.store.campaigns

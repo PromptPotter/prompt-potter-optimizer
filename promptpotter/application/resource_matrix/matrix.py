@@ -7,19 +7,28 @@ Absolute origin is a coarse triage; the exact number + Wilson CI ride each cell 
 operator judges reachable headroom and hand-picks the in-band cells for the panel.
 
 Bands per ``docs/operations/dataset-selection-rationale.md`` (origin 15–40% in-band,
-reachable ceiling 50–75%): here the coarse cutoffs are floor <0.15 and saturated ≥0.75,
-with the whole middle "in-band" — the operator narrows within it on the real number.
+reachable ceiling 50–75%): saturated is ≥0.75, and the floor is whichever is HIGHER of an
+absolute noise floor and the cell's own constant-answer floor — see ``constant_answer_floor``.
 """
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-FLOOR_MAX = 0.15  # below this, origin is in the noise floor — no separable signal
+FLOOR_MAX = 0.15  # an origin below this separates nothing from nothing, whatever the labels
 SATURATED_MIN = 0.75  # at/above this, the model already aces the task — no headroom
+# How much MORE concentrated on one label the pipeline may be than the ground truth before it
+# is called collapsed. Measured against the truth's own skew, not an absolute share, so a task
+# whose labels are genuinely lopsided is not punished for a model that correctly tracks them.
+# Calibrated on the justlogic depth sweep: at depths 5-7 the model answers one label 88-96% of
+# the time against a ~40%-skewed truth, yet still cleared its constant by a lucky sample or two
+# and was banded in-band. Beating a stub by one sample does not make you not a stub.
+COLLAPSE_EXCESS = 0.30
 
 BAND_FLOOR = "floor"
 BAND_IN = "in-band"
@@ -27,11 +36,65 @@ BAND_SATURATED = "saturated"
 BAND_ERROR = "error"
 
 
-def classify_band(origin_accuracy: float | None) -> str:
-    """Coarse triage of a cell from its origin accuracy alone."""
+def constant_answer_floor(results: list[Any] | None) -> float:
+    """What a stub that ignores the input and emits the commonest ground-truth label would score.
+
+    The real noise floor of a classification cell, and it is not a constant: on a 3-class set
+    whose majority label holds 40% of the bank, a pipeline that has collapsed onto one word
+    scores 0.40. An absolute cutoff cannot see that — it reads 0.40 as a healthy origin with
+    headroom, which is exactly how a degenerate cell earns a place in the panel. Measured live
+    on justlogic: a model answering "Uncertain" to 24 of 25 samples scored the floor exactly.
+
+    0.0 when there are no labels to count, and ~0 on free-text answers (every ground truth its
+    own bucket) — where there is no collapse to detect and ``FLOOR_MAX`` governs as before.
+    """
+    labels = [
+        str(gt)
+        for r in results or []
+        if isinstance(r, dict) and (gt := r.get("ground_truth")) not in (None, "")
+    ]
+    if not labels:
+        return 0.0
+    return Counter(labels).most_common(1)[0][1] / len(labels)
+
+
+def answer_concentration(results: list[Any] | None) -> tuple[str, float]:
+    """The pipeline's most-emitted label and the share of answers it took. ``("", 0.0)`` if none.
+
+    The peer of ``constant_answer_floor`` on the PREDICTION side: that one measures how
+    concentrated the truth is, this one how concentrated the model is. A model far more
+    concentrated than reality has stopped reading the input.
+    """
+    said = Counter(
+        str(p)
+        for r in results or []
+        if isinstance(r, dict) and (p := r.get("predicted")) not in (None, "")
+    )
+    if not said:
+        return "", 0.0
+    label, n = said.most_common(1)[0]
+    return label, n / sum(said.values())
+
+
+def classify_band(
+    origin_accuracy: float | None,
+    constant_floor: float = 0.0,
+    predicted_share: float = 0.0,
+) -> str:
+    """Triage a cell against the two ways it can fail to be a measurement.
+
+    1. It does not BEAT a stub — accuracy at or under its constant-answer floor. Nothing can be
+       optimized out of it, because the pipeline is not reading the input.
+    2. It IS a stub that got lucky — its answers are far more concentrated on one label than the
+       ground truth is, so the couple of points it clears the constant by are noise, not signal.
+       Test (1) alone misses this: a pipeline answering one label 96% of the time can still land
+       a sample or two above the floor and read as healthy.
+    """
     if origin_accuracy is None:
         return BAND_ERROR
-    if origin_accuracy < FLOOR_MAX:
+    if origin_accuracy <= max(FLOOR_MAX, constant_floor):
+        return BAND_FLOOR
+    if predicted_share - constant_floor >= COLLAPSE_EXCESS:
         return BAND_FLOOR
     if origin_accuracy >= SATURATED_MIN:
         return BAND_SATURATED
@@ -50,6 +113,14 @@ class CellVerdict(BaseModel):
     n: int
     wilson_lo: float
     wilson_hi: float
+    # The score a constant single-label answer earns on this cell's bank — the floor
+    # ``origin_accuracy`` has to clear to mean anything. Rides the cell so the operator
+    # reads the two numbers side by side and never hand-picks a stub into the panel.
+    constant_floor: float = 0.0
+    # Share of this cell's answers that went to its single most-emitted label. Against
+    # ``constant_floor`` (the truth's own concentration) this is what separates a pipeline
+    # that reasons from one that got lucky while emitting the same word.
+    predicted_share: float = 0.0
     band: str
     active_in_panel: bool = False
     measured_at: str

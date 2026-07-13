@@ -13,7 +13,15 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from promptpotter.application.resource_matrix.matrix import CellVerdict, classify_band, now_iso
+from promptpotter.application.resource_matrix.matrix import (
+    BAND_FLOOR,
+    COLLAPSE_EXCESS,
+    CellVerdict,
+    answer_concentration,
+    classify_band,
+    constant_answer_floor,
+    now_iso,
+)
 from promptpotter.shared.statistics import wilson_ci
 
 if TYPE_CHECKING:
@@ -82,6 +90,16 @@ async def measure_cells(
         acc = origin.origin_acc
         hits, total = origin.hits, origin.total
         lo, hi = wilson_ci(hits, total)
+        floor = constant_answer_floor(origin.origin_results)
+        label, share = answer_concentration(origin.origin_results)
+        band = classify_band(acc if total else None, floor, share)
+        note = ""
+        if band == BAND_FLOOR and share - floor >= COLLAPSE_EXCESS:
+            # A cell sits at the floor two ways — the model cannot do the task, or it has
+            # stopped trying and emits one label. Only the second is diagnosable from here,
+            # and it is the one an operator would otherwise mistake for the first and go
+            # shopping for a bigger model. (Measured: a bigger model hedged HARDER.)
+            note = f'answers "{label}" on {share:.0%} of samples — collapsed, not reasoning'
         out.append(
             CellVerdict(
                 dataset=dataset,
@@ -91,8 +109,11 @@ async def measure_cells(
                 n=total,
                 wilson_lo=lo,
                 wilson_hi=hi,
-                band=classify_band(acc if total else None),
+                constant_floor=floor,
+                predicted_share=share,
+                band=band,
                 measured_at=now_iso(),
+                note=note,
             )
         )
     return out
