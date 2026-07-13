@@ -11,7 +11,7 @@ Module map (read `entry.py` first — it is the one public entry point):
 - `identity.py` — `mint_campaign_id` / `build_origin_cycle_id` / `cycle_config_identity`.
 - `origin_gate.py` — the round-0 origin gate.
 - `sweep.py` — sweep-mode sibling runs.
-- `inner_recursion.py` — `run_inner_cycle`: L4. An inner campaign in its own asyncio
+- `runner/inner/cycle.py` — `run_inner_cycle`: L4. An inner campaign in its own asyncio
   task under a sandboxed flat registry. **L4 is recursion, not a 4th layer** — there
   is no `l4_*.py` anywhere and there will not be one.
 """

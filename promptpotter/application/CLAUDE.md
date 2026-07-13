@@ -30,7 +30,7 @@ intelligence; intelligence does not depend on either.
 
 ## Top-level modules
 
-- `runner/` — master orchestrator; the optimize-loop entry point (`identity`, `round`, `sweep`, `loop`, `entry`).
+- `runner/` — master orchestrator; the optimize-loop entry point (`identity`, `round`, `sweep`, `loop`, `entry`). `runner/inner/` is the L4 recursion: `tasks.py` (the panel a dataset declares in `inner_tasks.json` — the type is the validator, `extra="forbid"`) + `cycle.py` (spawn context, the sandboxed re-entrant task, the narrative). The law that SCORES the result is one layer down, in `domain/l4/` — keep it there.
 - `config.py` — `CampaignConfig` model + LLM factory. **Every knob declares itself on its own field** — `Annotated[T, Knob(scope, *estimands)]` says what it shapes (`Scope.POLICY` = resume keeps the data trace; `Scope.DATA` = resume runs divergence detection) and which `Estimand`(s) it moves. Adding a knob without one fails at import.
 - `knobs.py` — `KNOBS`, walked off those declarations: the ONE config-leaf taxonomy. Two facets read it — `classify_config_diff` (resume: does this edit fork the data trace?) and `COUPLINGS`/`resolve_knob_states` (which knobs collide, what overwrites what → preflight + `diagnostics/config_map.py` + the webapp config-map panel). One-way import: `knobs` → `config`, never the reverse.
 - `origin.py` — campaign origin scoring + dataset loading. `resolve_origin_opt_search_point` resolves the origin OSP by priority **seed → experiment prompts → dataset prompts → empty**: a `CycleSeed`'s `origin_prompt_fields` (read from the cycle's `CycleSeedRecord` on the ledger) *is* the origin (operator-steered fork or campaign-from-origin; lineage stamped from `seed.origin_source`).

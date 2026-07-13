@@ -103,7 +103,7 @@ def _is_dead(cycle_dir: Path, *, dead_after_s: float) -> bool:
 def _sweep_roots(projects_root: Path) -> list[Path]:
     """The top-level ``projects_root`` plus every L4 inner sandbox
     (``<workspace>/.inner/<outer_cycle_id>``, a sibling of ``projects_root`` —
-    see ``runner/inner_recursion.py``). Each inner sandbox is itself a
+    see ``runner/inner/cycle.py``). Each inner sandbox is itself a
     projects-root-shaped tree (``{tenant}/campaigns/{cid}/cycles/{cyid}/``), so
     the SAME glob pattern reaches it one level in — no recursion needed, the
     registry never nests an inner sandbox inside another."""

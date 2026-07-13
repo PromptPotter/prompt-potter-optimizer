@@ -390,7 +390,7 @@ The persisted world is a four-entity containment hierarchy
 - **L4** — PromptPotter optimizing its own meta-prompts: an outer cycle whose backend
   is an inner cycle. **Recursion, not a fourth layer** — the ladder is closed at
   L1/L2/L3 and there is no `l4_*.py`. Lives at the connector seam
-  (`connectors/promptpotter.py`) + `runner/inner_recursion.py::run_inner_cycle`, driven
+  (`connectors/promptpotter.py`) + `runner/inner/cycle.py::run_inner_cycle`, driven
   by `datasets/promptpotter-self/`. Plan: `docs/specs/l4-outer-loop.md`.
 - **sweep** — a cheap A/B of L1 candidates ahead of full promotion: sibling cycles
   under `campaigns/{id}/sweeps/{batch_id}`, run by `python -m promptpotter sweep`.

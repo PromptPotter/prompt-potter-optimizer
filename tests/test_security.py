@@ -201,7 +201,7 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
     shape of the code that achieves it.
     """
     from promptpotter.application.optimization.dispatch.llm_call import heartbeat as heartbeat_mod
-    from promptpotter.application.runner import inner_recursion
+    from promptpotter.application.runner.inner import cycle
     from promptpotter.domain.results import CycleResult
     from promptpotter.infrastructure.llm import models as llm_models
     from promptpotter.infrastructure.store.io import write_json
@@ -215,7 +215,7 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
             return len(self.records)
 
     monkeypatch.setattr(heartbeat_mod, "HEARTBEAT_INTERVAL_S", 0.01)
-    monkeypatch.setattr(inner_recursion, "OUTER_SAMPLE_WALL_S_PER_ROUND", 0.02)
+    monkeypatch.setattr(cycle, "OUTER_SAMPLE_WALL_S_PER_ROUND", 0.02)
 
     started = asyncio.Event()
     cancelled = asyncio.Event()
@@ -231,7 +231,7 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
             raise
         raise AssertionError("unreachable — the deadline must cancel this")
 
-    monkeypatch.setattr(inner_recursion, "_run_inner_campaign", _hanging_inner)
+    monkeypatch.setattr(cycle, "_run_inner_campaign", _hanging_inner)
     # `_resolve_inner_task` has no default ladder — the benchmark, its sample count,
     # round cap and target score are declared, or the spawn raises.
     write_json(
@@ -245,8 +245,8 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
             "tasks": [{"id": "justlogic-d67/seed-0", "inner_dataset_seed": 0}],
         },
     )
-    inner_recursion._INNER_SPAWN.set(
-        inner_recursion.InnerSpawnContext(
+    cycle._INNER_SPAWN.set(
+        cycle.InnerSpawnContext(
             inner_sandbox_root=tmp_path,
             dataset_config_dir=tmp_path,
             identity=None,  # type: ignore[arg-type]  # the stubbed inner run never reads it
@@ -255,8 +255,8 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
     )
     llm_models._CYCLE_LEDGER.set(_RecordingLedger())  # type: ignore[arg-type]
 
-    with pytest.raises(inner_recursion.InnerCycleUnscoreableError, match="wall-clock deadline"):
-        await inner_recursion.run_inner_cycle("justlogic-d67/seed-0", {})
+    with pytest.raises(cycle.InnerCycleUnscoreableError, match="wall-clock deadline"):
+        await cycle.run_inner_cycle("justlogic-d67/seed-0", {})
 
     assert started.is_set(), "the inner campaign never started — the deadline proved nothing"
     assert cancelled.is_set(), "the inner campaign outlived its deadline and kept spending"

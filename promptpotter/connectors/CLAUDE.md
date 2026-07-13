@@ -14,7 +14,7 @@ nodes.{name}.config`, never in the backend's repo.
 |---|---|---|---|---|
 | `termnorm` | `termnorm.py` | `{query, steps, node_config}` posted to `/matches` | `POST /sessions` handshake with terms array | TermNorm production backend |
 | `llm_only` | `llm_only.py` | `{query, node_config}` → in-process LLM call (`in_process_run`) | Noop (no remote service) | Basic single-LLM case, no backend server (l4-outer-loop § Feature A) |
-| `promptpotter` | `promptpotter.py` | `{query, meta_prompt_overrides}` → in-process inner cycle (`in_process_run` → `runner/inner_recursion.py`) | Noop (no remote service) | Optimizer-of-the-optimizer (L4) |
+| `promptpotter` | `promptpotter.py` | `{query, meta_prompt_overrides}` → in-process inner cycle (`in_process_run` → `runner/inner/cycle.py`) | Noop (no remote service) | Optimizer-of-the-optimizer (L4) |
 
 ## What the second connector taught the boundary
 
@@ -54,7 +54,7 @@ the same shape the scorer parses from an HTTP `/matches` body. The registry guar
   (`get_llm_client(provider).chat(...)` on the rendered prompt) and projects the
   answer onto the terminal ranking key. No TermNorm server for the basic case.
 - **`promptpotter` (Feature B, SHIPPED)** — `in_process_run` is a thin delegate to
-  `application/runner/inner_recursion.py::run_inner_cycle` (running a whole inner
+  `application/runner/inner/cycle.py::run_inner_cycle` (running a whole inner
   campaign is heavy orchestration — it belongs in `application/runner`, not the
   connector). That runner calls `run_optimization` in its **own `asyncio.Task`**
   (the three per-task ContextVars — `_CYCLE_LEDGER`, `_CURRENT_ROUND`,

@@ -11,8 +11,8 @@ from promptpotter.domain.escalation_signals import (
     RuntimeFailure,
     ValidationFailure,
 )
+from promptpotter.domain.l4.verdict import OuterVerdict
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.outer_verdict import OuterVerdict
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.run_records import DecisionRecord, ErrorRecord

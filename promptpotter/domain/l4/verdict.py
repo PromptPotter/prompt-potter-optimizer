@@ -1,24 +1,23 @@
-"""The L4 outer reads: one sample's proxy vector, and the round's blocked-paired verdict.
+"""The round's blocked-paired verdict on a meta-prompt variant.
 
-An L4 outer round scores each meta-prompt variant across the panel's cells (one inner
-cycle per (variant, cell)). Each cell yields a :class:`OuterSampleProxies` — the raw
-signals the outer scoring formula composes. The round then pairs them:
-the **cached round-0 origin** is the within-panel control — no config is ever re-measured
-mid-run. :func:`compute_outer_verdict` computes, for the round's target variant, the paired
-``(variant − origin)`` composite difference per cell, pooled across cells into an effect +
-CI, and a three-way decision. Cells are the blocks; the pooling treats them as
-exchangeable (a flat paired posterior across cells — per-cell n is 1, so inverse-variance
-weighting degenerates to this; a random-effects refinement is the documented next step).
+An L4 outer round scores each meta-prompt variant across the panel's cells (one inner cycle per
+(variant, cell)); each cell yields an :class:`~promptpotter.domain.l4.proxies.OuterSampleProxies`.
+The round then pairs them: the **cached round-0 origin** is the within-panel control — no config
+is ever re-measured mid-run. :func:`compute_outer_verdict` computes, for the round's target
+variant, the paired ``(variant − origin)`` composite difference per cell, pooled across cells into
+an effect + CI, and a three-way decision. Cells are the blocks; the pooling treats them as
+exchangeable (per-cell n is 1, so inverse-variance weighting degenerates to a flat paired
+posterior; a random-effects refinement is the documented next step).
 
-Pure domain: no I/O. The projection (`round_summary`) reads the cached round-0 origin
-cells off disk and passes them in; this module never touches the filesystem.
+Pure domain: no I/O. The projection (`round_summary`) reads the cached round-0 origin cells off
+disk and passes them in; this module never touches the filesystem.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from promptpotter.shared.statistics import (
     min_detectable_effect,
@@ -29,59 +28,6 @@ from promptpotter.shared.statistics import (
 DECISION_ADOPT = "adopt"
 DECISION_REJECT = "reject"
 DECISION_INCONCLUSIVE = "inconclusive"
-
-
-class OuterSampleProxies(BaseModel):
-    """One outer sample's observation vector — what a finished inner cycle says about the
-    meta-prompt that ran it. The type IS the governing law that used to be prose in
-    ``datasets/promptpotter-self/inner_tasks.json::description``.
-
-    **Bounded** is enforced where it is provable: ``normalized_gain`` divides a move by the
-    room available to make it (``max(origin, 1−origin) ≥ 0.5``), so ``[-1, 1]`` holds by
-    construction and the ``ge``/``le`` below is a statement of fact rather than a clamp;
-    the two quality terms are ``1 − mean(rate ∈ [0,1])``, and ``rounds_improved_frac`` is a
-    share. The endpoint deltas and the three efficiency ratios are genuinely unbounded —
-    a regressing meta-prompt goes negative, and lift-per-dollar has no natural ceiling — so
-    they carry the one bound that always holds: **finite**. ``allow_inf_nan=False`` is what
-    keeps a ``0/0`` or an ``x/0`` from reaching the scoring clamp, where ``min(1.0, nan)``
-    short-circuits to ``1.0`` and a sample that measured nothing scores perfect.
-
-    Every field is a *measurement*. There is no field that can be defaulted, because the
-    absence of a measurement is not a value — a cycle that cannot fill this in is excluded
-    (``InnerCycleUnscoreableError``), never scored on zeros.
-
-    ``extra="forbid"`` + ``frozen`` make the emitted key set exactly the declared one, so it
-    can be diffed against the outer dataset's ``observation_mappings``
-    (``verify_outer_observation_contract``) rather than drifting from it silently."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    # `after_N_rounds_delta` is a wire key: it names the pipeline_data observation the outer
-    # scoring formula reads, so its spelling is not ours to normalize.
-    #
-    # There is deliberately NO `rounds_to_N`, and no *target* anywhere in this vector. Counting
-    # rounds-to-a-threshold requires declaring the threshold, i.e. asserting up front how much
-    # room the inner benchmark has — and that assumption was both unused (the term carried no
-    # candidate gradient and was retired from the scoring formula) and wrong to make: a task the
-    # inner model looks bad at is a task it has not been tuned for yet, not a task with no
-    # headroom. `normalized_gain` divides the move by the room to the REAL ceiling
-    # (`max(origin, 1−origin)`), which needs no such declaration.
-    first_round_delta: float = Field(allow_inf_nan=False)
-    after_N_rounds_delta: float = Field(allow_inf_nan=False)  # noqa: N815
-    normalized_gain: float = Field(ge=-1.0, le=1.0)
-    cleanliness: float = Field(ge=0.0, le=1.0)
-    diversity_health: float = Field(ge=0.0, le=1.0)
-    rounds_improved_frac: float = Field(ge=0.0, le=1.0)
-    delta_per_dollar: float = Field(allow_inf_nan=False)
-    delta_per_candidate: float = Field(allow_inf_nan=False)
-    delta_per_second: float = Field(allow_inf_nan=False)
-
-
-# The observation keys one outer sample emits — DERIVED from the model, never hand-listed.
-# Three lists used to drift independently (a `PROXY_KEYS` tuple with no importers, the literal
-# dict `_compute_proxies` returned, and the dataset's `observation_mappings`); whether a drift
-# bit loudly or silently depended on whether the scoring formula happened to name the drifted key.
-OUTER_PROXY_KEYS: tuple[str, ...] = tuple(OuterSampleProxies.model_fields)
 
 
 class CandidateInfo(BaseModel):
@@ -209,10 +155,8 @@ def compute_outer_verdict(
 
 
 __all__ = [
-    "OUTER_PROXY_KEYS",
     "CandidateInfo",
     "OuterCellEffect",
-    "OuterSampleProxies",
     "OuterVerdict",
     "cell_fitness",
     "compute_outer_verdict",

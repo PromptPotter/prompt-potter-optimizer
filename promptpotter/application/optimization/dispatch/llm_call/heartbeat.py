@@ -7,7 +7,7 @@ counter (and freshness stays fresh) instead of looking frozen for 30-200s.
 Three callers ride this ONE loop (no duplicate heartbeat):
 
 - ``llm_call`` (``call.py``) — the optimizer LLM call, ``detail_fn=None``.
-- ``run_inner_cycle`` (``runner/inner_recursion.py``) — the L4 outer cycle awaiting
+- ``run_inner_cycle`` (``runner/inner/cycle.py``) — the L4 outer cycle awaiting
   a multi-minute inner campaign, with ``detail_fn`` reading the inner run's live
   ``dashboard.json`` so the outer chat shows ``"inner rX/Y · best Z%"``.
 - ``measure_sample`` (``scoring/sample_measurement.py``) — the backend scoring

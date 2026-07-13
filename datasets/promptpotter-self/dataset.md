@@ -14,7 +14,7 @@ because the inner model is far from what prompting can get out of it there, so t
 inner loop has room to climb and outer candidates score differently. No target
 score is declared: the panel says what an inner cycle may SPEND, never what it is
 expected to REACH). Each inner run reports a vector of proxy
-measurements (`domain/outer_verdict.py::OuterSampleProxies`) — among them
+measurements (`domain/l4/proxies.py::OuterSampleProxies`) — among them
 `first_round_delta`, `normalized_gain` (best inner depth as a fraction of the room
 available to move it, `after_n / max(origin, 1 − origin)`), `delta_per_dollar`, and
 the `cleanliness` / `diversity_health` health terms.

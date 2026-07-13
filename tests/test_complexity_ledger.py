@@ -72,7 +72,7 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # 1PL->2PL where a data-rich dataset wins held-out CV; fitness-comparability slice 3).
 # A feature, justified, so the baseline rises (per the surface-ledger rule).
 # then ``modules`` 296->297: the L4 inner-cycle runner
-# (`application/runner/inner_recursion.py`) — mints + runs a sandboxed inner
+# (`application/runner/inner/cycle.py`) — mints + runs a sandboxed inner
 # PromptPotter campaign in its own asyncio task under the spawning cycle's
 # `.runtime/inner/`, returning the three proxy metrics (l4-outer-loop slice 2,
 # the actual L4 recursion). A feature, justified, so the baseline rises.
@@ -132,7 +132,7 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # the L4 Lab subsystem (statistically-rigorous L4). New packages
 # ``application/meta_champion`` (reduce the pp-self corpus to a ranked champion
 # table + coronate/promote), ``application/resource_matrix`` (the target-model ×
-# dataset capability grid), the ``domain/outer_verdict`` blocked-paired verdict,
+# dataset capability grid), the ``domain/l4`` blocked-paired verdict,
 # plus ``matrix`` / ``champion`` CLI verb packages. Each is a concept the loop
 # lacked: select the overall-best meta-prompt, match models to datasets, a
 # rigorous per-round read. A feature, justified.
@@ -204,6 +204,30 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # ``intractable_samples`` panel: ``injections`` 24->21, ``opt_search_point_fields`` 27->25,
 # ``modules`` 313->312 (``auto_rules.py`` deleted).
 
+# 2026-07-13 the inner runner becomes a package, and its config declares itself: ``modules``
+# 315->317 / ``init_files`` 59->60 / ``reexport_shims`` 42->43. A 1105-line orchestration file
+# split along its real seam — ``inner/tasks.py`` (the panel an outer dataset DECLARES) vs
+# ``inner/cycle.py`` (how one cell is RUN). What the ledger cannot see is the subtraction that
+# paid for it: ``inner_tasks.json`` was the ONLY config in the package with no schema, hand-parsed
+# through a ``.get()`` ladder guarded by a hand-written ``_REQUIRED_BENCH_KEYS`` tuple — the
+# membership-test-over-NAMES bug class ``promptpotter/CLAUDE.md`` names. With nothing able to
+# reject a key, it had grown two nobody read: an 8,050-char ``description`` (a comment field
+# invented because JSON has no comment syntax — it had drifted into restating the proxy law, and
+# the guidance someone wrote there "so an LLM would read it" reached no LLM) and a ``dataset_path``
+# no code has ever resolved. `extra="forbid"` at every level makes both unrepresentable rather
+# than merely deleted, and the type replaces the hand-rolled validator + its coercion ladder.
+# 2026-07-13 the L4 law gets one home: ``modules`` 313->315 / ``init_files`` 58->59. Raised
+# DELIBERATELY, and the same argument as `shared/instrument.py` below: the ledger counts
+# modules, not scattered law, so it can see only the files that appeared. What it cannot see is
+# what was subtracted — the L4 proxy law was PURE DOMAIN LOGIC (reads a `CycleResult`, returns
+# an `OuterSampleProxies`; no I/O, no session, no store) living 500 lines deep inside a
+# 1105-line orchestration file in the APPLICATION layer, one package away from the type it
+# produces. That distance is why it drifted from its own type's docstrings, from the two docs
+# that restated it, and from an 8k-char JSON blob that restated it again. `domain/l4/` is one
+# findable package — `proxies` (what one inner cycle says about a meta-prompt: floor / exclude /
+# measure) and `verdict` (what a round of them says about a variant) — in the layer that
+# structurally forbids the I/O the law must never grow. One concept, one home; the module count
+# is the price of making it findable.
 LEDGER_BASELINE = {
     # 312 -> 313: `shared/instrument.py`. Raised DELIBERATELY, and it is the honest number to
     # argue about: the pass it pays for removed three ambient ContextVars and three public
@@ -213,9 +237,9 @@ LEDGER_BASELINE = {
     # instrument, with every hermetic property bound together, or it is not. The ledger counts
     # modules, not ambient globals, so it can see only the file that appeared. It cannot be
     # folded into an existing `shared/` module without making that module mean two things.
-    "modules": 313,
-    "init_files": 58,
-    "reexport_shims": 42,
+    "modules": 317,
+    "init_files": 60,
+    "reexport_shims": 43,
     "config_leaf_fields": 38,
     "settings_env": 16,
     "settings_const": 14,

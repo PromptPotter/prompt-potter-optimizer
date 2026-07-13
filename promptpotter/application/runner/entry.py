@@ -33,7 +33,7 @@ from promptpotter.application.run_observers import (
     RunObservers,
     build_run_observers,
 )
-from promptpotter.application.runner.inner_recursion import publish_inner_spawn_context
+from promptpotter.application.runner.inner import publish_inner_spawn_context
 from promptpotter.application.runner.loop import run_round_loop
 from promptpotter.application.runner.termination import BudgetGate
 from promptpotter.application.scoring.formula import split_scoring_block
@@ -64,7 +64,7 @@ logger = logging.getLogger(__name__)
 # re-invoke ``resume`` if they want to keep going.
 #
 # PER LEVEL, not per run: an L4 inner campaign gets its own budget of 10, so it multiplies the
-# inner wall-time envelope that `OUTER_SAMPLE_WALL_S_PER_ROUND` (inner_recursion.py) bounds. The
+# inner wall-time envelope that `OUTER_SAMPLE_WALL_S_PER_ROUND` (runner/inner/cycle.py) bounds. The
 # product is finite, and that deadline is what makes it so — sizing either one means reading both.
 MAX_AUTO_REBASES = 10
 

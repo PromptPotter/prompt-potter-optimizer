@@ -159,7 +159,7 @@ def build_stores(
 
     ``shared_root`` roots the two content-addressed caches (``archive`` +
     ``optimizer_calls``) somewhere other than ``projects_root``. Its ONE caller is the
-    L4 inner sandbox (``inner_recursion``), which must isolate campaign STATE without
+    L4 inner sandbox (``runner/inner``), which must isolate campaign STATE without
     isolating the tenant-global measurement cache. Omit it and the caches sit under
     ``projects_root``, as they do for every non-recursive run.
     """

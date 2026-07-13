@@ -286,13 +286,11 @@ def test_inner_narrative_carries_evidence_within_budget() -> None:
     deltas, or overruns the panel cap (1200c head-keep would clip the LATEST
     rounds), the outer loop is evidence-starved again with no error and no
     symptom (run b786e9: transcripts degenerated to identity tokens)."""
-    from promptpotter.application.runner.inner_recursion import (
-        _inner_narrative,
-        _InnerTaskSpec,
-    )
+    from promptpotter.application.runner.inner import InnerTaskSpec
+    from promptpotter.application.runner.inner.cycle import _inner_narrative
     from promptpotter.domain.results import CycleResult, RoundResult, ScoredCandidate
 
-    spec = _InnerTaskSpec(inner_dataset="justlogic", seed=3, n_samples=24, n_rounds=2, n_variants=2)
+    spec = InnerTaskSpec(inner_dataset="justlogic", seed=3, n_samples=24, n_rounds=2, n_variants=2)
 
     def _round(n: int, desc: str, fix: str, highlights: list[str]) -> RoundResult:
         return RoundResult(

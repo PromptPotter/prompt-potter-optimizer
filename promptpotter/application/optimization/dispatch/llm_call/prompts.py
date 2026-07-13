@@ -73,7 +73,7 @@ def set_optimizer_prompt_overrides(overrides: dict[str, dict[str, Any]] | None) 
     merged onto the loaded prompt by :func:`load_optimizer_prompt`. Two callers,
     both task-isolated: the runner seam binds the outer L4 cycle's meta-prompt set
     (:func:`load_optimizer_set_overrides`); the inner runner
-    (`runner/inner_recursion.py`) binds the outer's per-node mutations."""
+    (`runner/inner/cycle.py`) binds the outer's per-node mutations."""
     _OPTIMIZER_PROMPT_OVERRIDES.set(overrides or None)
 
 

@@ -196,7 +196,7 @@ or `infrastructure/backend.py`.**
 
 **The `in_process` arm is SHIPPED**, and two connectors ride it: `llm_only` (one
 direct LLM call, no backend server) and `promptpotter` (an inner cycle — L4, via
-`runner/inner_recursion.py`). It does not raise `NotImplementedError`.
+`runner/inner/cycle.py`). It does not raise `NotImplementedError`.
 
 Contract: [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md).
 

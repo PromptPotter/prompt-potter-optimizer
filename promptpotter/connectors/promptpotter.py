@@ -7,14 +7,14 @@ cheap proxy benchmark; the outer L1's mutation surface is the inner
 meta-prompt template fields, exposed via ``pipeline_params``.
 
 See ``docs/specs/roadmap.md`` for the full design — five-hook contract, the composed
-inner-cycle proxy vector (:class:`~promptpotter.domain.outer_verdict.OuterSampleProxies`),
+inner-cycle proxy vector (:class:`~promptpotter.domain.l4.proxies.OuterSampleProxies`),
 inner isolation under ``.runtime/inner/``, cost-realism warning.
 
 The five hooks are wired to the protocol; ``promptpotter_wire_adapter`` shapes
 the inner-cycle payload; ``PromptPotterSession`` is the in-process noop session.
 The connector declares ``execution="in_process"`` — the capability the loop
 dispatches on. ``_in_process_run`` delegates to the inner-cycle runner in
-``application/runner/inner_recursion.py`` (the recursion is heavy orchestration;
+``application/runner/inner/cycle.py`` (the recursion is heavy orchestration;
 the connector stays a thin adapter), which mints + runs a sandboxed inner campaign
 in its own asyncio task and returns the three proxy metrics. Decided in
 ``docs/specs/l4-outer-loop.md`` § 2 (in-process recursion, re-entrant isolation).
@@ -177,7 +177,7 @@ def _extract_experiment(
     **There is no label to match in L4.** The "sample" is an inner campaign
     whose fitness is the proxy composite (``campaign.json::scoring``), not a
     correct answer. So ``ground_truth`` is the inner-result token PREFIX the
-    runner emits (``inner:{query}``, ``runner/inner_recursion.py::run_inner_cycle``
+    runner emits (``inner:{query}``, ``runner/inner/cycle.py::run_inner_cycle``
     — which appends a compact outcome suffix to its prediction; keep the prefix
     in sync). Nothing matches predicted against ground_truth at the outer level
     (hit is ``fitness >= 1.0`` from the proxy formula) — the token exists so the
@@ -202,7 +202,7 @@ async def _in_process_run(query: str, payload: dict[str, Any]) -> dict[str, Any]
     arm of the shared ``in_process`` seam.
 
     Thin delegate: the recursion is heavy orchestration, so it lives in
-    ``application/runner/inner_recursion.py`` (the connector stays a thin adapter).
+    ``application/runner/inner/cycle.py`` (the connector stays a thin adapter).
     That runner calls ``run_optimization`` in its **own asyncio task** (so the
     per-task ContextVars — ``_CYCLE_LEDGER`` / ``_CURRENT_ROUND`` / ``_ABORT_CHECK``
     — don't clobber the outer's) under a store sandbox rooted at *this* cycle's
@@ -210,7 +210,7 @@ async def _in_process_run(query: str, payload: dict[str, Any]) -> dict[str, Any]
     cycle's context is published by the runner seam (``publish_inner_spawn_context``)
     so this context-free hook can find where to sandbox + which inner benchmark to
     run."""
-    from promptpotter.application.runner.inner_recursion import run_inner_cycle
+    from promptpotter.application.runner.inner import run_inner_cycle
 
     return await run_inner_cycle(query, payload)
 

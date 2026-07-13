@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from promptpotter.domain.outer_verdict import CandidateInfo, cell_fitness, compute_outer_verdict
+from promptpotter.domain.l4.verdict import CandidateInfo, cell_fitness, compute_outer_verdict
 from promptpotter.domain.results import (
     RoundResult,
     RoundSummary,

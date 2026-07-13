@@ -99,7 +99,7 @@ def effective_l1_field_names() -> dict[str, str]:
     mutation it is handed, exactly as it does for prose, `layout`, and
     `output_schema_descriptions`. Gating this on the inner cycle's own config would open a silent
     no-op channel: an inner campaign loads its config from the inner dataset's `campaign.json`
-    (`runner/inner_recursion.py`), never from the outer's, so the outer would emit a rename that
+    (`runner/inner/cycle.py`), never from the outer's, so the outer would emit a rename that
     nothing applied — and score it as a legitimate mutation.
 
     Empty on every normal, non-L4 cycle (no override bound). A proposed rename is dropped when

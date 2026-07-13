@@ -31,19 +31,14 @@ Self-optimization tests two beliefs:
 
 Each outer "sample" runs an inner PromptPotter cycle on a cheap proxy benchmark. The
 connector reports a **vector** of bounded, subset-invariant signals per inner cycle
-(`inner_recursion._compute_proxies`), and `campaign.json::scoring` composes them so a
+(`domain/l4/proxies.py::compute_outer_proxies`), and `campaign.json::scoring` composes them so a
 signal-rich campaign is never distilled to one number — **lift core × quality modulator ×
 efficiency**:
 
 - **Lift core** — `normalized_gain` (best discovered depth as a fraction of the room available
-  to move it, `after_n / max(origin, 1 − origin)`, removing origin-strength bias), recentred
-  `(x+1)/2` so regression < no-op < improvement stay distinct. Bounded in `[-1, 1]` **by
-  construction** — levels live in `[0,1]`, so the denominator never drops below `0.5`. Its
-  predecessor divided by `(target − origin)`, an *upward* room, while a regression falls
-  *toward zero*; on a strong-origin seed a mild regression therefore saturated a `-1` clamp,
-  and because the lift core is multiplicative that zeroed the whole cell — quality and
-  efficiency signal with it. Those cells scored 0.0 for every meta-prompt: holes in the panel,
-  not measurements. **There is no `target_score` any more, anywhere** — see *No declared
+  to move it), recentred `(x+1)/2` so regression < no-op < improvement stay distinct. **Its
+  definition, its bound and why it holds are the type's, not this doc's — read
+  `domain/l4/proxies.py`.** There is no `target_score` any more, anywhere; see *No declared
   headroom*, below.
 - **Quality modulator** — `cleanliness · diversity_health`, floored at 0.6: discounts a
   campaign with unscoreable/degraded inner samples, malformed candidate output, or mode
@@ -124,7 +119,7 @@ stochastic, so each cycle subtracted a freshly-redrawn baseline (one searchpoint
 one sample set, scored 0.375 in seven cycles and 0.417 in two) from the lift it was
 trying to measure. The shared `in_process`
 seam also yields the in-process `llm_only` connector (no TermNorm server for the
-basic case). Implementation: `promptpotter/application/runner/inner_recursion.py`.
+basic case). Implementation: `promptpotter/application/runner/inner/`.
 
 **The project is now in its closing phase: ship a *distributable* `promptpotter-self`.**
 The remaining work and the live-run learnings (gsm8k retired as the inner benchmark —

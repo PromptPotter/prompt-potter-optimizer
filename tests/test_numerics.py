@@ -871,7 +871,7 @@ def _fake_inner_round(
     no_op: int = 0,
     dup: int = 0,
 ) -> SimpleNamespace:
-    """A RoundResult stand-in carrying only the fields ``_compute_proxies`` reads.
+    """A RoundResult stand-in carrying only the fields ``compute_outer_proxies`` reads.
 
     A parse failure yields ZERO candidates by construction (``l1_generate`` returns ``[]``),
     so it is modelled on the round, never on a candidate — no ``ScoredCandidate`` can carry
@@ -923,10 +923,10 @@ def test_compute_proxies_composed_fitness_discriminates() -> None:
     # deltas exact, (b) normalize depth by the task's own headroom, and (c) let quality
     # penalties DROP the score so a clean campaign outranks a dirty one at equal lift. All
     # invisible if wrong: the run completes, the dashboard looks fine, the ranking is subtly off.
-    from promptpotter.application.runner.inner_recursion import _compute_proxies
+    from promptpotter.domain.l4.proxies import compute_outer_proxies
 
     clean = _fake_inner_result([0.40, 0.55], 0.30, [_fake_inner_round(1), _fake_inner_round(2)])
-    px = _compute_proxies(clean, elapsed=100.0).model_dump()
+    px = compute_outer_proxies(clean, elapsed=100.0).model_dump()
     assert px["first_round_delta"] == pytest.approx(0.10)
     assert px["after_N_rounds_delta"] == pytest.approx(0.25)
     # Depth over the room available to move it: max(origin, 1-origin) = max(0.30, 0.70).
@@ -947,7 +947,7 @@ def test_compute_proxies_composed_fitness_discriminates() -> None:
             _fake_inner_round(2, no_op=1, dup=1),
         ],
     )
-    pd = _compute_proxies(dirty, elapsed=100.0).model_dump()
+    pd = compute_outer_proxies(dirty, elapsed=100.0).model_dump()
     assert pd["after_N_rounds_delta"] == px["after_N_rounds_delta"]  # identical lift
     assert pd["cleanliness"] < px["cleanliness"]  # warnings register
     assert pd["diversity_health"] < px["diversity_health"]  # collapse registers
@@ -965,7 +965,7 @@ def test_compute_proxies_composed_fitness_discriminates() -> None:
             _fake_inner_round(2),
         ],
     )
-    pb = _compute_proxies(broke, elapsed=100.0).model_dump()
+    pb = compute_outer_proxies(broke, elapsed=100.0).model_dump()
     assert pb["cleanliness"] < px["cleanliness"]  # a broken round is NOT clean
     assert pb["cleanliness"] == pytest.approx(1.0 - 1.0 / 2)  # one of two L1 rounds fully dirty
     assert pb["cleanliness"] < pd["cleanliness"]  # and dirtier than mere sample degradation
@@ -986,13 +986,10 @@ def test_compute_proxies_excludes_tooling_failures_from_cleanliness() -> None:
     # meta-prompt at all. Charging tooling scores provider flakiness as a bad mutation — and
     # since an empty response is the single most common inner failure, the outer fitness becomes
     # mostly a measurement of provider noise. Nothing errors; the ranking is just wrong.
-    from promptpotter.application.runner.inner_recursion import (
-        InnerCycleUnscoreableError,
-        _compute_proxies,
-    )
+    from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError, compute_outer_proxies
 
     clean = _fake_inner_result([0.40, 0.55], 0.30, [_fake_inner_round(1), _fake_inner_round(2)])
-    px = _compute_proxies(clean, elapsed=100.0).model_dump()
+    px = compute_outer_proxies(clean, elapsed=100.0).model_dump()
 
     # One tooling round out of two → dropped, not charged. The surviving round is clean, so
     # cleanliness stays 1.0. (Charging it would give 0.5 — the same score as a meta-prompt that
@@ -1005,7 +1002,7 @@ def test_compute_proxies_excludes_tooling_failures_from_cleanliness() -> None:
             _fake_inner_round(2),
         ],
     )
-    pt = _compute_proxies(tooling, elapsed=100.0).model_dump()
+    pt = compute_outer_proxies(tooling, elapsed=100.0).model_dump()
     assert pt["cleanliness"] == pytest.approx(px["cleanliness"])
     assert pt["cleanliness"] == pytest.approx(1.0)
 
@@ -1018,7 +1015,7 @@ def test_compute_proxies_excludes_tooling_failures_from_cleanliness() -> None:
             _fake_inner_round(2),
         ],
     )
-    assert _compute_proxies(malformed, elapsed=100.0).cleanliness < 1.0
+    assert compute_outer_proxies(malformed, elapsed=100.0).cleanliness < 1.0
 
     # Every L1 round tooling-failed → meta-prompt-OWNED: under the inner determinism clamp a
     # systematic all-rounds-empty is the documented verbose-meta-prompt failure mode, not a
@@ -1033,7 +1030,7 @@ def test_compute_proxies_excludes_tooling_failures_from_cleanliness() -> None:
             _fake_inner_round(2, parse_failure="l1_provider_empty_response"),
         ],
     )
-    floor = _compute_proxies(all_tooling, elapsed=100.0).model_dump()
+    floor = compute_outer_proxies(all_tooling, elapsed=100.0).model_dump()
     assert floor["normalized_gain"] == -1.0
     assert floor["cleanliness"] == 0.0
 
@@ -1053,7 +1050,7 @@ def test_compute_proxies_excludes_tooling_failures_from_cleanliness() -> None:
         stop_reason=StopReason.CRASHED,
     )
     with pytest.raises(InnerCycleUnscoreableError, match="did not end on its own terms"):
-        _compute_proxies(failed_tooling, elapsed=100.0)
+        compute_outer_proxies(failed_tooling, elapsed=100.0)
 
 
 def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
@@ -1062,15 +1059,12 @@ def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
     # unexercised meta-prompt reported as flawless, and a *high* outer fitness. Nothing errors.
     # The exclusion predicate must ask "produced evidence?", not "failed?" — the two answers
     # differ on every row below.
-    from promptpotter.application.runner.inner_recursion import (
-        InnerCycleUnscoreableError,
-        _compute_proxies,
-    )
+    from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError, compute_outer_proxies
 
     # Zero L1 rounds, on a cycle that DID end on its own terms.
     empty = _fake_inner_result([], 0.30, [], stop_reason=StopReason.TARGET_HIT)
     with pytest.raises(InnerCycleUnscoreableError, match="no L1 rounds"):
-        _compute_proxies(empty, elapsed=100.0)
+        compute_outer_proxies(empty, elapsed=100.0)
 
     # ONLY A SUCCESS OUTCOME IS A MEASUREMENT. The dangerous rows are the ones with rounds on
     # the board: a rail-truncated cycle looks exactly like a completed one, so every aggregate
@@ -1097,7 +1091,7 @@ def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
             stop_reason=stop,
         )
         with pytest.raises(InnerCycleUnscoreableError, match="did not end on its own terms"):
-            _compute_proxies(truncated, elapsed=100.0)
+            compute_outer_proxies(truncated, elapsed=100.0)
 
     # ...and it is EXCLUDED, never floored: the floor is `normalized_gain = -1`, which zeroes the
     # cell (the lift core is multiplicative) — punishing the meta-prompt for a slow provider,
@@ -1110,14 +1104,14 @@ def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
         stop_reason=StopReason.TOKEN_BUDGET,
     )
     with pytest.raises(InnerCycleUnscoreableError, match="did not end on its own terms"):
-        _compute_proxies(railed_and_empty, elapsed=100.0)
+        compute_outer_proxies(railed_and_empty, elapsed=100.0)
 
     # Rounds ran, but the trajectory is empty → nothing to difference against origin. Without
     # the guard `first`/`after_N_rounds_delta` would both read a flat 0.0: "no lift" is a
     # plausible-looking number for "no measurement", which is what makes it dangerous.
     levelless = _fake_inner_result([], 0.30, [_fake_inner_round(1)])
     with pytest.raises(InnerCycleUnscoreableError, match="no levels"):
-        _compute_proxies(levelless, elapsed=100.0)
+        compute_outer_proxies(levelless, elapsed=100.0)
 
     # Rounds AND levels, but the origin was never scored. Every delta here is measured against
     # that floor, so substituting 0.0 (the old `origin_acc` stand-in, itself 0.0 when nothing
@@ -1125,11 +1119,11 @@ def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
     # for the CHEAPEST rows, since a crash at round 0 is what leaves the origin unscored.
     floorless = _fake_inner_result([0.40, 0.55], None, [_fake_inner_round(1), _fake_inner_round(2)])
     with pytest.raises(InnerCycleUnscoreableError, match="origin was never scored"):
-        _compute_proxies(floorless, elapsed=100.0)
+        compute_outer_proxies(floorless, elapsed=100.0)
 
     # ...and a cycle that DID produce evidence still scores, on the same predicate.
     ok = _fake_inner_result([0.40, 0.55], 0.30, [_fake_inner_round(1), _fake_inner_round(2)])
-    ok_px = _compute_proxies(ok, elapsed=100.0)
+    ok_px = compute_outer_proxies(ok, elapsed=100.0)
     assert ok_px.after_N_rounds_delta == pytest.approx(0.25)
 
 
@@ -1143,30 +1137,27 @@ def test_unmeasured_spend_never_scores_as_maximal_efficiency() -> None:
     import json
     from pathlib import Path
 
-    from promptpotter.application.runner.inner_recursion import (
-        InnerCycleUnscoreableError,
-        _compute_proxies,
-    )
+    from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError, compute_outer_proxies
 
     rounds = [_fake_inner_round(1), _fake_inner_round(2)]
 
     broke = _fake_inner_result([0.40, 0.55], 0.30, rounds, cost=0.0)
     with pytest.raises(InnerCycleUnscoreableError, match="no spend"):
-        _compute_proxies(broke, elapsed=100.0)
+        compute_outer_proxies(broke, elapsed=100.0)
 
     # Partially unpriced: a real, positive cost that nonetheless understates the true total.
     understated = _fake_inner_result([0.40, 0.55], 0.30, rounds, cost=0.03, unpriced_tokens=4096)
     with pytest.raises(InnerCycleUnscoreableError, match="understates real spend"):
-        _compute_proxies(understated, elapsed=100.0)
+        compute_outer_proxies(understated, elapsed=100.0)
 
     # The gradient the exclusion protects: at equal lift, the CHEAPER run scores higher — and no
     # run may reach the efficiency ceiling by reporting nothing.
     cfg = json.loads(Path("datasets/promptpotter-self/campaign.json").read_text(encoding="utf-8"))
     score = compile_scorer(cfg["campaign_config"]["scoring"])
-    cheap = _compute_proxies(
+    cheap = compute_outer_proxies(
         _fake_inner_result([0.40, 0.55], 0.30, rounds, cost=0.01), elapsed=100.0
     ).model_dump()
-    dear = _compute_proxies(
+    dear = compute_outer_proxies(
         _fake_inner_result([0.40, 0.55], 0.30, rounds, cost=0.30), elapsed=100.0
     ).model_dump()
     assert cheap["delta_per_dollar"] > dear["delta_per_dollar"]

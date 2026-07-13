@@ -19,6 +19,7 @@ sys.path.insert(0, str(_REPO))
 
 from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
 from promptpotter.domain.l1_layout import L1Layout
+from promptpotter.domain.l4.verdict import OuterCellEffect, OuterVerdict
 from promptpotter.domain.opt_search_point import (
     EvidenceGrounding,
     FewShotExample,
@@ -27,7 +28,6 @@ from promptpotter.domain.opt_search_point import (
     OptSearchPoint,
     WoundChannels,
 )
-from promptpotter.domain.outer_verdict import OuterCellEffect, OuterVerdict
 from promptpotter.domain.pipeline_schema import NodeConfigParam, NodeOutputSchema
 from promptpotter.domain.results import (
     DegradationHealth,

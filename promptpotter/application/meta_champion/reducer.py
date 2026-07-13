@@ -9,7 +9,7 @@ The comparison metric here is the **anchor-to-origin** paired effect: for each c
 meta-prompt state, the per-cell ``(candidate − origin) composite`` diff, paired on the
 shared cells the candidate was measured on, aggregated across every occurrence of that
 state anywhere in the corpus. Origin (the un-edited meta-prompt) is the round-0 arm — the
-same cached control the per-round ``outer_verdict`` (``domain/outer_verdict.py``) pairs
+same cached control the per-round verdict (``domain/l4/verdict.py``) pairs
 against, never re-measured. Absolute scores across runs are not comparable — only these
 paired-on-shared-cells effects are — which is why the table ranks by anchor effect, and
 confirmation is earned separately by a coronation match.
@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, ConfigDict
 
 from promptpotter.application.bootstrap.wiring import backend_type_of_dataset
-from promptpotter.domain.outer_verdict import cell_fitness
+from promptpotter.domain.l4.verdict import cell_fitness
 from promptpotter.infrastructure.projections.live_dashboard.round_summary import (
     origin_cells_from_disk,
 )
@@ -123,7 +123,7 @@ def _cell_composites(round_doc: dict[str, Any], candidate_id: str) -> dict[str, 
     Reads the per-sample rows under ``all_candidate_results[candidate_id]`` — one row per
     outer sample, whose ``query`` is the cell id and whose ``fitness`` is that cell's
     composite (its mean equals the candidate's round ``composite_fitness``). Thin adapter
-    over the shared pure extraction (``domain.outer_verdict.cell_fitness``) — this module's
+    over the shared pure extraction (``domain.l4.cell_fitness``) — this module's
     input is an already-loaded round doc, not a fresh disk read.
     """
     rows = (round_doc.get("all_candidate_results") or {}).get(candidate_id) or []

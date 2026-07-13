@@ -108,7 +108,7 @@ def _inner_sandbox_store(store: Stores, outer_cycle_id: str) -> Stores | None:
 
     L4 (``promptpotter-self``) runs each candidate as a real inner campaign under
     a flat, off-registry sandbox ``<workspace>/.inner/<outer_cycle_id>`` (keyed on
-    the outer cycle id alone — see ``inner_recursion.publish_inner_spawn_context``).
+    the outer cycle id alone — see ``runner/inner.publish_inner_spawn_context``).
     That sandbox is structurally a normal projects tree, so pointing
     ``build_stores`` at it lets every existing read work verbatim. Returns
     ``None`` when the viewed cycle spawned no inner campaigns (non-L4, or the
