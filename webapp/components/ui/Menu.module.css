@@ -1,0 +1,81 @@
+/* Menu primitive — the overflow panel behind a toolbar's "⋯". */
+
+.menu {
+  display: flex;
+  flex-direction: column;
+  min-width: 190px;
+  padding: 4px;
+  /* Bounded: a disclosure inside the menu (the θ explainer) can outgrow the
+     viewport, and a panel that runs off the bottom of the screen silently loses
+     its last rows. Scroll instead. */
+  max-height: min(60vh, 480px);
+  overflow-y: auto;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: var(--border-radius-md);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.item:hover:not(:disabled) {
+  background: var(--color-background-hover);
+  color: var(--color-text-primary);
+}
+
+.item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.on {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+/* Fixed gutter, so labels line up whether or not a row is checkable. */
+.check {
+  flex: 0 0 12px;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+}
+
+.groupLabel,
+.heading {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+  font-weight: 600;
+  padding: 6px 8px 2px;
+}
+
+.sub {
+  padding-left: 8px;
+}
+
+.sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--color-border);
+}

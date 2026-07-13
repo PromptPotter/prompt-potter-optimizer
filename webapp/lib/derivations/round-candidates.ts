@@ -1,18 +1,17 @@
 // Single source of truth for "which candidates exist per round, in
 // display order". Sole consumer of `liveL1Candidates` / `roundOf` /
 // `dash.rounds[]` for candidate-list purposes — every surface that
-// lists, plots, or selects candidates (FitnessPanel, LineageTree,
-// RoundSamplesView, RoundTabsStrip's per-tab counts) reads through this
-// helper.
+// lists, plots, or selects candidates (the candidates card's bars +
+// dendrogram + forest, RoundSamplesView) reads through this helper.
 //
 // Origin is not special: it's round 0 in `dash.rounds[]`, a one-candidate
 // round labelled "C0", and flows through the same history loop as every
 // other round.
 //
-// Why centralized: before this module, FitnessPanel and LineageTree
+// Why centralized: before this module, the bars and the tree
 // each ran their own history-vs-inflight switch with subtly different
-// guards, and each picked its own label scheme (FitnessPanel honored
-// `c.label`, LineageTree hardcoded `R{round}.{idx+1}`). That drift
+// guards, and each picked its own label scheme (the bars honored
+// `c.label`, the tree hardcoded `R{round}.{idx+1}`). That drift
 // produced the operator-visible bug where R1.1 in lineage and C1.1
 // in fitness pointed at different candidates. With one derivation,
 // the two surfaces cannot disagree.
@@ -29,7 +28,7 @@ import type { CandidateRow, RoundCandidates, RoundSummary } from "@/lib/types";
 // When a round closes mid-L2/L3 — no `l1_score` ever fired — the round-display
 // projection materializes a row with an empty `candidates[]`. Such a row is real
 // history but has no fitness data, so it must NOT be advertised as a completed
-// round, plotted, or fallen back to as `lastCompleted` (else the FitnessPanel
+// round, plotted, or fallen back to as `lastCompleted` (else the card
 // resolves no bars and the round-scoped surfaces blank/hang on it). The single
 // predicate every round-row consumer (`roundCandidates`, `availableRounds`) shares.
 export function roundHasCandidates(r: RoundSummary): boolean {
@@ -38,7 +37,7 @@ export function roundHasCandidates(r: RoundSummary): boolean {
 
 // `dash.rounds[]` ascending by round (round 0 = origin). The one place this
 // sort lives — every surface that walks history in order rides this instead of
-// re-spelling `(dash?.rounds ?? []).slice().sort(...)` (FitnessPanel, the axis
+// re-spelling `(dash?.rounds ?? []).slice().sort(...)` (the card, the axis
 // derivation, the spine below).
 export function sortedRounds(dash: DashboardSnapshot | null): RoundSummary[] {
   return (dash?.rounds ?? []).slice().sort((a, b) => a.round - b.round);
@@ -82,7 +81,11 @@ export function roundCandidates(dash: DashboardSnapshot | null): CandidateRow[] 
         key: `R${r.round}.${i}`,
         round: r.round,
         idx: i,
-        candidate_id: c.candidate_id,
+        // Never empty: a round summary that hasn't stamped an id falls back to
+        // the positional one, the same rule the lineage applies. Without this the
+        // spine and the tree keyed differently for the same candidate, and every
+        // surface that routes selection by `candidate_id` had to guard for "".
+        candidate_id: c.candidate_id || liveCandidateId(r.round, i),
         label: candidateLabel(r.round, i),
         accuracy: c.accuracy,
         composite: c.composite_fitness,

@@ -1,6 +1,6 @@
 "use client";
 // The "fixed sample set" utility for the per-candidate fitness chart, lifted out
-// of FitnessPanel so it's a self-contained, reusable unit (a future monitoring /
+// of the candidates card so it's a self-contained, reusable unit (a future monitoring /
 // export surface can mount it as-is). It reads/writes the shared
 // `SelectionContext.sampleSet` axis directly — no prop-drilling — and owns only
 // its local detail-drill state.

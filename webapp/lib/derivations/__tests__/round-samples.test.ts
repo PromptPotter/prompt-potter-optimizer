@@ -5,7 +5,7 @@ import type { DashboardSnapshot } from "@/lib/poll";
 import type { RoundResult } from "@/lib/types";
 
 // `samplesForRow` is the single live-vs-historical source switch every sample
-// surface rides (FitnessPanel bars, RoundSamplesView groups). It SELECTS one
+// surface rides (candidates-card bars, RoundSamplesView groups). It SELECTS one
 // source off the row's `source` tag — never merges, never falls back — so the
 // two readers can't drift on routing. These tests pin that an in-flight row
 // reads `dash` (ignoring the round file) and a historical row reads the round

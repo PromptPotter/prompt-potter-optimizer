@@ -28,7 +28,7 @@ import {
   type DetailByCycle,
   type LaneLayout,
   type RoundNodePos,
-} from "./layout";
+} from "./forest-layout";
 
 // One expanded candidate node: parent→child slant is drawn as a seg upstream;
 // this renders the lineage-style stub + label, clickable for candidate

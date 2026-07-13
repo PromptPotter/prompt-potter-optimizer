@@ -2,9 +2,9 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { DraftCampaignWire, DraftPatch } from "@/lib/api";
 import { StaticConnectorProvider, useConnector } from "@/lib/hooks/useConnector";
+import { SegmentedControl } from "@/components/ui";
 import { useSelection } from "@/lib/SelectionContext";
 import { targetNodeIds } from "@/lib/terms";
-import { cx } from "@/lib/cx";
 import { PipelineNodeList } from "@/components/dashboard/pipeline/PipelineNodeList";
 import { BackendNodeDetail } from "@/components/dashboard/pipeline/BackendNodeDetail";
 import { NodeSurface } from "@/components/dashboard/pipeline/NodeSurface";
@@ -102,25 +102,17 @@ function PipelineSetupInner({
         <span className="setup-preview-title">Pipeline</span>
       </header>
 
-      <div className="pipeline-mode-toggle" role="group" aria-label="Pipeline mode">
-        <button
-          type="button"
-          className={cx("pmode", isLlmOnly && "is-active")}
-          aria-pressed={isLlmOnly}
-          onClick={() => onApply({ pipeline_steps: LLM_ONLY })}
-        >
-          LLM only
-        </button>
-        <button
-          type="button"
-          className={cx("pmode", !isLlmOnly && "is-active")}
-          aria-pressed={!isLlmOnly}
-          disabled={!hasResearch}
-          onClick={() => hasResearch && onApply({ pipeline_steps: researchSteps })}
-        >
-          Research + Match
-        </button>
-      </div>
+      <SegmentedControl
+        options={[
+          { value: "llm", label: "LLM only" },
+          { value: "research", label: "Research + Match", disabled: !hasResearch },
+        ]}
+        value={isLlmOnly ? "llm" : "research"}
+        onChange={(mode) =>
+          onApply({ pipeline_steps: mode === "llm" ? LLM_ONLY : researchSteps })
+        }
+        ariaLabel="Pipeline mode"
+      />
 
       {isLlmOnly ? (
         <>

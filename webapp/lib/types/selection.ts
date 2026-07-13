@@ -1,7 +1,7 @@
 // Selection-context shapes. PR-A only lifts the existing
 // `SelectedCandidate` to its own file; PR-B (WS-4) reworks the
 // SelectionContext API around these types (coupled writes, absorbed
-// fitness-store toggles).
+// candidates-store toggles).
 
 // The selected candidate. Field names mirror the dashboard.json
 // shape (snake_case) so the JSON-side keys stay readable in the

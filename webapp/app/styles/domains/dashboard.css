@@ -23,8 +23,6 @@
 @media (max-width:880px){
   .content{padding:12px}
   .dash-spine-narrow{transform:none}
-  .dash-row-triad{gap:12px}
-  .dash-top-row{gap:10px}
 }
 .dash-spine-narrow:last-child{margin-bottom:0}
 
@@ -84,14 +82,8 @@
 .dash-hero{display:flex;flex-direction:column;gap:14px}
 .dash-hero .page-header{margin-bottom:0}
 
-/* Top band — Workflow alone, spanning the full 980px column so it reads as
-   twice the width of the FitnessPanel that sits below in the left grid
-   column. */
 .dash-top > *{margin-bottom:0}
 
-/* Main two-column grid — FitnessPanel left, Lineage right. Columns split
-   1:1 so both stay at ~half the 980 column (matches the user's "Lineage
-   same size as FitnessPanel"). */
 /* Dashboard lanes — three collapsible sections that taxonomize the
    panels by operator intent: NOW (what's running this instant) /
    VERDICT (has it improved?) / WHY (drill down). Open/closed state
@@ -105,33 +97,20 @@
 .dash-lane-body{display:flex;flex-direction:column;gap:12px;padding-top:14px}
 .dash-lane.closed .dash-lane-head{border-bottom-color:transparent}
 
-/* Triad layout — Fitness + Lineage always present; Inspector is a third
-   column conditionally rendered when a candidate is selected. A click
-   in any of the three re-anchors the others through SelectionContext,
-   so the inspector sits directly adjacent to the surfaces that drive
-   it instead of as a separated row below. Cards are equal-height and
-   align-items:start so a tall one (lineage with many forks) never
-   forces the others taller. */
-/* Size-to-content row. Fitness (left) keeps a fixed basis; Lineage (right) is
-   sized to its tree's natural width (flex-grow:0 — it never balloons to fill the
-   leftover band, so a short tree leaves no empty right gutter). --lineage-natural-w
-   is fed in by FamilyTree since the viewport's overflow hides that width from CSS.
-   When the tree and Fitness can't share the band, Lineage wraps to its OWN
-   full-width row below Fitness; min(…,100%) caps the demand at the band so a giant
-   tree scrolls inside the viewport instead of overflowing the page. The viewport's
-   own height is fixed + operator-resizable (family-tree.css), not coupled here. */
-.dash-row-triad{--triad-card-h:240px;width:100%;display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start}
-.dash-row-triad > .fitness-card{flex:0 1 460px;min-width:0;min-height:var(--triad-card-h);margin-left:0;margin-right:0}
-.dash-row-triad > .lineage-card{flex:0 1 auto;min-width:min(var(--lineage-natural-w,480px),100%);max-width:100%}
-.dash-row-triad > .fitness-card,
-.dash-row-triad > .lineage-card{display:flex;flex-direction:column;margin-bottom:0;padding:10px 14px}
-.dash-row-triad > .fitness-card.whatif-open{flex-basis:100%}
-.dash-row-triad .fitness-chart-frame{flex:1;height:160px;min-height:0}
-.dash-row-triad .fitness-body{flex:1;display:flex;flex-direction:column;min-height:0}
+/* The Now row — Optimizer first, then Candidates. Both cards size to their own
+   content, so the wrap is content-driven: Candidates keeps its compact Sequence
+   footprint and sits beside the optimizer, but the moment it needs the full band
+   (Forest, or What-If opening its second column) its 100% basis can't share the
+   line and it drops to the next row. Nothing here has to know which view is on. */
+.dash-now-row{display:flex;flex-wrap:wrap;align-items:flex-start;gap:18px;width:100%}
+.dash-now-row > *{margin-bottom:0}
+/* The candidates card centres itself when alone (margin:auto); in the row that
+   would shove it off the optimizer, so pin it left and let it take the slack. */
+.dash-now-row > .cand-card{margin-left:0;margin-right:0;flex:0 1 auto}
+.dash-now-row > .workflow-card{flex:0 0 auto}
 
-/* Scoring inspector — its own full-width row below the fitness/lineage row,
-   never beside lineage. Rendered as a sibling of .dash-row-triad so it spans
-   the whole spine; the border reset matches the old in-triad card framing. */
+/* Scoring inspector — its own full-width row below the Now row. The border reset
+   matches the card framing above it. */
 .inspector-row{max-height:520px;overflow:auto;margin-bottom:14px}
 .inspector-row .scoring-inspector{border-top:0;margin-top:0;padding-top:0}
 /* Per-searchpoint sample stream — the round-wide Samples table sliced to the
@@ -140,28 +119,11 @@
 .inspector-samples{margin-top:12px;border-top:0.5px solid var(--color-border);font-family:var(--font-mono);font-size:12px;line-height:1.5}
 .inspector-samples .rsv-rows{max-height:clamp(200px,32vh,420px);overflow-y:auto}
 
-/* What-If open — fitness card takes the full first line (flex-basis:100%, set
-   above), so lineage wraps to its own row beneath it. The chart frame stays at
-   its closed-mode size so the bars don't jump when the ablation grid opens.
-   Narrow screens need no special rule: the flex row wraps on its own once
-   Fitness + Lineage can't share the width. */
-
-/* Phone (≤640px): the cards shrink together so the dashboard reads in portrait
-   without the rotate prompt; the chart frame drops in step. */
+/* Phone (≤640px): the chart frame shrinks so the dashboard reads in portrait
+   without the rotate prompt. */
 @media (max-width:640px){
-  .dash-row-triad{--triad-card-h:200px}
-  .dash-row-triad > .fitness-card{flex-basis:100%}
-  .dash-row-triad .fitness-chart-frame{height:140px}
+  .fitness-chart-frame{height:140px}
 }
-
-/* Top row — TopStrip on the left, round-tabs strip on the right. The
-   round-tabs sit beside the headline KPIs so the round axis is visible
-   in the first second of looking at the page. align-items:stretch keeps
-   both cards the same height. */
-.dash-top-row{display:flex;align-items:stretch;gap:14px;width:100%}
-.dash-top-row > .topstrip{flex:1 1 auto;min-width:0}
-.dash-top-row > .round-tabs-strip{flex:0 1 auto;min-width:200px;max-width:55%;margin-bottom:0}
-@media (max-width:960px){.dash-top-row{flex-direction:column}.dash-top-row > .round-tabs-strip{max-width:none}}
 
 /* Eval charts inside LiveStateCard — stacked vertically because the
    narrow spine doesn't have width for the prior side-by-side layout.
@@ -177,20 +139,6 @@
 .trend-degraded-label{color:var(--color-warn);font-weight:600;flex:none}
 .trend-degraded-detail{color:var(--color-text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
-/* Round-tabs strip — clickable circle per L1 round, plus a LIVE pill for
-   the in-flight round. Sits directly above the fitness/lineage/inspector
-   triad so the round axis that ties them together is visible at a glance.
-   Horizontal scroll handles long campaigns (100 rounds = 100 circles). */
-.round-tabs-strip{display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--color-background-tertiary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-md);margin-bottom:14px}
-.round-tabs-label{font-size:10px;letter-spacing:.08em;color:var(--color-text-tertiary);text-transform:uppercase;font-weight:600;flex:0 0 auto}
-.round-tabs-scroll{display:flex;align-items:center;gap:5px;flex:1;overflow-x:auto;scrollbar-width:thin;padding:2px 0}
-.round-tab{flex:0 0 auto;min-width:28px;height:28px;padding:0 6px;border-radius:14px;border:1px solid var(--color-border);background:transparent;color:var(--color-text-secondary);font-family:var(--font-mono);font-size:12px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;line-height:1;transition:background-color 100ms,color 100ms,border-color 100ms}
-.round-tab:hover{color:var(--color-text-primary);border-color:var(--color-text-secondary)}
-.round-tab.active{background:var(--color-accent);color:var(--color-text-on-accent);border-color:var(--color-accent);font-weight:600}
-.round-tab-live{padding:0 10px;font-weight:600;gap:6px}
-.round-tab-live-dot{width:6px;height:6px;border-radius:50%;background:var(--color-success);box-shadow:0 0 4px var(--color-success);display:inline-block;animation:round-tab-live-pulse 1.6s ease-in-out infinite}
-@keyframes round-tab-live-pulse{0%,100%{opacity:.5}50%{opacity:1}}
-
 /* Round samples view — one card whose body picks live vs historical
    based on `selection.round`. Per-candidate `<details>` groups with
    sticky headers; click the header to anchor lineage + fitness on
@@ -200,11 +148,6 @@
 .round-back-live:hover{color:var(--color-text-primary);border-color:var(--color-text-secondary)}
 .rsv-filters{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:4px 4px 8px}
 .rsv-cand-select{background:var(--color-background-secondary);border:0;border-radius:4px;color:inherit;font:inherit;font-size:12px;padding:4px 8px;cursor:pointer;max-width:320px}
-.rsv-toggle{display:inline-flex;align-items:center;gap:0;border:1px solid var(--color-border);border-radius:6px;overflow:hidden}
-.rsv-toggle button{background:transparent;border:0;color:var(--color-text-secondary);padding:4px 10px;font-family:inherit;font-size:11px;cursor:pointer;border-right:1px solid var(--color-border)}
-.rsv-toggle button:last-child{border-right:0}
-.rsv-toggle button:hover{color:var(--color-text-primary);background:var(--color-background-hover)}
-.rsv-toggle button.on{background:var(--color-accent);color:var(--color-text-on-accent);font-weight:600}
 .rsv-count{margin-left:auto;color:var(--color-text-tertiary);font-size:11px;font-family:var(--font-mono)}
 .rsv-groups{max-height:clamp(280px,46vh,640px);overflow-y:auto;font-family:var(--font-mono);font-size:12px;line-height:1.5;padding:4px 0}
 .rsv-group{margin-bottom:8px}

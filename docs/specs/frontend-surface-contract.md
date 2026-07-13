@@ -256,18 +256,36 @@ controls:
   - id: topstrip.best_last
     do: Best/Last fitness from dashboard.json. "—" placeholders in auth_empty/warming.
     status: ok
-  - id: fitness.score_toggle
-    do: Composite <-> What-If; What-If reveals evaluator checkboxes to preview alternative scoring.
+  - id: candidates.card
+    do: Fitness bars + the bracket dendrogram beneath them on the SAME x-axis (one cycle, one
+        `roundCandidates` spine). Always on — there is no view to switch.
     status: ok
-  - id: lineage.tree
-    do: Fork+candidate cladogram from rounds[]; empty note before round 1.
+  - id: lineage.forest
+    do: Its OWN card, revealed by the toggle beside the dendrogram (and by a ⑂ fork mark, which
+        opens it with that sibling expanded). The multi-cycle cladogram — the only surface that
+        draws siblings. Empty note before round 1. Separate card because it shares no axis with
+        the bars, so it must not be bound to their width.
+    status: ok
+  - id: candidates.metric
+    do: ONE multi-select (Acc/Comp/θ) driving the bar series AND every node label in both views.
+        Never empty. θ rides a right-hand axis and stays sparse (a missing θ is never a 0 bar).
+    status: ok
+  - id: candidates.lens_whatif
+    do: Lens re-projects under an alternative criterion (served); What-If reveals evaluator
+        checkboxes and becomes the master lens.
     status: ok
   - id: samples
     do: Per-sample table — rendered inside the l1_score node inspector (click l1_score), not a standalone card. Empty note before scoring.
     status: ok
+  - id: optimizer.round_axis
+    do: One circle per closed round + a LIVE pill, in the optimizer card's toolbar — the optimizer
+        can only depict ONE round, so this is its scope, not a free-floating axis. Writes
+        selection.round; the canvas, the node inspector and the samples view all follow it.
+    status: ok
   - id: optimizer.node_strip
-    do: checkin/l3_plan/l2_context/l1_generate/l1_score/l1_critique nodes; click opens inspector
-        (needs round_NNNN.json). Dataset node disabled until ingest. Idle when no campaign.
+    do: checkin/l3_plan/l2_context/l1_generate/l1_score/l1_critique nodes for the VIEWED round
+        (live -> dashboard.json; historical -> the audit twin, via the one useRoundNodes resolver).
+        A historical round never pulses. Click opens the inspector. Idle when no campaign.
     status: ok
   - id: live_state.disclosure
     do: Collapsible raw dashboard.json + trend + score-frequency. "Waiting for first poll…" until data.

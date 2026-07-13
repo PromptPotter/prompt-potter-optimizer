@@ -1,14 +1,9 @@
 "use client";
-import { useMemo } from "react";
 import type { PipelineDoc } from "./types";
-import { type DashboardSnapshot } from "@/lib/poll";
 import { RoundSamplesView } from "@/components/dashboard/samples/RoundSamplesView";
 import { availableRounds } from "@/lib/derivations";
-import { isLiveRound } from "@/lib/hooks/useRoundSource";
-import { useRoundAudit } from "@/lib/hooks/useRoundFile";
+import { useRoundNodes } from "@/lib/hooks/useRoundNodes";
 import { useDashboard } from "@/lib/hooks/useDashboard";
-import { useWorkspace } from "@/lib/workspace";
-import { useEffectiveRound } from "@/lib/hooks/useEffectiveRound";
 import { activeNodeId } from "./layout";
 import { fmtSecs } from "@/lib/format";
 import { CopyButton } from "@/components/ui";
@@ -43,28 +38,11 @@ function fmtInline(v: unknown): string {
   }
 }
 
-// Resolve a node block for a given round:
-// - live round: read inline from `dash.current_round.nodes[id]`
-// - historical: read from the lazily-fetched round file's `nodes[id]`
-// `null` when the node did not fire in that round (or the file hasn't
-// landed yet).
-function liveNodeBlock(
-  dash: DashboardSnapshot | null,
-  id: string,
-): NodeBlock | null {
-  const liveNodes = dash?.current_round.nodes as Record<string, NodeBlock> | undefined;
-  const block = liveNodes?.[id];
-  return block && typeof block === "object" ? block : null;
-}
-
 export function OptimizerNodeDetail({ id, pipeline, onClose }: Props) {
-  // Self-sourced: live snapshot + liveness from the cycle stream; the viewed
-  // leaf path from the workspace for the lazy per-round fetch (an L4 inner loop
-  // reads the inner cycle's round file). `isLive` is the freshness gate — a
-  // frozen cycle keeps `dash.state` at its last phase, so without it the panel
-  // would claim the node is "live" forever.
+  // Self-sourced: live snapshot + liveness from the cycle stream. `isLive` is the
+  // freshness gate — a frozen cycle keeps `dash.state` at its last phase, so
+  // without it the panel would claim the node is "live" forever.
   const { dash, isLive, dashRound: liveRound } = useDashboard();
-  const { viewedPath } = useWorkspace();
   const view = pipeline?.view;
   const meta = view?.nodes.find((n) => n.id === id);
   const label = meta?.label ?? id;
@@ -73,27 +51,16 @@ export function OptimizerNodeDetail({ id, pipeline, onClose }: Props) {
   const cfg = pipeline?.nodes?.[id];
   const cfgInner = (cfg?.config ?? {}) as Record<string, unknown>;
 
-  // The viewed round comes from the single resolver every round-scoped
-  // surface shares (`useEffectiveRound`): the explicit pick, else the live
-  // in-flight round, else the most recent completed round. No bespoke
-  // fallback here — that is exactly the per-widget drift the resolver retired.
-  const { round: activeRound } = useEffectiveRound();
+  // The round's node blocks come from the one resolver this card shares with the
+  // canvas above it (`useRoundNodes`) — same round, same source-selection rule.
+  // Splitting that switch across the two surfaces is what let them disagree.
+  const { nodes, round: activeRound, isLiveRound: activeIsLive } = useRoundNodes();
   // Completed rounds are owned by `availableRounds` (round-axis) — ascending,
   // so the most recent fired round is the tail. Used only for the status line.
   const completed = availableRounds(dash, isLive).completed;
   const lastFiredRound = completed.at(-1) ?? null;
 
-  // Live round: read inline (no fetch). Historical round: lazy-fetch the round's AUDIT
-  // TWIN — the per-node LLM I/O lives there, never on the round document. This used to
-  // read `nodes` off the round document, so it rendered nothing for a completed round.
-  const liveBlock = liveNodeBlock(dash, id);
-  const activeIsLive = isLiveRound(dash, activeRound);
-  const { doc: auditDoc } = useRoundAudit(activeIsLive ? null : viewedPath, activeRound);
-  const block: NodeBlock | null = useMemo(() => {
-    if (activeRound == null) return null;
-    if (activeIsLive) return liveBlock;
-    return auditDoc?.nodes?.[id] ?? null;
-  }, [activeRound, activeIsLive, liveBlock, auditDoc, id]);
+  const block: NodeBlock | null = nodes[id] ?? null;
   const templateFields = block?.input?.template_fields as
     | Record<string, unknown>
     | undefined;
@@ -110,7 +77,9 @@ export function OptimizerNodeDetail({ id, pipeline, onClose }: Props) {
     : "";
 
   const livePhaseNode = activeNodeId(dash?.in_flight?.node ?? null, dash?.state ?? null);
-  const isLiveNow = isLive && livePhaseNode === id;
+  // `activeIsLive` too: a node inspected on a historical round is not live, even
+  // when that same node happens to be firing in the round currently running.
+  const isLiveNow = isLive && activeIsLive && livePhaseNode === id;
   const statusLine = isLiveNow
     ? `live · round ${liveRound ?? "—"}`
     : lastFiredRound != null
@@ -148,7 +117,7 @@ export function OptimizerNodeDetail({ id, pipeline, onClose }: Props) {
           {activeRound != null && (
             <span
               className="opt-detail-round-tag"
-              title="Round is set from the Optimizer toolbar picker (or the round-tabs strip)"
+              title="Round is set by the round axis in the Optimizer toolbar"
             >
               round {activeRound}
               {activeIsLive ? " · live" : ""}

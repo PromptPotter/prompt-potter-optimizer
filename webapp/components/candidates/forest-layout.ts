@@ -1,6 +1,6 @@
 // Cladogram geometry for the campaign lineage tree. Pure layout: builds the
 // per-session parent/child tree, assigns lanes, and resolves SVG node + branch
-// coordinates. No React — FamilyTree and Forest own the rendering.
+// coordinates. No React — CandidatesCard and Forest own the rendering.
 //
 // One tree, two depths per cycle lane:
 //   collapsed — one summary node per round (the round winner), the compact

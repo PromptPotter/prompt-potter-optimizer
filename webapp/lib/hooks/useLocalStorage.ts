@@ -1,6 +1,6 @@
 "use client";
 // One localStorage-backed state hook, built on `useSyncExternalStore` — the
-// same external-store pattern as fitness-store.ts and Lane.tsx. The server
+// same external-store pattern as candidates-store.ts and Lane.tsx. The server
 // snapshot is the default, so the static export's first render matches the
 // server HTML. Components bound to the same key stay in sync within the tab
 // (a module-level listener registry) and across tabs (the `storage` event).

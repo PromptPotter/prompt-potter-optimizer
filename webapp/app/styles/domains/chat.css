@@ -23,7 +23,7 @@
 .chat-job-dropdown{margin-top:8px;background:var(--color-background-primary);border:1px solid var(--color-border);border-radius:var(--border-radius-lg);padding:6px 14px 12px;display:grid;grid-template-columns:minmax(260px,300px) 1fr;gap:0 18px;align-items:start}
 .chat-job-dropdown .job-section{padding:8px 0 4px}
 /* What-if cell is its own inline-size container so the fitness card reflows on
-   the cell width (fitness.css `@container whatif`), not the viewport, and the
+   the cell width (candidates.css `@container whatif`), not the viewport, and the
    `1fr` track can shrink freely. */
 .chat-job-dropdown .job-whatif{padding:8px 0 4px;border-left:1px solid var(--color-border);padding-left:18px;min-width:0;container:whatif / inline-size}
 /* Collapse to one column on the chat pane's own width (the `content` container

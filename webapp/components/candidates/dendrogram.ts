@@ -1,0 +1,166 @@
+// Bracket-dendrogram geometry for the Sequence view — the strip that hangs
+// directly under the fitness bars and draws the intra-cycle genealogy of the
+// SAME flat candidate spine the bars plot (`roundCandidates(dash)`).
+//
+// Why a shallow fixed strip works at all: the genealogy is spine-and-fan — every
+// candidate of round r descends from the winner of the last ADVANCING round
+// before r (`forest-layout.ts` is the other reader of that rule). In the flat
+// (round asc, idx asc) order that puts every parent strictly LEFT of every
+// child, so a bracket is a plain x-interval and the whole picture is INTERVAL
+// PACKING, not tree layout — no crossing edges, nothing to route around.
+//
+// Depth: bracket r runs from inside block r-1 to the end of block r, so bracket
+// r+1 always collides with it — but bracket r+2 starts inside block r+1, which
+// lies entirely right of block r, so brackets two generations apart never
+// overlap and TWO rows suffice while every round advances. HELD rounds refute
+// that constant: a held round crowns no winner, so rounds r+1 and r+2 both hang
+// off w_r and their brackets NEST. Greedy lowest-free-row packing covers both
+// cases and the strip height falls out of it — nothing here hardcodes "2".
+//
+// x arrives as FRACTIONS of the chart's plot width (the bar chart's own category
+// centers, published by its `xBridge` plugin) and leaves untouched, so this
+// module is pure numbers and unit-testable without a canvas.
+
+export const NODE_ROW_Y = 7; // candidate dot cy, px from the strip top
+export const NODE_R = 3;
+export const FIRST_ROW_Y = 16; // the first bracket beam
+export const ROW_H = 9; // beam-to-beam
+export const BOTTOM_PAD = 4;
+
+export interface DendroNode {
+  key: string;
+  candidateId: string;
+  round: number;
+  label: string;
+  isWinner: boolean;
+  // Spine index === bar category index. THE alignment contract.
+  i: number;
+  // Category-center fraction of the plot width, 0..1.
+  xf: number;
+  y: number;
+}
+
+export interface DendroStub {
+  xf: number;
+  y1: number;
+  y2: number;
+  kind: "parent" | "child";
+}
+
+export interface DendroBracket {
+  // The CHILD round this beam feeds.
+  round: number;
+  x1f: number;
+  x2f: number;
+  y: number;
+  parentKey: string;
+}
+
+export interface Dendrogram {
+  nodes: DendroNode[];
+  stubs: DendroStub[];
+  brackets: DendroBracket[];
+  // Total strip height in px — grows only with the packed depth.
+  height: number;
+}
+
+// The narrow structural projection this geometry needs. Keeping it minimal is
+// what lets the caller content-stabilize it, so a per-sample value tick repaints
+// node text without ever re-running the packing.
+export interface DendroRow {
+  key: string;
+  round: number;
+  label: string;
+  candidate_id: string;
+  is_winner: boolean;
+}
+
+const FLOOR_H = NODE_ROW_Y + NODE_R + BOTTOM_PAD;
+
+export function dendrogram(
+  rows: readonly DendroRow[],
+  centers: readonly number[],
+): Dendrogram {
+  const nodes: DendroNode[] = [];
+  const stubs: DendroStub[] = [];
+  const brackets: DendroBracket[] = [];
+
+  // THE ALIGNMENT INVARIANT. This strip exists to be x-aligned with the bars; one
+  // drawn against a stale center list is a LIE about which candidate descends
+  // from which. React can render N+1 rows a frame before the chart knows about
+  // them (react-chartjs-2 updates in an effect), so refuse to draw rather than
+  // draw wrong — a blank band for one frame is the correct answer.
+  if (rows.length === 0 || rows.length !== centers.length) {
+    return { nodes, stubs, brackets, height: FLOOR_H };
+  }
+
+  rows.forEach((r, i) => {
+    nodes.push({
+      key: r.key,
+      candidateId: r.candidate_id,
+      round: r.round,
+      label: r.label,
+      isWinner: r.is_winner,
+      i,
+      xf: centers[i]!,
+      y: NODE_ROW_Y,
+    });
+  });
+
+  // A round is a CONTIGUOUS block in the spine (round asc, then idx asc).
+  const bands = new Map<number, { first: number; last: number }>();
+  rows.forEach((r, i) => {
+    const b = bands.get(r.round);
+    if (b) b.last = i;
+    else bands.set(r.round, { first: i, last: i });
+  });
+
+  // Greedy packing. `rowRight[d]` = right edge of the last bracket placed on
+  // depth row d. Rounds are walked in ascending order, which IS left-edge order
+  // (the parent index never decreases), so "the lowest row that ends before this
+  // one starts" is optimal. Strict `<`: a bracket whose left edge merely touches
+  // the row's right edge would render as one merged beam, so it gets its own row.
+  const rowRight: number[] = [];
+  const place = (x1f: number, x2f: number): number => {
+    for (let d = 0; d < rowRight.length; d++) {
+      if (rowRight[d]! < x1f) {
+        rowRight[d] = x2f;
+        return d;
+      }
+    }
+    rowRight.push(x2f);
+    return rowRight.length - 1;
+  };
+
+  // The incumbent — the winner of the last ADVANCING round. A held round crowns
+  // nobody and so never becomes a parent: the next round still fans from this
+  // same node. `is_winner` already carries the held-round fact (a held round has
+  // no winner), so the flat spine is the only input this needs.
+  let parent: DendroNode | null = null;
+
+  for (const round of [...bands.keys()].sort((a, b) => a - b)) {
+    const band = bands.get(round)!;
+    const kids = nodes.slice(band.first, band.last + 1);
+    const lastKid = kids[kids.length - 1];
+    if (!lastKid) continue;
+
+    if (parent) {
+      const d = place(parent.xf, lastKid.xf);
+      const y = FIRST_ROW_Y + d * ROW_H;
+      brackets.push({ round, x1f: parent.xf, x2f: lastKid.xf, y, parentKey: parent.key });
+      stubs.push({ xf: parent.xf, y1: NODE_ROW_Y, y2: y, kind: "parent" });
+      for (const k of kids) stubs.push({ xf: k.xf, y1: y, y2: NODE_ROW_Y, kind: "child" });
+    }
+
+    const winner = kids.find((n) => n.isWinner);
+    if (winner) parent = winner;
+  }
+
+  const depth = rowRight.length;
+  return {
+    nodes,
+    stubs,
+    brackets,
+    height: depth === 0 ? FLOOR_H : FIRST_ROW_Y + (depth - 1) * ROW_H + BOTTOM_PAD,
+  };
+}

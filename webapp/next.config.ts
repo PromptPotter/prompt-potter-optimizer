@@ -19,7 +19,7 @@ const nextConfig: NextConfig = {
   typescript: { ignoreBuildErrors: true },
   // Auto-memoize components + hooks. Lets us drop the manual React.memo /
   // useMemo / useCallback wrappers in a follow-up audit; the FitnessChart /
-  // TrendChart / TopStrip / LineageTree render-cost guards still hold. Changes
+  // TrendChart / TopStrip / candidates-card render-cost guards still hold. Changes
   // runtime behaviour, so it's validated on the shipped artifact only.
   reactCompiler: deployBuild,
   // Emit .map files alongside minified .js in the static export so a live

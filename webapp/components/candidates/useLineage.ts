@@ -1,18 +1,18 @@
 "use client";
-// Tree + state for the campaign lineage card. Everything that is NOT geometry
-// (layout.ts), NOT markup (FamilyTree/Forest), and NOT the shared fetch/overlay
-// (lib/lineage-overlay) lives here: the per-cycle expand set, the derived forests
-// + natural width, and the empty-stub cleanup mutation. The campaign fetch and the
-// mask/lens divergence overlay are owned by `LineageOverlayProvider` and read via
-// `useLineageOverlay()` — the SINGLE source both this card and the per-candidate
-// fitness panel render. The tree is the settled (closed-round, origin-C0-included)
-// structure served by `/lineage`, revalidated on the dashboard change-signal; the
-// in-flight round shows in the Fitness bars, not here (one source per data class).
+// Tree + state for the candidates card's Forest view. Everything that is NOT
+// geometry (forest-layout.ts), NOT markup (CandidatesCard/Forest), and NOT the
+// shared fetch/overlay (lib/lineage-overlay) lives here: the derived forests, the
+// per-candidate value overlays, the fork map, and the empty-stub cleanup
+// mutation. The campaign fetch and the mask/lens divergence overlay are owned by
+// `LineageOverlayProvider` and read via `useLineageOverlay()` — the SINGLE source
+// both this view and the bars render. The tree is the settled (closed-round,
+// origin-C0-included) structure served by `/lineage`, revalidated on the
+// dashboard change-signal; the in-flight round shows in the bars + the Sequence
+// dendrogram, not here (one source per data class).
 //
-// The mental model is three files, one per concern:
-//   layout.ts    pure geometry   (tree → SVG coordinates)
-//   useLineage   tree + state    (expand set, forests, cleanup)  ← here
-//   FamilyTree   view            (card + viewport + Forest, presentational)
+// View state (which metric, which lanes are open) is NOT here — it belongs to the
+// card as a whole and lives in `candidates-store`, so the Sequence and Forest
+// views cannot disagree about which number they are painting.
 
 import { useCallback, useMemo, useState } from "react";
 import { postCleanupEmpty } from "@/lib/api";
@@ -21,6 +21,7 @@ import { candidateLabel, liveCandidateId } from "@/lib/candidate-label";
 import { accuracyBasisValue } from "@/lib/fitness";
 import {
   groupByRound,
+  primaryMetric,
   roundCandidates,
   type HeadlineMetric,
 } from "@/lib/derivations";
@@ -30,17 +31,14 @@ import { bumpRevalidation } from "@/lib/revalidate";
 import { useLineageOverlay } from "@/lib/lineage-overlay";
 import { useStableContent } from "@/lib/stable";
 import type { CandidateRow } from "@/lib/types";
+import { setCandidatesState, useCandidatesState } from "./candidates-store";
 import {
-  COL_W,
-  LEFT_PAD,
-  RIGHT_PAD,
   buildTree,
   countDescendants,
-  layout,
   type CycleDetail,
   type CycleNode,
   type DetailByCycle,
-} from "./layout";
+} from "./forest-layout";
 
 // Lineage snapshot → normalized STRUCTURE (no fitness value — that's the live
 // `valueByKey` overlay). Candidates already arrive sorted by rank; the display
@@ -60,9 +58,9 @@ function detailFromLineage(c: CampaignLineageCycle): CycleDetail {
 }
 
 // Live dashboard rows → the SAME normalized structure, for the in-view active
-// cycle. Sourced from `roundCandidates(dash)` (the fitness bars' source) so the
-// active cycle's tree includes the in-flight round and can't disagree with the
-// bars. Structure only — value rides `valueByKey`.
+// cycle. Sourced from `roundCandidates(dash)` (the bars' source) so the active
+// cycle's tree includes the in-flight round and can't disagree with them.
+// Structure only — value rides `valueByKey`.
 function detailFromRows(rows: CandidateRow[]): CycleDetail {
   return {
     rounds: [...groupByRound(rows).entries()]
@@ -102,28 +100,23 @@ export interface Lineage {
   detailByCycle: DetailByCycle;
   // Per-candidate fitness, keyed `{cycleId}::{candidateId}` — the live value
   // overlay painted onto nodes. NOT part of the geometry (so a value tick never
-  // re-lays-out the tree). Carries the percent metric the operator selected
-  // (accuracy, or composite on the active cycle); θ rides `thetaByKey`. Active
-  // cycle's values come from the live dashboard; other cycles from the settled
-  // /lineage (accuracy only). `undefined` for a node with no value yet.
+  // re-lays-out the tree). Carries the percent metric the operator selected;
+  // θ rides `thetaByKey`. `undefined` for a node with no value yet.
   valueByKey: ReadonlyMap<string, number | null>;
   // Same-key overlay of difficulty-adjusted ability θ — painted into node tooltips so a
   // θ-elected winner shown below a higher-accuracy sibling is explainable in place.
   thetaByKey: ReadonlyMap<string, number | null>;
+  // The card's primary metric — what a node LABEL shows. The bars can plot
+  // several metrics at once; a node paints one number, so it takes the first
+  // selected in canonical order.
+  metric: HeadlineMetric;
+  // `candidate_id` → the cycle forked from it (in-view cycle only). Drives the ⑂
+  // mark in the Sequence view, whose click frees the hierarchy into the Forest.
+  forkedFrom: ReadonlyMap<string, string>;
   expanded: ReadonlySet<string>;
   // In-place expand/collapse toggle for one cycle's lane (pure view state —
   // never changes the dashboard's selected cycle).
   onLaneActivate: (cycleId: string) => void;
-  // Natural px width of the widest forest — fed to the card so it sizes to the
-  // tree (the viewport's overflow hides this width from CSS).
-  naturalWidth: number;
-  // Operator-selected headline metric for the lineage node values, seeded from
-  // the served campaign default (`headlineMetricDefault`) and client-overridable
-  // via `setHeadlineMetric`. θ never forced — defaults to accuracy unless the
-  // campaign config says otherwise. The gate stays θ regardless of this choice.
-  headlineMetric: HeadlineMetric;
-  headlineMetricDefault: HeadlineMetric;
-  setHeadlineMetric: (m: HeadlineMetric) => void;
   totalDescendants: number;
   // Empty-state facts for the in-view cycle.
   viewedHasRounds: boolean;
@@ -139,15 +132,16 @@ export function useLineage({
   campaignId: string | null;
   cycleId: string | null;
 }): Lineage {
-  // Shared campaign lineage from the single fetch both this card and the fitness
-  // panel render (R-36). The mask/lens overlay fields (lens, divergence, …) are
-  // NOT re-exposed here — `FamilyTree` and `Forest` read them straight from
-  // `useLineageOverlay()`, so this hook owns only the tree/expand/cleanup state.
+  // Shared campaign lineage from the single fetch both views render (R-36). The
+  // mask/lens overlay fields (lens, divergence, …) are NOT re-exposed here — the
+  // card and `Forest` read them straight from `useLineageOverlay()`, so this hook
+  // owns only the tree/fork/cleanup state.
   const { data } = useLineageOverlay();
-  // The in-view cycle's live dashboard — the same source the fitness bars read,
-  // so the active cycle's lineage detail (structure + values) can't disagree
-  // with them. Available here: this card renders under CycleStreamProvider.
+  // The in-view cycle's live dashboard — the same source the bars read, so the
+  // active cycle's lineage detail (structure + values) can't disagree with them.
   const { dash } = useDashboard();
+  const { metrics, expanded, expandedForCampaign, expandedForCycle } = useCandidatesState();
+  const metric = primaryMetric(metrics);
 
   // The active (in-view) cycle's live candidate rows from dashboard.json —
   // includes the in-flight round. Computed once and shared by the structure
@@ -157,42 +151,30 @@ export function useLineage({
     [cycleId, dash],
   );
 
-  // Which fitness number the operator reads on the lineage nodes. Seeded from the
-  // served campaign default (CampaignConfig.headline_metric → dash.headline_metric);
-  // a manual pick overrides for the session. The gate is always θ — this is pure
-  // display, so θ ("ability") is offered but never the forced default.
-  const headlineMetricDefault: HeadlineMetric = dash?.headline_metric ?? "accuracy";
-  const [metricOverride, setMetricOverride] = useState<HeadlineMetric | null>(null);
-  const headlineMetric = metricOverride ?? headlineMetricDefault;
-
-  // Independent per-cycle expand state — one unified tree where every cycle
-  // opens its intra-cycle candidate cladogram in place, any number at once.
-  // Ephemeral (no persistence). A campaign switch resets to the clean view (the
-  // in-view cycle expanded); selecting another fork ensure-expands it.
-  const [expanded, setExpanded] = useState<Set<string>>(() =>
-    cycleId ? new Set([cycleId]) : new Set(),
-  );
-  const [prevCampaign, setPrevCampaign] = useState(campaignId);
-  const [prevCycle, setPrevCycle] = useState(cycleId);
-  if (campaignId !== prevCampaign) {
-    setPrevCampaign(campaignId);
-    setPrevCycle(cycleId);
-    setExpanded(cycleId ? new Set([cycleId]) : new Set());
-  } else if (cycleId !== prevCycle) {
-    setPrevCycle(cycleId);
-    if (cycleId) {
-      setExpanded((prev) => (prev.has(cycleId) ? prev : new Set(prev).add(cycleId)));
-    }
+  // Render-phase expand reset (React's sanctioned adjust-state-on-prop-change).
+  // A campaign switch resets to the clean view (the in-view cycle expanded);
+  // selecting another fork ensure-expands it. The `expandedForCycle` latch is
+  // what stops a manual collapse of the in-view lane from being re-expanded on
+  // the next render.
+  if (campaignId !== expandedForCampaign) {
+    setCandidatesState({
+      expanded: cycleId ? new Set([cycleId]) : new Set(),
+      expandedForCampaign: campaignId,
+      expandedForCycle: cycleId,
+    });
+  } else if (cycleId && cycleId !== expandedForCycle) {
+    setCandidatesState({
+      expanded: new Set(expanded).add(cycleId),
+      expandedForCycle: cycleId,
+    });
   }
 
   const onLaneActivate = useCallback((cid: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(cid)) next.delete(cid);
-      else next.add(cid);
-      return next;
-    });
-  }, []);
+    const next = new Set(expanded);
+    if (next.has(cid)) next.delete(cid);
+    else next.add(cid);
+    setCandidatesState({ expanded: next });
+  }, [expanded]);
 
   // The campaign's root cycles — one cladogram each. A campaign mints exactly
   // one root today; the list shape survives so lineage stays id-ordered.
@@ -225,6 +207,21 @@ export function useLineage({
   );
   const detailByCycle: DetailByCycle = useMemo(() => new Map(detailEntries), [detailEntries]);
 
+  // Which candidates of the IN-VIEW cycle a sibling was cut from. The Sequence
+  // view has no lanes to show a fork in — it plots one cycle — so it marks the
+  // candidate the fork left from and offers the jump into the Forest, where the
+  // sibling actually has somewhere to be drawn.
+  const forkedFrom = useMemo<ReadonlyMap<string, string>>(() => {
+    const m = new Map<string, string>();
+    if (!cycleId) return m;
+    for (const c of data?.cycles ?? []) {
+      if (c.immediate_parent_cycle_id !== cycleId) continue;
+      if (!c.fork_from_candidate_id) continue;
+      m.set(c.fork_from_candidate_id, c.cycle_id);
+    }
+    return m;
+  }, [data, cycleId]);
+
   // Per-candidate percent-metric overlay, keyed `{cycleId}::{candidateId}`.
   // `/lineage` serves `composite_fitness` per candidate (verbatim from the
   // dashboard round summary), so settled/sibling cycles honor the composite
@@ -232,7 +229,7 @@ export function useLineage({
   // nothing recomputed client-side. θ is a separate overlay (`thetaByKey`)
   // since it is a logit, not a percent. Deliberately NOT content-stabilized:
   // it updates every poll, but only painted node text reads it.
-  const usesComposite = headlineMetric === "composite";
+  const usesComposite = metric === "composite";
   const valueByKey = useMemo<ReadonlyMap<string, number | null>>(() => {
     const m = new Map<string, number | null>();
     // Accuracy view: the WINNER (lineage spine) paints the round's cumulative
@@ -293,18 +290,6 @@ export function useLineage({
       .filter((f): f is { rootId: string; tree: CycleNode } => f !== null);
   }, [data, rootCycleIds]);
 
-  // Natural px width of the widest session forest — surfaced so the card can
-  // size to the tree (the viewport's overflow:auto hides this width from CSS).
-  const naturalWidth = useMemo(() => {
-    let w = 0;
-    for (const f of forests) {
-      const { maxCol } = layout(f.tree, detailByCycle, expanded);
-      const fw = LEFT_PAD + (maxCol + 1) * COL_W + RIGHT_PAD;
-      if (fw > w) w = fw;
-    }
-    return w;
-  }, [forests, detailByCycle, expanded]);
-
   // Empty-state facts for the in-view cycle (distinguishes an inherited fork
   // from a fresh cycle waiting for round 1).
   const viewedDetail = cycleId ? detailByCycle.get(cycleId) : undefined;
@@ -364,12 +349,10 @@ export function useLineage({
     detailByCycle,
     valueByKey,
     thetaByKey,
-    headlineMetric,
-    headlineMetricDefault,
-    setHeadlineMetric: setMetricOverride,
+    metric,
+    forkedFrom,
     expanded,
     onLaneActivate,
-    naturalWidth,
     totalDescendants: forests.reduce((n, f) => n + countDescendants(f.tree), 0),
     viewedHasRounds,
     isInheritedSibling,

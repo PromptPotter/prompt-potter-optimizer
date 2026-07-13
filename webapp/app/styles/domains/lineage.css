@@ -14,7 +14,7 @@
 .lineage-node:not(.selected) .lineage-label{fill:var(--color-accent)}
 .lineage-node.selected .lineage-stub{stroke:var(--color-selection);stroke-width:3}
 .lineage-node.selected .lineage-label{fill:var(--color-selection);font-weight:600}
-/* Scoring inspector — embedded inside the LineageTree card itself
+/* Scoring inspector — its own row under the candidates card
    (not a sibling card). Rendered below the SVG via a divider, so the
    summary + Endorse & fork button surface inside the lineage block
    the operator just clicked. */

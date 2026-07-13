@@ -39,7 +39,7 @@ export function RoundSamplesView() {
   const [candFilter, setCandFilter] = useState<string>("all");
 
   // Candidate list for this round — single source of truth shared with
-  // LineageTree and FitnessPanel via the spine hook. Round 0 is the origin (one
+  // the candidates card via the spine hook. Round 0 is the origin (one
   // candidate, "C0") and shows its per-sample stream from round_0000.json like
   // any round.
   const { byRound } = useRoundCandidates();
@@ -58,7 +58,7 @@ export function RoundSamplesView() {
     const out: { candidate: CandidateRow; samples: SampleRow[] }[] = [];
     for (const c of candidates) {
       // `samplesForRow` selects live vs historical off the row's own `source`
-      // tag (the spine sets it) — same routing FitnessPanel's bars use, never a
+      // tag (the spine sets it) — same routing the candidates card's bars use, never a
       // merge. `roundDoc` is null on the live round (the fetch is idled), and
       // an in-flight row reads `dash`, so the source is unambiguous.
       const raw = samplesForRow(c, dash, roundDoc);

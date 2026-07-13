@@ -1,0 +1,97 @@
+/* Chip primitive — a small pressable toggle. Base ported verbatim from the old
+   global `.fitness-chip` so the look is unchanged; it is scoped here now instead
+   of being a global class any surface could reach for. */
+
+.chip {
+  /* Never shrink. A toolbar that squeezes its buttons to fit is lying about how
+     much room it has; better to overflow visibly and be fixed. */
+  flex: 0 0 auto;
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  padding: 3px 9px;
+  border-radius: var(--border-radius-md);
+  background: var(--color-background-secondary);
+  color: var(--color-text-secondary);
+  border: 0.5px solid var(--color-border);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+/* Icon-only: square, so a row of them reads as a toolbar rather than a row of
+   pills. The glyph inherits `currentColor`, so the on/hover states just work. */
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+}
+
+.chip:hover:not(:disabled) {
+  background: var(--color-background-hover);
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
+}
+
+.chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.on {
+  background: var(--color-background-tint-active);
+  color: var(--color-accent);
+  border-color: rgba(var(--color-accent-rgb), 0.55);
+}
+
+.group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+/* Joined: facets of ONE concept, so one frame around the set and no borders
+   between them — three separately outlined pills would read as three unrelated
+   buttons. Square, deliberately: a rounded box reads as a button, and this is a
+   field of choices, not a thing you press. */
+.joined {
+  gap: 0;
+  border: 0.5px solid var(--color-border);
+  border-radius: 0;
+  overflow: hidden;
+}
+
+.joined .chip {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  /* Reserve the underline's height on every chip, so nothing shifts when one
+     lights up. */
+  border-bottom: 2px solid transparent;
+  padding-bottom: 1px;
+}
+
+.joined .chip:hover:not(:disabled) {
+  background: var(--color-background-hover);
+  border-bottom-color: var(--color-border);
+}
+
+/* On = an inset frame plus a fat underline. No fill swap: the chips sit in one
+   box, and repainting a cell's background inside it reads as a stray button. */
+.joined .on {
+  background: var(--color-background-tint-active);
+  color: var(--color-accent);
+  box-shadow: inset 0 0 0 1px rgba(var(--color-accent-rgb), 0.35);
+  border-bottom-color: var(--color-accent);
+}
+
+.groupLabel {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+  font-weight: 600;
+}

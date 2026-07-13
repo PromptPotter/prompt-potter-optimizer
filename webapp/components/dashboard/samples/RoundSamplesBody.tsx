@@ -2,8 +2,15 @@
 import type { CandidateRow, SampleRow, SelectedCandidate } from "@/lib/types";
 import { SampleRowItem } from "./SampleRowItem";
 import { fmtPct0 } from "@/lib/format";
+import { SegmentedControl, type Segment } from "@/components/ui";
 
 export type StatusFilter = "all" | "hit" | "miss";
+
+const STATUS_FILTERS: readonly Segment<StatusFilter>[] = [
+  { value: "all", label: "ALL" },
+  { value: "hit", label: "HIT" },
+  { value: "miss", label: "MISS" },
+];
 
 // Cap on rendered rows per candidate group so the DOM stays bounded
 // even on long rounds. Operator can expand the candidate to see all
@@ -54,18 +61,12 @@ export function RoundSamplesBody({
             </option>
           ))}
         </select>
-        <div role="group" className="rsv-toggle" aria-label="HIT/MISS filter">
-          {(["all", "hit", "miss"] as StatusFilter[]).map((f) => (
-            <button
-              key={f}
-              type="button"
-              className={statusFilter === f ? "on" : ""}
-              onClick={() => onStatusFilter(f)}
-            >
-              {f.toUpperCase()}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          options={STATUS_FILTERS}
+          value={statusFilter}
+          onChange={onStatusFilter}
+          ariaLabel="HIT/MISS filter"
+        />
         <span className="rsv-count">{totalRows} samples</span>
       </div>
       <div className="rsv-groups">

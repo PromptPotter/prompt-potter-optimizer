@@ -8,6 +8,9 @@
 /* Workflow canvas — sized small. Pipeline topology is reference info,
    not a primary view; cap the canvas so it doesn't take a third of the
    page. The SVG aspect-locks; cap width → height drops in lockstep. */
+/* Sizes to its canvas, as it always did. The round axis now lives in the toolbar,
+   but its scroller is capped (below) rather than allowed to stretch the card —
+   otherwise a 100-round campaign would drag the whole card to full width. */
 .workflow-card{background:var(--color-background-primary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-lg);overflow:hidden;margin-bottom:14px;width:fit-content;max-width:100%}
 /* Running cycle (live + fresh connection): wash the whole card green and
    weakly pulse so the optimizer reads as "active" at a glance. Neutralised
@@ -15,7 +18,25 @@
 .workflow-card.running{border-color:var(--color-success-border);background:var(--color-success-bg);animation:wf-running-pulse 2s ease-in-out infinite}
 .workflow-card.running .workflow-canvas-bg{background-color:var(--color-success-bg)}
 @keyframes wf-running-pulse{0%,100%{box-shadow:0 0 0 0 rgba(var(--color-success-rgb),0)}50%{box-shadow:0 0 14px 1px rgba(var(--color-success-rgb),0.35)}}
-.workflow-toolbar{padding:6px 12px;border-bottom:0.5px solid var(--color-border);display:flex;align-items:center;gap:8px;font-size:12px;color:var(--color-text-secondary)}
+.workflow-toolbar{padding:6px 12px;border-bottom:0.5px solid var(--color-border);display:flex;align-items:center;gap:10px;font-size:12px;color:var(--color-text-secondary)}
+.workflow-title{flex:0 0 auto;font-weight:600}
+
+/* The round axis, in the toolbar of the card it scopes — one circle per L1
+   round, plus a LIVE pill for the in-flight one. It sits here, not in a panel
+   of its own, because the optimizer can only ever depict ONE round: "which
+   round" is this card's scope, not a free-floating dashboard axis. The scroller
+   takes the slack (100 rounds = 100 circles) and keeps the toolbar one line. */
+.round-axis{display:flex;align-items:center;gap:8px;flex:0 1 auto;min-width:0}
+.round-axis-label{font-size:10px;letter-spacing:.08em;color:var(--color-text-tertiary);text-transform:uppercase;font-weight:600;flex:0 0 auto}
+/* Capped, not stretchy: the card sizes to its canvas, so a long campaign scrolls
+   its rounds inside this box instead of widening everything. */
+.round-axis-scroll{display:flex;align-items:center;gap:5px;min-width:0;max-width:260px;overflow-x:auto;scrollbar-width:thin;padding:2px 0}
+.round-tab{flex:0 0 auto;min-width:26px;height:26px;padding:0 6px;border-radius:13px;border:1px solid var(--color-border);background:transparent;color:var(--color-text-secondary);font-family:var(--font-mono);font-size:12px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;line-height:1;transition:background-color 100ms,color 100ms,border-color 100ms}
+.round-tab:hover{color:var(--color-text-primary);border-color:var(--color-text-secondary)}
+.round-tab.active{background:var(--color-accent);color:var(--color-text-on-accent);border-color:var(--color-accent);font-weight:600}
+.round-tab-live{padding:0 10px;font-weight:600;gap:6px}
+.round-tab-live-dot{width:6px;height:6px;border-radius:50%;background:var(--color-success);box-shadow:0 0 4px var(--color-success);display:inline-block;animation:round-tab-live-pulse 1.6s ease-in-out infinite}
+@keyframes round-tab-live-pulse{0%,100%{opacity:.5}50%{opacity:1}}
 .workflow-canvas-bg{background:var(--color-background-tertiary);background-image:radial-gradient(circle,var(--color-border) 1px,transparent 1px);background-size:24px 24px;width:100%;display:flex;align-items:center;justify-content:center}
 /* One compact wide-short canvas at every width — aspect-ratio mirrors
    CANVAS_W/CANVAS_H. Keeps the optimizer card short on desktop too. */

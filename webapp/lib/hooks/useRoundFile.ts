@@ -2,7 +2,7 @@
 // Lazy per-round file fetch. Deep audit surfaces (FreqChart bucket data,
 // ScoringInspector composite + hits, OptimizerNodeDetail node blocks) need
 // one round_NNNN.json at a time — not the full eager array. The summary
-// surfaces (FitnessPanel, TrendChart, TopStrip sparkline, LineageTree) read
+// surfaces (the candidates card, TrendChart, TopStrip sparkline) read
 // `dash.rounds[]` directly and never hit this hook.
 //
 // Addressed by the viewed CYCLE PATH, not bare `(campaign, cycle)` ids: the

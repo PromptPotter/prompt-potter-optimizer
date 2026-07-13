@@ -3,7 +3,7 @@ import { TERMS } from "@/lib/terms";
 import { type Row } from "./meta";
 import { whatifIconFor } from "./icons";
 import { DEFAULT_WHATIF_WEIGHT } from "./fitness-bars";
-import { type BarSlot } from "./FitnessChart";
+import type { CandidateView } from "@/lib/types";
 import { FitnessRankSummary } from "./FitnessRankSummary";
 
 interface Props {
@@ -11,7 +11,7 @@ interface Props {
   selected: Set<string>;
   inActive: Set<string>;
   weights: Readonly<Record<string, number>>;
-  bars: BarSlot[];
+  views: CandidateView[];
   onToggle: (name: string) => void;
   onWeight: (name: string, weight: number) => void;
 }
@@ -25,7 +25,7 @@ export function WhatIfGrid({
   selected,
   inActive,
   weights,
-  bars,
+  views,
   onToggle,
   onWeight,
 }: Props) {
@@ -106,7 +106,7 @@ export function WhatIfGrid({
         </div>
       </div>
       <div className="whatif-summary">
-        <FitnessRankSummary bars={bars} selected={selected} />
+        <FitnessRankSummary views={views} selected={selected} />
       </div>
     </div>
   );

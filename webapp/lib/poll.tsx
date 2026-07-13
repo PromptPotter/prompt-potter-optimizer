@@ -104,7 +104,7 @@ interface L1ScoreInput {
 
 // Shared frozen empty result for the no-candidate path so every consumer
 // gets a stable reference. A fresh `[]` per call gave each poll a new array
-// identity, churning the FitnessPanel Set chain
+// identity, churning the candidates card's Set chain
 // (realApplicable→viewApplicable→inActive) into an unbounded setState loop
 // once a real cycleId resolved post-login.
 const NO_CANDIDATES: LiveCandidate[] = Object.freeze([] as LiveCandidate[]) as LiveCandidate[];

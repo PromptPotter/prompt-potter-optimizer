@@ -13,8 +13,10 @@ import { cx } from "@/lib/cx";
 import { getCss } from "@/lib/theme";
 import { useSelection } from "@/lib/SelectionContext";
 import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useRoundNodes } from "@/lib/hooks/useRoundNodes";
 import { CopyButton } from "@/components/ui";
-import type { NodeDataLike, PipelineDoc } from "./types";
+import { RoundAxis } from "./RoundAxis";
+import type { PipelineDoc } from "./types";
 
 // Edge variants — collapses three parallel switches (stroke colour key,
 // dasharray, arrowhead marker id) into one row per kind. Add a kind:
@@ -49,11 +51,12 @@ export function WorkflowCanvas({ pipeline }: Props) {
   const canvasW = CANVAS_W;
   const canvasH = CANVAS_H;
   const activeId = activeNodeId(dash?.in_flight?.node ?? null, dash?.state);
-  // Node selection rides the shared SelectionContext so the Now lane can
-  // swap the 3-col row for OptimizerNodeDetail when a node is picked. The
-  // viewed-round axis is owned by RoundTabsStrip (same tab) — the canvas
-  // reads node selection only.
+  // The optimizer can only ever depict ONE round, so the round axis is this
+  // card's own scope — its picker sits in the toolbar and its dots, labels and
+  // pulse all read the round it resolves. Node selection rides the shared
+  // SelectionContext so the Now lane can swap in OptimizerNodeDetail below.
   const { node: selected, setSelectionForNode: setSelected } = useSelection();
+  const { nodes: roundNodes, round: viewedRound, isLiveRound: viewingLive } = useRoundNodes();
   // Bumped by the MutationObserver below on `data-theme` flips; drives the
   // `colors` memo so SVG strokes/labels re-derive from the new CSS vars.
   const [themeTick, setThemeTick] = useState(0);
@@ -84,15 +87,13 @@ export function WorkflowCanvas({ pipeline }: Props) {
     return (
       <div className="workflow-card">
         <div className="workflow-toolbar">
-          <span style={{ flex: 1 }}>Optimizer</span>
+          <span className="workflow-title">Optimizer</span>
           <span id="wf-status" style={{ color: "var(--color-text-tertiary)" }}>● topology pending</span>
         </div>
         <div className="workflow-canvas-bg" style={{ minHeight: 200 }} />
       </div>
     );
   }
-
-  const currentNodes = (dash?.current_round.nodes ?? {}) as Record<string, NodeDataLike>;
 
   // Node id → label, so a terminal edge (one whose target has no layout
   // position, e.g. `output`) can borrow that node's label ("Best SP")
@@ -106,7 +107,17 @@ export function WorkflowCanvas({ pipeline }: Props) {
   // the pulse. The SVG is aria-hidden, so this toolbar text (in an aria-live
   // region) is the channel that announces *which* node is live; it also makes
   // the signal legible at a glance and under prefers-reduced-motion (no pulse).
-  const activeLabel = isLive && activeId ? nodeLabel[activeId] : null;
+  // Gated on `viewingLive`: on a historical round there is no live node to name.
+  const activeLabel = isLive && viewingLive && activeId ? nodeLabel[activeId] : null;
+  const status = !dash
+    ? "pending"
+    : !viewingLive
+      ? `round ${viewedRound}`
+      : isLive
+        ? activeLabel
+          ? `live · ${activeLabel}`
+          : "live"
+        : "idle";
 
   const markerColors: Record<string, string> = {
     arrh: colors.txt,
@@ -116,16 +127,17 @@ export function WorkflowCanvas({ pipeline }: Props) {
   };
 
   return (
-    <div className={cx("workflow-card", isLive && "running")}>
+    <div className={cx("workflow-card", isLive && viewingLive && "running")}>
       <div className="workflow-toolbar">
-        <span style={{ flex: 1 }}>Optimizer</span>
-        <span style={{ color: isLive ? colors.ok : colors.txt }} aria-live="polite">
-          ● {isLive ? (activeLabel ? `live · ${activeLabel}` : "live") : dash ? "idle" : "pending"}
+        <span className="workflow-title">Optimizer</span>
+        <RoundAxis />
+        <span
+          style={{ color: isLive && viewingLive ? colors.ok : colors.txt }}
+          aria-live="polite"
+        >
+          ● {status}
         </span>
-        <CopyButton
-          data={dash?.current_round ?? view}
-          title="Copy the optimizer round as JSON"
-        />
+        <CopyButton data={roundNodes} title="Copy the viewed round's nodes as JSON" />
       </div>
       <div className="workflow-canvas-bg">
         <div className="workflow-canvas">
@@ -165,12 +177,15 @@ export function WorkflowCanvas({ pipeline }: Props) {
             {view.nodes.map((n) => {
               const pos = layout[n.id];
               if (!pos) return null;
-              const data = currentNodes[n.id];
+              const data = roundNodes[n.id];
               const hasData = !!data;
-              // Gated on `isLive` so a frozen canvas (process killed,
-              // freshness lapsed) stops pulsing the last phase's node —
-              // `dash.state` stays at the last phase but no node is "active".
-              const isActive = isLive && activeId === n.id;
+              // Gated on `isLive` so a frozen canvas (process killed, freshness
+              // lapsed) stops pulsing the last phase's node — `dash.state` stays
+              // at the last phase but no node is "active". Gated on `viewingLive`
+              // because the round axis now lives in this card's own toolbar: with
+              // round 2 picked while round 5 runs, a pulsing dot would be claiming
+              // round 5's liveness for round 2's picture.
+              const isActive = isLive && viewingLive && activeId === n.id;
               const isSelected = selected === n.id;
               const isIo = n.kind === "io";
               const dotCls = [

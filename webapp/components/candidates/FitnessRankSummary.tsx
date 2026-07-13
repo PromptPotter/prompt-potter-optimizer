@@ -1,4 +1,4 @@
-import { type BarSlot } from "./FitnessChart";
+import type { CandidateView } from "@/lib/types";
 import { fmtNum } from "@/lib/format";
 
 // 1-based rank of each line by value descending; lines with a null value
@@ -29,13 +29,13 @@ function topByFitness(lines: { key: string; v: number | null }[]): string | null
 // actual composite rank against its what-if rank and flags whether the top
 // fitness bar flips. Spans every bar including origin and historical rounds.
 export function FitnessRankSummary({
-  bars,
+  views,
   selected,
 }: {
-  bars: BarSlot[];
+  views: CandidateView[];
   selected: Set<string>;
 }) {
-  if (bars.length === 0) {
+  if (views.length === 0) {
     return (
       <span className="empty">
         Evaluator registry loads with round 1, then candidates surface here as scoring completes — toggle these on/off to preview alternative scoring without re-running.
@@ -49,7 +49,7 @@ export function FitnessRankSummary({
       </span>
     );
   }
-  const lines = bars.map((b) => ({
+  const lines = views.map((b) => ({
     key: b.key,
     label: b.label,
     actual: b.composite ?? null,

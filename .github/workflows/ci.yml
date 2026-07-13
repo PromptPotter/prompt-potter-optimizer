@@ -134,17 +134,18 @@ jobs:
       # `roundCandidates(dash)` (sole consumer of `liveL1Candidates`) +
       # the `useRoundCandidates` hook. Two surfaces re-deriving the same
       # candidate list independently is what produced the lineage/fitness
-      # alignment bug; one centralized spine makes that drift impossible.
-      # Single-field reads (`dash.origin`, `roundOf(dash)`) remain
+      # alignment bug; one centralized spine makes that drift impossible —
+      # and is what lets the bars and the dendrogram beneath them share one
+      # x-axis. Single-field reads (`dash.origin`, `roundOf(dash)`) remain
       # allowed — they don't replicate the spine. Migration of the
       # remaining `liveL1Candidates` sites (FreqChart per-sample bucket,
-      # HardSamplesHeatmap per-candidate marks, FitnessPanel evaluator
+      # HardSamplesHeatmap per-candidate marks, CandidatesCard evaluator
       # union) is a follow-up; each site needs its own derivation, not a
       # shared one.
       - name: Anti-rot — no liveL1Candidates outside the spine
         run: |
           violations=$(grep -RnlE 'liveL1Candidates' components/ \
-            | grep -vE 'FreqChart\.tsx|HardSamplesHeatmap\.tsx|FitnessPanel\.tsx' \
+            | grep -vE 'FreqChart\.tsx|HardSamplesHeatmap\.tsx|CandidatesCard\.tsx' \
             || true)
           if [ -n "$violations" ]; then
             echo "❌ liveL1Candidates is the candidate-spine constructor — only roundCandidates() and the three named follow-up sites may call it."

@@ -10,7 +10,7 @@ import { TERMS, targetNodeIds } from "@/lib/terms";
 import { headlineStats, isSelfOptimization, readSpend } from "@/lib/derivations";
 import { fmtText, fmtDuration, fmtUsd, fmtTokens, fmtPct0 } from "@/lib/format";
 import { Switch } from "@/components/ui";
-import { FitnessPanel } from "@/components/whatif/FitnessPanel";
+import { CandidatesCard } from "@/components/candidates/CandidatesCard";
 import { HardSamplesHeatmap } from "@/components/dashboard/samples/HardSamplesHeatmap";
 import { SelfOptSamplesPointer } from "@/components/dashboard/samples/SelfOptSamplesPointer";
 import { CyclePicker } from "@/components/shell/CyclePicker";
@@ -276,7 +276,7 @@ export function ChatPane({
               <div className="row"><span className="lbl">Token cap</span><span className="val">{budgetTokens != null ? fmtTokens(budgetTokens) : "Uncapped"}</span></div>
             </div>
             <div className="job-whatif">
-              <FitnessPanel />
+              <CandidatesCard />
             </div>
             <div className="job-section" title={TERMS.newjob_bar_adjust}>
               <div className="section-title">Finishing criteria</div>

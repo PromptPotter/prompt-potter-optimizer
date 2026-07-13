@@ -1,0 +1,22 @@
+/* Toolbar primitive — a single, non-wrapping row of icon controls. */
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 3px;
+  background: var(--color-border);
+  flex: 0 0 auto;
+}
+
+.spacer {
+  flex: 1 1 auto;
+  min-width: 8px;
+}

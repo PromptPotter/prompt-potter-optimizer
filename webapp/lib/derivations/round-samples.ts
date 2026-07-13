@@ -7,7 +7,7 @@
 // CLAUDE.md rule: live vs historical never merge. These functions are
 // deliberately separate, with no fallback chain between them — `samplesForRow`
 // SELECTS one based on the row's `source` tag (never merges), so every consumer
-// (FitnessPanel's bars, RoundSamplesView's groups) routes the same way.
+// (the candidates card's bars, RoundSamplesView's groups) routes the same way.
 
 import {
   liveCandidate,

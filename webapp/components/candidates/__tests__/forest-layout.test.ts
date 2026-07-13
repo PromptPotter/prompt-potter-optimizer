@@ -11,7 +11,7 @@ import {
   placeNodes,
   type CycleDetail,
   type DetailByCycle,
-} from "../layout";
+} from "../forest-layout";
 
 // --- builders -------------------------------------------------------------
 

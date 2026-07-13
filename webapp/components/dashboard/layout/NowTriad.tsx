@@ -5,24 +5,31 @@ import {
   WorkflowCanvas,
   type PipelineDoc,
 } from "@/components/workflow";
-import { FitnessPanel } from "@/components/whatif/FitnessPanel";
-import { FamilyTree } from "@/components/dashboard/lineage/FamilyTree";
+import { CandidatesCard } from "@/components/candidates/CandidatesCard";
+import { ForestCard } from "@/components/candidates/ForestCard";
+import { useCandidatesState } from "@/components/candidates/candidates-store";
 import { ScoringInspector } from "@/components/dashboard/scoring/ScoringInspector";
 import { useSelection } from "@/lib/SelectionContext";
 
-// The Now lane's main row + drill-down. Renders the Fitness + Lineage row,
-// then (when a candidate is selected) the Scoring inspector on its own
-// full-width row, then the optimizer pipeline canvas. The per-round samples
-// view is no longer a standalone card — it lives inside the l1_score node
-// panel (OptimizerNodeDetail), surfaced only when that node is clicked.
+// The Now lane: the Optimizer card (round axis + pipeline canvas) and the
+// Candidates card (bars + genealogy) share one row, optimizer first — you read
+// what the loop is DOING, then what it PRODUCED. Both size to their content, so
+// the row wraps on its own: the moment Candidates needs the full band (Forest
+// view, or What-If opening its second column), it drops to the next line instead
+// of squeezing the optimizer. No breakpoint decides that; the content does.
+//
+// The drill-downs then stack full-width below: the Scoring inspector when a
+// candidate is selected, the node panel when an optimizer node is. The per-round
+// samples view is not a standalone card either — it lives inside the l1_score
+// node panel, surfaced only when that node is clicked.
 //
 // Every region reads its own state from context (`useDashboard`,
 // `useWorkspace`, `useSelection`); the only thing threaded is `pipeline` (a
 // one-shot topology read with no context home). A click in any one surface
-// re-anchors the others through `useSelection` — fitness ↔ lineage ↔ inspector
-// ↔ samples stay structurally locked together. The lineage fetch + its
-// mask/lens divergence overlay are owned by `LineageOverlayProvider` at the
-// shell root.
+// re-anchors the others through `useSelection`: picking a candidate moves the
+// round axis, so the Optimizer card follows to the round that PRODUCED it. The
+// lineage fetch + its mask/lens divergence overlay are owned by
+// `LineageOverlayProvider` at the shell root.
 
 interface Props {
   pipeline: PipelineDoc | null;
@@ -31,12 +38,18 @@ interface Props {
 export function NowTriad({ pipeline }: Props) {
   const { candidate, node, setSelectionForCandidate, setSelectionForNode } =
     useSelection();
+  const { showForest } = useCandidatesState();
   return (
     <>
-      <div className="dash-row-triad">
-        <FitnessPanel />
-        <FamilyTree />
+      <div className="dash-now-row">
+        <WorkflowCanvas pipeline={pipeline} />
+        <CandidatesCard />
       </div>
+      {/* The lineage forest is its OWN card, opened by the toggle beside the
+          dendrogram. It shares no axis with the bars — it is a cladogram of
+          CYCLES on its own round-column grid — so it gets its own box and its
+          own width rather than being bound to the chart's geometry. */}
+      {showForest && <ForestCard />}
       {candidate && (
         <div className="card inspector-row">
           <ScoringInspector
@@ -45,7 +58,6 @@ export function NowTriad({ pipeline }: Props) {
           />
         </div>
       )}
-      <WorkflowCanvas pipeline={pipeline} />
       {node && isOptimizerNodeId(node) && (
         <OptimizerNodeDetail
           id={node}

@@ -6,7 +6,6 @@
    slanted parent-to-child branches, sharp corners, no dots. Winner gets
    slightly heavier stroke. Stroke color uses --color-text-primary so the
    tree reads black on light theme, white on dark. */
-.lineage-card{padding:14px 16px}
 .lineage-stub{stroke:var(--color-text-primary);stroke-width:1;fill:none}
 .lineage-stub.winner{stroke-width:1.6}
 .lineage-label{fill:var(--color-text-secondary);font-size:11px;letter-spacing:.02em}
@@ -27,7 +26,7 @@
    beyond which it scrolls (overflow:auto), so a deep forest can't push the rest
    of the dashboard off-screen. The operator can still drag the native grip
    (resize:vertical, house style — see .hs-block) to pin a height; a campaign
-   switch remounts the box (FamilyTree keys it on campaignId) so a dragged
+   switch remounts the box (the card keys it on campaignId) so a dragged
    height + scroll reset instead of leaking into the next campaign. Each <svg>
    renders at its intrinsic px size; a tree wider than the box scrolls
    horizontally. resize is a no-op on touch Safari, which degrades to the
@@ -115,20 +114,11 @@
   .lineage-node.mask-divergence .lineage-stub{animation:none;opacity:1}
 }
 /* Scoring-lens selector in the card header. */
-.lineage-lens{display:inline-flex;align-items:center;gap:4px}
-.lineage-lens-label{font-size:11px;color:var(--color-text-tertiary);text-transform:none;letter-spacing:0}
-.lineage-lens-select{background:transparent;border:1px solid var(--color-border);border-radius:4px;color:var(--color-text-secondary);cursor:pointer;font:inherit;font-size:11px;padding:1px 4px}
-.lineage-lens-select:disabled{opacity:0.6;cursor:default}
-/* Headline-metric selector (Acc / Comp / θ) — reuses the shared `.fitness-chip`
-   styling for the three toggle buttons; this only lays out the group + label. */
-.lineage-metric{display:inline-flex;align-items:center;gap:3px}
-.lineage-metric-label{font-size:11px;color:var(--color-text-tertiary);text-transform:none;letter-spacing:0;margin-right:1px}
 /* Red "mask active" tag in the card title — signals the lineage is showing a
    counterfactual projection, not the realized record. */
 .lineage-title{display:inline-flex;align-items:center;gap:8px}
 .lineage-mask-tag{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:#fff;background:var(--color-danger);border-radius:4px;padding:1px 6px;line-height:1.5;font-family:var(--font-mono)}
 /* Header right-side cluster: badge + "Clean up N stubs" button. */
-.family-cladogram-head-meta{display:inline-flex;align-items:center;gap:8px}
 .family-cladogram-cleanup-btn{background:transparent;border:1px solid var(--color-border);border-radius:4px;color:var(--color-text-secondary);cursor:pointer;font:inherit;font-size:11px;padding:2px 8px;text-transform:none;letter-spacing:0}
 .family-cladogram-cleanup-btn:hover{color:var(--color-danger);border-color:var(--color-danger)}
 .family-cladogram-cleanup-done{font-size:11px;color:var(--color-text-tertiary);font-style:italic;text-transform:none;letter-spacing:0}

@@ -1,5 +1,5 @@
-// The single round-axis reader for every "advertise a live round" surface
-// (RoundTabsStrip's pill, WorkflowCanvas's "(live)" picker option). Pins the
+// The single round-axis reader for every "advertise a live round" surface —
+// today the `RoundAxis` in the optimizer card's toolbar. Pins the
 // contract: `completed` is ascending closed rounds; `live` is the in-flight
 // round number ONLY when the optimizer is actually running AND that round
 // hasn't already closed into `dash.rounds[]`.

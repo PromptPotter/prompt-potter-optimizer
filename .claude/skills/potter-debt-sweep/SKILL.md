@@ -81,7 +81,7 @@ clean, mechanical, gate-safe change. **HOLD** (file to backlog, do not edit) any
   schema round-trips. *(2026-06-11: `DatasetSummary.splits` + `TaskDecomposition.FIELDS`
   are read by the HITL notebook; `FewShotExample.explanation` round-trips via the L1
   `FewShotExample(**ex)` schema — all three looked "dead" and were NOT.)*
-- **A feature / open lane**, not cleanup — e.g. the `whatif/` mask write-side is Lane C8.
+- **A feature / open lane**, not cleanup — e.g. the What-If mask write-side is Lane C8.
 - **A root-fix that lives upstream (R-08)** — e.g. a webapp fallback papering over a
   backend the projection should serve. File the root cause; don't patch the symptom.
 - **A judgment call** — delete-vs-adopt a constant, a documented-public `__all__`

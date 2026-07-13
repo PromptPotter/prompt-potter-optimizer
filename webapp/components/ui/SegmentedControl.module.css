@@ -1,0 +1,46 @@
+/* SegmentedControl primitive — a joined group of buttons, exactly one on.
+   Base ported from the three hand-rolled variants it replaces (.cand-view-toggle,
+   .rsv-toggle, .pipeline-mode-toggle), which had drifted apart on radius, divider
+   weight and the active fill. */
+
+.group {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--border-radius-md);
+  overflow: hidden;
+}
+
+.segment {
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  padding: 3px 10px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  border: 0;
+  border-right: 0.5px solid var(--color-border);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.segment:last-child {
+  border-right: 0;
+}
+
+.segment:hover:not(:disabled) {
+  background: var(--color-background-hover);
+  color: var(--color-text-primary);
+}
+
+.segment:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.on {
+  background: var(--color-accent);
+  color: var(--color-text-on-accent);
+  font-weight: 600;
+}

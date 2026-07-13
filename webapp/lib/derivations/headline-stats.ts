@@ -49,6 +49,14 @@ export function headlineMetricLabel(m: HeadlineMetric): string {
   return m === "ability" ? "ability θ" : m === "composite" ? "composite" : "accuracy";
 }
 
+// The candidates card's metric axis is a SET (the bars can pair several series),
+// but a node LABEL is one number. Take the first selected metric in canonical
+// `HEADLINE_METRICS` order — deterministic, and it feeds `fmtHeadlineValue`
+// unchanged, so the tree renderers need no new formatter.
+export function primaryMetric(metrics: ReadonlySet<HeadlineMetric>): HeadlineMetric {
+  return HEADLINE_METRICS.find((m) => metrics.has(m.id))?.id ?? "accuracy";
+}
+
 // Format one candidate's headline number for the selected metric: a percent for
 // accuracy/composite, a 2-dp logit for θ (`θ 0.41`). `null` → "—" either way.
 export function fmtHeadlineValue(

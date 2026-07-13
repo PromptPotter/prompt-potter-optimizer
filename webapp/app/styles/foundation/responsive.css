@@ -183,7 +183,7 @@
 }
 
 /* ── Rotate-to-landscape prompt (Phase 0 foundation) ──────────────
-   Dense visualisations (FamilyTree, WhatIfGrid, HardSamplesHeatmap,
+   Dense visualisations (the candidates Forest view, WhatIfGrid, HardSamplesHeatmap,
    RoundFileView, leverage, console, etc.) wrap in <RotatePrompt>. The
    Dashboard-tab boxes deliberately do NOT — they're sized to fit portrait.
    On portrait phone (orientation:portrait + width<bp-rotate) the

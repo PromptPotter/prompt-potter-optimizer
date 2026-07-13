@@ -2,12 +2,45 @@
 import { memo, useMemo } from "react";
 import { Bar } from "react-chartjs-2";
 import { cssRgba, ensureChartRegistered, getCss, useThemeVersion } from "@/lib/theme";
+import type { HeadlineMetric } from "@/lib/derivations";
+import type { CandidateView } from "@/lib/types";
 import type { ChartData, ChartOptions, ChartType, Plugin } from "chart.js";
 
 ensureChartRegistered();
 
+// Published plot geometry — the bridge that lets the dendrogram strip, an SVG
+// sibling rendered UNDER this canvas, land its nodes exactly on the bar category
+// centers.
+//
+// FRACTION space, deliberately. chart.js's category scale is linear in the plot
+// width (the bar controller sets `offset:true` on the index scale), so a centre's
+// fraction is INVARIANT under a pure width change — only the two px gutters and
+// the bar COUNT can move it. A window resize, What-If opening, or the sidebar
+// collapsing therefore costs no React work at all: the strip's percentage
+// coordinates track the canvas through the browser's own layout pass, in the same
+// frame. Publishing raw pixels would re-render on every resize tick and still
+// leave the genealogy one frame behind the bars mid-drag.
+export interface PlotGeometry {
+  // px inset, canvas left edge → plot area.
+  left: number;
+  // px inset, plot area's right edge → canvas right edge.
+  rightGutter: number;
+  // Category centre i, as a fraction of the plot width.
+  centers: number[];
+}
+
+export function geomEqual(a: PlotGeometry | null, b: PlotGeometry): boolean {
+  return (
+    a != null &&
+    a.left === b.left &&
+    a.rightGutter === b.rightGutter &&
+    a.centers.length === b.centers.length &&
+    a.centers.every((v, i) => v === b.centers[i])
+  );
+}
+
 // Per-bar sample count painted above each candidate's bar group. The metric
-// (accuracy / composite / what-if) is computed over `nSamples` samples — a
+// (accuracy / composite / what-if) is computed over `n_samples` samples — a
 // 0.6 over 5 samples is far noisier than a 0.6 over 20, and PoBB leader-lock
 // routinely stops a candidate on a partial set. The count makes that visible.
 declare module "chart.js" {
@@ -18,6 +51,7 @@ declare module "chart.js" {
     divergenceLine?: { index: number | null };
     inFlightPulse?: { index: number | null };
     compositeCiWhisker?: { ciLo: (number | null)[]; ciHi: (number | null)[] };
+    xBridge?: { onGeometry: (g: PlotGeometry) => void };
   }
 }
 
@@ -225,65 +259,50 @@ const inFlightPulsePlugin: Plugin<"bar", { index: number | null }> = {
   },
 };
 
+// `afterLayout`, NOT `afterDraw`: (1) `chartArea` and `scales` are final here;
+// (2) it fires on every update AND on every resize (chart.js's resize path runs
+// an update, which re-lays-out); (3) `inFlightPulse` re-enters `chart.draw()` at
+// ~60fps via rAF while a candidate scores, so an afterDraw publisher would
+// rebuild this array 60×/s for nothing.
+const xBridgePlugin: Plugin<"bar", { onGeometry: (g: PlotGeometry) => void }> = {
+  id: "xBridge",
+  afterLayout(chart, _args, opts) {
+    const emit = opts?.onGeometry;
+    const x = chart.scales.x;
+    if (!emit || !x) return;
+    const { left, right, width } = chart.chartArea;
+    // Hidden / zero-width card (a collapsed chat dropdown) makes every fraction
+    // garbage. Keep the last good geometry; re-showing fires a resize, which
+    // republishes.
+    if (!(width > 0)) return;
+    const n = chart.data.labels?.length ?? 0;
+    const centers: number[] = [];
+    for (let i = 0; i < n; i++) centers.push((x.getPixelForValue(i) - left) / width);
+    emit({ left, rightGutter: chart.width - right, centers });
+  },
+};
+
 // Stable identity — passing a fresh array each render churns the chart.
 const CHART_PLUGINS = [
   sampleCountPlugin,
   divergenceLinePlugin,
   inFlightPulsePlugin,
   compositeCiWhiskerPlugin,
+  xBridgePlugin,
 ];
 
 // Above this real-bar count, x-axis labels rotate 60° so they stop
-// overlapping their neighbours. Picked empirically against the 240px
-// fitness-card height (rotated labels eat ~30px of plot height).
+// overlapping their neighbours. Picked empirically against the card
+// height (rotated labels eat ~30px of plot height).
 const ROTATE_THRESHOLD = 8;
 
-// Pre-projected bar slot. Origin, historical rounds, and the in-flight
-// current round all collapse to the same shape — FitnessPanel handles the
-// merge so this component stays a pure plotter.
-//
-// `candidateId` + `round` (optional) lift the bar into the shared
-// SelectionContext: bars carrying them are clickable + highlight when the
-// matching candidate is selected anywhere in the dashboard. Origin and
-// pre-id'd live bars stay non-selectable (no row in the lineage to
-// cross-reference yet).
-export interface BarSlot {
-  key: string;          // React + dedup key
-  label: string;        // x-axis label (e.g. "C0", "C1.1", "C2.3")
-  accuracy: number | null;
-  composite: number | null;
-  whatif: number | null;
-  started: boolean;     // false = blank slot, true = scored or scoring
-  nSamples: number | null;   // samples the metric was computed over (null = unknown)
-  nExpected: number | null;  // full sample budget; set only when < nSamples is possible
-  candidateId?: string;
-  round?: number;
-  isWinner?: boolean;
-  // Difficulty-adjusted Rasch ability (logit scale) the winner is elected on — shown in the
-  // tooltip, NOT as a bar (θ is logits, the y-axis is the 0–1 accuracy scale). Null when no
-  // election fit (in-flight / eliminated). This is what explains a lower-accuracy winner.
-  theta?: number | null;
-  thetaSe?: number | null;
-  // Normal-CLT CI on the mean of this bar's per-sample composite fitness — drawn as
-  // an error-bar whisker around the composite bar. Null when not yet stamped (in-flight
-  // round) or when composite itself is null (nothing to bracket).
-  compositeCiLo?: number | null;
-  compositeCiHi?: number | null;
-  // Workspace-verify overlay — `accuracy` is the workspace accuracy
-  // (mean hit rate) over every archive measurement for this candidate's
-  // config; `workspaceN` is the total sample count behind it (typically
-  // >> the campaign n). Same metric as the blue accuracy bar so the two
-  // are visually apples-to-apples. Set only on bars that have a matching
-  // DiagnosticRunRecord on disk; drives the red `verify` series.
-  diag?: { accuracy: number; workspaceN: number; samplesAdded: number };
-}
-
 interface Props {
-  bars: BarSlot[];
-  showComposite: boolean;
+  views: CandidateView[];
+  // The card's metric axis — one bar series per selected metric. Never empty.
+  metrics: ReadonlySet<HeadlineMetric>;
   showWhatIf: boolean;
   selectedKey: string | null;
-  onSelect: (bar: BarSlot | null) => void;
+  onSelect: (view: CandidateView | null) => void;
   // Bar index where the active mask first diverges from the realized record —
   // the red vertical divider is drawn at its left edge. null = no mask / no
   // divergence (no divider).
@@ -291,16 +310,21 @@ interface Props {
   // Bar index of the candidate currently accumulating samples — it pulses
   // ("blinking") while live. null = nothing scoring (no pulse).
   inFlightIndex: number | null;
+  // Publishes the plot geometry the dendrogram strip aligns to. MUST be a stable
+  // callback: it rides the `options` memo, so a fresh identity per render would
+  // force a chart.update() on every poll tick.
+  onGeometry: (g: PlotGeometry) => void;
 }
 
 export const FitnessChart = memo(function FitnessChart({
-  bars,
-  showComposite,
+  views,
+  metrics,
   showWhatIf,
   selectedKey,
   onSelect,
   divergenceBoundary,
   inFlightIndex,
+  onGeometry,
 }: Props) {
   // Subscribe to theme so a flip re-runs this component and the data/options
   // memos below pick up the new getCss() values.
@@ -309,63 +333,74 @@ export const FitnessChart = memo(function FitnessChart({
   // categories evenly across the frame, and the `maxBarThickness` cap below
   // keeps individual bars narrow even at very low counts (a 2-bar round
   // shows two 28px bars centered, not two stretched-to-fill bars).
-  const labels = useMemo(() => bars.map((b) => b.label), [bars]);
+  const labels = useMemo(() => views.map((v) => v.label), [views]);
+
+  const showAccuracy = metrics.has("accuracy");
+  const showComposite = metrics.has("composite");
+  const showAbility = metrics.has("ability");
 
   // Two parallel arrays per series: *Raw drives the tooltip; *Plot pushes
   // null → 0 only for bars whose scoring has begun (so `minBarLength`
   // paints a stub). Unstarted bars stay null so chart.js leaves the slot
   // blank — distinguishing "still computing" from "not yet started".
-  // Sized to the padded slot count; padding slots stay null (no bar).
-  const { accRaw, compRaw, whatifRaw, verifyRaw, accPlot, compPlot, whatifPlot, verifyPlot } = useMemo(() => {
+  const {
+    accRaw, compRaw, whatifRaw, verifyRaw, thetaRaw, accPlot, compPlot, whatifPlot,
+  } = useMemo(() => {
     const aR: (number | null)[] = [];
     const cR: (number | null)[] = [];
     const wR: (number | null)[] = [];
     const vR: (number | null)[] = [];
+    const tR: (number | null)[] = [];
     for (let i = 0; i < labels.length; i++) {
-      aR.push(bars[i]?.accuracy ?? null);
-      cR.push(bars[i]?.composite ?? null);
-      wR.push(bars[i]?.whatif ?? null);
-      vR.push(bars[i]?.diag?.accuracy ?? null);
+      aR.push(views[i]?.accuracy ?? null);
+      cR.push(views[i]?.composite ?? null);
+      wR.push(views[i]?.whatif ?? null);
+      vR.push(views[i]?.diag?.accuracy ?? null);
+      tR.push(views[i]?.theta ?? null);
     }
     const coerce = (v: number | null, i: number): number | null =>
-      v == null ? (bars[i]?.started ? 0 : null) : v;
-    // The verify series stays strictly sparse — no started-floor coercion.
-    // A bar without a diagnostic-run record must render NO red bar, not a
-    // 0-height stub, or every column would carry a misleading red dot.
+      v == null ? (views[i]?.started ? 0 : null) : v;
+    // verify and θ stay strictly sparse — NO started-floor coercion. For verify a
+    // 0-height stub on every column would read as a red dot everywhere. For θ it
+    // is worse: on the 0–1 percent axis a coerced 0 reads as "nothing yet", but θ
+    // is a logit where 0 is a REAL, middling ability — coercing a missing θ to 0
+    // renders a fabricated measurement.
     return {
-      accRaw: aR, compRaw: cR, whatifRaw: wR, verifyRaw: vR,
+      accRaw: aR, compRaw: cR, whatifRaw: wR, verifyRaw: vR, thetaRaw: tR,
       accPlot: aR.map(coerce), compPlot: cR.map(coerce), whatifPlot: wR.map(coerce),
-      verifyPlot: vR,
     };
-  }, [bars, labels]);
+  }, [views, labels]);
 
   // Per-bar border overlay — picks out the bar matching the shared
-  // SelectionContext. Driven by --color-selection (set in app/styles/foundation/themes.css)
-  // so it matches the lineage tree's selected stub colour.
+  // SelectionContext. Driven by --color-selection (app/styles/foundation/themes.css)
+  // so it matches the dendrogram node's selected colour directly beneath it.
   const selectionBorder = useMemo(() => {
     if (selectedKey == null) return null;
-    const idx = bars.findIndex((b) => b.key === selectedKey);
+    const idx = views.findIndex((v) => v.key === selectedKey);
     if (idx < 0) return null;
     const colour = getCss("--color-selection");
     return { idx, colour };
     // themeVersion gates getCss() — needed in deps; lint flags it unused.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bars, selectedKey, themeVersion]);
+  }, [views, selectedKey, themeVersion]);
 
-  const hasVerify = useMemo(() => bars.some((b) => b.diag != null), [bars]);
+  const hasVerify = useMemo(() => views.some((v) => v.diag != null), [views]);
   const data = useMemo<ChartData<"bar">>(() => {
-    const seriesCount =
-      1 + (showComposite ? 1 : 0) + (showWhatIf ? 1 : 0) + (hasVerify ? 1 : 0);
+    const seriesCount = metrics.size + (showWhatIf ? 1 : 0) + (hasVerify ? 1 : 0);
     const cat =
-      seriesCount === 1 ? 0.55 : seriesCount === 2 ? 0.75 : seriesCount === 3 ? 0.9 : 0.95;
+      seriesCount <= 1 ? 0.55 : seriesCount === 2 ? 0.75 : seriesCount === 3 ? 0.9 : 0.95;
     // Dynamic bar thickness ceiling: chart frame fans out to ~720px on
     // wide layouts, so 25 bars × 3 series should leave room without
     // clipping. Scale max thickness down as the bar count grows; min 6.
     const barCount = Math.max(1, labels.length);
-    const maxBar = Math.max(6, Math.min(28, Math.round(640 / (barCount * seriesCount))));
+    const maxBar = Math.max(
+      6,
+      Math.min(28, Math.round(640 / (barCount * Math.max(1, seriesCount)))),
+    );
     const accent = cssRgba("--color-accent-rgb", 0.95);
     const accentDim = cssRgba("--color-accent-rgb", 0.55);
     const accentStrong = getCss("--color-accent-strong");
+    const muted = getCss("--color-text-tertiary");
     const borderArr = (base: string): string[] | string => {
       if (!selectionBorder) return base;
       return labels.map((_, i) => (i === selectionBorder.idx ? selectionBorder.colour : base));
@@ -374,19 +409,23 @@ export const FitnessChart = memo(function FitnessChart({
       if (!selectionBorder) return 0;
       return labels.map((_, i) => (i === selectionBorder.idx ? 3 : 0));
     };
-    const datasets: ChartData<"bar">["datasets"] = [
-      {
+    const shared = {
+      barPercentage: 0.95,
+      categoryPercentage: cat,
+      maxBarThickness: maxBar,
+      minBarLength: 2,
+    };
+    const datasets: ChartData<"bar">["datasets"] = [];
+    if (showAccuracy) {
+      datasets.push({
         label: "accuracy",
         data: accPlot,
         backgroundColor: accent,
         borderColor: borderArr(accent),
         borderWidth: widthArr(),
-        barPercentage: 0.95,
-        categoryPercentage: cat,
-        maxBarThickness: maxBar,
-        minBarLength: 2,
-      },
-    ];
+        ...shared,
+      });
+    }
     if (showComposite) {
       datasets.push({
         label: "composite",
@@ -394,10 +433,23 @@ export const FitnessChart = memo(function FitnessChart({
         backgroundColor: accentDim,
         borderColor: borderArr(accentDim),
         borderWidth: widthArr(),
+        ...shared,
+      });
+    }
+    if (showAbility) {
+      // θ is a LOGIT, not a percent — it rides its own right-hand axis, which
+      // auto-ranges and may go negative. No `minBarLength`: on a negative θ that
+      // would paint a stub on the wrong side of zero.
+      datasets.push({
+        label: "ability",
+        data: thetaRaw,
+        yAxisID: "y1",
+        backgroundColor: muted,
+        borderColor: borderArr(muted),
+        borderWidth: widthArr(),
         barPercentage: 0.95,
         categoryPercentage: cat,
         maxBarThickness: maxBar,
-        minBarLength: 2,
       });
     }
     if (showWhatIf) {
@@ -407,10 +459,7 @@ export const FitnessChart = memo(function FitnessChart({
         backgroundColor: accentStrong,
         borderColor: borderArr(accentStrong),
         borderWidth: widthArr(),
-        barPercentage: 0.95,
-        categoryPercentage: cat,
-        maxBarThickness: maxBar,
-        minBarLength: 2,
+        ...shared,
       });
     }
     if (hasVerify) {
@@ -420,27 +469,30 @@ export const FitnessChart = memo(function FitnessChart({
       // more samples?" signal, intentionally visually distinct.
       datasets.push({
         label: "verify",
-        data: verifyPlot,
+        data: verifyRaw,
         backgroundColor: "#e74c3c",
         borderColor: "#e74c3c",
         borderWidth: 0,
-        barPercentage: 0.95,
-        categoryPercentage: cat,
-        maxBarThickness: maxBar,
-        minBarLength: 2,
+        ...shared,
       });
     }
     return { labels, datasets };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [labels, accPlot, compPlot, whatifPlot, verifyPlot, showComposite, showWhatIf, hasVerify, themeVersion, selectionBorder]);
+  }, [labels, accPlot, compPlot, whatifPlot, verifyRaw, thetaRaw, metrics, showAccuracy, showComposite, showAbility, showWhatIf, hasVerify, themeVersion, selectionBorder]);
 
   const tooltipFor = (label: string, idx: number): string => {
     if (label === "verify") {
       const v = verifyRaw[idx];
       if (v == null) return "verify: —";
-      const diag = bars[idx]?.diag;
-      const tail = diag ? ` (workspace acc on n=${diag.workspaceN}, +${diag.samplesAdded} fresh)` : "";
+      const diag = views[idx]?.diag;
+      const tail = diag
+        ? ` (workspace acc on n=${diag.workspaceN}, +${diag.samplesAdded} fresh)`
+        : "";
       return `verify: ${v.toFixed(3)}${tail}`;
+    }
+    if (label === "ability") {
+      const v = thetaRaw[idx];
+      return `ability θ: ${v == null ? "—" : v.toFixed(2)}`;
     }
     const src = label === "accuracy" ? accRaw : label === "composite" ? compRaw : whatifRaw;
     const v = src[idx];
@@ -458,21 +510,31 @@ export const FitnessChart = memo(function FitnessChart({
     onClick: (_evt, elements) => {
       const hit = elements?.[0];
       if (!hit) return;
-      const bar = bars[hit.index];
-      if (!bar || !bar.candidateId || bar.round == null) return;     // origin / pre-id'd live bar
-      if (bar.key === selectedKey) onSelect(null);
-      else onSelect(bar);
+      const view = views[hit.index];
+      if (!view) return;
+      if (view.key === selectedKey) onSelect(null);
+      else onSelect(view);
     },
     onHover: (evt, elements) => {
       const target = (evt.native?.target ?? null) as HTMLElement | null;
       if (!target) return;
-      const hit = elements?.[0];
-      const bar = hit ? bars[hit.index] : null;
-      target.style.cursor = bar && bar.candidateId && bar.round != null ? "pointer" : "default";
+      target.style.cursor = elements?.[0] ? "pointer" : "default";
     },
     scales: {
       x: { grid: { display: false }, ticks: { font: { size: rotate ? 10 : 11, family: "Cascadia Mono, SF Mono, Menlo, Consolas, monospace" }, autoSkip: false, maxRotation: rotate ? 60 : 0, minRotation: rotate ? 60 : 0 } },
-      y: { min: 0, max: 1, grid: { color: getCss("--color-border") }, ticks: { font: { size: 11 }, stepSize: 0.25 } },
+      y: { min: 0, max: 1, grid: { color: getCss("--color-border") }, ticks: { font: { size: 11 }, stepSize: 0.2 } },
+      // θ's own axis, declared only while the ability series shows — otherwise the
+      // right-hand gutter (which every dendrogram fraction is measured against)
+      // would reserve space for an axis with no data.
+      ...(showAbility
+        ? {
+            y1: {
+              position: "right" as const,
+              grid: { display: false },
+              ticks: { font: { size: 11 } },
+            },
+          }
+        : {}),
     },
     plugins: {
       legend: { display: false },
@@ -483,9 +545,9 @@ export const FitnessChart = memo(function FitnessChart({
             const idx = items[0]?.dataIndex;
             if (idx == null) return "";
             const lines: string[] = [];
-            const n = bars[idx]?.nSamples;
+            const n = views[idx]?.n_samples;
             if (n != null) {
-              const exp = bars[idx]?.nExpected;
+              const exp = views[idx]?.n_expected;
               lines.push(
                 exp != null && exp !== n
                   ? `${n} of ${exp} samples scored`
@@ -494,14 +556,14 @@ export const FitnessChart = memo(function FitnessChart({
             }
             // Difficulty-adjusted ability — the metric the winner is elected on, so a
             // shorter (lower-accuracy) winner bar reads as "won on harder samples".
-            const theta = bars[idx]?.theta;
+            const theta = views[idx]?.theta;
             if (typeof theta === "number") {
-              const se = bars[idx]?.thetaSe;
+              const se = views[idx]?.theta_se;
               const tail = typeof se === "number" ? ` ± ${se.toFixed(2)}` : "";
               lines.push(`ability θ ${theta.toFixed(2)}${tail} (elected on θ, not accuracy)`);
             }
-            const ciLo = bars[idx]?.compositeCiLo;
-            const ciHi = bars[idx]?.compositeCiHi;
+            const ciLo = views[idx]?.compositeCiLo;
+            const ciHi = views[idx]?.compositeCiHi;
             if (typeof ciLo === "number" && typeof ciHi === "number") {
               lines.push(`composite 95% CI [${ciLo.toFixed(3)}, ${ciHi.toFixed(3)}]`);
             }
@@ -509,16 +571,17 @@ export const FitnessChart = memo(function FitnessChart({
           },
         },
       },
-      sampleCount: { counts: bars.map((b) => b.nSamples) },
+      sampleCount: { counts: views.map((v) => v.n_samples) },
       divergenceLine: { index: divergenceBoundary },
       inFlightPulse: { index: inFlightIndex },
       compositeCiWhisker: {
-        ciLo: bars.map((b) => b.compositeCiLo ?? null),
-        ciHi: bars.map((b) => b.compositeCiHi ?? null),
+        ciLo: views.map((v) => v.compositeCiLo),
+        ciHi: views.map((v) => v.compositeCiHi),
       },
+      xBridge: { onGeometry },
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [themeVersion, accRaw, compRaw, whatifRaw, verifyRaw, rotate, bars, selectedKey, onSelect, divergenceBoundary, inFlightIndex]);
+  }), [themeVersion, accRaw, compRaw, whatifRaw, verifyRaw, thetaRaw, rotate, views, selectedKey, onSelect, divergenceBoundary, inFlightIndex, showAbility, onGeometry]);
 
   return (
     <div className="fitness-chart-frame">

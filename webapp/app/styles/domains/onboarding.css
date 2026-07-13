@@ -52,10 +52,6 @@
 .origin-question-select{flex:0 0 auto}
 .origin-question-text{display:inline-flex;gap:4px;align-items:center;flex:0 0 auto}
 /* Pipeline mode toggle — two inline buttons (LLM only / Research + Match). */
-.pipeline-mode-toggle{display:flex;gap:6px;margin:4px 0 8px}
-.pipeline-mode-toggle .pmode{flex:1;font-size:12px;padding:6px 10px;border-radius:6px;border:0.5px solid var(--color-border);background:var(--color-background-secondary);color:var(--color-text-secondary);cursor:pointer}
-.pipeline-mode-toggle .pmode.is-active{border-color:var(--color-accent);color:var(--color-text-primary);font-weight:600}
-.pipeline-mode-toggle .pmode:disabled{opacity:.5;cursor:not-allowed}
 /* Starting-prompt control panel — the editable 6-field decomposition. */
 .prompt-editor{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border-radius:6px;border:0.5px solid var(--color-border);background:var(--color-background-secondary)}
 .prompt-editor-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap}

@@ -16,8 +16,8 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import { fetchCampaignLineage } from "@/lib/api";
 import type { CampaignLineageResponse, LineageDivergence } from "@/lib/api/types";
 import { liveCandidateId } from "@/lib/candidate-label";
-import { useFitnessState } from "@/components/whatif/fitness-store";
-import { formulaFromWeights } from "@/components/whatif/fitness-bars";
+import { useCandidatesState } from "@/components/candidates/candidates-store";
+import { formulaFromWeights } from "@/components/candidates/fitness-bars";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useDebounced } from "@/lib/hooks/useDebounced";
 import { useRevalidation } from "@/lib/revalidate";
@@ -79,7 +79,7 @@ export function LineageOverlayProvider({
   // The What-If card is the master: when open, the lineage follows its live
   // selection + weights (the SAME weighted criterion as the bars), debounced so a
   // continuous drag doesn't spam the fetch.
-  const { selected: whatifSelected, weights: whatifWeights, showWhatIf } = useFitnessState();
+  const { selected: whatifSelected, weights: whatifWeights, showWhatIf } = useCandidatesState();
   // The fixed sample-set chip is ALSO a mask: re-score accuracy over only those ids
   // backend-side. Serialized to a stable string so a same-content set doesn't re-fire.
   const { sampleSet } = useSelection();

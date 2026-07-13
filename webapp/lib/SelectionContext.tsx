@@ -11,7 +11,7 @@ import type { SelectedCandidate } from "@/lib/types";
 //   - sampleSet — a fixed set of sample ids to recompute the per-candidate
 //                 fitness bars over (null = each bar over its own samples).
 //                 Populated by the Sample-trajectory "Steps" view; consumed
-//                 by FitnessPanel's "fixed sample set" mode. Independent axis.
+//                 by the candidates card's "fixed sample set" mode. Independent axis.
 //
 // The candidate and round axes are coupled: a candidate selection
 // implies a round (the candidate's). Writes go through the helpers

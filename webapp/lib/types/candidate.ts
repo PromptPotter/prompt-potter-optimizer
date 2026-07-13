@@ -1,6 +1,6 @@
 // Canonical per-candidate row. Single shape backing every dashboard
-// surface that lists, plots, or selects candidates — FitnessPanel bars,
-// LineageTree stubs, RoundSamplesView groups, ScoringInspector target.
+// surface that lists, plots, or selects candidates — the candidates card's bars,
+// dendrogram + forest nodes, RoundSamplesView groups, ScoringInspector target.
 //
 // Built by `lib/derivations/round-candidates.ts` from the raw
 // `DashboardSnapshot`; components never re-derive the merge of
@@ -54,4 +54,20 @@ export interface CandidateRow {
   // Which source the row came from. Lets renderers tag in-flight bars,
   // and lets the derivation layer prove its own dedup discipline.
   source: CandidateSource;
+}
+
+// The spine row PLUS the overlays the candidates card paints on it. ONE array
+// feeds the bar categories AND the dendrogram nodes beneath them, so the two
+// halves of the Sequence view cannot disagree on count, order, or label —
+// there is nothing for them to disagree with.
+export interface CandidateView extends CandidateRow {
+  // Served What-If lens value (the lineage overlay's `lensValueByCandidate`),
+  // never recomputed client-side. `null` when no `score:` lens is active or the
+  // candidate is unscorable under it.
+  whatif: number | null;
+  // Any sign of activity. `false` = the slot exists but nothing is scored yet,
+  // which the chart must render as a BLANK, never as a 0.
+  started: boolean;
+  // Latest `verify` diagnostic run whose source label matches this candidate.
+  diag?: { accuracy: number; workspaceN: number; samplesAdded: number };
 }

@@ -3,5 +3,6 @@
 
 export * from "./types";
 export * from "./layout";
+export * from "./RoundAxis";
 export * from "./WorkflowCanvas";
 export * from "./OptimizerNodeDetail";

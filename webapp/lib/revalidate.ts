@@ -3,7 +3,7 @@
 // bumps a generation counter on success; poll loops that pass
 // `revalidateOn: useRevalidation()` into `usePoll` re-tick immediately
 // instead of waiting out their interval — so a new fork shows up at once,
-// not up to a poll-interval later. Module-scoped, mirroring fitness-store.ts.
+// not up to a poll-interval later. Module-scoped, mirroring candidates-store.ts.
 
 import { useSyncExternalStore } from "react";
 

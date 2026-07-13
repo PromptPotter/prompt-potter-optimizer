@@ -6,7 +6,6 @@ import { DashSpine } from "./DashSpine";
 import { CyclePicker } from "@/components/shell/CyclePicker";
 import { RunErrorBanner } from "./RunErrorBanner";
 import { TopStrip } from "./TopStrip";
-import { RoundTabsStrip } from "@/components/dashboard/samples/RoundTabsStrip";
 import { NowTriad } from "./NowTriad";
 import { Lane } from "./Lane";
 import { LiveStateCard } from "@/components/dashboard/scoring/LiveStateCard";
@@ -38,13 +37,7 @@ export function DashboardTab() {
       </DashSpine>
       <DashSpine>
         <RunErrorBanner />
-        {/* TopStrip + RoundTabsStrip share one row so the round axis (LIVE
-            pill + completed-round circles) sits beside the headline KPIs the
-            operator scans first. */}
-        <div className="dash-top-row">
-          <TopStrip />
-          <RoundTabsStrip />
-        </div>
+        <TopStrip />
       </DashSpine>
       <DashSpine>
         <NowTriad pipeline={pipeline} />
