@@ -1,5 +1,9 @@
 # Hosting PromptPotter securely
 
+> **The full access model** — the three tiers, every enforcement point, and the box
+> deploy checklist — is [`access-model.md`](access-model.md). This page is just the one
+> admin task you repeat.
+
 For the operator running PromptPotter on their own box (the
 [Linux deploy](../../deploy-linux/README.md)): the one admin task you'll repeat —
 **managing who can sign in** — and the rule that keeps it safe.
@@ -80,6 +84,7 @@ broker (Cloudflare Access service token) **plus** an app token — never a bare 
 
 ## See also
 
+- [Access model](access-model.md) — the three tiers, every enforcement point, the deploy checklist.
 - [Linux deploy](../../deploy-linux/README.md) — the full install (systemd + Cloudflare
   Tunnel + OIDC + allowlist).
 - [ADR-0004 — operator admin channels](../adr/0004-operator-admin-channels.md) — the

@@ -4,6 +4,7 @@ Running, integrating, and operating PromptPotter.
 
 | Page | Covers |
 |------|--------|
+| [Access model](access-model.md) | **The security map an audit opens** — the three tiers (admin / user / loop), the three boundary kinds, every enforcement point by symbol, and the Linux-box deploy checklist |
 | [Backend integration](backend-integration.md) | Contract a backend must implement (`/matches`, `/pipeline`, `/status`) and PromptPotter's REST API |
 | [Persistence and state](persistence-and-state.md) | The `.promptpotter/` tree, active session, cycle directory, `new` / `resume` flags, resume / rewind / fork / sweep, human-in-the-loop steer & fork + pause, scoring steer (env vars live in [`../manual/02-install.md`](../manual/02-install.md#environment-variables)) |
 | [Observability](observability.md) | What gets traced, Langfuse integration, P(best) stream, display conventions |

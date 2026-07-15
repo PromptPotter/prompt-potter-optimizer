@@ -125,6 +125,10 @@ cd "$INSTALL_DIR/deploy-linux" && ./update.sh   # deploy-linux lives inside the 
 
 ## Security posture
 
+> The full model + the post-install hardening checklist (systemd unit, PP↔TermNorm
+> token, firewall decision) is [`docs/operations/access-model.md`](../docs/operations/access-model.md)
+> § Deploy actions. This section is the perimeter summary.
+
 Stage-1 OIDC. Provider config: `.promptpotter/identity/oidc.json`. Email gate:
 `.promptpotter/identity/allowlist.json` (re-read on every sign-in — edits are
 instant, no restart). Don't stack Cloudflare Access — double-gate.
