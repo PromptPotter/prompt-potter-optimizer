@@ -145,20 +145,44 @@ install_oidc_middleware(app)
 
 
 @app.middleware("http")
-async def no_store_on_api(
+async def response_headers(
     request: Request, call_next: Callable[[Request], Awaitable[Response]]
 ) -> Response:
-    """Set ``Cache-Control: no-store`` on every ``/api/v1/*`` response.
+    """Security + freshness response headers, in one pass (the single
+    response-header seam — don't add a second middleware beside this).
 
-    The API is the webapp's live polling surface — ``dashboard.json``,
-    per-cycle round files, file listings, active-session pointer. Any
-    browser/intermediate caching is a freshness bug, not an optimization,
-    because we already serve from in-memory state and the on-disk files
-    are tiny. Static webapp assets at the root are unaffected (served
-    by StaticFiles with its own caching defaults).
+    Security headers on **every** response: ``X-Content-Type-Options: nosniff``,
+    ``X-Frame-Options: DENY`` + CSP ``frame-ancestors 'none'`` (clickjacking, both
+    header generations), ``Referrer-Policy``, and HSTS when the request arrived over
+    https (behind the Cloudflare tunnel uvicorn sees the forwarded proto via
+    ``--proxy-headers``; plain-http local dev gets no HSTS, correctly). The CSP is
+    **strict on JSON API paths** (``default-src 'none'`` — a JSON body is never a
+    document, so this only bites a direct browser navigation) and **frame-only on the
+    webapp document** so its own same-origin Next.js assets still load. A tighter
+    document CSP (``script-src``/``style-src`` with a nonce) is a follow-up — it needs
+    a webapp smoke test to avoid breaking the UI, so it is deliberately not set here.
+
+    Plus ``Cache-Control: no-store`` on ``/api/v1/*`` — the live polling surface
+    (``dashboard.json``, per-cycle round files, active-session pointer) must never be
+    cached: a freshness bug, not an optimization, since we serve from memory + tiny
+    on-disk files. Static webapp assets at the root keep StaticFiles' own caching.
     """
     response = await call_next(request)
-    if request.url.path.startswith("/api/v1/"):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    if request.url.scheme == "https":
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=63072000; includeSubDomains"
+        )
+    is_api = request.url.path.startswith("/api/v1/")
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'none'; frame-ancestors 'none'"
+        if is_api
+        else "frame-ancestors 'none'; base-uri 'self'; object-src 'none'",
+    )
+    if is_api:
         response.headers["Cache-Control"] = "no-store"
     return response
 

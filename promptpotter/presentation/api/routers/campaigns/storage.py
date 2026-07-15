@@ -114,8 +114,8 @@ class CampaignStorageResponse(BaseModel):
 @campaigns_router.get("/campaigns/{campaign_id}/storage", response_model=CampaignStorageResponse)
 def get_campaign_storage(store: StoreDep, campaign_id: str) -> CampaignStorageResponse:
     """On-disk size of the campaign tree, split into the six MECE leaves. 404 on cross-user."""
-    campaign = store.campaigns.load_campaign(campaign_id)
-    if campaign is None or campaign.owner_user_id != str(store.identity.user_id):
+    campaign = store.campaigns.load_owned(campaign_id, str(store.identity.user_id))
+    if campaign is None:
         raise NotFoundError(f"Campaign not found: {campaign_id}")
     acc = _campaign_split(store.campaigns.campaign_root_dir(campaign_id))
     return CampaignStorageResponse(

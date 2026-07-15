@@ -33,6 +33,7 @@ import {
   type ReactNode,
 } from "react";
 import {
+  ApiError,
   fetchActive,
   fetchCampaigns,
   fetchCycles,
@@ -221,9 +222,19 @@ export function WorkspaceProvider({
       } catch (err) {
         if (signal.aborted) return;
         // A 401 means the session died — re-probe /auth/me so the gate flips
-        // unauthed and the loop stops instead of storming. Other failures
-        // (incl. the 404 "no active session" steady state) just set the error.
+        // unauthed and the loop stops instead of storming.
         onAuthError(err);
+        // A 404 is the "no active session" steady state (nothing running yet, or
+        // the workspace was just cleared) — a valid empty answer, NOT a reachable-
+        // ness failure. Clear the pointer and leave activeError null so it never
+        // masquerades as "Server unreachable" (AppShell's netDown reads this).
+        if (err instanceof ApiError && err.status === 404) {
+          setSessionId(null);
+          setActiveCycleId(null);
+          setActiveCampaignId(null);
+          setActiveError(null);
+          return;
+        }
         setActiveError((err as Error)?.message ?? "active session unavailable");
         return;
       }

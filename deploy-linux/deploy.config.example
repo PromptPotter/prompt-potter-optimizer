@@ -35,6 +35,7 @@ BIND_HOST="127.0.0.1"          # uvicorn host (keep loopback behind the tunnel)
 BIND_PORT="8001"               # uvicorn port
 WEBAPP_DIR="webapp"            # static frontend dir built by `npm run build`
 HEALTH_PATH="/api/v1/health"   # liveness endpoint the scripts curl
+MEMORY_MAX=""                  # optional cgroup MemoryMax (e.g. "2G"); empty = no limit
 
 # --- backend service (optional) -----------------------------------------
 # The API the optimizer drives via /matches, cloned as a git sibling. Set these

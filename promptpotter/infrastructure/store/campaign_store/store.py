@@ -293,6 +293,19 @@ class CampaignStore:
             return None
         return Campaign.model_validate(data)
 
+    def load_owned(self, campaign_id: str, owner_user_id: str) -> Campaign | None:
+        """Load *campaign_id* iff it exists AND is owned by *owner_user_id*, else ``None``.
+
+        The single definition of owner-scoped campaign access: a missing campaign and a
+        cross-owner one collapse to ``None`` so every caller 404s both the same way
+        (existence-hiding). Callers keep their own ``NotFoundError`` message/code — only
+        the ownership rule lives here, not copied at each read/command site.
+        """
+        campaign = self.load_campaign(campaign_id)
+        if campaign is None or campaign.owner_user_id != owner_user_id:
+            return None
+        return campaign
+
     def _campaign_parents(self) -> list[Path]:
         """The two dirs a campaign tree can live under: ``campaigns/`` (active) and
         the ``archive/`` recycle bin. The ``*/cycles/*`` + ``*/campaign.json`` filters

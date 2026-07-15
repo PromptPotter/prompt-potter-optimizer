@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import Query
+from fastapi import Depends, Query
 from pydantic import BaseModel, Field
 
 from promptpotter.application.bootstrap.wiring import (
@@ -28,7 +28,7 @@ from promptpotter.application.meta_champion import ChampionRegistry, reduce_corp
 from promptpotter.application.resource_matrix import ResourceMatrix, read_matrix
 from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.layout import REPO_ROOT
-from promptpotter.presentation.api.deps import StoreDep
+from promptpotter.presentation.api.deps import StoreDep, require_capability
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
 from promptpotter.shared.identity import L4_LAB_CAP
@@ -250,10 +250,10 @@ def get_campaign_checkin(store: StoreDep, campaign_id: str) -> dict[str, Any]:
 @campaigns_router.get("/campaigns/{campaign_id}", response_model=CampaignDetailResponse)
 def get_campaign(store: StoreDep, campaign_id: str) -> CampaignDetailResponse:
     """Campaign manifest detail. 404 on cross-user reads."""
-    campaign = store.campaigns.load_campaign(campaign_id)
     # Cross-user reads return 404 (not 403) — existence leakage is itself a
-    # violation.
-    if campaign is None or campaign.owner_user_id != str(store.identity.user_id):
+    # violation. Ownership rule lives in `load_owned`.
+    campaign = store.campaigns.load_owned(campaign_id, str(store.identity.user_id))
+    if campaign is None:
         raise NotFoundError(f"Campaign not found: {campaign_id}")
     return CampaignDetailResponse(
         campaign_id=campaign.campaign_id,
@@ -328,8 +328,8 @@ def get_campaign_config_map(store: StoreDep, campaign_id: str) -> ConfigMapRespo
     Read-only: resolves the frozen ``CampaignConfig`` snapshot against the declared
     ``knobs`` registry. 404 on cross-user reads.
     """
-    campaign = store.campaigns.load_campaign(campaign_id)
-    if campaign is None or campaign.owner_user_id != str(store.identity.user_id):
+    campaign = store.campaigns.load_owned(campaign_id, str(store.identity.user_id))
+    if campaign is None:
         raise NotFoundError(f"Campaign not found: {campaign_id}")
     config = CampaignConfig.model_validate(campaign.config)
 
@@ -374,33 +374,32 @@ def get_campaign_config_map(store: StoreDep, campaign_id: str) -> ConfigMapRespo
     return ConfigMapResponse(groups=groups, couplings=couplings)
 
 
-def _require_l4_lab(store: Stores) -> None:
-    """Gate the L4 Lab routes on :data:`L4_LAB_CAP`. Without it, 404 (not 403) —
-    the whole Lab surface is invisible to a non-developer identity, matching the
-    existence-hiding convention the cross-user reads use. The webapp reads the same
-    capability off ``/auth/me`` and never renders the tab, so a 404 here is pure
-    defense-in-depth against a direct hit, never a path the UI walks into."""
-    if L4_LAB_CAP not in store.identity.capabilities:
-        raise NotFoundError("Not found", code="not_found")
+# The two L4 Lab routes are gated on :data:`L4_LAB_CAP` via the shared
+# ``require_capability`` dependency: without it, 404 (not 403) — the whole Lab
+# surface is invisible to a non-developer identity, matching the existence-hiding
+# convention the cross-user reads use. The webapp reads the same capability off
+# ``/auth/me`` and never renders the tab, so a 404 here is pure defense-in-depth
+# against a direct hit, never a path the UI walks into.
+_LAB_GATE = Depends(require_capability(L4_LAB_CAP))
 
 
-@campaigns_router.get("/champion-registry", response_model=ChampionRegistry)
+@campaigns_router.get(
+    "/champion-registry", response_model=ChampionRegistry, dependencies=[_LAB_GATE]
+)
 def get_champion_registry(store: StoreDep) -> ChampionRegistry:
     """The L4 champion table — every candidate meta-prompt state on disk, ranked by
     anchor-to-origin effect. Reduced fresh from the tenant's pp-self cycles on each
     fetch (dev on-demand surface, not the 2 s poll); zero LLM. Dev-only —
     :data:`L4_LAB_CAP`-gated (404 without it); empty for a dev with no pp-self cycles."""
-    _require_l4_lab(store)
     return reduce_corpus(store)
 
 
-@campaigns_router.get("/resource-matrix", response_model=ResourceMatrix)
+@campaigns_router.get("/resource-matrix", response_model=ResourceMatrix, dependencies=[_LAB_GATE])
 def get_resource_matrix(store: StoreDep) -> ResourceMatrix:
     """The L4 resource matrix — the (target-model × dataset) capability grid the
     operator built with ``matrix measure``. Read-only from the committed pp-self
     ``resource_matrix.json``. Dev-only — :data:`L4_LAB_CAP`-gated (404 without it);
     empty when it has never been measured."""
-    _require_l4_lab(store)
     pp_self_dir = resolve_dataset_config_dir(store, REPO_ROOT, "promptpotter-self")
     matrix = read_matrix(pp_self_dir)
     return matrix or ResourceMatrix(generated_at="", cells=[])

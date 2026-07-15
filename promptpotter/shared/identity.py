@@ -38,6 +38,12 @@ BENCHMARKS_READ_CAP = "datasets.benchmarks.read"
 # routes enforce it; ``/auth/me`` surfaces it so the webapp gates the tab.
 L4_LAB_CAP = "l4.lab.access"
 
+# The sole definition of "what the admin principal can do" — one frozenset the
+# env predicate (Stage 0) and the pinned-marker predicate (Stage 1, `oidc.py`)
+# both reference. WHO is admin stays two deliberate mechanisms; WHAT admin grants
+# lives here, once. Adding a capability to the admin tier = editing this line.
+ADMIN_CAPABILITIES = frozenset({BENCHMARKS_READ_CAP, L4_LAB_CAP})
+
 PROMPTPOTTER_ADMIN_ENV = "PROMPTPOTTER_ADMIN"
 
 
@@ -62,7 +68,7 @@ def _admin_caps_from_env() -> frozenset[str]:
     registered-developer identity (`oidc.py`, per ADR-0004 secure-by-default).
     """
     if os.environ.get(PROMPTPOTTER_ADMIN_ENV, "").strip() == "1":
-        return frozenset({BENCHMARKS_READ_CAP, L4_LAB_CAP})
+        return ADMIN_CAPABILITIES
     return frozenset()
 
 
@@ -87,6 +93,16 @@ def default_identity(tenant_id: str = "default", user_id: str = "default") -> Id
     )
 
 
+def has_capability(identity: IdentityContext, capability: str) -> bool:
+    """The one predicate for "does this identity hold *capability*".
+
+    The route-level gate (`presentation.api.deps.require_capability`) and the
+    dataset-visibility gateway (`infrastructure.store.dataset_access`) both read
+    capabilities through here, so every capability decision has one shape.
+    """
+    return capability in identity.capabilities
+
+
 def claim_email(identity: IdentityContext) -> str | None:
     """Best-effort read of the OIDC ``email`` claim — ``None`` when absent/non-string."""
     raw = identity.claims.get("email")
@@ -94,10 +110,12 @@ def claim_email(identity: IdentityContext) -> str | None:
 
 
 __all__ = [
+    "ADMIN_CAPABILITIES",
     "BENCHMARKS_READ_CAP",
     "L4_LAB_CAP",
     "PROMPTPOTTER_ADMIN_ENV",
     "IdentityContext",
     "claim_email",
     "default_identity",
+    "has_capability",
 ]

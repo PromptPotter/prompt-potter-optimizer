@@ -301,14 +301,22 @@ def compute_composite_fitness(
     # reference ``l1_diversity`` via campaign.json::scoring / scoring_steer.json.
     evaluator_values["l1_diversity"] = float(l1_diversity)
 
-    if callable(round_scorer):
-        scorer = round_scorer
-    elif isinstance(round_scorer, str):
-        scorer = compile_round_scorer(round_scorer)
+    if not results:
+        # No measurement — an operator skip at query 0/N, or a round whose every sample was
+        # excluded — has no fitness. Record the 0.0 floor (``total`` is already 0, the
+        # no-evidence marker election reads) rather than run the default ``accuracy`` scorer,
+        # which halts on the absent term and would crash the cycle. A round that DID measure
+        # rows but names an absent term is a formula bug and still raises below.
+        base = {**base, "accuracy": 0.0}
+        composite_fitness = 0.0
     else:
-        scorer = compile_round_scorer(default_per_round_formula(pipeline_schema))
-
-    composite_fitness = scorer(evaluator_values)
+        if callable(round_scorer):
+            scorer = round_scorer
+        elif isinstance(round_scorer, str):
+            scorer = compile_round_scorer(round_scorer)
+        else:
+            scorer = compile_round_scorer(default_per_round_formula(pipeline_schema))
+        composite_fitness = scorer(evaluator_values)
 
     # OptSP-layer counts for display and the validation-failure short-circuit.
     runtime_failure_count = 0
@@ -353,15 +361,13 @@ def matched_origin_stats(
     matched = [r for r in origin_results if r.get("sample_id") in candidate_sids]
     # A candidate's per-round subset can be DISJOINT from the origin's measured set
     # (``per_round_resubset`` re-picks the scored subset per candidate). Restricting then
-    # yields [], which measures no ``accuracy`` term — the round scorer refuses to score it
-    # and the whole campaign crashes. Fall back to the origin's full measured floor: a real
-    # number, not the fake 0.0 an empty set implies (which would credit the candidate with
-    # improvement over a floor the origin never measured — the bug ``score_incumbent_on_round``
-    # documents). An empty restriction that still OVERLAPS (origin genuinely 0/N on the subset)
-    # keeps its real 0.0 — only a truly disjoint set falls back.
+    # yields [] — fall back to the origin's full measured floor: a real number, not the fake
+    # 0.0 an empty set implies (which would credit the candidate with improvement over a floor
+    # the origin never measured — the bug ``score_incumbent_on_round`` documents). An empty
+    # restriction that still OVERLAPS (origin genuinely 0/N on the subset) keeps its real 0.0 —
+    # only a truly disjoint set falls back. A doubly-empty ``usable`` is handled by the gateway
+    # (``compute_composite_fitness`` scores an empty round to the 0.0 floor, not a crash).
     usable = matched or origin_results
-    if not usable:
-        return {"accuracy": 0.0, "hits": 0, "total": 0, "composite_fitness": 0.0}
     # `compute_composite_fitness` already spreads `_compute_accuracy(usable)` into its result —
     # calling it again here was a second `is_deprecated` walk over the same rows for the same
     # numbers, and a second place for the two to disagree.

@@ -23,6 +23,16 @@ say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!! \033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31mxx \033[0m %s\n' "$*" >&2; exit 1; }
 
+# idempotent KEY=VALUE in a .env-style file: replace the line if present, append if not.
+set_env_kv() {
+    local file="$1" key="$2" val="$3"
+    if grep -qE "^${key}=" "$file" 2>/dev/null; then
+        sed -i "s|^${key}=.*|${key}=${val}|" "$file"
+    else
+        printf '%s=%s\n' "$key" "$val" >> "$file"
+    fi
+}
+
 [[ "$(uname -s)" == "Linux" ]] || die "this script is Linux-only"
 [[ "$REPO_URL" != *"CHANGE-ME"* ]] || die "edit REPO_URL at the top of bootstrap.sh first (or pass REPO_URL=...)"
 
@@ -124,6 +134,28 @@ if [[ ! -f .env ]]; then
     sed -i "s|^ALLOWED_ORIGINS=.*|ALLOWED_ORIGINS=${ALLOWED_ORIGINS}|" .env
 else
     say ".env already exists — leaving it alone"
+fi
+
+# --- 5b. shared TermNorm bearer token (both sides already implement the check) ---
+# The optimizer authenticates to the TermNorm backend with a shared secret sent as
+# `Authorization: Bearer` (PromptPotter: connectors/termnorm.py; TermNorm:
+# config/middleware.py::bearer_auth_middleware, gated on TERMNORM_REQUIRE_AUTH). This
+# only PROVISIONS the secret — generated once, written to BOTH .env files so they match.
+# Idempotent: an existing non-empty token is reused, never clobbered.
+CUR_TOKEN="$(grep -E '^TERMNORM_TOKEN=' .env | head -1 | cut -d= -f2-)"
+if [[ -z "$CUR_TOKEN" ]]; then
+    CUR_TOKEN="$(openssl rand -hex 32 2>/dev/null || head -c32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+    set_env_kv .env TERMNORM_TOKEN "$CUR_TOKEN"
+    say "generated a shared TERMNORM_TOKEN in .env"
+fi
+if [[ -n "${BACKEND_DIR:-}" && -f "$BACKEND_DIR/.env" ]]; then
+    set_env_kv "$BACKEND_DIR/.env" TERMNORM_TOKEN "$CUR_TOKEN"
+    set_env_kv "$BACKEND_DIR/.env" TERMNORM_REQUIRE_AUTH true
+    say "enabled bearer auth on the TermNorm backend ($BACKEND_DIR/.env) with the shared token"
+elif [[ -n "${BACKEND_DIR:-}" ]]; then
+    warn "BACKEND_DIR set but $BACKEND_DIR/.env missing — set TERMNORM_TOKEN=$CUR_TOKEN + TERMNORM_REQUIRE_AUTH=true there by hand"
+else
+    say "backend side not co-managed (BACKEND_DIR unset) — set the SAME TERMNORM_TOKEN + TERMNORM_REQUIRE_AUTH=true in TermNorm's .env"
 fi
 
 # --- 6. webapp build -----------------------------------------------------

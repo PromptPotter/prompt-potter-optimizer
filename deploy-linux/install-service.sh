@@ -14,6 +14,9 @@ RUN_USER="${RUN_USER:-$USER}"
 BIND_HOST="${BIND_HOST:-127.0.0.1}"
 BIND_PORT="${BIND_PORT:-8001}"
 HEALTH_PATH="${HEALTH_PATH:-/api/v1/health}"
+# Optional cgroup memory ceiling (e.g. "2G"). Empty = no limit. A bound turns the
+# pp-self memory-starvation failure into a clean cgroup OOM instead of a silent OS kill.
+MEMORY_MAX="${MEMORY_MAX:-}"
 # ------------------------------------------------------------------------
 
 say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -54,12 +57,36 @@ ExecStart=$INSTALL_DIR/.venv/bin/python -m uvicorn $APP_MODULE \\
     --forwarded-allow-ips=127.0.0.1
 Restart=on-failure
 RestartSec=3s
-# Reasonable hardening — uvicorn doesn't need root or extra capabilities.
+# --- hardening (kernel-enforced blast-radius floor) ---------------------
+# uvicorn needs no privileges: drop every capability, deny privilege gain,
+# and make the whole filesystem read-only except the install dir it writes.
 NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
 PrivateTmp=true
-ProtectSystem=full
+ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=$INSTALL_DIR
+UMask=0077
+# kernel + process surface the app never touches
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged ~@resources
+${MEMORY_MAX:+MemoryMax=$MEMORY_MAX}
+# If the service fails to start after tightening, the usual first suspects are
+# ProtectSystem=strict (add the offending write path to ReadWritePaths) or the
+# SystemCallFilter (check: journalctl -u $SERVICE_NAME -e | grep -i 'signal\|syscall').
 
 [Install]
 WantedBy=multi-user.target

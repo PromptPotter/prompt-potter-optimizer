@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -14,7 +15,7 @@ from promptpotter.domain.backend import BackendConnection
 from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 from promptpotter.infrastructure.store import Stores, build_stores, cycle_dir_for
 from promptpotter.shared.errors import NotFoundError, ServiceUnavailableError, UnauthorizedError
-from promptpotter.shared.identity import IdentityContext
+from promptpotter.shared.identity import IdentityContext, has_capability
 
 PROMPTPOTTER_AUTH_OFF_ENV = "PROMPTPOTTER_AUTH"
 
@@ -62,6 +63,23 @@ def resolve_identity(request: Request) -> IdentityContext:
 
 
 IdentityDep = Annotated[IdentityContext, Depends(resolve_identity)]
+
+
+def require_capability(capability: str) -> Callable[[IdentityContext], None]:
+    """The single route-level capability gate — declare it in a route's
+    ``dependencies=[Depends(require_capability(CAP))]``.
+
+    Resolves the identity and raises 404 (existence-hiding, never 403) when the
+    capability is absent, matching the cross-user existence-leak posture. Routes
+    never hand-roll their own membership check — this is the reusable form of
+    ADR-0001's "capability gate on every handler".
+    """
+
+    def _guard(identity: IdentityDep) -> None:
+        if not has_capability(identity, capability):
+            raise NotFoundError("Not found", code="not_found")
+
+    return _guard
 
 
 def build_stores_from_identity(identity: IdentityDep) -> Stores:
@@ -131,6 +149,7 @@ __all__ = [
     "get_backend_or_404",
     "get_cycle_dir_or_404",
     "get_job_registry",
+    "require_capability",
     "resolve_identity",
     "warming_payload",
 ]

@@ -241,6 +241,15 @@ def test_an_unmeasured_term_is_never_scored_as_zero() -> None:
     with pytest.raises(ScoringTermMissingError, match="latency_norm"):
         compile_round_scorer("0.5 * accuracy + 0.5 * latency_norm")({"accuracy": 0.9})
 
+    # But the GATEWAY over an EMPTY round is defined, not a crash: an operator skip at query
+    # 0/N (or an all-excluded round) hands ``compute_composite_fitness`` no rows. It records the
+    # 0.0 floor with ``total`` 0 — the no-evidence marker that keeps the candidate out of winner
+    # election — rather than run the fail-loud scorer and halt the whole cycle.
+    empty = compute_composite_fitness([], _single_node_schema())
+    assert empty["composite_fitness"] == 0.0
+    assert empty["accuracy"] == 0.0
+    assert empty["total"] == 0
+
 
 def test_compile_scorer_accepts_known_formulas() -> None:
     """Production formulas across datasets must still compile after AST validation."""

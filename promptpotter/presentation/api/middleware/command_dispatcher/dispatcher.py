@@ -731,8 +731,8 @@ class CommandDispatcher:
     # Helpers
     # ------------------------------------------------------------------
     def _load_owned_campaign(self, campaign_id: str) -> Any:
-        campaign = self._store.campaigns.load_campaign(campaign_id)
-        if campaign is None or campaign.owner_user_id != str(self._store.identity.user_id):
+        campaign = self._store.campaigns.load_owned(campaign_id, str(self._store.identity.user_id))
+        if campaign is None:
             raise NotFoundError(
                 f"Campaign not found: {campaign_id}", code="command_target_not_found"
             )

@@ -26,7 +26,7 @@ from pathlib import Path
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import validate_dataset_name
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.identity import BENCHMARKS_READ_CAP
+from promptpotter.shared.identity import BENCHMARKS_READ_CAP, has_capability
 
 # Built-in try-and-learn demo datasets (repo ``datasets/{slug}/``). Surfaced to a
 # user while ``User.demo_mode_enabled`` is on — independent of the benchmark
@@ -94,7 +94,7 @@ def readable_dataset_dir(store: Stores, name: str) -> Path:
             return demo_dir
         raise DatasetAccessError(name)
 
-    if BENCHMARKS_READ_CAP in store.identity.capabilities:
+    if has_capability(store.identity, BENCHMARKS_READ_CAP):
         benchmark_dir = store.benchmarks_root / name  # name validated above
         if _has_config(benchmark_dir):
             return benchmark_dir
@@ -114,7 +114,7 @@ def list_readable_datasets(store: Stores) -> list[DatasetRef]:
             DatasetRef(slug, _read_title(dataset_dir), _read_n_samples(dataset_dir), "yours")
         )
 
-    if BENCHMARKS_READ_CAP in store.identity.capabilities and store.benchmarks_root.is_dir():
+    if has_capability(store.identity, BENCHMARKS_READ_CAP) and store.benchmarks_root.is_dir():
         for entry in sorted(store.benchmarks_root.iterdir()):
             if entry.name in DEMO_DATASET_SLUGS:
                 continue  # demo origins surface via the flag below, not the benchmark tier

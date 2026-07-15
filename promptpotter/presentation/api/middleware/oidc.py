@@ -21,7 +21,7 @@ from fastapi import FastAPI, Request, Response
 from promptpotter.domain.identity import Issuer, TenantId, UserId
 from promptpotter.infrastructure.identity.bundle import IdentityBundle
 from promptpotter.infrastructure.identity.migration import registered_user_id
-from promptpotter.shared.identity import BENCHMARKS_READ_CAP, L4_LAB_CAP, IdentityContext
+from promptpotter.shared.identity import ADMIN_CAPABILITIES, IdentityContext
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ def _session_capabilities(user_id: str, bundle: IdentityBundle) -> frozenset[str
     """
     admin_uid = registered_user_id(bundle.paths.default_claim_marker)
     if admin_uid is not None and user_id == admin_uid:
-        return frozenset({BENCHMARKS_READ_CAP, L4_LAB_CAP})
+        return ADMIN_CAPABILITIES
     return frozenset()
 
 
