@@ -105,12 +105,12 @@ def promptpotter_wire_adapter(
 
     Each per-node dict overrides template fields on the inner cycle's
     ``datasets/_optimizer/pipeline.json`` for that run. A ``model`` key (present only
-    when the campaign unlocked ``forbidden_axes_strict``) is the SINGLE inner-optimizer
-    model the carrier node carries; it rides the same channel untouched and is consumed
-    at the inner optimizer's ``llm_call`` config merge (fanned onto every node by
-    ``resolve_node_override``) — it is not a ``PromptTemplate`` field, so the prose merge
-    ignores it. ``node_config_items`` owns the "reserved key or non-dict" question for
-    every adapter (matching the TermNorm convention).
+    when the operator directly set the inner-optimizer model on the carrier node — a
+    cap-gated babysit override, never the optimizer's own search) rides the same
+    channel untouched and is consumed at the inner optimizer's ``llm_call`` config
+    merge — it is not a ``PromptTemplate`` field, so the prose merge ignores it.
+    ``node_config_items`` owns the "reserved key or non-dict" question for every
+    adapter (matching the TermNorm convention).
     """
     payload: dict[str, Any] = {"query": query}
 

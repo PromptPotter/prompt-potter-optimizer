@@ -11,7 +11,11 @@ from promptpotter.application.bootstrap.scoring_context import populate_session_
 from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.config import CampaignConfig
 from promptpotter.config.settings import DATASET_NAME
-from promptpotter.domain.opt_search_point import IndividualLineage, OptSearchPoint
+from promptpotter.domain.opt_search_point import (
+    IndividualLineage,
+    OptSearchPoint,
+    overlay_is_locked_axis_only,
+)
 from promptpotter.domain.results import RoundOrigin
 from promptpotter.domain.run_records import CycleSeed
 from promptpotter.domain.sample import Sample
@@ -164,34 +168,41 @@ def try_inherit_fork_origin(
     *,
     resolved_origin: OptSearchPoint,
 ) -> CampaignOrigin | None:
-    """Inherit a no-modification operator fork's C0 from its branch-point candidate.
+    """Inherit an operator fork's C0 from its branch-point candidate — for a no-edit
+    fork OR a model/provider-only steer.
 
-    When an operator forks from a searchpoint WITHOUT editing it, that searchpoint
-    *is* the fork's origin — its accuracy was already measured in the parent round.
-    Re-scoring it would re-roll a different number under a nondeterministic backend
+    When an operator forks from a searchpoint whose PROMPT it does not edit, that
+    searchpoint *is* the fork's origin — its accuracy was already measured in the parent
+    round. Re-scoring would re-roll a different number under a nondeterministic backend
     (the same prompt + samples does NOT reproduce the same accuracy), so C0 would no
     longer equal the branch point and the lineage would jump. Instead we inherit the
-    recorded measurement and skip the origin scoring pass — the loop goes straight to
-    L1_generate.
+    recorded measurement and skip the origin scoring pass — straight to L1_generate.
+
+    A model/provider-only steer inherits too (the sanctioned babysit path): the origin
+    is unchanged in every respect but the steered axis, so its done C0 is inherited exact
+    and only the candidate is measured under the steered model. This is what lets the
+    param-only pp-self origin be steered without re-paying C0.
 
     *resolved_origin* is the already-resolved fork origin (resolved once by
     ``establish_campaign_origin``). Returns the inherited :class:`CampaignOrigin` only
     when this is an operator-steered fork whose origin renders identically to the
-    ``from_candidate_id`` candidate in the parent's recorded round AND runs under the
-    same pipeline config. Any miss (non-fork, missing coords, edited prompt → different
-    render, edited config) returns ``None`` and the caller re-scores as before.
+    ``from_candidate_id`` candidate in the parent's recorded round, under an overlay that
+    is empty or locked-axis-only. Any miss (non-fork, missing coords, edited prompt →
+    different render, non-locked param edit) returns ``None`` and the caller re-scores.
     """
-    if seed is None or not seed.origin_prompt_fields:
+    if seed is None:
         return None
-    # Config gate. `render()` below compares the PROMPT; it says nothing about the
-    # pipeline. A fork carries a `pipeline_overlay` — the webapp's node-config editor sits
-    # beside Steer & fork — which `runner/entry.py` layers on top of the dataset config, so
-    # the fork RUNS under different params (a different model, even) while this path would
-    # hand it `cand.accuracy`, measured under the parent's. That is the stale-vs-fresh
-    # comparison `_identity_config` exists to prevent, arriving through a door it does not
-    # watch: the inherit path reads the parent's round file directly and never consults the
-    # measurement identity. An overlaid fork re-scores.
-    if seed.pipeline_overlay:
+    # Overlay gate. `render()` below compares the PROMPT; it says nothing about the
+    # pipeline. A fork carries a `pipeline_overlay` (the node-config editor beside Steer
+    # & fork) that `runner/entry.py` layers on top of the dataset config, so the fork RUNS
+    # under different params. A NON-locked param edit (temperature, effort, …) genuinely
+    # changes what the origin measures → re-score (return None). But a **model/provider-only**
+    # steer is the sanctioned babysit path: the origin is unchanged in every other respect,
+    # so the done C0 is inherited exact and only the candidate is measured under the steered
+    # model — grade C carries the "measured off the origin's model" caveat. An empty overlay
+    # (a no-edit fork) also inherits. This is why the param-only pp-self origin can be steered
+    # without re-paying its C0.
+    if seed.pipeline_overlay and not overlay_is_locked_axis_only(seed.pipeline_overlay):
         return None
 
     store = session.store.campaigns
@@ -223,24 +234,34 @@ def try_inherit_fork_origin(
         return None
 
     origin_acc = cand.accuracy
+    # Carry the branch-point candidate's per-sample rows (they ARE in the round file —
+    # `all_candidate_results[candidate_id]`, the origin's own being round 0's `results`).
+    # This is what makes the inherited C0 a FAITHFUL copy of the validated origin, not an
+    # empty shell: round 0's health is assessed on real samples (so the strict origin gate
+    # doesn't misfire "zero samples → critical" on an origin the parent already measured),
+    # and round-1 hard-sample seeding inherits the origin's per-sample δ evidence. No
+    # re-measurement — these are the recorded parent rows, exactly the inherited baseline.
+    inherited_results = list(
+        (parent_round.all_candidate_results or {}).get(from_candidate_id) or []
+    )
+    if not inherited_results:
+        inherited_results = list(parent_round.results or [])
     logger.info(
         "Fork %s: inheriting C0 from branch-point candidate %s (parent %s round %d) "
-        "acc=%.4f — skipping origin re-score, straight to L1",
+        "acc=%.4f, %d per-sample rows — skipping origin re-score, straight to L1",
         session.state.cycle_id,
         from_candidate_id,
         parent,
         from_round,
         origin_acc,
+        len(inherited_results),
     )
-    # origin_results left empty: per-candidate per-sample results aren't in the round
-    # file, and the reuse cache is noisy under nondeterminism. Hard-sample seeding for
-    # round 1 starts clean; the inherited C0 accuracy (the operator-facing value) is exact.
     # resolved_origin carries the OSP object (not a prompt-field dict) so the inherited C0 keeps
     # its lineage(source=seed.origin_source) — same shape the re-score path produces.
     return CampaignOrigin(
         resolved_origin=resolved_origin,
         origin_acc=origin_acc,
-        origin_results=[],
+        origin_results=inherited_results,
         instruction=resolved_origin.instruction,
     )
 

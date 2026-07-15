@@ -50,6 +50,7 @@ from pydantic import BaseModel, Field
 
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
+from promptpotter.domain.opt_search_point import overlay_sets_model_outside_allowed
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.models import (
     emit_command,
@@ -496,12 +497,19 @@ class CommandDispatcher:
             from promptpotter.application.optimization.resume_and_fork import mint_operator_fork
 
             seed = _parse_cycle_seed(payload_extras.get("seed"))
-            # Unlocking the engine-locked model/provider axis is a babysit action
-            # (ADR-0005 §4) — a distinct cap above the RUN-tier fork itself.
-            unlocks_axis = seed is not None and seed.config_overrides.forbidden_axes_strict is False
-            if unlocks_axis and not has_capability(self._store.identity, CAMPAIGN_BABYSIT_CAP):
+            # A seed that steers the inner-optimizer model OUTSIDE the origin's
+            # allow-list (`allowed_models`; empty = nothing sanctioned = any model
+            # steer counts) is the ADR-0005 §4 babysit action — a distinct cap above
+            # the RUN-tier fork. A steer to a SANCTIONED model is a clean human fork.
+            allowed_models = campaign.config.get("allowed_models") if campaign else None
+            steers_disallowed_model = seed is not None and overlay_sets_model_outside_allowed(
+                seed.pipeline_overlay, allowed_models
+            )
+            if steers_disallowed_model and not has_capability(
+                self._store.identity, CAMPAIGN_BABYSIT_CAP
+            ):
                 logger.warning(
-                    "fork-cycle axis-unlock denied for principal %s (missing %s)",
+                    "fork-cycle disallowed-model steer denied for principal %s (missing %s)",
                     self._acting_principal_id(),
                     CAMPAIGN_BABYSIT_CAP,
                 )

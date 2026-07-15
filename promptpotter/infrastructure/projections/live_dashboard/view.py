@@ -224,6 +224,43 @@ class LiveDashboardView(DerivedView):
             initial_llm_nodes=initial_llm_nodes,
         )
 
+    @classmethod
+    def write_launch_failure(
+        cls,
+        cycle_dir: CycleDir,
+        *,
+        campaign_id: str,
+        cycle_id: str,
+        session_id: str = "",
+        exc: BaseException,
+    ) -> None:
+        """Flip a cycle's ``dashboard.json`` terminal when a launch/run crashed
+        BEFORE the projection pipeline bound — so the file tree and the webapp show
+        the failure instead of a frozen ``init``, and the crash's own message lands
+        on disk (the folder-UI truth guarantee). Reads any prior state and marks it
+        terminal in place; writes a minimal one when none exists yet. Best-effort —
+        it runs on an error path and must not raise. Sole-writer rule holds: this IS
+        ``LiveDashboardView`` writing its own file, atomically."""
+        cycle_path = Path(cycle_dir)
+        state = resolve_resume_state(cycle_path, cycle_path, None) or LiveDashboardState(
+            campaign_id=campaign_id,
+            cycle_id=cycle_id,
+            session_id=session_id,
+            state_since=utcnow_iso(),
+            n_variants=0,
+            sp_budget_ttest=0,
+        )
+        state.error = DashboardError(
+            kind="launch_failed",
+            message=str(exc) or type(exc).__name__,
+            stop_reason="launch_aborted",
+        )
+        state.stop_reason = f"{type(exc).__name__}: {exc}"
+        state.run_phase = RunPhase.TERMINAL
+        state.state = "stopped"
+        state.state_since = utcnow_iso()
+        write_json(CycleLayout(cycle_path).dashboard, state.model_dump(), default=str)
+
     # -- State transitions ----------------------------------------------------
 
     def _set_state(self, name: str) -> None:

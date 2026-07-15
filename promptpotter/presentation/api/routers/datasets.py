@@ -747,18 +747,13 @@ def get_dataset_pipeline(name: str, store: StoreDep) -> DatasetPipelineResponse:
     schema = parse_pipeline_response(raw)
     connector = (raw.get("backend_name") or raw.get("name") or name).strip()
     backend_type = raw.get("backend_type")
-    # Model/provider lock is a campaign policy (`optimization.forbidden_axes_strict`),
-    # not a pipeline fact — a node may declare `model` in `param_keys` as a capability
-    # while the campaign still pins it. Read the dataset's default campaign.json; absent,
-    # fall back to the CampaignConfig default (strict — the conservative floor).
-    forbidden_strict = True
+    # Apply the dataset's default search-space narrowing so the setup editor opens
+    # showing the recommended per-node locks (e.g. retrieval nodes origin-locked); the
+    # draft's own overlay edits layer on top client-side. model/provider are always
+    # optimizer-locked (operator-owned axes), so no per-campaign policy is read here.
     campaign_path = dataset_dir / "campaign.json"
     if campaign_path.is_file():
         cfg = load_campaign_config(read_campaign_config_file(campaign_path))
-        forbidden_strict = cfg.optimization.forbidden_axes_strict
-        # Apply the dataset's default search-space narrowing so the setup editor
-        # opens showing the recommended per-node locks (e.g. retrieval nodes
-        # origin-locked); the draft's own overlay edits layer on top client-side.
         schema = schema.narrow(cfg.optimizer_narrowing)
     # Origin prompt for the first pipeline step — read-only seed the node panel
     # shows. `load_node_prompt` resolves `{node}.json` → `default.json`; absent a
@@ -776,7 +771,7 @@ def get_dataset_pipeline(name: str, store: StoreDep) -> DatasetPipelineResponse:
         backend_type=backend_type,
         pipeline=schema.model_dump(by_alias=True),
         view=schema.view.model_dump(by_alias=True) if schema.view is not None else None,
-        node_config_schema=schema.node_config_schema(forbidden_strict),
+        node_config_schema=schema.node_config_schema(),
         node_output_schema=schema.node_output_schemas(),
         origin_prompt_fields=origin_prompt_fields,
     )

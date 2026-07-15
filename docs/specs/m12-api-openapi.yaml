@@ -2026,8 +2026,8 @@ components:
         `pobb_epsilon`) — ABSOLUTE values the reconcile dialog re-sets (defaults to
         the parent's remaining, e.g. "3 of 6 rounds left"); (2) the selection-policy
         toggle (`per_round_resubset`) → the nested
-        `mechanisms.selection`; (3) the search-space policy toggles
-        (`schema_field_rename` / `forbidden_axes_strict`). Every policy knob
+        `mechanisms.selection`; (3) the search-space policy toggle
+        (`schema_field_rename`). Every policy knob
         invalidates search comparability, so a fork-at-offset-0 is how you A/B one
         without touching the global default or the parent cycle.
       properties:
@@ -2083,18 +2083,6 @@ components:
             LLM cannot emit a key the schema omits). Only meaningful on a campaign
             that optimizes an optimizer (`promptpotter-self`). An L2/L3
             `fork_proposal` can request this same unlock autonomously.
-        forbidden_axes_strict:
-          type: boolean
-          nullable: true
-          description: |
-            Unlock the `{model, provider}` axis so this fork's L1 may evolve the inner
-            optimizer's model as a searchpoint (a SINGLE model, fanned across every
-            inner node). `null` inherits the parent (locked by default: `node_param_keys`
-            never synthesizes the `model` axis, so the LLM cannot emit a key the schema
-            omits). Only meaningful on a campaign that optimizes an optimizer
-            (`promptpotter-self`) whose `pipeline.json` advertises `available_models`.
-            Operator-granted via "fork & steer" from the recorded origin; no autonomous
-            L2/L3 request yet.
 
     DeleteCyclePayload:
       $ref: '#/components/schemas/CycleRef'
@@ -2402,9 +2390,8 @@ components:
           type: array
           items: { type: string }
           description: |
-            Params the optimizer may never permute on any node under
-            `forbidden_axes_strict` (`["model","provider"]`); empty when strict
-            is off. Mirrors `PARAM_FORBIDDEN_KEYS`.
+            Params the optimizer may never permute on any node
+            (`["model","provider"]`) — always locked. Mirrors `PARAM_FORBIDDEN_KEYS`.
         nodes:
           type: object
           additionalProperties:
@@ -2435,10 +2422,9 @@ components:
       description: |
         The campaign-config knobs a draft carries, as one object — materialized
         into the committed `campaign.json::optimization` block. Operator-facing
-        (UI) vocabulary; `lock_model` commits as `forbidden_axes_strict`. Sent
-        whole on `DraftCampaign`; on the edit patch any subset is shallow-merged
-        onto the current value (a new knob is one property here, not a fresh
-        field threaded through every surface).
+        (UI) vocabulary. Sent whole on `DraftCampaign`; on the edit patch any
+        subset is shallow-merged onto the current value (a new knob is one property
+        here, not a fresh field threaded through every surface).
       properties:
         max_rounds:
           type: integer
@@ -2449,15 +2435,6 @@ components:
             Round ceiling; `0` measures the origin and stops. Smart-default `5`
             (matches the M10 prompt-iteration
             framework default). Operator-editable.
-        lock_model:
-          type: boolean
-          default: true
-          description: |
-            Whether the optimizer is barred from mutating model/provider
-            campaign-wide. Default locked — the conservative floor; operator-
-            editable in the pipeline-config panel. Commits as
-            `campaign.json::optimization.forbidden_axes_strict` and drives the
-            derived optimizer-locks permission view.
         prompt_block_catalogue:
           type: string
           enum: [guidance, restrict, off]
@@ -2913,8 +2890,8 @@ components:
               allOf:
                 - $ref: '#/components/schemas/OptimizationOverrides'
               description: |
-                The campaign-config knobs (`max_rounds` / `lock_model` /
-                `mechanisms`). The sent keys are shallow-merged onto the draft's
+                The campaign-config knobs (`max_rounds` / `mechanisms`). The sent
+                keys are shallow-merged onto the draft's
                 current overrides — send one knob or several; a nested `mechanisms`
                 replaces wholesale. Validated against `OptimizationOverrides`
                 server-side (rejects unknown keys / out-of-range `max_rounds`).

@@ -36,7 +36,7 @@ pipeline_params_override:
 
 ## Permission tiers — what the optimizer may touch
 
-Ride the existing lock. `OptimizationConfig.forbidden_axes_strict` + `PARAM_FORBIDDEN_KEYS` already implement exactly this shape for `model`/`provider`: when locked, `PipelineSchema.node_param_keys()` **drops the keys from the emitted JSON Schema**, so the LLM cannot emit a key that does not exist. Structural, not policed per round. No second gate.
+Ride the existing lock. `PARAM_FORBIDDEN_KEYS` already implements exactly this shape for `model`/`provider` (always locked): `PipelineSchema.node_param_keys()` **drops the keys from the emitted JSON Schema**, so the LLM cannot emit a key that does not exist. Structural, not policed per round. No second gate.
 
 | Tier | Surface | Default |
 |---|---|---|

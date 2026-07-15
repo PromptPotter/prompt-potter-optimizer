@@ -126,7 +126,6 @@ async def l1_generate(
         build_l1_response_schema(
             pipeline_schema,
             citable_fields=citable,
-            forbidden_axes_strict=cycle.config.optimization.forbidden_axes_strict,
             schema_field_rename=schema_field_rename,
         )
         if pipeline_schema

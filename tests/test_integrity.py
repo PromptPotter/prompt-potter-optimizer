@@ -523,7 +523,7 @@ def test_schema_description_axis_reaches_the_target_and_cannot_rename_a_field() 
 
     # A description edit is a valid `object` override (declared, type-checked).
     edit = {"llm_only": {"output_schema_descriptions": {"answer": "ANSWER FIRST."}}}
-    assert validate_overrides(edit, schema, forbidden_axes_strict=True) == []
+    assert validate_overrides(edit, schema) == []
 
     # APPLY: the fold rewrites the wire schema's prose and removes the virtual key; an
     # invented field (`made_up`) never reaches the wire; and no edit bound → schema untouched.
@@ -549,7 +549,6 @@ def test_schema_description_axis_reaches_the_target_and_cannot_rename_a_field() 
     forbidden = validate_overrides(
         {"llm_only": {"output_schema": {"type": "object"}}},
         schema,
-        forbidden_axes_strict=True,
     )
     assert [f.reason for f in forbidden] == ["forbidden_axis"]
 

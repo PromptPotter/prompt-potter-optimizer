@@ -50,13 +50,12 @@ PREVIEW_ROWS = 10
 
 class OptimizationOverrides(BaseModel):
     """The campaign-config knobs a new-campaign draft carries, as one validated
-    object — collapses what were three hand-threaded fields (``max_rounds`` /
-    ``lock_model`` / ``mechanisms``) so a new knob is one field here, not six
-    plumbing sites (draft → wire → edit-patch → webapp → OpenAPI). Operator-facing
-    (UI) vocabulary; the commit builder maps ``lock_model`` → the committed
-    ``campaign.json::optimization.forbidden_axes_strict``. The ``max_rounds`` bound
-    gates the operator EDIT path; the trusted internal ``draft_from_dataset`` path
-    builds the dict directly (a reused dataset's config may carry a higher ceiling)."""
+    object — collapses what were hand-threaded fields (``max_rounds`` /
+    ``mechanisms``) so a new knob is one field here, not six plumbing sites
+    (draft → wire → edit-patch → webapp → OpenAPI). Operator-facing (UI) vocabulary.
+    The ``max_rounds`` bound gates the operator EDIT path; the trusted internal
+    ``draft_from_dataset`` path builds the dict directly (a reused dataset's config
+    may carry a higher ceiling)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -65,11 +64,6 @@ class OptimizationOverrides(BaseModel):
         ge=0,
         le=100,
         description="Round ceiling for the campaign. 0 = measure the origin and stop.",
-    )
-    lock_model: bool = Field(
-        True,
-        description="Bar the optimizer from mutating model/provider campaign-wide "
-        "(commits as ``forbidden_axes_strict``).",
     )
     prompt_block_catalogue: Literal["guidance", "restrict", "off"] = Field(
         "guidance",
@@ -174,11 +168,10 @@ class DraftCampaign:
     # silently resetting to the connector default (the llm_only-on-reuse bug).
     pipeline_steps: list[str] = field(default_factory=list)
     # The campaign-config knobs, as one :class:`OptimizationOverrides`-shaped dict
-    # (``max_rounds`` / ``lock_model`` / ``mechanisms``). Seeded with the stock
-    # defaults, operator-editable in the new-campaign form, and materialized into
-    # the committed ``campaign.json::optimization`` (``lock_model`` →
-    # ``forbidden_axes_strict``). One object so a new knob is one field on
-    # :class:`OptimizationOverrides`, not a fresh thread through every surface.
+    # (``max_rounds`` / ``mechanisms``). Seeded with the stock defaults,
+    # operator-editable in the new-campaign form, and materialized into the
+    # committed ``campaign.json::optimization``. One object so a new knob is one
+    # field on :class:`OptimizationOverrides`, not a fresh thread through every surface.
     optimization_overrides: dict[str, Any] = field(default_factory=_default_optimization_overrides)
     # The target library a ``candidate_source`` pipeline ranks each query against —
     # the "4th required input" the operator drops in the ingest UI when a node type

@@ -194,14 +194,10 @@ edits ride the existing `L1Variant.pipeline_params_override` slot (no new
 `OPTIMIZER_RESPONSE_MODELS` entry), and the meta-evidence panels are the existing
 round-trace signals surfaced as outer injections, not re-derived.
 
-The mutation surface also includes the inner optimizer's **model** — a SINGLE model fanned
-across every inner node — when the campaign unlocks `forbidden_axes_strict` (locked by
-default; granted by "fork & steer" from the recorded origin, the same policy-unlock-forks-a-sibling
-shape as `schema_field_rename`). `node_param_keys` synthesizes ONE `model` axis on the first
-LLM node (from `available_models`); it rides the same override channel and is consumed at the
-inner optimizer's `llm_call` config merge (`resolve_node_override`), not the prose merge. Because
-it flows as a `pipeline_param` → `node_configs`, the swap is measured under its own searchpoint
-identity automatically — just a normal searchpoint the origin's allowed space already permits.
+The inner optimizer's **model** is NOT part of the mutation surface: `model`/`provider` are
+operator-owned axes the optimizer never searches. The inner model is pinned by the inner
+dataset's `pipeline.json` (or `inner_tasks.json::inner_model`); an operator may override it on
+a fork via the seed overlay, but that is a cap-gated babysit edit, not a searchpoint.
 
 ## 4. Outer composite fitness — per-sample core SHIPPED; cross-sample terms open
 

@@ -40,8 +40,11 @@ tags: [security, identity, authorization, capabilities, delegation, multi-tenant
 > delegate cannot write. Security test in `tests/test_security.py`.
 > **Also shipped (2026-07-15):** §5 per-grant spend-ceiling *enforcement*
 > (`effective_spend_cap_usd` folds the claim ceiling into its `min`); §4 babysit
-> *minimal* (the `fork-cycle` axis-unlock requires `campaign.babysit`, stamps the
-> cycle babysat, and forces its runs to grade `C` via `grade_run(human_intervened=…)`);
+> *minimal* (a fork seed whose `pipeline_overlay` sets a locked axis — model/provider —
+> requires `campaign.babysit`, stamps the cycle babysat, and forces its runs to grade
+> `C` via `grade_run(human_intervened=…)`; the trigger is the overlay edit, not any
+> policy flag — `forbidden_axes_strict` was removed, `PARAM_FORBIDDEN_KEYS` is now an
+> invariant the optimizer never searches);
 > and one-level delegation now *enforced* at the grant writer (a delegator that is
 > itself a sub-principal is rejected); §6 the bounded **`step-cycle`** verb (advance N
 > rounds in place then auto-pause) wired onto the resume machinery via
@@ -67,8 +70,9 @@ A user now wants to **delegate**. Concretely:
   the company-associated PC gets another.
 
 This generalizes a decision we hit building the L4 inner-optimizer **model-unlock**
-(`forbidden_axes_strict=false`, ADR relates: the fork-grant path). We first framed the
-guard as "only a *human* may unlock it." That is the wrong axis. The principal doing a
+(first built as a `forbidden_axes_strict` flag, since removed — the model is now set by
+a direct overlay edit on a fork). We first framed the guard as "only a *human* may unlock
+it." That is the wrong axis. The principal doing a
 privileged action isn't "human vs. machine" — it's an identity carrying (or lacking) a
 **capability**. The user's own AI, acting on their behalf, should carry the user's
 rights (co-principal); an external assistant reaching in over MCP should carry a
@@ -229,12 +233,22 @@ run today. The clean-measurement contract is *protected*, not bypassed.
 Warning copy is literal: "editing this marks this branch babysat — its runs won't count as
 clean measurements; fork from before the edit to keep a clean branch."
 
-**Minimal first slice — SHIPPED.** The smallest honest version is live: unlocking the
-engine-locked model/provider axis in a fork seed (`forbidden_axes_strict=false`) requires
-`campaign.babysit` (checked in the `fork-cycle` builder, above the RUN-tier fork itself),
-stamps the cycle index babysat via `mark_human_intervened`, and forces every run that cycle
-scores to grade **C** through a new `human_intervened` argument to `grade_run` — so the
-three existing consumers exclude it exactly as they exclude an incidental `C` run. The
+**Minimal first slice — SHIPPED.** The smallest honest version is live: a fork seed whose
+`pipeline_overlay` steers the inner-optimizer model OUTSIDE the origin's declared allow-list
+(`CampaignConfig.allowed_models` — empty = nothing sanctioned = restrictive default;
+`overlay_sets_model_outside_allowed`) requires `campaign.babysit` (checked in the `fork-cycle`
+builder, above the RUN-tier fork itself), stamps the cycle index babysat via
+`mark_human_intervened` (`kind="disallowed_model_override"`), and forces every run that cycle
+scores to grade **C** through a `human_intervened` argument to `grade_run` — so the three
+existing consumers exclude it exactly as they exclude an incidental `C` run. A steer to a
+SANCTIONED model (∈ `allowed_models`) is a clean human fork: no cap, no taint. The done C0 is
+INHERITED either way (`try_inherit_fork_origin` accepts a model/provider-only overlay), never
+re-measured — the fork gets the candidate's data, not a re-paid origin.
+The trigger is the direct overlay edit against the origin's allow-list, not a policy flag:
+`forbidden_axes_strict` was removed and `PARAM_FORBIDDEN_KEYS` is now an invariant (the
+optimizer never searches model/provider), so "human sets the model" and "optimizer may search
+it" are cleanly separate — only the former exists, and it is exactly what the babysit tag
+records (when the model is outside what the origin sanctioned). The
 cycle-level flag reaches the grade site through `Session.human_intervened` (read from the
 index at bootstrap for resume, set at the runner seed seam on first run). The full model
 above — subtree propagation down the lineage, and the fork-time *include-or-exclude the
@@ -282,8 +296,8 @@ secure method exists — a *known, bounded* limitation, not a hidden one.
 **Block the first (secure) slice:**
 
 1. **Babysat encoding — RESOLVED + SHIPPED (minimal slice).** Reused the existing substrate
-   (no new flag): `CampaignStore.mark_human_intervened` stamps the cycle index on the
-   axis-unlock path. Residual (a) — decided **cycle-level flag for the first cut**, true
+   (no new flag): `CampaignStore.mark_human_intervened` stamps the cycle index when the seed
+   overlay steers the model outside the origin's `allowed_models` (`overlay_sets_model_outside_allowed`). Residual (a) — decided **cycle-level flag for the first cut**, true
    subtree propagation on the positional genealogy deferred. Residual (b) — decided **neither
    a magic `source` prefix nor a per-stamp index read**: `grade_run` gained an explicit
    `human_intervened: bool` argument that forces grade `C`, fed from `Session.human_intervened`

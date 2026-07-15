@@ -69,15 +69,14 @@ def parse_population(
     pipeline_params: dict[str, Any] | None,
     schema: PipelineSchema | None,
     *,
-    forbidden_axes_strict: bool = True,
     prompt_block_catalogue: str = "guidance",
 ) -> tuple[list[OptSearchPoint], list[dict[str, Any] | None]]:
     """Project proposals → OptSearchPoints + merged pp; attach validation failures.
 
-    ``forbidden_axes_strict`` (default on) gates strict-mode rejection of
-    ``model``/``provider`` mutations (see ``OptimizationConfig.forbidden_axes_strict``).
-    ``prompt_block_catalogue`` gates the same rejection for a prompt-field value proposed
-    outside the block library — only under ``restrict`` (see the same-named knob).
+    ``model``/``provider`` mutations are always rejected (operator-owned axes, never
+    on L1's surface). ``prompt_block_catalogue`` gates the same rejection for a
+    prompt-field value proposed outside the block library — only under ``restrict``
+    (see the same-named knob).
     """
     osp_list: list[OptSearchPoint] = []
     merged: list[dict[str, Any] | None] = []
@@ -96,7 +95,6 @@ def parse_population(
                 outcome = L1_SCHEMA_COMPLIANCE.run(
                     pipeline_params_override,
                     pipeline_schema=schema,
-                    forbidden_axes_strict=forbidden_axes_strict,
                 )
                 if outcome is not None:
                     failures.extend(outcome.evidence["failures"])

@@ -52,12 +52,11 @@ def _r_pipeline_param_catalogue(b: InjectionBundle) -> str:
     schema = b.pipeline_schema
     if schema is None:
         return ""
-    # ONE surface, gated by the lock: when strict the `model` axis is absent, when
-    # unlocked it's synthesized with `available_models` as its value space.
-    npk = schema.node_param_keys(forbidden_strict=b.forbidden_axes_strict)
+    # ONE surface: model/provider are always absent (operator-owned, never an
+    # optimizer axis), so the catalogue never advertises them.
+    npk = schema.node_param_keys()
     if not npk:
         return ""
-    available_models = list(schema.available_models)
     lines = ["PIPELINE PARAM CATALOGUE (use only these — do not invent):"]
     for node_name, params in npk.items():
         node = schema.get_node(node_name)
@@ -67,7 +66,7 @@ def _r_pipeline_param_catalogue(b: InjectionBundle) -> str:
         enums = node.param_allowed_values
         bits: list[str] = []
         for p in sorted(params):
-            allowed = enums.get(p) or (available_models if p == "model" else None)
+            allowed = enums.get(p)
             if allowed:
                 shown = list(allowed)[:AXES_ENUM_PREVIEW]
                 preview = ", ".join(str(x) for x in shown)

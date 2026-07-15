@@ -98,27 +98,21 @@ def _derive_node_kind(node: PipelineNode | None) -> str:
     """Pick a webapp render kind for one pipeline node.
 
     Priority order: cache role wins because a hit short-circuits the
-    pipeline; then the LLM signal — a node is an LLM call if it is the
-    ``llm_only`` single-LLM sentinel, declares a ``generation`` wire /
-    langfuse type (the backend's explicit LLM marker), OR carries an
-    ``is_llm`` observation mapping. A bare ``llm_only`` overlay carries
-    none of the latter two, so the sentinel name is load-bearing here.
+    pipeline; then the LLM signal — :attr:`PipelineNode.runs_llm`, the ONE
+    broad "does this node run an LLM" predicate (``llm_only`` sentinel /
+    ``generation`` wire/langfuse type / ``is_llm`` mapping), shared with the
+    model-axis carrier so the render kind and the carrier never disagree.
     Everything else falls back to the connector's ``wire_type``
     (``tool`` / ``retriever``) and ultimately a plain ``tool`` dot.
     ``node_role`` of ``"ranker"`` / ``"candidate_source"`` is intentionally
     NOT checked — those roles can be LLM (``llm_ranking``) or pure algos
-    (``fuzzy_matching``); the three signals above are what discriminate.
+    (``fuzzy_matching``); ``runs_llm`` is what discriminates.
     """
     if node is None:
         return "tool"
     if str(node.node_type) == "cache":
         return "cache"
-    if (
-        node.name == "llm_only"
-        or node.is_llm
-        or node.wire_type == "generation"
-        or node.langfuse_type == "generation"
-    ):
+    if node.runs_llm:
         return "llm"
     if node.wire_type == "retriever":
         return "retriever"

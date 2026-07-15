@@ -13,7 +13,11 @@ from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
 from promptpotter.domain.l1_layout import L1Layout, default_l1_layout
 from promptpotter.domain.pipeline_schema import SCHEMA_DESCRIPTIONS_PARAM
-from promptpotter.domain.search_point import SearchPoint, TaskDecomposition
+from promptpotter.domain.search_point import (
+    PARAM_FORBIDDEN_KEYS,
+    SearchPoint,
+    TaskDecomposition,
+)
 from promptpotter.domain.validators import ValidatorOutcome
 
 if TYPE_CHECKING:
@@ -320,6 +324,38 @@ def node_config_items(pp: dict[str, Any] | None) -> Iterator[tuple[str, dict[str
         yield k, v
 
 
+def overlay_is_locked_axis_only(overlay: dict[str, Any] | None) -> bool:
+    """True iff *overlay* edits at least one node AND every key it sets is a
+    locked axis (``model``/``provider``). A pure model/provider steer — the origin
+    is unchanged in every other respect, so a param-only fork **inherits** the done
+    origin's C0 rather than re-scoring it (a non-locked param edit genuinely changes
+    the origin measurement → re-score). Gates the inherit path, not the taint."""
+    keys = [k for _node, cfg in node_config_items(overlay) for k in cfg]
+    return bool(keys) and all(k in PARAM_FORBIDDEN_KEYS for k in keys)
+
+
+def overlay_sets_model_outside_allowed(
+    overlay: dict[str, Any] | None, allowed_models: list[str] | None
+) -> bool:
+    """True iff a seed ``pipeline_overlay`` steers the inner-optimizer model/provider
+    to a value the origin has NOT sanctioned — the ADR-0005 babysit trigger.
+
+    ``allowed_models`` is the origin's declared allow-list (``CampaignConfig``).
+    A steer to a model IN the set is a clean human choice (no taint); a steer to a
+    model OUTSIDE it — or ANY model steer when the set is empty (nothing sanctioned,
+    the restrictive default) — taints the branch. A ``provider`` edit has no allow-list
+    to sanction it, so it always counts. The optimizer never searches these axes at all
+    (``PARAM_FORBIDDEN_KEYS`` invariant); this governs only the direct human steer."""
+    allowed = set(allowed_models or [])
+    for _node, cfg in node_config_items(overlay):
+        if "provider" in cfg:
+            return True
+        model = cfg.get("model")
+        if model is not None and model not in allowed:
+            return True
+    return False
+
+
 def fold_schema_descriptions(
     pp: dict[str, Any] | None, schema: PipelineSchema | None = None
 ) -> None:
@@ -453,4 +489,7 @@ __all__ = [
     "build_candidate_flat",
     "flatten_sp_summary",
     "group_diff_keys",
+    "node_config_items",
+    "overlay_is_locked_axis_only",
+    "overlay_sets_model_outside_allowed",
 ]

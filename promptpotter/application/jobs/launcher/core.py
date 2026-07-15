@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import time
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -55,15 +56,55 @@ from promptpotter.application.optimization.task_context import (
 )
 from promptpotter.application.runner.entry import RunMode, run_optimization
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
+from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.infrastructure.store.layout import REPO_ROOT
+from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import MachineBusyError, PayloadInvalidError
 from promptpotter.shared.identity import claim_email
 
 logger = logging.getLogger(__name__)
+
+
+def _record_launch_failure(
+    *,
+    stores: Stores,
+    campaign_id: str,
+    cycle_id: str,
+    session_id: str,
+    exc: BaseException,
+) -> None:
+    """Stamp a crashed launch onto the cycle's on-disk truth — a terminal
+    ``dashboard.json`` (via its sole writer) + ``index.json::finished_at`` — so the
+    file tree and the webapp show ``failed`` with the crash message instead of a
+    frozen ``init``. Called from the launch ``except`` sites, where the projection
+    pipeline never bound to write this itself. Best-effort: it must never mask the
+    original error, so any failure here is logged and swallowed."""
+    from promptpotter.infrastructure.projections.live_dashboard import LiveDashboardView
+
+    try:
+        cycle_dir = CycleDir(stores.campaigns.cycle_dir(campaign_id, cycle_id))
+        LiveDashboardView.write_launch_failure(
+            cycle_dir,
+            campaign_id=campaign_id,
+            cycle_id=cycle_id,
+            session_id=session_id,
+            exc=exc,
+        )
+        stores.campaigns.mark_finished(
+            campaign_id,
+            cycle_id,
+            status="failed",
+            stop_reason=f"{type(exc).__name__}: {exc}",
+            finished_at=utcnow_iso(),
+            crash_traceback=traceback.format_exc(),
+        )
+    except Exception:
+        logger.exception("failed to record launch failure for %s/%s", campaign_id, cycle_id)
+
 
 # The one outcome → JobStatus mapping. Sole bridge from the StopReason outcome
 # table to JobRegistry's lifecycle vocabulary; there is no per-reason reconciler.
@@ -234,7 +275,11 @@ async def mint_campaign_command(
     )
 
     # Everything below holds a slot — release it on any pre-launch failure so a
-    # crashed preflight/init never wedges the machine at capacity.
+    # crashed preflight/init never wedges the machine at capacity. `campaign_id` /
+    # `cycle_id` bind only once the mint resolves; init them so the failure handler
+    # can tell "crashed before a cycle existed" (nothing to mark) from "crashed
+    # after mint" (mark the cycle terminal).
+    campaign_id = cycle_id = ""
     try:
         # Pre-202 phase timing — the synchronous bootstrap is what the operator
         # waits on (round-0 scoring is already backgrounded). One INFO line per
@@ -297,8 +342,16 @@ async def mint_campaign_command(
             time.perf_counter() - _t_framing0,
             time.perf_counter() - _t0,
         )
-    except BaseException:
+    except BaseException as exc:
         job_registry.mark_finished(job.job_id, status="failed", stop_reason="launch_aborted")
+        if campaign_id and cycle_id:
+            _record_launch_failure(
+                stores=stores,
+                campaign_id=campaign_id,
+                cycle_id=cycle_id,
+                session_id="",
+                exc=exc,
+            )
         raise
 
     task = asyncio.create_task(
@@ -487,8 +540,15 @@ async def start_run_command(
         if not session_id:
             raise LaunchError(f"cycle {cycle_id} in {campaign_id} has no parent_session_id")
         session.session_id = session_id
-    except BaseException:
+    except BaseException as exc:
         job_registry.mark_finished(job.job_id, status="failed", stop_reason="launch_aborted")
+        _record_launch_failure(
+            stores=stores,
+            campaign_id=campaign_id,
+            cycle_id=cycle_id,
+            session_id="",
+            exc=exc,
+        )
         raise
 
     task = asyncio.create_task(
@@ -584,6 +644,17 @@ async def _run_in_background(
             job_id,
             status="failed",
             stop_reason=f"{type(exc).__name__}: {exc}",
+        )
+        # Reaching here means the runner never finalized this cycle (the failure
+        # fired before / outside its own try/except — e.g. build_run_observers),
+        # so nothing wrote the cycle terminal. Stamp it so the fork doesn't sit
+        # frozen at `init` in the file tree and the webapp.
+        _record_launch_failure(
+            stores=session.store,
+            campaign_id=session.campaign_id,
+            cycle_id=session.state.cycle_id or "",
+            session_id=session.session_id,
+            exc=exc,
         )
 
 

@@ -74,7 +74,6 @@ async def l1_score(
         candidates,
         pipeline_params,
         schema,
-        forbidden_axes_strict=cycle.config.optimization.forbidden_axes_strict,
         prompt_block_catalogue=cycle.config.optimization.prompt_block_catalogue,
     )
     # Resolve the winner's merged pipeline_params by identity, not position: `scored`

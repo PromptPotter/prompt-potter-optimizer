@@ -232,7 +232,7 @@ class _EditDraftPatch(BaseModel):
     # shape: the six string fields + optional few_shot_examples). Replaces the
     # draft's origin_prompt_fields wholesale — the editor sends the full object.
     origin_prompt_fields: dict[str, Any] | None = None
-    # The campaign-config knobs (max_rounds / lock_model / mechanisms) as one
+    # The campaign-config knobs (max_rounds / mechanisms) as one
     # object. Shallow-merged onto the draft's current overrides then validated
     # against OptimizationOverrides — so the editor can send one knob (e.g.
     # {"max_rounds": 8}) or several, and a nested `mechanisms` replaces wholesale.

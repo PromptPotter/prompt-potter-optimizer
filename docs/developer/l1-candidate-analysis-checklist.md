@@ -151,7 +151,7 @@ and worth flagging.
 | Check | Validator |
 |---|---|
 | Schema compliance (allowed-models, param_allowed_values, type) | `L1_SCHEMA_COMPLIANCE` |
-| Forbidden axes (`model`, `provider`) | `validate_overrides(forbidden_axes_strict=True)` |
+| Forbidden axes (`model`, `provider`) | `validate_overrides()` (always locked) |
 | Re-propose known-failing config | `L1_CONFIG_NOT_IN_RUNTIME_FAILURES` (this PR) |
 | L2 task_context no-op merge / paraphrase repeat | `L2_TASK_CONTEXT_STALE_REPEAT` (evidence `mode`: `verbatim` \| `paraphrase`) |
 | L2 duplicate insert (≥3 lines) | `L2_DUPLICATE_INSERT` |

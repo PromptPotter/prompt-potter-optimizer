@@ -53,6 +53,7 @@ def _prepare_cycle_for_resume(
     train_data: list[Sample],
     *,
     pivot_prompt: bool = True,
+    steer_fork: bool = False,
 ) -> dict[Any, Any]:
     """Apply pipeline to session + verify the campaign config still matches.
 
@@ -60,6 +61,11 @@ def _prepare_cycle_for_resume(
     empty stored ⇒ unstarted check-in, refuse; match ⇒ resume; differ ⇒ classify
     POLICY_ONLY (safe) vs DATA_AFFECTING (recommend fork or fresh ``new``;
     TTY pivot offered when ``pivot_prompt=True``, sweep callers pass False).
+
+    ``steer_fork`` (``--steer-model``) downgrades BOTH drift halts to a note: a
+    steer-fork mints a fresh sibling under the current config + prompts — the very
+    "config changed → fork" resolution the halt recommends — so it must not be
+    blocked by it, matching the web ``fork-cycle`` path (which runs no drift check).
 
     Second check: optimizer-prompt drift halts resume with a pointer to ``new``."""
     from promptpotter.application.knobs import DiffScope, classify_config_diff
@@ -106,6 +112,11 @@ def _prepare_cycle_for_resume(
             # Policy-only: cached measurements + L1 candidates stay valid; divergence walk short-circuits.
             print("Diff is policy-only — safe to resume in place. The new policy")
             print("governs unevaluated rounds; past measurements are reused.")
+        elif steer_fork:
+            # A steer-fork mints a fresh sibling under the current config — the drift's
+            # own recommended resolution. Don't halt; the fork carries the new config.
+            print("Diff is data-affecting, but --steer-model mints a fresh sibling")
+            print("under the current config — proceeding to fork (parent preserved).")
         else:
             print("Diff is data-affecting — cached measurements may not apply.")
             print("  • `python -m promptpotter resume --fork-on-divergence` branches a")
@@ -136,8 +147,9 @@ def _prepare_cycle_for_resume(
             raise _PivotToFreshError(dataset_name)
 
     # Optimizer-prompt drift — campaign identity folds in datasets/_optimizer/; editing them is data-affecting (``new`` is the fix).
+    # A steer-fork mints a fresh sibling under the current prompts, so this halt (like the config one above) does not apply.
     current_optimizer_hash = combined_optimizer_prompt_hash()
-    if campaign.optimizer_prompt_hash != current_optimizer_hash:
+    if not steer_fork and campaign.optimizer_prompt_hash != current_optimizer_hash:
         dataset_name = ctx.init_params.get("dataset_name") or "<dataset>"
         raise SystemExit(
             f"ERROR: the optimizer meta-prompts changed since campaign "
@@ -249,6 +261,103 @@ def _maybe_fork_operator_rewind(
         new_cycle_id,
         rewind_to,
         reason,
+    )
+
+
+def _origin_candidate_id(session: Session, cycle_id: str, from_round: int) -> str:
+    """The branch-point candidate id in *cycle_id*'s round *from_round* — what the
+    fork inherits its C0 from. A param-only origin's round 0 holds exactly the origin
+    candidate; return the single (or first) recorded candidate. Empty string when the
+    round file is missing or holds no candidate (the inherit path then re-scores)."""
+    round_file = session.store.campaigns.load_round_file(session.campaign_id, cycle_id, from_round)
+    scores = getattr(round_file, "candidate_scores", None) or [] if round_file else []
+    return scores[0].candidate_id if scores else ""
+
+
+def _maybe_fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx, session: Session) -> None:
+    """``--steer-model NODE=MODEL``: mint an operator-steered fork whose seed overlay
+    steers a node's inner-optimizer model — the CLI twin of the web steer-fork
+    (``POST /commands/fork-cycle``). The done origin's C0 is **inherited**, never
+    re-scored (the overlay is model-only; ``try_inherit_fork_origin`` reads the
+    branch-point candidate via ``from_candidate_id``), so only the candidate is
+    measured under the steered model.
+
+    Steering to a model OUTSIDE the origin's ``allowed_models`` (empty = nothing
+    sanctioned) is a babysit act: it requires ``campaign.babysit`` (the fork-cycle
+    applier's gate) and the runner stamps the branch grade C (``runner/entry.py``,
+    the seam both paths share). A steer to a SANCTIONED model is a clean fork — no
+    cap, no taint. Retargets the active pointer; the resume loop then runs the fork."""
+    specs = getattr(args, "steer_model", None)
+    if not specs:
+        return
+    if not ctx.cycle_id:
+        raise SystemExit(
+            "ERROR: `resume --steer-model` requires an active cycle on this session.\n"
+            "Run `python -m promptpotter new <dataset>` first."
+        )
+
+    from promptpotter.application.optimization.resume_and_fork import mint_operator_fork
+    from promptpotter.domain.opt_search_point import overlay_sets_model_outside_allowed
+    from promptpotter.domain.run_records import ConfigOverrides, CycleSeed
+    from promptpotter.shared.identity import CAMPAIGN_BABYSIT_CAP, has_capability
+
+    overlay: dict[str, Any] = {}
+    for spec in specs:
+        node, sep, model = spec.partition("=")
+        node, model = node.strip(), model.strip()
+        if not sep or not node or not model:
+            raise SystemExit(f"ERROR: --steer-model expects NODE=MODEL, got {spec!r}")
+        overlay.setdefault(node, {})["model"] = model
+
+    # Read the origin's allow-list off the campaign config (unchanged by this steer —
+    # the fork inherits it). A steer OUTSIDE it taints (babysit + grade C); a steer to
+    # a sanctioned model is clean.
+    allowed_models = ctx.campaign_config.allowed_models
+    disallowed = overlay_sets_model_outside_allowed(overlay, allowed_models)
+    if disallowed:
+        # Same capability gate the web fork-cycle applier runs. The terminal owner
+        # holds it; a delegated sub-principal without it is refused here.
+        if not has_capability(session.identity, CAMPAIGN_BABYSIT_CAP):
+            raise SystemExit(
+                f"ERROR: steering to a model outside the origin's allowed_models "
+                f"requires the {CAMPAIGN_BABYSIT_CAP} capability."
+            )
+        models = ", ".join(sorted(m for c in overlay.values() for m in [c.get("model")] if m))
+        print()
+        print(f"⚠  Steering the inner-optimizer model to {models} — NOT in the origin's")
+        print(f"   allowed_models {allowed_models or '[] (nothing sanctioned)'}.")
+        print("   This branch will be marked babysat (grade C); the origin's C0 is inherited.")
+        print()
+        # The `campaign.babysit` cap (checked above) is the authorization — same as the
+        # web fork-cycle path, which has no confirm. The TTY prompt is a courtesy: an
+        # explicit typed "no" cancels; a non-TTY run (None) proceeds on the cap.
+        if confirm_tty("Proceed with the babysit steer?", default_no=True) is False:
+            raise SystemExit("Cancelled. The active campaign is unchanged.")
+
+    steer_max = getattr(args, "steer_max_rounds", None)
+    config_overrides = (
+        ConfigOverrides(max_rounds=steer_max) if steer_max is not None else ConfigOverrides()
+    )
+    parent_cycle_id = ctx.cycle_id
+    new_cycle_id = mint_operator_fork(
+        stores=session.store,
+        campaign_id=ctx.campaign_id,
+        cycle_id=parent_cycle_id,
+        from_round=0,
+        # The origin candidate in the parent's round 0 — the C0 the fork inherits
+        # (skips the origin re-score, straight to L1 on the steered model).
+        from_candidate_id=_origin_candidate_id(session, parent_cycle_id, 0),
+        seed=CycleSeed(pipeline_overlay=overlay, config_overrides=config_overrides),
+        steered_by=str(session.identity.user_id),
+    )
+    ctx.cycle_id = new_cycle_id
+    session.state.cycle_id = new_cycle_id
+    logger.info(
+        "Operator steer-fork (%s): %s → %s [overlay=%s]",
+        "babysit, grade C" if disallowed else "clean, sanctioned model",
+        parent_cycle_id,
+        new_cycle_id,
+        overlay,
     )
 
 
@@ -422,8 +531,11 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
         )
 
     train_data = session.samples or []
+    steering = bool(getattr(args, "steer_model", None))
     try:
-        pipeline_params = _prepare_cycle_for_resume(args, ctx, session, campaign_config, train_data)
+        pipeline_params = _prepare_cycle_for_resume(
+            args, ctx, session, campaign_config, train_data, steer_fork=steering
+        )
     except _PivotToFreshError as pivot:
         # Operator pivoted: synthesize a ``new`` namespace from the active session's dataset + halt/spend knobs.
         from promptpotter.presentation.cli.commands.new import cmd_new
@@ -452,6 +564,7 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
 
     _maybe_fork_diag_sibling(args, ctx, session)
     _maybe_fork_operator_rewind(args, ctx, session)
+    _maybe_fork_operator_steer(args, ctx, session)
 
     log_startup_summary(
         session,

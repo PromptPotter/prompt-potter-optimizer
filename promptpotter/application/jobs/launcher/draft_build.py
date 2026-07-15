@@ -105,15 +105,14 @@ def derive_optimizer_locks(draft: DraftCampaign) -> dict[str, Any]:
 
     Makes the otherwise-hidden connector defaults visible *before* commit: the
     default pipeline, the per-node config floor + the ``param_allowed_values``
-    the optimizer may permute, and the campaign-wide forbidden axes
-    (``model``/``provider`` under ``forbidden_axes_strict``). A draft's
+    the optimizer may permute, and the always-locked forbidden axes
+    (``model``/``provider`` — the optimizer never searches them). A draft's
     ``pipeline_overlay`` is empty until commit, so without this the UI couldn't
     show that the optimizer is *locked out* of escalating these — not merely
     that ``low`` is a default. Mirrors the commit-time merge via
     :func:`merge_pipeline_overlay`.
     """
     connector = connectors.get(draft.connector)
-    forbidden_strict = draft.optimization_overrides["lock_model"]
     # The active pipeline is the permission surface — the optimizer can only move
     # nodes that actually run. Scope the per-node locks to it so the panel shows
     # only the dataset's real nodes (not every node the backend has registered,
@@ -133,7 +132,7 @@ def derive_optimizer_locks(draft: DraftCampaign) -> dict[str, Any]:
         # The draft's chosen pipeline (preserved on reuse) over the connector
         # default — so the UI shows the dataset's real pipeline, not llm_only.
         "pipeline": steps,
-        "forbidden_axes": sorted(PARAM_FORBIDDEN_KEYS) if forbidden_strict else [],
+        "forbidden_axes": sorted(PARAM_FORBIDDEN_KEYS),
         "nodes": node_locks,
     }
 
@@ -177,7 +176,7 @@ def _draft_pipeline_render(draft: DraftCampaign) -> dict[str, Any]:
     schema = schema.narrow(cfg.optimizer_narrowing)
     return {
         "pipeline_view": schema.view.model_dump(by_alias=True) if schema.view is not None else None,
-        "node_config_schema": schema.node_config_schema(cfg.optimization.forbidden_axes_strict),
+        "node_config_schema": schema.node_config_schema(),
         "node_output_schema": schema.node_output_schemas(),
     }
 
@@ -230,9 +229,6 @@ def _build_default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:
     overrides = draft.optimization_overrides
     optimization: dict[str, Any] = {"max_rounds": overrides["max_rounds"]}
     optimization.update(dict(connector.default_optimization))
-    # The operator's model-lock choice overrides the connector default —
-    # mirrors derive_optimizer_locks so the committed campaign matches the panel.
-    optimization["forbidden_axes_strict"] = overrides["lock_model"]
     optimization["prompt_block_catalogue"] = overrides["prompt_block_catalogue"]
     # The operator's mechanism-toggle choices ride straight onto the committed
     # campaign.json (sorting/selection + early-abort groups), like max_rounds.

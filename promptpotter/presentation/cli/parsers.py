@@ -209,6 +209,26 @@ def _add_resume_args(p_resume: argparse.ArgumentParser) -> None:
         help="One-line audit-trail reason recorded on the OPERATOR_REWIND fork; "
         "ignored unless `--rewind ROUND` is set.",
     )
+    p_resume.add_argument(
+        "--steer-model",
+        dest="steer_model",
+        action="append",
+        default=None,
+        metavar="NODE=MODEL",
+        help="Mint an operator-steered fork that overrides a node's model on the seed "
+        "overlay (repeatable). Editing an optimizer-locked axis is a babysit act: it "
+        "requires the `campaign.babysit` capability and grades the fork's runs C. CLI "
+        "twin of the web steer-fork (`POST /commands/fork-cycle`), same seam + gate.",
+    )
+    p_resume.add_argument(
+        "--steer-max-rounds",
+        dest="steer_max_rounds",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Round ceiling for a `--steer-model` fork (default: inherit the parent). "
+        "Ignored unless `--steer-model` is set.",
+    )
     _add_runtime_halts(p_resume)
 
 

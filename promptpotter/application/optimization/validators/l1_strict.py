@@ -196,7 +196,6 @@ def build_l1_response_schema(
     pipeline_schema: PipelineSchema,
     *,
     citable_fields: Sequence[str],
-    forbidden_axes_strict: bool = True,
     schema_field_rename: bool = False,
 ) -> dict[str, Any]:
     """l1_generate response_schema — three constrained slots per variant.
@@ -248,12 +247,11 @@ def build_l1_response_schema(
     pp_override["additionalProperties"] = False
     pp_properties = pp_override["properties"]
 
-    # The emittable per-node param surface is `node_param_keys(forbidden_strict)` —
-    # the ONE source the catalogue + validator share. When locked it omits the
-    # model axis entirely (the LLM cannot emit a key the schema doesn't declare,
-    # so the lock needs no per-round rejection); when unlocked it synthesizes a
-    # `model` axis whose value space is `available_models`.
-    npk = pipeline_schema.node_param_keys(forbidden_strict=forbidden_axes_strict)
+    # The emittable per-node param surface is `node_param_keys()` — the ONE source
+    # the catalogue + validator share. It omits model/provider entirely (the LLM
+    # cannot emit a key the schema doesn't declare, so the lock needs no per-round
+    # rejection).
+    npk = pipeline_schema.node_param_keys()
     available_models = list(pipeline_schema.available_models)
     for node_name, keys in npk.items():
         node = pipeline_schema.get_node(node_name)
@@ -351,17 +349,13 @@ def _matches_declared_type(value: Any, declared: str) -> bool:
 def validate_overrides(
     pipeline_params_override: dict[str, dict[str, Any]],
     pipeline_schema: PipelineSchema,
-    *,
-    forbidden_axes_strict: bool = True,
 ) -> list[ValidationFailure]:
     """Validate overrides vs available_models + param_allowed_values + param_types; failures drive synthetic-0.
 
-    When ``forbidden_axes_strict`` is on, any touch of
-    ``PARAM_FORBIDDEN_KEYS`` (``model``, ``provider``) is rejected outright,
-    independent of whether the proposed value would be in ``available_models``
-    — these axes are operator-fixed at the dataset overlay and not on L1's
-    surface at all. Off-by-flag enables ablation runs that intentionally
-    sweep model identity.
+    Any touch of ``PARAM_FORBIDDEN_KEYS`` (``model``, ``provider``) is rejected
+    outright, independent of whether the proposed value would be in
+    ``available_models`` — these axes are operator-owned (dataset overlay or a
+    cap-gated fork edit) and never on L1's surface at all.
 
     Type mismatch (``"0.2"`` proposed for a ``number``-declared param) is
     rejected with ``reason="type_mismatch"``. This catches the case the
@@ -386,7 +380,7 @@ def validate_overrides(
     """
     failures: list[ValidationFailure] = []
     allowed_models = list(pipeline_schema.available_models)
-    emittable = pipeline_schema.node_param_keys(forbidden_strict=forbidden_axes_strict)
+    emittable = pipeline_schema.node_param_keys()
     for node_name, node_params in pipeline_params_override.items():
         if not isinstance(node_params, dict):
             continue
@@ -414,9 +408,7 @@ def validate_overrides(
         node_types = node.param_types
         node_emittable = emittable.get(node_name, set())
         for param, value in node_params.items():
-            if param in SCHEMA_OWNED_FIELDS or (
-                forbidden_axes_strict and param in PARAM_FORBIDDEN_KEYS
-            ):
+            if param in SCHEMA_OWNED_FIELDS or param in PARAM_FORBIDDEN_KEYS:
                 failures.append(
                     ValidationFailure(
                         axis=f"{node_name}.{param}",
@@ -478,15 +470,12 @@ def _check_l1_schema_compliance(
     source_output: Any,
     *,
     pipeline_schema: PipelineSchema,
-    forbidden_axes_strict: bool = True,
     **_: Any,
 ) -> ValidatorOutcome | None:
     """Wrap validate_overrides → ValidatorOutcome (L1 retunes its own override)."""
     if not source_output or not pipeline_schema:
         return None
-    failures = validate_overrides(
-        source_output, pipeline_schema, forbidden_axes_strict=forbidden_axes_strict
-    )
+    failures = validate_overrides(source_output, pipeline_schema)
     if not failures:
         return None
     return ValidatorOutcome(

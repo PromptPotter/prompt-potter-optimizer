@@ -30,7 +30,7 @@ must emit only the label.
 
 - `llm_only` on OpenRouter `openai/gpt-oss-20b`, `reasoning_effort: low` (floored; the optimizer may raise it
   within the allowed set).
-- Model + provider are pinned (`forbidden_axes_strict`); the optimizer evolves the prompt fields,
+- Model + provider are always optimizer-locked; the optimizer evolves the prompt fields,
   `temperature`, `max_tokens`, and `reasoning_effort`.
 
 ## Follow-ups (not in this pilot)

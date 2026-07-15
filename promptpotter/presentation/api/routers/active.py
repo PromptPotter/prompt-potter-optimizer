@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     OPTIMIZER_PIPELINE_PATH,
 )
+from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.infrastructure.store import read_active_pointer
 from promptpotter.infrastructure.store.io import read_json
 from promptpotter.presentation.api.deps import (
@@ -172,8 +173,23 @@ async def get_machine_status(identity: IdentityDep, jobs: JobRegistryDep) -> Mac
 
 @active_router.get("/optimizer-pipeline", tags=["Optimizer"])
 def get_optimizer_pipeline() -> dict[str, Any]:
-    """Bundled ``datasets/_optimizer/pipeline.json`` — nodes + pipelines + ``view`` topology for the webapp workflow."""
+    """Bundled ``datasets/_optimizer/pipeline.json`` — nodes + pipelines + ``view``
+    topology, plus the per-node typed config surface (``node_config_schema`` /
+    ``node_output_schema``) so the canvas node-detail renders the optimizer's own
+    knobs (model / provider / reasoning_effort / temperature / …) through the same
+    canonical config element the steer panel uses, not a hand-rolled chip + JSON
+    dump. Read-only: the install-global ``_optimizer`` pipeline is edited via the
+    champion/Lab write path, never a fork; model/provider are always optimizer-locked."""
     pipeline: dict[str, Any] = read_json(OPTIMIZER_PIPELINE_PATH)
+    schema = parse_pipeline_response(pipeline)
+    pipeline["node_config_schema"] = {
+        node: [p.model_dump() for p in params]
+        for node, params in schema.node_config_schema().items()
+    }
+    pipeline["node_output_schema"] = {
+        node: (out.model_dump() if out is not None else None)
+        for node, out in schema.node_output_schemas().items()
+    }
     return pipeline
 
 

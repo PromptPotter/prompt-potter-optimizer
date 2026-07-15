@@ -419,26 +419,6 @@ class OptimizationConfig(BaseModel):
         ),
     )
 
-    forbidden_axes_strict: Annotated[bool, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
-        True,
-        description=(
-            "The single model-optimizability bit. When on (default), the "
-            "``model`` axis is ABSENT from the optimizer surface — "
-            "``PipelineSchema.node_param_keys`` drops ``PARAM_FORBIDDEN_KEYS`` "
-            "(``model``, ``provider``), so the param catalogue never advertises "
-            "them and ``build_l1_response_schema`` never declares them; the LLM "
-            "cannot emit a key the schema omits. ``validate_overrides`` is the "
-            "lone deterministic backstop for a provider that leaks the key past "
-            "its own schema — it rejects the candidate with "
-            "``ValidationFailure(reason='forbidden_axis')`` (synthetic-0, no "
-            "/matches spend). The dataset still OWNS the model value via "
-            "``nodes.{node}.config.model``; this flag governs only whether the "
-            "OPTIMIZER may search it. Flip to ``false`` for ablation runs that "
-            "sweep model identity — the ``model`` axis is then synthesized onto "
-            "each LLM node with ``available_models`` as its value space."
-        ),
-    )
-
     schema_field_rename: Annotated[bool, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
         False,
         description=(
@@ -446,7 +426,7 @@ class OptimizationConfig(BaseModel):
             "``l1_generate``'s output schema (``L1Variant``). Off by default: "
             "``build_l1_response_schema`` never grafts ``output_schema_field_names``, so the "
             "LLM cannot emit a key the schema omits — the same structural lock "
-            "``forbidden_axes_strict`` uses, not a per-round rejection. A field NAME is the "
+            "the model/provider axes use, not a per-round rejection. A field NAME is the "
             "wire contract; a ``description`` is not, which is why descriptions are always "
             "free and names are not. It gates the PROPOSAL only: an inner cycle honours a "
             "rename it is handed unconditionally (it loads its own ``campaign.json``, so "
@@ -554,9 +534,20 @@ class CampaignConfig(BaseModel):
         default_factory=dict,
         description="Per-node narrowing of the dataset-declared optimizer search "
         "space — the per-campaign param-lock + allowed-values lever beside "
-        "`exclude_nodes` (whole node) and `optimization.forbidden_axes_strict` "
-        "(model/provider). Subsets only; applied onto the schema by "
-        "`PipelineSchema.narrow` at pipeline setup.",
+        "`exclude_nodes` (whole node). model/provider are always locked. Subsets "
+        "only; applied onto the schema by `PipelineSchema.narrow` at pipeline setup.",
+    )
+    allowed_models: Annotated[list[str], Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+        default_factory=list,
+        description="The origin's permitted model set — the allow-list a human fork "
+        "may steer the inner-optimizer model to WITHOUT tainting the branch. Distinct "
+        "from `PipelineSchema.available_models` (the backend's whole catalogue, the menu "
+        "this is picked from). Governs only the direct human steer; the optimizer never "
+        "searches model/provider regardless (`PARAM_FORBIDDEN_KEYS` invariant). A steer "
+        "to a model NOT in this set is a `campaign.babysit` act — warned + graded C "
+        "(`overlay_sets_model_outside_allowed`). EMPTY = no model sanctioned, so any "
+        "model steer taints (restrictive default — hard to break out of the origin); a "
+        "non-empty set is the operator explicitly sanctioning those models.",
     )
     scoring: Annotated[str | dict[str, str] | None, Knob(Scope.DATA, Estimand.GATE)] = Field(None)
     headline_metric: Annotated[HeadlineMetric, Knob(Scope.POLICY, Estimand.DISPLAY)] = Field(
@@ -921,8 +912,8 @@ def _resolve_active_schema(
     if pipeline_schema and exclude:
         filtered = pipeline_schema.filter_to_steps(active)
     # Campaign search-space narrowing — the per-node param-lock + allowed-values
-    # subset, peer to exclude (above) and forbidden_axes_strict. The dataset
-    # declares the max; the campaign snapshot may only narrow it.
+    # subset, peer to exclude (above). The dataset declares the max; the campaign
+    # snapshot may only narrow it.
     if filtered and narrowing:
         filtered = filtered.narrow(narrowing)
     return active, filtered

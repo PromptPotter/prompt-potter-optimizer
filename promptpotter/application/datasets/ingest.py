@@ -220,10 +220,9 @@ def draft_from_dataset(
             "scoring_composite": scoring,
             # The campaign-config knobs as one object. Preserve the dataset's round
             # ceiling + its own mechanism toggles (sorting/early-abort) so reusing an
-            # Origin carries its config instead of resetting to stock; lock_model
-            # keeps the stock default. Built off the default dump (not validated)
-            # so a dataset's higher ceiling passes through — the 1-100 bound gates
-            # only the operator edit path.
+            # Origin carries its config instead of resetting to stock. Built off the
+            # default dump (not validated) so a dataset's higher ceiling passes
+            # through — the 1-100 bound gates only the operator edit path.
             "optimization_overrides": {
                 **OptimizationOverrides().model_dump(mode="json"),
                 "max_rounds": max_rounds,

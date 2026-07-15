@@ -245,8 +245,29 @@ class PipelineNode(BaseModel):
 
     @property
     def is_llm(self) -> bool:
-        """Whether this node makes an LLM call (any mapping has ``is_llm``)."""
+        """Whether this node makes an LLM call PER ITS OBSERVATION MAPPINGS. Narrow
+        on purpose: this is the "the dataset must declare a per-node ``model``" signal
+        (`config.py::_require_owned_models`). An in-process meta-prompt node (L4) runs
+        an LLM but carries no owned model — its model is the install-global optimizer
+        config — so it is deliberately NOT ``is_llm`` and stays exempt from that check."""
         return any(m.is_llm for m in self.observation_mappings)
+
+    @property
+    def runs_llm(self) -> bool:
+        """Whether this node runs an LLM call at all — the BROAD signal, the union of
+        the ``is_llm`` mapping, a ``generation`` wire/langfuse type (the backend's
+        explicit LLM marker), and the ``llm_only`` sentinel. This is the "could this
+        node carry the model axis" predicate: pp-self's ``meta_prompt`` nodes are
+        ``generation`` LLM calls with no per-node model, so ``is_llm`` is False for
+        them but ``runs_llm`` is True. Model-axis carrier selection reads THIS, not the
+        narrower ``is_llm`` — otherwise a self-optimization pipeline resolves no carrier
+        and the model axis silently never engages."""
+        return (
+            self.name == "llm_only"
+            or self.is_llm
+            or self.wire_type == "generation"
+            or self.langfuse_type == "generation"
+        )
 
 
 class NodeConfigParam(BaseModel):
@@ -276,8 +297,8 @@ class NodeConfigParam(BaseModel):
 
 class NodeSearchNarrowing(BaseModel):
     """A campaign's per-node narrowing of the dataset-declared optimizer search
-    space — the third per-campaign search-space lever beside ``exclude_nodes``
-    (whole node) and ``forbidden_axes_strict`` (model/provider). The dataset's
+    space — the per-campaign search-space lever beside ``exclude_nodes`` (whole
+    node); model/provider are always locked. The dataset's
     ``pipeline.json`` declares the MAXIMUM tunable surface; a campaign may only
     SUBSET it, frozen into the ``Campaign`` snapshot at mint and applied by
     :meth:`PipelineSchema.narrow`.
@@ -345,7 +366,7 @@ class PipelineSchema(BaseModel):
         (connector config included), so the cycle id and the measurement key agree."""
         return {"steps": list(self.active_steps)}
 
-    def node_config_schema(self, forbidden_strict: bool) -> dict[str, list[NodeConfigParam]]:
+    def node_config_schema(self) -> dict[str, list[NodeConfigParam]]:
         """The operator-editable config surface per node — the FULL config the
         node carries (the UNION of ``param_keys`` and the node's actual
         ``current_config``) except the prompt-decomposition fields (the prompt
@@ -358,15 +379,26 @@ class PipelineSchema(BaseModel):
         dataset). Widget ``kind`` resolves from ``model`` (→ ``available_models``)
         → ``param_allowed_values`` (→ enum) → ``param_types`` (number/bool/string;
         ``param_types`` covers config-only keys too, see ``_infer_param_types``).
-        ``forbidden_strict`` only sets the display-only ``optimizer_locked`` flag.
+        model/provider are ALWAYS ``optimizer_locked`` (operator-owned axes the
+        optimizer never searches) — a cap-holding operator may still edit them on a
+        fork, which taints the branch babysat (ADR-0005 §4).
 
         A param declared ``object``/``array`` (:data:`NESTED_PARAM_TYPES`) carries no
         widget and is skipped: the three widget kinds are all scalar, and a nested
         value in a text box is a corrupt edit waiting to happen. These params are
         optimizer-only (L4's ``layout`` / ``output_schema_descriptions``); the operator
         reads them in the searchpoint diff, not here.
+
+        When NO node declares ``model`` natively (an install-global-model pipeline —
+        pp-self's meta-prompt nodes run the shared optimizer model, own none) the model
+        row is SYNTHESIZED onto the carrier from ``available_models`` so the operator's
+        fork-model-steer has somewhere to land (without it the steer panel showed
+        "no configurable params").
         """
-        locked = PARAM_FORBIDDEN_KEYS if forbidden_strict else frozenset()
+        # A model row is synthesized on the carrier only when no node OWNS a model —
+        # otherwise the native row (justlogic's `llm_only.model`) is authoritative.
+        model_declared = any("model" in (n.param_keys | set(n.current_config)) for n in self.nodes)
+        model_carrier = None if model_declared else self._model_carrier()
         out: dict[str, list[NodeConfigParam]] = {}
         for n in self.nodes:
             params: list[NodeConfigParam] = []
@@ -389,13 +421,12 @@ class PipelineSchema(BaseModel):
                         else "string"
                     )
                     options = []
-                # Tunable = the optimizer may MOVE this param. model/provider ride
-                # the campaign-wide strict flag (forbidden when locked); every other
-                # param is tunable iff the node advertises it in `param_keys`. A
-                # config-only key (in current_config, not param_keys) is fixed.
-                tunable = (
-                    not forbidden_strict if key in PARAM_FORBIDDEN_KEYS else key in n.param_keys
-                )
+                # Tunable = the optimizer may MOVE this param. model/provider are
+                # operator-owned axes the optimizer never searches (always locked);
+                # every other param is tunable iff the node advertises it in
+                # `param_keys`. A config-only key (in current_config, not param_keys)
+                # is fixed.
+                tunable = False if key in PARAM_FORBIDDEN_KEYS else key in n.param_keys
                 params.append(
                     NodeConfigParam(
                         key=key,
@@ -403,12 +434,37 @@ class PipelineSchema(BaseModel):
                         kind=kind,
                         options=options,
                         description=n.param_descriptions.get(key, ""),
-                        optimizer_locked=key in locked,
+                        optimizer_locked=key in PARAM_FORBIDDEN_KEYS,
                         optimizer_tunable=tunable,
+                    )
+                )
+            if n.name == model_carrier and self.available_models:
+                # Synthesized carrier model row: optimizer-locked (never searched) yet
+                # operator-editable on a fork — the seed overlay outranks the dataset,
+                # same posture as a native model row.
+                params.append(
+                    NodeConfigParam(
+                        key="model",
+                        value=n.current_config.get("model"),
+                        kind="model",
+                        options=list(self.available_models),
+                        description="Optimizer model for this node — install-global by "
+                        "default, operator-steerable on a fork.",
+                        optimizer_locked=True,
+                        optimizer_tunable=False,
                     )
                 )
             out[n.name] = params
         return out
+
+    def _model_carrier(self) -> str | None:
+        """The single node the model axis rides — the first LLM-running node in
+        declaration order (:attr:`PipelineNode.runs_llm`). One carrier, not per-node, so
+        an outer L4 search evolves ONE inner-optimizer model fanned across every node
+        (`resolve_node_override` does the fan). Read by both :meth:`node_param_keys`
+        (optimizer-tunable axis) and :meth:`node_config_schema` (operator-editable row),
+        so the two never target different nodes."""
+        return next((s.name for s in self.nodes if s.runs_llm), None)
 
     def node_output_schemas(self) -> dict[str, NodeOutputSchema | None]:
         """Per-node structured-output contract (``fields`` / ``field_descriptions`` /
@@ -436,8 +492,8 @@ class PipelineSchema(BaseModel):
 
     def narrow(self, narrowing: dict[str, NodeSearchNarrowing] | None) -> "PipelineSchema":
         """Return a copy with each node's optimizer search space narrowed to the
-        campaign's per-node subset (the third search-space lever beside
-        :meth:`exclude` and ``forbidden_axes_strict``).
+        campaign's per-node subset (the search-space lever beside
+        :meth:`exclude`; model/provider are always locked).
 
         A node's ``param_keys`` intersect the campaign subset (``None`` = inherit
         the full set); prompt-decomposition fields are always kept tunable (the
@@ -482,39 +538,22 @@ class PipelineSchema(BaseModel):
         configs = self.node_configs(pipeline_params)
         return stable_hash(configs) if configs else ""
 
-    def node_param_keys(self, forbidden_strict: bool = True) -> dict[str, set[str]]:
+    def node_param_keys(self) -> dict[str, set[str]]:
         """Optimizer-tunable param keys per node — the SINGLE surface the param
         catalogue, the L1 output schema, and `validate_overrides` all derive from.
 
-        Model/provider optimizability is POLICY, not a per-dataset declaration: a
-        file's stale `param_keys` listing of them is inert. When `forbidden_strict`
-        (default) the model axis is ABSENT — the optimizer never sees it. When the
-        campaign explicitly unlocks AND the dataset advertises `available_models`,
-        the `model` axis is synthesized onto a SINGLE carrier node (the first LLM
-        node in declaration order; value space = `available_models`); that is the
-        sole ablation lever. One carrier, not per-node, so an outer L4 search evolves
-        ONE inner-optimizer model fanned across every node, not an independent model
-        per node (`resolve_node_override` does the fan). On a single-LLM dataset the
-        carrier IS the only node, so behaviour is unchanged. `provider` is never an
-        optimizer axis.
-
-        `SCHEMA_OWNED_FIELDS` (`output_schema` + schema registry identity) are
-        stripped UNCONDITIONALLY — they are the pipeline's structural wire contract,
-        not tunables; an L1 variant that mutated `output_schema` would break the
-        backend. Unlike model/provider there is no unlock: the schema is never an
-        optimizer axis. Stripping here keeps `build_l1_response_schema` from declaring
+        `PARAM_FORBIDDEN_KEYS` (`model`/`provider`) and `SCHEMA_OWNED_FIELDS`
+        (`output_schema` + schema registry identity) are stripped UNCONDITIONALLY.
+        Model/provider are operator-owned — set via the dataset overlay or a
+        cap-gated fork edit — never an optimizer axis; a file's stale `param_keys`
+        listing of them is inert. The schema is the pipeline's structural wire
+        contract, not a tunable; an L1 variant that mutated it would break the
+        backend. Stripping here keeps `build_l1_response_schema` from declaring
         them, so the LLM can't emit a key the schema omits.
         """
         out: dict[str, set[str]] = {}
-        carrier = (
-            next((s.name for s in self.nodes if s.is_llm), None)
-            if not forbidden_strict and self.available_models
-            else None
-        )
         for step in self.nodes:
             keys = set(step.param_keys) - PARAM_FORBIDDEN_KEYS - SCHEMA_OWNED_FIELDS
-            if step.name == carrier:
-                keys = keys | {"model"}
             if keys:
                 out[step.name] = keys
         return out

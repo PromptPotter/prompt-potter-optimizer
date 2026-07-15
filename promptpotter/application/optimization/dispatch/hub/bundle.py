@@ -178,8 +178,6 @@ class InjectionBundle:
     # Each round already carries its parent prompt + every candidate's evolved one, so
     # "what was tried, and how did it score" is a diff away and needs no new state.
     prior_rounds: list[RoundResult] = field(default_factory=list)
-    # Mirrors OptimizationConfig.forbidden_axes_strict; gates locked-axis catalogue advertising.
-    forbidden_axes_strict: bool = True
     # Mirrors OptimizationConfig.prompt_block_catalogue; picks the block-library header
     # (guidance = reuse-or-invent, restrict = library-only) or renders nothing when off.
     prompt_block_catalogue: str = "guidance"

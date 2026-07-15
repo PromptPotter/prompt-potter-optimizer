@@ -83,7 +83,7 @@ Append one `review` entry per cycle to `log.jsonl` (schema below). Then act on t
 | `degraded` AND cycle in `pending_full` (promotion) | **Halt.** Rank top issue → write proposed edit → set `paused = true`, `pause_reason = "degraded full cycle {cycle_id}"`. Exit. |
 | `broken` (either kind) | **Halt** regardless of cycle kind. Same proposed-edit + pause behavior. |
 
-**Model/provider locking is no longer a behavior check.** It's the single `forbidden_axes_strict` bit enforced at the schema surface (`PipelineSchema.node_param_keys` drops the axes when locked, so L1's output schema never declares them) plus the `validate_overrides` backstop for a rare provider leak. There is no `forbidden_axes_honored` check, and no `forbidden_axis_attempts`/`_healed` on L1Stats. A leak that slips past the schema lands as an ordinary `validation_failures` entry (synthetic-0, healed via Wound 1) — read it there if it ever appears; it is not a verdict input.
+**Model/provider locking is no longer a behavior check.** It's structural and always on: `PipelineSchema.node_param_keys` always drops the axes, so L1's output schema never declares them, plus the `validate_overrides` backstop for a rare provider leak. There is no `forbidden_axes_honored` check, and no `forbidden_axis_attempts`/`_healed` on L1Stats. A leak that slips past the schema lands as an ordinary `validation_failures` entry (synthetic-0, healed via Wound 1) — read it there if it ever appears; it is not a verdict input.
 
 **Top-issue rank** (first match wins). The verdict is conformance-pure, so a
 non-healthy cycle always carries ≥ 1 conformance ✗ — the top issue is always

@@ -236,7 +236,6 @@ def build_bundle(
         trajectory_results=trajectory_results,
         delta_scale=cycle.delta_scale,
         prior_rounds=list(cycle.rounds),
-        forbidden_axes_strict=cycle.config.optimization.forbidden_axes_strict,
         prompt_block_catalogue=cycle.config.optimization.prompt_block_catalogue,
         rebase_capability=cycle.config.optimization.rebase_capability,
         terminate_capability=cycle.config.optimization.terminate_capability,

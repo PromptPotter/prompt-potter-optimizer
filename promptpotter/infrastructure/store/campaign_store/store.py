@@ -622,7 +622,10 @@ class CampaignStore:
         path = self._index_path(campaign_id, cycle_id)
         data = read_json(path)
         data["human_intervened"] = True
-        data["interventions"].append({"kind": kind, "at": at})
+        # setdefault: the babysit stamp fires at bootstrap on a fresh-sibling fork index
+        # that carries no `interventions` list yet, unlike the skip-searchpoint caller
+        # which runs on an established cycle. The single append site guarantees the key.
+        data.setdefault("interventions", []).append({"kind": kind, "at": at})
         data["updated_at"] = utcnow_iso()
         write_json(path, data)
 
