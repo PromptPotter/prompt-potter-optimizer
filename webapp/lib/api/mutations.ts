@@ -73,10 +73,10 @@ async function _postCommand(
 // operator confirms the fork's own ceiling).
 //
 // Deliberately the RUN-LIMIT subset: the wire also carries the policy knobs
-// (`per_round_resubset`, `schema_field_rename`, `forbidden_axes_strict` — the
-// inner-optimizer model unlock), which invalidate search comparability and are set
-// at mint, by an L2/L3 `fork_proposal`, or by "fork & steer" — never by a checkbox
-// on a dialog whose job is "how much budget does this fork get".
+// (`per_round_resubset`, `schema_field_rename`), which invalidate search
+// comparability and are set at mint or by an L2/L3 `fork_proposal` — never by a
+// checkbox on a dialog whose job is "how much budget does this fork get". A
+// human-set model/provider value rides the fork's `pipeline_overlay`, not here.
 export interface ConfigOverrides {
   max_rounds?: number;
   spend_budget_usd?: number | null;
@@ -271,8 +271,8 @@ export type ProvenanceTag = "unset" | "proposed" | "confirmed";
 export interface OptimizerLocks {
   // Connector default pipeline step list (e.g. `["llm_only"]`).
   pipeline: string[];
-  // Params the optimizer may never permute on any node under
-  // `forbidden_axes_strict` (`["model","provider"]`); empty when strict is off.
+  // Params the optimizer may never permute on any node (`["model","provider"]`) —
+  // always locked (an invariant, not a per-campaign policy).
   forbidden_axes: string[];
   nodes: Record<string, OptimizerNodeLocks>;
 }
@@ -301,15 +301,11 @@ export interface PipelineDependencyWire {
 }
 
 // The campaign-config knobs a draft carries, as one object — materialized into
-// the committed campaign.json::optimization block. Operator-facing names;
-// `lock_model` commits as `forbidden_axes_strict`. A new knob is one property
-// here, not a fresh field threaded through every surface.
+// the committed campaign.json::optimization block. Operator-facing names. A new
+// knob is one property here, not a fresh field threaded through every surface.
 export interface OptimizationOverridesWire {
   // Round ceiling (1–100). Smart-default 5 (the M10 prompt-iteration default).
   max_rounds: number;
-  // Whether the optimizer is barred from changing model/provider campaign-wide.
-  // Default true (locked); toggled in the pipeline-config control panel.
-  lock_model: boolean;
   // How the reusable prompt building-block library reaches the optimizer:
   // suggest-but-may-invent (default), library-only, or no library at all.
   prompt_block_catalogue: "guidance" | "restrict" | "off";
@@ -612,8 +608,8 @@ export interface DraftPatch {
   // Replace the origin prompt wholesale (PromptTemplate field shape). The
   // editor sends the full object, not a sparse field patch.
   origin_prompt_fields?: Record<string, unknown>;
-  // The campaign-config knobs (max_rounds / lock_model / mechanisms). Sent keys
-  // are shallow-merged onto the draft's current overrides server-side — send one
+  // The campaign-config knobs (max_rounds / mechanisms). Sent keys are
+  // shallow-merged onto the draft's current overrides server-side — send one
   // knob or several; a nested `mechanisms` replaces wholesale.
   optimization_overrides?: Partial<OptimizationOverridesWire>;
 }

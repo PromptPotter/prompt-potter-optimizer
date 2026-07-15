@@ -7,6 +7,7 @@ import { useDashboard } from "@/lib/hooks/useDashboard";
 import { activeNodeId } from "./layout";
 import { fmtSecs } from "@/lib/format";
 import { CopyButton } from "@/components/ui";
+import { NodeConfigEditor } from "@/components/dashboard/control/NodeConfigEditor";
 import type { NodeBlock } from "@/lib/types";
 
 interface Props {
@@ -26,18 +27,6 @@ function fmtVal(v: unknown): string {
   }
 }
 
-function fmtInline(v: unknown): string {
-  if (v == null || v === "") return "—";
-  if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
-    return String(v);
-  }
-  try {
-    return JSON.stringify(v);
-  } catch {
-    return String(v);
-  }
-}
-
 export function OptimizerNodeDetail({ id, pipeline, onClose }: Props) {
   // Self-sourced: live snapshot + liveness from the cycle stream. `isLive` is the
   // freshness gate — a frozen cycle keeps `dash.state` at its last phase, so
@@ -50,6 +39,12 @@ export function OptimizerNodeDetail({ id, pipeline, onClose }: Props) {
 
   const cfg = pipeline?.nodes?.[id];
   const cfgInner = (cfg?.config ?? {}) as Record<string, unknown>;
+  // The node's typed config surface (model / provider / reasoning_effort / temp / …),
+  // served by `/optimizer-pipeline`. Rendered read-only through the SAME config element
+  // the steer panel uses, so the operator sees every knob the backend exposes instead of
+  // a hand-rolled chip strip. Empty for phase / measurement nodes (no config to show).
+  const configSchema = pipeline?.node_config_schema ?? null;
+  const configParams = configSchema?.[id] ?? [];
 
   // The round's node blocks come from the one resolver this card shares with the
   // canvas above it (`useRoundNodes`) — same round, same source-selection rule.
@@ -95,9 +90,6 @@ export function OptimizerNodeDetail({ id, pipeline, onClose }: Props) {
     : kind === "io" ? "I/O"
     : kind;
 
-  const hasConfig =
-    !!cfg && (cfg.type != null || Object.keys(cfgInner).length > 0);
-
   return (
     <div className="opt-detail">
       <header className="opt-detail-head">
@@ -135,19 +127,34 @@ export function OptimizerNodeDetail({ id, pipeline, onClose }: Props) {
         </div>
       </header>
 
+      {/* Meta strip = RUN facts only (what this node DID this round). Its static
+          config — model / provider / temp / format / parser / schema — is owned by the
+          Configuration panel below, rendered through the canonical config element, so it
+          no longer duplicates here. */}
       <div className="opt-detail-meta">
         <Chip label="model" value={block?.model ?? ""} />
         <Chip label="dur" value={block ? fmtSecs(block.duration_s) : ""} />
         <Chip label="tokens" value={tokens} />
         <Chip label="template" value={templateName ?? ""} />
         <Chip label="type" value={(cfg?.type as string) ?? ""} />
-        <Chip label="temp" value={fmtInline(cfgInner.temperature)} />
-        <Chip label="format" value={fmtInline(cfgInner.output_format)} />
-        <Chip label="prompt" value={fmtInline(cfgInner.prompt_family)} />
-        <Chip label="schema" value={fmtInline(cfgInner.schema_family)} />
-        <Chip label="parser" value={fmtInline(cfgInner.response_parser)} />
         <Chip label="ts" value={block?.timestamp ?? ""} />
       </div>
+
+      {configParams.length > 0 && (
+        <section className="opt-detail-config" aria-label="Node configuration">
+          <div className="opt-detail-col-head">
+            <span>Configuration</span>
+            <span className="opt-detail-col-count">{configParams.length}</span>
+          </div>
+          <NodeConfigEditor
+            mode="values"
+            schema={configSchema}
+            node={id}
+            seedOverlay={{}}
+            readOnly
+          />
+        </section>
+      )}
 
       {!block ? (
         <div className="opt-detail-empty">
@@ -222,14 +229,6 @@ export function OptimizerNodeDetail({ id, pipeline, onClose }: Props) {
           <details className="opt-detail-disclosure">
             <summary>raw output</summary>
             <pre className="opt-detail-pre">{fmtVal(block.output ?? {})}</pre>
-          </details>
-        )}
-        {hasConfig && (
-          <details className="opt-detail-disclosure">
-            <summary>configuration</summary>
-            <pre className="opt-detail-pre">
-              {fmtVal({ type: cfg.type, ...cfgInner })}
-            </pre>
           </details>
         )}
       </footer>

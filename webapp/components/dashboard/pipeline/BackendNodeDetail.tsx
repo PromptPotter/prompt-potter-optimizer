@@ -131,7 +131,6 @@ export function BackendNodeDetail({ draft, onClose, onPromptApply }: Props) {
         outputSchema={cv.nodeOutputSchema}
         label="draft — setup"
         mode="search-space"
-        lockModel={draft.optimization_overrides.lock_model}
         onClose={onClose}
         onApply={onPromptApply}
       />

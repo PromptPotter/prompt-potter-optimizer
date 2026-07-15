@@ -12,9 +12,9 @@ import {
 
 // The one node-config editor, mode-driven:
 //   - "search-space" (before mint): the operator declares what the optimizer MAY
-//     MOVE — a 🔒/🔓 lock per param, enum allow/deny chips, the campaign-wide model
-//     lock, a node-level master lock, an editable origin value. Per-node (`node`
-//     scopes it). Persists the draft `pipeline_overlay` via `onApply`.
+//     MOVE — a 🔒/🔓 lock per param, enum allow/deny chips, a node-level master
+//     lock, an editable origin value. Per-node (`node` scopes it). Persists the
+//     draft `pipeline_overlay` via `onApply`.
 //   - "values" (steer / inspect a fork): the concrete `{node:{param:value}}` the
 //     fork is seeded with. Whole-pipeline. Emits the sparse overlay via `onChange`.
 // Both share one row renderer; only the enum row (allow/deny chips vs a single
@@ -22,15 +22,20 @@ import {
 // `locksOnly` (search-space only) renders JUST the lock affordances — the per-param
 // 🔒/🔓 + enum allow/deny chips + node master lock, no value inputs and no model
 // row. It's the steer-fork lock surface: values ride the separate values editor,
-// and the model lock stays the campaign-level knob set at start.
+// and the model rides the node surface as a steerable value — model/provider are
+// always optimizer-locked, never a per-node lock.
 export function NodeConfigEditor(props: {
   mode: ConfigMode;
   schema: Record<string, NodeConfigParam[]> | null;
   seedOverlay: Record<string, unknown>;
   node?: string;
-  lockModel?: boolean;
   readOnly?: boolean;
   locksOnly?: boolean;
+  // values mode only: when false, an `optimizer_locked` param (model / provider)
+  // is held read-only — editing it is the ADR-0005 babysit act, allowed only for a
+  // principal holding `campaign.babysit`. Default true keeps every other caller
+  // (draft setup, inspect) unchanged; the steer form passes the operator's cap.
+  babysitEditable?: boolean;
   onApply?: (patch: DraftPatch) => void;
   onChange?: (overlay: Record<string, Record<string, unknown>>) => void;
 }) {
@@ -56,7 +61,6 @@ function SearchSpaceEditor({
   schema,
   seedOverlay,
   node,
-  lockModel: lockModelProp = false,
   readOnly = false,
   locksOnly = false,
   onApply,
@@ -64,21 +68,18 @@ function SearchSpaceEditor({
   schema: Record<string, NodeConfigParam[]> | null;
   seedOverlay: Record<string, unknown>;
   node?: string;
-  lockModel?: boolean;
   readOnly?: boolean;
   locksOnly?: boolean;
   onApply?: (patch: DraftPatch) => void;
 }) {
   const nodeId = node ?? "";
   const [prevNode, setPrevNode] = useState(nodeId);
-  const [lockModel, setLockModel] = useState(lockModelProp);
   const [rows, setRows] = useState<ConfigRow[]>(() =>
-    configRows(schema, seedOverlay, "search-space", nodeId, lockModelProp),
+    configRows(schema, seedOverlay, "search-space", nodeId),
   );
   if (nodeId !== prevNode) {
     setPrevNode(nodeId);
-    setLockModel(lockModelProp);
-    setRows(configRows(schema, seedOverlay, "search-space", nodeId, lockModelProp));
+    setRows(configRows(schema, seedOverlay, "search-space", nodeId));
   }
 
   if (rows.length === 0) return <EmptyConfig />;
@@ -91,21 +92,14 @@ function SearchSpaceEditor({
   // values and narrows allowed enum values.
   const singleNode = schema != null && Object.keys(schema).length <= 1;
 
-  const persist = (next: ConfigRow[], nextLock: boolean) => {
+  const persist = (next: ConfigRow[]) => {
     if (!onApply) return;
-    onApply(nodeOverlayPatch(seedOverlay, nextLock, nodeId, next));
+    onApply(nodeOverlayPatch(seedOverlay, nodeId, next));
   };
   const update = (i: number, patch: Partial<ConfigRow>) => {
     const next = rows.map((r, j) => (j === i ? { ...r, ...patch } : r));
     setRows(next);
-    persist(next, lockModel);
-  };
-  const toggleModelLock = () => {
-    const v = !lockModel;
-    setLockModel(v);
-    const next = rows.map((r) => (r.kind === "model" ? { ...r, locked: v } : r));
-    setRows(next);
-    persist(next, v);
+    persist(next);
   };
 
   // Node-level master lock: lock every non-model param at once (or open them);
@@ -116,7 +110,7 @@ function SearchSpaceEditor({
     const v = !nodeLocked;
     const next = rows.map((r) => (r.kind === "model" ? r : { ...r, locked: v }));
     setRows(next);
-    persist(next, lockModel);
+    persist(next);
   };
   const toggleChip = (i: number, level: string) => {
     const r = rows[i];
@@ -130,8 +124,8 @@ function SearchSpaceEditor({
   return (
     <div className="config-editor">
       {rows.map((r, i) =>
-        // locksOnly: the model lock is the campaign-level knob (set at start), not a
-        // per-fork param — drop its row so the steer surface shows only movable locks.
+        // locksOnly: the model VALUE is steered in the node surface; model/provider
+        // are always optimizer-locked, never a per-node lock — drop the row here.
         locksOnly && r.kind === "model" ? null : (
           <ConfigRowView
             key={r.key}
@@ -139,8 +133,10 @@ function SearchSpaceEditor({
             mode="search-space"
             readOnly={readOnly}
             locksOnly={locksOnly}
-            lockable={!singleNode}
-            onToggleLock={() => (r.kind === "model" ? toggleModelLock() : update(i, { locked: !r.locked }))}
+            // model/provider carry no lock affordance — they are always locked; only
+            // the operator-set origin value (the select) is editable here.
+            lockable={!singleNode && r.kind !== "model"}
+            onToggleLock={() => update(i, { locked: !r.locked })}
             onToggleChip={(level) => toggleChip(i, level)}
             onValue={(v) => update(i, { value: v })}
           />
@@ -197,12 +193,14 @@ function ValuesEditor({
   seedOverlay,
   node,
   readOnly = false,
+  babysitEditable = true,
   onChange,
 }: {
   schema: Record<string, NodeConfigParam[]> | null;
   seedOverlay: Record<string, unknown>;
   node?: string;
   readOnly?: boolean;
+  babysitEditable?: boolean;
   onChange?: (overlay: Record<string, Record<string, unknown>>) => void;
 }) {
   const rows = useMemo(
@@ -236,12 +234,16 @@ function ValuesEditor({
         const key = `${r.node}.${r.key}`;
         const edit = edits[key];
         const value = edit !== undefined ? edit : r.value;
+        // An optimizer-locked axis (model / provider) stays read-only unless the
+        // operator holds `campaign.babysit` — editing a value the optimizer owns is
+        // the babysit act, and it taints the branch (grade C) on the backend.
+        const rowReadOnly = readOnly || (!babysitEditable && r.optimizerLocked);
         return (
           <ConfigRowView
             key={key}
             row={{ ...r, value }}
             mode="values"
-            readOnly={readOnly}
+            readOnly={rowReadOnly}
             onValue={(v) => set(key, v)}
           />
         );
@@ -290,7 +292,11 @@ function ConfigRowView({
         {!isSearch && row.optimizerLocked ? (
           <span
             className="config-optlocked"
-            title="The optimizer can't change this — but you can, on this fork."
+            title={
+              readOnly
+                ? "The optimizer can't change this, and it's locked on this fork."
+                : "The optimizer can't change this — but you can, on this fork (a babysit edit)."
+            }
           >
             optimizer-locked
           </span>

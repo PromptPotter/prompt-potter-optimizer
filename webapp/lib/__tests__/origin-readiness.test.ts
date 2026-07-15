@@ -12,7 +12,6 @@ function draft(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
     scoring_composite: "exact_match",
     optimization_overrides: {
       max_rounds: 5,
-      lock_model: true,
       prompt_block_catalogue: "guidance",
       mechanisms: {
         selection: { per_round_resubset: true },

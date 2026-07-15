@@ -25,7 +25,7 @@ export interface ConfigRow {
   node: string;
   key: string;
   // "model" | "enum" | "number" | "bool" | "string" — drives the widget +
-  // coercion (model rides `lock_model`; enums carry a narrowed allow-set).
+  // coercion (enums carry a narrowed allow-set).
   kind: string;
   // Full declared value set (model/enum); empty otherwise.
   options: string[];
@@ -36,15 +36,15 @@ export interface ConfigRow {
   // (search-space); also the enum's "origin" chip tag.
   baseValue: string;
   // search-space: the optimizer may NOT move this param (leaves `param_keys`).
-  // Ignored for `model`, whose lock is the campaign-wide `lock_model` bit.
+  // Always true for `model`/`provider` — they are never an optimizer axis.
   locked: boolean;
   // search-space: the allowed-values subset the optimizer may use when open.
   allowed: string[];
   // values: present in the candidate overlay (vs the config floor) — keep it in
   // the emitted overlay even when the operator leaves it untouched.
   fromCandidate: boolean;
-  // The optimizer can't permute this (model/provider under a strict campaign).
-  // Shown as a hint; the operator may still set it on a fork.
+  // The optimizer can't permute this (model/provider — always locked). Shown as a
+  // hint; a cap-holding operator may still set it on a fork (a babysit edit).
   optimizerLocked: boolean;
   description: string;
 }
@@ -66,13 +66,12 @@ function coerce(kind: string, raw: string): unknown {
 // overlay seeds each row: search-space reads `nodes.{n}.{config, optimizer}`
 // (lock/allow/origin-value); values reads the flat `{node:{param:value}}` delta.
 // `node` scopes to one node (search-space, per-node); omit for whole-pipeline
-// (values). `lockModel` seeds the model row's lock in search-space mode.
+// (values).
 export function configRows(
   schema: Record<string, NodeConfigParam[]> | null,
   overlay: Record<string, unknown>,
   mode: ConfigMode,
   node?: string,
-  lockModel = false,
 ): ConfigRow[] {
   if (!schema) return [];
   const scoped = node != null ? schema[node] : undefined;
@@ -92,8 +91,10 @@ export function configRows(
       const narrowed = overlayAllowed[p.key];
       if (mode === "search-space") {
         const isModel = p.kind === "model";
+        // model/provider are always optimizer-locked; every other param inherits
+        // the overlay's open-set (or the schema's tunability when unset).
         const locked = isModel
-          ? lockModel
+          ? true
           : overlayKeys !== undefined
             ? !overlayKeys.includes(p.key)
             : !p.optimizer_tunable;
@@ -137,10 +138,10 @@ export function configRows(
 // search-space emit: merge this node's rows onto the draft overlay → patch.
 // `param_keys` = the open (unlocked) non-model params; `param_allowed_values`
 // narrows an open enum only when a strict subset; `config` carries changed origin
-// values (incl. the chosen model). `lock_model` rides `optimization_overrides`.
+// values (incl. the chosen model). model/provider are always optimizer-locked, so
+// there is no model-lock knob to emit.
 export function nodeOverlayPatch(
   base: Record<string, unknown>,
-  lockModel: boolean,
   node: string,
   rows: ConfigRow[],
 ): DraftPatch {
@@ -168,7 +169,7 @@ export function nodeOverlayPatch(
     optimizer: { param_keys: paramKeys, param_allowed_values: allowedValues },
     ...(Object.keys(config).length > 0 ? { config: { ...prevConfig, ...config } } : {}),
   };
-  return { optimization_overrides: { lock_model: lockModel }, pipeline_overlay: overlay };
+  return { pipeline_overlay: overlay };
 }
 
 // values emit: the sparse `{node:{param:value}}` fork seed, from the rows + the

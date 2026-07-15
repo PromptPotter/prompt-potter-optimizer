@@ -33,7 +33,7 @@ export function NodeSurface({
   label,
   title,
   mode,
-  lockModel,
+  babysitEditable,
   toggle,
   readOnly,
   flat,
@@ -56,7 +56,9 @@ export function NodeSurface({
   // Header title for the whole-pipeline view (ignored when `node` is set).
   title?: string;
   mode: ConfigMode;
-  lockModel?: boolean;
+  // values mode: gates editing of optimizer-locked axes (model/provider) behind the
+  // operator's `campaign.babysit` capability. Default (undefined) leaves them editable.
+  babysitEditable?: boolean;
   // Optional control rendered inside the card, between the role line and the
   // config body (the OBSERVE origin/live/historical selector).
   toggle?: ReactNode;
@@ -96,7 +98,7 @@ export function NodeSurface({
         schema={schema}
         node={node?.id}
         seedOverlay={configSeed}
-        lockModel={lockModel}
+        babysitEditable={babysitEditable}
         readOnly={configReadOnly}
         onApply={onApply}
         onChange={onConfigChange}

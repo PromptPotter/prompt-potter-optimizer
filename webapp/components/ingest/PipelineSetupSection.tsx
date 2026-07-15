@@ -130,7 +130,6 @@ function PipelineSetupInner({
               schema={cv.nodeConfigSchema}
               outputSchema={cv.nodeOutputSchema}
               mode="search-space"
-              lockModel={draft.optimization_overrides.lock_model}
               flat
               onApply={onApply}
             />

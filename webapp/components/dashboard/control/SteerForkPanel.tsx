@@ -19,8 +19,11 @@ import {
   liveCandidateSearchPoint,
   forkReconcileDefaults,
   configOverridesFromDefaults,
+  overlaySetsModelOutsideAllowed,
   searchPoint,
 } from "@/lib/derivations";
+import { useFetch } from "@/lib/hooks/useFetch";
+import { fetchCampaignDetail } from "@/lib/api";
 import type { SelectedCandidate } from "@/lib/types";
 import { NodeSurface } from "@/components/dashboard/pipeline/NodeSurface";
 import { NodeConfigEditor } from "./NodeConfigEditor";
@@ -76,6 +79,40 @@ export function SteerForkPanel({
     : candidateSearchPoint(doc, candidate.candidate_id);
   const seedPrompt = seed?.origin_prompt_fields ?? {};
   const overlay = seed?.pipeline_overlay ?? {};
+  // Nodes with a lockable param — a served param that isn't the model (model/provider
+  // are always optimizer-locked, never a per-node lock). A prompt-only pipeline serves
+  // none, so the lock block below hides entirely rather than printing a "no
+  // configurable params" box per node.
+  const lockableNodes = Object.entries(cv.nodeConfigSchema ?? {})
+    .filter(([, params]) => params.some((p) => p.kind !== "model"))
+    .map(([nodeId]) => nodeId);
+  // The origin's declared model allow-list (`CampaignConfig.allowed_models`). Absent /
+  // empty in the snapshot = nothing sanctioned = the restrictive default, so ANY model
+  // steer taints — matching the server gate (`overlay_sets_model_outside_allowed`).
+  const { data: detail } = useFetch(
+    campaignId ? (signal) => fetchCampaignDetail(campaignId, signal) : null,
+    [campaignId],
+  );
+  const allowedModels = (detail?.config.allowed_models as string[] | undefined) ?? [];
+  // Whether the acting operator may steer a locked axis at all. Steering model/provider
+  // outside the allow-list is the ADR-0005 babysit act, gated server-side on
+  // `campaign.babysit` (404 without); the client reflects it so a principal who lacks
+  // the cap sees the row read-only rather than a 404 on confirm. Owners hold every cap.
+  const canBabysit = !!me?.capabilities?.includes("campaign.babysit");
+  // Live-reactive copy of the picked overlay (the ref below is read at confirm; this
+  // drives the warning, which must react to the picked model AND the async allow-list).
+  // `null` = untouched → fall back to the seed overlay as it loads.
+  const [pickedOverlay, setPickedOverlay] = useState<Record<
+    string,
+    Record<string, unknown>
+  > | null>(null);
+  // Warn only when the picked model is OUTSIDE what the origin sanctioned — a clean
+  // steer to a sanctioned model shows nothing (the shipped allow-list gate, not the
+  // old "any locked axis exists" blanket).
+  const steersDisallowedModel = overlaySetsModelOutsideAllowed(
+    pickedOverlay ?? overlay,
+    allowedModels,
+  );
 
   // Captured working copies, read at confirm. Refs (not state) so a textarea
   // blur that fires immediately before the Confirm click is already reflected
@@ -110,6 +147,9 @@ export function SteerForkPanel({
     setErr(null);
     const forkSeed: OperatorForkOverride = {
       origin_prompt_fields: editedPrompt.current ?? seedPrompt,
+      // The overlay rides verbatim. A model/provider value in it is a locked-axis
+      // edit: the backend requires `campaign.babysit` (404 without) and stamps the
+      // branch grade C. A non-cap operator can't produce one — the row is read-only.
       pipeline_overlay: editedOverlay.current ?? overlay,
       config_overrides: limits.current,
       ...(Object.keys(editedNarrowing.current).length > 0
@@ -146,6 +186,22 @@ export function SteerForkPanel({
         </p>
       )}
 
+      {/* Babysit warning. Shown only when the picked model/provider is OUTSIDE the
+          origin's allowed_models (a sanctioned model is a clean steer) and the operator
+          holds the cap. Steering outside the allow-list marks the branch grade C. */}
+      {steersDisallowedModel && canBabysit ? (
+        <div className="steer-fork-babysit">
+          <p className="steer-fork-babysit-warn" role="note">
+            This model isn&apos;t in the origin&apos;s allowed models
+            {allowedModels.length > 0 ? ` (${allowedModels.join(", ")})` : ""}. Steering to
+            it marks this branch — and every round after it — operator-babysat (grade C):
+            excluded from clean comparison, origin reuse, and the L4 rollup. The
+            measurement is still recorded; it just isn&apos;t a clean one. Pick a sanctioned
+            model to keep a clean branch.
+          </p>
+        </div>
+      ) : null}
+
       <NodeSurface
         node={null}
         point={searchPoint(seedPrompt, overlay)}
@@ -153,26 +209,32 @@ export function SteerForkPanel({
         schema={cv.nodeConfigSchema}
         outputSchema={cv.nodeOutputSchema}
         mode="values"
+        babysitEditable={canBabysit}
         flat
         onApply={(p) => {
           editedPrompt.current = p.origin_prompt_fields ?? {};
         }}
         onConfigChange={(o) => {
           editedOverlay.current = o;
+          setPickedOverlay(o);
         }}
       />
 
       {/* Per-node search-space LOCK editor — which params the optimizer may move on
           the fork. Seeded from `{}` so each row reflects the served (campaign-narrowed)
           schema's tunability; edits ride `optimizer_narrowing` on the fork seed. The
-          model lock is the campaign-level knob (set at start), so it's not shown here. */}
-      {Object.keys(cv.nodeConfigSchema ?? {}).length > 0 ? (
+          model rides the node surface as a steerable value (its optimizer-lock is the
+          fork-level axis toggle), so a node whose ONLY served param is the model has
+          nothing to lock here — render lock rows only for nodes that carry a lockable
+          param, and drop the whole block when none do (a prompt-only pipeline like
+          pp-self, whose tunable surface is the prompt fields above). */}
+      {lockableNodes.length > 0 ? (
         <div className="steer-fork-locks">
           <p className="steer-fork-sub">
             Lock or unlock what the optimizer may tune on this fork — 🔒 holds a param at
             its value, 🔓 lets the optimizer move it.
           </p>
-          {Object.keys(cv.nodeConfigSchema ?? {}).map((nodeId) => (
+          {lockableNodes.map((nodeId) => (
             <NodeConfigEditor
               key={nodeId}
               mode="search-space"

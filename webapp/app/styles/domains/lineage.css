@@ -43,6 +43,10 @@
 .steer-fork-note{font-size:12px;color:var(--color-text-secondary);background:var(--color-background-tint);border-radius:5px;padding:6px 8px;margin:0}
 .steer-fork-err{color:var(--color-danger);font-size:12px}
 .steer-fork-locks{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--color-border);padding-top:10px}
+/* Babysit warning — framed in the warn colour when a cap-holder can edit a locked
+   axis (model/provider) on the fork; editing it taints the branch grade C. */
+.steer-fork-babysit{border:1px solid var(--color-warn-border);background:var(--color-warn-bg);border-radius:6px;padding:8px 10px}
+.steer-fork-babysit-warn{margin:0;font-size:12px;line-height:1.45;color:var(--color-warn)}
 .steer-fork-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px}
 .steer-fork-cancel{background:transparent;color:var(--color-text-secondary);border:1px solid var(--color-border);border-radius:6px;padding:6px 14px;font-size:13px;font-family:inherit;cursor:pointer}
 .steer-fork-confirm{background:var(--color-accent);color:var(--color-text-on-accent);border:0;border-radius:6px;padding:6px 14px;font-size:13px;font-family:inherit;cursor:pointer}

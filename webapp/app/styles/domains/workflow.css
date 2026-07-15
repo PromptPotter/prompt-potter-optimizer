@@ -108,9 +108,14 @@
 .opt-detail-samples{padding:8px 16px;border-top:0.5px solid var(--color-border)}
 .opt-detail-samples .round-samples-view{margin-bottom:0}
 
-/* Footer — secondary content as inline disclosures. The raw payloads and
-   config dump are escape hatches, not primary; default-collapsed so the
-   strip stays one line tall. */
+/* Node configuration — the optimizer node's own knobs (model / provider /
+   reasoning_effort / temperature / …) rendered read-only through the canonical
+   config element (NodeConfigEditor), replacing the old chip strip + JSON dump. */
+.opt-detail-config{border-top:0.5px solid var(--color-border)}
+.opt-detail-config .config-editor{padding:8px 16px}
+
+/* Footer — secondary content as inline disclosures. The raw payloads are escape
+   hatches, not primary; default-collapsed so the strip stays one line tall. */
 .opt-detail-footer{padding:6px 16px 10px;border-top:0.5px solid var(--color-border);display:flex;flex-wrap:wrap;gap:6px 14px;background:var(--color-background-secondary)}
 .opt-detail-disclosure{font-size:11px;color:var(--color-text-tertiary);flex:1 1 100%;min-width:0}
 .opt-detail-disclosure > summary{cursor:pointer;list-style:none;padding:4px 0;display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.4px;user-select:none}

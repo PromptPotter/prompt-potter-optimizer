@@ -3,6 +3,8 @@
 // mirrors PipelineView in promptpotter/domain/pipeline_schema.py — keep them
 // in sync.
 
+import type { NodeConfigParam, NodeOutputSchema } from "@/lib/api";
+
 export interface PipelineViewNode {
   id: string;
   label: string;
@@ -26,6 +28,12 @@ export interface PipelineView {
 export interface PipelineDoc {
   view?: PipelineView;
   nodes?: Record<string, { type?: string; config?: Record<string, unknown>; model?: string }>;
+  // Per-node typed config surface (model / provider / reasoning_effort / …), served
+  // by `/optimizer-pipeline` so the canvas node-detail renders the optimizer's own
+  // knobs through the canonical config element instead of a hand-rolled chip strip +
+  // JSON dump. Read-only there (the `_optimizer` pipeline is edited via champion/Lab).
+  node_config_schema?: Record<string, NodeConfigParam[]>;
+  node_output_schema?: Record<string, NodeOutputSchema | null>;
 }
 
 // One node block as written by AuditTrailView._handle_llm_call

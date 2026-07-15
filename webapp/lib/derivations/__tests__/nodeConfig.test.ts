@@ -24,18 +24,17 @@ function row(over: Partial<ConfigRow> & { key: string; kind: string }): ConfigRo
 
 describe("nodeOverlayPatch (search-space emit)", () => {
   it("writes open params to param_keys and omits locked ones", () => {
-    const patch = nodeOverlayPatch({}, true, "web_search", [
+    const patch = nodeOverlayPatch({}, "web_search", [
       row({ key: "max_sites", kind: "number" }),
       row({ key: "num_results", kind: "number", locked: true }),
     ]);
     const opt = (patch.pipeline_overlay!.web_search as Record<string, unknown>)
       .optimizer as Record<string, unknown>;
     expect(opt.param_keys).toEqual(["max_sites"]);
-    expect(patch.optimization_overrides).toEqual({ lock_model: true });
   });
 
   it("locks a node to [] when every param is locked", () => {
-    const patch = nodeOverlayPatch({}, false, "fuzzy_matching", [
+    const patch = nodeOverlayPatch({}, "fuzzy_matching", [
       row({ key: "threshold", kind: "number", locked: true }),
       row({ key: "scorer", kind: "enum", locked: true, options: ["WRatio", "QRatio"] }),
     ]);
@@ -46,7 +45,7 @@ describe("nodeOverlayPatch (search-space emit)", () => {
   });
 
   it("narrows an enum's allowed-values only when a strict subset", () => {
-    const patch = nodeOverlayPatch({}, false, "llm", [
+    const patch = nodeOverlayPatch({}, "llm", [
       row({
         key: "reasoning_effort",
         kind: "enum",
@@ -64,19 +63,19 @@ describe("nodeOverlayPatch (search-space emit)", () => {
   });
 
   it("carries a changed origin value into config, coerced by kind; model excluded from param_keys", () => {
-    const patch = nodeOverlayPatch({}, true, "entity_profiling", [
+    const patch = nodeOverlayPatch({}, "entity_profiling", [
       row({ key: "temperature", kind: "number", value: "0.2", baseValue: "0.3" }),
       row({ key: "model", kind: "model", value: "m2", baseValue: "m1", options: ["m1", "m2"] }),
     ]);
     const node = patch.pipeline_overlay!.entity_profiling as Record<string, unknown>;
     expect(node.config).toEqual({ temperature: 0.2, model: "m2" });
-    // temperature (open) lands in param_keys; model never does (it rides lock_model)
+    // temperature (open) lands in param_keys; model never does (always locked)
     expect((node.optimizer as Record<string, unknown>).param_keys).toEqual(["temperature"]);
   });
 
   it("merges onto an existing overlay without clobbering other nodes", () => {
     const base = { other_node: { config: { x: 1 } } };
-    const patch = nodeOverlayPatch(base, false, "web_search", [
+    const patch = nodeOverlayPatch(base, "web_search", [
       row({ key: "max_sites", kind: "number" }),
     ]);
     expect(patch.pipeline_overlay!.other_node).toEqual({ config: { x: 1 } });
