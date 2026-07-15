@@ -56,7 +56,7 @@ tags: [security, identity, authorization, capabilities, delegation, multi-tenant
 
 Today PromptPotter has exactly two principal shapes: a **registered user** (an
 `IdentityContext` with tenant-scoped capabilities) and an **admin** (the same, plus
-`ADMIN_CAPABILITIES = {BENCHMARKS_READ_CAP, L4_LAB_CAP}` when `PROMPTPOTTER_ADMIN=1`).
+`ADMIN_CAPABILITIES = {BENCHMARKS_READ_CAP}` when `PROMPTPOTTER_ADMIN=1`).
 That is enough for "one operator runs their own campaigns" and nothing more.
 
 A user now wants to **delegate**. Concretely:
@@ -98,10 +98,10 @@ Two gaps make this urgent, not merely nice:
    The identity model stops at user/admin.
 2. **~~The command highway applies privileged fields with no per-verb capability
    check.~~ CLOSED (2026-07-15, §3).** `POST /commands/{kind}` used to deserialize and
-   apply the payload for any authenticated principal who could reach the route — the
-   route-level `require_capability` primitive existed but was not mapped over the command
-   verbs. `CAP_FOR_KIND` + the dispatcher gate now enforce a per-verb capability at the
-   one seam. (Gap #1 — sub-principals/delegation/channels — remains.)
+   apply the payload for any authenticated principal who could reach the route — no
+   per-verb capability check existed at the command seam. `CAP_FOR_KIND` + the dispatcher
+   gate now enforce a per-verb capability at the one seam. (Gap #1 —
+   sub-principals/delegation/channels — remains.)
 
 ## Decision Drivers
 
@@ -117,8 +117,8 @@ Two gaps make this urgent, not merely nice:
   campaign → step one round at a time), not to nothing. Privilege is a ladder over the
   verbs, not a single switch.
 * **Build on what exists.** `IdentityContext.capabilities`, `has_capability`,
-  `require_capability`, the closed command-verb set, the ADR-0003 spend-cap machinery,
-  and `domain/measurement_provenance.py` are the primitives. This ADR *composes* them;
+  the closed command-verb set, the ADR-0003 spend-cap machinery, and
+  `domain/measurement_provenance.py` are the primitives. This ADR *composes* them;
   it does not replace them.
 * **Generic over specific.** One mechanism (direct edit → babysat), not a bespoke
   control per privileged value. The capability gates *who* may make such an edit; the

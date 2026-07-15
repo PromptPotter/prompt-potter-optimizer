@@ -11,7 +11,7 @@ them distinct is the whole design.
 
 | Boundary | Kind | Enforced by | Failure response |
 |---|---|---|---|
-| **admin ↔ user** | Authorization (capability) | one `require_capability` dependency + one `has_capability` predicate | 404 (existence-hiding) |
+| **admin ↔ user** | Authorization (capability) | the dataset-visibility gateway (`has_capability` in `dataset_access`) | 404 (existence-hiding) |
 | **user ↔ user** | Tenancy (data isolation) | structural directory rooting + one `load_owned` ownership rule | 404 |
 | **loop ↔ everything** | OS privilege | systemd-hardened unit (kernel-enforced) | process denied (EACCES / cgroup) |
 
@@ -20,8 +20,7 @@ them distinct is the whole design.
 ## Tier 1 — admin ↔ user: authorization
 
 **What admin can do** is one definition: `ADMIN_CAPABILITIES` in `shared/identity.py`
-(`datasets.benchmarks.read` + `l4.lab.access`). Adding an admin power = editing that one
-frozenset.
+(`datasets.benchmarks.read`). Adding an admin power = editing that one frozenset.
 
 **Who is admin** is *two deliberate predicates* — never merge them (merging regrants admin
 to every OIDC signup):
@@ -31,13 +30,12 @@ to every OIDC signup):
   the one pinned identity recorded in the default-claim marker (the web analogue of ADR-0004's
   chat-id lock).
 
-**Enforcement is one chokepoint:** `require_capability(cap)` (`presentation/api/deps.py`) — a
-FastAPI dependency declared in a route's `dependencies=[…]`; it reads `has_capability`
-(`shared/identity.py`), the same predicate the dataset-visibility gateway
-(`infrastructure/store/dataset_access.py`) uses. A missing capability returns **404, not 403**
-(existence leakage is itself a violation). Applied to the two L4-Lab routes
-(`routers/campaigns/registry.py`) and the benchmark datasets. This is the reusable form of
-ADR-0001's checklist item "capability gate on every handler."
+**Enforcement is one chokepoint:** the dataset-visibility gateway
+(`infrastructure/store/dataset_access.py`) — it reads `has_capability`
+(`shared/identity.py`) and hides install benchmarks from any identity lacking
+`BENCHMARKS_READ_CAP`. A gated read returns **404, not 403** (existence leakage is itself
+a violation). This satisfies ADR-0001's "capability gate on every handler" at the store
+boundary every read already funnels through — not a per-route dependency.
 
 **Command-verb authorization (ADR-0005).** Beyond the admin/read caps, every
 control-plane command requires a **tier capability** — `CAMPAIGN_{STEP,RUN,CREATE,BUDGET,LIFECYCLE,BABYSIT}_CAP`
@@ -153,7 +151,7 @@ not backend-supplied.
 |---|---|
 | Admin capability set (one definition) | `shared/identity.py::ADMIN_CAPABILITIES` |
 | Who-is-admin (two predicates) | `shared/identity.py::_admin_caps_from_env`, `middleware/oidc.py::_session_capabilities` |
-| Capability gate (one chokepoint) | `deps.py::require_capability`, `shared/identity.py::has_capability` |
+| Capability gate (one chokepoint) | `store/dataset_access.py`, `shared/identity.py::has_capability` |
 | Command-verb gate (second chokepoint) | `command_dispatcher/dispatcher.py::_require_capability_for` + `CAP_FOR_KIND` |
 | Command tier caps (one enumeration) | `shared/identity.py::CAMPAIGN_CAP_BY_TIER`, `OWNER_COMMAND_CAPABILITIES` |
 | Sealed sub-principal grant store | `infrastructure/identity/grants.py` (`.promptpotter/identity/grants.json`) |

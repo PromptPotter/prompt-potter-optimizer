@@ -45,11 +45,11 @@ def _session_capabilities(user_id: str, bundle: IdentityBundle) -> frozenset[str
     :data:`OWNER_COMMAND_CAPABILITIES` command set — bounded to their workspace
     by tenant-isolation, enforced per-verb at the dispatcher gate. The admin
     tier is separate and pinned: ``BENCHMARKS_READ_CAP`` (repo-root install
-    benchmarks) + ``L4_LAB_CAP`` (the dev-only L4 Lab) are granted ONLY to the
-    one pinned operator — the registered developer recorded in the default-claim
-    marker (the web analogue of ADR-0004's chat-id lock). A first-time signup
-    never matches the marker, so neither the benchmarks nor the Lab bleed
-    through; a fresh box with no marker has no admin at all (secure-by-default).
+    benchmarks) is granted ONLY to the one pinned operator — the registered
+    developer recorded in the default-claim marker (the web analogue of
+    ADR-0004's chat-id lock). A first-time signup never matches the marker, so
+    the benchmarks never bleed through; a fresh box with no marker has no admin
+    at all (secure-by-default).
 
     A delegated sub-principal (ADR-0005) resolves an ATTENUATED subset here from
     the sealed grant store instead of the blanket owner set — that is the seam

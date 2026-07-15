@@ -1,13 +1,11 @@
 "use client";
 // L4 champion registry — the ranked table of candidate meta-prompt states,
 // reduced fresh server-side from the tenant's on-disk pp-self cycles. One-shot
-// fetch (not the 2 s poll): the L4 Lab is a dev-only on-demand surface.
+// fetch (not the 2 s poll): it feeds the outer-loop dashboard boxes on demand.
 //
-// Visibility is gated by the `L4_LAB_CAP` capability off `/auth/me` (the dev-only
-// whitelabel gate), NOT by whether data exists — so a developer with zero pp-self
-// cycles still opens the Lab (to its empty state), and no end-user ever hits the
-// route. Pass `enabled=false` for a non-dev identity so the fetch never fires (the
-// route 404s without the capability anyway).
+// Pass `enabled=false` (the dashboard passes `isOuterSelfOpt`) so the fetch fires
+// only when viewing the outer pp-self loop — a normal or inner-loop view never
+// hits the route.
 
 import { useFetch } from "@/lib/hooks/useFetch";
 import { fetchChampionRegistry, type ChampionRegistryResponse } from "@/lib/api";

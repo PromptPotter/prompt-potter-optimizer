@@ -1,47 +1,31 @@
-/* L4 Lab — developer surface for meta-prompt tuning. Theme-aware (reads tokens);
-   leans operator/dense. Not shown to whitelabeled end-users. */
+/* L4 dashboard boxes — the outer pp-self loop's extra surfaces (outer verdict,
+   champion table, capability matrix), folded into the Dashboard tab and gated to
+   the outer loop. Theme-aware (reads tokens); leans operator/dense. Not shown to
+   whitelabeled end-users (they never run a self-optimizing campaign). */
 
-.lab-pane {
-  display: flex;
-  flex-direction: column;
-  gap: var(--dash-zone-gap);
-}
-
-.lab-head h1 {
-  font-size: 1.15rem;
-  margin: 0 0 2px;
-  color: var(--color-text-primary);
-}
-.lab-head p {
-  margin: 0;
-  color: var(--color-text-secondary);
-  font-size: 0.85rem;
-  max-width: 60ch;
-}
-
-.lab-lede {
+.l4-lede {
   margin: 0 0 12px;
   color: var(--color-text-secondary);
   font-size: 0.82rem;
   line-height: 1.5;
   max-width: 78ch;
 }
-.lab-lede strong {
+.l4-lede strong {
   color: var(--color-text-primary);
 }
 
-.lab-subtle {
+.l4-subtle {
   color: var(--color-text-tertiary);
   font-size: 0.78rem;
   font-variant-numeric: tabular-nums;
 }
 
-.lab-empty {
+.l4-empty {
   color: var(--color-text-tertiary);
   font-size: 0.85rem;
 }
-.lab-empty code,
-.lab-lede code {
+.l4-empty code,
+.l4-lede code {
   font-family: var(--font-mono);
   font-size: 0.85em;
   padding: 1px 4px;
@@ -50,16 +34,16 @@
 }
 
 /* ── Table ──────────────────────────────────────────────────── */
-.lab-table-wrap {
+.l4-table-wrap {
   overflow-x: auto; /* wide table scrolls in its own box; page never scrolls x */
 }
-.lab-table {
+.l4-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.82rem;
   font-variant-numeric: tabular-nums;
 }
-.lab-table th {
+.l4-table th {
   text-align: left;
   font-weight: 600;
   color: var(--color-text-tertiary);
@@ -70,60 +54,60 @@
   border-bottom: 1px solid var(--color-border);
   white-space: nowrap;
 }
-.lab-table td {
+.l4-table td {
   padding: 7px 10px;
   border-bottom: 1px solid var(--color-border);
   vertical-align: baseline;
 }
-.lab-row-champion {
+.l4-row-champion {
   background: var(--color-success-bg);
 }
 
-.lab-rank {
+.l4-rank {
   color: var(--color-text-tertiary);
   width: 2ch;
 }
-.lab-state {
+.l4-state {
   display: flex;
   align-items: center;
   gap: 8px;
   white-space: nowrap;
 }
-.lab-state code {
+.l4-state code {
   font-family: var(--font-mono);
   color: var(--color-text-primary);
 }
 
-.lab-effect {
+.l4-effect {
   white-space: nowrap;
 }
-.lab-effect-mean {
+.l4-effect-mean {
   font-weight: 600;
 }
-.lab-effect-ci {
+.l4-effect-ci {
   color: var(--color-text-tertiary);
   margin-left: 8px;
   font-size: 0.76rem;
 }
-.lab-eff-pos .lab-effect-mean {
+.l4-eff-pos .l4-effect-mean {
   color: var(--color-success);
 }
-.lab-eff-neg .lab-effect-mean {
+.l4-eff-neg .l4-effect-mean {
   color: var(--color-danger);
 }
-.lab-eff-flat .lab-effect-mean {
+.l4-eff-flat .l4-effect-mean {
   color: var(--color-text-secondary);
 }
 
-.lab-num {
+.l4-num {
   white-space: nowrap;
   color: var(--color-text-secondary);
 }
-.lab-dim {
+.l4-dim {
   color: var(--color-text-tertiary);
 }
 
-.lab-label {
+.l4-label {
   color: var(--color-text-secondary);
   max-width: 40ch;
   overflow: hidden;
@@ -131,7 +115,7 @@
   white-space: nowrap;
 }
 
-.lab-open {
+.l4-open {
   margin-left: 8px;
   font-size: 0.72rem;
   color: var(--color-accent);
@@ -141,17 +125,17 @@
   cursor: pointer;
   text-decoration: underline;
 }
-.lab-open:hover {
+.l4-open:hover {
   color: var(--color-accent-strong);
 }
 
 /* ── Preset collection ops (inert until the coronation slice) ── */
-.lab-ops {
+.l4-ops {
   display: flex;
   gap: 6px;
   white-space: nowrap;
 }
-.lab-op {
+.l4-op {
   font-size: 0.72rem;
   padding: 2px 8px;
   border-radius: 6px;
@@ -160,7 +144,7 @@
   color: var(--color-text-tertiary);
   cursor: not-allowed;
 }
-.lab-op:disabled {
+.l4-op:disabled {
   opacity: 0.55;
 }
 

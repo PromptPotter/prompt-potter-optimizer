@@ -312,7 +312,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
         grants,
         sub_principal_user_id="sub-1",
         delegated_by_user_id="owner-9",
-        capabilities=frozenset({CAMPAIGN_STEP_CAP, "admin.super", "l4.lab.access"}),
+        capabilities=frozenset({CAMPAIGN_STEP_CAP, "admin.super", "datasets.benchmarks.read"}),
         spend_ceiling_usd=5.0,
         note="claude",
         actor="owner-9",

@@ -29,20 +29,11 @@ from promptpotter.domain.identity import Issuer, TenantId, UserId, safe_name
 # cached benchmarks to first-time signups.
 BENCHMARKS_READ_CAP = "datasets.benchmarks.read"
 
-# Capability gate for the L4 Lab — the developer surface for tuning
-# PromptPotter itself (champion table, resource matrix, outer verdict). The
-# product is whitelabeled: end-users optimize THEIR pipelines but never tune
-# the optimizer, so the Lab is dev-only. Granted to the SAME single admin
-# principal as ``BENCHMARKS_READ_CAP`` (``PROMPTPOTTER_ADMIN=1`` on the Stage-0
-# box; the pinned registered developer at the OIDC seam). The two Lab read
-# routes enforce it; ``/auth/me`` surfaces it so the webapp gates the tab.
-L4_LAB_CAP = "l4.lab.access"
-
 # The sole definition of "what the admin principal can do" — one frozenset the
 # env predicate (Stage 0) and the pinned-marker predicate (Stage 1, `oidc.py`)
 # both reference. WHO is admin stays two deliberate mechanisms; WHAT admin grants
 # lives here, once. Adding a capability to the admin tier = editing this line.
-ADMIN_CAPABILITIES = frozenset({BENCHMARKS_READ_CAP, L4_LAB_CAP})
+ADMIN_CAPABILITIES = frozenset({BENCHMARKS_READ_CAP})
 
 # Control-plane command capabilities — one per privilege tier of the closed
 # `/commands/{kind}` set (the dispatcher's `CAP_FOR_KIND` maps each kind to one).
@@ -132,7 +123,7 @@ def default_identity(tenant_id: str = "default", user_id: str = "default") -> Id
     same single workspace the authenticated web reads (one tenant per operator).
     The single local operator owns their tenant, so they hold the full
     :data:`OWNER_COMMAND_CAPABILITIES` command set; ``PROMPTPOTTER_ADMIN=1``
-    additionally augments with :data:`BENCHMARKS_READ_CAP` and :data:`L4_LAB_CAP`.
+    additionally augments with :data:`BENCHMARKS_READ_CAP`.
     Stage 1 (M12 OIDC client) replaces this factory at the resolver seam
     (`presentation/api/deps.py::resolve_identity`); no other call site changes.
     """
@@ -148,8 +139,8 @@ def default_identity(tenant_id: str = "default", user_id: str = "default") -> Id
 def has_capability(identity: IdentityContext, capability: str) -> bool:
     """The one predicate for "does this identity hold *capability*".
 
-    The route-level gate (`presentation.api.deps.require_capability`) and the
-    dataset-visibility gateway (`infrastructure.store.dataset_access`) both read
+    The dataset-visibility gateway (`infrastructure.store.dataset_access`) and the
+    command-verb gate (`command_dispatcher._require_capability_for`) both read
     capabilities through here, so every capability decision has one shape.
     """
     return capability in identity.capabilities
@@ -171,7 +162,6 @@ __all__ = [
     "CAMPAIGN_LIFECYCLE_CAP",
     "CAMPAIGN_RUN_CAP",
     "CAMPAIGN_STEP_CAP",
-    "L4_LAB_CAP",
     "OWNER_COMMAND_CAPABILITIES",
     "PROMPTPOTTER_ADMIN_ENV",
     "IdentityContext",

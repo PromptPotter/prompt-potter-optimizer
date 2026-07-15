@@ -146,10 +146,10 @@ class MeResponse(BaseModel):
     provider: str | None
     connected_accounts: list[ConnectedAccount]
     available_providers: list[str]
-    # RBAC permit set for this identity (sorted). The webapp gates dev-only
-    # surfaces on membership — e.g. the L4 Lab tab shows iff ``l4.lab.access`` is
-    # present. Empty for a first-time signup; the pinned developer carries the
-    # admin caps. The Lab's read routes enforce the same capability server-side.
+    # RBAC permit set for this identity (sorted) — the honest permit envelope.
+    # Empty for a first-time signup; the pinned developer carries the admin caps
+    # (e.g. benchmark-dataset read). Server routes enforce them; the webapp reads
+    # this to reflect, not to gate (the outer-loop dashboard boxes gate on data).
     capabilities: list[str]
     # Consent gate inputs. ``terms_version`` is the live required version;
     # ``terms_accepted_version`` is what this user last accepted (None = never).

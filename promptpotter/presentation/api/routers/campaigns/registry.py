@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import Depends, Query
+from fastapi import Query
 from pydantic import BaseModel, Field
 
 from promptpotter.application.bootstrap.wiring import (
@@ -28,10 +28,9 @@ from promptpotter.application.meta_champion import ChampionRegistry, reduce_corp
 from promptpotter.application.resource_matrix import ResourceMatrix, read_matrix
 from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.layout import REPO_ROOT
-from promptpotter.presentation.api.deps import StoreDep, require_capability
+from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
-from promptpotter.shared.identity import L4_LAB_CAP
 
 
 class CampaignSummary(BaseModel):
@@ -374,32 +373,25 @@ def get_campaign_config_map(store: StoreDep, campaign_id: str) -> ConfigMapRespo
     return ConfigMapResponse(groups=groups, couplings=couplings)
 
 
-# The two L4 Lab routes are gated on :data:`L4_LAB_CAP` via the shared
-# ``require_capability`` dependency: without it, 404 (not 403) — the whole Lab
-# surface is invisible to a non-developer identity, matching the existence-hiding
-# convention the cross-user reads use. The webapp reads the same capability off
-# ``/auth/me`` and never renders the tab, so a 404 here is pure defense-in-depth
-# against a direct hit, never a path the UI walks into.
-_LAB_GATE = Depends(require_capability(L4_LAB_CAP))
-
-
-@campaigns_router.get(
-    "/champion-registry", response_model=ChampionRegistry, dependencies=[_LAB_GATE]
-)
+# The two L4 read surfaces are tenant-scoped (a tenant sees only its own pp-self
+# cycles / matrix) and consumed by the outer-loop dashboard boxes, which render only
+# when the operator is viewing their own self-optimizing campaign — so the read is
+# self-gating on data. No capability gate: whitelabeled users never run a pp-self
+# campaign, so these return empty for them, and there is nothing to hide.
+@campaigns_router.get("/champion-registry", response_model=ChampionRegistry)
 def get_champion_registry(store: StoreDep) -> ChampionRegistry:
     """The L4 champion table — every candidate meta-prompt state on disk, ranked by
     anchor-to-origin effect. Reduced fresh from the tenant's pp-self cycles on each
-    fetch (dev on-demand surface, not the 2 s poll); zero LLM. Dev-only —
-    :data:`L4_LAB_CAP`-gated (404 without it); empty for a dev with no pp-self cycles."""
+    fetch (on-demand, not the 2 s poll); zero LLM. Tenant-scoped; empty for a tenant
+    with no pp-self cycles."""
     return reduce_corpus(store)
 
 
-@campaigns_router.get("/resource-matrix", response_model=ResourceMatrix, dependencies=[_LAB_GATE])
+@campaigns_router.get("/resource-matrix", response_model=ResourceMatrix)
 def get_resource_matrix(store: StoreDep) -> ResourceMatrix:
     """The L4 resource matrix — the (target-model × dataset) capability grid the
     operator built with ``matrix measure``. Read-only from the committed pp-self
-    ``resource_matrix.json``. Dev-only — :data:`L4_LAB_CAP`-gated (404 without it);
-    empty when it has never been measured."""
+    ``resource_matrix.json``; empty when it has never been measured."""
     pp_self_dir = resolve_dataset_config_dir(store, REPO_ROOT, "promptpotter-self")
     matrix = read_matrix(pp_self_dir)
     return matrix or ResourceMatrix(generated_at="", cells=[])

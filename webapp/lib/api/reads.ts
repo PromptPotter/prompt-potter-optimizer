@@ -53,9 +53,10 @@ export interface MeResponse {
   provider: string | null;
   connected_accounts: ConnectedAccount[];
   available_providers: string[];
-  // RBAC permit set for this identity. Dev-only surfaces gate on membership —
-  // the L4 Lab tab shows iff `L4_LAB_CAP` is present. Empty for a normal user;
-  // the pinned developer carries the admin caps. The Lab routes enforce the same.
+  // RBAC permit set for this identity — the honest `/auth/me` envelope. Empty for a
+  // normal user; the pinned developer carries the admin caps. No webapp surface reads
+  // it today (the outer-loop dashboard boxes gate on data, not a capability), but the
+  // next capability gate will.
   capabilities: string[];
   // Consent gate. `terms_version` is the live required version; the app blocks
   // behind the consent gate while `terms_accepted_version` (what this user last
@@ -64,9 +65,6 @@ export interface MeResponse {
   terms_accepted_version: string | null;
 }
 
-// Capability that gates the dev-only L4 Lab — mirror of
-// `promptpotter.shared.identity.L4_LAB_CAP`. A normal end-user never carries it.
-export const L4_LAB_CAP = "l4.lab.access";
 export function fetchMe(signal?: AbortSignal): Promise<MeResponse> {
   return jget<MeResponse>(`${API}/auth/me`, signal);
 }
@@ -583,11 +581,12 @@ export function fetchConfigMap(
   );
 }
 
-// --- L4 champion registry (dev-only L4 Lab) -----------------------------------
+// --- L4 champion registry (outer-loop dashboard box) --------------------------
 // The ranked table of candidate meta-prompt states, reduced fresh from the
 // tenant's on-disk pp-self cycles. Empty (n_cycles_scanned=0) for every tenant
-// with no pp-self campaigns — i.e. every whitelabeled end-user — which is what
-// gates the L4 Lab out of the end-user surface.
+// with no pp-self campaigns — i.e. every whitelabeled end-user; the dashboard
+// renders the box only when viewing the outer pp-self loop, so the read is
+// self-gating on data.
 export interface ChampionCellEffect {
   cell: string;
   mean_d: number;
@@ -621,7 +620,7 @@ export function fetchChampionRegistry(signal?: AbortSignal): Promise<ChampionReg
   return jget<ChampionRegistryResponse>(`${API}/champion-registry`, signal);
 }
 
-// --- L4 resource matrix (dev-only L4 Lab) -------------------------------------
+// --- L4 resource matrix (outer-loop dashboard box) ----------------------------
 // The (target-model × dataset) capability grid the operator built with
 // `matrix measure`. Empty until measured.
 export interface ResourceCell {

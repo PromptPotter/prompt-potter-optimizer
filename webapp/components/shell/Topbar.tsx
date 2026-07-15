@@ -34,7 +34,7 @@ function ThemeToggle() {
 // Per-cycle sub-tabs (Replit-style): the sidebar carries the campaign
 // library; the topbar carries the views over the *currently-selected*
 // campaign — Chat, Dashboard, Verify, and the Files tree.
-export type Tab = "chat" | "dashboard" | "files" | "verify" | "lab";
+export type Tab = "chat" | "dashboard" | "files" | "verify";
 
 interface Props {
   tab: Tab;
@@ -42,9 +42,6 @@ interface Props {
   // Mobile-only — when present, renders a hamburger on the left of the
   // topbar that toggles the Sidebar drawer. Desktop hides it via CSS.
   onMenuToggle?: () => void;
-  // Dev-only L4 Lab tab. Off for whitelabeled end-users (no pp-self data);
-  // AppShell decides via `hasL4Data`.
-  showLab?: boolean;
 }
 
 const BASE_TABS: { id: Tab; label: string }[] = [
@@ -53,10 +50,9 @@ const BASE_TABS: { id: Tab; label: string }[] = [
   { id: "verify", label: "Verify" },
   { id: "files", label: "Files" },
 ];
-const LAB_TAB: { id: Tab; label: string } = { id: "lab", label: "L4 Lab" };
 
-export function Topbar({ tab, onTabChange, onMenuToggle, showLab }: Props) {
-  const tabs = showLab ? [...BASE_TABS, LAB_TAB] : BASE_TABS;
+export function Topbar({ tab, onTabChange, onMenuToggle }: Props) {
+  const tabs = BASE_TABS;
   const [accountOpen, setAccountOpen] = useState(false);
   const [authPromptOpen, setAuthPromptOpen] = useState(false);
   const [authErrorCode, setAuthErrorCode] = useState<string | null>(null);

@@ -868,10 +868,10 @@ class CommandDispatcher:
         """Per-verb capability gate — the one seam every command funnels through.
 
         Maps the closed command *kind* to its tier capability (``CAP_FOR_KIND``)
-        and checks the request identity holds it. Absence raises 404
-        (existence-hiding, matching ``deps.require_capability`` — a principal
-        without the cap is told the verb does not exist, never 403). A tenant
-        owner holds every tier; a delegated sub-principal an attenuated subset.
+        and checks the request identity holds it. Absence raises 404 — the
+        existence-hiding posture the cross-user reads use: a principal without the
+        cap is told the verb does not exist, never 403. A tenant owner holds every
+        tier; a delegated sub-principal an attenuated subset.
         """
         cap = CAP_FOR_KIND.get(kind)
         if cap is None or not has_capability(self._store.identity, cap):

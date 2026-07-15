@@ -2,6 +2,9 @@
 import { useFetch } from "@/lib/hooks/useFetch";
 import { fetchPipeline } from "@/lib/api";
 import type { PipelineDoc } from "@/components/workflow";
+import { useWorkspace } from "@/lib/workspace";
+import { isSelfOptimization } from "@/lib/derivations";
+import { useChampionRegistry } from "@/lib/hooks/useChampionRegistry";
 import { DashSpine } from "./DashSpine";
 import { CyclePicker } from "@/components/shell/CyclePicker";
 import { RunErrorBanner } from "./RunErrorBanner";
@@ -9,6 +12,9 @@ import { TopStrip } from "./TopStrip";
 import { NowTriad } from "./NowTriad";
 import { Lane } from "./Lane";
 import { LiveStateCard } from "@/components/dashboard/scoring/LiveStateCard";
+import { OuterVerdictPanel } from "@/components/dashboard/scoring/OuterVerdictPanel";
+import { ChampionConsole } from "@/components/dashboard/scoring/ChampionConsole";
+import { CapabilityMatrixPanel } from "@/components/dashboard/scoring/CapabilityMatrixPanel";
 import { MechanismsPanel } from "@/components/dashboard/control/MechanismsPanel";
 import { AllowedModelsPanel } from "@/components/dashboard/control/AllowedModelsPanel";
 import { ConfigMapPanel } from "@/components/dashboard/control/ConfigMapPanel";
@@ -25,6 +31,19 @@ export function DashboardTab() {
     () => fetchPipeline().then((p) => p as PipelineDoc),
     [],
   );
+
+  // The outer L4 loop earns extra boxes: the per-round outer verdict + the
+  // cross-cycle champion/capability surfaces. `campaignId` is the ROOT hop, so
+  // this reads the outer campaign's backend_type; depth 1 == viewing the outer
+  // (not a drilled-in inner). Drilling into `↻ inner` → 2-hop path → gate false
+  // → the plain dashboard, which is what an inner run should show. No fallback for
+  // an unresolved backend_type — it correctly reads as "not self-optimizing".
+  const { viewedPath, campaignId, campaigns } = useWorkspace();
+  const rootBackendType = campaigns.find((c) => c.campaign_id === campaignId)?.backend_type;
+  const isOuterSelfOpt = viewedPath?.length === 1 && isSelfOptimization(rootBackendType);
+  // Fetch fires only when gated in (one-shot, not the 2 s poll).
+  const { registry } = useChampionRegistry(isOuterSelfOpt);
+
   return (
     <div className="content" id="content-dashboard">
       <DashSpine>
@@ -40,6 +59,11 @@ export function DashboardTab() {
         <RunErrorBanner />
         <TopStrip />
       </DashSpine>
+      {isOuterSelfOpt && (
+        <DashSpine>
+          <OuterVerdictPanel />
+        </DashSpine>
+      )}
       <DashSpine>
         <NowTriad pipeline={pipeline} />
       </DashSpine>
@@ -83,6 +107,25 @@ export function DashboardTab() {
           <ConfigMapPanel />
         </DashSpine>
       </Lane>
+      {isOuterSelfOpt && (
+        <Lane
+          id="l4-lab"
+          title="L4 lab"
+          subtitle="Champion ranking + capability matrix — outer meta-optimization (dev surface)"
+          defaultOpen={false}
+        >
+          <DashSpine>
+            {registry ? (
+              <ChampionConsole registry={registry} />
+            ) : (
+              <p className="l4-empty">Loading champion registry…</p>
+            )}
+          </DashSpine>
+          <DashSpine>
+            <CapabilityMatrixPanel />
+          </DashSpine>
+        </Lane>
+      )}
     </div>
   );
 }

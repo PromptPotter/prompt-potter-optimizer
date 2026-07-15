@@ -118,13 +118,13 @@ export const OuterVerdictPanel = memo(function OuterVerdictPanel() {
   return (
     <CardFrame title="Outer verdict" headingTag="h2">
       {!verdict ? (
-        <p className="lab-empty">
+        <p className="l4-empty">
           Select a pp-self cycle with a completed round to see its blocked paired verdict
           (per-cell variant−noop effects pooled across the panel).
         </p>
       ) : (
         <>
-          <p className="lab-lede">
+          <p className="l4-lede">
             <Badge tone={DECISION_TONE[verdict.decision] ?? "default"}>{verdict.decision}</Badge>{" "}
             Variant lifts the optimizer <strong>{fmt(verdict.effect)}</strong> [{fmt(verdict.ci_lo)},{" "}
             {fmt(verdict.ci_hi)}] across {verdict.n_cells} cell
