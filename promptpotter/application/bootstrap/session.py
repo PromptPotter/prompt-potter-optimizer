@@ -88,6 +88,10 @@ class Session:
     scoring: ScorerSetup = field(default_factory=ScorerSetup)
 
     source: str = ""
+    # This cycle was babysat — an operator directly edited an engine-owned/locked
+    # value (ADR-0005). Read from the cycle index at bootstrap; forces every run
+    # this cycle scores to grade C (excluded from digest / reuse / L4).
+    human_intervened: bool = False
 
     def llm_node_name(self) -> str:
         """The dataset's prompt-bearing LLM node — the override target for a per-cell

@@ -5,7 +5,7 @@
   "backend_name": "PromptPotter",
   "backend_type": "promptpotter",
   "available_models": [
-    "openai/gpt-oss-120b"
+    "deepseek/deepseek-v4-flash:nitro"
   ],
   "nodes": {
     "l1_generate": {

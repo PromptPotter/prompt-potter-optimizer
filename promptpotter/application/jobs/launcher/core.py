@@ -379,9 +379,11 @@ async def start_run_command(
     kind: str,
     halt_at_accuracy: float | None = None,
     spend_budget_usd: float | None = None,
+    stop_after_rounds: int | None = None,
     backend_url: str = DEFAULT_BACKEND_URL,
 ) -> Job:
     """Spawn a runner against an existing cycle. ``kind`` ∈ ``{"new", "resume"}``.
+    ``stop_after_rounds`` bounds the run to that many rounds in place (``step-round``).
 
     Mirrors CLI ``resume`` for ``kind="resume"`` and CLI ``new`` re-mint for
     ``kind="new"`` (used after pause or to retry an interrupted launch).
@@ -499,6 +501,7 @@ async def start_run_command(
             task_context=task_context,
             halt_at_accuracy=halt_at_accuracy,
             spend_budget_usd=spend_budget_usd,
+            stop_after_rounds=stop_after_rounds,
         ),
         name=f"job-{job.job_id}",
     )
@@ -516,6 +519,7 @@ async def _run_in_background(
     task_context: TaskDecomposition,
     halt_at_accuracy: float | None,
     spend_budget_usd: float | None,
+    stop_after_rounds: int | None = None,
 ) -> None:
     """Asyncio task body — drives the run, updates registry on transitions."""
     from promptpotter.application.run_observers import build_run_observers
@@ -544,7 +548,7 @@ async def _run_in_background(
             session=session,
             observers=observers,
             task_context=task_context,
-            mode=RunMode(halt_at_accuracy=halt_at_accuracy),
+            mode=RunMode(halt_at_accuracy=halt_at_accuracy, stop_after_rounds=stop_after_rounds),
             spend_budget_usd=spend_budget_usd,
         )
         stop_reason = result.stop_reason

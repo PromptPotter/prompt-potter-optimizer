@@ -26,7 +26,7 @@ from typing import Any, cast
 
 from promptpotter.application.config import missing_template_vars
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
-    resolve_node_schema_field_names,
+    resolve_node_override,
 )
 from promptpotter.application.optimization.dispatch.schemas import L1GenerateOutput, L1Variant
 from promptpotter.config.prompt_blocks import prompt_blocks
@@ -107,7 +107,7 @@ def effective_l1_field_names() -> dict[str, str]:
     its target collides with a field that is not itself being renamed away
     (`{changes_description: prompt_fields_override}` would make the response ambiguous).
     """
-    proposed = resolve_node_schema_field_names("l1_generate")
+    proposed = resolve_node_override("l1_generate").schema_field_names
     if not proposed:
         return {}
     survivors = set(L1Variant.model_fields) - set(proposed)

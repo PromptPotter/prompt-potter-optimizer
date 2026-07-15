@@ -490,9 +490,13 @@ class PipelineSchema(BaseModel):
         file's stale `param_keys` listing of them is inert. When `forbidden_strict`
         (default) the model axis is ABSENT — the optimizer never sees it. When the
         campaign explicitly unlocks AND the dataset advertises `available_models`,
-        the `model` axis is synthesized onto each LLM node (value space =
-        `available_models`); that is the sole ablation lever. `provider` is never
-        an optimizer axis.
+        the `model` axis is synthesized onto a SINGLE carrier node (the first LLM
+        node in declaration order; value space = `available_models`); that is the
+        sole ablation lever. One carrier, not per-node, so an outer L4 search evolves
+        ONE inner-optimizer model fanned across every node, not an independent model
+        per node (`resolve_node_override` does the fan). On a single-LLM dataset the
+        carrier IS the only node, so behaviour is unchanged. `provider` is never an
+        optimizer axis.
 
         `SCHEMA_OWNED_FIELDS` (`output_schema` + schema registry identity) are
         stripped UNCONDITIONALLY — they are the pipeline's structural wire contract,
@@ -502,9 +506,14 @@ class PipelineSchema(BaseModel):
         them, so the LLM can't emit a key the schema omits.
         """
         out: dict[str, set[str]] = {}
+        carrier = (
+            next((s.name for s in self.nodes if s.is_llm), None)
+            if not forbidden_strict and self.available_models
+            else None
+        )
         for step in self.nodes:
             keys = set(step.param_keys) - PARAM_FORBIDDEN_KEYS - SCHEMA_OWNED_FIELDS
-            if not forbidden_strict and self.available_models and step.is_llm:
+            if step.name == carrier:
                 keys = keys | {"model"}
             if keys:
                 out[step.name] = keys

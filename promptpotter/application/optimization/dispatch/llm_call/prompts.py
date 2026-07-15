@@ -17,6 +17,7 @@ import functools
 import hashlib
 import json
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from promptpotter.domain.l1_layout import (
@@ -34,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "OPTIMIZER_PIPELINE_PATH",
+    "ResolvedNodeOverride",
     "combined_optimizer_prompt_hash",
     "compute_optimizer_prompt_hashes",
     "get_optimizer_config_overrides",
@@ -42,7 +44,7 @@ __all__ = [
     "load_optimizer_prompt",
     "load_optimizer_set_overrides",
     "resolve_node_layout",
-    "resolve_node_schema_field_names",
+    "resolve_node_override",
     "set_optimizer_prompt_overrides",
 ]
 
@@ -50,8 +52,9 @@ OPTIMIZER_PIPELINE_PATH = REPO_ROOT / "datasets" / "_optimizer" / "pipeline.json
 
 # Per-cycle override of the optimizer meta-prompts, keyed by optimizer node
 # (`l1_generate` / `l1_critique` / `l2_context` / `l3_plan`) → a partial
-# `PromptTemplate`-field dict, merged onto the loaded prompt by
-# `_apply_prompt_override`. ONE channel, two callers — both task-isolated:
+# `PromptTemplate`-field dict (plus the structural `layout` / `output_schema_field_names` /
+# `model` levers), resolved by `resolve_node_override`. ONE channel, two callers — both
+# task-isolated:
 #   1. the OUTER L4 cycle binds its specialized meta-prompt SET here
 #      (`load_optimizer_set_overrides`, from `OptimizationConfig.optimizer_set`,
 #      set at the runner seam) so it reasons about editing an inner optimizer; and
@@ -100,7 +103,7 @@ def load_optimizer_set_overrides(opt_set: str) -> dict[str, dict[str, Any]]:
     ``datasets/_optimizer_meta/prompts.json``). The file is a flat
     ``{node: {field: text}}`` map of only the fields that set rewrites; it rides
     the SAME per-node override channel as the inner-cycle mutations
-    (:func:`set_optimizer_prompt_overrides` → :func:`_apply_prompt_override`), so
+    (:func:`set_optimizer_prompt_overrides` → :func:`resolve_node_override`), so
     every injection slot the set does not name (the ``pipeline_param_catalogue``
     in ``problem_description``, the evidence panels, …) stays intact from
     ``datasets/_optimizer/``. Empty ``opt_set`` or a missing file → ``{}``.
@@ -234,36 +237,76 @@ def load_optimizer_prompt(name: str) -> PromptTemplate:
     """
     from promptpotter.application.optimization.dispatch.hub import validate_template
 
-    template = _apply_prompt_override(name, _load_local(name))
+    template = _load_local(name)
+    if fields := resolve_node_override(name).prompt_fields:
+        template = template.model_copy(update=fields)
     validate_template(name, template)
     return template
 
 
-def _apply_prompt_override(name: str, template: PromptTemplate) -> PromptTemplate:
-    """Merge any per-run override fields (L4 inner cycle) onto *template*.
+@dataclass(frozen=True)
+class ResolvedNodeOverride:
+    """The outer L4 cycle's per-node mutation, resolved from the specimen channel into one surface.
 
-    The outer L1 mutates the six decomposition fields per inner node; only keys
-    that are real ``PromptTemplate`` fields are merged (the model is ``extra``-
-    strict). No override bound → the template passes through unchanged. The
-    merged result still runs through ``validate_template``, so an override that
-    drops a mandatory injection slot fails loud (and the inner cycle's round loop
-    catches it — a bad mutation scores poorly, it doesn't break the run)."""
-    overrides = _OPTIMIZER_PROMPT_OVERRIDES.get()
-    if not overrides:
-        return template
-    node_override = overrides.get(name)
-    if not isinstance(node_override, dict) or not node_override:
-        return template
-    fields = {k: v for k, v in node_override.items() if k in PromptTemplate.model_fields}
-    return template.model_copy(update=fields) if fields else template
+    Every field is empty / ``None`` on a normal (non-L4) cycle, so reading it there is a total
+    no-op. ``prompt_fields`` are the ``PromptTemplate``-field edits (the model is ``extra``-strict,
+    so it is never one of them); ``schema_field_names`` is the cleaned ``{field: wire_name}`` rename
+    map. ``model`` / ``provider`` are the SINGLE inner-optimizer model the outer carrier node set
+    (``node_param_keys`` constrains the outer search to one carrier), returned for EVERY node so one
+    choice fans across the whole inner optimizer at apply time. ``resolve_node_layout`` is the peer
+    for the layout half, which has a non-optional floor and so keeps its own accessor."""
+
+    prompt_fields: dict[str, Any]
+    schema_field_names: dict[str, str]
+    model: str | None
+    provider: str | None
 
 
-def _node_override_dict(node: str, key: str) -> dict[str, Any]:
-    """The outer L4 cycle's ``overrides[node][key]`` object, or ``{}`` — the one read every
-    structural (not-a-``PromptTemplate``-field) per-node lever shares."""
-    node_override = (_OPTIMIZER_PROMPT_OVERRIDES.get() or {}).get(node)
-    raw = node_override.get(key) if isinstance(node_override, dict) else None
+def _node_override(node: str) -> dict[str, Any]:
+    """The raw ``overrides[node]`` object bound for this task, or ``{}``."""
+    raw = (_OPTIMIZER_PROMPT_OVERRIDES.get() or {}).get(node)
     return raw if isinstance(raw, dict) else {}
+
+
+def _single_model_override() -> tuple[str | None, str | None]:
+    """The one inner-optimizer ``(model, provider)`` the outer carrier node set — fanned onto
+    every node. Empty on every normal cycle and for an outer meta-prompt SET (prose only)."""
+    for nd in (_OPTIMIZER_PROMPT_OVERRIDES.get() or {}).values():
+        if isinstance(nd, dict) and isinstance(nd.get("model"), str) and nd["model"]:
+            prov = nd.get("provider")
+            return nd["model"], prov if isinstance(prov, str) and prov else None
+    return None, None
+
+
+def resolve_node_override(node: str) -> ResolvedNodeOverride:
+    """Resolve the outer L4 cycle's mutation of *node* into one typed surface — the single reader
+    of the specimen channel's per-node dict for its prose, schema-rename, and model levers.
+
+    Prose fields merge onto the template in :func:`load_optimizer_prompt`; renames feed
+    ``build_l1_response_schema`` via ``effective_l1_field_names``; the single fanned model is
+    consumed in :func:`..call.llm_call`'s config merge. A rename target is dropped when it is a
+    non-identifier, a no-op self-rename, or a duplicate (two fields claiming one wire name is an
+    unresolvable response); a collision with a field that is NOT being renamed is rejected at the
+    apply site, which knows the field set. A bad L4 mutation must score poorly, never break the run.
+    """
+    raw = _node_override(node)
+    prompt_fields = {k: v for k, v in raw.items() if k in PromptTemplate.model_fields}
+    names: dict[str, str] = {}
+    rename_raw = raw.get("output_schema_field_names")
+    if isinstance(rename_raw, dict):
+        for field, wire in rename_raw.items():
+            if not isinstance(field, str) or not isinstance(wire, str):
+                continue
+            wire = wire.strip()
+            if not wire.isidentifier() or wire == field:
+                continue
+            names[field] = wire
+        targets = list(names.values())
+        names = {f: w for f, w in names.items() if targets.count(w) == 1}
+    model, provider = _single_model_override()
+    return ResolvedNodeOverride(
+        prompt_fields=prompt_fields, schema_field_names=names, model=model, provider=provider
+    )
 
 
 def resolve_node_layout(node: str) -> L1Layout:
@@ -279,11 +322,11 @@ def resolve_node_layout(node: str) -> L1Layout:
     mandatory / unknown-placeholder / dup edit is the GUARD RAIL: it rolls back to the
     floor, so the inner cycle runs on the good default and the bad edit scores as
     no-improvement rather than starving the node. No override bound (every normal,
-    non-L4 cycle) → the floor unchanged (``_apply_prompt_override``'s peer for the
+    non-L4 cycle) → the floor unchanged (:class:`ResolvedNodeOverride`'s peer for the
     structural, not-a-``PromptTemplate``-field, half of a per-node edit)."""
     spec = NODE_LAYOUTS[node]
-    raw = _node_override_dict(node, "layout")
-    if not raw:
+    raw = _node_override(node).get("layout")
+    if not isinstance(raw, dict) or not raw:
         return spec.floor
     update: dict[str, list[str]] = {}
     for slot in L1_LAYOUT_SLOTS:
@@ -302,39 +345,6 @@ def resolve_node_layout(node: str) -> L1Layout:
         )
         return spec.floor
     return merged
-
-
-def resolve_node_schema_field_names(node: str) -> dict[str, str]:
-    """The outer L4 cycle's field-NAME edits for *node*'s output schema — ``{field: wire_name}``.
-
-    The first and strongest lever (``docs/concepts/structured-output.md`` § 1): the model holds
-    strong priors about what belongs under ``rationale`` vs ``evidence`` vs ``scratch``. Unlike a
-    ``description``, a name IS the wire contract — so a rename is a **presentation transform
-    only**: the emitted schema advertises ``wire_name``, the response validates through a
-    ``validation_alias``, and every downstream reader still sees the model's own field name.
-    Nothing but the LLM observes the change.
-
-    **Locked by default.** ``build_l1_response_schema`` grafts the key only when the campaign sets
-    ``optimization.schema_field_rename``, so the LLM cannot emit a key that does not exist —
-    structural, not policed. Rides the same per-node override object as the prose, ``layout``,
-    and ``output_schema_descriptions`` edits.
-
-    Dropped rather than raised on: non-strings, blanks, non-identifiers, no-op self-renames, and
-    duplicate targets (two fields claiming one wire name is an unresolvable response). Collisions
-    with a field that is NOT being renamed are rejected at the apply site, which knows the field
-    set. A bad L4 mutation must score poorly, never break the run.
-    """
-    raw = _node_override_dict(node, "output_schema_field_names")
-    clean: dict[str, str] = {}
-    for field, wire in raw.items():
-        if not isinstance(field, str) or not isinstance(wire, str):
-            continue
-        wire = wire.strip()
-        if not wire.isidentifier() or wire == field:
-            continue
-        clean[field] = wire
-    targets = list(clean.values())
-    return {f: w for f, w in clean.items() if targets.count(w) == 1}
 
 
 def list_optimizer_prompts() -> list[str]:

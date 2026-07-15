@@ -373,15 +373,19 @@ class ConfigOverrides(BaseModel):
       patiences / `pobb_epsilon`) — absolute values the fork-time reconcile
       dialog re-sets ("3 of 6 rounds left" → confirm the fork's own ceiling).
     - **Selection policy** (`per_round_resubset`) — the `mechanisms.selection` toggle.
-    - **Search-space policy** (`schema_field_rename`) — unlocks the field-NAME
-      lever on the inner `l1_generate`'s output schema.
+    - **Search-space policy** (`schema_field_rename` / `forbidden_axes_strict`) —
+      `schema_field_rename` unlocks the field-NAME lever on the inner `l1_generate`'s
+      output schema; `forbidden_axes_strict=False` unlocks the `{model, provider}`
+      axis, so an outer L4 cycle may evolve the inner optimizer's model as a
+      searchpoint (fork-granted from a locked origin — the operator's "fork & steer").
 
-    The two policy knobs ride here for the same reason: each declares itself
+    The policy knobs ride here for the same reason: each declares itself
     `Knob(Scope.POLICY, Estimand.SEARCH)` on its `CampaignConfig` field, so
     changing one invalidates search comparability and MUST mint a sibling cycle
     rather than mutate the running one (the operator's "behaviour-knob change →
     sibling cycle" workflow). `schema_field_rename`'s two writers are that
-    operator fork and an L2/L3 `fork_proposal`.
+    operator fork and an L2/L3 `fork_proposal`; `forbidden_axes_strict` is
+    operator-only for now.
 
     Domain twin of the `ConfigOverrides` wire schema."""
 
@@ -396,6 +400,7 @@ class ConfigOverrides(BaseModel):
     pobb_epsilon: float | None = None
     per_round_resubset: bool | None = None
     schema_field_rename: bool | None = None
+    forbidden_axes_strict: bool | None = None
 
 
 class CycleSeed(BaseModel):

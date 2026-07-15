@@ -220,8 +220,14 @@ paths:
   /commands/step-cycle:
     post:
       operationId: stepCycle
-      x-status: declared-not-wired  # no handler; POST 404s `command_kind_unknown`
       summary: Advance N rounds then auto-pause (default N=1).
+      description: |
+        Bounded manual advance: resumes the cycle in place, runs `rounds` clean
+        rounds (default 1), then auto-pauses (StopReason.PAUSED — resumable, so the
+        operator can step again). Reuses the resume launcher + the run-scoped
+        `RunMode.stop_after_rounds` stop; no new runner path. The `campaign.step`
+        tier — a delegate holding it (but not `campaign.run`) can step but cannot
+        fire an autonomous loop.
       tags: [cycle-control]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -2020,10 +2026,10 @@ components:
         `pobb_epsilon`) — ABSOLUTE values the reconcile dialog re-sets (defaults to
         the parent's remaining, e.g. "3 of 6 rounds left"); (2) the selection-policy
         toggle (`per_round_resubset`) → the nested
-        `mechanisms.selection`; (3) the search-space policy toggle
-        (`schema_field_rename`). Both policy knobs invalidate search comparability,
-        so a fork-at-offset-0 is how you A/B one without touching the global default
-        or the parent cycle.
+        `mechanisms.selection`; (3) the search-space policy toggles
+        (`schema_field_rename` / `forbidden_axes_strict`). Every policy knob
+        invalidates search comparability, so a fork-at-offset-0 is how you A/B one
+        without touching the global default or the parent cycle.
       properties:
         max_rounds:
           type: integer
@@ -2077,6 +2083,18 @@ components:
             LLM cannot emit a key the schema omits). Only meaningful on a campaign
             that optimizes an optimizer (`promptpotter-self`). An L2/L3
             `fork_proposal` can request this same unlock autonomously.
+        forbidden_axes_strict:
+          type: boolean
+          nullable: true
+          description: |
+            Unlock the `{model, provider}` axis so this fork's L1 may evolve the inner
+            optimizer's model as a searchpoint (a SINGLE model, fanned across every
+            inner node). `null` inherits the parent (locked by default: `node_param_keys`
+            never synthesizes the `model` axis, so the LLM cannot emit a key the schema
+            omits). Only meaningful on a campaign that optimizes an optimizer
+            (`promptpotter-self`) whose `pipeline.json` advertises `available_models`.
+            Operator-granted via "fork & steer" from the recorded origin; no autonomous
+            L2/L3 request yet.
 
     DeleteCyclePayload:
       $ref: '#/components/schemas/CycleRef'

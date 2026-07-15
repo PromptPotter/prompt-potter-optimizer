@@ -96,7 +96,7 @@ def promptpotter_wire_adapter(
 
     ```
     {
-      "l1_generate":  {"instruction": "...", "decomposition_hint": "..."},
+      "l1_generate":  {"instruction": "...", "model": "openai/gpt-oss-120b"},
       "l1_critique":  {"negative_critique_framing": "..."},
       "l2_context":   {"refinement_instruction": "..."},
       "l3_plan":      {"replan_trigger": "..."},
@@ -104,9 +104,13 @@ def promptpotter_wire_adapter(
     ```
 
     Each per-node dict overrides template fields on the inner cycle's
-    ``datasets/_optimizer/pipeline.json`` for that run. ``node_config_items`` owns the
-    "reserved key or non-dict" question for every adapter (matching the TermNorm
-    convention).
+    ``datasets/_optimizer/pipeline.json`` for that run. A ``model`` key (present only
+    when the campaign unlocked ``forbidden_axes_strict``) is the SINGLE inner-optimizer
+    model the carrier node carries; it rides the same channel untouched and is consumed
+    at the inner optimizer's ``llm_call`` config merge (fanned onto every node by
+    ``resolve_node_override``) — it is not a ``PromptTemplate`` field, so the prose merge
+    ignores it. ``node_config_items`` owns the "reserved key or non-dict" question for
+    every adapter (matching the TermNorm convention).
     """
     payload: dict[str, Any] = {"query": query}
 

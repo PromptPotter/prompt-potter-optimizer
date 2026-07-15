@@ -312,15 +312,17 @@ def build_dataset_run_data(
     dataset_name: str | None,
     source: str = "",
     pipeline_schema: PipelineSchema | None = None,
+    human_intervened: bool = False,
 ) -> dict[str, Any]:
     """Measurement-batch dict ready for ``Stores.archive.save()``.
-    ``dataset_name`` is required (keyword-only); ``None`` permitted only for forensic writes."""
+    ``dataset_name`` is required (keyword-only); ``None`` permitted only for forensic writes.
+    ``human_intervened`` marks a babysat cycle's run non-clean (grade ``C``)."""
     from promptpotter.domain.measurement_provenance import grade_run
 
     rendered_prompt = search_point.render()
     sp_h = search_point.sp_hash(pipeline_schema)
     measurements = list(results)
-    provenance = grade_run(source, measurements, pipeline_schema)
+    provenance = grade_run(source, measurements, pipeline_schema, human_intervened=human_intervened)
     data: dict[str, Any] = {
         "run_id": run_id,
         "name": name,

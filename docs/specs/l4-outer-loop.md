@@ -188,11 +188,20 @@ module constant: per-campaign pipeline *resolution* was not built because it wou
 ~600-line schema blob. The set is selected per-cycle by `OptimizationConfig.optimizer_set`
 and applied through the **existing** per-node override channel
 (`load_optimizer_set_overrides` → `set_optimizer_prompt_overrides` →
-`_apply_prompt_override`) — the same channel the inner runner uses for its mutations, so
+`resolve_node_override`) — the same channel the inner runner uses for its mutations, so
 outer=meta / inner=default isolate by task with zero new ContextVar. The outer L1's per-node
 edits ride the existing `L1Variant.pipeline_params_override` slot (no new
 `OPTIMIZER_RESPONSE_MODELS` entry), and the meta-evidence panels are the existing
 round-trace signals surfaced as outer injections, not re-derived.
+
+The mutation surface also includes the inner optimizer's **model** — a SINGLE model fanned
+across every inner node — when the campaign unlocks `forbidden_axes_strict` (locked by
+default; granted by "fork & steer" from the recorded origin, the same policy-unlock-forks-a-sibling
+shape as `schema_field_rename`). `node_param_keys` synthesizes ONE `model` axis on the first
+LLM node (from `available_models`); it rides the same override channel and is consumed at the
+inner optimizer's `llm_call` config merge (`resolve_node_override`), not the prose merge. Because
+it flows as a `pipeline_param` → `node_configs`, the swap is measured under its own searchpoint
+identity automatically — just a normal searchpoint the origin's allowed space already permits.
 
 ## 4. Outer composite fitness — per-sample core SHIPPED; cross-sample terms open
 

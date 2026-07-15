@@ -370,6 +370,7 @@ async def score_search_point(
             dataset_name=session.dataset_name,
             source=source,
             pipeline_schema=pipeline_schema,
+            human_intervened=session.human_intervened,
         )
         # The cursor is over ``results``, not "the last row": a cache hit appends a
         # MATERIALIZED row (rescored, recovered — which can cost real backend calls) without

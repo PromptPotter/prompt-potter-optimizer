@@ -73,9 +73,10 @@ async function _postCommand(
 // operator confirms the fork's own ceiling).
 //
 // Deliberately the RUN-LIMIT subset: the wire also carries the policy knobs
-// (`per_round_resubset`, `schema_field_rename`), which invalidate search
-// comparability and are set at mint or by an L2/L3 `fork_proposal` — never by a
-// checkbox on a dialog whose job is "how much budget does this fork get".
+// (`per_round_resubset`, `schema_field_rename`, `forbidden_axes_strict` — the
+// inner-optimizer model unlock), which invalidate search comparability and are set
+// at mint, by an L2/L3 `fork_proposal`, or by "fork & steer" — never by a checkbox
+// on a dialog whose job is "how much budget does this fork get".
 export interface ConfigOverrides {
   max_rounds?: number;
   spend_budget_usd?: number | null;

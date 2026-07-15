@@ -63,6 +63,7 @@ async def run_round_loop(
     sweep: bool = False,
     diag: bool = False,
     halt_at_accuracy: float | None = None,
+    stop_after_rounds: int | None = None,
     budget_gate: BudgetGate | None = None,
 ) -> tuple[StopReason, ErrorRecord | None]:
     """Round loop. sweep/diag halt after round 2. ``halt_at_accuracy`` → TARGET_HIT;
@@ -81,6 +82,11 @@ async def run_round_loop(
     clean_rounds = max(session.state.resumed_from_round - 1, 0)
     # None ⇒ unlimited; HARD_CAP is the real ceiling either way.
     max_rounds = opt.max_rounds if opt.max_rounds is not None else HARD_CAP
+    # `step-cycle`: advance exactly this many rounds in place then auto-pause (stays
+    # resumable, so the operator can step again). Bounded by rounds completed THIS
+    # invocation (delta off `clean_rounds`), reusing the pause stop below rather than
+    # the configured ceiling.
+    clean_rounds_at_start = clean_rounds
 
     try:
         # Origin is round 0 — emit it through the standard completion path before
@@ -117,6 +123,15 @@ async def run_round_loop(
             # (generate / L2 / L3) that have no inner loop. The cycle stays
             # resumable — `_finalize_run` skips terminal marking on PAUSED.
             if pause_requested(session):
+                declare_run_phase(session, RunPhase.PAUSED)
+                return StopReason.PAUSED, None
+
+            # `step-cycle` boundary: once this invocation has advanced its allotted
+            # rounds, auto-pause through the same resumable stop as an operator pause.
+            if (
+                stop_after_rounds is not None
+                and clean_rounds - clean_rounds_at_start >= stop_after_rounds
+            ):
                 declare_run_phase(session, RunPhase.PAUSED)
                 return StopReason.PAUSED, None
 

@@ -23,6 +23,7 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     get_optimizer_config_overrides,
     get_optimizer_schema,
     load_optimizer_prompt,
+    resolve_node_override,
 )
 from promptpotter.application.optimization.dispatch.schemas import (
     OPTIMIZER_RESPONSE_MODELS,
@@ -199,6 +200,16 @@ async def llm_call(
         else:
             config = {}
     merged = {**_LLM_DEFAULTS, **config, **overrides}
+    # Specimen model — the outer L4 cycle evolving the inner OPTIMIZER's model as a searchpoint.
+    # A SINGLE model the outer carrier node set, fanned onto every inner node (`resolve_node_override`
+    # returns it for all). Beats the node's file config, stays UNDER the instrument clamp below
+    # (which pins only temperature+seed, so no collision). `None` on every normal call → no-op;
+    # `hash_call` already keys on `merged["model"]`, so the swap gets its own cache key + searchpoint
+    # identity for free.
+    if node and (specimen := resolve_node_override(node)).model:
+        merged["model"] = specimen.model
+        if specimen.provider:
+            merged["provider"] = specimen.provider
     # Per-run tunable clamp (L4 inner-cycle determinism), applied LAST so it beats
     # both the node's file config and any per-call override — notably `l1_generate`'s
     # `temperature=creativity`, the dominant run-to-run noise source. Bound only inside

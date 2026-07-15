@@ -68,7 +68,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.runner.inner.tasks import InnerTaskSpec, resolve_inner_task
+from promptpotter.application.runner.inner.tasks import (
+    InnerTaskSpec,
+    inner_instrument_config,
+    resolve_inner_task,
+)
 from promptpotter.domain.l4.proxies import (
     OUTER_PROXY_KEYS,
     InnerCycleUnscoreableError,
@@ -435,72 +439,12 @@ async def _run_inner_campaign(
         if cfg_path.exists():
             file_config = read_campaign_config_file(cfg_path)
     profile = session.store.backends.load_connector_profile(session.backend_id) or {}
-    campaign_config = load_campaign_config({**profile, **file_config})
-    # Cap inner rounds at the task's budget — the proxy metrics are defined over
-    # exactly this many rounds, and it bounds the (geometric) recursion cost.
-    # Score every candidate on the WHOLE inner bank (``sp_budget_ttest = len(train_data)``),
-    # not a thinner per-round subset: the outer proxy reads each candidate's θ-LCB, whose
-    # width is set by how many samples that candidate was scored on, so a bank drawn but not
-    # fully scored just widens the LCB and starves the outer signal (the inner draw and the
-    # inner measurement must be the same size — anything less is wasted samples).
-    #
-    # The spend + token caps the inner dataset carries for its STANDALONE life are cleared: an
-    # instrument's budget is its ROUND budget, and a cap that trips on measured tokens truncates
-    # the trajectory nondeterministically. See the module note above the wall-clock deadline.
-    opt_update: dict[str, Any] = {
-        "max_rounds": spec.n_rounds,
-        "spend_budget_usd": None,
-        "token_budget": None,
-    }
-    if spec.n_variants is not None:
-        # inner_n_variants (inner_tasks.json) — the outer task spec owns the inner
-        # search width, same as it owns the round cap; the inner dataset's own
-        # n_variants is a standalone-campaign default, not an L4 decision.
-        opt_update["n_variants"] = spec.n_variants
-    if spec.lives is not None:
-        # inner_lives (inner_tasks.json) — `max_rounds` above is the ceiling a COMPOUNDING
-        # inner campaign may reach; lives is what stops a STALLING one early. Same channel,
-        # same ownership rationale as `n_variants`.
-        opt_update["lives"] = spec.lives
-    cfg_update: dict[str, Any] = {
-        "sp_budget_ttest": len(train_data),
-        "optimization": campaign_config.optimization.model_copy(update=opt_update),
-    }
-    # CRN (common random numbers): pin this cell's inner LLM seed on the dataset's
-    # prompt-bearing node — `spec.seed` is the per-cell data-draw seed, already fixed
-    # per cell and identical across every outer arm (origin + every variant) hitting
-    # that cell. Every inner LLM call for this cell then shares one seed regardless of
-    # which outer meta-prompt spawned it, so the inner's own run-to-run noise is common
-    # and cancels in the (variant − origin) paired outer diff — for zero extra spend.
-    # Rides the same sanctioned pipeline_overrides channel as the model override
-    # below (merge, don't clobber, any dataset-level overrides).
-    #
-    # THE CANCELLATION IS CONDITIONAL ON THE INNER DATASET'S ROUTING, and today's is not
-    # eligible: a seed is only meaningful inside ONE inference stack, and `justlogic` pins
-    # `:nitro`, which sends each call to whichever upstream is fastest right now (deliberate
-    # — without it the backend was 83% of the outer round's wall-clock). So the seed is set
-    # and carried, but under a nitro-routed model it buys nothing: the two arms draw
-    # independently and the outer verdict clears a higher noise floor, bought back with panel
-    # cells. Drop `:nitro` from the inner dataset and this becomes a real variance reduction
-    # again — the mechanism is correct, its precondition is a config choice.
-    #
-    # The node is ASKED, never assumed: a hardcoded `llm_only` wrote both overrides
-    # under a nonexistent key on any inner dataset that named its node otherwise —
-    # no error, no seed, and a paired diff quietly missing its variance cancellation.
-    llm_node = session.llm_node_name()
-    po: dict[str, Any] = {k: dict(v) for k, v in (campaign_config.pipeline_overrides or {}).items()}
-    node = dict(po.get(llm_node, {}))
-    node["seed"] = spec.seed
-    if spec.inner_model:
-        # The cell's target-model override (the panel's environment axis) rides the
-        # same channel onto the inner dataset's single-call node — every in-band panel
-        # cell is a single-call reasoning dataset.
-        node["model"] = spec.inner_model
-        if spec.inner_provider:
-            node["provider"] = spec.inner_provider
-    po[llm_node] = node
-    cfg_update["pipeline_overrides"] = po
-    campaign_config = campaign_config.model_copy(update=cfg_update)
+    campaign_config = inner_instrument_config(
+        spec,
+        load_campaign_config({**profile, **file_config}),
+        llm_node=session.llm_node_name(),
+        n_scored=len(train_data),
+    )
 
     prepare_fresh_cycle(session, campaign_config, train_data)
     # Publish the freshly-minted inner cycle dir so the outer task's heartbeat

@@ -14,11 +14,11 @@ rather than merely tidy.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from promptpotter.application.config import LivesConfig
+from promptpotter.application.config import CampaignConfig, LivesConfig
 from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError
 from promptpotter.infrastructure.store.io import read_json_optional
 
@@ -141,11 +141,65 @@ def resolve_inner_task(ctx: InnerSpawnContext, query: str) -> InnerTaskSpec:
     )
 
 
+def inner_instrument_config(
+    spec: InnerTaskSpec,
+    base: CampaignConfig,
+    *,
+    llm_node: str,
+    n_scored: int,
+) -> CampaignConfig:
+    """The ``CampaignConfig`` an inner instrument runs under — a pure derivation of the panel
+    spec over the inner dataset's own committed config. The declared counterpart of the L4 law
+    in ``domain/l4/``; session-free, so ``llm_node`` (the prompt-bearing node) is passed in.
+
+    Two derivations are load-bearing:
+
+    - **Budget is the ROUND budget.** ``max_rounds`` caps the cell (the proxies are defined over
+      exactly that many rounds), and ``spend_budget_usd`` / ``token_budget`` are cleared: a cap
+      that trips on measured tokens truncates the trajectory nondeterministically. ``sp_budget_ttest``
+      = the WHOLE bank, never a thinner per-round subset — the outer proxy reads each candidate's
+      θ-LCB, whose width is set by how many samples it was scored on, so a drawn-but-unscored bank
+      just widens the LCB and starves the outer signal.
+    - **CRN seed on the prompt-bearing node.** ``spec.seed`` is the per-cell data-draw seed, fixed
+      per cell and identical across every outer arm, so one seed makes the inner's run-to-run noise
+      common and cancel in the (variant − origin) paired diff — at zero extra spend. The node is
+      ASKED (``llm_node``), never assumed: a hardcoded name wrote the seed under a nonexistent key
+      on any dataset that named its node otherwise, silently dropping the cancellation. The
+      cancellation is conditional on the inner routing: a ``:nitro`` model draws freely regardless
+      of seed, so it is carried but buys nothing until ``:nitro`` is dropped from the inner dataset.
+    """
+    opt_update: dict[str, Any] = {
+        "max_rounds": spec.n_rounds,
+        "spend_budget_usd": None,
+        "token_budget": None,
+    }
+    if spec.n_variants is not None:
+        opt_update["n_variants"] = spec.n_variants
+    if spec.lives is not None:
+        opt_update["lives"] = spec.lives
+    po: dict[str, Any] = {k: dict(v) for k, v in (base.pipeline_overrides or {}).items()}
+    node = dict(po.get(llm_node, {}))
+    node["seed"] = spec.seed
+    if spec.inner_model:
+        node["model"] = spec.inner_model
+        if spec.inner_provider:
+            node["provider"] = spec.inner_provider
+    po[llm_node] = node
+    return base.model_copy(
+        update={
+            "sp_budget_ttest": n_scored,
+            "optimization": base.optimization.model_copy(update=opt_update),
+            "pipeline_overrides": po,
+        }
+    )
+
+
 __all__ = [
     "InnerBenchmarkConfig",
     "InnerTask",
     "InnerTaskSpec",
     "InnerTasks",
+    "inner_instrument_config",
     "load_inner_tasks",
     "resolve_inner_task",
 ]

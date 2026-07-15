@@ -86,6 +86,10 @@ class RunMode:
     diag: bool = False
     halt_at_accuracy: float | None = None
     resume_from_round_override: int | None = None
+    # Manual `step-round`: advance exactly this many rounds in place then halt at the
+    # round boundary (StopReason.MAX_ROUNDS), overriding the configured ceiling — the
+    # `campaign.step` verb for a delegate that cannot fire an autonomous run.
+    stop_after_rounds: int | None = None
 
 
 def _build_budget_gate(
@@ -139,8 +143,9 @@ def _apply_config_overrides(
     ``INIT.enter`` display event). The reconciled ``spend_budget_usd`` also becomes
     the spend-cap probe's initial ceiling (``change-spend-budget`` can still move it
     at runtime). The selection-policy override (``per_round_resubset``) rides the
-    nested ``mechanisms.selection``; ``schema_field_rename`` sits flat beside the
-    limits. Both are policy, so a fork can A/B a behaviour knob in isolation."""
+    nested ``mechanisms.selection``; ``schema_field_rename`` and
+    ``forbidden_axes_strict`` (the model/provider unlock) sit flat beside the
+    limits. All are policy, so a fork can A/B a behaviour knob in isolation."""
     opt_updates: dict[str, Any] = {
         k: v
         for k, v in {
@@ -152,6 +157,7 @@ def _apply_config_overrides(
             "l3_patience": overrides.l3_patience,
             "pobb_epsilon": overrides.pobb_epsilon,
             "schema_field_rename": overrides.schema_field_rename,
+            "forbidden_axes_strict": overrides.forbidden_axes_strict,
         }.items()
         if v is not None
     }
@@ -250,6 +256,18 @@ async def _prepare_run(
         campaign_config, spend_budget_usd = _apply_config_overrides(
             campaign_config, spend_budget_usd, seed.config_overrides
         )
+        if seed.config_overrides.forbidden_axes_strict is False and session.state.cycle_id:
+            # A seed that unlocks the locked model/provider axis is a direct human
+            # edit of an engine-owned value (ADR-0005 babysit). Stamp the cycle index
+            # here — the mint seam could not (the index is created at bootstrap) — and
+            # flag the session so every run it scores grades non-clean.
+            session.store.campaigns.mark_human_intervened(
+                session.campaign_id,
+                session.state.cycle_id,
+                kind="axis_unlock",
+                at=utcnow_iso(),
+            )
+            session.human_intervened = True
 
     if origin is None:
         # Establish C0 through the single origin seam: a no-edit operator fork inherits
@@ -484,6 +502,7 @@ async def _run_single_cycle(
             sweep=mode.sweep,
             diag=mode.diag,
             halt_at_accuracy=mode.halt_at_accuracy,
+            stop_after_rounds=mode.stop_after_rounds,
             budget_gate=budget_gate,
         )
     except (KeyboardInterrupt, asyncio.CancelledError) as exc:

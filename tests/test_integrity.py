@@ -136,6 +136,11 @@ def test_provenance_grade_separates_deliberate_from_connector() -> None:
     # one signal but not both → middling, never confused with a clean A
     assert grade_run("origin", connector_batch, schema).grade == "B"
     assert grade_run("", llm_batch, schema).grade == "B"
+    # A babysat run (a human edited an engine-locked value, ADR-0005) is forced to
+    # C even on the otherwise-clean-A path — else a tainted point reused as clean
+    # would silently bias the digest/L4 the same way connector noise does.
+    prov = grade_run("optimization_loop", llm_batch, schema, human_intervened=True)
+    assert prov.grade == "C" and prov.human_intervened is True
 
 
 def _seed_graded(

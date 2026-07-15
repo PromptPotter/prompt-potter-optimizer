@@ -121,21 +121,28 @@ def effective_spend_cap_usd(
     user: User,
     stores: Stores,
 ) -> float | None:
-    """Compose the per-cycle spend cap with the user's daily cap.
+    """Compose the per-cycle spend cap with the user's daily cap and any
+    delegated ceiling.
 
     Sums today's ``TokenUsageRecord`` cost from the canonical ledger
     (:func:`~promptpotter.application.jobs.spend.sum_user_spend`) to get
-    ``daily_spent``; returns ``min(requested, daily_cap - daily_spent)``. A
-    negative remainder collapses to ``0.0`` so the runner halts at the first
-    round boundary.
+    ``daily_spent``, then returns the ``min`` of the requested cap, the daily
+    remainder, and a delegated sub-principal's ``spend_ceiling_usd`` (ADR-0005,
+    carried in the identity's claims). A negative daily remainder collapses to
+    ``0.0`` so the runner halts at the first round boundary; ``None`` means no
+    cap applies from any source.
     """
-    if user.spend_budget_usd_daily is None:
-        return requested_cap_usd
-    spent = sum_user_spend(store=stores, since=start_of_utc_day(), until=time.time())
-    daily_remaining = max(0.0, user.spend_budget_usd_daily - spent)
-    if requested_cap_usd is None:
-        return daily_remaining
-    return min(float(requested_cap_usd), daily_remaining)
+    caps = [c for c in (requested_cap_usd, _delegated_spend_ceiling(stores)) if c is not None]
+    if user.spend_budget_usd_daily is not None:
+        spent = sum_user_spend(store=stores, since=start_of_utc_day(), until=time.time())
+        caps.append(max(0.0, user.spend_budget_usd_daily - spent))
+    return min(float(c) for c in caps) if caps else None
+
+
+def _delegated_spend_ceiling(stores: Stores) -> float | None:
+    """A sub-principal's grant ceiling from the identity claims, else ``None``."""
+    ceiling = stores.identity.claims.get("spend_ceiling_usd")
+    return float(ceiling) if isinstance(ceiling, int | float) else None
 
 
 __all__ = [
