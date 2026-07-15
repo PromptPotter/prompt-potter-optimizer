@@ -17,7 +17,7 @@ this type.
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
 from promptpotter.domain.identity import Issuer, TenantId, UserId, safe_name
@@ -43,6 +43,57 @@ L4_LAB_CAP = "l4.lab.access"
 # both reference. WHO is admin stays two deliberate mechanisms; WHAT admin grants
 # lives here, once. Adding a capability to the admin tier = editing this line.
 ADMIN_CAPABILITIES = frozenset({BENCHMARKS_READ_CAP, L4_LAB_CAP})
+
+# Control-plane command capabilities — one per privilege tier of the closed
+# `/commands/{kind}` set (the dispatcher's `CAP_FOR_KIND` maps each kind to one).
+# A tenant owner holds all of them over their own workspace; a delegated
+# sub-principal an attenuated subset from the sealed grant store. Ladder and
+# roles: ADR-0005 §§1,3-4.
+CAMPAIGN_STEP_CAP = "campaign.step"
+CAMPAIGN_RUN_CAP = "campaign.run"
+CAMPAIGN_CREATE_CAP = "campaign.create"
+CAMPAIGN_BUDGET_CAP = "campaign.budget"
+CAMPAIGN_LIFECYCLE_CAP = "campaign.lifecycle"
+CAMPAIGN_BABYSIT_CAP = "campaign.babysit"
+
+# Short tier name → capability. The ONE place the ladder is enumerated: the owner
+# set derives from it and the admin channel parses `/grant sub step,create`
+# against it. Adding a tier = one line here, flowing to every consumer.
+CAMPAIGN_CAP_BY_TIER: dict[str, str] = {
+    "step": CAMPAIGN_STEP_CAP,
+    "run": CAMPAIGN_RUN_CAP,
+    "create": CAMPAIGN_CREATE_CAP,
+    "budget": CAMPAIGN_BUDGET_CAP,
+    "lifecycle": CAMPAIGN_LIFECYCLE_CAP,
+    "babysit": CAMPAIGN_BABYSIT_CAP,
+}
+
+# The full command-verb set a tenant owner holds — derived from the tier map so it
+# can never drift from it. Sub-principals are carved as a subset; the dispatcher
+# gate enforces the carve. Kept separate from `ADMIN_CAPABILITIES` — owning a
+# tenant is not the dev-only benchmarks/Lab admin.
+OWNER_COMMAND_CAPABILITIES = frozenset(CAMPAIGN_CAP_BY_TIER.values())
+
+
+def capabilities_from_tiers(tiers: Iterable[str]) -> frozenset[str]:
+    """Map short tier names to capabilities; unknown names raise ``ValueError``.
+
+    The admin channel uses this to turn an operator's ``step,create`` into the
+    grant's capability set — an unknown tier is a typo, rejected loudly, not a
+    silently-dropped (and thus under-)grant.
+    """
+    caps: set[str] = set()
+    for tier in tiers:
+        name = tier.strip().lower()
+        if not name:
+            continue
+        if name not in CAMPAIGN_CAP_BY_TIER:
+            raise ValueError(
+                f"unknown capability tier {name!r}; choose from {sorted(CAMPAIGN_CAP_BY_TIER)}"
+            )
+        caps.add(CAMPAIGN_CAP_BY_TIER[name])
+    return frozenset(caps)
+
 
 PROMPTPOTTER_ADMIN_ENV = "PROMPTPOTTER_ADMIN"
 
@@ -79,8 +130,9 @@ def default_identity(tenant_id: str = "default", user_id: str = "default") -> Id
     operator (one who has signed in once, recorded in the default-claim marker)
     passes ``user_id == tenant_id == their uid`` so a terminal run lands in the
     same single workspace the authenticated web reads (one tenant per operator).
-    ``PROMPTPOTTER_ADMIN=1`` augments capabilities with :data:`BENCHMARKS_READ_CAP`
-    and :data:`L4_LAB_CAP`.
+    The single local operator owns their tenant, so they hold the full
+    :data:`OWNER_COMMAND_CAPABILITIES` command set; ``PROMPTPOTTER_ADMIN=1``
+    additionally augments with :data:`BENCHMARKS_READ_CAP` and :data:`L4_LAB_CAP`.
     Stage 1 (M12 OIDC client) replaces this factory at the resolver seam
     (`presentation/api/deps.py::resolve_identity`); no other call site changes.
     """
@@ -89,7 +141,7 @@ def default_identity(tenant_id: str = "default", user_id: str = "default") -> Id
         tenant_id=TenantId(safe_name(tenant_id)),
         issuer=None,
         claims={},
-        capabilities=_admin_caps_from_env(),
+        capabilities=OWNER_COMMAND_CAPABILITIES | _admin_caps_from_env(),
     )
 
 
@@ -112,9 +164,18 @@ def claim_email(identity: IdentityContext) -> str | None:
 __all__ = [
     "ADMIN_CAPABILITIES",
     "BENCHMARKS_READ_CAP",
+    "CAMPAIGN_BABYSIT_CAP",
+    "CAMPAIGN_BUDGET_CAP",
+    "CAMPAIGN_CAP_BY_TIER",
+    "CAMPAIGN_CREATE_CAP",
+    "CAMPAIGN_LIFECYCLE_CAP",
+    "CAMPAIGN_RUN_CAP",
+    "CAMPAIGN_STEP_CAP",
     "L4_LAB_CAP",
+    "OWNER_COMMAND_CAPABILITIES",
     "PROMPTPOTTER_ADMIN_ENV",
     "IdentityContext",
+    "capabilities_from_tiers",
     "claim_email",
     "default_identity",
     "has_capability",

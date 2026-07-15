@@ -44,7 +44,7 @@ import logging
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, Field
 
@@ -78,6 +78,15 @@ from promptpotter.shared.errors import (
     PotterError,
     ServiceUnavailableError,
 )
+from promptpotter.shared.identity import (
+    CAMPAIGN_BABYSIT_CAP,
+    CAMPAIGN_BUDGET_CAP,
+    CAMPAIGN_CREATE_CAP,
+    CAMPAIGN_LIFECYCLE_CAP,
+    CAMPAIGN_RUN_CAP,
+    CAMPAIGN_STEP_CAP,
+    has_capability,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,11 +104,51 @@ CycleScopedKind = Literal[
     "origin-gate-decision",
     "change-spend-budget",
     "start-run",
+    "step-cycle",
 ]
 WorkspaceBackendKind = Literal["register-backend", "mint-campaign"]
 CheckinScopedKind = Literal["edit-draft-campaign", "resolve-origin", "start-checkin"]
 
 Applier = Callable[[], Awaitable[Any]] | Callable[[], Any]
+
+# The one cap→verb ladder (ADR-0005 §3): every command kind that funnels through
+# `_record_and_apply` requires exactly one tier capability, checked at that single
+# seam. A tenant owner holds every tier (OWNER_COMMAND_CAPABILITIES); a delegated
+# sub-principal an attenuated subset. `fork-cycle` is RUN-tier — the babysit
+# grant that gates unlocking a LOCKED axis in the seed is a distinct slice.
+CAP_FOR_KIND: dict[str, str] = {
+    "archive-campaign": CAMPAIGN_LIFECYCLE_CAP,
+    "delete-campaign": CAMPAIGN_LIFECYCLE_CAP,
+    "unarchive-campaign": CAMPAIGN_LIFECYCLE_CAP,
+    "delete-cycle": CAMPAIGN_LIFECYCLE_CAP,
+    "cleanup-empty-cycles": CAMPAIGN_LIFECYCLE_CAP,
+    "skip-searchpoint": CAMPAIGN_STEP_CAP,
+    "pause-cycle": CAMPAIGN_STEP_CAP,
+    "origin-gate-decision": CAMPAIGN_STEP_CAP,
+    "step-cycle": CAMPAIGN_STEP_CAP,
+    "start-run": CAMPAIGN_RUN_CAP,
+    "fork-cycle": CAMPAIGN_RUN_CAP,
+    "start-checkin": CAMPAIGN_RUN_CAP,
+    "change-spend-budget": CAMPAIGN_BUDGET_CAP,
+    "mint-campaign": CAMPAIGN_CREATE_CAP,
+    "register-backend": CAMPAIGN_CREATE_CAP,
+    "edit-draft-campaign": CAMPAIGN_CREATE_CAP,
+    "resolve-origin": CAMPAIGN_CREATE_CAP,
+}
+
+# Import-time exhaustiveness — a new dispatched kind with no cap is a silent
+# unguarded verb (the membership-over-NAMES bug class). Derive the closed set
+# from the Literal types themselves so the map can never drift from the wire.
+_ALL_DISPATCHED_KINDS: frozenset[str] = frozenset(
+    get_args(LifecycleKind)
+    + get_args(CycleScopedKind)
+    + get_args(WorkspaceBackendKind)
+    + get_args(CheckinScopedKind)
+)
+assert set(CAP_FOR_KIND) == _ALL_DISPATCHED_KINDS, (
+    "CAP_FOR_KIND out of sync with the dispatched command set: "
+    f"{_ALL_DISPATCHED_KINDS.symmetric_difference(CAP_FOR_KIND)}"
+)
 
 
 class CommandAcceptedBody(BaseModel):
@@ -356,6 +405,7 @@ class CommandDispatcher:
         dedupe: bool = True,
         effect_fn: Callable[[], dict[str, Any]] | None = None,
     ) -> CommandOutcome:
+        self._require_capability_for(kind)
         # A deduped retry never re-runs the applier, so a 200-body kind supplies
         # `on_replay` to rebuild its body from disk; one whose body has no disk
         # home passes `dedupe=False` and lets its own domain guard answer.
@@ -380,7 +430,7 @@ class CommandDispatcher:
                 kind=kind,
                 payload=payload,
                 idempotency_key=idempotency_key,
-                issued_by_user_id=str(self._store.identity.user_id),
+                issued_by_user_id=self._acting_principal_id(),
             )
             ack_status: Literal["applied", "rejected"] = "applied"
             ack_detail = ""
@@ -446,6 +496,16 @@ class CommandDispatcher:
             from promptpotter.application.optimization.resume_and_fork import mint_operator_fork
 
             seed = _parse_cycle_seed(payload_extras.get("seed"))
+            # Unlocking the engine-locked model/provider axis is a babysit action
+            # (ADR-0005 §4) — a distinct cap above the RUN-tier fork itself.
+            unlocks_axis = seed is not None and seed.config_overrides.forbidden_axes_strict is False
+            if unlocks_axis and not has_capability(self._store.identity, CAMPAIGN_BABYSIT_CAP):
+                logger.warning(
+                    "fork-cycle axis-unlock denied for principal %s (missing %s)",
+                    self._acting_principal_id(),
+                    CAMPAIGN_BABYSIT_CAP,
+                )
+                raise NotFoundError("Not found", code="not_found")
 
             async def _apply_fork() -> None:
                 # Mint the operator-steered fork (writes the cycle + seed,
@@ -474,6 +534,20 @@ class CommandDispatcher:
                 )
 
             return _apply_fork
+        if kind == "step-cycle":
+            # Advance N rounds in place then auto-pause — reuses the resume machinery +
+            # RunMode's run-scoped stop; the `campaign.step` tier for a delegate without
+            # run. `rounds` defaults to 1 (StepCyclePayload).
+            rounds = payload_extras.get("rounds", 1)
+            steps = int(rounds) if isinstance(rounds, int | float) else 1
+            return lambda: self._apply_start_run(
+                campaign_id=campaign_id,
+                cycle_id=cycle_id,
+                kind="resume",
+                halt_at_accuracy=None,
+                spend_budget_usd=None,
+                stop_after_rounds=max(1, steps),
+            )
         if kind == "skip-searchpoint":
             return lambda: self._apply_skip_searchpoint(campaign_id, cycle_id)
         if kind == "cleanup-empty-cycles":
@@ -672,8 +746,10 @@ class CommandDispatcher:
         kind: str,
         halt_at_accuracy: float | None,
         spend_budget_usd: float | None,
+        stop_after_rounds: int | None = None,
     ) -> None:
         """Spawn the runner against an existing cycle. ``kind`` ∈ {new, resume}.
+        ``stop_after_rounds`` bounds it to that many rounds in place (``step-round``).
 
         ``BackendUnreachableError`` bubbles uncaught to ``_record_and_apply``
         for the central 503 mapping (R2).
@@ -694,6 +770,7 @@ class CommandDispatcher:
             kind=kind,
             halt_at_accuracy=halt_at_accuracy,
             spend_budget_usd=spend_budget_usd,
+            stop_after_rounds=stop_after_rounds,
         )
 
     def _apply_cleanup_empty(self, campaign_id: str, cycle_id: str) -> None:
@@ -730,6 +807,34 @@ class CommandDispatcher:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+    def _acting_principal_id(self) -> str:
+        """The id recorded as a command's issuer. For a delegated sub-principal
+        (ADR-0005) that is its own `claims["principal"]`, not the delegator whose
+        tenant it acts in — so the audit trail names the real actor."""
+        principal = self._store.identity.claims.get("principal")
+        if isinstance(principal, str) and principal:
+            return principal
+        return str(self._store.identity.user_id)
+
+    def _require_capability_for(self, kind: str) -> None:
+        """Per-verb capability gate — the one seam every command funnels through.
+
+        Maps the closed command *kind* to its tier capability (``CAP_FOR_KIND``)
+        and checks the request identity holds it. Absence raises 404
+        (existence-hiding, matching ``deps.require_capability`` — a principal
+        without the cap is told the verb does not exist, never 403). A tenant
+        owner holds every tier; a delegated sub-principal an attenuated subset.
+        """
+        cap = CAP_FOR_KIND.get(kind)
+        if cap is None or not has_capability(self._store.identity, cap):
+            logger.warning(
+                "command %r denied for principal %s (missing %s)",
+                kind,
+                self._acting_principal_id(),
+                cap,
+            )
+            raise NotFoundError("Not found", code="not_found")
+
     def _load_owned_campaign(self, campaign_id: str) -> Any:
         campaign = self._store.campaigns.load_owned(campaign_id, str(self._store.identity.user_id))
         if campaign is None:

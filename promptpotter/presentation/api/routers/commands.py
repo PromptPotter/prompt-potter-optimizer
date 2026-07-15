@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, cast, get_args
 
 from fastapi import APIRouter, Header, Path, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -88,22 +88,11 @@ logger = logging.getLogger(__name__)
 
 commands_router = APIRouter(prefix="/commands", tags=["Commands"])
 
-_LIFECYCLE_KINDS: frozenset[str] = frozenset(
-    {"archive-campaign", "delete-campaign", "unarchive-campaign"}
-)
-_CYCLE_SCOPED_KINDS: frozenset[str] = frozenset(
-    {
-        "fork-cycle",
-        "skip-searchpoint",
-        "delete-cycle",
-        "cleanup-empty-cycles",
-        "pause-cycle",
-        "origin-gate-decision",
-        "change-spend-budget",
-        "start-run",
-    }
-)
-_WORKSPACE_BACKEND_KINDS: frozenset[str] = frozenset({"register-backend", "mint-campaign"})
+# Routing groups derived from the dispatcher's kind Literals (the SoT) — never
+# re-authored here, so a new kind reaches the router the moment it joins its Literal.
+_LIFECYCLE_KINDS: frozenset[str] = frozenset(get_args(LifecycleKind))
+_CYCLE_SCOPED_KINDS: frozenset[str] = frozenset(get_args(CycleScopedKind))
+_WORKSPACE_BACKEND_KINDS: frozenset[str] = frozenset(get_args(WorkspaceBackendKind))
 _WIRED_KINDS: frozenset[str] = _LIFECYCLE_KINDS | _CYCLE_SCOPED_KINDS | _WORKSPACE_BACKEND_KINDS
 
 
@@ -673,6 +662,11 @@ async def post_command(
             raise PayloadInvalidError("payload.kind must be 'new' or 'resume'.")
         extras["kind"] = kind_raw
         extras.update(_run_limits(payload))
+    elif kind == "step-cycle":
+        rounds_raw = payload.get("rounds", 1)
+        if not isinstance(rounds_raw, int) or not (1 <= rounds_raw <= 100):
+            raise PayloadInvalidError("payload.rounds must be an integer in [1, 100].")
+        extras["rounds"] = rounds_raw
 
     cycle_kind: CycleScopedKind = kind  # type: ignore[assignment]
     cycle_outcome = await dispatcher.dispatch_cycle_command(

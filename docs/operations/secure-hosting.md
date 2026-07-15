@@ -55,13 +55,22 @@ Message your bot:
 | `/allow alice@example.com` | Adds the email to the allowlist (she can now sign in). |
 | `/deny alice@example.com` | Removes the email (she can no longer sign in). |
 | `/list` | Replies with the current allowlist. |
+| `/grant <sub_user_id> step,create` | Delegates an **attenuated** sub-principal (ADR-0005): the delegate acts in your workspace holding only those capability tiers. |
+| `/revoke <sub_user_id>` | Removes a delegation (the user reverts to owning only their own empty workspace). |
+| `/grants` | Replies with the current delegations. |
 
 If you set `ADMIN_BOT_PASSPHRASE`, prefix the command with it:
 `my-word /allow alice@example.com`. Messages from any chat id other than yours are
 silently ignored.
 
-Every change is recorded to `.promptpotter/identity/allowlist_audit.jsonl` (who, what,
-when) — an audit trail you can `cat` on the box.
+Delegation tiers are `step, run, create, budget, lifecycle, babysit` (see the access
+model). A `<sub_user_id>` is the canonical id shown in the delegate's own account modal
+(`/auth/me`); the delegator is you (the registered operator). The grant lives in the
+sealed `.promptpotter/identity/grants.json` a delegate cannot write, and its capabilities
+are clamped to yours at every use — a grant can never exceed what you hold.
+
+Every change is recorded to `.promptpotter/identity/allowlist_audit.jsonl` (allowlist) or
+`grants_audit.jsonl` (delegations) — an audit trail you can `cat` on the box.
 
 ## Why not just expose an admin endpoint?
 

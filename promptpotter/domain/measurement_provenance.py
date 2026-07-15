@@ -53,12 +53,14 @@ class RunProvenance:
     grade: str
     deliberate_source: bool
     llm_path_fraction: float
+    human_intervened: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "grade": self.grade,
             "deliberate_source": self.deliberate_source,
             "llm_path_fraction": round(self.llm_path_fraction, 4),
+            "human_intervened": self.human_intervened,
         }
 
 
@@ -105,6 +107,8 @@ def grade_run(
     source: str,
     measurements: Iterable[Mapping[str, Any]],
     schema: PipelineSchema | None,
+    *,
+    human_intervened: bool = False,
 ) -> RunProvenance:
     """Grade a run from its source + per-sample termination.
 
@@ -112,17 +116,29 @@ def grade_run(
     datapoint). ``B`` — one of the two but not both (a deliberate batch that
     mostly short-circuited, or a full LLM batch from an incidental source). ``C``
     — neither: an incidental connector-retrieval replay, the bias source.
+
+    A ``human_intervened`` run (a direct operator edit of an engine-owned/locked
+    value — the babysit path, ADR-0005) is forced to ``C`` regardless of source or
+    path: it is deliberate but no longer a clean autonomous datapoint, so it must
+    be excluded from the digest / reuse / L4 exactly like an incidental row.
     """
     deliberate = is_deliberate_source(source)
     frac = llm_path_fraction(measurements, llm_terminal_nodes(schema))
     full_path = frac >= LLM_PATH_FLOOR
-    if deliberate and full_path:
+    if human_intervened:
+        grade = "C"
+    elif deliberate and full_path:
         grade = "A"
     elif deliberate or full_path:
         grade = "B"
     else:
         grade = "C"
-    return RunProvenance(grade=grade, deliberate_source=deliberate, llm_path_fraction=frac)
+    return RunProvenance(
+        grade=grade,
+        deliberate_source=deliberate,
+        llm_path_fraction=frac,
+        human_intervened=human_intervened,
+    )
 
 
 def entry_grade(entry: Mapping[str, Any]) -> str:

@@ -22,6 +22,14 @@ Commands (only from the locked chat)::
     /allow <email>   add to the allowlist
     /deny  <email>   remove from the allowlist
     /list            show the current allowlist
+
+    /grant  <sub_user_id> <tiers>   delegate an attenuated sub-principal (ADR-0005)
+    /revoke <sub_user_id>           remove a delegation
+    /grants                         show current delegations
+
+``<tiers>`` is a comma-separated slice of {step, run, create, budget, lifecycle,
+babysit}; the delegator is the registered operator (default-claim marker). A
+``<sub_user_id>`` is the canonical id from the delegate's own /auth/me.
 """
 
 from __future__ import annotations
@@ -35,12 +43,22 @@ import httpx
 
 from promptpotter.config.logging import setup_logging
 from promptpotter.infrastructure.identity.allowlist import add_email, list_emails, remove_email
-from promptpotter.infrastructure.identity.paths import default_identity_paths
+from promptpotter.infrastructure.identity.grants import (
+    grant_principal,
+    list_grants,
+    revoke_principal,
+)
+from promptpotter.infrastructure.identity.migration import registered_user_id
+from promptpotter.infrastructure.identity.paths import IdentityPaths, default_identity_paths
+from promptpotter.shared.identity import capabilities_from_tiers
 
 logger = logging.getLogger(__name__)
 
 _POLL_TIMEOUT_S = 50
-_USAGE = "Commands:\n/allow <email>\n/deny <email>\n/list"
+_USAGE = (
+    "Commands:\n/allow <email>\n/deny <email>\n/list\n"
+    "/grant <sub_user_id> <tiers>\n/revoke <sub_user_id>\n/grants"
+)
 
 
 def parse_command(text: str, passphrase: str | None) -> tuple[str, str] | None:
@@ -65,7 +83,7 @@ def parse_command(text: str, passphrase: str | None) -> tuple[str, str] | None:
 
 
 def handle_command(command: str, argument: str, actor: str) -> str:
-    """Apply *command* to the allowlist and return the reply text."""
+    """Apply *command* to the allowlist or the grant store and return the reply text."""
     paths = default_identity_paths()
     if command == "list":
         emails = list_emails(paths.allowlist)
@@ -87,7 +105,63 @@ def handle_command(command: str, argument: str, actor: str) -> str:
         except ValueError as exc:
             return f"Error: {exc}"
         return f"{verb} {argument.strip().lower()}. Allowlist now has {len(emails)} entr{'y' if len(emails) == 1 else 'ies'}."
+    if command in ("grant", "revoke", "grants"):
+        return _handle_grant_command(command, argument, actor, paths)
     return _USAGE
+
+
+def _handle_grant_command(command: str, argument: str, actor: str, paths: IdentityPaths) -> str:
+    """The delegation facet: /grants (list), /grant <sub> <tiers>, /revoke <sub>."""
+    if command == "grants":
+        grants = list_grants(paths.grants)
+        if not grants:
+            return "Delegations: (none)"
+        lines: list[str] = []
+        for sub, g in sorted(grants.items()):
+            caps_val = g.get("capabilities")
+            caps_str = ", ".join(str(c) for c in caps_val) if isinstance(caps_val, list) else ""
+            lines.append(f"{sub} → by {g.get('delegated_by', '?')}: {caps_str or '(none)'}")
+        return "Delegations:\n" + "\n".join(lines)
+    if command == "revoke":
+        if not argument:
+            return "Usage: /revoke <sub_user_id>"
+        removed = revoke_principal(
+            paths.grants,
+            sub_principal_user_id=argument.strip(),
+            actor=actor,
+            audit_path=paths.grants_audit,
+        )
+        return (
+            f"Revoked {argument.strip()}." if removed else f"No delegation for {argument.strip()}."
+        )
+    # /grant <sub_user_id> <tiers>
+    parts = argument.split(maxsplit=1)
+    if len(parts) < 2:
+        return "Usage: /grant <sub_user_id> <tiers>  (tiers e.g. step,create)"
+    sub_user_id, tiers_csv = parts[0].strip(), parts[1]
+    delegator = registered_user_id(paths.default_claim_marker)
+    if delegator is None:
+        return "Cannot grant: no registered operator to delegate from (sign in once first)."
+    try:
+        caps = capabilities_from_tiers(tiers_csv.split(","))
+    except ValueError as exc:
+        return f"Error: {exc}"
+    if not caps:
+        return "Error: name at least one tier (step, run, create, budget, lifecycle, babysit)."
+    try:
+        grant_principal(
+            paths.grants,
+            sub_principal_user_id=sub_user_id,
+            delegated_by_user_id=delegator,
+            capabilities=caps,
+            spend_ceiling_usd=None,
+            note=f"via {actor}",
+            actor=actor,
+            audit_path=paths.grants_audit,
+        )
+    except ValueError as exc:
+        return f"Error: {exc}"
+    return f"Granted {sub_user_id} [{', '.join(sorted(caps))}] as delegate of {delegator}."
 
 
 def _send_message(client: httpx.Client, chat_id: str, text: str) -> None:

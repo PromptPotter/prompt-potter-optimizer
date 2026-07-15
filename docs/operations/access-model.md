@@ -39,6 +39,34 @@ FastAPI dependency declared in a route's `dependencies=[…]`; it reads `has_cap
 (`routers/campaigns/registry.py`) and the benchmark datasets. This is the reusable form of
 ADR-0001's checklist item "capability gate on every handler."
 
+**Command-verb authorization (ADR-0005).** Beyond the admin/read caps, every
+control-plane command requires a **tier capability** — `CAMPAIGN_{STEP,RUN,CREATE,BUDGET,LIFECYCLE,BABYSIT}_CAP`
+(`shared/identity.py`, enumerated once as `CAMPAIGN_CAP_BY_TIER`). Enforcement is a
+**second one-chokepoint**: `_require_capability_for` reads `CAP_FOR_KIND[kind]` at the
+dispatcher's `_record_and_apply` (`command_dispatcher/dispatcher.py`) — the single site
+every command funnels through — before applying. An import-time assert keeps `CAP_FOR_KIND`
+exhaustive over the closed kind set. Same 404 posture. A first-class tenant owner holds the
+full `OWNER_COMMAND_CAPABILITIES`, so single-owner installs are unaffected.
+
+**Delegated sub-principals (ADR-0005 §1).** A user may delegate an **attenuated** slice of
+their rights to a sub-principal (a friendly sub-user / an AI assistant reaching in). The grant
+lives in the **sealed grant store** — `.promptpotter/identity/grants.json`, the same protected
+identity zone as the allowlist, which a delegate cannot write (no self-escalation). At the OIDC
+seam, `_identity_context_from_session` resolves the grant and rebinds the delegate to act
+inside the delegator's tenant with `grant ∩ owner` capabilities — **attenuation is enforced at
+read**, so a hand-edited over-grant is clamped, and a malformed/no-delegator grant fails secure
+(own tenant, zero caps). The command audit records the delegate itself (`claims["principal"]`),
+not the delegator it acts as. Provisioned only through the operator-admin channel
+(`admin_bot.py`: `/grant`, `/revoke`, `/grants`); the grant writer rejects a delegator that is
+itself a sub-principal (**one-level delegation**, enforced). A grant's **spend ceiling** is
+enforced — `effective_spend_cap_usd` folds it into `min(requested, daily_remaining, ceiling)`.
+The **`campaign.babysit`** cap gates a direct edit of an engine-locked value: unlocking the
+model/provider axis in a `fork-cycle` seed requires it, stamps the cycle babysat, and forces
+its runs to grade `C` (excluded from digest / reuse / L4). The **`campaign.step`** rung gates
+`step-cycle` (advance N rounds in place then auto-pause) — a delegate with step-but-not-run can
+advance bounded work but cannot fire an autonomous loop. **Deferred (honestly):** channel-scoped
+grants (require unspoofable channel identity) and the babysat *subtree* model.
+
 ---
 
 ## Tier 2 — user ↔ user: tenancy
@@ -126,6 +154,10 @@ not backend-supplied.
 | Admin capability set (one definition) | `shared/identity.py::ADMIN_CAPABILITIES` |
 | Who-is-admin (two predicates) | `shared/identity.py::_admin_caps_from_env`, `middleware/oidc.py::_session_capabilities` |
 | Capability gate (one chokepoint) | `deps.py::require_capability`, `shared/identity.py::has_capability` |
+| Command-verb gate (second chokepoint) | `command_dispatcher/dispatcher.py::_require_capability_for` + `CAP_FOR_KIND` |
+| Command tier caps (one enumeration) | `shared/identity.py::CAMPAIGN_CAP_BY_TIER`, `OWNER_COMMAND_CAPABILITIES` |
+| Sealed sub-principal grant store | `infrastructure/identity/grants.py` (`.promptpotter/identity/grants.json`) |
+| Delegation attenuation (enforced at read) | `grants.py::resolve_effective_capabilities`, `middleware/oidc.py::_delegated_identity` |
 | Dataset visibility gateway | `infrastructure/store/dataset_access.py` |
 | Tenant isolation (structural) | `infrastructure/store/stores.py::build_stores` |
 | Ownership rule (one definition) | `campaign_store/store.py::load_owned` |

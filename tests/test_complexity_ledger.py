@@ -256,7 +256,16 @@ LEDGER_BASELINE = {
     # instrument, with every hermetic property bound together, or it is not. The ledger counts
     # modules, not ambient globals, so it can see only the file that appeared. It cannot be
     # folded into an existing `shared/` module without making that module mean two things.
-    "modules": 317,
+    # then ``modules`` 317->318: the sealed sub-principal grant store
+    # (``infrastructure/identity/grants.py``) — the delegation authority file
+    # (ADR-0005 §1) that turns an authenticated user into a delegator's
+    # attenuated sub-principal. It lives in the identity zone beside the allowlist
+    # (a delegate cannot write its own grant); attenuation is enforced at read
+    # time (grant ∩ owner set). A first-class security feature — user-minted
+    # sub-users with a bounded capability slice — so the baseline rises. It can't
+    # fold into ``allowlist.py`` (email gate) or ``migration.py`` (default-claim
+    # rebind) without making either mean two things.
+    "modules": 318,
     "init_files": 60,
     "reexport_shims": 43,
     "config_leaf_fields": 38,

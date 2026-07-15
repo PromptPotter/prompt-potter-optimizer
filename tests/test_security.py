@@ -260,3 +260,145 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
 
     assert started.is_set(), "the inner campaign never started — the deadline proved nothing"
     assert cancelled.is_set(), "the inner campaign outlived its deadline and kept spending"
+
+
+def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path: Path) -> None:
+    """A delegated sub-principal (ADR-0005) must never resolve MORE authority than
+    the grant + the delegator hold. Every failure here is silent escalation: a
+    mis-clamp hands a delegate a capability it was never given, and nothing errors —
+    the privileged command simply succeeds. Pins four properties: attenuation clamps
+    an over-broad grant, the rebind binds to the delegator's tenant (not an arbitrary
+    one), the dispatcher gate denies a tier the delegate lacks, and a malformed grant
+    fails secure (no caps) rather than promoting to owner.
+    """
+    import types
+
+    from promptpotter.infrastructure.identity.grants import (
+        grant_principal,
+        read_grant,
+        resolve_effective_capabilities,
+        revoke_principal,
+    )
+    from promptpotter.infrastructure.identity.session import SessionData
+    from promptpotter.infrastructure.store.io import write_json
+    from promptpotter.presentation.api.middleware.command_dispatcher.dispatcher import (
+        CommandDispatcher,
+    )
+    from promptpotter.presentation.api.middleware.oidc import _delegated_identity
+    from promptpotter.shared.errors import NotFoundError
+    from promptpotter.shared.identity import (
+        CAMPAIGN_STEP_CAP,
+        OWNER_COMMAND_CAPABILITIES,
+    )
+
+    grants = tmp_path / "grants.json"
+    audit = tmp_path / "grants_audit.jsonl"
+
+    def _session(user_id: str) -> SessionData:
+        return SessionData(
+            user_id=user_id,
+            tenant_id=user_id,
+            issuer="iss",
+            subject="sub",
+            email=f"{user_id}@x.com",
+            provider="google",
+            created_at=0,
+            expires_at=9_999_999_999,
+        )
+
+    # The delegator grants a step-only slice PLUS caps it does not itself own (a
+    # hand-edited over-grant). Attenuation must clamp the extras away at read time.
+    grant_principal(
+        grants,
+        sub_principal_user_id="sub-1",
+        delegated_by_user_id="owner-9",
+        capabilities=frozenset({CAMPAIGN_STEP_CAP, "admin.super", "l4.lab.access"}),
+        spend_ceiling_usd=5.0,
+        note="claude",
+        actor="owner-9",
+        audit_path=audit,
+    )
+    grant = read_grant(grants, "sub-1")
+    assert grant is not None and not grant.is_denied
+    effective = resolve_effective_capabilities(grant, OWNER_COMMAND_CAPABILITIES)
+    assert effective == {CAMPAIGN_STEP_CAP}, "over-broad grant was not clamped to the owner set"
+
+    # Rebind: the delegate acts in the delegator's tenant, audited as ITSELF.
+    ident = _delegated_identity(_session("sub-1"), grant)
+    assert str(ident.user_id) == "owner-9" and str(ident.tenant_id) == "owner-9"
+    assert ident.claims["principal"] == "sub-1"
+    assert ident.capabilities == frozenset({CAMPAIGN_STEP_CAP})
+
+    # Gate: the step-only delegate may step but CANNOT fire an autonomous run.
+    disp = CommandDispatcher(types.SimpleNamespace(identity=ident))
+    disp._require_capability_for("skip-searchpoint")  # holds campaign.step → no raise
+    with pytest.raises(NotFoundError):
+        disp._require_capability_for("start-run")  # lacks campaign.run
+    assert disp._acting_principal_id() == "sub-1", "audit must name the delegate, not the delegator"
+
+    # A grant with no delegator is fail-secure: own tenant, ZERO caps — never owner.
+    write_json(grants, {"grants": {"sub-2": {"capabilities": ["campaign.run"]}}})
+    denied = read_grant(grants, "sub-2")
+    assert denied is not None and denied.is_denied
+    denied_ident = _delegated_identity(_session("sub-2"), denied)
+    assert str(denied_ident.user_id) == "sub-2"  # trapped in its own (empty) tenant
+    assert denied_ident.capabilities == frozenset()
+
+    # Revoking reverts a delegate to a normal full-owner user (read → None).
+    grant_principal(
+        grants,
+        sub_principal_user_id="sub-3",
+        delegated_by_user_id="owner-9",
+        capabilities=frozenset({CAMPAIGN_STEP_CAP}),
+        spend_ceiling_usd=None,
+        note="",
+        actor="owner-9",
+        audit_path=audit,
+    )
+    assert revoke_principal(
+        grants, sub_principal_user_id="sub-3", actor="owner-9", audit_path=audit
+    )
+    assert read_grant(grants, "sub-3") is None
+
+    # One-level delegation: a delegator that is ITSELF a sub-principal is rejected
+    # at the (sole) writer — else the read-time attenuation ceiling (the full owner
+    # set) would silently over-grant a chained delegate.
+    grant_principal(
+        grants,
+        sub_principal_user_id="sub-boss",
+        delegated_by_user_id="owner-9",
+        capabilities=frozenset({CAMPAIGN_STEP_CAP}),
+        spend_ceiling_usd=None,
+        note="",
+        actor="owner-9",
+        audit_path=audit,
+    )
+    with pytest.raises(ValueError, match="one-level"):
+        grant_principal(
+            grants,
+            sub_principal_user_id="sub-x",
+            delegated_by_user_id="sub-boss",
+            capabilities=frozenset({CAMPAIGN_STEP_CAP}),
+            spend_ceiling_usd=None,
+            note="",
+            actor="owner-9",
+            audit_path=audit,
+        )
+
+    # A delegated spend ceiling (ADR-0005) clamps the effective cap — a sub-principal
+    # cannot outspend its grant even if the requested/daily caps are higher. Escaping
+    # it is silent budget over-run, so it is pinned here with the other authority caps.
+    from promptpotter.application.jobs.quota import effective_spend_cap_usd
+
+    capped_stores = types.SimpleNamespace(
+        identity=types.SimpleNamespace(claims={"spend_ceiling_usd": 2.0})
+    )
+    uncapped_stores = types.SimpleNamespace(identity=types.SimpleNamespace(claims={}))
+    no_daily = types.SimpleNamespace(spend_budget_usd_daily=None)
+    assert (
+        effective_spend_cap_usd(requested_cap_usd=10.0, user=no_daily, stores=capped_stores) == 2.0
+    )
+    assert (
+        effective_spend_cap_usd(requested_cap_usd=10.0, user=no_daily, stores=uncapped_stores)
+        == 10.0
+    )

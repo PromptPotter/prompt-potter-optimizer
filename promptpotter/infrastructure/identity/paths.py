@@ -39,6 +39,16 @@ class IdentityPaths:
     def default_claim_marker(self) -> Path:
         return self.root / "default_claimed.json"
 
+    @property
+    def grants(self) -> Path:
+        """Sealed sub-principal grant store (ADR-0005) — the delegation authority
+        file, in the same protected zone as the allowlist."""
+        return self.root / "grants.json"
+
+    @property
+    def grants_audit(self) -> Path:
+        return self.root / "grants_audit.jsonl"
+
 
 def default_identity_paths() -> IdentityPaths:
     """Identity data dir sibling of the default `projects/` root."""
