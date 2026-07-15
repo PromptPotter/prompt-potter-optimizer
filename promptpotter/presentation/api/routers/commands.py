@@ -71,6 +71,7 @@ from promptpotter.infrastructure.store import Stores
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.middleware import CommandAcceptedBody, CommandDispatcher
 from promptpotter.presentation.api.middleware.command_dispatcher import (
+    CampaignConfigKind,
     CycleScopedKind,
     LifecycleKind,
     WorkspaceBackendKind,
@@ -93,7 +94,10 @@ commands_router = APIRouter(prefix="/commands", tags=["Commands"])
 _LIFECYCLE_KINDS: frozenset[str] = frozenset(get_args(LifecycleKind))
 _CYCLE_SCOPED_KINDS: frozenset[str] = frozenset(get_args(CycleScopedKind))
 _WORKSPACE_BACKEND_KINDS: frozenset[str] = frozenset(get_args(WorkspaceBackendKind))
-_WIRED_KINDS: frozenset[str] = _LIFECYCLE_KINDS | _CYCLE_SCOPED_KINDS | _WORKSPACE_BACKEND_KINDS
+_CAMPAIGN_CONFIG_KINDS: frozenset[str] = frozenset(get_args(CampaignConfigKind))
+_WIRED_KINDS: frozenset[str] = (
+    _LIFECYCLE_KINDS | _CYCLE_SCOPED_KINDS | _WORKSPACE_BACKEND_KINDS | _CAMPAIGN_CONFIG_KINDS
+)
 
 
 class CommandEnvelope(BaseModel):
@@ -240,6 +244,10 @@ class _EditDraftPatch(BaseModel):
     # The origin's target library. Set from the operator's upload or derived from one
     # of the draft's own columns (`routers/datasets.py`); both ride this patch.
     candidate_library: list[str] | None = Field(default=None, min_length=1)
+    # The origin's sanctioned model allow-list (ticked in the check-in pipeline setup).
+    # Replaces the draft's set wholesale — the checklist sends the full ticked list; an
+    # empty list clears it (restrictive default). Not gated (config, like the connector).
+    allowed_models: list[str] | None = None
 
 
 # Every field the origin resolver may propose must be settable by this command —
@@ -330,6 +338,7 @@ async def dispatch_draft_patch(
         (patch.origin_prompt_fields, "origin_prompt_fields"),
         (patch.pipeline_steps, "pipeline_steps"),
         (patch.candidate_library, "candidate_library"),
+        (patch.allowed_models, "allowed_models"),
     ):
         if patch_val is not None:
             changes[draft_attr] = patch_val
@@ -616,6 +625,20 @@ async def post_command(
         return workspace_outcome.accepted
 
     campaign_id = _require_string(payload, "campaign_id", max_len=128)
+
+    if kind in _CAMPAIGN_CONFIG_KINDS:
+        # In-place campaign config edit (set-allowed-models) — campaign-scoped, no cycle.
+        allowed_raw = payload.get("allowed_models")
+        if not isinstance(allowed_raw, list) or not all(isinstance(m, str) for m in allowed_raw):
+            raise PayloadInvalidError("payload.allowed_models must be a list of strings.")
+        config_kind: CampaignConfigKind = kind  # type: ignore[assignment]
+        config_outcome = await dispatcher.dispatch_campaign_config(
+            kind=config_kind,
+            campaign_id=campaign_id,
+            allowed_models=allowed_raw,
+            idempotency_key=idemp,
+        )
+        return config_outcome.accepted
 
     if kind in _LIFECYCLE_KINDS:
         reason = _optional_string(payload, "reason", max_len=512)

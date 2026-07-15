@@ -627,10 +627,17 @@ def apply_inherited_overlay(
     if seed is not None:
         narrowing.update(seed.optimizer_narrowing)
     frozen_overrides: dict[str, Any] = frozen_config.get("pipeline_overrides") or {}
+    # `allowed_models` is the campaign's committed model allow-list — the SINGLE source
+    # of truth is the frozen snapshot (edited only by the cap-gated `set-allowed-models`
+    # command; the live dataset file is a mint-time SEED). Re-apply it unconditionally so
+    # the runner's grade-C stamp reads the SAME value the fork-cycle cap-gate reads off
+    # `campaign.config` — never the live file, which would let the two disagree. Absent =
+    # the restrictive default ([]), same as the snapshot's own default.
     return config.model_copy(
         update={
             "pipeline_overrides": {**config.pipeline_overrides, **frozen_overrides},
             "optimizer_narrowing": narrowing,
+            "allowed_models": list(frozen_config.get("allowed_models") or []),
         }
     )
 

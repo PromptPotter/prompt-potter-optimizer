@@ -730,6 +730,43 @@ paths:
         '409': { $ref: '#/components/responses/VersionConflict' }
         '422': { $ref: '#/components/responses/PayloadInvalid' }
 
+  /commands/set-allowed-models:
+    post:
+      operationId: setAllowedModels
+      summary: Rewrite a campaign's inner-optimizer model allow-list (in place).
+      description: |
+        In-place edit of the campaign's committed `allowed_models` — the frozen
+        `campaign.json::config`, the SINGLE source of truth both the fork-cycle
+        cap-gate and the runner's grade-C stamp read (via `apply_inherited_overlay`).
+        Replaces the set wholesale; an empty list clears it (restrictive default:
+        any human model steer then taints the branch grade C). Campaign-scoped —
+        no `Expected-Version`; the `CommandRecord` lands on the WORKSPACE ledger.
+        Owner-gated on `campaign.lifecycle`, a strictly stronger authority than
+        `campaign.babysit`, so a babysit-delegate cannot self-authorize by adding
+        its own model. Identity-neutral: `allowed_models` is not in
+        `root_content_hash`, so no re-stamp and no re-measure.
+      tags: [campaign]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: set-allowed-models }
+                    payload: { $ref: '#/components/schemas/SetAllowedModelsPayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '404': { $ref: '#/components/responses/CommandTargetNotFound' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
   /commands/change-scoring-composite:
     post:
       operationId: changeScoringComposite
@@ -2316,6 +2353,21 @@ components:
                 against ScoringContext; reject as 422 `payload_invalid`
                 when the composite references unknown evaluator ids.
 
+    SetAllowedModelsPayload:
+      allOf:
+        - $ref: '#/components/schemas/CampaignRef'
+        - type: object
+          required: [allowed_models]
+          additionalProperties: false
+          properties:
+            allowed_models:
+              type: array
+              items: { type: string }
+              description: |
+                The full sanctioned model list, replacing the campaign's set wholesale.
+                Empty clears it (restrictive default). A human fork steered to a listed
+                model is clean; to an unlisted one, babysat (grade C).
+
     MarkHardSamplePayload:
       allOf:
         - $ref: '#/components/schemas/CycleRef'
@@ -2615,6 +2667,16 @@ components:
             list isn't sent — a library can run to tens of thousands of entries.
             Populated via `POST /datasets/draft/candidate-library`; committed to
             `{slug}/candidate_library.txt`.
+        allowed_models:
+          type: array
+          items: { type: string }
+          default: []
+          description: |
+            The origin's sanctioned inner-optimizer model allow-list, ticked in the
+            check-in pipeline setup. Materializes to `campaign.json::config.allowed_models`
+            (a top-level CampaignConfig field). Empty = nothing sanctioned = restrictive
+            default: any human fork that steers the model taints the branch grade C
+            (`overlay_sets_model_outside_allowed`); a steer to a listed model is clean.
         dependencies:
           type: array
           description: |
@@ -2940,6 +3002,14 @@ components:
                 and its `/from-column` sibling derive this value from an upload or a
                 column and dispatch it as this patch — they are alternate ingresses
                 for `edit-draft-campaign`, not separate write paths.
+            allowed_models:
+              type: array
+              items: { type: string }
+              description: |
+                The origin's sanctioned model allow-list (ticked in the check-in
+                pipeline setup). Replaces the draft's set wholesale; an empty list
+                clears it (restrictive default). Materializes to
+                `campaign.json::config.allowed_models`.
 
     StartCheckinPayload:
       type: object

@@ -239,6 +239,10 @@ def _build_default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:
             "scoring": f"{draft.scoring_composite}(predicted, ground_truth)",
             "exclude_nodes": list(connector.default_exclude_nodes),
             "optimization": optimization,
+            # Top-level CampaignConfig field (not an `optimization` knob). Omitted when
+            # empty so the delta-snapshot stays clean — absent reads as the restrictive
+            # default (nothing sanctioned) both here and at the babysit gate.
+            **({"allowed_models": list(draft.allowed_models)} if draft.allowed_models else {}),
         },
     }
 

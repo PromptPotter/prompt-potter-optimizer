@@ -109,6 +109,9 @@ CycleScopedKind = Literal[
 ]
 WorkspaceBackendKind = Literal["register-backend", "mint-campaign"]
 CheckinScopedKind = Literal["edit-draft-campaign", "resolve-origin", "start-checkin"]
+# Campaign-scoped IN-PLACE config edits (the campaign persists — distinct from
+# lifecycle, which moves/removes the tree). Rewrites the frozen `campaign.json::config`.
+CampaignConfigKind = Literal["set-allowed-models"]
 
 Applier = Callable[[], Awaitable[Any]] | Callable[[], Any]
 
@@ -135,6 +138,11 @@ CAP_FOR_KIND: dict[str, str] = {
     "register-backend": CAMPAIGN_CREATE_CAP,
     "edit-draft-campaign": CAMPAIGN_CREATE_CAP,
     "resolve-origin": CAMPAIGN_CREATE_CAP,
+    # Editing the allow-list DEFINES what a babysit steer may reach — a strictly
+    # stronger authority than `campaign.babysit` (which only permits a tainted steer).
+    # Gating it on the owner-held lifecycle tier keeps a babysit-delegate from
+    # self-authorizing by adding their own model to the allow-list.
+    "set-allowed-models": CAMPAIGN_LIFECYCLE_CAP,
 }
 
 # Import-time exhaustiveness — a new dispatched kind with no cap is a silent
@@ -145,6 +153,7 @@ _ALL_DISPATCHED_KINDS: frozenset[str] = frozenset(
     + get_args(CycleScopedKind)
     + get_args(WorkspaceBackendKind)
     + get_args(CheckinScopedKind)
+    + get_args(CampaignConfigKind)
 )
 assert set(CAP_FOR_KIND) == _ALL_DISPATCHED_KINDS, (
     "CAP_FOR_KIND out of sync with the dispatched command set: "
@@ -226,6 +235,37 @@ class CommandDispatcher:
             idempotency_key=idempotency_key,
             applier=lambda: self._apply_lifecycle(kind, campaign_id, reason, keep_results),
         )
+
+    async def dispatch_campaign_config(
+        self,
+        *,
+        kind: CampaignConfigKind,
+        campaign_id: str,
+        allowed_models: list[str],
+        idempotency_key: str,
+    ) -> CommandOutcome:
+        """Campaign-scoped IN-PLACE config edit — rewrites the frozen ``allowed_models``
+        allow-list, the single source of truth both the fork cap-gate (``campaign.config``)
+        and the runner's grade-C stamp (via ``apply_inherited_overlay``) read. The campaign
+        stays in place, so — unlike lifecycle — the ``CommandRecord`` is a normal admin
+        edit; it lands on the WORKSPACE ledger (the campaign-scoped audit home). Owner-gated
+        via ``CAP_FOR_KIND`` at ``_record_and_apply`` (``CAMPAIGN_LIFECYCLE_CAP``)."""
+        self._load_owned_campaign(campaign_id)
+        ledger = CycleEventLog.open_workspace(WorkspaceDir(self._store.base_dir))
+        return await self._record_and_apply(
+            ledger=ledger,
+            kind=kind,
+            payload={"campaign_id": campaign_id, "allowed_models": list(allowed_models)},
+            idempotency_key=idempotency_key,
+            applier=lambda: self._apply_set_allowed_models(campaign_id, allowed_models),
+        )
+
+    def _apply_set_allowed_models(
+        self, campaign_id: str, allowed_models: list[str]
+    ) -> dict[str, Any]:
+        """Write the frozen snapshot's allow-list; echo the applied value for the ack."""
+        self._store.campaigns.set_allowed_models(campaign_id, allowed_models)
+        return {"campaign_id": campaign_id, "allowed_models": list(allowed_models)}
 
     # ------------------------------------------------------------------
     # Cycle-scoped (migrated sanctioned POSTs)

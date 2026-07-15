@@ -10,6 +10,7 @@ import { NowTriad } from "./NowTriad";
 import { Lane } from "./Lane";
 import { LiveStateCard } from "@/components/dashboard/scoring/LiveStateCard";
 import { MechanismsPanel } from "@/components/dashboard/control/MechanismsPanel";
+import { AllowedModelsPanel } from "@/components/dashboard/control/AllowedModelsPanel";
 import { ConfigMapPanel } from "@/components/dashboard/control/ConfigMapPanel";
 
 // The Dashboard tab's arrangement, owned here rather than inline in the shell:
@@ -60,6 +61,16 @@ export function DashboardTab() {
       >
         <DashSpine>
           <MechanismsPanel />
+        </DashSpine>
+      </Lane>
+      <Lane
+        id="allowed-models"
+        title="Allowed models"
+        subtitle="Which models a human may steer a fork to without tainting it (campaign.json)"
+        defaultOpen={false}
+      >
+        <DashSpine>
+          <AllowedModelsPanel />
         </DashSpine>
       </Lane>
       <Lane

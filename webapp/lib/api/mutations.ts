@@ -121,6 +121,20 @@ export async function postForkCycle(
   return _postCommand("fork-cycle", payload);
 }
 
+// Rewrite a campaign's inner-optimizer model allow-list — the frozen
+// `campaign.json::config`, the single source both the fork cap-gate and the runner's
+// grade-C stamp read. Replaces the set wholesale; [] clears it (restrictive default).
+// Owner-gated server-side (`campaign.lifecycle`); the optimizer never touches it.
+export async function postSetAllowedModels(
+  campaignId: string,
+  allowedModels: string[],
+): Promise<CommandAcceptedBody> {
+  return _postCommand("set-allowed-models", {
+    campaign_id: campaignId,
+    allowed_models: allowedModels,
+  });
+}
+
 export async function postCleanupEmpty(
   campaignId: string,
   cycleId: string,
@@ -345,6 +359,9 @@ export interface DraftCampaignWire {
   // list isn't sent — a library can run to tens of thousands of entries; the UI
   // needs only fulfilled-ness + size.
   candidate_library_size: number;
+  // The origin's sanctioned inner-optimizer model allow-list (ticked in setup).
+  // Empty = nothing sanctioned = restrictive default (any human model steer taints).
+  allowed_models: string[];
   created_at: string;
   updated_at: string;
   // Connector-derived backend-pipeline permission surface; see `OptimizerLocks`.
@@ -612,6 +629,9 @@ export interface DraftPatch {
   // shallow-merged onto the draft's current overrides server-side — send one
   // knob or several; a nested `mechanisms` replaces wholesale.
   optimization_overrides?: Partial<OptimizationOverridesWire>;
+  // The origin's sanctioned model allow-list. Replaces the draft's set wholesale
+  // (the checklist sends the full ticked list); [] clears it (restrictive default).
+  allowed_models?: string[];
 }
 
 export async function postEditDraftCampaign(

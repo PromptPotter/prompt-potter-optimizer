@@ -342,6 +342,25 @@ class CampaignStore:
         data.update(updates)
         write_json(path, data)
 
+    def set_allowed_models(self, campaign_id: str, allowed_models: list[str]) -> None:
+        """Rewrite the frozen config snapshot's ``allowed_models`` — the SINGLE source of
+        truth for a campaign's model allow-list (read by both the fork-cycle cap-gate off
+        ``campaign.config`` and, via ``apply_inherited_overlay``, the runner's grade-C
+        stamp). Empty clears the key (delta-snapshot convention: absent = restrictive
+        default). Identity-neutral — ``allowed_models`` is not in ``root_content_hash``,
+        so no re-stamp and no re-measure. The ``set-allowed-models`` command's writer."""
+        path = self._manifest_path(campaign_id)
+        data = read_json(path)
+        config = data.get("config")
+        if not isinstance(config, dict):
+            config = {}
+        if allowed_models:
+            config["allowed_models"] = list(allowed_models)
+        else:
+            config.pop("allowed_models", None)
+        data["config"] = config
+        write_json(path, data)
+
     def repoint_dataset(self, old_name: str, new_name: str) -> int:
         """Move every campaign pinned to *old_name* onto *new_name*. Returns the count.
 

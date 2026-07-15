@@ -10,6 +10,7 @@ from ``presentation.api.middleware.command_dispatcher`` unchanged.
 from __future__ import annotations
 
 from promptpotter.presentation.api.middleware.command_dispatcher.dispatcher import (
+    CampaignConfigKind,
     CommandAcceptedBody,
     CommandDispatcher,
     CycleScopedKind,
@@ -18,6 +19,7 @@ from promptpotter.presentation.api.middleware.command_dispatcher.dispatcher impo
 )
 
 __all__ = [
+    "CampaignConfigKind",
     "CommandAcceptedBody",
     "CommandDispatcher",
     "CycleScopedKind",

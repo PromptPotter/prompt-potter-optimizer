@@ -181,6 +181,12 @@ class DraftCampaign:
     # surfaced-and-droppable dependency, not a hard mint block (the answers already
     # in the data are a degenerate-but-runnable pool).
     candidate_library: tuple[str, ...] = ()
+    # The origin's sanctioned inner-optimizer model set (`CampaignConfig.allowed_models`).
+    # Ticked in the check-in pipeline setup; materializes into `campaign.json::config.
+    # allowed_models` (top-level, a CampaignConfig field — NOT under `optimization`).
+    # Empty = nothing sanctioned = restrictive default (any human model steer taints).
+    # The allow-list a human fork may steer the inner model to without a babysit warning.
+    allowed_models: tuple[str, ...] = ()
     # Set when this draft was opened by reusing a prior origin (the picker's
     # "Reuse an origin" path) — the chosen origin's content id. When non-empty,
     # ``prepare_checkin_run`` passes ``origin_prompt_fields`` as the
@@ -229,6 +235,7 @@ class DraftCampaign:
             # ``dependencies`` block (added at the wire boundary, which has the
             # connector's node types).
             "candidate_library_size": len(self.candidate_library),
+            "allowed_models": list(self.allowed_models),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -263,6 +270,7 @@ class DraftCampaign:
             "pipeline_steps": list(self.pipeline_steps),
             "optimization_overrides": dict(self.optimization_overrides),
             "candidate_library": list(self.candidate_library),
+            "allowed_models": list(self.allowed_models),
             "reused_origin_id": self.reused_origin_id,
         }
 
@@ -299,6 +307,7 @@ class DraftCampaign:
             pipeline_steps=list(data.get("pipeline_steps", [])),
             optimization_overrides=dict(data.get("optimization_overrides", {})),
             candidate_library=tuple(data.get("candidate_library", ())),
+            allowed_models=tuple(data.get("allowed_models", ())),
             reused_origin_id=data.get("reused_origin_id", ""),
         )
 

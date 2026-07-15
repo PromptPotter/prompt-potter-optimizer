@@ -37,6 +37,7 @@ function draft(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
     },
     origin_prompt_fields: {},
     candidate_library_size: 0,
+    allowed_models: [],
     created_at: "2026-05-30T00:00:00Z",
     updated_at: "2026-05-30T00:00:00Z",
     optimizer_locks: { pipeline: ["llm_only"], forbidden_axes: ["model", "provider"], nodes: {} },

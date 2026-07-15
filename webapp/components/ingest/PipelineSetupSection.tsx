@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { DraftCampaignWire, DraftPatch } from "@/lib/api";
 import { StaticConnectorProvider, useConnector } from "@/lib/hooks/useConnector";
-import { SegmentedControl } from "@/components/ui";
+import { SegmentedControl, Chip, ChipGroup } from "@/components/ui";
 import { useSelection } from "@/lib/SelectionContext";
 import { targetNodeIds } from "@/lib/terms";
 import { PipelineNodeList } from "@/components/dashboard/pipeline/PipelineNodeList";
@@ -71,6 +71,26 @@ function PipelineSetupInner({
 }) {
   const cv = useConnector();
   const { node: selected, setSelectionForNode } = useSelection();
+
+  // The model catalogue the allow-list picks from — the union of every model-kind
+  // param's options across nodes (server-populated from `PipelineSchema.available_models`).
+  const modelCatalogue = useMemo(() => {
+    const set = new Set<string>();
+    for (const params of Object.values(cv.nodeConfigSchema ?? {})) {
+      for (const p of params) if (p.kind === "model") for (const o of p.options) set.add(o);
+    }
+    return [...set];
+  }, [cv.nodeConfigSchema]);
+  const allowedModels = draft.allowed_models ?? [];
+  // Toggle a model in/out of the origin's allow-list — the full ticked list rides
+  // one patch (server replaces wholesale). Unticking to empty is the restrictive
+  // default (any human model steer then taints the branch grade C).
+  const toggleAllowed = (model: string) =>
+    onApply({
+      allowed_models: allowedModels.includes(model)
+        ? allowedModels.filter((m) => m !== model)
+        : [...allowedModels, model],
+    });
 
   // Research+Match preset = the committed pipeline's nodes (stable during setup).
   // `llm_only` isn't in a committed Research+Match view, so its preset is fixed.
@@ -149,6 +169,31 @@ function PipelineSetupInner({
           ) : null}
         </>
       )}
+
+      {/* Origin allow-list: which models a human may steer a fork to without a
+          babysit warning. The optimizer never searches the model regardless; this
+          governs only the direct human steer. Ticked → clean; unticked → grade C. */}
+      {modelCatalogue.length > 0 ? (
+        <div className="pipeline-setup-allowed">
+          <p className="bnode-role">
+            Allowed models — which models a human may steer a fork to without tainting it.
+            A fork steered to an unticked model still runs but is marked grade C (not a
+            clean measurement). None ticked = nothing sanctioned (any model steer warns).
+          </p>
+          <ChipGroup label="Allowed models" showLabel>
+            {modelCatalogue.map((m) => (
+              <Chip
+                key={m}
+                on={allowedModels.includes(m)}
+                onClick={() => toggleAllowed(m)}
+                title={`${allowedModels.includes(m) ? "Allowed" : "Not allowed"}: ${m}`}
+              >
+                {m}
+              </Chip>
+            ))}
+          </ChipGroup>
+        </div>
+      ) : null}
     </section>
   );
 }
