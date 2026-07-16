@@ -1212,6 +1212,104 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
 
+  /campaigns/{campaignId}/cycles/{cycleId}/tree:
+    get:
+      operationId: getLineageTree
+      summary: The lineage tree rooted at one cycle — the single served genealogy.
+      description: |
+        ONE tree, one owner. Nodes alternate `course -> candidate -> (course | sample)`
+        forever, so an L4 inner run is not a special case — it is the same shape one
+        level down, and L5+ needs no new tier.
+
+        Rooted at a COURSE, not a campaign: a campaign is a bag of courses, and the
+        flat `/campaigns/{id}/lineage` this replaces could not describe a leaf below
+        depth 1 (the pp-self bug). `GET /campaigns` + `GET /cycles` stay the flat
+        registry the sidebar groups.
+
+        IDENTITY is built from each course's **ledger** (`CandidateMintedRecord`) plus
+        `index.json` topology — deliberately NOT the round file. A round that never closed
+        writes no round file, but it minted its candidates, and at L4 their inner campaigns
+        are finished on disk under a parent that a positional read cannot name. The ledger
+        is the only witness independent of round close.
+
+        The round-CLOSE facts (`is_winner`, `theta`, `cumulative_accuracy`) come from
+        `dashboard.json::rounds[]`, the declared projection for them — the ledger genuinely
+        does not carry them. So a round that never closed reports **no winner** rather than
+        promoting its lone candidate, which is the honest answer the flat `/lineage` refused
+        to give.
+
+        `depth` expands N course-levels; a node with `children_available: true` and an
+        empty `children` is the lazy boundary a client expands into. Conditional-GET
+        rides the newest mtime across the subtree's `ledger.jsonl` + `index.json` — the
+        ledger bumps per candidate, so a 2 s poll sees an in-flight candidate the moment
+        it starts, which `dashboard.json`'s mtime never guaranteed. A `lens`/`samples`
+        request always recomputes (those cannot ride `If-Modified-Since`).
+      tags: [cycles]
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The top-level (root) campaign id.
+          schema: { type: string, minLength: 8, maxLength: 128 }
+        - name: cycleId
+          in: path
+          required: true
+          description: The top-level (root) cycle id — the key of any `.inner/` sandbox below it.
+          schema: { type: string, minLength: 8, maxLength: 128 }
+        - name: descend
+          in: query
+          required: false
+          description: |
+            `~`-joined `campaign::cycle` hops to descend into before resolving the leaf,
+            as on the dashboard route. Empty/absent → the caller's own tree. Send back a
+            node's own `path` verbatim to root the tree at that node.
+          schema: { type: string }
+        - name: depth
+          in: query
+          required: false
+          description: |
+            How many COURSE levels to expand. `0` = this course + its candidates only,
+            with `children_available` marking where courses hang below.
+          schema: { type: integer, minimum: 0, maximum: 8, default: 1 }
+        - name: lens
+          in: query
+          required: false
+          description: |
+            A counterfactual overlay. `score:<formula>` = an alternative scoring formula —
+            stamps each candidate's `lens_value` and marks a `divergence` on the spine node
+            where that criterion would have elected someone else. `abort:<variant>`,
+            variant ∈ {`epsilon_off`, `lock_in_off`, `all_off`} = switch off a PoBB abort
+            contributor. Absent → the tree is the raw read. Unknown value → 400.
+          schema: { type: string }
+        - name: samples
+          in: query
+          required: false
+          description: |
+            The sample-set mask: a comma-separated sample-id list. Re-scores each candidate
+            over only those samples into `sample_set_accuracy` / `sample_set_n`. Composes
+            with a `score:` lens; ignored for an `abort:` lens. A non-integer token → 400.
+          schema: { type: string }
+        - name: If-Modified-Since
+          in: header
+          required: false
+          description: Standard conditional-GET validator; the route 304s when unchanged.
+          schema: { type: string }
+      responses:
+        '200':
+          description: The course at the resolved path, and its subtree.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LineageNode'
+        '304':
+          description: Unchanged since `If-Modified-Since`.
+        '404':
+          description: Unknown cycle (or cross-tenant), or a `descend` hop names no sandbox.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
   /cycles:
     get:
       operationId: getCycles
@@ -1831,6 +1929,159 @@ components:
           description: |
             The ledger offset at which the `CommandRecord` was appended.
             Client subscribers can use this to align the SSE tail.
+
+    CycleHop:
+      type: object
+      description: One `(campaign, cycle)` step of a CyclePath.
+      required: [campaign_id, cycle_id]
+      additionalProperties: false
+      properties:
+        campaign_id: { type: string }
+        cycle_id: { type: string }
+
+    LineageDivergence:
+      type: object
+      description: |
+        Where an alternative criterion would have elected someone else. It rides the node it
+        describes (`LineageNode.divergence`), so there is no parallel list to re-join onto
+        the tree by a hand-rolled key.
+      required: []
+      additionalProperties: false
+      properties:
+        alternative_candidate_id:
+          type: [string, "null"]
+          description: |
+            The candidate the masked criterion would have elected instead (measured, so
+            nameable); null when the round would simply have held on origin.
+
+    LineageNode:
+      type: object
+      description: |
+        One node of the served lineage tree — the SAME shape at every depth, which is the
+        point: a client writes one renderer, not one per tier. `course` and `candidate`
+        strictly alternate. Declared in full here rather than as an open object: the
+        `/lineage` response this replaces was `additionalProperties: true`, and that hole
+        is exactly how five disagreeing lineage shapes went unnoticed.
+      required: [kind, id, label, path, children, children_available]
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          enum: [course, candidate]
+        id:
+          type: string
+          description: Course → the cycle_id. Candidate → the searchpoint id minted at L1/origin.
+        parent_id:
+          type: [string, "null"]
+          description: |
+            The candidate this node descends from; null only at the true root. A fork and
+            an L4 inner run carry the SAME edge — one resolver reads
+            `fork.from_candidate_id` and `spawned_by`, so a course hangs off a node and
+            needs no lane geometry.
+        label:
+          type: string
+          description: Minted at mint time, never derived from list position.
+        path:
+          type: array
+          description: |
+            The addressable CyclePath of the course this node belongs to, root → leaf.
+            Send it back as `descend` to root the tree here — no client re-derivation.
+          items: { $ref: '#/components/schemas/CycleHop' }
+        children:
+          type: array
+          items: { $ref: '#/components/schemas/LineageNode' }
+        children_available:
+          type: boolean
+          description: |
+            True with `children` empty = the lazy boundary: this node HAS children the
+            request's `depth` did not expand. False + empty = it genuinely has none. A
+            client must never read an empty list as proof of a leaf.
+        round:
+          type: [integer, "null"]
+          description: Column hint. Candidates only — rounds are not a tier.
+        accuracy: { type: [number, "null"] }
+        composite_fitness: { type: [number, "null"] }
+        state:
+          type: string
+          description: |
+            Candidate → `minted` | `measured`. Never `winner` (that rides `is_winner`):
+            election is stamped at round close, so an unclosed round HAS no winner and this
+            tree declines to invent one. Course → the cycle status.
+        is_winner:
+          type: boolean
+          description: |
+            Elected this round. False throughout a round that never closed — such a round
+            has no winner, and a lone candidate is not promoted to one.
+        round_closed:
+          type: boolean
+          description: |
+            Did this candidate's round CLOSE? It separates the two ways a round crowns
+            nobody: closed with no winner = HELD (it ran, nothing beat the incumbent);
+            not closed = it never finished, so there is no election to report. `is_winner`
+            alone collapses those into one `false`.
+        theta:
+          type: [number, "null"]
+          description: |
+            Difficulty-adjusted Rasch ability the election ranked on — what explains a
+            lower-accuracy winner. Null outside the round's election fit.
+        theta_se: { type: [number, "null"] }
+        evaluators:
+          type: object
+          additionalProperties: { type: number }
+          description: The candidate's stored evaluator namespace — what a `score:` lens re-scores.
+        composite_ci_lo: { type: [number, "null"] }
+        composite_ci_hi: { type: [number, "null"] }
+        scored_samples: { type: [integer, "null"] }
+        expected_samples: { type: [integer, "null"] }
+        cumulative_accuracy:
+          type: [number, "null"]
+          description: |
+            The adopted lineage rescored over EVERY sample probed so far — the
+            cross-round-comparable frontier the trend plots. Carried by the round's WINNER
+            only: it is a property of the advancing spine, and a losing sibling never
+            joined it.
+        lens_value:
+          type: [number, "null"]
+          description: |
+            This candidate's fitness under the request's `score:` lens, re-scored
+            server-side. Null without a lens, or when the namespace can't satisfy it.
+        sample_set_accuracy:
+          type: [number, "null"]
+          description: |
+            Scorer-faithful accuracy over the request's `samples=` subset. Null without a
+            mask, or when this candidate never ran any selected sample — a blank slot, not
+            a fabricated 0%.
+        sample_set_n:
+          type: [integer, "null"]
+          description: How many of the `samples=` subset this candidate actually ran.
+        divergence:
+          oneOf:
+            - $ref: '#/components/schemas/LineageDivergence'
+            - type: "null"
+          description: |
+            Set where the lens would have FORKED the record at this node. It rides the node
+            rather than a parallel array keyed `"{cycle_id}::r{round}"` — the client used to
+            re-join two flat lists onto the tree by a hand-rolled string.
+        divergent:
+          type: boolean
+          description: This node is inside the counterfactual subtree below a divergence; render dimmed.
+        course_kind:
+          type: [string, "null"]
+          enum: [root, fork, diag, sweep, inner, null]
+          description: Courses only.
+        dataset_name: { type: string }
+        trigger:
+          type: string
+          description: Fork trigger; empty for roots and inner runs.
+        steered_by: { type: [string, "null"] }
+        task:
+          type: [string, "null"]
+          description: |
+            An inner run's benchmark task. Load-bearing: every task runs for every
+            candidate, so the candidate edge alone does not identify an inner run.
+        best_accuracy: { type: [number, "null"] }
+        hearts: { type: [integer, "null"] }
+        lives_cap: { type: [integer, "null"] }
 
     ErrorEnvelope:
       type: object

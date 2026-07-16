@@ -477,16 +477,22 @@ class CandidateMintedRecord(BaseModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-# What the cycle's OWN ledger can answer about a candidate. Election — who won — is a
-# round-close fact and is deliberately absent: an unclosed round has no winner, and
-# inventing one for a lone candidate is a fabrication.
+# What the cycle's OWN ledger can answer about a candidate. `minted` = named, not yet scored;
+# `measured` = it has a number. Never `winner`: election is a round-close fact the ledger does
+# not carry, so an unclosed round's candidates stay `measured` and nothing invents a winner.
 CandidateState = Literal["minted", "measured"]
 
 
 class LedgerCandidate(BaseModel):
     """The candidate tier as the ledger tells it — `CandidateMintedRecord` (identity) folded
     onto the `candidate_scored` snapshot (measurement) by `(round, idx)`. Derived, not a
-    record: `scan_ledger_candidates` builds it, nothing appends it."""
+    record: `scan_ledger_candidates` builds it, nothing appends it.
+
+    The snapshot carries a whole `ScoredCandidate.model_dump()`, so the evaluator namespace,
+    the CI and the sample counts come free. **Election and θ do not appear here and cannot:**
+    both are stamped at round CLOSE, after this snapshot is emitted, and reach a reader
+    through `dashboard.json::rounds[]`.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -500,6 +506,12 @@ class LedgerCandidate(BaseModel):
     accuracy: float | None = None
     composite_fitness: float | None = None
     state: CandidateState = "minted"
+    # The candidate's stored evaluator namespace — what a `score:` lens re-scores against.
+    evaluators: dict[str, float] = Field(default_factory=dict)
+    composite_ci_lo: float | None = None
+    composite_ci_hi: float | None = None
+    scored_samples: int | None = None
+    expected_samples: int | None = None
 
 
 class CycleSeedRecord(BaseModel):

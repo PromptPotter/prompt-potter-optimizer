@@ -113,9 +113,10 @@ def list_cycle_files(
     file-content routes), so the Files tree of an L4 inner descendant lists the
     inner cycle's tree. Absent/empty ``descend`` is a plain per-cycle read.
     """
-    leaf_store, (leaf_campaign, leaf_cycle) = resolve_cycle_path(
-        store, (CycleHop(campaign_id, cycle_id), *decode_descend(descend))
+    leaf_store, leaf = resolve_cycle_path(
+        store, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))
     )
+    leaf_campaign, leaf_cycle = leaf.campaign_id, leaf.cycle_id
     cycle_dir = cycle_dir_for(leaf_store.base_dir, leaf_campaign, leaf_cycle)
     if not cycle_dir.is_dir():
         raise NotFoundError(f"Cycle not found: {campaign_id}/{cycle_id}")
@@ -168,9 +169,10 @@ def get_cycle_file(
     an L4 inner descendant's ``rounds/round_NNNN.json`` reads from the inner cycle
     dir — not the outer root. Absent/empty ``descend`` is a plain per-cycle read.
     """
-    leaf_store, (leaf_campaign, leaf_cycle) = resolve_cycle_path(
-        store, (CycleHop(campaign_id, cycle_id), *decode_descend(descend))
+    leaf_store, leaf = resolve_cycle_path(
+        store, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))
     )
+    leaf_campaign, leaf_cycle = leaf.campaign_id, leaf.cycle_id
     if scope == "cycle":
         scope_root = cycle_dir_for(leaf_store.base_dir, leaf_campaign, leaf_cycle)
     else:

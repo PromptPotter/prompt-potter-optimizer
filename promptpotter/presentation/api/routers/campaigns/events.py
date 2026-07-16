@@ -98,9 +98,10 @@ async def stream_cycle_events(
 
     See ``docs/developer/event-stream.md`` for the certified Profile A contract.
     """
-    leaf_store, (leaf_campaign, leaf_cycle) = resolve_cycle_path(
-        store, (CycleHop(campaign_id, cycle_id), *decode_descend(descend))
+    leaf_store, leaf = resolve_cycle_path(
+        store, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))
     )
+    leaf_campaign, leaf_cycle = leaf.campaign_id, leaf.cycle_id
     cycle_dir = Path(cycle_dir_for(leaf_store.base_dir, leaf_campaign, leaf_cycle))
     if not cycle_dir.exists():
         raise NotFoundError(f"Unknown cycle {leaf_campaign}/{leaf_cycle}.")

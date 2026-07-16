@@ -359,7 +359,7 @@ def _artifact_scope_store(
     if not campaign_id or not cycle_id:
         raise BadRequestError("descend requires campaign_id and cycle_id (the root hop)")
     leaf_store, leaf = resolve_cycle_path(
-        store, (CycleHop(campaign_id, cycle_id), *decode_descend(descend))
+        store, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))
     )
     return leaf_store, leaf.campaign_id, leaf.cycle_id
 

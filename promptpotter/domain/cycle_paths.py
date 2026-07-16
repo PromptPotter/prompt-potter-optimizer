@@ -30,7 +30,9 @@ them without crossing hexagonal layers.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import NamedTuple, NewType, Protocol
+from typing import NewType, Protocol
+
+from pydantic import BaseModel, ConfigDict
 
 from promptpotter.domain.run_records import CycleRecord
 
@@ -41,12 +43,18 @@ CycleDir = NewType("CycleDir", Path)
 WorkspaceDir = NewType("WorkspaceDir", Path)
 
 
-class CycleHop(NamedTuple):
+class CycleHop(BaseModel):
     """One ``(campaign, cycle)`` step of a :data:`CyclePath`.
 
-    The campaign component is carried for symmetry with the webapp and to name the
-    leaf; it plays no part in descent — a sandbox is keyed on the cycle id alone.
+    The campaign component is carried to name the leaf and for symmetry with the
+    webapp; it plays no part in descent — a sandbox is keyed on the cycle id alone.
+
+    A model rather than a tuple so it serializes as ``{campaign_id, cycle_id}``: a
+    served path is read by a client that already speaks this shape, and a positional
+    pair on the wire is one more thing for a reader to decode wrongly.
     """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     campaign_id: str
     cycle_id: str

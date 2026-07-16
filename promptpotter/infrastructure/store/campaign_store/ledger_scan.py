@@ -71,6 +71,13 @@ def scan_ledger_candidates(ledger_path: Path) -> list[LedgerCandidate]:
     number. Either alone yields a candidate — a minted one not yet scored is `minted`, and
     a cycle that pre-dates the mint record is still named by its score. Re-runs of the same
     ``(round, idx)`` overwrite, so a rewind's re-mint wins, as in ``scan_ledger_cycle_seed``.
+
+    **Election and θ are deliberately absent, because the ledger does not have them.** The
+    ``ROUND_WINNER`` decision goes to a plain list that lands in the round file, not to the
+    ledger (``record_decision``'s sink is polymorphic — only some call sites pass the
+    ``CycleEventLog``), and θ is stamped onto the candidate at election time, *after* this
+    snapshot was emitted. Both are round-CLOSE facts and reach a reader through
+    ``dashboard.json::rounds[]``. Do not fold them here from a lookalike record.
     """
     found: dict[tuple[int, int], dict[str, object]] = {}
 
@@ -103,6 +110,9 @@ def scan_ledger_candidates(ledger_path: Path) -> list[LedgerCandidate]:
             # `(round, idx)` is the join, NOT the id. The origin deposits its aggregate
             # through this same event carrying no id and no label — anonymous as identity,
             # but it is still round 0's score, and the mint record above supplies the name.
+            # `scores` IS a `ScoredCandidate.model_dump()` (the origin's aggregate is the one
+            # leaner sender) — so the evaluator namespace, the CI and the sample counts are
+            # already here, and no reader needs a second witness to ask for them.
             _merge(
                 (rnd, idx),
                 candidate_id=scores.get("candidate_id"),
@@ -110,6 +120,11 @@ def scan_ledger_candidates(ledger_path: Path) -> list[LedgerCandidate]:
                 changes_description=scores.get("changes_description"),
                 accuracy=scores.get("accuracy"),
                 composite_fitness=scores.get("composite_fitness"),
+                evaluators=scores.get("evaluators"),
+                composite_ci_lo=scores.get("composite_ci_lo"),
+                composite_ci_hi=scores.get("composite_ci_hi"),
+                scored_samples=scores.get("scored_samples"),
+                expected_samples=scores.get("expected_samples"),
                 state="measured",
             )
 

@@ -130,7 +130,7 @@ def decode_descend(descend: str | None) -> CyclePath:
         cmp, sep, cyc = seg.partition("::")
         if not sep or not cmp or not cyc:
             raise BadRequestError(f"Malformed descend hop: {seg!r}")
-        hops.append(CycleHop(cmp, cyc))
+        hops.append(CycleHop(campaign_id=cmp, cycle_id=cyc))
     return tuple(hops)
 
 

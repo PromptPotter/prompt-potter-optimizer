@@ -265,7 +265,27 @@ LEDGER_BASELINE = {
     # sub-users with a bounded capability slice — so the baseline rises. It can't
     # fold into ``allowlist.py`` (email gate) or ``migration.py`` (default-claim
     # rebind) without making either mean two things.
-    "modules": 318,
+    # 318 -> 319 (2026-07-17): ``infrastructure/store/lineage_views.py`` — the ONE served
+    # lineage tree (``course -> candidate -> (course | sample)``, alternating at any depth).
+    # A deliberate raise, and a TEMPORARY one, so read the debt before copying the pattern:
+    #
+    # The lineage tree had FIVE witnesses on disk and no owner, so every surface reassembled
+    # its own and they disagreed about the same node — a cycle whose round never closed has
+    # candidates on its ledger, finished L4 inner campaigns hanging off them, and no round
+    # file, so the positional read serving ``/lineage`` reports the parent does not exist.
+    # This module is the owner. It cannot ride an existing one: it must recurse through
+    # ``inner_sandbox_store``, which forces it above ``campaign_store/`` (that package is
+    # imported BY ``stores.py``, so a scan there would close an import cycle).
+    #
+    # The paying deletion is ``routers/campaigns/lineage.py`` (5 wire models + 10 projection
+    # helpers), which returns this to 318. It is NOT deferred for comfort: ``/tree`` is not
+    # yet a superset — the lens/mask overlay (``lens_value``, ``sample_set_accuracy``,
+    # ``theta``, ``is_winner``, ``cumulative_accuracy``, ``divergences[]``) still rides
+    # ``/lineage``, and deleting it today would silently regress the What-If bars. Landing a
+    # half-migrated tree beside a live one, quietly, is the exact failure this ratchet exists
+    # to make loud — so it is written down here instead. **Lower this to 318 with that
+    # deletion; do not add another module under this line.**
+    "modules": 319,
     "init_files": 60,
     # 43 -> 9 (2026-07-16): 34 package ``__init__`` files that did nothing but re-export a
     # leaf's names were emptied to docstring-only namespace markers, and their ~190 consumer
