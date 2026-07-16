@@ -2,7 +2,8 @@
 import { SignInPrompt } from "@/components/ui";
 import type { AuthStatus } from "@/lib/auth-context";
 import type { LifecycleFilter } from "@/lib/api";
-import type { CampaignGroup } from "./sidebar/grouping";
+import type { OriginGroup } from "./sidebar/grouping";
+import type { TreeCtx } from "./sidebar/ForestRows";
 import { CampaignTreePane } from "./CampaignTreePane";
 import { SidebarFilterPopover } from "./sidebar/SidebarFilterPopover";
 
@@ -14,14 +15,8 @@ interface Props {
   datasetNames: string[];
   datasetFilter: string | null;
   setDatasetFilter: (d: string | null) => void;
-  groups: CampaignGroup[];
-  collapsedNodes: Set<string>;
-  toggleNode: (key: string) => void;
-  campaignId: string | null;
-  cycleId: string | null;
-  activeCampaignId: string | null;
-  activeCycleId: string | null;
-  onSelectCycle: (campaignId: string, cycleId: string) => void;
+  origins: OriginGroup[];
+  ctx: TreeCtx;
 }
 
 // The campaign-library body — the header + filter button, the auth/loading
@@ -37,14 +32,8 @@ export function SidebarContent({
   datasetNames,
   datasetFilter,
   setDatasetFilter,
-  groups,
-  collapsedNodes,
-  toggleNode,
-  campaignId,
-  cycleId,
-  activeCampaignId,
-  activeCycleId,
-  onSelectCycle,
+  origins,
+  ctx,
 }: Props) {
   const filtered = lifecycleFilter === "archived" || datasetFilter != null;
   const clearFilters = () => {
@@ -93,7 +82,7 @@ export function SidebarContent({
       ) : (
         !loaded && <div className="unit-library-note">loading…</div>
       )}
-      {loaded && groups.length === 0 && lifecycleFilter === "archived" && (
+      {loaded && origins.length === 0 && lifecycleFilter === "archived" && (
         <div className="unit-library-empty">
           <div className="empty-headline">No archived campaigns</div>
           <div className="empty-body">
@@ -102,7 +91,7 @@ export function SidebarContent({
           </div>
         </div>
       )}
-      {loaded && groups.length === 0 && lifecycleFilter !== "archived" && (
+      {loaded && origins.length === 0 && lifecycleFilter !== "archived" && (
         <div className="unit-library-empty">
           {/* Points at the CTA already on screen (Sidebar's `+ New campaign`) rather than
               sending a browser user to a terminal and a repo path they can't open. */}
@@ -113,18 +102,7 @@ export function SidebarContent({
           </div>
         </div>
       )}
-      {loaded && groups.length > 0 && (
-        <CampaignTreePane
-          groups={groups}
-          collapsedNodes={collapsedNodes}
-          toggleNode={toggleNode}
-          campaignId={campaignId}
-          cycleId={cycleId}
-          activeCampaignId={activeCampaignId}
-          activeCycleId={activeCycleId}
-          onSelectCycle={onSelectCycle}
-        />
-      )}
+      {loaded && origins.length > 0 && <CampaignTreePane origins={origins} ctx={ctx} />}
     </div>
   );
 }

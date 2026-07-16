@@ -561,6 +561,29 @@ export interface ActiveSessionResponse {
   cycle_id: string;
 }
 
+/** The outer work-item an L4 inner cycle was spawned to measure. */
+export interface SpawnedBy {
+  /** The outer cycle that owns this inner sandbox */
+  outer_cycle_id: string;
+  /** Outer round; 0 is the origin (C0). Null when the spawn came from outside any
+   * round (the noise-floor diagnostic). */
+  round: number | null;
+  /** Position in the outer round's population; null for the origin. */
+  candidate_idx: number | null;
+  /** The outer candidate's `OptSearchPoint.lineage.id` — stable across rounds; null
+   * for the origin. */
+  candidate_id: string | null;
+  /** Canonical label (`C0` for the origin, else `C{round}.{idx+1}`) — the same
+   * string the round file and console use. */
+  candidate_label: string | null;
+  /** The panel cell this run measured — the outer query, e.g.
+   * `justlogic-d23/seed-0` (`inner_tasks.json::tasks[].id`). The candidate
+   * fields do NOT identify a run: every task runs for every candidate, so one
+   * candidate's spawns are as many as the panel has cells and are told apart
+   * only by this. Null on a run minted before the stamp existed. */
+  task: string | null;
+}
+
 export interface CycleListEntry {
   /** Campaign the cycle belongs to */
   campaign_id: string;
@@ -593,6 +616,12 @@ export interface CycleListEntry {
    * is babysat and no longer purely reproducible. Drives the 'babysat' badge;
    * orthogonal to run_phase. */
   human_intervened: boolean;
+  /** Which outer work-item asked for this cycle, when it is an L4 inner
+   * measurement; null for an ordinary campaign. Lets the sidebar name an
+   * inner run by the candidate that produced it instead of by launch order.
+   * Null on inner cycles minted before the stamp existed — they fall back to
+   * their origin hash. */
+  spawned_by: SpawnedBy | null;
 }
 
 export interface CyclesResponse {
@@ -615,7 +644,7 @@ export interface CommandAcceptedBody {
 }
 
 export interface CampaignSummary {
-  /** Stable campaign id ({dataset}__{origin hash}) */
+  /** Campaign id ({dataset}__{rand6}) — one RUN of an origin */
   campaign_id: string;
   /** Dataset this campaign optimizes */
   dataset_name: string;
@@ -625,7 +654,10 @@ export interface CampaignSummary {
   status: string;
   /** ISO 8601 creation timestamp */
   created_at: string;
-  /** The campaign's root cycle id */
+  /** The campaign's root cycle id — `cycle_<root_content_hash>`, so it IS the
+   * campaign's ORIGIN identity. Campaigns on one declaration share it and
+   * differ only in the random `campaign_id` suffix, which is what makes them
+   * separate RUNS of that origin; the sidebar groups the forest by this key. */
   root_cycle_id: string;
   /** Backend this campaign optimizes against */
   backend_id: string;

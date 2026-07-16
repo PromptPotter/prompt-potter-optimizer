@@ -33,9 +33,12 @@ from typing import Any
 __all__ = [
     "MAX_INSTRUMENT_DEPTH",
     "InstrumentMode",
+    "MeasuredCandidate",
     "enter_instrument_mode",
     "instrument_depth",
     "instrument_mode",
+    "measured_candidate",
+    "set_measured_candidate",
 ]
 
 # How deep the recursion may nest. L4 (an outer campaign scoring inner campaigns) is depth 1;
@@ -107,3 +110,50 @@ def instrument_depth() -> int:
     """Recursion depth of this task's cycle; 0 when it is a normal campaign."""
     mode = _MODE.get()
     return mode.depth if mode is not None else 0
+
+
+@dataclass(frozen=True)
+class MeasuredCandidate:
+    """Which candidate the OUTER loop is scoring right now.
+
+    Deliberately NOT part of :class:`InstrumentMode`: that declares what a cycle *is*
+    (hermetic properties that must hold together), while this is provenance — who asked
+    for the measurement. Conflating them would make a mode-read imply a spawn-read.
+
+    It exists because candidate identity dies at the connector seam. ``measure_sample``
+    takes ``(sample, session, pipeline_params)`` and the ``WireAdapter``/``InProcessRun``
+    protocols carry only ``(query, payload)`` — deliberately, so a connector stays
+    ignorant of the loop above it. Widening that protocol for a field only L4 reads would
+    tax ``termnorm`` and every future connector; an ambient read costs them nothing. Same
+    reasoning, and same shape, as ``_CURRENT_ROUND`` — which supplies the round half of
+    this stamp and is why the round isn't duplicated here.
+
+    Bound in the OUTER task by ``score_one_candidate``. ``run_inner_cycle`` runs in that
+    same task (its inner campaign gets a fresh task only afterwards), so the binding is
+    live at the spawn site.
+    """
+
+    idx: int
+    candidate_id: str
+    label: str
+
+
+_MEASURED: contextvars.ContextVar[MeasuredCandidate | None] = contextvars.ContextVar(
+    "measured_candidate", default=None
+)
+
+
+def set_measured_candidate(candidate: MeasuredCandidate | None) -> None:
+    """Declare the candidate the outer loop is scoring, for anything it spawns.
+
+    Set (never reset) per candidate: the loop scores them in sequence within one task, so
+    each ``set`` supersedes the last, and the value is only ever read *inside* a scoring
+    call. ``None`` at a spawn means no candidate was in scope — an origin (C0) pass, which
+    is a real answer, not a missing one.
+    """
+    _MEASURED.set(candidate)
+
+
+def measured_candidate() -> MeasuredCandidate | None:
+    """The candidate being scored in this task, or ``None`` outside candidate scoring."""
+    return _MEASURED.get()

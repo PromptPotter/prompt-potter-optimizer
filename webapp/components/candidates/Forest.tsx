@@ -9,6 +9,7 @@ import {
 import { cx } from "@/lib/cx";
 import { shortFamilyTail } from "@/lib/ids";
 import { useSelection } from "@/lib/SelectionContext";
+import { isSelectedCandidate } from "@/lib/types";
 import { useLineageOverlay } from "@/lib/lineage-overlay";
 import { heartsText } from "@/lib/derivations";
 import {
@@ -194,21 +195,20 @@ export function Forest({
   const bandTop = (l: LaneLayout): number => TOP_PAD + l.laneOffset * LANE_H - LANE_H / 2 + 2;
   const bandH = (l: LaneLayout): number => l.laneSpan * LANE_H - 4;
 
-  // Candidate click: inspect that searchpoint. A candidate in a non-selected
-  // lane first navigates the dashboard to its cycle (so inspector/samples
-  // follow, and the SelectionProvider doesn't clear the candidate on the cycle
-  // change); within the selected lane it picks/toggles the candidate directly.
+  // Candidate click: inspect that searchpoint. A node in a non-selected lane also
+  // navigates the dashboard to its cycle, so the inspector/samples follow it — but
+  // it SELECTS either way: the selection names `n.cycleId`, which is the cycle
+  // being navigated to, so the provider's cycle-change clear keeps it. This used to
+  // navigate and drop the pick on the floor, because the clear ate any candidate
+  // written across a cycle change.
   const onPickCandidate = (n: RoundNodePos): void => {
-    if (n.cycleId !== cycleId) {
-      onSelectCycle(campaignId, n.cycleId);
-      return;
-    }
-    const isSel =
-      candidate != null && candidate.round === n.round && candidate.candidate_id === n.candidateId;
+    if (n.cycleId !== cycleId) onSelectCycle(campaignId, n.cycleId);
+    const isSel = isSelectedCandidate(candidate, n.cycleId, n.round, n.candidateId);
     setSelectionForCandidate(
       isSel
         ? null
         : {
+            cycle_id: n.cycleId,
             round: n.round,
             candidate_id: n.candidateId,
             label: n.candidateLabel,
@@ -426,12 +426,7 @@ export function Forest({
                   accuracy={valOf(n)}
                   theta={thetaOf(n)}
                   metric={metric}
-                  selected={
-                    n.cycleId === cycleId &&
-                    candidate != null &&
-                    candidate.round === n.round &&
-                    candidate.candidate_id === n.candidateId
-                  }
+                  selected={isSelectedCandidate(candidate, n.cycleId, n.round, n.candidateId)}
                   onPick={onPickCandidate}
                   dimmed={divergentKeys.has(key)}
                   alt={divergenceByKey.get(key) === n.candidateId && n.candidateId !== ""}

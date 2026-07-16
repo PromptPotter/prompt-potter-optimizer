@@ -29,18 +29,26 @@ from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
     readable_dataset_dir,
 )
-from promptpotter.presentation.api.deps import StoreDep
+from promptpotter.infrastructure.store.stores import descend_store
+from promptpotter.presentation.api.deps import StoreDep, decode_descend
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
 
 
 class CampaignSummary(BaseModel):
-    campaign_id: str = Field(description="Stable campaign id ({dataset}__{origin hash})")
+    campaign_id: str = Field(description="Campaign id ({dataset}__{rand6}) — one RUN of an origin")
     dataset_name: str = Field(description="Dataset this campaign optimizes")
     label: str = Field(default="", description="Operator-supplied campaign label")
     status: str = Field(description="Status of the campaign's run (its root cycle)")
     created_at: str = Field(description="ISO 8601 creation timestamp")
-    root_cycle_id: str = Field(description="The campaign's root cycle id")
+    root_cycle_id: str = Field(
+        description=(
+            "The campaign's root cycle id — `cycle_<root_content_hash>`, so it IS the "
+            "campaign's ORIGIN identity. Campaigns on one declaration share it and differ "
+            "only in the random `campaign_id` suffix, which is what makes them separate RUNS "
+            "of that origin; the sidebar groups the forest by this key."
+        )
+    )
     backend_id: str = Field(default="", description="Backend this campaign optimizes against")
     backend_type: str = Field(
         default="",
@@ -181,8 +189,9 @@ def list_campaigns(
         description="Operator visibility filter — 'active' (default, includes "
         "in-progress 'checkin' campaigns), 'archived', 'deleted', 'checkin', or 'all'",
     ),
+    descend: str | None = Query(None),
 ) -> CampaignListResponse:
-    """Every campaign on disk owned by the caller, newest first.
+    """Every campaign in one store owned by the caller, newest first.
 
     Filters: optional ``?dataset=`` for one dataset, ``?lifecycle=`` for the
     visibility intent (defaults to ``active``; ``archived`` and ``deleted`` drop
@@ -192,15 +201,22 @@ def list_campaigns(
     them, so origin/campaign-backed lists that ask the store for ``active``
     directly stay free of the empty-hash check-ins. Cross-user campaigns are
     invisible — the ``owner_user_id`` gate filters on ``store.identity.user_id``.
+
+    ``descend`` names the chain of cycles to descend INTO (see ``GET /cycles``);
+    absent/empty is the tenant's own tree. It is the twin of the cycle list: a
+    forest is campaigns × cycles, and the sidebar groups runs by
+    ``root_cycle_id`` (their origin), so BOTH lists must be available at every
+    depth for one tree builder to serve L4, L5, and the top level alike.
     """
     if lifecycle not in _LIFECYCLE_FILTERS:
         raise PayloadInvalidError(
             f"Invalid lifecycle filter: {lifecycle!r}. Expected one of {_LIFECYCLE_FILTERS}."
         )
-    owner = str(store.identity.user_id)
-    campaigns = store.campaigns.list_campaigns(dataset, lifecycle=lifecycle, owner_user_id=owner)
+    leaf = descend_store(store, decode_descend(descend))
+    owner = str(leaf.identity.user_id)
+    campaigns = leaf.campaigns.list_campaigns(dataset, lifecycle=lifecycle, owner_user_id=owner)
     if lifecycle == "active":
-        campaigns += store.campaigns.list_campaigns(
+        campaigns += leaf.campaigns.list_campaigns(
             dataset, lifecycle="checkin", owner_user_id=owner
         )
     campaigns.sort(key=lambda c: c.created_at, reverse=True)
@@ -209,8 +225,8 @@ def list_campaigns(
         campaigns=[
             _campaign_summary(
                 c,
-                store.campaigns.run_status(c.campaign_id, c.root_cycle_id),
-                _backend_type(store, c.dataset_name, memo),
+                leaf.campaigns.run_status(c.campaign_id, c.root_cycle_id),
+                _backend_type(leaf, c.dataset_name, memo),
             )
             for c in campaigns
         ],

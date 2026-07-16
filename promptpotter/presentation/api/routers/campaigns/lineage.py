@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import Request, Response
+from fastapi import Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -30,7 +30,8 @@ from promptpotter.domain.scoring import RoundScorer
 from promptpotter.infrastructure.store import cycle_dir_for
 from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.infrastructure.store.layout import sibling_kind
-from promptpotter.presentation.api.deps import StoreDep
+from promptpotter.infrastructure.store.stores import descend_store
+from promptpotter.presentation.api.deps import StoreDep, decode_descend
 from promptpotter.presentation.api.routers.campaigns._conditional import (
     client_seen_at_or_after,
     http_date,
@@ -468,6 +469,7 @@ def get_campaign_lineage(
     campaign_id: str,
     lens: str | None = None,
     samples: str | None = None,
+    descend: str | None = Query(None),
 ) -> Response:
     """Aggregated lineage for the whole campaign.
 
@@ -475,6 +477,13 @@ def get_campaign_lineage(
     fork/topology facts (supplemented by a ledger scan for fork-cut rounds when
     the index doesn't carry them) and ``dashboard.json`` for the round state
     (completed + in-flight). The tree is built from each cycle's ``parent_cycle_id``.
+
+    ``descend`` names the chain of cycles to descend INTO before resolving
+    ``campaign_id`` (``~``-joined ``campaign::cycle``, as on ``/cycles``);
+    absent/empty is the caller's own tree. An L4 inner campaign lives in its
+    spawning cycle's ``.inner/`` sandbox, which is structurally a normal projects
+    tree — so one hop reads an inner campaign's lineage with the same code, and
+    L5+ nests the same way.
 
     An optional **lens** selects a divergence overlay. ``lens=score:<formula>`` = an
     alternative scoring formula (where that criterion would have forked the record);
@@ -486,17 +495,16 @@ def get_campaign_lineage(
     ignored for an ``abort:`` lens. No lens + no samples ⇒ overlay empty, lineage
     byte-identical to the raw read.
     """
-    if store.campaigns.load_campaign(campaign_id) is None:
+    leaf = descend_store(store, decode_descend(descend))
+    if leaf.campaigns.load_campaign(campaign_id) is None:
         raise NotFoundError(f"Campaign not found: {campaign_id}")
-    enum_entries = [
-        e for e in store.campaigns.enumerate_cycles() if e["campaign_id"] == campaign_id
-    ]
+    enum_entries = [e for e in leaf.campaigns.enumerate_cycles() if e["campaign_id"] == campaign_id]
 
     # Conditional fast-path — only on the UNMASKED poll. A masked body depends on
     # `lens`/`samples`, which `If-Modified-Since` can't capture, so those always
     # recompute; the 2 s webapp poll never carries a lens.
     mtime_epoch = _lineage_mtime(
-        [cycle_dir_for(store.base_dir, campaign_id, e["cycle_id"]) for e in enum_entries]
+        [cycle_dir_for(leaf.base_dir, campaign_id, e["cycle_id"]) for e in enum_entries]
     )
     headers = {"Last-Modified": http_date(mtime_epoch)} if mtime_epoch is not None else {}
     if (
@@ -523,7 +531,7 @@ def get_campaign_lineage(
     out_cycles: list[CampaignLineageCycle] = []
     for entry in sorted(enum_entries, key=lambda e: e["cycle_id"]):
         cid = entry["cycle_id"]
-        cdir = cycle_dir_for(store.base_dir, campaign_id, cid)
+        cdir = cycle_dir_for(leaf.base_dir, campaign_id, cid)
         index = read_json_optional(cdir / "index.json")
         if not isinstance(index, dict):
             out_cycles.append(

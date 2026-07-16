@@ -77,14 +77,14 @@ export function decodeCyclePath(s: string): CyclePath | null {
   return hops.length ? hops : null;
 }
 
-// The root hop — what chat, selection, dataset, and files bind to (the top-level
-// cycle that owns the operator conversation).
+// The root hop — what chat, dataset, and files bind to (the top-level cycle that
+// owns the operator conversation).
 export function pathRoot(path: CyclePath): CycleHop {
   return path[0]!;
 }
 
-// The leaf hop — what the dashboard stream re-roots to (the inner cycle when
-// drilled in, else the root).
+// The leaf hop — what the dashboard stream and the selection axes re-root to (the
+// inner cycle when drilled in, else the root).
 export function pathLeaf(path: CyclePath): CycleHop {
   return path[path.length - 1]!;
 }

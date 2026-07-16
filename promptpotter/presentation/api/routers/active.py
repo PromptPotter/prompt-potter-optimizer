@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
@@ -27,10 +27,12 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.infrastructure.store import read_active_pointer
 from promptpotter.infrastructure.store.io import read_json
+from promptpotter.infrastructure.store.stores import descend_store
 from promptpotter.presentation.api.deps import (
     IdentityDep,
     JobRegistryDep,
     StoreDep,
+    decode_descend,
 )
 from promptpotter.shared.errors import NotFoundError
 
@@ -62,6 +64,36 @@ def get_active_session(store: StoreDep) -> ActiveSessionResponse:
         session_id=session_id,
         campaign_id=campaign_id,
         cycle_id=cycle_id,
+    )
+
+
+class SpawnedBy(BaseModel):
+    """The outer work-item an L4 inner cycle was spawned to measure.
+
+    Stamped at inner-cycle mint (``runner/inner/cycle.py``) — an inner campaign's own
+    ids carry no outer provenance (random ``campaign_id``, ``cycle_id`` hashed from its
+    OWN origin), so without this the fan-out can only be numbered by launch order.
+    """
+
+    outer_cycle_id: str = Field(description="The outer cycle that owns this inner sandbox")
+    round: int | None = Field(
+        default=None,
+        description="Outer round; 0 is the origin (C0). Null when the spawn came from outside any round (the noise-floor diagnostic).",
+    )
+    candidate_idx: int | None = Field(
+        default=None, description="Position in the outer round's population; null for the origin."
+    )
+    candidate_id: str | None = Field(
+        default=None,
+        description="The outer candidate's `OptSearchPoint.lineage.id` — stable across rounds; null for the origin.",
+    )
+    candidate_label: str | None = Field(
+        default=None,
+        description="Canonical label (`C0` for the origin, else `C{round}.{idx+1}`) — the same string the round file and console use.",
+    )
+    task: str | None = Field(
+        default=None,
+        description="The panel cell this run measured — the outer query, e.g. `justlogic-d23/seed-0` (`inner_tasks.json::tasks[].id`). The candidate fields do NOT identify a run: every task runs for every candidate, so one candidate's spawns are as many as the panel has cells and are told apart only by this. Null on a run minted before the stamp existed.",
     )
 
 
@@ -99,6 +131,16 @@ class CycleListEntry(BaseModel):
         default=False,
         description="True once an operator manually intervened (e.g. skip-searchpoint); the cycle is babysat and no longer purely reproducible. Drives the 'babysat' badge; orthogonal to run_phase.",
     )
+    spawned_by: SpawnedBy | None = Field(
+        default=None,
+        description=(
+            "Which outer work-item asked for this cycle, when it is an L4 inner "
+            "measurement; null for an ordinary campaign. Lets the sidebar name an inner "
+            "run by the candidate that produced it instead of by launch order. Null on "
+            "inner cycles minted before the stamp existed — they fall back to their "
+            "origin hash."
+        ),
+    )
 
 
 class CyclesResponse(BaseModel):
@@ -113,14 +155,28 @@ class CyclesResponse(BaseModel):
 
 
 @active_router.get("/cycles", response_model=CyclesResponse, tags=["Cycles"])
-def get_cycles(store: StoreDep) -> CyclesResponse:
-    """Every cycle on disk for the tenant + active pointer (one round-trip for the picker)."""
+def get_cycles(store: StoreDep, descend: str | None = Query(None)) -> CyclesResponse:
+    """Every cycle in one store + that store's active pointer — one round-trip per forest.
+
+    ``descend`` names the chain of cycles to descend INTO (``~``-joined
+    ``campaign::cycle``, mirroring the webapp's ``CyclePath``); absent/empty is the
+    tenant's own tree. Each hop enters that cycle's ``.inner/`` sandbox, so ONE
+    route serves the top-level forest, an L4 cycle's inner fan-out, or an L5+
+    descendant — a sandbox is structurally a normal projects tree, so the read is
+    byte-identical at every depth (:func:`descend_store`).
+
+    The pointer is the store's own: at the top level the active session, inside a
+    sandbox the inner loop running right now. It is reported RAW — liveness is
+    ``CycleListEntry.run_phase``'s job, and a consumer asking "is the pointed cycle
+    live?" reads that off ``cycles[]`` rather than having this route re-derive it.
+    """
+    leaf = descend_store(store, decode_descend(descend))
     _, active_cmp, active_cid = read_active_pointer(
-        store.tenant_id, projects_root=store.projects_root
+        leaf.tenant_id, projects_root=leaf.projects_root
     )
-    entries = store.campaigns.enumerate_cycles()
+    entries = leaf.campaigns.enumerate_cycles()
     return CyclesResponse(
-        tenant_id=store.tenant_id,
+        tenant_id=leaf.tenant_id,
         active_campaign_id=active_cmp or None,
         active_cycle_id=active_cid or None,
         cycles=[CycleListEntry(**e) for e in entries],

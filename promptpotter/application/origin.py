@@ -16,8 +16,8 @@ from promptpotter.domain.opt_search_point import (
     OptSearchPoint,
     overlay_is_locked_axis_only,
 )
-from promptpotter.domain.results import RoundOrigin
-from promptpotter.domain.run_records import CycleSeed
+from promptpotter.domain.results import RoundOrigin, candidate_label
+from promptpotter.domain.run_records import CandidateMintedRecord, CycleSeed
 from promptpotter.domain.sample import Sample
 
 if TYPE_CHECKING:
@@ -461,6 +461,22 @@ async def prepare_scoring_context(
     # ci=0/ct=1 ⇒ dashboard ticks per-sample during origin like L1.
     if listener is not None:
         emit_phase(listener.on_phase, CampaignPhase.ORIGIN, "enter", round=0)
+
+    # C0 is a minted candidate like any other, and it is the ONE the ledger could never
+    # name: `on_candidate_scored` below passes a raw aggregate, not a `ScoredCandidate`,
+    # so only `emit_origin_round` — at round close — ever wrote "C0" down.
+    if (ledger := session.state.ledger) is not None:
+        ledger.append(
+            CandidateMintedRecord(
+                round=0,
+                idx=0,
+                candidate_id=resolved_origin.lineage.id,
+                parent_id=resolved_origin.lineage.parent_id,
+                label=candidate_label(0, 0),
+                changes_description=resolved_origin.lineage.changes_description,
+                source=resolved_origin.lineage.source or "origin",
+            )
+        )
 
     from promptpotter.application.optimization.l1.score.signal_effect import (
         is_transient_scoring_abort,

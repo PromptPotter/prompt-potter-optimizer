@@ -20,7 +20,8 @@ from promptpotter.application.optimization.validators.l1_strict import (
     detect_invariants,
 )
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent, emit_phase
-from promptpotter.domain.results import CandidateProposal
+from promptpotter.domain.results import CandidateProposal, candidate_label
+from promptpotter.domain.run_records import CandidateMintedRecord, LLMCallRecord
 
 # Module-level alias for test monkeypatching.
 from promptpotter.infrastructure.tracing.bridge import observed_node
@@ -89,8 +90,6 @@ async def generate_or_load_candidates(
             # trail + dashboard see the node, without lying about a real
             # LLM call having happened.
             if (_ledger := session.state.ledger) is not None:
-                from promptpotter.domain.run_records import LLMCallRecord
-
                 _ledger.append(
                     LLMCallRecord(
                         node="l1_generate",
@@ -149,6 +148,21 @@ async def generate_or_load_candidates(
             round_num,
             [cp.model_dump() for cp in candidates],
         )
+    # Identity, the moment it exists — a round that never closes still names its
+    # candidates. The replay branch above skips this: its record is already on the ledger.
+    if (ledger := session.state.ledger) is not None:
+        for idx, cp in enumerate(candidates):
+            ledger.append(
+                CandidateMintedRecord(
+                    round=round_num,
+                    idx=idx,
+                    candidate_id=cp.osp.lineage.id,
+                    parent_id=cp.osp.lineage.parent_id,
+                    label=candidate_label(round_num, idx),
+                    changes_description=cp.osp.lineage.changes_description,
+                    source=cp.osp.lineage.source,
+                )
+            )
 
     emit_phase(
         on_phase,

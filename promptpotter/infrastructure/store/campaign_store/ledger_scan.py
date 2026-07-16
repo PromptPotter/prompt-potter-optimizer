@@ -1,4 +1,4 @@
-"""Physical-file ledger scans — the highest closed round, and the cycle seed.
+"""Physical-file ledger scans — the highest closed round, the cycle seed, the candidates.
 
 Both read through ``iter_jsonl``, the declared read-model primitive: corruption-
 tolerant (a torn trailing line degrades to "not there") but NOT failure-tolerant.
@@ -18,7 +18,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from promptpotter.domain.run_records import CycleSeed
+from promptpotter.domain.run_records import CandidateMintedRecord, CycleSeed, LedgerCandidate
 from promptpotter.infrastructure.store.read_model import iter_jsonl
 
 
@@ -59,4 +59,74 @@ def scan_ledger_cycle_seed(ledger_path: Path) -> CycleSeed | None:
     return found
 
 
-__all__ = ["scan_ledger_cycle_seed", "scan_ledger_max_round_complete"]
+def scan_ledger_candidates(ledger_path: Path) -> list[LedgerCandidate]:
+    """The cycle's candidate tier, folded out of ``ledger_path`` in ``(round, idx)`` order.
+
+    Independent of round CLOSE, which is the whole point: a cycle whose producer died
+    mid-round still names the candidates it minted, and at L4 the inner campaigns they
+    spawned still have a parent to hang off.
+
+    A fold over TWO events, because identity and measurement are two facts arriving at two
+    times: ``CandidateMintedRecord`` names the candidate, ``candidate_scored`` gives it a
+    number. Either alone yields a candidate — a minted one not yet scored is `minted`, and
+    a cycle that pre-dates the mint record is still named by its score. Re-runs of the same
+    ``(round, idx)`` overwrite, so a rewind's re-mint wins, as in ``scan_ledger_cycle_seed``.
+    """
+    found: dict[tuple[int, int], dict[str, object]] = {}
+
+    def _merge(key: tuple[int, int], **fields: object) -> None:
+        acc = found.setdefault(key, {"round": key[0], "idx": key[1]})
+        acc.update({k: v for k, v in fields.items() if v is not None})
+
+    for rec in iter_jsonl(ledger_path):
+        kind = rec.get("record_type")
+        if kind == "candidate_minted":
+            try:
+                minted = CandidateMintedRecord.model_validate(rec)
+            except ValidationError:
+                continue
+            _merge(
+                (minted.round, minted.idx),
+                candidate_id=minted.candidate_id,
+                parent_id=minted.parent_id,
+                label=minted.label,
+                changes_description=minted.changes_description,
+                source=minted.source,
+            )
+        elif kind == "snapshot" and rec.get("event") == "candidate_scored":
+            rnd, idx = rec.get("round"), rec.get("candidate_idx")
+            scores = (rec.get("payload") or {}).get("scores")
+            if not isinstance(rnd, int) or not isinstance(idx, int):
+                continue
+            if not isinstance(scores, dict):
+                continue
+            # `(round, idx)` is the join, NOT the id. The origin deposits its aggregate
+            # through this same event carrying no id and no label — anonymous as identity,
+            # but it is still round 0's score, and the mint record above supplies the name.
+            _merge(
+                (rnd, idx),
+                candidate_id=scores.get("candidate_id"),
+                label=scores.get("label"),
+                changes_description=scores.get("changes_description"),
+                accuracy=scores.get("accuracy"),
+                composite_fitness=scores.get("composite_fitness"),
+                state="measured",
+            )
+
+    # An `id` + a `label` are what make a candidate a NODE. A fold that saw neither event
+    # in full (a torn line, a `candidate_started` with no id) yields nothing rather than a
+    # nameless row — an absent node is honest, a nameless one is not.
+    out: list[LedgerCandidate] = []
+    for key in sorted(found):
+        try:
+            out.append(LedgerCandidate.model_validate(found[key]))
+        except ValidationError:
+            continue
+    return out
+
+
+__all__ = [
+    "scan_ledger_candidates",
+    "scan_ledger_cycle_seed",
+    "scan_ledger_max_round_complete",
+]

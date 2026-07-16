@@ -36,10 +36,17 @@ import { useAuth } from "@/lib/auth-context";
 import { useFetch } from "@/lib/hooks/useFetch";
 import {
   HEADLINE_METRICS,
+  cellsForCandidate,
   headlineMetricLabel,
+  indexForks,
+  panelCellLabel,
   sortedRounds,
   type HeadlineMetric,
 } from "@/lib/derivations";
+import { rootCycleId, shortFamilyTail } from "@/lib/ids";
+import { useForest } from "@/lib/hooks/useForest";
+import type { CycleListEntry } from "@/lib/api";
+import { isSelectedCandidate } from "@/lib/types";
 import { useWorkspace } from "@/lib/workspace";
 import { useLineage } from "./useLineage";
 import { useCandidateViews } from "./useCandidateViews";
@@ -77,6 +84,23 @@ const METRIC_GLYPH: Record<HeadlineMetric, string> = {
   ability: "θ",
 };
 
+// Everything a fork/run bar cannot answer: election aggregates are per-round
+// numbers over a candidate population, which a whole course isn't.
+const NO_ELECTION = {
+  composite: null,
+  theta: null,
+  theta_se: null,
+  compositeCiLo: null,
+  compositeCiHi: null,
+  cumulative_accuracy: null,
+  evaluators: {},
+  is_winner: false,
+  n_samples: null,
+  n_expected: null,
+  source: "history",
+  whatif: null,
+} as const;
+
 // `heading` rows are optgroup labels; the rest are pickable. One flat list, so the
 // menu markup stays a map() instead of nested groups.
 const LENS_OPTIONS: readonly { value?: string; label?: string; heading?: string }[] = [
@@ -93,7 +117,18 @@ export function CandidatesCard() {
   // Self-sourced: live snapshot from the cycle stream, (campaignId, cycleId)
   // from the workspace. `cycleId` scopes the one-shot evaluator-seed.
   const { dash, isLive } = useDashboard();
-  const { campaignId, cycleId, selectCycle: onSelectCycle } = useWorkspace();
+  const {
+    campaignId,
+    cycleId,
+    leafCampaignId,
+    leafCycleId,
+    leafIsL4,
+    viewedPath,
+    viewedCandidate,
+    cycles,
+    selectCycle: onSelectCycle,
+    selectCyclePath,
+  } = useWorkspace();
   // Shared candidate selection — driving any of {bar, dendrogram node, forest
   // stub} sets this context slot; every other surface re-renders highlighted, and
   // the round axis in the optimizer card follows to the round that produced it.
@@ -317,13 +352,92 @@ export function CandidatesCard() {
   const overlay = useLineageOverlay();
   const { lens, setLens, maskActive, maskLabel, whatifActive } = overlay;
 
-  const views = useCandidateViews(
+  const candidateViews = useCandidateViews(
     diagByLabel,
     sampleSet,
     overlay.sampleSetByCandidate,
     dash,
     overlay.lensValueByCandidate,
     cycleId,
+  );
+
+  // ── ONE RULE: the bars are the CHILDREN of the VIEWED node — the node the tree on the
+  // left is parked on, and the same children it draws under that node.
+  //
+  //   course viewed    → its candidates + one bar per fork cut from it. A FORK course
+  //                      drops its borrowed C0 (it replays the candidate it was cut from —
+  //                      that bar lives on the parent), same rule as its sidebar row.
+  //   L4 candidate     → the inner runs filed under it (`spawned_by` join, the sidebar's
+  //                      own filing).
+  //   plain candidate  → no children of its own; the bars stay on its course.
+  //
+  // The viewed node is `viewedPath` + `viewedCandidate` — NAVIGATION, written only by the
+  // tree. It is deliberately not `selectedCandidate` (INSPECTION, written by a bar click):
+  // one slot for both made the chart its own input, so clicking a bar re-plotted the chart
+  // out from under the cursor. Fork/run bars carry SERVED numbers, never recomputed.
+  const leafIsRoot =
+    leafCycleId != null &&
+    (cycles.find(
+      (c) => c.campaign_id === leafCampaignId && c.cycle_id === leafCycleId,
+    )?.is_root ??
+      rootCycleId(leafCycleId) === leafCycleId);
+  const candidateRows = useMemo(
+    () =>
+      leafIsRoot
+        ? candidateViews
+        : candidateViews.filter((v) => !(v.round === 0 && v.label === "C0")),
+    [candidateViews, leafIsRoot],
+  );
+
+  const forkChildren = useMemo<CycleListEntry[]>(() => {
+    if (!leafCampaignId || !leafCycleId) return [];
+    const own = cycles.filter((c) => c.campaign_id === leafCampaignId);
+    return indexForks(own).get(leafCycleId) ?? [];
+  }, [cycles, leafCampaignId, leafCycleId]);
+  const forkViews = useMemo<CandidateView[]>(() => {
+    const lastRound = candidateRows.at(-1)?.round ?? 0;
+    return forkChildren.map<CandidateView>((f, i) => ({
+      ...NO_ELECTION,
+      key: `fork|${f.cycle_id}`,
+      round: lastRound,
+      idx: i,
+      candidate_id: f.cycle_id,
+      label: shortFamilyTail(f.cycle_id),
+      accuracy: f.best_accuracy ?? f.origin_accuracy,
+      started: (f.best_accuracy ?? f.origin_accuracy) != null,
+    }));
+  }, [forkChildren, candidateRows]);
+  const forkKeys = useMemo(
+    () => new Set(forkViews.map((v) => v.key)),
+    [forkViews],
+  );
+
+  // The VIEWED L4 candidate's runs — from the course's sandbox, the same store the
+  // sidebar's inner rows read. Null = the tree is parked on the course, so the bars are
+  // its candidates.
+  const inner = useForest(viewedPath ?? [], leafIsL4 && viewedPath != null);
+  const viewedRound = useMemo(
+    () => candidateViews.find((v) => v.label === viewedCandidate)?.round ?? 0,
+    [candidateViews, viewedCandidate],
+  );
+  const runBars = useMemo<CandidateView[] | null>(() => {
+    if (!leafIsL4 || !viewedCandidate) return null;
+    return cellsForCandidate(inner.cycles, viewedCandidate).map<CandidateView>((c, i) => ({
+      ...NO_ELECTION,
+      key: `run|${c.campaign_id}|${c.cycle_id}`,
+      round: viewedRound,
+      idx: i,
+      candidate_id: c.cycle_id,
+      // An unstamped run has no cell to name it — its dataset is what's known.
+      label: c.spawned_by?.task ? panelCellLabel(c.spawned_by.task) : c.dataset_name,
+      accuracy: c.best_accuracy ?? c.origin_accuracy,
+      started: c.best_accuracy != null || c.origin_accuracy != null,
+    }));
+  }, [leafIsL4, viewedCandidate, viewedRound, inner.cycles]);
+
+  const views = useMemo(
+    () => runBars ?? (forkViews.length ? [...candidateRows, ...forkViews] : candidateRows),
+    [runBars, candidateRows, forkViews],
   );
 
   // Only what the BARS need from the lineage: the metric they paint, the fork
@@ -351,14 +465,20 @@ export function CandidatesCard() {
   // force a chart.update() on every 2s poll tick (and defeat FitnessChart's memo).
   const onSelect = useCallback(
     (v: CandidateView | null) => {
-      if (!v) {
+      if (!v || !leafCycleId) {
         setSelectionForCandidate(null);
         return;
       }
-      // Atomic candidate+round write — the round axis follows the candidate's
-      // round, so picking a candidate here re-anchors the optimizer card on the
-      // round that produced it.
+      // A bar click INSPECTS. It never navigates — the chart must not move under the
+      // cursor that clicked it, and the tree on the left is the only navigator. A course
+      // bar (a fork, an inner run) is no exception: it is a measured thing with data
+      // under it like any other, so it lights up and reports what it measured.
+      //
+      // Atomic candidate+round write — the round axis follows the candidate's round, so
+      // picking one re-anchors the optimizer card on the round that produced it. The bars
+      // plot `dash`, which is the LEAF's, so the leaf cycle produced this candidate.
       setSelectionForCandidate({
+        cycle_id: leafCycleId,
         round: v.round,
         candidate_id: v.candidate_id,
         label: v.label,
@@ -366,7 +486,7 @@ export function CandidatesCard() {
         is_winner: v.is_winner,
       });
     },
-    [setSelectionForCandidate],
+    [setSelectionForCandidate, leafCycleId],
   );
 
   // The ⑂ click: free the hierarchy. The bars plot one cycle, so a sibling has
@@ -385,14 +505,10 @@ export function CandidatesCard() {
 
   const selectedKey = useMemo(
     () =>
-      selectedCandidate
-        ? (views.find(
-            (v) =>
-              v.round === selectedCandidate.round &&
-              v.candidate_id === selectedCandidate.candidate_id,
-          )?.key ?? null)
-        : null,
-    [views, selectedCandidate],
+      views.find((v) =>
+        isSelectedCandidate(selectedCandidate, leafCycleId, v.round, v.candidate_id),
+      )?.key ?? null,
+    [views, selectedCandidate, leafCycleId],
   );
 
   // Mask divergence boundary → the bar index where the active lens first parts
@@ -402,6 +518,8 @@ export function CandidatesCard() {
   // active or nothing diverges.
   const divergenceBoundary = useMemo(() => {
     if (!overlay.maskActive) return null;
+    // Run bars all sit inside ONE round — no round boundary to draw.
+    if (runBars) return null;
     const { points, subtree } = divergenceRoundsFor(overlay, cycleId);
     let firstRound = Infinity;
     for (const r of points) firstRound = Math.min(firstRound, r);
@@ -409,7 +527,7 @@ export function CandidatesCard() {
     if (!Number.isFinite(firstRound)) return null;
     const idx = views.findIndex((v) => v.round >= firstRound);
     return idx >= 0 ? idx : null;
-  }, [overlay, cycleId, views]);
+  }, [overlay, cycleId, views, runBars]);
 
   // The bar of the candidate currently accumulating samples — it blinks while
   // live. The scoring candidate is `dash.candidate` ("C2.3/4"); gate on the
@@ -462,7 +580,19 @@ export function CandidatesCard() {
       // VIEW switch isn't here at all: it lives down beside the tree it switches.
       title={
         <Toolbar className="cand-toolbar">
-          <span className="cand-title">Candidates</span>
+          {/* Run-bars mode names the viewed candidate and is the way back up a tier. */}
+          {runBars && viewedCandidate && viewedPath ? (
+            <button
+              type="button"
+              className="cand-title cand-crumb"
+              onClick={() => selectCyclePath(viewedPath, null)}
+              title="Back to this course's candidates"
+            >
+              ‹ {viewedCandidate} · runs
+            </button>
+          ) : (
+            <span className="cand-title">Candidates</span>
+          )}
           {maskActive && (
             <Badge
               tone="danger"
@@ -596,19 +726,23 @@ export function CandidatesCard() {
               have no siblings at all, so it has nothing to show and nobody should
               be paying header width for it. */}
           <div className="cand-tree-row">
-            <DendrogramStrip
-              views={views}
-              plot={plot}
-              metric={metric}
-              selectedKey={selectedKey}
-              onSelect={onSelect}
-              forkedFrom={forkedFrom}
-              onFreeHierarchy={onFreeHierarchy}
-            />
+            {/* Run bars are sibling courses — no candidate descent to draw. */}
+            {!runBars && (
+              <DendrogramStrip
+                views={views}
+                plot={plot}
+                metric={metric}
+                selectedKey={selectedKey}
+                onSelect={onSelect}
+                forkedFrom={forkedFrom}
+                forkKeys={forkKeys}
+                onFreeHierarchy={onFreeHierarchy}
+              />
+            )}
             {forestToggle}
           </div>
         </div>
-        {showWhatIf && (
+        {showWhatIf && !runBars && (
           <WhatIfGrid
             rows={rows}
             selected={selected}

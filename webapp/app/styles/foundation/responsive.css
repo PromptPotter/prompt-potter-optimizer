@@ -160,7 +160,7 @@
    focus-zoom — the sweep applies that per-input, this block keeps the
    touch region honest in the meantime. */
 @media (pointer:coarse){
-  button:not(.btn-tight):not(.unit-library-chip):not(.account-menu-item):not(.account-nav-item),
+  button:not(.btn-tight):not(.account-menu-item):not(.account-nav-item),
   a[role="button"],
   input[type="submit"],
   input[type="button"],

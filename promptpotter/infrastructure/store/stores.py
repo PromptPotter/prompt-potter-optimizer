@@ -1,7 +1,14 @@
-"""Composite ``Stores`` bundle + content-addressed ``OptimizerCallCache``.
+"""Composite ``Stores`` bundle + content-addressed ``OptimizerCallCache``, and the
+descent that reaches a nested one.
 
 Cache is SHA-256-keyed, cross-cycle/cross-fork; file-per-record at
 ``<base_dir>/archive/optimizer_calls/{hash}.json`` (mirror of MeasurementArchive).
+
+:func:`inner_sandbox_store` / :func:`descend_store` / :func:`resolve_cycle_path` live
+here because they CONSTRUCT stores — they are :func:`build_stores` re-entered at a
+deeper root, not request plumbing. They spent their first life in the FastAPI dep
+module, which made a `store/` view unable to recurse without an
+``infrastructure -> presentation`` import.
 """
 
 from __future__ import annotations
@@ -13,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.identity import TenantId
 from promptpotter.infrastructure.store.backend_store import BackendStore
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
@@ -20,6 +28,7 @@ from promptpotter.infrastructure.store.checkin_draft_store import CheckinDraftSt
 from promptpotter.infrastructure.store.diagnostic_run_store import DiagnosticRunStore
 from promptpotter.infrastructure.store.io import (
     read_json_optional,
+    validate_path_component,
     write_json,
 )
 from promptpotter.infrastructure.store.layout import (
@@ -31,6 +40,7 @@ from promptpotter.infrastructure.store.session_store import SessionStore
 from promptpotter.infrastructure.store.sweep_store import SweepStore
 from promptpotter.infrastructure.store.tenant_dataset_store import TenantDatasetStore
 from promptpotter.infrastructure.store.user_store import UserStore
+from promptpotter.shared.errors import BadRequestError, NotFoundError
 from promptpotter.shared.hashing import HASH_TRUNCATE
 from promptpotter.shared.identity import IdentityContext
 
@@ -187,4 +197,80 @@ def build_stores(
     )
 
 
-__all__ = ["OptimizerCallCache", "Stores", "build_stores", "hash_call"]
+def inner_sandbox_store(store: Stores, outer_cycle_id: str) -> Stores | None:
+    """A :class:`Stores` rooted at *outer_cycle_id*'s inner sandbox, or ``None``.
+
+    L4 (``promptpotter-self``) runs each candidate as a real inner campaign under
+    a flat, off-registry sandbox ``<workspace>/.inner/<outer_cycle_id>`` (keyed on
+    the outer cycle id alone — see ``runner/inner.publish_inner_spawn_context``).
+    That sandbox is structurally a normal projects tree, so pointing
+    :func:`build_stores` at it lets every existing read work verbatim. ``None`` when
+    the cycle spawned no inner campaigns (non-L4, or the loop hasn't recursed
+    yet) — callers degrade to an empty list / 404, never an error.
+
+    Anchored on ``shared_root`` — the REAL workspace root, invariant across depth —
+    exactly as the writer is, and carried into the sandbox store for the same
+    reason. ``projects_root`` is NOT a valid anchor: inside a sandbox it already IS
+    ``.inner/<parent>``, so an L5 hop would read ``.inner/.inner/<id>`` while the
+    writer wrote ``.inner/<id>``, and the sandbox's ``archive`` + ``optimizer_calls``
+    would root under the sandbox instead of staying tenant-global. The two roots
+    coincide at depth 1, which is why neither had fired.
+    """
+    validate_path_component(outer_cycle_id)
+    sandbox_root = store.shared_root.parent / ".inner" / outer_cycle_id
+    if not (sandbox_root / store.tenant_id).is_dir():
+        return None
+    return build_stores(store.identity, projects_root=sandbox_root, shared_root=store.shared_root)
+
+
+def descend_store(store: Stores, hops: CyclePath) -> Stores:
+    """Fold ``.inner/<cycle_id>`` over *hops* — THE recursive step, and the one
+    place a nested store is reached.
+
+    Each hop descends INTO that hop's cycle, so the returned store is the one whose
+    tree contains the hop chain's last sandbox; ``()`` is the caller's own store.
+    :func:`inner_sandbox_store` is re-entrant, so depth is unbounded by construction
+    (L4, L5, … all fold identically). Every component is char-validated before any
+    filesystem touch (400 on bad chars); a missing sandbox is a 404.
+    """
+    cur = store
+    for hop in hops:
+        try:
+            validate_path_component(hop.campaign_id)
+            validate_path_component(hop.cycle_id)
+        except ValueError as exc:
+            raise BadRequestError(str(exc)) from exc
+        nxt = inner_sandbox_store(cur, hop.cycle_id)
+        if nxt is None:
+            raise NotFoundError(f"No inner sandbox for cycle '{hop.cycle_id}'")
+        cur = nxt
+    return cur
+
+
+def resolve_cycle_path(store: Stores, path: CyclePath) -> tuple[Stores, CycleHop]:
+    """Resolve a :data:`CyclePath` (root → leaf) to ``(Stores, leaf)``.
+
+    What makes an inner cycle addressable exactly like a top-level one: the leaf
+    names an entity, and every hop before it is a descent (:func:`descend_store`).
+    Hop 0 is a cycle in the caller's own tree.
+    """
+    if not path:
+        raise BadRequestError("empty cycle path")
+    leaf = path[-1]
+    try:
+        validate_path_component(leaf.campaign_id)
+        validate_path_component(leaf.cycle_id)
+    except ValueError as exc:
+        raise BadRequestError(str(exc)) from exc
+    return descend_store(store, path[:-1]), leaf
+
+
+__all__ = [
+    "OptimizerCallCache",
+    "Stores",
+    "build_stores",
+    "descend_store",
+    "hash_call",
+    "inner_sandbox_store",
+    "resolve_cycle_path",
+]

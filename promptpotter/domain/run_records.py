@@ -16,6 +16,8 @@ from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.shared.clock import utcnow_iso
 
 __all__ = [
+    "CandidateMintedRecord",
+    "CandidateState",
     "CommandAckRecord",
     "CommandRecord",
     "ConfigOverrides",
@@ -29,6 +31,7 @@ __all__ = [
     "LLMCallProgressRecord",
     "LLMCallRecord",
     "LLMCallStartRecord",
+    "LedgerCandidate",
     "OperatorSweepFile",
     "PhaseRecord",
     "ResumeCheckpointKind",
@@ -447,6 +450,58 @@ class CycleSeed(BaseModel):
         return self
 
 
+class CandidateMintedRecord(BaseModel):
+    """A candidate's IDENTITY, written the moment it is minted — before it is scored.
+
+    The lineage tier used to exist only where a round CLOSED: `rounds/round_NNNN.json` and
+    its `dashboard.json` projection are both written by `close_round`, so a round whose
+    producer died mid-flight left its candidates unnameable even though their work — and
+    at L4 their whole inner campaigns — sat finished on disk. Identity is not a
+    measurement and must not share the measurement's durability.
+
+    `label` rides here because it is a MINTED fact, not a read-time one. Re-deriving
+    `C{round}.{idx+1}` from list position at every read is what forced the
+    `spawned_by.candidate_label` string join and the webapp's positional fallback.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    record_type: Literal["candidate_minted"] = "candidate_minted"
+    round: int
+    idx: int
+    candidate_id: str
+    parent_id: str | None = None
+    label: str
+    changes_description: str = ""
+    source: str = ""
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
+# What the cycle's OWN ledger can answer about a candidate. Election — who won — is a
+# round-close fact and is deliberately absent: an unclosed round has no winner, and
+# inventing one for a lone candidate is a fabrication.
+CandidateState = Literal["minted", "measured"]
+
+
+class LedgerCandidate(BaseModel):
+    """The candidate tier as the ledger tells it — `CandidateMintedRecord` (identity) folded
+    onto the `candidate_scored` snapshot (measurement) by `(round, idx)`. Derived, not a
+    record: `scan_ledger_candidates` builds it, nothing appends it."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    round: int
+    idx: int
+    candidate_id: str
+    parent_id: str | None = None
+    label: str
+    changes_description: str = ""
+    source: str = ""
+    accuracy: float | None = None
+    composite_fitness: float | None = None
+    state: CandidateState = "minted"
+
+
 class CycleSeedRecord(BaseModel):
     """The cycle's read-once starting point (`CycleSeed`) as a ledger record — appended
     at mint / operator-steered fork / check-in flip, re-read at bootstrap. Folds the old
@@ -465,6 +520,7 @@ class CycleSeedRecord(BaseModel):
 # Discriminated union by `record_type`; keep order alphabetical — hash-keyed snapshots go stale otherwise.
 CycleRecord = Annotated[
     ResumeCheckpointRecord
+    | CandidateMintedRecord
     | CommandAckRecord
     | CommandRecord
     | CycleSeedRecord

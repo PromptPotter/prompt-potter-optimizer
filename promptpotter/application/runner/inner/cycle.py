@@ -150,12 +150,17 @@ class InnerSpawnContext:
     origin from scratch — and because an inner origin is stochastic, it redrew a different
     accuracy each time (observed: the same content hash on the same 24 samples scoring
     0.375 in seven sandboxes and 0.417 in two). The outer fitness subtracts that origin,
-    so the isolation injected a noise term larger than the lift it was measuring."""
+    so the isolation injected a noise term larger than the lift it was measuring.
+
+    ``spawn_cycle_id`` is the OUTER cycle that owns this sandbox — carried explicitly
+    rather than re-parsed off ``inner_sandbox_root.name``, so the provenance an inner
+    campaign stamps names its parent by fact, not by string surgery on a path."""
 
     inner_sandbox_root: Path
     dataset_config_dir: Path
     identity: IdentityContext
     shared_root: Path
+    spawn_cycle_id: str
 
 
 _INNER_SPAWN: contextvars.ContextVar[InnerSpawnContext | None] = contextvars.ContextVar(
@@ -191,8 +196,43 @@ def publish_inner_spawn_context(session: Session) -> None:
             dataset_config_dir=Path(dataset_dir),
             identity=session.store.identity,
             shared_root=shared_root,
+            spawn_cycle_id=cycle_id,
         )
     )
+
+
+def _spawn_provenance(ctx: InnerSpawnContext, round_num: int | None, query: str) -> dict[str, Any]:
+    """Which outer work-item is asking for this measurement — stamped on the inner cycle.
+
+    Without it an inner campaign is anonymous: its ``campaign_id`` is random and its
+    ``cycle_id`` is a hash of its OWN origin, so nothing on disk says which outer round
+    or candidate produced it, and the sidebar can only number runs by launch order.
+
+    A work-item is (candidate × ``task``), not a candidate: the panel runs EVERY task
+    per candidate, so one candidate's spawns are as many as ``inner_tasks.json`` has
+    cells (seven for ``promptpotter-self``). ``task`` is the outer QUERY — the panel
+    cell's id, e.g. ``justlogic-d23/seed-0`` — and it is the only thing telling those
+    siblings apart; the candidate fields are identical across all of them.
+
+    Read in the OUTER task (see the caller). ``candidate`` is ``None`` for the origin
+    pass — C0 doesn't go through candidate scoring — which is a real answer, not a
+    missing one, so the label still resolves. A ``round`` of ``None`` means the spawn
+    came from outside any round (the fenced ``noise-floor`` diagnostic).
+    """
+    from promptpotter.domain.results import candidate_label
+    from promptpotter.shared.instrument import measured_candidate
+
+    cand = measured_candidate()
+    return {
+        "outer_cycle_id": ctx.spawn_cycle_id,
+        "round": round_num,
+        "candidate_idx": cand.idx if cand else None,
+        "candidate_id": cand.candidate_id if cand else None,
+        "candidate_label": (
+            cand.label if cand else (candidate_label(0, 0) if round_num == 0 else None)
+        ),
+        "task": query,
+    }
 
 
 def _verify_outer_observation_contract(session: Session, dataset_dir: Path) -> None:
@@ -340,6 +380,7 @@ async def _run_inner_campaign(
     spec: InnerTaskSpec,
     meta_prompt_overrides: dict[str, dict[str, Any]],
     cycle_dir_box: dict[str, Path],
+    spawned_by: dict[str, Any],
 ) -> CycleResult:
     """Mint + run one sandboxed inner campaign; return its ``CycleResult``.
 
@@ -447,9 +488,18 @@ async def _run_inner_campaign(
     )
 
     prepare_fresh_cycle(session, campaign_config, train_data)
-    # Publish the freshly-minted inner cycle dir so the outer task's heartbeat
-    # detail_fn can tail this run's dashboard.json (best {best}% / round X/Y).
     if session.campaign_id and session.state.cycle_id:
+        # Stamp WHO asked for this measurement onto the cycle index. Written here rather
+        # than threaded through `prepare_fresh_cycle` → `auto_mint_session`: those are the
+        # generic mint seam every campaign shares, and this is an L4-only fact, so it stays
+        # in the L4 module. The cycle index is a raw dict (no model, no `extra="forbid"`),
+        # so the key costs nothing and no prior inner cycle needs re-stamping — an older
+        # one simply has no `spawned_by` and falls back to its origin hash.
+        session.store.campaigns.update(
+            session.campaign_id, session.state.cycle_id, {"spawned_by": spawned_by}
+        )
+        # Publish the freshly-minted inner cycle dir so the outer task's heartbeat
+        # detail_fn can tail this run's dashboard.json (best {best}% / round X/Y).
         cycle_dir_box["dir"] = session.store.campaigns.cycle_dir(
             session.campaign_id, session.state.cycle_id
         )
@@ -551,6 +601,12 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
 
     outer_ledger = _CYCLE_LEDGER.get()
     cycle_dir_box: dict[str, Path] = {}
+    # Capture the outer work-item HERE, in the outer task, and hand it to the inner
+    # campaign explicitly. It must not be read from inside the inner task: that task
+    # gets a COPY of this context, and the inner cycle's own round loop immediately
+    # rebinds `_CURRENT_ROUND` to its round — so a read over there would attribute the
+    # inner campaign to itself.
+    spawned_by = _spawn_provenance(ctx, _CURRENT_ROUND.get(), query)
 
     def _inner_detail() -> str | None:
         """The outer heartbeat tick's live sub-status — read best-effort off the
@@ -587,7 +643,9 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
     # no-evidence shape rather than caught here. A completed inner run that merely failed to
     # improve is a SUCCESS outcome (MAX_ROUNDS) with poor proxies — measured, not excluded —
     # so a bad mutation is still penalised.
-    inner_task = asyncio.create_task(_run_inner_campaign(ctx, spec, overrides, cycle_dir_box))
+    inner_task = asyncio.create_task(
+        _run_inner_campaign(ctx, spec, overrides, cycle_dir_box, spawned_by)
+    )
     heartbeat_task: asyncio.Task[None] | None = None
     if outer_ledger is not None:
         heartbeat_task = asyncio.create_task(

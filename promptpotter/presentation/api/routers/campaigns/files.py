@@ -11,13 +11,11 @@ from typing import Literal
 from fastapi import Query
 from pydantic import BaseModel, Field
 
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.infrastructure.store import campaign_root_dir_for, cycle_dir_for
-from promptpotter.presentation.api.deps import StoreDep
+from promptpotter.infrastructure.store.stores import resolve_cycle_path
+from promptpotter.presentation.api.deps import StoreDep, decode_descend
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
-from promptpotter.presentation.api.routers.campaigns.cycles import (
-    _decode_descend,
-    resolve_cycle_path,
-)
 from promptpotter.shared.errors import BadRequestError, ContentTooLargeError, NotFoundError
 
 # Campaign-level file artifacts that live at the campaign dir, not a cycle dir.
@@ -115,8 +113,8 @@ def list_cycle_files(
     file-content routes), so the Files tree of an L4 inner descendant lists the
     inner cycle's tree. Absent/empty ``descend`` is a plain per-cycle read.
     """
-    leaf_store, leaf_campaign, leaf_cycle = resolve_cycle_path(
-        store, [(campaign_id, cycle_id), *_decode_descend(descend)]
+    leaf_store, (leaf_campaign, leaf_cycle) = resolve_cycle_path(
+        store, (CycleHop(campaign_id, cycle_id), *decode_descend(descend))
     )
     cycle_dir = cycle_dir_for(leaf_store.base_dir, leaf_campaign, leaf_cycle)
     if not cycle_dir.is_dir():
@@ -170,8 +168,8 @@ def get_cycle_file(
     an L4 inner descendant's ``rounds/round_NNNN.json`` reads from the inner cycle
     dir — not the outer root. Absent/empty ``descend`` is a plain per-cycle read.
     """
-    leaf_store, leaf_campaign, leaf_cycle = resolve_cycle_path(
-        store, [(campaign_id, cycle_id), *_decode_descend(descend)]
+    leaf_store, (leaf_campaign, leaf_cycle) = resolve_cycle_path(
+        store, (CycleHop(campaign_id, cycle_id), *decode_descend(descend))
     )
     if scope == "cycle":
         scope_root = cycle_dir_for(leaf_store.base_dir, leaf_campaign, leaf_cycle)

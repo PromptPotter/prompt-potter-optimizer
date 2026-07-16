@@ -172,12 +172,22 @@ def _mint_fork(
     ``OPERATOR_SWEEP`` requires ``sweep_batch_id`` + ``sweep_source_file``.
     ``OPERATOR_DIAG`` takes neither.
 
-    The seam stamps ``from_round`` onto the spec: only ``mint_operator_fork`` used to
-    set it, so five of six triggers wrote ``index.json::fork.from_round = null`` — and
-    the two readers disagreed about the cut (the lineage tree fell back to scanning the
-    parent ledger; the mask projection had no fallback and silently read ``None``).
+    ``fork_from_round`` is MECHANICAL — how many of the parent's rounds this fork
+    lifts (``0`` = a clean offshoot that lifts none). ``ForkSpec.from_round`` is
+    PROVENANCE — which round the cut was taken from. A rebase makes them equal, so
+    the seam back-fills the spec when its author left it unset: five of six triggers
+    otherwise wrote ``index.json::fork.from_round = null`` and the two readers
+    disagreed about the cut (the lineage tree fell back to scanning the parent ledger;
+    the mask projection had no fallback and silently read ``None``).
+
+    An author who DOES know the round keeps it. A steered fork lifts nothing yet is
+    cut from a real round's candidate — overwriting it here wrote ``from_round: 0``
+    beside a round-3 ``from_candidate_id``, so the label lookup searched round 0,
+    missed, and ``origin.py::try_inherit_fork_origin`` silently re-scored the origin
+    instead of inheriting it.
     """
-    payload = payload.model_copy(update={"from_round": fork_from_round})
+    if payload.from_round is None:
+        payload = payload.model_copy(update={"from_round": fork_from_round})
     if payload.trigger in _REBASE_TRIGGERS:
         if payload.trigger is ForkTrigger.SCORING_DIVERGENCE and surviving_rounds is None:
             raise ValueError("_mint_fork(SCORING_DIVERGENCE) requires surviving_rounds")

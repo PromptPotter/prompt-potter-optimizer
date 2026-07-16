@@ -7,6 +7,7 @@ touches one file. Default hooks are no-ops."""
 from __future__ import annotations
 
 from promptpotter.domain.run_records import (
+    CandidateMintedRecord,
     CycleRecord,
     ErrorRecord,
     LLMCallProgressRecord,
@@ -43,6 +44,8 @@ class DerivedView:
             self._handle_error(record)
         elif isinstance(record, RoundWarningRecord):
             self._handle_round_warning(record)
+        elif isinstance(record, CandidateMintedRecord):
+            self._handle_candidate_minted(record)
 
     def _handle_phase(self, record: PhaseRecord) -> None: ...
     def _handle_snapshot(self, record: SnapshotRecord) -> None: ...
@@ -53,6 +56,7 @@ class DerivedView:
     def _handle_llm_call(self, record: LLMCallRecord) -> None: ...
     def _handle_error(self, record: ErrorRecord) -> None: ...
     def _handle_round_warning(self, record: RoundWarningRecord) -> None: ...
+    def _handle_candidate_minted(self, record: CandidateMintedRecord) -> None: ...
 
     def drain(self) -> None:
         """Settle buffered state to disk on cycle teardown so the ledger's

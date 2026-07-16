@@ -29,14 +29,12 @@ from pathlib import Path
 from fastapi import Query
 from sse_starlette import EventSourceResponse
 
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.infrastructure.projections.event_stream.tail import CycleLedgerTail
 from promptpotter.infrastructure.store import cycle_dir_for
-from promptpotter.presentation.api.deps import StoreDep
+from promptpotter.infrastructure.store.stores import resolve_cycle_path
+from promptpotter.presentation.api.deps import StoreDep, decode_descend
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
-from promptpotter.presentation.api.routers.campaigns.cycles import (
-    _decode_descend,
-    resolve_cycle_path,
-)
 from promptpotter.shared.errors import NotFoundError
 
 __all__ = ["stream_cycle_events"]
@@ -100,8 +98,8 @@ async def stream_cycle_events(
 
     See ``docs/developer/event-stream.md`` for the certified Profile A contract.
     """
-    leaf_store, leaf_campaign, leaf_cycle = resolve_cycle_path(
-        store, [(campaign_id, cycle_id), *_decode_descend(descend)]
+    leaf_store, (leaf_campaign, leaf_cycle) = resolve_cycle_path(
+        store, (CycleHop(campaign_id, cycle_id), *decode_descend(descend))
     )
     cycle_dir = Path(cycle_dir_for(leaf_store.base_dir, leaf_campaign, leaf_cycle))
     if not cycle_dir.exists():

@@ -57,6 +57,7 @@ from promptpotter.presentation.api.routers.active import (
     ActiveSessionResponse,
     CycleListEntry,
     CyclesResponse,
+    SpawnedBy,
 )
 from promptpotter.presentation.api.routers.campaigns.files import (
     FileContentResponse,
@@ -129,6 +130,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     DatasetPipelineResponse,
     # --- active router ---
     ActiveSessionResponse,
+    SpawnedBy,  # nested in CycleListEntry — the emitter does not recurse, so register it
     CycleListEntry,
     CyclesResponse,
     # --- commands middleware ---

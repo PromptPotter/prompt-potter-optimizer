@@ -17,13 +17,15 @@
 import { useCallback, useMemo, useState } from "react";
 import { postCleanupEmpty } from "@/lib/api";
 import type { CampaignLineageCycle } from "@/lib/api";
-import { candidateLabel, liveCandidateId } from "@/lib/candidate-label";
+import { liveCandidateId } from "@/lib/candidate-label";
 import { accuracyBasisValue } from "@/lib/fitness";
 import {
   groupByRound,
+  lineageCandidates,
   primaryMetric,
   roundCandidates,
   type HeadlineMetric,
+  type LineageCandidate,
 } from "@/lib/derivations";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { rootCycleId } from "@/lib/ids";
@@ -41,17 +43,25 @@ import {
 } from "./forest-layout";
 
 // Lineage snapshot → normalized STRUCTURE (no fitness value — that's the live
-// `valueByKey` overlay). Candidates already arrive sorted by rank; the display
-// index drives the short "C{r}.{n}" label so it matches the live labels.
+// `valueByKey` overlay). Candidate identity + label come from the shared
+// `lineageCandidates` derivation, which the sidebar's candidate rows read too —
+// so a candidate is named and keyed identically wherever the settled source is
+// rendered. Re-grouped by round here because the lane geometry is round-shaped.
 function detailFromLineage(c: CampaignLineageCycle): CycleDetail {
+  const byRound = new Map<number, LineageCandidate[]>();
+  for (const cand of lineageCandidates(c)) {
+    const arr = byRound.get(cand.round) ?? [];
+    arr.push(cand);
+    byRound.set(cand.round, arr);
+  }
   return {
     rounds: c.rounds.map((r) => ({
       round: r.round,
       advanced: r.advanced,
-      candidates: r.candidates.map((cand, i) => ({
-        candidateId: cand.candidate_id || liveCandidateId(r.round, i),
-        label: candidateLabel(r.round, i),
-        isWinner: cand.is_winner,
+      candidates: (byRound.get(r.round) ?? []).map((cand) => ({
+        candidateId: cand.candidateId,
+        label: cand.label,
+        isWinner: cand.isWinner,
       })),
     })),
   };

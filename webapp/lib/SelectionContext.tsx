@@ -59,12 +59,19 @@ interface Ctx {
 
 const SelectionCtx = createContext<Ctx | null>(null);
 
-// Provider lives high in AppShell (above the shell) so selection
-// persists across Chat/Dashboard/Files tab switches. Auto-clears when
-// the operator picks a different cycle: a stale candidate_id would
-// point into the wrong cycle's tree, a stale node would mismatch the
-// new cycle's pipeline, and a stale round would scope drills into
-// the wrong cycle's round_NNNN.json.
+// Provider lives high in AppShell (above the shell) so selection persists across
+// Chat/Dashboard/Files tab switches. It is keyed on the VIEWED LEAF hop, the same
+// cycle the inspector, the samples panes and `round_NNNN.json` re-root to — the
+// axes below scope those surfaces, so they have to agree on which cycle they mean.
+// Keyed on the root hop instead, drilling into an L4 inner loop left the outer
+// cycle's candidate selected against the inner cycle's rounds.
+//
+// Cycle change drops the node and sample-set axes outright: a node would mismatch
+// the new cycle's pipeline, and a sample set is a list of ids picked from the old
+// one. The candidate survives only if it NAMES the incoming cycle — i.e. it was
+// picked for the cycle being navigated to, which is exactly the cross-cycle click
+// (a sidebar candidate row, an off-lane forest node) that this clear used to eat.
+// A candidate from any other cycle points into the wrong tree and still goes.
 export function SelectionProvider({
   cycleId,
   children,
@@ -79,8 +86,12 @@ export function SelectionProvider({
   const [prevCycle, setPrevCycle] = useState(cycleId);
   if (cycleId !== prevCycle) {
     setPrevCycle(cycleId);
-    setCandidate(null);
-    setRound(null);
+    // Round follows the candidate it belongs to — kept together, or dropped
+    // together. A surviving candidate with a cleared round would scope the
+    // samples view off the round that produced it.
+    const kept = candidate && candidate.cycle_id === cycleId ? candidate : null;
+    setCandidate(kept);
+    setRound(kept ? kept.round : null);
     setNode(null);
     setSampleSet(null);
   }

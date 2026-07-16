@@ -1,4 +1,4 @@
-"""Per-cycle reads — the live dashboard and an L4 cycle's inner fan-out.
+"""Per-cycle reads — the live dashboard for any cycle at any depth.
 
 All routes carry ``(campaign_id, cycle_id)``. ``dashboard.json`` is
 per-cycle — the dashboard route serves the viewed cycle's own file, so a
@@ -12,21 +12,20 @@ from pathlib import Path
 from fastapi import Query, Request, Response
 from fastapi.responses import JSONResponse
 
-from promptpotter.infrastructure.store import (
-    build_stores,
-    cycle_dir_for,
-    read_active_pointer,
+from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.infrastructure.store import cycle_dir_for
+from promptpotter.infrastructure.store.io import read_json_tolerant
+from promptpotter.infrastructure.store.stores import resolve_cycle_path
+from promptpotter.presentation.api.deps import (
+    StoreDep,
+    decode_descend,
+    warming_payload,
 )
-from promptpotter.infrastructure.store.io import read_json_tolerant, validate_path_component
-from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.presentation.api.deps import StoreDep, warming_payload
-from promptpotter.presentation.api.routers.active import CycleListEntry, CyclesResponse
 from promptpotter.presentation.api.routers.campaigns._conditional import (
     client_seen_at_or_after,
     http_date,
 )
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
-from promptpotter.shared.errors import BadRequestError, NotFoundError
 
 
 def serve_dashboard_response(
@@ -97,117 +96,7 @@ def get_cycle_dashboard(
     ``warming_up`` payload at 200 instead of 404 so the webapp can render a
     "campaign initialising" placeholder rather than appear offline.
     """
-    stores, leaf_cmp, leaf_cyc = resolve_cycle_path(
-        store, [(campaign_id, cycle_id), *_decode_descend(descend)]
+    stores, leaf = resolve_cycle_path(
+        store, (CycleHop(campaign_id, cycle_id), *decode_descend(descend))
     )
-    return serve_dashboard_response(request, stores.base_dir, leaf_cmp, leaf_cyc)
-
-
-def _inner_sandbox_store(store: Stores, outer_cycle_id: str) -> Stores | None:
-    """A ``Stores`` rooted at the outer cycle's inner sandbox, or ``None``.
-
-    L4 (``promptpotter-self``) runs each candidate as a real inner campaign under
-    a flat, off-registry sandbox ``<workspace>/.inner/<outer_cycle_id>`` (keyed on
-    the outer cycle id alone — see ``runner/inner.publish_inner_spawn_context``).
-    That sandbox is structurally a normal projects tree, so pointing
-    ``build_stores`` at it lets every existing read work verbatim. Returns
-    ``None`` when the viewed cycle spawned no inner campaigns (non-L4, or the
-    loop hasn't recursed yet) — the caller degrades to an empty list / 404, never
-    an error.
-    """
-    validate_path_component(outer_cycle_id)
-    sandbox_root = store.projects_root.parent / ".inner" / outer_cycle_id
-    if not (sandbox_root / store.tenant_id).is_dir():
-        return None
-    return build_stores(store.identity, projects_root=sandbox_root)
-
-
-def _decode_descend(descend: str | None) -> list[tuple[str, str]]:
-    """Parse the ``?descend=`` tail into ``(campaign, cycle)`` hops below the root.
-
-    Mirrors the webapp's ``encodeDescend`` (``webapp/lib/ids.ts``): ``~``-joined
-    ``campaign::cycle`` hops, empty/absent → no descent. Component-char validation
-    is :func:`resolve_cycle_path`'s job; here we only reject a structurally
-    malformed hop (missing ``::``) as a 400 rather than let it 500 downstream.
-    """
-    if not descend:
-        return []
-    hops: list[tuple[str, str]] = []
-    for seg in descend.split("~"):
-        cmp, sep, cyc = seg.partition("::")
-        if not sep or not cmp or not cyc:
-            raise BadRequestError(f"Malformed descend hop: {seg!r}")
-        hops.append((cmp, cyc))
-    return hops
-
-
-def resolve_cycle_path(store: Stores, path: list[tuple[str, str]]) -> tuple[Stores, str, str]:
-    """Resolve a cycle PATH (root → leaf hops) to ``(Stores, campaign, cycle)``.
-
-    The single walk that makes an inner cycle addressable exactly like a
-    top-level one: hop 0 is a cycle in the caller's own tree; each later hop lives
-    in the previous hop's ``.inner/<previous cycle id>`` sandbox, so
-    :func:`_inner_sandbox_store` IS the recursive step. Re-entrant by construction
-    (L5+ nests the same way). Every component is char-validated before any
-    filesystem touch (400 on bad chars); a missing sandbox is a 404.
-    """
-    if not path:
-        raise BadRequestError("empty cycle path")
-    cur = store
-    for i, (cmp, cyc) in enumerate(path):
-        try:
-            validate_path_component(cmp)
-            validate_path_component(cyc)
-        except ValueError as exc:
-            raise BadRequestError(str(exc)) from exc
-        if i == 0:
-            continue
-        nxt = _inner_sandbox_store(cur, path[i - 1][1])
-        if nxt is None:
-            raise NotFoundError(f"No inner sandbox for cycle '{path[i - 1][1]}'")
-        cur = nxt
-    return cur, path[-1][0], path[-1][1]
-
-
-@campaigns_router.get(
-    "/campaigns/{campaign_id}/cycles/{cycle_id}/inner-cycles",
-    response_model=CyclesResponse,
-    tags=["Cycles"],
-)
-def get_inner_cycles(store: StoreDep, campaign_id: str, cycle_id: str) -> CyclesResponse:
-    """Inner campaigns spawned by an L4 outer cycle — the fan-out this cycle ran.
-
-    Keyed on the **viewed** outer ``cycle_id`` (the webapp can browse a past,
-    non-active outer cycle), not the active pointer. Reuses the same webapp-picker
-    shape as ``GET /cycles`` (one ``CycleListEntry`` per inner cycle); the
-    ``active_campaign_id`` / ``active_cycle_id`` fields carry the **inner**
-    sandbox's live pointer, so the sidebar can mark the inner loop running right
-    now. A non-L4 cycle (no ``.inner/`` sandbox) returns an empty list — that
-    absence is what tells the webapp to show no expand affordance.
-    """
-    inner = _inner_sandbox_store(store, cycle_id)
-    if inner is None:
-        return CyclesResponse(
-            tenant_id=store.tenant_id,
-            active_campaign_id=None,
-            active_cycle_id=None,
-            cycles=[],
-        )
-    _, live_cmp, live_cid = read_active_pointer(store.tenant_id, projects_root=inner.projects_root)
-    if live_cmp and live_cid:
-        # The pointer file is freshness-blind and never cleared on death (it's
-        # written once at inner-cycle start) — a dead/finished producer would
-        # otherwise leave "Open the live inner run →" pointing at nothing. Null
-        # the pair once the pointed cycle is actually terminal; SelfOptSamplesPointer
-        # falls back to its sidebar-expand hint. The producer-side pointer file
-        # itself is left untouched — it's dead by definition, this is the read-side fix.
-        pointed = inner.campaigns.load(live_cmp, live_cid)
-        if pointed is None or pointed.get("finished_at"):
-            live_cmp, live_cid = "", ""
-    entries = inner.campaigns.enumerate_cycles()
-    return CyclesResponse(
-        tenant_id=store.tenant_id,
-        active_campaign_id=live_cmp or None,
-        active_cycle_id=live_cid or None,
-        cycles=[CycleListEntry(**e) for e in entries],
-    )
+    return serve_dashboard_response(request, stores.base_dir, leaf.campaign_id, leaf.cycle_id)

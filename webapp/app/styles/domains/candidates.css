@@ -20,6 +20,10 @@
    spacer — so give it a plain block and let the toolbar own the layout. */
 .cand-card > .card-title{display:block;margin-bottom:10px}
 .cand-title{font-size:14px;font-weight:500;color:var(--color-text-primary);white-space:nowrap;flex:0 0 auto}
+/* Run-bars mode: the title is the way back out — styled as the title it replaces. */
+.cand-crumb{background:none;border:0;font:inherit;cursor:pointer;padding:0;
+  color:var(--color-text-secondary)}
+.cand-crumb:hover{color:var(--color-text-primary)}
 /* The descendant count rides the forest toggle — the forest is the only thing
    that can draw siblings, so "there are 3" belongs on the control that reveals
    them, not in a badge of its own. */
@@ -70,6 +74,8 @@
    colour alone (the aria-label carries it too). */
 .cand-dendro-dot.winner{fill:var(--color-accent);stroke:var(--color-accent)}
 .cand-dendro-dot.eliminated{fill:var(--color-background-primary);stroke:var(--color-text-tertiary)}
+/* A fork bar's dot — a sibling course, not a candidate: dashed ring, no fill claim. */
+.cand-dendro-dot.fork{fill:var(--color-background-primary);stroke:var(--color-text-tertiary);stroke-dasharray:2 1.5}
 .cand-dendro-hit:hover .cand-dendro-dot{r:4.5}
 .cand-dendro-hit.selected .cand-dendro-dot{fill:var(--color-selection);stroke:var(--color-selection)}
 .cand-dendro-hit:focus-visible .cand-dendro-dot{stroke:var(--color-accent);filter:drop-shadow(0 0 5px var(--color-accent-glow))}

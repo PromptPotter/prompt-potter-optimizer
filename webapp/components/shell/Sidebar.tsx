@@ -6,42 +6,58 @@ import { postLogout } from "@/lib/api";
 import { BRAND } from "@/lib/brand";
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { TERMS } from "@/lib/terms";
+import { encodeCyclePath, rootCycleId, type CyclePath } from "@/lib/ids";
 import {
   COLLAPSED_STORAGE_KEY,
   EMPTY_COLLAPSED,
+  buildForest,
   collapsedCodec,
-  groupCampaigns,
+  nodeKey,
 } from "./sidebar/grouping";
+import type { TreeCtx } from "./sidebar/ForestRows";
 import { SidebarContent } from "./SidebarContent";
 
 interface Props {
-  // A unit is the pair (campaignId, cycleId) — cycle_id alone is ambiguous
-  // across campaigns, so selection always carries both.
-  onSelectCycle: (campaignId: string, cycleId: string) => void;
+  // Selection carries the whole CyclePath — a cycle_id is ambiguous across
+  // campaigns, and a campaign+cycle pair is ambiguous across stores once an
+  // inner forest is open. The path is the one unambiguous address at any depth.
+  onSelectPath: (path: CyclePath, candidate?: string | null) => void;
   onNewCycle: () => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
 }
 
-// The sidebar is a forest. A **campaign** is a declared optimization effort
-// (a dataset + pipeline origin + context); its id is `{dataset}__{hash}`,
-// stable across re-runs. A campaign holds N **sessions** — one per `python
-// -m promptpotter new` on that declaration; a session's identity is its
-// root cycle (`cycle_{hash}` for session 1, `cycle_{hash}_s{N}` for the
-// Nth). Each session is itself a tree: a root + its forks / diag / sweeps.
+// The sidebar is a FOREST, and the shape repeats at every depth:
 //
-// So the nesting is: campaign → session → fork-tree. Campaigns render in
-// one flat, recency-sorted list; the header's filter popover
-// (lifecycle + dataset) narrows it. The single-session campaign — the common case —
-// collapses: the campaign row IS that session and opens it directly. The
-// session tier appears only when a campaign has 2+ sessions.
+//   Forest → Origin → Run → Cycle-tree → (Inner Forest)
+//
+// An **origin** is the complete specification the loop starts from; its identity
+// is the content hash of that spec, which is exactly the root cycle id
+// (`cycle_<hash>`). A **run** is one campaign (`{dataset}__{rand6}`) measuring it
+// — so two campaigns on an unchanged declaration are two runs of ONE origin, and
+// the origin tier groups them. Each run is itself a tree: a root cycle + its
+// forks / diags / sweeps. Any cycle can open its own **inner forest** (an L4
+// `promptpotter-self` fan-out lives in a `.inner/<cycle_id>` sandbox, which is
+// structurally just another store) — that closes the recursion, so L5+ needs no
+// new tier.
+//
+// This tier renders origins in one recency-sorted list; the header's filter
+// popover (lifecycle + dataset) narrows it. The single-run origin — the common
+// case — collapses: the run row IS that origin and opens it directly. The origin
+// tier appears only when it actually groups 2+ runs, i.e. when it carries
+// information.
+//
+// Only `at: []` (the tenant's own store) is polled here; deeper forests fetch on
+// expand via `useForest`.
 
-export function Sidebar({ onSelectCycle, onNewCycle, collapsed, onToggleCollapse }: Props) {
+export function Sidebar({ onSelectPath, onNewCycle, collapsed, onToggleCollapse }: Props) {
   // Cycle list + campaign registry + active pointer + current selection all
   // come from the shared workspace context — one poll for the whole app.
   const {
     cycleId,
     campaignId,
+    viewedPath,
+    viewedCandidate,
     campaigns,
     cycles,
     cyclesLoaded,
@@ -76,44 +92,48 @@ export function Sidebar({ onSelectCycle, onNewCycle, collapsed, onToggleCollapse
     }
   }, []);
 
-  const allGroups = useMemo(
-    () => groupCampaigns(campaigns, cycles),
-    [campaigns, cycles],
-  );
+  // Filter BEFORE grouping: the dataset filter drops runs, and an origin's run
+  // count is what decides whether its tier renders at all. Grouping first would
+  // leave an origin claiming "2 runs" while showing one.
+  const origins = useMemo(() => {
+    const kept =
+      datasetFilter == null
+        ? campaigns
+        : campaigns.filter(
+            (c) => (c.dataset_name || "(unknown)") === datasetFilter,
+          );
+    return buildForest(kept, cycles);
+  }, [campaigns, cycles, datasetFilter]);
 
   // Distinct dataset names, for the filter popover's dataset picker.
   const datasetNames = useMemo(() => {
     const s = new Set<string>();
-    for (const g of allGroups) s.add(g.campaign.dataset_name || "(unknown)");
+    for (const c of campaigns) s.add(c.dataset_name || "(unknown)");
     return [...s].sort();
-  }, [allGroups]);
+  }, [campaigns]);
 
-  const groups = useMemo(
-    () =>
-      datasetFilter == null
-        ? allGroups
-        : allGroups.filter(
-            (g) => (g.campaign.dataset_name || "(unknown)") === datasetFilter,
-          ),
-    [allGroups, datasetFilter],
-  );
-
-  // Auto-expand the campaign containing the viewed/active cycle — "where am
-  // I?" should be visible without a click. We never auto-collapse; explicit
-  // collapse beats helpfulness.
+  // Auto-expand the course containing the viewed/active cycle — "where am I?"
+  // should be visible without a click. We never auto-collapse; explicit collapse
+  // beats helpfulness. Targets the campaign's ROOT course, since that's the node a
+  // viewed fork hides under.
   const focusKey = useMemo(() => {
     const cmpId = campaignId ?? activeCampaignId;
     const cyId = cycleId ?? activeCycleId;
     if (!cmpId || !cyId) return null;
-    return `cmp:${cmpId}`;
+    const path = encodeCyclePath([{ campaignId: cmpId, cycleId: rootCycleId(cyId) }]);
+    return nodeKey("course", path);
   }, [campaignId, activeCampaignId, cycleId, activeCycleId]);
 
+  // The stored set is every node TOGGLED AWAY FROM ITS DEFAULT, and a course now
+  // defaults CLOSED (opening one fetches its lineage) — so expanding means ADDING
+  // the key. This deleted it while courses defaulted open; left as-is against the
+  // new default it would collapse the very row it exists to reveal.
   useEffect(() => {
     if (!focusKey) return;
     setCollapsedNodes((prev) => {
-      if (!prev.has(focusKey)) return prev;
+      if (prev.has(focusKey)) return prev;
       const next = new Set(prev);
-      next.delete(focusKey);
+      next.add(focusKey);
       return next;
     });
   }, [focusKey, setCollapsedNodes]);
@@ -128,6 +148,30 @@ export function Sidebar({ onSelectCycle, onNewCycle, collapsed, onToggleCollapse
       });
     },
     [setCollapsedNodes],
+  );
+
+  // Everything the tree needs, at any depth. The pointer here is the TOP-LEVEL
+  // store's; each inner forest overrides it with its own (a sandbox's live loop
+  // is not the workspace's active session).
+  const ctx: TreeCtx = useMemo(
+    () => ({
+      collapsedNodes,
+      toggleNode,
+      viewedPath,
+      viewedCandidate,
+      selectCyclePath: onSelectPath,
+      activeCampaignId,
+      activeCycleId,
+    }),
+    [
+      collapsedNodes,
+      toggleNode,
+      viewedPath,
+      viewedCandidate,
+      onSelectPath,
+      activeCampaignId,
+      activeCycleId,
+    ],
   );
 
   // Wait for BOTH the cycle list and the campaign list for the CURRENT
@@ -179,14 +223,8 @@ export function Sidebar({ onSelectCycle, onNewCycle, collapsed, onToggleCollapse
         datasetNames={datasetNames}
         datasetFilter={datasetFilter}
         setDatasetFilter={setDatasetFilter}
-        groups={groups}
-        collapsedNodes={collapsedNodes}
-        toggleNode={toggleNode}
-        campaignId={campaignId}
-        cycleId={cycleId}
-        activeCampaignId={activeCampaignId}
-        activeCycleId={activeCycleId}
-        onSelectCycle={onSelectCycle}
+        origins={origins}
+        ctx={ctx}
       />
       <div className="sidebar-footer">
         <a

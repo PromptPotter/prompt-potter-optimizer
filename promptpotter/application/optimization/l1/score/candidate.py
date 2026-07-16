@@ -31,6 +31,7 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import ScoredCandidate, candidate_label
 from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.validators import StopRule
+from promptpotter.shared.instrument import MeasuredCandidate, set_measured_candidate
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
@@ -88,6 +89,14 @@ async def score_one_candidate(
     resolved config."""
     label = candidate_label(round_num, idx)
     resolved_pipeline_params = candidate_sp.config_params
+
+    # Declare which candidate is being measured, for anything this scoring pass spawns.
+    # Today's one reader is the L4 recursion (an inner campaign stamps its provenance
+    # from it) — the connector seam carries only `(query, payload)`, so identity cannot
+    # reach it any other way. Bound before the validation-skip return below: a skipped
+    # candidate spawns nothing, but leaving the PRIOR candidate's identity bound would
+    # mis-attribute whatever ran next.
+    set_measured_candidate(MeasuredCandidate(idx=idx, candidate_id=osp_c.lineage.id, label=label))
 
     # Path 1 — validation-skip synthetic-0. A ``hallucinated_node`` wound is the one
     # NON-fatal validation failure: L1 named a node that doesn't exist, but that phantom

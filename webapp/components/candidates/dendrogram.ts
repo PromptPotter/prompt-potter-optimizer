@@ -33,6 +33,10 @@ export interface DendroNode {
   round: number;
   label: string;
   isWinner: boolean;
+  // A fork bar — a sibling COURSE trailing the candidate spine. It keeps its bar
+  // slot (the alignment contract is over ALL categories) but joins no round band:
+  // its descent is cross-cycle, which the Forest draws, not this strip.
+  isFork: boolean;
   // Spine index === bar category index. THE alignment contract.
   i: number;
   // Category-center fraction of the plot width, 0..1.
@@ -73,6 +77,7 @@ export interface DendroRow {
   label: string;
   candidate_id: string;
   is_winner: boolean;
+  is_fork: boolean;
 }
 
 const FLOOR_H = NODE_ROW_Y + NODE_R + BOTTOM_PAD;
@@ -101,15 +106,18 @@ export function dendrogram(
       round: r.round,
       label: r.label,
       isWinner: r.is_winner,
+      isFork: r.is_fork,
       i,
       xf: centers[i]!,
       y: NODE_ROW_Y,
     });
   });
 
-  // A round is a CONTIGUOUS block in the spine (round asc, then idx asc).
+  // A round is a CONTIGUOUS block in the spine (round asc, then idx asc). Fork
+  // rows trail the candidate spine and join no band, so contiguity holds.
   const bands = new Map<number, { first: number; last: number }>();
   rows.forEach((r, i) => {
+    if (r.is_fork) return;
     const b = bands.get(r.round);
     if (b) b.last = i;
     else bands.set(r.round, { first: i, last: i });

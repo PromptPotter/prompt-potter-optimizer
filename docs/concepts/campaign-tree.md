@@ -29,19 +29,23 @@ Forks land flat under `cycles/`. The tree is reconstructed from `parent_cycle_id
 
 ## Three callers, one primitive
 
-| Caller | Trigger | Payload |
-|---|---|---|
-| **Scoring divergence** | `resume --fork-on-divergence` detects a recorded decision no longer holds under the current scorer | none |
-| **Operator sweep** | `new --sweep-batch` with payloads under `datasets/{name}/sweep/` | `ResumeCheckpointRecord.data.fork.sweep_payload` |
-| **Operator-steered fork** | operator stops the run and forks a sibling from any round, editing the searchpoint's prompt + node config + limits (webapp Steer & fork) | `ForkPayload` (`origin_prompt_fields`, `pipeline_overlay`, `config_overrides`, `steered_by`) |
+Every cut serializes ONE typed `ForkSpec` (`domain/run_records.py`) to `FORK_CUT.data.fork` + `index.json::fork`: `{trigger, reason, issued_by, from_round, from_candidate_id, l1_layout, seed}`.
 
-The primitive does not know which caller fired. New callers add new `data.*` keys; the primitive stays small. Library measurements are deliberately not on the tree — content-addressed by `JobSearchPoint.content_hash`, two forks see identical content hashes and read the same `archive/` row (why the second fork's origin costs zero LLM calls).
+| Caller | Trigger | What it fills |
+|---|---|---|
+| **Scoring divergence** | `resume --fork-on-divergence` detects a recorded decision no longer holds under the current scorer | trigger/reason/issued_by only |
+| **Operator sweep** | `new --sweep-batch` with payloads under `datasets/{name}/sweep/` | batch id + source file ride `_mint_fork` args, not the spec |
+| **Operator-steered fork** | operator stops the run and forks a sibling from any round, editing the searchpoint's prompt + node config + limits (webapp Steer & fork) | `seed: CycleSeed` (`origin_prompt_fields`, `pipeline_overlay`, `config_overrides`) + `from_candidate_id` |
+
+**`from_round` is provenance; `_mint_fork(fork_from_round=…)` is mechanics.** The arg says how many parent rounds this cut LIFTS (`0` = a clean offshoot that lifts none); the spec field says which round it was CUT FROM. A rebase makes them equal, so the seam back-fills the spec when its author left it unset — but only then. Only a steered cut names `from_candidate_id`, so only it can be labelled by the candidate it came from; divergence / rebase / sweep / diag attach at round level and nothing on disk names their candidate.
+
+The primitive does not know which caller fired. New callers add a `ForkTrigger` member; the primitive stays small. Library measurements are deliberately not on the tree — content-addressed by `JobSearchPoint.content_hash`, two forks see identical content hashes and read the same `archive/` row (why the second fork's origin costs zero LLM calls).
 
 ## Three checks for new fork drivers
 
 When a new driver lands, run it through three checks. If any fail, the primitive has reached its scope and the feature wants its own layer:
 
-1. **Trigger-agnostic.** New caller adds a `ForkTrigger` enum member + `ForkPayload` — no edits to `_mint_fork`'s body, no new ledger record kind.
+1. **Trigger-agnostic.** New caller adds a `ForkTrigger` enum member and fills `ForkSpec` — no edits to `_mint_fork`'s body, no new ledger record kind.
 2. **Override is OSP-carriable.** Branch-differing fields are (or trivially extend to) `OptSearchPoint` fields. Different pipeline shape or scoring formula is a layer above.
 3. **No data fracture.** No parallel persistence directory; no duplicate of something already in `archive/`, `rounds/`, or the ledger.
 

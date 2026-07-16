@@ -221,7 +221,11 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
     cancelled = asyncio.Event()
 
     async def _hanging_inner(
-        ctx: Any, spec: Any, overrides: Any, cycle_dir_box: dict[str, Path]
+        ctx: Any,
+        spec: Any,
+        overrides: Any,
+        cycle_dir_box: dict[str, Path],
+        spawned_by: dict[str, Any],
     ) -> CycleResult:
         started.set()
         try:
@@ -251,6 +255,7 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
             dataset_config_dir=tmp_path,
             identity=None,  # type: ignore[arg-type]  # the stubbed inner run never reads it
             shared_root=tmp_path,
+            spawn_cycle_id="cycle_deadbeef0000",
         )
     )
     llm_models._CYCLE_LEDGER.set(_RecordingLedger())  # type: ignore[arg-type]

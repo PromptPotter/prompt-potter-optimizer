@@ -1,4 +1,4 @@
-"""Typed paths + projection protocol for the run ledger.
+"""Typed addresses + projection protocol for the run ledger.
 
 Two newtype guards for ledger / projection write targets:
 
@@ -12,6 +12,16 @@ Two newtype guards for ledger / projection write targets:
   §0) — the ledger backend-scoped commands (``register-backend``,
   ``mint-campaign``) ride. Construct from ``Stores.base_dir``.
 
+…and the one ADDRESS a cycle answers to at any depth:
+
+* ``CycleHop`` / ``CyclePath`` — root → leaf. A bare ``cycle_id`` is ambiguous
+  across campaigns, and a ``(campaign, cycle)`` pair is ambiguous across stores
+  once an L4 inner forest is open (``.inner/<cycle_id>`` is a whole projects tree
+  of its own, and inner cycle ids repeat across sibling sandboxes). The path is
+  what disambiguates: every hop but the last is a DESCENT into that hop's
+  sandbox, and the last names the entity. This is the wire's ``descend`` chain
+  and the webapp's ``CyclePath`` as one type, so no reader re-derives it.
+
 These types live in :mod:`promptpotter.domain` so both ``application``
 (``CycleEventLog``-side) and ``infrastructure`` (projection-side) can import
 them without crossing hexagonal layers.
@@ -20,15 +30,29 @@ them without crossing hexagonal layers.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import NewType, Protocol
+from typing import NamedTuple, NewType, Protocol
 
 from promptpotter.domain.run_records import CycleRecord
 
-__all__ = ["CycleDir", "Projection", "WorkspaceDir"]
+__all__ = ["CycleDir", "CycleHop", "CyclePath", "Projection", "WorkspaceDir"]
 
 
 CycleDir = NewType("CycleDir", Path)
 WorkspaceDir = NewType("WorkspaceDir", Path)
+
+
+class CycleHop(NamedTuple):
+    """One ``(campaign, cycle)`` step of a :data:`CyclePath`.
+
+    The campaign component is carried for symmetry with the webapp and to name the
+    leaf; it plays no part in descent — a sandbox is keyed on the cycle id alone.
+    """
+
+    campaign_id: str
+    cycle_id: str
+
+
+CyclePath = tuple[CycleHop, ...]
 
 
 class Projection(Protocol):

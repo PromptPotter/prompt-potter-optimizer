@@ -1,7 +1,7 @@
 // Read endpoints — thin GET wrappers over the FastAPI surface.
 
 import { API, jget, jgetConditional, type Conditional } from "./client";
-import { encodeDescend, pathRoot, type CyclePath } from "../ids";
+import { encodeCyclePath, encodeDescend, pathRoot, type CyclePath } from "../ids";
 import type {
   ActiveSessionResponse,
   CampaignLineageResponse,
@@ -390,42 +390,39 @@ export function fetchDashboardByPath(
   );
 }
 
-// Lists the inner campaigns an L4 `promptpotter-self` outer cycle spawned (each
-// candidate runs as a real inner campaign under a flat off-registry sandbox).
-// Same picker shape as `/cycles`; its `active_*` carry the inner sandbox's live
-// pointer. A non-L4 outer cycle returns an empty `cycles` list (never 404) — the
-// signal to show no expand affordance. Keyed on the VIEWED outer cycle.
-export function fetchInnerCycles(
-  outerCampaignId: string,
-  outerCycleId: string,
-  signal?: AbortSignal,
-): Promise<CyclesResponse> {
-  return jget<CyclesResponse>(
-    `${API}/campaigns/${encodeURIComponent(outerCampaignId)}` +
-      `/cycles/${encodeURIComponent(outerCycleId)}/inner-cycles`,
-    signal,
-  );
-}
-
 // `lifecycle` mirrors the server's `?lifecycle=` filter — defaults to
 // "active" server-side; pass "archived" to surface the archived set
 // (deleted stays out of the default UI). "all" returns every status.
 export type LifecycleFilter = "active" | "archived" | "deleted" | "all";
 
+// The forest reads. `at` is the chain of cycles to descend INTO — `[]` (the
+// default) is the tenant's own tree, one hop is an L4 cycle's inner fan-out, two
+// is an L5 descendant. A sandbox is structurally a normal projects tree, so these
+// are the SAME two endpoints at every depth; nothing here is depth-aware.
+//
+// Note this is `encodeCyclePath`, not `encodeDescend`: the dashboard names a leaf
+// ENTITY (so its descend drops the root hop), while a forest names a STORE — every
+// hop is a descent.
 export function fetchCampaigns(
   dataset?: string,
   signal?: AbortSignal,
   lifecycle?: LifecycleFilter,
+  at: CyclePath = [],
 ): Promise<CampaignListResponse> {
   const params = new URLSearchParams();
   if (dataset) params.set("dataset", dataset);
   if (lifecycle && lifecycle !== "active") params.set("lifecycle", lifecycle);
+  if (at.length) params.set("descend", encodeCyclePath(at));
   const qs = params.toString();
   return jget<CampaignListResponse>(`${API}/campaigns${qs ? `?${qs}` : ""}`, signal);
 }
 
-export function fetchCycles(signal?: AbortSignal): Promise<CyclesResponse> {
-  return jget<CyclesResponse>(`${API}/cycles`, signal);
+export function fetchCycles(
+  signal?: AbortSignal,
+  at: CyclePath = [],
+): Promise<CyclesResponse> {
+  const qs = at.length ? `?descend=${encodeURIComponent(encodeCyclePath(at))}` : "";
+  return jget<CyclesResponse>(`${API}/cycles${qs}`, signal);
 }
 
 // The six MECE leaves every storage surface shares — they sum to the on-disk total.
@@ -655,14 +652,18 @@ export function fetchCampaignLineage(
   samples: number[] | null,
   ifModifiedSince?: string | null,
   signal?: AbortSignal,
+  at: CyclePath = [],
 ): Promise<Conditional<CampaignLineageResponse>> {
   // One `lens` value drives the divergence overlay: `score:<formula>` = an
   // alternative scoring formula, `abort:<variant>` = a PoBB abort-contributor
   // switch-off. `samples` = the sample-set mask (re-score accuracy over only these
   // ids); it composes with a `score:` lens and is ignored for an `abort:` lens.
+  // `at` descends into a sandbox before resolving the campaign — an L4 inner
+  // campaign's lineage reads through the same route, one hop deeper.
   const params = new URLSearchParams();
   if (lens) params.set("lens", lens);
   if (samples && samples.length > 0) params.set("samples", samples.join(","));
+  if (at.length) params.set("descend", encodeCyclePath(at));
   const q = params.toString();
   return jgetConditional<CampaignLineageResponse>(
     `${API}/campaigns/${encodeURIComponent(campaignId)}/lineage${q ? `?${q}` : ""}`,

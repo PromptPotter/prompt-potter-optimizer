@@ -275,6 +275,12 @@ async def _prepare_run(
             session.human_intervened = True
 
     if origin is None:
+        # Round 0 IS a round — the origin's measurement, labelled C0. Declare it like
+        # any other, so `_CURRENT_ROUND` is bound for everything the origin pass spawns
+        # (token records, the L4 heartbeat, an inner cycle's provenance stamp). Only
+        # `run_round_loop` used to call this, so the origin scored with the round
+        # unbound and every measurement it produced was stamped `None`.
+        cb.set_round(0)
         # Establish C0 through the single origin seam: a no-edit operator fork inherits
         # its branch-point candidate's recorded accuracy (skipping the re-score, which
         # would re-roll under a nondeterministic backend); everything else scores it.

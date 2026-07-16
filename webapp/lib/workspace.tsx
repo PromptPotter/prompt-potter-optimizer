@@ -51,6 +51,7 @@ import {
 import { usePoll } from "./hooks/usePoll";
 import { bumpRevalidation, useRevalidation } from "./revalidate";
 import { useAuthGate } from "./auth-context";
+import { isSelfOptimization } from "./derivations";
 import { isInFlight } from "./run-phase";
 
 interface WorkspaceState {
@@ -61,16 +62,33 @@ interface WorkspaceState {
   // pointer / pin resolves. Its root hop is the top-level cycle; a deeper leaf is
   // an L4 inner descendant.
   viewedPath: CyclePath | null;
-  cycleId: string | null; // the ROOT hop's cycle (chat/selection/dataset anchor)
+  cycleId: string | null; // the ROOT hop's cycle (chat/dataset/files anchor)
   // The campaign the root hop belongs to — authoritative, never derived from a
   // bare `cycle_id` (a cycle_id is unique only within its campaign). Null until
   // the pointer / pin resolves.
   campaignId: string | null;
-  // The LEAF hop — what the dashboard / live feed / samples follow (the inner
-  // cycle when drilled into an L4 loop, else identical to the root hop). Derived
-  // once here so no surface re-inlines `viewedPath[len-1]`.
+  // The LEAF hop — what the dashboard / live feed / samples / selection follow
+  // (the inner cycle when drilled into an L4 loop, else identical to the root
+  // hop). Derived once here so no surface re-inlines `viewedPath[len-1]`.
   leafCampaignId: string | null;
   leafCycleId: string | null;
+  // Does the VIEWED course optimize prompts — i.e. are its samples whole inner
+  // campaigns rather than scored rows? Read off the LEAF's campaign, never the
+  // root's: a fork of a pp-self campaign is still depth 1 and still self-optimizing,
+  // while drilling INTO an inner run puts an ordinary benchmark campaign on the leaf,
+  // which is not in `campaigns` (it lives in a sandbox) and correctly reads false.
+  // Derived here because three surfaces branch on it and each had re-run the lookup.
+  leafIsL4: boolean;
+  // The candidate NODE the tree is parked on inside the leaf course, by label ("C0",
+  // "C1.1"), or null for the course itself. A candidate is a tier of the lineage tree but
+  // never a hop of a path — the course carries the address — so it rides beside
+  // `viewedPath` rather than inside it.
+  //
+  // This is NAVIGATION: "which node's children do the bars plot". It is NOT
+  // `SelectionContext.candidate`, which is INSPECTION: "which bar is lit". Only the tree
+  // writes this one; a bar click writes the other. They were one slot, which made the
+  // chart its own input — clicking a bar re-plotted the chart under the operator's cursor.
+  viewedCandidate: string | null;
   datasetName: string | null;
   following: boolean; // the viewed path tracks the active pointer
   cycles: CycleListEntry[];
@@ -97,11 +115,16 @@ interface WorkspaceState {
   lifecycleFilter: LifecycleFilter;
   setLifecycleFilter: (f: LifecycleFilter) => void;
   // Pin an explicit cycle address → following=false. The general verb; a hop
-  // can be top-level or an inner descendant.
-  selectCyclePath: (path: CyclePath) => void;
+  // can be top-level or an inner descendant. `candidate` parks the tree on one of that
+  // course's candidates; omitting it means the course itself.
+  selectCyclePath: (path: CyclePath, candidate?: string | null) => void;
   // Convenience: pin a top-level (1-hop) cycle. Both ids required — a cycle_id
   // alone is ambiguous across campaigns.
   selectCycle: (campaignId: string, cycleId: string) => void;
+  // Open a run that lives in the VIEWED leaf's sandbox — one hop deeper than what
+  // is on screen. The L4 surfaces (a cell bar, a panel row) name a run and mean
+  // "descend into it"; they don't own the address, so they don't build the path.
+  drillInto: (campaignId: string, cycleId: string) => void;
   // Drop back to the top-level (root) cycle from an inner descendant, keeping it
   // pinned. No-op at depth 1.
   backToOuter: () => void;
@@ -146,6 +169,9 @@ export function WorkspaceProvider({
   // following). Both the top-level and inner-descendant selections live here as
   // one address; there is no separate inner-focus axis.
   const [pinnedPath, setPinnedPath] = useState<CyclePath | null>(null);
+  // Scoped to `pinnedPath` — every write below sets the pair, so a candidate can never
+  // outlive the course that owns it.
+  const [viewedCandidate, setViewedCandidate] = useState<string | null>(null);
   const [following, setFollowing] = useState(true);
   // The `?path=` deep-link is read in a mount effect rather than a useState
   // initializer so the static-export HTML and the first client render agree (no
@@ -255,6 +281,7 @@ export function WorkspaceProvider({
         if (prevPointer !== null && prevPointer !== nextPointer) {
           setFollowing(true);
           setPinnedPath(null); // a fresh outer mint invalidates any pin
+          setViewedCandidate(null);
         }
         prevActivePointerRef.current = nextPointer;
       }
@@ -308,12 +335,20 @@ export function WorkspaceProvider({
   });
 
   // The viewed path: the server pointer (a top-level 1-hop cycle) while
-  // following, else the explicit pin.
-  const viewedPath: CyclePath | null = following
-    ? activeCampaignId && activeCycleId
-      ? [{ campaignId: activeCampaignId, cycleId: activeCycleId }]
-      : null
-    : pinnedPath;
+  // following, else the explicit pin. Memoized because it is an ADDRESS, and an
+  // address that changes identity every render is not one: consumers key polls,
+  // memos and callbacks on it (`useForest`, the candidates card's `onSelect` — which
+  // rides the chart's `options` memo, so a fresh array here forced a `chart.update()`
+  // on every 2 s pointer tick).
+  const viewedPath: CyclePath | null = useMemo(
+    () =>
+      following
+        ? activeCampaignId && activeCycleId
+          ? [{ campaignId: activeCampaignId, cycleId: activeCycleId }]
+          : null
+        : pinnedPath,
+    [following, activeCampaignId, activeCycleId, pinnedPath],
+  );
 
   // The root hop — what chat / selection / dataset / files bind to. campaignId
   // is authoritative on both sides — never inferred from a bare cycle_id.
@@ -326,6 +361,9 @@ export function WorkspaceProvider({
   const leafHop = viewedPath ? pathLeaf(viewedPath) : null;
   const leafCampaignId = leafHop?.campaignId ?? null;
   const leafCycleId = leafHop?.cycleId ?? null;
+  const leafIsL4 = isSelfOptimization(
+    campaigns.find((c) => c.campaign_id === leafCampaignId)?.backend_type,
+  );
 
   // Dataset of the root hop: the cycle-list row matched on BOTH ids.
   const cycleEntry =
@@ -362,10 +400,14 @@ export function WorkspaceProvider({
     window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
   }, [initialized, following, pinnedPath]);
 
-  const selectCyclePath = useCallback((path: CyclePath) => {
-    setFollowing(false);
-    setPinnedPath(path);
-  }, []);
+  const selectCyclePath = useCallback(
+    (path: CyclePath, candidate: string | null = null) => {
+      setFollowing(false);
+      setPinnedPath(path);
+      setViewedCandidate(candidate);
+    },
+    [],
+  );
 
   const selectCycle = useCallback(
     (cid: string, cyid: string) =>
@@ -373,16 +415,26 @@ export function WorkspaceProvider({
     [selectCyclePath],
   );
 
+  const drillInto = useCallback(
+    (cid: string, cyid: string) => {
+      if (!viewedPath) return;
+      selectCyclePath([...viewedPath, { campaignId: cid, cycleId: cyid }]);
+    },
+    [viewedPath, selectCyclePath],
+  );
+
   // Drop back to the top-level cycle from an inner descendant, keeping it
   // pinned. No-op at depth 1 (and while following — a follow view is always a
   // 1-hop pointer, so there is nothing to pop).
   const backToOuter = useCallback(() => {
     setPinnedPath((prev) => (prev && prev.length > 1 ? prev.slice(0, 1) : prev));
+    setViewedCandidate(null);
   }, []);
 
   const followActive = useCallback(() => {
     setFollowing(true);
     setPinnedPath(null);
+    setViewedCandidate(null);
   }, []);
 
   // Switching tabs re-queries `/campaigns?lifecycle=` — bump revalidation so the
@@ -401,6 +453,8 @@ export function WorkspaceProvider({
     campaignId,
     leafCampaignId,
     leafCycleId,
+    leafIsL4,
+    viewedCandidate,
     datasetName,
     following,
     cycles,
@@ -414,6 +468,7 @@ export function WorkspaceProvider({
     setLifecycleFilter: selectLifecycle,
     selectCyclePath,
     selectCycle,
+    drillInto,
     backToOuter,
     followActive,
   };

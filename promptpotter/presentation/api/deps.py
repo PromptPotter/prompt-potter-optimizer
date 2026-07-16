@@ -11,9 +11,15 @@ from fastapi import Depends, Request
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.settings import settings
 from promptpotter.domain.backend import BackendConnection
+from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 from promptpotter.infrastructure.store import Stores, build_stores, cycle_dir_for
-from promptpotter.shared.errors import NotFoundError, ServiceUnavailableError, UnauthorizedError
+from promptpotter.shared.errors import (
+    BadRequestError,
+    NotFoundError,
+    ServiceUnavailableError,
+    UnauthorizedError,
+)
 from promptpotter.shared.identity import IdentityContext
 
 PROMPTPOTTER_AUTH_OFF_ENV = "PROMPTPOTTER_AUTH"
@@ -107,6 +113,27 @@ def warming_payload(campaign_id: str, cycle_id: str) -> dict[str, Any]:
     }
 
 
+def decode_descend(descend: str | None) -> CyclePath:
+    """Parse a ``?descend=`` tail into a :data:`CyclePath` of descent hops.
+
+    Mirrors the webapp's ``encodeDescend`` (``webapp/lib/ids.ts``): ``~``-joined
+    ``campaign::cycle`` hops, empty/absent → no descent. This is the wire CODEC and
+    nothing more — component-char validation and the descent itself belong to
+    ``descend_store`` (``infrastructure/store/stores.py``); here we only reject a
+    structurally malformed hop (missing ``::``) as a 400 rather than let it 500
+    downstream.
+    """
+    if not descend:
+        return ()
+    hops: list[CycleHop] = []
+    for seg in descend.split("~"):
+        cmp, sep, cyc = seg.partition("::")
+        if not sep or not cmp or not cyc:
+            raise BadRequestError(f"Malformed descend hop: {seg!r}")
+        hops.append(CycleHop(cmp, cyc))
+    return tuple(hops)
+
+
 def get_job_registry(request: Request) -> JobRegistry:
     """Pull the process-wide :class:`JobRegistry` off ``app.state``.
 
@@ -128,6 +155,7 @@ __all__ = [
     "JobRegistryDep",
     "StoreDep",
     "build_stores_from_identity",
+    "decode_descend",
     "get_backend_or_404",
     "get_cycle_dir_or_404",
     "get_job_registry",

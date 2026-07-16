@@ -47,7 +47,6 @@ from promptpotter.domain.run_records import CycleSeed, CycleSeedRecord
 # this package's ``__init__`` and lands back here mid-initialization. The module object
 # exists in ``sys.modules`` at that point; its attributes do not yet.
 from promptpotter.infrastructure import runtime_flags
-from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_cycle_seed,
     scan_ledger_max_round_complete,
@@ -879,6 +878,7 @@ class CampaignStore:
             "created_at": data.get("created_at", ""),
             "updated_at": data.get("updated_at", ""),
             "human_intervened": bool(data.get("human_intervened", False)),
+            "spawned_by": data.get("spawned_by"),
         }
 
     def enumerate_cycles(self) -> list[dict[str, Any]]:
@@ -1110,6 +1110,16 @@ class CampaignStore:
         """Append the cycle seed as the read-once ``CycleSeedRecord`` on the ledger
         (was ``.overrides/seed.json``). A steered fork appends its own after inheriting
         the parent's virtually, so on disk it is this cycle's own first seed record."""
+        # Imported at call time, for the same reason ``runtime_flags`` is module-bound
+        # above: ``ledger`` imports ``store.layout``, which runs this package's eager
+        # ``__init__`` and lands back here mid-initialization. Whether that explodes
+        # depends on which module the process imports FIRST — entry points reach
+        # ``store`` first and hide it; anything reaching ``ledger`` first (e.g.
+        # ``scripts/build_ts_types.py``, via the command dispatcher) got an ImportError.
+        # The real root is the fat ``store/__init__`` eagerly pulling all ten leaf
+        # stores; this only cuts the back-edge.
+        from promptpotter.infrastructure.ledger import CycleEventLog
+
         cycle_dir = self.cycle_dir(campaign_id, cycle_id)
         CycleEventLog.open(CycleDir(cycle_dir)).append(CycleSeedRecord(seed=seed))
 

@@ -30,6 +30,7 @@ from promptpotter.application.intelligence.measurement_series import (
 )
 from promptpotter.application.jobs.launcher.checkin import load_checkin_draft
 from promptpotter.application.jobs.launcher.draft_build import draft_wire_with_locks
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import NodeConfigParam, NodeOutputSchema
 from promptpotter.infrastructure.store import (
@@ -42,10 +43,11 @@ from promptpotter.infrastructure.store.archive_views import (
     measurement_series_for_samples,
 )
 from promptpotter.infrastructure.store.io import read_json
-from promptpotter.presentation.api.deps import StoreDep, get_cycle_dir_or_404
-from promptpotter.presentation.api.routers.campaigns.cycles import (
-    _decode_descend,
-    resolve_cycle_path,
+from promptpotter.infrastructure.store.stores import resolve_cycle_path
+from promptpotter.presentation.api.deps import (
+    StoreDep,
+    decode_descend,
+    get_cycle_dir_or_404,
 )
 from promptpotter.presentation.api.routers.commands import (
     dispatch_draft_patch,
@@ -356,7 +358,10 @@ def _artifact_scope_store(
         return store, campaign_id, cycle_id
     if not campaign_id or not cycle_id:
         raise BadRequestError("descend requires campaign_id and cycle_id (the root hop)")
-    return resolve_cycle_path(store, [(campaign_id, cycle_id), *_decode_descend(descend)])
+    leaf_store, leaf = resolve_cycle_path(
+        store, (CycleHop(campaign_id, cycle_id), *decode_descend(descend))
+    )
+    return leaf_store, leaf.campaign_id, leaf.cycle_id
 
 
 def _resolve_scope_artifact(

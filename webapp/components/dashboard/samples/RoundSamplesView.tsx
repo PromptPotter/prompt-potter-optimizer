@@ -7,7 +7,9 @@ import { useWorkspace } from "@/lib/workspace";
 import { useEffectiveRound } from "@/lib/hooks/useEffectiveRound";
 import { useRoundSource } from "@/lib/hooks/useRoundSource";
 import { useRoundCandidates } from "@/lib/hooks/useRoundCandidates";
-import { samplesForRow } from "@/lib/derivations";
+import { useForest } from "@/lib/hooks/useForest";
+import { innerPanelIndex, samplesForRow } from "@/lib/derivations";
+import type { CycleListEntry } from "@/lib/api";
 import type { CandidateRow, SampleRow } from "@/lib/types";
 import { RoundSamplesBody, type StatusFilter } from "./RoundSamplesBody";
 import { RoundSamplesEmptyState } from "./RoundSamplesEmptyState";
@@ -23,8 +25,32 @@ export function RoundSamplesView() {
   // Round files follow the VIEWED leaf hop (an L4 inner loop reads the inner
   // cycle's `rounds/`, not the outer root's) — the same address the dashboard
   // stream uses. `useRoundSource` owns the descend-aware fetch + live guard.
-  const { viewedPath } = useWorkspace();
+  // `leafIsL4`: are this course's samples inner campaigns rather than scored rows?
+  // The workspace's answer, off the LEAF's campaign — the same one the candidates
+  // card branches on, so the two surfaces cannot disagree about the course.
+  const { viewedPath, leafCycleId, leafIsL4: isL4, drillInto } = useWorkspace();
+  // The sandbox this course's cells ran in. Fetched only when it has one — and
+  // shared with every other surface reading this same path, one poll between them.
+  const inner = useForest(viewedPath ?? [], isL4 && viewedPath != null);
+  const panel = useMemo(() => innerPanelIndex(inner.cycles), [inner.cycles]);
+  const openRun = (run: CycleListEntry): void => drillInto(run.campaign_id, run.cycle_id);
   const { setSelectionForCandidate, setSelectionForRound, candidate } = useSelection();
+  // The groups are read from the leaf's round source, so the leaf is the cycle
+  // that produced these candidates — the selection names it, and the panes it
+  // scopes read that same hop.
+  const onSelectCandidate = (c: CandidateRow | null): void =>
+    setSelectionForCandidate(
+      c && leafCycleId
+        ? {
+            cycle_id: leafCycleId,
+            round: c.round,
+            candidate_id: c.candidate_id,
+            label: c.label,
+            accuracy: c.accuracy,
+            is_winner: c.is_winner,
+          }
+        : null,
+    );
   // The active round — the explicit pick, else the live in-flight round —
   // from the single resolver every round-scoped surface shares.
   const { round: effectiveRound } = useEffectiveRound();
@@ -62,18 +88,23 @@ export function RoundSamplesView() {
       // merge. `roundDoc` is null on the live round (the fetch is idled), and
       // an in-flight row reads `dash`, so the source is unambiguous.
       const raw = samplesForRow(c, dash, roundDoc);
-      const filtered = raw.filter((s) => {
-        if (statusFilter === "all") return true;
-        if (statusFilter === "hit") return s.status === "HIT";
-        return s.status === "MISS";
-      });
+      // An L4 cell has no HIT/MISS to filter on — it was optimized, not scored, so
+      // every `status` is null. The control is hidden in that mode; skipping the
+      // filter here keeps a stale "hit" pick from blanking the panel.
+      const filtered = isL4
+        ? raw
+        : raw.filter((s) => {
+            if (statusFilter === "all") return true;
+            if (statusFilter === "hit") return s.status === "HIT";
+            return s.status === "MISS";
+          });
       out.push({ candidate: c, samples: filtered });
     }
     if (candFilter !== "all") {
       return out.filter((g) => g.candidate.candidate_id === candFilter);
     }
     return out;
-  }, [candidates, candFilter, statusFilter, dash, roundDoc, effectiveRound]);
+  }, [candidates, candFilter, statusFilter, dash, roundDoc, effectiveRound, isL4]);
 
   const totalRows = useMemo(
     () => groups.reduce((n, g) => n + g.samples.length, 0),
@@ -133,7 +164,10 @@ export function RoundSamplesView() {
           candFilter={candFilter}
           onCandFilter={setCandFilter}
           selectedCandidate={candidate}
-          onSelectCandidate={setSelectionForCandidate}
+          cycleId={leafCycleId}
+          onSelectCandidate={onSelectCandidate}
+          panel={isL4 ? panel : null}
+          onOpenRun={openRun}
         />
       )}
     </CardFrame>

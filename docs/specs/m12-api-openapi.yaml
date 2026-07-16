@@ -79,12 +79,13 @@ tags:
       the eventual Start IS a command (`/commands/start-checkin`) declared above.
   - name: cycles
     description: |
-      Read-only per-cycle reads. NOTE: some read GETs (e.g. `/cycles`) predate
-      this file and are not yet declared here — this file began as the closed
-      *command* set. The per-cycle `/dashboard` (with its `descend` inner-descent
-      query) and `/inner-cycles` reads below are declared per the "declare new
-      GETs before the handler" rule; the remaining pre-existing read drift is
-      tracked separately, not resolved here.
+      Read-only cycle reads. `descend` is the one inner-descent mechanism across
+      them: a `~`-joined `campaign::cycle` hop chain that re-roots the read into
+      `.inner/<cycle_id>`, so `/cycles` (the forest) and `/dashboard` (one leaf)
+      each serve the top level, an L4 inner fan-out, and L5+ through the same
+      handler. NOTE: this file began as the closed *command* set, so some read
+      GETs predate it and are not yet declared; the remaining pre-existing read
+      drift is tracked separately, not resolved here.
 
 # v0 closed inbound command set — DRAFT for operator redline.
 #
@@ -1165,6 +1166,10 @@ paths:
         warming-fallback / atomic-read semantics at any depth (one server-side
         implementation, `serve_dashboard_response`). The leaf `dashboard.json`
         self-stamps its own ids, so the webapp's payload-identity guard is unchanged.
+        The in-flight round's per-candidate searchpoints
+        (`current_round.nodes.l1_score.input.candidates[]`) carry the
+        `SearchpointCandidate` shape — the same shape a round file's
+        `candidate_scores[]` carries historically.
       tags: [cycles]
       parameters:
         - name: campaignId
@@ -1207,41 +1212,67 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
 
-  /campaigns/{campaignId}/cycles/{cycleId}/inner-cycles:
+  /cycles:
     get:
-      operationId: getInnerCycles
-      summary: Inner campaigns spawned by an L4 (`promptpotter-self`) outer cycle.
+      operationId: getCycles
+      summary: Every cycle in one store + that store's active pointer — one forest.
       description: |
-        When the optimizer optimizes its own meta-prompts (L4), each candidate
-        runs as a real inner campaign under a flat, off-registry sandbox
-        `<workspace>/.inner/<outer_cycle_id>`. This lists those inner cycles for
-        the **viewed** outer cycle (the webapp may browse a past, non-active outer
-        cycle), reusing the same picker shape as `GET /cycles`. The response's
-        `active_campaign_id` / `active_cycle_id` carry the **inner** sandbox's live
-        pointer so the sidebar can mark the inner loop running right now. A non-L4
-        cycle (no sandbox) returns an empty `cycles` list — never a 404 — which is
-        what tells the webapp to show no expand affordance.
+        A *forest* is one store's whole content: campaigns (`GET /campaigns`,
+        which takes the same `descend`) grouped by their `root_cycle_id` — their
+        ORIGIN — each holding the runs on that origin, and each run's cycles: its
+        root plus every fork / diag / sweep, returned FLAT and related only by
+        `parent_cycle_id`. Whether a consumer nests them or lays them out as
+        peers is the consumer's call; the wire asserts no hierarchy.
+
+        `descend` names the chain of cycles to descend INTO; absent/empty is the
+        caller's own tenant tree. When the optimizer optimizes its own
+        meta-prompts (L4), each candidate runs as a real inner campaign under a
+        flat, off-registry sandbox `<workspace>/.inner/<cycle_id>`, which is
+        structurally a normal projects tree — so descending one hop returns that
+        cycle's inner fan-out through this same route, and an L5+ descendant
+        through two. There is no depth-specific read.
+
+        `active_campaign_id` / `active_cycle_id` carry the RESOLVED store's own
+        pointer: the active session at the top level, the inner loop running
+        right now inside a sandbox. They are reported raw — liveness is
+        `CycleListEntry.run_phase`'s job, and a consumer asking "is the pointed
+        cycle live?" reads that off `cycles[]` rather than having this route
+        re-derive it.
+
+        A cycle that spawned no inner campaigns (non-L4, or the loop hasn't
+        recursed yet) has no sandbox, so a `descend` hop naming it is a 404 —
+        that absence is what tells the webapp to show no expand affordance.
       tags: [cycles]
       parameters:
-        - name: campaignId
-          in: path
-          required: true
-          description: The outer campaign id (carried for route symmetry).
-          schema: { type: string, minLength: 8, maxLength: 128 }
-        - name: cycleId
-          in: path
-          required: true
-          description: The outer cycle id — the sole key of the `.inner/` sandbox.
-          schema: { type: string, minLength: 8, maxLength: 128 }
+        - name: descend
+          in: query
+          required: false
+          description: |
+            `~`-joined `campaign::cycle` hops to descend into, mirroring the
+            webapp's `CyclePath`. Empty/absent → the caller's own tree. A hop's
+            campaign component is carried for wire symmetry only; a sandbox is
+            keyed on the cycle id.
+          schema: { type: string }
       responses:
         '200':
           description: |
-            Inner cycles for this outer cycle (empty list when non-L4 / no
-            recursion yet); `active_*` carry the inner sandbox's live pointer.
+            Every cycle in the resolved store; `active_*` carry that store's pointer.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/CyclesResponse'
+        '400':
+          description: A `descend` hop is malformed (missing `::`) or has bad path chars.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: A `descend` hop names an inner sandbox that does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
   /commands/replace-dataset:
     post:
@@ -1710,6 +1741,49 @@ components:
         minimum: 0
 
   schemas:
+    SearchpointCandidate:
+      type: object
+      additionalProperties: true
+      description: |
+        One candidate searchpoint as the webapp joins it — DESCRIPTIVE, not a
+        route body: both carriers are `additionalProperties: true` passthroughs
+        (the file IS the contract per the folder-UI doctrine). Carried by
+        `dashboard.json::current_round.nodes.l1_score.input.candidates[]` (live,
+        writer `projections/live_dashboard/render.py`) and
+        `rounds/round_NNNN.json::candidate_scores[]` (historical, writer
+        `domain/results.py::ScoredCandidate`, served via the generic file route).
+        The webapp joins `resolved_pipeline_params` values onto the static
+        `node_config_schema` rows from the pipeline endpoint (`lib/derivations`);
+        the "·evolved" badge is that client-side diff — no served flag.
+      properties:
+        candidate_id:
+          type: string
+          description: Live id is `r{round}_{idx}`; round files carry the stable id.
+        label:
+          type: string
+          description: Display label, e.g. `C1.2`.
+        idx:
+          type: integer
+          minimum: 0
+        prompt_fields:
+          type: object
+          additionalProperties: true
+          description: |
+            The evolved prompt — `OptSearchPoint.prompt_field_dict()` shape (the
+            six PromptTemplate string fields; pp-self meta pipelines instead carry
+            per-node prompt fields inside `resolved_pipeline_params`).
+        resolved_pipeline_params:
+          type: object
+          additionalProperties: true
+          description: |
+            The COMPLETE server-resolved, config-only params this candidate runs
+            — origin floor ⊕ candidate delta, prompt stripped:
+            `{node: {param: value}, steps: […]}`. Never re-merged client-side.
+        pipeline_params_override:
+          type: object
+          additionalProperties: true
+          description: The sparse fork-transport delta. Round files only.
+
     CommandEnvelope:
       type: object
       required: [kind, payload]
@@ -1847,10 +1921,10 @@ components:
               checklist — not the operator — is the source of truth for
               completeness (see `docs/specs/roadmap.md`).
 
-    # ---- Read-surface shapes (cycle list / inner-cycle reads) ----
+    # ---- Read-surface shapes (the forest's cycle list, at any depth) ----
     # Mirrors promptpotter/presentation/api/routers/active.py::CycleListEntry
-    # + CyclesResponse. Reused verbatim by GET /cycles (undeclared, pre-existing)
-    # and GET .../inner-cycles (declared above).
+    # + CyclesResponse. GET /cycles serves it at every depth via ?descend=
+    # (declared above) — top level, an L4 cycle's inner fan-out, or L5+.
 
     CycleListEntry:
       type: object
@@ -1890,12 +1964,13 @@ components:
         active_campaign_id:
           type: [string, 'null']
           description: |
-            Active campaign per the active pointer. On /inner-cycles this carries
-            the INNER sandbox's live pointer (the inner loop running now), not the
-            workspace pointer.
+            Active campaign per the RESOLVED store's own pointer: the active
+            session at the top level, the inner loop running now when `descend`
+            walked into a sandbox. Raw — check the pointed cycle's `run_phase`
+            in `cycles[]` for liveness rather than assuming this is live.
         active_cycle_id:
           type: [string, 'null']
-          description: Active cycle per the active pointer (inner sandbox pointer on /inner-cycles).
+          description: Active cycle per the resolved store's own pointer (see active_campaign_id).
         cycles:
           type: array
           items:

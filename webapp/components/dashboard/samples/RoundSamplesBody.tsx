@@ -1,7 +1,10 @@
 "use client";
-import type { CandidateRow, SampleRow, SelectedCandidate } from "@/lib/types";
+import { isSelectedCandidate, type CandidateRow, type SampleRow, type SelectedCandidate } from "@/lib/types";
+import type { CycleListEntry } from "@/lib/api";
 import { SampleRowItem } from "./SampleRowItem";
+import { PanelCellRow } from "./PanelCellRow";
 import { fmtPct0 } from "@/lib/format";
+import { panelCellKey } from "@/lib/derivations";
 import { SegmentedControl, type Segment } from "@/components/ui";
 
 export type StatusFilter = "all" | "hit" | "miss";
@@ -26,7 +29,21 @@ interface Props {
   candFilter: string;
   onCandFilter: (id: string) => void;
   selectedCandidate: SelectedCandidate | null;
-  onSelectCandidate: (c: SelectedCandidate | null) => void;
+  // The cycle these groups were READ from (the viewed leaf). A row carries no cycle
+  // of its own, and a `candidate_id` is unique only within one — so this is what says
+  // whether `selectedCandidate` names a row here or a row in some other tree.
+  cycleId: string | null;
+  // Names the candidate row clicked, or null to clear. This renderer doesn't build
+  // the selection itself — that needs the cycle the round was read from, which the
+  // view owns.
+  onSelectCandidate: (c: CandidateRow | null) => void;
+  // PANEL MODE. Non-null when this course is L4, i.e. its samples are inner
+  // campaigns rather than scored rows: `(candidate_label, cell)` → the run that
+  // measured that cell. Null for an ordinary course, which renders scored rows.
+  // Null vs empty is a real distinction — empty means L4 with the sandbox not yet
+  // read, and the cells still list.
+  panel: ReadonlyMap<string, CycleListEntry> | null;
+  onOpenRun: (run: CycleListEntry) => void;
 }
 
 // Filters + per-candidate sample groups. Pure renderer extracted from
@@ -42,7 +59,10 @@ export function RoundSamplesBody({
   candFilter,
   onCandFilter,
   selectedCandidate,
+  cycleId,
   onSelectCandidate,
+  panel,
+  onOpenRun,
 }: Props) {
   return (
     <>
@@ -61,20 +81,27 @@ export function RoundSamplesBody({
             </option>
           ))}
         </select>
-        <SegmentedControl
-          options={STATUS_FILTERS}
-          value={statusFilter}
-          onChange={onStatusFilter}
-          ariaLabel="HIT/MISS filter"
-        />
-        <span className="rsv-count">{totalRows} samples</span>
+        {/* Hidden in panel mode: an L4 cell has no HIT/MISS to filter on. */}
+        {!panel && (
+          <SegmentedControl
+            options={STATUS_FILTERS}
+            value={statusFilter}
+            onChange={onStatusFilter}
+            ariaLabel="HIT/MISS filter"
+          />
+        )}
+        <span className="rsv-count">
+          {totalRows} {panel ? "cells" : "samples"}
+        </span>
       </div>
       <div className="rsv-groups">
         {groups.map((g) => {
-          const isCandSelected =
-            selectedCandidate != null &&
-            selectedCandidate.round === g.candidate.round &&
-            selectedCandidate.candidate_id === g.candidate.candidate_id;
+          const isCandSelected = isSelectedCandidate(
+            selectedCandidate,
+            cycleId,
+            g.candidate.round,
+            g.candidate.candidate_id,
+          );
           const hits = g.samples.reduce(
             (n, s) => n + (s.status === "HIT" ? 1 : 0),
             0,
@@ -91,25 +118,25 @@ export function RoundSamplesBody({
               <button
                 type="button"
                 className="rsv-group-head"
-                onClick={() =>
-                  onSelectCandidate(
-                    isCandSelected
-                      ? null
-                      : {
-                          round: g.candidate.round,
-                          candidate_id: g.candidate.candidate_id,
-                          label: g.candidate.label,
-                          accuracy: g.candidate.accuracy,
-                          is_winner: g.candidate.is_winner,
-                        },
-                  )
-                }
+                onClick={() => onSelectCandidate(isCandSelected ? null : g.candidate)}
                 title="Click to anchor lineage + fitness on this candidate"
               >
                 <span className="rsv-cand-label">{g.candidate.label}</span>
                 <span className="rsv-tally">
-                  <span className="tag-hit">HIT {hits}</span>
-                  <span className="tag-miss">MISS {misses}</span>
+                  {/* An L4 cell carries no `is_hit` — it was optimized by a whole
+                      campaign, not scored — so a HIT/MISS tally here counted every
+                      null as a miss and read "HIT 0 / MISS 7" beside a 39%
+                      headline. The panel's own count is the honest reading. */}
+                  {panel ? (
+                    <span className="tag-cached" title="Each cell is an inner campaign">
+                      {g.samples.length} {g.samples.length === 1 ? "cell" : "cells"}
+                    </span>
+                  ) : (
+                    <>
+                      <span className="tag-hit">HIT {hits}</span>
+                      <span className="tag-miss">MISS {misses}</span>
+                    </>
+                  )}
                   {cached > 0 && (
                     <span
                       className="tag-cached"
@@ -124,9 +151,19 @@ export function RoundSamplesBody({
                 <div className="rsv-empty-row">No matching samples.</div>
               ) : (
                 <div className="rsv-rows">
-                  {display.map((s) => (
-                    <SampleRowItem key={s.key} row={s} />
-                  ))}
+                  {display.map((s) =>
+                    panel ? (
+                      <PanelCellRow
+                        key={s.key}
+                        cell={s.query}
+                        run={panel.get(panelCellKey(g.candidate.label, s.query)) ?? null}
+                        cached={s.cached}
+                        onOpen={onOpenRun}
+                      />
+                    ) : (
+                      <SampleRowItem key={s.key} row={s} />
+                    ),
+                  )}
                   {truncated > 0 && (
                     <div className="rsv-empty-row">
                       +{truncated} more (rendering capped at {PER_GROUP_CAP}).

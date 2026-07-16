@@ -81,6 +81,8 @@ function AppShellInner() {
     cyclesLoaded,
     cycles,
     selectCycle,
+    selectCyclePath,
+    leafCycleId,
   } = useWorkspace();
   // The DISPLAY panes (connector, pipeline hero, hard-samples) follow the VIEWED
   // LEAF hop — the same hop the dashboard stream re-roots to — so drilling into an
@@ -240,7 +242,9 @@ function AppShellInner() {
   const showCheckin = selectedCheckin && tab === "chat";
 
   return (
-    <SelectionProvider cycleId={cycleId}>
+    // Keyed on the LEAF hop, like the dashboard stream — selection scopes the
+    // inspector / samples / round files, and those read the leaf.
+    <SelectionProvider cycleId={leafCycleId}>
     {/* The campaign lineage fetch + its mask/lens divergence overlay — owned once
         at the shell root (inside CycleStreamProvider + SelectionProvider it reads
         from), consumed by the lineage card and the fitness panel. */}
@@ -264,14 +268,21 @@ function AppShellInner() {
         Skip to content
       </a>
       <Sidebar
-        onSelectCycle={(cmp, cyc) => {
-          selectCycle(cmp, cyc);
+        onSelectPath={(path, candidate) => {
+          selectCyclePath(path, candidate);
           // The tab is the operator's axis — selecting a unit must NOT hijack it
           // (picking a campaign while reading the Chat stays on Chat). The one
           // exception is a check-in: it has no dashboard.json, so Dashboard/Verify
-          // would dead-end — send it to Chat, its authoring home.
+          // would dead-end — send it to Chat, its authoring home. Only a top-level
+          // cycle can be a check-in (an inner run is machine-minted and always
+          // past authoring), so a descended path never redirects.
+          if (path.length > 1) return;
+          const hop = path[0]!;
           const checkin = cycles.some(
-            (c) => c.campaign_id === cmp && c.cycle_id === cyc && c.run_phase === "checkin",
+            (c) =>
+              c.campaign_id === hop.campaignId &&
+              c.cycle_id === hop.cycleId &&
+              c.run_phase === "checkin",
           );
           if (checkin) setTab("chat");
         }}

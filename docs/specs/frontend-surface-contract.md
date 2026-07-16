@@ -162,7 +162,49 @@ controls:
         new_campaign).
     status: ok
   - id: campaign_list
-    do: List campaigns (Active/Archived + dataset narrow both via the filter popover).
+    do: List the forest as alternating COURSE → CANDIDATE tiers, at any depth.
+        ORIGIN == C0, said ONCE. The campaign row and its ROOT course are one row (a
+        campaign mints exactly one root; drawn apart, a fork-less campaign rendered as
+        two rows with one score). The merge STOPS there — a root course's C0 stays an
+        ordinary candidate row, first in its list. Folding it in too left the origin's
+        own measurements with nowhere to live, and badged every course `C0`, which says
+        nothing: every course is its own origin.
+        Campaign chrome (⋯ menu, size hover) sits on the course row — archiving is a
+        campaign verb.
+        A course lists what it produced — `C0`, then `C1.1`, `C1.2`, … from the round
+        trajectory (`/lineage`, one conditional fetch per campaign; lazy on course-open,
+        since every campaign wears a course row).
+        A FORK IS A SIBLING COURSE, beside the candidates — not inside the one it was cut
+        from. Borrowing an origin is not being contained by it, and nesting buried the
+        fork a level too deep. The cut is a BADGE (`from C0`), never the name (it sits
+        beside that candidate, so the name would double the neighbouring row); the label
+        is its id tail. Only a steered cut names `from_candidate_id`; a round-level cut
+        (divergence/rebase/sweep/diag) wears no badge rather than claim a candidate.
+        A FORK WEARS NO C0 ROW — its badge already names the origin it borrowed, and it
+        replays rather than re-derives it, so the row would restate the row above it and
+        hold nothing.
+        At L4 a candidate opens the inner campaigns that measured it — the recursion, and
+        what makes a root's C0 the home of the origin's own runs. One candidate has as
+        many as the panel has cells, identical but for `spawned_by.task`
+        (`{dataset}/seed-N`), so an inner run wears its TASK; its candidate is the row it
+        hangs under. A run only nests under a candidate row that EXISTS: `C0` on a fork,
+        or a label whose round never closed, has none, so the run sits directly on the
+        course rather than rendering nowhere at all.
+        `won` needs a CONTESTED round — round 0 runs one candidate, so C0 beats nobody
+        and wears no badge.
+        NO per-tier framing: the tree is its indent rail and its labels. Boxing/colouring
+        the tiers nested boxes inside boxes; the visual design is deferred, not half-done.
+        A candidate has a row whether or not it spawned anything (a cache-hit candidate
+        ran nothing). Filing is `spawned_by` only — never by order.
+        The ● dot is PER-FOREST: green = this cycle's own `run_phase`; accent = its
+        store's active pointer. Each depth resolves its own pointer (the session up top,
+        the inner loop in a sandbox), so an inner row's dot answers for the sandbox — a
+        global pointer names no cycle down there and the dot never lit.
+        Clicking a candidate INSPECTS it, never navigates: a candidate is a tier, not a
+        path hop, so it has no address. The row drives its COURSE's path plus the shared
+        candidate axis (`setSelectionForCandidate` — the channel a fitness bar uses), and
+        the inspector / samples / round axis follow it.
+        Active/Archived + dataset narrow via the filter popover.
         anon: "Sign in to see your campaigns." (SignInPrompt).
         auth_empty: "No campaigns yet — start one."
     status: ok
@@ -257,8 +299,20 @@ controls:
     do: Best/Last fitness from dashboard.json. "—" placeholders in auth_empty/warming.
     status: ok
   - id: candidates.card
-    do: Fitness bars + the bracket dendrogram beneath them on the SAME x-axis (one cycle, one
-        `roundCandidates` spine). Always on — there is no view to switch.
+    do: Fitness bars = the CHILDREN of the VIEWED lineage-tree node, the same rows the
+        sidebar draws under it. The viewed node is NAVIGATION (`viewedPath` +
+        `viewedCandidate`) and only the sidebar writes it; a bar click is INSPECTION
+        (`SelectionContext.candidate`) and NEVER navigates - one slot for both made the
+        chart its own input, so clicking a bar re-plotted it under the cursor. COURSE
+        viewed - its candidates (one cycle, one `roundCandidates` spine; a fork course
+        drops its borrowed C0, which lives on the parent) plus one bar per fork cut from
+        it (served best, no election aggregates, a dashed dendrogram dot outside the round
+        packing). L4 CANDIDATE viewed - the inner runs filed under it by `spawned_by`
+        (title becomes the crumb back up a tier; dendrogram + What-If hidden, no candidate
+        descent / evaluator namespace to draw). Every bar - candidate, fork or run - is a
+        measured thing, so a click lights it, lights its dendrogram dot, and scopes the
+        inspector/samples; none of them move the chart. The bracket dendrogram sits beneath
+        the course view on the SAME x-axis.
     status: ok
   - id: lineage.forest
     do: Its OWN card, revealed by the toggle beside the dendrogram (and by a ⑂ fork mark, which
@@ -275,7 +329,24 @@ controls:
         checkboxes and becomes the master lens.
     status: ok
   - id: samples
-    do: Per-sample table — rendered inside the l1_score node inspector (click l1_score), not a standalone card. Empty note before scoring.
+    do: Per-sample table — rendered inside the l1_score node inspector (click l1_score), not a
+        standalone card. Empty note before scoring.
+        PANEL MODE at L4: a self-optimizing course's samples are inner CAMPAIGNS, not scored rows —
+        the round records only the cell's name (`{dataset}/seed-N`) with a null `is_hit`. Each cell
+        renders as the run that measured it (phase, origin→best, opens the cycle), joined by
+        `spawned_by` on `(candidate_label, task)` — never by order. TWO absences, not one: a
+        cell the LIVE round hasn't named yet reads "pending" (the name lands with the round
+        file, so there is nothing to join on); a NAMED cell with no stamped run reads "run not
+        recorded". Conflating them accused the engine of losing provenance on every live round.
+        The HIT/MISS tally + filter are HIDDEN here: nulls counted as misses read
+        "HIT 0 / MISS 7" beside a 39% headline. Reads `leafIsL4` (the LEAF's backend_type), so a
+        pp-self fork is in and a drilled-into inner run is out.
+    status: ok
+  - id: scoring.inspector
+    do: Candidate drill-in. PRIMARY element is the one runnable-spec surface (NodeSurface, values
+        mode, read-only) for the selected searchpoint — live round from dashboard.json, completed
+        round from round_NNNN.json (no stitch); scalar stats + per-sample rows below; Steer & fork
+        opens the editable twin. Loading note until the spec's round data lands.
     status: ok
   - id: optimizer.round_axis
     do: One circle per closed round + a LIVE pill, in the optimizer card's toolbar — the optimizer

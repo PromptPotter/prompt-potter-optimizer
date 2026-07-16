@@ -172,6 +172,20 @@
 .rsv-detail{padding:6px 8px 4px 96px;display:grid;grid-template-columns:max-content 1fr;gap:4px 12px;font-size:12px}
 .rsv-detail .kv-label{color:var(--color-text-tertiary)}
 
+/* An L4 panel cell — a whole inner campaign, not a scored row. It borrows
+   `.rsv-row`'s spacing so the two modes sit at the same rhythm, then overrides the
+   parts that only make sense for a scored line (a cell has no HIT/MISS body). */
+.pcr-row{display:flex;align-items:baseline;gap:8px;width:100%;text-align:left;
+  background:none;border:0;border-bottom:0.5px dotted transparent;font:inherit;cursor:pointer}
+.pcr-row:hover{background:var(--color-background-hover)}
+.pcr-absent{cursor:default;color:var(--color-text-tertiary)}
+.pcr-name{flex:1;min-width:0;display:flex;align-items:baseline;gap:6px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pcr-meta{flex:0 0 auto;display:flex;align-items:baseline;gap:8px;
+  font-variant-numeric:tabular-nums}
+.pcr-status{color:var(--color-text-secondary);font-size:11px}
+.pcr-note{flex:0 0 auto;font-size:11px;font-style:italic}
+
 /* Hero / progress fluidity — collapses the KPI trio under the title block on
    narrow viewports without leaving the cells overlapping. */
 @container content (max-width:780px){
