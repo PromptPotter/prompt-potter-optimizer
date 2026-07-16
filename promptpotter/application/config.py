@@ -698,7 +698,7 @@ def _check_optimizer_below_target(target_models: tuple[str, ...]) -> PreflightWa
     pin. Both sides must parse a ``<N>b`` size or the check is skipped (no guess).
     The optimizer model is read from the install-global optimizer node config
     (``datasets/_optimizer/pipeline.json``), not a per-campaign copy."""
-    from promptpotter.application.optimization.dispatch.llm_call import optimizer_model
+    from promptpotter.application.optimization.dispatch.llm_call.prompts import optimizer_model
 
     opt_model = optimizer_model()
     opt_b = _model_params_b(opt_model)
@@ -826,7 +826,7 @@ def resolve_pipeline_config_params(
     Shared by :func:`configure_and_apply_pipeline` (which adds prompts + validation + the
     session apply) and the ``GET /origins`` prospective-origin id, so the two can never
     silently diverge. Takes no live ``Session`` — resolvable from disk."""
-    from promptpotter.application.datasets import load_dataset_node_overlay
+    from promptpotter.application.datasets.prompts import load_dataset_node_overlay
 
     pipeline_params: dict[str, Any] = {"steps": list(active)}
     if dataset_dir is not None:
@@ -948,7 +948,7 @@ def _apply_starting_prompts(
     ``{{var}}`` the node declares; warns when the dataset ships prompts but no
     active node can carry one. Assumes the caller checked ``has_dataset_prompts``.
     """
-    from promptpotter.application.datasets import load_node_prompt
+    from promptpotter.application.datasets.prompts import load_node_prompt
 
     prompt_nodes = [n for n in filtered.prompt_node_names() if n in active]
     if not prompt_nodes:
@@ -1032,7 +1032,7 @@ def configure_and_apply_pipeline(
     log: Callable[[str], None] = logger.info,
 ) -> dict[str, Any]:
     """Build pipeline identity, apply filtered schema + overrides onto *session*."""
-    from promptpotter.application.datasets import has_dataset_prompts
+    from promptpotter.application.datasets.prompts import has_dataset_prompts
 
     exclude = list(campaign_config.exclude_nodes)
     active, filtered = _resolve_active_schema(

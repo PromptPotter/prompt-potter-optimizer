@@ -11,7 +11,3 @@ The certified Profile-A contract (snapshot-then-tail semantics, heartbeat
 cadence, sequence-gap detection) is documented in
 ``docs/developer/event-stream.md``.
 """
-
-from promptpotter.infrastructure.projections.event_stream.tail import CycleLedgerTail
-
-__all__ = ["CycleLedgerTail"]

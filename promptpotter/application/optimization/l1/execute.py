@@ -9,11 +9,11 @@ from promptpotter.application.intelligence.exploration import (
     build_observations,
     select_round_subset,
 )
-from promptpotter.application.optimization.dispatch.llm_call import optimizer_model
+from promptpotter.application.optimization.dispatch.llm_call.prompts import optimizer_model
 from promptpotter.application.optimization.l1.critique import run_l1_critique
 from promptpotter.application.optimization.l1.resume import generate_or_load_candidates
-from promptpotter.application.optimization.l1.score import l1_score
-from promptpotter.application.optimization.pobb.elimination import PoBBConfig
+from promptpotter.application.optimization.l1.score.winner import l1_score
+from promptpotter.application.optimization.pobb.elimination.checks import PoBBConfig
 from promptpotter.application.optimization.round_analysis import compute_round_diagnostics
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.phases import CampaignPhase, emit_phase
@@ -22,13 +22,13 @@ from promptpotter.domain.results import RoundResult
 from promptpotter.domain.validators import StopRule
 
 # Module-level alias for test monkeypatching.
-from promptpotter.infrastructure.tracing import (
+from promptpotter.infrastructure.tracing.bridge import observed_node
+from promptpotter.infrastructure.tracing.events import (
     L1CritiqueWritten,
     PromptVersion,
     RoundEnd,
     RoundStart,
     RoundWinnerChosen,
-    observed_node,
 )
 from promptpotter.shared.errors import graceful
 

@@ -27,7 +27,7 @@ async def cmd_ab(args: argparse.Namespace) -> CommandResult:
     """Re-derive the active cycle's recorded decisions under the current engine; report flips."""
     from promptpotter.application.bootstrap.scoring_context import populate_session_scoring
     from promptpotter.application.config import configure_and_apply_pipeline
-    from promptpotter.application.optimization.resume_and_fork import ab_replay_cycle
+    from promptpotter.application.optimization.resume_and_fork.ab_replay import ab_replay_cycle
     from promptpotter.application.scoring.formula import split_scoring_block
 
     ctx = load_session(args)

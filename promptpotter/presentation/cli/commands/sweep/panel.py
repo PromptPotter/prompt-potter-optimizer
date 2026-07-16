@@ -77,9 +77,9 @@ async def _fork_and_bind(
     ``application/sweep.sweep_runner`` — the active pointer is retargeted by
     ``_mint_fork`` and the caller must restore it after the loop.
     """
-    from promptpotter.application.bootstrap import init_services
+    from promptpotter.application.bootstrap.wiring import init_services
     from promptpotter.application.config import configure_and_apply_pipeline
-    from promptpotter.application.optimization.resume_and_fork import _mint_fork
+    from promptpotter.application.optimization.resume_and_fork.fork_siblings import _mint_fork
     from promptpotter.domain.run_records import ForkSpec, ForkTrigger
     from promptpotter.infrastructure.store import build_stores
 
@@ -130,7 +130,7 @@ async def _run_one_panel_variant(
 ) -> tuple[Any, Any]:
     """Run one optimize cycle with ``variant``'s L1 template applied.
     Returns ``(cycle_result, observers)``."""
-    from promptpotter.application.sweep import optimizer_prompt_override
+    from promptpotter.application.sweep.toolkit import optimizer_prompt_override
 
     template = _resolve_template(variant)
     with optimizer_prompt_override(variant.node, template):
@@ -150,7 +150,7 @@ def _variant_to_result(
     prior_round1_acc: float | None,
 ) -> dict[str, Any]:
     """Compose one sweep-result dict from a finished panel run."""
-    from promptpotter.application.sweep import (
+    from promptpotter.application.sweep.toolkit import (
         build_sweep_result,
         current_optimizer_prompt_hash,
     )
@@ -227,7 +227,7 @@ async def _run_panel_verb(
     the prior round1_accuracy for round2 lift computation when called
     via ``--from-sweep``.
     """
-    from promptpotter.application.sweep import slice_samples, write_sweep_result
+    from promptpotter.application.sweep.toolkit import slice_samples, write_sweep_result
     from promptpotter.infrastructure.store import save_active_pointer
     from promptpotter.shared.errors import ResumeDivergenceError
     from promptpotter.shared.spend import refresh_rates
@@ -255,9 +255,9 @@ async def _run_panel_verb(
         dataset_name=session.dataset_name,
     )
     dataset = ctx.init_params["dataset_name"] or "unknown"
-    sweep_id = __import__(
-        "promptpotter.application.sweep", fromlist=["mint_sweep_id"]
-    ).mint_sweep_id()
+    from promptpotter.application.sweep.toolkit import mint_sweep_id
+
+    sweep_id = mint_sweep_id()
     multi = len(variants) > 1 or (len(variants) == 1 and variants[0].path is not None)
     batch_id = _mint_toolkit_batch_id() if multi else None
     # Fork off the BASE cycle, never the active one — the active pointer may be a
@@ -367,7 +367,7 @@ async def _cmd_sweep_round2(args: argparse.Namespace) -> CommandResult:
     (by ``round1_accuracy``) and re-run each with 2 rounds, anchoring
     round2_lift against each variant's prior round1. Without
     ``--from-sweep``, falls back to ``--l1-prompts`` / current L1."""
-    from promptpotter.application.sweep import find_sweep_results
+    from promptpotter.application.sweep.toolkit import find_sweep_results
     from promptpotter.infrastructure.store import build_stores
 
     if getattr(args, "from_sweep", None):

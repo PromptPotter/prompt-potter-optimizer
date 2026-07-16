@@ -70,7 +70,7 @@ def _prepare_cycle_for_resume(
 
     Second check: optimizer-prompt drift halts resume with a pointer to ``new``."""
     from promptpotter.application.knobs import DiffScope, classify_config_diff
-    from promptpotter.application.optimization.dispatch.llm_call import (
+    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         combined_optimizer_prompt_hash,
     )
 
@@ -193,7 +193,7 @@ def _maybe_fork_diag_sibling(args: argparse.Namespace, ctx: SessionCtx, session:
     existing_index = session.store.campaigns.load(ctx.campaign_id, ctx.cycle_id) or {}
     if (existing_index.get("final") or {}).get("mode") != "diag":
         return
-    from promptpotter.application.optimization.resume_and_fork import _mint_fork
+    from promptpotter.application.optimization.resume_and_fork.fork_siblings import _mint_fork
     from promptpotter.domain.run_records import ForkSpec, ForkTrigger
 
     tenant_id = session.identity.tenant_id
@@ -233,7 +233,7 @@ def _maybe_fork_operator_rewind(
     if rewind_to == 0:
         raise SystemExit("ERROR: --rewind 0 mints a fork at the cycle root. Use `--diag` instead.")
 
-    from promptpotter.application.optimization.resume_and_fork import _mint_fork
+    from promptpotter.application.optimization.resume_and_fork.fork_siblings import _mint_fork
     from promptpotter.domain.run_records import ForkSpec, ForkTrigger
 
     reason = (getattr(args, "rewind_reason", "") or "").strip() or (
@@ -297,7 +297,9 @@ def _maybe_fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx, sessio
             "Run `python -m promptpotter new <dataset>` first."
         )
 
-    from promptpotter.application.optimization.resume_and_fork import mint_operator_fork
+    from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
+        mint_operator_fork,
+    )
     from promptpotter.domain.opt_search_point import overlay_sets_model_outside_allowed
     from promptpotter.domain.run_records import ConfigOverrides, CycleSeed
     from promptpotter.shared.identity import CAMPAIGN_BABYSIT_CAP, has_capability
@@ -372,7 +374,7 @@ async def _drive_optimization(
     fork_on_divergence: bool,
 ) -> CycleResult:
     """One pass through the loop. Caller handles divergence menu + re-invoke."""
-    from promptpotter.application.runner import RunMode
+    from promptpotter.application.runner.entry import RunMode
 
     cycle_result, _ = await drive_cycle(
         args,

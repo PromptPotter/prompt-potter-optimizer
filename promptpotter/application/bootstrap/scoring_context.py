@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from promptpotter.application.run_observers import RunCallbacks
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
-    from promptpotter.infrastructure.tracing import ObservabilityBridge
+    from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,7 @@ def bootstrap_cycle(
     ``next_resume_round``), or an invalid ``--from N`` rewind — is NOT caught: it
     propagates and halts loud. Swallowing it would silently discard the prior
     rounds and re-spend the campaign from scratch under a fresh anonymous cycle."""
-    from promptpotter.application.runner import cycle_config_identity
+    from promptpotter.application.runner.identity import cycle_config_identity
 
     if not session.backend_id:
         return None, 1
@@ -201,7 +201,7 @@ def _start_observability_and_scoring(
     scorer_id: str,
 ) -> tuple[str, ObservabilityBridge | None]:
     """Start ObservabilityBridge + populate scoring; obs may be None on failure."""
-    from promptpotter.infrastructure.tracing import ObservabilityBridge
+    from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 
     tracing_campaign_id = resolved_cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
     obs = ObservabilityBridge.start_campaign(
@@ -236,7 +236,7 @@ def _apply_resume_fork(
     fork_on_divergence: bool,
 ) -> tuple[str | None, int]:
     """Replay decisions; fork on divergence. Returns possibly-rebound (id, round)."""
-    from promptpotter.application.optimization.resume_and_fork import (
+    from promptpotter.application.optimization.resume_and_fork.resume import (
         resume_with_divergence_check,
     )
 
@@ -271,8 +271,10 @@ def _finalize_loop_state(
 ) -> None:
     """Init AxisIndex, write final session/cycle state, emit ``INIT.exit``."""
     from promptpotter.application.bootstrap.session import _open_cycle_ledger
-    from promptpotter.application.intelligence.indexes import AxisIndex
-    from promptpotter.application.optimization.pobb.elimination import build_degradation_checks
+    from promptpotter.application.intelligence.indexes.axis import AxisIndex
+    from promptpotter.application.optimization.pobb.elimination.checks import (
+        build_degradation_checks,
+    )
     from promptpotter.domain.phases import CampaignPhase, emit_phase
 
     cycle.axes = AxisIndex.ensure_for(

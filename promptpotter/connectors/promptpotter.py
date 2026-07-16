@@ -214,7 +214,7 @@ async def _in_process_run(query: str, payload: dict[str, Any]) -> dict[str, Any]
     cycle's context is published by the runner seam (``publish_inner_spawn_context``)
     so this context-free hook can find where to sandbox + which inner benchmark to
     run."""
-    from promptpotter.application.runner.inner import run_inner_cycle
+    from promptpotter.application.runner.inner.cycle import run_inner_cycle
 
     return await run_inner_cycle(query, payload)
 

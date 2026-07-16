@@ -239,7 +239,7 @@ def load_optimizer_prompt(name: str) -> PromptTemplate:
     :data:`dispatch_hub.INJECTIONS` (and not in the per-template extras list)
     raises at load time rather than silently rendering empty.
     """
-    from promptpotter.application.optimization.dispatch.hub import validate_template
+    from promptpotter.application.optimization.dispatch.hub.facade import validate_template
 
     template = base_optimizer_template(name)
     if fields := resolve_node_override(name).prompt_fields:

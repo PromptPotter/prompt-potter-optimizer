@@ -267,7 +267,21 @@ LEDGER_BASELINE = {
     # rebind) without making either mean two things.
     "modules": 318,
     "init_files": 60,
-    "reexport_shims": 43,
+    # 43 -> 9 (2026-07-16): 34 package ``__init__`` files that did nothing but re-export a
+    # leaf's names were emptied to docstring-only namespace markers, and their ~190 consumer
+    # sites now import the leaf they actually wanted. A shim is a hop a reader must take and
+    # a second place a name lives; deleting one subtracts both.
+    #
+    # **The 9 survivors are the floor — they are not shims, and emptying them breaks the app.**
+    # Don't re-propose them:
+    #   * ``connectors`` — IS the connector registry (import-time guards).
+    #   * ``presentation/api/routers/campaigns`` — IS the route registry: its submodule imports
+    #     run the ``@campaigns_router`` decorators, so emptying it mounts a router with ZERO
+    #     routes. The one that reads like a pure re-export and is not.
+    #   * ``infrastructure/store``, ``shared``, ``application/scoring/formula``,
+    #     ``application/views/render``, ``cli/commands/{champion,matrix,sweep}`` — real code
+    #     in the body (the counter sees ``__all__`` + an import and says "shim"; it is wrong).
+    "reexport_shims": 9,
     "config_leaf_fields": 38,
     "settings_env": 16,
     "settings_const": 14,

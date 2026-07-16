@@ -28,14 +28,14 @@ from promptpotter.application.intelligence.hard_sample_sorter import (
     build_hard_samples_artifact_from_observations,
 )
 from promptpotter.application.output.review import render_review_md
-from promptpotter.application.views import (
+from promptpotter.application.views.render import to_markdown
+from promptpotter.application.views.view_models import (
     DigestStatusView,
     FinalWinnerView,
     ForkSummaryView,
     HardSamplesView,
     LogMdView,
     RoundDigestView,
-    to_markdown,
 )
 from promptpotter.domain.rendering import format_l1_critique_for_prompt
 from promptpotter.domain.results import RoundResult

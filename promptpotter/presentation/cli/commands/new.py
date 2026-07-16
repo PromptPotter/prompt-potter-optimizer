@@ -157,7 +157,7 @@ async def _ingest_checkin(args: argparse.Namespace) -> str:
     from promptpotter.application.datasets.ingest import SlugTakenError, ingest_draft
     from promptpotter.application.datasets.origin_readiness import origin_readiness
     from promptpotter.application.datasets.origin_resolve import resolve_origin_turn
-    from promptpotter.application.jobs.launcher import save_checkin_draft
+    from promptpotter.application.jobs.launcher.checkin import save_checkin_draft
     from promptpotter.infrastructure.store import build_stores
 
     file_path = Path(args.dataset)
@@ -217,7 +217,10 @@ async def _ingest_and_prepare_checkin(
     Backend reachability isn't preflighted here: a check-in is durable, so if the
     backend is down the campaign is minted + flipped + left ready, and the common
     tail's status check reports it — ``resume`` runs it once the backend is up."""
-    from promptpotter.application.jobs.launcher import load_checkin_draft, prepare_checkin_run
+    from promptpotter.application.jobs.launcher.checkin import (
+        load_checkin_draft,
+        prepare_checkin_run,
+    )
     from promptpotter.infrastructure.store import build_stores
 
     campaign_id = await _ingest_checkin(args)
@@ -310,7 +313,7 @@ async def _mint_fresh_session(
     """Find-or-create campaign + mint session + root cycle. No scoring (origin runs as phase 0 of the loop).
     Returns ``(session, campaign_config, dataset_name, session_id)``."""
     from promptpotter.application.config import load_campaign_config as _load_cfg
-    from promptpotter.application.datasets import read_campaign_config_file
+    from promptpotter.application.datasets.authored import read_campaign_config_file
 
     # Shared unwrap only — `new` validates AFTER merging with the connector
     # profile ({**profile, **file_config}), a different composition order than
@@ -373,7 +376,7 @@ async def _run_sweep_batch(
     sweep_payloads: list[tuple[Path, Any]],
 ) -> CommandResult:
     """Thin shim → ``application.sweep.run_sweep_batch``; binds observer factory to CLI args + campaign_config."""
-    from promptpotter.application.sweep import run_sweep_batch
+    from promptpotter.application.sweep.sweep_runner import run_sweep_batch
 
     def observer_factory(session: Session, origin_acc: float) -> RunObservers:
         return build_observers(args, session, campaign_config, train_data, origin_acc)
@@ -407,10 +410,7 @@ async def _maybe_dispatch_sweep_batch(
     mint one fork per OperatorSweepFile. ``None`` falls through to the normal path."""
     if not getattr(args, "sweep", False):
         return None
-    from promptpotter.application.sweep import (
-        load_sweep_payloads,
-        resolve_sweep_dir,
-    )
+    from promptpotter.application.sweep.sweep_runner import load_sweep_payloads, resolve_sweep_dir
 
     sweep_dir = resolve_sweep_dir(dataset_config_dir)
     if sweep_dir is None:
@@ -430,7 +430,7 @@ async def _run_loop(
     train_data: list[Sample],
 ) -> CommandResult:
     """Drive the optimization loop via the shared CLI driver."""
-    from promptpotter.application.runner import RunMode
+    from promptpotter.application.runner.entry import RunMode
 
     cycle_result, _ = await drive_cycle(
         args,

@@ -362,9 +362,9 @@ async def _run_inner_campaign(
     # from here). Deferring to call time keeps this module import-light.
     from promptpotter.application.bootstrap.wiring import init_services
     from promptpotter.application.config import load_campaign_config
-    from promptpotter.application.datasets import read_campaign_config_file
+    from promptpotter.application.datasets.authored import read_campaign_config_file
     from promptpotter.application.jobs.mint import prepare_fresh_cycle
-    from promptpotter.application.optimization.dispatch.llm_call import (
+    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         set_optimizer_prompt_overrides,
     )
     from promptpotter.application.optimization.task_context import (
@@ -372,7 +372,7 @@ async def _run_inner_campaign(
         load_or_build_task_context,
     )
     from promptpotter.application.run_observers import build_run_observers
-    from promptpotter.application.runner import RunMode, run_optimization
+    from promptpotter.application.runner.entry import RunMode, run_optimization
     from promptpotter.infrastructure.store import build_stores
     from promptpotter.infrastructure.store.archive_views import capture_evidence_epoch
     from promptpotter.shared.instrument import enter_instrument_mode

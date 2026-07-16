@@ -4,16 +4,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.dispatch.hub import (
-    DispatchHub,
-    build_bundle,
-    citable_fields,
-)
-from promptpotter.application.optimization.dispatch.llm_call import (
+from promptpotter.application.optimization.dispatch.hub.facade import DispatchHub, build_bundle
+from promptpotter.application.optimization.dispatch.hub.injections.registry import citable_fields
+from promptpotter.application.optimization.dispatch.llm_call.call import (
     LLMCallContext,
+    run_optimizer_node,
+)
+from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     load_optimizer_prompt,
     optimizer_model,
-    run_optimizer_node,
 )
 from promptpotter.application.optimization.dispatch.schemas import (
     L1GenerateOutput,
@@ -34,13 +33,13 @@ from promptpotter.domain.results import (
 )
 from promptpotter.infrastructure.llm.json_parse import MetaPromptParseError
 from promptpotter.infrastructure.llm.models import emit_round_warning
-from promptpotter.infrastructure.tracing import CandidateCreated
+from promptpotter.infrastructure.tracing.events import CandidateCreated
 from promptpotter.shared import truncate
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.infrastructure.tracing import ObservabilityBridge
+    from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 
 import logging
 

@@ -267,7 +267,7 @@ def test_layout_only_override_moves_optimizer_prompt_hash() -> None:
     on the hash silently pool layout-differing inner cycles (run b786e9: C1.3's
     inner campaigns stamped the origin's hash). Prose-hash behavior is untouched:
     no override → identical hashes."""
-    from promptpotter.application.optimization.dispatch.llm_call import (
+    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         compute_optimizer_prompt_hashes,
         set_optimizer_prompt_overrides,
     )
@@ -299,8 +299,8 @@ def test_inner_narrative_carries_evidence_within_budget() -> None:
     deltas, or overruns the panel cap (1200c head-keep would clip the LATEST
     rounds), the outer loop is evidence-starved again with no error and no
     symptom (run b786e9: transcripts degenerated to identity tokens)."""
-    from promptpotter.application.runner.inner import InnerTaskSpec
     from promptpotter.application.runner.inner.cycle import _inner_narrative
+    from promptpotter.application.runner.inner.tasks import InnerTaskSpec
     from promptpotter.domain.results import CycleResult, RoundResult, ScoredCandidate
 
     spec = InnerTaskSpec(inner_dataset="justlogic", seed=3, n_samples=24, n_rounds=2, n_variants=2)
@@ -386,7 +386,7 @@ def test_evidence_channel_clips_are_visible_and_tail_preserving(
     reasoning-trace head-keep dropped the CONCLUSION — the one step the critique
     is ordered to quote; (3) an over-cap `task_context` field hard-sliced mid-word
     at the render site. All three produce wrong prompt content with no error."""
-    from promptpotter.application.optimization.dispatch.hub import (
+    from promptpotter.application.optimization.dispatch.hub.bundle import (
         CycleSlice,
         InjectionBundle,
         RoundDigest,
@@ -680,15 +680,15 @@ def test_schema_violation_is_a_non_result_not_a_wrong_answer() -> None:
             async def chat(self, *_: Any, **__: Any) -> Any:
                 return resp
 
-        import promptpotter.infrastructure.llm as llm_pkg
+        from promptpotter.infrastructure.llm import registry
 
-        original = llm_pkg.get_llm_client
-        llm_pkg.get_llm_client = lambda _p: _Client()  # type: ignore[assignment]
+        original = registry.get_llm_client
+        registry.get_llm_client = lambda _p: _Client()  # type: ignore[assignment]
         try:
             payload = {"node_config": {"llm_only": {**base_cfg, **(cfg_extra or {})}}}
             out = asyncio.run(llm_only_in_process_run("q", payload))
         finally:
-            llm_pkg.get_llm_client = original  # type: ignore[assignment]
+            registry.get_llm_client = original  # type: ignore[assignment]
         return list(out["data"]["final_ranking"])
 
     schema_cfg = {"output_schema": schema, "answer_field": "answer"}
@@ -716,7 +716,7 @@ def test_schema_field_rename_is_locked_by_default_and_never_silently_half_applie
     stay off: if the old key still validated, a rename the model ignored would look applied.
     """
     from promptpotter.application.config import CampaignConfig, OptimizationConfig
-    from promptpotter.application.optimization.dispatch.llm_call import (
+    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         set_optimizer_prompt_overrides,
     )
     from promptpotter.application.optimization.dispatch.schemas import (

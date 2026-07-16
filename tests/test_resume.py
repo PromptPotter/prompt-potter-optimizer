@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from promptpotter.application.optimization.resume_and_fork import replay_decisions
+from promptpotter.application.optimization.resume_and_fork.replayers import replay_decisions
 from promptpotter.application.scoring.formula import compile_scorer, rescore_results
 from promptpotter.application.scoring.search_point_scorer import (
     merge_with_unprocessed_priors,

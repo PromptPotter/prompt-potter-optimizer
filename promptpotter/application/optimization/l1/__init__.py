@@ -25,35 +25,3 @@ Out-of-bounds: no module writes campaign artifacts directly (persistence
 routes through ``CycleEventLog.append``); LLM calls only via the generate /
 critique paths; no dispatch-hub bypass for prompt fills.
 """
-
-from __future__ import annotations
-
-from promptpotter.application.optimization.l1.execute import execute_round
-from promptpotter.application.optimization.l1.generate import (
-    candidate_summaries,
-    l1_generate,
-)
-from promptpotter.application.optimization.l1.resume import generate_or_load_candidates
-from promptpotter.application.optimization.l1.score import (
-    CandidateOutcome,
-    CandidateRunResult,
-    SignalEffect,
-    decode_signal_effect,
-    l1_score,
-    score_one_candidate,
-    score_population,
-)
-
-__all__ = [
-    "CandidateOutcome",
-    "CandidateRunResult",
-    "SignalEffect",
-    "candidate_summaries",
-    "decode_signal_effect",
-    "execute_round",
-    "generate_or_load_candidates",
-    "l1_generate",
-    "l1_score",
-    "score_one_candidate",
-    "score_population",
-]

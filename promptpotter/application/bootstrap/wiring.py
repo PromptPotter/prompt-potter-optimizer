@@ -16,11 +16,8 @@ from typing import Any
 
 from promptpotter import connectors
 from promptpotter.application.bootstrap.session import Session
-from promptpotter.application.datasets import (
-    read_candidate_library_file,
-    resolve_dataset_items,
-    samples_from_dicts,
-)
+from promptpotter.application.datasets.csv_ingest import read_candidate_library_file
+from promptpotter.application.datasets.loaders import resolve_dataset_items, samples_from_dicts
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
@@ -369,7 +366,7 @@ async def init_services(
             )
         )
 
-    from promptpotter.infrastructure.tracing import LangfuseLogger
+    from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
 
     session = Session(
         store=store,

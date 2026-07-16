@@ -36,37 +36,3 @@ Module map:
 * :mod:`facade` — :class:`DispatchHub`, :func:`build_bundle` (the live
   ``Cycle``-snapshot path), and :func:`validate_template`.
 """
-
-from __future__ import annotations
-
-from promptpotter.application.optimization.dispatch.hub.bundle import (
-    CycleSlice,
-    InjectionBundle,
-    InjectionKind,
-    RoundDigest,
-)
-from promptpotter.application.optimization.dispatch.hub.facade import (
-    DispatchHub,
-    InjectionRenderError,
-    build_bundle,
-    validate_template,
-)
-from promptpotter.application.optimization.dispatch.hub.injections.registry import (
-    INJECTIONS,
-    STALL_EXPLORATION,
-    citable_fields,
-)
-
-__all__ = [
-    "INJECTIONS",
-    "STALL_EXPLORATION",
-    "CycleSlice",
-    "DispatchHub",
-    "InjectionBundle",
-    "InjectionKind",
-    "InjectionRenderError",
-    "RoundDigest",
-    "build_bundle",
-    "citable_fields",
-    "validate_template",
-]

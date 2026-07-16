@@ -18,7 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from promptpotter.application.optimization.dispatch.hub import (
+from promptpotter.application.optimization.dispatch.hub.injections.registry import (
     INJECTIONS,
     STALL_EXPLORATION,
     citable_fields,

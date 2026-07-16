@@ -33,12 +33,12 @@ if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.config import CampaignConfig
     from promptpotter.application.run_observers import RunObservers
-    from promptpotter.application.runner import RunMode
+    from promptpotter.application.runner.entry import RunMode
     from promptpotter.domain.results import CycleResult
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store import Stores
     from promptpotter.presentation.cli.session import SessionCtx
-    from promptpotter.presentation.views.live import LiveDisplay
+    from promptpotter.presentation.views.live.display import LiveDisplay
 
 logger = logging.getLogger("promptpotter.presentation.cli")
 
@@ -119,7 +119,7 @@ async def init_services_cli(
     *identity* defaults to the Stage-0 :func:`default_identity`; CLI callers
     derive it from ``args.tenant`` via :func:`identity_from_args`.
     """
-    from promptpotter.application.bootstrap import init_services
+    from promptpotter.application.bootstrap.wiring import init_services
     from promptpotter.config.logging import setup_logging
 
     setup_logging(style="full" if _VERBOSE else "cli")
@@ -151,7 +151,7 @@ def identity_from_args(args: Any) -> IdentityContext:
     :class:`~promptpotter.domain.identity.TenantId`; everything past this point
     passes :class:`IdentityContext`, never bare strings.
     """
-    from promptpotter.infrastructure.identity import registered_or_default_identity
+    from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 
     return registered_or_default_identity(getattr(args, "tenant", None))
 
@@ -190,7 +190,7 @@ def _build_live_display(
     """Build the CLI's LiveDisplay — verbose (-v) gets full notebook parity, else concise."""
     from promptpotter.application.scoring.formula import split_scoring_block
     from promptpotter.presentation.views.display import set_display_tags
-    from promptpotter.presentation.views.live import LiveDisplay as _LiveDisplay
+    from promptpotter.presentation.views.live.display import LiveDisplay as _LiveDisplay
 
     set_display_tags(session.pipeline_schema)
     scoring_formula = split_scoring_block(campaign_config.scoring).per_sample
@@ -252,7 +252,7 @@ async def drive_cycle(
     ``OptimizationConfig.spend_budget_usd``). Callers construct only the verb's
     :class:`RunMode`.
     """
-    from promptpotter.application.runner import run_optimization
+    from promptpotter.application.runner.entry import run_optimization
 
     pre_origin_acc = ctx.state.get("origin_accuracy", 0.0)
     observers = build_observers(args, session, campaign_config, train_data, pre_origin_acc)
@@ -299,7 +299,7 @@ def _build_divergence_hint() -> str:
     enum so adding a kind (with its gating choice) updates the operator
     message automatically.
     """
-    from promptpotter.application.optimization.resume_and_fork import (
+    from promptpotter.application.optimization.resume_and_fork.decisions import (
         RESUME_CHECKPOINT_GATING,
         GatingMode,
     )

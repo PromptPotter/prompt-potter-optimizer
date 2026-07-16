@@ -40,7 +40,7 @@ from promptpotter.shared.errors import (
 
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
-    from promptpotter.application.intelligence.indexes import AxisIndex
+    from promptpotter.application.intelligence.indexes.axis import AxisIndex
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
 
@@ -270,7 +270,7 @@ async def _process_fresh_sample(
         )
         if ctx.on_sample_scored is not None:
             ctx.on_sample_scored(display_cached, idx, dataset_len)
-        from promptpotter.infrastructure.llm import (
+        from promptpotter.infrastructure.llm.rate_limit import (
             DEPR_RETRY_COOLDOWN_SEC,
             wait_with_countdown,
         )

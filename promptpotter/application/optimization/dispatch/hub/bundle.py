@@ -22,7 +22,7 @@ from promptpotter.domain.results import CritiqueReadout, RoundResult
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 
 if TYPE_CHECKING:
-    from promptpotter.application.intelligence.indexes import AxisIndex
+    from promptpotter.application.intelligence.indexes.axis import AxisIndex
 
 
 # Per-injection caps — bound LLM-authored output to keep individual blocks tight.

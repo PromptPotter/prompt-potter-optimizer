@@ -11,6 +11,12 @@ owns its own live telemetry file, stamped with its own ``cycle_id``. The
 per-cycle dashboard route serves the file for the cycle passed in (no
 session-root collapse).
 
+**The imports below are the registration, not a re-export convenience.** Each
+submodule decorates the shared ``campaigns_router`` at import time, so emptying
+this file to a namespace marker — the fate of the package ``__init__`` files
+that only re-exported — mounts a router with zero routes and 404s the whole
+surface. It stays.
+
 The route surface is split across submodules, each decorating the shared
 ``campaigns_router``: ``registry`` (campaign list + detail), ``cycles``
 (cycle list/detail, rounds, dashboard), ``lineage`` (the campaign-wide

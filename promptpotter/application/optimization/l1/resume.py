@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from promptpotter.application.optimization.dispatch.llm_call import (
+from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     optimizer_model,
     optimizer_node_config,
 )
@@ -23,11 +23,11 @@ from promptpotter.domain.phases import CampaignPhase, PhaseEvent, emit_phase
 from promptpotter.domain.results import CandidateProposal
 
 # Module-level alias for test monkeypatching.
-from promptpotter.infrastructure.tracing import observed_node
+from promptpotter.infrastructure.tracing.bridge import observed_node
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.infrastructure.tracing import ObservabilityBridge
+    from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 
 logger = logging.getLogger(__name__)
 

@@ -30,11 +30,8 @@ async def cmd_matrix(args: argparse.Namespace) -> CommandResult:
 async def _cmd_matrix_measure(args: argparse.Namespace) -> CommandResult:
     """Score origin for each (dataset, model) cell; upsert into resource_matrix.json."""
     from promptpotter.application.bootstrap.wiring import resolve_dataset_config_dir
-    from promptpotter.application.resource_matrix import (
-        measure_cells,
-        upsert_cells,
-        write_matrix,
-    )
+    from promptpotter.application.resource_matrix.matrix import upsert_cells, write_matrix
+    from promptpotter.application.resource_matrix.measure import measure_cells
     from promptpotter.infrastructure.store.layout import REPO_ROOT
 
     identity = identity_from_args(args)

@@ -534,7 +534,9 @@ class CommandDispatcher:
         payload_extras: dict[str, Any],
     ) -> Any:
         if kind == "fork-cycle":
-            from promptpotter.application.optimization.resume_and_fork import mint_operator_fork
+            from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
+                mint_operator_fork,
+            )
 
             seed = _parse_cycle_seed(payload_extras.get("seed"))
             # A seed that steers the inner-optimizer model OUTSIDE the origin's
@@ -767,7 +769,7 @@ class CommandDispatcher:
         ``BackendUnreachableError`` bubbles uncaught to ``_record_and_apply``
         for the central 503 mapping (R2).
         """
-        from promptpotter.application.jobs import mint_campaign_command
+        from promptpotter.application.jobs.launcher.core import mint_campaign_command
 
         if self._job_registry is None:
             raise ServiceUnavailableError(
@@ -802,7 +804,7 @@ class CommandDispatcher:
         ``BackendUnreachableError`` bubbles uncaught to ``_record_and_apply``
         for the central 503 mapping (R2).
         """
-        from promptpotter.application.jobs import start_run_command
+        from promptpotter.application.jobs.launcher.core import start_run_command
 
         if self._job_registry is None:
             raise ServiceUnavailableError(

@@ -1,6 +1,7 @@
 """HTTP read API — backend storage + campaign registry + per-cycle live reads.
 
-Eight router objects mounted at ``/api/v1`` from ``main.py``:
+Nothing is re-exported here — ``main.py`` imports each router from its own
+module under ``routers/`` and mounts it at ``/api/v1``:
 
 1. **Backend storage** (``backends_router``) — manages backend connections,
    syncs experiments from backends in their native format, and exposes
@@ -35,26 +36,7 @@ Eight router objects mounted at ``/api/v1`` from ``main.py``:
    Runs pre-auth; populates the opaque session cookie consumed by the
    OIDC middleware.
 
-``main.py`` imports the router names directly; this ``__init__.py``
-re-exports them.
+``campaigns`` is a package whose ``__init__`` imports its own route submodules
+so their decorators run (see ``routers/campaigns/_router.py``); the rest are
+plain modules.
 """
-
-from promptpotter.presentation.api.routers.active import active_router
-from promptpotter.presentation.api.routers.auth import auth_router
-from promptpotter.presentation.api.routers.backends import backends_router
-from promptpotter.presentation.api.routers.campaigns import campaigns_router
-from promptpotter.presentation.api.routers.commands import commands_router
-from promptpotter.presentation.api.routers.datasets import datasets_router
-from promptpotter.presentation.api.routers.origins import origins_router
-from promptpotter.presentation.api.routers.verify import verify_router
-
-__all__ = [
-    "active_router",
-    "auth_router",
-    "backends_router",
-    "campaigns_router",
-    "commands_router",
-    "datasets_router",
-    "origins_router",
-    "verify_router",
-]

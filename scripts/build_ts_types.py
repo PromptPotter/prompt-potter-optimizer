@@ -50,7 +50,7 @@ from promptpotter.infrastructure.projections.live_dashboard.state import (
     SpendBucket,
     SpendRollup,
 )
-from promptpotter.presentation.api.middleware.command_dispatcher import (
+from promptpotter.presentation.api.middleware.command_dispatcher.dispatcher import (
     CommandAcceptedBody,
 )
 from promptpotter.presentation.api.routers.active import (

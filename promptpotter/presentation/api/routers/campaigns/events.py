@@ -29,7 +29,7 @@ from pathlib import Path
 from fastapi import Query
 from sse_starlette import EventSourceResponse
 
-from promptpotter.infrastructure.projections.event_stream import CycleLedgerTail
+from promptpotter.infrastructure.projections.event_stream.tail import CycleLedgerTail
 from promptpotter.infrastructure.store import cycle_dir_for
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router

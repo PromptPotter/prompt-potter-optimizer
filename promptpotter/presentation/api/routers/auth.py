@@ -28,7 +28,7 @@ from fastapi import APIRouter, Path, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
-from promptpotter.application.jobs import JobRegistry
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.jobs.spend import (
     iter_user_token_usage,
     record_cost_usd,
@@ -51,7 +51,7 @@ from promptpotter.infrastructure.identity.verifier import IDTokenInvalidError
 from promptpotter.infrastructure.store.layout import DEFAULT_PROJECTS_ROOT
 from promptpotter.infrastructure.store.user_store import ConsentRecord
 from promptpotter.presentation.api.deps import IdentityDep, StoreDep
-from promptpotter.presentation.api.middleware import SESSION_COOKIE_NAME
+from promptpotter.presentation.api.middleware.oidc import SESSION_COOKIE_NAME
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import (
     ConflictError,

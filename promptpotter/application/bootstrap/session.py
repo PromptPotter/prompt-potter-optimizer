@@ -22,12 +22,13 @@ from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.identity import IdentityContext, default_identity
 
 if TYPE_CHECKING:
-    from promptpotter.application.intelligence.indexes import SampleIndex
+    from promptpotter.application.intelligence.indexes.sample import SampleIndex
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.validators import StopRule
     from promptpotter.infrastructure.ledger import CycleEventLog
-    from promptpotter.infrastructure.projections import AuditTrailView
-    from promptpotter.infrastructure.tracing import LangfuseLogger, ObservabilityBridge
+    from promptpotter.infrastructure.projections.audit_trail import AuditTrailView
+    from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
+    from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
 
 
 logger = logging.getLogger(__name__)
@@ -184,7 +185,7 @@ def auto_mint_session(
     from datetime import UTC, datetime
 
     from promptpotter.application.config import freeze_campaign_config
-    from promptpotter.application.optimization.dispatch.llm_call import (
+    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         combined_optimizer_prompt_hash,
     )
     from promptpotter.application.runner.identity import mint_campaign_id
@@ -362,7 +363,7 @@ def finalize_checkin_to_active(
     from datetime import UTC, datetime
 
     from promptpotter.application.config import freeze_campaign_config
-    from promptpotter.application.optimization.dispatch.llm_call import (
+    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         combined_optimizer_prompt_hash,
     )
 

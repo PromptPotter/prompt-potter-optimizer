@@ -15,22 +15,3 @@ Module map (read `entry.py` first — it is the one public entry point):
   task under a sandboxed flat registry. **L4 is recursion, not a 4th layer** — there
   is no `l4_*.py` anywhere and there will not be one.
 """
-
-from __future__ import annotations
-
-from promptpotter.application.runner.entry import RunMode, run_optimization
-from promptpotter.application.runner.identity import (
-    build_origin_cycle_id,
-    content_hash_of,
-    cycle_config_identity,
-    mint_campaign_id,
-)
-
-__all__ = [
-    "RunMode",
-    "build_origin_cycle_id",
-    "content_hash_of",
-    "cycle_config_identity",
-    "mint_campaign_id",
-    "run_optimization",
-]

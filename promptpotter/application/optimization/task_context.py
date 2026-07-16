@@ -19,7 +19,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from promptpotter.application.optimization.dispatch.llm_call import (
+from promptpotter.application.optimization.dispatch.llm_call.call import (
     LLMCallContext,
     run_optimizer_node,
 )
@@ -34,7 +34,7 @@ from promptpotter.infrastructure.store.io import (
     read_text_optional,
     write_json,
 )
-from promptpotter.infrastructure.tracing import observed_node
+from promptpotter.infrastructure.tracing.bridge import observed_node
 
 __all__ = [
     "checkin_call_context",

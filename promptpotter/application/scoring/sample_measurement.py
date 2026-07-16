@@ -17,12 +17,12 @@ from promptpotter.config.settings import NO_RESULT
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import QueryMeasurement
-from promptpotter.infrastructure.llm import emit_token_usage
+from promptpotter.infrastructure.llm.models import emit_token_usage
 from promptpotter.shared.errors import ErrorCategory, has_pipeline_warnings
 
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
-    from promptpotter.application.intelligence.indexes import AxisIndex
+    from promptpotter.application.intelligence.indexes.axis import AxisIndex
 
 logger = logging.getLogger(__name__)
 
@@ -438,7 +438,9 @@ async def measure_sample(
         # when token_matching is terminal, final_ranking when an llm_ranking/llm_only node
         # is — read through the schema, not a hardcoded key. extract_item_label is
         # shape-agnostic (dict {candidate}, (name, score) tuple, or bare string).
-        from promptpotter.application.optimization.pobb.elimination import terminal_ranking
+        from promptpotter.application.optimization.pobb.elimination.classification import (
+            terminal_ranking,
+        )
         from promptpotter.application.scoring.formula import extract_item_label
 
         ranked = terminal_ranking({"pipeline_data": data}, pipeline_schema)

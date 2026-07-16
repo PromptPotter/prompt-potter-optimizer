@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from promptpotter.infrastructure.llm import (
+from promptpotter.infrastructure.llm.rate_limit import (
     MAX_429_ATTEMPTS,
     decide_429_wait,
     wait_with_countdown,

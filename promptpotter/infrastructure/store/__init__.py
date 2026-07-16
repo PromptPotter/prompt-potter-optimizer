@@ -40,7 +40,7 @@ from pathlib import Path
 from promptpotter.domain.identity import TenantId
 from promptpotter.infrastructure.store import archive_views
 from promptpotter.infrastructure.store.backend_store import BackendStore
-from promptpotter.infrastructure.store.campaign_store import CampaignStore
+from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.checkin_draft_store import CheckinDraftStore
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,

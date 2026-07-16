@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from promptpotter.application.optimization.dispatch.llm_call import optimizer_model
+from promptpotter.application.optimization.dispatch.llm_call.prompts import optimizer_model
 from promptpotter.application.scoring.evaluators import (
     default_per_round_formula,
     default_per_round_formula_short,

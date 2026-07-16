@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.views import AnyView, InitExitView
+from promptpotter.application.views.view_models import AnyView, InitExitView
 from promptpotter.config.settings import OPTIMIZER_PROMPT_WARN_CHARS
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
@@ -53,7 +53,7 @@ from promptpotter.presentation.views.live.phase import (
     render_round_stats,
 )
 from promptpotter.presentation.views.live.sample import fmt_query_result
-from promptpotter.presentation.views.render import to_text
+from promptpotter.presentation.views.render.text import to_text
 from promptpotter.shared.composite import render_composite_fitness_block
 
 if TYPE_CHECKING:

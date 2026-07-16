@@ -59,13 +59,13 @@ async def measure_noise_floor(
     the true inner noise floor; on a plain cycle it measures backend run-to-run noise.
     ``k``x real spend — deliberate and operator-visible, never triggered by the loop.
     """
-    from promptpotter.application.bootstrap import init_services
     from promptpotter.application.bootstrap.scoring_context import populate_session_scoring
+    from promptpotter.application.bootstrap.wiring import init_services
     from promptpotter.application.config import configure_and_apply_pipeline
     from promptpotter.application.config import (
         load_campaign_config as validate_campaign_config,
     )
-    from promptpotter.application.runner.inner import publish_inner_spawn_context
+    from promptpotter.application.runner.inner.cycle import publish_inner_spawn_context
     from promptpotter.application.scoring.formula import split_scoring_block
     from promptpotter.application.scoring.search_point_scorer import score_search_point
 

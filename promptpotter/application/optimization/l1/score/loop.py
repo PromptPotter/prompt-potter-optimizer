@@ -8,18 +8,18 @@ from typing import TYPE_CHECKING, Any, cast
 from promptpotter.application.intelligence.adaptive_queue_mechanism import build_round_order
 from promptpotter.application.optimization.l1.score.candidate import score_one_candidate
 from promptpotter.application.optimization.l1.score.signal_effect import CandidateOutcome
-from promptpotter.application.optimization.pobb.elimination import (
+from promptpotter.application.optimization.pobb.elimination.checks import (
     PoBBConfig,
     build_elimination_check,
 )
-from promptpotter.application.optimization.resume_and_fork import ResumeCheckpointRecord
+from promptpotter.application.optimization.resume_and_fork.decisions import ResumeCheckpointRecord
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.escalation_signals import EscalationSignal
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import CandidateProposal, SampleOrderStep, ScoredCandidate
 from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.validators import StopRule
-from promptpotter.infrastructure.tracing import CandidateScored
+from promptpotter.infrastructure.tracing.events import CandidateScored
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:

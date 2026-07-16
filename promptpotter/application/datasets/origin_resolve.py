@@ -38,8 +38,8 @@ from promptpotter.application.datasets.origin_readiness import (
     origin_readiness,
     resolution_block,
 )
-from promptpotter.application.jobs.launcher import save_checkin_draft
-from promptpotter.application.optimization.dispatch.llm_call import (
+from promptpotter.application.jobs.launcher.checkin import save_checkin_draft
+from promptpotter.application.optimization.dispatch.llm_call.call import (
     LLMCallContext,
     run_optimizer_node,
 )
@@ -50,7 +50,7 @@ from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.infrastructure.llm.models import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store import Stores
-from promptpotter.infrastructure.tracing import observed_node
+from promptpotter.infrastructure.tracing.bridge import observed_node
 
 logger = logging.getLogger(__name__)
 

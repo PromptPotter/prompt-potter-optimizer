@@ -13,7 +13,7 @@ import logging
 from collections import Counter
 from typing import Any
 
-from promptpotter.application.optimization.pobb.elimination import (
+from promptpotter.application.optimization.pobb.elimination.classification import (
     get_ranked_items,
     ranked_item_keys_from_schema,
 )

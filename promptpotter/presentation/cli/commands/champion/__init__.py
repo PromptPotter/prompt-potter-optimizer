@@ -34,7 +34,7 @@ async def cmd_champion(args: argparse.Namespace) -> CommandResult:
 
 def _cmd_champion_apply(args: argparse.Namespace) -> CommandResult:
     """Graduate the reigning champion into the distributable ``datasets/_optimizer``."""
-    from promptpotter.application.meta_champion import apply_champion_to_optimizer
+    from promptpotter.application.meta_champion.champion import apply_champion_to_optimizer
 
     outcome = apply_champion_to_optimizer(dry_run=args.dry_run)
     lines = [outcome.detail]
@@ -54,7 +54,7 @@ def _cmd_champion_apply(args: argparse.Namespace) -> CommandResult:
 
 def _cmd_champion_promote(args: argparse.Namespace) -> CommandResult:
     """Elect a state as the reigning champion (writes the pointer)."""
-    from promptpotter.application.meta_champion import promote_champion
+    from promptpotter.application.meta_champion.champion import promote_champion
     from promptpotter.infrastructure.store import build_stores
 
     stores = build_stores(identity_from_args(args))
@@ -64,7 +64,7 @@ def _cmd_champion_promote(args: argparse.Namespace) -> CommandResult:
 
 def _cmd_champion_coronate(args: argparse.Namespace) -> CommandResult:
     """Head-to-head a challenger vs the reigning champion; crown it if the CI clears."""
-    from promptpotter.application.meta_champion import coronate
+    from promptpotter.application.meta_champion.champion import coronate
     from promptpotter.infrastructure.store import build_stores
 
     stores = build_stores(identity_from_args(args))
@@ -80,7 +80,8 @@ def _cmd_champion_coronate(args: argparse.Namespace) -> CommandResult:
 
 def _cmd_champion_replay(args: argparse.Namespace) -> CommandResult:
     """Print the reigning champion + persisted table from disk (zero recompute)."""
-    from promptpotter.application.meta_champion import read_champion_pointer, read_registry
+    from promptpotter.application.meta_champion.champion import read_champion_pointer
+    from promptpotter.application.meta_champion.reducer import read_registry
     from promptpotter.infrastructure.store import build_stores
 
     stores = build_stores(identity_from_args(args))
@@ -111,7 +112,7 @@ def _cmd_champion_replay(args: argparse.Namespace) -> CommandResult:
 
 def _cmd_champion_refresh(args: argparse.Namespace) -> CommandResult:
     """Rebuild the champion registry from disk and print the ranked table."""
-    from promptpotter.application.meta_champion import reduce_corpus, write_registry
+    from promptpotter.application.meta_champion.reducer import reduce_corpus, write_registry
     from promptpotter.infrastructure.store import build_stores
 
     stores = build_stores(identity_from_args(args))

@@ -5,15 +5,12 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, cast
 
-from promptpotter.application.optimization.dispatch.hub import (
-    DispatchHub,
-    build_bundle,
-)
-from promptpotter.application.optimization.dispatch.llm_call import (
+from promptpotter.application.optimization.dispatch.hub.facade import DispatchHub, build_bundle
+from promptpotter.application.optimization.dispatch.llm_call.call import (
     LLMCallContext,
-    resolve_node_layout,
     run_optimizer_node,
 )
+from promptpotter.application.optimization.dispatch.llm_call.prompts import resolve_node_layout
 from promptpotter.application.optimization.dispatch.schemas import L1CritiqueOutput
 from promptpotter.domain.results import CritiqueReadout
 
@@ -43,7 +40,9 @@ async def run_l1_critique(
     dict so persistence doesn't drag Pydantic into the domain serialization path.
     """
     bundle = build_bundle(cycle, latest_round=round_result)
-    from promptpotter.application.optimization.dispatch.llm_call import load_optimizer_prompt
+    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+        load_optimizer_prompt,
+    )
 
     template, prompt_vars = DispatchHub.fill(
         load_optimizer_prompt("l1_critique"), resolve_node_layout("l1_critique"), bundle

@@ -20,7 +20,9 @@ from typing import TYPE_CHECKING, Any, cast
 # state type Cycle holds; importing it via escalation/__init__ would load the
 # firing driver, which depends back on Cycle → import cycle. See escalation/__init__.
 from promptpotter.application.optimization.escalation.state import EscalationFSM
-from promptpotter.application.optimization.pobb.elimination import extract_warning_types
+from promptpotter.application.optimization.pobb.elimination.classification import (
+    extract_warning_types,
+)
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.opt_search_point import OptSearchPoint, node_config_items
@@ -38,7 +40,7 @@ if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.config import CampaignConfig
     from promptpotter.application.intelligence.exploration import Observation, RulerEntry
-    from promptpotter.application.intelligence.indexes import AxisIndex
+    from promptpotter.application.intelligence.indexes.axis import AxisIndex
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.results import CalibrationModel
     from promptpotter.domain.sample import Sample

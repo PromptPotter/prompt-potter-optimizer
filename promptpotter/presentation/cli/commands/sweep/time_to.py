@@ -32,7 +32,7 @@ async def _cmd_sweep_time_to(args: argparse.Namespace) -> CommandResult:
     ``--max-rounds`` overrides ``campaign.json::optimization.max_rounds``
     for this sweep only; the override stays in-memory.
     """
-    from promptpotter.application.sweep import (
+    from promptpotter.application.sweep.toolkit import (
         build_sweep_result,
         current_optimizer_prompt_hash,
         optimizer_prompt_override,

@@ -37,17 +37,15 @@ from promptpotter.domain.run_records import (
     LLMCallRecord,
     LLMCallStartRecord,
 )
-from promptpotter.infrastructure.llm import (
+from promptpotter.infrastructure.llm.base import LLMClientBase
+from promptpotter.infrastructure.llm.json_parse import MetaPromptParseError, extract_parsed_json
+from promptpotter.infrastructure.llm.models import LLMResponse, emit_token_usage
+from promptpotter.infrastructure.llm.rate_limit import (
     MAX_429_ATTEMPTS,
-    LLMClientBase,
-    LLMResponse,
     decide_429_wait,
-    emit_token_usage,
-    extract_parsed_json,
-    get_llm_client,
     wait_with_countdown,
 )
-from promptpotter.infrastructure.llm.json_parse import MetaPromptParseError
+from promptpotter.infrastructure.llm.registry import get_llm_client
 from promptpotter.infrastructure.store.stores import OptimizerCallCache, hash_call
 
 if TYPE_CHECKING:
@@ -213,8 +211,8 @@ async def llm_call(
     # Per-run tunable clamp (L4 inner-cycle determinism), applied LAST so it beats
     # both the node's file config and any per-call override — notably `l1_generate`'s
     # `temperature=creativity`, the dominant run-to-run noise source. Bound only inside
-    # an inner asyncio task (`set_optimizer_config_overrides`); `None` on every normal
-    # call, so this is a no-op outside L4 inner campaigns.
+    # an inner asyncio task (`shared.instrument.enter_instrument_mode`); `None` on every
+    # normal call, so this is a no-op outside L4 inner campaigns.
     if config_overrides := get_optimizer_config_overrides():
         merged = {**merged, **config_overrides}
     llm_client = get_llm_client(merged["provider"])

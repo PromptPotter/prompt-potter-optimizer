@@ -10,15 +10,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.resume_and_fork import _mint_fork
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
+    _mint_fork,
     cleanup_stub_fork_if_empty,
 )
-from promptpotter.application.views import (
-    SweepPayloadRow,
-    SweepSummaryView,
-    render_sweep_summary,
-)
+from promptpotter.application.views.render import render_sweep_summary
+from promptpotter.application.views.view_models import SweepPayloadRow, SweepSummaryView
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.results import PayloadOutcome, SweepBatchResult
 from promptpotter.domain.run_records import ForkSpec, ForkTrigger, OperatorSweepFile
@@ -97,15 +94,11 @@ async def run_sweep_batch(
     verbose: bool,
 ) -> SweepBatchResult:
     """Mint one fork per ``OperatorSweepFile`` off ``root_ctx.cycle_id``; restore active pointer on exit."""
-    from promptpotter.application.bootstrap import init_services
+    from promptpotter.application.bootstrap.wiring import init_services
     from promptpotter.application.config import configure_and_apply_pipeline
-    from promptpotter.application.runner import (
-        RunMode,
-    )
-    from promptpotter.application.runner import (
-        run_optimization as _orch_run_optimization,
-    )
-    from promptpotter.infrastructure.identity import registered_or_default_identity
+    from promptpotter.application.runner.entry import RunMode
+    from promptpotter.application.runner.entry import run_optimization as _orch_run_optimization
+    from promptpotter.infrastructure.identity.migration import registered_or_default_identity
     from promptpotter.presentation.cli.session import load_session
 
     # Same resolution as `new`/`resume`: explicit --tenant > registered

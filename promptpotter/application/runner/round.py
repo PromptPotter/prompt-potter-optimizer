@@ -11,13 +11,14 @@ from typing import TYPE_CHECKING, cast
 from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.config import CampaignConfig
 from promptpotter.application.optimization.cycle import Cycle
-from promptpotter.application.optimization.escalation import NextAction, escalate_l2
+from promptpotter.application.optimization.escalation.firing import escalate_l2
+from promptpotter.application.optimization.escalation.state import NextAction
 from promptpotter.application.optimization.l1.critique import run_l1_critique
 from promptpotter.application.optimization.round_analysis import compute_round_diagnostics
 from promptpotter.application.optimization.validators.l1_strict import (
     DROPPED_MANDATORY_PLACEHOLDER,
 )
-from promptpotter.application.output import (
+from promptpotter.application.output.writers import (
     write_hard_samples_artifacts,
     write_log_md,
     write_review_md,
@@ -37,7 +38,7 @@ from promptpotter.domain.results_health import (
     evidence_starved_node,
 )
 from promptpotter.domain.run_records import PhaseRecord, ResumeCheckpointRecord
-from promptpotter.infrastructure.tracing import observed_node
+from promptpotter.infrastructure.tracing.bridge import observed_node
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:

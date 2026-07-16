@@ -11,7 +11,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any, cast
 
-from promptpotter.application.datasets import build_dataset_run_data
+from promptpotter.application.datasets.loaders import build_dataset_run_data
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.query_loop import run_query_loop
@@ -23,7 +23,7 @@ from promptpotter.shared.errors import error_category, is_error_result
 
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
-    from promptpotter.application.intelligence.indexes import AxisIndex
+    from promptpotter.application.intelligence.indexes.axis import AxisIndex
     from promptpotter.application.scoring.query_loop import QueryLoopResult
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
@@ -119,7 +119,7 @@ def _split_off_deprecated_samples(
     cached_sample_results: dict[int, QueryMeasurement],
 ) -> tuple[dict[int, QueryMeasurement], dict[int, QueryMeasurement]]:
     """Load-side cache split: (kept, deprecated rows that need fresh re-measure)."""
-    from promptpotter.application.optimization.pobb.elimination import is_deprecated
+    from promptpotter.application.optimization.pobb.elimination.classification import is_deprecated
 
     deprecated = {sid: r for sid, r in cached_sample_results.items() if is_deprecated(r)}
     kept = {sid: r for sid, r in cached_sample_results.items() if sid not in deprecated}
@@ -146,7 +146,9 @@ def _resolve_prior_cache(
     dataset_name = session.dataset_name
     cached_sample_results: dict[int, QueryMeasurement] = {}
     if store and backend_id and dataset_name and not force_fresh:
-        from promptpotter.application.optimization.pobb.elimination import is_deprecated
+        from promptpotter.application.optimization.pobb.elimination.classification import (
+            is_deprecated,
+        )
 
         node_configs = pipeline_schema.node_configs(search_point.pipeline_params or {})
         cached_sample_results = cast(
@@ -241,7 +243,8 @@ def _emit_dataset_run(
     backend_id = session.backend_id
     if not (store and backend_id):
         return
-    from promptpotter.infrastructure.tracing import DatasetRun, ObservabilityBridge
+    from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
+    from promptpotter.infrastructure.tracing.events import DatasetRun
     from promptpotter.shared.errors import graceful
 
     with graceful("DatasetRun emit failed"):

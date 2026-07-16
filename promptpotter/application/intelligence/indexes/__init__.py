@@ -29,25 +29,3 @@ the walk, the per-entry payload schema, cursor ownership, and
 cache-invalidation hooks — divergent shapes for each implementation.
 Deliberately not unified.
 """
-
-from promptpotter.application.intelligence.indexes.axis import (
-    NOISE_THRESHOLD,
-    AxisImpact,
-    AxisIndex,
-    ValueRecord,
-)
-from promptpotter.application.intelligence.indexes.sample import (
-    FailureCluster,
-    SampleIndex,
-    SampleRecord,
-)
-
-__all__ = [
-    "NOISE_THRESHOLD",
-    "AxisImpact",
-    "AxisIndex",
-    "FailureCluster",
-    "SampleIndex",
-    "SampleRecord",
-    "ValueRecord",
-]

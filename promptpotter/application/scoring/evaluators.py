@@ -64,7 +64,7 @@ def compute_accuracy(*, results: list[QueryMeasurement], **_: Any) -> float | No
     ``materialize_round_values`` → ``compute_composite_fitness`` without
     ``ScoringTermMissingError`` first (see ``docs/specs/code-debt-cleanup.md``)."""
     # Lazy: scoring → optimization circular.
-    from promptpotter.application.optimization.pobb.elimination import is_deprecated
+    from promptpotter.application.optimization.pobb.elimination.classification import is_deprecated
 
     if not results:
         return None

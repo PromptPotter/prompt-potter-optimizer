@@ -73,12 +73,12 @@ def test_secret_redaction_filter_scrubs_settings_values_and_prefixes(
 
 def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
     """Dataset-content signals fenced; operator/optimizer state stays bare."""
-    from promptpotter.application.optimization.dispatch.hub import (
+    from promptpotter.application.optimization.dispatch.hub.bundle import (
         CycleSlice,
-        DispatchHub,
         InjectionBundle,
         RoundDigest,
     )
+    from promptpotter.application.optimization.dispatch.hub.facade import DispatchHub
     from promptpotter.domain.escalation_signals import (
         RuntimeFailure,
         ValidationFailure,

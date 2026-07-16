@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.bootstrap.session import auto_mint_session
 from promptpotter.application.config import configure_and_apply_pipeline
 from promptpotter.application.origin import resolve_origin_opt_search_point
-from promptpotter.application.runner import build_origin_cycle_id
+from promptpotter.application.runner.identity import build_origin_cycle_id
 from promptpotter.domain.run_records import CycleSeed
 
 if TYPE_CHECKING:

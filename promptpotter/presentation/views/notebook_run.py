@@ -7,10 +7,8 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.bootstrap import (
-    init_services as _init_services,
-)
 from promptpotter.application.bootstrap.session import Session
+from promptpotter.application.bootstrap.wiring import init_services as _init_services
 from promptpotter.application.jobs.mint import prepare_fresh_cycle
 from promptpotter.application.origin import (
     CampaignOrigin,
@@ -22,9 +20,7 @@ from promptpotter.application.run_observers import (
     RunObservers,
     build_run_observers,
 )
-from promptpotter.application.runner import (
-    run_optimization as _run_optimization,
-)
+from promptpotter.application.runner.entry import run_optimization as _run_optimization
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.settings import (
@@ -33,7 +29,7 @@ from promptpotter.config.settings import (
 )
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import CycleResult
-from promptpotter.infrastructure.tracing import langfuse_trace_url
+from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
 from promptpotter.presentation.views.display import (
     BOLD,
     GREEN,
@@ -42,7 +38,7 @@ from promptpotter.presentation.views.display import (
     _dbox_block,
     render_pipeline_overrides,
 )
-from promptpotter.presentation.views.live import LiveDisplay
+from promptpotter.presentation.views.live.display import LiveDisplay
 
 if TYPE_CHECKING:
     from promptpotter.application.config import CampaignConfig

@@ -15,7 +15,7 @@ from typing import Any
 
 from promptpotter.domain.identity import TenantId
 from promptpotter.infrastructure.store.backend_store import BackendStore
-from promptpotter.infrastructure.store.campaign_store import CampaignStore
+from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.checkin_draft_store import CheckinDraftStore
 from promptpotter.infrastructure.store.diagnostic_run_store import DiagnosticRunStore
 from promptpotter.infrastructure.store.io import (

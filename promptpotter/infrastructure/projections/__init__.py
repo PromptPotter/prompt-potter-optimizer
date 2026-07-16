@@ -21,25 +21,3 @@ The outbound SSE stream is NOT a ledger subscriber — it tails the on-disk
 :class:`event_stream.CycleLedgerTail <.event_stream>`, so the writer side here
 just appends to the ledger like everything else; no in-process fan-out.
 """
-
-from promptpotter.infrastructure.projections.audit_trail import AuditTrailView
-from promptpotter.infrastructure.projections.live_dashboard import LiveDashboardView
-from promptpotter.infrastructure.projections.live_state import (
-    LiveStateCore,
-    apply_p_best_update,
-    apply_phase,
-    roll_p_best_at_round_complete,
-    top_n_p_best,
-)
-from promptpotter.infrastructure.projections.pobb_stream import PoBBStreamView
-
-__all__ = [
-    "AuditTrailView",
-    "LiveDashboardView",
-    "LiveStateCore",
-    "PoBBStreamView",
-    "apply_p_best_update",
-    "apply_phase",
-    "roll_p_best_at_round_complete",
-    "top_n_p_best",
-]

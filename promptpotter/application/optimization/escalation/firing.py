@@ -18,15 +18,14 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.application.mask.backprop import select_rewind_round
 from promptpotter.application.mask.load import load_mask_record
-from promptpotter.application.optimization.dispatch.hub import (
-    DispatchHub,
-    build_bundle,
-)
-from promptpotter.application.optimization.dispatch.llm_call import (
+from promptpotter.application.optimization.dispatch.hub.facade import DispatchHub, build_bundle
+from promptpotter.application.optimization.dispatch.llm_call.call import (
     LLMCallContext,
+    run_optimizer_node,
+)
+from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     load_optimizer_prompt,
     resolve_node_layout,
-    run_optimizer_node,
 )
 from promptpotter.application.optimization.dispatch.schemas import (
     ForkProposal,
@@ -36,7 +35,7 @@ from promptpotter.application.optimization.dispatch.schemas import (
     TerminateProposal,
 )
 from promptpotter.application.optimization.escalation.state import NextAction
-from promptpotter.application.optimization.resume_and_fork import (
+from promptpotter.application.optimization.resume_and_fork.decisions import (
     ResumeCheckpointKind,
     record_decision,
 )
@@ -63,14 +62,15 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.infrastructure.llm.json_parse import MetaPromptParseError
 from promptpotter.infrastructure.llm.models import emit_round_warning
-from promptpotter.infrastructure.tracing import LayerApplied, observed_node
+from promptpotter.infrastructure.tracing.bridge import observed_node
+from promptpotter.infrastructure.tracing.events import LayerApplied
 from promptpotter.shared import truncate
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.application.config import CampaignConfig
     from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.infrastructure.tracing import ObservabilityBridge
+    from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 
 logger = logging.getLogger(__name__)
 

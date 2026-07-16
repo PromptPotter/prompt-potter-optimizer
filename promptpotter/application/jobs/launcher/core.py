@@ -23,16 +23,15 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter import connectors
-from promptpotter.application.bootstrap import init_services
 from promptpotter.application.bootstrap.session import Session
-from promptpotter.application.bootstrap.wiring import resolve_dataset_config_dir
+from promptpotter.application.bootstrap.wiring import init_services, resolve_dataset_config_dir
 from promptpotter.application.config import (
     CampaignConfig,
     apply_inherited_overlay,
     configure_and_apply_pipeline,
     load_campaign_config,
 )
-from promptpotter.application.datasets import read_campaign_config_file
+from promptpotter.application.datasets.authored import read_campaign_config_file
 from promptpotter.application.datasets.csv_ingest import Table, materialize_samples
 from promptpotter.application.datasets.dataset_replace import recover_pending_replacements
 from promptpotter.application.datasets.draft_campaign import DraftCampaign
@@ -83,7 +82,7 @@ def _record_launch_failure(
     frozen ``init``. Called from the launch ``except`` sites, where the projection
     pipeline never bound to write this itself. Best-effort: it must never mask the
     original error, so any failure here is logged and swallowed."""
-    from promptpotter.infrastructure.projections.live_dashboard import LiveDashboardView
+    from promptpotter.infrastructure.projections.live_dashboard.view import LiveDashboardView
 
     try:
         cycle_dir = CycleDir(stores.campaigns.cycle_dir(campaign_id, cycle_id))

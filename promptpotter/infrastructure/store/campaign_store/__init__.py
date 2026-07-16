@@ -14,9 +14,3 @@ Note ``campaign.json`` here is the minted **manifest** (a frozen :class:`Campaig
 NOT the dataset **template** of the same name under ``datasets/{name}/`` — two
 incompatible schemas, one filename. See ``application/datasets/authored.py``.
 """
-
-from __future__ import annotations
-
-from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-
-__all__ = ["CampaignStore"]

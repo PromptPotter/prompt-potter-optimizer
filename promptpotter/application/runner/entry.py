@@ -15,11 +15,11 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from promptpotter.application.bootstrap import init_optimization_loop
+from promptpotter.application.bootstrap.scoring_context import init_optimization_loop
 from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.config import CampaignConfig, apply_node_overlay
 from promptpotter.application.optimization.cycle import Cycle
-from promptpotter.application.optimization.escalation import apply_fork_payload_to_osp
+from promptpotter.application.optimization.escalation.firing import apply_fork_payload_to_osp
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
     _mint_fork,
     cleanup_stub_fork_if_empty,
@@ -33,7 +33,7 @@ from promptpotter.application.run_observers import (
     RunObservers,
     build_run_observers,
 )
-from promptpotter.application.runner.inner import publish_inner_spawn_context
+from promptpotter.application.runner.inner.cycle import publish_inner_spawn_context
 from promptpotter.application.runner.loop import run_round_loop
 from promptpotter.application.runner.termination import BudgetGate
 from promptpotter.application.scoring.formula import split_scoring_block
@@ -50,8 +50,8 @@ from promptpotter.domain.run_records import (
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import ScoringSpec
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.infrastructure.llm import set_abort_check
 from promptpotter.infrastructure.llm.models import emit_error_record
+from promptpotter.infrastructure.llm.rate_limit import set_abort_check
 from promptpotter.infrastructure.runtime_flags import clear_run_control_flags, read_spend_caps
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.clock import utcnow_iso
@@ -668,7 +668,7 @@ async def run_optimization(
     # bindings of the cycles it spawns never collide. Empty set → no-op (every
     # normal cycle), and must NOT clear an inner runner's already-bound mutations.
     if campaign_config.optimization.optimizer_set:
-        from promptpotter.application.optimization.dispatch.llm_call import (
+        from promptpotter.application.optimization.dispatch.llm_call.prompts import (
             load_optimizer_set_overrides,
             set_optimizer_prompt_overrides,
         )
@@ -772,7 +772,7 @@ def _finalize_run(
         cycle_status = str(stop_reason)
         # index.json::final — terminal-summary namespace the `potter-l1-meta-campaign` skill gates
         # on; review.md + variant leaderboard read it for the frozen verdict.
-        from promptpotter.application.optimization.dispatch.llm_call import (
+        from promptpotter.application.optimization.dispatch.llm_call.prompts import (
             compute_optimizer_prompt_hashes,
         )
         from promptpotter.application.optimization.l1.stats import (

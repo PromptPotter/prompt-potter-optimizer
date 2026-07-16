@@ -118,7 +118,7 @@ async def llm_only_in_process_run(query: str, payload: dict[str, Any]) -> dict[s
     ranking key + per-node ``step_tokens``/``step_timings`` the dashboard ledger
     and ``classify_result`` read — the same fields TermNorm's wire body carries.
     """
-    from promptpotter.infrastructure.llm import get_llm_client
+    from promptpotter.infrastructure.llm.registry import get_llm_client
 
     cfg = _pick_llm_node(payload.get("node_config") or {})
     provider = str(cfg.get("provider") or "")

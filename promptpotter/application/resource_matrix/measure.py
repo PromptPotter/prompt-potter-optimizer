@@ -34,7 +34,7 @@ logger = logging.getLogger("promptpotter.resource_matrix")
 def _base_config(session: Session) -> CampaignConfig:
     """Load the dataset's own ``campaign.json`` config (connector profile + file)."""
     from promptpotter.application.config import load_campaign_config
-    from promptpotter.application.datasets import read_campaign_config_file
+    from promptpotter.application.datasets.authored import read_campaign_config_file
 
     file_config: dict[str, object] = {}
     if session.dataset_config_dir is not None:

@@ -15,14 +15,10 @@ from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from promptpotter.application.mask import (
-    Verdict,
-    find_divergences,
-    make_abort_verdict,
-    make_scoring_verdict,
-)
+from promptpotter.application.mask.divergence import Verdict, find_divergences
 from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.mask.record import MaskRecord
+from promptpotter.application.mask.verdicts import make_abort_verdict, make_scoring_verdict
 from promptpotter.application.scoring.formula import compile_round_scorer
 from promptpotter.application.scoring.metrics import value_with_mask_applied
 from promptpotter.domain.rendering import display_fitness

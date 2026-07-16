@@ -26,13 +26,6 @@ export function shortFamilyTail(cycleId: string): string {
   return cycleId;
 }
 
-// Origin-hash tail of a campaign id — `{dataset}__{hash}` → the hash.
-// Disambiguates two campaigns on the same dataset.
-export function campaignOriginHash(campaignId: string): string {
-  const sep = campaignId.indexOf("__");
-  return sep >= 0 ? campaignId.slice(sep + 2) : campaignId;
-}
-
 // Composite unit key — a cycle_id is unique only within its campaign, so
 // pickers key/value/store the pair `{campaign}::{cycle}`. Split it back on
 // `UNIT_SEP`.

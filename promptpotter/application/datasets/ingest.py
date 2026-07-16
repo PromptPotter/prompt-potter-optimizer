@@ -97,7 +97,7 @@ def ingest_draft(
     orphan). Byte-size capping is the wire boundary's concern — not enforced here.
     Returns the keyed draft (``draft_id`` == the new ``campaign_id``).
     """
-    from promptpotter.application.jobs.launcher import create_checkin_campaign
+    from promptpotter.application.jobs.launcher.checkin import create_checkin_campaign
 
     table = read_tabular(blob, fmt=format_from_filename(filename or "upload.csv"))
     base_slug = (slug or default_slug_from_filename(filename or "upload")).lower()
@@ -151,7 +151,7 @@ def draft_from_dataset(
     fall back to connector defaults). The same check-in → Start sequence runs from
     here on, so both surfaces share one path. Returns the keyed draft.
     """
-    from promptpotter.application.jobs.launcher import create_checkin_campaign
+    from promptpotter.application.jobs.launcher.checkin import create_checkin_campaign
 
     items = resolve_dataset_items(stores, dataset_name)
     rows: list[dict[str, str]] = [

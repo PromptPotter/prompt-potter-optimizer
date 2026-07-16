@@ -14,29 +14,28 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.origin import (
     build_campaign_emitter,
 )
-from promptpotter.application.views import ViewContext, from_phase_event
+from promptpotter.application.views.ingress import from_phase_event
+from promptpotter.application.views.view_models import ViewContext
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm import (
+from promptpotter.infrastructure.llm.models import (
     reset_current_round,
     reset_cycle_ledger,
     set_current_round,
     set_cycle_ledger,
 )
-from promptpotter.infrastructure.projections import (
-    AuditTrailView,
-    LiveDashboardView,
-    PoBBStreamView,
-)
-from promptpotter.infrastructure.tracing import langfuse_trace_url
+from promptpotter.infrastructure.projections.audit_trail import AuditTrailView
+from promptpotter.infrastructure.projections.live_dashboard.view import LiveDashboardView
+from promptpotter.infrastructure.projections.pobb_stream import PoBBStreamView
+from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.config import CampaignConfig
     from promptpotter.domain.sample import Sample
-    from promptpotter.presentation.views.live import LiveDisplay
+    from promptpotter.presentation.views.live.display import LiveDisplay
 
 __all__ = ["ForkInfo", "RunCallbacks", "RunObservers", "build_run_observers"]
 

@@ -19,8 +19,8 @@ from promptpotter.application.optimization.l1.score.signal_effect import (
     CandidateOutcome,
     decode_signal_effect,
 )
-from promptpotter.application.optimization.pobb.elimination import PoBBCheck
-from promptpotter.application.optimization.resume_and_fork import (
+from promptpotter.application.optimization.pobb.elimination.checks import PoBBCheck
+from promptpotter.application.optimization.resume_and_fork.decisions import (
     ResumeCheckpointKind,
     ResumeCheckpointRecord,
     record_decision,

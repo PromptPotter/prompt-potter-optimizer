@@ -125,7 +125,7 @@ def build_campaign_emitter(
     parent cycle to seed prior trajectory from; ``None`` seeds from the cycle's
     own dir. ``langfuse_trace_url`` is the set-once operator deep link.
     """
-    from promptpotter.infrastructure.projections import LiveDashboardView
+    from promptpotter.infrastructure.projections.live_dashboard.view import LiveDashboardView
 
     opt = campaign_config.optimization
     return LiveDashboardView.for_session(
@@ -309,10 +309,7 @@ def resolve_origin_opt_search_point(
 
     names = prompt_node_names or []
     if dataset_dir is not None and names:
-        from promptpotter.application.datasets import (
-            has_dataset_prompts,
-            load_node_prompt,
-        )
+        from promptpotter.application.datasets.prompts import has_dataset_prompts, load_node_prompt
 
         if has_dataset_prompts(dataset_dir):
             for node_name in names:
@@ -392,7 +389,7 @@ async def prepare_scoring_context(
 
     *resolved_origin* lets the caller pass an already-resolved origin OSP (so it isn't
     resolved twice on the runner path); when ``None`` it's resolved here (the notebook path)."""
-    from promptpotter.application.datasets import sample_dataset
+    from promptpotter.application.datasets.loaders import sample_dataset
 
     if resolved_origin is None:
         prompt_nodes = pipeline_schema.prompt_node_names() if pipeline_schema else []

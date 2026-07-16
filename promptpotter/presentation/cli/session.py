@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.infrastructure.identity import registered_or_default_identity
+from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 from promptpotter.infrastructure.store import Stores, build_stores
 
 if TYPE_CHECKING:
@@ -55,7 +55,7 @@ class SessionCtx:
         from promptpotter.application.config import (
             load_campaign_config as validate_campaign_config,
         )
-        from promptpotter.application.datasets import read_campaign_config_file
+        from promptpotter.application.datasets.authored import read_campaign_config_file
         from promptpotter.infrastructure.store.layout import REPO_ROOT
 
         dataset_name = self.init_params.get("dataset_name") or ""

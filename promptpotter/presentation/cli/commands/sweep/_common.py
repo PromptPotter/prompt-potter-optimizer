@@ -82,7 +82,7 @@ def _resolve_template(variant: _Variant) -> Any:
     """Load the PromptTemplate from the variant's path (None ⇒ current loader)."""
     if variant.path is None:
         return None
-    from promptpotter.application.sweep import load_prompt_template_from_path
+    from promptpotter.application.sweep.toolkit import load_prompt_template_from_path
 
     return load_prompt_template_from_path(variant.path)
 
@@ -144,7 +144,7 @@ async def _run_sweep_optimize(
     ``halt_at_accuracy`` and the active optimizer-prompt override (managed by
     the caller via :func:`optimizer_prompt_override`).
     Returns ``(cycle_result, observers)``."""
-    from promptpotter.application.runner import RunMode
+    from promptpotter.application.runner.entry import RunMode
 
     return await drive_cycle(
         args,
@@ -163,7 +163,7 @@ def _panel_stats_from_round(round_result: Any, panel_size: int) -> dict[str, flo
     """Pull per-candidate accuracy + pipeline_params from a ``RoundResult``
     and route through :func:`compute_panel_stats`. ``None`` on a stat the panel
     could not measure — a panel that received no candidate has no accuracy."""
-    from promptpotter.application.sweep import compute_panel_stats
+    from promptpotter.application.sweep.toolkit import compute_panel_stats
 
     scores = list(round_result.candidate_scores or [])
     accuracies = [s.accuracy for s in scores]

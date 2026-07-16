@@ -23,9 +23,3 @@ ledger-subscriber loop:
 * :mod:`state` — the Pydantic schema (single source of truth) every
   ``_persist()`` validates the payload through.
 """
-
-from __future__ import annotations
-
-from promptpotter.infrastructure.projections.live_dashboard.view import LiveDashboardView
-
-__all__ = ["LiveDashboardView"]

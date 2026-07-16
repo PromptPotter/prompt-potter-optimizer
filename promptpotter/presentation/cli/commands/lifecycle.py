@@ -24,8 +24,10 @@ import uuid
 
 from promptpotter.infrastructure.store import build_stores
 from promptpotter.infrastructure.store.layout import DEFAULT_PROJECTS_ROOT
-from promptpotter.presentation.api.middleware import CommandDispatcher
-from promptpotter.presentation.api.middleware.command_dispatcher import LifecycleKind
+from promptpotter.presentation.api.middleware.command_dispatcher.dispatcher import (
+    CommandDispatcher,
+    LifecycleKind,
+)
 from promptpotter.presentation.cli.commands._shared import CommandResult, identity_from_args
 from promptpotter.shared.errors import ConflictError, NotFoundError
 

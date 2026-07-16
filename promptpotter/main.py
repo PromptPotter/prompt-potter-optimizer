@@ -15,17 +15,22 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from scalar_fastapi import get_scalar_api_reference
 
-from promptpotter.application.jobs import Job, JobRegistry, default_jobs_dir
 from promptpotter.application.jobs.reaper import periodic_sweep, reap_cycle_by_id
+from promptpotter.application.jobs.registry import Job, JobRegistry, default_jobs_dir
 from promptpotter.config.logging import setup_logging, silence_proactor_disconnect_noise
 from promptpotter.config.settings import APP_VERSION, settings
-from promptpotter.infrastructure.identity import (
-    build_identity_bundle,
-    default_identity_paths,
-)
+from promptpotter.infrastructure.identity.bundle import build_identity_bundle
+from promptpotter.infrastructure.identity.paths import default_identity_paths
 from promptpotter.infrastructure.store.layout import DEFAULT_PROJECTS_ROOT, REPO_ROOT
-from promptpotter.presentation import api
-from promptpotter.presentation.api.middleware import install_oidc_middleware
+from promptpotter.presentation.api.middleware.oidc import install_oidc_middleware
+from promptpotter.presentation.api.routers.active import active_router
+from promptpotter.presentation.api.routers.auth import auth_router
+from promptpotter.presentation.api.routers.backends import backends_router
+from promptpotter.presentation.api.routers.campaigns import campaigns_router
+from promptpotter.presentation.api.routers.commands import commands_router
+from promptpotter.presentation.api.routers.datasets import datasets_router
+from promptpotter.presentation.api.routers.origins import origins_router
+from promptpotter.presentation.api.routers.verify import verify_router
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import PotterError
 
@@ -204,14 +209,14 @@ async def health_check() -> dict[str, str]:
 # Include routers. Each router owns its own tags (and prefix where it maps to a
 # single resource); the mount supplies only the shared /api/v1 version prefix.
 app.include_router(_health, prefix="/api/v1")
-app.include_router(api.backends_router, prefix="/api/v1")
-app.include_router(api.campaigns_router, prefix="/api/v1")
-app.include_router(api.active_router, prefix="/api/v1")
-app.include_router(api.datasets_router, prefix="/api/v1")
-app.include_router(api.origins_router, prefix="/api/v1")
-app.include_router(api.verify_router, prefix="/api/v1")
-app.include_router(api.commands_router, prefix="/api/v1")
-app.include_router(api.auth_router, prefix="/api/v1")
+app.include_router(backends_router, prefix="/api/v1")
+app.include_router(campaigns_router, prefix="/api/v1")
+app.include_router(active_router, prefix="/api/v1")
+app.include_router(datasets_router, prefix="/api/v1")
+app.include_router(origins_router, prefix="/api/v1")
+app.include_router(verify_router, prefix="/api/v1")
+app.include_router(commands_router, prefix="/api/v1")
+app.include_router(auth_router, prefix="/api/v1")
 
 # Static webapp mount — read-only operator dashboard at the domain root
 # (Next.js export from webapp/, built via `npm run build` in that directory).

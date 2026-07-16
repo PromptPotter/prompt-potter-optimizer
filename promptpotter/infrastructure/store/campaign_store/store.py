@@ -42,8 +42,12 @@ from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import RoundResult, best_round_by_cumulative_accuracy
 from promptpotter.domain.run_records import CycleSeed, CycleSeedRecord
+
+# Bound as a module, not by name: ``runtime_flags`` imports ``store.io``, which runs
+# this package's ``__init__`` and lands back here mid-initialization. The module object
+# exists in ``sys.modules`` at that point; its attributes do not yet.
+from promptpotter.infrastructure import runtime_flags
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.runtime_flags import derive_run_phase, is_checkin
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_cycle_seed,
     scan_ledger_max_round_complete,
@@ -808,7 +812,7 @@ class CampaignStore:
         (not just the sweep's staleness gate). A paused cycle stays a suspended
         unit until the operator resumes or archives it."""
         cycle_dir = self.cycle_dir(campaign_id, cycle_id)
-        if CycleLayout(cycle_dir).pause_flag.is_file() or is_checkin(cycle_dir):
+        if CycleLayout(cycle_dir).pause_flag.is_file() or runtime_flags.is_checkin(cycle_dir):
             return False
         index_path = self._index_path(campaign_id, cycle_id)
         data = read_json_optional(index_path)
@@ -842,7 +846,7 @@ class CampaignStore:
         # the one computation the picker, both live dots, and the badge all
         # read — no surface re-derives "running" from its own inputs.
         is_terminal = isinstance(data, dict) and bool(data.get("finished_at"))
-        run_phase = str(derive_run_phase(index_path.parent, is_terminal=is_terminal))
+        run_phase = str(runtime_flags.derive_run_phase(index_path.parent, is_terminal=is_terminal))
         if not isinstance(data, dict):
             data = {}
             status = "unreadable"

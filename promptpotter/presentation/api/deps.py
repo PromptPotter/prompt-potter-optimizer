@@ -8,7 +8,7 @@ from typing import Annotated, Any
 
 from fastapi import Depends, Request
 
-from promptpotter.application.jobs import JobRegistry
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.settings import settings
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.infrastructure.identity.migration import registered_or_default_identity

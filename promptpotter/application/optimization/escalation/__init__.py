@@ -17,7 +17,7 @@ HERE (this package owns the decision machinery):
 - :mod:`.firing` — :func:`escalate_l2` (L2/L3 firing driver) +
   :func:`apply_fork_payload_to_osp`.
 
-MAPPED (the concept spans these; canonical homes, not re-exported here):
+MAPPED (the concept spans these; canonical homes):
 - wound + signal TYPES → ``domain/escalation_signals.py`` (``EscalationSignal``,
   ``EscalationTarget``, ``NurseOwner``, ``ValidationFailure``, ``RuntimeFailure``).
 - wound RENDERING into the optimizer prompt → ``dispatch/hub/injections/
@@ -31,39 +31,12 @@ MAPPED (the concept spans these; canonical homes, not re-exported here):
 - the post-round ROUTING call (``decide_escalation`` → ``escalate_l2``)
   fires in ``runner/round.py``.
 
-External callers import from this surface. The ONE exception: ``cycle.py`` and
-``resume_and_fork/resume.py`` import the foundational :class:`EscalationFSM`
-from ``.state`` directly — going through this surface eagerly loads the firing
-driver, which depends back on ``Cycle`` (import cycle). Foundational state
-types sit below the driver; everything else uses the package surface.
+Nothing is re-exported here — every consumer imports the leaf directly, e.g.
+``from promptpotter.application.optimization.escalation.decide import
+decide_escalation``. That is also what keeps the package import-safe: a
+re-exporting surface here would eagerly load the firing driver, which depends
+back on ``Cycle``, so ``cycle.py`` and ``resume_and_fork/resume.py`` had to
+reach past it to ``.state`` for the foundational :class:`EscalationFSM`. With
+no surface to hop through, that exception is gone — foundational state types
+simply sit below the driver.
 """
-
-from promptpotter.application.optimization.escalation.decide import (
-    EscalationInputs,
-    decide_escalation,
-)
-from promptpotter.application.optimization.escalation.firing import (
-    apply_fork_payload_to_osp,
-    escalate_l2,
-)
-from promptpotter.application.optimization.escalation.rules import (
-    DEFAULT_ESCALATION_RULES,
-    EscalationRule,
-)
-from promptpotter.application.optimization.escalation.state import (
-    EscalationEvent,
-    EscalationFSM,
-    NextAction,
-)
-
-__all__ = [
-    "DEFAULT_ESCALATION_RULES",
-    "EscalationEvent",
-    "EscalationFSM",
-    "EscalationInputs",
-    "EscalationRule",
-    "NextAction",
-    "apply_fork_payload_to_osp",
-    "decide_escalation",
-    "escalate_l2",
-]

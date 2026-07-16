@@ -18,14 +18,15 @@ from promptpotter.application.config import (
     estimand_doc,
     knob_label,
 )
-from promptpotter.application.jobs.launcher import draft_wire_with_locks, load_checkin_draft
+from promptpotter.application.jobs.launcher.checkin import load_checkin_draft
+from promptpotter.application.jobs.launcher.draft_build import draft_wire_with_locks
 from promptpotter.application.knobs import (
     COUPLINGS,
     check_couplings,
     resolve_knob_states,
 )
-from promptpotter.application.meta_champion import ChampionRegistry, reduce_corpus
-from promptpotter.application.resource_matrix import ResourceMatrix, read_matrix
+from promptpotter.application.meta_champion.reducer import ChampionRegistry, reduce_corpus
+from promptpotter.application.resource_matrix.matrix import ResourceMatrix, read_matrix
 from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.layout import REPO_ROOT
 from promptpotter.presentation.api.deps import StoreDep

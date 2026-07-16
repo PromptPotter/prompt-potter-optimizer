@@ -13,7 +13,7 @@ from enum import StrEnum
 from typing import Any
 
 from promptpotter.application.optimization.l1.population import pobb_decision_data
-from promptpotter.application.optimization.pobb.elimination import PoBBCheck
+from promptpotter.application.optimization.pobb.elimination.checks import PoBBCheck
 from promptpotter.config.settings import POBB_DEFAULT_EPSILON
 from promptpotter.domain.escalation_signals import (
     EscalationSignal,
