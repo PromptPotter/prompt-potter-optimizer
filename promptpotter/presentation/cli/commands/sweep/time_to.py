@@ -6,7 +6,11 @@ import argparse
 import logging
 
 from promptpotter.domain.phases import StopReason
-from promptpotter.presentation.cli.commands._shared import _DIVERGENCE_HINT, CommandResult
+from promptpotter.presentation.cli.commands._shared import (
+    _DIVERGENCE_HINT,
+    CommandResult,
+    backend_unreachable_result,
+)
 from promptpotter.presentation.cli.commands.sweep._common import (
     _parse_variants,
     _resolve_template,
@@ -43,16 +47,19 @@ async def _cmd_sweep_time_to(args: argparse.Namespace) -> CommandResult:
     campaign_config = load_session(args).campaign_config
     target_acc = args.target / 100.0
     max_rounds = int(args.max_rounds)
-    spend_budget = float(args.spend_budget) if args.spend_budget is not None else None
+    # The effective budget: CLI flag, else the campaign config (drive_cycle
+    # applies the same fallback — this is display-only).
+    spend_budget = (
+        float(args.spend_budget_usd)
+        if args.spend_budget_usd is not None
+        else campaign_config.optimization.spend_budget_usd
+    )
     sweep_opt = campaign_config.optimization.model_copy(update={"max_rounds": max_rounds})
     campaign_config = campaign_config.model_copy(update={"optimization": sweep_opt})
 
     train_data, ctx, session = await _setup_sweep_cycle(args, campaign_config)
     if train_data is None:
-        return CommandResult(
-            data={"error": "backend_unreachable", "backend_url": ctx.backend_url},
-            human=f"Backend unreachable at {ctx.backend_url}. Start the backend and retry.",
-        )
+        return backend_unreachable_result(ctx.backend_url)
 
     train_data, resolved_slice = slice_samples(
         train_data,
@@ -84,7 +91,6 @@ async def _cmd_sweep_time_to(args: argparse.Namespace) -> CommandResult:
                 session,
                 train_data,
                 halt_at_accuracy=target_acc,
-                spend_budget_usd=spend_budget,
             )
     except ResumeDivergenceError as div:
         return CommandResult(

@@ -18,11 +18,15 @@ from promptpotter.application.jobs.mint import prepare_fresh_cycle
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
+    backend_unreachable_result,
     bind_session_identity,
-    campaign_result_human,
+    build_observers,
+    cycle_result_command,
+    drive_cycle,
     get_verbose,
     identity_from_args,
     init_services_cli,
+    pipeline_summary,
 )
 from promptpotter.presentation.cli.session import load_session
 from promptpotter.presentation.views.startup_checklist import checkin_line
@@ -34,7 +38,6 @@ if TYPE_CHECKING:
     from promptpotter.application.run_observers import RunObservers
     from promptpotter.domain.sample import Sample
     from promptpotter.presentation.cli.session import SessionCtx
-    from promptpotter.presentation.views.live import LiveDisplay
 
 logger = logging.getLogger("promptpotter.presentation.cli")
 
@@ -362,62 +365,6 @@ async def _mint_fresh_session(
     return session, campaign_config, dataset_name, minted.session_id
 
 
-def _build_live_display(
-    args: argparse.Namespace,
-    *,
-    session: Session,
-    campaign_config: CampaignConfig,
-    origin_acc: float,
-) -> LiveDisplay:
-    """Build the CLI's LiveDisplay — verbose (-v) gets full notebook parity, else concise."""
-    from promptpotter.application.scoring.formula import split_scoring_block
-    from promptpotter.presentation.views.display import set_display_tags
-    from promptpotter.presentation.views.live import LiveDisplay as _LiveDisplay
-
-    set_display_tags(session.pipeline_schema)
-    scoring_formula = split_scoring_block(campaign_config.scoring).per_sample
-    opt = campaign_config.optimization
-
-    if getattr(args, "verbose", False):
-        return _LiveDisplay(
-            campaign_rounds=[],
-            origin_acc=origin_acc,
-            l1_patience=opt.l1_patience,
-            pipeline_schema=session.pipeline_schema,
-            scoring_formula=scoring_formula,
-        )
-    return _LiveDisplay(
-        origin_acc=origin_acc,
-        l1_patience=opt.l1_patience,
-        scoring_formula=scoring_formula,
-        pipeline_schema=session.pipeline_schema,
-    )
-
-
-def _build_observers(
-    args: argparse.Namespace,
-    session: Session,
-    campaign_config: CampaignConfig,
-    train_data: list[Sample],
-    origin_acc: float,
-) -> RunObservers:
-    """CLI thin shim around ``build_run_observers`` — passes ``args``-derived display."""
-    from promptpotter.application.run_observers import build_run_observers
-
-    display = _build_live_display(
-        args, session=session, campaign_config=campaign_config, origin_acc=origin_acc
-    )
-    return build_run_observers(
-        session=session,
-        campaign_config=campaign_config,
-        dataset=train_data,
-        display=display,
-        # ``new`` always starts at round 0, no resume.
-        resumed_from_round=None,
-        origin_accuracy=origin_acc,
-    )
-
-
 async def _run_sweep_batch(
     args: argparse.Namespace,
     root_ctx: SessionCtx,
@@ -429,7 +376,7 @@ async def _run_sweep_batch(
     from promptpotter.application.sweep import run_sweep_batch
 
     def observer_factory(session: Session, origin_acc: float) -> RunObservers:
-        return _build_observers(args, session, campaign_config, train_data, origin_acc)
+        return build_observers(args, session, campaign_config, train_data, origin_acc)
 
     result = await run_sweep_batch(
         args,
@@ -482,60 +429,22 @@ async def _run_loop(
     session: Session,
     train_data: list[Sample],
 ) -> CommandResult:
-    """Build observers, drive the optimization loop."""
-    from promptpotter.application.runner import (
-        RunMode,
-    )
-    from promptpotter.application.runner import (
-        run_optimization as _orch_run_optimization,
-    )
+    """Drive the optimization loop via the shared CLI driver."""
+    from promptpotter.application.runner import RunMode
 
-    pre_origin_acc = ctx.state.get("origin_accuracy", 0.0)
-    observers = _build_observers(args, session, campaign_config, train_data, pre_origin_acc)
-    ctx.save_phase("optimizing")
-
-    # Control-local hooks (pause.flag under .runtime/) are bound centrally in
-    # run_optimization (the single runner seam) so CLI and API launches behave
-    # identically — no per-entry-point wiring here.
-    cycle_result = await _orch_run_optimization(
-        train_data,
+    cycle_result, _ = await drive_cycle(
+        args,
+        ctx,
         campaign_config,
-        session=session,
-        observers=observers,
-        task_context=ctx.task_context,
+        session,
+        train_data,
         mode=RunMode(
             sweep=getattr(args, "sweep", False),
             diag=getattr(args, "diag", False),
             halt_at_accuracy=getattr(args, "halt_at_accuracy", None),
         ),
-        # CLI ``--spend-budget`` overrides ``OptimizationConfig.spend_budget_usd``;
-        # falls back to the config value when no flag is given.
-        spend_budget_usd=getattr(args, "spend_budget_usd", None)
-        or campaign_config.optimization.spend_budget_usd,
     )
-
-    ctx.state["best_accuracy"] = cycle_result.best_accuracy
-    ctx.save_phase("optimize")
-    campaign_dir = session.store.campaigns.campaign_root_dir(ctx.campaign_id)
-    return CommandResult(
-        data=cycle_result.model_dump(),
-        human=campaign_result_human(
-            campaign_dir,
-            dataset_name=ctx.init_params.get("dataset_name") or "?",
-            cycle_id=cycle_result.cycle_id,
-        ),
-    )
-
-
-def _pipeline_detail(session: Session) -> str:
-    """Pipeline name + active-node summary for the pre-flight check-in line."""
-    ps = session.pipeline_schema
-    pipe = f"{ps.name} v{ps.version}" if ps else "pipeline unavailable"
-    active = list((session.pipeline_params or {}).get("steps") or [])
-    nodes = f"{len(active)} node{'' if len(active) == 1 else 's'}"
-    if active:
-        nodes += f" ({', '.join(active)})"
-    return f"{pipe} · {nodes}"
+    return cycle_result_command(ctx, session, cycle_result)
 
 
 async def cmd_new(args: argparse.Namespace) -> CommandResult:
@@ -560,21 +469,12 @@ async def cmd_new(args: argparse.Namespace) -> CommandResult:
 
     status = await session.backend_client.check_status()
     if status.get("status") == "unreachable":
-        return CommandResult(
-            data={"error": "backend_unreachable", "backend_url": args.backend_url},
-            human=(
-                f"Backend unreachable at {args.backend_url}.\n\n"
-                "The TermNorm backend ships in a sibling repo. Clone it next to "
-                "PromptPotter, then start it:\n"
-                "  TermNorm-excel\\backend-api\\start-server-py-LLMs.bat\n\n"
-                "Install guide: docs/manual/02-install.md"
-            ),
-        )
+        return backend_unreachable_result(args.backend_url)
     checkin_line("backend", f"reachable at {args.backend_url}")
 
     train_data = session.samples or []
     checkin_line("dataset", f"{dataset_name} ({len(train_data)} queries)")
-    checkin_line("pipeline", _pipeline_detail(session))
+    checkin_line("pipeline", pipeline_summary(session, session.pipeline_params))
 
     await _checkin_task(
         session,

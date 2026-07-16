@@ -250,6 +250,8 @@ async def l1_score(
             )
             update["composite_fitness"] = s["composite_fitness"]
             update["accuracy"] = s["accuracy"]
+            update["hits"] = s["hits"]
+            update["total"] = s["total"]
         candidate_scores[cs_idx] = cs.model_copy(update=update)
 
     # ``coverage_floor`` is persisted so the replayer applies the same electability floor — without
@@ -301,6 +303,11 @@ async def l1_score(
         best_matched_origin_composite = matched["composite_fitness"]
 
     base = _compute_accuracy(best_results)
+    # Headline hits/total ride the winner's ScoredCandidate row — the replication
+    # block above updates it over ALL rows, so the round header and the
+    # per-candidate table cannot disagree under ``replicate_survivors > 0``.
+    best_hits = winner_cs.hits if winner_id else base["hits"]
+    best_total = winner_cs.total if winner_id else base["total"]
     p_value: float | None = None
     if base["total"] > 0 and winner_id:
         # Recorded diagnostic (shown in the round view); does not gate promotion.
@@ -381,8 +388,8 @@ async def l1_score(
         label=best_label,
         accuracy=best_acc,
         composite_fitness=best_comp,
-        hits=base["hits"],
-        total=base["total"],
+        hits=best_hits,
+        total=best_total,
         improved=improved,
         p_value=p_value,
         improved_reason=improved_reason,

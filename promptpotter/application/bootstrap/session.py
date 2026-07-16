@@ -162,7 +162,8 @@ def _build_index_header(session: Session, dataset_size: int) -> dict[str, Any]:
         "steps": [n.name for n in nodes],
         "backend_url": session.backend_client.base_url,
         "backend_id": session.backend_id,
-        "dataset_name": session.dataset_name,
+        # No dataset_name here — campaign.json::dataset_name is the one owner;
+        # every reader derives from it (a header copy needed its own re-sync).
         "dataset_size": dataset_size,
     }
 

@@ -7,10 +7,25 @@ lists, persistence versioning, and service-level defaults.
 """
 
 import math
+import tomllib
+from importlib.metadata import version
+from pathlib import Path
 
 from pydantic_settings import BaseSettings
 
-APP_VERSION: str = "0.8.7"
+
+def _app_version() -> str:
+    """One version owner: ``pyproject.toml``. The dev tree reads the file directly
+    (editable-install dist metadata goes stale on a bump until reinstall); an
+    installed wheel has no pyproject.toml on disk and reads its own metadata."""
+    pyproject = Path(__file__).parents[2] / "pyproject.toml"
+    if pyproject.is_file():
+        with pyproject.open("rb") as f:
+            return str(tomllib.load(f)["project"]["version"])
+    return version("promptpotter-optimizer")
+
+
+APP_VERSION: str = _app_version()
 
 # Current legal-terms version the consent gate requires. Date-stamped: bumping it
 # (when the Terms / Privacy text on the marketing site materially changes)

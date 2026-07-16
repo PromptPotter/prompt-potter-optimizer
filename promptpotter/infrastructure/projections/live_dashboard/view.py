@@ -390,6 +390,14 @@ class LiveDashboardView(DerivedView):
                 rounds_list.append(summary)
                 rounds_list.sort(key=lambda r: r.round)
                 self.state.rounds = rounds_list
+                # Settle the served headline lift AFTER the append so round 0's own
+                # summary is present when it computes its first value.
+                origin = next(
+                    (r.cumulative_accuracy for r in self.state.rounds if r.round == 0), None
+                )
+                self.state.headline_delta = (
+                    round(self.state.best - origin, 4) if origin is not None else None
+                )
                 self._flush_pending_persist()
             return
 

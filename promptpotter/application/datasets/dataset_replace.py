@@ -14,7 +14,7 @@ holds orchestration, not path knowledge):
 1. **Data** — ``TenantDatasetStore.version_dataset`` renames ``{slug}/`` →
    ``{slug}-vN/`` and fixes its self-reference.
 2. **Campaign pins** — ``CampaignStore.repoint_dataset`` rewrites each
-   ``campaign.json::dataset_name`` *and* cycle ``index.json::header.dataset_name``.
+   ``campaign.json::dataset_name`` (the one owner; cycle readers derive from it).
 3. **Measurements** — ``MeasurementArchive.restamp_dataset`` re-stamps the
    archive index + detail files.
 

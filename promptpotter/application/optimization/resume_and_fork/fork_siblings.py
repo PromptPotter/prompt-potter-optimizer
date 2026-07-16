@@ -42,6 +42,7 @@ from promptpotter.infrastructure.store import (
     root_cycle_id,
     save_active_pointer,
 )
+from promptpotter.infrastructure.store.layout import campaign_cycles_dir
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import graceful
 
@@ -119,7 +120,7 @@ def _next_diag_sibling_id(
 ) -> str:
     """Next ``{root}_diag_NNN`` id; siblings root at the family root."""
     root_id = root_cycle_id(parent_cycle_id)
-    cycles_dir = campaign_store.campaign_root_dir(campaign_id) / "cycles"
+    cycles_dir = campaign_cycles_dir(campaign_store.campaign_root_dir(campaign_id))
     pattern = re.compile(rf"^{re.escape(root_id)}_diag_(\d+)$")
     max_n = 0
     if cycles_dir.is_dir():

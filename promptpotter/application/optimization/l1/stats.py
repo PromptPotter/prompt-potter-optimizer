@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from promptpotter.application.optimization.validators.l1_behavior import CheckResult
 from promptpotter.domain.results import RoundResult
 
-__all__ = ["L1Stats", "compute_l1_stats"]
+__all__ = ["HEADLINE_ACC", "L1Stats", "compute_l1_stats", "first_round_at_threshold"]
 
 
 # Headline-accuracy threshold for ``rounds_to_95``.
@@ -44,7 +44,7 @@ def compute_l1_stats(
     l2_behavior_results: list[list[CheckResult]] | None = None,
 ) -> L1Stats:
     """Aggregate rounds + behaviour checks → L1Stats."""
-    rounds_to_95 = _first_round_at_threshold(rounds, HEADLINE_ACC)
+    rounds_to_95 = first_round_at_threshold(rounds, HEADLINE_ACC)
     yield_rate = _mean_yield_rate(rounds)
     top_lifts = _top_lifts(rounds, origin_composite_fitness)
     top_lift_mean = sum(top_lifts) / len(top_lifts) if top_lifts else None
@@ -110,7 +110,9 @@ def _compute_round_1_verdict(
 # --- aggregation helpers ---------------------------------------------------
 
 
-def _first_round_at_threshold(rounds: list[RoundResult], threshold: float) -> int | None:
+def first_round_at_threshold(rounds: list[RoundResult], threshold: float) -> int | None:
+    """First round whose accuracy clears *threshold* — ``rounds_to_95``'s one
+    definition, shared with the ``index.json::final`` writer."""
     return next((r.round for r in rounds if r.accuracy >= threshold), None)
 
 

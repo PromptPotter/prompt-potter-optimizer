@@ -57,6 +57,7 @@ from promptpotter.infrastructure.store.io import (
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
     archive_root_dir_for,
+    campaign_cycles_dir,
     campaign_root_dir_for,
     classify,
     cycle_dir_under,
@@ -205,7 +206,7 @@ def _strip_to_keepsake(campaign_dir: Path) -> None:
     langfuse dataset mirror) drop without a hand-maintained subdir list; emptied dirs
     are pruned after. ``sweeps/`` is a batch-diagnostic tree with no keepsake and no
     cycle, so it drops wholesale."""
-    cycles_dir = campaign_dir / "cycles"
+    cycles_dir = campaign_cycles_dir(campaign_dir)
     if cycles_dir.is_dir():
         for cdir in cycles_dir.iterdir():
             if not cdir.is_dir():
@@ -319,6 +320,27 @@ class CampaignStore:
                 out.extend(parent.glob("*/cycles/*/index.json"))
         return sorted(out)
 
+    def iter_campaign_dirs(self) -> list[Path]:
+        """Every campaign dir (has a ``campaign.json``) under ``campaigns/`` AND
+        ``archive/``. The one campaign-tree enumeration — anything summing or
+        reducing over "all campaigns" walks this, so an archived campaign's
+        spend and measurements stay visible."""
+        out: list[Path] = []
+        for parent in self._campaign_parents():
+            if parent.exists():
+                out.extend(p.parent for p in parent.glob("*/campaign.json"))
+        return sorted(out)
+
+    def iter_cycle_ledgers(self) -> list[Path]:
+        """Every per-cycle ledger (``cycles/*/.runtime/ledger.jsonl``) across the
+        campaign tree, archived included — archiving a campaign mid-day must not
+        free daily spend-cap budget."""
+        return [
+            ledger
+            for campaign_dir in self.iter_campaign_dirs()
+            for ledger in sorted(campaign_cycles_dir(campaign_dir).glob("*/.runtime/ledger.jsonl"))
+        ]
+
     @staticmethod
     def _ids_from_index_path(index_path: Path) -> tuple[str, str]:
         """``(campaign_id, cycle_id)`` for a ``campaigns/{c}/cycles/{cy}/index.json`` path."""
@@ -365,15 +387,13 @@ class CampaignStore:
         """Move every campaign pinned to *old_name* onto *new_name*. Returns the count.
 
         The campaign half of the dataset version-and-repoint migration
-        (``application/datasets/dataset_replace.py``): rewrites both the
-        manifest pin (``campaign.json::dataset_name``, which resolution reads
-        live) *and* every cycle ``index.json::header.dataset_name`` (which the
-        cycle listing surfaces — the backfill only fires when that header is
-        empty, so a stale stamp would otherwise outlive the move). After this,
-        a prior campaign resolves the exact bytes it always ran on, now living
-        under *new_name*. Any lifecycle (active / archived / deleted) — an
-        archived campaign's data must stay truthful too. Idempotent: a campaign
-        already on *new_name* doesn't match and is skipped.
+        (``application/datasets/dataset_replace.py``): rewrites the manifest pin
+        (``campaign.json::dataset_name``) — the ONE owner; every cycle-level
+        reader derives from it. After this, a prior campaign resolves the exact
+        bytes it always ran on, now living under *new_name*. Any lifecycle
+        (active / archived / deleted) — an archived campaign's data must stay
+        truthful too. Idempotent: a campaign already on *new_name* doesn't match
+        and is skipped.
         """
         count = 0
         for cid in self.list_campaign_ids():
@@ -381,23 +401,8 @@ class CampaignStore:
             if campaign is None or campaign.dataset_name != old_name:
                 continue
             self.update_campaign(cid, {"dataset_name": new_name})
-            self._repoint_cycle_headers(cid, old_name, new_name)
             count += 1
         return count
-
-    def _repoint_cycle_headers(self, campaign_id: str, old_name: str, new_name: str) -> None:
-        """Rewrite ``header.dataset_name`` on every cycle index that still stamps *old_name*."""
-        cycles_dir = self.campaign_root_dir(campaign_id) / "cycles"
-        if not cycles_dir.exists():
-            return
-        for index_path in sorted(cycles_dir.glob("*/index.json")):
-            data = read_json_optional(index_path)
-            if not isinstance(data, dict):
-                continue
-            header = data.get("header")
-            if isinstance(header, dict) and header.get("dataset_name") == old_name:
-                header["dataset_name"] = new_name
-                write_json(index_path, data)
 
     def list_campaign_ids(self) -> list[str]:
         """Every campaign id on disk (dir with ``campaign.json``), sorted — active
@@ -537,7 +542,7 @@ class CampaignStore:
         # sandboxes are keyed by cycle_id and live off-tree, so we need the ids first.
         inner_cycle_ids: list[str] = []
         if inner_sandbox_root is not None:
-            cycles_dir = campaign_dir / "cycles"
+            cycles_dir = campaign_cycles_dir(campaign_dir)
             if cycles_dir.is_dir():
                 inner_cycle_ids = [p.name for p in cycles_dir.iterdir() if p.is_dir()]
         if keep_results:
@@ -848,10 +853,9 @@ class CampaignStore:
         sk = data.get("sibling_kind", kind)
         fork_raw = data.get("fork")
         fork_trigger = fork_raw.get("trigger") if isinstance(fork_raw, dict) else None
-        dataset_name = header.get("dataset_name", "")
-        if not dataset_name:
-            campaign = self.load_campaign(campaign_id)
-            dataset_name = campaign.dataset_name if campaign is not None else ""
+        # Derived from the one owner (campaign.json::dataset_name) — no per-cycle copy.
+        campaign = self.load_campaign(campaign_id)
+        dataset_name = campaign.dataset_name if campaign is not None else ""
         return {
             "campaign_id": campaign_id,
             "cycle_id": cycle_id,

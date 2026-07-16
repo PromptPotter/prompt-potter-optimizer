@@ -467,17 +467,13 @@ async def _run_transition(
                 severity="error",
                 message=(
                     f"{transition.template_name} returned unusable output "
-                    f"({'empty/truncated' if len((parse_err.raw or '').strip()) < 20 else 'schema-noncompliant'}) "
+                    f"({'empty/truncated' if parse_err.is_empty else 'schema-noncompliant'}) "
                     "— the prior framing was kept and the loop continues."
                 ),
                 detail={
                     "node": transition.template_name,
                     "layer": transition.layer_id,
-                    "finish_reason": parse_err.finish_reason,
-                    "completion_tokens": parse_err.completion_tokens,
-                    "reasoning_tokens": parse_err.reasoning_tokens,
-                    "reasoning_chars": parse_err.reasoning_chars,
-                    "raw_chars": len((parse_err.raw or "").strip()),
+                    **parse_err.warning_detail(),
                 },
             )
             emit_phase(
@@ -523,12 +519,20 @@ async def _run_transition(
     # (which carries ``terminate_proposal`` to the ledger) is emitted before the raise. Reuses
     # the existing HALTED-class StopReason.ABORT — no new stop reason, no sidecar (R-48/R-09).
     if result.terminate_proposal is not None:
-        logger.info(
-            "%s emitted terminate_proposal — cycle will exit HALTED (ABORT): %s",
-            transition.layer_id,
-            result.terminate_proposal.reason or "unrecoverable fault",
-        )
-        raise StopLoop(StopReason.ABORT)
+        if not cycle.config.optimization.terminate_capability:
+            # Same shape as the fork gate below: off ⇒ the prompt carried no
+            # terminate guidance, and a volunteered field must not ABORT the run.
+            logger.warning(
+                "%s emitted terminate_proposal while terminate_capability is off — ignored",
+                transition.layer_id,
+            )
+        else:
+            logger.info(
+                "%s emitted terminate_proposal — cycle will exit HALTED (ABORT): %s",
+                transition.layer_id,
+                result.terminate_proposal.reason or "unrecoverable fault",
+            )
+            raise StopLoop(StopReason.ABORT)
 
     if result.fork_proposal is not None:
         if not cycle.config.optimization.rebase_capability:

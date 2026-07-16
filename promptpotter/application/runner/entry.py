@@ -775,9 +775,13 @@ def _finalize_run(
         from promptpotter.application.optimization.dispatch.llm_call import (
             compute_optimizer_prompt_hashes,
         )
+        from promptpotter.application.optimization.l1.stats import (
+            HEADLINE_ACC,
+            first_round_at_threshold,
+        )
 
         rounds = cycle_result.rounds
-        rounds_to_95 = next((r.round for r in rounds if r.accuracy >= 0.95), None)
+        rounds_to_95 = first_round_at_threshold(rounds, HEADLINE_ACC)
         final_block: dict[str, Any] = {
             "stop_reason": stop_reason,
             "rounds_to_95": rounds_to_95,

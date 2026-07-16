@@ -42,7 +42,7 @@ from promptpotter.domain.results import RoundResult
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
 from promptpotter.infrastructure.store.campaign_store.store import origin_accuracy_of
 from promptpotter.infrastructure.store.io import read_json_tolerant, write_json, write_text
-from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
 from promptpotter.infrastructure.store.read_model import iter_jsonl
 from promptpotter.shared.errors import graceful
 
@@ -369,7 +369,7 @@ def _load_sibling_indices(
     store: CampaignStore, campaign_id: str, *, exclude: str
 ) -> list[dict[str, Any]] | None:
     """Every cycle ``index.json`` in the campaign except ``exclude``. ``None`` when empty."""
-    cycles_dir = store.campaign_root_dir(campaign_id) / "cycles"
+    cycles_dir = campaign_cycles_dir(store.campaign_root_dir(campaign_id))
     if not cycles_dir.is_dir():
         return None
     out: list[dict[str, Any]] = []

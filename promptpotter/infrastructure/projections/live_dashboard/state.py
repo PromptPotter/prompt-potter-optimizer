@@ -270,6 +270,11 @@ class LiveDashboardState(BaseModel):
 
     best: float = 0.0
     current_acc: float = 0.0
+    # Served headline lift: ``best − rounds[0].cumulative_accuracy`` (one basis on
+    # both sides). The ONE derivation of "how far above origin is the incumbent" —
+    # the webapp headline chip and the L4 inner progress line read it, neither
+    # recomputes it. ``None`` until round 0 has settled.
+    headline_delta: float | None = None
     composite_fitness_formula: str | None = None
     # Campaign default for which fitness number headlines the operator's text
     # surfaces (CampaignConfig.headline_metric). DISPLAY config — the gate is

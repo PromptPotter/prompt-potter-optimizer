@@ -209,13 +209,16 @@ def _r_rebase_capability(b: InjectionBundle) -> str:
 
 
 _TERMINATE_CAPABILITY_TEXT = (
-    "TERMINATE PROPOSAL — stop the whole cycle. If the EVIDENCE STARVED panel above names a node "
-    "that failed across ~all of this round's samples (an enricher whose backend quota or "
-    "rate-limit is exhausted, so the measurement itself is unreliable), TERMINATE NOW — do NOT "
-    "attempt a task_context refinement first: no framing nudge recovers a starved backend, and "
-    'another round just burns spend on noise. Emit terminate_proposal = {"reason": "<1-2 sentences '
-    'naming the dead node and what the operator must fix>"}; the cycle halts, the operator fixes '
-    "the backend and resumes. For every OTHER fault terminate is rare — default omit; use it ONLY "
+    "TERMINATE PROPOSAL — stop the whole cycle. Evaluate this FIRST, before any refinement: if "
+    "the EVIDENCE STARVED panel above names a node that failed across ~all of this round's "
+    "samples (an enricher whose backend quota or rate-limit is exhausted), the measurement "
+    "itself is unreliable and the round's failure clusters — including "
+    "critique.failure_highlights and the axis-memory cluster, often a downstream matcher — are "
+    "CASCADE NOISE from that dead node, not real targets. Do NOT chase them with a refinement "
+    "first: no framing nudge recovers a starved backend, and another round just burns spend on "
+    'noise. TERMINATE NOW — emit terminate_proposal = {"reason": "<1-2 sentences naming the '
+    'dead node and what the operator must fix>"}; the cycle halts, the operator fixes the '
+    "backend and resumes. For every OTHER fault terminate is rare — default omit; use it ONLY "
     "for an unrecoverable upstream/backend fault, never for a hard task or a stalled-but-healthy "
     "search (rewind or keep refining for those)."
 )

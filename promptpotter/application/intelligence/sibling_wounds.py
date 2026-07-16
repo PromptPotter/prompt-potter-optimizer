@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.domain.escalation_signals import RuntimeFailure
 from promptpotter.domain.phases import StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.infrastructure.store.io import read_json_tolerant
+from promptpotter.infrastructure.store.layout import campaign_cycles_dir
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store import Stores
@@ -62,7 +63,7 @@ def gather_sibling_runtime_failures(
     out: list[RuntimeFailure] = []
     seen_keys: set[tuple[str, str, str]] = set()
 
-    cycles_dir = stores.campaigns.campaign_root_dir(campaign_id) / "cycles"
+    cycles_dir = campaign_cycles_dir(stores.campaigns.campaign_root_dir(campaign_id))
     if not cycles_dir.exists():
         return out
 

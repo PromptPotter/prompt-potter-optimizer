@@ -257,6 +257,13 @@ class LivesConfig(BaseModel):
     )
 
 
+# The prompt-block-library modes — named once so the draft override
+# (``OptimizationOverrides``) references the same closed set instead of
+# re-spelling it (a 4th mode added there-but-not-here silently never
+# reached check-in, and vice versa).
+PromptBlockCatalogue = Literal["guidance", "restrict", "off"]
+
+
 class OptimizationConfig(BaseModel):
     """Optimization-loop knobs. `improvement_threshold` + `degradation_threshold` are required (no default)."""
 
@@ -398,25 +405,25 @@ class OptimizationConfig(BaseModel):
         ),
     )
 
-    prompt_block_catalogue: Annotated[
-        Literal["guidance", "restrict", "off"], Knob(Scope.POLICY, Estimand.SEARCH)
-    ] = Field(
-        "guidance",
-        description=(
-            "How the prompt building-block library (``promptpotter/config/"
-            "prompt_variants.json`` — reusable ``persona`` / ``task_intent`` / "
-            "``thinking_style`` / ``answer_format`` values adopted from PromptWizard "
-            "and PromptPotter's own runs) is offered to ``l1_generate``. ``guidance`` "
-            "(default) shows the blocks adopted from this project's own runs — the "
-            "value space stays open, so L1 may reuse one verbatim, adapt one, or write "
-            "its own, and the imported Self-Discover tail would only be menu. "
-            "``restrict`` narrows the field's value space to the *whole* library (which "
-            "it therefore renders in full) — an off-library value is a forbidden value, "
-            "rejected by "
-            "``validate_overrides`` exactly as a forbidden axis is (synthetic-0, no "
-            "backend spend, healed via the L2 wound). ``off`` renders nothing, so the "
-            "prompt is bit-for-bit identical to a no-library ablation run."
-        ),
+    prompt_block_catalogue: Annotated[PromptBlockCatalogue, Knob(Scope.POLICY, Estimand.SEARCH)] = (
+        Field(
+            "guidance",
+            description=(
+                "How the prompt building-block library (``promptpotter/config/"
+                "prompt_variants.json`` — reusable ``persona`` / ``task_intent`` / "
+                "``thinking_style`` / ``answer_format`` values adopted from PromptWizard "
+                "and PromptPotter's own runs) is offered to ``l1_generate``. ``guidance`` "
+                "(default) shows the blocks adopted from this project's own runs — the "
+                "value space stays open, so L1 may reuse one verbatim, adapt one, or write "
+                "its own, and the imported Self-Discover tail would only be menu. "
+                "``restrict`` narrows the field's value space to the *whole* library (which "
+                "it therefore renders in full) — an off-library value is a forbidden value, "
+                "rejected by "
+                "``validate_overrides`` exactly as a forbidden axis is (synthetic-0, no "
+                "backend spend, healed via the L2 wound). ``off`` renders nothing, so the "
+                "prompt is bit-for-bit identical to a no-library ablation run."
+            ),
+        )
     )
 
     schema_field_rename: Annotated[bool, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(

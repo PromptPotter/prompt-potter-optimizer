@@ -24,11 +24,15 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from promptpotter.application.config import MechanismConfig
+from promptpotter.application.config import (
+    MechanismConfig,
+    OptimizationConfig,
+    PromptBlockCatalogue,
+)
 from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.domain.identity import TenantId, safe_name
 from promptpotter.domain.origin_provenance import Provenance
@@ -65,8 +69,9 @@ class OptimizationOverrides(BaseModel):
         le=100,
         description="Round ceiling for the campaign. 0 = measure the origin and stop.",
     )
-    prompt_block_catalogue: Literal["guidance", "restrict", "off"] = Field(
-        "guidance",
+    prompt_block_catalogue: PromptBlockCatalogue = Field(
+        # The config field's own default — the draft never re-spells it.
+        OptimizationConfig.model_fields["prompt_block_catalogue"].default,
         description="How the reusable prompt building-block library reaches the "
         "optimizer: ``guidance`` (suggest blocks, it may still invent), "
         "``restrict`` (blocks only), ``off`` (no library).",

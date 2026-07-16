@@ -586,9 +586,6 @@ def get_campaign_lineage(
             else 0
         )
 
-        header_raw = index.get("header")
-        header = header_raw if isinstance(header_raw, dict) else {}
-
         out_cycles.append(
             CampaignLineageCycle(
                 cycle_id=cid,
@@ -600,7 +597,7 @@ def get_campaign_lineage(
                 steered_by=steered_by,
                 round_column_offset=col_offset,
                 status=str(index.get("status") or ""),
-                dataset_name=str(header.get("dataset_name") or entry["dataset_name"]),
+                dataset_name=str(entry["dataset_name"]),
                 hearts=hearts,
                 lives_cap=lives_cap,
                 best_accuracy=(

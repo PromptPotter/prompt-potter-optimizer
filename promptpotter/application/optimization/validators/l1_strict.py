@@ -33,7 +33,7 @@ from promptpotter.config.prompt_blocks import prompt_blocks
 from promptpotter.config.settings import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVERRIDES
 from promptpotter.domain.escalation_signals import ValidationFailure
 from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, NODE_LAYOUTS
-from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.opt_search_point import OptSearchPoint, candidate_delta
 from promptpotter.domain.pipeline_schema import (
     NESTED_PARAM_TYPES,
     SCHEMA_DESCRIPTIONS_PARAM,
@@ -669,21 +669,6 @@ class L1YieldStats:
 INVARIANT_REASONS = frozenset({"no_op_variant", "duplicate_variant"})
 
 
-def _parent_value(parent_cfg: dict[str, Any], param: str, proposed: Any) -> Any:
-    """The parent's CURRENT value for *param*, shaped like the override that proposes it.
-
-    Every param but one reads straight off the parent's node config. ``output_schema_descriptions``
-    is virtual: the prose it edits lives folded inside ``output_schema.properties[f].description``
-    (:func:`fold_schema_descriptions`), so the parent never carries the key and a naive lookup
-    returns ``None`` — making an exact re-proposal of the existing prose read as a mutation. It is
-    reconstructed here, keyed by the fields the override actually names.
-    """
-    if param == SCHEMA_DESCRIPTIONS_PARAM and isinstance(proposed, dict):
-        props = (parent_cfg.get("output_schema") or {}).get("properties") or {}
-        return {f: (props.get(f) or {}).get("description", "") for f in proposed}
-    return parent_cfg.get(param)
-
-
 def detect_invariants(
     proposals: list[CandidateProposal],
     parent_osp: OptSearchPoint,
@@ -717,25 +702,18 @@ def detect_invariants(
     parent_tc = parent_osp.memory.task_context.to_dict()
     for i, cp in enumerate(proposals):
         child = cp.osp
-        pf_delta = tuple(
-            (f, getattr(child, f))
-            for f in PROMPT_STRING_FIELDS
-            if getattr(child, f) != getattr(parent_osp, f)
+        pf, pp = candidate_delta(
+            {f: getattr(child, f) for f in PROMPT_STRING_FIELDS},
+            {f: getattr(parent_osp, f) for f in PROMPT_STRING_FIELDS},
+            cp.pipeline_params_override,
+            parent_pp,
         )
+        pf_delta = tuple(pf.items())
         child_tc = child.memory.task_context.to_dict()
         tc_delta = tuple(sorted((k, v) for k, v in child_tc.items() if v != parent_tc.get(k)))
         # json canon (not tuple-of-items) so a nested value — e.g. a slice-6 `layout`
         # dict riding alongside the prose edits — stays hashable for the `seen` sig.
-        # Per-PARAM, and only where the proposal actually moves the parent's value: an
-        # override that restates what the parent already holds is not a mutation.
-        pp_delta = tuple(
-            sorted(
-                (n, p, json.dumps(v, sort_keys=True))
-                for n, cfg in (cp.pipeline_params_override or {}).items()
-                for p, v in (cfg or {}).items()
-                if v != _parent_value(parent_pp.get(n) or {}, p, v)
-            )
-        )
+        pp_delta = tuple(sorted((n, p, json.dumps(v, sort_keys=True)) for (n, p), v in pp.items()))
         sig = (pf_delta, tc_delta, pp_delta)
         if not any(sig):
             cp.osp.memory.wounds.validation_failures = [

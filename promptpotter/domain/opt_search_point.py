@@ -419,6 +419,52 @@ def fold_schema_descriptions(
 # --- Diff helpers (views) ---
 
 
+def parent_param_value(parent_cfg: dict[str, Any], param: str, proposed: Any) -> Any:
+    """The parent's CURRENT value for *param*, shaped like the override that proposes it.
+
+    Every param but one reads straight off the parent's node config. ``output_schema_descriptions``
+    is virtual: the prose it edits lives folded inside ``output_schema.properties[f].description``
+    (:func:`fold_schema_descriptions`), so the parent never carries the key and a naive lookup
+    returns ``None`` — making an exact re-proposal of the existing prose read as a mutation. It is
+    reconstructed here, keyed by the fields the override actually names.
+    """
+    if param == SCHEMA_DESCRIPTIONS_PARAM and isinstance(proposed, dict):
+        props = (parent_cfg.get("output_schema") or {}).get("properties") or {}
+        return {f: (props.get(f) or {}).get("description", "") for f in proposed}
+    return parent_cfg.get(param)
+
+
+def candidate_delta(
+    child_fields: dict[str, Any],
+    parent_fields: dict[str, Any],
+    pp_override: dict[str, Any] | None,
+    parent_pp: dict[str, Any] | None,
+) -> tuple[dict[str, Any], dict[tuple[str, str], Any]]:
+    """What a candidate ACTUALLY changed vs its parent — the ONE delta definition.
+
+    Prompt-field component: the ``PROMPT_STRING_FIELDS`` whose child value differs.
+    Param component: per-``(node, param)`` overrides that MOVE the parent's resolved
+    value — restating what the parent already holds is not a mutation, and the
+    virtual ``output_schema_descriptions`` compares against the folded schema prose
+    (:func:`parent_param_value`). Dedup (``detect_invariants``) hashes this and the
+    ALREADY TRIED panel renders it, so a delta rule honored in one cannot desert
+    the other (the panel would show a re-proposal as new).
+    """
+    pf = {
+        f: child_fields.get(f)
+        for f in PROMPT_STRING_FIELDS
+        if child_fields.get(f) != parent_fields.get(f)
+    }
+    parent = parent_pp or {}
+    pp = {
+        (n, p): v
+        for n, cfg in node_config_items(pp_override)
+        for p, v in cfg.items()
+        if v != parent_param_value(parent.get(n) or {}, p, v)
+    }
+    return pf, pp
+
+
 def _fmt_pp_val(v: object) -> str:
     if isinstance(v, float):
         return f"{v:g}"

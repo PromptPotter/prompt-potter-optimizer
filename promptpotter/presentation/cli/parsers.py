@@ -310,7 +310,7 @@ def _add_sweep_args(p_sweep: argparse.ArgumentParser) -> None:
     )
     p_time_to.add_argument(
         "--spend-budget",
-        dest="spend_budget",
+        dest="spend_budget_usd",
         type=float,
         default=None,
         help="Halt when cumulative cycle spend (USD, optimizer + backend) ≥ this value.",

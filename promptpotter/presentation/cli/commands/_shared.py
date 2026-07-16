@@ -24,13 +24,21 @@ from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
 )
-from promptpotter.infrastructure.store.layout import REPO_ROOT
+from promptpotter.infrastructure.store.layout import REPO_ROOT, campaign_cycles_dir
 from promptpotter.shared.identity import IdentityContext, default_identity
 
 if TYPE_CHECKING:
+    import argparse
+
     from promptpotter.application.bootstrap.session import Session
+    from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.run_observers import RunObservers
+    from promptpotter.application.runner import RunMode
+    from promptpotter.domain.results import CycleResult
+    from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store import Stores
     from promptpotter.presentation.cli.session import SessionCtx
+    from promptpotter.presentation.views.live import LiveDisplay
 
 logger = logging.getLogger("promptpotter.presentation.cli")
 
@@ -57,6 +65,17 @@ def get_verbose() -> bool:
     return _VERBOSE
 
 
+def pipeline_summary(session: Session, pipeline_params: dict[str, Any] | None) -> str:
+    """Pipeline name + active-node summary — the check-in line and the startup log share it."""
+    ps = session.pipeline_schema
+    pipe = f"{ps.name} v{ps.version}" if ps else "pipeline unavailable"
+    active = list((pipeline_params or {}).get("steps") or [])
+    nodes = f"{len(active)} node{'s' if len(active) != 1 else ''}"
+    if active:
+        nodes += f" ({', '.join(active)})"
+    return f"{pipe} · {nodes}"
+
+
 def log_startup_summary(
     session: Session,
     pipeline_params: dict[str, Any] | None,
@@ -65,14 +84,10 @@ def log_startup_summary(
     dataset_name: str | None,
 ) -> None:
     """One-line collapsed summary of pipeline + backend + dataset + active nodes."""
-    ps = session.pipeline_schema
-    pipe = f"{ps.name} v{ps.version}" if ps else "pipeline unavailable"
-    active = list((pipeline_params or {}).get("steps") or [])
-    nodes = f"{len(active)} node{'s' if len(active) != 1 else ''}"
-    if active:
-        nodes += f" ({', '.join(active)})"
     ds = f"{dataset_name or '?'} ({dataset_len} queries)"
-    logger.info("%s · %s · backend %s · dataset %s", pipe, nodes, backend_url, ds)
+    logger.info(
+        "%s · backend %s · dataset %s", pipeline_summary(session, pipeline_params), backend_url, ds
+    )
 
 
 def campaign_result_human(campaign_dir: Any, *, dataset_name: str, cycle_id: str | None) -> str:
@@ -150,6 +165,132 @@ def bind_session_identity(session: Session, ctx: SessionCtx) -> None:
     session.state.cycle_id = ctx.cycle_id
 
 
+def backend_unreachable_result(backend_url: str) -> CommandResult:
+    """The shared preflight failure every loop verb (``new`` / ``resume`` / sweep)
+    returns when ``check_status`` reports the backend down."""
+    return CommandResult(
+        data={"error": "backend_unreachable", "backend_url": backend_url},
+        human=(
+            f"Backend unreachable at {backend_url}.\n\n"
+            "The TermNorm backend ships in a sibling repo. Clone it next to "
+            "PromptPotter, then start it:\n"
+            "  TermNorm-excel\\backend-api\\start-server-py-LLMs.bat\n\n"
+            "Install guide: docs/manual/02-install.md"
+        ),
+    )
+
+
+def _build_live_display(
+    args: argparse.Namespace,
+    *,
+    session: Session,
+    campaign_config: CampaignConfig,
+    origin_acc: float,
+) -> LiveDisplay:
+    """Build the CLI's LiveDisplay — verbose (-v) gets full notebook parity, else concise."""
+    from promptpotter.application.scoring.formula import split_scoring_block
+    from promptpotter.presentation.views.display import set_display_tags
+    from promptpotter.presentation.views.live import LiveDisplay as _LiveDisplay
+
+    set_display_tags(session.pipeline_schema)
+    scoring_formula = split_scoring_block(campaign_config.scoring).per_sample
+    opt = campaign_config.optimization
+
+    if getattr(args, "verbose", False):
+        return _LiveDisplay(
+            campaign_rounds=[],
+            origin_acc=origin_acc,
+            l1_patience=opt.l1_patience,
+            pipeline_schema=session.pipeline_schema,
+            scoring_formula=scoring_formula,
+        )
+    return _LiveDisplay(
+        origin_acc=origin_acc,
+        l1_patience=opt.l1_patience,
+        scoring_formula=scoring_formula,
+        pipeline_schema=session.pipeline_schema,
+    )
+
+
+def build_observers(
+    args: argparse.Namespace,
+    session: Session,
+    campaign_config: CampaignConfig,
+    train_data: list[Sample],
+    origin_acc: float,
+) -> RunObservers:
+    """CLI thin shim around ``build_run_observers`` — passes ``args``-derived display."""
+    from promptpotter.application.run_observers import build_run_observers
+
+    display = _build_live_display(
+        args, session=session, campaign_config=campaign_config, origin_acc=origin_acc
+    )
+    return build_run_observers(
+        session=session,
+        campaign_config=campaign_config,
+        dataset=train_data,
+        display=display,
+        resumed_from_round=None,
+        origin_accuracy=origin_acc,
+    )
+
+
+async def drive_cycle(
+    args: argparse.Namespace,
+    ctx: SessionCtx,
+    campaign_config: CampaignConfig,
+    session: Session,
+    train_data: list[Sample],
+    *,
+    mode: RunMode,
+) -> tuple[CycleResult, RunObservers]:
+    """One pass through the optimization loop — the single CLI driver.
+
+    Owns the scaffolding every loop verb (``new`` / ``resume`` / sweep) shares:
+    observers, the "optimizing" → "optimize" phase flips, banking
+    ``best_accuracy``, and the spend fallback (CLI ``--spend-budget`` overrides
+    ``OptimizationConfig.spend_budget_usd``). Callers construct only the verb's
+    :class:`RunMode`.
+    """
+    from promptpotter.application.runner import run_optimization
+
+    pre_origin_acc = ctx.state.get("origin_accuracy", 0.0)
+    observers = build_observers(args, session, campaign_config, train_data, pre_origin_acc)
+    ctx.save_phase("optimizing")
+
+    # Control-local hooks (pause.flag under .runtime/) are bound centrally in
+    # run_optimization (the single runner seam) so CLI and API launches behave
+    # identically — no per-entry-point wiring here.
+    cycle_result = await run_optimization(
+        train_data,
+        campaign_config,
+        session=session,
+        observers=observers,
+        task_context=ctx.task_context,
+        mode=mode,
+        spend_budget_usd=getattr(args, "spend_budget_usd", None)
+        or campaign_config.optimization.spend_budget_usd,
+    )
+    ctx.state["best_accuracy"] = cycle_result.best_accuracy
+    ctx.save_phase("optimize")
+    return cycle_result, observers
+
+
+def cycle_result_command(
+    ctx: SessionCtx, session: Session, cycle_result: CycleResult
+) -> CommandResult:
+    """The shared finish tail for ``new`` / ``resume`` — result payload + human summary."""
+    campaign_dir = session.store.campaigns.campaign_root_dir(ctx.campaign_id)
+    return CommandResult(
+        data=cycle_result.model_dump(),
+        human=campaign_result_human(
+            campaign_dir,
+            dataset_name=ctx.init_params.get("dataset_name") or "?",
+            cycle_id=cycle_result.cycle_id,
+        ),
+    )
+
+
 def _build_divergence_hint() -> str:
     """Derive the divergence-checked-kinds list from the RESUME_CHECKPOINT_GATING table.
 
@@ -216,7 +357,7 @@ def resolve_campaign(stores: Stores, needle: str) -> str:
 
 def resolve_cycle(stores: Stores, campaign_id: str, hint: str | None) -> str:
     """Resolve a cycle id within *campaign_id*; ``hint=None`` auto-picks the sole cycle (raises on ambiguity)."""
-    cycles_dir = stores.campaigns.campaign_root_dir(campaign_id) / "cycles"
+    cycles_dir = campaign_cycles_dir(stores.campaigns.campaign_root_dir(campaign_id))
     if not cycles_dir.exists():
         raise SystemExit(f"ERROR: campaign {campaign_id!r} has no cycles/ directory.")
     ids = sorted(p.name for p in cycles_dir.iterdir() if p.is_dir())
@@ -266,13 +407,18 @@ def confirm_tty(prompt: str, *, default_no: bool = True) -> bool | None:
 
 __all__ = [
     "CommandResult",
+    "backend_unreachable_result",
     "bind_session_identity",
+    "build_observers",
     "campaign_result_human",
     "confirm_tty",
+    "cycle_result_command",
+    "drive_cycle",
     "get_verbose",
     "identity_from_args",
     "init_services_cli",
     "log_startup_summary",
+    "pipeline_summary",
     "resolve_campaign",
     "resolve_cycle",
     "set_verbose",

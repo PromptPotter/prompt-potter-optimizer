@@ -28,7 +28,9 @@ def start_of_utc_day() -> float:
 
 
 def iter_user_token_usage(*, store: Stores, since: float, until: float) -> list[dict[str, Any]]:
-    """Walk every per-cycle ledger under the user's workspace.
+    """Walk every per-cycle ledger under the user's workspace — archived included,
+    via ``CampaignStore.iter_cycle_ledgers`` (archiving a campaign must not free
+    daily-cap budget).
 
     The canonical per-cycle ledger lives at ``{cycle_dir}/.runtime/ledger.jsonl``
     (the name ``events.jsonl`` is used only by the workspace-scoped sibling).
@@ -48,10 +50,7 @@ def iter_user_token_usage(*, store: Stores, since: float, until: float) -> list[
     resolves it via :func:`record_cost_usd`.
     """
     out: list[dict[str, Any]] = []
-    campaigns_root = store.base_dir / "campaigns"
-    if not campaigns_root.is_dir():
-        return out
-    for ledger_path in campaigns_root.glob("*/cycles/*/.runtime/ledger.jsonl"):
+    for ledger_path in store.campaigns.iter_cycle_ledgers():
         for rec in iter_jsonl(ledger_path):
             if rec.get("record_type") != "token_usage":
                 continue

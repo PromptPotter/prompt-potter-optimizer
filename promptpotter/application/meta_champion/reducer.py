@@ -30,7 +30,7 @@ from promptpotter.domain.l4.verdict import cell_fitness
 from promptpotter.infrastructure.projections.live_dashboard.round_summary import (
     origin_cells_from_disk,
 )
-from promptpotter.infrastructure.store.layout import REPO_ROOT
+from promptpotter.infrastructure.store.layout import REPO_ROOT, campaign_cycles_dir
 from promptpotter.shared.statistics import paired_diff_posterior
 
 if TYPE_CHECKING:
@@ -150,7 +150,7 @@ class _Accum:
         self.orig_by_cell: dict[str, list[float]] = {}
 
 
-def _pp_self_campaign_dirs(store: Stores, campaigns_dir: Path) -> list[Path]:
+def _pp_self_campaign_dirs(store: Stores) -> list[Path]:
     """Campaign dirs whose bound dataset drives the L4 recursion connector.
 
     Asks each dataset's ``pipeline.json::backend_type`` — the same predicate the sidebar's
@@ -158,13 +158,9 @@ def _pp_self_campaign_dirs(store: Stores, campaigns_dir: Path) -> list[Path]:
     skipped an A/B arm, a fork, or a renamed dataset instead of loudly rejecting it, and
     widening it by hand is what made it wrong twice.
     """
-    if not campaigns_dir.is_dir():
-        return []
     kind_of: dict[str, str] = {}  # once per dataset, not once per campaign
     dirs: list[Path] = []
-    for child in sorted(campaigns_dir.iterdir()):
-        if not child.is_dir():
-            continue
+    for child in store.campaigns.iter_campaign_dirs():
         cfg = _read_json(child / "campaign.json")
         block_raw = cfg.get("campaign_config")
         block = block_raw if isinstance(block_raw, dict) else cfg
@@ -180,12 +176,11 @@ def _pp_self_campaign_dirs(store: Stores, campaigns_dir: Path) -> list[Path]:
 
 def reduce_corpus(store: Stores) -> ChampionRegistry:
     """Walk every pp-self cycle in *store*'s workspace and build the ranked champion table."""
-    campaigns_dir = store.base_dir / "campaigns"
     accums: dict[str, _Accum] = {}
     n_cycles = 0
 
-    for campaign_dir in _pp_self_campaign_dirs(store, campaigns_dir):
-        cycles_dir = campaign_dir / "cycles"
+    for campaign_dir in _pp_self_campaign_dirs(store):
+        cycles_dir = campaign_cycles_dir(campaign_dir)
         if not cycles_dir.is_dir():
             continue
         for cycle_dir in sorted(cycles_dir.iterdir()):

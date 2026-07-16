@@ -34,7 +34,7 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
     signal,
 )
 from promptpotter.domain.escalation_signals import ExplorationBudget
-from promptpotter.domain.opt_search_point import flatten_sp_summary
+from promptpotter.domain.opt_search_point import candidate_delta, flatten_sp_summary
 from promptpotter.domain.results import CritiqueReadout, ScoredCandidate
 from promptpotter.domain.results_health import EVIDENCE_STARVED_RATE
 
@@ -532,23 +532,29 @@ def _r_failing_samples(b: InjectionBundle) -> str:
     return fence_untrusted("\n".join(lines))
 
 
-def _candidate_mutation(cand: ScoredCandidate, parent: dict[str, Any]) -> list[str]:
+def _candidate_mutation(
+    cand: ScoredCandidate, parent: dict[str, Any], parent_pp: dict[str, Any] | None
+) -> list[str]:
     """What this candidate actually changed, as ``field: "new value stem"`` rows.
 
     Derived from the payload, never from ``changes_description``: a candidate's
     ``prompt_fields`` is its evolved prompt in full, and the round's own ``prompt_fields``
-    is the parent every candidate in that round was mutated from — so the fields that
-    differ ARE the mutation. Param overrides are already a sparse delta and need no diff.
+    is the parent every candidate in that round was mutated from. The delta rule is the
+    shared :func:`candidate_delta` — the same definition dedup hashes, so the panel
+    cannot render a re-proposal (an override restating the parent's value, or the
+    parent's own schema prose echoed back) as a new mutation.
     """
+    pf, pp = candidate_delta(
+        cand.prompt_fields or {}, parent, cand.pipeline_params_override, parent_pp
+    )
+    pp_nested: dict[str, Any] = {}
+    for (node, param), value in pp.items():
+        pp_nested.setdefault(node, {})[param] = value
     rows = [
-        f'{key}: "{str(value)[:MEMORY_VALUE_CAP]}"'
-        for key, value in flatten_sp_summary(cand.pipeline_params_override or {}).items()
+        f'{key}: "{value[:MEMORY_VALUE_CAP]}"'
+        for key, value in flatten_sp_summary(pp_nested).items()
     ]
-    rows += [
-        f'{field}: "{str(value)[:MEMORY_VALUE_CAP]}"'
-        for field, value in (cand.prompt_fields or {}).items()
-        if value and str(value) != str(parent.get(field, ""))
-    ]
+    rows += [f'{field}: "{str(value)[:MEMORY_VALUE_CAP]}"' for field, value in pf.items() if value]
     return rows[:MEMORY_FIELD_CAP]
 
 
@@ -598,17 +604,21 @@ def _r_mutation_memory(b: InjectionBundle) -> str:
     deliberately, and must never read 0.0 — that reads as "beat the origin by its whole
     accuracy"), so its row reports where it was cut instead of inventing a comparison.
     """
-    rounds = [r for r in b.prior_rounds if r.candidate_scores][-MEMORY_ROUND_CAP:]
+    prior = list(b.prior_rounds)
+    rounds = [(i, r) for i, r in enumerate(prior) if r.candidate_scores][-MEMORY_ROUND_CAP:]
     if not rounds:
         return ""
     lines = [
         "ALREADY TRIED (this cycle — a mutation measured and lost here does not improve by "
         "being proposed again):"
     ]
-    for rr in rounds:
+    for i, rr in rounds:
         parent = rr.prompt_fields or {}
+        # The candidates' parent params = the PRIOR round's resolved pipeline_params
+        # (the winner / retained incumbent this round mutated from).
+        parent_pp = prior[i - 1].pipeline_params if i > 0 else None
         for cand in rr.candidate_scores:
-            mutation = _candidate_mutation(cand, parent) or ["(no change recorded)"]
+            mutation = _candidate_mutation(cand, parent, parent_pp) or ["(no change recorded)"]
             scored = (
                 f"{cand.accuracy:.0%} vs origin {cand.matched_origin_accuracy:.0%} on its samples"
                 if cand.matched_origin_accuracy is not None

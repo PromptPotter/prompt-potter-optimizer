@@ -566,16 +566,12 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
         rnd = dash.get("round")
         best = dash.get("best")
         max_rounds = (dash.get("run_limits") or {}).get("max_rounds")
-        # Lead with the running winner's LIFT over origin (delta) — the meaningful
-        # number for a live run — and carry absolute best as context. Origin reads the
-        # SAME cumulative basis as `best` (round-0 cumulative_accuracy), mirroring the
-        # webapp's `headlineStats` so the two surfaces can't disagree.
-        origin = next(
-            (r.get("cumulative_accuracy") for r in dash.get("rounds") or [] if r.get("round") == 0),
-            None,
-        )
-        if isinstance(best, int | float) and isinstance(origin, int | float):
-            lift = f"Δ{best - origin:+.0%} (best {best:.0%})"
+        # Lead with the running winner's LIFT over origin — the SERVED
+        # ``headline_delta`` (LiveDashboardState), the same number the webapp
+        # headline reads, so the two surfaces cannot disagree.
+        delta = dash.get("headline_delta")
+        if isinstance(delta, int | float) and isinstance(best, int | float):
+            lift = f"Δ{delta:+.0%} (best {best:.0%})"
         elif isinstance(best, int | float):
             lift = f"best {best:.0%}"
         else:

@@ -17,15 +17,16 @@ from promptpotter.application.jobs.mint import resolve_cycle_plan
 from promptpotter.presentation.cli.commands._shared import (
     _DIVERGENCE_HINT,
     CommandResult,
+    backend_unreachable_result,
     bind_session_identity,
-    campaign_result_human,
     confirm_tty,
+    cycle_result_command,
+    drive_cycle,
     get_verbose,
     identity_from_args,
     init_services_cli,
     log_startup_summary,
 )
-from promptpotter.presentation.cli.commands.new import _build_observers
 from promptpotter.presentation.cli.session import load_session
 
 if TYPE_CHECKING:
@@ -371,25 +372,14 @@ async def _drive_optimization(
     fork_on_divergence: bool,
 ) -> CycleResult:
     """One pass through the loop. Caller handles divergence menu + re-invoke."""
-    from promptpotter.application.runner import (
-        RunMode,
-    )
-    from promptpotter.application.runner import (
-        run_optimization as _orch_run_optimization,
-    )
+    from promptpotter.application.runner import RunMode
 
-    pre_origin_acc = ctx.state.get("origin_accuracy", 0.0)
-    observers = _build_observers(args, session, campaign_config, train_data, pre_origin_acc)
-    ctx.save_phase("optimizing")
-
-    # Control-local hooks (pause.flag) are bound centrally in run_optimization
-    # (the single runner seam) so CLI + API launches match.
-    cycle_result = await _orch_run_optimization(
-        train_data,
+    cycle_result, _ = await drive_cycle(
+        args,
+        ctx,
         campaign_config,
-        session=session,
-        observers=observers,
-        task_context=ctx.task_context,
+        session,
+        train_data,
         mode=RunMode(
             resume_from_round_override=getattr(args, "resume_from_round", None),
             no_divergence_check=getattr(args, "no_divergence_check", False),
@@ -397,10 +387,6 @@ async def _drive_optimization(
             diag=getattr(args, "diag", False),
             halt_at_accuracy=getattr(args, "halt_at_accuracy", None),
         ),
-        # CLI ``--spend-budget`` overrides ``OptimizationConfig.spend_budget_usd``;
-        # falls back to the config value when no flag is given.
-        spend_budget_usd=getattr(args, "spend_budget_usd", None)
-        or campaign_config.optimization.spend_budget_usd,
     )
     return cycle_result
 
@@ -474,17 +460,7 @@ async def _run_loop(
             fork_on_divergence=True,
         )
 
-    ctx.state["best_accuracy"] = cycle_result.best_accuracy
-    ctx.save_phase("optimize")
-    campaign_dir = session.store.campaigns.campaign_root_dir(ctx.campaign_id)
-    return CommandResult(
-        data=cycle_result.model_dump(),
-        human=campaign_result_human(
-            campaign_dir,
-            dataset_name=ctx.init_params.get("dataset_name") or "?",
-            cycle_id=cycle_result.cycle_id,
-        ),
-    )
+    return cycle_result_command(ctx, session, cycle_result)
 
 
 async def cmd_resume(args: argparse.Namespace) -> CommandResult:
@@ -519,16 +495,7 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
 
     status = await session.backend_client.check_status()
     if status.get("status") == "unreachable":
-        return CommandResult(
-            data={"error": "backend_unreachable", "backend_url": ctx.backend_url},
-            human=(
-                f"Backend unreachable at {ctx.backend_url}.\n\n"
-                "The TermNorm backend ships in a sibling repo. Clone it next to "
-                "PromptPotter, then start it:\n"
-                "  TermNorm-excel\\backend-api\\start-server-py-LLMs.bat\n\n"
-                "Install guide: docs/manual/02-install.md"
-            ),
-        )
+        return backend_unreachable_result(ctx.backend_url)
 
     train_data = session.samples or []
     steering = bool(getattr(args, "steer_model", None))

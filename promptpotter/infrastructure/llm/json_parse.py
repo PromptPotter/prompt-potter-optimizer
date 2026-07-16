@@ -60,12 +60,39 @@ class MetaPromptParseError(RuntimeError):
         self.reasoning_tokens = reasoning_tokens
         self.reasoning_chars = reasoning_chars
 
+    @property
+    def raw_chars(self) -> int:
+        """Stripped content length — the number every consumer reports."""
+        return len((self.raw or "").strip())
+
+    @property
+    def is_empty(self) -> bool:
+        """Provider-degraded empty/truncated content, vs schema-noncompliant output.
+        The one home of the <20-chars split — it steers L2's heal direction, so the
+        L1 and L2/L3 handlers must classify identically."""
+        return self.raw_chars < 20
+
+    def warning_detail(self) -> dict[str, Any]:
+        """The provider's own account of WHY, for a round warning's disk-bound
+        ``detail``. ``finish_reason: length`` + a large ``reasoning_tokens`` means
+        the meta-prompt is too big for the token budget (fix the prompt); ``stop``
+        with ~2 completion tokens means the provider degraded (retry/route
+        elsewhere). Same symptom, opposite fix — so both land on disk rather than
+        only in the log."""
+        return {
+            "finish_reason": self.finish_reason,
+            "completion_tokens": self.completion_tokens,
+            "reasoning_tokens": self.reasoning_tokens,
+            "reasoning_chars": self.reasoning_chars,
+            "raw_chars": self.raw_chars,
+        }
+
     def diagnosis(self) -> str:
         """One-line, disk-bound account of the failure — the wound's ``value`` and the log."""
         return (
             f"finish_reason={self.finish_reason} completion_tokens={self.completion_tokens} "
             f"reasoning_tokens={self.reasoning_tokens} reasoning_chars={self.reasoning_chars} "
-            f"content_chars={len((self.raw or '').strip())} model={self.model}"
+            f"content_chars={self.raw_chars} model={self.model}"
         )
 
 

@@ -79,11 +79,17 @@ def archive_root_dir_for(tenant_root: Path, campaign_id: str) -> Path:
     return tenant_root / "archive" / validate_path_component(campaign_id)
 
 
+def campaign_cycles_dir(campaign_root: Path) -> Path:
+    """The ``cycles/`` dir under an ALREADY-RESOLVED campaign root — the sole owner
+    of the literal, for every enumerator that walks a campaign's cycles."""
+    return campaign_root / "cycles"
+
+
 def cycle_dir_under(campaign_root: Path, cycle_id: str) -> Path:
     """Per-cycle dir under an ALREADY-RESOLVED campaign root — the sole owner of the
     ``cycles/{cycle_id}`` layout. ``CampaignStore`` passes an archive-aware root here;
     :func:`cycle_dir_for` passes the ``campaigns/``-only one."""
-    return campaign_root / "cycles" / validate_path_component(cycle_id)
+    return campaign_cycles_dir(campaign_root) / validate_path_component(cycle_id)
 
 
 def cycle_dir_for(tenant_root: Path, campaign_id: str, cycle_id: str) -> Path:

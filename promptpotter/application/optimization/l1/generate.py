@@ -151,8 +151,7 @@ async def l1_generate(
     except MetaPromptParseError as parse_err:
         # Schema-noncompliant after one repair retry. Split provider-degraded (empty) vs
         # structurally wrong — both wound the same channel but `reason` steers L2's heal direction.
-        raw = (parse_err.raw or "").strip()
-        is_empty = len(raw) < 20
+        is_empty = parse_err.is_empty
         reason = L1_PARSE_FAILURE_TOOLING if is_empty else L1_PARSE_FAILURE_MALFORMED
         logger.error(
             "L1 R%d: %s — zero candidates this round (raw=%d chars) [%s]",
@@ -160,7 +159,7 @@ async def l1_generate(
             "provider returned empty/truncated content"
             if is_empty
             else "meta-prompt parse failure after retry",
-            len(raw),
+            parse_err.raw_chars,
             parse_err.diagnosis(),
         )
         opt_sp.memory.wounds.validation_failures.append(
@@ -183,20 +182,7 @@ async def l1_generate(
                 )
                 + f" (model {model})."
             ),
-            detail={
-                "reason": reason,
-                "raw_chars": len(raw),
-                "model": model,
-                # The provider's own account. `finish_reason: length` + a large
-                # `reasoning_tokens` means the meta-prompt is too big for the token
-                # budget (fix the prompt); `stop` with ~2 completion tokens means the
-                # provider degraded (retry/route elsewhere). Same symptom, opposite fix,
-                # so both land on disk rather than only in the log.
-                "finish_reason": parse_err.finish_reason,
-                "completion_tokens": parse_err.completion_tokens,
-                "reasoning_tokens": parse_err.reasoning_tokens,
-                "reasoning_chars": parse_err.reasoning_chars,
-            },
+            detail={"reason": reason, "model": model, **parse_err.warning_detail()},
         )
         return [], reason
     slot_sizes = sorted(

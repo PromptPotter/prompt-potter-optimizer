@@ -14,11 +14,11 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.presentation.cli.commands._shared import (
     bind_session_identity,
+    drive_cycle,
     identity_from_args,
     init_services_cli,
     log_startup_summary,
 )
-from promptpotter.presentation.cli.commands.new import _build_observers
 from promptpotter.presentation.cli.commands.resume_command import _prepare_cycle_for_resume
 from promptpotter.presentation.cli.session import load_session
 
@@ -139,38 +139,24 @@ async def _run_sweep_optimize(
     train_data: list[Sample],
     *,
     halt_at_accuracy: float | None = None,
-    spend_budget_usd: float | None = None,
 ) -> tuple[Any, Any]:
-    """Drive ``run_optimization`` for any sweep verb — honors
-    ``halt_at_accuracy`` / ``spend_budget_usd`` and the active optimizer-prompt
-    override (managed by the caller via :func:`optimizer_prompt_override`).
+    """Drive one sweep cycle via the shared :func:`drive_cycle` — honors
+    ``halt_at_accuracy`` and the active optimizer-prompt override (managed by
+    the caller via :func:`optimizer_prompt_override`).
     Returns ``(cycle_result, observers)``."""
-    from promptpotter.application.runner import (
-        RunMode,
-    )
-    from promptpotter.application.runner import (
-        run_optimization as _orch_run_optimization,
-    )
+    from promptpotter.application.runner import RunMode
 
-    pre_origin_acc = ctx.state.get("origin_accuracy", 0.0)
-    observers = _build_observers(args, session, campaign_config, train_data, pre_origin_acc)
-    ctx.save_phase("optimizing")
-
-    cycle_result = await _orch_run_optimization(
-        train_data,
+    return await drive_cycle(
+        args,
+        ctx,
         campaign_config,
-        session=session,
-        observers=observers,
-        task_context=ctx.task_context,
+        session,
+        train_data,
         mode=RunMode(
             resume_from_round_override=getattr(args, "resume_from_round", None),
             halt_at_accuracy=halt_at_accuracy,
         ),
-        spend_budget_usd=spend_budget_usd,
     )
-    ctx.state["best_accuracy"] = cycle_result.best_accuracy
-    ctx.save_phase("optimize")
-    return cycle_result, observers
 
 
 def _panel_stats_from_round(round_result: Any, panel_size: int) -> dict[str, float | None]:

@@ -11,6 +11,7 @@ from promptpotter.domain.phases import StopReason
 from promptpotter.presentation.cli.commands._shared import (
     _DIVERGENCE_HINT,
     CommandResult,
+    backend_unreachable_result,
     get_verbose,
     identity_from_args,
 )
@@ -246,10 +247,7 @@ async def _run_panel_verb(
 
     train_data, ctx, session = await _setup_sweep_cycle(args, campaign_config)
     if train_data is None:
-        return CommandResult(
-            data={"error": "backend_unreachable", "backend_url": ctx.backend_url},
-            human=f"Backend unreachable at {ctx.backend_url}. Start the backend and retry.",
-        )
+        return backend_unreachable_result(ctx.backend_url)
     train_data, resolved_slice = slice_samples(
         train_data,
         args.slice_spec,
