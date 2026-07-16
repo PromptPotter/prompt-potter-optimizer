@@ -7,10 +7,7 @@ from typing import Any
 from fastapi import Query
 from pydantic import BaseModel, Field
 
-from promptpotter.application.bootstrap.wiring import (
-    backend_type_of_dataset,
-    resolve_dataset_config_dir,
-)
+from promptpotter.application.bootstrap.wiring import backend_type_of_dataset
 from promptpotter.application.config import (
     CampaignConfig,
     Estimand,
@@ -28,7 +25,10 @@ from promptpotter.application.knobs import (
 from promptpotter.application.meta_champion.reducer import ChampionRegistry, reduce_corpus
 from promptpotter.application.resource_matrix.matrix import ResourceMatrix, read_matrix
 from promptpotter.infrastructure.store import Stores
-from promptpotter.infrastructure.store.layout import REPO_ROOT
+from promptpotter.infrastructure.store.dataset_access import (
+    DatasetAccessError,
+    readable_dataset_dir,
+)
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
@@ -84,7 +84,7 @@ def _backend_type(store: Stores, dataset_name: str, memo: dict[str, str]) -> str
     """Memo over ``backend_type_of_dataset`` — the listing endpoint answers it once per DATASET,
     not once per campaign, since a workspace holds many campaigns per dataset."""
     if dataset_name not in memo:
-        memo[dataset_name] = backend_type_of_dataset(store, REPO_ROOT, dataset_name)
+        memo[dataset_name] = backend_type_of_dataset(store, dataset_name)
     return memo[dataset_name]
 
 
@@ -392,7 +392,11 @@ def get_champion_registry(store: StoreDep) -> ChampionRegistry:
 def get_resource_matrix(store: StoreDep) -> ResourceMatrix:
     """The L4 resource matrix — the (target-model × dataset) capability grid the
     operator built with ``matrix measure``. Read-only from the committed pp-self
-    ``resource_matrix.json``; empty when it has never been measured."""
-    pp_self_dir = resolve_dataset_config_dir(store, REPO_ROOT, "promptpotter-self")
+    ``resource_matrix.json``; empty when it has never been measured — or when the
+    install carries no pp-self dataset at all."""
+    try:
+        pp_self_dir = readable_dataset_dir(store, "promptpotter-self")
+    except DatasetAccessError:
+        return ResourceMatrix(generated_at="", cells=[])
     matrix = read_matrix(pp_self_dir)
     return matrix or ResourceMatrix(generated_at="", cells=[])

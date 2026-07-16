@@ -29,7 +29,7 @@ from promptpotter.application.bootstrap.session import (
     finalize_checkin_to_active,
     mint_checkin_skeleton,
 )
-from promptpotter.application.bootstrap.wiring import init_services, resolve_dataset_config_dir
+from promptpotter.application.bootstrap.wiring import init_services
 from promptpotter.application.datasets.dataset_replace import recover_pending_replacements
 from promptpotter.application.datasets.draft_campaign import DraftCampaign, dataset_source_of
 from promptpotter.application.datasets.origin_readiness import resolution_block
@@ -52,7 +52,7 @@ from promptpotter.application.optimization.task_context import (
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.run_records import CycleSeed
 from promptpotter.infrastructure.store import Stores
-from promptpotter.infrastructure.store.layout import REPO_ROOT
+from promptpotter.infrastructure.store.dataset_access import readable_dataset_dir
 from promptpotter.shared.identity import claim_email
 
 if TYPE_CHECKING:
@@ -193,7 +193,7 @@ async def prepare_checkin_run(
 
     session = await make_session(dataset_name)
 
-    dataset_root = resolve_dataset_config_dir(stores, REPO_ROOT, dataset_name)
+    dataset_root = readable_dataset_dir(stores, dataset_name)
     campaign_config = build_cycle_config(session, dataset_root, pipeline_overlay=pipeline_overlay)
 
     train_data = session.samples or []

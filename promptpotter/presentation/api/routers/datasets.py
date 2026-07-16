@@ -74,13 +74,12 @@ class DatasetIndexEntry(BaseModel):
 
     name: str = Field(description="Slug used as the path segment under `datasets/`.")
     title: str | None = Field(default=None, description="Display title (from `dataset.md`).")
-    tier: Literal["yours", "benchmark", "demo"] = Field(
+    tier: Literal["yours", "install"] = Field(
         description=(
             "``yours`` = user-owned Origin under ``projects/{tenant}/datasets/{slug}/``. "
-            "``benchmark`` = install-global ``datasets/{slug}/``; visible only to identities "
-            "holding the ``datasets.benchmarks.read`` capability. "
-            "``demo`` = the built-in try-and-learn dataset, surfaced while "
-            "``User.demo_mode_enabled`` is on (independent of the benchmark capability)."
+            "``install`` = content that ships with the product at ``datasets/{slug}/`` "
+            "(benchmarks, demos, ``promptpotter-self``) — tracked in git, so readable by "
+            "anyone using the install. A ``yours`` slug shadows an ``install`` one."
         ),
     )
     n_samples: int = Field(
@@ -95,12 +94,11 @@ class DatasetIndexResponse(BaseModel):
 
 @datasets_router.get("", response_model=DatasetIndexResponse)
 def list_datasets(store: StoreDep) -> DatasetIndexResponse:
-    """Every dataset this identity may read — tenant Origins, demo origins (while
-    demo mode is on), and install benchmarks (only with ``datasets.benchmarks.read``).
+    """Every dataset this identity may read — its own tenant Origins, then install content.
 
-    The visibility policy lives once in ``store/dataset_access.py`` and is shared
-    with the per-dataset read endpoints, so the picker can never list a dataset
-    that ``GET /datasets/{name}/...`` would then deny.
+    The rule lives once in ``store/dataset_access.py`` and is shared with the
+    per-dataset read endpoints, so the picker can never list a dataset that
+    ``GET /datasets/{name}/...`` would then deny.
     """
     return DatasetIndexResponse(
         datasets=[

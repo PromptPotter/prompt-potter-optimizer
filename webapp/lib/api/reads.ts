@@ -139,12 +139,13 @@ export function fetchActivity(
 }
 
 // Dataset registry — backs the Dashboard "New campaign" entry. Identity-
-// scoped server-side: every tenant sees their own user-uploaded Origins
-// (`tier: "yours"`); install-global benchmarks (`tier: "benchmark"`) ride
-// the `datasets.benchmarks.read` capability and are hidden from web
-// tenants by default. Wire shape pinned in
+// scoped server-side: every tenant sees their own uploaded Origins
+// (`tier: "yours"`), then the content that ships with the product
+// (`tier: "install"` — benchmarks, demos, `promptpotter-self`), which is
+// tracked in git and so needs no capability. A "yours" slug shadows an
+// "install" one. Wire shape pinned in
 // `docs/specs/m12-api-openapi.yaml::DatasetIndexEntry`.
-export type DatasetTier = "yours" | "benchmark" | "demo";
+export type DatasetTier = "yours" | "install";
 export interface DatasetIndexEntry {
   name: string;
   title: string | null;

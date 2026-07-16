@@ -30,7 +30,7 @@ from promptpotter.domain.l4.verdict import cell_fitness
 from promptpotter.infrastructure.projections.live_dashboard.round_summary import (
     origin_cells_from_disk,
 )
-from promptpotter.infrastructure.store.layout import REPO_ROOT, campaign_cycles_dir
+from promptpotter.infrastructure.store.layout import campaign_cycles_dir
 from promptpotter.shared.statistics import paired_diff_posterior
 
 if TYPE_CHECKING:
@@ -168,7 +168,7 @@ def _pp_self_campaign_dirs(store: Stores) -> list[Path]:
         if not dataset_name:
             continue
         if dataset_name not in kind_of:
-            kind_of[dataset_name] = backend_type_of_dataset(store, REPO_ROOT, dataset_name)
+            kind_of[dataset_name] = backend_type_of_dataset(store, dataset_name)
         if kind_of[dataset_name] == _PP_SELF_BACKEND_TYPE:
             dirs.append(child)
     return dirs

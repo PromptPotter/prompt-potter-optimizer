@@ -24,7 +24,7 @@ from typing import Any
 
 from promptpotter import connectors
 from promptpotter.application.bootstrap.session import Session
-from promptpotter.application.bootstrap.wiring import init_services, resolve_dataset_config_dir
+from promptpotter.application.bootstrap.wiring import init_services
 from promptpotter.application.config import (
     CampaignConfig,
     apply_inherited_overlay,
@@ -59,8 +59,11 @@ from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store import Stores
+from promptpotter.infrastructure.store.dataset_access import (
+    DatasetAccessError,
+    readable_dataset_dir,
+)
 from promptpotter.infrastructure.store.io import read_json_optional
-from promptpotter.infrastructure.store.layout import REPO_ROOT
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import MachineBusyError, PayloadInvalidError
 from promptpotter.shared.identity import claim_email
@@ -253,9 +256,10 @@ async def mint_campaign_command(
     # a crashed version-and-repoint can leave a campaign pointing at a name whose
     # data has already moved to `-vN`. Cheap no-op when nothing's pending.
     recover_pending_replacements(stores=stores)
-    dataset_root = resolve_dataset_config_dir(stores, REPO_ROOT, dataset_name)
-    if not dataset_root.is_dir():
-        raise LaunchError(f"dataset not found: {dataset_name!r} (no {dataset_root}/)")
+    try:
+        dataset_root = readable_dataset_dir(stores, dataset_name)
+    except DatasetAccessError:
+        raise LaunchError(f"dataset not found: {dataset_name!r}") from None
 
     backend_type = _read_backend_type_from_dataset(dataset_root, dataset_name)
 
@@ -450,7 +454,10 @@ async def start_run_command(
     if campaign is None or campaign.owner_user_id != str(stores.identity.user_id):
         raise LaunchError(f"campaign not found or not owned: {campaign_id}")
 
-    dataset_root = resolve_dataset_config_dir(stores, REPO_ROOT, campaign.dataset_name)
+    try:
+        dataset_root = readable_dataset_dir(stores, campaign.dataset_name)
+    except DatasetAccessError:
+        raise LaunchError(f"dataset not found: {campaign.dataset_name!r}") from None
     backend_type = _read_backend_type_from_dataset(dataset_root, campaign.dataset_name)
     dataset_name = campaign.dataset_name
 

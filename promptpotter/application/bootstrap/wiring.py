@@ -27,6 +27,10 @@ from promptpotter.domain.pipeline_parsing import merge_node_blocks, parse_pipeli
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.infrastructure.backend import BackendClient, build_backend_client
 from promptpotter.infrastructure.store import Stores, build_stores
+from promptpotter.infrastructure.store.dataset_access import (
+    DatasetAccessError,
+    readable_dataset_dir,
+)
 from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.shared.identity import IdentityContext, default_identity
 from promptpotter.shared.instrument import instrument_mode
@@ -84,21 +88,6 @@ async def _verify_connector_revision(
             expected,
             actual,
         )
-
-
-def resolve_dataset_config_dir(store: Stores, project_root: Path, dataset_name: str) -> Path:
-    """Return the dataset's config dir — tenant Origin first, then repo benchmark.
-
-    Tenant uploads land at ``{tenant_root}/datasets/{slug}/`` (the chat-first
-    ingest path); repo ``datasets/{name}/`` holds install-global benchmarks
-    (`aime_2025`, `bbeh`, `gsm8k`, `justlogic`, `lca-termnorm`,
-    `promptpotter-self`, ...). On collision the tenant copy wins, so a user
-    can override a benchmark by ingesting their own slug of the same name.
-    """
-    tenant_dir = store.tenant_datasets.dataset_dir(dataset_name)
-    if (tenant_dir / "pipeline.json").is_file() or (tenant_dir / "cache.json").is_file():
-        return tenant_dir
-    return project_root / "datasets" / dataset_name
 
 
 def _warn_if_no_terminal_ranker(schema: PipelineSchema, status: Callable[[str], None]) -> None:
@@ -183,7 +172,7 @@ def _read_backend_type(dataset_config_dir: Path | None, dataset_name: str | None
     return bt.lower()
 
 
-def backend_type_of_dataset(store: Stores, project_root: Path, dataset_name: str) -> str:
+def backend_type_of_dataset(store: Stores, dataset_name: str) -> str:
     """Connector kind of *dataset_name*, or ``""`` when it cannot be resolved.
 
     THE predicate for "which connector does this dataset use?" for every read-side caller —
@@ -197,10 +186,8 @@ def backend_type_of_dataset(store: Stores, project_root: Path, dataset_name: str
     there a missing kind means the run cannot pick a connector at all.
     """
     try:
-        raw = read_json_optional(
-            resolve_dataset_config_dir(store, project_root, dataset_name) / "pipeline.json"
-        )
-    except (OSError, ValueError):
+        raw = read_json_optional(readable_dataset_dir(store, dataset_name) / "pipeline.json")
+    except (OSError, ValueError, DatasetAccessError):
         return ""
     bt = (raw or {}).get("backend_type")
     return bt.lower() if isinstance(bt, str) else ""
@@ -239,7 +226,7 @@ def _load_dataset_into_session(
     valid = [item for item in items if item.get("query") and item.get("ground_truth")]
     session.samples = samples_from_dicts(valid)
     gt_terms = {r["ground_truth"] for r in items if r.get("ground_truth")}
-    config_dir = resolve_dataset_config_dir(session.store, Path(session.project_root), dataset_name)
+    config_dir = readable_dataset_dir(session.store, dataset_name)
     # The candidate library is part of the per-pipeline origin; read it through the
     # one origin-file seam. Unioned with the ground-truth answers (never replacing
     # them) so every label stays rankable even when the library uses a different
@@ -328,7 +315,7 @@ async def init_services(
     if instrument_mode() is None:
         store.archive.maintain_index()
 
-    dataset_config_dir = resolve_dataset_config_dir(store, project_root, dataset_name)
+    dataset_config_dir = readable_dataset_dir(store, dataset_name)
     backend_type = _read_backend_type(dataset_config_dir, dataset_name)
     connector = connectors.get(backend_type)
     client = build_backend_client(connector, backend_url)
@@ -389,4 +376,4 @@ async def init_services(
     return session
 
 
-__all__ = ["backend_type_of_dataset", "init_services", "resolve_dataset_config_dir"]
+__all__ = ["backend_type_of_dataset", "init_services"]

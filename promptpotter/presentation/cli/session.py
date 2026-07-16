@@ -42,13 +42,12 @@ class SessionCtx:
         ``campaign.json::config`` — that overlay lives only on the snapshot, so a live-file
         rebuild would drop it. Session-state copy never consulted (may carry stale schema fields).
 
-        Resolution is **tenant-first**, via the same ``resolve_dataset_config_dir`` the runner
-        uses: a tenant upload at ``projects/{tenant}/datasets/{slug}/`` before a repo benchmark
-        at ``datasets/{name}/``. Reading only the repo root meant every *ingested* dataset — the
-        only kind a distributed install has — found no live file and resumed off the frozen
-        snapshot instead, making it the config of record for exactly the campaigns whose
-        snapshot is least likely to still validate."""
-        from promptpotter.application.bootstrap.wiring import resolve_dataset_config_dir
+        Resolution is **tenant-first**, via the same ``readable_dataset_dir`` the runner
+        uses: a tenant upload at ``projects/{tenant}/datasets/{slug}/`` before install
+        content at ``datasets/{name}/``. Reading only the repo root meant every *ingested*
+        dataset — the only kind a distributed install has — found no live file and resumed
+        off the frozen snapshot instead, making it the config of record for exactly the
+        campaigns whose snapshot is least likely to still validate."""
         from promptpotter.application.config import (
             apply_inherited_overlay,
         )
@@ -56,13 +55,20 @@ class SessionCtx:
             load_campaign_config as validate_campaign_config,
         )
         from promptpotter.application.datasets.authored import read_campaign_config_file
-        from promptpotter.infrastructure.store.layout import REPO_ROOT
+        from promptpotter.infrastructure.store.dataset_access import (
+            DatasetAccessError,
+            readable_dataset_dir,
+        )
 
         dataset_name = self.init_params.get("dataset_name") or ""
         raw: dict[str, Any] = {}
         if dataset_name:
-            ds_dir = resolve_dataset_config_dir(self.store, REPO_ROOT, dataset_name)
-            raw = read_campaign_config_file(ds_dir / "campaign.json")
+            try:
+                ds_dir = readable_dataset_dir(self.store, dataset_name)
+            except DatasetAccessError:
+                pass  # campaign outlives its dataset dir — resume off the snapshot
+            else:
+                raw = read_campaign_config_file(ds_dir / "campaign.json")
         config = validate_campaign_config(raw)
         campaign = (
             self.store.campaigns.load_campaign(self.campaign_id) if self.campaign_id else None

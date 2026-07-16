@@ -3107,17 +3107,17 @@ components:
           description: |
             Dataset directory name. For `tier: "yours"` this is the
             tenant-scoped slug under `projects/{tenant}/datasets/{slug}/`.
-            For `tier: "benchmark"` this is the repo-root `datasets/{slug}/`
+            For `tier: "install"` this is the repo-root `datasets/{slug}/`
             name (e.g. `aime_2025`, `bbeh`).
         tier:
           type: string
-          enum: [yours, benchmark, demo]
+          enum: [yours, install]
           description: |
             `"yours"` — user-owned Origin under `projects/{tenant}/datasets/`.
-            `"benchmark"` — install-global read-only Origin; visible only when
-            the identity holds the `datasets.benchmarks.read` capability.
-            `"demo"` — the built-in try-and-learn dataset, surfaced while
-            `User.demo_mode_enabled` is on (independent of the benchmark cap).
+            `"install"` — content shipping with the product at `datasets/{slug}/`
+            (benchmarks, demos, `promptpotter-self`). Tracked in git, so readable
+            by anyone using the install; no capability gates it. A `"yours"` slug
+            shadows an `"install"` one of the same name.
         n_samples:
           type: integer
           minimum: 0

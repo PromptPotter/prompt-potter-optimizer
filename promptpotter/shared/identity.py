@@ -16,24 +16,10 @@ this type.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
 from promptpotter.domain.identity import Issuer, TenantId, UserId, safe_name
-
-# Capability gate for repo-root ``datasets/`` (install-global benchmarks).
-# Granted to Stage-0 callers when ``PROMPTPOTTER_ADMIN=1``; granted at
-# Stage 1 per OIDC claim. Web tenants never receive it by default — that
-# is why ``/api/v1/datasets`` no longer leaks the developer's locally
-# cached benchmarks to first-time signups.
-BENCHMARKS_READ_CAP = "datasets.benchmarks.read"
-
-# The sole definition of "what the admin principal can do" — one frozenset the
-# env predicate (Stage 0) and the pinned-marker predicate (Stage 1, `oidc.py`)
-# both reference. WHO is admin stays two deliberate mechanisms; WHAT admin grants
-# lives here, once. Adding a capability to the admin tier = editing this line.
-ADMIN_CAPABILITIES = frozenset({BENCHMARKS_READ_CAP})
 
 # Control-plane command capabilities — one per privilege tier of the closed
 # `/commands/{kind}` set (the dispatcher's `CAP_FOR_KIND` maps each kind to one).
@@ -61,8 +47,7 @@ CAMPAIGN_CAP_BY_TIER: dict[str, str] = {
 
 # The full command-verb set a tenant owner holds — derived from the tier map so it
 # can never drift from it. Sub-principals are carved as a subset; the dispatcher
-# gate enforces the carve. Kept separate from `ADMIN_CAPABILITIES` — owning a
-# tenant is not the dev-only benchmarks/Lab admin.
+# gate enforces the carve.
 OWNER_COMMAND_CAPABILITIES = frozenset(CAMPAIGN_CAP_BY_TIER.values())
 
 
@@ -86,9 +71,6 @@ def capabilities_from_tiers(tiers: Iterable[str]) -> frozenset[str]:
     return frozenset(caps)
 
 
-PROMPTPOTTER_ADMIN_ENV = "PROMPTPOTTER_ADMIN"
-
-
 @dataclass(frozen=True)
 class IdentityContext:
     """Frozen identity carrier — see module docstring for field semantics."""
@@ -100,20 +82,6 @@ class IdentityContext:
     capabilities: frozenset[str] = field(default_factory=frozenset)
 
 
-def _admin_caps_from_env() -> frozenset[str]:
-    """Stage-0 admin capabilities when ``PROMPTPOTTER_ADMIN=1`` is set.
-
-    Sound ONLY on the single-operator Stage-0 box (auth-off CLI / local dev),
-    where "the box's operator" and "the identity" are the same principal. The
-    multi-user OIDC path MUST NOT use this — a process-wide flag there would
-    grant the capability to every signup. There, admin is pinned to the
-    registered-developer identity (`oidc.py`, per ADR-0004 secure-by-default).
-    """
-    if os.environ.get(PROMPTPOTTER_ADMIN_ENV, "").strip() == "1":
-        return ADMIN_CAPABILITIES
-    return frozenset()
-
-
 def default_identity(tenant_id: str = "default", user_id: str = "default") -> IdentityContext:
     """Stage-0 single-operator identity factory.
 
@@ -122,8 +90,7 @@ def default_identity(tenant_id: str = "default", user_id: str = "default") -> Id
     passes ``user_id == tenant_id == their uid`` so a terminal run lands in the
     same single workspace the authenticated web reads (one tenant per operator).
     The single local operator owns their tenant, so they hold the full
-    :data:`OWNER_COMMAND_CAPABILITIES` command set; ``PROMPTPOTTER_ADMIN=1``
-    additionally augments with :data:`BENCHMARKS_READ_CAP`.
+    :data:`OWNER_COMMAND_CAPABILITIES` command set.
     Stage 1 (M12 OIDC client) replaces this factory at the resolver seam
     (`presentation/api/deps.py::resolve_identity`); no other call site changes.
     """
@@ -132,16 +99,17 @@ def default_identity(tenant_id: str = "default", user_id: str = "default") -> Id
         tenant_id=TenantId(safe_name(tenant_id)),
         issuer=None,
         claims={},
-        capabilities=OWNER_COMMAND_CAPABILITIES | _admin_caps_from_env(),
+        capabilities=OWNER_COMMAND_CAPABILITIES,
     )
 
 
 def has_capability(identity: IdentityContext, capability: str) -> bool:
     """The one predicate for "does this identity hold *capability*".
 
-    The dataset-visibility gateway (`infrastructure.store.dataset_access`) and the
-    command-verb gate (`command_dispatcher._require_capability_for`) both read
+    The command-verb gate (`command_dispatcher._require_capability_for`) reads
     capabilities through here, so every capability decision has one shape.
+    Dataset *reads* are not a capability decision — see
+    `infrastructure.store.dataset_access`.
     """
     return capability in identity.capabilities
 
@@ -153,8 +121,6 @@ def claim_email(identity: IdentityContext) -> str | None:
 
 
 __all__ = [
-    "ADMIN_CAPABILITIES",
-    "BENCHMARKS_READ_CAP",
     "CAMPAIGN_BABYSIT_CAP",
     "CAMPAIGN_BUDGET_CAP",
     "CAMPAIGN_CAP_BY_TIER",
@@ -163,7 +129,6 @@ __all__ = [
     "CAMPAIGN_RUN_CAP",
     "CAMPAIGN_STEP_CAP",
     "OWNER_COMMAND_CAPABILITIES",
-    "PROMPTPOTTER_ADMIN_ENV",
     "IdentityContext",
     "capabilities_from_tiers",
     "claim_email",

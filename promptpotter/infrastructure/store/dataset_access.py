@@ -1,20 +1,29 @@
-"""Identity-aware dataset access gateway — the single seam for reading a
-dataset directory through the API trust boundary.
+"""Dataset access gateway — the single seam that resolves a dataset directory.
 
-Tenant Origins (``projects/{tenant}/datasets/{slug}/``) are always readable by
-their owner. Install-global benchmarks (``datasets/{name}/``) are readable only
-by an identity holding :data:`BENCHMARKS_READ_CAP` (the registered operator,
-pinned at the OIDC seam). The *list* of readable datasets and the per-dataset
-directory *resolver* share ONE rule, so the picker can never surface a dataset
-the read endpoints would deny — and no handler can reach a benchmark directory
-without the capability.
+Two classes of dataset exist, and the split is by *ownership*, not by permission:
 
-Why a gateway and not an inline check per handler: capability enforcement that
-lives at each call site is only as strong as the least careful handler. Routing
-every dataset-directory access through here makes the check structural — a route
-that does not go through the gateway cannot resolve a dataset at all.
-Presentation code MUST NOT read :attr:`Stores.benchmarks_root` directly —
-the structural guard is routing every access through this gateway; no
+* **Tenant content** — ``projects/{tenant}/datasets/{slug}/``. Whatever this
+  identity ingested. Isolated by path: a tenant's root is derived from its own
+  id, so one tenant cannot name its way into another's.
+* **Install content** — repo ``datasets/{name}/``. The benchmarks, demos and
+  ``promptpotter-self`` that SHIP WITH THE PRODUCT. Every one of them is tracked
+  in git, so anyone who has the install already has these bytes on disk.
+
+Install content therefore carries no capability check: gating a read on data that
+arrives with the checkout protects nothing, while denying it blanks every panel
+bound to a benchmark campaign. A private cut is not install content and does not
+belong in the repo dir — it belongs in the tenant, where path isolation already
+protects it. (The predecessor of this module gated repo ``datasets/`` behind a
+``datasets.benchmarks.read`` capability granted by a ``PROMPTPOTTER_ADMIN=1`` env
+flag. It existed to protect one gitignored scratch cut living in the install dir,
+and the cost was that the pipeline hero and the hard-sample leaderboard rendered
+blank for every benchmark campaign unless that flag was set.)
+
+Resolution is tenant-first, so a tenant may shadow an install slug with its own.
+
+The *list* and the *resolver* share ONE rule, so the picker can never surface a
+dataset the read endpoints would deny. Presentation code MUST NOT read
+:attr:`Stores.benchmarks_root` directly — route every access through here; no
 standing test (see ``tests/CLAUDE.md``).
 """
 
@@ -26,20 +35,14 @@ from pathlib import Path
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import validate_dataset_name
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.identity import BENCHMARKS_READ_CAP, has_capability
-
-# Built-in try-and-learn demo datasets (repo ``datasets/{slug}/``). Surfaced to a
-# user while ``User.demo_mode_enabled`` is on — independent of the benchmark
-# capability, so a brand-new signup can try the product without being an admin.
-DEMO_DATASET_SLUGS: tuple[str, ...] = ("email-tagging",)
 
 
 class DatasetAccessError(Exception):
-    """The identity may not read *name* — absent, or a benchmark sans capability.
+    """No dataset *name* this identity can resolve — invalid slug, or absent.
 
-    Both reasons collapse to one exception (and the router maps it to 404) so the
-    response never distinguishes "no such dataset" from "exists but you may not
-    see it" — the existence-leak posture the rest of the API already takes.
+    The router maps it to 404. Kept as one exception because there is now one
+    reason: the dataset is not there. (It formerly also meant "exists but you
+    may not see it"; install content no longer hides.)
     """
 
     def __init__(self, name: str) -> None:
@@ -49,12 +52,12 @@ class DatasetAccessError(Exception):
 
 @dataclass(frozen=True)
 class DatasetRef:
-    """One readable dataset and which tier granted it visibility."""
+    """One readable dataset and which tier it came from."""
 
     name: str
     title: str | None
     n_samples: int
-    tier: str  # "yours" | "benchmark" | "demo"
+    tier: str  # "yours" | "install"
 
 
 def _has_config(dataset_dir: Path) -> bool:
@@ -62,22 +65,13 @@ def _has_config(dataset_dir: Path) -> bool:
     return (dataset_dir / "cache.json").is_file() or (dataset_dir / "pipeline.json").is_file()
 
 
-def _demo_mode_on(store: Stores) -> bool:
-    """Whether this identity has the try-and-learn demo origins switched on."""
-    user = store.users.get_or_create(
-        user_id=str(store.identity.user_id),
-        tenant_id=str(store.identity.tenant_id),
-    )
-    return user.demo_mode_enabled
-
-
 def readable_dataset_dir(store: Stores, name: str) -> Path:
-    """Resolve the directory for *name* the identity is permitted to read.
+    """Resolve *name*'s directory — tenant content first, then install content.
 
-    The visibility policy, in one place (shared with :func:`list_readable_datasets`):
-    tenant Origin first; then a demo origin while demo mode is on; then an install
-    benchmark with :data:`BENCHMARKS_READ_CAP`. Raises :class:`DatasetAccessError`
-    when *name* is invalid, absent, or a dataset this identity may not see.
+    The one resolver every read AND every mint goes through (see the module
+    docstring for why install content needs no capability). Raises
+    :class:`DatasetAccessError` when *name* is an invalid slug or resolves to
+    no dataset dir on either tier.
     """
     try:
         tenant_dir = store.tenant_datasets.dataset_dir(name)  # validates the slug
@@ -86,38 +80,48 @@ def readable_dataset_dir(store: Stores, name: str) -> Path:
     if _has_config(tenant_dir):
         return tenant_dir
 
-    # Demo origins are gated by the user's demo flag, NOT the benchmark capability,
-    # so a brand-new (non-admin) signup can still open them.
-    if name in DEMO_DATASET_SLUGS:
-        demo_dir = store.benchmarks_root / name  # name validated above
-        if _demo_mode_on(store) and _has_config(demo_dir):
-            return demo_dir
-        raise DatasetAccessError(name)
-
-    if has_capability(store.identity, BENCHMARKS_READ_CAP):
-        benchmark_dir = store.benchmarks_root / name  # name validated above
-        if _has_config(benchmark_dir):
-            return benchmark_dir
+    install_dir = store.benchmarks_root / name  # name validated above
+    if _has_config(install_dir):
+        return install_dir
     raise DatasetAccessError(name)
 
 
-def list_readable_datasets(store: Stores) -> list[DatasetRef]:
-    """Every dataset the identity may read — the same policy as :func:`readable_dataset_dir`.
+def _is_internal(name: str) -> bool:
+    """Install dirs prefixed ``_`` are the optimizer's OWN config, not task datasets.
 
-    Tenant Origins always; install benchmarks only with :data:`BENCHMARKS_READ_CAP`
-    (never the demo slugs); the demo origins while demo mode is on.
+    ``_optimizer`` / ``_optimizer_meta`` hold the meta-prompt pipelines the loop runs
+    *with*; no one mints a campaign against them. The leading underscore is the
+    existing convention that says so, and the wire contract already agrees — the
+    ``slug`` pattern in ``m12-api-openapi.yaml::DatasetIndexEntry`` is
+    ``^[a-z][a-z0-9_-]*$``, which no ``_``-prefixed name can match. Listing one was
+    always out-of-contract; it only stayed invisible while install content needed a
+    capability nobody but a developer held. :func:`readable_dataset_dir` still
+    resolves them by exact name, which is how the loop reads them.
+    """
+    return name.startswith("_")
+
+
+def list_readable_datasets(store: Stores) -> list[DatasetRef]:
+    """Every dataset this identity may pick — tenant content, then install content.
+
+    A tenant slug shadows an install slug of the same name, matching the resolver's
+    tenant-first precedence. Narrower than :func:`readable_dataset_dir` by exactly
+    the internal dirs (:func:`_is_internal`) — narrower is safe, since the invariant
+    is that the picker never surfaces a dataset the read endpoints would deny.
     """
     refs: list[DatasetRef] = []
+    own: set[str] = set()
     for slug in store.tenant_datasets.list_slugs():
         dataset_dir = store.tenant_datasets.dataset_dir(slug)
+        own.add(slug)
         refs.append(
             DatasetRef(slug, _read_title(dataset_dir), _read_n_samples(dataset_dir), "yours")
         )
 
-    if has_capability(store.identity, BENCHMARKS_READ_CAP) and store.benchmarks_root.is_dir():
+    if store.benchmarks_root.is_dir():
         for entry in sorted(store.benchmarks_root.iterdir()):
-            if entry.name in DEMO_DATASET_SLUGS:
-                continue  # demo origins surface via the flag below, not the benchmark tier
+            if entry.name in own or _is_internal(entry.name):
+                continue  # tenant copy already won / optimizer's own config
             if not entry.is_dir() or not (entry / "pipeline.json").is_file():
                 continue
             try:
@@ -125,16 +129,8 @@ def list_readable_datasets(store: Stores) -> list[DatasetRef]:
             except ValueError:
                 continue
             refs.append(
-                DatasetRef(entry.name, _read_title(entry), _read_n_samples(entry), "benchmark")
+                DatasetRef(entry.name, _read_title(entry), _read_n_samples(entry), "install")
             )
-
-    if _demo_mode_on(store):
-        for slug in DEMO_DATASET_SLUGS:
-            demo_dir = store.benchmarks_root / slug
-            if (demo_dir / "pipeline.json").is_file():
-                refs.append(
-                    DatasetRef(slug, _read_title(demo_dir), _read_n_samples(demo_dir), "demo")
-                )
     return refs
 
 
@@ -163,7 +159,6 @@ def _read_n_samples(dataset_dir: Path) -> int:
 
 
 __all__ = [
-    "DEMO_DATASET_SLUGS",
     "DatasetAccessError",
     "DatasetRef",
     "list_readable_datasets",

@@ -29,10 +29,9 @@ async def cmd_matrix(args: argparse.Namespace) -> CommandResult:
 
 async def _cmd_matrix_measure(args: argparse.Namespace) -> CommandResult:
     """Score origin for each (dataset, model) cell; upsert into resource_matrix.json."""
-    from promptpotter.application.bootstrap.wiring import resolve_dataset_config_dir
     from promptpotter.application.resource_matrix.matrix import upsert_cells, write_matrix
     from promptpotter.application.resource_matrix.measure import measure_cells
-    from promptpotter.infrastructure.store.layout import REPO_ROOT
+    from promptpotter.infrastructure.store.dataset_access import readable_dataset_dir
 
     identity = identity_from_args(args)
     session = await init_services_cli(dataset_name=args.dataset, identity=identity)
@@ -41,7 +40,7 @@ async def _cmd_matrix_measure(args: argparse.Namespace) -> CommandResult:
     )
 
     # The artifact belongs to the pp-self panel, not the measured dataset.
-    pp_self_dir = resolve_dataset_config_dir(session.store, REPO_ROOT, "promptpotter-self")
+    pp_self_dir = readable_dataset_dir(session.store, "promptpotter-self")
     matrix = upsert_cells(pp_self_dir, cells)
     path = write_matrix(pp_self_dir, matrix)
 

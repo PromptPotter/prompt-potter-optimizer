@@ -25,10 +25,8 @@ from promptpotter.infrastructure.identity.grants import (
     read_grant,
     resolve_effective_capabilities,
 )
-from promptpotter.infrastructure.identity.migration import registered_user_id
 from promptpotter.infrastructure.identity.session import SessionData
 from promptpotter.shared.identity import (
-    ADMIN_CAPABILITIES,
     OWNER_COMMAND_CAPABILITIES,
     IdentityContext,
 )
@@ -36,29 +34,6 @@ from promptpotter.shared.identity import (
 logger = logging.getLogger(__name__)
 
 SESSION_COOKIE_NAME = "promptpotter_session"
-
-
-def _session_capabilities(user_id: str, bundle: IdentityBundle) -> frozenset[str]:
-    """Capabilities for an authenticated web identity.
-
-    Every authenticated user owns their own tenant, so each holds the full
-    :data:`OWNER_COMMAND_CAPABILITIES` command set — bounded to their workspace
-    by tenant-isolation, enforced per-verb at the dispatcher gate. The admin
-    tier is separate and pinned: ``BENCHMARKS_READ_CAP`` (repo-root install
-    benchmarks) is granted ONLY to the one pinned operator — the registered
-    developer recorded in the default-claim marker (the web analogue of
-    ADR-0004's chat-id lock). A first-time signup never matches the marker, so
-    the benchmarks never bleed through; a fresh box with no marker has no admin
-    at all (secure-by-default).
-
-    A delegated sub-principal (ADR-0005) resolves an ATTENUATED subset here from
-    the sealed grant store instead of the blanket owner set — that is the seam
-    the sub-user model plugs into, without touching the dispatcher.
-    """
-    admin_uid = registered_user_id(bundle.paths.default_claim_marker)
-    if admin_uid is not None and user_id == admin_uid:
-        return OWNER_COMMAND_CAPABILITIES | ADMIN_CAPABILITIES
-    return OWNER_COMMAND_CAPABILITIES
 
 
 def _delegated_identity(data: SessionData, grant: PrincipalGrant) -> IdentityContext:
@@ -101,7 +76,9 @@ def _identity_context_from_session(
     """Look up the session; return an `IdentityContext` or `None` if expired/unknown.
 
     A user carrying a grant (ADR-0005) resolves to a delegated identity acting in
-    their delegator's tenant; everyone else is a first-class owner of their own.
+    their delegator's tenant; everyone else is a first-class owner of their own,
+    holding the full :data:`OWNER_COMMAND_CAPABILITIES` set — bounded to their
+    workspace by tenant-isolation, enforced per-verb at the dispatcher gate.
     """
     data = bundle.session_store.read(session_id)
     if data is None:
@@ -118,7 +95,7 @@ def _identity_context_from_session(
             "provider": data.provider,
             "subject": data.subject,
         },
-        capabilities=_session_capabilities(data.user_id, bundle),
+        capabilities=OWNER_COMMAND_CAPABILITIES,
     )
 
 
