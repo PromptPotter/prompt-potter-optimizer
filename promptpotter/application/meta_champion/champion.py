@@ -321,7 +321,7 @@ def _invalidate_optimizer_prompt_caches() -> None:
     Harmless in the one-shot CLI (nothing cached yet)."""
     from promptpotter.application.optimization.dispatch.llm_call import prompts as _p
 
-    for fn in (_p._load_optimizer_manifest, _p.get_optimizer_schema, _p._load_local):
+    for fn in (_p._load_optimizer_manifest, _p.get_optimizer_schema, _p.base_optimizer_template):
         with contextlib.suppress(AttributeError):
             fn.cache_clear()
 

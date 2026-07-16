@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from promptpotter.application.config import missing_template_vars
+from promptpotter.application.optimization.dispatch.llm_call import prompts as _opt_prompts
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     resolve_node_override,
 )
@@ -33,7 +34,13 @@ from promptpotter.config.prompt_blocks import prompt_blocks
 from promptpotter.config.settings import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVERRIDES
 from promptpotter.domain.escalation_signals import ValidationFailure
 from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, NODE_LAYOUTS
-from promptpotter.domain.opt_search_point import OptSearchPoint, candidate_delta
+from promptpotter.domain.opt_search_point import (
+    TEMPLATE_TOKEN_RE,
+    OptSearchPoint,
+    PromptTemplate,
+    candidate_delta,
+    node_config_items,
+)
 from promptpotter.domain.pipeline_schema import (
     NESTED_PARAM_TYPES,
     SCHEMA_DESCRIPTIONS_PARAM,
@@ -592,6 +599,45 @@ L1_CONFIG_NOT_IN_RUNTIME_FAILURES: LLMOutputValidator = LLMOutputValidator(
 )
 
 
+def _meta_template_failures(pipeline_params: dict[str, Any]) -> list[ValidationFailure]:
+    """Prose-embedded injection ports dropped from an inner meta-prompt (the L4 surface).
+
+    A ``{{token}}`` in a meta-prompt's non-layout prose (``{{terminate_capability}}`` in
+    ``l3_plan.instruction``, ``{{citable_fields}}`` in ``l1_generate``) is a channel port, not
+    prose: layout-carried signals have their mandatory guard in ``validate_l1_layout``, and the
+    capability directives already have a sanctioned off-switch (the config bit renders them
+    empty) — so an L4 prose rewrite that deletes the token severs the channel while the schema
+    keeps accepting its proposals, and no measurement can see what went missing. Checks the
+    MERGED params, not the round's delta: a child of a broken incumbent inherits the token-less
+    prose without re-proposing it, and the program it would run is just as severed.
+    """
+    failures: list[ValidationFailure] = []
+    for node_name, cfg in node_config_items(pipeline_params):
+        if node_name not in NODE_LAYOUTS:
+            continue
+        prose = {
+            k: v for k, v in cfg.items() if k in PromptTemplate.model_fields and isinstance(v, str)
+        }
+        if not prose:
+            continue
+        base = _opt_prompts.base_optimizer_template(node_name)
+        declared = sorted(set(TEMPLATE_TOKEN_RE.findall(base.render())))
+        if not declared:
+            continue
+        merged = base.model_copy(update=prose)
+        missing = missing_template_vars(merged.render(), declared)
+        if missing:
+            failures.append(
+                ValidationFailure(
+                    axis=f"{node_name}.prompt",
+                    value="dropped:" + ",".join(missing),
+                    allowed=declared,
+                    reason=DROPPED_MANDATORY_PLACEHOLDER,
+                )
+            )
+    return failures
+
+
 def _check_l1_prompt_placeholders_intact(
     source_output: Any,
     *,
@@ -599,41 +645,47 @@ def _check_l1_prompt_placeholders_intact(
     pipeline_schema: PipelineSchema | None = None,
     **_: Any,
 ) -> ValidatorOutcome | None:
-    """Reject an L1 candidate whose evolved prompt drops a mandatory backend placeholder.
+    """Reject a candidate whose program drops a mandatory injection placeholder.
 
-    The optimizer's evolved prompt lands on exactly ONE node — ``prompt_node_names()[0]``,
-    the node ``OptSearchPoint.to_job_search_point`` injects ``osp.render()`` into. The other
-    prompt-bearing nodes keep their fixed starting prompt and are never touched by L1, so this
-    checks that one node only. If a mutation drops one of its declared ``{{vars}}`` (e.g.
-    ``{{combined_text}}`` / ``{{format_string}}`` carrying web_search evidence into
-    entity_profiling), the backend injects nothing there and the evidence-free program would
-    otherwise score as a valid winner. Mint guards this at setup
-    (``configure_and_apply_pipeline``); this is its in-loop twin, same ``missing_template_vars``.
+    Two surfaces, one rule — a mutation may degrade what flows through a channel (measurable;
+    the proxy goes negative), never delete the channel itself (unmeasurable):
+
+    - **Target prompt**: the evolved prompt lands on exactly ONE node —
+      ``prompt_node_names()[0]``, the node ``OptSearchPoint.to_job_search_point`` injects
+      ``osp.render()`` into; the other prompt-bearing nodes keep their fixed starting prompt.
+      If a mutation drops a declared ``{{var}}`` (e.g. ``{{combined_text}}`` carrying
+      web_search evidence into entity_profiling), the backend injects nothing there and the
+      evidence-free program would otherwise score as a valid winner. Mint guards this at setup
+      (``configure_and_apply_pipeline``); this is its in-loop twin, same ``missing_template_vars``.
+    - **Inner meta-prompts** (L4): ``source_output`` is the candidate's MERGED
+      ``pipeline_params``; :func:`_meta_template_failures` guards the prose-embedded ports the
+      same way. Same reason, same fatal synthetic-0 path, same patience-0 L2 fire.
     """
     if opt_sp is None or pipeline_schema is None:
         return None
+    failures: list[ValidationFailure] = []
     prompt_nodes = pipeline_schema.prompt_node_names()
-    if not prompt_nodes:
-        return None
-    node = pipeline_schema.get_node(prompt_nodes[0])
-    if node is None or node.prompt_info is None:
-        return None
-    declared = node.prompt_info.template_variables
-    missing = missing_template_vars(opt_sp.render(), declared) if declared else []
-    if not missing:
+    if prompt_nodes:
+        node = pipeline_schema.get_node(prompt_nodes[0])
+        if node is not None and node.prompt_info is not None:
+            declared = node.prompt_info.template_variables
+            missing = missing_template_vars(opt_sp.render(), declared) if declared else []
+            if missing:
+                failures.append(
+                    ValidationFailure(
+                        axis=f"{prompt_nodes[0]}.prompt",
+                        value="dropped:" + ",".join(missing),
+                        allowed=list(declared),
+                        reason=DROPPED_MANDATORY_PLACEHOLDER,
+                    )
+                )
+    if isinstance(source_output, dict):
+        failures.extend(_meta_template_failures(source_output))
+    if not failures:
         return None
     return ValidatorOutcome(
         validator_id=L1_PROMPT_PLACEHOLDERS_INTACT.id,
-        evidence={
-            "failures": [
-                ValidationFailure(
-                    axis=f"{prompt_nodes[0]}.prompt",
-                    value="dropped:" + ",".join(missing),
-                    allowed=list(declared),
-                    reason=DROPPED_MANDATORY_PLACEHOLDER,
-                )
-            ]
-        },
+        evidence={"failures": failures},
     )
 
 

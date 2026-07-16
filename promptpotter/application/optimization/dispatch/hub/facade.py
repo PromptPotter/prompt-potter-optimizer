@@ -15,7 +15,6 @@ construct bundles directly); the ``Cycle`` knot lives here in the
 from __future__ import annotations
 
 import logging
-import re
 from typing import TYPE_CHECKING
 
 from promptpotter.application.optimization.dispatch.hub.bundle import (
@@ -26,7 +25,7 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
 from promptpotter.application.optimization.dispatch.hub.injections.registry import INJECTIONS
 from promptpotter.domain.escalation_signals import exploration_budget
 from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, L1Layout
-from promptpotter.domain.opt_search_point import PromptTemplate
+from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, PromptTemplate
 from promptpotter.domain.results_health import compute_node_failure_rates
 from promptpotter.infrastructure.llm.models import emit_round_warning
 
@@ -35,8 +34,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.results import RoundResult
 
 logger = logging.getLogger(__name__)
-
-_PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
 
 _SECTION_SEP = "\n\n"
 
@@ -80,7 +77,7 @@ def validate_template(name: str, template: PromptTemplate) -> None:
     """Raise KeyError if any ``{{slot}}`` isn't a signal or known extra (typo → silent empty render)."""
     extras = _TEMPLATE_EXTRAS.get(name, set())
     text = template.render()
-    referenced = set(_PLACEHOLDER_RE.findall(text))
+    referenced = set(TEMPLATE_TOKEN_RE.findall(text))
     unknown = referenced - INJECTIONS.keys() - extras
     if unknown:
         raise KeyError(
@@ -169,7 +166,7 @@ class DispatchHub:
                 update[slot] = static
         filled = template.model_copy(update=update)
 
-        remaining = set(_PLACEHOLDER_RE.findall(filled.render()))
+        remaining = set(TEMPLATE_TOKEN_RE.findall(filled.render()))
         injection_vars = {
             name: DispatchHub.render(name, bundle) for name in remaining if name in INJECTIONS
         }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import re
 import uuid
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Self
@@ -23,6 +24,12 @@ from promptpotter.domain.validators import ValidatorOutcome
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.search_point import JobSearchPoint
+
+
+# The `{{token}}` shape `compile_prompt` substitutes — the ONE definition every
+# reader of a template's token set shares (dispatch-hub fill/validate, the
+# meta-prompt port guard in `validators/l1_strict.py`).
+TEMPLATE_TOKEN_RE = re.compile(r"\{\{(\w+)\}\}")
 
 
 class FewShotExample(BaseModel):

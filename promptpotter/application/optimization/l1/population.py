@@ -83,6 +83,7 @@ def parse_population(
     for cp in proposals:
         pipeline_params_override = cp.pipeline_params_override
         osp = cp.osp
+        merged_pp = merge_pipeline_params(pipeline_params, pipeline_params_override, schema)
         if schema:
             failures: list[ValidationFailure] = []
             block_outcome = L1_PROMPT_BLOCKS_IN_LIBRARY.run(
@@ -106,10 +107,12 @@ def parse_population(
                 )
                 if rf_outcome is not None:
                     failures.extend(rf_outcome.evidence["failures"])
-            # Mandatory backend placeholders intact in the evolved prompt — runs even when
-            # the mutation is prompt-fields-only (the exact case that drops {{combined_text}}).
+            # Mandatory placeholders intact — the evolved TARGET prompt (runs even when the
+            # mutation is prompt-fields-only, the exact case that drops {{combined_text}})
+            # AND, on an L4 campaign, the MERGED inner meta-prompts (a child of a broken
+            # incumbent inherits a severed port without re-proposing it).
             ph_outcome = L1_PROMPT_PLACEHOLDERS_INTACT.run(
-                {},
+                merged_pp or {},
                 opt_sp=osp,
                 pipeline_schema=schema,
             )
@@ -127,7 +130,7 @@ def parse_population(
                         vf.reason,
                     )
         osp_list.append(osp)
-        merged.append(merge_pipeline_params(pipeline_params, pipeline_params_override, schema))
+        merged.append(merged_pp)
     return osp_list, merged
 
 

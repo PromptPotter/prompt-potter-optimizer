@@ -163,18 +163,18 @@ def optimizer_prompt_override(node_name: str, template: PromptTemplate | None) -
         yield
         return
 
-    original = _opt_prompts._load_local
+    original = _opt_prompts.base_optimizer_template
 
     def _overridden(name: str) -> PromptTemplate:
         if name == node_name:
             return template
         return original(name)
 
-    _opt_prompts._load_local = _overridden  # type: ignore[assignment]
+    _opt_prompts.base_optimizer_template = _overridden  # type: ignore[assignment]
     try:
         yield
     finally:
-        _opt_prompts._load_local = original
+        _opt_prompts.base_optimizer_template = original
         # lru_cache clear: canonical loader re-reads from disk, not a stale override.
         with contextlib.suppress(AttributeError):
             original.cache_clear()

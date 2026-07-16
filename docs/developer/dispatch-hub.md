@@ -80,9 +80,8 @@ flowchart LR
   LAYOUT --> L1G
   AXM --> L1G
 
-  %% L1_CRITIQUE inputs
-  PLAN --> L1C
-  TC --> L1C
+  %% L1_CRITIQUE inputs (the distiller reads raw round output, not the strategic frame —
+  %% plan/task_context are not in its layout vocabulary)
   DIAG --> L1C
   L1W --> L1C
 
@@ -167,7 +166,7 @@ This is where the reader's mental model of a round usually starts: candidates we
 
 - ¹⁴ **`axis_memory`** (DERIVED) ← `cycle.axes.digest()` — AxisIndex per-axis effect_size + sample-coverage; consumed by L1_GENERATE, L2_CONTEXT, L3_PLAN. Empty when AxisIndex isn't yet initialised (round 1).
 - **Panels family** (`injections/panels.py`, DERIVED views; each `@signal` docstring is the SoT): `escalation_panel` (L1 stall depth + `exploration_budget` — gates the `stall_exploration` citation), `evidence_health` (per-node failure rates — flags an evidence-starved enricher), `answer_distribution` (what the pipeline ANSWERS vs what is true, as label tallies, plus the score a constant single-label answer would earn — the collapse detector; empty on free-text answer spaces), `failing_samples` (every current miss, one line each, ordered easiest-first on the cycle's locked δ ruler — which samples are still failing, how hard each is, what was answered vs what was true), `mutation_memory` (what this cycle has ALREADY tried: the changed field and its value, what it scored against its own matched origin, how it ended — keyed on the payload, never on the LLM's `changes_description`), `origin_strengths` (round-0 origin's per-sample hits, the floor variants must preserve), `archive_top_runs` (top-K historical runs on this dataset), `rare_hit_samples` (samples cracked by ≤3 of ≥10 attempts).
-- **Capability directives** (`injections/layer_state.py`): `rebase_capability` / `terminate_capability` (conditional escape-hatch instructions into L2+L3 prompts; render empty when the config knob is off so ablation prompt bodies stay bit-identical).
+- **Capability directives** (`injections/layer_state.py`): `rebase_capability` / `terminate_capability` (conditional escape-hatch instructions into L2+L3 prompts; render empty when the config knob is off so ablation prompt bodies stay bit-identical). Their `{{tokens}}` — like every prose-embedded token in a base meta-prompt — are **ports, not prose**: an L4 prose rewrite that drops one severs the channel unmeasurably (the schema keeps accepting the proposals it no longer teaches), so `L1_PROMPT_PLACEHOLDERS_INTACT` rejects such a candidate as `dropped_mandatory_placeholder` (synthetic-0), checked on the MERGED params so inherited breakage flags too. Layout-carried signals have the same rule via `validate_l1_layout`'s mandatory set; the config bit is the one sanctioned way to silence a directive.
 
 ### Current state
 

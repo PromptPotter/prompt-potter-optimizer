@@ -1862,6 +1862,53 @@ def test_parse_population_flags_dropped_mandatory_placeholder():
     assert osp_list[1].memory.wounds.validation_failures == []
 
 
+def test_parse_population_flags_dropped_meta_prompt_port():
+    """An L4 candidate whose merged `l3_plan.instruction` drops the `{{terminate_capability}}`/
+    `{{rebase_capability}}` ports is invalid (synthetic-0) — a severed layer-control channel
+    once ran 4 inner campaigns as normal measurements, silently. Checked on MERGED params, so a
+    child inheriting the broken prose from its parent (no override of its own) flags too."""
+    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+        base_optimizer_template,
+    )
+    from promptpotter.application.optimization.l1.population import parse_population
+
+    schema = PipelineSchema(
+        name="promptpotter-self",
+        nodes=[PipelineNode(name="l3_plan", param_keys={"instruction"})],
+    )
+    parent = _parent()
+    base_instruction = base_optimizer_template("l3_plan").instruction
+    dropped = CandidateProposal(
+        osp=parent.mutate(),
+        pipeline_params_override={"l3_plan": {"instruction": "Generate a detailed plan."}},
+    )
+    intact = CandidateProposal(
+        osp=parent.mutate(),
+        pipeline_params_override={"l3_plan": {"instruction": base_instruction + " Be terse."}},
+    )
+    inherits_broken = CandidateProposal(osp=parent.mutate(persona="Strict"))
+
+    osp_list, _ = parse_population(
+        [dropped, intact],
+        pipeline_params=None,
+        schema=schema,
+    )
+    inherited_list, _ = parse_population(
+        [inherits_broken],
+        pipeline_params={"l3_plan": {"instruction": "Plan without ports."}},
+        schema=schema,
+    )
+
+    dropped_failures = osp_list[0].memory.wounds.validation_failures
+    assert [vf.reason for vf in dropped_failures] == ["dropped_mandatory_placeholder"]
+    assert dropped_failures[0].axis == "l3_plan.prompt"
+    assert "terminate_capability" in dropped_failures[0].value
+    assert osp_list[1].memory.wounds.validation_failures == []
+    assert [vf.reason for vf in inherited_list[0].memory.wounds.validation_failures] == [
+        "dropped_mandatory_placeholder"
+    ]
+
+
 # ===========================================================================
 # 7. L2 output validators (fire + quiet)
 # ===========================================================================

@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "OPTIMIZER_PIPELINE_PATH",
     "ResolvedNodeOverride",
+    "base_optimizer_template",
     "combined_optimizer_prompt_hash",
     "compute_optimizer_prompt_hashes",
     "get_optimizer_config_overrides",
@@ -217,7 +218,10 @@ def _resolved_prompt_for_node(name: str) -> dict[str, Any] | None:
 
 
 @functools.lru_cache(maxsize=32)
-def _load_local(name: str) -> PromptTemplate:
+def base_optimizer_template(name: str) -> PromptTemplate:
+    """The manifest template for *name*, override-free — the base an L4 prose mutation
+    merges onto, and the declaration of the prose-embedded ``{{tokens}}`` (capability
+    directives, caller extras) such a mutation must preserve."""
     body = _resolved_prompt_for_node(name)
     if body is None:
         raise KeyError(
@@ -237,7 +241,7 @@ def load_optimizer_prompt(name: str) -> PromptTemplate:
     """
     from promptpotter.application.optimization.dispatch.hub import validate_template
 
-    template = _load_local(name)
+    template = base_optimizer_template(name)
     if fields := resolve_node_override(name).prompt_fields:
         template = template.model_copy(update=fields)
     validate_template(name, template)
