@@ -55,8 +55,9 @@ tags: [security, identity, authorization, capabilities, delegation, multi-tenant
 ## Context and Problem Statement
 
 Today PromptPotter has exactly two principal shapes: a **registered user** (an
-`IdentityContext` with tenant-scoped capabilities) and an **admin** (the same, plus
-`ADMIN_CAPABILITIES = {BENCHMARKS_READ_CAP}` when `PROMPTPOTTER_ADMIN=1`).
+`IdentityContext` with tenant-scoped capabilities) and a **host admin** (the same, plus
+`ADMIN_CAPABILITIES` — a declared tier whose powers currently ride the ADR-0004
+operator-admin channel rather than the API).
 That is enough for "one operator runs their own campaigns" and nothing more.
 
 A user now wants to **delegate**. Concretely:

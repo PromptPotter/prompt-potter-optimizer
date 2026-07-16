@@ -73,7 +73,7 @@ class Session:
     index_terms: list[str] = field(default_factory=list)
     identity: IdentityContext = field(default_factory=default_identity)
     dataset_name: str | None = None
-    # Resolved tenant-first at bootstrap (`resolve_dataset_config_dir`): tenant
+    # Resolved tenant-first at bootstrap (`readable_dataset_dir`): tenant
     # uploads at `projects/{tenant}/datasets/{slug}/`, else repo `datasets/{name}/`.
     # The single resolution seam — every dataset-file loader reads this rather than
     # recomputing a repo path from the bare name.

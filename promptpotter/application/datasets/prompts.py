@@ -4,7 +4,7 @@ Each dataset ships ``{dataset_dir}/prompts/`` with PromptTemplate JSON.
 Resolution: ``{node_name}.json`` → ``{variant}.json`` → ``FileNotFoundError``.
 
 ``dataset_dir`` is the resolved config dir carried on ``Session.dataset_config_dir``
-(tenant-first via ``resolve_dataset_config_dir``) — these loaders never recompute a
+(tenant-first via ``readable_dataset_dir``) — these loaders never recompute a
 repo-relative path from the bare dataset name, so tenant uploads and repo benchmarks
 load through the same code."""
 

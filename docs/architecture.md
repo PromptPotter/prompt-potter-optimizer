@@ -161,7 +161,7 @@ world is a strict containment hierarchy:
   identity filter. The two tiers serve different purposes (operator
   benchmarking vs tenant work); both share the `pipeline.json` /
   `campaign.json` / `task_description.md` shape. **One resolution
-  seam:** `resolve_dataset_config_dir` picks the dir (tenant slug first,
+  seam:** `readable_dataset_dir` picks the dir (tenant slug first,
   repo benchmark second) once at bootstrap and stamps it on
   `Session.dataset_config_dir`; every downstream dataset-file loader
   (node overlay, starting prompts, origin prompt, sweep dir) reads that

@@ -25,8 +25,10 @@ from promptpotter.infrastructure.identity.grants import (
     read_grant,
     resolve_effective_capabilities,
 )
+from promptpotter.infrastructure.identity.migration import registered_user_id
 from promptpotter.infrastructure.identity.session import SessionData
 from promptpotter.shared.identity import (
+    ADMIN_CAPABILITIES,
     OWNER_COMMAND_CAPABILITIES,
     IdentityContext,
 )
@@ -34,6 +36,30 @@ from promptpotter.shared.identity import (
 logger = logging.getLogger(__name__)
 
 SESSION_COOKIE_NAME = "promptpotter_session"
+
+
+def _session_capabilities(user_id: str, bundle: IdentityBundle) -> frozenset[str]:
+    """Capabilities for an authenticated web identity.
+
+    Every authenticated user owns their own tenant, so each holds the full
+    :data:`OWNER_COMMAND_CAPABILITIES` command set — bounded to their workspace by
+    tenant-isolation, enforced per-verb at the dispatcher gate.
+
+    WHO is host-admin, Stage 1 (web / OIDC): the one identity pinned in the
+    default-claim marker — the registered developer, the web analogue of ADR-0004's
+    chat-id lock. A first-time signup never matches the marker, and a fresh box with
+    no marker has no admin at all (secure-by-default). This is the deliberate twin of
+    Stage 0's `_admin_caps_from_env`; **never merge them** — a process-wide env flag
+    here would make every signup an admin.
+
+    A delegated sub-principal (ADR-0005) resolves an ATTENUATED subset from the sealed
+    grant store instead of the blanket owner set — that is the seam the sub-user model
+    plugs into, without touching the dispatcher.
+    """
+    admin_uid = registered_user_id(bundle.paths.default_claim_marker)
+    if admin_uid is not None and user_id == admin_uid:
+        return OWNER_COMMAND_CAPABILITIES | ADMIN_CAPABILITIES
+    return OWNER_COMMAND_CAPABILITIES
 
 
 def _delegated_identity(data: SessionData, grant: PrincipalGrant) -> IdentityContext:
@@ -76,9 +102,7 @@ def _identity_context_from_session(
     """Look up the session; return an `IdentityContext` or `None` if expired/unknown.
 
     A user carrying a grant (ADR-0005) resolves to a delegated identity acting in
-    their delegator's tenant; everyone else is a first-class owner of their own,
-    holding the full :data:`OWNER_COMMAND_CAPABILITIES` set — bounded to their
-    workspace by tenant-isolation, enforced per-verb at the dispatcher gate.
+    their delegator's tenant; everyone else is a first-class owner of their own.
     """
     data = bundle.session_store.read(session_id)
     if data is None:
@@ -95,7 +119,7 @@ def _identity_context_from_session(
             "provider": data.provider,
             "subject": data.subject,
         },
-        capabilities=OWNER_COMMAND_CAPABILITIES,
+        capabilities=_session_capabilities(data.user_id, bundle),
     )
 
 

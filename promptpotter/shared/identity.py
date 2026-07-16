@@ -16,10 +16,29 @@ this type.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
 from promptpotter.domain.identity import Issuer, TenantId, UserId, safe_name
+
+# ── Tier 1a: host-admin ────────────────────────────────────────────────────
+# The sole definition of "what the HOST admin (the person who runs the box) can
+# do that a tenant owner cannot". Adding an admin power = adding it to this
+# frozenset; nowhere else.
+#
+# It is EMPTY today, and that is a true statement about the system rather than a
+# placeholder: every host-admin power currently ships through the operator-admin
+# CHANNEL (`presentation/admin_bot.py` — allowlist, `/grant`, `/revoke`, provider
+# config), which ADR-0004 fixes as outbound-only and explicitly NOT an inbound API
+# route. So there is no API-side admin power to name yet. The tier stays declared
+# because the boundary is real and must remain legible: the next admin-only API
+# power lands here instead of being re-invented ad hoc at a call site.
+#
+# `datasets.benchmarks.read` was its one historical member and MUST NOT come back.
+# It gated repo `datasets/`, which is tracked in git and therefore already on the
+# disk of anyone holding the install — see `infrastructure/store/dataset_access.py`.
+ADMIN_CAPABILITIES: frozenset[str] = frozenset()
 
 # Control-plane command capabilities — one per privilege tier of the closed
 # `/commands/{kind}` set (the dispatcher's `CAP_FOR_KIND` maps each kind to one).
@@ -47,7 +66,8 @@ CAMPAIGN_CAP_BY_TIER: dict[str, str] = {
 
 # The full command-verb set a tenant owner holds — derived from the tier map so it
 # can never drift from it. Sub-principals are carved as a subset; the dispatcher
-# gate enforces the carve.
+# gate enforces the carve. Kept separate from `ADMIN_CAPABILITIES` — owning a
+# tenant is not running the box.
 OWNER_COMMAND_CAPABILITIES = frozenset(CAMPAIGN_CAP_BY_TIER.values())
 
 
@@ -71,6 +91,9 @@ def capabilities_from_tiers(tiers: Iterable[str]) -> frozenset[str]:
     return frozenset(caps)
 
 
+PROMPTPOTTER_ADMIN_ENV = "PROMPTPOTTER_ADMIN"
+
+
 @dataclass(frozen=True)
 class IdentityContext:
     """Frozen identity carrier — see module docstring for field semantics."""
@@ -82,6 +105,24 @@ class IdentityContext:
     capabilities: frozenset[str] = field(default_factory=frozenset)
 
 
+def _admin_caps_from_env() -> frozenset[str]:
+    """WHO is host-admin, Stage 0 (auth-off CLI / local dev): the env flag.
+
+    Sound ONLY on the single-operator box, where "the box's operator" and "the
+    identity" are the same principal. The multi-user OIDC path MUST NOT use this —
+    a process-wide flag there would make every signup an admin. There, admin is
+    pinned to the registered-developer identity (`oidc.py`).
+
+    This and the Stage-1 pinned-marker predicate are *two deliberate predicates*
+    for the same question. **Never merge them.** WHAT admin grants lives once, in
+    :data:`ADMIN_CAPABILITIES`; WHO is admin is answered differently per stage
+    because the two stages have different threat models.
+    """
+    if os.environ.get(PROMPTPOTTER_ADMIN_ENV, "").strip() == "1":
+        return ADMIN_CAPABILITIES
+    return frozenset()
+
+
 def default_identity(tenant_id: str = "default", user_id: str = "default") -> IdentityContext:
     """Stage-0 single-operator identity factory.
 
@@ -90,7 +131,8 @@ def default_identity(tenant_id: str = "default", user_id: str = "default") -> Id
     passes ``user_id == tenant_id == their uid`` so a terminal run lands in the
     same single workspace the authenticated web reads (one tenant per operator).
     The single local operator owns their tenant, so they hold the full
-    :data:`OWNER_COMMAND_CAPABILITIES` command set.
+    :data:`OWNER_COMMAND_CAPABILITIES` command set; ``PROMPTPOTTER_ADMIN=1``
+    additionally augments with :data:`ADMIN_CAPABILITIES` (Tier 1a).
     Stage 1 (M12 OIDC client) replaces this factory at the resolver seam
     (`presentation/api/deps.py::resolve_identity`); no other call site changes.
     """
@@ -99,7 +141,7 @@ def default_identity(tenant_id: str = "default", user_id: str = "default") -> Id
         tenant_id=TenantId(safe_name(tenant_id)),
         issuer=None,
         claims={},
-        capabilities=OWNER_COMMAND_CAPABILITIES,
+        capabilities=OWNER_COMMAND_CAPABILITIES | _admin_caps_from_env(),
     )
 
 
@@ -121,6 +163,7 @@ def claim_email(identity: IdentityContext) -> str | None:
 
 
 __all__ = [
+    "ADMIN_CAPABILITIES",
     "CAMPAIGN_BABYSIT_CAP",
     "CAMPAIGN_BUDGET_CAP",
     "CAMPAIGN_CAP_BY_TIER",
@@ -129,6 +172,7 @@ __all__ = [
     "CAMPAIGN_RUN_CAP",
     "CAMPAIGN_STEP_CAP",
     "OWNER_COMMAND_CAPABILITIES",
+    "PROMPTPOTTER_ADMIN_ENV",
     "IdentityContext",
     "capabilities_from_tiers",
     "claim_email",

@@ -1,43 +1,76 @@
-# The access model — three tiers, three boundaries
+# The access model — four tiers, four boundaries
 
 > **The one page a security audit opens.** It names each trust boundary, the *kind*
 > of boundary it is, where it is enforced (by symbol), and the one honestly-deferred
 > gap. If a claim here disagrees with the code, the code wins and this page is wrong —
 > fix it.
 
-PromptPotter has three access tiers — **admin > user > loop** — but they are **three
-different kinds of boundary**. Conflating them is what made the model illegible; keeping
-them distinct is the whole design.
+PromptPotter has four access tiers — **host-admin > owner > delegate > loop** — and they
+are **four different kinds of boundary**. Conflating them is what made the model
+illegible; keeping them distinct, and never collapsing the hierarchy, is the whole design.
 
 | Boundary | Kind | Enforced by | Failure response |
 |---|---|---|---|
-| **admin ↔ user** | Authorization (capability) | the dataset-visibility gateway (`has_capability` in `dataset_access`) | 404 (existence-hiding) |
+| **host-admin ↔ user** | Authorization (host privilege) | the operator-admin channel (ADR-0004, chat-id lock) + `ADMIN_CAPABILITIES` for any API-side power | channel: ignored; API: 404 |
+| **owner ↔ delegate** | Authorization (capability) | one dispatcher gate (`_require_capability_for` over `CAP_FOR_KIND`) | 404 (existence-hiding) |
 | **user ↔ user** | Tenancy (data isolation) | structural directory rooting + one `load_owned` ownership rule | 404 |
 | **loop ↔ everything** | OS privilege | systemd-hardened unit (kernel-enforced) | process denied (EACCES / cgroup) |
 
+> **A dataset read is not an authorization decision — it belongs to no tier.**
+> Repo `datasets/` is install content — **tracked in git**, hence already on the disk
+> of anyone holding the install, so a capability over it would guard nothing while
+> blanking every panel bound to such a campaign. **Ownership, not permission, is the
+> split:** install content ships and is readable; private data belongs in the tenant,
+> where Tier 2 isolates it structurally. Putting a private cut in the repo dir and then
+> gating the dir is the anti-pattern — move the cut. (`datasets.benchmarks.read` was
+> exactly that mistake and is gone; do not re-add it to Tier 1a.)
+
 ---
 
-## Tier 1 — admin ↔ user: authorization
+## Tier 1a — host-admin ↔ user: host privilege
 
-**What admin can do** is one definition: `ADMIN_CAPABILITIES` in `shared/identity.py`
-(`datasets.benchmarks.read`). Adding an admin power = editing that one frozenset.
+The person who **runs the box** is not the same principal as a user who owns a tenant on
+it, and the two must never collapse — on the team-online deployment (our default), every
+signup is a user, and users hold nearly all of an owner's rights. What separates a host
+admin is a small, explicitly-named set, never an implicit "and also…".
 
-**Who is admin** is *two deliberate predicates* — never merge them (merging regrants admin
-to every OIDC signup):
-- **Stage 0 (CLI / auth-off):** `_admin_caps_from_env` — the `PROMPTPOTTER_ADMIN=1` env flag,
-  sound only on the single-operator box.
-- **Stage 1 (web / OIDC):** `_session_capabilities` (`presentation/api/middleware/oidc.py`) —
-  the one pinned identity recorded in the default-claim marker (the web analogue of ADR-0004's
-  chat-id lock).
+**What host-admin can do** is one definition: `ADMIN_CAPABILITIES` (`shared/identity.py`).
+It is **empty today**, and that is an honest statement rather than a placeholder: every
+current host-admin power ships through the **operator-admin channel**
+(`presentation/admin_bot.py` — sign-in allowlist, `/grant`, `/revoke`, provider config),
+which [ADR-0004](../adr/0004-operator-admin-channels.md) fixes as outbound-only and
+explicitly **not** an inbound API route. There is simply no API-side admin power yet. The
+tier stays declared so the next one lands there instead of being re-invented at a call
+site — the seam is the point, not its current cardinality.
 
-**Enforcement is one chokepoint:** the dataset-visibility gateway
-(`infrastructure/store/dataset_access.py`) — it reads `has_capability`
-(`shared/identity.py`) and hides install benchmarks from any identity lacking
-`BENCHMARKS_READ_CAP`. A gated read returns **404, not 403** (existence leakage is itself
-a violation). This satisfies ADR-0001's "capability gate on every handler" at the store
-boundary every read already funnels through — not a per-route dependency.
+**Who is host-admin** is *two deliberate predicates* — **never merge them** (merging
+regrants admin to every OIDC signup):
+- **Stage 0 (CLI / auth-off):** `shared/identity.py::_admin_caps_from_env` — the
+  `PROMPTPOTTER_ADMIN=1` env flag, sound only on the single-operator box.
+- **Stage 1 (web / OIDC):** `middleware/oidc.py::_session_capabilities` — the one pinned
+  identity in the default-claim marker (the web analogue of ADR-0004's chat-id lock). A
+  fresh box with no marker has no admin at all (secure-by-default).
 
-**Command-verb authorization (ADR-0005).** Beyond the admin/read caps, every
+**Dataset reads are NOT part of this tier**, and adding them back is the regression to
+watch for. `infrastructure/store/dataset_access.py` is a resolver, not a gate: tenant
+content first, then install content, no capability consulted. Tier 2 is what keeps one
+user's data from another's; a capability was never what did that work.
+
+---
+
+## Tier 1b — owner ↔ delegate: authorization
+
+**What a principal may do** is one definition: `CAMPAIGN_CAP_BY_TIER` in
+`shared/identity.py`, from which `OWNER_COMMAND_CAPABILITIES` is *derived* so the two can
+never drift. Adding a power = one line there. Kept separate from `ADMIN_CAPABILITIES`:
+owning a tenant is not running the box.
+
+**Who holds what:** every authenticated user owns their own tenant and holds the full owner
+set (`_identity_context_from_session`, `presentation/api/middleware/oidc.py`); the single
+local operator gets the same from `default_identity` (`shared/identity.py`) on the CLI /
+auth-off path. A **delegate** holds an attenuated subset — see below.
+
+**Command-verb authorization (ADR-0005).** Every
 control-plane command requires a **tier capability** — `CAMPAIGN_{STEP,RUN,CREATE,BUDGET,LIFECYCLE,BABYSIT}_CAP`
 (`shared/identity.py`, enumerated once as `CAMPAIGN_CAP_BY_TIER`). Enforcement is a
 **second one-chokepoint**: `_require_capability_for` reads `CAP_FOR_KIND[kind]` at the
@@ -149,10 +182,10 @@ not backend-supplied.
 
 | Concern | Look at |
 |---|---|
-| Admin capability set (one definition) | `shared/identity.py::ADMIN_CAPABILITIES` |
-| Who-is-admin (two predicates) | `shared/identity.py::_admin_caps_from_env`, `middleware/oidc.py::_session_capabilities` |
-| Capability gate (one chokepoint) | `store/dataset_access.py`, `shared/identity.py::has_capability` |
-| Command-verb gate (second chokepoint) | `command_dispatcher/dispatcher.py::_require_capability_for` + `CAP_FOR_KIND` |
+| Host-admin capability set (one definition) | `shared/identity.py::ADMIN_CAPABILITIES` (empty; powers ride the ADR-0004 channel) |
+| Who-is-host-admin (two predicates, never merged) | `shared/identity.py::_admin_caps_from_env`, `middleware/oidc.py::_session_capabilities` |
+| Dataset resolution (NOT a capability gate) | `store/dataset_access.py::readable_dataset_dir` — tenant content, then install content |
+| Command-verb gate (the one chokepoint) | `command_dispatcher/dispatcher.py::_require_capability_for` + `CAP_FOR_KIND` |
 | Command tier caps (one enumeration) | `shared/identity.py::CAMPAIGN_CAP_BY_TIER`, `OWNER_COMMAND_CAPABILITIES` |
 | Sealed sub-principal grant store | `infrastructure/identity/grants.py` (`.promptpotter/identity/grants.json`) |
 | Delegation attenuation (enforced at read) | `grants.py::resolve_effective_capabilities`, `middleware/oidc.py::_delegated_identity` |

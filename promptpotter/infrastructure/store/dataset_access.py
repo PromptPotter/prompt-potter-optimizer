@@ -9,15 +9,11 @@ Two classes of dataset exist, and the split is by *ownership*, not by permission
   ``promptpotter-self`` that SHIP WITH THE PRODUCT. Every one of them is tracked
   in git, so anyone who has the install already has these bytes on disk.
 
-Install content therefore carries no capability check: gating a read on data that
-arrives with the checkout protects nothing, while denying it blanks every panel
-bound to a benchmark campaign. A private cut is not install content and does not
-belong in the repo dir — it belongs in the tenant, where path isolation already
-protects it. (The predecessor of this module gated repo ``datasets/`` behind a
-``datasets.benchmarks.read`` capability granted by a ``PROMPTPOTTER_ADMIN=1`` env
-flag. It existed to protect one gitignored scratch cut living in the install dir,
-and the cost was that the pipeline hero and the hard-sample leaderboard rendered
-blank for every benchmark campaign unless that flag was set.)
+Install content therefore carries **no capability check**, and adding one back is
+the mistake to avoid: gating a read on bytes that arrive with the checkout
+protects nothing, while denying it blanks every panel bound to that campaign. A
+private cut is not install content — it belongs in the tenant, where path
+isolation already protects it, not in the repo dir.
 
 Resolution is tenant-first, so a tenant may shadow an install slug with its own.
 
@@ -40,9 +36,8 @@ from promptpotter.infrastructure.store.stores import Stores
 class DatasetAccessError(Exception):
     """No dataset *name* this identity can resolve — invalid slug, or absent.
 
-    The router maps it to 404. Kept as one exception because there is now one
-    reason: the dataset is not there. (It formerly also meant "exists but you
-    may not see it"; install content no longer hides.)
+    The router maps it to 404. One exception because there is one reason: the
+    dataset is not there.
     """
 
     def __init__(self, name: str) -> None:
@@ -91,12 +86,11 @@ def _is_internal(name: str) -> bool:
 
     ``_optimizer`` / ``_optimizer_meta`` hold the meta-prompt pipelines the loop runs
     *with*; no one mints a campaign against them. The leading underscore is the
-    existing convention that says so, and the wire contract already agrees — the
-    ``slug`` pattern in ``m12-api-openapi.yaml::DatasetIndexEntry`` is
-    ``^[a-z][a-z0-9_-]*$``, which no ``_``-prefixed name can match. Listing one was
-    always out-of-contract; it only stayed invisible while install content needed a
-    capability nobody but a developer held. :func:`readable_dataset_dir` still
-    resolves them by exact name, which is how the loop reads them.
+    convention that says so, and the wire contract agrees — the ``slug`` pattern in
+    ``m12-api-openapi.yaml::DatasetIndexEntry`` is ``^[a-z][a-z0-9_-]*$``, which no
+    ``_``-prefixed name can match, so listing one is out-of-contract.
+    :func:`readable_dataset_dir` still resolves them by exact name, which is how the
+    loop reads them.
     """
     return name.startswith("_")
 

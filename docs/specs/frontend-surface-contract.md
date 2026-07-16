@@ -341,8 +341,7 @@ controls:
 ## Coverage
 
 The authenticated + live-campaign surface is verified against real on-disk
-campaigns via the faithful harness (`PROMPTPOTTER_AUTH=off` +
-`PROMPTPOTTER_ADMIN=1` for benchmark campaigns — recipe + why the admin flag:
+campaigns via the faithful harness (`PROMPTPOTTER_AUTH=off` — recipe:
 [`../../webapp/CLAUDE.md`](../../webapp/CLAUDE.md) § Testing posture).
 
 Two states remain **un-exercised** (not contract gaps — just unreached here):
