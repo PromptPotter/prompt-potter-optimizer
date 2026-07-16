@@ -34,13 +34,16 @@ export function PipelineNodeList() {
         // (demo / not-yet-loaded) → no badge, not a false "open".
         const params = schema?.[n.id];
         const locked = params != null && params.every((p) => !p.optimizer_tunable);
+        const isSelected = selected?.scope === "target" && selected.id === n.id;
         return (
           <li key={n.id}>
             {i > 0 ? <span aria-hidden="true">→</span> : null}
             <button
               type="button"
-              aria-pressed={selected === n.id}
-              onClick={() => setSelectionForNode(selected === n.id ? null : n.id)}
+              aria-pressed={isSelected}
+              onClick={() =>
+                setSelectionForNode(isSelected ? null : { id: n.id, scope: "target" })
+              }
             >
               {locked ? (
                 <span className="pnl-lock" title="Optimizer-locked" aria-label="optimizer-locked">

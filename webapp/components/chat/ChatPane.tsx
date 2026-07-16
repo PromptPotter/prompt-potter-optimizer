@@ -6,7 +6,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { useIngestFlow } from "@/lib/hooks/useIngestFlow";
 import { IngestConversation } from "@/components/ingest/IngestConversation";
 import type { OnMinted } from "@/components/ingest/types";
-import { TERMS, targetNodeIds } from "@/lib/terms";
+import { TERMS } from "@/lib/terms";
 import { headlineStats, isSelfOptimization, readSpend } from "@/lib/derivations";
 import { fmtText, fmtDuration, fmtUsd, fmtTokens, fmtPct0, fmtPctSigned } from "@/lib/format";
 import { Switch } from "@/components/ui";
@@ -50,6 +50,7 @@ interface Props {
   // True while the displayed dataset slice is from a prior (unit, scope) and
   // a fresh fetch is in flight — lets the table dim instead of blanking.
   datasetStale: boolean;
+  datasetError: string | null;
   hardSamplesScope: HardSamplesScope;
   onHardSamplesScopeChange: (s: HardSamplesScope) => void;
   // Bumped by the shell's "New campaign" button while this tab is in view —
@@ -95,6 +96,7 @@ export function ChatPane({
   datasetSplitTest,
   archivePerSample,
   datasetStale,
+  datasetError,
   hardSamplesScope,
   onHardSamplesScopeChange,
   newCampaignTick,
@@ -164,10 +166,10 @@ export function ChatPane({
   // inner campaigns — so the hard-samples panels point to the inner run instead.
   const selfOpt = isSelfOptimization(cv.backendType);
   const { node: selectedNode, setSelectionForNode } = useSelection();
-  // Target-node ids are disjoint from the optimizer canvas (membership-gate);
-  // the demo/preview hero with no view exposes the synthetic "llm" chip id.
-  const showBackendDetail =
-    selectedNode != null && targetNodeIds(cv.view).includes(selectedNode);
+  // The scope the click was recorded with — NOT a name test. The ids are not a
+  // disjoint namespace: pp-self's target pipeline declares `l1_generate` &
+  // friends, the optimizer's own node names.
+  const showBackendDetail = selectedNode?.scope === "target";
   // While a campaign is being set up, the connector preview shows the DRAFT's
   // searchpoint (not the prior cycle / origin). Carries through awaiting-context
   // and ready — the two phases that hold a draft.
@@ -311,6 +313,7 @@ export function ChatPane({
               datasetSplitTest={datasetSplitTest}
               archivePerSample={archivePerSample}
               datasetStale={datasetStale}
+              datasetError={datasetError}
               hardSamplesScope={hardSamplesScope}
               onHardSamplesScopeChange={onHardSamplesScopeChange}
             />

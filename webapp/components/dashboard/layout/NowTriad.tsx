@@ -1,10 +1,5 @@
 "use client";
-import {
-  isOptimizerNodeId,
-  OptimizerNodeDetail,
-  WorkflowCanvas,
-  type PipelineDoc,
-} from "@/components/workflow";
+import { OptimizerNodeDetail, WorkflowCanvas, type PipelineDoc } from "@/components/workflow";
 import { CandidatesCard } from "@/components/candidates/CandidatesCard";
 import { ForestCard } from "@/components/candidates/ForestCard";
 import { useCandidatesState } from "@/components/candidates/candidates-store";
@@ -58,9 +53,9 @@ export function NowTriad({ pipeline }: Props) {
           />
         </div>
       )}
-      {node && isOptimizerNodeId(node) && (
+      {node?.scope === "optimizer" && (
         <OptimizerNodeDetail
-          id={node}
+          id={node.id}
           pipeline={pipeline}
           onClose={() => setSelectionForNode(null)}
         />

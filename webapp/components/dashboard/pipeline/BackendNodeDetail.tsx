@@ -78,7 +78,11 @@ export function BackendNodeDetail({ draft, onClose, onPromptApply }: Props) {
   // `cv` self-sourced from the nearest ConnectorProvider.
   const cv = useConnector();
   const { dash, isLive } = useDashboard();
-  const { node: selectedId, candidate: selCand } = useSelection();
+  const { node: selected, candidate: selCand } = useSelection();
+  // Target-scoped selections only — this panel renders the BACKEND node. An
+  // optimizer-scoped id could otherwise match a same-named target node (pp-self
+  // declares `l1_generate` on both canvases).
+  const selectedId = selected?.scope === "target" ? selected.id : null;
   const node = cv.view?.nodes.find((n) => n.id === selectedId && n.kind !== "io") ?? null;
 
   // The selected node id scopes prompt resolution: a meta-prompt node (pp-self's

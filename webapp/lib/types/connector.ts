@@ -22,10 +22,20 @@
 import type { BackendHealth, BackendInfo, NodeConfigParam, NodeOutputSchema } from "@/lib/api";
 import type { NodeDataLike, PipelineView } from "@/components/workflow";
 
+// How the `GET /datasets/{name}/pipeline` read went. A null `view` alone cannot
+// say WHY — in flight, failed, and no-dataset-bound all read as null, and the
+// hero rendered the same silent dash for all three (claiming `aria-busy` forever
+// on a read that had already failed). Consumers must distinguish them: an
+// operator staring at a dash cannot tell a loading pipeline from a broken one.
+export type PipelineStatus = "unbound" | "loading" | "ok" | "error";
+
 export interface ConnectorView {
   connector: string | null;
   backendType: string | null;
   view: PipelineView | null;
+  // Why `view` is what it is. Pairs with `view`; never infer state from `view`
+  // being null.
+  pipelineStatus: PipelineStatus;
   active: BackendInfo | null;
   others: BackendInfo[];
   baseUrl: string | null;

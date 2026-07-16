@@ -29,9 +29,12 @@ interface ScopeSlice {
 interface DatasetPreviewState extends ScopeSlice {
   splitTest: number | null;
   isStale: boolean;
-  // Honest failure signal — set when the dataset-scope fetch (the spine)
-  // threw for the unit in view. Additive: consumers may ignore it (the table
-  // already renders an empty state for an empty slice).
+  // Honest failure signal — set when the dataset-scope fetch (the spine) threw
+  // for the unit in view. Consumers MUST render it: an empty slice and a failed
+  // read are different facts, and the heatmap's own guard cannot tell them apart
+  // from `items` alone. (This comment used to claim the table renders an empty
+  // state for an empty slice; it did not — it returned null, so a 404 was
+  // indistinguishable from a collapsed panel and this field had no consumer.)
   error: string | null;
 }
 

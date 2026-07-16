@@ -49,13 +49,14 @@ import {
 import { useAuthGate } from "@/lib/auth-context";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { usePoll } from "@/lib/hooks/usePoll";
-import type { ConnectorView } from "@/lib/types";
+import type { ConnectorView, PipelineStatus } from "@/lib/types";
 import type { NodeDataLike, PipelineView } from "@/components/workflow";
 
 const EMPTY: ConnectorView = {
   connector: null,
   backendType: null,
   view: null,
+  pipelineStatus: "unbound",
   active: null,
   others: [],
   baseUrl: null,
@@ -79,6 +80,12 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
   const { authed, onAuthError } = useAuthGate();
   const [backends, setBackends] = useState<BackendInfo[]>([]);
   const [view, setView] = useState<PipelineView | null>(null);
+  // The dataset the resolved fields below were fetched FOR, plus whether that
+  // fetch failed. Stamping the key (rather than resetting state in the effect)
+  // is the pure-derivation recipe in webapp/CLAUDE.md § State reset on prop
+  // change: freshness is computed during render, so switching campaigns can
+  // never paint the previous dataset's pipeline for a frame.
+  const [loaded, setLoaded] = useState<{ key: string; failed: boolean } | null>(null);
   const [connector, setConnector] = useState<string | null>(null);
   const [backendType, setBackendType] = useState<string | null>(null);
   const [nodeConfigSchema, setNodeConfigSchema] = useState<Record<
@@ -163,6 +170,7 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
           setNodeConfigSchema(resp?.node_config_schema ?? null);
           setNodeOutputSchema(resp?.node_output_schema ?? null);
           setOriginPromptFields(resp?.origin_prompt_fields ?? null);
+          setLoaded({ key: datasetName, failed: false });
         }
       } catch {
         if (!cancelled) {
@@ -172,6 +180,7 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
           setNodeConfigSchema(null);
           setNodeOutputSchema(null);
           setOriginPromptFields(null);
+          setLoaded({ key: datasetName, failed: true });
         }
       }
     })();
@@ -227,6 +236,13 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
 
   return useMemo<ConnectorView>(() => {
     if (!datasetName) return { ...EMPTY, isLive, currentNodes, phase };
+    // Every field below is dataset-derived, so until this dataset's own fetch has
+    // landed they belong to the PREVIOUS one. Report "loading" and withhold them
+    // rather than paint another campaign's pipeline as this one's.
+    if (loaded?.key !== datasetName) {
+      return { ...EMPTY, pipelineStatus: "loading", isLive, currentNodes, phase };
+    }
+    const pipelineStatus: PipelineStatus = loaded.failed ? "error" : "ok";
     const active = connector ? backends.find((b) => b.name === connector) ?? null : null;
     const baseUrl = active?.base_url ?? null;
     // One physical endpoint can hold many registrations — today the mint/ingest
@@ -247,6 +263,7 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
       connector,
       backendType,
       view,
+      pipelineStatus,
       active,
       others: active ? distinct.filter((b) => b !== active) : distinct,
       baseUrl,
@@ -264,6 +281,7 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
     connector,
     backendType,
     view,
+    loaded,
     backends,
     currentNodes,
     isLive,

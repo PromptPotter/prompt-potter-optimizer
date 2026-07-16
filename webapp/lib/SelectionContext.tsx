@@ -7,7 +7,8 @@ import type { SelectedCandidate } from "@/lib/types";
 //   - candidate — which searchpoint is the operator inspecting
 //   - round     — which L1-round are the lineage / fitness / samples
 //                 surfaces scoped to (null = follow live in-flight)
-//   - node      — which optimizer node is open for drill (workflow detail)
+//   - node      — which node is open for drill, AND which canvas it was
+//                 clicked on (see SelectedNode)
 //   - sampleSet — a fixed set of sample ids to recompute the per-candidate
 //                 fitness bars over (null = each bar over its own samples).
 //                 Populated by the Sample-trajectory "Steps" view; consumed
@@ -21,10 +22,26 @@ import type { SelectedCandidate } from "@/lib/types";
 
 export type { SelectedCandidate };
 
+// Which canvas a node was selected on. Load-bearing: a node ID alone does NOT
+// identify a node, because the two canvases are NOT disjoint namespaces. The
+// `promptpotter-self` TARGET pipeline declares nodes named `l1_generate` /
+// `l1_critique` / `l2_context` / `l3_plan` — byte-identical to the OPTIMIZER's
+// own node ids. Under an id-only selection, clicking `l1_generate` on the chat
+// hero (a target node) also opened OptimizerNodeDetail for the optimizer's
+// unrelated `l1_generate` on the Dashboard. The clicked canvas is the only thing
+// that disambiguates them, so the writer records it rather than a reader
+// guessing from the name.
+export type NodeScope = "optimizer" | "target";
+
+export interface SelectedNode {
+  id: string;
+  scope: NodeScope;
+}
+
 interface Ctx {
   candidate: SelectedCandidate | null;
   round: number | null;
-  node: string | null;
+  node: SelectedNode | null;
   sampleSet: number[] | null;
   // Atomic candidate+round write. Passing null clears both axes.
   setSelectionForCandidate: (c: SelectedCandidate | null) => void;
@@ -32,8 +49,9 @@ interface Ctx {
   // differs — a stranded highlight on the wrong round is never the
   // user's intent.
   setSelectionForRound: (r: number | null) => void;
-  // Workflow-node write. Independent of the candidate/round pair.
-  setSelectionForNode: (n: string | null) => void;
+  // Node write — the caller names the canvas it is writing from. Independent
+  // of the candidate/round pair.
+  setSelectionForNode: (n: SelectedNode | null) => void;
   // Fixed-sample-set write. Passing null returns the fitness bars to
   // per-candidate-own-samples mode. Independent of the other axes.
   setSelectionForSampleSet: (ids: number[] | null) => void;
@@ -56,7 +74,7 @@ export function SelectionProvider({
 }) {
   const [candidate, setCandidate] = useState<SelectedCandidate | null>(null);
   const [round, setRound] = useState<number | null>(null);
-  const [node, setNode] = useState<string | null>(null);
+  const [node, setNode] = useState<SelectedNode | null>(null);
   const [sampleSet, setSampleSet] = useState<number[] | null>(null);
   const [prevCycle, setPrevCycle] = useState(cycleId);
   if (cycleId !== prevCycle) {
@@ -85,7 +103,7 @@ export function SelectionProvider({
     }
   }, []);
 
-  const setSelectionForNode = useCallback((n: string | null) => {
+  const setSelectionForNode = useCallback((n: SelectedNode | null) => {
     setNode(n);
   }, []);
 

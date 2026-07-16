@@ -124,6 +124,7 @@ function AppShellInner() {
     splitTest: datasetSplitTest,
     archivePerSample,
     isStale: datasetStale,
+    error: datasetError,
   } = useDatasetPreview(viewedPath, leafDatasetName, hardSamplesScope);
   // Sidebar collapse — user-driven, persistent across reloads. Default
   // expanded; once the user collapses it, that sticks until they toggle
@@ -339,6 +340,7 @@ function AppShellInner() {
             datasetSplitTest={datasetSplitTest}
             archivePerSample={archivePerSample}
             datasetStale={datasetStale}
+            datasetError={datasetError}
             hardSamplesScope={hardSamplesScope}
             onHardSamplesScopeChange={setHardSamplesScope}
             newCampaignTick={newCampaignTick}

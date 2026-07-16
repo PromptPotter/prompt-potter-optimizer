@@ -44,15 +44,6 @@ export const LAYOUT: Record<string, NodePoint> = {
   l1_critique: { cx: 286, cy: 120 },
 };
 
-// Whether a selected node id belongs to the optimizer canvas (these LAYOUT
-// keys are the only clickable optimizer dots). The target/backend pipeline ids
-// (`llm_only`, …) are a disjoint namespace, so this is the membership gate that
-// keeps OptimizerNodeDetail and BackendNodeDetail from cross-rendering on the
-// shared SelectionContext.node axis.
-export function isOptimizerNodeId(id: string | null): boolean {
-  return id != null && id in LAYOUT;
-}
-
 export type EdgeKind = "forward" | "loop" | "directive" | "escalate";
 
 export interface EdgeGeometry {

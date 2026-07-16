@@ -1,11 +1,12 @@
 "use client";
 import type { PipelineView, PipelineViewNode } from "@/components/workflow";
 import type { NodeConfigParam } from "@/lib/api";
+import type { PipelineStatus } from "@/lib/types";
 import { ConnectorInspector } from "./ConnectorInspector";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useSelection } from "@/lib/SelectionContext";
-import { isSelfOptimization, liveObserveConfig } from "@/lib/derivations";
+import { liveObserveConfig } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
 
 // The backend target LLM is being called throughout L1 scoring (and origin).
@@ -141,14 +142,14 @@ function SingleNodeChip({
   const { node: selected, setSelectionForNode: setSelected } = useSelection();
   const active = isLive && BACKEND_ACTIVE_PHASES.has(phase ?? "");
   const model = active ? (liveModelFor(node.id) ?? "running") : "idle";
-  const isSelected = selected === node.id;
+  const isSelected = selected?.scope === "target" && selected.id === node.id;
   return (
     <button
       type="button"
       className={cx("wf-hero-node", "llm", isSelected && "selected", active && "active")}
       aria-pressed={isSelected}
       aria-label={`Node: ${node.label}`}
-      onClick={() => setSelected(isSelected ? null : node.id)}
+      onClick={() => setSelected(isSelected ? null : { id: node.id, scope: "target" })}
     >
       <div className="head">
         <div className="ico">{LLM_ICON}</div>
@@ -159,24 +160,34 @@ function SingleNodeChip({
   );
 }
 
-// No pipeline view loaded yet — the `/datasets/{name}/pipeline` fetch is in flight,
-// failed, or no dataset is bound. NOT a real node: we must not fabricate a single
-// "LLM" chip here (it would misrepresent a failed/loading fetch — or a real 5-node
-// pipeline — as a genuine single-LLM pipeline). Neutral, non-clickable, no model value.
-// For an L4 self-optimization unit the empty `view` is not a failure — it has no
-// HTTP pipeline; label it honestly rather than as an unavailable one.
-function PipelinePlaceholder({ selfOpt }: { selfOpt: boolean }) {
+// No pipeline view to draw. NOT a real node: we must not fabricate a single "LLM"
+// chip here (it would misrepresent a failed/loading fetch — or a real 5-node
+// pipeline — as a genuine single-LLM pipeline). Neutral, non-clickable, no model.
+//
+// The three reasons `view` can be missing are DIFFERENT and must read differently.
+// This once collapsed them into one "—" with an unconditional `aria-busy`, so a
+// read that had already failed announced itself as loading, forever — the operator
+// had no way to tell a slow pipeline from a broken one, and the answer to "why is
+// there a dash?" was only findable in the network tab.
+function PipelinePlaceholder({ status }: { status: PipelineStatus }) {
+  const [label, value, hint] =
+    status === "error"
+      ? (["Pipeline", "unavailable", "Couldn't read this campaign's dataset."] as const)
+      : status === "loading"
+        ? (["Pipeline", "loading…", undefined] as const)
+        : (["Pipeline", "none", "No dataset bound to this campaign."] as const);
   return (
     <div
       className="wf-hero-node"
-      aria-label={selfOpt ? "Self-optimization (L4)" : "Pipeline unavailable"}
-      aria-busy={selfOpt ? undefined : true}
+      aria-label={`Pipeline ${value}`}
+      aria-busy={status === "loading" || undefined}
+      title={hint}
     >
       <div className="head">
         <div className="ico">{LLM_ICON}</div>
-        <div className="lbl">{selfOpt ? "Self-opt" : "Pipeline"}</div>
+        <div className="lbl">{label}</div>
       </div>
-      <div className="val">{selfOpt ? "L4" : "—"}</div>
+      <div className="val">{value}</div>
     </div>
   );
 }
@@ -239,10 +250,13 @@ function MultiNodeStrip({
           <path key={`edge-${i}`} className="edge" d={edgePath(i)} />
         ))}
         {interior.map((n, i) => {
-          const isSelected = selected === n.id;
+          const isSelected = selected?.scope === "target" && selected.id === n.id;
           const isLlm = n.kind === "llm";
           const active = isLlm && isLive && BACKEND_ACTIVE_PHASES.has(phase ?? "");
-          const model = active ? (liveModelFor(n.id) ?? "running") : null;
+          // Same rest/active reading as SingleNodeChip — an LLM node at rest is
+          // "idle", not blank. Only LLM nodes get the sub-line: a tool node has no
+          // model, so "idle" there would imply a call that never happens.
+          const model = isLlm ? (active ? (liveModelFor(n.id) ?? "running") : "idle") : null;
           const cxPos = cxFor(i);
           const dotCls = cx(
             "node",
@@ -260,11 +274,11 @@ function MultiNodeStrip({
               tabIndex={0}
               aria-pressed={isSelected}
               aria-label={n.label}
-              onClick={() => setSelected(isSelected ? null : n.id)}
+              onClick={() => setSelected(isSelected ? null : { id: n.id, scope: "target" })}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
-                  setSelected(isSelected ? null : n.id);
+                  setSelected(isSelected ? null : { id: n.id, scope: "target" });
                 }
               }}
             >
@@ -297,7 +311,6 @@ function MultiNodeStrip({
 export function TargetPipelineHero({ samplesOpen, onToggle }: Props) {
   const cv = useConnector();
   const { dash } = useDashboard();
-  const selfOpt = isSelfOptimization(cv.backendType);
   const interior = cv.view ? interiorNodes(cv.view) : [];
   const soleNode = interior.length === 1 ? interior[0] : undefined;
   // The running searchpoint's resolved model when live; static origin otherwise.
@@ -325,10 +338,11 @@ export function TargetPipelineHero({ samplesOpen, onToggle }: Props) {
         <ConnectorInspector view={cv} />
       </div>
       {cv.view == null || interior.length === 0 ? (
-        // View not loaded (fetch in flight / failed / no dataset), a degenerate
-        // empty pipeline, or an L4 self-optimization unit with no HTTP pipeline —
-        // honest placeholder, never a fabricated node.
-        <PipelinePlaceholder selfOpt={selfOpt} />
+        // View not loaded (in flight / failed / no dataset bound) or a degenerate
+        // empty pipeline — honest placeholder, never a fabricated node. An `ok`
+        // read that still yields no interior nodes is a real empty pipeline, which
+        // reads as "none" — the same thing an unbound campaign has.
+        <PipelinePlaceholder status={cv.pipelineStatus === "ok" ? "unbound" : cv.pipelineStatus} />
       ) : soleNode ? (
         // A genuine single-node pipeline (first-class since the is_single_node
         // refactor) — render its REAL node, not a synthesized "LLM" stand-in.

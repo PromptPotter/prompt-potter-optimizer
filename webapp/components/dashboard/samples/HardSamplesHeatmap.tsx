@@ -27,6 +27,10 @@ interface Props {
   archivePerSample: Map<number, ArchiveDot[]>;
   // True while the displayed dataset slice is from a prior (unit, scope).
   datasetStale: boolean;
+  // Set when the roster read failed for the unit in view. Distinct from an empty
+  // roster: this panel must never answer a broken read with the same silence it
+  // gives a genuinely empty one.
+  datasetError: string | null;
   hardSamplesScope: HardSamplesScope;
   onHardSamplesScopeChange: (s: HardSamplesScope) => void;
 }
@@ -80,6 +84,7 @@ export function HardSamplesHeatmap({
   datasetSplitTest,
   archivePerSample,
   datasetStale,
+  datasetError,
   hardSamplesScope,
   onHardSamplesScopeChange,
 }: Props) {
@@ -131,7 +136,28 @@ export function HardSamplesHeatmap({
     return [...datasetItems].sort((a, b) => compareHardSamples(a, b, measuredIn));
   }, [datasetItems, archivePerSample]);
 
-  if (datasetItems.length === 0) return null;
+  // A failed read and an empty roster are different facts and read differently.
+  // Both used to `return null`, so a 404 was indistinguishable from a collapsed
+  // panel — the operator's only recourse was the network tab.
+  if (datasetError) {
+    return (
+      <div className="hs-heat-wrap">
+        <p className="hs-heat-empty" role="status">
+          Couldn&rsquo;t read this campaign&rsquo;s samples
+          {datasetName ? ` (${datasetName})` : ""}.
+        </p>
+      </div>
+    );
+  }
+  if (datasetItems.length === 0) {
+    return (
+      <div className="hs-heat-wrap">
+        <p className="hs-heat-empty" role="status">
+          No samples on this campaign&rsquo;s dataset yet.
+        </p>
+      </div>
+    );
+  }
 
   const totalHits = [...perSample.values()].reduce(
     (n, ms) => n + ms.filter((m) => m.hit).length,

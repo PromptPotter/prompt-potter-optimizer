@@ -186,7 +186,7 @@ export function WorkflowCanvas({ pipeline }: Props) {
               // round 2 picked while round 5 runs, a pulsing dot would be claiming
               // round 5's liveness for round 2's picture.
               const isActive = isLive && viewingLive && activeId === n.id;
-              const isSelected = selected === n.id;
+              const isSelected = selected?.scope === "optimizer" && selected.id === n.id;
               const isIo = n.kind === "io";
               const dotCls = [
                 "wf-dot",
@@ -220,12 +220,14 @@ export function WorkflowCanvas({ pipeline }: Props) {
                   aria-label={isIo ? `${n.label} (I/O)` : `Node: ${n.label}`}
                   aria-pressed={isSelected || undefined}
                   aria-disabled={isIo || undefined}
-                  onClick={() => !isIo && setSelected(isSelected ? null : n.id)}
+                  onClick={() =>
+                    !isIo && setSelected(isSelected ? null : { id: n.id, scope: "optimizer" })
+                  }
                   onKeyDown={(e) => {
                     if (isIo) return;
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
-                      setSelected(isSelected ? null : n.id);
+                      setSelected(isSelected ? null : { id: n.id, scope: "optimizer" });
                     }
                   }}
                 >

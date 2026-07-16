@@ -89,8 +89,6 @@ export function HardSamplesTable({
   const virtualRows = virtualizer.getVirtualItems();
   const totalHeight = virtualizer.getTotalSize();
 
-  if (datasetItems.length === 0) return null;
-
   return (
     <div className="hs-zone">
       <div

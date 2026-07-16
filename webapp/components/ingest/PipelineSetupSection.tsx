@@ -98,10 +98,11 @@ function PipelineSetupInner({
   const researchSteps = nodes.map((n) => n.id);
   const hasResearch = researchSteps.length > 0;
   const isLlmOnly = arraysEqual(draft.optimizer_locks.pipeline, LLM_ONLY);
-  // A node detail is only valid when the selection is one of THIS view's nodes
-  // (the selection axis is app-global; a Chat-tab selection for another dataset
-  // simply won't match, so no stale detail shows).
-  const showDetail = selected != null && targetNodeIds(cv.view).includes(selected);
+  // A node detail is only valid for a target-scoped selection that is one of
+  // THIS view's nodes (the selection axis is app-global; a Chat-tab selection
+  // for another dataset simply won't match, so no stale detail shows).
+  const showDetail =
+    selected?.scope === "target" && targetNodeIds(cv.view).includes(selected.id);
 
   // Open the LLM node by default once the view loads — the prompt is the central
   // setup edit, and it lives inside that node's surface (config → prompt →
@@ -112,7 +113,7 @@ function PipelineSetupInner({
   useEffect(() => {
     if (!autoOpened.current && !isLlmOnly && selected == null && llmNodeId) {
       autoOpened.current = true;
-      setSelectionForNode(llmNodeId);
+      setSelectionForNode({ id: llmNodeId, scope: "target" });
     }
   }, [isLlmOnly, selected, llmNodeId, setSelectionForNode]);
 
