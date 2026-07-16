@@ -20,8 +20,8 @@ export const TrendChart = memo(function TrendChart() {
   // getCss() values into the chart data/options below.
   useThemeVersion();
   const { points, best: bestData } = useMemo(
-    () => fitnessTrend(dash?.rounds),
-    [dash?.rounds],
+    () => fitnessTrend(dash?.rounds, dash?.best),
+    [dash?.rounds, dash?.best],
   );
   const curData = points.map((p) => p.composite);
   const labels = points.map((p) => String(p.round));

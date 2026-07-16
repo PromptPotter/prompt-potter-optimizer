@@ -1,11 +1,11 @@
 "use client";
-import type { PipelineDoc } from "./types";
+import { nodeKindLabel, type PipelineDoc } from "./types";
 import { RoundSamplesView } from "@/components/dashboard/samples/RoundSamplesView";
 import { availableRounds } from "@/lib/derivations";
 import { useRoundNodes } from "@/lib/hooks/useRoundNodes";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { activeNodeId } from "./layout";
-import { fmtSecs } from "@/lib/format";
+import { fmtSecs, fmtValue } from "@/lib/format";
 import { CopyButton } from "@/components/ui";
 import { NodeConfigEditor } from "@/components/dashboard/control/NodeConfigEditor";
 import type { NodeBlock } from "@/lib/types";
@@ -14,17 +14,6 @@ interface Props {
   id: string;
   pipeline: PipelineDoc | null;
   onClose: () => void;
-}
-
-function fmtVal(v: unknown): string {
-  if (v == null) return "—";
-  if (typeof v === "string") return v;
-  if (typeof v === "number" || typeof v === "boolean") return String(v);
-  try {
-    return JSON.stringify(v, null, 2);
-  } catch {
-    return String(v);
-  }
 }
 
 export function OptimizerNodeDetail({ id, pipeline, onClose }: Props) {
@@ -83,12 +72,7 @@ export function OptimizerNodeDetail({ id, pipeline, onClose }: Props) {
         ? "not yet fired"
         : kind;
 
-  const kindBadge =
-    kind === "llm" ? "LLM"
-    : kind === "measurement" ? "system step"
-    : kind === "phase" ? "phase"
-    : kind === "io" ? "I/O"
-    : kind;
+  const kindBadge = nodeKindLabel(kind);
 
   return (
     <div className="opt-detail">
@@ -182,7 +166,7 @@ export function OptimizerNodeDetail({ id, pipeline, onClose }: Props) {
                     <div key={k} className="opt-detail-field">
                       <dt>{k}</dt>
                       <dd>
-                        <pre>{fmtVal(v)}</pre>
+                        <pre>{fmtValue(v, { pretty: true })}</pre>
                       </dd>
                     </div>
                   ))}
@@ -199,11 +183,11 @@ export function OptimizerNodeDetail({ id, pipeline, onClose }: Props) {
             </div>
             <div className="opt-detail-col-body">
               {response != null ? (
-                <pre className="opt-detail-pre">{fmtVal(response)}</pre>
+                <pre className="opt-detail-pre">{fmtValue(response, { pretty: true })}</pre>
               ) : isLiveNow ? (
                 <div className="opt-detail-col-empty">In flight — response not yet written.</div>
               ) : Object.keys(otherOutput).length > 0 ? (
-                <pre className="opt-detail-pre">{fmtVal(otherOutput)}</pre>
+                <pre className="opt-detail-pre">{fmtValue(otherOutput, { pretty: true })}</pre>
               ) : (
                 <div className="opt-detail-col-empty">No response on this block.</div>
               )}
@@ -222,13 +206,13 @@ export function OptimizerNodeDetail({ id, pipeline, onClose }: Props) {
         {block && (
           <details className="opt-detail-disclosure">
             <summary>raw input</summary>
-            <pre className="opt-detail-pre">{fmtVal(block.input ?? {})}</pre>
+            <pre className="opt-detail-pre">{fmtValue(block.input ?? {}, { pretty: true })}</pre>
           </details>
         )}
         {block && (
           <details className="opt-detail-disclosure">
             <summary>raw output</summary>
-            <pre className="opt-detail-pre">{fmtVal(block.output ?? {})}</pre>
+            <pre className="opt-detail-pre">{fmtValue(block.output ?? {}, { pretty: true })}</pre>
           </details>
         )}
       </footer>

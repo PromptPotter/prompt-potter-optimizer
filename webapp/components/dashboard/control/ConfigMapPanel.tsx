@@ -11,6 +11,7 @@ import { useFetch } from "@/lib/hooks/useFetch";
 import { fetchConfigMap, type ConfigCoupling } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace";
 import { CardFrame, Badge, type BadgeTone } from "@/components/ui";
+import { fmtValue } from "@/lib/format";
 
 const SEVERITY_TONE: Record<string, BadgeTone> = {
   collision: "danger",
@@ -21,14 +22,6 @@ const SEVERITY_TONE: Record<string, BadgeTone> = {
 function sourceTone(source: string): BadgeTone {
   if (source === "campaign" || source === "required") return "accent";
   return "default"; // default | constant — muted
-}
-
-function fmtValue(value: unknown): string {
-  if (value === null || value === undefined) return "—";
-  if (typeof value === "boolean") return value ? "ON" : "OFF";
-  if (Array.isArray(value)) return value.length === 0 ? "[]" : JSON.stringify(value);
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
 }
 
 function CouplingRow({ c }: { c: ConfigCoupling }) {

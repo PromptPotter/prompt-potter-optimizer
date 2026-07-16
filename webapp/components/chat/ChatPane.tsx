@@ -8,7 +8,7 @@ import { IngestConversation } from "@/components/ingest/IngestConversation";
 import type { OnMinted } from "@/components/ingest/types";
 import { TERMS, targetNodeIds } from "@/lib/terms";
 import { headlineStats, isSelfOptimization, readSpend } from "@/lib/derivations";
-import { fmtText, fmtDuration, fmtUsd, fmtTokens, fmtPct0 } from "@/lib/format";
+import { fmtText, fmtDuration, fmtUsd, fmtTokens, fmtPct0, fmtPctSigned } from "@/lib/format";
 import { Switch } from "@/components/ui";
 import { CandidatesCard } from "@/components/candidates/CandidatesCard";
 import { HardSamplesHeatmap } from "@/components/dashboard/samples/HardSamplesHeatmap";
@@ -194,8 +194,7 @@ export function ChatPane({
   // Lead the job-bar with the running winner's LIFT over origin — the meaningful
   // number for a live run; absolute best rides as secondary context (the log keeps
   // absolute). `delta` is the same-basis `best − origin` from `headlineStats`.
-  const deltaPct =
-    delta != null ? `${delta >= 0 ? "+" : ""}${(delta * 100).toFixed(0)}%` : "—";
+  const deltaPct = fmtPctSigned(delta);
 
   const {
     backendUsd,

@@ -1,6 +1,7 @@
 "use client";
 
 import type { DatasetIndexEntry, OriginEntry } from "@/lib/api";
+import { fmtPct0 } from "@/lib/format";
 
 // New Campaign entry list — two scrollable menus (≤8 rows each), one click:
 //   Origins  → reuse a real, runnable origin (from `GET /origins` — campaign-
@@ -33,7 +34,7 @@ export function DatasetPickList({
   // "N campaigns · last 42%", or "prepared" for an origin with no campaign yet.
   const originMeta = (o: OriginEntry): string => {
     if (o.n_campaigns === 0) return "prepared";
-    const acc = o.origin_accuracy == null ? "" : ` · ${Math.round(o.origin_accuracy * 100)}%`;
+    const acc = o.origin_accuracy == null ? "" : ` · ${fmtPct0(o.origin_accuracy)}`;
     return `${o.n_campaigns} campaign${o.n_campaigns === 1 ? "" : "s"}${acc}`;
   };
 

@@ -12,6 +12,21 @@ export interface PipelineViewNode {
   kind?: string;
 }
 
+// Human label for a PipelineViewNode.kind — the ONE kind→label map (the node
+// detail badge and the canvas sublabel were spelling "system step" separately).
+export function nodeKindLabel(kind: string | undefined): string {
+  switch (kind) {
+    case "llm":
+      return "LLM";
+    case "measurement":
+      return "system step";
+    case "io":
+      return "I/O";
+    default:
+      return kind ?? "";
+  }
+}
+
 export interface PipelineViewEdge {
   from: string;
   to: string;

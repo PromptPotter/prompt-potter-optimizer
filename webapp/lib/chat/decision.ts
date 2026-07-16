@@ -11,6 +11,8 @@
 
 import type { DashboardSnapshot } from "@/lib/poll";
 import type { OriginGateDecision } from "@/lib/api";
+import type { DegradationHealth } from "@/lib/api/types";
+import { roundHealthAt } from "@/lib/derivations";
 
 interface DecisionButton {
   decision: OriginGateDecision;
@@ -18,24 +20,13 @@ interface DecisionButton {
   variant: "primary" | "ghost" | "danger";
 }
 
-// The origin verdict the gate holds on — the `health` block of round 0
-// (`dashboard.json::rounds[round==0].health`), the same shape the deleted modal
-// read. Loose by design: dashboard.json is operator-facing JSON.
-export interface GateVerdict {
-  grade: string;
-  degradedRate?: number;
-  structuralCount?: number;
-  transientCount?: number;
-  dominantNode?: string;
-  suggestedAction?: string;
-  reasons: string[];
-}
-
 export interface DecisionItem {
   kind: "origin-gate";
   title: string;
   lead: string;
-  verdict: GateVerdict | null;
+  // The origin verdict the gate holds on — round 0's backend-computed `health`
+  // block, the generated type (no loose re-parse; R-36: served, never recomputed).
+  verdict: DegradationHealth | null;
   buttons: DecisionButton[];
 }
 
@@ -45,37 +36,6 @@ const GATE_BUTTONS: DecisionButton[] = [
   { decision: "abort", label: "Abort", variant: "danger" },
 ];
 
-function asRec(v: unknown): Record<string, unknown> {
-  return v && typeof v === "object" ? (v as Record<string, unknown>) : {};
-}
-function num(v: unknown): number | undefined {
-  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
-}
-function str(v: unknown): string | undefined {
-  return typeof v === "string" ? v : undefined;
-}
-
-function readVerdict(dash: DashboardSnapshot | null): GateVerdict | null {
-  const rounds: Record<string, unknown>[] = Array.isArray(dash?.rounds)
-    ? (dash.rounds as unknown as Record<string, unknown>[])
-    : [];
-  const origin = rounds.find((r) => num(r.round) === 0);
-  const health = origin ? asRec(origin.health) : null;
-  if (!health || Object.keys(health).length === 0) return null;
-  const reasons = Array.isArray(health.reasons)
-    ? health.reasons.filter((r): r is string => typeof r === "string")
-    : [];
-  return {
-    grade: str(health.grade) ?? "unknown",
-    degradedRate: num(health.degraded_rate),
-    structuralCount: num(health.structural_count),
-    transientCount: num(health.transient_count),
-    dominantNode: str(health.dominant_node),
-    suggestedAction: str(health.suggested_action),
-    reasons,
-  };
-}
-
 // Pure: the current decision item for the viewed cycle, or `null` when no
 // operator choice is pending. Cleared automatically the instant `run_phase`
 // leaves `gate` (the runner side-effect resolves; the poll observes it).
@@ -84,7 +44,7 @@ export function deriveDecision(
   dash: DashboardSnapshot | null,
 ): DecisionItem | null {
   if (runPhase !== "gate") return null;
-  const verdict = readVerdict(dash);
+  const verdict = roundHealthAt(dash, 0);
   const grade = verdict?.grade ?? "unknown";
   return {
     kind: "origin-gate",

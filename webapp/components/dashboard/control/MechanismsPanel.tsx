@@ -13,6 +13,7 @@ import { useFetch } from "@/lib/hooks/useFetch";
 import { fetchCampaignDetail, fetchMechanismsSchema } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace";
 import { CardFrame, Badge, Switch } from "@/components/ui";
+import { fmtValue } from "@/lib/format";
 
 type MechanismValues = Record<string, Record<string, boolean>>;
 
@@ -89,10 +90,10 @@ export function MechanismsPanel({
                       <Badge
                         tone={on ? "success" : "default"}
                         title={
-                          overridden ? `Overridden — default ${t.default ? "ON" : "OFF"}` : "Default"
+                          overridden ? `Overridden — default ${fmtValue(t.default)}` : "Default"
                         }
                       >
-                        {on ? "ON" : "OFF"}
+                        {fmtValue(on)}
                         {overridden ? " •" : ""}
                       </Badge>
                     )}

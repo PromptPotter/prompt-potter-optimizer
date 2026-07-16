@@ -86,13 +86,13 @@ function finite(v: unknown): number | null {
 export function headlineStats(dash: DashboardSnapshot | null): HeadlineStats {
   // `best` is the server-side rolling max of `rounds[].cumulative_accuracy` — the
   // incumbent's full-population score (LiveDashboardView._absorb_round_complete is
-  // the sole writer; it is NOT composite-based). Origin must read the SAME
-  // cumulative basis, else `delta` subtracts across bases — a fabricated number
-  // that ChatPane renders as the "pp/$" efficiency chip.
+  // the sole writer; it is NOT composite-based). `delta` is SERVED
+  // (`headline_delta`, the same basis) — never recomputed here, so this chip and
+  // the L4 inner progress line read one number (R-36).
   const best = finite(dash?.best);
   const round0 = (dash?.rounds ?? []).find((r) => r.round === 0);
   const origin = round0 ? finite(round0.cumulative_accuracy) : null;
-  const delta = best != null && origin != null ? best - origin : null;
+  const delta = finite(dash?.headline_delta);
   return { best, origin, delta };
 }
 
@@ -117,6 +117,7 @@ export interface FitnessTrend {
 // candidate rows, badged with its sample count.
 export function fitnessTrend(
   rounds: readonly RoundSummary[] | undefined,
+  servedBest?: number | null,
 ): FitnessTrend {
   const points = (rounds ?? [])
     .map((r) => ({ round: r.round, composite: r.cumulative_accuracy }))
@@ -126,6 +127,14 @@ export function fitnessTrend(
   for (const p of points) {
     runningBest = Math.max(runningBest, p.composite);
     best.push(runningBest);
+  }
+  // Anchor the terminal point to the SERVED `dash.best` (the engine's own fold,
+  // `_absorb_round_complete`) so the chart's running-best line can never end
+  // below the Best tile — e.g. a fork whose seed carried a best its own
+  // rounds[] doesn't reach.
+  const last = best.length - 1;
+  if (last >= 0 && servedBest != null && Number.isFinite(servedBest)) {
+    best[last] = Math.max(best[last] ?? 0, servedBest);
   }
   return { points, best };
 }

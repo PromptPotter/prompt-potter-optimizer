@@ -57,7 +57,7 @@ export const TopStrip = memo(function TopStrip() {
   // Sparkline: running-best composite over rounds, read from the
   // dashboard's per-round summary block.
   const spark = useMemo(() => {
-    const { best: ys } = fitnessTrend(dash?.rounds);
+    const { best: ys } = fitnessTrend(dash?.rounds, dash?.best);
     if (ys.length < 2) return null;
     const W = 120;
     const H = 26;
@@ -69,7 +69,7 @@ export const TopStrip = memo(function TopStrip() {
       .join("");
     const area = `${path} L${W},${H} L0,${H} Z`;
     return { path, area, W, H };
-  }, [dash?.rounds]);
+  }, [dash?.rounds, dash?.best]);
 
   // Rolling qps — ref pattern lifted from ProgressCard. EMA across
   // dashboard ticks; reading qpsRef.current.qps during render is intended.

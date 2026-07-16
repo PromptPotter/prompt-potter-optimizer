@@ -16,7 +16,7 @@ import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useRoundNodes } from "@/lib/hooks/useRoundNodes";
 import { CopyButton } from "@/components/ui";
 import { RoundAxis } from "./RoundAxis";
-import type { PipelineDoc } from "./types";
+import { nodeKindLabel, type PipelineDoc } from "./types";
 
 // Edge variants — collapses three parallel switches (stroke colour key,
 // dasharray, arrowhead marker id) into one row per kind. Add a kind:
@@ -201,7 +201,7 @@ export function WorkflowCanvas({ pipeline }: Props) {
                 n.kind === "io"
                   ? ""
                   : n.kind === "measurement"
-                    ? "system step"
+                    ? nodeKindLabel(n.kind)
                     : hasData
                       ? data.model || "—"
                       : "idle";

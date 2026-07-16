@@ -4,6 +4,7 @@
 
 import { type CSSProperties } from "react";
 import { type DatasetItem } from "@/lib/api";
+import { fmtPct0, fmtPct1 } from "@/lib/format";
 
 export const STORAGE_KEY = "hs-grid:v1";
 export const FOLDED_WIDTH = 28;
@@ -140,7 +141,7 @@ export function cellFor(
       return {
         text: `${hits}/${n}`,
         raw: rate,
-        title: `${hits} hit of ${n} measurements — ${(rate * 100).toFixed(0)}%`,
+        title: `${hits} hit of ${n} measurements — ${fmtPct0(rate)}`,
         style: hitRateStyle(rate),
       };
     }
@@ -160,7 +161,7 @@ export function cellFor(
           : "δ —  (unmeasured)";
       const pLine =
         item.p_hat !== null
-          ? `p̂(hit | seed)=${(item.p_hat * 100).toFixed(0)}%  (marginal hit prob the queue mechanism reads)`
+          ? `p̂(hit | seed)=${fmtPct0(item.p_hat)}  (marginal hit prob the queue mechanism reads)`
           : "p̂ —  (unmeasured)";
       return {
         text: item.pick_score.toFixed(4),
@@ -182,10 +183,10 @@ export function cellFor(
       // row, which is the explanation operators want when reading the sort.
       if (item.p_hat === null) return { text: "—", raw: null };
       return {
-        text: `${(item.p_hat * 100).toFixed(0)}%`,
+        text: fmtPct0(item.p_hat),
         raw: item.p_hat,
         title:
-          `p̂(hit | seed) = ${(item.p_hat * 100).toFixed(1)}%\n` +
+          `p̂(hit | seed) = ${fmtPct1(item.p_hat)}\n` +
           `σ((θ_seed − δ_s) / √(1 + π·(σ_θ² + se(δ)²)/8))\n` +
           `0.5 → contested at the seed's ability (high info gain potential).\n` +
           `0 or 1 → predictable; even a hit/miss tells the queue mechanism little.`,

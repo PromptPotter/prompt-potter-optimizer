@@ -1,21 +1,21 @@
 "use client";
-// The VIEWED LEAF hop's index.json — its dataset name and its started-at
-// timestamp, from ONE fetch. The connector / pipeline hero / hard-samples panes
-// follow the leaf (like the dashboard already does), so an L4 inner loop shows
-// the inner run's dataset — justlogic's `llm_only` + termnorm backend + real
-// per-sample heat-map — instead of the outer pp-self meta pipeline; and the ETA
-// chip's burn-rate reads the INNER cycle's start time, not the older outer root's
-// (else leaf spend ÷ outer age understates the burn and overstates the ETA).
+// The VIEWED LEAF hop's dataset name + started-at timestamp. The connector /
+// pipeline hero / hard-samples panes follow the leaf (like the dashboard
+// already does), so an L4 inner loop shows the inner run's dataset —
+// justlogic's `llm_only` + termnorm backend + real per-sample heat-map —
+// instead of the outer pp-self meta pipeline; and the ETA chip's burn-rate
+// reads the INNER cycle's start time, not the older outer root's (else leaf
+// spend ÷ outer age understates the burn and overstates the ETA).
 //
 // At depth 1 (leaf == root) there is nothing to fetch: the caller already holds
 // the root dataset name from the workspace `/cycles` list and the shell already
 // fetches the root index.json for its started-at, so we return the root name and
 // a null `createdAt` (caller keeps its root value) — byte-identical to today, no
-// extra request. Only a genuine drill-in (path length > 1) fetches the leaf
-// `index.json`; inner cycles live in an off-registry `.inner/` sandbox, so their
-// header isn't in the `/cycles` list and must be read from the leaf's own file.
-// `fetchCycleFileByPath` rides the same `?descend=` seam `useRoundFile` uses, so
-// it resolves any depth.
+// extra request. Only a genuine drill-in (path length > 1) fetches the leaf's
+// own files; inner cycles live in an off-registry `.inner/` sandbox, so they
+// aren't in the `/cycles` list. The dataset name reads its one owner —
+// `campaign.json::dataset_name` (scope=campaign) — and the started-at reads the
+// leaf `index.json`; both ride the same `?descend=` seam `useRoundFile` uses.
 //
 // Same stamp discipline as `useRoundFile` (via the shared `usePathKeyedFetch`):
 // the loaded value is returned only once its stamp matches, so a drill-in never
@@ -46,12 +46,14 @@ export function useLeafCycleIndex(
     path,
     EMPTY,
     async (p, signal) => {
-      const resp = await fetchCycleFileByPath(p, "cycle", "index.json", signal);
-      const idx = resp.content ? JSON.parse(resp.content) : {};
+      const [idxResp, campResp] = await Promise.all([
+        fetchCycleFileByPath(p, "cycle", "index.json", signal),
+        fetchCycleFileByPath(p, "campaign", "campaign.json", signal),
+      ]);
+      const idx = idxResp.content ? JSON.parse(idxResp.content) : {};
+      const camp = campResp.content ? JSON.parse(campResp.content) : {};
       const datasetName =
-        (typeof idx.header?.dataset_name === "string" && idx.header.dataset_name) ||
-        (typeof idx.dataset_name === "string" && idx.dataset_name) ||
-        null;
+        typeof camp.dataset_name === "string" && camp.dataset_name ? camp.dataset_name : null;
       const createdAt = typeof idx.created_at === "string" ? idx.created_at : null;
       return { datasetName, createdAt };
     },

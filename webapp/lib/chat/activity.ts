@@ -17,6 +17,7 @@
 // the per-sample running update all upsert to one row.
 
 import { candidateLabel } from "@/lib/candidate-label";
+import { fmtPct0 } from "@/lib/format";
 
 // One outbound SSE frame. Mirrors `domain/projection_envelope.py::ProjectionEnvelope`.
 // `payload` is the underlying record's `model_dump` (so a record's own nested
@@ -65,7 +66,8 @@ function num(v: unknown): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
 }
 function pct0(v: number | null | undefined): string | undefined {
-  return v == null ? undefined : `${(v * 100).toFixed(0)}%`;
+  // `undefined` (omit the chip) where fmtPct0 would render an em-dash.
+  return v == null ? undefined : fmtPct0(v);
 }
 
 // A candidate's subset-relative fitness as a %. Per-candidate rows only — round/origin

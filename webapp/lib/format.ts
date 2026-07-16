@@ -12,6 +12,12 @@ export function fmtPct0(v: number | null | undefined): string {
   return typeof v === "number" && Number.isFinite(v) ? `${(v * 100).toFixed(0)}%` : "—";
 }
 
+// Signed percentage, no decimals — "+4%" / "-2%". Non-finite → "—".
+export function fmtPctSigned(v: number | null | undefined): string {
+  if (typeof v !== "number" || !Number.isFinite(v)) return "—";
+  return `${v >= 0 ? "+" : ""}${(v * 100).toFixed(0)}%`;
+}
+
 // Short elapsed time — "840ms" / "4.20s" / "1.5m". Non-finite → "—".
 export function fmtSecs(s: number | null | undefined): string {
   if (typeof s !== "number" || !Number.isFinite(s)) return "—";
@@ -89,6 +95,21 @@ export function fmtClock(s: unknown): string {
 export function fmtText(v: unknown): string {
   if (v == null || v === "") return "—";
   return String(v);
+}
+
+// Unknown-VALUE display — the one formatter for a config/param value of any
+// shape: booleans as ON/OFF, objects/arrays as JSON (`pretty` indents),
+// everything else via fmtText. Panels do not re-inline their own switch.
+export function fmtValue(v: unknown, opts?: { pretty?: boolean }): string {
+  if (typeof v === "boolean") return v ? "ON" : "OFF";
+  if (v != null && typeof v === "object") {
+    try {
+      return opts?.pretty ? JSON.stringify(v, null, 2) : JSON.stringify(v);
+    } catch {
+      return String(v);
+    }
+  }
+  return fmtText(v);
 }
 
 // Relative age in seconds → "30s ago" / "5m ago" / "2h ago" / "3d ago".
