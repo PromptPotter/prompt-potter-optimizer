@@ -15,6 +15,23 @@
   gap: 8px;
 }
 
+/* The observe searchpoint selector (origin/live/historical) — sits ABOVE the
+   node surface, mirroring `.bnode`'s width constraint so the two read as one
+   column. It selects WHICH spec the box shows; it is not part of the spec. */
+.observe-toggle {
+  max-width: 560px;
+  margin: 14px auto 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.observe-toggle-label {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 /* Per-node surface: a kind chip in the title + a one-line role descriptor, so a
    retriever/tool/cache node reads as what it is rather than an empty prompt. */
 .bnode-kind {

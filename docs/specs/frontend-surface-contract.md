@@ -172,7 +172,7 @@ controls:
         Campaign chrome (⋯ menu, size hover) sits on the course row — archiving is a
         campaign verb.
         A course lists what it produced — `C0`, then `C1.1`, `C1.2`, … from the round
-        trajectory (`/lineage`, one conditional fetch per campaign; lazy on course-open,
+        trajectory (`/tree`, one conditional fetch per campaign; lazy on course-open,
         since every campaign wears a course row).
         A FORK IS A SIBLING COURSE, beside the candidates — not inside the one it was cut
         from. Borrowing an origin is not being contained by it, and nesting buried the

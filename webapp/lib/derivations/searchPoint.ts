@@ -10,6 +10,7 @@
 // not a read-only view — so the two stay separate functions over one served field.
 
 import {
+  liveInputCandidate,
   liveL1InputCandidates,
   roundOf,
   type DashboardSnapshot,
@@ -105,6 +106,21 @@ export function originObserveConfig(
   const scores = round0?.candidate_scores;
   if (!Array.isArray(scores)) return null;
   return rowConfig(scores[0] as LiveInputCandidate, "origin", nodeId);
+}
+
+// Live, by id: the SELECTED in-flight candidate out of the live l1_score input
+// (not the latest-seeded one `liveObserveConfig` shows). Null until that
+// candidate has been seeded (`candidate_started`). The scoring inspector reads
+// this when the operator drills into a candidate of the still-running round.
+export function liveCandidateObserveConfig(
+  dash: DashboardSnapshot | null,
+  candidateId: string,
+  label: string,
+  nodeId?: string | null,
+): ObserveConfig | null {
+  const liveRound = roundOf(dash);
+  if (liveRound == null || !candidateId) return null;
+  return rowConfig(liveInputCandidate(dash, liveRound, candidateId), `live — ${label}`, nodeId);
 }
 
 // Historical: a specific past candidate (the last completed round's winner) out

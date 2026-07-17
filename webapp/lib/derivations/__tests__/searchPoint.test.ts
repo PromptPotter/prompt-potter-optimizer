@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   candidateObserveConfig,
+  liveCandidateObserveConfig,
   liveObserveConfig,
   originObserveConfig,
 } from "../searchPoint";
@@ -39,6 +40,30 @@ describe("liveObserveConfig", () => {
   it("defaults config to {} when the candidate carries none yet", () => {
     const r = liveObserveConfig(liveDash([{ idx: 0, label: "C1.1", prompt_fields: { instruction: "a" } }]));
     expect(r?.config).toEqual({});
+  });
+});
+
+describe("liveCandidateObserveConfig", () => {
+  const snap = liveDash([
+    { idx: 0, label: "C1.1", prompt_fields: { instruction: "a" }, resolved_pipeline_params: { llm: { model: "x" } } },
+    { idx: 1, label: "C1.2", prompt_fields: { instruction: "b" }, resolved_pipeline_params: { llm: { model: "y" } } },
+  ]);
+
+  it("locates the in-flight candidate by id (not the latest-seeded one)", () => {
+    const r = liveCandidateObserveConfig(snap, "r1_0", "C1.1");
+    expect(r?.label).toBe("live — C1.1");
+    expect(r?.promptFields).toEqual({ instruction: "a" });
+    expect(r?.config).toEqual({ llm: { model: "x" } });
+  });
+
+  it("returns null for an unknown / not-yet-seeded id", () => {
+    expect(liveCandidateObserveConfig(snap, "r1_9", "C1.10")).toBeNull();
+    expect(liveCandidateObserveConfig(snap, "", "x")).toBeNull();
+  });
+
+  it("returns null without a live round", () => {
+    expect(liveCandidateObserveConfig(null, "r1_0", "C1.1")).toBeNull();
+    expect(liveCandidateObserveConfig(dash({}), "r1_0", "C1.1")).toBeNull();
   });
 });
 

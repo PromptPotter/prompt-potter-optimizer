@@ -1,7 +1,8 @@
 # Mask — a criterion projected over the lineage
 
-**Status:** the read-side is SHIPPED (scoring + abort verdicts on `GET /lineage`;
-code is the SoT — see § Shipped read-side). This spec keeps the framing, the
+**Status:** the read-side is SHIPPED — scoring + abort verdicts decorate the one served
+genealogy, `GET /campaigns/{c}/cycles/{cy}/tree` (code is the SoT — see § Shipped
+read-side). This spec keeps the framing, the
 design decisions, and the deferred **write-side** (fork-from-divergence, roadmap
 **Lane C8**, [`roadmap.md`](roadmap.md) § Lineage mask). Divergence is projection
 logic and is backend-owned ([R-36]).
@@ -83,9 +84,10 @@ behind the gateway / archive and is served; the webapp renders, never recomputes
 `value_with_mask_applied` sits in `application/scoring/metrics.py` next to
 `compute_composite_fitness` (missing evaluator name → `None` = honest absence,
 never a fabricated score); the API-edge selector is `_resolve_verdict(lens)` in
-`presentation/api/routers/campaigns/lineage.py` (**one** `lens` query param:
-`score:<formula>` | `abort:<variant>`; `samples=` composes with a `score:`
-lens); the webapp reads one fetch via `LineageOverlayProvider`
+`presentation/api/routers/campaigns/cycles.py`, which serves the tree (**one** `lens`
+query param: `score:<formula>` | `abort:<variant>`; `samples=` composes with a `score:`
+lens; the assembly rules live in `store/lineage_views.py`); the webapp reads one fetch
+via `LineageOverlayProvider`
 (`webapp/lib/lineage-overlay.tsx`), rendered, never recomputed. Two verdicts are
 live: **scoring** (re-elected leader under a swapped formula ≠ `is_winner`; the
 only verdict with a value face) and **abort** (`make_abort_verdict(suppress)` —

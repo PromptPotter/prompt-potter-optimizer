@@ -6,9 +6,15 @@ import { useWorkspace } from "@/lib/workspace";
 import { fmtPct1 } from "@/lib/format";
 import type { CandidateRow, SelectedCandidate } from "@/lib/types";
 import { liveCandidate } from "@/lib/poll";
-import { samplesForRow } from "@/lib/derivations";
+import {
+  candidateObserveConfig,
+  liveCandidateObserveConfig,
+  samplesForRow,
+} from "@/lib/derivations";
+import { useConnector } from "@/lib/hooks/useConnector";
 import { useRoundCandidates } from "@/lib/hooks/useRoundCandidates";
 import { Dialog } from "@/components/ui";
+import { NodeSurface } from "@/components/dashboard/pipeline/NodeSurface";
 import { SteerForkPanel } from "@/components/dashboard/control/SteerForkPanel";
 import { SampleRowItem } from "@/components/dashboard/samples/SampleRowItem";
 
@@ -21,8 +27,14 @@ interface Props {
 // mirrors RoundSamplesBody's PER_GROUP_CAP.
 const SAMPLE_CAP = 250;
 
+// The candidate drill-in. Its PRIMARY element is the one runnable-spec surface
+// (NodeSurface, values mode, read-only) for the selected searchpoint — the same
+// box the chat hero and the steer panel render, so a candidate's spec is never a
+// bespoke presentation. The scalar stats + per-sample rows below describe how
+// that spec SCORED; Steer & fork opens its editable twin.
 export function ScoringInspector({ selected, onClose }: Props) {
   const { dash } = useDashboard();
+  const cv = useConnector();
   // Round files follow the VIEWED leaf hop — so an L4 inner loop's candidate
   // resolves its `round_NNNN.json` from the inner cycle's dir, not the outer
   // root's empty `rounds/` (the old "round file not on disk" degradation).
@@ -62,6 +74,15 @@ export function ScoringInspector({ selected, onClose }: Props) {
     return samplesForRow(row, dash, doc);
   }, [row, dash, doc]);
 
+  // The selected candidate's runnable spec, through the one observe join every
+  // spec surface reads: in-flight round from dashboard.json's live l1_score
+  // input, completed round from its round file (no stitch). Round 0 = origin.
+  const cfg = !selected
+    ? null
+    : isLive
+      ? liveCandidateObserveConfig(dash, selected.candidate_id, selected.label)
+      : candidateObserveConfig(doc, selected.candidate_id, selected.label);
+
   if (!selected) return null;
 
   return (
@@ -78,6 +99,23 @@ export function ScoringInspector({ selected, onClose }: Props) {
           ×
         </button>
       </div>
+      {cfg ? (
+        <NodeSurface
+          node={null}
+          point={{ origin_prompt_fields: cfg.promptFields, pipeline_overlay: {} }}
+          configSeed={cfg.config}
+          schema={cv.nodeConfigSchema}
+          outputSchema={cv.nodeOutputSchema}
+          title="Searchpoint"
+          label={cfg.label}
+          mode="values"
+          readOnly
+        />
+      ) : (
+        <p className="inspector-note">
+          Searchpoint loading — the spec appears when its round data lands.
+        </p>
+      )}
       <div className="inspector-body">
         <div className="inspector-row">
           <span className="inspector-key">label</span>

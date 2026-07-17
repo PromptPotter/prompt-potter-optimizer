@@ -1,5 +1,4 @@
 "use client";
-import type { ReactNode } from "react";
 import type { DraftPatch, NodeConfigParam, NodeOutputSchema } from "@/lib/api";
 import type { CandidateSearchPoint, ConfigMode } from "@/lib/derivations";
 import type { PipelineViewNode } from "@/components/workflow";
@@ -8,8 +7,10 @@ import { NodeConfigEditor } from "@/components/dashboard/control/NodeConfigEdito
 import { NodeOutputSchemaView } from "@/components/dashboard/control/NodeOutputSchemaView";
 
 // The one node surface: config → prompt → output, rendered as an inseparable
-// unit so config can never be gated away from its prompt. Used everywhere a
-// node's program is shown or edited:
+// unit so config can never be gated away from its prompt. It renders exactly
+// ONE runnable specification — which searchpoint that is (origin, live,
+// historical) is the host's decision, made outside this box. Used everywhere
+// a node's program is shown or edited:
 //   - a concrete view node (`node` set) → config scoped to that node;
 //   - the whole pipeline (`node === null`) → config across every node + the
 //     prompt (the single-LLM chip / steer-fork seed).
@@ -34,7 +35,6 @@ export function NodeSurface({
   title,
   mode,
   babysitEditable,
-  toggle,
   readOnly,
   flat,
   onClose,
@@ -59,9 +59,6 @@ export function NodeSurface({
   // values mode: gates editing of optimizer-locked axes (model/provider) behind the
   // operator's `campaign.babysit` capability. Default (undefined) leaves them editable.
   babysitEditable?: boolean;
-  // Optional control rendered inside the card, between the role line and the
-  // config body (the OBSERVE origin/live/historical selector).
-  toggle?: ReactNode;
   readOnly?: boolean;
   flat?: boolean;
   onClose?: () => void;
@@ -92,7 +89,6 @@ export function NodeSurface({
 
   const body = (
     <>
-      {toggle}
       <NodeConfigEditor
         mode={mode}
         schema={schema}

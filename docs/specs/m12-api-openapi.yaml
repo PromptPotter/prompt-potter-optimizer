@@ -1098,6 +1098,60 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '503': { $ref: '#/components/responses/BackendUnreachable' }
 
+  /campaigns:
+    get:
+      operationId: listCampaigns
+      summary: Every campaign in one store owned by the caller, newest first.
+      description: |
+        The forest's other half — `GET /cycles` returns one store's cycles,
+        this returns its campaigns, and the webapp groups the pair by
+        `root_cycle_id` (`buildForest`). Takes the same `descend`: absent/empty
+        is the caller's own tenant tree; a hop chain re-roots the list into an
+        L4 `.inner/<cycle_id>` sandbox, so one route lists the top level and
+        any depth. Response shape is owned by the server model
+        (`registry.py::CampaignListResponse`, generated into
+        `webapp/lib/api/types.generated.ts::CampaignSummary`) — not duplicated
+        here.
+      tags: [cycles]
+      parameters:
+        - name: dataset
+          in: query
+          required: false
+          description: Filter to one dataset's campaigns.
+          schema: { type: string }
+        - name: lifecycle
+          in: query
+          required: false
+          description: |
+            Operator visibility filter — `active` (default; also surfaces
+            in-progress `checkin` campaigns), `archived`, `deleted`, `checkin`,
+            or `all`.
+          schema:
+            type: string
+            enum: [active, archived, deleted, checkin, all]
+            default: active
+        - name: descend
+          in: query
+          required: false
+          description: |
+            `~`-joined `campaign::cycle` hops to descend into, as on
+            `GET /cycles`. Empty/absent → the caller's own tree.
+          schema: { type: string }
+      responses:
+        '200':
+          description: The resolved store's campaigns, newest first (`CampaignListResponse`).
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '404':
+          description: A `descend` hop names an inner sandbox that does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
   /campaigns/{campaignId}/checkin:
     get:
       operationId: getCampaignCheckin

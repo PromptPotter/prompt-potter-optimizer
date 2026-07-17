@@ -16,8 +16,8 @@ import { useWorkspace } from "@/lib/workspace";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useRoundFile } from "@/lib/hooks/useRoundFile";
-import { cx } from "@/lib/cx";
 import type { DashboardSnapshot } from "@/lib/poll";
+import { SegmentedControl } from "@/components/ui";
 import { NodeSurface } from "./NodeSurface";
 
 // Detail for the node clicked in the pipeline. It dispatches on LIFECYCLE, not on
@@ -26,8 +26,9 @@ import { NodeSurface } from "./NodeSurface";
 //     (the draft-backed lock/allow editor) + prompt + output;
 //   - setup + the whole-pipeline chip → read-only draft preview (no toggle);
 //   - a RUN (no draft) → OBSERVE the resolved config the searchpoint executes,
-//     read-only, with a 3-way origin ↔ live ↔ historical toggle, scoped to the
-//     selected node's header/prompt.
+//     read-only. The 3-way origin ↔ live ↔ historical selector sits ABOVE the
+//     surface — it picks WHICH searchpoint the box shows; the box itself always
+//     renders exactly one runnable spec.
 // AUTHOR (lock editing) is a setup act; OBSERVE (read-only resolved config) is a
 // run act — so a concrete node during a run shows OBSERVE, never the lock editor.
 // All three OBSERVE states read ONE server-resolved field
@@ -212,41 +213,31 @@ export function BackendNodeDetail({ draft, onClose, onPromptApply }: Props) {
 
   const toggle =
     avail.live || avail.historical ? (
-      <div className="config-row observe-toggle">
-        <span className="config-label">View</span>
-        <span className="config-value">
-          {OBSERVE_STATES.map((s) => (
-            <button
-              key={s}
-              type="button"
-              className={cx(
-                "config-level",
-                state === s ? "is-on" : "is-off",
-                !avail[s] && "is-disabled",
-              )}
-              disabled={!avail[s]}
-              aria-pressed={state === s}
-              onClick={() => setPref(s)}
-            >
-              {s}
-            </button>
-          ))}
-        </span>
+      <div className="observe-toggle">
+        <span className="observe-toggle-label">View</span>
+        <SegmentedControl<ObserveState>
+          options={OBSERVE_STATES.map((s) => ({ value: s, label: s, disabled: !avail[s] }))}
+          value={state}
+          onChange={setPref}
+          ariaLabel="Searchpoint view — origin, live, or historical"
+        />
       </div>
     ) : null;
 
   return (
-    <NodeSurface
-      node={node}
-      point={{ origin_prompt_fields: cfg.promptFields, pipeline_overlay: {} }}
-      configSeed={cfg.config}
-      schema={cv.nodeConfigSchema}
-      outputSchema={cv.nodeOutputSchema}
-      label={cfg.label}
-      mode="values"
-      toggle={toggle}
-      readOnly
-      onClose={onClose}
-    />
+    <>
+      {toggle}
+      <NodeSurface
+        node={node}
+        point={{ origin_prompt_fields: cfg.promptFields, pipeline_overlay: {} }}
+        configSeed={cfg.config}
+        schema={cv.nodeConfigSchema}
+        outputSchema={cv.nodeOutputSchema}
+        label={cfg.label}
+        mode="values"
+        readOnly
+        onClose={onClose}
+      />
+    </>
   );
 }
