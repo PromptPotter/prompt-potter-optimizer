@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.dispatch.hub.facade import DispatchHub, build_bundle
-from promptpotter.application.optimization.dispatch.hub.injections.registry import citable_fields
+from promptpotter.application.optimization.dispatch.facade import DispatchHub, build_bundle
+from promptpotter.application.optimization.dispatch.injections.registry import citable_fields
 from promptpotter.application.optimization.dispatch.llm_call.call import (
     LLMCallContext,
     run_optimizer_node,

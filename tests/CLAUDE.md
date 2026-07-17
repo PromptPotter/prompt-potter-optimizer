@@ -37,7 +37,7 @@ A few wiring guarantees worth enforcing are **import-time asserts in the module
 that owns the registry** (they fail loud at import, cost nothing to maintain, and
 need no test to update): e.g. `RESUME_CHECKPOINT_GATING` exhaustiveness
 (`application/optimization/resume_and_fork/decisions.py`), `L1_POSSIBLE ⊆ INJECTIONS`
-(`dispatch/hub/injections/registry.py`), the `L1_MANDATORY`/origin-layout subset
+(`dispatch/injections/registry.py`), the `L1_MANDATORY`/origin-layout subset
 checks (`domain/l1_layout.py`), the divergence-hint exhaustiveness
 (`cli/commands/_shared.py`). Add new ones the same way — beside the thing they
 validate, never as a `test_structure` scan.

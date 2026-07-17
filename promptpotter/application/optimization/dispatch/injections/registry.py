@@ -18,14 +18,14 @@ from __future__ import annotations
 
 import inspect
 
-from promptpotter.application.optimization.dispatch.hub.bundle import (
+from promptpotter.application.optimization.dispatch.bundle import (
     _Injection,
     injection_registry,
 )
 
 # Imported for the @signal side effect — each module decorates its `_r_*` renderers, which
 # registers them into the bundle-level registry that `injection_registry()` snapshots below.
-from promptpotter.application.optimization.dispatch.hub.injections import (
+from promptpotter.application.optimization.dispatch.injections import (
     catalogues,
     layer_state,
     panels,

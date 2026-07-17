@@ -48,7 +48,7 @@ cached deprecated answer instead of re-evaluating."""
 # TARGET-prompt interpolation — the `{{var}}` slots a dataset row fills on its way
 # to the backend. NOT the dispatch-hub `INJECTIONS` registry, which fills `{{slot}}`s
 # in the OPTIMIZER's meta-prompts. Same syntax, two populations, two regexes (the
-# other is `dispatch/hub/facade.py`); adding a signal for an L1/L2/L3 prompt goes
+# other is `dispatch/facade.py`); adding a signal for an L1/L2/L3 prompt goes
 # there, never here.
 _TEMPLATE_VAR_RE = re.compile(r"\{\{(\w+)\}\}")
 

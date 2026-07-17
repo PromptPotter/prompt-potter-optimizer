@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
-from promptpotter.application.optimization.dispatch.hub.bundle import (
+from promptpotter.application.optimization.dispatch.bundle import (
     RUNTIME_FAILURE_RECENCY_WINDOW,
     InjectionBundle,
     InjectionKind,

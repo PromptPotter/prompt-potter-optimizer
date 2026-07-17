@@ -104,7 +104,7 @@ The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no 
 
 ## 4. DispatchHub INJECTIONS keys
 
-`{{slot}}` names available in any optimizer prompt. Assembled into `dispatch/hub/injections/registry.py::INJECTIONS` from the `@signal("<slot>", …)` decorator on each renderer (`injections/{panels,layer_state,catalogues,wounds}.py`). Adding a slot is one decorated renderer — key and body co-located. Using a slot not in the dict is a load-time `KeyError` via `validate_template`.
+`{{slot}}` names available in any optimizer prompt. Assembled into `dispatch/injections/registry.py::INJECTIONS` from the `@signal("<slot>", …)` decorator on each renderer (`injections/{panels,layer_state,catalogues,wounds}.py`). Adding a slot is one decorated renderer — key and body co-located. Using a slot not in the dict is a load-time `KeyError` via `validate_template`.
 
 **The stable contract is the mechanism, not the slot list** — the set evolves (22 today; e.g. the four old per-wound slots merged into `l1_wounds` + `guard_breaches`), so this page doesn't freeze a table that drifts. The live set is the registry itself; the doc-level reference with per-slot detail is [`dispatch-hub.md`](dispatch-hub.md) § Reference.
 

@@ -1,6 +1,6 @@
 # Dispatch hub + L1 layout
 
-Visual + reference for `promptpotter/application/optimization/dispatch/hub/` — the registry that fills `{{placeholders}}` in the four optimizer prompts — and for `L1Layout`, the structural surface L2 edits to decide what L1_GENERATE sees. Pairs with [`l2-internals.md`](l2-internals.md) (L2_CONTEXT firing).
+Visual + reference for `promptpotter/application/optimization/dispatch/` — the registry that fills `{{placeholders}}` in the four optimizer prompts — and for `L1Layout`, the structural surface L2 edits to decide what L1_GENERATE sees. Pairs with [`l2-internals.md`](l2-internals.md) (L2_CONTEXT firing).
 
 The hub is stateless. `INJECTIONS` is a typed `dict[str, _Injection]` — each entry carries `name`, `kind` (MEASUREMENT / DERIVED / TRACE / DIRECTIVE), `render: InjectionBundle → str`, a `char_cap`, a `citable` flag, and a docstring, registered by the `@signal("<name>", …)` decorator at the renderer's definition site. `validate_template()` (called from `load_optimizer_prompt`) raises on `{{slot}}` names not in the registry: a typo in a template fails at module load, not at first render.
 
@@ -233,7 +233,7 @@ L2's parser (`escalation._parse_l2`) coerces `{slot: [name, ...]}` into `L1Layou
 
 **Adding an injection** → the golden-path recipe lives in [`adding-a-surface.md`](adding-a-surface.md).
 
-**File-line anchors** — `INJECTIONS`: `dispatch/hub/injections/registry.py` · `InjectionBundle`: `dispatch/hub/bundle.py` · `DispatchHub` + `build_bundle`: `dispatch/hub/facade.py` · `L1Layout`, `L1_POSSIBLE`, `L1_MANDATORY`, `L1_LAYOUT_SLOTS`, `default_l1_layout`, `validate_l1_layout`: `promptpotter/domain/l1_layout.py` · L1 compose path: `application/optimization/l1/generate.py::l1_generate` · OSP layout field: `OptSearchPoint.memory.l1_layout` (`domain/opt_search_point.py`, `L2L3Memory`).
+**File-line anchors** — `INJECTIONS`: `dispatch/injections/registry.py` · `InjectionBundle`: `dispatch/bundle.py` · `DispatchHub` + `build_bundle`: `dispatch/facade.py` · `L1Layout`, `L1_POSSIBLE`, `L1_MANDATORY`, `L1_LAYOUT_SLOTS`, `default_l1_layout`, `validate_l1_layout`: `promptpotter/domain/l1_layout.py` · L1 compose path: `application/optimization/l1/generate.py::l1_generate` · OSP layout field: `OptSearchPoint.memory.l1_layout` (`domain/opt_search_point.py`, `L2L3Memory`).
 
 ## Future — diagnostics vs l1_wounds
 

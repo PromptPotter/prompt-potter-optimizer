@@ -16,7 +16,7 @@ Module map:
   critique, current prompt) + L2-authored supplemental rules.
 * :mod:`registry` — the ``INJECTIONS`` dict.
 
-The public re-export surface lives one level up at
-``promptpotter.application.optimization.dispatch.hub`` — callers
-outside this package import from there, not from this ``__init__``.
+Callers import the leaf they need (``injections.registry`` for
+:data:`INJECTIONS` / :func:`citable_fields`); this ``__init__`` re-exports
+nothing.
 """

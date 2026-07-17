@@ -12,7 +12,7 @@ from collections import Counter
 from typing import Any
 
 from promptpotter.application.intelligence.exploration import ruler_entry
-from promptpotter.application.optimization.dispatch.hub.bundle import (
+from promptpotter.application.optimization.dispatch.bundle import (
     ANSWER_SPACE_CAP,
     MEMORY_FIELD_CAP,
     MEMORY_ROUND_CAP,

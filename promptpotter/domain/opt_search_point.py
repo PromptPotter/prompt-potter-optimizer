@@ -132,7 +132,7 @@ class EvidenceGrounding(BaseModel):
     """Panel field + citation L1 declares to justify a mutation.
 
     The set of citable panels is not declared anywhere: it is DERIVED per round from the
-    node's live layout (``dispatch.hub.injections.registry.citable_fields``), so L1 can only
+    node's live layout (``dispatch.injections.registry.citable_fields``), so L1 can only
     cite a panel it was actually shown."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)

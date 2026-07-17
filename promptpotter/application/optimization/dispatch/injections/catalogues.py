@@ -4,7 +4,7 @@ L1 signal menu (L2 reads when authoring l1_layout). Load-bearing per architectur
 
 from __future__ import annotations
 
-from promptpotter.application.optimization.dispatch.hub.bundle import (
+from promptpotter.application.optimization.dispatch.bundle import (
     AXES_ENUM_PREVIEW,
     InjectionBundle,
     InjectionKind,

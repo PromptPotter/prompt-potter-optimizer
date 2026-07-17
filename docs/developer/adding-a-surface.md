@@ -74,12 +74,12 @@ Contract: [`application/CLAUDE.md`](../../promptpotter/application/CLAUDE.md) §
 ## 2. A prompt injection
 
 A `{{slot}}` the optimizer LLM sees. The registry is `INJECTIONS`
-(`application/optimization/dispatch/hub/injections/registry.py`); every renderer
+(`application/optimization/dispatch/injections/registry.py`); every renderer
 is a pure `(InjectionBundle) -> str`.
 
 **Recipe:**
 
-1. Write a `_r_<name>(bundle) -> str` renderer in `dispatch/hub/injections/`
+1. Write a `_r_<name>(bundle) -> str` renderer in `dispatch/injections/`
    (returns `""` when its source field is empty — empty injections are skipped).
 2. Decorate it with `@signal("<name>", kind=…, description=…)` — registration
    happens at the definition site; key and body are co-located, no separate

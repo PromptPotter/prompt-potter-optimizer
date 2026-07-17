@@ -301,8 +301,22 @@ LEDGER_BASELINE = {
     # has more readers (scoring, metrics) than the stop rules do, and a general result
     # classifier living in a module named for a budget-allocation algorithm would read wrong
     # at every one of those call sites. Two honest concepts, one package, no wrapper.
-    "modules": 311,
-    "init_files": 55,
+    # then 311 -> 310, ``init_files`` 55 -> 54 (2026-07-17): ``dispatch/hub/`` was dissolved —
+    # ``bundle``/``facade`` rose to ``dispatch/``, ``injections/`` to ``dispatch/injections/``.
+    # It was the repo's ONLY d5 path, in the loop's most-read zone, and the hop bought nothing:
+    # the package name said what its parent (``dispatch``) and its own class (``DispatchHub``)
+    # already said. ``injections/`` stays a package — it is a real concept with a registry, not
+    # duplication. The ``@signal`` side-effect imports are explicit module imports, not a
+    # package walk, so they survive the move untouched.
+    # then ``init_files`` 54 -> 52 (2026-07-17): ``cli/commands/{champion,matrix}`` were
+    # packages containing exactly ONE file — their own ``__init__``. Every other command in
+    # that directory is a module (``new``, ``verify``, ``ab``, ``reset``, …), so the two dirs
+    # bought a reader one hop to learn there was nothing to choose, and made the listing lie
+    # about which commands have parts. ``sweep/`` stays a package: it genuinely has four
+    # (``panel``, ``rank``, ``time_to``, ``_common``). The import path is unchanged either way
+    # (``commands.champion`` resolves to package or module alike), so this cost zero repoints.
+    "modules": 310,
+    "init_files": 52,
     # 43 -> 9 (2026-07-16): 34 package ``__init__`` files that did nothing but re-export a
     # leaf's names were emptied to docstring-only namespace markers, and their ~190 consumer
     # sites now import the leaf they actually wanted. A shim is a hop a reader must take and
@@ -311,16 +325,21 @@ LEDGER_BASELINE = {
     # 9 -> 8 (2026-07-17): ``infrastructure/store`` left the floor — see the ``modules`` note
     # above. It was only ever a survivor because the active-session pointer lived in its body.
     #
-    # **The 8 survivors are the floor — they are not shims, and emptying them breaks the app.**
+    # 8 -> 6 (2026-07-17): ``cli/commands/{champion,matrix}`` left the floor — see the
+    # ``init_files`` note above. Their bodies are unchanged; they are simply modules now, so
+    # the counter stops seeing an ``__init__`` at all. A body in an ``__init__`` was the only
+    # thing that ever made them look like shims.
+    #
+    # **The 6 survivors are the floor — they are not shims, and emptying them breaks the app.**
     # Don't re-propose them:
     #   * ``connectors`` — IS the connector registry (import-time guards).
     #   * ``presentation/api/routers/campaigns`` — IS the route registry: its submodule imports
     #     run the ``@campaigns_router`` decorators, so emptying it mounts a router with ZERO
     #     routes. The one that reads like a pure re-export and is not.
     #   * ``shared``, ``application/scoring/formula``, ``application/views/render``,
-    #     ``cli/commands/{champion,matrix,sweep}`` — real code in the body (the counter sees
-    #     ``__all__`` + an import and says "shim"; it is wrong).
-    "reexport_shims": 8,
+    #     ``cli/commands/sweep`` — real code in the body (the counter sees ``__all__`` + an
+    #     import and says "shim"; it is wrong).
+    "reexport_shims": 6,
     "config_leaf_fields": 38,
     "settings_env": 16,
     "settings_const": 14,

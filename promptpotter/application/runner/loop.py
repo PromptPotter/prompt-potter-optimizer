@@ -19,7 +19,7 @@ import traceback
 from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.config import CampaignConfig
 from promptpotter.application.optimization.cycle import Cycle
-from promptpotter.application.optimization.dispatch.hub.facade import InjectionRenderError
+from promptpotter.application.optimization.dispatch.facade import InjectionRenderError
 from promptpotter.application.optimization.l1.execute import execute_round
 from promptpotter.application.run_observers import RunCallbacks
 from promptpotter.application.run_phase_control import declare_run_phase, pause_requested

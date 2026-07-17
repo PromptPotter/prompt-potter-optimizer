@@ -20,7 +20,7 @@ HERE (this package owns the decision machinery):
 MAPPED (the concept spans these; canonical homes):
 - wound + signal TYPES → ``domain/escalation_signals.py`` (``EscalationSignal``,
   ``EscalationTarget``, ``NurseOwner``, ``ValidationFailure``, ``RuntimeFailure``).
-- wound RENDERING into the optimizer prompt → ``dispatch/hub/injections/
+- wound RENDERING into the optimizer prompt → ``dispatch/injections/
   wounds.py`` (registered by role in the ``INJECTIONS`` registry).
 - the FSM LIVES ON ``optimization/cycle.py::Cycle.escalation`` (rebuilt via
   ``EscalationFSM.from_ledger`` on resume — see ``resume_and_fork/resume.py``).

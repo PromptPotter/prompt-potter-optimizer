@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 import logging
 
-from promptpotter.application.optimization.dispatch.hub.bundle import (
+from promptpotter.application.optimization.dispatch.bundle import (
     TASK_CONTEXT_VALUE_CAP,
     InjectionBundle,
     InjectionKind,

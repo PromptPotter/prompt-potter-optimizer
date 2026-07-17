@@ -386,15 +386,15 @@ def test_evidence_channel_clips_are_visible_and_tail_preserving(
     reasoning-trace head-keep dropped the CONCLUSION — the one step the critique
     is ordered to quote; (3) an over-cap `task_context` field hard-sliced mid-word
     at the render site. All three produce wrong prompt content with no error."""
-    from promptpotter.application.optimization.dispatch.hub.bundle import (
+    from promptpotter.application.optimization.dispatch.bundle import (
         CycleSlice,
         InjectionBundle,
         RoundDigest,
     )
-    from promptpotter.application.optimization.dispatch.hub.injections.layer_state import (
+    from promptpotter.application.optimization.dispatch.injections.layer_state import (
         _r_task_context,
     )
-    from promptpotter.application.optimization.dispatch.hub.injections.panels import (
+    from promptpotter.application.optimization.dispatch.injections.panels import (
         _edges_at_line,
     )
     from promptpotter.application.optimization.dispatch.schemas import L1CritiqueOutput

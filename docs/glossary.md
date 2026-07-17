@@ -365,21 +365,21 @@ The persisted world is a four-entity containment hierarchy
 ## Dispatch — info-flow to optimizer prompts
 
 - **INJECTIONS** — the typed registry of every `{{slot}}` an optimizer
-  prompt can reference. `application/optimization/dispatch/hub/injections/registry.py`.
+  prompt can reference. `application/optimization/dispatch/injections/registry.py`.
 - **DispatchHub** — the facade with one `fill` path: fills a node's layout
   (`NODE_LAYOUTS[node].floor`, or L2's live `l1_layout` for `l1_generate`) +
   resolves non-layout `{{token}}`s → `(filled_template, injection_vars)`.
-  `application/optimization/dispatch/hub/facade.py`.
+  `application/optimization/dispatch/facade.py`.
 - **Bundle** (`InjectionBundle`) — frozen per-call state container
   every renderer reads. Built by `build_bundle(cycle)`.
-  `application/optimization/dispatch/hub/bundle.py`.
+  `application/optimization/dispatch/bundle.py`.
 - **l1_layout** — the L2-authored placeholder layout that drives which
   signals appear in each L1 prompt slot. Read at L1 fill time.
   `domain/l1_layout.py`.
 - **Evidence grounding** — every L1 variant declares an
   `evidence_grounding: {field, citation}` naming the panel entry that
   justifies the mutation. The citable panels are derived per round from
-  the node's live layout (`citable_fields`, `dispatch/hub/injections/
+  the node's live layout (`citable_fields`, `dispatch/injections/
   registry.py`), so a panel L1 was not shown cannot be cited. Validated by
   `application/optimization/validators/l1_behavior.py`.
 - **Meta-prompt** — synonym for "optimizer prompt" (L1/L2/L3/Critique

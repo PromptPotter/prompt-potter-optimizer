@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, cast
 
-from promptpotter.application.optimization.dispatch.hub.facade import DispatchHub, build_bundle
+from promptpotter.application.optimization.dispatch.facade import DispatchHub, build_bundle
 from promptpotter.application.optimization.dispatch.llm_call.call import (
     LLMCallContext,
     run_optimizer_node,

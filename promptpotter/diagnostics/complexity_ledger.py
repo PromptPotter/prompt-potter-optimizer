@@ -82,7 +82,7 @@ def _is_reexport_shim(init_file: Path) -> bool:
 def compute_ledger() -> dict[str, int]:
     """Return the current surface count for every tracked dimension."""
     from promptpotter.application.knobs import KNOBS
-    from promptpotter.application.optimization.dispatch.hub.injections.registry import (
+    from promptpotter.application.optimization.dispatch.injections.registry import (
         INJECTIONS,
     )
     from promptpotter.application.optimization.escalation.rules import DEFAULT_ESCALATION_RULES

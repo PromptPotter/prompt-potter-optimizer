@@ -31,7 +31,7 @@ persona → task_intent → problem_description → instruction
 → thinking_style → answer_format → few_shot_examples → plan
 ```
 
-**Render chain:** `Cycle → build_bundle(layer) → DispatchHub.fill_{l1,fixed} → compile_prompt → LLM`. Injection renderers in `INJECTIONS` (`dispatch/hub/injections/`) are pure `(InjectionBundle) → str`; layer-agnostic. `INJECTIONS` is a typed `dict[str, _Injection]` carrying `name`, `kind`, `render`, and a docstring per entry. The hub has no state. Visual reference + per-placeholder source map: [`dispatch-hub.md`](dispatch-hub.md).
+**Render chain:** `Cycle → build_bundle(layer) → DispatchHub.fill_{l1,fixed} → compile_prompt → LLM`. Injection renderers in `INJECTIONS` (`dispatch/injections/`) are pure `(InjectionBundle) → str`; layer-agnostic. `INJECTIONS` is a typed `dict[str, _Injection]` carrying `name`, `kind`, `render`, and a docstring per entry. The hub has no state. Visual reference + per-placeholder source map: [`dispatch-hub.md`](dispatch-hub.md).
 
 **Invariant:** no prompt site summarizes its own data. If a name isn't in `INJECTIONS`, it doesn't enter a prompt. The registry is code-derived; capabilities can't silently disappear. `validate_template()` (called from `load_optimizer_prompt`) raises at module load on any `{{slot}}` name not in `INJECTIONS` — typos fail loud, not silent.
 
@@ -62,7 +62,7 @@ Every node fills through the one `fill` path from its `NodeLayoutSpec` (`domain/
 
 ### Injection registry — what's in `INJECTIONS`
 
-Layer-agnostic by contract. Every renderer reads off `InjectionBundle` and returns `str` (empty when the source field is empty — empty injections are skipped by the fillers). **22 slots**, each registered by `@signal("<name>", …)` at its renderer's definition site (`dispatch/hub/injections/{layer_state,panels,catalogues,wounds}.py`) — the decorator docstrings are the per-slot SoT, and [`dispatch-hub.md`](dispatch-hub.md) § Reference is the doc-level reference (this page deliberately doesn't repeat the table). Note the wound *storage* stays three typed lists on `OSP.memory.wounds`, but only two wound slots render: `l1_wounds` (validation + runtime, fenced) and `guard_breaches` (L2+L3 post-parse, plain).
+Layer-agnostic by contract. Every renderer reads off `InjectionBundle` and returns `str` (empty when the source field is empty — empty injections are skipped by the fillers). **22 slots**, each registered by `@signal("<name>", …)` at its renderer's definition site (`dispatch/injections/{layer_state,panels,catalogues,wounds}.py`) — the decorator docstrings are the per-slot SoT, and [`dispatch-hub.md`](dispatch-hub.md) § Reference is the doc-level reference (this page deliberately doesn't repeat the table). Note the wound *storage* stays three typed lists on `OSP.memory.wounds`, but only two wound slots render: `l1_wounds` (validation + runtime, fenced) and `guard_breaches` (L2+L3 post-parse, plain).
 
 L2 owns the L1-only injection subset via `l1_layout`; see [`dispatch-hub.md`](dispatch-hub.md) § L1 layout. L2-internal injections (`l1_overrides`, `l1_signal_catalogue`) are absent from `L1_POSSIBLE` so L2 cannot inject its own state into L1 as a layout entry — `l1_overrides`'s contents reach L1 only via the `n_variants`/`creativity` caller extras.
 
