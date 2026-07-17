@@ -25,7 +25,7 @@ def _is_forbidden_axis(axis: str) -> bool:
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes.sample import FailureCluster, SampleRecord
-    from promptpotter.infrastructure.store import Stores
+    from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
 

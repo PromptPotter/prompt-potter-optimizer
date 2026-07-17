@@ -58,12 +58,10 @@ from promptpotter.infrastructure.llm.models import (
     reset_cycle_ledger,
     set_cycle_ledger,
 )
-from promptpotter.infrastructure.store import (
-    Stores,
-    read_active_pointer,
-)
 from promptpotter.infrastructure.store.io import read_json_tolerant, write_json
 from promptpotter.infrastructure.store.layout import CycleLayout, root_cycle_id
+from promptpotter.infrastructure.store.session_pointer import read_active_pointer
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.presentation.api.middleware.command_dispatcher.helpers import (
     _DeleteCycleRejectedError,
     _find_idempotent_command,

@@ -28,12 +28,12 @@ from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.models import reset_cycle_ledger, set_cycle_ledger
-from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.io import (
     read_json_optional,
     read_text_optional,
     write_json,
 )
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.tracing.bridge import observed_node
 
 __all__ = [

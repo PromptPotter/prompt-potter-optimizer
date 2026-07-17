@@ -12,7 +12,7 @@ from fastapi import Query
 from pydantic import BaseModel, Field
 
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.infrastructure.store import campaign_root_dir_for, cycle_dir_for
+from promptpotter.infrastructure.store.layout import campaign_root_dir_for, cycle_dir_for
 from promptpotter.infrastructure.store.stores import resolve_cycle_path
 from promptpotter.presentation.api.deps import StoreDep, decode_descend
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router

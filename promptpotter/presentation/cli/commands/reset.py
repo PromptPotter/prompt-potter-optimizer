@@ -15,11 +15,11 @@ import sys
 from pathlib import Path
 
 from promptpotter.domain.identity import TenantId
-from promptpotter.infrastructure.store import (
+from promptpotter.infrastructure.store.layout import DEFAULT_PROJECTS_ROOT
+from promptpotter.infrastructure.store.session_pointer import (
     active_pointer_exists,
     clear_active_pointer,
 )
-from promptpotter.infrastructure.store.layout import DEFAULT_PROJECTS_ROOT
 from promptpotter.presentation.cli.commands._shared import CommandResult
 
 logger = logging.getLogger("promptpotter.presentation.cli.reset")

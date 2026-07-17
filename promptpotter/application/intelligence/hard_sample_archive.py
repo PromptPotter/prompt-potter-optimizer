@@ -18,7 +18,7 @@ from promptpotter.infrastructure.store import archive_views
 from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
-    from promptpotter.infrastructure.store import Stores
+    from promptpotter.infrastructure.store.stores import Stores
 
 __all__ = [
     "build_archive_hard_samples_artifact",

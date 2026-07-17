@@ -21,7 +21,7 @@ from promptpotter.application.scoring.search_point_scorer import (
 )
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import CycleSeed
-from promptpotter.infrastructure.store import Stores
+from promptpotter.infrastructure.store.stores import Stores
 
 # Every cycle lives inside a campaign; the foundation factory's default id.
 _CAMPAIGN = "testds__20260101-000000"

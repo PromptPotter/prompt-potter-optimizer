@@ -35,7 +35,7 @@ from promptpotter.domain.search_point import JobSearchPoint
 
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
-    from promptpotter.infrastructure.store import CampaignStore
+    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
 logger = logging.getLogger(__name__)
 

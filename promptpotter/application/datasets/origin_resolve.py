@@ -49,7 +49,7 @@ from promptpotter.application.scoring.formula.matchers import extraction_note_fo
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.infrastructure.llm.models import reset_cycle_ledger, set_cycle_ledger
-from promptpotter.infrastructure.store import Stores
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.tracing.bridge import observed_node
 
 logger = logging.getLogger(__name__)

@@ -58,12 +58,12 @@ from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
     readable_dataset_dir,
 )
 from promptpotter.infrastructure.store.io import read_json_optional
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import MachineBusyError, PayloadInvalidError
 from promptpotter.shared.identity import claim_email

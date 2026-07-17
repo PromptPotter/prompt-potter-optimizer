@@ -51,8 +51,8 @@ from promptpotter.application.optimization.task_context import (
 )
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.run_records import CycleSeed
-from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.dataset_access import readable_dataset_dir
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.identity import claim_email
 
 if TYPE_CHECKING:

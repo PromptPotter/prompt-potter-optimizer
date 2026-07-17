@@ -1223,7 +1223,7 @@ def test_cached_calls_are_metered_but_not_billed(tmp_path: Path) -> None:
     from promptpotter.domain.cycle_paths import CycleDir
     from promptpotter.domain.run_records import TokenUsageRecord
     from promptpotter.infrastructure.projections.live_dashboard.view import LiveDashboardView
-    from promptpotter.infrastructure.store import cycle_dir_for, session_dir_for
+    from promptpotter.infrastructure.store.layout import cycle_dir_for, session_dir_for
 
     view = LiveDashboardView(
         cycle_dir=CycleDir(cycle_dir_for(tmp_path, "c1", "cyc1")),

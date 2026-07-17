@@ -273,23 +273,41 @@ LEDGER_BASELINE = {
     # no net module cost. The raise was booked here before the deletion landed rather than
     # taken quietly, because a half-migrated tree living beside the live one is exactly what
     # this ratchet exists to make loud.
-    "modules": 318,
+    # 318 -> 319 (2026-07-17): ``infrastructure/store/session_pointer.py``. Raised
+    # DELIBERATELY, and it buys the death of a cycle GENERATOR. ``store/__init__`` used to
+    # eagerly import all ten leaf stores, so importing any leaf (``store.io`` /
+    # ``store.layout`` — both pure, neither able to cycle alone) executed it and dragged in
+    # ``CampaignStore``, which imports back up to ``runtime_flags`` and ``ledger``. Whether
+    # that exploded depended on which module the process reached FIRST: entry points hit
+    # ``store`` first and hid it, so THREE back-edges were cut to dodge it — and CI's
+    # ``scripts/build_ts_types.py``, which reaches ``ledger`` first, went red anyway.
+    # The only reason that ``__init__`` needed a body was the active-session pointer; moved
+    # here, the aggregator empties, and all three hacks revert to plain imports (the
+    # acceptance test for the pass). It cannot fold into ``session_store.py``: that is an
+    # instance store over ``sessions/{id}/session.json``, this is tenant-keyed free
+    # functions over ``.workspace/active_session.json`` — a different file, root and shape.
+    # ``reexport_shims`` 9 -> 8 pays for it, so TOTAL is flat: the win is that a fourth
+    # back-edge is now impossible rather than likely, which this ledger cannot count.
+    "modules": 319,
     "init_files": 60,
     # 43 -> 9 (2026-07-16): 34 package ``__init__`` files that did nothing but re-export a
     # leaf's names were emptied to docstring-only namespace markers, and their ~190 consumer
     # sites now import the leaf they actually wanted. A shim is a hop a reader must take and
     # a second place a name lives; deleting one subtracts both.
     #
-    # **The 9 survivors are the floor — they are not shims, and emptying them breaks the app.**
+    # 9 -> 8 (2026-07-17): ``infrastructure/store`` left the floor — see the ``modules`` note
+    # above. It was only ever a survivor because the active-session pointer lived in its body.
+    #
+    # **The 8 survivors are the floor — they are not shims, and emptying them breaks the app.**
     # Don't re-propose them:
     #   * ``connectors`` — IS the connector registry (import-time guards).
     #   * ``presentation/api/routers/campaigns`` — IS the route registry: its submodule imports
     #     run the ``@campaigns_router`` decorators, so emptying it mounts a router with ZERO
     #     routes. The one that reads like a pure re-export and is not.
-    #   * ``infrastructure/store``, ``shared``, ``application/scoring/formula``,
-    #     ``application/views/render``, ``cli/commands/{champion,matrix,sweep}`` — real code
-    #     in the body (the counter sees ``__all__`` + an import and says "shim"; it is wrong).
-    "reexport_shims": 9,
+    #   * ``shared``, ``application/scoring/formula``, ``application/views/render``,
+    #     ``cli/commands/{champion,matrix,sweep}`` — real code in the body (the counter sees
+    #     ``__all__`` + an import and says "shim"; it is wrong).
+    "reexport_shims": 8,
     "config_leaf_fields": 38,
     "settings_env": 16,
     "settings_const": 14,

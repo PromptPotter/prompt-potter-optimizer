@@ -17,8 +17,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.read_model import iter_jsonl
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.spend import lookup_rate
 
 

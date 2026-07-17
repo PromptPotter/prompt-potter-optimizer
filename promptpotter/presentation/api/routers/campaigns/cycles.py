@@ -22,8 +22,8 @@ from promptpotter.application.mask.verdicts import make_abort_verdict, make_scor
 from promptpotter.application.scoring.formula import compile_round_scorer
 from promptpotter.application.scoring.metrics import value_with_mask_applied
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.infrastructure.store import cycle_dir_for
 from promptpotter.infrastructure.store.io import read_json_tolerant
+from promptpotter.infrastructure.store.layout import cycle_dir_for
 from promptpotter.infrastructure.store.lineage_views import (
     LineageDivergence,
     LineageNode,

@@ -26,12 +26,12 @@ from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.pipeline_parsing import merge_node_blocks, parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.infrastructure.backend import BackendClient, build_backend_client
-from promptpotter.infrastructure.store import Stores, build_stores
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
     readable_dataset_dir,
 )
 from promptpotter.infrastructure.store.io import read_json_optional
+from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.shared.identity import IdentityContext, default_identity
 from promptpotter.shared.instrument import instrument_mode
 

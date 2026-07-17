@@ -25,7 +25,7 @@ from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
     from promptpotter.domain.scoring import QueryMeasurement
-    from promptpotter.infrastructure.store import Stores
+    from promptpotter.infrastructure.store.stores import Stores
     from promptpotter.shared.identity import IdentityContext
 
 logger = logging.getLogger(__name__)

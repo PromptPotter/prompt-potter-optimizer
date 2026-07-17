@@ -12,7 +12,7 @@ from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import campaign_cycles_dir
 
 if TYPE_CHECKING:
-    from promptpotter.infrastructure.store import Stores
+    from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ def gather_sibling_runtime_failures(
     exclude_cycle_id: str | None = None,
 ) -> list[RuntimeFailure]:
     """Aggregate deduped runtime_failures from finished sibling cycles of ``root_cycle_id``."""
-    from promptpotter.infrastructure.store import root_cycle_id as _root_of
+    from promptpotter.infrastructure.store.layout import root_cycle_id as _root_of
 
     out: list[RuntimeFailure] = []
     seen_keys: set[tuple[str, str, str]] = set()

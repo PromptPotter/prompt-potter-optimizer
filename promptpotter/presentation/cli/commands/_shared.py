@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from promptpotter.application.runner.entry import RunMode
     from promptpotter.domain.results import CycleResult
     from promptpotter.domain.sample import Sample
-    from promptpotter.infrastructure.store import Stores
+    from promptpotter.infrastructure.store.stores import Stores
     from promptpotter.presentation.cli.session import SessionCtx
     from promptpotter.presentation.views.live.display import LiveDisplay
 

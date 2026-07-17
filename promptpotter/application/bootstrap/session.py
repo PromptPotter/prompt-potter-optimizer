@@ -12,13 +12,10 @@ from promptpotter.domain.phases import StopReason
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import RoundScorer, Scorer
 from promptpotter.infrastructure.backend import BackendClient
-from promptpotter.infrastructure.store import (
-    Stores,
-    mint_session_id,
-    save_active_pointer,
-)
 from promptpotter.infrastructure.store.io import validate_path_component
 from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.store.session_pointer import mint_session_id, save_active_pointer
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.identity import IdentityContext, default_identity
 
 if TYPE_CHECKING:

@@ -24,12 +24,11 @@ from promptpotter.application.knobs import (
 )
 from promptpotter.application.meta_champion.reducer import ChampionRegistry, reduce_corpus
 from promptpotter.application.resource_matrix.matrix import ResourceMatrix, read_matrix
-from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
     readable_dataset_dir,
 )
-from promptpotter.infrastructure.store.stores import descend_store
+from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.presentation.api.deps import StoreDep, decode_descend
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError

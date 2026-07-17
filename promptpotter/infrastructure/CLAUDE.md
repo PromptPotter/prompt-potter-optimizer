@@ -95,9 +95,14 @@ leaf stores: `backends` (`BackendStore`), `tenant_datasets`, `sessions`,
 `campaigns` (`store/campaign_store/`), `checkin` (`CheckinDraftStore`),
 `sweeps`, `archive` (`MeasurementArchive`), `optimizer_calls`
 (`OptimizerCallCache`), `diagnostic_runs`, `users`. Shared I/O in
-`store/io.py`; path helpers in `store/layout.py`; derived reads are free
+`store/io.py`; path helpers in `store/layout.py`; the per-tenant
+active-session pointer in `store/session_pointer.py`; derived reads are free
 functions in view modules (`store/archive_views.py` is the template — it is
-also the archive's single-writer facade). The
+also the archive's single-writer facade). **`store/__init__.py` re-exports
+nothing** — import each leaf directly. It aggregated all ten eagerly, so any
+leaf import dragged in `CampaignStore` and cycled back through `runtime_flags`
+/ `ledger`; three back-edges were cut to dodge that before the aggregator
+itself went. The
 `CycleDir` / `WorkspaceDir` write-target newtypes live in
 `domain/cycle_paths.py` — projections and stores accept these newtypes,
 not raw `str`/`Path`. `archive/` is cross-cycle/cross-tenant;

@@ -25,8 +25,8 @@ from promptpotter.application.mask.record import (
 )
 from promptpotter.application.scoring.evaluators import materialize_row_derivable
 from promptpotter.domain.results import ScoredCandidate, is_leader_eligible
-from promptpotter.infrastructure.store import cycle_dir_for
 from promptpotter.infrastructure.store.io import read_json_optional
+from promptpotter.infrastructure.store.layout import cycle_dir_for
 from promptpotter.infrastructure.store.stores import Stores
 
 

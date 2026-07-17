@@ -49,7 +49,7 @@ from promptpotter.shared.errors import graceful
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.infrastructure.store import CampaignStore
+    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
 __all__ = [
     "from_disk_log",

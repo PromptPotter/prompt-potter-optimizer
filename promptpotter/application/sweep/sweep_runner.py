@@ -19,11 +19,9 @@ from promptpotter.application.views.view_models import SweepPayloadRow, SweepSum
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.results import PayloadOutcome, SweepBatchResult
 from promptpotter.domain.run_records import ForkSpec, ForkTrigger, OperatorSweepFile
-from promptpotter.infrastructure.store import (
-    build_stores,
-    root_cycle_id,
-    save_active_pointer,
-)
+from promptpotter.infrastructure.store.layout import root_cycle_id
+from promptpotter.infrastructure.store.session_pointer import save_active_pointer
+from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:

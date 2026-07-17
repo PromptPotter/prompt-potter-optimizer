@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from promptpotter.infrastructure.store import Stores, build_stores
+from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.shared.identity import default_identity
 
 

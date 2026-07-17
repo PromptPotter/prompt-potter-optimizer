@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.infrastructure.identity.migration import registered_or_default_identity
-from promptpotter.infrastructure.store import Stores, build_stores
+from promptpotter.infrastructure.store.stores import Stores, build_stores
 
 if TYPE_CHECKING:
     from promptpotter.application.config import CampaignConfig
@@ -98,7 +98,10 @@ def no_dataset_hint() -> str:
 
 def load_session(args: argparse.Namespace) -> SessionCtx:
     """Load active session from disk."""
-    from promptpotter.infrastructure.store import active_pointer_exists, read_active_pointer
+    from promptpotter.infrastructure.store.session_pointer import (
+        active_pointer_exists,
+        read_active_pointer,
+    )
 
     # Same resolver as `identity_from_args` — explicit --tenant > registered
     # developer (claim marker) > anonymous default. Must match, else resume

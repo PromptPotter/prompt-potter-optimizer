@@ -13,7 +13,7 @@ import argparse
 import logging
 
 from promptpotter.application.noise_floor import NoiseFloorError, measure_noise_floor
-from promptpotter.infrastructure.store import build_stores
+from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
     get_verbose,

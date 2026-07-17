@@ -158,7 +158,7 @@ async def _ingest_checkin(args: argparse.Namespace) -> str:
     from promptpotter.application.datasets.origin_readiness import origin_readiness
     from promptpotter.application.datasets.origin_resolve import resolve_origin_turn
     from promptpotter.application.jobs.launcher.checkin import save_checkin_draft
-    from promptpotter.infrastructure.store import build_stores
+    from promptpotter.infrastructure.store.stores import build_stores
 
     file_path = Path(args.dataset)
     stores = build_stores(identity_from_args(args))
@@ -221,7 +221,7 @@ async def _ingest_and_prepare_checkin(
         load_checkin_draft,
         prepare_checkin_run,
     )
-    from promptpotter.infrastructure.store import build_stores
+    from promptpotter.infrastructure.store.stores import build_stores
 
     campaign_id = await _ingest_checkin(args)
     stores = build_stores(identity_from_args(args))

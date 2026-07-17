@@ -20,7 +20,7 @@ import time
 
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.jobs.spend import start_of_utc_day, sum_user_spend
-from promptpotter.infrastructure.store import Stores
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.store.user_store import User
 from promptpotter.shared.errors import PotterError
 

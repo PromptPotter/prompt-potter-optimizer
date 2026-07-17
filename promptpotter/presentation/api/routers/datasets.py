@@ -33,16 +33,16 @@ from promptpotter.application.jobs.launcher.draft_build import draft_wire_with_l
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import NodeConfigParam, NodeOutputSchema
-from promptpotter.infrastructure.store import (
-    DatasetAccessError,
-    campaign_root_dir_for,
-    list_readable_datasets,
-    readable_dataset_dir,
-)
 from promptpotter.infrastructure.store.archive_views import (
     measurement_series_for_samples,
 )
+from promptpotter.infrastructure.store.dataset_access import (
+    DatasetAccessError,
+    list_readable_datasets,
+    readable_dataset_dir,
+)
 from promptpotter.infrastructure.store.io import read_json
+from promptpotter.infrastructure.store.layout import campaign_root_dir_for
 from promptpotter.infrastructure.store.stores import resolve_cycle_path
 from promptpotter.presentation.api.deps import (
     StoreDep,

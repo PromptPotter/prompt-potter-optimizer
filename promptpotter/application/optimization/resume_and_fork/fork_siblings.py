@@ -37,18 +37,18 @@ from promptpotter.domain.identity import TenantId
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import UNATTRIBUTED_OPERATOR, ForkSpec, ForkTrigger
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.store import (
+from promptpotter.infrastructure.store.layout import campaign_cycles_dir, root_cycle_id
+from promptpotter.infrastructure.store.session_pointer import (
     read_active_pointer,
-    root_cycle_id,
     save_active_pointer,
 )
-from promptpotter.infrastructure.store.layout import campaign_cycles_dir
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.domain.run_records import CycleSeed
-    from promptpotter.infrastructure.store import CampaignStore, Stores
+    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
+    from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
 

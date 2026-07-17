@@ -81,7 +81,7 @@ async def _fork_and_bind(
     from promptpotter.application.config import configure_and_apply_pipeline
     from promptpotter.application.optimization.resume_and_fork.fork_siblings import _mint_fork
     from promptpotter.domain.run_records import ForkSpec, ForkTrigger
-    from promptpotter.infrastructure.store import build_stores
+    from promptpotter.infrastructure.store.stores import build_stores
 
     identity = identity_from_args(args)
     tenant_id = identity.tenant_id
@@ -228,7 +228,7 @@ async def _run_panel_verb(
     via ``--from-sweep``.
     """
     from promptpotter.application.sweep.toolkit import slice_samples, write_sweep_result
-    from promptpotter.infrastructure.store import save_active_pointer
+    from promptpotter.infrastructure.store.session_pointer import save_active_pointer
     from promptpotter.shared.errors import ResumeDivergenceError
     from promptpotter.shared.spend import refresh_rates
 
@@ -368,7 +368,7 @@ async def _cmd_sweep_round2(args: argparse.Namespace) -> CommandResult:
     round2_lift against each variant's prior round1. Without
     ``--from-sweep``, falls back to ``--l1-prompts`` / current L1."""
     from promptpotter.application.sweep.toolkit import find_sweep_results
-    from promptpotter.infrastructure.store import build_stores
+    from promptpotter.infrastructure.store.stores import build_stores
 
     if getattr(args, "from_sweep", None):
         stores = build_stores(identity_from_args(args))

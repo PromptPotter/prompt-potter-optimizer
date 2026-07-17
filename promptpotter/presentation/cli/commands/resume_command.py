@@ -481,7 +481,7 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
     # rounds) isn't resumable: there's nothing to run until it's Started. Guard
     # cheaply before init_services so the operator gets a clear next step instead of
     # a confusing dataset-not-found deep in the loop.
-    from promptpotter.infrastructure.store import build_stores
+    from promptpotter.infrastructure.store.stores import build_stores
 
     _campaign = build_stores(identity_from_args(args)).campaigns.load_campaign(ctx.campaign_id)
     if _campaign is not None and _campaign.lifecycle_status == "checkin":

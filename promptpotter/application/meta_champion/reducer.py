@@ -34,7 +34,7 @@ from promptpotter.infrastructure.store.layout import campaign_cycles_dir
 from promptpotter.shared.statistics import paired_diff_posterior
 
 if TYPE_CHECKING:
-    from promptpotter.infrastructure.store import Stores
+    from promptpotter.infrastructure.store.stores import Stores
 
 # The connector whose cycles carry meta-prompt candidates — i.e. the L4 recursion.
 _PP_SELF_BACKEND_TYPE = "promptpotter"

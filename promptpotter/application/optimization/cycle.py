@@ -219,7 +219,7 @@ def _inherit_sibling_runtime_failures(opt_sp: OptSearchPoint, session: Session) 
     from promptpotter.application.intelligence.sibling_wounds import (
         gather_sibling_runtime_failures,
     )
-    from promptpotter.infrastructure.store import root_cycle_id as _root_cycle_id
+    from promptpotter.infrastructure.store.layout import root_cycle_id as _root_cycle_id
 
     if not session.state.cycle_id:
         return

@@ -65,7 +65,7 @@ def main() -> None:
     # First-run guard: if no active session exists, print a friendly landing
     # instead of letting resume fail with a confusing error.
     if args.command is None:
-        from promptpotter.infrastructure.store import active_pointer_exists
+        from promptpotter.infrastructure.store.session_pointer import active_pointer_exists
         from promptpotter.presentation.cli.commands._shared import identity_from_args
 
         if not active_pointer_exists(identity_from_args(args).tenant_id):

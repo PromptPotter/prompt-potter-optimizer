@@ -42,11 +42,8 @@ from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import RoundResult, best_round_by_cumulative_accuracy
 from promptpotter.domain.run_records import CycleSeed, CycleSeedRecord
-
-# Bound as a module, not by name: ``runtime_flags`` imports ``store.io``, which runs
-# this package's ``__init__`` and lands back here mid-initialization. The module object
-# exists in ``sys.modules`` at that point; its attributes do not yet.
-from promptpotter.infrastructure import runtime_flags
+from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.runtime_flags import derive_run_phase, is_checkin
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_cycle_seed,
     scan_ledger_max_round_complete,
@@ -67,6 +64,7 @@ from promptpotter.infrastructure.store.layout import (
     root_cycle_id,
     sibling_kind,
 )
+from promptpotter.infrastructure.store.session_pointer import read_active_pointer_under
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import BadRequestError, ConflictError, NotFoundError
 
@@ -463,10 +461,6 @@ class CampaignStore:
         """Whether *campaign_id* is the tenant's active-session campaign — the live
         lens / running run. Archiving or deleting it would strand the pointer + its
         open ``.runtime/`` handles, so the move + destructive verbs refuse it."""
-        # Function-local: the package `__init__` imports this module, so the
-        # pointer reader can only be reached at call time.
-        from promptpotter.infrastructure.store import read_active_pointer_under
-
         _, active_campaign, _ = read_active_pointer_under(self._base_dir)
         return bool(active_campaign) and active_campaign == campaign_id
 
@@ -811,7 +805,7 @@ class CampaignStore:
         (not just the sweep's staleness gate). A paused cycle stays a suspended
         unit until the operator resumes or archives it."""
         cycle_dir = self.cycle_dir(campaign_id, cycle_id)
-        if CycleLayout(cycle_dir).pause_flag.is_file() or runtime_flags.is_checkin(cycle_dir):
+        if CycleLayout(cycle_dir).pause_flag.is_file() or is_checkin(cycle_dir):
             return False
         index_path = self._index_path(campaign_id, cycle_id)
         data = read_json_optional(index_path)
@@ -845,7 +839,7 @@ class CampaignStore:
         # the one computation the picker, both live dots, and the badge all
         # read — no surface re-derives "running" from its own inputs.
         is_terminal = isinstance(data, dict) and bool(data.get("finished_at"))
-        run_phase = str(runtime_flags.derive_run_phase(index_path.parent, is_terminal=is_terminal))
+        run_phase = str(derive_run_phase(index_path.parent, is_terminal=is_terminal))
         if not isinstance(data, dict):
             data = {}
             status = "unreadable"
@@ -1110,16 +1104,6 @@ class CampaignStore:
         """Append the cycle seed as the read-once ``CycleSeedRecord`` on the ledger
         (was ``.overrides/seed.json``). A steered fork appends its own after inheriting
         the parent's virtually, so on disk it is this cycle's own first seed record."""
-        # Imported at call time, for the same reason ``runtime_flags`` is module-bound
-        # above: ``ledger`` imports ``store.layout``, which runs this package's eager
-        # ``__init__`` and lands back here mid-initialization. Whether that explodes
-        # depends on which module the process imports FIRST — entry points reach
-        # ``store`` first and hide it; anything reaching ``ledger`` first (e.g.
-        # ``scripts/build_ts_types.py``, via the command dispatcher) got an ImportError.
-        # The real root is the fat ``store/__init__`` eagerly pulling all ten leaf
-        # stores; this only cuts the back-edge.
-        from promptpotter.infrastructure.ledger import CycleEventLog
-
         cycle_dir = self.cycle_dir(campaign_id, cycle_id)
         CycleEventLog.open(CycleDir(cycle_dir)).append(CycleSeedRecord(seed=seed))
 

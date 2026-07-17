@@ -67,7 +67,7 @@ from promptpotter.application.jobs.launcher.draft_build import draft_wire_with_l
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.connectors import BackendUnreachableError
 from promptpotter.domain.origin_provenance import Provenance
-from promptpotter.infrastructure.store import Stores
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.middleware.command_dispatcher.dispatcher import (
     CampaignConfigKind,

@@ -13,7 +13,8 @@ from promptpotter.config.settings import settings
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.infrastructure.identity.migration import registered_or_default_identity
-from promptpotter.infrastructure.store import Stores, build_stores, cycle_dir_for
+from promptpotter.infrastructure.store.layout import cycle_dir_for
+from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.shared.errors import (
     BadRequestError,
     NotFoundError,

@@ -13,7 +13,8 @@ from __future__ import annotations
 import argparse
 import logging
 
-from promptpotter.infrastructure.store import archive_views, build_stores
+from promptpotter.infrastructure.store import archive_views
+from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli.commands._shared import CommandResult, identity_from_args
 
 logger = logging.getLogger("promptpotter.presentation.cli.reindex")

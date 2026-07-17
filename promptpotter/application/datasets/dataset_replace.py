@@ -35,8 +35,8 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.io import read_json_optional, write_json
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 
 logger = logging.getLogger(__name__)

@@ -413,8 +413,8 @@ async def _run_inner_campaign(
     )
     from promptpotter.application.run_observers import build_run_observers
     from promptpotter.application.runner.entry import RunMode, run_optimization
-    from promptpotter.infrastructure.store import build_stores
     from promptpotter.infrastructure.store.archive_views import capture_evidence_epoch
+    from promptpotter.infrastructure.store.stores import build_stores
     from promptpotter.shared.instrument import enter_instrument_mode
 
     # Apply the outer L1's meta-prompt mutations to the inner optimizer prompts — set in THIS

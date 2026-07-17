@@ -14,10 +14,10 @@ from pathlib import Path
 
 from promptpotter.application.jobs.reaper import sweep_dead_cycles
 from promptpotter.domain.phases import StopReason
-from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.store.stores import Stores
 
 _CAMPAIGN = "testds__20260101-000000"
 _CYCLE = "cycle-0"

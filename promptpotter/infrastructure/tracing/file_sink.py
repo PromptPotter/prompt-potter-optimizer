@@ -12,13 +12,13 @@ import uuid
 from pathlib import Path
 from typing import Any, ClassVar
 
-from promptpotter.infrastructure.store import cycle_dir_for
 from promptpotter.infrastructure.store.io import (
     append_jsonl,
     read_json_optional,
     write_json,
     write_text,
 )
+from promptpotter.infrastructure.store.layout import cycle_dir_for
 from promptpotter.infrastructure.tracing.events import (
     CampaignEnd,
     CampaignStart,

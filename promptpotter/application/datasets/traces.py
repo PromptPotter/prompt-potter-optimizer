@@ -17,7 +17,7 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import RoundResult
 
 if TYPE_CHECKING:
-    from promptpotter.infrastructure.store import Stores
+    from promptpotter.infrastructure.store.stores import Stores
 
 
 def _infer_escalation_layer(prev: OptSearchPoint, nxt: OptSearchPoint) -> str:

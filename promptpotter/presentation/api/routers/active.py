@@ -25,8 +25,8 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     OPTIMIZER_PIPELINE_PATH,
 )
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.infrastructure.store import read_active_pointer
 from promptpotter.infrastructure.store.io import read_json
+from promptpotter.infrastructure.store.session_pointer import read_active_pointer
 from promptpotter.infrastructure.store.stores import descend_store
 from promptpotter.presentation.api.deps import (
     IdentityDep,
