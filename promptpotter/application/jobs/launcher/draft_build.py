@@ -21,7 +21,7 @@ from __future__ import annotations
 from typing import Any
 
 from promptpotter import connectors
-from promptpotter.application.config import load_campaign_config
+from promptpotter.application.config import freeze_campaign_config, load_campaign_config
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
     merge_pipeline_overlay,
@@ -224,27 +224,37 @@ def _build_default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:
     :attr:`Connector.default_optimization`) — the launcher no longer
     hard-codes ``["llm_ranking"]`` or ``n_variants=3``. Connectors that
     leave the fields empty get the schema defaults.
+
+    Written as the **delta from defaults** (``freeze_campaign_config``), the same
+    shape the minted snapshot persists: a knob nobody chose never reaches disk, so
+    renaming or dropping it later cannot make this file unreadable. That matters
+    here because ``CampaignConfig`` is ``extra="forbid"`` and three endpoints read
+    this one file — ``/datasets/{name}/pipeline``, ``/preview``, and the draft
+    mint. ``draft.optimization_overrides`` is a *full* dump of every knob
+    (``OptimizationOverrides().model_dump()``), so passing it through verbatim
+    spelled every mechanism toggle onto disk at its default and made every
+    ingested dataset a hostage to the next rename.
+
+    Validating before freezing also means a connector whose ``default_optimization``
+    omits a required knob fails at mint, where the cause is legible — not on the
+    first read of a file that was never loadable.
     """
     connector = connectors.get(draft.connector)
     overrides = draft.optimization_overrides
     optimization: dict[str, Any] = {"max_rounds": overrides["max_rounds"]}
     optimization.update(dict(connector.default_optimization))
     optimization["prompt_block_catalogue"] = overrides["prompt_block_catalogue"]
-    # The operator's mechanism-toggle choices ride straight onto the committed
-    # campaign.json (sorting/selection + early-abort groups), like max_rounds.
     optimization["mechanisms"] = dict(overrides["mechanisms"])
-    return {
-        "campaign_config": {
+    config = load_campaign_config(
+        {
             "dataset_name": draft.slug,
             "scoring": f"{draft.scoring_composite}(predicted, ground_truth)",
             "exclude_nodes": list(connector.default_exclude_nodes),
             "optimization": optimization,
-            # Top-level CampaignConfig field (not an `optimization` knob). Omitted when
-            # empty so the delta-snapshot stays clean — absent reads as the restrictive
-            # default (nothing sanctioned) both here and at the babysit gate.
             **({"allowed_models": list(draft.allowed_models)} if draft.allowed_models else {}),
-        },
-    }
+        }
+    )
+    return {"campaign_config": freeze_campaign_config(config)}
 
 
 def _build_task_context(draft: DraftCampaign) -> dict[str, Any]:

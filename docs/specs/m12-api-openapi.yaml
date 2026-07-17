@@ -2147,7 +2147,8 @@ components:
             `command_kind_unknown` (404), `slug_collision` (409),
             `machine_busy` (409), `backend_unreachable` (503),
             `ingest_failed` / `origin_incomplete` / `pipeline_config_invalid`
-            (422). Generic families: `bad_request` (400), `unauthenticated`
+            (422), `stored_config_invalid` (500). Generic families:
+            `bad_request` (400), `unauthenticated`
             (401), `capability_denied` (403), `not_found` (404), `too_large`
             (413), `request_invalid` (422), `service_unavailable` (503),
             `internal_error` (500). New codes require a YAML update first.
@@ -2166,6 +2167,7 @@ components:
             - ingest_failed
             - origin_incomplete
             - pipeline_config_invalid
+            - stored_config_invalid
             - nothing_to_replace
             - resolver_failed
             - backend_sync_failed
@@ -2220,6 +2222,21 @@ components:
               `proposed_unconfirmed`. The deterministic origin-readiness
               checklist — not the operator — is the source of truth for
               completeness (see `docs/specs/roadmap.md`).
+            * `stored_config_invalid` (500 on any read of a stored config the
+              server itself persisted) — `path` (the workspace-relative file)
+              and `reason` (what the parse or validation rejected, naming the
+              offending key). Distinct from `pipeline_config_invalid` (422),
+              which rejects config the *caller* supplied: this one means data on
+              disk stopped satisfying the code that reads it — typically a knob
+              dropped from `CampaignConfig` (`extra="forbid"`) while a file
+              written earlier still names it. It is a 500 because the caller did
+              nothing wrong and cannot fix it; the remedy is
+              `scripts/restamp_campaign_configs.py`, which `deploy-linux/update.sh`
+              runs on every deploy.
+            * `internal_error` (500, the catch-all) — `error_id`, a short hex
+              handle also logged with the traceback. The one thing that ties the
+              opaque client-side string to the server-side cause; quote it when
+              reporting a 500.
 
     # ---- Read-surface shapes (the forest's cycle list, at any depth) ----
     # Mirrors promptpotter/presentation/api/routers/active.py::CycleListEntry

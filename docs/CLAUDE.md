@@ -33,7 +33,7 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 | What is the shape of this project? | [`architecture.md`](architecture.md) §0 |
 | What is the load-bearing surface? | [`architecture.md`](architecture.md) §0.5 |
 | What does this domain word mean? | [`glossary.md`](glossary.md) |
-| What's the difference between origin, check-in, and round-0/C0? | [`architecture.md`](architecture.md) §0.5 (the start-definitions bullet) |
+| What is the origin? When is it a *parent* instead? | [`architecture.md`](architecture.md) §0.5 (the start-definitions bullet) |
 | Under which fitness formula? active / what-if / lens / replay, `composite_fitness` vs `accuracy` | [`architecture.md`](architecture.md) §0.5 (Composite-fitness resolution chain) + [`concepts/scoring-and-memory.md`](concepts/scoring-and-memory.md) |
 | The situational reasoning doctrines (simplify-the-problem / surface-ledger / reach-the-operator)? | [`developer/conventions.md`](developer/conventions.md) § Reasoning doctrine (the two universal gates stay in root [`CLAUDE.md`](../CLAUDE.md)) |
 | Debugging the PP↔TermNorm highway (async hygiene, `--reload` session wipe, latency)? | [`operations/backend-integration.md`](operations/backend-integration.md) § Debugging the highway |

@@ -5,6 +5,7 @@ PromptPotter Optimizer API — main FastAPI application entry point.
 import asyncio
 import contextlib
 import logging
+import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
@@ -128,9 +129,15 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    # An unhandled error is by definition one we can't describe — but the operator
+    # must still be able to reach the traceback that describes it. The id ties the
+    # string they see to the `logger.exception` line here; without it the only way
+    # back is a hand-grep of journald against a wall-clock guess.
+    error_id = uuid.uuid4().hex[:12]
+    logger.exception("Unhandled error [%s] on %s %s", error_id, request.method, request.url.path)
     return JSONResponse(
-        status_code=500, content=_envelope("internal_error", "Internal server error")
+        status_code=500,
+        content=_envelope("internal_error", "Internal server error", {"error_id": error_id}),
     )
 
 

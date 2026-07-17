@@ -37,7 +37,7 @@ __all__ = [
     "EliminationContext",
     "HeadlineMetric",
     "PayloadOutcome",
-    "RoundOrigin",
+    "RoundParent",
     "RoundResult",
     "RoundSummary",
     "RoundSummaryCandidate",
@@ -329,8 +329,10 @@ class CandidateProposal(StrictModel):
     prompt_fields_override: dict[str, str] = Field(default_factory=dict)
 
 
-class RoundOrigin(StrictModel):
-    """The round's challenger anchor. On probe rounds, scalars reflect the probe subset, not the full set."""
+class RoundParent(StrictModel):
+    """The individual this round's candidates were mutated from, scored over the samples they
+    touched so every paired diff is matched. It is the origin only at round 0; after that it is
+    the prior winner. On probe rounds, scalars reflect the probe subset, not the full set."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
 
@@ -432,7 +434,7 @@ class RoundResult(StrictModel):
     pipeline_params: dict[str, Any] | None = None
     # Prior round's accuracy (or campaign origin for round 0).
     origin_accuracy: float = 0.0
-    # Per-sample rows — ``QueryMeasurement`` + stale-data markers (see ``RoundOrigin.results``).
+    # Per-sample rows — ``QueryMeasurement`` + stale-data markers (see ``RoundParent.results``).
     results: list[dict[str, Any]] = Field(default_factory=list)
     # Per-candidate scored results — lets resume rescore under a changed scorer + replay decisions.
     all_candidate_results: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)

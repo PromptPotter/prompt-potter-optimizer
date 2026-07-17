@@ -1,23 +1,26 @@
-"""Ratchet: the package's conceptual surface may shrink, never grow.
+"""Ratchet: the package's conceptual surface never moves unexamined.
 
 This is the enforcement teeth behind the <surface-ledger> doctrine
 (docs/developer/conventions.md § Reasoning doctrine). The
 recurring AI blind spot is additive-but-safe "refactors" that grow the module +
 import surface while claiming to simplify; a prose rule gets ignored, a red test
-does not. Each dimension is pinned to a baseline and asserted ``<=`` — a change
-that raises any dimension fails here and must justify itself as a feature, not a
-refactor.
+does not. Each dimension is pinned to a baseline and asserted ``<=``, so a raise
+stops here and asks for a reason — it is not forbidden. Growing the surface means
+editing the baseline up with the reason recorded below (a feature, or a shape that
+makes the codebase quicker to develop). What is banned is growing the surface
+while calling itself a refactor.
 
 When a deletion legitimately LOWERS a dimension, lower its baseline in the same
-commit (surface-ledger rule 4: "lower the baseline to lock the win"). The baseline IS
-the finish line — when no number can fall further without losing a load-bearing
-concept, the unification phase is done.
+commit (surface-ledger rule 4: "lower the baseline to lock the win") so it cannot
+drift back. The baseline records where the surface stands; it is not a target to
+reach and halt at.
 """
 
 from promptpotter.diagnostics.complexity_ledger import compute_ledger
 
-# Captured 2026-06-19 after the unification-phase subtractions. Only ever edit a
-# number DOWNWARD (a deletion that earned it) — never up without a feature reason.
+# Captured 2026-06-19 after the unification-phase subtractions. Every edit to a
+# number carries a reason: down = a deletion earned it, up = a feature or a
+# develop-speed win. The raises named below are the precedent, not exceptions.
 # Deliberate feature raises since the 2026-06-19 capture: ``settings_const``
 # 15→16 (the consent-gate security feature) and ``modules`` 293→295 (the durable
 # check-in: ``infrastructure/store/checkin_draft_store.py`` + the two-transition

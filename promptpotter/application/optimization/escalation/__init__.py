@@ -33,10 +33,7 @@ MAPPED (the concept spans these; canonical homes):
 
 Nothing is re-exported here — every consumer imports the leaf directly, e.g.
 ``from promptpotter.application.optimization.escalation.decide import
-decide_escalation``. That is also what keeps the package import-safe: a
-re-exporting surface here would eagerly load the firing driver, which depends
-back on ``Cycle``, so ``cycle.py`` and ``resume_and_fork/resume.py`` had to
-reach past it to ``.state`` for the foundational :class:`EscalationFSM`. With
-no surface to hop through, that exception is gone — foundational state types
-simply sit below the driver.
+decide_escalation``. A re-exporting surface would pull the firing driver — and
+through it dispatch, llm_call and mask — into every consumer that wants only a
+state type. The leaves stay importable on their own; do not add a barrel here.
 """

@@ -164,10 +164,10 @@ async def _rescore_and_reemit(
     verdict re-stamps ``cycle.origin_health`` and every round-0 surface
     (``round_0000.json``, ``dashboard.json::rounds[0]``) updates in one shape."""
     from promptpotter.application.datasets.loaders import sample_dataset
-    from promptpotter.application.origin import rescore_origin
+    from promptpotter.application.origin import rescore_parent
 
     scoring_set = sample_dataset(dataset, config.sp_budget_ttest)
-    origin = await rescore_origin(cycle, scoring_set, 0, callbacks=cb, force_fresh=True)
+    origin = await rescore_parent(cycle, scoring_set, 0, callbacks=cb, force_fresh=True)
     tr = cycle.tracking
     tr.origin_accuracy = origin.accuracy
     tr.origin_composite_fitness = origin.composite_fitness

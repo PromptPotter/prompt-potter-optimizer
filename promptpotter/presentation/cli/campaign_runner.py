@@ -56,8 +56,9 @@ def main() -> None:
     args = parser.parse_args()
     set_verbose(bool(getattr(args, "verbose", False)))
 
-    # Bare invocation defaults to `resume`. Re-parse with the verb injected so
-    # `resume`'s own defaults populate (--from, --fork-on-divergence, halt/spend, etc.).
+    # Bare invocation defaults to `resume`. Re-parse with the verb appended to the ORIGINAL
+    # argv (not alone) so `resume`'s own defaults populate (--from, --fork-on-divergence,
+    # halt/spend, etc.) WITHOUT dropping the globals — `--tenant`/`--json` sit before the verb.
     # First-run guard: if no active session exists, print a friendly landing
     # instead of letting resume fail with a confusing error.
     if args.command is None:
@@ -77,7 +78,7 @@ def main() -> None:
                 "Docs: https://github.com/runfish5/prompt-potter-optimizer"
             )
             return
-        args = parser.parse_args(["resume"])
+        args = parser.parse_args([*sys.argv[1:], "resume"])
 
     if args.command in ("new", "resume"):
         from promptpotter.config.env_bootstrap import ensure_api_key

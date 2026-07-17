@@ -451,6 +451,37 @@ def test_a_campaign_frozen_before_todays_config_still_loads(built_stores: Stores
     assert classify_config_diff(frozen, campaign.config) == (DiffScope.NONE, [])
 
 
+def test_a_dataset_template_frozen_before_todays_config_still_loads() -> None:
+    """Sibling of the manifest test above, for the *other* forbid surface.
+
+    `datasets/{slug}/campaign.json::campaign_config` is a second `CampaignConfig` on disk,
+    read by three endpoints (`/datasets/{name}/pipeline`, `/preview`, and the draft mint) plus
+    the launcher. It spells out its knobs in FULL — an ingest-written template carries every
+    `mechanisms` toggle at its default — so a knob dropped from `CampaignConfig` makes it
+    `extra_forbidden` and every read of that dataset 500s. The manifest fixture beside this one
+    does NOT cover it: different wrapper key, different reader (`read_campaign_config_file`).
+    That gap is exactly how `swiss-invoices-eval` bricked on a live deploy after a rename — a
+    user's ingested dataset carries a materialized origin (paid check-in output) we cannot
+    re-stamp, so the loss is theirs and irreversible.
+
+    Pinned, never regenerated: a rename of any knob this template names must fail HERE, in CI,
+    not on a user's disk. Remedy on failure is `scripts/restamp_campaign_configs.py` (which
+    `deploy-linux/update.sh` now runs on every deploy) — never `extra="allow"`, never a shim.
+    """
+    from pathlib import Path
+
+    from promptpotter.application.datasets.authored import load_dataset_campaign_config
+
+    fixture = (
+        Path(__file__).parent / "fixtures" / "cycles" / "frozen_dataset_template" / "campaign.json"
+    )
+    # The real reader the three endpoints share — unwraps `campaign_config`, validates through
+    # the live `CampaignConfig` (extra="forbid"). A dropped knob raises here.
+    config = load_dataset_campaign_config(fixture)
+    assert config.optimization.mechanisms.elimination.leader_lock_in is False
+    assert config.optimization.mechanisms.selection.per_round_resubset is False
+
+
 def test_lives_resume_fold_matches_live_observe() -> None:
     """Resume-integrity: the banked-lives ("hearts") count rebuilt from the ledger's
     ``improved`` sequence (``EscalationFSM.fold``) must equal the live in-run count

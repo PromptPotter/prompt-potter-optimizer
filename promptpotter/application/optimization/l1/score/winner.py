@@ -19,7 +19,7 @@ from promptpotter.application.optimization.resume_and_fork.decisions import (
     record_decision,
 )
 from promptpotter.application.optimization.validators.l1_strict import L1YieldStats
-from promptpotter.application.origin import rescore_origin
+from promptpotter.application.origin import rescore_parent
 from promptpotter.application.scoring.metrics import (
     _compute_accuracy,
     composite_ci,
@@ -123,14 +123,14 @@ async def l1_score(
             dataset,
             rep_k,
         )
-    # The incumbent floor, scored on the SAME samples the candidates ran. PoBB already
-    # backfilled the incumbent (seed) onto every sample a candidate touched, so re-scoring
-    # it over the touched union is all cache hits — a real matched origin floor at no added
+    # The parent floor, scored on the SAME samples the candidates ran. PoBB already
+    # backfilled the parent (seed) onto every sample a candidate touched, so re-scoring
+    # it over the touched union is all cache hits — a real matched floor at no added
     # spend, and nothing wasted on subset samples no candidate reached. Probe rounds keep
-    # their cumulative re-scope (the incumbent already measured the warned-query set).
+    # their cumulative re-scope (the parent already measured the warned-query set).
     if cycle.probe_next_round:
-        origin_scoring_set = dataset
-        origin = cycle.origin_for_round(dataset, round_num)
+        parent_scoring_set = dataset
+        parent = cycle.parent_for_round(dataset, round_num)
     else:
         scored_sids = {
             r["sample_id"]
@@ -139,28 +139,28 @@ async def l1_score(
             if r.get("sample_id") is not None
         }
         touched = [s for s in dataset if int(s.id) in scored_sids]
-        origin_scoring_set = touched or dataset
-        origin = await rescore_origin(cycle, origin_scoring_set, round_num, callbacks=callbacks)
-    # Opt-in replication of the ORIGIN reference. Origin is the shared comparison anchor for the
+        parent_scoring_set = touched or dataset
+        parent = await rescore_parent(cycle, parent_scoring_set, round_num, callbacks=callbacks)
+    # Opt-in replication of the PARENT reference — the shared comparison anchor for the
     # θ election + paired diff, so its single-draw noise floods every candidate's comparison
     # (correlated across arms — the 0.808 the variance read found). Give it `rep_k` extra
     # force_fresh draws too, but thread them ONLY into the decision estimators
-    # (`origin_election_results`); the base single draw stays the matched-origin DISPLAY floor so
+    # (`parent_election_results`); the base single draw stays the matched DISPLAY floor so
     # its cell count stays honest. Probe rounds keep their own re-scope (not replicated).
-    origin_election_results: list[QueryMeasurement] = list(
-        cast("list[QueryMeasurement]", origin.results)
+    parent_election_results: list[QueryMeasurement] = list(
+        cast("list[QueryMeasurement]", parent.results)
     )
     if rep_k > 0 and not cycle.probe_next_round:
         for _ in range(rep_k):
-            extra = await rescore_origin(
-                cycle, origin_scoring_set, round_num, callbacks=callbacks, force_fresh=True
+            extra = await rescore_parent(
+                cycle, parent_scoring_set, round_num, callbacks=callbacks, force_fresh=True
             )
-            origin_election_results.extend(cast("list[QueryMeasurement]", extra.results))
-    # Full-set origin stats — fallback for `matched_origin` when every candidate ran every sample.
-    origin_base = _compute_accuracy(cast("list[QueryMeasurement]", origin.results))
+            parent_election_results.extend(cast("list[QueryMeasurement]", extra.results))
+    # Full-set parent stats — fallback for `matched_origin` when every candidate ran every sample.
+    parent_base = _compute_accuracy(cast("list[QueryMeasurement]", parent.results))
     # No-winner headline = the RETAINED incumbent's standing (the cumulative frontier the cycle
     # already tracks), NOT the incumbent re-scored on this round's hard touched subset
-    # (`origin.accuracy`). That subset re-score is the election's matched floor (kept below); leaking
+    # (`parent.accuracy`). That subset re-score is the election's matched floor (kept below); leaking
     # it into the round headline deflates a HELD round — e.g. 20% shown for a prompt truly at 42%,
     # because the touched subset is the incumbent's own hard failures. `results`/`hits`/`total` source
     # from the SAME frontier so they stay mutually consistent (the round-health Wilson CI pairs
@@ -170,19 +170,19 @@ async def l1_score(
     tr = cycle.tracking
     best_acc = tr.current_accuracy
     best_comp = tr.current_composite_fitness
-    # The origin reference shown beside the headline must share its sample basis, or a held
+    # The parent reference shown beside the headline must share its sample basis, or a held
     # round renders "accuracy 58% (origin 18%)" — a phantom lift. No winner ⇒ both are the
     # incumbent's standing (lift 0); a winner keeps the touched matched reference (set below).
     best_origin_accuracy = tr.current_accuracy
-    best_osp: OptSearchPoint = origin.osp
+    best_osp: OptSearchPoint = parent.osp
     best_results: list[QueryMeasurement] = list(
-        cast("list[QueryMeasurement]", tr.current_results or origin.results)
+        cast("list[QueryMeasurement]", tr.current_results or parent.results)
     )
-    best_label = origin.label
-    best_scores: dict[str, float] = dict(origin.evaluators)
-    best_matched_origin_acc = origin.accuracy
-    best_matched_origin_hits = origin_base["hits"]
-    best_matched_origin_composite = origin.composite_fitness
+    best_label = parent.label
+    best_scores: dict[str, float] = dict(parent.evaluators)
+    best_matched_origin_acc = parent.accuracy
+    best_matched_origin_hits = parent_base["hits"]
+    best_matched_origin_composite = parent.composite_fitness
     # Elect by confident improvement over MATCHED origin (origin on the candidate's own measured
     # samples), NOT raw accuracy vs origin's full-set rate. The online picker scores each candidate
     # on a different hard-first subset, so origin's full-set accuracy (inflated by the easy samples
@@ -207,7 +207,7 @@ async def l1_score(
         # PoBB-locked candidates may have only run q8/20 — comparing their 8-sample accuracy to
         # origin's full-set rate punishes early-stop. Restrict origin to the candidate's measured set.
         matched = matched_origin_stats(
-            cast("list[QueryMeasurement]", origin.results),
+            cast("list[QueryMeasurement]", parent.results),
             cand_results,
             schema,
             round_scorer=session.scoring.round_scorer,
@@ -259,7 +259,7 @@ async def l1_score(
     winner_id, abilities = elect_round_winner(
         electable,
         all_candidate_results,
-        origin_election_results,
+        parent_election_results,
         coverage_floor,
         cycle.delta_scale or {},
     )
@@ -284,7 +284,7 @@ async def l1_score(
             "coverage_floor": coverage_floor,
         },
         winner_id,
-        data={"current_best_accuracy_at_record": origin.accuracy},
+        data={"current_best_accuracy_at_record": parent.accuracy},
         round=round_num,
     )
     if winner_id:
@@ -293,7 +293,7 @@ async def l1_score(
         matched = matched_by_id[winner_id]
         best_acc = winner_cs.accuracy
         best_comp = winner_cs.composite_fitness
-        best_origin_accuracy = origin.accuracy
+        best_origin_accuracy = parent.accuracy
         best_osp = winner_ind
         best_results = list(all_candidate_results[winner_id])
         best_label = winner_ind.lineage.changes_description or winner_ind.lineage.id[:12]
@@ -315,7 +315,7 @@ async def l1_score(
         # not binary hits: a candidate that lifts ground-truth's rank without yet landing it at
         # rank 1 is real improvement on the smooth signal, and a binary-hit test is blind to it.
         # One-sided paired-difference posterior — the same machinery PoBB elimination runs.
-        cand_fit, origin_fit = paired_fitness(best_results, origin_election_results)
+        cand_fit, origin_fit = paired_fitness(best_results, parent_election_results)
         if cand_fit:
             mean_d, se_d, _ = paired_diff_posterior(cand_fit, origin_fit)
             if se_d > 1e-12:

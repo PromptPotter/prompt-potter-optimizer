@@ -131,16 +131,25 @@ The persisted world is a four-entity containment hierarchy
   version-and-repoint contract, not an in-place overwrite (the old data
   is preserved under `{slug}-vN`; orchestration in
   `application/datasets/dataset_replace.py`).
-- **Origin** — the **complete specification the potter loop starts from**
-  (prompt fields + per-node pipeline config + the pipeline's required
-  inputs + dataset binding), fully formed **independent of measurement**.
-  Resolved by `resolve_origin_opt_search_point` (`application/origin.py`);
-  full definition + the two gates: `docs/architecture.md` §0.5. The data a
-  campaign starts from is a **Dataset**, never an "origin".
-  - **origin's round-0 score** (`origin_accuracy` / round 0 / **C0**) —
-    the origin's *measurement*, downstream of its definition, never
-    equated with it. Persisted solely as `rounds[0]`; readers derive it
-    via `origin_accuracy_of` (`campaign_store/store.py`).
+- **Origin** — the **starting configuration** the potter loop evolves from,
+  which is the same thing as **C0**, its first candidate: an individual *is*
+  a configuration, and the origin resolves to an `OptSearchPoint`
+  (`resolve_origin_opt_search_point`, `application/origin.py`) — the type
+  every candidate is. For a fork, the point it branches *from*. It arrives
+  **incomplete** (prompt fields + per-node pipeline config + the pipeline's
+  required inputs + dataset binding); **check-in** completes and gates it,
+  after which it is the parent of round 1's candidates. Full definition +
+  the two gates: `docs/architecture.md` §0.5. The data a campaign starts
+  from is a **Dataset**, never an "origin".
+  - **origin's round-0 score** (`origin_accuracy` / round 0) — C0's
+    measurement. Persisted solely as `rounds[0]`; readers derive it via
+    `origin_accuracy_of` (`campaign_store/store.py`).
+- **Parent** — the individual a candidate was mutated from, scored over the
+  samples that candidate touched so every paired diff is matched
+  (`RoundParent`, `domain/results.py`; built by `rescore_parent` /
+  `Cycle.parent_for_round`). **At round 0 the parent is the origin; after
+  that it is the prior winner** — so "origin" is reserved for offset 0 and
+  the fork point, and every other round says *parent*.
 - **Campaign** — one declared optimization effort: a dataset, a
   pipeline origin, context text, and the optimizer meta-prompts it runs
   under. A first-class entity holding one session root + its fork/diag/

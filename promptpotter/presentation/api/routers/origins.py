@@ -23,8 +23,8 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import Field
 
-from promptpotter.application.config import load_campaign_config, resolve_pipeline_config_params
-from promptpotter.application.datasets.authored import read_campaign_config_file
+from promptpotter.application.config import resolve_pipeline_config_params
+from promptpotter.application.datasets.authored import load_dataset_campaign_config
 from promptpotter.application.datasets.csv_ingest import IngestError
 from promptpotter.application.datasets.ingest import draft_from_dataset
 from promptpotter.application.datasets.loaders import resolve_dataset_items
@@ -132,7 +132,7 @@ def _dataset_origin_id(store: Stores, dataset_dir: Path, dataset_name: str) -> s
     try:
         raw = read_json(dataset_dir / "pipeline.json")
         schema = parse_pipeline_response(raw)
-        cfg = load_campaign_config(read_campaign_config_file(dataset_dir / "campaign.json"))
+        cfg = load_dataset_campaign_config(dataset_dir / "campaign.json")
         active = schema.active_steps_excluding(cfg.exclude_nodes)
         if not active:
             return None

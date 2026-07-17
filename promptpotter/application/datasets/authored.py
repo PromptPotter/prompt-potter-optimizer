@@ -22,10 +22,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
 from promptpotter.application.config import CampaignConfig
 from promptpotter.application.config import load_campaign_config as validate_campaign_config
 from promptpotter.application.datasets.csv_ingest import read_candidate_library_file
 from promptpotter.infrastructure.store.io import read_json_optional
+from promptpotter.shared.errors import StoredConfigInvalidError
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,26 +80,56 @@ def read_campaign_config_file(path: Path) -> dict[str, Any]:
     :class:`Campaign`, ``extra="forbid"``, owned by ``CampaignStore``). Two incompatible schemas
     share one filename; check which tree the path is under before assuming a shape — and read
     the template through here, never with a hand-rolled ``.get("campaign_config", data)``, which
-    quietly accepted an unwrapped shape no writer produces."""
+    quietly accepted an unwrapped shape no writer produces.
+
+    Unreadable bytes raise :class:`StoredConfigInvalidError` naming *path* — this is the
+    only layer that still knows which file it was, so a bare ``JSONDecodeError`` escaping
+    here reaches the operator as a nameless 500."""
     if not path.is_file():
         return {}
     raw = path.read_text(encoding="utf-8").strip()
     if not raw:
         return {}
-    result: dict[str, Any] = json.loads(raw).get("campaign_config") or {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise StoredConfigInvalidError(path=str(path), reason=f"not valid JSON — {exc}") from exc
+    result: dict[str, Any] = parsed.get("campaign_config") or {}
     return result
+
+
+def load_dataset_campaign_config(path: Path) -> CampaignConfig:
+    """A dataset's ``campaign.json`` → its validated :class:`CampaignConfig`.
+
+    The read-and-validate pair, owned once. Four call sites re-composed
+    ``load_campaign_config(read_campaign_config_file(path))`` by hand — three dataset
+    reads (``/datasets/{name}/pipeline``, ``/preview``, ``/origins``) plus
+    :func:`read_authored_dataset` behind the draft mint — and each dropped the path on
+    the floor, so the same stale key 500'd four ways with nothing naming the file.
+
+    ``CampaignConfig`` is ``extra="forbid"``: a knob dropped from the model makes every
+    file still naming it unloadable. That is a property of *our* deploy, not of the
+    caller's request, so it surfaces as :class:`StoredConfigInvalidError` carrying the
+    path and the offending key — and the remedy (``restamp_campaign_configs.py``) runs
+    on every deploy. Callers wanting the raw dict to merge still use
+    :func:`read_campaign_config_file`.
+    """
+    try:
+        return validate_campaign_config(read_campaign_config_file(path))
+    except ValidationError as exc:
+        reason = "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors())
+        raise StoredConfigInvalidError(path=str(path), reason=reason) from exc
 
 
 def read_authored_dataset(dataset_dir: Path) -> AuthoredDataset:
     """Parse an authored dataset dir's config files into an :class:`AuthoredDataset`.
 
     Validates ``campaign.json`` through :class:`CampaignConfig` (``extra="forbid"``)
-    — a malformed/extra-key config raises ``pydantic.ValidationError`` rather than
-    silently defaulting. Does not read ``cache.json`` / rows (see module docstring).
+    — a malformed/extra-key config raises :class:`StoredConfigInvalidError` naming the
+    file and the key, rather than silently defaulting. Does not read ``cache.json`` /
+    rows (see module docstring).
     """
-    campaign_config = validate_campaign_config(
-        read_campaign_config_file(dataset_dir / "campaign.json")
-    )
+    campaign_config = load_dataset_campaign_config(dataset_dir / "campaign.json")
 
     task_path = dataset_dir / "task_description.md"
     task_description = task_path.read_text(encoding="utf-8").strip() if task_path.is_file() else ""
@@ -117,4 +150,9 @@ def read_authored_dataset(dataset_dir: Path) -> AuthoredDataset:
     )
 
 
-__all__ = ["AuthoredDataset", "read_authored_dataset", "read_campaign_config_file"]
+__all__ = [
+    "AuthoredDataset",
+    "load_dataset_campaign_config",
+    "read_authored_dataset",
+    "read_campaign_config_file",
+]

@@ -37,26 +37,6 @@ jobs:
       - name: Type check
         run: uv run mypy promptpotter/
 
-      # Anti-rot for the package public surface (abstraction-shape guard).
-      # External callers import a concept home from its package __init__, not a
-      # deep submodule — a deep import re-leaks internals and re-scatters the
-      # concept. Allowlist = the documented foundational exceptions (the
-      # EscalationFSM state type, imported below the firing driver to avoid an
-      # import cycle — see escalation/__init__). Extend the allowlist only with
-      # a reason; the allowlist is the remaining-debt ledger.
-      - name: Surface guard — no deep imports past a concept home
-        run: |
-          violations=$(grep -rn "from promptpotter.application.optimization.escalation\." promptpotter/ --include=*.py \
-            | grep -v "/escalation/" \
-            | grep -v "escalation.state import EscalationFSM" \
-            || true)
-          if [ -n "$violations" ]; then
-            echo "❌ Deep import past the escalation concept home. Import from the package surface (from ...escalation import X)."
-            echo "   Allowlisted exception: the foundational EscalationFSM via .state (cycle.py / resume.py)."
-            echo "$violations"
-            exit 1
-          fi
-
       # Layering guard: application/ MUST NOT import presentation/ (the one
       # inversion that matters — presentation→application is the normal
       # direction). The view-emit machinery lives in application/views now;
@@ -67,7 +47,7 @@ jobs:
       - name: Layering guard — application must not import presentation
         run: |
           violations=$(grep -rn "from promptpotter.presentation\|import promptpotter.presentation" promptpotter/application/ --include=*.py \
-            | grep -v "presentation.views.live import LiveDisplay" \
+            | grep -v "presentation.views.live.display import LiveDisplay" \
             | grep -v "presentation.cli.session import SessionCtx" \
             | grep -v "presentation.cli.session import load_session" \
             || true)
@@ -144,8 +124,10 @@ jobs:
       # shared one.
       - name: Anti-rot — no liveL1Candidates outside the spine
         run: |
-          violations=$(grep -RnlE 'liveL1Candidates' components/ \
+          violations=$(grep -RnlE 'liveL1Candidates' components/ lib/ app/ \
+            | grep -vE '__tests__/' \
             | grep -vE 'FreqChart\.tsx|HardSamplesHeatmap\.tsx|CandidatesCard\.tsx' \
+            | grep -vE 'lib/poll\.tsx|lib/derivations/round-candidates\.ts' \
             || true)
           if [ -n "$violations" ]; then
             echo "❌ liveL1Candidates is the candidate-spine constructor — only roundCandidates() and the three named follow-up sites may call it."

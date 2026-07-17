@@ -8,8 +8,7 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, File, Form, Header, Query, Request, UploadFile
 from pydantic import Field
 
-from promptpotter.application.config import load_campaign_config
-from promptpotter.application.datasets.authored import read_campaign_config_file
+from promptpotter.application.datasets.authored import load_dataset_campaign_config
 from promptpotter.application.datasets.csv_ingest import (
     MAX_SAMPLES,
     IngestError,
@@ -580,7 +579,7 @@ def get_dataset_preview(
     # one reader, one shape.
     campaign_path = dataset_dir / "campaign.json"
     declared = (
-        load_campaign_config(read_campaign_config_file(campaign_path)).dataset_split
+        load_dataset_campaign_config(campaign_path).dataset_split
         if campaign_path.is_file()
         else None
     )
@@ -753,7 +752,7 @@ def get_dataset_pipeline(name: str, store: StoreDep) -> DatasetPipelineResponse:
     # optimizer-locked (operator-owned axes), so no per-campaign policy is read here.
     campaign_path = dataset_dir / "campaign.json"
     if campaign_path.is_file():
-        cfg = load_campaign_config(read_campaign_config_file(campaign_path))
+        cfg = load_dataset_campaign_config(campaign_path)
         schema = schema.narrow(cfg.optimizer_narrowing)
     # Origin prompt for the first pipeline step — read-only seed the node panel
     # shows. `load_node_prompt` resolves `{node}.json` → `default.json`; absent a

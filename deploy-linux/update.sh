@@ -48,6 +48,15 @@ command -v uv >/dev/null 2>&1 || { command -v "$HOME/.local/bin/uv" >/dev/null 2
 if command -v getenforce >/dev/null 2>&1 && [[ "$(getenforce)" == "Enforcing" ]]; then
   sudo restorecon -RF "$INSTALL_DIR/.venv/bin"
 fi
+# `CampaignConfig` is extra="forbid", so a field this sync dropped makes every
+# campaign.json still naming it unreadable — the campaign 500s on first touch.
+# Re-stamping is the sanctioned remedy and it belongs to deploying, not to
+# remembering: report-only failures (unreadable file, no workspace yet) must not
+# abort an otherwise-good deploy, so its exit code is advisory.
+say "data: re-stamp configs onto the synced schema"
+if ! ( cd "$INSTALL_DIR" && .venv/bin/python scripts/restamp_campaign_configs.py --apply ); then
+  bad "re-stamp reported skips/failures (above) — deploy continues; check them"
+fi
 [[ -d "$INSTALL_DIR/$WEBAPP_DIR" ]] && ( cd "$INSTALL_DIR/$WEBAPP_DIR" && npm install --silent && npm run build:deploy )
 sudo systemctl restart "$SERVICE_NAME"
 

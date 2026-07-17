@@ -324,9 +324,8 @@ def _build_divergence_hint() -> str:
     # Import-time exhaustiveness (built once at module load): every gated kind
     # must surface in the operator hint. Fails at the source if a format edit
     # ever drops a branch — replaces a standalone completeness test.
-    assert all(k.value in hint for k in RESUME_CHECKPOINT_GATING), (
-        "divergence hint must name every ResumeCheckpointKind"
-    )
+    if not all(k.value in hint for k in RESUME_CHECKPOINT_GATING):
+        raise RuntimeError("divergence hint must name every ResumeCheckpointKind")
     return hint
 
 

@@ -7,14 +7,15 @@ import asyncio
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Force utf-8 stdout so Windows cp1252 console doesn't choke on box-drawing characters.
 os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 try:
-    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-    sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+    sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
 except Exception:
     pass
 
@@ -46,7 +47,7 @@ def _build_config(
     rounds: int,
     patience: int,
     task_context: str,
-) -> dict:
+) -> dict[str, Any]:
     return {
         "dataset_name": dataset,
         "scoring": _infer_scoring(dataset),
@@ -84,7 +85,7 @@ def _infer_scoring(dataset: str) -> str:
             cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
             formula = cfg.get("campaign_config", {}).get("scoring")
             if formula:
-                return formula
+                return str(formula)
         except Exception:
             pass
     return "exact_match(predicted, ground_truth)"

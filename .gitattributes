@@ -1,2 +1,7 @@
+# Normalize all text to LF in the index so a generator's committed output is one byte shape
+# on every platform — otherwise a Windows `newline=None` write (CRLF) drifts against a CI
+# `git diff --exit-code` run on Linux, and only a local `core.autocrlf` hides it.
+* text=auto
+
 # Shell scripts must stay LF — CRLF breaks the `#!` shebang on Linux deploy boxes.
 *.sh text eol=lf

@@ -127,7 +127,7 @@ def _process(
     tally.rewritten += 1
     if apply:
         holder[key_path[-1]] = new
-        path.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+        path.write_text(json.dumps(doc, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def main() -> int:

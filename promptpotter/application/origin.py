@@ -16,7 +16,7 @@ from promptpotter.domain.opt_search_point import (
     OptSearchPoint,
     overlay_is_locked_axis_only,
 )
-from promptpotter.domain.results import RoundOrigin, candidate_label
+from promptpotter.domain.results import RoundParent, candidate_label
 from promptpotter.domain.run_records import CandidateMintedRecord, CycleSeed
 from promptpotter.domain.sample import Sample
 
@@ -34,41 +34,39 @@ __all__ = [
     "build_campaign_emitter",
     "establish_campaign_origin",
     "prepare_scoring_context",
-    "rescore_origin",
+    "rescore_parent",
     "resolve_origin_opt_search_point",
     "try_inherit_fork_origin",
 ]
 
 
-async def rescore_origin(
+async def rescore_parent(
     cycle: Cycle,
     scoring_set: list[Sample],
     round_num: int,
     *,
     callbacks: RunCallbacks,
     force_fresh: bool = False,
-) -> RoundOrigin:
-    """Score the incumbent champion on THIS round's ``scoring_set`` so winner election
-    compares candidate-vs-incumbent on the SAME hard-first samples the candidates run.
+) -> RoundParent:
+    """Score the round's parent — the origin at round 0, the prior winner after — on THIS
+    round's ``scoring_set``, so winner election compares candidate-vs-parent on the SAME
+    hard-first samples the candidates ran.
+
+    The online picker scores each candidate on a different hard-first subset, while the
+    parent was only ever scored on its own earlier rounds; without this re-score,
+    ``matched_origin_stats`` intersects disjoint sample sets and returns a fake ``0.0``
+    floor. Re-scoring through the ``score_search_point`` gateway + content-hash cache
+    yields a real same-subset floor, and samples the parent already measured replay from
+    cache — so the cost is one measurement per *new* hard sample it hasn't seen.
 
     ``force_fresh`` bypasses the measurement cache (see ``score_search_point``). The
-    winner-election path leaves it ``False`` — the incumbent's own prior measurements
-    replay for free. The origin gate sets it ``True`` so a re-score after a backend-code
-    fix reflects the fix instead of replaying the stale (broken) origin.
+    winner-election path leaves it ``False``. The origin gate sets it ``True`` so a re-score
+    after a backend-code fix reflects the fix instead of replaying the stale origin.
 
-    The online picker scores each candidate on a different hard-first subset, but the
-    incumbent (the origin at round 1, the prior winner after) was only ever scored on
-    its own earlier rounds. ``matched_origin_stats`` therefore intersected disjoint
-    sample sets and returned a fake ``0.0`` floor — letting a candidate "improve" over an
-    origin floor that was never measured (round 1: 0 hits, ``improved=True``). Re-scoring the
-    incumbent here, through the ``score_search_point`` gateway + content-hash cache,
-    yields a real same-subset floor; samples it already measured replay from cache for
-    free, so the cost is one measurement per *new* hard sample the incumbent hasn't seen.
-
-    This re-scores a PRIOR searchpoint (the incumbent), not a foreground candidate,
-    so it fires **no** per-sample display callbacks — wiring them would mint a bogus
-    ``C{round}.0`` row. Its spend rides the token ledger; ``degradation_checks=None``
-    blocks the floor from aborting itself.
+    This re-scores a PRIOR searchpoint, not a foreground candidate, so it fires **no**
+    per-sample display callbacks — wiring them would mint a bogus ``C{round}.0`` row. Its
+    spend rides the token ledger; ``degradation_checks=None`` blocks the floor from
+    aborting itself.
     """
     from promptpotter.application.scoring.metrics import compute_composite_fitness
     from promptpotter.application.scoring.search_point_scorer import score_search_point
@@ -81,7 +79,7 @@ async def rescore_origin(
         tr.current_sp,
         scoring_set,
         session,
-        label="origin_baseline",
+        label="round_parent",
         degradation_checks=None,
         n_total_candidates=0,
         axes=cycle.axes,
@@ -100,7 +98,7 @@ async def rescore_origin(
         )
         accuracy = s["accuracy"]
         composite_fitness = s["composite_fitness"]
-    return RoundOrigin(
+    return RoundParent(
         accuracy=accuracy,
         composite_fitness=composite_fitness,
         osp=cycle.opt_sp,

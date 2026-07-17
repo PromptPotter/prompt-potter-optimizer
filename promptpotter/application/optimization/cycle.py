@@ -30,7 +30,7 @@ from promptpotter.domain.rendering import display_fitness
 from promptpotter.domain.results import (
     CritiqueReadout,
     DegradationHealth,
-    RoundOrigin,
+    RoundParent,
     RoundResult,
 )
 from promptpotter.domain.run_records import RebaseRequest, ResumeCheckpointRecord
@@ -624,8 +624,8 @@ class Cycle:
         rr.opt_search_point = self.opt_sp
         return rr
 
-    def origin_for_round(self, scoring_set: list[Sample], round_num: int) -> RoundOrigin:
-        """Build round origin; on probe rounds, rescore over the probe subset."""
+    def parent_for_round(self, scoring_set: list[Sample], round_num: int) -> RoundParent:
+        """Build the round's parent; on probe rounds, rescore over the probe subset."""
         schema = self.session.pipeline_schema
         tr = self.tracking
         accuracy = tr.current_accuracy
@@ -645,7 +645,7 @@ class Cycle:
                     subset_scores.get("composite_fitness"), accuracy
                 )
                 results = subset
-        return RoundOrigin(
+        return RoundParent(
             accuracy=accuracy,
             composite_fitness=composite_fitness,
             osp=self.opt_sp,

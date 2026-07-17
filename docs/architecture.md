@@ -609,23 +609,33 @@ the PR description.
 - **`new`-verb decomposition into `task_context`** — the one-time
   `checkin` LLM call that seeds the campaign when `new <name>`
   first sees a dataset. Don't fold into `l1_generate`.
-- **Origin vs check-in vs round-0/C0 — the start definitions the whole
-  loop depends on.** These three are distinct and constantly conflated;
-  keep them straight (say "origin", never "baseline", R-23):
-  - **Origin** = the **complete specification required to start the potter
-    loop** — the *starting program* the optimizer evolves from. It is
-    everything needed to begin: the prompt fields, the per-node pipeline
-    config, the **required inputs** a pipeline declares (query/target column
-    map, answer space, and any node-type-raised dependency like a
-    `candidate_source` node's candidate library), and the dataset binding.
-    It is **per-pipeline** — different backends require different inputs —
-    and it is **independent of measurement**: the origin exists fully formed
-    *before* anything is scored. Scoring it produces round 0 / **C0** /
-    `origin_accuracy`, but that measurement is *downstream of* the origin,
-    **not part of its definition** (the recurring conflation: "origin" the
-    spec vs "the origin's round-0 score"). Resolution:
-    `resolve_origin_opt_search_point` (`application/origin.py`); scoring it is
-    a separate step (`establish_campaign_origin`).
+- **Origin, parent, and check-in — the start definitions the whole loop
+  depends on.** Say "origin", never "baseline" (R-23):
+  - **Origin = the starting configuration = C0.** One word, one thing. In
+    program evolution an individual **is** a configuration: the origin
+    resolves to an `OptSearchPoint` (`resolve_origin_opt_search_point`,
+    `application/origin.py`) — the same type every candidate is — so "the
+    config the loop starts from" and "C0, the first candidate" are one
+    statement, not two. For a fork it is the point the fork branches *from*.
+    Scoring it yields its **measurement** (round 0, `origin_accuracy`, via
+    `establish_campaign_origin`) — what you get by measuring C0, never a
+    rival sense of the word.
+  - **The origin arrives incomplete; check-in completes it and gates it.**
+    The operator supplies what they have (a pipeline, some prompt fields);
+    it is not a whole origin until the **required inputs** that pipeline
+    declares are resolved — query/target column map, answer space, dataset
+    binding, and any node-type-raised dependency like a `candidate_source`
+    node's candidate library. Origin is therefore **per-pipeline**:
+    different backends require different inputs. Once it clears both gates
+    below, it is the **parent of round 1's candidates** — round 0 is not
+    something C0 parents; round 0 *is* C0, measured.
+  - **Origin is the parent at offset 0.** The general relation is *parent* —
+    the individual a candidate was mutated from, scored over the samples that
+    candidate touched so the diff is matched (`RoundParent`,
+    `domain/results.py`; built by `rescore_parent` / `Cycle.parent_for_round`).
+    At round 0 the parent is the origin; after that it is the prior winner.
+    **Reserve "origin" for offset 0 and the fork point; everywhere else say
+    parent.** Two names for one relation is how this word drifted before.
   - **Check-in** = the **process that produces a complete origin** from a raw
     upload. One LLM resolver node (`application/datasets/origin_resolve.py`)
     *proposes* the column map, the decomposed Layer-1 prompt fields (incl. an
@@ -652,10 +662,11 @@ the PR description.
     both gates** — iterating the pipeline choice, the `answer_format`, and the
     required starting values — until the origin both passes readiness *and*
     runs scoreable. Only then does the loop proceed.
-  - The line: **origin is the complete start specification; check-in is the
-    resolver+gate that produces a complete one; round 0 / C0 is its
-    measurement, downstream and separate.** Forward plan:
-    [`specs/roadmap.md`](specs/roadmap.md) § Origin-resolution check-in.
+  - The line: **origin IS C0 — the first candidate, or the point a fork
+    branches from; check-in is the resolver+gate that produces it; every
+    later round compares against its *parent*, which is the origin only at
+    offset 0.** Forward plan: [`specs/roadmap.md`](specs/roadmap.md)
+    § Origin-resolution check-in.
 - **`MeasurementArchive` (`measurements/runs/{run_id}.jsonl` +
   `measurements/index.jsonl` index + retrieval views
   `measurements_for_sample()` / `measurements_for_config()`)** — the

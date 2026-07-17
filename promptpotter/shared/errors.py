@@ -145,6 +145,32 @@ class ServiceUnavailableError(PotterError):
     code = "service_unavailable"
 
 
+class StoredConfigInvalidError(PotterError):
+    """A config file the server itself persisted no longer loads — 500.
+
+    Not 400/404/422: the request was well-formed, the file exists, and the caller
+    can't fix it. The usual cause is a knob dropped from ``CampaignConfig``
+    (``extra="forbid"``) while a file written earlier still names it — so the
+    remedy is ``scripts/restamp_campaign_configs.py``, which
+    ``deploy-linux/update.sh`` runs on every deploy.
+
+    Without this class such a failure reaches the catch-all as a bare
+    ``internal_error``, and the key that broke it lives only in a traceback in
+    journald — which is exactly how one stale toggle cost an afternoon. ``path``
+    and ``reason`` are required because a corrupt-file error that names neither
+    is the shrug this exists to replace.
+    """
+
+    http_status = 500
+    code = "stored_config_invalid"
+
+    def __init__(self, *, path: str, reason: str) -> None:
+        super().__init__(
+            f"{path} is no longer readable by this build: {reason}",
+            details={"path": path, "reason": reason},
+        )
+
+
 class RequestTooLargeError(RuntimeError):
     """Raised when a single LLM request exceeds the provider's per-minute token cap.
 
@@ -281,6 +307,7 @@ __all__ = [
     "RequestTooLargeError",
     "ResumeDivergenceError",
     "ServiceUnavailableError",
+    "StoredConfigInvalidError",
     "UnauthorizedError",
     "error_category",
     "graceful",

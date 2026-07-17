@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from promptpotter.application.optimization.dispatch.schemas import (
     OPTIMIZER_RESPONSE_MODELS,
@@ -17,7 +18,7 @@ def main() -> int:
     manifest_path = repo_root / "datasets" / "_optimizer" / "pipeline.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
-    resolved: dict[str, dict] = {}
+    resolved: dict[str, dict[str, Any]] = {}
     for node, model_cls in OPTIMIZER_RESPONSE_MODELS.items():
         schema = model_cls.model_json_schema()
         resolved[f"{node}/1"] = {
@@ -35,7 +36,12 @@ def main() -> int:
         }
 
     manifest["resolved_schemas"] = resolved
-    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    # `ensure_ascii=False`: the manifest is UTF-8 and its descriptions are hand-written
+    # prose. Escaping them to \uXXXX makes the generator unable to reproduce its own
+    # committed output, so the contract check fails on punctuation instead of on schema drift.
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
     print(f"wrote {len(resolved)} schemas to {manifest_path.relative_to(repo_root)}")
     return 0
 

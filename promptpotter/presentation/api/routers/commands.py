@@ -252,10 +252,11 @@ class _EditDraftPatch(StrictModel):
 # that correspondence is what lets a finding be rendered as a clickable
 # `edit-draft-campaign` without the model ever naming a command. Fails at import,
 # not at the operator's click.
-assert set(FINDING_PATCH_KEYS.values()) <= set(_EditDraftPatch.model_fields), (
-    f"resolver proposes fields edit-draft-campaign cannot patch: "
-    f"{set(FINDING_PATCH_KEYS.values()) - set(_EditDraftPatch.model_fields)}"
-)
+if not set(FINDING_PATCH_KEYS.values()) <= set(_EditDraftPatch.model_fields):
+    raise RuntimeError(
+        "resolver proposes fields edit-draft-campaign cannot patch: "
+        f"{set(FINDING_PATCH_KEYS.values()) - set(_EditDraftPatch.model_fields)}"
+    )
 
 
 def _require_kind(envelope: CommandEnvelope, expected: str) -> None:

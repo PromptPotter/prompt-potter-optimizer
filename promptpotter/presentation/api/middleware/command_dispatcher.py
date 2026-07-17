@@ -216,10 +216,11 @@ _ALL_DISPATCHED_KINDS: frozenset[str] = frozenset(
     + get_args(CheckinScopedKind)
     + get_args(CampaignConfigKind)
 )
-assert set(CAP_FOR_KIND) == _ALL_DISPATCHED_KINDS, (
-    "CAP_FOR_KIND out of sync with the dispatched command set: "
-    f"{_ALL_DISPATCHED_KINDS.symmetric_difference(CAP_FOR_KIND)}"
-)
+if set(CAP_FOR_KIND) != _ALL_DISPATCHED_KINDS:
+    raise RuntimeError(
+        "CAP_FOR_KIND out of sync with the dispatched command set: "
+        f"{_ALL_DISPATCHED_KINDS.symmetric_difference(CAP_FOR_KIND)}"
+    )
 
 
 class CommandAcceptedBody(StrictModel):
