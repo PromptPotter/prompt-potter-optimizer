@@ -1,24 +1,27 @@
-// Cladogram geometry for the campaign lineage tree. Pure layout: builds the
-// per-session parent/child tree, assigns lanes, and resolves SVG node + branch
-// coordinates. No React — CandidatesCard and Forest own the rendering.
+// Cladogram geometry for the served lineage tree. Pure layout: walks the ONE tree
+// `/tree` serves, assigns lanes, and resolves SVG node + branch coordinates. No
+// React — CandidatesCard and Forest own the rendering.
 //
-// One tree, two depths per cycle lane:
+// The tree alternates `course → candidate → (course | sample)` at every depth, so
+// this is one recursion rather than a per-tier rule: a fork and an L4 inner run are
+// the same edge (a course hanging off a candidate), and L5+ needs nothing new.
+//
+// Two depths per course lane:
 //   collapsed — one summary node per round (the round winner), the compact
-//               campaign/fork view. laneSpan = 1 row.
-//   expanded  — the full intra-cycle candidate cladogram for that cycle:
-//               one node per candidate per round, winner→children branches.
-//               laneSpan = the widest round's candidate count, so an expanded
-//               lane pushes the lanes below it down by that many rows.
-// Forks anchor to the parent's WINNER node (the "spine") at the fork round, so
-// a fork stem stays attached even when the parent lane fans out.
+//               course view. laneSpan = 1 row.
+//   expanded  — the full intra-course candidate cladogram: one node per candidate
+//               per round, winner→children branches. laneSpan = the widest round's
+//               candidate count, so an expanded lane pushes the lanes below it down.
+//
+// **There is no `round_column_offset` and no client-side tree build.** A course
+// hangs off a candidate, so its columns start one right of THAT candidate — the
+// tree's own shape answers it. The server used to compute the offset precisely so
+// the client wouldn't need fork-lane semantics; now nobody needs them.
 
-import { type CampaignLineageCycle, type SiblingKind } from "@/lib/api";
-import { rootCycleId } from "@/lib/ids";
+import type { LineageDivergence, LineageNode } from "@/lib/api";
 
-// Cladogram dimensions. Each round across a session's family is one
-// column; each cycle gets its own horizontal lane (one row collapsed,
-// N rows expanded). Forks branch off their parent's lane at the
-// parent-round where the fork was cut and then run their own rounds.
+// Cladogram dimensions. Each round is one column; each course gets its own
+// horizontal lane (one row collapsed, N rows expanded).
 export const COL_W = 110;          // width per round-column
 export const LANE_H = 26;          // height per lane-row
 const STUB = 14;            // horizontal stub before a collapsed round node
@@ -30,11 +33,16 @@ export const TOP_PAD = HEADER_H + 8; // first lane sits below the header row
 export const RIGHT_PAD = 80;       // room for the rightmost label
 export const NODE_R = 3.5;         // round-node circle radius
 
-export const KIND_GLYPH: Record<SiblingKind, string> = {
+// A course's kind, as the tree serves it. `inner` is an L4 seed run — a course
+// filed under a candidate rather than cut beside one.
+export type CourseKind = NonNullable<LineageNode["course_kind"]>;
+
+export const KIND_GLYPH: Record<CourseKind, string> = {
   root: "●",
   fork: "⑂",
   sweep: "~",
   diag: "Δ",
+  inner: "◇",
 };
 
 // Operator-fork provenance mark, appended after the kind glyph. "✎" = the
@@ -44,120 +52,68 @@ export const TRIGGER_GLYPH: Record<string, string> = {
   operator_steered: "✎",
 };
 
-// Normalized per-cycle detail the geometry consumes. Built by `useLineage`:
-// structure (rounds + candidate id/label/winner) only — NO fitness value. The
-// in-view active cycle's structure is sourced from the live dashboard.json
-// (`roundCandidates`), every other cycle from the settled `/lineage`
-// (source-by-cycle-role — never a per-field merge). The fitness number is a
-// separate live `valueByKey` overlay painted at render, so a per-sample value
-// tick never re-runs the layout memo. Labels are already short ("C1.2") here.
-interface LaneCandidate {
-  candidateId: string;
-  label: string;
-  isWinner: boolean;
-}
-interface LaneRound {
-  round: number;
-  // Did a candidate WIN and advance the incumbent this round? false = a "held"
-  // round: the incumbent is unchanged, so the spine mints no new winner node and
-  // the NEXT round chains from the last real winner — never from an eliminated
-  // candidate (the pre-fix misdraw).
-  advanced: boolean;
-  candidates: LaneCandidate[];
-}
-export interface CycleDetail {
-  rounds: LaneRound[];
-}
-export type DetailByCycle = Map<string, CycleDetail>;
-
-const EMPTY_DETAIL: CycleDetail = { rounds: [] };
-
-// The round's elected winner, or null on a held round (no candidate advanced the
-// incumbent). NO first-candidate fallback: crowning an eliminated candidate is the
-// exact misdraw this fix removes — a held round has no winner node, and the spine
-// carries the last real winner forward instead.
-function pickWinner(candidates: LaneCandidate[]): LaneCandidate | null {
-  return candidates.find((c) => c.isWinner) ?? null;
+// One course's candidate children, in served (round) order.
+export function candidatesOf(course: LineageNode): LineageNode[] {
+  return course.children.filter((c) => c.kind === "candidate");
 }
 
-// Rows an expanded lane occupies — the widest round's candidate count, floored
-// at 1 so a single-candidate lane still has a row.
-export function expandedLaneSpan(detail: CycleDetail): number {
+// The courses hanging off a candidate — a fork cut from it, an L4 inner run filed under
+// it. The tree makes those the same edge, so callers take one list and never branch on
+// which kind of thing produced it.
+export function childCourses(candidate: LineageNode | undefined): LineageNode[] {
+  return (candidate?.children ?? []).filter((c) => c.kind === "course");
+}
+
+function groupRounds(cands: readonly LineageNode[]): Map<number, LineageNode[]> {
+  const byRound = new Map<number, LineageNode[]>();
+  for (const c of cands) {
+    const r = c.round ?? 0;
+    const arr = byRound.get(r) ?? [];
+    arr.push(c);
+    byRound.set(r, arr);
+  }
+  return byRound;
+}
+
+// The round's elected winner, or null when it crowned nobody. NO first-candidate
+// fallback: a held round has no winner, and a round that never CLOSED has no
+// election at all — crowning either one's lone candidate is the exact misdraw this
+// removes.
+function pickWinner(cands: readonly LineageNode[]): LineageNode | null {
+  return cands.find((c) => c.is_winner) ?? null;
+}
+
+// Rows an expanded lane occupies — the widest round's candidate count, floored at 1
+// so a single-candidate lane still has a row.
+export function expandedLaneSpan(cands: readonly LineageNode[]): number {
   let max = 1;
-  for (const r of detail.rounds) {
-    if (r.candidates.length > max) max = r.candidates.length;
+  for (const n of groupRounds(cands).values()) {
+    if (n.length > max) max = n.length;
   }
   return max;
 }
 
-// Build immediate-parent map + per-parent child list (sorted by recency
-// of fork) so the BFS lays out forks under their parent in a stable order.
-export interface CycleNode {
-  cycle: CampaignLineageCycle;
-  children: CycleNode[];
-}
-
-export function buildTree(
-  rootId: string,
-  cycles: CampaignLineageCycle[],
-): CycleNode | null {
-  // A campaign is a forest of N session roots — restrict to THIS session's
-  // own cycles so an orphan never attaches across session boundaries.
-  const own = cycles.filter((c) => rootCycleId(c.cycle_id) === rootId);
-  const byId = new Map<string, CampaignLineageCycle>();
-  for (const c of own) byId.set(c.cycle_id, c);
-  const root = byId.get(rootId);
-  if (!root) return null;
-  const childrenOf = new Map<string, CampaignLineageCycle[]>();
-  for (const c of own) {
-    if (c.cycle_id === rootId) continue;
-    const pid =
-      c.immediate_parent_cycle_id && byId.has(c.immediate_parent_cycle_id)
-        ? c.immediate_parent_cycle_id
-        : rootId;
-    const arr = childrenOf.get(pid) ?? [];
-    arr.push(c);
-    childrenOf.set(pid, arr);
-  }
-  // Sort children by fork_from_round (smaller round first — earlier
-  // fork sits visually closer to the parent's first rounds), then by
-  // cycle_id for stable ordering when round info is missing.
-  for (const arr of childrenOf.values()) {
-    arr.sort((a, b) => {
-      const ra = a.fork_from_round ?? Number.MAX_SAFE_INTEGER;
-      const rb = b.fork_from_round ?? Number.MAX_SAFE_INTEGER;
-      if (ra !== rb) return ra - rb;
-      return a.cycle_id.localeCompare(b.cycle_id);
-    });
-  }
-  const visit = (cycle: CampaignLineageCycle): CycleNode => ({
-    cycle,
-    children: (childrenOf.get(cycle.cycle_id) ?? []).map(visit),
-  });
-  return visit(root);
-}
-
-// Layout pass: assign each cycle a lane band (a starting row `laneOffset` and a
-// height `laneSpan` in LANE_H units) via DFS so a parent and its child subtree
-// stay visually grouped. An expanded cycle reserves `laneSpan` rows; every lane
-// after it shifts down. Each cycle uses the server-computed
-// `round_column_offset` for x-positions, so the client doesn't need to know
-// HITL-vs-divergence semantics.
+// Layout pass: assign each course a lane band (a starting row `laneOffset` and a
+// height `laneSpan` in LANE_H units) via DFS so a parent and its child subtree stay
+// visually grouped. An expanded course reserves `laneSpan` rows; every lane after it
+// shifts down.
 export interface LaneLayout {
-  cycle: CampaignLineageCycle;
-  detail: CycleDetail;
+  course: LineageNode;
+  candidates: LineageNode[];
   expanded: boolean;
-  // Starting row (in LANE_H units) of this cycle's band, and its height.
+  // Starting row (in LANE_H units) of this course's band, and its height.
   laneOffset: number;
   laneSpan: number;
+  // Column of this course's round 0 — one right of the candidate it hangs off.
+  baseCol: number;
+  // The candidate this course descends from, and the course that candidate sits on.
+  // Both null only at the tree's root.
+  anchorCandidateId: string | null;
   parentCycleId: string | null;
-  forkFromRound: number | null;
-  forkFromCandidateId: string | null;
 }
 
 export function layout(
-  tree: CycleNode,
-  detailByCycle: DetailByCycle,
+  root: LineageNode,
   expanded: ReadonlySet<string>,
 ): {
   laneByCycle: Map<string, LaneLayout>;
@@ -167,62 +123,75 @@ export function layout(
   const laneByCycle = new Map<string, LaneLayout>();
   let nextRow = 0;
   let maxCol = 0;
-  const visit = (node: CycleNode): void => {
-    const cycle = node.cycle;
-    const detail = detailByCycle.get(cycle.cycle_id) ?? EMPTY_DETAIL;
-    const isExpanded = expanded.has(cycle.cycle_id);
-    const laneSpan = isExpanded ? expandedLaneSpan(detail) : 1;
+  const visit = (
+    course: LineageNode,
+    baseCol: number,
+    anchorCandidateId: string | null,
+    parentCycleId: string | null,
+  ): void => {
+    const cands = candidatesOf(course);
+    const isExpanded = expanded.has(course.id);
+    const laneSpan = isExpanded ? expandedLaneSpan(cands) : 1;
     const laneOffset = nextRow;
     nextRow += laneSpan;
-    // Rightmost column: when the cycle has rounds, take the highest round +
-    // server's column offset. When it doesn't, extend the lane to one column
-    // past the cut point so the empty-fork stub sits RIGHT of the parent
-    // anchor (not left of it).
-    let rightmostCol: number;
-    if (detail.rounds.length > 0) {
-      rightmostCol =
-        cycle.round_column_offset + Math.max(...detail.rounds.map((r) => r.round));
-    } else {
-      rightmostCol = Math.max(1, (cycle.fork_from_round ?? 0) + 1);
-    }
-    if (rightmostCol > maxCol) maxCol = rightmostCol;
-    laneByCycle.set(cycle.cycle_id, {
-      cycle,
-      detail,
+    // Rightmost column: the course's own last round. An empty course still occupies
+    // its base column, so its stub sits RIGHT of the anchor rather than left of it.
+    const rightmost =
+      cands.length > 0 ? baseCol + Math.max(...cands.map((c) => c.round ?? 0)) : baseCol;
+    if (rightmost > maxCol) maxCol = rightmost;
+    laneByCycle.set(course.id, {
+      course,
+      candidates: cands,
       expanded: isExpanded,
       laneOffset,
       laneSpan,
-      parentCycleId: cycle.immediate_parent_cycle_id,
-      forkFromRound: cycle.fork_from_round,
-      forkFromCandidateId: cycle.fork_from_candidate_id,
+      baseCol,
+      anchorCandidateId,
+      parentCycleId,
     });
-    for (const child of node.children) visit(child);
+    // Depth-first per child so a course's whole subtree stays contiguous. The child's
+    // columns start one right of the candidate it hangs off — that IS the offset.
+    for (const cand of cands) {
+      for (const child of cand.children) {
+        if (child.kind === "course") {
+          visit(child, baseCol + (cand.round ?? 0) + 1, cand.id, course.id);
+        }
+      }
+    }
   };
-  visit(tree);
+  visit(root, 0, null, null);
   return { laneByCycle, totalLaneRows: nextRow, maxCol };
 }
 
 // Compute SVG (x, y) for every node (collapsed = one summary node per round;
-// expanded = one node per candidate per round) and the branch segments between
-// them.
+// expanded = one node per candidate per round) and the branch segments between them.
 export interface RoundNodePos {
   cycleId: string;
   round: number;
   col: number;
   x: number;
   y: number;
-  // Short candidate label ("C1.2") for expanded nodes; "" for collapsed summary
-  // nodes (Forest draws "R{n}" for those).
+  // Short candidate label ("C1.2") for expanded nodes; "" for a collapsed round that
+  // elected nobody (Forest draws "R{n}" for collapsed nodes).
   candidateLabel: string;
-  // Stable id for selection routing (round 0 = origin's candidate id).
+  // Stable id for selection routing — the MINTED candidate id, never a position.
   candidateId: string;
   isWinner: boolean;
+  // Did the round CLOSE? With `isWinner` false it separates a HELD round (it ran,
+  // nothing beat the incumbent) from one that never finished (no election to
+  // report). Collapsing those into one false is how a never-closed round's lone
+  // candidate got promoted to a fake winner.
+  roundClosed: boolean;
   isExpanded: boolean;
-  // Carries the lane (cycle) label — the winner of the cycle's last round.
+  // Carries the lane (course) label — the last node of the course's last round.
   isLastInLane: boolean;
-  sibling_kind: SiblingKind;
+  courseKind: CourseKind;
   // Fork creation trigger — drives the operator_steered provenance glyph.
   trigger: string;
+  // The counterfactual, carried by the node itself rather than re-joined from a
+  // parallel array by a hand-rolled `{cycle}::r{round}` key.
+  divergence: LineageDivergence | null;
+  divergent: boolean;
 }
 interface BranchSeg {
   x1: number;
@@ -233,14 +202,41 @@ interface BranchSeg {
 }
 
 // Band-center y for a lane (the row the collapsed node sits on, and the y the
-// origin / fork stems anchor to).
+// fork stems fall back to).
 function bandCenterY(l: LaneLayout): number {
   return TOP_PAD + (l.laneOffset + (l.laneSpan - 1) / 2) * LANE_H;
 }
 
-// Left x of a lane's column band — what the band-left fork fallbacks anchor to.
+// Left x of a lane's column band — what the band-left fork fallback anchors to.
 function bandLeftX(l: LaneLayout): number {
-  return LEFT_PAD + l.cycle.round_column_offset * COL_W;
+  return LEFT_PAD + l.baseCol * COL_W;
+}
+
+function nodeAt(
+  l: LaneLayout,
+  cand: LineageNode,
+  x: number,
+  y: number,
+  isExpanded: boolean,
+  label: string,
+): RoundNodePos {
+  return {
+    cycleId: l.course.id,
+    round: cand.round ?? 0,
+    col: l.baseCol + (cand.round ?? 0),
+    x,
+    y,
+    candidateLabel: label,
+    candidateId: cand.id,
+    isWinner: cand.is_winner,
+    roundClosed: cand.round_closed,
+    isExpanded,
+    isLastInLane: false,
+    courseKind: l.course.course_kind ?? "root",
+    trigger: l.course.trigger,
+    divergence: cand.divergence,
+    divergent: cand.divergent,
+  };
 }
 
 export function placeNodes(layouts: Map<string, LaneLayout>): {
@@ -252,42 +248,30 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
   const nodes: RoundNodePos[] = [];
   const segs: BranchSeg[] = [];
   const spineByCycleRound = new Map<string, RoundNodePos>();
-  // Parent-cycle candidate lookup for forks that carry from_candidate_id.
+  // Candidate ids are MINTED and globally unique, so one flat map anchors a child
+  // course to its parent candidate at any depth — no per-cycle key scoping.
   const nodeByCandidate = new Map<string, RoundNodePos>();
 
   for (const l of layouts.values()) {
-    const offset = l.cycle.round_column_offset;
-    const rounds = [...l.detail.rounds].sort((a, b) => a.round - b.round);
-    const lastRound = rounds.at(-1)?.round ?? 0;
-    const colX = (round: number): number => LEFT_PAD + (offset + round) * COL_W;
+    const rounds = [...groupRounds(l.candidates).entries()].sort((a, b) => a[0] - b[0]);
+    const lastRound = rounds.at(-1)?.[0] ?? 0;
+    const colX = (round: number): number => LEFT_PAD + (l.baseCol + round) * COL_W;
 
     if (!l.expanded) {
       // Collapsed: one summary node per round on the band's single row.
       const y = bandCenterY(l);
       let prev: RoundNodePos | null = null;
-      for (const r of rounds) {
-        const winner = pickWinner(r.candidates);
-        const node: RoundNodePos = {
-          cycleId: l.cycle.cycle_id,
-          round: r.round,
-          col: offset + r.round,
-          x: colX(r.round),
-          y,
-          candidateLabel: winner?.label ?? "",
-          candidateId: winner?.candidateId ?? "",
-          // A held round is a real round on the positional spine, but it crowned
-          // no winner — mark it so, so the node renders held (not a false win).
-          isWinner: r.advanced,
-          isExpanded: false,
-          isLastInLane: r.round === lastRound,
-          sibling_kind: l.cycle.sibling_kind,
-          trigger: l.cycle.trigger,
-        };
+      for (const [round, cands] of rounds) {
+        const winner = pickWinner(cands);
+        // The round's stand-in when it elected nobody: the first candidate carries
+        // the position, but never the crown — `isWinner` rides the real fact.
+        const stand = winner ?? cands[0];
+        if (!stand) continue;
+        const node = nodeAt(l, stand, colX(round), y, false, winner?.label ?? "");
         nodes.push(node);
-        spineByCycleRound.set(`${l.cycle.cycle_id}::r${r.round}`, node);
-        if (node.candidateId) {
-          nodeByCandidate.set(`${l.cycle.cycle_id}::c${node.candidateId}`, node);
-        }
+        spineByCycleRound.set(`${l.course.id}::r${round}`, node);
+        if (winner) nodeByCandidate.set(winner.id, node);
+        if (round === lastRound) node.isLastInLane = true;
         if (prev) {
           segs.push({ x1: prev.x, y1: prev.y, x2: node.x - STUB, y2: node.y, variant: "chain" });
           segs.push({ x1: node.x - STUB, y1: node.y, x2: node.x, y2: node.y, variant: "chain" });
@@ -297,126 +281,75 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
       continue;
     }
 
-    // Expanded: the full intra-cycle candidate cladogram. Round 1 has no
-    // parent node (the origin trunk was removed) — its candidates draw only
-    // their own stub; each later round chains from the last WINNING round's
-    // winner. A held round (no winner) advances nothing: its candidates still
-    // fan from the retained incumbent, but the incumbent stays the parent of the
-    // following round — a held round never becomes a parent.
+    // Expanded: the full intra-course candidate cladogram. The first round has no
+    // parent node — its candidates draw only their own stub; each later round chains
+    // from the last WINNING round's winner. A held round advances nothing: its
+    // candidates still fan from the retained incumbent, and the incumbent stays the
+    // parent of the following round — a held round never becomes a parent.
     let parent: { x: number; y: number } | null = null;
     let lastWinnerNode: RoundNodePos | null = null;
 
-    for (const r of rounds) {
-      const n = r.candidates.length;
-      if (n === 0) continue;
-      const topRow = (l.laneSpan - n) / 2;
-      const x = colX(r.round);
+    for (const [round, cands] of rounds) {
+      if (cands.length === 0) continue;
+      const topRow = (l.laneSpan - cands.length) / 2;
+      const x = colX(round);
       const roundNodes: RoundNodePos[] = [];
-      r.candidates.forEach((cand, i) => {
+      cands.forEach((cand, i) => {
         const y = TOP_PAD + (l.laneOffset + topRow + i) * LANE_H;
-        const node: RoundNodePos = {
-          cycleId: l.cycle.cycle_id,
-          round: r.round,
-          col: offset + r.round,
-          x,
-          y,
-          candidateLabel: cand.label,
-          candidateId: cand.candidateId,
-          isWinner: cand.isWinner,
-          isExpanded: true,
-          isLastInLane: false,
-          sibling_kind: l.cycle.sibling_kind,
-          trigger: l.cycle.trigger,
-        };
+        const node = nodeAt(l, cand, x, y, true, cand.label);
         nodes.push(node);
         roundNodes.push(node);
-        if (node.candidateId) {
-          nodeByCandidate.set(`${l.cycle.cycle_id}::c${node.candidateId}`, node);
-        }
-        // Parent winner → this child's stub start. The stub itself (and the
-        // label) is drawn by the node group in lineage style, so emit only the
-        // slant here. Round 1 has no parent (no origin) — it draws just its stub.
+        nodeByCandidate.set(cand.id, node);
+        // Parent winner → this child's stub start. The stub itself (and the label) is
+        // drawn by the node group in lineage style, so emit only the slant here.
         if (parent) {
           segs.push({ x1: parent.x, y1: parent.y, x2: x - CAND_STUB, y2: y, variant: "chain" });
         }
       });
-      const winner = pickWinner(r.candidates);
-      const winnerNode = winner
-        ? roundNodes.find((nn) => nn.candidateId === winner.candidateId) ?? null
-        : null;
+      const winner = pickWinner(cands);
+      const winnerNode = winner ? roundNodes.find((n) => n.candidateId === winner.id) : undefined;
       if (winnerNode) {
-        // Advancing round: this winner becomes the spine node and the parent of
-        // the next round's fan.
-        spineByCycleRound.set(`${l.cycle.cycle_id}::r${r.round}`, winnerNode);
-        if (r.round === lastRound) winnerNode.isLastInLane = true;
+        // Advancing round: this winner becomes the spine node and the parent of the
+        // next round's fan.
+        spineByCycleRound.set(`${l.course.id}::r${round}`, winnerNode);
+        if (round === lastRound) winnerNode.isLastInLane = true;
         parent = { x: winnerNode.x, y: winnerNode.y };
         lastWinnerNode = winnerNode;
       } else if (lastWinnerNode) {
-        // Held round: no new winner. Anchor any fork cut here to the retained
-        // incumbent, and leave `parent` on the last real winner so the next
-        // round fans from it — the held round contributes no spine node.
-        spineByCycleRound.set(`${l.cycle.cycle_id}::r${r.round}`, lastWinnerNode);
-        if (r.round === lastRound) lastWinnerNode.isLastInLane = true;
+        // Held (or never-closed) round: no new winner. Leave `parent` on the last real
+        // winner so the next round fans from it — this round contributes no spine node.
+        spineByCycleRound.set(`${l.course.id}::r${round}`, lastWinnerNode);
+        if (round === lastRound) lastWinnerNode.isLastInLane = true;
       }
     }
   }
 
-  // Fork stems — parent spine node (or specific from-candidate) → child lane.
-  // Anchor selection respects fork_from_round semantics:
-  //   fr === 0           → parent's band center (cut before any round)
-  //   from_candidate_id  → that exact candidate node
-  //   parent has R{fr}   → parent's winner spine at that round
-  //   parent ran less    → parent's last spine node
-  //   parent has no rounds yet → parent's band center
-  // Child stub never goes LEFT of its anchor: clamp childX to (anchorX + COL_W).
+  // Course stems — the candidate a course hangs off → that course's lane. The tree
+  // names the anchor outright, so there is no `fork_from_round` semantics to
+  // re-derive: resolve the candidate's node, else fall back to the parent lane's
+  // band. Child stub never goes LEFT of its anchor: clamp childX to (anchorX + COL_W).
   for (const l of layouts.values()) {
     if (!l.parentCycleId) continue;
     const parentLayout = layouts.get(l.parentCycleId);
     if (!parentLayout) continue;
-    const parentBandY = bandCenterY(parentLayout);
-    const fr = l.forkFromRound;
-    let anchorX: number;
-    let anchorY: number;
-    const fromCand = l.forkFromCandidateId
-      ? nodeByCandidate.get(`${l.parentCycleId}::c${l.forkFromCandidateId}`)
+    const anchorNode = l.anchorCandidateId
+      ? nodeByCandidate.get(l.anchorCandidateId)
       : undefined;
-    if (fromCand) {
-      anchorX = fromCand.x;
-      anchorY = fromCand.y;
-    } else if (fr === 0) {
-      anchorX = bandLeftX(parentLayout);
-      anchorY = parentBandY;
-    } else {
-      const exact = fr != null ? spineByCycleRound.get(`${l.parentCycleId}::r${fr}`) : undefined;
-      if (exact) {
-        anchorX = exact.x;
-        anchorY = exact.y;
-      } else {
-        // Parent's last spine node, else its band left edge.
-        let last: RoundNodePos | undefined;
-        for (const r of parentLayout.detail.rounds) {
-          const node = spineByCycleRound.get(`${l.parentCycleId}::r${r.round}`);
-          if (node) last = node;
-        }
-        if (last) {
-          anchorX = last.x;
-          anchorY = last.y;
-        } else {
-          anchorX = LEFT_PAD + parentLayout.cycle.round_column_offset * COL_W;
-          anchorY = parentBandY;
-        }
-      }
-    }
+    // A collapsed parent draws only winners, so a course cut from an eliminated
+    // candidate has no node to hang on — anchor it to the parent's band instead.
+    const anchorX = anchorNode?.x ?? bandLeftX(parentLayout);
+    const anchorY = anchorNode?.y ?? bandCenterY(parentLayout);
+
     const childBandY = bandCenterY(l);
     const minChildX = anchorX + COL_W;
-    // Anchor the child stem at its first node (min round); empty forks at the
-    // clamped minimum so the stem always slants rightward.
-    let childX = minChildX;
-    const firstRound = l.detail.rounds.length > 0
-      ? Math.min(...l.detail.rounds.map((r) => r.round))
+    // Anchor the child stem at its first node; an empty course at the clamped
+    // minimum so the stem always slants rightward.
+    const firstRound = l.candidates.length > 0
+      ? Math.min(...l.candidates.map((c) => c.round ?? 0))
       : null;
+    let childX = minChildX;
     if (firstRound != null) {
-      const firstNode = spineByCycleRound.get(`${l.cycle.cycle_id}::r${firstRound}`);
+      const firstNode = spineByCycleRound.get(`${l.course.id}::r${firstRound}`);
       if (firstNode) childX = firstNode.x;
     }
     if (childX < minChildX) childX = minChildX;
@@ -427,8 +360,15 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
   return { nodes, segs, spineByCycleRound };
 }
 
-export function countDescendants(tree: CycleNode): number {
+// Courses below this one in the tree — the "+N more" count on a collapsed root.
+export function countDescendants(root: LineageNode): number {
   let n = 0;
-  for (const c of tree.children) n += 1 + countDescendants(c);
+  const visit = (node: LineageNode): void => {
+    for (const child of node.children) {
+      if (child.kind === "course") n += 1;
+      visit(child);
+    }
+  };
+  visit(root);
   return n;
 }

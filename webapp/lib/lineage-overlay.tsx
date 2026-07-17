@@ -1,27 +1,34 @@
 "use client";
-// Record-scoped seam for the campaign lineage + its mask/lens divergence overlay.
+// Record-scoped seam for the served lineage TREE + its mask/lens counterfactual.
 //
-// The `/lineage` overlay is a property of the served *record*, not of any one
-// widget — both the lineage card (the tree) and the per-candidate fitness panel
-// render it. So a single provider owns the one campaign-scoped fetch and the lens
-// selection, and both surfaces read it through context. No widget publishes to a
-// module global from a render effect; one fetch, one source of truth, rendered —
-// never recomputed (R-36).
+// The tree is a property of the served *record*, not of any one widget — the
+// forest, the sidebar's candidate rows and the per-candidate fitness panel all
+// render it. So a single provider owns the one fetch and the lens selection, and
+// every surface reads it through context. No widget publishes to a module global
+// from a render effect; one fetch, one source of truth, rendered — never
+// recomputed (R-36).
 //
 // The fetch is driven by: the lineage card's preset `lens` dropdown, the What-If
 // card's live selection/weights (the `score:` formula, debounced), and the fixed
 // sample-set chip (the `samples` mask). All three compose here, once.
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { fetchCampaignLineage } from "@/lib/api";
-import type { CampaignLineageResponse, LineageDivergence } from "@/lib/api/types";
-import { liveCandidateId } from "@/lib/candidate-label";
+import { fetchLineageTree } from "@/lib/api";
+import type { LineageDivergence, LineageNode } from "@/lib/api/types";
+import { walkCourses } from "@/lib/derivations";
 import { useCandidatesState } from "@/components/candidates/candidates-store";
 import { formulaFromWeights } from "@/components/candidates/fitness-bars";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useDebounced } from "@/lib/hooks/useDebounced";
+import { rootCycleId } from "@/lib/ids";
 import { useRevalidation } from "@/lib/revalidate";
 import { useSelection } from "@/lib/SelectionContext";
+
+// Course-levels the forest expands. The tree recurses `course → candidate →
+// (course | sample)`, so this reaches a campaign's forks, their forks, and the L4
+// inner runs filed under any of their candidates. Each level costs one ledger scan
+// per course, so it is the cost dial — not a hidden recursion.
+const FOREST_DEPTH = 3;
 
 // Short label per preset lens for the mask tag.
 const LENS_LABELS: Record<string, string> = {
@@ -32,8 +39,9 @@ const LENS_LABELS: Record<string, string> = {
 };
 
 interface LineageOverlay {
-  // The whole campaign lineage response — cycles + the served divergence overlay.
-  data: CampaignLineageResponse | null;
+  // THE served genealogy, rooted at the campaign's root course. Nodes alternate
+  // course → candidate → (course | sample) at every depth.
+  tree: LineageNode | null;
   // The PRESET lens dropdown value: "" (off), "score:<formula>", or "abort:<variant>".
   // The What-If card overrides it as the master when open.
   lens: string;
@@ -43,13 +51,10 @@ interface LineageOverlay {
   maskActive: boolean;
   maskLabel: string;
   whatifActive: boolean;
-  // Marker nodes → one-step alternative candidate; the dimmed counterfactual subtree.
-  divergenceByKey: ReadonlyMap<string, string | null>;
-  divergentKeys: ReadonlySet<string>;
   // Each candidate's fitness under the active `score:` lens — served, never recomputed
-  // here (R-36). Key `{cycle_id}::{candidate_id|liveId}`, the SAME candidate identity the
-  // lineage tree and fitness bars resolve by. Empty without a `score:` lens (e.g. What-If
-  // closed), so a consumer reads null and falls back to its default series.
+  // here (R-36). Key `{cycle_id}::{candidate_id}`, the SAME candidate identity every
+  // other surface resolves by. Empty without a `score:` lens (e.g. What-If closed), so
+  // a consumer reads null and falls back to its default series.
   lensValueByCandidate: ReadonlyMap<string, number>;
   // Each closed candidate's scorer-faithful accuracy over the active `samples=` subset +
   // the count it ran — served (R-36), keyed the same way. Empty without a `samples=` mask.
@@ -59,11 +64,25 @@ interface LineageOverlay {
 
 const LineageOverlayContext = createContext<LineageOverlay | null>(null);
 
+// Every (course, candidate) pair in the tree — the one walk the overlay maps ride.
+function candidatePairs(tree: LineageNode | null): { courseId: string; cand: LineageNode }[] {
+  if (!tree) return [];
+  const out: { courseId: string; cand: LineageNode }[] = [];
+  for (const course of walkCourses(tree)) {
+    for (const cand of course.children) {
+      if (cand.kind === "candidate") out.push({ courseId: course.id, cand });
+    }
+  }
+  return out;
+}
+
 export function LineageOverlayProvider({
   campaignId,
+  cycleId,
   children,
 }: {
   campaignId: string | null;
+  cycleId: string | null;
   children: React.ReactNode;
 }) {
   const [tick, setTick] = useState(0);
@@ -76,7 +95,7 @@ export function LineageOverlayProvider({
     setPrevCampaign(campaignId);
     setLens("");
   }
-  // The What-If card is the master: when open, the lineage follows its live
+  // The What-If card is the master: when open, the tree follows its live
   // selection + weights (the SAME weighted criterion as the bars), debounced so a
   // continuous drag doesn't spam the fetch.
   const { selected: whatifSelected, weights: whatifWeights, showWhatIf } = useCandidatesState();
@@ -105,10 +124,13 @@ export function LineageOverlayProvider({
       ? "Sample set"
       : (LENS_LABELS[lens] ?? "");
 
-  // `cycleId` is deliberately NOT a fetch dep: /lineage is campaign-scoped, so a
-  // same-campaign cycle switch returns identical data. `lensParam`/`samplesParam`
-  // ARE deps: they change the served overlay. Refetch on any mutation (fork,
-  // cleanup, lifecycle) via the shared revalidation seam.
+  // The tree is rooted at the campaign's ROOT course, and its own recursion reaches
+  // every fork below it — so selecting a fork must not re-root (and re-fetch) it.
+  // `rootCycleId` is a pure string derivation, so a same-campaign cycle switch
+  // resolves to the same root and the same query key: `cycleId` stays out of the
+  // fetch identity exactly as it did when this read was campaign-scoped.
+  const rootCycle = cycleId ? rootCycleId(cycleId) : null;
+
   const reval = useRevalidation();
   // Revalidate on the SAME signal the live header moves on — a round closing or a
   // phase flip — so the tree never lags the 2 s dashboard poll. A quiescent stretch
@@ -117,31 +139,36 @@ export function LineageOverlayProvider({
   const { dash, dashRound } = useDashboard();
   const dashChangeKey = `${dash?.rounds.length ?? 0}:${dashRound ?? -1}:${dash?.run_phase ?? ""}`;
 
-  const [data, setData] = useState<CampaignLineageResponse | null>(null);
-  // Query identity = campaign + lens + samples. A change is a DIFFERENT served
+  const [tree, setTree] = useState<LineageNode | null>(null);
+  // Query identity = root course + lens + samples. A change is a DIFFERENT served
   // body (different URL), so drop the prior tree in the same render before the
   // refetch lands (render-phase guarded reset, webapp/CLAUDE.md).
-  const queryKey = `${campaignId ?? ""}|${lensParam ?? ""}|${samplesKey}`;
+  const queryKey = `${campaignId ?? ""}|${rootCycle ?? ""}|${lensParam ?? ""}|${samplesKey}`;
   const [prevQueryKey, setPrevQueryKey] = useState(queryKey);
   if (queryKey !== prevQueryKey) {
     setPrevQueryKey(queryKey);
-    setData(null);
+    setTree(null);
   }
 
   // Last-Modified validator, keyed to the query identity so it's only reused
   // within the same body — a new query (campaign/lens/samples) fetches fresh.
   const lastModifiedRef = useRef<{ key: string; value: string | null }>({ key: "", value: null });
   useEffect(() => {
-    if (!campaignId) return;
+    if (!campaignId || !rootCycle) return;
     const ac = new AbortController();
     let cancelled = false;
     const ims = lastModifiedRef.current.key === queryKey ? lastModifiedRef.current.value : null;
-    fetchCampaignLineage(campaignId, lensParam, samplesParam, ims, ac.signal)
+    fetchLineageTree(
+      [{ campaignId, cycleId: rootCycle }],
+      { lens: lensParam, samples: samplesParam, depth: FOREST_DEPTH },
+      ims,
+      ac.signal,
+    )
       .then((res) => {
         if (cancelled) return;
         lastModifiedRef.current = { key: queryKey, value: res.lastModified ?? ims };
         // 304 keeps the current tree — a quiescent revalidation costs nothing.
-        if (res.kind === "ok") setData(res.data);
+        if (res.kind === "ok") setTree(res.data);
       })
       .catch(() => {
         // Transient/aborted — keep the last good tree rather than blanking it.
@@ -150,55 +177,41 @@ export function LineageOverlayProvider({
       cancelled = true;
       ac.abort();
     };
-  }, [campaignId, queryKey, lensParam, samplesParam, tick, reval, dashChangeKey]);
+  }, [campaignId, rootCycle, queryKey, lensParam, samplesParam, tick, reval, dashChangeKey]);
 
-  // Served overlay → lookup structures keyed by `{cycle_id}::r{round}`.
-  const divergenceByKey = useMemo(() => {
-    const m = new Map<string, string | null>();
-    for (const d of data?.divergences ?? []) m.set(d.node_key, d.alternative_candidate_id);
-    return m;
-  }, [data]);
-  const divergentKeys = useMemo(() => new Set(data?.divergent ?? []), [data]);
-  // Served per-candidate lens value → lookup keyed by `{cycle_id}::{candidate_id|liveId}`.
-  // Candidate identity is resolved EXACTLY as the tree (useLineage) and the bars
-  // (round-candidates) resolve it — real id, else the position-derived live id — so all
-  // three surfaces key one candidate one way. Only non-null values land (a candidate the
-  // formula can't score is absent, read as null downstream).
+  const pairs = useMemo(() => candidatePairs(tree), [tree]);
+
+  // Served per-candidate lens value → lookup keyed by `{cycle_id}::{candidate_id}`.
+  // Candidate identity is the MINTED id the node carries, which every other surface
+  // resolves by too — so all of them key one candidate one way. Only non-null values
+  // land (a candidate the formula can't score is absent, read as null downstream).
   const lensValueByCandidate = useMemo(() => {
     const m = new Map<string, number>();
-    for (const cyc of data?.cycles ?? []) {
-      for (const r of cyc.rounds) {
-        r.candidates.forEach((cand, i) => {
-          if (cand.lens_value == null) return;
-          const id = cand.candidate_id || liveCandidateId(r.round, i);
-          m.set(`${cyc.cycle_id}::${id}`, cand.lens_value);
-        });
-      }
+    for (const { courseId, cand } of pairs) {
+      if (cand.lens_value != null) m.set(`${courseId}::${cand.id}`, cand.lens_value);
     }
     return m;
-  }, [data]);
+  }, [pairs]);
   // Served per-candidate sample-set accuracy → lookup, same identity key. `sample_set_n`
   // is non-null exactly when a `samples=` mask was applied (0 = ran none of the chosen set,
   // accuracy null), so it's the presence guard; absence ⇒ no mask, consumer falls back.
   const sampleSetByCandidate = useMemo(() => {
     const m = new Map<string, { accuracy: number | null; n: number }>();
-    for (const cyc of data?.cycles ?? []) {
-      for (const r of cyc.rounds) {
-        r.candidates.forEach((cand, i) => {
-          if (cand.sample_set_n == null) return;
-          const id = cand.candidate_id || liveCandidateId(r.round, i);
-          m.set(`${cyc.cycle_id}::${id}`, {
-            accuracy: cand.sample_set_accuracy,
-            n: cand.sample_set_n,
-          });
-        });
-      }
+    for (const { courseId, cand } of pairs) {
+      if (cand.sample_set_n == null) continue;
+      m.set(`${courseId}::${cand.id}`, {
+        accuracy: cand.sample_set_accuracy,
+        n: cand.sample_set_n,
+      });
     }
     return m;
-  }, [data]);
-  // "Active" (red tag) only when the served overlay actually carries a divergence —
+  }, [pairs]);
+  // "Active" (red tag) only when the served tree actually carries a divergence —
   // NOT merely because a lens/chip is requested.
-  const maskActive = divergenceByKey.size > 0 || divergentKeys.size > 0;
+  const maskActive = useMemo(
+    () => pairs.some(({ cand }) => cand.divergence !== null || cand.divergent),
+    [pairs],
+  );
 
   // Window refocus ⇒ refetch, so forks/cleanups made from another tab or the CLI
   // surface without a manual reload.
@@ -210,25 +223,21 @@ export function LineageOverlayProvider({
 
   const value = useMemo<LineageOverlay>(
     () => ({
-      data,
+      tree,
       lens,
       setLens,
       maskActive,
       maskLabel,
       whatifActive: showWhatIf,
-      divergenceByKey,
-      divergentKeys,
       lensValueByCandidate,
       sampleSetByCandidate,
     }),
     [
-      data,
+      tree,
       lens,
       maskActive,
       maskLabel,
       showWhatIf,
-      divergenceByKey,
-      divergentKeys,
       lensValueByCandidate,
       sampleSetByCandidate,
     ],
@@ -247,25 +256,23 @@ export function useLineageOverlay(): LineageOverlay {
   return ctx;
 }
 
-// Per-cycle divergence facts for the round axis — which rounds of `cycleId` are a
+// Per-course divergence facts for the round axis — which rounds of `cycleId` are a
 // divergence point vs. inside the counterfactual subtree. Pure derivation over the
-// served overlay; surfaces share it so they mark identically.
+// served tree; surfaces share it so they mark identically. The marker rides the
+// round's WINNER (the candidate the lens would have replaced), and every candidate
+// of a counterfactual round carries `divergent`.
 export function divergenceRoundsFor(
   overlay: LineageOverlay,
   cycleId: string | null,
 ): { points: ReadonlySet<number>; subtree: ReadonlySet<number> } {
   const points = new Set<number>();
   const subtree = new Set<number>();
-  if (!cycleId) return { points, subtree };
-  for (const d of overlay.data?.divergences ?? []) {
-    if (d.cycle_id === cycleId) points.add(d.round);
-  }
-  const prefix = `${cycleId}::r`;
-  for (const key of overlay.data?.divergent ?? []) {
-    if (key.startsWith(prefix)) {
-      const r = Number(key.slice(prefix.length));
-      if (Number.isFinite(r)) subtree.add(r);
-    }
+  if (!cycleId || !overlay.tree) return { points, subtree };
+  const course = walkCourses(overlay.tree).find((c) => c.id === cycleId);
+  for (const cand of course?.children ?? []) {
+    if (cand.round == null) continue;
+    if (cand.divergence) points.add(cand.round);
+    if (cand.divergent) subtree.add(cand.round);
   }
   return { points, subtree };
 }

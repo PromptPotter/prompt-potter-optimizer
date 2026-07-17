@@ -843,3 +843,82 @@ def test_adopt_advances_identity_and_carries_the_wound_ledger():
     assert cyc.opt_sp.memory.wounds.l3_note == "prior failure ledger"
     # The OWNED surface came from the new incumbent, not the carried memory.
     assert cyc.opt_sp.memory.task_context.domain == "biotech"
+
+
+def test_a_forks_attempts_stay_separate_on_the_campaigns_timeline(built_stores) -> None:
+    """A fork that ran three rounds contributes THREE attempts, never one merged bar.
+
+    Silent by construction, which is why it rides here. The lineage tree is a read model, so
+    a wrong shape raises nothing — and the version this replaced built the fork as a course
+    and then hoisted its grandchildren onto a single node, painting that node with the fork's
+    `best_accuracy`. Three distinct searchpoints, three distinct scores, would render as one
+    plausible bar wearing a number none of them measured. The only fork on disk had a single
+    real attempt, so it looked correct and shipped.
+
+    Also pins the two facts that make the merged shape unreachable: a fork's `C0` names the
+    candidate it was cut from (`parent_id` spans cycles), so it is a REPLAY and collapses
+    into it; and the surviving attempts are renumbered onto the campaign's ONE sequence,
+    because `C{round}.{n}` is a course's private counter and every fork mints its own `C1.1`.
+    """
+    from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.cycle_paths import CycleHop
+    from promptpotter.infrastructure.store.lineage_views import build_lineage_tree
+
+    campaign_id, root = "demo__aaaaaa", "cycle_1111"
+    base = built_stores.base_dir / "campaigns" / campaign_id
+    base.mkdir(parents=True, exist_ok=True)
+    (base / "campaign.json").write_text(
+        Campaign(
+            campaign_id=campaign_id,
+            dataset_name="demo",
+            created_at="2026-01-01T00:00:00",
+            root_cycle_id=root,
+        ).model_dump_json()
+    )
+
+    def write(cycle_id: str, cands: list[tuple[int, str, str | None]], **index: Any) -> None:
+        cdir = base / "cycles" / cycle_id
+        (cdir / ".runtime").mkdir(parents=True, exist_ok=True)
+        (cdir / "index.json").write_text(json.dumps({"status": "finished", **index}))
+        (cdir / ".runtime" / "ledger.jsonl").write_text(
+            "".join(
+                json.dumps(
+                    {
+                        "record_type": "candidate_minted",
+                        "round": rnd,
+                        "idx": 0,
+                        "candidate_id": cid,
+                        "parent_id": parent,
+                        "label": f"C{rnd}.1" if rnd else "C0",
+                    }
+                )
+                + "\n"
+                for rnd, cid, parent in cands
+            )
+        )
+
+    write(root, [(0, "root-c0", None)])
+    write(
+        f"{root}_fork_beef",
+        [
+            # The fork's origin NAMES the candidate it was cut from — that is what makes it
+            # a replay rather than an attempt, and it is structural, not a convention.
+            (0, "fork-c0", "root-c0"),
+            (1, "fork-c1", "fork-c0"),
+            (2, "fork-c2", "fork-c1"),
+            (3, "fork-c3", "fork-c2"),
+        ],
+        parent_cycle_id=root,
+        fork={"from_candidate_id": "root-c0"},
+        best_accuracy=0.42,
+    )
+
+    kids = build_lineage_tree(
+        built_stores, (CycleHop(campaign_id=campaign_id, cycle_id=root),), depth=1
+    ).children
+
+    # Three attempts, each keeping its own identity — not one node wearing 0.42.
+    assert [k.id for k in kids] == ["root-c0", "fork-c1", "fork-c2", "fork-c3"]
+    assert [k.label for k in kids] == ["C0", "C1.1", "C2.1", "C3.1"]
+    # The replayed origin IS `root-c0`, measured again — it is not a second node.
+    assert "fork-c0" not in {k.id for k in kids}

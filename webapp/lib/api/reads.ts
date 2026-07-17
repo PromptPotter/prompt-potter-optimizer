@@ -4,7 +4,6 @@ import { API, jget, jgetConditional, type Conditional } from "./client";
 import { encodeCyclePath, encodeDescend, pathRoot, type CyclePath } from "../ids";
 import type {
   ActiveSessionResponse,
-  CampaignLineageResponse,
   CampaignListResponse,
   CyclesResponse,
   DatasetPreviewResponse,
@@ -12,6 +11,7 @@ import type {
   FileContentResponse,
   FilesResponse,
   HardSamplesScope,
+  LineageNode,
   MeasurementSeriesResponse,
 } from "./types";
 
@@ -642,31 +642,47 @@ export function fetchResourceMatrix(signal?: AbortSignal): Promise<ResourceMatri
   return jget<ResourceMatrixResponse>(`${API}/resource-matrix`, signal);
 }
 
+// THE lineage read — one recursive tree rooted at a COURSE, nodes alternating
+// `course → candidate → (course | sample)` at every depth. It is the only
+// genealogy the webapp fetches; nothing here re-derives one.
+//
+// Rooted at a course, not a campaign: a campaign is a bag of courses, and the
+// tree's own recursion (a fork or an L4 inner run is a course hanging off a
+// candidate) already reaches every one of them. `/campaigns` + `/cycles` stay the
+// flat registry the sidebar groups by.
+//
 // Conditional, like the dashboard poll: the unmasked request honors
 // `If-Modified-Since` → 304 so revalidation on the dashboard change-signal is
 // cheap during quiescent stretches. A masked request (lens/samples set) always
 // computes server-side — the server never 304s those.
-export function fetchCampaignLineage(
-  campaignId: string,
-  lens: string | null,
-  samples: number[] | null,
+// `path` addresses the ROOT COURSE of the tree — the same CyclePath every other
+// path-addressed read uses, so an L4 inner course's tree rides `?descend=` through
+// the one URL builder rather than a second convention.
+export function fetchLineageTree(
+  path: CyclePath,
+  opts: {
+    lens?: string | null;
+    samples?: number[] | null;
+    // Course-levels to expand. `children_available` with empty `children` is the
+    // lazy boundary, so depth is the caller's cost dial.
+    depth?: number;
+  } = {},
   ifModifiedSince?: string | null,
   signal?: AbortSignal,
-  at: CyclePath = [],
-): Promise<Conditional<CampaignLineageResponse>> {
-  // One `lens` value drives the divergence overlay: `score:<formula>` = an
-  // alternative scoring formula, `abort:<variant>` = a PoBB abort-contributor
-  // switch-off. `samples` = the sample-set mask (re-score accuracy over only these
-  // ids); it composes with a `score:` lens and is ignored for an `abort:` lens.
-  // `at` descends into a sandbox before resolving the campaign — an L4 inner
-  // campaign's lineage reads through the same route, one hop deeper.
+): Promise<Conditional<LineageNode>> {
+  // One `lens` value drives the counterfactual: `score:<formula>` = an alternative
+  // scoring formula, `abort:<variant>` = a PoBB abort-contributor switch-off.
+  // `samples` = the sample-set mask (re-score accuracy over only these ids); it
+  // composes with a `score:` lens and is ignored for an `abort:` lens. Both land
+  // ON the node they describe — there is no parallel array to re-join.
+  const { lens = null, samples = null, depth } = opts;
   const params = new URLSearchParams();
   if (lens) params.set("lens", lens);
   if (samples && samples.length > 0) params.set("samples", samples.join(","));
-  if (at.length) params.set("descend", encodeCyclePath(at));
+  if (depth != null) params.set("depth", String(depth));
   const q = params.toString();
-  return jgetConditional<CampaignLineageResponse>(
-    `${API}/campaigns/${encodeURIComponent(campaignId)}/lineage${q ? `?${q}` : ""}`,
+  return jgetConditional<LineageNode>(
+    cyclePathUrl(path, `/tree${q ? `?${q}` : ""}`),
     ifModifiedSince,
     signal,
   );

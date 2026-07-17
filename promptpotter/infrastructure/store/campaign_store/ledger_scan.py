@@ -30,7 +30,7 @@ def scan_ledger_max_round_complete(ledger_path: Path) -> int:
     round uses.
     """
     max_complete = -1
-    for rec in iter_jsonl(ledger_path):
+    for rec in iter_jsonl(ledger_path, record_types=frozenset({"phase"})):
         if rec.get("record_type") != "phase":
             continue
         if rec.get("phase") == "round" and rec.get("event") == "complete":
@@ -47,7 +47,7 @@ def scan_ledger_cycle_seed(ledger_path: Path) -> CycleSeed | None:
     The seed is written once at mint, but we take the last match so a re-seed wins.
     """
     found: CycleSeed | None = None
-    for rec in iter_jsonl(ledger_path):
+    for rec in iter_jsonl(ledger_path, record_types=frozenset({"cycle_seed"})):
         if rec.get("record_type") != "cycle_seed":
             continue
         seed_data = rec.get("seed")
@@ -85,7 +85,9 @@ def scan_ledger_candidates(ledger_path: Path) -> list[LedgerCandidate]:
         acc = found.setdefault(key, {"round": key[0], "idx": key[1]})
         acc.update({k: v for k, v in fields.items() if v is not None})
 
-    for rec in iter_jsonl(ledger_path):
+    for rec in iter_jsonl(
+        ledger_path, record_types=frozenset({"candidate_minted", "candidate_scored"})
+    ):
         kind = rec.get("record_type")
         if kind == "candidate_minted":
             try:

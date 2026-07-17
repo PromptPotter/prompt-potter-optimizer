@@ -715,104 +715,118 @@ export interface FileContentResponse {
   content: string | null;
 }
 
-export interface CampaignLineageCandidate {
-  /** Stable id assigned at L1-score time */
-  candidate_id: string;
-  /** Short L1-generated description */
-  label: string;
-  /** Per-candidate accuracy */
-  accuracy: number | null;
-  /** The candidate's fitness under the run's active formula (equals accuracy when
-   * no formula was active) — served verbatim from the dashboard round summary
-   * so the lineage tree can honor the composite headline selection on
-   * settled/sibling cycles too, never recomputed client-side. */
-  composite_fitness: number | null;
-  /** Final rank within the round */
-  rank: number | null;
-  /** True for the round's elected winner */
-  is_winner: boolean;
-  /** Difficulty-adjusted Rasch ability the winner was elected on
-   * (`elect_round_winner`) — the subset-invariant metric that explains a
-   * lower-accuracy winner. Null for candidates outside the round's election
-   * fit. */
-  theta: number | null;
-  /** Laplace SE on `theta` (for a CI on the ability). */
-  theta_se: number | null;
-  /** This candidate's fitness under the request's `score:` lens formula, recomputed
-   * from its stored evaluator namespace via the single scoring operation (the
-   * same one the mask divergence rides). Null without a `score:` lens, or
-   * when the candidate's namespace can't satisfy the formula. */
-  lens_value: number | null;
-  /** Scorer-faithful accuracy over the request's `samples=` subset, re-scored
-   * server-side from this candidate's per-sample rows (the same
-   * `materialize_row_derivable` the mask divergence rides). Null without a
-   * `samples=` mask, or when the candidate never ran any selected sample. */
-  sample_set_accuracy: number | null;
-  /** How many of the `samples=` subset this candidate actually ran (the honest 'n
-   * of N' — older candidates that skipped some chosen samples read a smaller
-   * n). Null without a `samples=` mask. */
-  sample_set_n: number | null;
-}
-
-export interface CampaignLineageRound {
-  /** Round number within the cycle (1-indexed) */
-  round: number;
-  /** Round label — winner's L1 description */
-  label: string;
-  /** Did a candidate WIN and advance the incumbent this round? False = a 'held'
-   * round (no winner): the incumbent is unchanged and the spine must chain
-   * the NEXT round from the last real winner, not from an eliminated
-   * candidate. The webapp reads this rather than re-inferring a winner from
-   * the candidate list. */
-  advanced: boolean;
-  /** Round-level accuracy (winner) */
-  accuracy: number | null;
-  /** The adopted lineage rescored over EVERY sample probed so far — the cross-
-   * round-comparable frontier (matches the trend chart). The webapp paints
-   * the WINNER node with this so the lineage spine reads as honest progress,
-   * not the per-round subset swing; sibling alternatives keep their own
-   * subset `accuracy`. */
-  cumulative_accuracy: number | null;
-  /** All candidates scored this round, sorted by rank */
-  candidates: CampaignLineageCandidate[];
-}
-
-export interface CampaignLineageCycle {
+/** One ``(campaign, cycle)`` step of a :data:`CyclePath`. */
+export interface CycleHop {
+  campaign_id: string;
   cycle_id: string;
-  sibling_kind: 'root' | 'fork' | 'diag' | 'sweep';
-  immediate_parent_cycle_id: string | null;
-  fork_from_round: number | null;
-  fork_from_candidate_id: string | null;
-  trigger: string;
-  steered_by: string | null;
-  round_column_offset: number;
-  status: string;
-  dataset_name: string;
-  best_accuracy: number | null;
-  hearts: number | null;
-  lives_cap: number | null;
-  rounds: CampaignLineageRound[];
 }
 
-/** A mask divergence point — the first node on a branch an alternative scoring */
+/** Where an alternative criterion would have elected someone else. */
 export interface LineageDivergence {
-  /** Lineage node id, formatted `{cycle_id}::r{round}` */
-  node_key: string;
-  cycle_id: string;
-  round: number;
   /** The candidate the masked criterion would have elected instead (measured, so
    * nameable); null when the round would simply have held on origin. */
   alternative_candidate_id: string | null;
 }
 
-export interface CampaignLineageResponse {
-  campaign_id: string;
-  /** Every cycle in the campaign (root + forks + sweeps + diag). Sorted by cycle
-   * id; lay out via immediate_parent_cycle_id. */
-  cycles: CampaignLineageCycle[];
-  divergences: LineageDivergence[];
-  /** Node keys of the counterfactual subtree to render dimmed. */
-  divergent: string[];
+/** One node of the served tree. The same shape at every depth — that is the point. */
+export interface LineageNode {
+  /** course | candidate — they strictly alternate */
+  kind: 'course' | 'candidate';
+  /** Course: the cycle_id. Candidate: the searchpoint id minted at L1/origin. */
+  id: string;
+  /** The candidate this node descends from; null only at the true root. A course
+   * carries the same edge its own C0 carries — a course descends from nothing
+   * its origin does not. */
+  parent_id: string | null;
+  /** `C{round}.{n}` on the campaign's ONE timeline. Minted for a candidate L1
+   * produced. A FORK never had a label to mint, so it takes the next free
+   * index of the round after the candidate it was cut from, by mint time — a
+   * hand-cut attempt is numbered like any other. Never re-derived for a
+   * candidate that has a minted one. */
+  label: string;
+  /** The addressable CyclePath of the course this node belongs to, root → leaf.
+   * What lets a client select an inner node without re-deriving how to reach
+   * it. */
+  path: CycleHop[];
+  children: LineageNode[];
+  /** True with `children` empty = the lazy boundary: this node HAS children the
+   * request's `depth` did not expand. False + empty = it genuinely has none.
+   * A client must never read an empty list as proof of a leaf. */
+  children_available: boolean;
+  /** Column hint. Candidates only. */
+  round: number | null;
+  accuracy: number | null;
+  composite_fitness: number | null;
+  /** Candidate: minted | measured — never 'winner' (that rides `is_winner`).
+   * Course: the cycle status. */
+  state: string;
+  /** Elected this round. False throughout a round that never closed: election is
+   * stamped at close, so such a round HAS no winner and this tree declines to
+   * invent one for a lone candidate. */
+  is_winner: boolean;
+  /** Did this candidate's round CLOSE? It is what separates the two ways a round
+   * can crown nobody: closed with no winner = HELD (it ran, nothing beat the
+   * incumbent — render it held); not closed = the round never finished, so
+   * there is no election to report. `is_winner` alone collapses those two
+   * into one false, which is how a never-closed round's lone candidate got
+   * promoted to a fake winner. */
+  round_closed: boolean;
+  /** Difficulty-adjusted Rasch ability the election ranked on — what explains a
+   * lower-accuracy winner. Null outside the round's election fit. */
+  theta: number | null;
+  theta_se: number | null;
+  /** The candidate's stored evaluator namespace — the measurement a `score:` lens
+   * re-scores against. */
+  evaluators: Record<string, number>;
+  composite_ci_lo: number | null;
+  composite_ci_hi: number | null;
+  scored_samples: number | null;
+  expected_samples: number | null;
+  /** The adopted lineage rescored over EVERY sample probed so far — the cross-
+   * round-comparable frontier the trend plots. Carried by the round's WINNER
+   * only: it is a property of the advancing spine, and a losing sibling never
+   * joined it. */
+  cumulative_accuracy: number | null;
+  /** This candidate's fitness under the request's `score:` lens, re-scored server-
+   * side from its stored evaluator namespace. Null without a lens, or when
+   * the namespace can't satisfy the formula. */
+  lens_value: number | null;
+  /** Scorer-faithful accuracy over the request's `samples=` subset. Null without a
+   * `samples=` mask, or when this candidate never ran any selected sample. */
+  sample_set_accuracy: number | null;
+  /** How many of the `samples=` subset this candidate ran. */
+  sample_set_n: number | null;
+  /** Set when the request's lens would have FORKED the record at this node — the
+   * marker. It rides the node itself; there is no parallel list to re-join by
+   * a hand-rolled key. Only ever set on a closed round's node. */
+  divergence: LineageDivergence | null;
+  /** This node is inside the counterfactual subtree below a divergence — the client
+   * dims it. */
+  divergent: boolean;
+  /** Courses, and the candidates a fork contributed to this timeline — on those it
+   * is the provenance stamp (⑂) that marks an attempt the operator cut apart
+   * from one L1 minted in this course. */
+  course_kind: 'root' | 'fork' | 'diag' | 'sweep' | 'inner' | null;
+  /** Courses only: checkin | running | paused | detached | terminal — the ONE
+   * server-owned run-state (`derive_run_phase`), the same value `/cycles`
+   * serves. A sidebar drawing an inner run off this tree needs its ● without
+   * a second read. */
+  run_phase: string;
+  dataset_name: string;
+  /** Fork trigger; empty for roots and inner runs. */
+  trigger: string;
+  /** Operator who cut this fork. */
+  steered_by: string | null;
+  /** An inner run's benchmark task. Load-bearing: every task runs for every
+   * candidate, so the candidate edge alone does not identify an inner run. */
+  task: string | null;
+  best_accuracy: number | null;
+  /** This course's round-0 score. What a course bar shows before the course has a
+   * `best_accuracy` — a fork that has only run its origin has one and not the
+   * other, and reading only `best` blanks its bar. */
+  origin_accuracy: number | null;
+  hearts: number | null;
+  lives_cap: number | null;
 }
 
 /** One page of diagnostic-run records, newest first. */

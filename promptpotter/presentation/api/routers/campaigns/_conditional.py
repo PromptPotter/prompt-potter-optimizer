@@ -1,6 +1,6 @@
 """Shared HTTP conditional-request helpers for the campaign read routes.
 
-Both the per-cycle ``dashboard`` poll and the campaign ``lineage`` poll honor
+Both the per-cycle ``dashboard`` poll and the lineage ``tree`` poll honor
 ``If-Modified-Since`` → ``304 Not Modified`` so the 2 s webapp polls stay cheap
 during quiescent stretches — the body is only recomputed when an on-disk mtime
 has actually advanced.

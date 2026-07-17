@@ -27,8 +27,7 @@ export function ForestCard() {
   const { dash } = useDashboard();
   const { campaignId, cycleId, selectCycle: onSelectCycle } = useWorkspace();
   const {
-    forests,
-    detailByCycle,
+    tree,
     valueByKey,
     thetaByKey,
     metric,
@@ -62,7 +61,7 @@ export function ForestCard() {
               <IconBroom />
             </Chip>
           )}
-          <CopyButton data={forests} title="Copy the lineage as JSON" />
+          <CopyButton data={tree} title="Copy the lineage as JSON" />
           <button
             type="button"
             className="forest-close"
@@ -77,18 +76,16 @@ export function ForestCard() {
     >
       <RotatePrompt surfaceName="The lineage forest" skipRender>
         <section className="family-cladogram" aria-label="Campaign lineage tree">
-          {/* One fixed-height, operator-resizable viewport for every session
-              forest. Keyed on campaignId so a campaign switch remounts it: the
-              dragged height + scroll reset to the default instead of leaking
-              into the next campaign. */}
+          {/* One fixed-height, operator-resizable viewport for the campaign's tree.
+              Keyed on campaignId so a campaign switch remounts it: the dragged
+              height + scroll reset to the default instead of leaking into the next
+              campaign. */}
           <div key={campaignId ?? "none"} className="family-cladogram-viewport">
-            {forests.map((f) => (
+            {tree && (
               <Forest
-                key={f.rootId}
-                tree={f.tree}
+                tree={tree}
                 campaignId={campaignId ?? ""}
                 cycleId={cycleId}
-                detailByCycle={detailByCycle}
                 valueByKey={valueByKey}
                 thetaByKey={thetaByKey}
                 metric={metric}
@@ -96,7 +93,7 @@ export function ForestCard() {
                 onLaneActivate={onLaneActivate}
                 onSelectCycle={onSelectCycle}
               />
-            ))}
+            )}
           </div>
           {!viewedHasRounds && (
             <div className="lineage-empty">

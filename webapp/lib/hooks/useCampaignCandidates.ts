@@ -1,39 +1,44 @@
 "use client";
-// One campaign's candidates, per cycle — what the sidebar opens under a cycle row.
+// One course's subtree of candidates — what the sidebar opens under a cycle row.
 //
-// Rides `/lineage`, which already answers "every cycle in this campaign, with each
-// round's candidates" in ONE conditional round-trip. The alternative — a
-// `dashboard.json` fetch per cycle — is the same data N times over, and the sidebar
-// shows many cycles at once.
+// Rides `/tree`, which answers a course, its candidates, and every course hanging
+// off them in ONE conditional round-trip. The alternative — a `dashboard.json`
+// fetch per cycle — is the same data N times over, and the sidebar shows many
+// cycles at once.
 //
 // Deliberately NOT `useLineageOverlay`: that provider is the VIEWED campaign's, and
 // it carries the what-if / lens / sample-set masks. The sidebar names candidates for
 // any campaign and must show what the run actually did, not what a mask says it
-// would have done under another formula.
+// would have done under another formula. Both normalize through the one
+// `derivations/lineage-candidates.ts`, so a candidate is named and keyed identically.
 //
 // Lazy + per-path, same discipline as useForest: nothing fetches until a cycle's
 // candidates are open, and a stamped key means one campaign's rows never bleed into
 // another's.
 
 import { useCallback, useRef, useState } from "react";
-import { fetchCampaignLineage } from "../api";
+import { fetchLineageTree } from "../api";
 import {
-  labelByCandidateId,
-  lineageCandidates,
+  candidatesByCourse,
+  forkAttempts,
   type LineageCandidate,
 } from "../derivations";
 import { encodeCyclePath, type CyclePath } from "../ids";
 import { useAuthGate } from "../auth-context";
 import { usePoll } from "./usePoll";
 
+// Course-levels to expand — the campaign's forks, their forks, and the L4 inner
+// runs filed under any candidate. Each level costs one ledger scan per course.
+const SIDEBAR_DEPTH = 3;
+
 export interface CampaignCandidates {
   // cycle_id → its candidates, origin (C0) first, in round order.
   byCycle: ReadonlyMap<string, LineageCandidate[]>;
-  // cycle_id → the label of the candidate this cycle was CUT FROM (`C2.2`), for a
-  // fork whose cut named one. Absent for roots, and for divergence / rebase / sweep
-  // / diag cuts, which attach at round level only — nothing on disk names their
-  // candidate, so nothing here invents one.
-  forkFromLabel: ReadonlyMap<string, string>;
+  // fork cycle_id → its place on the campaign's ONE timeline. A fork is served as a
+  // CANDIDATE of the course it was cut in (it is an attempt, not a container for one), so
+  // this is how a surface holding a fork from the flat `/cycles` registry asks what the
+  // fork is called — `C1.4`, the fourth attempt — and what it was cut from.
+  forkAttempt: ReadonlyMap<string, LineageCandidate>;
   loaded: boolean;
   // The fetch resolved but FAILED. Distinct from `loaded` with no rows, and the
   // distinction is load-bearing: a course whose candidates couldn't be read is not a
@@ -44,7 +49,7 @@ export interface CampaignCandidates {
 
 const EMPTY: CampaignCandidates = {
   byCycle: new Map(),
-  forkFromLabel: new Map(),
+  forkAttempt: new Map(),
   loaded: false,
   failed: false,
 };
@@ -53,13 +58,10 @@ interface Loaded extends CampaignCandidates {
   key: string | null;
 }
 
-export function useCampaignCandidates(
-  campaignId: string,
-  at: CyclePath,
-  enabled: boolean,
-): CampaignCandidates {
+// `path` addresses the ROOT COURSE whose subtree the rows render.
+export function useCampaignCandidates(path: CyclePath, enabled: boolean): CampaignCandidates {
   const { authed, onAuthError } = useAuthGate();
-  const key = enabled ? `${encodeCyclePath(at)}|${campaignId}` : null;
+  const key = enabled ? encodeCyclePath(path) : null;
 
   const [loaded, setLoaded] = useState<Loaded>({ ...EMPTY, key: null });
   // Last-Modified validator, keyed to the query so a 304 only ever keeps the tree
@@ -71,7 +73,7 @@ export function useCampaignCandidates(
       if (key === null) return;
       const ims = imsRef.current.key === key ? imsRef.current.value : null;
       try {
-        const res = await fetchCampaignLineage(campaignId, null, null, ims, signal, at);
+        const res = await fetchLineageTree(path, { depth: SIDEBAR_DEPTH }, ims, signal);
         if (signal.aborted) return;
         imsRef.current = { key, value: res.lastModified ?? ims };
         // 304 = nothing changed; keep the rows we have rather than blanking them.
@@ -79,18 +81,13 @@ export function useCampaignCandidates(
           setLoaded((prev) => (prev.key === key ? prev : { ...EMPTY, key, failed: true }));
           return;
         }
-        const cycles = res.data.cycles;
-        const labelById = labelByCandidateId(cycles);
-        const byCycle = new Map<string, LineageCandidate[]>();
-        const forkFromLabel = new Map<string, string>();
-        for (const c of cycles) {
-          byCycle.set(c.cycle_id, lineageCandidates(c));
-          const cutLabel = c.fork_from_candidate_id
-            ? labelById.get(c.fork_from_candidate_id)
-            : undefined;
-          if (cutLabel) forkFromLabel.set(c.cycle_id, cutLabel);
-        }
-        setLoaded({ key, byCycle, forkFromLabel, loaded: true, failed: false });
+        setLoaded({
+          key,
+          byCycle: candidatesByCourse(res.data),
+          forkAttempt: forkAttempts(res.data),
+          loaded: true,
+          failed: false,
+        });
       } catch (e) {
         if (signal.aborted) return;
         onAuthError(e);
@@ -102,9 +99,9 @@ export function useCampaignCandidates(
         );
       }
     },
-    // `at` is rebuilt per render; `key` is its stable identity.
+    // `path` is rebuilt per render; `key` is its stable identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [key, campaignId, onAuthError],
+    [key, onAuthError],
   );
 
   usePoll(tick, {

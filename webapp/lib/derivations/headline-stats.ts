@@ -18,8 +18,8 @@ import { fmtPct0 } from "@/lib/format";
 // the operator reads (θ is jargon, so it is never the forced default). Seeded
 // from the served `dash.headline_metric` (CampaignConfig.headline_metric),
 // client-overridable. `composite_fitness` is served on every settled row
-// (dashboard candidates AND `/lineage` candidates), so all cycles honor the
-// composite selection on one basis.
+// (dashboard candidates AND `/tree` nodes), so all cycles honor the composite
+// selection on one basis.
 export type HeadlineMetric = "accuracy" | "composite" | "ability";
 
 // The toggle's options, in display order, each with the teaching tooltip that

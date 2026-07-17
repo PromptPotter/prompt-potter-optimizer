@@ -58,7 +58,7 @@ export interface TreeCtx {
 }
 
 // Stated once because two components ask: `RunRow` gates the campaign's one
-// `/lineage` read on it, and the `CourseRow` it renders gates the rows.
+// `/tree` read on it, and the `CourseRow` it renders gates the rows.
 function courseOpen(ctx: TreeCtx, path: CyclePath): boolean {
   return isNodeOpen(ctx.collapsedNodes, "course", encodeCyclePath(path));
 }
@@ -142,17 +142,14 @@ function shortOrigin(originId: string): string {
   return originId.startsWith("cycle_") ? originId.slice(6, 14) : originId.slice(0, 8);
 }
 
-// ONE campaign: its root course, wearing the campaign's name. `/lineage` answers
-// the whole campaign in one conditional round-trip, so it is fetched once here
-// (gated on the root course being open) and threaded down, never per course.
+// ONE campaign: its root course, wearing the campaign's name. `/tree` answers the
+// root course and every course below it in one conditional round-trip, so it is
+// fetched once here (gated on the root course being open) and threaded down, never
+// per course.
 function RunRow({ run, at, ctx }: { run: RunGroup; at: CyclePath; ctx: TreeCtx }) {
   const { campaign, root, branches } = run;
   const rootPath: CyclePath = [...at, { campaignId: root.campaign_id, cycleId: root.cycle_id }];
-  const candidates = useCampaignCandidates(
-    campaign.campaign_id,
-    at,
-    courseOpen(ctx, rootPath),
-  );
+  const candidates = useCampaignCandidates(rootPath, courseOpen(ctx, rootPath));
   const forks = useMemo(() => indexForks(branches), [branches]);
 
   return (
@@ -234,7 +231,13 @@ function CourseRow({
   const originAccuracy = produced.find((c) => c.label === "C0")?.accuracy ?? cycle.origin_accuracy;
   // A fork wears no C0 row: it borrows its origin from the candidate it was cut
   // from (the `from C0` badge names it) and replays rather than re-derives it.
-  const rows = cycle.is_root ? produced : produced.filter((c) => c.label !== "C0");
+  //
+  // A FORK is not a candidate ROW of this course either, even though the tree serves it as
+  // one: it already has a row of its own below (`ForkCourse`), wearing the same timeline
+  // label. Listing it here too would put the same attempt on the course twice.
+  const rows = (cycle.is_root ? produced : produced.filter((c) => c.label !== "C0")).filter(
+    (c) => !c.isFork,
+  );
   // A campaign row is handed the best across its whole fork tree (the winner often
   // lives in a fork); a fork row answers for itself.
   const best = bestAccuracy ?? cycle.best_accuracy;
@@ -369,7 +372,7 @@ function CourseRow({
           {candidates.failed && (
             <li
               className="inner-library-empty"
-              title="The campaign's `/lineage` read failed. Its candidates are unknown, not absent — nothing here claims this course produced nothing."
+              title="The campaign's `/tree` read failed. Its candidates are unknown, not absent — nothing here claims this course produced nothing."
             >
               Couldn&apos;t read candidates
             </li>
@@ -418,9 +421,17 @@ function CourseRow({
   );
 }
 
-// A fork, rendered as the course it is. The id tail names it; `from C0` says where
-// it started. Only a steered cut names a candidate on disk — divergence / rebase /
-// sweep / diag cuts attach at round level and wear no cut badge.
+// A fork, rendered as the ATTEMPT it is — one row, not two.
+//
+// It wears its place on the campaign's ONE timeline (`C1.4` — the fourth attempt off C0),
+// because that is what the operator cut: a fork is not a container holding a candidate, it
+// IS the candidate. It used to wear its id tail and then hold a `C1.1` row inside it, which
+// was the fork's OWN round-1 counter — every course mints one, so four forks off C0 all
+// read `C1.1` and the number named nothing. The runs now hang straight off this row, the
+// same shape the origin's have always had.
+//
+// `from C0` says where it started. Only a steered cut names a candidate on disk —
+// divergence / rebase / sweep / diag cuts attach at round level and wear no cut badge.
 function ForkCourse({
   fork,
   campaign,
@@ -436,6 +447,9 @@ function ForkCourse({
   candidates: CampaignCandidates;
   forks: ForkIndex;
 }) {
+  // Its own cycle_id is the key: the tree serves the fork as a candidate whose `id` IS that.
+  // Falls back to the id tail only before the tree has landed — never to a made-up index.
+  const attempt = candidates.forkAttempt.get(fork.cycle_id);
   return (
     <CourseRow
       cycle={fork}
@@ -444,8 +458,8 @@ function ForkCourse({
       ctx={ctx}
       candidates={candidates}
       forks={forks}
-      label={shortFamilyTail(fork.cycle_id)}
-      cutFrom={candidates.forkFromLabel.get(fork.cycle_id) ?? null}
+      label={attempt?.label ?? shortFamilyTail(fork.cycle_id)}
+      cutFrom={attempt?.cutFrom ?? null}
     />
   );
 }

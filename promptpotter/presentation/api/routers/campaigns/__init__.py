@@ -19,8 +19,8 @@ surface. It stays.
 
 The route surface is split across submodules, each decorating the shared
 ``campaigns_router``: ``registry`` (campaign list + detail), ``cycles``
-(cycle list/detail, rounds, dashboard), ``lineage`` (the campaign-wide
-cladogram), ``files`` (file-tree reads — every on-disk artifact, ``log.md``
+(cycle list/detail, rounds, dashboard, and the ``tree`` — the one served
+genealogy), ``files`` (file-tree reads — every on-disk artifact, ``log.md``
 and ``hard_samples.json`` among them), ``storage``, and ``events`` (the
 per-cycle SSE ledger stream, the one live tail).
 """
@@ -29,7 +29,6 @@ from promptpotter.presentation.api.routers.campaigns import (
     cycles,
     events,
     files,
-    lineage,
     registry,
     storage,
 )
@@ -40,7 +39,6 @@ __all__ = [
     "cycles",
     "events",
     "files",
-    "lineage",
     "registry",
     "storage",
 ]

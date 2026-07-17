@@ -10,8 +10,8 @@ import { cx } from "@/lib/cx";
 import { shortFamilyTail } from "@/lib/ids";
 import { useSelection } from "@/lib/SelectionContext";
 import { isSelectedCandidate } from "@/lib/types";
-import { useLineageOverlay } from "@/lib/lineage-overlay";
 import { heartsText } from "@/lib/derivations";
+import type { LineageNode } from "@/lib/api";
 import {
   CAND_STUB,
   COL_W,
@@ -25,11 +25,16 @@ import {
   TOP_PAD,
   layout,
   placeNodes,
-  type CycleNode,
-  type DetailByCycle,
   type LaneLayout,
   type RoundNodePos,
 } from "./forest-layout";
+
+// A course's operator-facing name: a root wears its dataset, a branch its short tail.
+function courseName(course: LineageNode): string {
+  return course.course_kind === "root"
+    ? course.dataset_name || course.id
+    : shortFamilyTail(course.id);
+}
 
 // One expanded candidate node: parent→child slant is drawn as a seg upstream;
 // this renders the lineage-style stub + label, clickable for candidate
@@ -119,14 +124,12 @@ const CandidateNode = memo(function CandidateNode({
   );
 });
 
-// One session's cladogram — its own <svg> so cross-session lane math
-// never has to be reconciled. The session header appears only when the
-// campaign has more than one session.
+// The campaign's cladogram — the ONE served tree, rendered. Its own <svg> so lane
+// math is never reconciled across surfaces.
 export function Forest({
   tree,
   campaignId,
   cycleId,
-  detailByCycle,
   valueByKey,
   thetaByKey,
   metric,
@@ -134,10 +137,11 @@ export function Forest({
   onLaneActivate,
   onSelectCycle,
 }: {
-  tree: CycleNode;
+  // The served genealogy's root course. Nodes alternate course → candidate →
+  // (course | sample), so forks and L4 inner runs need no special case here.
+  tree: LineageNode;
   campaignId: string;
   cycleId: string | null;
-  detailByCycle: DetailByCycle;
   // Live per-candidate percent metric (accuracy/composite), keyed
   // `{cycleId}::{candidateId}` — painted onto nodes outside the geometry memo so a
   // value tick costs only a text re-render.
@@ -158,13 +162,6 @@ export function Forest({
   onSelectCycle: (campaignId: string, cycleId: string) => void;
 }) {
   const { candidate, setSelectionForCandidate } = useSelection();
-  // Served scoring-mask overlay, read straight from its provider (the single
-  // source the fitness panel + lineage card share), keyed by `{cycle_id}::r{round}`.
-  // `divergenceByKey`: a divergence node → the one-step alternative candidate id
-  // (or null = origin would hold). `divergentKeys`: the dimmed counterfactual
-  // subtree. Both empty when no lens is active. Rendered, never recomputed (R-36).
-  const { divergenceByKey, divergentKeys } = useLineageOverlay();
-  const nodeKey = (cid: string, round: number): string => `${cid}::r${round}`;
   // The live fitness painted on a node — the `valueByKey` overlay, looked up by
   // the same candidate identity the bars use. Outside the layout memo, so it
   // updates each poll without re-flowing the tree.
@@ -173,14 +170,26 @@ export function Forest({
   // Difficulty-adjusted ability for the node tooltip — what the winner was elected on.
   const thetaOf = (n: RoundNodePos): number | null =>
     thetaByKey.get(`${n.cycleId}::${n.candidateId}`) ?? null;
-  // Layout is pure + the inputs are content-stabilized upstream, so this memo
-  // re-runs only on a real shape change (new round / candidate / winner flip /
-  // lane toggle), never on a bare 2 s poll.
+  // Layout is pure and the tree changes identity only on a real refetch, so this
+  // memo re-runs only on a shape change (new round / candidate / winner flip / lane
+  // toggle), never on a bare 2 s poll — the value overlay rides outside it.
   const { laneByCycle, totalLaneRows, maxCol } = useMemo(
-    () => layout(tree, detailByCycle, expanded),
-    [tree, detailByCycle, expanded],
+    () => layout(tree, expanded),
+    [tree, expanded],
   );
   const { nodes, segs } = useMemo(() => placeNodes(laneByCycle), [laneByCycle]);
+  // The candidates a lens would have elected instead. The marker rides the round's
+  // WINNER and names its alternative, so the alternative learns of itself here —
+  // one pass over the placed nodes, no parallel array to re-join.
+  const altIds = useMemo(
+    () =>
+      new Set(
+        nodes
+          .map((n) => n.divergence?.alternative_candidate_id)
+          .filter((id): id is string => !!id),
+      ),
+    [nodes],
+  );
   const height = TOP_PAD + totalLaneRows * LANE_H + 8;
   const width = LEFT_PAD + (maxCol + 1) * COL_W + RIGHT_PAD;
 
@@ -265,10 +274,10 @@ export function Forest({
 
           {/* Selected-lane highlight — covers the whole band when expanded. */}
           {laneList.map((l) => {
-            if (l.cycle.cycle_id !== cycleId) return null;
+            if (l.course.id !== cycleId) return null;
             return (
               <rect
-                key={`hl-${l.cycle.cycle_id}`}
+                key={`hl-${l.course.id}`}
                 x={0}
                 y={bandTop(l)}
                 width={width}
@@ -284,12 +293,13 @@ export function Forest({
               compact. This is the row-background collapse target (a searchpoint
               node always wins over it). */}
           {laneList.map((l) => {
-            const cyc = l.cycle;
-            const isEmpty = cyc.rounds.length === 0;
+            const course = l.course;
+            const isEmpty = l.candidates.length === 0;
+            const roundCount = new Set(l.candidates.map((c) => c.round)).size;
             const verb = l.expanded ? "Collapse" : "Expand";
             return (
               <rect
-                key={`lanehit-${cyc.cycle_id}`}
+                key={`lanehit-${course.id}`}
                 x={0}
                 y={bandTop(l)}
                 width={width}
@@ -297,27 +307,28 @@ export function Forest({
                 className="family-cladogram-lane-hit"
                 role="button"
                 tabIndex={0}
-                aria-label={`${verb} ${cyc.sibling_kind === "root" ? cyc.dataset_name || cyc.cycle_id : shortFamilyTail(cyc.cycle_id)}`}
-                onClick={() => onLaneActivate(cyc.cycle_id)}
+                aria-label={`${verb} ${courseName(course)}`}
+                onClick={() => onLaneActivate(course.id)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
-                    onLaneActivate(cyc.cycle_id);
+                    onLaneActivate(course.id);
                   }
                 }}
                 style={{ cursor: "pointer" }}
               >
                 <title>
-                  {cyc.cycle_id}
-                  {`\n${cyc.sibling_kind}`}
-                  {cyc.trigger === "operator_steered"
-                    ? ` · steered${cyc.steered_by ? ` by ${cyc.steered_by}` : ""}`
+                  {course.id}
+                  {`\n${course.course_kind}`}
+                  {course.task ? ` · ${course.task}` : ""}
+                  {course.trigger === "operator_steered"
+                    ? ` · steered${course.steered_by ? ` by ${course.steered_by}` : ""}`
                     : ""}
-                  {cyc.status ? ` · ${cyc.status}` : ""}
-                  {cyc.best_accuracy != null ? ` · best ${fmtPct0(cyc.best_accuracy)}` : ""}
+                  {course.state ? ` · ${course.state}` : ""}
+                  {course.best_accuracy != null ? ` · best ${fmtPct0(course.best_accuracy)}` : ""}
                   {isEmpty
                     ? "\nNo post-divergence rounds — use Clean up in the header to prune"
-                    : `\n${cyc.rounds.length} round(s) · click row to ${l.expanded ? "collapse" : "expand"}`}
+                    : `\n${roundCount} round(s) · click row to ${l.expanded ? "collapse" : "expand"}`}
                 </title>
               </rect>
             );
@@ -329,21 +340,16 @@ export function Forest({
             .map((n) => {
               const cycleSelected = n.cycleId === cycleId;
               const layoutEntry = laneByCycle.get(n.cycleId);
-              const cycName = layoutEntry
-                ? layoutEntry.cycle.sibling_kind === "root"
-                  ? layoutEntry.cycle.dataset_name || layoutEntry.cycle.cycle_id
-                  : shortFamilyTail(layoutEntry.cycle.cycle_id)
-                : n.cycleId;
+              const cycName = layoutEntry ? courseName(layoutEntry.course) : n.cycleId;
               const rowLabelText = n.isLastInLane && layoutEntry ? cycName : null;
               // The lane's ♥ bank, as glyphs — the cladogram is an <svg>, so the shared
               // <Hearts> component can't mount here; `heartsText` is the same derivation
               // rendered as text. Empty string when the cycle isn't in lives mode.
               const laneHearts = layoutEntry
-                ? heartsText(layoutEntry.cycle.hearts, layoutEntry.cycle.lives_cap)
+                ? heartsText(layoutEntry.course.hearts, layoutEntry.course.lives_cap)
                 : "";
-              const key = nodeKey(n.cycleId, n.round);
-              const isDivergence = divergenceByKey.has(key);
-              const isDivergent = divergentKeys.has(key);
+              const isDivergence = n.divergence !== null;
+              const isDivergent = n.divergent;
               return (
                 <g
                   key={`n-${n.cycleId}-${n.round}`}
@@ -369,7 +375,7 @@ export function Forest({
                     cx={n.x}
                     cy={n.y}
                     r={NODE_R}
-                    className={`family-cladogram-dot kind-${n.sibling_kind}`}
+                    className={`family-cladogram-dot kind-${n.courseKind}`}
                   />
                   {isDivergence && (
                     <circle
@@ -390,7 +396,7 @@ export function Forest({
                   {rowLabelText && (
                     <text x={n.x + 8} y={n.y + 3} className="family-cladogram-cyclelabel">
                       <tspan className="family-cladogram-glyph">
-                        {KIND_GLYPH[n.sibling_kind]}
+                        {KIND_GLYPH[n.courseKind]}
                         {TRIGGER_GLYPH[n.trigger] ?? ""}
                       </tspan>
                       <tspan dx="4">{rowLabelText}</tspan>
@@ -417,34 +423,27 @@ export function Forest({
           {/* Expanded candidate nodes (lineage-style stubs). */}
           {nodes
             .filter((n) => n.isExpanded)
-            .map((n) => {
-              const key = nodeKey(n.cycleId, n.round);
-              return (
-                <CandidateNode
-                  key={`c-${n.cycleId}-${n.round}-${n.candidateId}`}
-                  n={n}
-                  accuracy={valOf(n)}
-                  theta={thetaOf(n)}
-                  metric={metric}
-                  selected={isSelectedCandidate(candidate, n.cycleId, n.round, n.candidateId)}
-                  onPick={onPickCandidate}
-                  dimmed={divergentKeys.has(key)}
-                  alt={divergenceByKey.get(key) === n.candidateId && n.candidateId !== ""}
-                  divergence={divergenceByKey.has(key) && n.isWinner}
-                />
-              );
-            })}
+            .map((n) => (
+              <CandidateNode
+                key={`c-${n.cycleId}-${n.round}-${n.candidateId}`}
+                n={n}
+                accuracy={valOf(n)}
+                theta={thetaOf(n)}
+                metric={metric}
+                selected={isSelectedCandidate(candidate, n.cycleId, n.round, n.candidateId)}
+                onPick={onPickCandidate}
+                dimmed={n.divergent}
+                alt={altIds.has(n.candidateId)}
+                divergence={n.divergence !== null}
+              />
+            ))}
 
           {/* Expanded lanes carry their cycle label beside the last winner. */}
           {nodes
             .filter((n) => n.isExpanded && n.isLastInLane)
             .map((n) => {
-              const cyc = laneByCycle.get(n.cycleId)?.cycle;
-              if (!cyc) return null;
-              const label =
-                cyc.sibling_kind === "root"
-                  ? cyc.dataset_name || cyc.cycle_id
-                  : shortFamilyTail(cyc.cycle_id);
+              const course = laneByCycle.get(n.cycleId)?.course;
+              if (!course) return null;
               return (
                 <text
                   key={`elabel-${n.cycleId}`}
@@ -453,10 +452,10 @@ export function Forest({
                   className="family-cladogram-cyclelabel"
                 >
                   <tspan className="family-cladogram-glyph">
-                    {KIND_GLYPH[cyc.sibling_kind]}
-                    {TRIGGER_GLYPH[cyc.trigger] ?? ""}
+                    {KIND_GLYPH[course.course_kind ?? "root"]}
+                    {TRIGGER_GLYPH[course.trigger] ?? ""}
                   </tspan>
-                  <tspan dx="4">{label}</tspan>
+                  <tspan dx="4">{courseName(course)}</tspan>
                 </text>
               );
             })}

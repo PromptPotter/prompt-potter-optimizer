@@ -1,14 +1,16 @@
 "use client";
-// Tree + state for the candidates card's Forest view. Everything that is NOT
-// geometry (forest-layout.ts), NOT markup (CandidatesCard/Forest), and NOT the
-// shared fetch/overlay (lib/lineage-overlay) lives here: the derived forests, the
-// per-candidate value overlays, the fork map, and the empty-stub cleanup
-// mutation. The campaign fetch and the mask/lens divergence overlay are owned by
-// `LineageOverlayProvider` and read via `useLineageOverlay()` — the SINGLE source
-// both this view and the bars render. The tree is the settled (closed-round,
-// origin-C0-included) structure served by `/lineage`, revalidated on the
-// dashboard change-signal; the in-flight round shows in the bars + the Sequence
-// dendrogram, not here (one source per data class).
+// State for the candidates card's Forest view. Everything that is NOT geometry
+// (forest-layout.ts), NOT markup (CandidatesCard/Forest), and NOT the shared
+// fetch/overlay (lib/lineage-overlay) lives here: the per-candidate value overlays,
+// the fork map, and the empty-stub cleanup mutation. The tree itself and the
+// mask/lens counterfactual are owned by `LineageOverlayProvider` and read via
+// `useLineageOverlay()` — the SINGLE source both this view and the bars render.
+//
+// **The structure is the served tree, and nothing else** — no source-by-cycle-role
+// merge. The tree rides the LEDGER, which mints a candidate the moment it exists, so
+// the in-flight round is already in it and there is nothing to stitch. The live
+// dashboard stays what it is: the per-sample VALUE overlay (`valueByKey`), painted at
+// render so a value tick never re-runs the layout memo.
 //
 // View state (which metric, which lanes are open) is NOT here — it belongs to the
 // card as a whole and lives in `candidates-store`, so the Sequence and Forest
@@ -16,79 +18,21 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { postCleanupEmpty } from "@/lib/api";
-import type { CampaignLineageCycle } from "@/lib/api";
-import { liveCandidateId } from "@/lib/candidate-label";
+import type { LineageNode } from "@/lib/api";
 import { accuracyBasisValue } from "@/lib/fitness";
 import {
-  groupByRound,
-  lineageCandidates,
   primaryMetric,
   roundCandidates,
+  walkCourses,
   type HeadlineMetric,
-  type LineageCandidate,
 } from "@/lib/derivations";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { rootCycleId } from "@/lib/ids";
 import { bumpRevalidation } from "@/lib/revalidate";
 import { useLineageOverlay } from "@/lib/lineage-overlay";
-import { useStableContent } from "@/lib/stable";
 import type { CandidateRow } from "@/lib/types";
 import { setCandidatesState, useCandidatesState } from "./candidates-store";
-import {
-  buildTree,
-  countDescendants,
-  type CycleDetail,
-  type CycleNode,
-  type DetailByCycle,
-} from "./forest-layout";
-
-// Lineage snapshot → normalized STRUCTURE (no fitness value — that's the live
-// `valueByKey` overlay). Candidate identity + label come from the shared
-// `lineageCandidates` derivation, which the sidebar's candidate rows read too —
-// so a candidate is named and keyed identically wherever the settled source is
-// rendered. Re-grouped by round here because the lane geometry is round-shaped.
-function detailFromLineage(c: CampaignLineageCycle): CycleDetail {
-  const byRound = new Map<number, LineageCandidate[]>();
-  for (const cand of lineageCandidates(c)) {
-    const arr = byRound.get(cand.round) ?? [];
-    arr.push(cand);
-    byRound.set(cand.round, arr);
-  }
-  return {
-    rounds: c.rounds.map((r) => ({
-      round: r.round,
-      advanced: r.advanced,
-      candidates: (byRound.get(r.round) ?? []).map((cand) => ({
-        candidateId: cand.candidateId,
-        label: cand.label,
-        isWinner: cand.isWinner,
-      })),
-    })),
-  };
-}
-
-// Live dashboard rows → the SAME normalized structure, for the in-view active
-// cycle. Sourced from `roundCandidates(dash)` (the bars' source) so the active
-// cycle's tree includes the in-flight round and can't disagree with them.
-// Structure only — value rides `valueByKey`.
-function detailFromRows(rows: CandidateRow[]): CycleDetail {
-  return {
-    rounds: [...groupByRound(rows).entries()]
-      .sort((a, b) => a[0] - b[0])
-      .map(([round, cands]) => ({
-        round,
-        // A live round has advanced once a candidate is flagged winner; the
-        // in-flight (not-yet-elected) round reads as not-yet-advanced, which is
-        // correct — it's the lane's last round, so it never mischains a successor.
-        advanced: cands.some((c) => c.is_winner),
-        candidates: cands.map((c) => ({
-          candidateId: c.candidate_id,
-          label: c.label,
-          isWinner: c.is_winner,
-        })),
-      })),
-  };
-}
+import { candidatesOf, countDescendants } from "./forest-layout";
 
 // Empty-stub cleanup — one campaign-wide modal mutation. Stubs accumulate
 // because fork-creation paths mint the cycle dir BEFORE the first round runs;
@@ -105,9 +49,8 @@ interface LineageCleanup {
 }
 
 export interface Lineage {
-  // One cladogram per session root, each with its own fork tree.
-  forests: { rootId: string; tree: CycleNode }[];
-  detailByCycle: DetailByCycle;
+  // THE served genealogy's root course, or null before the first read lands.
+  tree: LineageNode | null;
   // Per-candidate fitness, keyed `{cycleId}::{candidateId}` — the live value
   // overlay painted onto nodes. NOT part of the geometry (so a value tick never
   // re-lays-out the tree). Carries the percent metric the operator selected;
@@ -120,11 +63,11 @@ export interface Lineage {
   // several metrics at once; a node paints one number, so it takes the first
   // selected in canonical order.
   metric: HeadlineMetric;
-  // `candidate_id` → the cycle forked from it (in-view cycle only). Drives the ⑂
+  // `candidate_id` → the course hanging off it (in-view cycle only). Drives the ⑂
   // mark in the Sequence view, whose click frees the hierarchy into the Forest.
   forkedFrom: ReadonlyMap<string, string>;
   expanded: ReadonlySet<string>;
-  // In-place expand/collapse toggle for one cycle's lane (pure view state —
+  // In-place expand/collapse toggle for one course's lane (pure view state —
   // never changes the dashboard's selected cycle).
   onLaneActivate: (cycleId: string) => void;
   totalDescendants: number;
@@ -142,20 +85,18 @@ export function useLineage({
   campaignId: string | null;
   cycleId: string | null;
 }): Lineage {
-  // Shared campaign lineage from the single fetch both views render (R-36). The
-  // mask/lens overlay fields (lens, divergence, …) are NOT re-exposed here — the
-  // card and `Forest` read them straight from `useLineageOverlay()`, so this hook
-  // owns only the tree/fork/cleanup state.
-  const { data } = useLineageOverlay();
+  // The shared tree from the single fetch both views render (R-36). The mask/lens
+  // fields are NOT re-exposed here — the card and `Forest` read the counterfactual
+  // off the nodes themselves, so this hook owns only the value/fork/cleanup state.
+  const { tree } = useLineageOverlay();
   // The in-view cycle's live dashboard — the same source the bars read, so the
-  // active cycle's lineage detail (structure + values) can't disagree with them.
+  // active cycle's node values can't disagree with them.
   const { dash } = useDashboard();
   const { metrics, expanded, expandedForCampaign, expandedForCycle } = useCandidatesState();
   const metric = primaryMetric(metrics);
 
   // The active (in-view) cycle's live candidate rows from dashboard.json —
-  // includes the in-flight round. Computed once and shared by the structure
-  // build and the value overlay below.
+  // includes the in-flight round's per-sample value movement.
   const liveRows = useMemo<CandidateRow[]>(
     () => (cycleId && dash ? roundCandidates(dash) : []),
     [cycleId, dash],
@@ -186,59 +127,30 @@ export function useLineage({
     setCandidatesState({ expanded: next });
   }, [expanded]);
 
-  // The campaign's root cycles — one cladogram each. A campaign mints exactly
-  // one root today; the list shape survives so lineage stays id-ordered.
-  const rootCycleIds = useMemo(
-    () =>
-      (data?.cycles ?? [])
-        .filter((c) => c.sibling_kind === "root")
-        .map((c) => c.cycle_id)
-        .sort(),
-    [data],
-  );
+  const courses = useMemo(() => (tree ? walkCourses(tree) : []), [tree]);
 
-  // Normalized per-cycle STRUCTURE — source-by-cycle-role: the in-view active
-  // cycle from the live dashboard (so its in-flight round shows and tracks the
-  // bars), every other cycle from the settled /lineage. No fitness value here
-  // (that's `valueByKey`), and content-stabilized — so Forest's layout memo
-  // recomputes only on a real shape change (new candidate / round / winner flip
-  // / expand), never on a per-sample value tick.
-  const detailEntries = useStableContent(
-    useMemo(() => {
-      const map = new Map<string, CycleDetail>();
-      for (const c of data?.cycles ?? []) {
-        map.set(
-          c.cycle_id,
-          c.cycle_id === cycleId && dash ? detailFromRows(liveRows) : detailFromLineage(c),
-        );
-      }
-      return [...map.entries()];
-    }, [data, cycleId, dash, liveRows]),
-  );
-  const detailByCycle: DetailByCycle = useMemo(() => new Map(detailEntries), [detailEntries]);
-
-  // Which candidates of the IN-VIEW cycle a sibling was cut from. The Sequence
-  // view has no lanes to show a fork in — it plots one cycle — so it marks the
-  // candidate the fork left from and offers the jump into the Forest, where the
+  // Which candidates of the IN-VIEW course a child course hangs off. The Sequence
+  // view has no lanes to show one in — it plots one course — so it marks the
+  // candidate the course was cut from and offers the jump into the Forest, where the
   // sibling actually has somewhere to be drawn.
   const forkedFrom = useMemo<ReadonlyMap<string, string>>(() => {
     const m = new Map<string, string>();
-    if (!cycleId) return m;
-    for (const c of data?.cycles ?? []) {
-      if (c.immediate_parent_cycle_id !== cycleId) continue;
-      if (!c.fork_from_candidate_id) continue;
-      m.set(c.fork_from_candidate_id, c.cycle_id);
+    const viewed = courses.find((c) => c.id === cycleId);
+    if (!viewed) return m;
+    for (const cand of candidatesOf(viewed)) {
+      for (const child of cand.children) {
+        if (child.kind === "course") m.set(cand.id, child.id);
+      }
     }
     return m;
-  }, [data, cycleId]);
+  }, [courses, cycleId]);
 
-  // Per-candidate percent-metric overlay, keyed `{cycleId}::{candidateId}`.
-  // `/lineage` serves `composite_fitness` per candidate (verbatim from the
-  // dashboard round summary), so settled/sibling cycles honor the composite
-  // selection on the SAME basis as the active cycle — one tree, one basis,
-  // nothing recomputed client-side. θ is a separate overlay (`thetaByKey`)
-  // since it is a logit, not a percent. Deliberately NOT content-stabilized:
-  // it updates every poll, but only painted node text reads it.
+  // Per-candidate percent-metric overlay, keyed `{cycleId}::{candidateId}`. The tree
+  // serves `composite_fitness` per candidate, so settled/sibling courses honor the
+  // composite selection on the SAME basis as the active cycle — one tree, one basis,
+  // nothing recomputed client-side. θ is a separate overlay (`thetaByKey`) since it
+  // is a logit, not a percent. Deliberately NOT content-stabilized: it updates every
+  // poll, but only painted node text reads it.
   const usesComposite = metric === "composite";
   const valueByKey = useMemo<ReadonlyMap<string, number | null>>(() => {
     const m = new Map<string, number | null>();
@@ -246,17 +158,16 @@ export function useLineage({
     // frontier — the cross-round-comparable series the trend plots — so the spine
     // reads as honest progress, not the per-round subset swing. Losers keep their
     // own subset score.
-    for (const c of data?.cycles ?? []) {
-      for (const r of c.rounds) {
-        r.candidates.forEach((cand, i) => {
-          const id = cand.candidate_id || liveCandidateId(r.round, i);
-          const value = usesComposite
-            ? cand.composite_fitness ?? null
-            : accuracyBasisValue(cand.is_winner, r.cumulative_accuracy, cand.accuracy);
-          m.set(`${c.cycle_id}::${id}`, value);
-        });
+    for (const course of courses) {
+      for (const cand of candidatesOf(course)) {
+        const value = usesComposite
+          ? cand.composite_fitness
+          : accuracyBasisValue(cand.is_winner, cand.cumulative_accuracy, cand.accuracy);
+        m.set(`${course.id}::${cand.id}`, value);
       }
     }
+    // The in-view course's values track the 2 s poll, so its in-flight round moves
+    // in step with the bars rather than waiting on the tree's revalidation.
     if (cycleId && dash) {
       for (const row of liveRows) {
         const value = usesComposite
@@ -266,7 +177,7 @@ export function useLineage({
       }
     }
     return m;
-  }, [data, cycleId, dash, liveRows, usesComposite]);
+  }, [courses, cycleId, dash, liveRows, usesComposite]);
 
   // Parallel overlay carrying each candidate's difficulty-adjusted ability θ, same key shape
   // as `valueByKey`. Painted into the node tooltip so a θ-elected winner shown below a
@@ -274,44 +185,28 @@ export function useLineage({
   // election fit (in-flight / eliminated).
   const thetaByKey = useMemo<ReadonlyMap<string, number | null>>(() => {
     const m = new Map<string, number | null>();
-    for (const c of data?.cycles ?? []) {
-      for (const r of c.rounds) {
-        r.candidates.forEach((cand, i) => {
-          const id = cand.candidate_id || liveCandidateId(r.round, i);
-          m.set(`${c.cycle_id}::${id}`, cand.theta);
-        });
-      }
+    for (const course of courses) {
+      for (const cand of candidatesOf(course)) m.set(`${course.id}::${cand.id}`, cand.theta);
     }
     if (cycleId && dash) {
       for (const row of liveRows) m.set(`${cycleId}::${row.candidate_id}`, row.theta);
     }
     return m;
-  }, [data, cycleId, dash, liveRows]);
-
-  // One cladogram per session — every session root renders, including a lone
-  // root with no forks (its single lane carries the intra-cycle view).
-  const forests = useMemo(() => {
-    if (!data) return [];
-    return rootCycleIds
-      .map((rootId) => {
-        const tree = buildTree(rootId, data.cycles);
-        return tree ? { rootId, tree } : null;
-      })
-      .filter((f): f is { rootId: string; tree: CycleNode } => f !== null);
-  }, [data, rootCycleIds]);
+  }, [courses, cycleId, dash, liveRows]);
 
   // Empty-state facts for the in-view cycle (distinguishes an inherited fork
   // from a fresh cycle waiting for round 1).
-  const viewedDetail = cycleId ? detailByCycle.get(cycleId) : undefined;
-  const viewedHasRounds = (viewedDetail?.rounds.length ?? 0) > 0;
+  const viewedHasRounds = useMemo(() => {
+    const viewed = courses.find((c) => c.id === cycleId);
+    return viewed ? candidatesOf(viewed).length > 0 : false;
+  }, [courses, cycleId]);
   const parentId = cycleId ? rootCycleId(cycleId) : null;
   const isInheritedSibling = parentId != null && parentId !== cycleId;
 
   const stubCount = useMemo(
     () =>
-      (data?.cycles ?? []).filter((c) => c.rounds.length === 0 && c.sibling_kind !== "root")
-        .length,
-    [data],
+      courses.filter((c) => c.course_kind !== "root" && candidatesOf(c).length === 0).length,
+    [courses],
   );
 
   // Empty-stub cleanup mutation + its modal state.
@@ -321,7 +216,7 @@ export function useLineage({
   const [cleanupAcked, setCleanupAcked] = useState(false);
 
   const confirmCleanup = useCallback(async () => {
-    const rootId = rootCycleIds[0];
+    const rootId = tree?.id;
     if (!campaignId || !rootId) return;
     setCleaning(true);
     setCleanupError(null);
@@ -335,7 +230,7 @@ export function useLineage({
     } finally {
       setCleaning(false);
     }
-  }, [campaignId, rootCycleIds]);
+  }, [campaignId, tree]);
 
   const cleanup: LineageCleanup = {
     open: cleanupOpen,
@@ -355,15 +250,14 @@ export function useLineage({
   };
 
   return {
-    forests,
-    detailByCycle,
+    tree,
     valueByKey,
     thetaByKey,
     metric,
     forkedFrom,
     expanded,
     onLaneActivate,
-    totalDescendants: forests.reduce((n, f) => n + countDescendants(f.tree), 0),
+    totalDescendants: tree ? countDescendants(tree) : 0,
     viewedHasRounds,
     isInheritedSibling,
     parentId,

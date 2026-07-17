@@ -36,16 +36,15 @@ import { useAuth } from "@/lib/auth-context";
 import { useFetch } from "@/lib/hooks/useFetch";
 import {
   HEADLINE_METRICS,
-  cellsForCandidate,
   headlineMetricLabel,
-  indexForks,
   panelCellLabel,
   sortedRounds,
+  walkCourses,
   type HeadlineMetric,
 } from "@/lib/derivations";
 import { rootCycleId, shortFamilyTail } from "@/lib/ids";
-import { useForest } from "@/lib/hooks/useForest";
-import type { CycleListEntry } from "@/lib/api";
+import { candidatesOf, childCourses } from "./forest-layout";
+import type { LineageNode } from "@/lib/api";
 import { isSelectedCandidate } from "@/lib/types";
 import { useWorkspace } from "@/lib/workspace";
 import { useLineage } from "./useLineage";
@@ -120,12 +119,9 @@ export function CandidatesCard() {
   const {
     campaignId,
     cycleId,
-    leafCampaignId,
     leafCycleId,
-    leafIsL4,
     viewedPath,
     viewedCandidate,
-    cycles,
     selectCycle: onSelectCycle,
     selectCyclePath,
   } = useWorkspace();
@@ -364,23 +360,31 @@ export function CandidatesCard() {
   // ── ONE RULE: the bars are the CHILDREN of the VIEWED node — the node the tree on the
   // left is parked on, and the same children it draws under that node.
   //
-  //   course viewed    → its candidates + one bar per fork cut from it. A FORK course
+  //   course viewed    → its candidates + one bar per course CUT from it. A FORK course
   //                      drops its borrowed C0 (it replays the candidate it was cut from —
   //                      that bar lives on the parent), same rule as its sidebar row.
-  //   L4 candidate     → the inner runs filed under it (`spawned_by` join, the sidebar's
-  //                      own filing).
-  //   plain candidate  → no children of its own; the bars stay on its course.
+  //   candidate viewed → the courses filed under it (an L4 candidate's inner runs).
+  //   plain candidate  → no child courses; the bars stay on its course.
   //
   // The viewed node is `viewedPath` + `viewedCandidate` — NAVIGATION, written only by the
   // tree. It is deliberately not `selectedCandidate` (INSPECTION, written by a bar click):
   // one slot for both made the chart its own input, so clicking a bar re-plotted the chart
-  // out from under the cursor. Fork/run bars carry SERVED numbers, never recomputed.
-  const leafIsRoot =
-    leafCycleId != null &&
-    (cycles.find(
-      (c) => c.campaign_id === leafCampaignId && c.cycle_id === leafCycleId,
-    )?.is_root ??
-      rootCycleId(leafCycleId) === leafCycleId);
+  // out from under the cursor. Course bars carry SERVED numbers, never recomputed.
+  //
+  // **The child courses come from the ONE served tree** (`/tree`, via the overlay). They
+  // were re-derived here from `/cycles` twice over — `indexForks` for the forks, a
+  // `spawned_by` join for the runs — the same genealogy assembled two more ways beside the
+  // tree that already states it, which is what a `leafIsL4` lookup and a `leafIsRoot`
+  // regex guess were propping up. The tree answers all three: a candidate either has child
+  // courses or it does not; a course knows its own kind.
+  const viewedCourse = useMemo(
+    () => (overlay.tree ? walkCourses(overlay.tree).find((c) => c.id === leafCycleId) : undefined),
+    [overlay.tree, leafCycleId],
+  );
+
+  // A fork replays the candidate it was cut from, so its borrowed C0 belongs to the
+  // parent's bars, not its own — same rule as its sidebar row.
+  const leafIsRoot = leafCycleId != null && rootCycleId(leafCycleId) === leafCycleId;
   const candidateRows = useMemo(
     () =>
       leafIsRoot
@@ -389,51 +393,68 @@ export function CandidatesCard() {
     [candidateViews, leafIsRoot],
   );
 
-  const forkChildren = useMemo<CycleListEntry[]>(() => {
-    if (!leafCampaignId || !leafCycleId) return [];
-    const own = cycles.filter((c) => c.campaign_id === leafCampaignId);
-    return indexForks(own).get(leafCycleId) ?? [];
-  }, [cycles, leafCampaignId, leafCycleId]);
-  const forkViews = useMemo<CandidateView[]>(() => {
-    const lastRound = candidateRows.at(-1)?.round ?? 0;
-    return forkChildren.map<CandidateView>((f, i) => ({
-      ...NO_ELECTION,
-      key: `fork|${f.cycle_id}`,
-      round: lastRound,
-      idx: i,
-      candidate_id: f.cycle_id,
-      label: shortFamilyTail(f.cycle_id),
-      accuracy: f.best_accuracy ?? f.origin_accuracy,
-      started: (f.best_accuracy ?? f.origin_accuracy) != null,
-    }));
-  }, [forkChildren, candidateRows]);
-  const forkKeys = useMemo(
-    () => new Set(forkViews.map((v) => v.key)),
-    [forkViews],
+  // One bar per course, at `round`. A course is a measured thing: it shows what it
+  // measured (`best_accuracy`, else its origin's score) and nothing a whole course can't
+  // answer — election aggregates are per-round numbers over a candidate population, which
+  // a course isn't.
+  const courseBars = useCallback(
+    (courses: readonly LineageNode[], round: number): CandidateView[] =>
+      courses.map<CandidateView>((c, i) => ({
+        ...NO_ELECTION,
+        key: `course|${c.id}`,
+        round,
+        idx: i,
+        candidate_id: c.id,
+        // An inner run wears the cell it measured; a fork, its short tail. An unstamped
+        // run has no cell to name it — its dataset is what's known.
+        label:
+          c.course_kind === "inner"
+            ? c.task
+              ? panelCellLabel(c.task)
+              : c.dataset_name
+            : shortFamilyTail(c.id),
+        accuracy: c.best_accuracy ?? c.origin_accuracy,
+        started: (c.best_accuracy ?? c.origin_accuracy) != null,
+      })),
+    [],
   );
 
-  // The VIEWED L4 candidate's runs — from the course's sandbox, the same store the
-  // sidebar's inner rows read. Null = the tree is parked on the course, so the bars are
-  // its candidates.
-  const inner = useForest(viewedPath ?? [], leafIsL4 && viewedPath != null);
-  const viewedRound = useMemo(
-    () => candidateViews.find((v) => v.label === viewedCandidate)?.round ?? 0,
-    [candidateViews, viewedCandidate],
+  // Parked on a CANDIDATE: the bars are the courses filed under it — an L4 candidate's
+  // inner runs, and any course cut from it. `null` = it has none, so the bars stay on its
+  // course. That is also the whole of what `leafIsL4` used to answer: a candidate either
+  // has child courses or it does not, and the tree says so without a backend-type lookup.
+  const viewedCandNode = useMemo(
+    () =>
+      viewedCandidate && viewedCourse
+        ? candidatesOf(viewedCourse).find((c) => c.label === viewedCandidate)
+        : undefined,
+    [viewedCourse, viewedCandidate],
   );
   const runBars = useMemo<CandidateView[] | null>(() => {
-    if (!leafIsL4 || !viewedCandidate) return null;
-    return cellsForCandidate(inner.cycles, viewedCandidate).map<CandidateView>((c, i) => ({
+    if (!viewedCandNode) return null;
+    const bars = courseBars(childCourses(viewedCandNode), viewedCandNode.round ?? 0);
+    return bars.length > 0 ? bars : null;
+  }, [courseBars, viewedCandNode]);
+
+  // Parked on the COURSE: its candidates, plus one bar per FORK cut from it. A fork is
+  // served as a candidate of this course — it IS an attempt — carrying `course_kind`, which
+  // is what tells it apart from one L1 minted. It rides the tree rather than `dash` because
+  // `dashboard.json` is this cycle's own telemetry and a fork is a different cycle.
+  const forkViews = useMemo<CandidateView[]>(() => {
+    if (!viewedCourse) return [];
+    const forks = candidatesOf(viewedCourse).filter((c) => c.course_kind !== null);
+    return forks.map<CandidateView>((c, i) => ({
       ...NO_ELECTION,
-      key: `run|${c.campaign_id}|${c.cycle_id}`,
-      round: viewedRound,
+      key: `course|${c.id}`,
+      round: c.round ?? 0,
       idx: i,
-      candidate_id: c.cycle_id,
-      // An unstamped run has no cell to name it — its dataset is what's known.
-      label: c.spawned_by?.task ? panelCellLabel(c.spawned_by.task) : c.dataset_name,
-      accuracy: c.best_accuracy ?? c.origin_accuracy,
-      started: c.best_accuracy != null || c.origin_accuracy != null,
+      candidate_id: c.id,
+      label: c.label,
+      accuracy: c.accuracy,
+      started: c.accuracy != null,
     }));
-  }, [leafIsL4, viewedCandidate, viewedRound, inner.cycles]);
+  }, [viewedCourse]);
+  const forkKeys = useMemo(() => new Set(forkViews.map((v) => v.key)), [forkViews]);
 
   const views = useMemo(
     () => runBars ?? (forkViews.length ? [...candidateRows, ...forkViews] : candidateRows),

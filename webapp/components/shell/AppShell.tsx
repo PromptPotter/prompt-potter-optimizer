@@ -245,10 +245,11 @@ function AppShellInner() {
     // Keyed on the LEAF hop, like the dashboard stream — selection scopes the
     // inspector / samples / round files, and those read the leaf.
     <SelectionProvider cycleId={leafCycleId}>
-    {/* The campaign lineage fetch + its mask/lens divergence overlay — owned once
-        at the shell root (inside CycleStreamProvider + SelectionProvider it reads
-        from), consumed by the lineage card and the fitness panel. */}
-    <LineageOverlayProvider campaignId={campaignId}>
+    {/* The served lineage tree + its mask/lens counterfactual — owned once at the
+        shell root (inside CycleStreamProvider + SelectionProvider it reads from),
+        consumed by the forest, the sidebar rows and the fitness panel. Rooted at the
+        ROOT hop: the tree's own recursion reaches every fork and inner run below it. */}
+    <LineageOverlayProvider campaignId={campaignId} cycleId={cycleId}>
     <ConnectorProvider datasetName={leafDatasetName}>
     <div
       className={cx(

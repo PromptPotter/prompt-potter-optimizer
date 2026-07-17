@@ -1222,9 +1222,8 @@ paths:
         level down, and L5+ needs no new tier.
 
         Rooted at a COURSE, not a campaign: a campaign is a bag of courses, and the
-        flat `/campaigns/{id}/lineage` this replaces could not describe a leaf below
-        depth 1 (the pp-self bug). `GET /campaigns` + `GET /cycles` stay the flat
-        registry the sidebar groups.
+        flat campaign-rooted read this replaced could not describe a leaf below depth 1.
+        `GET /campaigns` + `GET /cycles` stay the flat registry the sidebar groups.
 
         IDENTITY is built from each course's **ledger** (`CandidateMintedRecord`) plus
         `index.json` topology — deliberately NOT the round file. A round that never closed
@@ -1234,9 +1233,9 @@ paths:
 
         The round-CLOSE facts (`is_winner`, `theta`, `cumulative_accuracy`) come from
         `dashboard.json::rounds[]`, the declared projection for them — the ledger genuinely
-        does not carry them. So a round that never closed reports **no winner** rather than
-        promoting its lone candidate, which is the honest answer the flat `/lineage` refused
-        to give.
+        does not carry them. `round_closed` separates the two ways a round crowns nobody:
+        closed with no winner = HELD; not closed = no election to report. So a round that
+        never closed reports **no winner** rather than promoting its lone candidate.
 
         `depth` expands N course-levels; a node with `children_available: true` and an
         empty `children` is the lazy boundary a client expands into. Conditional-GET
@@ -2068,7 +2067,18 @@ components:
         course_kind:
           type: [string, "null"]
           enum: [root, fork, diag, sweep, inner, null]
-          description: Courses only.
+          description: |
+            Courses, and the candidates a FORK contributed to this timeline — on those it is
+            the provenance stamp (⑂) marking an attempt the operator cut, apart from one L1
+            minted in this course. A fork is not a node: its candidates land on the parent's
+            one timeline, renumbered there, and its replayed C0 merges into the candidate it
+            was cut from.
+        run_phase:
+          type: string
+          enum: [checkin, running, paused, detached, terminal, ""]
+          description: |
+            Courses only: the ONE server-owned run-state (`derive_run_phase`) — the same value
+            `/cycles` serves, never a second "is it running?" derivation. Empty on a candidate.
         dataset_name: { type: string }
         trigger:
           type: string

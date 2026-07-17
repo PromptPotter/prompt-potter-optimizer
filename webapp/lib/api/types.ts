@@ -8,13 +8,10 @@
 
 export type {
   ActiveSessionResponse,
-  CampaignLineageCandidate,
-  CampaignLineageCycle,
-  CampaignLineageResponse,
-  CampaignLineageRound,
   CampaignListResponse,
   CampaignSummary,
   CommandAcceptedBody,
+  CycleHop,
   CycleListEntry,
   CyclesResponse,
   DatasetItem,
@@ -31,6 +28,7 @@ export type {
   DashboardError,
   InFlightCall,
   LineageDivergence,
+  LineageNode,
   LiveDashboardState,
   LoopWarning,
   RunLimits,

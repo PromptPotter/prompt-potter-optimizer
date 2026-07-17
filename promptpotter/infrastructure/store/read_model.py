@@ -30,17 +30,36 @@ from promptpotter.config.settings import LOCK_TIMEOUT
 from promptpotter.infrastructure.store.io import append_jsonl, ensure_parent_dir, write_jsonl
 
 
-def iter_jsonl(path: Path) -> list[dict[str, Any]]:
+def iter_jsonl(path: Path, *, record_types: frozenset[str] | None = None) -> list[dict[str, Any]]:
     """Every JSON object in *path*, in file order; missing file → ``[]``.
 
     Blank and corrupt lines and non-object rows are skipped — a half-written
     trailing line (crash mid-append) degrades to "not there", never an error.
+
+    *record_types* skips a line that cannot carry one of them **without parsing it**. A
+    cycle's ledger is the sole ingress for every event it ever emits — token usage, each
+    sample scored, every LLM call — so a scan looking for two record types was JSON-decoding
+    the whole file to keep a handful: one lineage tree cost 12k parses across 21 ledgers, and
+    that was the entire cost of serving it. The test is a substring probe for the quoted
+    value, so it cannot miss a row it should keep (a record_type is a plain identifier — JSON
+    escaping never rewrites those bytes) and a false positive is simply parsed and filtered
+    as before. Same rows out; the caller still checks ``record_type`` itself.
     """
+    probes = tuple(f'"{t}"' for t in record_types) if record_types else ()
     rows: list[dict[str, Any]] = []
     try:
         with open(path, encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
+            for raw in fh:
+                # Probe the raw line BEFORE stripping or parsing: on a ledger the skipped
+                # lines are the overwhelming majority, so anything spent per line before the
+                # test is spent on rows nobody wants.
+                if probes:
+                    for probe in probes:
+                        if probe in raw:
+                            break
+                    else:
+                        continue
+                line = raw.strip()
                 if not line:
                     continue
                 try:

@@ -147,12 +147,15 @@ export function buildForest(
 // `spawned_by` at mint, and served on the round trajectory — so no run is placed by
 // guessing at order.
 //
-// A run only files under a candidate row that EXISTS, which `rendered` names. Two ways
-// it doesn't: the label is C0 on a fork (which wears no C0 row), or the round never
-// closed so `/lineage` reports no candidate for it — six runs of a died-mid-round-1
-// fork matched `C1.1`, found no row, and rendered nowhere at all. Those come back
-// `loose`, to sit directly on the course: one layer, and the run's own name says what
-// is known about it.
+// A run only files under a candidate row that EXISTS, which `rendered` names. It
+// doesn't when the label is C0 on a fork (which wears no C0 row), or when the run
+// carries no `spawned_by` at all. Those come back `loose`, to sit directly on the
+// course: one layer, and the run's own name says what is known about it.
+//
+// A round that never CLOSED no longer lands here: candidate identity rides the ledger,
+// which mints a candidate before any round file exists, so `/tree` names C1.1 whether
+// or not its round finished. Six runs of a died-mid-round-1 fork used to match `C1.1`,
+// find no row, and render nowhere at all.
 export interface InnerRunFiling {
   byLabel: ReadonlyMap<string, RunGroup[]>;
   loose: RunGroup[];
@@ -199,7 +202,7 @@ export function nodeKey(kind: NodeKind, path: string): string {
 // it comes open.
 //
 // `course` costs a fetch, so it comes closed and opens on ask: opening one pulls its
-// candidates (`/lineage`, one per campaign) and, at L4, its inner store. Every
+// candidates (`/tree`, one per campaign) and, at L4, its inner store. Every
 // campaign wears a course row, so open-by-default would fire both for every row in
 // the sidebar at load.
 //

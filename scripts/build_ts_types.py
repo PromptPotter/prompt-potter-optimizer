@@ -17,6 +17,7 @@ from pydantic.fields import ComputedFieldInfo, FieldInfo
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO))
 
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
 from promptpotter.domain.l1_layout import L1Layout
 from promptpotter.domain.l4.verdict import OuterCellEffect, OuterVerdict
@@ -50,6 +51,10 @@ from promptpotter.infrastructure.projections.live_dashboard.state import (
     SpendBucket,
     SpendRollup,
 )
+from promptpotter.infrastructure.store.lineage_views import (
+    LineageDivergence,
+    LineageNode,
+)
 from promptpotter.presentation.api.middleware.command_dispatcher.dispatcher import (
     CommandAcceptedBody,
 )
@@ -63,13 +68,6 @@ from promptpotter.presentation.api.routers.campaigns.files import (
     FileContentResponse,
     FileEntry,
     FilesResponse,
-)
-from promptpotter.presentation.api.routers.campaigns.lineage import (
-    CampaignLineageCandidate,
-    CampaignLineageCycle,
-    CampaignLineageResponse,
-    CampaignLineageRound,
-    LineageDivergence,
 )
 from promptpotter.presentation.api.routers.campaigns.registry import (
     CampaignListResponse,
@@ -142,12 +140,10 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     FileEntry,
     FilesResponse,
     FileContentResponse,
-    # --- campaigns/lineage router ---
-    CampaignLineageCandidate,
-    CampaignLineageRound,
-    CampaignLineageCycle,
+    # --- the lineage tree (store/lineage_views) ---
+    CycleHop,  # nested in LineageNode.path — the emitter does not recurse, so register it
     LineageDivergence,
-    CampaignLineageResponse,
+    LineageNode,
     # --- verify router ---
     DiagnosticRunListResponse,
 ]

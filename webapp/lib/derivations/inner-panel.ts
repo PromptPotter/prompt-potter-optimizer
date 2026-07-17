@@ -17,6 +17,11 @@
 // IS IT FILED? (it carries `spawned_by`; an interrupted mint writes none, and a
 // wrong join is worse than an absent one). An unfiled cell has no panel key and
 // drops out of the lookup; the sidebar lists it loose under its course instead.
+//
+// This resolves a CELL of the outer round file, which is why it still joins on the
+// stamp. It is not the genealogy: "which runs hang off this candidate" is answered
+// by the served tree (`/tree`), and asking it here as well is how the same edge came
+// to have two answers.
 
 import type { CycleListEntry } from "@/lib/api";
 import { rootCycleId } from "@/lib/ids";
@@ -24,15 +29,6 @@ import { rootCycleId } from "@/lib/ids";
 // Every cell of a course's sandbox — the runs it fanned out, forks excluded.
 function innerCells(cycles: readonly CycleListEntry[]): CycleListEntry[] {
   return cycles.filter((c) => rootCycleId(c.cycle_id) === c.cycle_id);
-}
-
-// The cells ONE candidate asked for — the L4 candidate's children, the same
-// `spawned_by.candidate_label` join the sidebar files its inner runs by.
-export function cellsForCandidate(
-  cycles: readonly CycleListEntry[],
-  candidateLabel: string,
-): CycleListEntry[] {
-  return innerCells(cycles).filter((c) => c.spawned_by?.candidate_label === candidateLabel);
 }
 
 // `(candidate_label, cell)` → the inner cycle that measured it. Both halves of the
