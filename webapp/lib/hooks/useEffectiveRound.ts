@@ -1,13 +1,10 @@
 "use client";
 // Single source for "which round the round-scoped surfaces display".
 //
-// The round axis is a legitimate twin — operator INTENT (`selection.round`,
-// null = follow the live in-flight round) over the DATA fact (`roundOf(dash)`).
-// Those two stay distinct, but the *derived* effective round must live in ONE
-// place: every round-scoped surface used to re-implement `selectedRound ??
-// roundOf(dash)` inline, so the samples, score-frequency, and per-candidate
-// fitness surfaces could each disagree on the active round. This collapses that
-// derivation, so they can't.
+// The round axis is a legitimate twin — operator INTENT (`selection.round`, null =
+// follow the live in-flight round) over the DATA fact (`roundOf(dash)`). Those two
+// stay distinct; the DERIVED effective round is one answer, here, so no round-scoped
+// surface can hold a different one.
 
 import { useMemo } from "react";
 import { useDashboard } from "@/lib/hooks/useDashboard";

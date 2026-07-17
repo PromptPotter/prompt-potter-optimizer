@@ -277,8 +277,7 @@ def get_lineage_tree(
     re-score over only those samples. No lens + no samples ⇒ the tree is the raw read.
 
     A shell, deliberately: resolve the path, build the view, serve it. The assembly rules
-    live in ``store/lineage_views.py`` — they were re-derived per surface before, which is
-    how five witnesses came to disagree about the same node.
+    live in ``store/lineage_views.py``.
     """
     path = (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))
     stores, leaf = resolve_cycle_path(store, path)

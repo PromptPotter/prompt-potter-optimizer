@@ -4,13 +4,10 @@ import { Popover } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import type { LifecycleFilter } from "@/lib/api";
 
-// The campaign-library filter, folded behind one button so the sidebar body
-// stays a clean forest even with dozens of datasets. Opening it reveals the
-// two controls that used to sit always-on above the tree — the lifecycle
-// segment and the dataset picker — plus a type-to-filter box so picking a
-// dataset out of a long list is direct instead of a scan down a chip wall.
-// The trigger carries a dot whenever a non-default filter is set, so the
-// operator can see the list is narrowed without opening the panel.
+// The campaign-library filter, folded behind one button so the sidebar body stays a
+// clean forest even with dozens of datasets: a lifecycle segment, a dataset picker,
+// and a type-to-filter box. The trigger carries a dot whenever a non-default filter
+// is set — a narrowed list must never look like a complete one.
 
 interface Props {
   lifecycleFilter: LifecycleFilter;

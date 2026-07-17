@@ -57,13 +57,10 @@ import type { CandidateView } from "@/lib/types";
 
 // The candidates card — this cycle's population and its ancestry, in one surface.
 //
-// The fitness bars and the genealogy under them used to be two cards side by
-// side, which was an accident of how they grew: both already ride the SAME flat
-// candidate spine (`roundCandidates` → C0, C1.1, C1.2, C2.1 …), and the bar
-// chart's x categories ARE that spine. Laid out in that sequence rather than
-// stacked per round, the tree shares the bars' x-axis exactly — so it belongs
-// beneath them, in their box, and everything in this card is bound to that
-// alignment.
+// The bars and the dendrogram under them ride the SAME flat candidate spine
+// (`roundCandidates` → C0, C1.1, C1.2, C2.1 …) and the bar chart's x categories ARE
+// that spine — so the tree shares the bars' x-axis exactly, which is why it belongs
+// beneath them, in their box. Everything in this card is bound to that alignment.
 //
 // The multi-cycle FOREST is deliberately NOT in here — it lives in `ForestCard`.
 // It shares no axis with the bars (it is a cladogram of cycles on its own

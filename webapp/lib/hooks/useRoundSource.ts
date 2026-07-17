@@ -1,17 +1,12 @@
 "use client";
 // The single home for the "live round → dashboard.json, historical round →
-// round_NNNN.json" source guard. `round_NNNN.json` is the immutable audit
-// record of a *completed* round (AuditTrailView, round-boundary only); the
-// in-flight round lives only in `dashboard.json`. So fetching the round file
-// for the live round always 404s — and is unnecessary, since the live data is
-// already in `dash`.
+// round_NNNN.json" source guard. `round_NNNN.json` is written at the round
+// boundary, so the live round HAS no file — fetching one always 404s, and the
+// live data is already in `dash`.
 //
-// Every deep-audit surface used to hand-roll this guard (`isLive = round ===
-// roundOf(dash)` → pass `null` to `useRoundFile`) and two of them forgot it,
-// fetching the live round's not-yet-written file → 404 + a degraded panel.
-// This hook makes the guard impossible to forget: it idles the fetch on the
-// live round and hands back `isLive` so the caller picks its live derivation
-// from `dash`, else reads `doc`. It SELECTS one source — it never merges them
+// The guard is here so it cannot be forgotten: the fetch idles on the live round,
+// and `isLive` tells the caller to read `dash` rather than `doc`. It SELECTS one
+// source — it never merges them
 // (the no-stitch rule in `webapp/CLAUDE.md` "Display-data sources").
 //
 // Peers: `useRoundFile` (raw fetch, now only reached through here for live-

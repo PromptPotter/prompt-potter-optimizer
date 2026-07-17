@@ -1,11 +1,7 @@
 "use client";
 // The single "which round's node blocks am I showing" resolver for the optimizer
-// card — the canvas and its drill-in panel now read one answer.
-//
-// They used to disagree: the canvas hardcoded `dash.current_round.nodes` (LIVE
-// ONLY) while the node detail resolved the round through `useEffectiveRound()`
-// and fetched the audit twin. Picking round 2 while round 5 ran lit up round 5's
-// dots and pulse above round 2's I/O.
+// card — the canvas and its drill-in panel read one answer, so they cannot light
+// up different rounds.
 //
 // The source is SELECTED, never merged (the no-stitch rule in webapp/CLAUDE.md
 // § Display-data sources):
