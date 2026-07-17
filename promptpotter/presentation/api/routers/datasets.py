@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, File, Form, Header, Query, Request, UploadFile
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
 
 from promptpotter.application.config import load_campaign_config
 from promptpotter.application.datasets.authored import read_campaign_config_file
@@ -33,6 +33,7 @@ from promptpotter.application.jobs.launcher.draft_build import draft_wire_with_l
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import NodeConfigParam, NodeOutputSchema
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.archive_views import (
     measurement_series_for_samples,
 )
@@ -68,7 +69,7 @@ datasets_router = APIRouter(prefix="/datasets", tags=["Datasets"])
 HeatmapScope = Literal["cycle", "campaign", "dataset"]
 
 
-class DatasetIndexEntry(BaseModel):
+class DatasetIndexEntry(StrictModel):
     """One row in the dataset registry — backs the Dashboard ``New campaign`` view.
 
     Wire shape pinned in ``docs/specs/m12-api-openapi.yaml::DatasetIndexEntry``.
@@ -90,7 +91,7 @@ class DatasetIndexEntry(BaseModel):
     )
 
 
-class DatasetIndexResponse(BaseModel):
+class DatasetIndexResponse(StrictModel):
     datasets: list[DatasetIndexEntry]
 
 
@@ -233,10 +234,8 @@ async def upload_candidate_library(
     )
 
 
-class _BuildLibraryBody(BaseModel):
+class _BuildLibraryBody(StrictModel):
     """Body for building a candidate library from one of the draft's own columns."""
-
-    model_config = ConfigDict(extra="forbid")
 
     # `draft_id` IS the owning `campaign_id`; bound it exactly as every other
     # check-in route does (`commands.py::_require_checkin_id`), not 64.
@@ -428,7 +427,7 @@ def _trim_unmeasured(
     return out
 
 
-class DatasetItem(BaseModel):
+class DatasetItem(StrictModel):
     sample_id: int
     query: str
     ground_truth: str
@@ -460,7 +459,7 @@ class DatasetItem(BaseModel):
     )
 
 
-class DatasetPreviewResponse(BaseModel):
+class DatasetPreviewResponse(StrictModel):
     name: str
     row_count: int
     split_test: int | None = Field(
@@ -594,7 +593,7 @@ def get_dataset_preview(
     )
 
 
-class MeasurementDot(BaseModel):
+class MeasurementDot(StrictModel):
     ord: str = Field(
         description="Opaque ordinal for lex sort + uniqueness (encodes ts/run/idx or round/cand).",
     )
@@ -602,12 +601,12 @@ class MeasurementDot(BaseModel):
     label: str = Field(description="Short human label, e.g. 'R3 cand 2'.")
 
 
-class SampleSeries(BaseModel):
+class SampleSeries(StrictModel):
     sample_id: int
     measurements: list[MeasurementDot]
 
 
-class MeasurementSeriesResponse(BaseModel):
+class MeasurementSeriesResponse(StrictModel):
     name: str
     scope: HeatmapScope
     items: list[SampleSeries]
@@ -700,7 +699,7 @@ def get_dataset_measurement_series(
     return MeasurementSeriesResponse(name=raw["name"], scope=scope, items=items)
 
 
-class DatasetPipelineResponse(BaseModel):
+class DatasetPipelineResponse(StrictModel):
     """Target pipeline view for a dataset overlay. `view` drives the webapp chat-pane hero;
     `pipeline` is the full parsed schema for consumers needing per-node config; `connector` is
     the original-cased name for chip labelling; `origin_prompt_fields` is the origin PromptTemplate

@@ -17,8 +17,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import ConfigDict
 
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.statistics import (
     min_detectable_effect,
     paired_diff_posterior,
@@ -30,7 +31,7 @@ DECISION_REJECT = "reject"
 DECISION_INCONCLUSIVE = "inconclusive"
 
 
-class CandidateInfo(BaseModel):
+class CandidateInfo(StrictModel):
     """The minimal per-candidate facts the verdict needs (no RoundResult import)."""
 
     model_config = ConfigDict(frozen=True)
@@ -42,7 +43,7 @@ class CandidateInfo(BaseModel):
     is_winner: bool
 
 
-class OuterCellEffect(BaseModel):
+class OuterCellEffect(StrictModel):
     """One cell's paired (variant − origin) composite difference."""
 
     model_config = ConfigDict(frozen=True)
@@ -53,7 +54,7 @@ class OuterCellEffect(BaseModel):
     diff: float
 
 
-class OuterVerdict(BaseModel):
+class OuterVerdict(StrictModel):
     """The pooled blocked-paired verdict for a round's target variant."""
 
     model_config = ConfigDict(frozen=True)

@@ -16,7 +16,9 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
+
+from promptpotter.domain.strict_model import StrictModel
 
 __all__ = ["ProjectionEnvelope", "ProjectionKind"]
 
@@ -44,7 +46,7 @@ ProjectionKind = Literal[
 ]
 
 
-class ProjectionEnvelope(BaseModel):
+class ProjectionEnvelope(StrictModel):
     """One outbound SSE frame.
 
     Frozen wire shape — receivers MUST treat unknown future fields as a
@@ -52,7 +54,7 @@ class ProjectionEnvelope(BaseModel):
     AsyncAPI YAML update first (security box 1).
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True)
 
     kind: ProjectionKind = Field(
         description="Closed-set discriminator; one of seven record_type literals or three projection-only kinds.",

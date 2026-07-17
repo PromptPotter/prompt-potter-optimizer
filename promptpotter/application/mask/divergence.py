@@ -18,12 +18,13 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Callable
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 
 from promptpotter.application.mask.record import MaskCycle, MaskRecord, MaskRound
+from promptpotter.domain.strict_model import StrictModel
 
 
-class VerdictOutcome(BaseModel):
+class VerdictOutcome(StrictModel):
     """A verdict's answer for one round. ``alternative_candidate_id`` names the
     one-step counterfactual when the masked criterion would have elected a
     *different* candidate (it was measured, so it is invariant — nameable); ``None``
@@ -42,7 +43,7 @@ class VerdictOutcome(BaseModel):
 Verdict = Callable[[MaskRound], VerdictOutcome]
 
 
-class Divergence(BaseModel):
+class Divergence(StrictModel):
     """A divergence point — the first round on a branch the criterion would have
     forked. Rendered as a marker on that node (not dimmed); its descendant subtree
     is dimmed (the ``divergent`` set)."""
@@ -55,7 +56,7 @@ class Divergence(BaseModel):
     alternative_candidate_id: str | None = None
 
 
-class DivergenceResult(BaseModel):
+class DivergenceResult(StrictModel):
     """The fold's output. ``divergences`` are the markers; ``divergent`` are the
     node keys of the dimmed counterfactual subtree (strictly *after* each
     divergence — the divergence node itself stays a real, marked node)."""

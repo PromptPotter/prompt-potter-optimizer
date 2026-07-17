@@ -10,9 +10,10 @@ from __future__ import annotations
 import enum
 from typing import Annotated, Any, Literal, TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 
 __all__ = [
@@ -71,7 +72,7 @@ class DecisionRecord(TypedDict):
     data: dict[str, Any]
 
 
-class ResumeCheckpointRecord(BaseModel):
+class ResumeCheckpointRecord(StrictModel):
     """One recorded decision: ``inputs_ref`` + ``outcome`` drive divergence; ``data`` is archival."""
 
     model_config = ConfigDict(frozen=True)
@@ -94,7 +95,7 @@ class ResumeCheckpointRecord(BaseModel):
         }
 
 
-class PhaseRecord(BaseModel):
+class PhaseRecord(StrictModel):
     """A campaign-phase boundary event (round-start, l2-fired, origin-complete, …)."""
 
     model_config = ConfigDict(frozen=True)
@@ -116,7 +117,7 @@ class PhaseRecord(BaseModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class SnapshotRecord(BaseModel):
+class SnapshotRecord(StrictModel):
     """In-flight live-state snapshot; `event` discriminates (sample/candidate started/scored)."""
 
     model_config = ConfigDict(frozen=True)
@@ -132,7 +133,7 @@ class SnapshotRecord(BaseModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class TokenUsageRecord(BaseModel):
+class TokenUsageRecord(StrictModel):
     """LLM token + cost telemetry → `dashboard.json::spend`.
 
     `kind` splits `backend` (pipeline) vs `loop` (optimizer) for the
@@ -169,7 +170,7 @@ class TokenUsageRecord(BaseModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class LLMCallStartRecord(BaseModel):
+class LLMCallStartRecord(StrictModel):
     """In-flight marker appended BEFORE the SDK call → `dashboard.json::in_flight`.
 
     Pairs with `LLMCallRecord` via `call_id` (hex). Keeps a multi-minute call from looking frozen.
@@ -189,7 +190,7 @@ class LLMCallStartRecord(BaseModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class LLMCallProgressRecord(BaseModel):
+class LLMCallProgressRecord(StrictModel):
     """Heartbeat every `HEARTBEAT_INTERVAL_S` while the SDK call is blocked → `in_flight.elapsed_s`. Cache replays skip it."""
 
     model_config = ConfigDict(frozen=True)
@@ -207,7 +208,7 @@ class LLMCallProgressRecord(BaseModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class LLMCallRecord(BaseModel):
+class LLMCallRecord(StrictModel):
     """Full I/O of one optimizer LLM call; ledger-resident so `round_NNNN.json::nodes` is derived.
 
     `payload_kind='synthesized'` ⇒ replay where messages/response/usage are absent.
@@ -226,7 +227,7 @@ class LLMCallRecord(BaseModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class CommandRecord(BaseModel):
+class CommandRecord(StrictModel):
     """Inbound HTTP command appended to the canonical ledger.
 
     Sole writer at the API seam: `CommandDispatcher`. Three target ledgers:
@@ -255,7 +256,7 @@ class CommandRecord(BaseModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class CommandAckRecord(BaseModel):
+class CommandAckRecord(StrictModel):
     """Ack of a `CommandRecord` — emitted by the actuator that applied it.
 
     `status="applied"` ⇒ the mutation landed; `"rejected"` ⇒ the actuator
@@ -279,7 +280,7 @@ class CommandAckRecord(BaseModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class ErrorRecord(BaseModel):
+class ErrorRecord(StrictModel):
     """Structured runner failure on ``CRASHED`` / ``RENDER_ERROR`` / ``DIVERGED``.
 
     Emitted from the runner's three ``except`` sites in
@@ -321,7 +322,7 @@ RoundWarningKind = Literal[
 ]
 
 
-class RoundWarningRecord(BaseModel):
+class RoundWarningRecord(StrictModel):
     """Non-fatal, round-scoped degradation the operator must see on every channel.
 
     Distinct from :class:`ErrorRecord` (a fatal run halt) and from
@@ -365,7 +366,7 @@ class ForkTrigger(enum.StrEnum):
     SCORING_DIVERGENCE = "scoring_divergence"
 
 
-class ConfigOverrides(BaseModel):
+class ConfigOverrides(StrictModel):
     """The fork's `OptimizationConfig` delta — every field optional (absent
     inherits the parent), applied to the fork's snapshot at bootstrap; never
     mutates the parent's frozen config. Three kinds of knob ride here:
@@ -386,7 +387,7 @@ class ConfigOverrides(BaseModel):
 
     Domain twin of the `ConfigOverrides` wire schema."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True)
 
     max_rounds: int | None = None
     spend_budget_usd: float | None = None
@@ -399,7 +400,7 @@ class ConfigOverrides(BaseModel):
     schema_field_rename: bool | None = None
 
 
-class CycleSeed(BaseModel):
+class CycleSeed(StrictModel):
     """The chosen starting point a non-root cycle begins from — origin prompt +
     config overlay + reconciled limits. `origin_prompt_fields` is a
     `PromptTemplate.prompt_field_dict()` shape → becomes the origin `OptSearchPoint`
@@ -416,7 +417,7 @@ class CycleSeed(BaseModel):
     campaign-from-origin, and written by an L2/L3 `fork_proposal` that carries a
     `config_overrides` unlock; sweep + diag triggers carry no seed."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True)
 
     origin_prompt_fields: dict[str, Any] = Field(default_factory=dict)
     pipeline_overlay: dict[str, Any] = Field(default_factory=dict)
@@ -448,7 +449,7 @@ class CycleSeed(BaseModel):
         return self
 
 
-class CandidateMintedRecord(BaseModel):
+class CandidateMintedRecord(StrictModel):
     """A candidate's IDENTITY, written the moment it is minted — before it is scored.
 
     **Identity is not a measurement and must not share the measurement's durability.**
@@ -461,7 +462,7 @@ class CandidateMintedRecord(BaseModel):
     `C{round}.{idx+1}` from list position at read time is a positional guess.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["candidate_minted"] = "candidate_minted"
     round: int
@@ -480,7 +481,7 @@ class CandidateMintedRecord(BaseModel):
 CandidateState = Literal["minted", "measured"]
 
 
-class LedgerCandidate(BaseModel):
+class LedgerCandidate(StrictModel):
     """The candidate tier as the ledger tells it — `CandidateMintedRecord` (identity) folded
     onto the `candidate_scored` snapshot (measurement) by `(round, idx)`. Derived, not a
     record: `scan_ledger_candidates` builds it, nothing appends it.
@@ -491,7 +492,7 @@ class LedgerCandidate(BaseModel):
     through `dashboard.json::rounds[]`.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True)
 
     round: int
     idx: int
@@ -511,7 +512,7 @@ class LedgerCandidate(BaseModel):
     expected_samples: int | None = None
 
 
-class CycleSeedRecord(BaseModel):
+class CycleSeedRecord(StrictModel):
     """The cycle's read-once starting point (`CycleSeed`) as a ledger record — appended
     at mint / operator-steered fork / check-in flip, re-read at bootstrap. Folds the old
     `.overrides/seed.json` sidecar into the replayable spine: a fork inherits its parent's
@@ -519,7 +520,7 @@ class CycleSeedRecord(BaseModel):
     own ledger file returns that cycle's seed — and `None` for a cycle that carries none
     (sweep / diag). Not a progress event: the SSE tail skips it (not in `ProjectionKind`)."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["cycle_seed"] = "cycle_seed"
     seed: CycleSeed
@@ -552,13 +553,13 @@ CycleRecord = Annotated[
 UNATTRIBUTED_OPERATOR = "operator"
 
 
-class ForkSpec(BaseModel):
+class ForkSpec(StrictModel):
     """Why + what-changed at a fork cut → `FORK_CUT.data.fork` + `index.json::fork`.
     One typed record for every fork; `l1_layout` carries L2/L3 rebase deltas,
     `seed` carries the operator-steered origin override. The single fork-provenance
     model — no free-string `fork.trigger` twin."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True)
 
     trigger: ForkTrigger
     reason: str
@@ -569,7 +570,7 @@ class ForkSpec(BaseModel):
     seed: CycleSeed | None = None
 
 
-class RebaseRequest(BaseModel):
+class RebaseRequest(StrictModel):
     """In-loop rebase signal stashed by L2/L3 emission on the cycle, resolved
     post-finalize by ``runner.entry`` into a ``_mint_fork`` call + observer
     rebuild + loop re-entry on the new fork. ``trigger`` discriminates the
@@ -581,7 +582,7 @@ class RebaseRequest(BaseModel):
     searched only on the sibling. It rides the fork's ``CycleSeed``, so a later
     ``resume`` of that fork reads the same unlock back off disk."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True)
 
     fork_from_round: int
     trigger: ForkTrigger
@@ -590,10 +591,10 @@ class RebaseRequest(BaseModel):
     config_overrides: ConfigOverrides | None = None
 
 
-class OperatorSweepFile(BaseModel):
+class OperatorSweepFile(StrictModel):
     """Operator JSON under ``datasets/{name}/sweep/``; dispatcher widens to ``ForkSpec(OPERATOR_SWEEP)``."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True)
 
     reason: str = ""
     l1_layout: dict[str, list[str]] | None = None

@@ -6,8 +6,9 @@ import enum
 from collections.abc import Callable
 from typing import Any, NamedTuple
 
-from pydantic import BaseModel, Field
+from pydantic import ConfigDict, Field
 
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 
 __all__ = [
@@ -253,10 +254,10 @@ class StopLoop(Exception):  # noqa: N818 — control-flow signal, not an error
         super().__init__(reason.value)
 
 
-class PhaseEvent(BaseModel):
+class PhaseEvent(StrictModel):
     """Emitted at phase boundaries during the feedback cycle."""
 
-    model_config = {"frozen": True}
+    model_config = ConfigDict(frozen=True)
 
     phase: str
     event: str

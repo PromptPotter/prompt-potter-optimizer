@@ -14,10 +14,12 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
+
+from promptpotter.domain.strict_model import StrictModel
 
 
-class Campaign(BaseModel):
+class Campaign(StrictModel):
     """Frozen manifest for one optimization campaign — ``campaign.json``.
 
     Identity + config + operator visibility intent ONLY — no run state. Run
@@ -35,7 +37,7 @@ class Campaign(BaseModel):
     then.
     """
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(frozen=True)
 
     campaign_id: str
     dataset_name: str

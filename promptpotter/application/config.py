@@ -14,11 +14,12 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
 
 from promptpotter.config.settings import POBB_DEFAULT_EPSILON, PROMPT_STRING_FIELDS
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.results import HeadlineMetric
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
@@ -144,12 +145,10 @@ class Knob:
         object.__setattr__(self, "estimands", estimands)
 
 
-class SelectionMechanisms(BaseModel):
+class SelectionMechanisms(StrictModel):
     """Hard-sample sorting & selection — how each round's scoring subset is chosen
     and ordered. Turn BOTH off to freeze the sample basis at campaign start: one
     fixed subset, fixed order, identical for every round and candidate."""
-
-    model_config = ConfigDict(extra="forbid")
 
     per_round_resubset: Annotated[bool, Knob(Scope.POLICY, Estimand.SELECTION, Estimand.GATE)] = (
         Field(
@@ -170,13 +169,11 @@ class SelectionMechanisms(BaseModel):
     )
 
 
-class EliminationMechanisms(BaseModel):
+class EliminationMechanisms(StrictModel):
     """Early-abort / candidate-elimination rules that stop measuring a candidate —
     or gate round promotion — before the full sample budget is spent. Off → the
     mechanism never fires; candidates run their full budget. Numeric tuning for an
     enabled mechanism lives on the sibling `OptimizationConfig` fields."""
-
-    model_config = ConfigDict(extra="forbid")
 
     epsilon_elimination: Annotated[bool, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
         True,
@@ -220,7 +217,7 @@ class EliminationMechanisms(BaseModel):
     )
 
 
-class MechanismConfig(BaseModel):
+class MechanismConfig(StrictModel):
     """Pluggable orchestration mechanisms, grouped by kind. Each toggle turns one
     mechanism on/off; numeric tuning for an enabled mechanism lives on its
     `OptimizationConfig` field (`pobb_epsilon`, `pobb_lock_in`, …). Add a mechanism
@@ -228,13 +225,11 @@ class MechanismConfig(BaseModel):
     schema. (Patience-driven L1/L2/L3 escalation is governed separately by
     `l1_patience` / `l2_patience` / `l3_patience`; None disarms L2/L3.)"""
 
-    model_config = ConfigDict(extra="forbid")
-
     selection: SelectionMechanisms = Field(default_factory=SelectionMechanisms)
     elimination: EliminationMechanisms = Field(default_factory=EliminationMechanisms)
 
 
-class LivesConfig(BaseModel):
+class LivesConfig(StrictModel):
     """Improvement-banked round budget ("hearts"). Opt-in alternative to the fixed
     ``max_rounds`` calendar boundary: the run starts with ``start`` lives, banks one
     each round that improves and loses one each round that doesn't, and stops when the
@@ -242,8 +237,6 @@ class LivesConfig(BaseModel):
     fast. Rides the SAME per-round ``improved`` verdict that drives ``l1_stall_count``
     (no new verdict). ``max_rounds``/``HARD_CAP`` and the spend budget stay the absolute
     ceilings. See docs/specs/l4-outer-loop.md."""
-
-    model_config = ConfigDict(extra="forbid")
 
     start: Annotated[int, Knob(Scope.POLICY, Estimand.ESCALATION, Estimand.SPEND)] = Field(
         2,
@@ -264,10 +257,8 @@ class LivesConfig(BaseModel):
 PromptBlockCatalogue = Literal["guidance", "restrict", "off"]
 
 
-class OptimizationConfig(BaseModel):
+class OptimizationConfig(StrictModel):
     """Optimization-loop knobs. `improvement_threshold` + `degradation_threshold` are required (no default)."""
-
-    model_config = ConfigDict(extra="forbid")
 
     max_rounds: Annotated[int | None, Knob(Scope.POLICY, Estimand.ESCALATION, Estimand.SPEND)] = (
         Field(
@@ -507,19 +498,15 @@ class OptimizationConfig(BaseModel):
     mechanisms: MechanismConfig = Field(default_factory=MechanismConfig)
 
 
-class DatasetSplit(BaseModel):
+class DatasetSplit(StrictModel):
     """Train/test fold sizes — display metadata. `train` is the bank; `test` stays off-bank, on-demand."""
-
-    model_config = ConfigDict(extra="forbid")
 
     train: int = Field(description="Training-bank fold size — the cache.json row count")
     test: int = Field(description="Held-out test fold size — not in the bank or the table")
 
 
-class CampaignConfig(BaseModel):
+class CampaignConfig(StrictModel):
     """Top-level user-authored campaign configuration (``datasets/{name}/campaign.json``)."""
-
-    model_config = ConfigDict(extra="forbid")
 
     dataset_name: Annotated[str, Knob(Scope.DATA, Estimand.SEARCH)] = Field("")
     sp_budget_ttest: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(

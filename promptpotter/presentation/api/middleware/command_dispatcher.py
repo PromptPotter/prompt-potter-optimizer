@@ -47,13 +47,14 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal, get_args
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import ConfigDict, Field, ValidationError
 
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
 from promptpotter.domain.opt_search_point import overlay_sets_model_outside_allowed
 from promptpotter.domain.run_records import CommandRecord, CycleSeed
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.models import (
     emit_command,
@@ -96,8 +97,8 @@ class _DeleteCycleRejectedError(Exception):
         self.reason = reason
 
 
-class _IdempotentMatch(BaseModel):
-    model_config = {"frozen": True}
+class _IdempotentMatch(StrictModel):
+    model_config = ConfigDict(frozen=True)
     command_id: str
     offset: int
 
@@ -221,7 +222,7 @@ assert set(CAP_FOR_KIND) == _ALL_DISPATCHED_KINDS, (
 )
 
 
-class CommandAcceptedBody(BaseModel):
+class CommandAcceptedBody(StrictModel):
     """The 202 response shape declared in ``m12-api-openapi.yaml``."""
 
     command_id: str = Field(description="Stable id of the appended `CommandRecord`.")

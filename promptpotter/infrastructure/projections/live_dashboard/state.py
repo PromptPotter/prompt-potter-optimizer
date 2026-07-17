@@ -16,10 +16,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.results import HeadlineMetric, RoundSummary
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 
 __all__ = [
@@ -35,15 +36,13 @@ __all__ = [
 ]
 
 
-class BackfillLogEntry(BaseModel):
+class BackfillLogEntry(StrictModel):
     """One paired-PoBB backfill event appended by ``LiveDashboardView._append_backfill``.
 
     Names the round/candidate the backfill fired during, the sample the
     priors were caught up on, and which priors gained a measurement. The
     list is capped at 256 entries in the writer.
     """
-
-    model_config = ConfigDict(extra="forbid")
 
     round: int
     candidate_idx: int
@@ -52,7 +51,7 @@ class BackfillLogEntry(BaseModel):
     prior_ids: list[str]
 
 
-class SpendBucket(BaseModel):
+class SpendBucket(StrictModel):
     """One spend sub-bucket (backend or optimizer-loop). Mutated only by
     :meth:`LiveDashboardView._handle_token_usage` — the sole writer for
     ``dashboard.json::spend`` after the canonical-ledger collapse.
@@ -65,8 +64,6 @@ class SpendBucket(BaseModel):
     have in the cache. They coincide exactly on a cold cache — which is why this was
     invisible until an L4 arm replayed a prior run and read as free.
     """
-
-    model_config = ConfigDict(extra="forbid")
 
     used_usd: float = 0.0
     input_tokens: int = 0
@@ -85,15 +82,13 @@ class SpendBucket(BaseModel):
     incurred_unpriced_tokens: int = 0
 
 
-class SpendRollup(BaseModel):
+class SpendRollup(StrictModel):
     """``state.spend`` — two-bucket spend rollup + total.
 
     Carries spend only; the armed USD ceiling lives in ``run_limits.spend_budget_usd``
     (the single authoritative budget source every surface reads). There is no
     ``budget_usd`` here — it was a always-null duplicate that let the RemoteBar and
     the chat job-bar disagree."""
-
-    model_config = ConfigDict(extra="forbid")
 
     backend: SpendBucket = Field(default_factory=SpendBucket)
     loop: SpendBucket = Field(default_factory=SpendBucket)
@@ -114,10 +109,8 @@ class SpendRollup(BaseModel):
         )
 
 
-class BackendWarning(BaseModel):
+class BackendWarning(StrictModel):
     """One entry in ``recent_backend_warnings`` — backend transport retry / 429 / 5xx surface."""
-
-    model_config = ConfigDict(extra="forbid")
 
     ts: str
     kind: str
@@ -130,15 +123,13 @@ class BackendWarning(BaseModel):
     query: str | None = None
 
 
-class LoopWarning(BaseModel):
+class LoopWarning(StrictModel):
     """One entry in ``recent_loop_warnings`` — an optimizer-loop degradation the
     self-healing rails recovered from (zero-candidate round, L2 framing
     soft-reject, injection budget truncation). Projected from the canonical
     :class:`~promptpotter.domain.run_records.RoundWarningRecord`. Previously
     log-only; now visible on the dashboard / file-tree alongside
     ``recent_backend_warnings``."""
-
-    model_config = ConfigDict(extra="forbid")
 
     ts: str
     kind: str
@@ -148,7 +139,7 @@ class LoopWarning(BaseModel):
     detail: dict[str, Any] = Field(default_factory=dict)
 
 
-class DashboardError(BaseModel):
+class DashboardError(StrictModel):
     """``dashboard.json::error`` — structured crash summary written by
     :meth:`LiveDashboardView._handle_error` from the canonical ``ErrorRecord``
     when the runner exits via ``CRASHED`` / ``RENDER_ERROR`` / ``DIVERGED``.
@@ -156,22 +147,18 @@ class DashboardError(BaseModel):
     class name; ``stop_reason`` echoes the ledger ``StopReason``. Absent on
     normal stops (paused / completed)."""
 
-    model_config = ConfigDict(extra="forbid")
-
     kind: str
     message: str
     stop_reason: str
 
 
-class InFlightCall(BaseModel):
+class InFlightCall(StrictModel):
     """``state.in_flight`` — the optimizer LLM call currently in progress.
 
     Set on :class:`LLMCallStartRecord`; cleared on the paired
     :class:`LLMCallRecord` by ``call_id``. ``None`` between calls — the
     explicit None lets the webapp distinguish "no call" from "stale slot".
     """
-
-    model_config = ConfigDict(extra="forbid")
 
     call_id: str
     node: str
@@ -181,15 +168,13 @@ class InFlightCall(BaseModel):
     started_at_ms: int
 
 
-class RunLimits(BaseModel):
+class RunLimits(StrictModel):
     """``state.run_limits`` — the cycle's declared run-limit ceilings, written
     once at ``INIT:exit`` from the ``OptimizationConfig``. Static (unlike the
     live ``patience`` "N/max" string): the operator-facing source the fork
     reconcile dialog defaults against ("3 of 6 rounds left"). A steered fork
     re-emits its own reconciled limits here at its INIT.
     """
-
-    model_config = ConfigDict(extra="forbid")
 
     max_rounds: int | None = None
     l1_patience: int
@@ -206,7 +191,7 @@ class RunLimits(BaseModel):
     lives_cap: int | None = None
 
 
-class LiveDashboardState(BaseModel):
+class LiveDashboardState(StrictModel):
     """``dashboard.json`` — operator-facing snapshot, polled by the webapp.
 
     See :class:`promptpotter.infrastructure.projections.live_dashboard.LiveDashboardView`
@@ -222,7 +207,7 @@ class LiveDashboardState(BaseModel):
       ``round_NNNN.json``, lazy-fetched by the webapp.
     """
 
-    model_config = ConfigDict(extra="forbid", validate_assignment=False)
+    model_config = ConfigDict(validate_assignment=False)
 
     # Identity stamp — which session-family this dashboard.json describes.
     # Set once at construction; the webapp drops any polled payload whose

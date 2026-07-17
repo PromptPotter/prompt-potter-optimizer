@@ -9,15 +9,15 @@ tenant archive root, not on any single campaign.
 from __future__ import annotations
 
 from fastapi import APIRouter, Query
-from pydantic import BaseModel
 
 from promptpotter.domain.results import DiagnosticRunRecord
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.presentation.api.deps import StoreDep
 
 verify_router = APIRouter(tags=["Verify"])
 
 
-class DiagnosticRunListResponse(BaseModel):
+class DiagnosticRunListResponse(StrictModel):
     """One page of diagnostic-run records, newest first."""
 
     n: int

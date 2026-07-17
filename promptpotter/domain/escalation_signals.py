@@ -6,7 +6,9 @@ import enum
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
+
+from promptpotter.domain.strict_model import StrictModel
 
 
 class EscalationTarget(enum.StrEnum):
@@ -84,7 +86,7 @@ class EscalationSignal:
         return self.target is EscalationTarget.LEADER_LOCKED
 
 
-class ValidationFailure(BaseModel):
+class ValidationFailure(StrictModel):
     """L1-output parse-time invariant violation; drives synthetic-0 in ``score_search_point``.
 
     Surfaced to L2's prompt as JSON (via ``model_dump``) so the field
@@ -135,7 +137,7 @@ class ValidationFailure(BaseModel):
     )
 
 
-class RuntimeFailure(BaseModel):
+class RuntimeFailure(StrictModel):
     """Post-eval degradation evidence, per-candidate.
 
     On ``OptSearchPoint.wounds.runtime_failures``; surfaced in the score

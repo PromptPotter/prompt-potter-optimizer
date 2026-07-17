@@ -14,7 +14,7 @@ import logging
 from contextvars import ContextVar, Token
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from promptpotter.domain.run_records import (
     CommandAckRecord,
@@ -25,6 +25,7 @@ from promptpotter.domain.run_records import (
     RoundWarningRecord,
     TokenUsageRecord,
 )
+from promptpotter.domain.strict_model import StrictModel
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.ledger import CycleEventLog
@@ -32,7 +33,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class LLMResponse(BaseModel):
+class LLMResponse(StrictModel):
     """Standardized response from LLM providers."""
 
     content: str = Field(..., description="Response content")

@@ -315,7 +315,19 @@ LEDGER_BASELINE = {
     # about which commands have parts. ``sweep/`` stays a package: it genuinely has four
     # (``panel``, ``rank``, ``time_to``, ``_common``). The import path is unchanged either way
     # (``commands.champion`` resolves to package or module alike), so this cost zero repoints.
-    "modules": 310,
+    # then 310 -> 311 (2026-07-17): ``domain/strict_model.py``. Raised DELIBERATELY, and it is
+    # a one-class module on purpose: ``StrictModel`` is the base 168 of the package's 172
+    # models now inherit, so it must sit below all of them and import nothing but Pydantic.
+    # It cannot fold into an existing ``domain/`` module without every model importing that
+    # module's other concerns, and ``shared/`` excludes it by its own charter ("no service or
+    # model dependencies"). What the module buys: Pydantic's default is ``extra="ignore"``, so
+    # the posture was not decided anywhere — it was re-decided, or forgotten, 172 times across
+    # 119 hand-copied ``model_config`` lines. 65 of those lines are now gone (the base says it
+    # once), and the default inverted: forbid is what you get by not thinking, lax is what you
+    # write down. The bug it pays for shipped: ``ObservationMapping(obs_key=…)`` — the field is
+    # ``output_field`` — rode a real ``pipeline.json`` for months, silently a no-op, with ruff,
+    # mypy and pytest all green.
+    "modules": 311,
     "init_files": 52,
     # 43 -> 9 (2026-07-16): 34 package ``__init__`` files that did nothing but re-export a
     # leaf's names were emptied to docstring-only namespace markers, and their ~190 consumer
@@ -364,6 +376,26 @@ LEDGER_BASELINE = {
     # pre-parse, provider SDK payloads behind `follow_imports="skip"`), and `**kwargs: Any`
     # is excluded outright.
     "any_params": 73,
+    # NEW dimension (2026-07-17), landing at 4 — a Pydantic model that does NOT end up
+    # ``extra="forbid"``, so an unknown key is dropped instead of raised. 106 before the
+    # ``StrictModel`` migration, 4 after. It is a conceptual surface because the alternative
+    # to counting them is the state we were in: nobody could say which models were strict,
+    # and the answer was per-model archaeology through 119 hand-copied ``model_config`` lines.
+    # Unlike ``any_params``, this one does NOT march to zero — the 4 are the floor, each
+    # naming its reason on the model itself:
+    #   * ``RoundResult`` / ``ScoredCandidate`` — ``@computed_field`` round-trip. Pydantic
+    #     serializes a computed field OUT and rejects it back IN, so ``model_dump()`` writing
+    #     ``round_id``/``scoreboard``/``ci_lo``/``ci_hi`` into the round file and
+    #     ``model_validate()`` reading that same file are only compatible while extras are
+    #     ignored. Verified, not assumed: forbid breaks all 78 real round files on disk.
+    #   * ``NodePromptInfo`` — the BACKEND owns that sub-object's vocabulary (``family``,
+    #     ``description`` ride real ``pipeline.json`` files) and PP reads a subset by contract.
+    #     A backend PP does not own must be free to describe itself without crashing PP.
+    #   * ``Sample`` — a dataset row carries whatever columns the operator's file had.
+    # ``ObservationMapping`` is deliberately NOT on this list though it also parses
+    # ``pipeline.json``: PP owns that vocabulary, so an unknown key there is a typo, which is
+    # the whole reason this arc exists. All 10 committed ``pipeline.json`` files pass forbid.
+    "models_lax": 4,
     "prompt_string_fields": 6,
     "injections": 24,
     "escalation_rules": 6,

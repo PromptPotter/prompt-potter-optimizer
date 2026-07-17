@@ -32,9 +32,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import NewType, Protocol
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import ConfigDict
 
 from promptpotter.domain.run_records import CycleRecord
+from promptpotter.domain.strict_model import StrictModel
 
 __all__ = ["CycleDir", "CycleHop", "CyclePath", "Projection", "WorkspaceDir"]
 
@@ -43,7 +44,7 @@ CycleDir = NewType("CycleDir", Path)
 WorkspaceDir = NewType("WorkspaceDir", Path)
 
 
-class CycleHop(BaseModel):
+class CycleHop(StrictModel):
     """One ``(campaign, cycle)`` step of a :data:`CyclePath`.
 
     The campaign component is carried to name the leaf and for symmetry with the
@@ -54,7 +55,7 @@ class CycleHop(BaseModel):
     pair on the wire is one more thing for a reader to decode wrongly.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True)
 
     campaign_id: str
     cycle_id: str

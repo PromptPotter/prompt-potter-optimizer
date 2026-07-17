@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from promptpotter.application.config import load_campaign_config, resolve_pipeline_config_params
 from promptpotter.application.datasets.authored import read_campaign_config_file
@@ -35,6 +35,7 @@ from promptpotter.application.runner.identity import build_origin_cycle_id
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.sample import Sample
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.campaign_store.store import origin_accuracy_of
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
@@ -51,7 +52,7 @@ logger = logging.getLogger(__name__)
 origins_router = APIRouter(prefix="/origins", tags=["Origins"])
 
 
-class OriginEntry(BaseModel):
+class OriginEntry(StrictModel):
     origin_id: str = Field(
         description="Origin content identity — a campaign's root_content_hash (or the "
         "dataset's prospective origin hash for a prepared origin)"
@@ -72,7 +73,7 @@ class OriginEntry(BaseModel):
     created_at: str = Field(default="", description="ISO 8601 — earliest campaign on this origin")
 
 
-class OriginListResponse(BaseModel):
+class OriginListResponse(StrictModel):
     origins: list[OriginEntry] = Field(description="Runnable origins, newest first")
     total: int = Field(description="Number of origins")
 

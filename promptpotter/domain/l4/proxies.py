@@ -14,11 +14,12 @@ from __future__ import annotations
 
 import logging
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 
 from promptpotter.domain.escalation_signals import NurseOwner
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.results import L1_PARSE_FAILURE_TOOLING, CycleResult, RoundResult
+from promptpotter.domain.strict_model import StrictModel
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ class InnerCycleUnscoreableError(RuntimeError):
     """
 
 
-class OuterSampleProxies(BaseModel):
+class OuterSampleProxies(StrictModel):
     """One outer sample's observation vector — what a finished inner cycle says about the
     meta-prompt that ran it. **This type is the governing law**; nothing restates it.
 
@@ -84,7 +85,7 @@ class OuterSampleProxies(BaseModel):
     looks bad at is a task it has not been tuned for yet, not a task with no headroom.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True)
 
     # `after_N_rounds_delta` is a wire key naming the pipeline_data observation the outer
     # scoring formula reads, so its spelling is not ours to normalize.

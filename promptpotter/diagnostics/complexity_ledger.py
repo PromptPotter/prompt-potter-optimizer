@@ -31,6 +31,9 @@ the same number:
   ``dict[str, Any]``). A type the checker cannot see is surface a reader must carry in
   their head, and it silently disarms ``warn_return_any`` — see ``_count_any_params``.
   Like ``reexport_shims``, this one is meant to march to a floor, not sit at one.
+- ``models_lax`` — Pydantic models that do not end up ``extra="forbid"``, so an unknown
+  key is dropped instead of raised. The floor is the models that must stay lax and say
+  so on themselves — see ``_count_lax_models``.
 - ``prompt_string_fields`` — ``len(PROMPT_STRING_FIELDS)``.
 - ``injections`` — ``len(INJECTIONS)`` (the dispatch-hub registry self-validates).
 - ``escalation_rules`` — ``len(DEFAULT_ESCALATION_RULES)``, the policy surface
@@ -110,6 +113,83 @@ def _count_any_params(py_files: list[Path]) -> int:
     return total
 
 
+def _count_lax_models(py_files: list[Path]) -> int:
+    """Pydantic models that do NOT end up ``extra="forbid"`` — i.e. that silently drop
+    unknown keys.
+
+    Pydantic's default is ``extra="ignore"``, so a model built with a misspelled keyword
+    returns a valid-looking instance. ``ObservationMapping(obs_key=…)`` — the field is
+    ``output_field`` — rode a real ``pipeline.json`` that way for months with every gate
+    green. Inheriting :class:`~promptpotter.domain.strict_model.StrictModel` inverts that
+    default; this count is what stops the lax ones growing back.
+
+    It is not meant to reach zero. Two shapes must stay lax, and each says so on the model:
+    a ``@computed_field`` round-trip (``model_dump()`` writes the field, ``model_validate()``
+    must not reject it back), and a sub-object whose vocabulary the *backend* owns and PP
+    reads a subset of. What the floor buys is that those stay countable and argued for,
+    instead of being whatever Pydantic happened to default to.
+
+    Resolved by AST, not by import: enumerating models at runtime means importing every
+    module, and the eager ``store/__init__`` aggregator makes import order a live hazard.
+    """
+    import ast
+
+    bases: dict[str, list[str]] = {}
+    declared: dict[str, str | None] = {}
+    for path in py_files:
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            names = [b.id for b in node.bases if isinstance(b, ast.Name)]
+            if not names:
+                continue
+            extra: str | None = None
+            for stmt in node.body:
+                if not isinstance(stmt, ast.Assign) or not any(
+                    isinstance(t, ast.Name) and t.id == "model_config" for t in stmt.targets
+                ):
+                    continue
+                value = stmt.value
+                keys: dict[object, ast.expr] = {}
+                if isinstance(value, ast.Call):
+                    keys = {kw.arg: kw.value for kw in value.keywords if kw.arg}
+                elif isinstance(value, ast.Dict):
+                    keys = {
+                        k.value: v
+                        for k, v in zip(value.keys, value.values, strict=True)
+                        if isinstance(k, ast.Constant)
+                    }
+                node_extra = keys.get("extra")
+                if isinstance(node_extra, ast.Constant):
+                    extra = str(node_extra.value)
+            bases[node.name] = names
+            declared[node.name] = extra
+
+    def is_model(name: str, seen: frozenset[str] = frozenset()) -> bool:
+        if name == "BaseModel":
+            return True
+        if name in seen or name not in bases:
+            return False
+        return any(is_model(b, seen | {name}) for b in bases[name])
+
+    def effective_extra(name: str, seen: frozenset[str] = frozenset()) -> str | None:
+        if name in seen or name not in bases:
+            return None
+        if declared.get(name):
+            return declared[name]
+        for base in bases[name]:
+            found = effective_extra(base, seen | {name})
+            if found:
+                return found
+        return None
+
+    return sum(
+        1
+        for name in bases
+        if name != "BaseModel" and is_model(name) and effective_extra(name) != "forbid"
+    )
+
+
 def _is_reexport_shim(init_file: Path) -> bool:
     text = init_file.read_text(encoding="utf-8")
     has_all = "__all__" in text
@@ -140,6 +220,7 @@ def compute_ledger() -> dict[str, int]:
         "settings_const": sum(1 for name in settings_mod.__all__ if name.isupper()),
         "opt_search_point_fields": _count_leaves(OptSearchPoint),
         "any_params": _count_any_params(py_files),
+        "models_lax": _count_lax_models(py_files),
         "prompt_string_fields": len(PROMPT_STRING_FIELDS),
         "injections": len(INJECTIONS),
         "escalation_rules": len(DEFAULT_ESCALATION_RULES),

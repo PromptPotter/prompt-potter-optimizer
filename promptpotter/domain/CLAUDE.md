@@ -50,10 +50,16 @@ back-compat shims. The word `legacy` is **never** sanctioned.
 ## Conventions
 
 - PEP 604 type hints (`X | None`, `list[str]`).
-- Fully `mypy --strict` — no override in `pyproject.toml`. New domain
-  code passes strict: typed defs, parameterized `dict`/`list`, no `Any`
-  returns. The pure core (`domain/` + `shared/` + `config/`) is the
-  migrated strict zone; the I/O layers still sit behind the ledger.
+- `mypy` `strict = true` is **global** (`pyproject.toml`), not a per-layer tier: the only
+  overrides are `tests.*` (loose by charter) and a third-party `follow_imports = "skip"`
+  list. `domain/` is not an `Any`-free zone either — it still carries bare `Any` params,
+  counted by the ledger's `any_params`, which is where that debt is tracked down.
+- **Inherit `StrictModel` (`strict_model.py`), not `BaseModel`.** Pydantic's default is
+  `extra="ignore"`, so an unknown key is dropped and a misspelled kwarg is a silent no-op
+  — that is how `ObservationMapping(obs_key=…)` (the field is `output_field`) rode a real
+  `pipeline.json` for months with every gate green. `model_config` merges across
+  inheritance, so a subclass adds `frozen=True` without restating `extra`. A model that
+  must stay lax says so on itself and states why; the ledger's `models_lax` counts them.
 - Frozen Pydantic models default; lineage via `derive()`, never mutation.
 - Pure: no I/O, no `BackendClient`, no `Stores`. If a function needs
   infrastructure, it lives in `application/`.

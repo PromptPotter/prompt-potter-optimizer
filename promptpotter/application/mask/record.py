@@ -19,10 +19,12 @@ raw measurements and needs no ``PipelineSchema`` — which is never persisted.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
+
+from promptpotter.domain.strict_model import StrictModel
 
 
-class MaskCandidate(BaseModel):
+class MaskCandidate(StrictModel):
     """One round candidate as the fold sees it — recorded facts, no derived score.
 
     ``evaluators`` is the candidate's stored, already-materialized per-round
@@ -56,7 +58,7 @@ class MaskCandidate(BaseModel):
     abort: str | None = None
 
 
-class MaskRound(BaseModel):
+class MaskRound(StrictModel):
     """One round on a cycle's spine — its candidates plus the anchor they ran against.
 
     ``anchor_evaluators`` / ``anchor_accuracy`` are the round's origin /
@@ -86,7 +88,7 @@ class MaskRound(BaseModel):
         return f"{self.cycle_id}::r{self.round}"
 
 
-class MaskCycle(BaseModel):
+class MaskCycle(StrictModel):
     """One cycle — a spine of rounds plus its edge to the parent it forked from.
 
     ``fork_from_round`` is the parent round this cycle was cut at (parent
@@ -102,7 +104,7 @@ class MaskCycle(BaseModel):
     rounds: list[MaskRound] = Field(default_factory=list)
 
 
-class MaskRecord(BaseModel):
+class MaskRecord(StrictModel):
     """The whole campaign forest the fold walks. Edges live on the cycles."""
 
     model_config = ConfigDict(frozen=True)

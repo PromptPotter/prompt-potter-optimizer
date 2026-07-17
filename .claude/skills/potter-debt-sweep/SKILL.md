@@ -68,17 +68,20 @@ spotted smell"), the exclusion set from Phase 1, and the output contract
 **A zero from ripgrep is not a zero.** `rg` silently skips any file holding a NUL byte when
 recursing — no warning, unlike `grep`'s "Binary file … matches" — and it cannot find such
 files either, since searching for `\x00` skips exactly the files that contain one. The tool
-cannot see its own blind spot, so a "zero call sites" verdict is only as good as `rg`'s
-ability to read every candidate file. Two such files were found on 2026-07-17 (one of them
-the backlog itself), each having manufactured false dead-code findings. Confirm any
-zero-callers claim with a second shape — `git grep`, or a byte scan over `git ls-files`.
+cannot see its own blind spot. Two such files were found on 2026-07-17 (one of them the
+backlog itself), each having manufactured false dead-code findings. **That specific hole is
+now gated** — `tests/test_integrity.py::test_no_raw_nul_bytes_in_tracked_text_files` byte-scans
+every tracked text file, so don't re-hunt NULs by hand; a green suite means `rg` can read the
+tree. The habit it leaves behind still stands: a "zero call sites" verdict is a claim about
+a tool's reach, so confirm one with a second shape — a different pattern, file type, or path
+scope — before deleting anything on it.
 
 The lenses:
 
 1. **Dead code & speculative surface** — params never read; `X | None` returns always non-None; default kwargs no caller overrides; Pydantic/dataclass fields declared-but-unpopulated; enum variants with no construction site; unreferenced symbols. *Verify: grep ALL refs across `promptpotter/` + `tests/` + `webapp/` (wire keys) + `datasets/` (JSON).*
-2. **Fallbacks & hidden defaults (R-03/R-04/R-24/R-07)** — `.get(k, default)` on contract-guaranteed keys; `X or <default>` masking a contract value; try/except that swallows+defaults; default kwargs encoding an experiment knob; breadcrumb/back-compat comments + the shim they guard. *Skip the two sanctioned fallbacks (score_population synthetic-0; load-boundary deprecated-sample gate) and external-input boundary guards (file/JSON ingest, `extra='forbid'` user-config).*
+2. **Fallbacks & hidden defaults (R-03/R-04/R-24/R-07)** — `.get(k, default)` on contract-guaranteed keys; `X or <default>` masking a contract value; try/except that swallows+defaults; default kwargs encoding an experiment knob; breadcrumb/back-compat comments + the shim they guard. *Skip the two sanctioned fallbacks (score_population synthetic-0; load-boundary deprecated-sample gate) and external-input boundary guards (file/JSON ingest, `extra='forbid'` user-config).* **Read the TYPE before calling a defensive default cosmetic.** On a value typed `Any`, `X or <default>` may have no runtime job at all and exist only to silence the type checker: `warn_return_any` fires on a bare `Any`, and unioning it with anything — which `or <default>` does — defeats it. `resp.content or ""` read as a pointless no-op for months and deleting the `or` made a mypy error fire instantly. **Both halves of this lens are now ratcheted, so do NOT re-hunt them by hand:** bare `Any` params are counted by the ledger's `any_params`, and models that drop unknown keys by `models_lax`. Report only what those two counters structurally cannot see.
 3. **Structural** — single-caller indirection with no test + no layer-boundary reason (inline candidate); near-duplicate logic that should be one seam; misplaced responsibility; god-files that regrew. *Skip layer-boundary splits (application/intelligence ↮ application/optimization) and `_private` helpers used once in the same file.*
-4. **Webapp R-36** — any scoring/fitness/accuracy/ordering/what-if math computed in TypeScript (must be a backend served projection); dead components / unused exports / dead branches; duplicate derivations. *Skip the M13 intentional UI placeholders (Topbar search, ChatPane attach/toggles, AccountModal buttons).*
+4. **Webapp R-36** — any scoring/fitness/accuracy/ordering/what-if math computed in TypeScript (must be a backend served projection); dead components / unused exports / dead branches; duplicate derivations. *Skip the M13 intentional UI placeholders (Topbar search, ChatPane attach/toggles, AccountModal buttons).* **Resolve every path against the working tree before reporting it** — this lens reasons from a snapshot and has cited a renamed directory (`components/whatif/`) and a deleted spec as live. A finding whose file no longer exists is noise that costs the operator the same read as a real one. *Not greppable, don't re-propose it: a CI grep for `?? <number>` was measured on 2026-07-17 — 33 hits, all legitimate (`round ?? 0`, `length ?? 0`, optional-spend sums). The tell for R-36 is that the value is **served**, which no regex can see.*
 5. **Doc/config drift** — doc/CLAUDE.md/spec claims about a symbol/path/signature the code contradicts; stale comments; config keys referenced-but-absent; vocabulary regressions (`baseline`/`query`/`service`/`building block` where the domain word belongs); broken cross-references. *Skip CHANGELOG history + archival meta-campaign snapshots.*
 
 ## Phase 3 — Synthesize into tiers

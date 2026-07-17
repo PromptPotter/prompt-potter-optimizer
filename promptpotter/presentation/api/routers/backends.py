@@ -10,9 +10,10 @@ writes a ``CommandRecord`` to the workspace ledger
 from __future__ import annotations
 
 from fastapi import APIRouter
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from promptpotter import connectors
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.backend import build_backend_client
 from promptpotter.presentation.api.deps import StoreDep, get_backend_or_404
 from promptpotter.shared.clock import utcnow_iso
@@ -20,7 +21,7 @@ from promptpotter.shared.clock import utcnow_iso
 backends_router = APIRouter(prefix="/backends", tags=["Backends"])
 
 
-class BackendResponse(BaseModel):
+class BackendResponse(StrictModel):
     id: str = Field(description="Backend identifier")
     name: str = Field(description="Human-readable backend name")
     backend_type: str = Field(description="Backend type (e.g. 'default')")
@@ -28,7 +29,7 @@ class BackendResponse(BaseModel):
     created_at: str = Field(description="ISO 8601 creation timestamp")
 
 
-class BackendHealthResponse(BaseModel):
+class BackendHealthResponse(StrictModel):
     backend_id: str = Field(description="Backend identifier")
     base_url: str = Field(description="Backend API base URL probed")
     status: str = Field(description="Reachability: 'live', 'unreachable', or 'error'")

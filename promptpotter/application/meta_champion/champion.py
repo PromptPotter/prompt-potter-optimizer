@@ -30,20 +30,17 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
-
 from promptpotter.application.meta_champion.reducer import (
     CandidateRow,
     champion_pointer_path,
     read_registry,
 )
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.statistics import paired_diff_posterior
 
 
-class ChampionPointer(BaseModel):
+class ChampionPointer(StrictModel):
     """The reigning champion — the distributable pick."""
-
-    model_config = ConfigDict(extra="forbid")
 
     state_hash: str
     label: str
@@ -53,10 +50,8 @@ class ChampionPointer(BaseModel):
     since: str
 
 
-class CoronationOutcome(BaseModel):
+class CoronationOutcome(StrictModel):
     """The paired verdict of a challenger vs the reigning champion."""
-
-    model_config = ConfigDict(extra="forbid")
 
     challenger: str
     champion: str | None
@@ -195,10 +190,8 @@ def coronate(
     )
 
 
-class FieldChange(BaseModel):
+class FieldChange(StrictModel):
     """One graduated prompt field — the before/after the operator reviews in git."""
-
-    model_config = ConfigDict(extra="forbid")
 
     node: str
     field: str
@@ -206,10 +199,8 @@ class FieldChange(BaseModel):
     after: str
 
 
-class GraduationOutcome(BaseModel):
+class GraduationOutcome(StrictModel):
     """The result of applying the reigning champion to the distributable optimizer."""
-
-    model_config = ConfigDict(extra="forbid")
 
     champion: str | None
     applied: bool  # False on dry-run, no champion, or no net change

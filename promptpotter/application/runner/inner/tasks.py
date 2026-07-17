@@ -16,10 +16,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import ConfigDict, Field, ValidationError
 
 from promptpotter.application.config import CampaignConfig, LivesConfig
 from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import read_json_optional
 
 if TYPE_CHECKING:
@@ -28,7 +29,7 @@ if TYPE_CHECKING:
     from promptpotter.application.runner.inner.cycle import InnerSpawnContext
 
 
-class InnerBenchmarkConfig(BaseModel):
+class InnerBenchmarkConfig(StrictModel):
     """What every cell of the panel may SPEND — never what it is expected to REACH.
 
     There is no target score here, and deliberately so: declaring one asserts up front how much
@@ -41,7 +42,7 @@ class InnerBenchmarkConfig(BaseModel):
     fitness against a benchmark nobody declared. Every required field is required.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True)
 
     n_samples_per_inner_round: int = Field(ge=1)
     max_inner_rounds: int = Field(ge=1)
@@ -58,7 +59,7 @@ class InnerBenchmarkConfig(BaseModel):
     inner_optimizer_temperature: float | None = Field(default=None, ge=0.0, le=2.0)
 
 
-class InnerTask(BaseModel):
+class InnerTask(StrictModel):
     """One panel cell. ``id`` is the outer query (e.g. ``"justlogic-d67/seed-0"``).
 
     A cell that omits the override fields inherits the top-level benchmark and the dataset's own
@@ -67,7 +68,7 @@ class InnerTask(BaseModel):
     (model, dataset) cell is a fixed in-band resource, not a fuzzy pick.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True)
 
     id: str = Field(min_length=1)
     inner_dataset_seed: int = Field(default=0, ge=0)
@@ -77,20 +78,20 @@ class InnerTask(BaseModel):
     inner_provider: str | None = None
 
 
-class InnerTasks(BaseModel):
+class InnerTasks(StrictModel):
     """The whole file. ``extra="forbid"`` at every level — a key nobody reads cannot be written."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True)
 
     inner_benchmark: str = Field(min_length=1)
     inner_benchmark_config: InnerBenchmarkConfig
     tasks: list[InnerTask] = Field(min_length=1)
 
 
-class InnerTaskSpec(BaseModel):
+class InnerTaskSpec(StrictModel):
     """One outer query resolved against the panel → the inner campaign to run for it."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True)
 
     inner_dataset: str
     seed: int

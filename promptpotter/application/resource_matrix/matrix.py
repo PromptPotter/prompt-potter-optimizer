@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from promptpotter.domain.strict_model import StrictModel
 
 FLOOR_MAX = 0.15  # an origin below this separates nothing from nothing, whatever the labels
 SATURATED_MIN = 0.75  # at/above this, the model already aces the task — no headroom
@@ -101,10 +101,8 @@ def classify_band(
     return BAND_IN
 
 
-class CellVerdict(BaseModel):
+class CellVerdict(StrictModel):
     """One (target-model, dataset) cell's measured capability verdict."""
-
-    model_config = ConfigDict(extra="forbid")
 
     dataset: str
     target_model: str
@@ -131,10 +129,8 @@ class CellVerdict(BaseModel):
         return (self.dataset, self.target_model, self.provider or "")
 
 
-class ResourceMatrix(BaseModel):
+class ResourceMatrix(StrictModel):
     """The full capability grid — merged/upserted across ``matrix measure`` runs."""
-
-    model_config = ConfigDict(extra="forbid")
 
     generated_at: str
     cells: list[CellVerdict]

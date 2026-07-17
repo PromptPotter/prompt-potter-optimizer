@@ -28,8 +28,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.layout import FileKind, classify
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
@@ -100,7 +101,7 @@ def _leaf_fields(acc: dict[str, int]) -> dict[str, int]:
     return {f"{k}_bytes": acc[k] for k in _LEAVES}
 
 
-class CampaignStorageResponse(BaseModel):
+class CampaignStorageResponse(StrictModel):
     campaign_id: str = Field(description="The campaign measured")
     on_disk_bytes: int = Field(description="Whole campaign-dir footprint — sum of the six leaves")
     dataset_bytes: int = Field(description="langfuse ground-truth mirror (the input-data copy)")
@@ -126,7 +127,7 @@ def get_campaign_storage(store: StoreDep, campaign_id: str) -> CampaignStorageRe
 # --- per-dataset tier breakdown (the Files-view "cake") -----------------------
 
 
-class DatasetStorageEntry(BaseModel):
+class DatasetStorageEntry(StrictModel):
     dataset_name: str
     total_bytes: int = Field(description="On disk — the sum of the six leaves")
     dataset_bytes: int
@@ -137,7 +138,7 @@ class DatasetStorageEntry(BaseModel):
     reports_bytes: int
 
 
-class DatasetStorageResponse(BaseModel):
+class DatasetStorageResponse(StrictModel):
     total_bytes: int = Field(description="Grand total across the caller's datasets")
     datasets: list[DatasetStorageEntry] = Field(description="Fattest-first per-dataset leaf splits")
 
@@ -165,7 +166,7 @@ def get_storage_by_dataset(store: StoreDep) -> DatasetStorageResponse:
 # --- workspace rollup — accounts for 100% of the tenant's disk ----------------
 
 
-class WorkspaceStorageEntry(BaseModel):
+class WorkspaceStorageEntry(StrictModel):
     campaign_id: str
     dataset_name: str
     lifecycle_status: str
@@ -178,7 +179,7 @@ class WorkspaceStorageEntry(BaseModel):
     reports_bytes: int
 
 
-class WorkspaceStorageResponse(BaseModel):
+class WorkspaceStorageResponse(StrictModel):
     total_bytes: int = Field(
         description="The tenant's real on-disk total — campaigns + caches + other"
     )

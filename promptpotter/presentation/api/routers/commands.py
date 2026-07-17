@@ -44,7 +44,7 @@ import re
 from typing import Annotated, Any, cast, get_args
 
 from fastapi import APIRouter, Header, Path, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
 
 from promptpotter.application.datasets.csv_ingest import IngestError
 from promptpotter.application.datasets.dataset_replace import (
@@ -67,6 +67,7 @@ from promptpotter.application.jobs.launcher.draft_build import draft_wire_with_l
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.connectors import BackendUnreachableError
 from promptpotter.domain.origin_provenance import Provenance
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.middleware.command_dispatcher import (
@@ -101,10 +102,8 @@ _WIRED_KINDS: frozenset[str] = (
 )
 
 
-class CommandEnvelope(BaseModel):
+class CommandEnvelope(StrictModel):
     """Inbound envelope per ``m12-api-openapi.yaml#/components/schemas/CommandEnvelope``."""
-
-    model_config = ConfigDict(extra="forbid")
 
     kind: str = Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9-]*$")
     payload: dict[str, Any] = Field(default_factory=dict)
@@ -215,10 +214,8 @@ def _build_workspace_payload(kind: str, payload: dict[str, Any]) -> dict[str, An
     return mint_out
 
 
-class _EditDraftPatch(BaseModel):
+class _EditDraftPatch(StrictModel):
     """Sparse mutation payload — only declared fields ride through."""
-
-    model_config = ConfigDict(extra="forbid")
 
     slug: str | None = Field(
         default=None, min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_-]*$"

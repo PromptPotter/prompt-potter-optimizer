@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, NotRequired, TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import ConfigDict, Field, computed_field
 
 from promptpotter.domain.escalation_signals import (
     EscalationSignal,
@@ -16,6 +16,7 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.run_records import DecisionRecord, ErrorRecord
+from promptpotter.domain.strict_model import StrictModel
 
 # Which IRT model a cycle's δ ruler was fitted under. The absence of a member is the third,
 # real state: a cold ruler is FLAT, so θ degenerates to logit-accuracy — neither 1PL nor 2PL.
@@ -158,7 +159,7 @@ def is_round_winner(candidate_id: str, winner_id: str) -> bool:
     return bool(winner_id) and candidate_id == winner_id
 
 
-class ScoredCandidate(BaseModel):
+class ScoredCandidate(StrictModel):
     """One candidate's L1 score report — the single shape for round-file scores.
 
     ``model_dump()`` *is* the wire format; ``model_validate()`` reads it back.
@@ -167,7 +168,9 @@ class ScoredCandidate(BaseModel):
     by readers.
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
+    # `extra="ignore"`: `ci_lo`/`ci_hi` are computed fields — `model_dump()` writes them,
+    # `model_validate()` must not reject them coming back.
+    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True, extra="ignore")
 
     candidate_id: str
     label: str
@@ -287,7 +290,7 @@ _SCOREBOARD_INCLUDE: set[str] = {
 }
 
 
-class ScoreboardRow(BaseModel):
+class ScoreboardRow(StrictModel):
     """One rank-ordered row of ``RoundResult.scoreboard`` — the round file's display table."""
 
     model_config = ConfigDict(frozen=True)
@@ -311,7 +314,7 @@ class ScoreboardRow(BaseModel):
     is_winner: bool
 
 
-class CandidateProposal(BaseModel):
+class CandidateProposal(StrictModel):
     """LLM-proposed candidate — OSP + the two override deltas, persisted across generate→score for resume replay.
 
     Both deltas ride here, not just the merged result: the OSP carries the *resulting*
@@ -326,7 +329,7 @@ class CandidateProposal(BaseModel):
     prompt_fields_override: dict[str, str] = Field(default_factory=dict)
 
 
-class RoundOrigin(BaseModel):
+class RoundOrigin(StrictModel):
     """The round's challenger anchor. On probe rounds, scalars reflect the probe subset, not the full set."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
@@ -342,7 +345,7 @@ class RoundOrigin(BaseModel):
     evaluators: dict[str, float] = Field(default_factory=dict)
 
 
-class SampleOrderStep(BaseModel):
+class SampleOrderStep(StrictModel):
     """One measurement step in a round's adaptive sample-selection timeline.
 
     Frozen snapshot of the adaptive queue mechanism's state the moment it picked
@@ -373,7 +376,7 @@ L1_PARSE_FAILURE_MALFORMED = "meta_prompt_parse_failure"
 L1_PARSE_FAILURE_TOOLING = "l1_provider_empty_response"
 
 
-class RoundResult(BaseModel):
+class RoundResult(StrictModel):
     """Per-round outcome — and the round document itself.
 
     ``model_dump()`` IS ``rounds/round_NNNN.json``; ``model_validate()`` reads it back.
@@ -389,7 +392,9 @@ class RoundResult(BaseModel):
     every health surface.
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    # `extra="ignore"`: `round_id`/`scoreboard` are computed fields — `model_dump()` writes
+    # them into the round file, `model_validate()` must not reject them coming back.
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="ignore")
 
     # --- checkpoint-critical scalars (no raw payloads) ---
     round: int
@@ -511,7 +516,7 @@ class RoundResult(BaseModel):
         return str(lineage.get("id", "")) if isinstance(lineage, dict) else ""
 
 
-class CycleSpend(BaseModel):
+class CycleSpend(StrictModel):
     """Terminal token/USD totals for a finished cycle — the summed cost across
     the backend + optimizer-loop buckets.
 
@@ -544,7 +549,7 @@ class CycleSpend(BaseModel):
     incurred_unpriced_tokens: int = 0
 
 
-class CycleResult(BaseModel):
+class CycleResult(StrictModel):
     """Final result of the feedback cycling process."""
 
     rounds: list[RoundResult]
@@ -591,7 +596,7 @@ class CycleResult(BaseModel):
     error: ErrorRecord | None = None
 
 
-class DiagnosticRunRecord(BaseModel):
+class DiagnosticRunRecord(StrictModel):
     """One on-demand workspace-scope diagnostic run — the ``verify`` and ``noise-floor``
     CLI verbs' shared sidecar shape.
 
@@ -630,7 +635,7 @@ class DiagnosticRunRecord(BaseModel):
     noise_floor_raw: list[float] | None = None
 
 
-class RoundSummaryCandidate(BaseModel):
+class RoundSummaryCandidate(StrictModel):
     """Display-summary row for `dashboard.json::rounds[].candidates` — chart/lineage/sparkline subset of `ScoredCandidate`."""
 
     model_config = ConfigDict(frozen=True)
@@ -682,7 +687,7 @@ HealthGrade = Literal["healthy", "degraded", "critical"]
 HeadlineMetric = Literal["accuracy", "composite", "ability"]
 
 
-class DegradationHealth(BaseModel):
+class DegradationHealth(StrictModel):
     """Context-aware degradation verdict for a round (origin included), computed
     PP-side at round close (``domain/results_health.py``) from the backend's
     per-sample warning stamps — the single graded signal every surface renders (R-36).
@@ -721,7 +726,7 @@ class DegradationHealth(BaseModel):
     suggested_action: str | None = None
 
 
-class RoundSummary(BaseModel):
+class RoundSummary(StrictModel):
     """Display row for `dashboard.json::rounds[]` — webapp's completed-round source.
 
     Top-level `accuracy`/`composite_fitness` mirror the winner's subset score;
@@ -762,7 +767,7 @@ class RoundSummary(BaseModel):
     outer_verdict: OuterVerdict | None = None
 
 
-class PayloadOutcome(BaseModel):
+class PayloadOutcome(StrictModel):
     """Per-payload row inside a ``SweepBatchResult``."""
 
     source_file: str
@@ -773,7 +778,7 @@ class PayloadOutcome(BaseModel):
     cycle_id: str
 
 
-class SweepBatchResult(BaseModel):
+class SweepBatchResult(StrictModel):
     """Final outcome of a sweep batch — all forks attempted, persistence finalized."""
 
     batch_id: str

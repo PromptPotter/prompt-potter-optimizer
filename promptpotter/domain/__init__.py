@@ -7,6 +7,7 @@ ResumeCheckpointKind), pipeline_schema.py + pipeline_parsing.py
 cycle_paths.py (CycleDir / WorkspaceDir newtypes), results.py (RoundResult).
 Shared pure logic: scoring.py, escalation_signals.py, validators.py,
 phases.py, sample.py, l1_layout.py, connector.py, backend.py.
+strict_model.py (StrictModel) is the base every model here inherits.
 
 No mutation (lineage via derive()), no infrastructure imports.
 full contract: domain/CLAUDE.md

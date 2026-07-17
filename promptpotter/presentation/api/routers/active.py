@@ -19,12 +19,13 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from fastapi import APIRouter, Query
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     OPTIMIZER_PIPELINE_PATH,
 )
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import read_json
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
 from promptpotter.infrastructure.store.stores import descend_store
@@ -39,7 +40,7 @@ from promptpotter.shared.errors import NotFoundError
 active_router = APIRouter()
 
 
-class ActiveSessionResponse(BaseModel):
+class ActiveSessionResponse(StrictModel):
     tenant_id: str = Field(description="Tenant the active session belongs to")
     session_id: str = Field(description="Active session id")
     campaign_id: str = Field(description="Active campaign id (pinned by the webapp)")
@@ -67,7 +68,7 @@ def get_active_session(store: StoreDep) -> ActiveSessionResponse:
     )
 
 
-class SpawnedBy(BaseModel):
+class SpawnedBy(StrictModel):
     """The outer work-item an L4 inner cycle was spawned to measure.
 
     Stamped at inner-cycle mint (``runner/inner/cycle.py``) — an inner campaign's own
@@ -97,7 +98,7 @@ class SpawnedBy(BaseModel):
     )
 
 
-class CycleListEntry(BaseModel):
+class CycleListEntry(StrictModel):
     campaign_id: str = Field(description="Campaign the cycle belongs to")
     cycle_id: str
     parent_session_id: str = ""
@@ -143,7 +144,7 @@ class CycleListEntry(BaseModel):
     )
 
 
-class CyclesResponse(BaseModel):
+class CyclesResponse(StrictModel):
     tenant_id: str
     active_campaign_id: str | None = Field(
         description="Active campaign per active_session.json; null when no session is active."
@@ -183,7 +184,7 @@ def get_cycles(store: StoreDep, descend: str | None = Query(None)) -> CyclesResp
     )
 
 
-class MachineHolder(BaseModel):
+class MachineHolder(StrictModel):
     user: str = Field(description="user_id of the operator whose run owns the slot")
     campaign_id: str
     cycle_id: str
@@ -192,7 +193,7 @@ class MachineHolder(BaseModel):
     )
 
 
-class MachineStatusResponse(BaseModel):
+class MachineStatusResponse(StrictModel):
     busy: bool = Field(
         description="True iff a *different* user holds a running job (the server runs one campaign at a time)."
     )

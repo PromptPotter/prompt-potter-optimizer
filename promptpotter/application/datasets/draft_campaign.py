@@ -26,7 +26,7 @@ import uuid
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
 
 from promptpotter.application.config import (
     MechanismConfig,
@@ -37,6 +37,7 @@ from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.domain.identity import TenantId, safe_name
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
@@ -52,7 +53,7 @@ PREVIEW_ROWS = 10
 """Sample-preview head size returned alongside every mutation response."""
 
 
-class OptimizationOverrides(BaseModel):
+class OptimizationOverrides(StrictModel):
     """The campaign-config knobs a new-campaign draft carries, as one validated
     object — collapses what were hand-threaded fields (``max_rounds`` /
     ``mechanisms``) so a new knob is one field here, not six plumbing sites
@@ -60,8 +61,6 @@ class OptimizationOverrides(BaseModel):
     The ``max_rounds`` bound gates the operator EDIT path; the trusted internal
     ``draft_from_dataset`` path builds the dict directly (a reused dataset's config
     may carry a higher ceiling)."""
-
-    model_config = ConfigDict(extra="forbid")
 
     max_rounds: int = Field(
         DEFAULT_MAX_ROUNDS,

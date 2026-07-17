@@ -44,7 +44,9 @@ import functools
 from collections.abc import Callable, Mapping
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, create_model, model_validator
+from pydantic import BaseModel, BeforeValidator, Field, create_model, model_validator
+
+from promptpotter.domain.strict_model import StrictModel
 
 
 def _truncate(max_len: int) -> Callable[[Any], Any]:
@@ -99,7 +101,7 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 
-class VariantEvidenceGrounding(BaseModel):
+class VariantEvidenceGrounding(StrictModel):
     """One row of evidence justifying a variant's chosen mutation.
 
     ``field`` names the panel entry the LLM is grounding on. The allowed values are
@@ -114,13 +116,11 @@ class VariantEvidenceGrounding(BaseModel):
     the ``evidence_grounding_present`` behavior check (see :mod:`l1_behavior`).
     """
 
-    model_config = ConfigDict(extra="forbid")
-
     field: str = Field(description="A citable panel named in the prompt, or stall_exploration.")
     citation: str
 
 
-class L1Variant(BaseModel):
+class L1Variant(StrictModel):
     """One candidate variant proposed by ``l1_generate``.
 
     Three override slots, each carrying a different layer's mutations:
@@ -145,8 +145,6 @@ class L1Variant(BaseModel):
     check — a variant whose overrides merely restate the parent's own values — which
     this model cannot see.
     """
-
-    model_config = ConfigDict(extra="forbid")
 
     # FIELD ORDER IS GENERATION ORDER — evidence precedes the decision it justifies, and the
     # decision is the MUTATION, not the prose about it. `changes_description` trails the three
@@ -197,10 +195,8 @@ class L1Variant(BaseModel):
         return self
 
 
-class L1GenerateOutput(BaseModel):
+class L1GenerateOutput(StrictModel):
     """Top-level shape returned by the ``l1_generate`` meta-prompt."""
-
-    model_config = ConfigDict(extra="forbid")
 
     variants: list[L1Variant]
 
@@ -246,7 +242,7 @@ def _build_l1_response_model(items: tuple[tuple[str, str], ...]) -> type[L1Gener
     return create_model(
         f"L1GenerateOutput__{suffix}",
         __base__=L1GenerateOutput,
-        variants=(list[variant], ...),
+        variants=(list[variant], ...),  # type: ignore[valid-type]  # runtime-built model
     )
 
 
@@ -255,7 +251,7 @@ def _build_l1_response_model(items: tuple[tuple[str, str], ...]) -> type[L1Gener
 # ---------------------------------------------------------------------------
 
 
-class L1CritiqueOutput(BaseModel):
+class L1CritiqueOutput(StrictModel):
     """Critique returned at round-end. Three load-bearing fields only:
     ``priority_fix`` (the headline steer), ``failure_highlights`` (per-
     sample evidence quotes), ``suggested_axes`` (for L2's axis pick).
@@ -263,8 +259,6 @@ class L1CritiqueOutput(BaseModel):
     were dropped — priority_fix already names axis+change, origin_strengths
     panel carries the preserve signal, failure_highlights enumerates the
     other open clusters."""
-
-    model_config = ConfigDict(extra="forbid")
 
     # 320 (not 200): the mandated format `<axis>: <change> - addresses <quoted
     # pattern>` cannot hold a real verbatim quote in 200c — observed truncating
@@ -292,7 +286,7 @@ class L1CritiqueOutput(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class ForkProposal(BaseModel):
+class ForkProposal(StrictModel):
     """L2/L3-emitted proposal to rewind the search to an earlier round.
 
     **The layer decides WHETHER; UCB decides WHERE.** There is deliberately no
@@ -315,8 +309,6 @@ class ForkProposal(BaseModel):
     config, so its measurements stay comparable.
     """
 
-    model_config = ConfigDict(extra="forbid")
-
     reason: str = ""
     unlock_schema_field_rename: bool = Field(
         False,
@@ -335,7 +327,7 @@ class ForkProposal(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class TerminateProposal(BaseModel):
+class TerminateProposal(StrictModel):
     """L2/L3-emitted decision to terminate the cycle — the intelligent-tier
     counterpart to the deterministic stop conditions.
 
@@ -349,8 +341,6 @@ class TerminateProposal(BaseModel):
     ("L2: web_search dead 2 rounds, no framing recovers it — fix the backend + resume").
     A deterministic rule cannot judge "is this recoverable?"; the LLM tier can (R-48)."""
 
-    model_config = ConfigDict(extra="forbid")
-
     reason: str = ""
 
 
@@ -361,7 +351,7 @@ class TerminateProposal(BaseModel):
 OptimizerAction = Literal["normal_round", "probe_round"]
 
 
-class L2ContextOutput(BaseModel):
+class L2ContextOutput(StrictModel):
     """L2 refinement. All fields optional — the LLM sets only what it
     wants to change.
 
@@ -373,8 +363,6 @@ class L2ContextOutput(BaseModel):
     flexible ``{slot: [placeholder, ...]}`` map validated downstream by
     :func:`validate_l1_layout`.
     """
-
-    model_config = ConfigDict(extra="forbid")
 
     task_context: dict[str, Any] = Field(default_factory=dict)
     action: OptimizerAction = "normal_round"
@@ -391,10 +379,8 @@ class L2ContextOutput(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class L3PlanOutput(BaseModel):
+class L3PlanOutput(StrictModel):
     """L3 strategic replan."""
-
-    model_config = ConfigDict(extra="forbid")
 
     plan: str
     note: str = ""
@@ -408,10 +394,8 @@ class L3PlanOutput(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class CheckinTaskContext(BaseModel):
+class CheckinTaskContext(StrictModel):
     """Domain-context sub-object inside the checkin output."""
-
-    model_config = ConfigDict(extra="forbid")
 
     domain: str = ""
     pipeline_purpose: str = ""
@@ -422,7 +406,7 @@ class CheckinTaskContext(BaseModel):
     downstream_context: str = ""
 
 
-class OriginFinding(BaseModel):
+class OriginFinding(StrictModel):
     """One origin-readiness field the resolver proposes a value for.
 
     ``evidence`` is mandatory in spirit — a finding citing nothing from the
@@ -430,8 +414,6 @@ class OriginFinding(BaseModel):
     the apply loop, mirroring the ``evidence_grounding`` contract on
     ``l1_generate``. Only ``confidence == "high"`` auto-confirms; ``"low"``
     lands the field PROPOSED and waits for an operator click."""
-
-    model_config = ConfigDict(extra="forbid")
 
     field: str = Field(
         default="", description="Checklist field id, e.g. 'task_description', 'column.query'."
@@ -446,7 +428,7 @@ class OriginFinding(BaseModel):
     )
 
 
-class OriginQuestion(BaseModel):
+class OriginQuestion(StrictModel):
     """One operator-facing question on a ``kind='ask'`` turn.
 
     ``field`` names the checklist field the answer resolves so the panel can
@@ -454,8 +436,6 @@ class OriginQuestion(BaseModel):
     loop), rather than the operator hunting for the matching control.
     ``options``, when non-empty, is a closed set the answer must come from
     (rendered as a picker); empty means free text."""
-
-    model_config = ConfigDict(extra="forbid")
 
     field: str = Field(
         default="", description="Checklist field id the answer resolves, e.g. 'column.query'."
@@ -467,12 +447,10 @@ class OriginQuestion(BaseModel):
     )
 
 
-class OriginNextAction(BaseModel):
+class OriginNextAction(StrictModel):
     """What the resolver wants to happen next. The deterministic checklist —
     not this field — decides completeness; a false ``ready`` is re-checked and
     rejected."""
-
-    model_config = ConfigDict(extra="forbid")
 
     kind: str = Field(
         default="propose",
@@ -484,7 +462,7 @@ class OriginNextAction(BaseModel):
     )
 
 
-class CheckinOutput(BaseModel):
+class CheckinOutput(StrictModel):
     """Output of the checkin prompt. Two modes share one shape:
 
     * **Task decomposition** (CLI ``new``) — raw context → the Layer-1 prompt
@@ -495,8 +473,6 @@ class CheckinOutput(BaseModel):
       relevant finding. The Layer-1 fields are ALSO authored here (decomposed
       from the proposed task_description) to seed the campaign's starting prompt.
     """
-
-    model_config = ConfigDict(extra="forbid")
 
     persona: str = ""
     task_intent: str = ""

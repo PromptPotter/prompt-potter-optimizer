@@ -5,8 +5,9 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, fields
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, field_validator
+from pydantic import ConfigDict, field_validator
 
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.hashing import content_hash
 
 if TYPE_CHECKING:
@@ -23,7 +24,7 @@ PARAM_SCOPE_KEYS: frozenset[str] = frozenset(
 """Per-node LLM-call tunable axes (non-prompt). Drives param-scope discipline + continuous_envelope."""
 
 
-class SearchPoint(BaseModel):
+class SearchPoint(StrictModel):
     """Abstract — subclassed by frozen ``JobSearchPoint`` and mutable ``OptSearchPoint``."""
 
     def render(self) -> str:
@@ -33,7 +34,7 @@ class SearchPoint(BaseModel):
 class JobSearchPoint(SearchPoint):
     """Frozen target-layer point: ``pipeline_params`` + optional ``prompt_fields``."""
 
-    model_config = {"frozen": True}
+    model_config = ConfigDict(frozen=True)
 
     pipeline_params: dict[str, Any] | None = None
     prompt_fields: dict[str, Any] | None = None

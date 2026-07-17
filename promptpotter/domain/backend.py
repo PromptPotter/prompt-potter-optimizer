@@ -1,11 +1,12 @@
 """Pydantic model for the connected-backend record (one per registered backend)."""
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 
 
-class BackendConnection(BaseModel):
+class BackendConnection(StrictModel):
     """A registered backend connection (e.g. a local backend)."""
 
     id: str = Field(..., description="Unique backend ID, e.g. 'local'")

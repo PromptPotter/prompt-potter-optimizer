@@ -6,10 +6,11 @@ import json
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import ConfigDict, Field, PrivateAttr
 
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
+from promptpotter.domain.strict_model import StrictModel
 
 # Prompt-decomposition fields the prompt editor owns — excluded from the
 # operator-editable node-config surface (they live in `param_keys` too, but the
@@ -89,7 +90,7 @@ CANDIDATE_LIBRARY = "candidate_library"
 CANDIDATE_LIBRARY_FILE = "candidate_library.txt"
 
 
-class PipelineDependency(BaseModel):
+class PipelineDependency(StrictModel):
     """A categorical input a pipeline requires beyond (pipeline + dataset + origin),
     derived from its **node types** — not hardcoded per backend.
 
@@ -102,7 +103,7 @@ class PipelineDependency(BaseModel):
     several); ``hint`` says how to fulfil it.
     """
 
-    model_config = {"frozen": True}
+    model_config = ConfigDict(frozen=True)
 
     kind: str
     node: str
@@ -146,17 +147,17 @@ def dependencies_from_node_types(
     return tuple(deps)
 
 
-class ObservationMapping(BaseModel):
+class ObservationMapping(StrictModel):
     """Maps one trace observation field to a pipeline_data key."""
 
-    model_config = {"frozen": True}
+    model_config = ConfigDict(frozen=True)
 
     pipeline_key: str
     output_field: str | None = None
     is_llm: bool = False
 
 
-class NodeOutputSchema(BaseModel):
+class NodeOutputSchema(StrictModel):
     """Resolved output schema for a TARGET pipeline node — the structured output the
     backend node produces, parsed from ``GET /pipeline``.
 
@@ -166,34 +167,36 @@ class NodeOutputSchema(BaseModel):
     act on the optimizer side; the target-side axis is spec-only today.
     """
 
-    model_config = {"frozen": True}
+    model_config = ConfigDict(frozen=True)
 
     fields: list[str] = Field(default_factory=list)
     field_descriptions: dict[str, str] = Field(default_factory=dict)
     json_schema: dict[str, Any] = Field(default_factory=dict)
 
 
-class NodePromptInfo(BaseModel):
+class NodePromptInfo(StrictModel):
     """Describes the prompt a node accepts — its presence marks the node as
     prompt-bearing (the injection point for the candidate prompt) and names the
     template variables. The input-side companion to :class:`NodeOutputSchema`."""
 
-    model_config = {"frozen": True}
+    # `extra="ignore"`: the backend owns this sub-object's vocabulary and describes itself
+    # to humans there (`family`, `description`); PP reads only `template_variables`.
+    model_config = ConfigDict(frozen=True, extra="ignore")
 
     template_variables: list[str] = Field(default_factory=list)
 
 
-class PipelineViewNode(BaseModel):
+class PipelineViewNode(StrictModel):
     """Webapp pipeline-graph node."""
 
-    model_config = {"frozen": True}
+    model_config = ConfigDict(frozen=True)
 
     id: str
     label: str
     kind: str = ""  # "io" | "llm" | "tool" | "retriever" | "cache" | "measurement" | "phase"
 
 
-class PipelineViewEdge(BaseModel):
+class PipelineViewEdge(StrictModel):
     """Webapp pipeline-graph edge."""
 
     model_config = ConfigDict(frozen=True, populate_by_name=True)
@@ -204,7 +207,7 @@ class PipelineViewEdge(BaseModel):
     label: str = ""
 
 
-class PipelineView(BaseModel):
+class PipelineView(StrictModel):
     """Webapp-facing graph projection — ``datasets/_optimizer/pipeline.json::view`` or derived."""
 
     model_config = ConfigDict(frozen=True, populate_by_name=True)
@@ -213,10 +216,10 @@ class PipelineView(BaseModel):
     edges: list[PipelineViewEdge] = Field(default_factory=list)
 
 
-class PipelineNode(BaseModel):
+class PipelineNode(StrictModel):
     """One node in a pipeline (target or optimizer)."""
 
-    model_config = {"frozen": True}
+    model_config = ConfigDict(frozen=True)
 
     name: str
     wire_type: str = ""
@@ -266,7 +269,7 @@ class PipelineNode(BaseModel):
         )
 
 
-class NodeConfigParam(BaseModel):
+class NodeConfigParam(StrictModel):
     """One operator-editable config param of a node — the FULL config surface the
     operator-steer panel renders, NOT the optimizer-permutation subset
     (`optimizer_locks`). `kind` drives the input widget (`model`/`enum` → a
@@ -280,7 +283,7 @@ class NodeConfigParam(BaseModel):
     the campaign-wide strict flag). A config-only key is not tunable; a node whose
     every param is non-tunable is optimizer-fixed (origin-locked)."""
 
-    model_config = {"frozen": True}
+    model_config = ConfigDict(frozen=True)
 
     key: str
     value: Any = None
@@ -291,7 +294,7 @@ class NodeConfigParam(BaseModel):
     optimizer_tunable: bool = False
 
 
-class NodeSearchNarrowing(BaseModel):
+class NodeSearchNarrowing(StrictModel):
     """A campaign's per-node narrowing of the dataset-declared optimizer search
     space — the per-campaign search-space lever beside ``exclude_nodes`` (whole
     node); model/provider are always locked. The dataset's
@@ -304,16 +307,16 @@ class NodeSearchNarrowing(BaseModel):
     regardless — the prompt is always evolved). ``param_allowed_values`` narrows a
     param's enum to a subset of the dataset's allowed set."""
 
-    model_config = {"frozen": True}
+    model_config = ConfigDict(frozen=True)
 
     param_keys: list[str] | None = None
     param_allowed_values: dict[str, list[str]] = Field(default_factory=dict)
 
 
-class PipelineSchema(BaseModel):
+class PipelineSchema(StrictModel):
     """Frozen, backend-agnostic pipeline description; SoT for identity at campaign start."""
 
-    model_config = {"frozen": True}
+    model_config = ConfigDict(frozen=True)
 
     name: str = ""
     version: str = ""

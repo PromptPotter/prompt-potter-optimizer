@@ -9,9 +9,10 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import Query
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.layout import campaign_root_dir_for, cycle_dir_for
 from promptpotter.infrastructure.store.stores import resolve_cycle_path
 from promptpotter.presentation.api.deps import StoreDep, decode_descend
@@ -28,20 +29,20 @@ _MAX_FILE_ENTRIES = 5000
 _TEXT_SUFFIXES = {".txt", ".jsonl", ""}
 
 
-class FileEntry(BaseModel):
+class FileEntry(StrictModel):
     path: str = Field(description="Path relative to the scope root, forward slashes")
     scope: Literal["cycle", "campaign"] = Field(description="Which root the path is under")
     size: int = Field(description="File size in bytes")
     mtime: str = Field(description="ISO 8601 UTC modification time")
 
 
-class FilesResponse(BaseModel):
+class FilesResponse(StrictModel):
     campaign_id: str
     cycle_id: str
     entries: list[FileEntry]
 
 
-class FileContentResponse(BaseModel):
+class FileContentResponse(StrictModel):
     campaign_id: str
     cycle_id: str
     scope: Literal["cycle", "campaign"]

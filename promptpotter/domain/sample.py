@@ -15,13 +15,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import ConfigDict, Field
+
+from promptpotter.domain.strict_model import StrictModel
 
 
-class Sample(BaseModel):
+class Sample(StrictModel):
     """Canonical per-sample handle + metadata + trace coordinates."""
 
-    model_config = {"extra": "ignore"}
+    # `extra="ignore"`: a dataset row carries whatever columns the operator's file had
+    # (`task`, `source_sheet`, …); this model owns only the ones it names.
+    model_config = ConfigDict(extra="ignore")
 
     # Primary identity + inputs — owned directly.
     id: int

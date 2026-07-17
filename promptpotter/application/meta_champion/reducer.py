@@ -23,10 +23,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict
-
 from promptpotter.application.bootstrap.wiring import backend_type_of_dataset
 from promptpotter.domain.l4.verdict import cell_fitness
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.projections.live_dashboard.round_summary import (
     origin_cells_from_disk,
 )
@@ -41,20 +40,16 @@ _PP_SELF_BACKEND_TYPE = "promptpotter"
 _ORIGIN_HASH = "origin"
 
 
-class CellEffect(BaseModel):
+class CellEffect(StrictModel):
     """One environment cell's paired (candidate − origin) effect for a state."""
-
-    model_config = ConfigDict(extra="forbid")
 
     cell: str
     mean_d: float
     n: int
 
 
-class Provenance(BaseModel):
+class Provenance(StrictModel):
     """Where one occurrence of a candidate state was measured on disk."""
-
-    model_config = ConfigDict(extra="forbid")
 
     campaign_id: str
     cycle_id: str
@@ -62,10 +57,8 @@ class Provenance(BaseModel):
     candidate_id: str
 
 
-class CandidateRow(BaseModel):
+class CandidateRow(StrictModel):
     """One unique meta-prompt state, aggregated across every occurrence in the corpus."""
-
-    model_config = ConfigDict(extra="forbid")
 
     state_hash: str
     label: str
@@ -80,10 +73,8 @@ class CandidateRow(BaseModel):
     status: str  # provisional | confirmed | champion
 
 
-class ChampionRegistry(BaseModel):
+class ChampionRegistry(StrictModel):
     """The ranked champion table — regenerated wholesale by ``champion refresh``."""
-
-    model_config = ConfigDict(extra="forbid")
 
     generated_at: str
     n_cycles_scanned: int

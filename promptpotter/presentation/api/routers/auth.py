@@ -26,7 +26,7 @@ from urllib.parse import quote_plus
 
 from fastapi import APIRouter, Path, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
-from pydantic import BaseModel
+from pydantic import Field
 
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.jobs.spend import (
@@ -36,6 +36,7 @@ from promptpotter.application.jobs.spend import (
     sum_user_spend,
 )
 from promptpotter.config.settings import TERMS_VERSION
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.allowlist import check_allowlist
 from promptpotter.infrastructure.identity.bundle import IdentityBundle
 from promptpotter.infrastructure.identity.github import (
@@ -67,7 +68,7 @@ auth_router = APIRouter(prefix="/auth", tags=["Auth"])
 _SUPPORTED_PROVIDERS = frozenset({"google", "github"})
 
 
-class ConnectedAccount(BaseModel):
+class ConnectedAccount(StrictModel):
     """One OIDC provider currently bound to the active session.
 
     Stage-1 beta is single-account-per-user — the list is always length 1.
@@ -79,7 +80,7 @@ class ConnectedAccount(BaseModel):
     email: str | None
 
 
-class QuotaStatus(BaseModel):
+class QuotaStatus(StrictModel):
     """Live snapshot of the abuse-limit knobs vs. today's usage.
 
     Drives the Security pane's quota card. ``*_max`` mirrors `user.json`
@@ -95,13 +96,13 @@ class QuotaStatus(BaseModel):
     max_campaigns_per_day: int
 
 
-class UserSettings(BaseModel):
+class UserSettings(StrictModel):
     """Per-user preferences surfaced in Account → Preferences."""
 
     demo_mode_enabled: bool
 
 
-class ActivityBucket(BaseModel):
+class ActivityBucket(StrictModel):
     """One bucket of the Activity pane's three stacked bar charts.
 
     ``series`` maps each colour-axis label (model name or provider slug)
@@ -114,12 +115,12 @@ class ActivityBucket(BaseModel):
     spend_usd: float
     tokens: int
     requests: int
-    series_spend: dict[str, float] = {}
-    series_tokens: dict[str, int] = {}
-    series_requests: dict[str, int] = {}
+    series_spend: dict[str, float] = Field(default_factory=dict)
+    series_tokens: dict[str, int] = Field(default_factory=dict)
+    series_requests: dict[str, int] = Field(default_factory=dict)
 
 
-class ActivityResponse(BaseModel):
+class ActivityResponse(StrictModel):
     """Time-bucketed spend / requests / tokens over the requested window."""
 
     window: str
@@ -135,7 +136,7 @@ class ActivityResponse(BaseModel):
     total_requests: int
 
 
-class MeResponse(BaseModel):
+class MeResponse(StrictModel):
     """Current identity envelope. Returned by ``GET /auth/me`` only."""
 
     user_id: str
@@ -440,13 +441,13 @@ def patch_user_settings(body: UserSettings, store: StoreDep) -> UserSettings:
     return UserSettings(demo_mode_enabled=body.demo_mode_enabled)
 
 
-class AcceptTermsBody(BaseModel):
+class AcceptTermsBody(StrictModel):
     """The version the client is accepting — must equal the live TERMS_VERSION."""
 
     version: str
 
 
-class TermsConsent(BaseModel):
+class TermsConsent(StrictModel):
     """Consent state echoed back after an accept (same fields the gate reads on
     ``/me``). The accepted timestamp stays server-side in ``user.json``."""
 

@@ -17,8 +17,9 @@ from __future__ import annotations
 
 from typing import Any, Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from pydantic import ConfigDict, Field, field_serializer
 
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
 
 # Cross-layer protocol fields L1 cannot operate without. Dropping any (esp. critique) fires
@@ -62,13 +63,11 @@ L1_LAYOUT_SLOTS: tuple[str, ...] = (
 )
 
 
-class L1Layout(BaseModel):
+class L1Layout(StrictModel):
     """Per-slot list of placeholder names that the dispatch hub resolves
     when filling L1's PromptTemplate. Empty lists ⇒ slot uses only the
     template's static text.
     """
-
-    model_config = ConfigDict(extra="forbid")
 
     persona: list[str] = Field(default_factory=list)
     task_intent: list[str] = Field(default_factory=list)
@@ -91,7 +90,7 @@ class L1Layout(BaseModel):
         return cast("list[str]", getattr(self, name))
 
 
-class NodeLayoutSpec(BaseModel):
+class NodeLayoutSpec(StrictModel):
     """Per-node information-flow spec — one optimizer node's searchable injection axis.
 
     * ``editor`` — who may mutate this node's layout: ``l2_l4`` (L2 in-campaign +

@@ -10,8 +10,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import (
     read_json_optional,
     write_json,
@@ -19,7 +20,7 @@ from promptpotter.infrastructure.store.io import (
 from promptpotter.shared.clock import utcnow_iso
 
 
-class ConsentRecord(BaseModel):
+class ConsentRecord(StrictModel):
     """Provable record that a user accepted a specific Terms version.
 
     ``version`` is the accepted ``settings.TERMS_VERSION``; ``accepted_at`` is
@@ -30,20 +31,20 @@ class ConsentRecord(BaseModel):
     version, when.
     """
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(frozen=True)
 
     version: str
     accepted_at: str
 
 
-class User(BaseModel):
+class User(StrictModel):
     """Per-user quota record. Persisted as ``user.json`` under the tenant root.
 
     All limits are nullable / overridable per-install via the on-disk file —
     operator hand-edits raise/lower for trusted users without redeploys.
     """
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(frozen=True)
 
     user_id: str
     tenant_id: str

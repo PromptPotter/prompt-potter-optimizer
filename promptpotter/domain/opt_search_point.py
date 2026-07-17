@@ -8,7 +8,7 @@ import uuid
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import ConfigDict, Field, field_validator
 
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
@@ -19,6 +19,7 @@ from promptpotter.domain.search_point import (
     SearchPoint,
     TaskDecomposition,
 )
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
 
 if TYPE_CHECKING:
@@ -32,7 +33,7 @@ if TYPE_CHECKING:
 TEMPLATE_TOKEN_RE = re.compile(r"\{\{(\w+)\}\}")
 
 
-class FewShotExample(BaseModel):
+class FewShotExample(StrictModel):
     """An input/output pair used as a few-shot demonstration."""
 
     input: str
@@ -128,23 +129,21 @@ class PromptTemplate(SearchPoint):
         return cls(few_shot_examples=fse, **fields, **kwargs)
 
 
-class EvidenceGrounding(BaseModel):
+class EvidenceGrounding(StrictModel):
     """Panel field + citation L1 declares to justify a mutation.
 
     The set of citable panels is not declared anywhere: it is DERIVED per round from the
     node's live layout (``dispatch.injections.registry.citable_fields``), so L1 can only
     cite a panel it was actually shown."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(frozen=True)
 
     field: str = Field(description="A citable panel named in the prompt, or stall_exploration.")
     citation: str = Field(description="Short string naming the panel entry cited.")
 
 
-class WoundChannels(BaseModel):
+class WoundChannels(StrictModel):
     """Four wound streams + sticky L3 note; rendered by dispatch-hub injections."""
-
-    model_config = ConfigDict(extra="forbid")
 
     l3_note: str = ""
     validation_failures: list[ValidationFailure] = Field(default_factory=list)
@@ -153,7 +152,7 @@ class WoundChannels(BaseModel):
     l3_guard_breaches: list[ValidatorOutcome] = Field(default_factory=list)
 
 
-class IndividualLineage(BaseModel):
+class IndividualLineage(StrictModel):
     """Identity + provenance — set once at creation, never mutated."""
 
     id: str = Field(default_factory=lambda: uuid.uuid4().hex)
@@ -168,7 +167,7 @@ class IndividualLineage(BaseModel):
     evidence_grounding: EvidenceGrounding | None = None
 
 
-class L2L3Memory(BaseModel):
+class L2L3Memory(StrictModel):
     """L2/L3-authored state that travels with the candidate.
 
     Bundled together because all four are authored by the escalation layers
@@ -179,8 +178,6 @@ class L2L3Memory(BaseModel):
     inherits ``task_context`` + ``l1_overrides`` and resets the other two
     to defaults — the propagation asymmetry lives in those two methods.
     """
-
-    model_config = ConfigDict(extra="forbid")
 
     wounds: WoundChannels = Field(
         default_factory=WoundChannels,

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import Query
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from promptpotter.application.bootstrap.wiring import backend_type_of_dataset
 from promptpotter.application.config import (
@@ -25,6 +25,7 @@ from promptpotter.application.knobs import (
 from promptpotter.application.meta_champion.reducer import ChampionRegistry, reduce_corpus
 from promptpotter.application.resource_matrix.matrix import ResourceMatrix, read_matrix
 from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
     readable_dataset_dir,
@@ -35,7 +36,7 @@ from promptpotter.presentation.api.routers.campaigns._router import campaigns_ro
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
 
 
-class CampaignSummary(BaseModel):
+class CampaignSummary(StrictModel):
     campaign_id: str = Field(description="Campaign id ({dataset}__{rand6}) — one RUN of an origin")
     dataset_name: str = Field(description="Dataset this campaign optimizes")
     label: str = Field(default="", description="Operator-supplied campaign label")
@@ -76,7 +77,7 @@ class CampaignSummary(BaseModel):
     )
 
 
-class CampaignListResponse(BaseModel):
+class CampaignListResponse(StrictModel):
     campaigns: list[CampaignSummary] = Field(description="List of campaign summaries")
     total: int = Field(description="Total number of campaigns")
 
@@ -113,21 +114,21 @@ def _campaign_summary(campaign: Campaign, status: str, backend_type: str) -> Cam
     )
 
 
-class MechanismToggle(BaseModel):
+class MechanismToggle(StrictModel):
     key: str = Field(description="Field key under its group (e.g. 'epsilon_elimination')")
     label: str = Field(description="Human-readable toggle name")
     description: str = Field(description="What the mechanism does, on vs off")
     default: bool = Field(description="Default value (preserves stock loop behavior)")
 
 
-class MechanismGroup(BaseModel):
+class MechanismGroup(StrictModel):
     key: str = Field(description="Group key under optimization.mechanisms (e.g. 'elimination')")
     label: str = Field(description="Human-readable group name")
     description: str = Field(description="What this group of mechanisms governs")
     toggles: list[MechanismToggle] = Field(description="Toggles in this group, in declared order")
 
 
-class MechanismSchemaResponse(BaseModel):
+class MechanismSchemaResponse(StrictModel):
     """Self-describing descriptor for the campaign-config mechanism toggles.
 
     Derived live from ``MechanismConfig``'s JSON schema, so a new toggle (a bool
@@ -289,7 +290,7 @@ def get_campaign(store: StoreDep, campaign_id: str) -> CampaignDetailResponse:
     )
 
 
-class ConfigKnob(BaseModel):
+class ConfigKnob(StrictModel):
     path: str = Field(
         description="Dotted CampaignConfig path (or const.<NAME> for a hardcoded floor)"
     )
@@ -300,14 +301,14 @@ class ConfigKnob(BaseModel):
     )
 
 
-class ConfigEstimandGroup(BaseModel):
+class ConfigEstimandGroup(StrictModel):
     key: str = Field(description="Estimand key (selection, difficulty, ability, …)")
     label: str = Field(description="Human-readable estimand name")
     doc: str = Field(description="Plain-language one-liner of what this estimand is")
     knobs: list[ConfigKnob] = Field(description="Knobs that move this estimand, in declared order")
 
 
-class ConfigCoupling(BaseModel):
+class ConfigCoupling(StrictModel):
     name: str = Field(description="Coupling id")
     knobs: list[str] = Field(description="Dotted knob paths the coupling relates")
     labels: list[str] = Field(description="Short display names for those knobs")
@@ -322,7 +323,7 @@ class ConfigCoupling(BaseModel):
     )
 
 
-class ConfigMapResponse(BaseModel):
+class ConfigMapResponse(StrictModel):
     """The config-map for one campaign: every knob grouped by the statistical
     estimand it moves (with effective value + source layer), plus every declared
     coupling flagged active/inactive against this campaign's frozen config.

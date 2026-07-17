@@ -38,11 +38,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal, NamedTuple
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.run_records import LedgerCandidate
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_candidates
 from promptpotter.infrastructure.store.campaign_store.store import origin_accuracy_of
@@ -57,7 +58,7 @@ NodeKind = Literal["course", "candidate"]
 CourseKind = Literal["root", "fork", "diag", "sweep", "inner"]
 
 
-class LineageDivergence(BaseModel):
+class LineageDivergence(StrictModel):
     """Where an alternative criterion would have elected someone else. Rides the node it
     describes (``LineageNode.divergence``) — there is no parallel list to re-join."""
 
@@ -70,7 +71,7 @@ class LineageDivergence(BaseModel):
     )
 
 
-class LineageNode(BaseModel):
+class LineageNode(StrictModel):
     """One node of the served tree. The same shape at every depth — that is the point."""
 
     model_config = ConfigDict(frozen=True)
