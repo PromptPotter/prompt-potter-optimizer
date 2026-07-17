@@ -76,7 +76,7 @@ L1's own layout (`l1_layout`) renders the validation block inside the `{{l1_woun
 
 ## Wound 2 — L1 (or the operator) tends the `RuntimeFailure`
 
-`DegradationCheck` (`application/optimization/pobb/elimination/checks.py`) fires mid-evaluation. Two paths:
+`DegradationCheck` (`application/optimization/pobb/checks.py`) fires mid-evaluation. Two paths:
 
 1. **Fatal-code fast path.** `classify_result()` derives a fatal code from raw response shape (`finish_reason=length` + `reasoning_tokens > 0` → `reasoning_budget_exhausted`). One sighting ends the candidate; bypasses `min_queries`/`threshold`.
 2. **Rate-based.** After `min_queries=3`, if `degraded_rate >= 0.4`, eliminate.
@@ -160,7 +160,7 @@ The L1 critique itself lives on `RoundResult.critique` (a dict, not on `L2L3Memo
 
 ## `classify_result()` — fatal classification
 
-`classify_result()` (`application/optimization/pobb/elimination/classification.py`) derives **fatal codes** from the backend's neutral advisories (`llm_only:content_empty`, `*:content_filtered`, …) and raw response shape (`pipeline_data.step_tokens.{node}`: normalised `finish_reason`, `reasoning` token count). Backend = facts, optimizer = policy.
+`classify_result()` (`application/optimization/pobb/classification.py`) derives **fatal codes** from the backend's neutral advisories (`llm_only:content_empty`, `*:content_filtered`, …) and raw response shape (`pipeline_data.step_tokens.{node}`: normalised `finish_reason`, `reasoning` token count). Backend = facts, optimizer = policy.
 
 Rule table:
 

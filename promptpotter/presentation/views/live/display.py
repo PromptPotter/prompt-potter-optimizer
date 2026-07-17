@@ -331,7 +331,7 @@ class LiveDisplay(DerivedView):
     def on_p_best_update(self, current_id: str, n_samples: int, p_best: dict[str, float]) -> None:
         """Stash PoBB snapshot; print one-line summary on first fire per candidate at q≥8."""
         apply_p_best_update(self._core, current_id, n_samples, p_best)
-        POBB_DISPLAY_MIN_SAMPLES = 8  # matches ``lock_in_n_min`` in pobb/elimination/checks.py
+        POBB_DISPLAY_MIN_SAMPLES = 8  # matches ``lock_in_n_min`` in pobb/checks.py
         if (
             current_id
             and current_id != self._pobb_printed_for

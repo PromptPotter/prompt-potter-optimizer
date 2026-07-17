@@ -119,7 +119,7 @@ def _split_off_deprecated_samples(
     cached_sample_results: dict[int, QueryMeasurement],
 ) -> tuple[dict[int, QueryMeasurement], dict[int, QueryMeasurement]]:
     """Load-side cache split: (kept, deprecated rows that need fresh re-measure)."""
-    from promptpotter.application.optimization.pobb.elimination.classification import is_deprecated
+    from promptpotter.application.optimization.pobb.classification import is_deprecated
 
     deprecated = {sid: r for sid, r in cached_sample_results.items() if is_deprecated(r)}
     kept = {sid: r for sid, r in cached_sample_results.items() if sid not in deprecated}
@@ -146,7 +146,7 @@ def _resolve_prior_cache(
     dataset_name = session.dataset_name
     cached_sample_results: dict[int, QueryMeasurement] = {}
     if store and backend_id and dataset_name and not force_fresh:
-        from promptpotter.application.optimization.pobb.elimination.classification import (
+        from promptpotter.application.optimization.pobb.classification import (
             is_deprecated,
         )
 

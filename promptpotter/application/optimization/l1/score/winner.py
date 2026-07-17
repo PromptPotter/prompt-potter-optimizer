@@ -12,7 +12,7 @@ from promptpotter.application.optimization.l1.score.loop import (
     replicate_survivors_pass,
     score_population,
 )
-from promptpotter.application.optimization.pobb.elimination.checks import PoBBConfig
+from promptpotter.application.optimization.pobb.checks import PoBBConfig
 from promptpotter.application.optimization.resume_and_fork.decisions import (
     ResumeCheckpointKind,
     ResumeCheckpointRecord,

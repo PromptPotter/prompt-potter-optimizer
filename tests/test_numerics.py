@@ -37,7 +37,7 @@ from promptpotter.application.mask.backprop import accumulate_node_stats, select
 from promptpotter.application.mask.divergence import find_divergences
 from promptpotter.application.mask.record import MaskCandidate, MaskCycle, MaskRecord, MaskRound
 from promptpotter.application.mask.verdicts import make_abort_verdict, make_scoring_verdict
-from promptpotter.application.optimization.pobb.elimination.classification import terminal_ranking
+from promptpotter.application.optimization.pobb.classification import terminal_ranking
 from promptpotter.application.scoring.evaluators import all_evaluators, materialize_round_values
 from promptpotter.application.scoring.formula import (
     ScoringFormulaError,
@@ -1672,7 +1672,7 @@ def test_classify_result_routes_structural_warning_to_fatal() -> None:
 
 scipy = pytest.importorskip("scipy")  # transitively required by the PoBB math
 
-from promptpotter.application.optimization.pobb.elimination.checks import (  # noqa: E402
+from promptpotter.application.optimization.pobb.checks import (  # noqa: E402
     PoBBCheck,
     PoBBConfig,
 )
@@ -2104,7 +2104,7 @@ def test_fatal_degradation_runtime_failure_escalates_to_operator():
     varies — the other two wounds' owners are structural (record type + guard stream).
     """
     from promptpotter.application.optimization.l1.score.signal_effect import decode_signal_effect
-    from promptpotter.application.optimization.pobb.elimination.checks import PoBBCheck, PoBBConfig
+    from promptpotter.application.optimization.pobb.checks import PoBBCheck, PoBBConfig
     from promptpotter.domain.escalation_signals import EscalationSignal
 
     def _decode(check_result):

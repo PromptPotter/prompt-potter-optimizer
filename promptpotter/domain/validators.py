@@ -8,7 +8,7 @@ owner is structural, not a stored choice.
 
 **StopRule** — mid-round check on the running results stream; emits
 :class:`EscalationSignal` to stop the candidate (ELIMINATE / LEADER_LOCKED).
-Concretes in ``application/optimization/pobb/elimination/checks.py``.
+Concretes in ``application/optimization/pobb/checks.py``.
 """
 
 from __future__ import annotations

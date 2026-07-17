@@ -272,7 +272,7 @@ def _finalize_loop_state(
     """Init AxisIndex, write final session/cycle state, emit ``INIT.exit``."""
     from promptpotter.application.bootstrap.session import _open_cycle_ledger
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
-    from promptpotter.application.optimization.pobb.elimination.checks import (
+    from promptpotter.application.optimization.pobb.checks import (
         build_degradation_checks,
     )
     from promptpotter.domain.phases import CampaignPhase, emit_phase

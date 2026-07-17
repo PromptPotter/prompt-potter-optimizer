@@ -250,7 +250,7 @@ The persisted world is a four-entity containment hierarchy
   rule (knobs `optimization.pobb_epsilon` / `elimination_n_min`): paired
   sample-keyed priors, joint 1PL Rasch fit, closed-form `p_best` —
   [`concepts/paired-sample-pobb.md`](concepts/paired-sample-pobb.md).
-  `application/optimization/pobb/elimination/checks.py`.
+  `application/optimization/pobb/checks.py`.
 - **Posterior width** — `1 - max(p_best)`. Operator-visible measure of
   how confidently the leader can be locked in. Surfaced on
   `dashboard.json::current_round.pobb`.
@@ -315,7 +315,7 @@ The persisted world is a four-entity containment hierarchy
   stratum (order-agnostic). `need > opportunities` ⇒ `binom_sf` = 0 =
   the deterministic can't-catch-up corner. Records as `margin_cut`.
   Folded the old dominance + equivalence gates.
-  `application/optimization/pobb/elimination/checks.py::_margin_stats`.
+  `application/optimization/pobb/checks.py::_margin_stats`.
 - **pick-value** — the between-round CAT acquisition objective:
   `decision_information_gain + delta_learning_gain` (in nats). Drives
   `select_round_subset` ranking and the `pick_score` snapshot.
@@ -339,7 +339,7 @@ The persisted world is a four-entity containment hierarchy
   for a `token_matching`-terminal pipeline, `final_ranking` for an
   `llm_ranking`/`llm_only` one), derived by `terminal_ranking()` — the
   pipeline shape decides the source key, it is not hardcoded.
-  `application/optimization/pobb/elimination/classification.py`.
+  `application/optimization/pobb/classification.py`.
 
 ## Escalation + healing
 

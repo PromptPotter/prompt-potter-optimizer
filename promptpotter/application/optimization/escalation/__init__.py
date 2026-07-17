@@ -26,7 +26,7 @@ MAPPED (the concept spans these; canonical homes):
   ``EscalationFSM.from_ledger`` on resume — see ``resume_and_fork/resume.py``).
 - signals are CONSTRUCTED at the failure sites: ``l1/generate.py``,
   ``l1/score/signal_effect.py``, ``validators/l1_strict.py``,
-  ``scoring/search_point_scorer.py``, ``pobb/elimination/checks.py``,
+  ``scoring/search_point_scorer.py``, ``pobb/checks.py``,
   ``intelligence/sibling_wounds.py``.
 - the post-round ROUTING call (``decide_escalation`` → ``escalate_l2``)
   fires in ``runner/round.py``.

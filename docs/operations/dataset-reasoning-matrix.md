@@ -44,7 +44,7 @@ If a hard subtask still trips on either model, the operator can:
 1. Override per-cycle: `pipeline_overrides.llm_only.reasoning_effort = "none"` in `campaign.json`.
 2. Or override `pipeline_overrides.llm_only.max_tokens = 8192` (or higher) — but this is model-specific tuning, not a dataset default.
 
-See `datasets/bbeh/task_description.md` for the trap description and `promptpotter/application/optimization/pobb/elimination/classification.py` for the `classify_result()` rule table.
+See `datasets/bbeh/task_description.md` for the trap description and `promptpotter/application/optimization/pobb/classification.py` for the `classify_result()` rule table.
 
 ## Why TermNorm research nodes cap `reasoning_effort: low` (native structured output)
 

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.intelligence.exploration import graded_response
-from promptpotter.application.optimization.pobb.elimination.classification import (
+from promptpotter.application.optimization.pobb.classification import (
     extract_warning_types,
     is_deprecated,
 )

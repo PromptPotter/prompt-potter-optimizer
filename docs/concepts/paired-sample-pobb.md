@@ -206,7 +206,7 @@ scorer differs, the candidate side gets rescored (by `resume.py::_rescore`); the
 prior side stays at the recorded hits (a scorer change that materially shifts
 priors surfaces as divergence via the candidate side).
 
-Entry points: `optimization/pobb/elimination/checks.py::PoBBCheck` (the
+Entry points: `optimization/pobb/checks.py::PoBBCheck` (the
 mechanism), `scoring/metrics.py::elimination_p_best` (the one θ rule
 shared by live `check()` and replay); the closures that wire them are
 named inline above.

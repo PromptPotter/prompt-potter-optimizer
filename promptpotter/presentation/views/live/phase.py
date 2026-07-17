@@ -137,7 +137,7 @@ def render_round_stats(
     try:
         from collections import Counter
 
-        from promptpotter.application.optimization.pobb.elimination.classification import (
+        from promptpotter.application.optimization.pobb.classification import (
             get_ranked_items,
             ranked_item_keys_from_schema,
         )

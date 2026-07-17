@@ -295,8 +295,14 @@ LEDGER_BASELINE = {
     # importers outside it), ``application/output/`` (``writers`` + ``review``), and
     # ``projections/event_stream/`` (one module, one importer). A package around one call
     # chain is a directory a reader must open to learn there was nothing to choose.
-    "modules": 312,
-    "init_files": 56,
+    # then 312 -> 311, ``init_files`` 56 -> 55: ``pobb/elimination/`` was a package whose
+    # parent package held nothing else — two nested dirs around two leaves. The leaves moved
+    # up to ``pobb/{checks,classification}.py``. NOT fused into one module: ``classify_result``
+    # has more readers (scoring, metrics) than the stop rules do, and a general result
+    # classifier living in a module named for a budget-allocation algorithm would read wrong
+    # at every one of those call sites. Two honest concepts, one package, no wrapper.
+    "modules": 311,
+    "init_files": 55,
     # 43 -> 9 (2026-07-16): 34 package ``__init__`` files that did nothing but re-export a
     # leaf's names were emptied to docstring-only namespace markers, and their ~190 consumer
     # sites now import the leaf they actually wanted. A shim is a hop a reader must take and

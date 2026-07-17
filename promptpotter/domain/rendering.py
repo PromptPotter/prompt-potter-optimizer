@@ -89,7 +89,7 @@ def format_l1_critique_for_prompt(
 
 
 # --------------------------------------------------------------------------- #
-# classify_result (was pobb/elimination/classification)                       #
+# classify_result (was pobb/classification)                       #
 # --------------------------------------------------------------------------- #
 
 

@@ -79,7 +79,7 @@ def _compute_accuracy(results: list[QueryMeasurement]) -> dict[str, Any]:
     Kept as a thin function (not part of the registry) because several
     consumers read ``hits`` / ``total`` directly.
     """
-    from promptpotter.application.optimization.pobb.elimination.classification import is_deprecated
+    from promptpotter.application.optimization.pobb.classification import is_deprecated
 
     deprecated = sum(1 for r in results if is_deprecated(r))
     valid = [r for r in results if not is_deprecated(r)]
@@ -120,7 +120,7 @@ def composite_ci(results: list[QueryMeasurement]) -> tuple[float | None, float |
     no cell was measured — nothing to bracket.
     """
     # Lazy: scoring → optimization circular.
-    from promptpotter.application.optimization.pobb.elimination.classification import is_deprecated
+    from promptpotter.application.optimization.pobb.classification import is_deprecated
     from promptpotter.shared.statistics import mean_ci
 
     scoreable = [r for r in results if not is_deprecated(r) and not is_error_result(r)]
@@ -419,7 +419,7 @@ def _distinct_valid_cells(results: list[QueryMeasurement]) -> int:
     ``coverage_floor``; a cell with one errored and one clean replicate still counts
     (the clean row carries the evidence). Identity with row count at n=1.
     """
-    from promptpotter.application.optimization.pobb.elimination.classification import is_deprecated
+    from promptpotter.application.optimization.pobb.classification import is_deprecated
 
     return len(
         {

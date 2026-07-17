@@ -13,7 +13,7 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import opti
 from promptpotter.application.optimization.l1.critique import run_l1_critique
 from promptpotter.application.optimization.l1.resume import generate_or_load_candidates
 from promptpotter.application.optimization.l1.score.winner import l1_score
-from promptpotter.application.optimization.pobb.elimination.checks import PoBBConfig
+from promptpotter.application.optimization.pobb.checks import PoBBConfig
 from promptpotter.application.optimization.round_analysis import compute_round_diagnostics
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.phases import CampaignPhase, emit_phase

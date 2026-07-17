@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 from promptpotter.application.intelligence.adaptive_queue_mechanism import build_round_order
 from promptpotter.application.optimization.l1.score.candidate import score_one_candidate
 from promptpotter.application.optimization.l1.score.signal_effect import CandidateOutcome
-from promptpotter.application.optimization.pobb.elimination.checks import (
+from promptpotter.application.optimization.pobb.checks import (
     PoBBConfig,
     build_elimination_check,
 )

@@ -77,7 +77,7 @@ data maps back into pipeline state.
 
 The per-sample `predicted` value is the **head of the terminal ranker's output** — not a fixed
 key. `terminal_ranking(result, schema)`
-(`promptpotter/application/optimization/pobb/elimination/classification.py`) walks the schema
+(`promptpotter/application/optimization/pobb/classification.py`) walks the schema
 **in reverse** for the last node with `node_role ∈ {ranker, candidate_source}` that wrote its
 `pipeline_key`, and `sample_measurement.py` takes the head of that list (shape-agnostic via
 `extract_item_label`). So:

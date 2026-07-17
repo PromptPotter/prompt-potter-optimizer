@@ -438,7 +438,7 @@ async def measure_sample(
         # when token_matching is terminal, final_ranking when an llm_ranking/llm_only node
         # is — read through the schema, not a hardcoded key. extract_item_label is
         # shape-agnostic (dict {candidate}, (name, score) tuple, or bare string).
-        from promptpotter.application.optimization.pobb.elimination.classification import (
+        from promptpotter.application.optimization.pobb.classification import (
             terminal_ranking,
         )
         from promptpotter.application.scoring.formula import extract_item_label
