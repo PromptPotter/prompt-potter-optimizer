@@ -23,16 +23,19 @@ import { accuracyBasisValue } from "@/lib/fitness";
 import {
   primaryMetric,
   roundCandidates,
+  candidatesOf,
+  countDescendants,
+  nodeAt,
+  nodeKeyOf,
   walkCourses,
   type HeadlineMetric,
 } from "@/lib/derivations";
 import { useDashboard } from "@/lib/hooks/useDashboard";
-import { rootCycleId } from "@/lib/ids";
+import { encodeCyclePath, rootCycleId, type CyclePath } from "@/lib/ids";
 import { bumpRevalidation } from "@/lib/revalidate";
 import { useLineageOverlay } from "@/lib/lineage-overlay";
 import type { CandidateRow } from "@/lib/types";
 import { setCandidatesState, useCandidatesState } from "./candidates-store";
-import { candidatesOf, countDescendants } from "./forest-layout";
 
 // Empty-stub cleanup — one campaign-wide modal mutation. Stubs accumulate
 // because fork-creation paths mint the cycle dir BEFORE the first round runs;
@@ -51,8 +54,8 @@ interface LineageCleanup {
 export interface Lineage {
   // THE served genealogy's root course, or null before the first read lands.
   tree: LineageNode | null;
-  // Per-candidate fitness, keyed `{cycleId}::{candidateId}` — the live value
-  // overlay painted onto nodes. NOT part of the geometry (so a value tick never
+  // Per-candidate fitness, keyed by the candidate's ADDRESS (`nodeKeyOf`) — the live
+  // value overlay painted onto nodes. NOT part of the geometry (so a value tick never
   // re-lays-out the tree). Carries the percent metric the operator selected;
   // θ rides `thetaByKey`. `undefined` for a node with no value yet.
   valueByKey: ReadonlyMap<string, number | null>;
@@ -69,7 +72,7 @@ export interface Lineage {
   expanded: ReadonlySet<string>;
   // In-place expand/collapse toggle for one course's lane (pure view state —
   // never changes the dashboard's selected cycle).
-  onLaneActivate: (cycleId: string) => void;
+  onLaneActivate: (courseKey: string) => void;
   totalDescendants: number;
   // Empty-state facts for the in-view cycle.
   viewedHasRounds: boolean;
@@ -81,9 +84,13 @@ export interface Lineage {
 export function useLineage({
   campaignId,
   cycleId,
+  path,
 }: {
   campaignId: string | null;
   cycleId: string | null;
+  // The VIEWED course's address. `cycleId` alone cannot name a node: inner ids repeat
+  // across sibling sandboxes, so every tree lookup and every overlay key rides this.
+  path: CyclePath | null;
 }): Lineage {
   // The shared tree from the single fetch both views render (R-36). The mask/lens
   // fields are NOT re-exposed here — the card and `Forest` read the counterfactual
@@ -92,7 +99,7 @@ export function useLineage({
   // The in-view cycle's live dashboard — the same source the bars read, so the
   // active cycle's node values can't disagree with them.
   const { dash } = useDashboard();
-  const { metrics, expanded, expandedForCampaign, expandedForCycle } = useCandidatesState();
+  const { metrics, expanded, expandedForCampaign, expandedForLane } = useCandidatesState();
   const metric = primaryMetric(metrics);
 
   // The active (in-view) cycle's live candidate rows from dashboard.json —
@@ -102,28 +109,41 @@ export function useLineage({
     [cycleId, dash],
   );
 
+  // The viewed course's address, and the prefix every live row's key is built from —
+  // `nodeKeyOf` is `{encoded path}|{id}`, and a live row's candidate sits on this path.
+  const viewedKey = path ? encodeCyclePath(path) : "";
+  // The viewed course's LANE key. Null before the tree lands, and null when the viewed
+  // course is a FORK — a fork is not a node, its candidates ride the parent's lane.
+  const viewedLaneKey = useMemo(() => {
+    const viewed = tree && path ? nodeAt(tree, path) : undefined;
+    return viewed ? nodeKeyOf(viewed) : null;
+  }, [tree, path]);
+
   // Render-phase expand reset (React's sanctioned adjust-state-on-prop-change).
-  // A campaign switch resets to the clean view (the in-view cycle expanded);
-  // selecting another fork ensure-expands it. The `expandedForCycle` latch is
-  // what stops a manual collapse of the in-view lane from being re-expanded on
-  // the next render.
+  // A campaign switch resets to the clean view (the in-view lane expanded); selecting
+  // another fork ensure-expands it. The `expandedForLane` latch is what stops a manual
+  // collapse of the in-view lane from being re-expanded on the next render.
+  //
+  // Keyed on the LANE, which only the tree can name — so a campaign switch clears here
+  // and the default expansion settles on the render the tree lands, rather than being
+  // guessed from `cycleId` (which is not a lane key: inner ids repeat).
   if (campaignId !== expandedForCampaign) {
     setCandidatesState({
-      expanded: cycleId ? new Set([cycleId]) : new Set(),
+      expanded: viewedLaneKey ? new Set([viewedLaneKey]) : new Set(),
       expandedForCampaign: campaignId,
-      expandedForCycle: cycleId,
+      expandedForLane: viewedLaneKey,
     });
-  } else if (cycleId && cycleId !== expandedForCycle) {
+  } else if (viewedLaneKey && viewedLaneKey !== expandedForLane) {
     setCandidatesState({
-      expanded: new Set(expanded).add(cycleId),
-      expandedForCycle: cycleId,
+      expanded: new Set(expanded).add(viewedLaneKey),
+      expandedForLane: viewedLaneKey,
     });
   }
 
-  const onLaneActivate = useCallback((cid: string) => {
+  const onLaneActivate = useCallback((key: string) => {
     const next = new Set(expanded);
-    if (next.has(cid)) next.delete(cid);
-    else next.add(cid);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
     setCandidatesState({ expanded: next });
   }, [expanded]);
 
@@ -135,7 +155,7 @@ export function useLineage({
   // sibling actually has somewhere to be drawn.
   const forkedFrom = useMemo<ReadonlyMap<string, string>>(() => {
     const m = new Map<string, string>();
-    const viewed = courses.find((c) => c.id === cycleId);
+    const viewed = tree && path ? nodeAt(tree, path) : undefined;
     if (!viewed) return m;
     for (const cand of candidatesOf(viewed)) {
       for (const child of cand.children) {
@@ -143,9 +163,9 @@ export function useLineage({
       }
     }
     return m;
-  }, [courses, cycleId]);
+  }, [tree, path]);
 
-  // Per-candidate percent-metric overlay, keyed `{cycleId}::{candidateId}`. The tree
+  // Per-candidate percent-metric overlay, keyed by `nodeKeyOf`. The tree
   // serves `composite_fitness` per candidate, so settled/sibling courses honor the
   // composite selection on the SAME basis as the active cycle — one tree, one basis,
   // nothing recomputed client-side. θ is a separate overlay (`thetaByKey`) since it
@@ -163,7 +183,7 @@ export function useLineage({
         const value = usesComposite
           ? cand.composite_fitness
           : accuracyBasisValue(cand.is_winner, cand.cumulative_accuracy, cand.accuracy);
-        m.set(`${course.id}::${cand.id}`, value);
+        m.set(nodeKeyOf(cand), value);
       }
     }
     // The in-view course's values track the 2 s poll, so its in-flight round moves
@@ -173,11 +193,11 @@ export function useLineage({
         const value = usesComposite
           ? row.composite ?? null
           : accuracyBasisValue(row.is_winner, row.cumulative_accuracy, row.accuracy);
-        m.set(`${cycleId}::${row.candidate_id}`, value);
+        m.set(`${viewedKey}|${row.candidate_id}`, value);
       }
     }
     return m;
-  }, [courses, cycleId, dash, liveRows, usesComposite]);
+  }, [courses, cycleId, dash, liveRows, usesComposite, viewedKey]);
 
   // Parallel overlay carrying each candidate's difficulty-adjusted ability θ, same key shape
   // as `valueByKey`. Painted into the node tooltip so a θ-elected winner shown below a
@@ -186,20 +206,20 @@ export function useLineage({
   const thetaByKey = useMemo<ReadonlyMap<string, number | null>>(() => {
     const m = new Map<string, number | null>();
     for (const course of courses) {
-      for (const cand of candidatesOf(course)) m.set(`${course.id}::${cand.id}`, cand.theta);
+      for (const cand of candidatesOf(course)) m.set(nodeKeyOf(cand), cand.theta);
     }
     if (cycleId && dash) {
-      for (const row of liveRows) m.set(`${cycleId}::${row.candidate_id}`, row.theta);
+      for (const row of liveRows) m.set(`${viewedKey}|${row.candidate_id}`, row.theta);
     }
     return m;
-  }, [courses, cycleId, dash, liveRows]);
+  }, [courses, cycleId, dash, liveRows, viewedKey]);
 
   // Empty-state facts for the in-view cycle (distinguishes an inherited fork
   // from a fresh cycle waiting for round 1).
   const viewedHasRounds = useMemo(() => {
-    const viewed = courses.find((c) => c.id === cycleId);
+    const viewed = tree && path ? nodeAt(tree, path) : undefined;
     return viewed ? candidatesOf(viewed).length > 0 : false;
-  }, [courses, cycleId]);
+  }, [tree, path]);
   const parentId = cycleId ? rootCycleId(cycleId) : null;
   const isInheritedSibling = parentId != null && parentId !== cycleId;
 

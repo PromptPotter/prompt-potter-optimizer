@@ -13,8 +13,8 @@
 
 import { fmtPct0 } from "@/lib/format";
 import { runPhaseLabel } from "@/lib/run-phase";
-import { panelCellLabel } from "@/lib/derivations";
-import type { CycleListEntry } from "@/lib/api";
+import { panelCellLabel, pathOf } from "@/lib/derivations";
+import type { LineageNode } from "@/lib/api";
 
 export function PanelCellRow({
   cell,
@@ -23,9 +23,9 @@ export function PanelCellRow({
   onOpen,
 }: {
   cell: string;
-  run: CycleListEntry | null;
+  run: LineageNode | null;
   cached: boolean;
-  onOpen: (c: CycleListEntry) => void;
+  onOpen: (run: LineageNode) => void;
 }) {
   const name = panelCellLabel(cell);
 
@@ -65,13 +65,14 @@ export function PanelCellRow({
   const live = run.run_phase === "running";
   const lifted =
     run.origin_accuracy != null && run.best_accuracy != null && run.best_accuracy !== run.origin_accuracy;
+  const at = pathOf(run).at(-1);
 
   return (
     <button
       type="button"
       className="rsv-row pcr-row"
       onClick={() => onOpen(run)}
-      title={`${run.campaign_id} · ${run.cycle_id}\n\nThe inner campaign that measured this cell. Opens it.`}
+      title={`${at?.campaignId ?? ""} · ${at?.cycleId ?? ""}\n\nThe inner campaign that measured this cell. Opens it.`}
     >
       <span className="pcr-name">
         {name}
@@ -91,7 +92,7 @@ export function PanelCellRow({
       </span>
       <span className="pcr-meta">
         {run.run_phase === "terminal" && (
-          <span className="pcr-status">{runPhaseLabel(run.run_phase, run.status)}</span>
+          <span className="pcr-status">{runPhaseLabel(run.run_phase, run.state)}</span>
         )}
         <span className="pcr-score">
           {fmtPct0(run.origin_accuracy ?? run.best_accuracy ?? null)}

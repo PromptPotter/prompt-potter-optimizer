@@ -6,41 +6,26 @@
 // null, `predicted`/`ground_truth` are empty. The measurement it stands for lives
 // in the sandbox, as a campaign of its own.
 //
-// `spawned_by` is what joins them: the engine stamps the SAME two strings it
-// scored under — `task` (the cell) and `candidate_label` (who asked) — so a cell
-// resolves to its run by lookup, never by order. Both halves are needed: seed-0
-// measured for C0 and seed-0 measured for C1.1 are different runs of the same
-// declaration.
+// The join is the served tree's own edge — the course filed under the candidate —
+// so BOTH halves come from one namespace. Reading the runs' `spawned_by` stamps
+// instead got the fork case wrong: a fork's cells are stamped with the fork's
+// PRIVATE counter (`C1.1`), while the timeline they render on renumbers them
+// (`C1.4`). The tree does that renumbering; a raw stamp cannot.
 //
-// TWO predicates, decided here once: IS IT A CELL? (its own root cycle — a fork
-// continues a cell's run, so it belongs to that cell's story, not beside it) and
-// IS IT FILED? (it carries `spawned_by`; an interrupted mint writes none, and a
-// wrong join is worse than an absent one). An unfiled cell has no panel key and
-// drops out of the lookup; the sidebar lists it loose under its course instead.
-//
-// This resolves a CELL of the outer round file, which is why it still joins on the
-// stamp. It is not the genealogy: "which runs hang off this candidate" is answered
-// by the served tree (`/tree`), and asking it here as well is how the same edge came
-// to have two answers.
+// A cell whose run carries no `task` has no key and drops out of the lookup — an
+// interrupted mint writes no provenance, and a wrong join is worse than an absent
+// one. The row still renders, saying so.
 
-import type { CycleListEntry } from "@/lib/api";
-import { rootCycleId } from "@/lib/ids";
+import type { LineageNode } from "@/lib/api";
+import { candidatesOf, childCourses } from "./lineage-candidates";
 
-// Every cell of a course's sandbox — the runs it fanned out, forks excluded.
-function innerCells(cycles: readonly CycleListEntry[]): CycleListEntry[] {
-  return cycles.filter((c) => rootCycleId(c.cycle_id) === c.cycle_id);
-}
-
-// `(candidate_label, cell)` → the inner cycle that measured it. Both halves of the
-// stamp are needed, so an unfiled cell has no key and drops out.
-export function innerPanelIndex(
-  cycles: readonly CycleListEntry[],
-): ReadonlyMap<string, CycleListEntry> {
-  const m = new Map<string, CycleListEntry>();
-  for (const c of innerCells(cycles)) {
-    const sb = c.spawned_by;
-    if (!sb?.candidate_label || !sb.task) continue;
-    m.set(panelCellKey(sb.candidate_label, sb.task), c);
+// `(candidate_label, cell)` → the inner run that measured it, over one course's timeline.
+export function innerPanelIndex(course: LineageNode | null): ReadonlyMap<string, LineageNode> {
+  const m = new Map<string, LineageNode>();
+  for (const cand of candidatesOf(course ?? undefined)) {
+    for (const run of childCourses(cand)) {
+      if (run.task) m.set(panelCellKey(cand.label, run.task), run);
+    }
   }
   return m;
 }

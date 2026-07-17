@@ -1,6 +1,6 @@
 "use client";
 import { isSelectedCandidate, type CandidateRow, type SampleRow, type SelectedCandidate } from "@/lib/types";
-import type { CycleListEntry } from "@/lib/api";
+import type { LineageNode } from "@/lib/api";
 import { SampleRowItem } from "./SampleRowItem";
 import { PanelCellRow } from "./PanelCellRow";
 import { fmtPct0 } from "@/lib/format";
@@ -42,8 +42,8 @@ interface Props {
   // measured that cell. Null for an ordinary course, which renders scored rows.
   // Null vs empty is a real distinction — empty means L4 with the sandbox not yet
   // read, and the cells still list.
-  panel: ReadonlyMap<string, CycleListEntry> | null;
-  onOpenRun: (run: CycleListEntry) => void;
+  panel: ReadonlyMap<string, LineageNode> | null;
+  onOpenRun: (run: LineageNode) => void;
 }
 
 // Filters + per-candidate sample groups. Pure renderer extracted from

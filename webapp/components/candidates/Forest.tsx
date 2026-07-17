@@ -4,6 +4,7 @@ import { fmtPct0 } from "@/lib/format";
 import {
   fmtHeadlineValue,
   headlineMetricLabel,
+  nodeKeyOf,
   type HeadlineMetric,
 } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
@@ -143,7 +144,7 @@ export function Forest({
   campaignId: string;
   cycleId: string | null;
   // Live per-candidate percent metric (accuracy/composite), keyed
-  // `{cycleId}::{candidateId}` — painted onto nodes outside the geometry memo so a
+  // Keyed by the candidate's address (`nodeKeyOf`) — painted onto nodes outside the geometry memo so a
   // value tick costs only a text re-render.
   valueByKey: ReadonlyMap<string, number | null>;
   // Same-key overlay of difficulty-adjusted ability θ — the node value when
@@ -156,7 +157,7 @@ export function Forest({
   // A lane clicked away from a searchpoint node — toggles that cycle's lane
   // between its expanded candidate cladogram and the compact summary row, in
   // place. Never changes the dashboard's selected cycle.
-  onLaneActivate: (cycleId: string) => void;
+  onLaneActivate: (courseKey: string) => void;
   // Navigate the dashboard to a cycle — fired when a candidate in a non-selected
   // lane is clicked (the inspector/samples follow the searchpoint).
   onSelectCycle: (campaignId: string, cycleId: string) => void;
@@ -166,18 +167,18 @@ export function Forest({
   // the same candidate identity the bars use. Outside the layout memo, so it
   // updates each poll without re-flowing the tree.
   const valOf = (n: RoundNodePos): number | null =>
-    valueByKey.get(`${n.cycleId}::${n.candidateId}`) ?? null;
+    valueByKey.get(n.candKey) ?? null;
   // Difficulty-adjusted ability for the node tooltip — what the winner was elected on.
   const thetaOf = (n: RoundNodePos): number | null =>
-    thetaByKey.get(`${n.cycleId}::${n.candidateId}`) ?? null;
+    thetaByKey.get(n.candKey) ?? null;
   // Layout is pure and the tree changes identity only on a real refetch, so this
   // memo re-runs only on a shape change (new round / candidate / winner flip / lane
   // toggle), never on a bare 2 s poll — the value overlay rides outside it.
-  const { laneByCycle, totalLaneRows, maxCol } = useMemo(
+  const { laneByKey, totalLaneRows, maxCol } = useMemo(
     () => layout(tree, expanded),
     [tree, expanded],
   );
-  const { nodes, segs } = useMemo(() => placeNodes(laneByCycle), [laneByCycle]);
+  const { nodes, segs } = useMemo(() => placeNodes(laneByKey), [laneByKey]);
   // The candidates a lens would have elected instead. The marker rides the round's
   // WINNER and names its alternative, so the alternative learns of itself here —
   // one pass over the placed nodes, no parallel array to re-join.
@@ -199,7 +200,7 @@ export function Forest({
     headerCols.push(c);
   }
 
-  const laneList = [...laneByCycle.values()];
+  const laneList = [...laneByKey.values()];
   // Band y/height for a lane (covers all its rows when expanded).
   const bandTop = (l: LaneLayout): number => TOP_PAD + l.laneOffset * LANE_H - LANE_H / 2 + 2;
   const bandH = (l: LaneLayout): number => l.laneSpan * LANE_H - 4;
@@ -308,11 +309,11 @@ export function Forest({
                 role="button"
                 tabIndex={0}
                 aria-label={`${verb} ${courseName(course)}`}
-                onClick={() => onLaneActivate(course.id)}
+                onClick={() => onLaneActivate(nodeKeyOf(course))}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
-                    onLaneActivate(course.id);
+                    onLaneActivate(nodeKeyOf(course));
                   }
                 }}
                 style={{ cursor: "pointer" }}
@@ -339,7 +340,7 @@ export function Forest({
             .filter((n) => !n.isExpanded)
             .map((n) => {
               const cycleSelected = n.cycleId === cycleId;
-              const layoutEntry = laneByCycle.get(n.cycleId);
+              const layoutEntry = laneByKey.get(n.courseKey);
               const cycName = layoutEntry ? courseName(layoutEntry.course) : n.cycleId;
               const rowLabelText = n.isLastInLane && layoutEntry ? cycName : null;
               // The lane's ♥ bank, as glyphs — the cladogram is an <svg>, so the shared
@@ -352,7 +353,7 @@ export function Forest({
               const isDivergent = n.divergent;
               return (
                 <g
-                  key={`n-${n.cycleId}-${n.round}`}
+                  key={`n-${n.courseKey}-${n.round}`}
                   className={cx(
                     "family-cladogram-node",
                     cycleSelected && "selected",
@@ -362,11 +363,11 @@ export function Forest({
                   role="button"
                   tabIndex={0}
                   aria-label={`Expand ${cycName}`}
-                  onClick={() => onLaneActivate(n.cycleId)}
+                  onClick={() => onLaneActivate(n.courseKey)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
-                      onLaneActivate(n.cycleId);
+                      onLaneActivate(n.courseKey);
                     }
                   }}
                   style={{ cursor: "pointer" }}
@@ -425,7 +426,7 @@ export function Forest({
             .filter((n) => n.isExpanded)
             .map((n) => (
               <CandidateNode
-                key={`c-${n.cycleId}-${n.round}-${n.candidateId}`}
+                key={`c-${n.candKey}`}
                 n={n}
                 accuracy={valOf(n)}
                 theta={thetaOf(n)}
@@ -442,11 +443,11 @@ export function Forest({
           {nodes
             .filter((n) => n.isExpanded && n.isLastInLane)
             .map((n) => {
-              const course = laneByCycle.get(n.cycleId)?.course;
+              const course = laneByKey.get(n.courseKey)?.course;
               if (!course) return null;
               return (
                 <text
-                  key={`elabel-${n.cycleId}`}
+                  key={`elabel-${n.courseKey}`}
                   x={n.x + CAND_STUB + 84}
                   y={n.y + 3}
                   className="family-cladogram-cyclelabel"

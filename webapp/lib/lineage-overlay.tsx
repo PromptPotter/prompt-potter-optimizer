@@ -14,13 +14,13 @@
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { fetchLineageTree } from "@/lib/api";
-import type { LineageDivergence, LineageNode } from "@/lib/api/types";
-import { walkCourses } from "@/lib/derivations";
+import type { LineageNode } from "@/lib/api/types";
+import { nodeAt, walkCourses } from "@/lib/derivations";
 import { useCandidatesState } from "@/components/candidates/candidates-store";
 import { formulaFromWeights } from "@/components/candidates/fitness-bars";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useDebounced } from "@/lib/hooks/useDebounced";
-import { rootCycleId } from "@/lib/ids";
+import { rootCycleId, type CyclePath } from "@/lib/ids";
 import { useRevalidation } from "@/lib/revalidate";
 import { useSelection } from "@/lib/SelectionContext";
 
@@ -51,15 +51,6 @@ interface LineageOverlay {
   maskActive: boolean;
   maskLabel: string;
   whatifActive: boolean;
-  // Each candidate's fitness under the active `score:` lens — served, never recomputed
-  // here (R-36). Key `{cycle_id}::{candidate_id}`, the SAME candidate identity every
-  // other surface resolves by. Empty without a `score:` lens (e.g. What-If closed), so
-  // a consumer reads null and falls back to its default series.
-  lensValueByCandidate: ReadonlyMap<string, number>;
-  // Each closed candidate's scorer-faithful accuracy over the active `samples=` subset +
-  // the count it ran — served (R-36), keyed the same way. Empty without a `samples=` mask.
-  // In-flight candidates aren't here (no round file yet); the bars live-slice those.
-  sampleSetByCandidate: ReadonlyMap<string, { accuracy: number | null; n: number }>;
 }
 
 const LineageOverlayContext = createContext<LineageOverlay | null>(null);
@@ -181,31 +172,6 @@ export function LineageOverlayProvider({
 
   const pairs = useMemo(() => candidatePairs(tree), [tree]);
 
-  // Served per-candidate lens value → lookup keyed by `{cycle_id}::{candidate_id}`.
-  // Candidate identity is the MINTED id the node carries, which every other surface
-  // resolves by too — so all of them key one candidate one way. Only non-null values
-  // land (a candidate the formula can't score is absent, read as null downstream).
-  const lensValueByCandidate = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const { courseId, cand } of pairs) {
-      if (cand.lens_value != null) m.set(`${courseId}::${cand.id}`, cand.lens_value);
-    }
-    return m;
-  }, [pairs]);
-  // Served per-candidate sample-set accuracy → lookup, same identity key. `sample_set_n`
-  // is non-null exactly when a `samples=` mask was applied (0 = ran none of the chosen set,
-  // accuracy null), so it's the presence guard; absence ⇒ no mask, consumer falls back.
-  const sampleSetByCandidate = useMemo(() => {
-    const m = new Map<string, { accuracy: number | null; n: number }>();
-    for (const { courseId, cand } of pairs) {
-      if (cand.sample_set_n == null) continue;
-      m.set(`${courseId}::${cand.id}`, {
-        accuracy: cand.sample_set_accuracy,
-        n: cand.sample_set_n,
-      });
-    }
-    return m;
-  }, [pairs]);
   // "Active" (red tag) only when the served tree actually carries a divergence —
   // NOT merely because a lens/chip is requested.
   const maskActive = useMemo(
@@ -229,18 +195,8 @@ export function LineageOverlayProvider({
       maskActive,
       maskLabel,
       whatifActive: showWhatIf,
-      lensValueByCandidate,
-      sampleSetByCandidate,
     }),
-    [
-      tree,
-      lens,
-      maskActive,
-      maskLabel,
-      showWhatIf,
-      lensValueByCandidate,
-      sampleSetByCandidate,
-    ],
+    [tree, lens, maskActive, maskLabel, showWhatIf],
   );
 
   return (
@@ -263,12 +219,14 @@ export function useLineageOverlay(): LineageOverlay {
 // of a counterfactual round carries `divergent`.
 export function divergenceRoundsFor(
   overlay: LineageOverlay,
-  cycleId: string | null,
+  path: CyclePath | null,
 ): { points: ReadonlySet<number>; subtree: ReadonlySet<number> } {
   const points = new Set<number>();
   const subtree = new Set<number>();
-  if (!cycleId || !overlay.tree) return { points, subtree };
-  const course = walkCourses(overlay.tree).find((c) => c.id === cycleId);
+  if (!path || !overlay.tree) return { points, subtree };
+  // Addressed, not scanned: a bare cycle id names more than one course (inner ids
+  // repeat across sandboxes), and `find` would answer with whichever came first.
+  const course = nodeAt(overlay.tree, path);
   for (const cand of course?.children ?? []) {
     if (cand.round == null) continue;
     if (cand.divergence) points.add(cand.round);
@@ -277,5 +235,3 @@ export function divergenceRoundsFor(
   return { points, subtree };
 }
 
-// Re-export so consumers needn't reach into the API types directly.
-export type { LineageDivergence };

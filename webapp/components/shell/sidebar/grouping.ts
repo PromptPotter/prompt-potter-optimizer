@@ -22,14 +22,12 @@ import { rootCycleId } from "@/lib/ids";
 // sweep descending from it. A campaign mints exactly one root (`{dataset}__{rand6}`
 // per `new`), so there is no session tier.
 //
-// `root` and `branches` are split because chrome differs (the ⋯ menu is campaign-
-// scoped, so it belongs to the root alone) — NOT because one contains the other. As
-// candidate-groups they are peers: each holds its own origin and candidates, and a
-// fork is a sibling course spawned from a candidate, not a part of the root.
+// The ⋯ menu is campaign-scoped, so `root` is named apart from its forks — not
+// because one contains the other. As candidate-groups they are peers: each holds its
+// own origin and candidates, and a fork is a sibling course spawned from a candidate.
 export interface RunGroup {
   campaign: CampaignSummary;
   root: CycleListEntry;
-  branches: CycleListEntry[];
   // Most-recent updated_at across every cycle — sorts so the run being actively
   // worked on stays at the top.
   updatedAt: string;
@@ -93,7 +91,6 @@ function groupRuns(
     runs.push({
       campaign,
       root,
-      branches,
       updatedAt: all.reduce(
         (m, c) => (c.updated_at > m ? c.updated_at : m),
         campaign.created_at,
@@ -140,44 +137,6 @@ export function buildForest(
   }
   origins.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
   return origins;
-}
-
-// One course's inner runs, filed under the candidate each was asked to measure.
-// `candidate_label` is the join: the SAME string on both sides — stamped into
-// `spawned_by` at mint, and served on the round trajectory — so no run is placed by
-// guessing at order.
-//
-// A run only files under a candidate row that EXISTS, which `rendered` names. It
-// doesn't when the label is C0 on a fork (which wears no C0 row), or when the run
-// carries no `spawned_by` at all. Those come back `loose`, to sit directly on the
-// course: one layer, and the run's own name says what is known about it.
-//
-// A round that never CLOSED no longer lands here: candidate identity rides the ledger,
-// which mints a candidate before any round file exists, so `/tree` names C1.1 whether
-// or not its round finished. Six runs of a died-mid-round-1 fork used to match `C1.1`,
-// find no row, and render nowhere at all.
-export interface InnerRunFiling {
-  byLabel: ReadonlyMap<string, RunGroup[]>;
-  loose: RunGroup[];
-}
-
-export function fileInnerRuns(
-  runs: readonly RunGroup[],
-  rendered: ReadonlySet<string>,
-): InnerRunFiling {
-  const byLabel = new Map<string, RunGroup[]>();
-  const loose: RunGroup[] = [];
-  for (const run of runs) {
-    const lbl = run.root.spawned_by?.candidate_label;
-    if (!lbl || !rendered.has(lbl)) {
-      loose.push(run);
-      continue;
-    }
-    const arr = byLabel.get(lbl) ?? [];
-    arr.push(run);
-    byLabel.set(lbl, arr);
-  }
-  return { byLabel, loose };
 }
 
 // The persisted set is every node TOGGLED AWAY FROM ITS DEFAULT — so empty

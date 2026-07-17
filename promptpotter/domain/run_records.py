@@ -326,12 +326,10 @@ class RoundWarningRecord(BaseModel):
 
     Distinct from :class:`ErrorRecord` (a fatal run halt) and from
     ``RoundDiagnostics`` (post-scoring analytics): these are mid-round
-    self-heal events that previously logged ONLY to the server's stdout —
-    the optimizer LLM returning empty/truncated output and the round
-    recording zero candidates, an L2 framing-output validator soft-reject,
-    an over-budget injection truncation. The self-healing rails recover and
-    the run continues, but the operator never saw it on the dashboard, the
-    round file, or the CLI.
+    self-heal events — the optimizer LLM returning empty/truncated output and
+    the round recording zero candidates, an L2 framing-output validator
+    soft-reject, an over-budget injection truncation. The rails recover and the
+    run continues, so stdout alone would leave the operator never knowing.
 
     Rides the canonical ledger via :func:`emit_round_warning` over the
     ``_CYCLE_LEDGER`` ContextVar — the same shape as :func:`emit_error_record`
@@ -453,15 +451,14 @@ class CycleSeed(BaseModel):
 class CandidateMintedRecord(BaseModel):
     """A candidate's IDENTITY, written the moment it is minted — before it is scored.
 
-    The lineage tier used to exist only where a round CLOSED: `rounds/round_NNNN.json` and
-    its `dashboard.json` projection are both written by `close_round`, so a round whose
-    producer died mid-flight left its candidates unnameable even though their work — and
-    at L4 their whole inner campaigns — sat finished on disk. Identity is not a
-    measurement and must not share the measurement's durability.
+    **Identity is not a measurement and must not share the measurement's durability.**
+    Everything written by `close_round` (`rounds/round_NNNN.json`, its `dashboard.json`
+    projection) exists only where a round CLOSED — so a cycle whose producer dies
+    mid-flight must still leave its candidates nameable, their work, and at L4 their whole
+    inner campaigns, sitting finished on disk.
 
-    `label` rides here because it is a MINTED fact, not a read-time one. Re-deriving
-    `C{round}.{idx+1}` from list position at every read is what forced the
-    `spawned_by.candidate_label` string join and the webapp's positional fallback.
+    `label` rides here because it is a MINTED fact, not a read-time one — re-deriving
+    `C{round}.{idx+1}` from list position at read time is a positional guess.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")

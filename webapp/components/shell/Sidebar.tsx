@@ -47,8 +47,8 @@ interface Props {
 // tier appears only when it actually groups 2+ runs, i.e. when it carries
 // information.
 //
-// Only `at: []` (the tenant's own store) is polled here; deeper forests fetch on
-// expand via `useForest`.
+// Only the tenant's own store is polled here; a course's subtree fetches on expand
+// via `useCampaignTree`.
 
 export function Sidebar({ onSelectPath, onNewCycle, collapsed, onToggleCollapse }: Props) {
   // Cycle list + campaign registry + active pointer + current selection all
@@ -57,7 +57,7 @@ export function Sidebar({ onSelectPath, onNewCycle, collapsed, onToggleCollapse 
     cycleId,
     campaignId,
     viewedPath,
-    viewedCandidate,
+    viewedCandidateId,
     campaigns,
     cycles,
     cyclesLoaded,
@@ -158,7 +158,7 @@ export function Sidebar({ onSelectPath, onNewCycle, collapsed, onToggleCollapse 
       collapsedNodes,
       toggleNode,
       viewedPath,
-      viewedCandidate,
+      viewedCandidateId,
       selectCyclePath: onSelectPath,
       activeCampaignId,
       activeCycleId,
@@ -167,7 +167,7 @@ export function Sidebar({ onSelectPath, onNewCycle, collapsed, onToggleCollapse 
       collapsedNodes,
       toggleNode,
       viewedPath,
-      viewedCandidate,
+      viewedCandidateId,
       onSelectPath,
       activeCampaignId,
       activeCycleId,

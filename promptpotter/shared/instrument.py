@@ -7,13 +7,12 @@ tenant-global mutable memory, it is bounded by rails, it retries on live provide
 conditions — so without help ``f`` is a function of the meta-prompt AND of the whole
 history and mood of the machine it ran on. It leaks by construction.
 
-An inner cycle is therefore made hermetic by *subtracting* campaign features. That
-subtraction used to be three independent ambient ContextVars (recursion depth, the
-optimizer decoding clamp, the evidence epoch), each set by hand at the spawn site and each
-one a thing a new code path could forget — and forgetting any one of them silently
-reintroduces the leak, because the resulting number still looks like a measurement. This
-is the one declared mode that replaces them: a cycle either IS an instrument (and every
-hermetic property holds together) or it is not.
+An inner cycle is therefore made hermetic by *subtracting* campaign features — recursion
+depth, the optimizer decoding clamp, the evidence epoch. This is the ONE declared mode
+that binds them: a cycle either IS an instrument, with every hermetic property holding
+together, or it is not. Never re-split them into properties a spawn site sets by hand —
+forgetting one silently reintroduces the leak, and the resulting number still looks
+exactly like a measurement.
 
 **Not a fourth LayerStrategy.** The ladder is closed at L1/L2/L3 and L4 is recursion (see
 ``application/optimization/CLAUDE.md``). This declares what a cycle *is*, not a new tier of

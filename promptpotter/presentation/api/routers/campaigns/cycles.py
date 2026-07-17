@@ -267,8 +267,7 @@ def get_lineage_tree(
 
     Nodes alternate ``course -> candidate -> (course | sample)`` forever, so an L4 inner
     run is the same shape one level down rather than a special case, and L5+ needs no new
-    tier. ``depth`` expands N course-levels; ``children_available`` with an empty
-    ``children`` is the lazy boundary a sidebar expands into.
+    tier. ``depth`` expands N course-levels.
 
     An optional **lens** decorates the nodes with a counterfactual. ``lens=score:<formula>``
     = an alternative scoring formula (each candidate's ``lens_value``, plus a ``divergence``

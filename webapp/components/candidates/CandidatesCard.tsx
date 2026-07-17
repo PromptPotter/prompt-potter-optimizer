@@ -37,18 +37,15 @@ import { useFetch } from "@/lib/hooks/useFetch";
 import {
   HEADLINE_METRICS,
   headlineMetricLabel,
+  nodeAt,
+  nodeKeyOf,
   panelCellLabel,
   sortedRounds,
-  walkCourses,
   type HeadlineMetric,
 } from "@/lib/derivations";
-import { rootCycleId, shortFamilyTail } from "@/lib/ids";
-import { candidatesOf, childCourses } from "./forest-layout";
-import type { LineageNode } from "@/lib/api";
 import { isSelectedCandidate } from "@/lib/types";
 import { useWorkspace } from "@/lib/workspace";
 import { useLineage } from "./useLineage";
-import { useCandidateViews } from "./useCandidateViews";
 import { SampleSetControl } from "./SampleSetControl";
 import { measuredUniverse } from "@/lib/sample-set";
 import { useLineageOverlay, divergenceRoundsFor } from "@/lib/lineage-overlay";
@@ -83,22 +80,14 @@ const METRIC_GLYPH: Record<HeadlineMetric, string> = {
   ability: "θ",
 };
 
-// Everything a fork/run bar cannot answer: election aggregates are per-round
-// numbers over a candidate population, which a whole course isn't.
-const NO_ELECTION = {
-  composite: null,
-  theta: null,
-  theta_se: null,
-  compositeCiLo: null,
-  compositeCiHi: null,
-  cumulative_accuracy: null,
-  evaluators: {},
-  is_winner: false,
-  n_samples: null,
-  n_expected: null,
-  source: "history",
-  whatif: null,
-} as const;
+// The latest `verify` run for a candidate, in the shape the chart paints.
+function diagView(
+  d: DiagnosticRunRecord | undefined,
+): { accuracy: number; workspaceN: number; samplesAdded: number } | undefined {
+  return d
+    ? { accuracy: d.workspace_accuracy, workspaceN: d.workspace_n, samplesAdded: d.samples_added }
+    : undefined;
+}
 
 // `heading` rows are optgroup labels; the rest are pickable. One flat list, so the
 // menu markup stays a map() instead of nested groups.
@@ -121,7 +110,7 @@ export function CandidatesCard() {
     cycleId,
     leafCycleId,
     viewedPath,
-    viewedCandidate,
+    viewedCandidateId,
     selectCycle: onSelectCycle,
     selectCyclePath,
   } = useWorkspace();
@@ -343,122 +332,86 @@ export function CandidatesCard() {
   // picks + trajectory drill all live in `SampleSetControl`.
   const sampleUniverse = useMemo(() => measuredUniverse(history), [history]);
 
-  // The shared served overlay — its `lensValueByCandidate` is the What-If bar value
+  // The shared served overlay — the node's own `lens_value` is the What-If bar value
   // (R-36, never recomputed here), and its divergence facts drive the boundary below.
   const overlay = useLineageOverlay();
   const { lens, setLens, maskActive, maskLabel, whatifActive } = overlay;
 
-  const candidateViews = useCandidateViews(
-    diagByLabel,
-    sampleSet,
-    overlay.sampleSetByCandidate,
-    dash,
-    overlay.lensValueByCandidate,
-    cycleId,
-  );
-
   // ── ONE RULE: the bars are the CHILDREN of the VIEWED node — the node the tree on the
-  // left is parked on, and the same children it draws under that node.
+  // left is parked on, and the same children it draws under it.
   //
-  //   course viewed    → its candidates + one bar per course CUT from it. A FORK course
-  //                      drops its borrowed C0 (it replays the candidate it was cut from —
-  //                      that bar lives on the parent), same rule as its sidebar row.
-  //   candidate viewed → the courses filed under it (an L4 candidate's inner runs).
-  //   plain candidate  → no child courses; the bars stay on its course.
+  //   course viewed    → its timeline: every candidate on it, including the attempts its
+  //                      forks contributed.
+  //   candidate viewed → the courses that measured it (an L4 candidate's inner runs).
   //
-  // The viewed node is `viewedPath` + `viewedCandidate` — NAVIGATION, written only by the
+  // The viewed node is `viewedPath` + `viewedCandidateId` — NAVIGATION, written only by the
   // tree. It is deliberately not `selectedCandidate` (INSPECTION, written by a bar click):
-  // one slot for both made the chart its own input, so clicking a bar re-plotted the chart
-  // out from under the cursor. Course bars carry SERVED numbers, never recomputed.
-  //
-  // **The child courses come from the ONE served tree** (`/tree`, via the overlay). They
-  // were re-derived here from `/cycles` twice over — `indexForks` for the forks, a
-  // `spawned_by` join for the runs — the same genealogy assembled two more ways beside the
-  // tree that already states it, which is what a `leafIsL4` lookup and a `leafIsRoot`
-  // regex guess were propping up. The tree answers all three: a candidate either has child
-  // courses or it does not; a course knows its own kind.
-  const viewedCourse = useMemo(
-    () => (overlay.tree ? walkCourses(overlay.tree).find((c) => c.id === leafCycleId) : undefined),
-    [overlay.tree, leafCycleId],
-  );
-
-  // A fork replays the candidate it was cut from, so its borrowed C0 belongs to the
-  // parent's bars, not its own — same rule as its sidebar row.
-  const leafIsRoot = leafCycleId != null && rootCycleId(leafCycleId) === leafCycleId;
-  const candidateRows = useMemo(
+  // one slot for both makes the chart its own input, so clicking a bar re-plots it under
+  // the cursor.
+  const viewedNode = useMemo(
     () =>
-      leafIsRoot
-        ? candidateViews
-        : candidateViews.filter((v) => !(v.round === 0 && v.label === "C0")),
-    [candidateViews, leafIsRoot],
-  );
-
-  // One bar per course, at `round`. A course is a measured thing: it shows what it
-  // measured (`best_accuracy`, else its origin's score) and nothing a whole course can't
-  // answer — election aggregates are per-round numbers over a candidate population, which
-  // a course isn't.
-  const courseBars = useCallback(
-    (courses: readonly LineageNode[], round: number): CandidateView[] =>
-      courses.map<CandidateView>((c, i) => ({
-        ...NO_ELECTION,
-        key: `course|${c.id}`,
-        round,
-        idx: i,
-        candidate_id: c.id,
-        // An inner run wears the cell it measured; a fork, its short tail. An unstamped
-        // run has no cell to name it — its dataset is what's known.
-        label:
-          c.course_kind === "inner"
-            ? c.task
-              ? panelCellLabel(c.task)
-              : c.dataset_name
-            : shortFamilyTail(c.id),
-        accuracy: c.best_accuracy ?? c.origin_accuracy,
-        started: (c.best_accuracy ?? c.origin_accuracy) != null,
-      })),
-    [],
-  );
-
-  // Parked on a CANDIDATE: the bars are the courses filed under it — an L4 candidate's
-  // inner runs, and any course cut from it. `null` = it has none, so the bars stay on its
-  // course. That is also the whole of what `leafIsL4` used to answer: a candidate either
-  // has child courses or it does not, and the tree says so without a backend-type lookup.
-  const viewedCandNode = useMemo(
-    () =>
-      viewedCandidate && viewedCourse
-        ? candidatesOf(viewedCourse).find((c) => c.label === viewedCandidate)
+      overlay.tree && viewedPath
+        ? nodeAt(overlay.tree, viewedPath, viewedCandidateId)
         : undefined,
-    [viewedCourse, viewedCandidate],
+    [overlay.tree, viewedPath, viewedCandidateId],
   );
-  const runBars = useMemo<CandidateView[] | null>(() => {
-    if (!viewedCandNode) return null;
-    const bars = courseBars(childCourses(viewedCandNode), viewedCandNode.round ?? 0);
-    return bars.length > 0 ? bars : null;
-  }, [courseBars, viewedCandNode]);
 
-  // Parked on the COURSE: its candidates, plus one bar per FORK cut from it. A fork is
-  // served as a candidate of this course — it IS an attempt — carrying `course_kind`, which
-  // is what tells it apart from one L1 minted. It rides the tree rather than `dash` because
-  // `dashboard.json` is this cycle's own telemetry and a fork is a different cycle.
-  const forkViews = useMemo<CandidateView[]>(() => {
-    if (!viewedCourse) return [];
-    const forks = candidatesOf(viewedCourse).filter((c) => c.course_kind !== null);
-    return forks.map<CandidateView>((c, i) => ({
-      ...NO_ELECTION,
-      key: `course|${c.id}`,
-      round: c.round ?? 0,
-      idx: i,
-      candidate_id: c.id,
-      label: c.label,
-      accuracy: c.accuracy,
-      started: c.accuracy != null,
-    }));
-  }, [viewedCourse]);
-  const forkKeys = useMemo(() => new Set(forkViews.map((v) => v.key)), [forkViews]);
+  // The one thing the tree cannot answer: the candidate being scored RIGHT NOW. The ledger
+  // mints a candidate before measuring it but only snapshots the score at completion, so a
+  // mid-scoring bar lives in `dash.current_round`. One source per data class — history =
+  // tree, live = `current_round`. Keyed by label: a course's OWN candidates keep their
+  // minted label, and `dash` is the viewed course's telemetry because `viewedPath` IS its
+  // address.
+  const inflightByLabel = useMemo(
+    () => new Map(inflightCandidates.map((c) => [c.label, c])),
+    [inflightCandidates],
+  );
 
-  const views = useMemo(
-    () => runBars ?? (forkViews.length ? [...candidateRows, ...forkViews] : candidateRows),
-    [runBars, candidateRows, forkViews],
+  const views = useMemo<CandidateView[]>(() => {
+    const sliced = sampleSet != null;
+    return (viewedNode?.children ?? []).map<CandidateView>((n, i) => {
+      const isCourse = n.kind === "course";
+      // A course shows what it reached, else what it started from. A cut that broke before
+      // measuring anything has no number and must render blank, never as its origin's.
+      const own = isCourse ? (n.best_accuracy ?? n.origin_accuracy) : n.accuracy;
+      const live = isCourse ? undefined : inflightByLabel.get(n.label);
+      // Slice mode reads the SERVED scorer-faithful value. Election aggregates can't be
+      // re-sliced per sample, so they are suppressed rather than shown on a different basis
+      // than the bar beside them.
+      const accuracy = sliced ? n.sample_set_accuracy : (own ?? live?.stats?.accuracy ?? null);
+      const label = isCourse ? (n.task ? panelCellLabel(n.task) : n.dataset_name) : n.label;
+      return {
+        key: nodeKeyOf(n),
+        round: n.round ?? 0,
+        idx: i,
+        candidate_id: n.id,
+        label,
+        accuracy,
+        composite: sliced || isCourse ? null : n.composite_fitness,
+        theta: sliced ? null : n.theta,
+        theta_se: sliced ? null : n.theta_se,
+        compositeCiLo: sliced ? null : n.composite_ci_lo,
+        compositeCiHi: sliced ? null : n.composite_ci_hi,
+        evaluators: n.evaluators,
+        is_winner: n.is_winner,
+        cumulative_accuracy: n.cumulative_accuracy,
+        n_samples: sliced ? n.sample_set_n : (n.scored_samples ?? live?.stats?.total ?? null),
+        n_expected: sliced ? (sampleSet?.length ?? null) : n.expected_samples,
+        source: live && own == null ? "inflight" : "history",
+        whatif: sliced ? null : n.lens_value,
+        started: accuracy != null,
+        diag: diagView(diagByLabel.get(label)),
+      };
+    });
+  }, [viewedNode, inflightByLabel, sampleSet, diagByLabel]);
+
+  // A fork's attempt is a course under the hood — the ⑂ marks lead there.
+  const forkKeys = useMemo(
+    () =>
+      new Set(
+        (viewedNode?.children ?? []).filter((n) => n.course_kind != null).map((n) => nodeKeyOf(n)),
+      ),
+    [viewedNode],
   );
 
   // Only what the BARS need from the lineage: the metric they paint, the fork
@@ -467,6 +420,7 @@ export function CandidatesCard() {
   const { metric, forkedFrom, expanded, totalDescendants } = useLineage({
     campaignId,
     cycleId,
+    path: viewedPath,
   });
 
   // The bar chart's plot geometry, published by its `xBridge` plugin — the one
@@ -539,16 +493,17 @@ export function CandidatesCard() {
   // active or nothing diverges.
   const divergenceBoundary = useMemo(() => {
     if (!overlay.maskActive) return null;
-    // Run bars all sit inside ONE round — no round boundary to draw.
-    if (runBars) return null;
-    const { points, subtree } = divergenceRoundsFor(overlay, cycleId);
+    // Parked on a candidate, the bars are sibling courses inside ONE round — no round
+    // boundary to draw.
+    if (viewedCandidateId) return null;
+    const { points, subtree } = divergenceRoundsFor(overlay, viewedPath);
     let firstRound = Infinity;
     for (const r of points) firstRound = Math.min(firstRound, r);
     for (const r of subtree) firstRound = Math.min(firstRound, r);
     if (!Number.isFinite(firstRound)) return null;
     const idx = views.findIndex((v) => v.round >= firstRound);
     return idx >= 0 ? idx : null;
-  }, [overlay, cycleId, views, runBars]);
+  }, [overlay, viewedPath, views, viewedCandidateId]);
 
   // The bar of the candidate currently accumulating samples — it blinks while
   // live. The scoring candidate is `dash.candidate` ("C2.3/4"); gate on the
@@ -602,14 +557,14 @@ export function CandidatesCard() {
       title={
         <Toolbar className="cand-toolbar">
           {/* Run-bars mode names the viewed candidate and is the way back up a tier. */}
-          {runBars && viewedCandidate && viewedPath ? (
+          {viewedCandidateId && viewedPath ? (
             <button
               type="button"
               className="cand-title cand-crumb"
               onClick={() => selectCyclePath(viewedPath, null)}
               title="Back to this course's candidates"
             >
-              ‹ {viewedCandidate} · runs
+              ‹ {viewedNode?.label ?? "runs"} · runs
             </button>
           ) : (
             <span className="cand-title">Candidates</span>
@@ -747,8 +702,8 @@ export function CandidatesCard() {
               have no siblings at all, so it has nothing to show and nobody should
               be paying header width for it. */}
           <div className="cand-tree-row">
-            {/* Run bars are sibling courses — no candidate descent to draw. */}
-            {!runBars && (
+            {/* Parked on a candidate, the bars are sibling courses — no descent to draw. */}
+            {!viewedCandidateId && (
               <DendrogramStrip
                 views={views}
                 plot={plot}
@@ -763,7 +718,7 @@ export function CandidatesCard() {
             {forestToggle}
           </div>
         </div>
-        {showWhatIf && !runBars && (
+        {showWhatIf && !viewedCandidateId && (
           <WhatIfGrid
             rows={rows}
             selected={selected}

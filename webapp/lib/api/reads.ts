@@ -663,8 +663,7 @@ export function fetchLineageTree(
   opts: {
     lens?: string | null;
     samples?: number[] | null;
-    // Course-levels to expand. `children_available` with empty `children` is the
-    // lazy boundary, so depth is the caller's cost dial.
+    // Course-levels to expand — the caller's cost dial.
     depth?: number;
   } = {},
   ifModifiedSince?: string | null,

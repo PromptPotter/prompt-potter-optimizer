@@ -6,9 +6,9 @@ Cache is SHA-256-keyed, cross-cycle/cross-fork; file-per-record at
 
 :func:`inner_sandbox_store` / :func:`descend_store` / :func:`resolve_cycle_path` live
 here because they CONSTRUCT stores — they are :func:`build_stores` re-entered at a
-deeper root, not request plumbing. They spent their first life in the FastAPI dep
-module, which made a `store/` view unable to recurse without an
-``infrastructure -> presentation`` import.
+deeper root, not request plumbing. Keep them out of the FastAPI dep module: a
+``store/`` view could then not recurse without an ``infrastructure -> presentation``
+import.
 """
 
 from __future__ import annotations

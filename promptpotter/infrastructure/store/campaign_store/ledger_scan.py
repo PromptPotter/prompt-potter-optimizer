@@ -2,10 +2,8 @@
 
 Both read through ``iter_jsonl``, the declared read-model primitive: corruption-
 tolerant (a torn trailing line degrades to "not there") but NOT failure-tolerant.
-They each used to hand-parse the file behind ``except OSError``, which returned the
-same value as "nothing on the ledger" — an unreadable file told the operator their
-round had never completed, and turned a seeded cycle into an unseeded one, silently
-changing what the campaign optimizes.
+Never swallow an ``OSError`` here — "unreadable" would return what "nothing on the
+ledger" returns, and a seeded cycle would silently become an unseeded one.
 
 These scan the PHYSICAL file, deliberately. ``CycleEventLog.iter`` replays a fork's
 inherited parent prefix first; a fork's own seed and its own closed rounds are the

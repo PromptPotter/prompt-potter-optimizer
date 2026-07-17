@@ -5,11 +5,11 @@ import {
   LANE_H,
   LEFT_PAD,
   TOP_PAD,
-  candidatesOf,
   expandedLaneSpan,
   layout,
   placeNodes,
 } from "../forest-layout";
+import { candidatesOf, nodeKeyOf } from "@/lib/derivations";
 
 // --- builders -------------------------------------------------------------
 
@@ -22,13 +22,11 @@ function node(
     parent_id: null,
     path: [],
     children: [],
-    children_available: false,
     round: null,
     accuracy: null,
     composite_fitness: null,
     state: "",
     is_winner: false,
-    round_closed: false,
     theta: null,
     theta_se: null,
     evaluators: {},
@@ -63,10 +61,9 @@ function cands(counts: number[]): LineageNode[] {
   return candsH(counts.map((n) => ({ n })));
 }
 
-// Per-round builder that can mark a round `held` (it closed but crowned nobody) or
-// `open` (it never closed, so there is no election at all). Those are different
-// facts, and collapsing them is the misdraw the tree exists to end.
-function candsH(rounds: { n: number; held?: boolean; open?: boolean }[]): LineageNode[] {
+// `held` marks a round that crowned nobody — it either closed with no candidate
+// beating the incumbent, or never closed at all. Either way there is no winner.
+function candsH(rounds: { n: number; held?: boolean }[]): LineageNode[] {
   return rounds.flatMap((r, ri) =>
     Array.from({ length: r.n }, (_, i) =>
       node({
@@ -75,8 +72,7 @@ function candsH(rounds: { n: number; held?: boolean; open?: boolean }[]): Lineag
         label: `C${ri + 1}.${i + 1}`,
         round: ri + 1,
         accuracy: 0.5,
-        is_winner: !r.held && !r.open && i === r.n - 1,
-        round_closed: !r.open,
+        is_winner: !r.held && i === r.n - 1,
       }),
     ),
   );
@@ -93,10 +89,18 @@ function course(
     label: id,
     course_kind: id.includes("_fork_") ? "fork" : "root",
     dataset_name: "ds",
+    // A course is addressed by its PATH, and the lane key is built from it. Default to
+    // the tenant's own store; a sandboxed course passes its own `path` via `over`.
+    path: [{ campaign_id: "camp", cycle_id: id }],
     children,
-    children_available: children.length > 0,
     ...over,
   });
+}
+
+// A course's lane key, exactly as `layout` computes it — asked of the same function
+// rather than hand-rolled here, so the test cannot drift from the key it asserts on.
+function laneKey(id: string, over: Partial<LineageNode> = {}): string {
+  return nodeKeyOf(course(id, [], over));
 }
 
 // Hang a course off the winner of `round` — the edge the tree serves, and the only
@@ -104,7 +108,7 @@ function course(
 function hangOffWinner(parent: LineageNode, round: number, child: LineageNode): LineageNode {
   const children = parent.children.map((c) =>
     c.round === round && c.is_winner
-      ? { ...c, children: [...c.children, child], children_available: true }
+      ? { ...c, children: [...c.children, child] }
       : c,
   );
   return { ...parent, children };
@@ -127,11 +131,49 @@ describe("layout", () => {
       1,
       course("cycle_a_fork_b", cands([1])),
     );
-    const { totalLaneRows, laneByCycle } = layout(tree, new Set());
+    const { totalLaneRows, laneByKey } = layout(tree, new Set());
     expect(totalLaneRows).toBe(2);
-    expect(laneByCycle.get("cycle_a")!.laneSpan).toBe(1);
-    expect(laneByCycle.get("cycle_a")!.laneOffset).toBe(0);
-    expect(laneByCycle.get("cycle_a_fork_b")!.laneOffset).toBe(1);
+    expect(laneByKey.get(laneKey("cycle_a"))!.laneSpan).toBe(1);
+    expect(laneByKey.get(laneKey("cycle_a"))!.laneOffset).toBe(0);
+    expect(laneByKey.get(laneKey("cycle_a_fork_b"))!.laneOffset).toBe(1);
+  });
+
+  // Two L4 inner runs, one id. This is real: inner cycle ids are minted per sandbox,
+  // so sibling sandboxes repeat them — one id sits in three sandboxes on disk today.
+  // Keyed on `course.id` these two collapse onto one lane and a run vanishes from the
+  // forest; keyed on the address they are two courses, which is what they are.
+  it("two sandboxes' identically-named inner runs get their own lanes", () => {
+    const inner = (sandbox: string): LineageNode =>
+      course("cycle_inner", cands([1]), {
+        course_kind: "inner",
+        path: [
+          { campaign_id: "camp", cycle_id: sandbox },
+          { campaign_id: "inner_camp", cycle_id: "cycle_inner" },
+        ],
+      });
+    const tree = hangOffWinner(
+      hangOffWinner(course("cycle_a", cands([1, 1])), 1, inner("cycle_a")),
+      2,
+      inner("cycle_a_fork_b"),
+    );
+    const { totalLaneRows, laneByKey } = layout(tree, new Set());
+    // Three lanes: the root and BOTH inner runs — not two with one overwritten.
+    expect(totalLaneRows).toBe(3);
+    expect(laneByKey.size).toBe(3);
+    const a = laneKey("cycle_inner", {
+      path: [
+        { campaign_id: "camp", cycle_id: "cycle_a" },
+        { campaign_id: "inner_camp", cycle_id: "cycle_inner" },
+      ],
+    });
+    const b = laneKey("cycle_inner", {
+      path: [
+        { campaign_id: "camp", cycle_id: "cycle_a_fork_b" },
+        { campaign_id: "inner_camp", cycle_id: "cycle_inner" },
+      ],
+    });
+    expect(a).not.toBe(b);
+    expect(laneByKey.get(a)!.laneOffset).not.toBe(laneByKey.get(b)!.laneOffset);
   });
 
   it("expanded course reserves its span and pushes lanes below it down", () => {
@@ -140,34 +182,31 @@ describe("layout", () => {
       1,
       course("cycle_a_fork_b", cands([1])),
     );
-    const { totalLaneRows, laneByCycle } = layout(tree, new Set(["cycle_a"]));
-    expect(laneByCycle.get("cycle_a")!.laneSpan).toBe(4);
-    expect(laneByCycle.get("cycle_a")!.laneOffset).toBe(0);
+    const { totalLaneRows, laneByKey } = layout(tree, new Set([laneKey("cycle_a")]));
+    expect(laneByKey.get(laneKey("cycle_a"))!.laneSpan).toBe(4);
+    expect(laneByKey.get(laneKey("cycle_a"))!.laneOffset).toBe(0);
     // The collapsed fork now starts at row 4, not row 1.
-    expect(laneByCycle.get("cycle_a_fork_b")!.laneOffset).toBe(4);
+    expect(laneByKey.get(laneKey("cycle_a_fork_b"))!.laneOffset).toBe(4);
     expect(totalLaneRows).toBe(5);
   });
 
-  // What `round_column_offset` used to be told by the server: a course hangs off a
-  // candidate, so its columns start one right of THAT candidate — derived from the
-  // tree's own shape, so no fork-lane semantics reach the client.
   it("a child course's columns start one right of the candidate it hangs off", () => {
     const tree = hangOffWinner(
       course("cycle_a", cands([2, 2])),
       2,
       course("cycle_a_fork_b", cands([1])),
     );
-    const { laneByCycle } = layout(tree, new Set());
-    expect(laneByCycle.get("cycle_a")!.baseCol).toBe(0);
+    const { laneByKey } = layout(tree, new Set());
+    expect(laneByKey.get(laneKey("cycle_a"))!.baseCol).toBe(0);
     // Cut at the parent's round 2 (column 2) ⇒ the fork's round 0 is column 3.
-    expect(laneByCycle.get("cycle_a_fork_b")!.baseCol).toBe(3);
+    expect(laneByKey.get(laneKey("cycle_a_fork_b"))!.baseCol).toBe(3);
   });
 });
 
 describe("placeNodes", () => {
   it("collapsed: one summary node per round, chained", () => {
-    const { laneByCycle } = layout(course("cycle_a", cands([2, 3])), new Set());
-    const { nodes } = placeNodes(laneByCycle);
+    const { laneByKey } = layout(course("cycle_a", cands([2, 3])), new Set());
+    const { nodes } = placeNodes(laneByKey);
     const summary = nodes.filter((n) => !n.isExpanded);
     expect(summary).toHaveLength(2);
     expect(summary.map((n) => n.round)).toEqual([1, 2]);
@@ -176,14 +215,14 @@ describe("placeNodes", () => {
   });
 
   it("expanded: one node per candidate per round + winner→child chain segs", () => {
-    const { laneByCycle } = layout(course("cycle_a", cands([3, 2])), new Set(["cycle_a"]));
-    const { nodes, segs, spineByCycleRound } = placeNodes(laneByCycle);
+    const { laneByKey } = layout(course("cycle_a", cands([3, 2])), new Set([laneKey("cycle_a")]));
+    const { nodes, segs, spineByKeyRound } = placeNodes(laneByKey);
     const placed = nodes.filter((n) => n.isExpanded && n.round > 0);
     expect(placed).toHaveLength(5); // 3 + 2
     // Exactly one winner per round.
     expect(placed.filter((n) => n.round === 1 && n.isWinner)).toHaveLength(1);
     // Round 2's two children each chain from round 1's winner.
-    const r1winner = spineByCycleRound.get("cycle_a::r1")!;
+    const r1winner = spineByKeyRound.get(`${laneKey("cycle_a")}::r1`)!;
     for (const child of placed.filter((n) => n.round === 2)) {
       const seg = segs.find(
         (s) =>
@@ -202,9 +241,9 @@ describe("placeNodes", () => {
       2,
       course("cycle_a_fork_b", cands([1])),
     );
-    const { laneByCycle } = layout(tree, new Set(["cycle_a"]));
-    const { segs, spineByCycleRound } = placeNodes(laneByCycle);
-    const parentR2Winner = spineByCycleRound.get("cycle_a::r2")!;
+    const { laneByKey } = layout(tree, new Set([laneKey("cycle_a")]));
+    const { segs, spineByKeyRound } = placeNodes(laneByKey);
+    const parentR2Winner = spineByKeyRound.get(`${laneKey("cycle_a")}::r2`)!;
     const forkStem = segs.find(
       (s) => s.variant === "fork" && s.x1 === parentR2Winner.x && s.y1 === parentR2Winner.y,
     );
@@ -213,16 +252,16 @@ describe("placeNodes", () => {
 
   it("expanded: a held round advances nothing; the next round chains from the last winner", () => {
     // R1 wins, R2 is held (closed, no winner), R3 wins.
-    const { laneByCycle } = layout(
+    const { laneByKey } = layout(
       course("cycle_a", candsH([{ n: 2 }, { n: 2, held: true }, { n: 2 }])),
-      new Set(["cycle_a"]),
+      new Set([laneKey("cycle_a")]),
     );
-    const { nodes, segs, spineByCycleRound } = placeNodes(laneByCycle);
+    const { nodes, segs, spineByKeyRound } = placeNodes(laneByKey);
 
-    const r1winner = spineByCycleRound.get("cycle_a::r1")!;
+    const r1winner = spineByKeyRound.get(`${laneKey("cycle_a")}::r1`)!;
     // A held round mints NO new spine node — its spine entry is the retained
     // incumbent (round 1's winner), so a course cut here still anchors correctly.
-    expect(spineByCycleRound.get("cycle_a::r2")).toBe(r1winner);
+    expect(spineByKeyRound.get(`${laneKey("cycle_a")}::r2`)).toBe(r1winner);
     // No round-2 candidate is crowned.
     expect(nodes.filter((n) => n.round === 2 && n.isWinner)).toHaveLength(0);
 
@@ -246,45 +285,38 @@ describe("placeNodes", () => {
   });
 
   it("collapsed: a held round's summary node is marked not-won", () => {
-    const { laneByCycle } = layout(
+    const { laneByKey } = layout(
       course("cycle_a", candsH([{ n: 2 }, { n: 2, held: true }])),
       new Set(),
     );
-    const { nodes } = placeNodes(laneByCycle);
+    const { nodes } = placeNodes(laneByKey);
     const summary = nodes.filter((n) => !n.isExpanded);
     expect(summary.find((n) => n.round === 1)!.isWinner).toBe(true);
     expect(summary.find((n) => n.round === 2)!.isWinner).toBe(false);
   });
 
-  // A round that never CLOSED and a round that HELD both crown nobody. They are not
-  // the same fact, and the lone candidate of a never-closed round must not inherit
-  // the crown by being the only one there.
-  it("a never-closed round crowns nobody and is not mistaken for a held one", () => {
-    const { laneByCycle } = layout(
-      course("cycle_a", candsH([{ n: 1 }, { n: 1, open: true }])),
-      new Set(["cycle_a"]),
+  it("a lone candidate in a round that crowned nobody is not promoted", () => {
+    const { laneByKey } = layout(
+      course("cycle_a", candsH([{ n: 1 }, { n: 1, held: true }])),
+      new Set([laneKey("cycle_a")]),
     );
-    const { nodes } = placeNodes(laneByCycle);
-    const r2 = nodes.find((n) => n.round === 2)!;
-    expect(r2.isWinner).toBe(false);
-    expect(r2.roundClosed).toBe(false);
-    // Round 1 closed and elected — the two rounds are distinguishable.
-    const r1 = nodes.find((n) => n.round === 1)!;
-    expect(r1.isWinner).toBe(true);
-    expect(r1.roundClosed).toBe(true);
+    const { nodes } = placeNodes(laneByKey);
+    // Being the only candidate there is not an election.
+    expect(nodes.find((n) => n.round === 2)!.isWinner).toBe(false);
+    expect(nodes.find((n) => n.round === 1)!.isWinner).toBe(true);
   });
 
   it("single expanded course reproduces the intraloop spine (the 'cool one')", () => {
-    const { laneByCycle, maxCol } = layout(
+    const { laneByKey, maxCol } = layout(
       course("cycle_a", cands([2, 2, 1])),
-      new Set(["cycle_a"]),
+      new Set([laneKey("cycle_a")]),
     );
-    const { nodes, spineByCycleRound } = placeNodes(laneByCycle);
+    const { nodes, spineByKeyRound } = placeNodes(laneByKey);
     // 2 + 2 + 1 candidate nodes (no origin trunk)
     expect(nodes).toHaveLength(5);
     // A winner spine entry per round, columns ascending.
-    expect(spineByCycleRound.get("cycle_a::r1")!.x).toBe(LEFT_PAD + 1 * COL_W);
-    expect(spineByCycleRound.get("cycle_a::r3")!.x).toBe(LEFT_PAD + 3 * COL_W);
+    expect(spineByKeyRound.get(`${laneKey("cycle_a")}::r1`)!.x).toBe(LEFT_PAD + 1 * COL_W);
+    expect(spineByKeyRound.get(`${laneKey("cycle_a")}::r3`)!.x).toBe(LEFT_PAD + 3 * COL_W);
     expect(maxCol).toBe(3);
     // Band-centered round-1 fan: top candidate above center for span 2.
     const r1 = nodes.filter((n) => n.round === 1).sort((a, b) => a.y - b.y);

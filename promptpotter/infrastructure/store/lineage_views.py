@@ -1,63 +1,36 @@
-"""The lineage tree — ONE served shape, one owner, read at any depth.
+"""The lineage tree — the served genealogy, read at any depth.
 
 Nodes alternate, forever::
 
-    Course -> Candidate -> (Course | Sample) -> ...
+    Course -> Candidate -> Course -> ...
 
-A **course** is a cycle (a campaign root, a fork, or an L4 inner run). A **candidate**
-is C0 / C1.1 / … — a searchpoint the loop minted. At L4 a candidate's children ARE
-courses; that is the recursion, and it is why L5+ needs no new tier.
+A **course** is a cycle (a campaign root or an L4 inner run). A **candidate** is C0 /
+C1.1 — a searchpoint the loop minted. At L4 a candidate's children ARE courses; that is
+the recursion, so L5+ needs no new tier.
 
-Four collapses make it one thing rather than five:
+**A course's children are its TIMELINE:** the candidates it minted, plus every attempt
+its forks contributed, renumbered here. ``C{round}.{n}`` is a position in a course's
+private sequence — every course mints its own ``C0``/``C1.1`` — so a fork's own counter
+names nothing campaign-wide and the renumber is what makes the label mean something. A
+candidate this course minted is never renumbered.
 
-1. **A fork and an inner run are the same edge.** ``index.json::fork.from_candidate_id``
-   and ``index.json::spawned_by`` both mean "a course hanging off candidate X". One
-   resolver reads both, so the fork-lane geometry (``round_column_offset``,
-   post-divergence round filtering) has nothing left to compute — a course hangs off a
-   node; it does not need a lane.
-2. **A fork is not a node — its candidates land on the parent's timeline** (:func:`_contributions`).
-   A fork is an attempt the operator cut, so what it produced belongs on the campaign's ONE
-   sequence, renumbered there; the fork survives as a provenance stamp (``course_kind``,
-   ``steered_by``, and the ``path`` that reaches its own dashboard) on the candidates it
-   contributed. A fork that produced nothing is still a row — it is a cut that broke, and
-   the timeline that hides it cannot be counted on.
-3. **A fork's C0 is a REPLAY, and a replay merges into what it replays** (:func:`_is_replay`).
-   Structural, not a convention: ``CandidateMintedRecord.parent_id`` spans cycles, so a
-   campaign root's origin has no parent while a fork's origin always names the candidate it
-   was cut from. That C0 is not an attempt — it is the parent's attempt measured again — so
-   it disappears and the runs that measured it graft onto the candidate it replays. **This
-   is what removes the fork tier: a merge, not a hoist.** ``parent_id`` then goes back to
-   being what it is — a column hint for the dendrogram, never the tree's shape.
-4. **The label is minted, not derived** — for anything that HAS a minted one. Nothing here
-   renumbers an L1 candidate from its list position. A fork course never had a label to
-   mint, so collapse 2 assigns it one, and there is exactly one place that happens.
+**A fork is not a node.** It survives as a provenance stamp (``course_kind``,
+``steered_by``, ``path``) on the candidates it contributed; its ``path`` is what reaches
+its own dashboard. Its ``C0`` is a replay and merges into what it replays
+(:func:`_is_replay`). ``parent_id`` is a column hint for the dendrogram, never the tree's
+shape.
 
-**ONE timeline per campaign.** ``C{round}.{n}`` is a position in a course's private
-sequence, so every course mints its own ``C0``/``C1.1`` and the label alone names nothing:
-four forks cut off ``C0`` were all called ``C1.1``. Folding the forks onto the parent's
-sequence is what makes the label mean something campaign-wide — the fork cut fourth reads
-``C1.4``.
+**Two owners, and they cannot be collapsed.** IDENTITY comes from the ledger: it is the
+only witness independent of round close, and a round that died mid-flight still minted
+its candidates — at L4 their inner campaigns sit finished on disk under them. ELECTION, θ
+and ``cumulative_accuracy`` come from ``dashboard.json::rounds[]`` because the ledger does
+not carry them (:func:`_close_facts` says why) — do not try to fold them from a lookalike
+record. ``rounds/round_NNNN.json`` is the measurement record and is not a lineage source.
 
-**Why the ledger.** A round that never closed writes no round file and no ``dashboard.json``
-summary, but it *minted* its candidates — and at L4 their inner campaigns sit finished on
-disk under a parent that, read positionally, does not exist. The ledger is the only witness
-independent of round close, which is the entire reason IDENTITY comes from it.
-``rounds/round_NNNN.json`` stays what it always was: the measurement record. It is not a
-lineage source.
-
-**And why the dashboard, still.** Election, θ and ``cumulative_accuracy`` are round-CLOSE
-facts that the ledger genuinely does not carry (see :func:`_close_facts`), so they ride
-``dashboard.json::rounds[]`` — the declared projection for exactly that. This is not the
-old five-witness problem returning: identity has ONE owner (the ledger), measurement has
-ONE owner (the round close), and no surface re-derives either. A round that never closed
-simply has no winner here, which is the honest answer and the one the old surfaces refused
-to give.
-
-**The decision genealogy is NOT this one and must not become it.** ``mask/backprop.py``,
-``mask/divergence.py`` and the resume replayers ride the positional ``(cycle_id, round)``
-+ ``parent_cycle_id`` system, deliberately: it is hardened, moving it has no functional
-gain, and it cannot be ``ab``-validated. This module is a READ MODEL for display. It
-decides nothing.
+**This is a READ MODEL. It decides nothing.** The DECISION genealogy is a different system
+— ``mask/backprop.py``, ``mask/divergence.py`` and the resume replayers ride positional
+``(cycle_id, round)`` + ``parent_cycle_id``. Do not move them onto this: it is hardened, it
+cannot be ``ab``-validated, and there is no functional gain.
 """
 
 from __future__ import annotations
@@ -85,12 +58,8 @@ CourseKind = Literal["root", "fork", "diag", "sweep", "inner"]
 
 
 class LineageDivergence(BaseModel):
-    """Where an alternative criterion would have elected someone else.
-
-    It rides the node it describes (``LineageNode.divergence``) rather than a parallel list
-    keyed ``"{cycle_id}::r{round}"``: the client had to re-join two flat arrays onto the tree
-    by a hand-rolled string, and a tree that knows its own nodes can simply carry the fact.
-    """
+    """Where an alternative criterion would have elected someone else. Rides the node it
+    describes (``LineageNode.divergence``) — there is no parallel list to re-join."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -113,27 +82,19 @@ class LineageNode(BaseModel):
     parent_id: str | None = Field(
         default=None,
         description="The candidate this node descends from; null only at the true root. A "
-        "course carries the same edge its own C0 carries — a course descends from nothing "
-        "its origin does not.",
+        "course carries the same edge its own C0 carries.",
     )
     label: str = Field(
-        description="`C{round}.{n}` on the campaign's ONE timeline. Minted for a candidate "
-        "L1 produced. A FORK never had a label to mint, so it takes the next free index of "
-        "the round after the candidate it was cut from, by mint time — a hand-cut attempt is "
-        "numbered like any other. Never re-derived for a candidate that has a minted one.",
+        description="`C{round}.{n}` on the campaign's ONE timeline: this course's own "
+        "candidates keep their minted label; an attempt a fork contributed takes the next "
+        "free index of its round, by mint time.",
     )
     path: list[CycleHop] = Field(
         default_factory=list,
-        description="The addressable CyclePath of the course this node belongs to, root → "
-        "leaf. What lets a client select an inner node without re-deriving how to reach it.",
+        description="THE address, root → leaf: the course this node belongs to. A candidate "
+        "a fork contributed carries the FORK's path, so selecting it re-roots onto that fork.",
     )
     children: list[LineageNode] = Field(default_factory=list)
-    children_available: bool = Field(
-        default=False,
-        description="True with `children` empty = the lazy boundary: this node HAS children "
-        "the request's `depth` did not expand. False + empty = it genuinely has none. A "
-        "client must never read an empty list as proof of a leaf.",
-    )
 
     # -- candidate scalars ----------------------------------------------------
     round: int | None = Field(default=None, description="Column hint. Candidates only.")
@@ -146,17 +107,8 @@ class LineageNode(BaseModel):
     )
     is_winner: bool = Field(
         default=False,
-        description="Elected this round. False throughout a round that never closed: election "
-        "is stamped at close, so such a round HAS no winner and this tree declines to invent "
-        "one for a lone candidate.",
-    )
-    round_closed: bool = Field(
-        default=False,
-        description="Did this candidate's round CLOSE? It is what separates the two ways a "
-        "round can crown nobody: closed with no winner = HELD (it ran, nothing beat the "
-        "incumbent — render it held); not closed = the round never finished, so there is no "
-        "election to report. `is_winner` alone collapses those two into one false, which is "
-        "how a never-closed round's lone candidate got promoted to a fake winner.",
+        description="Elected this round. False throughout a round that never CLOSED — "
+        "election is stamped at close, so such a round has no winner to report.",
     )
     theta: float | None = Field(
         default=None,
@@ -195,9 +147,8 @@ class LineageNode(BaseModel):
     )
     divergence: LineageDivergence | None = Field(
         default=None,
-        description="Set when the request's lens would have FORKED the record at this node — "
-        "the marker. It rides the node itself; there is no parallel list to re-join by a "
-        "hand-rolled key. Only ever set on a closed round's node.",
+        description="Set when the request's lens would have FORKED the record at this node. "
+        "Only ever set on a closed round's node.",
     )
     divergent: bool = Field(
         default=False,
@@ -210,15 +161,13 @@ class LineageNode(BaseModel):
     # these carry the provenance a surface marks it by — ⑂, who steered it, what stopped it.
     course_kind: CourseKind | None = Field(
         default=None,
-        description="Courses, and the candidates a fork contributed to this timeline — on "
-        "those it is the provenance stamp (⑂) that marks an attempt the operator cut apart "
-        "from one L1 minted in this course.",
+        description="Courses, and the candidates a fork contributed here — on those it is "
+        "the ⑂ stamp marking an attempt the operator cut.",
     )
     run_phase: str = Field(
         default="",
-        description="Courses only: checkin | running | paused | detached | terminal — the ONE "
-        "server-owned run-state (`derive_run_phase`), the same value `/cycles` serves. A "
-        "sidebar drawing an inner run off this tree needs its ● without a second read.",
+        description="Courses only: checkin | running | paused | detached | terminal — the "
+        "ONE server-owned run-state (`derive_run_phase`), the same value `/cycles` serves.",
     )
     dataset_name: str = ""
     trigger: str = Field(default="", description="Fork trigger; empty for roots and inner runs.")
@@ -231,9 +180,8 @@ class LineageNode(BaseModel):
     best_accuracy: float | None = None
     origin_accuracy: float | None = Field(
         default=None,
-        description="This course's round-0 score. What a course bar shows before the course "
-        "has a `best_accuracy` — a fork that has only run its origin has one and not the "
-        "other, and reading only `best` blanks its bar.",
+        description="This course's round-0 score. A course that has only run its origin has "
+        "this and no `best_accuracy`, so reading only `best` blanks its bar.",
     )
     hearts: int | None = None
     lives_cap: int | None = None
@@ -246,9 +194,8 @@ class _Course(NamedTuple):
     path: CyclePath
     # NOT `index` — a NamedTuple field by that name shadows `tuple.index`.
     manifest: dict[str, object]
-    # An L4 inner run (a sandbox root) vs a fork/sweep/diag of THIS course. The two hang
-    # off a candidate by the same edge, but they are not the same KIND of thing and the
-    # tree renders them differently — see `_fork_as_candidate`.
+    # An L4 inner run (a sandbox root) vs a fork/sweep/diag of THIS course. Both hang off a
+    # candidate by the same edge; only a fork contributes attempts to this course's timeline.
     inner: bool
 
     @property
@@ -259,16 +206,11 @@ class _Course(NamedTuple):
 
 
 class _Reads:
-    """Every store this tree touches, read ONCE — for the life of one build, nothing longer.
+    """Every store this tree touches, read ONCE. ``enumerate_cycles`` answers a WHOLE store,
+    so asking it per course is the tree's O(n²).
 
-    ``enumerate_cycles`` answers a WHOLE store, and :func:`_child_courses` asked it once per
-    course: 23 scans of the same 7 cycles for one tree, each rebuilding the full picker entry
-    — a campaign load and a run-phase derivation — for every cycle in the store, to answer
-    one question ("which of you names me as parent?"). That is the tree's O(n²), and it is
-    why a 3-campaign workspace served this in 1.3 s.
-
-    Deliberately per-build and thrown away after: the file tree IS the dashboard, so a tree
-    cached across requests would serve a round that has since closed.
+    Per-build and thrown away after: the file tree IS the dashboard, so a memo outliving the
+    request would serve a round that has since closed.
     """
 
     def __init__(self) -> None:
@@ -285,12 +227,6 @@ class _Reads:
         if (key := (store.base_dir, campaign_id)) not in self._campaigns:
             self._campaigns[key] = store.campaigns.load_campaign(campaign_id)
         return self._campaigns[key]
-
-
-def _in_sandbox(store: Stores) -> bool:
-    """Is this store rooted in an L4 sandbox? ``build_stores`` roots one at
-    ``.inner/<cycle_id>``, so the answer is in the root path — no flag to thread."""
-    return ".inner" in store.projects_root.parts
 
 
 def _read_index(store: Stores, hop: CycleHop) -> dict[str, object]:
@@ -331,8 +267,8 @@ def _course_edge(index: dict[str, object]) -> tuple[str | None, str | None]:
 
 
 class _CloseFacts(NamedTuple):
-    """What only a round CLOSE knows about a candidate. Presence in the map IS
-    ``round_closed`` — a round that never closed has no entry at all."""
+    """What only a round CLOSE knows about a candidate. A round that never closed has no
+    entry at all, so its candidates never inherit a crown nobody awarded."""
 
     is_winner: bool
     theta: float | None
@@ -405,7 +341,8 @@ def _course_scalars(
     # those "root" would put two roots in one tree. A fork of an inner run stays a fork —
     # only the sandbox's own roots are the recursion's entry point.
     kind: CourseKind = sibling_kind(hop.cycle_id)
-    if kind == "root" and (spawned or _in_sandbox(store)):
+    # A sandbox store is rooted at `.inner/<cycle_id>`, so its own path is the answer.
+    if kind == "root" and (spawned or ".inner" in store.projects_root.parts):
         kind = "inner"
 
     return {
@@ -425,13 +362,6 @@ def _course_scalars(
         "hearts": hearts if isinstance(hearts, int) else None,
         "lives_cap": cap if isinstance(cap, int) else None,
     }
-
-
-def _candidates_of(store: Stores, hop: CycleHop) -> list[LedgerCandidate]:
-    ledger = (
-        cycle_dir_for(store.base_dir, hop.campaign_id, hop.cycle_id) / ".runtime" / "ledger.jsonl"
-    )
-    return scan_ledger_candidates(ledger)
 
 
 def _child_courses(store: Stores, path: CyclePath, reads: _Reads) -> list[_Course]:
@@ -507,27 +437,20 @@ def _bucket_by_parent(
 def _is_replay(node: LineageNode) -> bool:
     """A ``C0`` that descends from a candidate IS that candidate, re-run.
 
-    **Structural, not a convention.** A campaign root's origin has ``parent_id = None`` —
-    nothing preceded it. A fork's origin always names the candidate it was cut from, because
-    that is what a fork does: it borrows an origin and replays it rather than re-deriving one.
-    So this node is not an attempt; it is the parent's attempt, measured again in a new cycle.
-    It merges into what it replays (:func:`_contributions`) and the runs that measured it move
-    there — another measurement of the same searchpoint, filed where that searchpoint lives.
+    **Structural, not a convention:** a campaign root's origin has no parent; a fork's always
+    names the candidate it was cut from, because a fork borrows an origin rather than deriving
+    one. So it is not an attempt — it merges into what it replays, and the runs that measured
+    it move there (:func:`_contributions`).
     """
     return node.label == "C0" and node.parent_id is not None
 
 
 def _empty_attempt(course: LineageNode, *, cut_from: str, round_: int) -> LineageNode:
-    """A fork that put no candidate on the timeline, as the one row it still deserves.
+    """A fork that put no candidate on the timeline still holds its row — dropping it would
+    hand its index to the next real attempt.
 
-    Three of the forks on disk today died before minting anything (or minted only a replayed
-    C0). They contributed no attempt — but the operator cut them, they broke, and a timeline
-    that silently drops them cannot be counted on: the next real attempt would take their
-    index and read as the first try rather than the fourth.
-
-    ``accuracy`` is None on purpose. ``index.json::best_accuracy`` on such a fork is seeded
-    from the parent, so painting it as this attempt's fitness would report a number nothing
-    here measured. ``origin_accuracy`` still says where the cut started from.
+    ``accuracy`` is None on purpose: ``index.json::best_accuracy`` on such a fork is seeded
+    from the parent, so painting it would report a number nothing here measured.
     """
     return course.model_copy(
         update={
@@ -536,7 +459,6 @@ def _empty_attempt(course: LineageNode, *, cut_from: str, round_: int) -> Lineag
             "round": round_,
             "accuracy": None,
             "children": [],
-            "children_available": False,
         }
     )
 
@@ -558,13 +480,10 @@ def _contributions(
 ) -> _Contribution:
     """A fork, resolved onto the timeline of the course it was cut in.
 
-    Labels are NOT assigned here — :func:`_build` owns the timeline's numbering, and it is the
-    only place that can, because the index depends on every sibling.
-
-    Note the ``depth`` passed straight through rather than decremented. Depth is the caller's
-    dial on how far COURSES expand, and a fork is not a course node any more: its candidates
-    are *this* course's timeline, so their runs sit at this course's depth. A fork of a fork
-    resolves transitively — its attempts land on the fork's timeline, which lands on ours.
+    Labels are assigned by :func:`_build`, the only place that can: the index depends on every
+    sibling. ``depth`` passes straight through rather than decrementing — a fork is not a
+    course node, so its candidates are *this* course's timeline and their runs sit at this
+    course's depth. A fork of a fork resolves transitively.
     """
     course = _build(fork.store, fork.path, depth=depth, reads=reads)
     replays = [c for c in course.children if _is_replay(c)]
@@ -601,7 +520,9 @@ def _contributions(
 def _build(store: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> LineageNode:
     leaf = path[-1]
     index = _read_index(store, leaf)
-    candidates = _candidates_of(store, leaf)
+    candidates = scan_ledger_candidates(
+        cycle_dir_for(store.base_dir, leaf.campaign_id, leaf.cycle_id) / ".runtime" / "ledger.jsonl"
+    )
     children = _child_courses(store, path, reads)
     inner = [c for c in children if c.inner]
     # Mint order IS the campaign's timeline, so it is what positions a fork on it.
@@ -651,7 +572,6 @@ def _build(store: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Line
                 scored_samples=cand.scored_samples,
                 expected_samples=cand.expected_samples,
                 is_winner=close.is_winner,
-                round_closed=cand.candidate_id in closed,
                 theta=close.theta,
                 theta_se=close.theta_se,
                 cumulative_accuracy=close.cumulative_accuracy,
@@ -661,7 +581,6 @@ def _build(store: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Line
                     if depth > 0
                 ]
                 + replayed,
-                children_available=bool(under or replayed),
             )
         )
 
@@ -692,7 +611,6 @@ def _build(store: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Line
         label=leaf.cycle_id,
         path=hops,
         children=kids,
-        children_available=bool(kids),
         **_course_scalars(store, leaf, index, reads),
     )
 
@@ -700,8 +618,6 @@ def _build(store: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Line
 def build_lineage_tree(store: Stores, path: CyclePath, *, depth: int = 1) -> LineageNode:
     """The course at *path* and its subtree, expanded *depth* course-levels down.
 
-    ``depth=0`` returns the course with its candidates and ``children_available`` set
-    wherever a candidate has courses beneath it — the lazy boundary a sidebar expands into.
     Each level costs one ledger scan plus two small JSON reads per course, so depth is the
     caller's cost dial and never a hidden recursion.
     """

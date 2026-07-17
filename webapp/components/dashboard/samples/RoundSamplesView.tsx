@@ -7,9 +7,9 @@ import { useWorkspace } from "@/lib/workspace";
 import { useEffectiveRound } from "@/lib/hooks/useEffectiveRound";
 import { useRoundSource } from "@/lib/hooks/useRoundSource";
 import { useRoundCandidates } from "@/lib/hooks/useRoundCandidates";
-import { useForest } from "@/lib/hooks/useForest";
-import { innerPanelIndex, samplesForRow } from "@/lib/derivations";
-import type { CycleListEntry } from "@/lib/api";
+import { useCampaignTree } from "@/lib/hooks/useCampaignTree";
+import { innerPanelIndex, pathOf, samplesForRow } from "@/lib/derivations";
+import type { LineageNode } from "@/lib/api";
 import type { CandidateRow, SampleRow } from "@/lib/types";
 import { RoundSamplesBody, type StatusFilter } from "./RoundSamplesBody";
 import { RoundSamplesEmptyState } from "./RoundSamplesEmptyState";
@@ -26,14 +26,21 @@ export function RoundSamplesView() {
   // cycle's `rounds/`, not the outer root's) — the same address the dashboard
   // stream uses. `useRoundSource` owns the descend-aware fetch + live guard.
   // `leafIsL4`: are this course's samples inner campaigns rather than scored rows?
-  // The workspace's answer, off the LEAF's campaign — the same one the candidates
-  // card branches on, so the two surfaces cannot disagree about the course.
+  // The leaf campaign's DECLARED backend type — not "did the tree find inner runs".
+  // An L4 course whose first cells are still minting has no runs filed yet, and
+  // inferring the mode from the tree would render those cells as scored rows and
+  // tally every null `is_hit` as a MISS. The declaration is the honest input; the
+  // tree answers which run measured which cell, not what kind of course this is.
   const { viewedPath, leafCycleId, leafIsL4: isL4, drillInto } = useWorkspace();
-  // The sandbox this course's cells ran in. Fetched only when it has one — and
-  // shared with every other surface reading this same path, one poll between them.
-  const inner = useForest(viewedPath ?? [], isL4 && viewedPath != null);
-  const panel = useMemo(() => innerPanelIndex(inner.cycles), [inner.cycles]);
-  const openRun = (run: CycleListEntry): void => drillInto(run.campaign_id, run.cycle_id);
+  // The viewed course's served tree — the runs filed under its candidates. Rooted at
+  // the VIEWED path, not the campaign root: a fork renders its own timeline, and its
+  // candidates wear its own labels, which is what the bars below are keyed on.
+  const { root } = useCampaignTree(viewedPath ?? [], isL4 && viewedPath != null);
+  const panel = useMemo(() => innerPanelIndex(root), [root]);
+  const openRun = (run: LineageNode): void => {
+    const at = pathOf(run).at(-1);
+    if (at) drillInto(at.campaignId, at.cycleId);
+  };
   const { setSelectionForCandidate, setSelectionForRound, candidate } = useSelection();
   // The groups are read from the leaf's round source, so the leaf is the cycle
   // that produced these candidates — the selection names it, and the panes it

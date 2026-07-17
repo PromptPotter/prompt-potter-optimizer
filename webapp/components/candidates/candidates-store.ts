@@ -45,11 +45,15 @@ interface CandidatesState {
   weights: Record<string, number>;
   seededForCycle: string | null;
 
-  // Forest lane expand set. Lives here rather than in `useLineage`'s local state
-  // so it survives the tab swap like every other field on this card.
+  // Forest lane expand set — LANE KEYS (`nodeKeyOf`), not cycle ids: inner cycle ids
+  // repeat across sibling sandboxes, so an id would expand two lanes at once. Lives
+  // here rather than in `useLineage`'s local state so it survives the tab swap like
+  // every other field on this card.
   expanded: ReadonlySet<string>;
   expandedForCampaign: string | null;
-  expandedForCycle: string | null;
+  // The lane the default expansion was applied for — the latch that keeps a manual
+  // collapse from being undone on the next render.
+  expandedForLane: string | null;
 }
 
 let state: CandidatesState = {
@@ -62,7 +66,7 @@ let state: CandidatesState = {
   seededForCycle: null,
   expanded: new Set<string>(),
   expandedForCampaign: null,
-  expandedForCycle: null,
+  expandedForLane: null,
 };
 
 const listeners = new Set<() => void>();

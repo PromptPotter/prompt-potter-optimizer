@@ -61,7 +61,7 @@ export interface CandidateRow {
 // halves of the Sequence view cannot disagree on count, order, or label —
 // there is nothing for them to disagree with.
 export interface CandidateView extends CandidateRow {
-  // Served What-If lens value (the lineage overlay's `lensValueByCandidate`),
+  // Served What-If lens value (the node's own `lens_value`),
   // never recomputed client-side. `null` when no `score:` lens is active or the
   // candidate is unscorable under it.
   whatif: number | null;

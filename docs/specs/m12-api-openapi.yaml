@@ -1233,12 +1233,10 @@ paths:
 
         The round-CLOSE facts (`is_winner`, `theta`, `cumulative_accuracy`) come from
         `dashboard.json::rounds[]`, the declared projection for them — the ledger genuinely
-        does not carry them. `round_closed` separates the two ways a round crowns nobody:
-        closed with no winner = HELD; not closed = no election to report. So a round that
-        never closed reports **no winner** rather than promoting its lone candidate.
+        does not carry them. A round that never closed reports **no winner** rather than
+        promoting its lone candidate.
 
-        `depth` expands N course-levels; a node with `children_available: true` and an
-        empty `children` is the lazy boundary a client expands into. Conditional-GET
+        `depth` expands N course-levels. Conditional-GET
         rides the newest mtime across the subtree's `ledger.jsonl` + `index.json` — the
         ledger bumps per candidate, so a 2 s poll sees an in-flight candidate the moment
         it starts, which `dashboard.json`'s mtime never guaranteed. A `lens`/`samples`
@@ -1267,8 +1265,7 @@ paths:
           in: query
           required: false
           description: |
-            How many COURSE levels to expand. `0` = this course + its candidates only,
-            with `children_available` marking where courses hang below.
+            How many COURSE levels to expand. `0` = this course + its candidates only.
           schema: { type: integer, minimum: 0, maximum: 8, default: 1 }
         - name: lens
           in: query
@@ -1961,7 +1958,7 @@ components:
         strictly alternate. Declared in full here rather than as an open object: the
         `/lineage` response this replaces was `additionalProperties: true`, and that hole
         is exactly how five disagreeing lineage shapes went unnoticed.
-      required: [kind, id, label, path, children, children_available]
+      required: [kind, id, label, path, children]
       additionalProperties: false
       properties:
         kind:
@@ -1989,12 +1986,6 @@ components:
         children:
           type: array
           items: { $ref: '#/components/schemas/LineageNode' }
-        children_available:
-          type: boolean
-          description: |
-            True with `children` empty = the lazy boundary: this node HAS children the
-            request's `depth` did not expand. False + empty = it genuinely has none. A
-            client must never read an empty list as proof of a leaf.
         round:
           type: [integer, "null"]
           description: Column hint. Candidates only — rounds are not a tier.
@@ -2011,13 +2002,6 @@ components:
           description: |
             Elected this round. False throughout a round that never closed — such a round
             has no winner, and a lone candidate is not promoted to one.
-        round_closed:
-          type: boolean
-          description: |
-            Did this candidate's round CLOSE? It separates the two ways a round crowns
-            nobody: closed with no winner = HELD (it ran, nothing beat the incumbent);
-            not closed = it never finished, so there is no election to report. `is_winner`
-            alone collapses those into one `false`.
         theta:
           type: [number, "null"]
           description: |
@@ -2090,6 +2074,7 @@ components:
             An inner run's benchmark task. Load-bearing: every task runs for every
             candidate, so the candidate edge alone does not identify an inner run.
         best_accuracy: { type: [number, "null"] }
+        origin_accuracy: { type: [number, "null"] }
         hearts: { type: [integer, "null"] }
         lives_cap: { type: [integer, "null"] }
 

@@ -1,52 +1,33 @@
-// The `/tree` walk — THE normalizer for the served genealogy, peer of
-// `round-candidates.ts` (which normalizes the live single-cycle `dashboard.json`).
-// Two sources, two derivations, one each — a second copy of either is the drift the
-// candidate spine exists to prevent.
+// The `/tree` walk — THE reader of the served genealogy, peer of `round-candidates.ts`
+// (which normalizes the live single-cycle `dashboard.json`). Two sources, one derivation
+// each; a second copy of either is drift.
 //
-// The tree alternates `course → candidate → (course | sample)` at every depth, so
-// everything here is one recursion rather than a per-tier rule. Identity is served:
-// `candidate_id` and `label` are minted facts on the node, never re-derived from a
-// list position — which is what the position fallbacks used to be papering over.
+// The tree alternates `course → candidate → course` at every depth, so this is one
+// recursion rather than a per-tier rule. `id` and `label` are minted facts on the node —
+// never re-derived from a list position.
 
 import type { LineageNode } from "@/lib/api";
+import { encodeCyclePath, type CyclePath } from "@/lib/ids";
 
-export interface LineageCandidate {
-  candidateId: string;
-  // `C0` for the origin, `C{round}.{n}` otherwise — the SAME string the round file,
-  // the console and the candidates chart use. Minted at L1/origin and served.
-  label: string;
-  round: number;
-  accuracy: number | null;
-  compositeFitness: number | null;
-  isWinner: boolean;
-  // Did this round elect a winner at all? A held round advances nobody, and a
-  // consumer that infers "winner = first candidate" crowns an eliminated one.
-  advanced: boolean;
-  // Did this round CLOSE? It separates the two ways a round crowns nobody: closed
-  // with no winner = held (it ran, nothing beat the incumbent); not closed = it
-  // never finished, so there is no election to report. `advanced` alone collapses
-  // those into one false — which is how a never-closed round's lone candidate got
-  // promoted to a fake winner.
-  roundClosed: boolean;
-  // Did this round have RIVALS? Round 0 runs one candidate — the origin — so its
-  // `is_winner` is true by having nobody to beat. That is a fact about the round's
-  // shape, not an achievement, and badging C0 "won" beside the candidate that
-  // actually won put two winners on one course.
-  contested: boolean;
-  // A FORK the operator cut, folded onto this course's timeline as the attempt it is.
-  // `candidateId` is then the fork's own cycle_id, and `label` is its position on the
-  // campaign's ONE timeline — the fork cut fourth reads `C1.4`. Served: a fork's label
-  // cannot be minted (it is not an L1 candidate), and every course mints its own private
-  // `C1.1`, so the per-course counter names nothing campaign-wide.
-  isFork: boolean;
-  // The label of the candidate this fork was CUT FROM (`C0`) — a badge, never the name.
-  // Null for anything L1 minted.
-  cutFrom: string | null;
+// A node's address. The served hops are the wire's snake_case; `CyclePath` is the app's.
+// ONE conversion, here, so no surface re-maps a served path into an address by hand.
+export function pathOf(node: LineageNode): CyclePath {
+  return node.path.map((h) => ({ campaignId: h.campaign_id, cycleId: h.cycle_id }));
 }
 
-// Every course in the tree, root first. A fork and an L4 inner run are the same
-// edge here (both are courses hanging off a candidate), so one walk reaches every
-// depth and no caller branches on which kind it found.
+// A node's children, split by what they are. A course's children are its timeline; a
+// candidate's are the courses that measured it. Nothing else is in either list.
+export function candidatesOf(course: LineageNode | undefined): LineageNode[] {
+  return (course?.children ?? []).filter((c) => c.kind === "candidate");
+}
+
+// The courses hanging off a candidate — an L4 inner run filed under it. A fork is NOT one
+// of these: a fork is not a node, its candidates sit on the parent's timeline.
+export function childCourses(candidate: LineageNode | undefined): LineageNode[] {
+  return (candidate?.children ?? []).filter((c) => c.kind === "course");
+}
+
+// Every course in the tree, root first.
 export function walkCourses(root: LineageNode): LineageNode[] {
   const out: LineageNode[] = [];
   const visit = (node: LineageNode): void => {
@@ -57,55 +38,53 @@ export function walkCourses(root: LineageNode): LineageNode[] {
   return out;
 }
 
-// One course's candidates, flat and in round order. `advanced` / `contested` are
-// facts about a round's SET of candidates, so they're folded from the siblings —
-// the node carries what only it knows, this carries what only the set knows.
-export function courseCandidates(course: LineageNode): LineageCandidate[] {
-  const cands = course.children.filter((c) => c.kind === "candidate");
-  const labelById = new Map(cands.map((c) => [c.id, c.label]));
-  const perRound = new Map<number, LineageNode[]>();
-  for (const c of cands) {
-    const arr = perRound.get(c.round ?? 0) ?? [];
-    arr.push(c);
-    perRound.set(c.round ?? 0, arr);
-  }
-  return cands.map((c) => {
-    const siblings = perRound.get(c.round ?? 0) ?? [];
-    // A fork carries the provenance of the course it is — that is what marks it apart
-    // from an attempt L1 minted.
-    const isFork = c.course_kind !== null;
-    return {
-      candidateId: c.id,
-      label: c.label,
-      round: c.round ?? 0,
-      accuracy: c.accuracy,
-      compositeFitness: c.composite_fitness,
-      isWinner: c.is_winner,
-      advanced: siblings.some((s) => s.is_winner),
-      roundClosed: c.round_closed,
-      contested: siblings.length > 1,
-      isFork,
-      cutFrom: isFork ? (labelById.get(c.parent_id ?? "") ?? null) : null,
-    };
-  });
+// Courses below this one — the "+N more" count on a collapsed root. `walkCourses`
+// includes the root itself; this counts what hangs BELOW it.
+export function countDescendants(root: LineageNode): number {
+  return walkCourses(root).length - 1;
 }
 
-// Every fork on the tree, keyed by its own cycle_id — what a surface that already has a
-// fork (from the flat `/cycles` registry) asks for its place on the timeline.
-export function forkAttempts(root: LineageNode): ReadonlyMap<string, LineageCandidate> {
-  const m = new Map<string, LineageCandidate>();
-  for (const course of walkCourses(root)) {
-    for (const cand of courseCandidates(course)) {
-      if (cand.isFork) m.set(cand.candidateId, cand);
+// THE lookup: the node at an address.
+//
+// **The address is `(path, candidateId)`, read off the node it names** — never a label
+// (`C1.1` is a course's private position, minted by every course) and never a bare cycle_id
+// (inner ids repeat across sibling `.inner/` sandboxes; `path` is unique by construction).
+//
+// `candidateId` null addresses the course itself. A fork's path with no candidate addresses
+// nothing, correctly: there is no fork node to view.
+export function nodeAt(
+  root: LineageNode,
+  path: CyclePath,
+  candidateId?: string | null,
+): LineageNode | undefined {
+  const want = encodeCyclePath(path);
+  const wantKind = candidateId ? "candidate" : "course";
+  const visit = (node: LineageNode): LineageNode | undefined => {
+    if (
+      node.kind === wantKind &&
+      encodeCyclePath(pathOf(node)) === want &&
+      (!candidateId || node.id === candidateId)
+    ) {
+      return node;
     }
-  }
-  return m;
+    for (const child of node.children) {
+      const hit = visit(child);
+      if (hit) return hit;
+    }
+    return undefined;
+  };
+  return visit(root);
 }
 
-// `cycle_id` → its candidates, for every course in the tree.
-export function candidatesByCourse(root: LineageNode): ReadonlyMap<string, LineageCandidate[]> {
-  const m = new Map<string, LineageCandidate[]>();
-  for (const course of walkCourses(root)) m.set(course.id, courseCandidates(course));
-  return m;
+// A node's key, unique across the whole tree — unlike its `id`, since course ids collide
+// across sandboxes.
+export function nodeKeyOf(node: LineageNode): string {
+  return `${encodeCyclePath(pathOf(node))}|${node.id}`;
 }
 
+// The label of the candidate a fork was CUT FROM — a badge, never the name. Null for
+// anything this course minted itself.
+export function cutFromLabel(node: LineageNode, siblings: readonly LineageNode[]): string | null {
+  if (node.course_kind === null) return null;
+  return siblings.find((s) => s.id === node.parent_id)?.label ?? null;
+}

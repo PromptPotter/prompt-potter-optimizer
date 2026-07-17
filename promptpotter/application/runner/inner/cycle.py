@@ -32,8 +32,7 @@ What makes the inner cycle a *measurement* rather than a campaign is declared in
 It binds recursion depth, the evidence epoch (the archive stays shared as a content-addressed
 CACHE, but is hidden as cross-run MEMORY, so the instrument does not depend on how often it has
 been used) and the optimizer decoding clamp, together. Read that module before changing any of
-them: they used to be three independent ambient toggles set by hand here, and forgetting any one
-silently reintroduced the leak — the resulting number still looked like a measurement.
+them.
 
 The spawning cycle publishes its context (:func:`publish_inner_spawn_context`,
 called from ``runner/entry.py::run_optimization`` for every cycle) so the

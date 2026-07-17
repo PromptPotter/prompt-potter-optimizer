@@ -79,16 +79,20 @@ interface WorkspaceState {
   // which is not in `campaigns` (it lives in a sandbox) and correctly reads false.
   // Derived here because three surfaces branch on it and each had re-run the lookup.
   leafIsL4: boolean;
-  // The candidate NODE the tree is parked on inside the leaf course, by label ("C0",
-  // "C1.1"), or null for the course itself. A candidate is a tier of the lineage tree but
-  // never a hop of a path — the course carries the address — so it rides beside
-  // `viewedPath` rather than inside it.
+  // The candidate NODE the tree is parked on inside the leaf course, by its served `id`,
+  // or null for the course itself. A candidate is a tier of the lineage tree but never a
+  // hop of a path — the course carries the address — so it rides beside `viewedPath`
+  // rather than inside it.
+  //
+  // An ID, never a LABEL. `C1.1` is a course's PRIVATE position and every course mints
+  // one, so a label addresses nothing across a campaign; the id is minted and unique. Both
+  // halves of the address are read off the node that was clicked — nothing builds one.
   //
   // This is NAVIGATION: "which node's children do the bars plot". It is NOT
   // `SelectionContext.candidate`, which is INSPECTION: "which bar is lit". Only the tree
   // writes this one; a bar click writes the other. They were one slot, which made the
   // chart its own input — clicking a bar re-plotted the chart under the operator's cursor.
-  viewedCandidate: string | null;
+  viewedCandidateId: string | null;
   datasetName: string | null;
   following: boolean; // the viewed path tracks the active pointer
   cycles: CycleListEntry[];
@@ -117,7 +121,7 @@ interface WorkspaceState {
   // Pin an explicit cycle address → following=false. The general verb; a hop
   // can be top-level or an inner descendant. `candidate` parks the tree on one of that
   // course's candidates; omitting it means the course itself.
-  selectCyclePath: (path: CyclePath, candidate?: string | null) => void;
+  selectCyclePath: (path: CyclePath, candidateId?: string | null) => void;
   // Convenience: pin a top-level (1-hop) cycle. Both ids required — a cycle_id
   // alone is ambiguous across campaigns.
   selectCycle: (campaignId: string, cycleId: string) => void;
@@ -171,7 +175,7 @@ export function WorkspaceProvider({
   const [pinnedPath, setPinnedPath] = useState<CyclePath | null>(null);
   // Scoped to `pinnedPath` — every write below sets the pair, so a candidate can never
   // outlive the course that owns it.
-  const [viewedCandidate, setViewedCandidate] = useState<string | null>(null);
+  const [viewedCandidateId, setViewedCandidateId] = useState<string | null>(null);
   const [following, setFollowing] = useState(true);
   // The `?path=` deep-link is read in a mount effect rather than a useState
   // initializer so the static-export HTML and the first client render agree (no
@@ -281,7 +285,7 @@ export function WorkspaceProvider({
         if (prevPointer !== null && prevPointer !== nextPointer) {
           setFollowing(true);
           setPinnedPath(null); // a fresh outer mint invalidates any pin
-          setViewedCandidate(null);
+          setViewedCandidateId(null);
         }
         prevActivePointerRef.current = nextPointer;
       }
@@ -337,9 +341,9 @@ export function WorkspaceProvider({
   // The viewed path: the server pointer (a top-level 1-hop cycle) while
   // following, else the explicit pin. Memoized because it is an ADDRESS, and an
   // address that changes identity every render is not one: consumers key polls,
-  // memos and callbacks on it (`useForest`, the candidates card's `onSelect` — which
-  // rides the chart's `options` memo, so a fresh array here forced a `chart.update()`
-  // on every 2 s pointer tick).
+  // memos and callbacks on it (`useCampaignTree`, the candidates card's `onSelect` —
+  // which rides the chart's `options` memo, so a fresh array here forced a
+  // `chart.update()` on every 2 s pointer tick).
   const viewedPath: CyclePath | null = useMemo(
     () =>
       following
@@ -404,7 +408,7 @@ export function WorkspaceProvider({
     (path: CyclePath, candidate: string | null = null) => {
       setFollowing(false);
       setPinnedPath(path);
-      setViewedCandidate(candidate);
+      setViewedCandidateId(candidate);
     },
     [],
   );
@@ -428,13 +432,13 @@ export function WorkspaceProvider({
   // 1-hop pointer, so there is nothing to pop).
   const backToOuter = useCallback(() => {
     setPinnedPath((prev) => (prev && prev.length > 1 ? prev.slice(0, 1) : prev));
-    setViewedCandidate(null);
+    setViewedCandidateId(null);
   }, []);
 
   const followActive = useCallback(() => {
     setFollowing(true);
     setPinnedPath(null);
-    setViewedCandidate(null);
+    setViewedCandidateId(null);
   }, []);
 
   // Switching tabs re-queries `/campaigns?lifecycle=` — bump revalidation so the
@@ -454,7 +458,7 @@ export function WorkspaceProvider({
     leafCampaignId,
     leafCycleId,
     leafIsL4,
-    viewedCandidate,
+    viewedCandidateId,
     datasetName,
     following,
     cycles,

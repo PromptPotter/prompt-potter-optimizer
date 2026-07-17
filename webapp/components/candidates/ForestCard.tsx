@@ -25,7 +25,7 @@ import { useLineage } from "./useLineage";
 // the dendrogram (the thing it's the counterpart to) and writes `showForest`.
 export function ForestCard() {
   const { dash } = useDashboard();
-  const { campaignId, cycleId, selectCycle: onSelectCycle } = useWorkspace();
+  const { campaignId, cycleId, viewedPath, selectCycle: onSelectCycle } = useWorkspace();
   const {
     tree,
     valueByKey,
@@ -38,7 +38,7 @@ export function ForestCard() {
     isInheritedSibling,
     parentId,
     cleanup,
-  } = useLineage({ campaignId, cycleId });
+  } = useLineage({ campaignId, cycleId, path: viewedPath });
 
   return (
     <CardFrame
