@@ -1,22 +1,29 @@
 ---
 name: potter-debt-sweep
-description: The daily automated code-hygiene sweep for PromptPotter. Runs a five-lens verification audit (dead code / fallbacks+hidden-defaults / structural / webapp R-36 / doc-drift), verifies every finding before touching anything, applies only the gate-safe fixes, reconciles the debt backlog, and appends to one rolling PR. Use on the daily schedule, before any release, or whenever the operator says "run the debt sweep" / "do the daily cleanup" / "sweep for untracked debt". Edits code autonomously — so the verify-before-act discipline and the gate are non-negotiable. Distinct from spec-buddy (spec docs, not code).
+description: The code-hygiene sweep for PromptPotter. Runs a five-lens verification audit (dead code / fallbacks+hidden-defaults / structural / webapp R-36 / doc-drift), verifies every finding before touching anything, applies only the gate-safe fixes to the working tree, reconciles the debt backlog, and reports. Leaves the tree dirty for the operator to review — it never branches, commits, or pushes. Use before any release, or whenever the operator says "run the debt sweep" / "do the daily cleanup" / "sweep for untracked debt". Edits code autonomously — so the verify-before-act discipline and the gate are non-negotiable. Distinct from spec-buddy (spec docs, not code).
 model: opus
 ---
 
-# potter-debt-sweep — the daily code-hygiene PR
+# potter-debt-sweep — the code-hygiene sweep
 
-**Goal:** every day, surface code debt the linters can't (dead code, hidden
-defaults, single-caller indirection, client-side scoring, doc drift), apply
-*only* the fixes that are provably safe and pass the full gate, file the rest
-on the backlog, and **append to one rolling PR** so the operator reviews at leisure and `main`
-never takes an unreviewed auto-edit. The operator must be able to trust this
-running unattended — so the rigor below is the product, not the speed.
+**Goal:** surface code debt the linters can't (dead code, hidden defaults,
+single-caller indirection, client-side scoring, doc drift), apply *only* the
+fixes that are provably safe and pass the full gate, file the rest on the
+backlog, and **leave the result in the working tree for the operator to review**.
+The rigor below is the product, not the speed.
 
-This skill is the **explicit exception** to "commit straight to main" (R-20)
-and "never push unless told" (R-19): the operator has standing-authorized this
-skill's runs to branch → commit → push → PR. It still NEVER commits to `main`
-directly and NEVER touches a sibling repo (TermNorm, marketing).
+**The deliverable is a dirty tree plus a report — never a PR.** This skill does
+not branch, commit, push, or open a PR. An earlier version pushed to a rolling
+`debt-sweep/rolling` PR; it sat unmerged until it was 79 commits behind, and its
+own doc line-ref fixes went stale *inside* it — the PR would have landed numbers
+that were wrong by the time anyone read it. It was closed and the branch deleted.
+A review artifact the operator has to leave their workflow to find does not get
+reviewed. Report where they already are instead.
+
+Because the sweep leaves edits uncommitted, **name every path you touched in the
+report** — a concurrent session's `git add -A` would otherwise sweep them up.
+It still NEVER commits to `main` and NEVER touches a sibling repo (TermNorm,
+marketing).
 
 ---
 
@@ -36,12 +43,10 @@ directly and NEVER touches a sibling repo (TermNorm, marketing).
    `python -m uv run ruff check promptpotter/ tests/ && python -m uv run mypy promptpotter/ &&
    python -m uv run pytest -q`. The `--frozen` flag installs the exact `uv.lock` graph CI uses;
    never gate against an ad-hoc `pip install` set. If already red, abort and report.
-5. **Establish the rolling branch.** `gh pr list --head debt-sweep/rolling --state open`. If a
-   rolling PR is open → `git checkout -B debt-sweep/rolling origin/debt-sweep/rolling &&
-   git merge --no-edit origin/main` (fold main in by **merge, never rebase/force-push**; on a
-   conflict, abort and report — let the operator land it). If none is open → stay on `main`; the
-   fresh `debt-sweep/rolling` branch is cut in Phase 7. The audit runs on this ref so prior-day
-   fixes not yet merged aren't re-flagged.
+5. **Stay on `main`.** There is no sweep branch — the audit runs on `main` itself and the
+   fixes stay uncommitted in the tree. Prior fixes can't be re-flagged because they either
+   landed (the operator committed them) or are still in the tree in front of you; anything
+   deliberately *not* fixed lives on the backlog, which Phase 1 loads as the exclusion set.
 
 ## Phase 1 — Baseline
 
@@ -58,7 +63,17 @@ directly and NEVER touches a sibling repo (TermNorm, marketing).
 Spawn **five `general-purpose` agents in one message** (one per lens). Each gets:
 the high-confidence bar ("verified by tracing call sites + reading bodies, NOT a
 spotted smell"), the exclusion set from Phase 1, and the output contract
-(`file:line` · one-sentence verified why · proposed action · confidence). The lenses:
+(`file:line` · one-sentence verified why · proposed action · confidence).
+
+**A zero from ripgrep is not a zero.** `rg` silently skips any file holding a NUL byte when
+recursing — no warning, unlike `grep`'s "Binary file … matches" — and it cannot find such
+files either, since searching for `\x00` skips exactly the files that contain one. The tool
+cannot see its own blind spot, so a "zero call sites" verdict is only as good as `rg`'s
+ability to read every candidate file. Two such files were found on 2026-07-17 (one of them
+the backlog itself), each having manufactured false dead-code findings. Confirm any
+zero-callers claim with a second shape — `git grep`, or a byte scan over `git ls-files`.
+
+The lenses:
 
 1. **Dead code & speculative surface** — params never read; `X | None` returns always non-None; default kwargs no caller overrides; Pydantic/dataclass fields declared-but-unpopulated; enum variants with no construction site; unreferenced symbols. *Verify: grep ALL refs across `promptpotter/` + `tests/` + `webapp/` (wire keys) + `datasets/` (JSON).*
 2. **Fallbacks & hidden defaults (R-03/R-04/R-24/R-07)** — `.get(k, default)` on contract-guaranteed keys; `X or <default>` masking a contract value; try/except that swallows+defaults; default kwargs encoding an experiment knob; breadcrumb/back-compat comments + the shim they guard. *Skip the two sanctioned fallbacks (score_population synthetic-0; load-boundary deprecated-sample gate) and external-input boundary guards (file/JSON ingest, `extra='forbid'` user-config).*
@@ -97,8 +112,10 @@ After applying the safe fixes, gate through the **pinned** env (same as Phase 0.
 `python -m uv run ruff format promptpotter/ tests/` →
 `python -m uv run ruff check promptpotter/ tests/` → `python -m uv run mypy promptpotter/` →
 `python -m uv run pytest -q`. If any TypeScript changed: `cd webapp && npm run lint && npx tsc --noEmit && npm run test && npm run build`.
-If the gate goes red, **revert the offending edit** (`git checkout -- <file>`) and
-re-gate — do not open a PR with a red gate. A fix that can't pass the gate becomes a backlog entry instead.
+If the gate goes red, **revert the offending edit** and re-gate. A fix that can't pass the
+gate becomes a backlog entry instead. Revert by restoring the specific hunk you wrote —
+**never `git checkout -- <file>`**: it resets to HEAD, not to "before my edit", so on a tree
+that already holds operator WIP or another sweep fix it destroys work you didn't write.
 
 ## Phase 6 — Reconcile the backlog
 
@@ -110,29 +127,20 @@ open a new dated section — the chronological sweep-log shape was retired 2026-
 readiness buckets. Re-confirm any stale-looking existing entry against the code before
 trusting it (entries decay); fix or drop a wrong one as part of the sweep.
 
-## Phase 7 — Append to the rolling PR
+## Phase 7 — Report, leave the tree dirty
 
-One stable branch, `debt-sweep/rolling`, carries every sweep until the operator merges it —
-daily runs **append**, they never open a second PR. (The 06-15 pile-up was fresh-branch-per-day;
-rolling collapses the queue to one reviewable PR.)
+The fixes stay **uncommitted in the working tree**. Do not branch, commit, push, or open a PR.
+The operator reads the report, reviews `git diff`, and commits what they want.
 
-- Branch: always `debt-sweep/rolling` (set up in Phase 0.5 — already checked out if a PR was open).
-- Commit in **~2 coherent commits** (R-16): one for the code fixes
-  (`refactor: drop dead code + hidden defaults (daily debt sweep)`), one for docs/backlog
-  (`docs: fix <surface> drift + reconcile debt backlog`). Conventional prefixes, ≤800 chars,
-  the `Co-Authored-By` trailer. `git add` only the paths you changed (R-37).
-- Push (`git push -u origin debt-sweep/rolling`) — fast-forward only; **never force-push** (fold
-  `main` in via the Phase 0.5 merge, never a rebase, so the operator's in-flight review survives).
-- **PR body:** if the rolling PR is open, **append** a dated section via `gh pr edit` (R-27 —
-  augment, never rewrite the existing body); else `gh pr create`, title `Debt sweep — rolling`.
-  Each dated section mirrors the report: **Shipped** (tiered, verified why), **Held + reasons**,
-  **Medium for operator** (T5). (Date passed in — do not call `Date.now()` inside a workflow.)
-- **Confirm the PR's CI is green before declaring done.** After pushing, `gh pr checks
-  debt-sweep/rolling --watch` (or poll). If the `check` job goes red, **report the failure** —
-  do not claim a clean sweep. Local-green is necessary, the PR's own CI is the proof.
-- **If nothing was safe to fix and nothing changed**: push nothing, open/append nothing; emit a
-  one-line "swept YYYY-MM-DD — clean, nothing to fix" so the daily signal still lands. If only
-  the backlog changed (new holds filed), append the docs commit alone.
+- **Report in chat**, mirroring the tiers: **Shipped** (each with its verified why),
+  **Held + reasons**, **Medium for operator** (T5).
+- **List every path you touched**, explicitly. This is the one thing the operator needs that
+  they can't cheaply re-derive: a concurrent session's `git add -A` would otherwise sweep your
+  edits into an unrelated commit, and a path list is what lets them `git add` by path instead.
+- **Lead with the gate result.** Local-green is now the only proof there is — there's no PR CI
+  behind it. If the gate is red, say so and name the failure; never report a clean sweep on red.
+- **If nothing was safe to fix**: change nothing and say "swept — clean, nothing to fix". If only
+  the backlog changed (new holds filed), say that; the backlog edit is itself left uncommitted.
 
 ## Guardrails (unattended-safe)
 
@@ -140,7 +148,6 @@ rolling collapses the queue to one reviewable PR.)
 - **No sibling-repo edits** (R-37) — TermNorm + marketing are off-limits; cross-repo
   items stay on the backlog as cross-repo notes.
 - **Hold all feature/lane work** — this skill ships cleanup only.
-- **One open rolling PR at a time** — every run appends to `debt-sweep/rolling` until the operator
-  merges it; never open a second debt-sweep PR. Never push to `main`. Never force-push.
+- **Never branch, commit, push, or open a PR.** The deliverable is a reviewed-in-place diff.
 - **Never sweep on red, never declare done on red** — Phase 0.3 aborts if main's CI is red;
-  Phase 7 won't claim a clean sweep until the rolling PR's CI is green.
+  Phase 7 won't claim a clean sweep on a red gate.

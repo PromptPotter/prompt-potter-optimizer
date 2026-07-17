@@ -350,10 +350,13 @@ The persisted world is a four-entity containment hierarchy
 - **Escalation** — the post-round router (`decide_escalation` over
   `DEFAULT_ESCALATION_RULES`) deciding CONTINUE / FIRE_L2 / STOP_*.
   `application/optimization/escalation/`.
-- **Wound** — one of the four self-healing channels between layers:
-  Wound 1 (L1 validation failure → L2 heal), Wound 2 (mid-eval
-  degradation → L2 heal), Wound 3 (L1 self-healing on critique),
-  Wound 4 (L2 guard-breach → L3 heal). See
+- **Wound** — one of four self-healing paths, keyed by (detection point ×
+  **nurse owner**), never by producer: Wound 1 (L1 validation failure → L1
+  re-proposes a valid override), Wound 2 (mid-eval degradation → L1 retunes
+  the node config, or OPERATOR on a fatal), Wound 3 (L2 stall → L3 replans),
+  Wound 4 (L2 guard-breach → L3 replans). Storage is four typed lists;
+  rendering collapses to two owner-grouped signals — `l1_wounds`
+  (validation + runtime) and `guard_breaches` (L2 + L3 post-parse). See
   `docs/developer/self-healing-internals.md`.
 - **Guard breach** — programmatic post-parse validator outcome on the
   L2 or L3 LLM output. Fields:
@@ -424,9 +427,8 @@ The persisted world is a four-entity containment hierarchy
 - **Pipeline** — the connector's typed node graph self-described via
   `GET /pipeline`. Built into `PipelineSchema` at boot.
   `domain/pipeline_schema.py`.
-- **Node** — one step in the pipeline. Has runtime, short_circuit,
-  node_type, and `optimizer.param_keys`. NEVER "service" or "building
-  block."
+- **Node** — one step in the pipeline. Has runtime, node_type, and
+  `optimizer.param_keys`. NEVER "service" or "building block."
 - **Overlay** — per-dataset operator delta merged onto each wire
   payload. Lives at `datasets/{name}/pipeline.json::nodes.{name}.config`.
   The sole route for changing a backend tunable.

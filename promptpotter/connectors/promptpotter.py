@@ -8,7 +8,7 @@ meta-prompt template fields, exposed via ``pipeline_params``.
 
 See ``docs/specs/roadmap.md`` for the full design — five-hook contract, the composed
 inner-cycle proxy vector (:class:`~promptpotter.domain.l4.proxies.OuterSampleProxies`),
-inner isolation under ``.runtime/inner/``, cost-realism warning.
+inner isolation in the flat ``<workspace>/.inner/`` registry, cost-realism warning.
 
 The five hooks are wired to the protocol; ``promptpotter_wire_adapter`` shapes
 the inner-cycle payload; ``PromptPotterSession`` is the in-process noop session.
@@ -209,8 +209,10 @@ async def _in_process_run(query: str, payload: dict[str, Any]) -> dict[str, Any]
     ``application/runner/inner/cycle.py`` (the connector stays a thin adapter).
     That runner calls ``run_optimization`` in its **own asyncio task** (so the
     per-task ContextVars — ``_CYCLE_LEDGER`` / ``_CURRENT_ROUND`` / ``_ABORT_CHECK``
-    — don't clobber the outer's) under a store sandbox rooted at *this* cycle's
-    ``.runtime/inner/`` (re-entrant, so L5+ nests by construction). The spawning
+    — don't clobber the outer's) under a store sandbox rooted at
+    ``<workspace>/.inner/<this cycle_id>/`` — a FLAT registry, named by this cycle but
+    never nested under it, so the tree stays shallow at every depth and L5+ nests
+    logically rather than on disk (physical nesting blew Windows' ``MAX_PATH``). The spawning
     cycle's context is published by the runner seam (``publish_inner_spawn_context``)
     so this context-free hook can find where to sandbox + which inner benchmark to
     run."""

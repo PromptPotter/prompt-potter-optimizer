@@ -663,8 +663,8 @@ async def run_optimization(
     mode = mode or RunMode()
     started_at = utcnow_iso()
     # Publish this cycle as the spawn context for any L4 recursion: a child that
-    # uses the ``promptpotter`` connector reads it to root its sandbox at THIS
-    # cycle's ``.runtime/inner/`` + find the inner benchmark. Unconditional (the
+    # uses the ``promptpotter`` connector reads it to root its sandbox at
+    # ``<workspace>/.inner/<this cycle_id>/`` + find the inner benchmark. Unconditional (the
     # runner can't know a child will recurse) + re-entrant (each level publishes
     # its own); a no-op until the cycle_id is set.
     publish_inner_spawn_context(session)

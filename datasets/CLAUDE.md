@@ -32,7 +32,7 @@ Optional:
 
 The roster is the directory listing; each dataset's connector is read off its own `pipeline.json::nodes` — don't mirror either here. The special cases worth knowing:
 
-- **`lca-termnorm`** (`termnorm`) — the **only** dataset that still needs a TermNorm server; every other benchmark declares a single `llm_only` node and runs fully in-process.
+- **`lca-termnorm`** (`termnorm`) — the multi-node retrieval pipeline. Every other benchmark declares a single `llm_only` **node**, but that is a node name, not the `llm_only` *connector*: all of them are `backend_type: "termnorm"` and route over HTTP to the server exactly as `lca-termnorm` does. No committed dataset runs in-process.
 - **`aime_2025`** — its overlay routes to OpenRouter+Mistral, off the Groq default.
 - **`email-tagging`** — the built-in try-and-learn demo, surfaced while `User.demo_mode_enabled`.
 - **`justlogic`** — the L4 inner benchmark; **`promptpotter-self`** (`promptpotter` connector) — the one L4 dataset ([§ L4 below](#l4--promptpotter-self)).

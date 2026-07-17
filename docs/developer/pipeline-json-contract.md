@@ -35,13 +35,23 @@ rejection and content-hash sensitivity by
 
 ## Node declaration (`nodes[name]`)
 
+**PromptPotter parses a SUBSET of this file.** The parser builds `PipelineNode` from
+`type`, `node_role`, `config` and the `optimizer` sub-object — nothing else. The rest
+(`description`, `runtime`, `short_circuit`, `input_schema`) is the **backend's
+self-description**: it states the node's own topology for a human or a future reader,
+and no `PipelineNode` field carries it. That is by design, not rot — do not re-file
+these as dead keys. The mirror rule: a key PP does not *use* gets no model field
+(`PipelineNode.short_circuit` was deleted 2026-07-17 for exactly that), but the key
+still belongs in the file and in this table. "Required" below means *a connector must
+publish it*, not *PP reads it*.
+
 | Field | Required | Type | Notes |
 |---|---|---|---|
-| `type` | required | `str` | Wire type — one of `llm`, `llm/structured`, `llm/meta`, `agent`, `deterministic`, `measurement`, `web_search`. Mapped to `PipelineNode.wire_type`. |
-| `node_role` | required | `str` | One of `""`, `candidate_source`, `ranker`, `enricher`, `cache`. Mapped to `PipelineNode.node_type` (the typed `NodeType` enum). |
-| `description` | required | `str` | One-line node description. |
-| `runtime` | required | `str` | One of `backend`, `optimizer`. Distinguishes connector-served nodes from optimizer-internal LLM calls. |
-| `short_circuit` | required | `bool` | Whether a successful match in this node bypasses downstream nodes. |
+| `type` | required | `str` | Wire type — `generation`, `cache`, `retriever`, `tool`, `meta_prompt` for connector-served nodes; `llm/meta`, `measurement`, `agent` for `_optimizer` internal nodes. Mapped to `PipelineNode.wire_type`. |
+| `node_role` | optional | `str` | One of `""`, `candidate_source`, `ranker`, `enricher`, `cache`. Mapped to `PipelineNode.node_type` (the typed `NodeType` enum). Absent on every `_optimizer` node; parsed as `""`. |
+| `description` | required | `str` | One-line node description. Self-description (see below) — not parsed. |
+| `runtime` | connector-served | `str` | Where the node runs **inside the backend's own topology**: `backend`, `frontend` (e.g. TermNorm's Excel add-in runs `cache_lookup` / `fuzzy_matching` client-side), `in_process`. Orthogonal to `Connector.execution`, which says how *PromptPotter* reaches the backend — one `remote_http` connector legitimately mixes all three (`lca-termnorm` does). Self-description — not parsed. Absent on `_optimizer` nodes. |
+| `short_circuit` | connector-served | `bool` | Whether a successful match here bypasses downstream nodes (`lca-termnorm`'s two `frontend` nodes set it — a cache hit answers without reaching the backend). Self-description — not parsed. |
 | `config` | optional | `dict` | Node-local defaults. For LLM nodes typically `{model, temperature, max_tokens, ...}`. For optimizer nodes also `{prompt_family, prompt_version, schema_family, schema_version}` keys that index into the registries. |
 | `prompt_info` | optional | `dict` | Inline `{family, template_variables, description}` — marks the node as prompt-bearing (the candidate-prompt injection point). Used when no `resolved_prompts` registry is present. |
 | `output_schema` | — | — | **Not a node-level key.** An inline output schema is declared at `config.output_schema` — the same place the connector forwards it to the backend from, so there is one schema, not a display copy beside a wire copy. Parsed by `parse_resolved_schema` into the node's read-model exactly like a `resolved_schemas` entry, and locked against the optimizer (`SCHEMA_OWNED_FIELDS`). |

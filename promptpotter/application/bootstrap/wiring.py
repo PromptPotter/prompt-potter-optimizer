@@ -289,8 +289,9 @@ async def init_services(
 
     ``store`` injects a pre-built :class:`Stores` instead of rooting one under
     ``project_root/.promptpotter``: the L4 inner-cycle runner passes a sandboxed
-    store rooted at the spawning cycle's ``.runtime/inner/`` so an inner campaign's
-    state never touches the outer's active pointer. ``project_root`` still resolves
+    store rooted at the flat ``<workspace>/.inner/<spawn_cycle_id>/`` registry — named
+    by the spawning cycle, never nested under it — so an inner campaign's state never
+    touches the outer's active pointer. ``project_root`` still resolves
     repo-benchmark dataset dirs (``datasets/{name}/``), so the sandbox reads the
     inner dataset from the repo while writing campaign state into the sandbox."""
 

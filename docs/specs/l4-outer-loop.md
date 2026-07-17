@@ -159,9 +159,11 @@ Standing invariants (verified — don't re-chase):
 `Connector.in_process_run(query, payload)` returning the result shape the scorer already
 consumes; the HTTP arm is unchanged, and dispatch stays on the declared mode, never the
 connector name (`connectors/CLAUDE.md`). Two connectors ride the one seam: **`llm_only`**
-(`connectors/llm_only.py` — calls the LLM client directly on the rendered prompt; six
-committed datasets declare it, so the basic case needs no server — only `lca-termnorm`
-still does) and **`promptpotter`** (delegates to the inner-cycle runner, §2).
+(`connectors/llm_only.py` — calls the LLM client directly on the rendered prompt; wired and
+dispatchable, but **no committed dataset declares `backend_type: "llm_only"`** — the six
+single-node benchmarks name an `llm_only` *node* inside a `termnorm` pipeline, which is a
+different thing and still needs the server, so the no-server case is shipped and unadopted)
+and **`promptpotter`** (delegates to the inner-cycle runner, §2).
 
 ## 2. In-process recursion isolation — SHIPPED; keep it depth-agnostic
 
