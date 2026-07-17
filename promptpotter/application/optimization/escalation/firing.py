@@ -70,6 +70,7 @@ from promptpotter.shared.errors import graceful
 if TYPE_CHECKING:
     from promptpotter.application.config import CampaignConfig
     from promptpotter.application.optimization.cycle import Cycle
+    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 
 logger = logging.getLogger(__name__)
@@ -410,7 +411,7 @@ async def _run_transition(
     transition: LayerStrategy,
     cycle: Cycle,
     config: CampaignConfig,
-    pipeline_schema: Any,
+    pipeline_schema: PipelineSchema | None,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None,
     *,
@@ -639,7 +640,7 @@ def _trigger_payload(
 async def escalate_l2(
     cycle: Cycle,
     config: CampaignConfig,
-    pipeline_schema: Any,
+    pipeline_schema: PipelineSchema | None,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None = None,
     obs: ObservabilityBridge | None = None,

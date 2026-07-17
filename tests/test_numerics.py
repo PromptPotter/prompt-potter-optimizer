@@ -625,18 +625,23 @@ def test_mask_abort_verdict_rides_the_same_fold():
 
 
 def test_composite_fitness_zeroed_on_validation_failure():
-    fake_opt_sp = SimpleNamespace(
-        memory=SimpleNamespace(
-            wounds=SimpleNamespace(
-                validation_failures=[object()],
-                runtime_failures=[],
-                l2_guard_breaches=[],
-                l3_guard_breaches=[],
+    # A REAL OptSearchPoint, not a namespace stub. The stub carried a bare `object()`
+    # where a `ValidationFailure` goes and had no `render()` — it only ever type-checked
+    # because `compute_composite_fitness(opt_sp: Any)` accepted anything, and production
+    # code grew a `hasattr(opt_sp, "render")` guard to tolerate it. The type is the contract.
+    opt_sp = OptSearchPoint(
+        memory=L2L3Memory(
+            wounds=WoundChannels(
+                validation_failures=[
+                    ValidationFailure(
+                        axis="llm_only.model", value="bad", allowed=[], reason="forbidden_axis"
+                    )
+                ]
             )
         )
     )
     scored = compute_composite_fitness(
-        [_eval_result(score=1.0)], _single_node_schema(), opt_sp=fake_opt_sp
+        [_eval_result(score=1.0)], _single_node_schema(), opt_sp=opt_sp
     )
     assert scored["composite_fitness"] == 0.0
 
@@ -1692,13 +1697,18 @@ from promptpotter.application.optimization.validators.l3_output import (  # noqa
 from promptpotter.domain.escalation_signals import (  # noqa: E402
     EscalationTarget,
     NurseOwner,
+    ValidationFailure,
 )
 from promptpotter.domain.l1_layout import (  # noqa: E402
     NODE_LAYOUTS,
     L1Layout,
     validate_l1_layout,
 )
-from promptpotter.domain.opt_search_point import OptSearchPoint  # noqa: E402
+from promptpotter.domain.opt_search_point import (  # noqa: E402
+    L2L3Memory,
+    OptSearchPoint,
+    WoundChannels,
+)
 from promptpotter.domain.results import (  # noqa: E402
     CandidateProposal,
     ScoredCandidate,

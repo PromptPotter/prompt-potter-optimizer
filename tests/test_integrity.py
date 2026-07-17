@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -922,3 +923,48 @@ def test_a_forks_attempts_stay_separate_on_the_campaigns_timeline(built_stores) 
     assert [k.label for k in kids] == ["C0", "C1.1", "C2.1", "C3.1"]
     # The replayed origin IS `root-c0`, measured again — it is not a second node.
     assert "fork-c0" not in {k.id for k in kids}
+
+
+# Binary formats legitimately full of NULs. Suffix-scoped so a NEW binary kind must be
+# named here deliberately rather than widening the guard by accident.
+_BINARY_SUFFIXES = frozenset(
+    {".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", ".pdf", ".woff", ".woff2"}
+)
+
+
+def test_no_raw_nul_bytes_in_tracked_text_files() -> None:
+    """A raw NUL makes ripgrep skip the whole file SILENTLY when recursing.
+
+    Not a style nit — it corrupts every audit run over the repo, and it is
+    self-concealing: `rg` cannot find NUL-bearing files either, because searching
+    `\x00` skips exactly the files that contain one. The tool cannot see its own
+    blind spot, so re-running it never surfaces the lie. Meanwhile a NUL is a legal
+    string char, so `tsc` / eslint / `next build` / `pytest` all stay green.
+
+    2026-07-17: two tracked files held one — `webapp/lib/hooks/useConnector.ts`
+    (a live consumer of three API readers, so audits "proved" those dead) and
+    `docs/specs/code-debt-cleanup.md`, where the entry *describing* the raw NUL had
+    pasted a raw NUL into the clause prescribing the fix. Between them they
+    manufactured false dead-code findings twice.
+    """
+    root = Path(__file__).resolve().parents[1]
+    listing = subprocess.run(
+        ["git", "ls-files", "-z"], cwd=root, capture_output=True, check=True
+    ).stdout
+    offenders: list[str] = []
+    for raw in listing.split(b"\x00"):
+        if not raw:
+            continue
+        rel = raw.decode("utf-8", "surrogateescape")
+        path = root / rel
+        if path.suffix.lower() in _BINARY_SUFFIXES or not path.is_file():
+            continue
+        if b"\x00" in path.read_bytes():
+            offenders.append(rel)
+
+    assert not offenders, (
+        f"raw NUL byte in tracked text file(s): {offenders}. ripgrep will silently skip "
+        "these when recursing, so every 'zero call sites' claim over them is false. "
+        "Replace the byte with a visible separator, or add the suffix to _BINARY_SUFFIXES "
+        "if the file is genuinely binary."
+    )

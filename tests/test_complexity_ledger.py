@@ -344,6 +344,26 @@ LEDGER_BASELINE = {
     "settings_env": 16,
     "settings_const": 14,
     "opt_search_point_fields": 25,
+    # NEW dimension (2026-07-17), landing at 73 — a bare ``x: Any`` parameter whose real type
+    # exists and simply was not written. It belongs on a CONCEPTUAL-surface ledger because a
+    # type the checker cannot see is surface a reader must carry in their head: the docstring
+    # says `OptSearchPoint`, the signature says `Any`, and only one of those is checked.
+    # It earns the ratchet because `strict = true` STRUCTURALLY cannot catch it —
+    # `disallow_untyped_defs` is satisfied (`Any` IS an annotation) and `warn_return_any` is
+    # defeated by any expression that unions `Any` with a concrete type. That is not
+    # hypothetical: `resp.content or ""` (`connectors/llm_only.py`) read as a cosmetic
+    # no-op for months while doing nothing but silencing `no-any-return`; deleting the `or`
+    # made the error fire instantly. `disallow_any_explicit` is not the fix — it rejects
+    # `dict[str, Any]` (honest, for raw JSON) exactly as hard.
+    # 95 -> 73 in the landing pass: the 22 whose type was already named in-repo, incl.
+    # `score_search_point(opt_sp: Any)` — the single scoring gateway — and
+    # `compute_composite_fitness`, whose own signature typed `pipeline_schema: PipelineSchema`
+    # three lines above. Typing them was not cosmetic: it surfaced that `escalate_l2` really
+    # does receive `PipelineSchema | None`, a fact the `Any` had hidden from every reader.
+    # Like ``reexport_shims``, this marches to a FLOOR, not to zero — ~30 are honest (raw JSON
+    # pre-parse, provider SDK payloads behind `follow_imports="skip"`), and `**kwargs: Any`
+    # is excluded outright.
+    "any_params": 73,
     "prompt_string_fields": 6,
     "injections": 24,
     "escalation_rules": 6,

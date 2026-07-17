@@ -13,11 +13,14 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.results import CritiqueReadout
 from promptpotter.shared import extract_boxed_number, extract_gsm8k_number, extract_last_bold
+
+if TYPE_CHECKING:
+    from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.shared.errors import ErrorCategory, error_category, is_error_result
 
 
@@ -45,26 +48,23 @@ def round_winner_key(composite_fitness: float | None, accuracy: float) -> tuple[
 # --------------------------------------------------------------------------- #
 
 
-def _valid_axis_set(schema: Any) -> set[str]:
+def _valid_axis_set(schema: PipelineSchema) -> set[str]:
     """Schema-legitimate axes (prompt fields + node names + param keys) — used to filter L2's
     hallucinated `suggested_axes` (e.g. `prompt_size`) before they seed the next round.
     """
     out: set[str] = set(PROMPT_STRING_FIELDS) | {"few_shot_examples", "plan"}
-    if schema is None:
-        return out
-    for node in getattr(schema, "nodes", ()):
-        name = getattr(node, "name", "")
-        if name:
-            out.add(name)
-        for pk in getattr(node, "param_keys", ()) or ():
+    for node in schema.nodes:
+        if node.name:
+            out.add(node.name)
+        for pk in node.param_keys:
             out.add(pk)
-            if name:
-                out.add(f"{name}.{pk}")
+            if node.name:
+                out.add(f"{node.name}.{pk}")
     return out
 
 
 def format_l1_critique_for_prompt(
-    critique: CritiqueReadout | None, pipeline_schema: Any = None
+    critique: CritiqueReadout | None, pipeline_schema: PipelineSchema | None = None
 ) -> str:
     """L1 critique → compact text for L1_GENERATE + L2_CONTEXT. Three load-bearing fields:
     `priority_fix`, schema-filtered `suggested_axes`, `failure_highlights`.

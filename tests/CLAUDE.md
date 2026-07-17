@@ -31,6 +31,17 @@ for any test is not "does this guard a contract?" — almost everything does —
 That is the suite — **six files**. No structural / wire / persistence / identity /
 quota / lifecycle / event-stream / display / shape tests — all of those fail loud.
 
+**One sanctioned repo-wide scan**, and the reasoning matters because it looks like the
+thing the line above bans. `test_integrity.py::test_no_raw_nul_bytes_in_tracked_text_files`
+walks `git ls-files`. It earns its place on this file's own bar: a raw NUL byte makes
+ripgrep skip the whole file **silently** while `tsc`/eslint/`next build`/`pytest` all stay
+green — so nothing fails loud, and every later audit reads a codebase with that file
+missing. It is also self-concealing (searching `\0` skips exactly the files containing one),
+so no amount of re-grepping finds it. It cannot be an import-time assert either: no
+production module owns the repo's file bytes. Two such files existed on 2026-07-17 and had
+manufactured false dead-code findings twice. A scan that catches a tool lying about the
+codebase is not a shape test.
+
 ## Structural invariants live in production, not tests
 
 A few wiring guarantees worth enforcing are **import-time asserts in the module

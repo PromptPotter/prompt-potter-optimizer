@@ -23,6 +23,7 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.store.io import read_json, read_json_optional, write_json
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 
 logger = logging.getLogger(__name__)
@@ -187,7 +188,7 @@ SLICE_NAMES: tuple[str, ...] = ("all", "easy", "hard")
 
 
 def _archive_hit_rates(
-    stores: Any,
+    stores: Stores,
     sample_ids: list[int],
     *,
     dataset_name: str | None,
@@ -213,7 +214,7 @@ def slice_samples(
     samples: list[Sample],
     slice_spec: str,
     *,
-    stores: Any | None = None,
+    stores: Stores | None = None,
     dataset_name: str | None = None,
 ) -> tuple[list[Sample], str]:
     """Filter by *slice_spec* ∈ SLICE_NAMES or ``samples=ID1,ID2,...``.

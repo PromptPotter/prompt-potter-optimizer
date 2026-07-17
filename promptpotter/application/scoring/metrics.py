@@ -32,6 +32,7 @@ from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.exploration import RaschPosterior, Ruler
+    from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.pipeline_schema import (
         PipelineNode,
         PipelineSchema,
@@ -264,7 +265,7 @@ def compute_composite_fitness(
     results: list[QueryMeasurement],
     pipeline_schema: PipelineSchema,
     *,
-    opt_sp: Any = None,
+    opt_sp: OptSearchPoint | None = None,
     round_scorer: RoundScorer | str | None = None,
     l1_diversity: float = 1.0,
 ) -> dict[str, Any]:

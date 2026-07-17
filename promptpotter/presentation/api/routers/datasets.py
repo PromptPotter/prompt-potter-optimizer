@@ -43,7 +43,7 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.io import read_json
 from promptpotter.infrastructure.store.layout import campaign_root_dir_for
-from promptpotter.infrastructure.store.stores import resolve_cycle_path
+from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
 from promptpotter.presentation.api.deps import (
     StoreDep,
     decode_descend,
@@ -307,7 +307,7 @@ def draft_from_existing_dataset(name: str, store: StoreDep) -> dict[str, Any]:
     return draft_wire_with_locks(draft)
 
 
-def _resolve_or_404(store: Any, name: str) -> Path:
+def _resolve_or_404(store: Stores, name: str) -> Path:
     """Resolve *name* through the identity-aware gateway; 404 if not readable.
 
     The 404 (rather than 403) keeps the existence-leak posture: a non-admin can't
@@ -339,7 +339,7 @@ def _load_dataset_cache(dataset_dir: Path) -> tuple[dict[str, Any], dict[int, di
 
 
 def _artifact_scope_store(
-    store: Any,
+    store: Stores,
     campaign_id: str | None,
     cycle_id: str | None,
     descend: str | None,
@@ -365,7 +365,7 @@ def _artifact_scope_store(
 
 
 def _resolve_scope_artifact(
-    store: Any,
+    store: Stores,
     *,
     scope: HeatmapScope,
     name: str,

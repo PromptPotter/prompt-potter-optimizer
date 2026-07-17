@@ -14,6 +14,7 @@ from promptpotter.shared.composite import to_short_formula
 from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
 
 if TYPE_CHECKING:
+    from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
     from promptpotter.domain.scoring import QueryMeasurement
 
@@ -121,7 +122,9 @@ def _make_self_healer_evaluator(spec: SelfHealerSpec) -> Evaluator:
     """Build the per-channel self-heal Evaluator: ``min(len(events)/n_samples, 1.0)``,
     ``direction='low'``. ``events`` is the matching list on ``opt_sp.memory.wounds``."""
 
-    def compute(*, results: list[QueryMeasurement], opt_sp: Any = None, **_: Any) -> float | None:
+    def compute(
+        *, results: list[QueryMeasurement], opt_sp: OptSearchPoint | None = None, **_: Any
+    ) -> float | None:
         # No samples, or no OptSearchPoint to read the wound channels off: the heal rate was
         # not measured. 0.0 would read as "nothing needed healing".
         if not results or opt_sp is None:
@@ -274,10 +277,10 @@ def compute_pipeline_compactness(*, schema: PipelineSchema, **_: Any) -> float:
     return max(0.0, 1.0 - (n - 1) / (worst - 1))
 
 
-def compute_prompt_compactness(*, opt_sp: Any = None, **_: Any) -> float | None:
+def compute_prompt_compactness(*, opt_sp: OptSearchPoint | None = None, **_: Any) -> float | None:
     """``1 - len(render)/budget``; ``None`` when there is no prompt to measure — an absent
     prompt is not a maximally compact one."""
-    if opt_sp is None or not hasattr(opt_sp, "render"):
+    if opt_sp is None:
         return None
     rendered = opt_sp.render() or ""
     if not rendered:
@@ -487,7 +490,7 @@ def materialize_round_values(
     schema: PipelineSchema,
     results: list[QueryMeasurement],
     *,
-    opt_sp: Any = None,
+    opt_sp: OptSearchPoint | None = None,
 ) -> dict[str, float]:
     """Run every per-round evaluator that applies; return ``{name: value}``, omitting the
     evaluators that had nothing to measure (``None``)."""

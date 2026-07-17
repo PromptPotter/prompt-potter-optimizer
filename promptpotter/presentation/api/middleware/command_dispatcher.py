@@ -50,6 +50,7 @@ from typing import Any, Literal, get_args
 from pydantic import BaseModel, Field, ValidationError
 
 from promptpotter.domain.backend import BackendConnection
+from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
 from promptpotter.domain.opt_search_point import overlay_sets_model_outside_allowed
 from promptpotter.domain.run_records import CommandRecord, CycleSeed
@@ -382,7 +383,7 @@ class CommandDispatcher:
     async def _dispatch_delete_cycle(
         self,
         *,
-        campaign: Any,
+        campaign: Campaign,
         campaign_id: str,
         cycle_id: str,
         idempotency_key: str,
@@ -587,7 +588,7 @@ class CommandDispatcher:
     def _build_cycle_applier(
         self,
         kind: CycleScopedKind,
-        campaign: Any,
+        campaign: Campaign,
         campaign_id: str,
         cycle_id: str,
         payload_extras: dict[str, Any],

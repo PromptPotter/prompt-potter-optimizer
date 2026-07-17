@@ -125,7 +125,7 @@ def _unwrap_single_element_list(parsed: Any) -> Any:
     return parsed
 
 
-def extract_parsed_json(response: Any) -> Any:
+def extract_parsed_json(response: LLMResponse) -> Any:
     """Return the parsed JSON object from an ``LLMResponse``.
 
     JSON-mode calls populate ``response.parsed`` upstream; this is the

@@ -19,6 +19,7 @@ from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.identity import IdentityContext, default_identity
 
 if TYPE_CHECKING:
+    from promptpotter.application.config import CampaignConfig
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.validators import StopRule
@@ -168,7 +169,7 @@ def _build_index_header(session: Session, dataset_size: int) -> dict[str, Any]:
 
 def auto_mint_session(
     session: Session,
-    campaign_config: Any,
+    campaign_config: CampaignConfig,
     *,
     cycle_id: str,
     origin_acc: float = 0.0,
@@ -339,7 +340,7 @@ def mint_checkin_skeleton(stores: Stores, *, slug: str) -> tuple[str, str, str]:
 
 def finalize_checkin_to_active(
     session: Session,
-    campaign_config: Any,
+    campaign_config: CampaignConfig,
     *,
     campaign_id: str,
     cycle_id: str,

@@ -27,6 +27,10 @@ the same number:
 - ``settings_const`` — module-level constants exported by ``settings`` (the
   upper-case names in its ``__all__``; excludes the ``Settings`` class + instance).
 - ``opt_search_point_fields`` — recursive leaf count of ``OptSearchPoint``.
+- ``any_params`` — bare ``x: Any`` named parameters (not ``*args``/``**kwargs``, not
+  ``dict[str, Any]``). A type the checker cannot see is surface a reader must carry in
+  their head, and it silently disarms ``warn_return_any`` — see ``_count_any_params``.
+  Like ``reexport_shims``, this one is meant to march to a floor, not sit at one.
 - ``prompt_string_fields`` — ``len(PROMPT_STRING_FIELDS)``.
 - ``injections`` — ``len(INJECTIONS)`` (the dispatch-hub registry self-validates).
 - ``escalation_rules`` — ``len(DEFAULT_ESCALATION_RULES)``, the policy surface
@@ -72,6 +76,40 @@ def _count_leaves(model: type[BaseModel], _seen: set[type[BaseModel]] | None = N
     return total
 
 
+def _count_any_params(py_files: list[Path]) -> int:
+    """Bare ``x: Any`` / ``x: Any | None`` NAMED parameters across the package.
+
+    Excludes ``*args``/``**kwargs: Any`` (idiomatic passthrough) and container values
+    like ``dict[str, Any]`` (honest — raw JSON has no better type). What is left is the
+    actionable shape: a parameter whose real type exists and simply was not written.
+
+    Why it is a ledger dimension and not a mypy flag: ``disallow_any_explicit`` rejects
+    ``dict[str, Any]`` just as hard, so it cannot express "Any is fine for JSON, not for
+    a parameter with a known type". And ``strict``'s own ``warn_return_any`` does NOT
+    cover it — an ``Any`` param is a complete annotation, so ``disallow_untyped_defs``
+    is satisfied, and ``no-any-return`` is defeated by any expression that unions ``Any``
+    with a concrete type. ``resp.content or ""`` (`connectors/llm_only.py`, pre-2026-07-17)
+    was exactly that: the ``or`` had no runtime job, only a type-checker one, and deleting
+    it made the error fire instantly. Nothing recorded that, so a debt sweep read the
+    guard as a cosmetic no-op. This count is the only thing that sees the declaration.
+    """
+    import ast
+
+    total = 0
+    for path in py_files:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            args = node.args
+            for arg in args.posonlyargs + args.args + args.kwonlyargs:
+                if arg.annotation is None:
+                    continue
+                if ast.unparse(arg.annotation) in ("Any", "Any | None"):
+                    total += 1
+    return total
+
+
 def _is_reexport_shim(init_file: Path) -> bool:
     text = init_file.read_text(encoding="utf-8")
     has_all = "__all__" in text
@@ -101,6 +139,7 @@ def compute_ledger() -> dict[str, int]:
         "settings_env": len(Settings.model_fields),
         "settings_const": sum(1 for name in settings_mod.__all__ if name.isupper()),
         "opt_search_point_fields": _count_leaves(OptSearchPoint),
+        "any_params": _count_any_params(py_files),
         "prompt_string_fields": len(PROMPT_STRING_FIELDS),
         "injections": len(INJECTIONS),
         "escalation_rules": len(DEFAULT_ESCALATION_RULES),

@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
     from promptpotter.application.scoring.query_loop import QueryLoopResult
+    from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
@@ -277,7 +278,7 @@ async def score_search_point(
     n_total_candidates: int = 1,
     axes: AxisIndex | None = None,
     l1_diversity: float = 1.0,
-    opt_sp: Any = None,
+    opt_sp: OptSearchPoint | None = None,
     on_sample_pre_check: Callable[[Sample], Awaitable[None]] | None = None,
     force_fresh: bool = False,
 ) -> tuple[list[QueryMeasurement], dict[str, Any], EscalationSignal | None]:

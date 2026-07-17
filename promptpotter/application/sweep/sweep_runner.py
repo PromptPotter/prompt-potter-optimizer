@@ -21,7 +21,7 @@ from promptpotter.domain.results import PayloadOutcome, SweepBatchResult
 from promptpotter.domain.run_records import ForkSpec, ForkTrigger, OperatorSweepFile
 from promptpotter.infrastructure.store.layout import root_cycle_id
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
-from promptpotter.infrastructure.store.stores import build_stores
+from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
@@ -53,7 +53,7 @@ def load_sweep_payloads(sweep_dir: Path) -> list[tuple[Path, OperatorSweepFile]]
 
 
 def existing_fork_source_files(
-    store: Any, campaign_id: str, parent_cycle_id: str
+    store: Stores, campaign_id: str, parent_cycle_id: str
 ) -> dict[str, str]:
     """``{source_file: fork_cycle_id}`` for prior FORK_CUTs under this parent.
 

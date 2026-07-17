@@ -24,6 +24,7 @@ from promptpotter.application.knobs import (
 )
 from promptpotter.application.meta_champion.reducer import ChampionRegistry, reduce_corpus
 from promptpotter.application.resource_matrix.matrix import ResourceMatrix, read_matrix
+from promptpotter.domain.campaign import Campaign
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
     readable_dataset_dir,
@@ -95,7 +96,7 @@ def _backend_type(store: Stores, dataset_name: str, memo: dict[str, str]) -> str
     return memo[dataset_name]
 
 
-def _campaign_summary(campaign: Any, status: str, backend_type: str) -> CampaignSummary:
+def _campaign_summary(campaign: Campaign, status: str, backend_type: str) -> CampaignSummary:
     return CampaignSummary(
         campaign_id=campaign.campaign_id,
         dataset_name=campaign.dataset_name,

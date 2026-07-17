@@ -23,6 +23,7 @@ from promptpotter.shared.errors import ErrorCategory, has_pipeline_warnings
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
+    from promptpotter.domain.pipeline_schema import PipelineSchema
 
 logger = logging.getLogger(__name__)
 
@@ -185,7 +186,7 @@ def emit_step_token_usage(
 
 def _compute_step_tokens(
     resp_data: dict[str, Any],
-    pipeline_schema: Any,
+    pipeline_schema: PipelineSchema,
     wire_params: dict[str, Any],
 ) -> dict[str, StepTokenUsage]:
     """Collect per-LLM-node token counts from the backend response.
