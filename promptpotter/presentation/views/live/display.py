@@ -53,7 +53,7 @@ from promptpotter.presentation.views.live.phase import (
     render_round_stats,
 )
 from promptpotter.presentation.views.live.sample import fmt_query_result
-from promptpotter.presentation.views.render.text import to_text
+from promptpotter.presentation.views.render import to_text
 from promptpotter.shared.composite import render_composite_fitness_block
 
 if TYPE_CHECKING:

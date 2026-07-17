@@ -55,7 +55,7 @@ from promptpotter.infrastructure.store.lineage_views import (
     LineageDivergence,
     LineageNode,
 )
-from promptpotter.presentation.api.middleware.command_dispatcher.dispatcher import (
+from promptpotter.presentation.api.middleware.command_dispatcher import (
     CommandAcceptedBody,
 )
 from promptpotter.presentation.api.routers.active import (

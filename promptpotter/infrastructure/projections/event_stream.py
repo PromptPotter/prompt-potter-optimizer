@@ -17,6 +17,9 @@ current ``dashboard.json`` (read as-is, never extended) so a client opening
 mid-run paints the state-so-far and then appends the live tail.
 
 This same primitive is what an MCP "watch this run" resource would consume.
+
+The certified Profile-A contract (snapshot-then-tail semantics, heartbeat cadence,
+sequence-gap detection) is documented in ``docs/developer/event-stream.md``.
 """
 
 from __future__ import annotations

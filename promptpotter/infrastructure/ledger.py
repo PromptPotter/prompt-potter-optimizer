@@ -125,7 +125,7 @@ class CycleEventLog:
                     except (ValidationError, ValueError):
                         # A torn final line (append is not crash-atomic, ll. 87-88)
                         # or a version-skewed record. Skip-and-continue the way the
-                        # sibling readers do (ledger_scan.py, event_stream/tail.py) —
+                        # sibling readers do (ledger_scan.py, event_stream.py) —
                         # the ledger is the SoT, so one bad line must not abort the
                         # whole read and blind every projection rebuild / fork lookup.
                         logger.warning(

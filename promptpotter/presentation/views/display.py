@@ -2,7 +2,7 @@
 
 ANSI colors + box-drawing + scoreboard + interrupt banner + display-tag
 state + small numeric helpers. Higher-level renderers consume these in
-``views/render/text.py`` and the ``views/live/`` package.
+``views/render.py`` and the ``views/live/`` package.
 """
 
 from __future__ import annotations

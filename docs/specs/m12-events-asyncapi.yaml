@@ -60,7 +60,7 @@ channels:
       SSE stream of every record appended to the canonical per-cycle ledger
       (`.runtime/ledger.jsonl`), plus a leading snapshot frame and periodic
       heartbeats. Sole writer: `CycleLedgerTail`
-      (`infrastructure/projections/event_stream/tail.py`) — a cross-process
+      (`infrastructure/projections/event_stream.py`) — a cross-process
       tail of that file, NOT an in-process projection.
     description: |
       Subscription contract (security boxes 13-15):

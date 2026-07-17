@@ -2,7 +2,7 @@
 
 The outbound half of the M12 Control-remote highway: how a client subscribes to a cycle's live ledger over Server-Sent Events, what frames it gets and in what order, and the guarantees the runtime makes about ordering, gap detection, and idle-keepalive.
 
-Permanent contract: [`docs/adr/0001-m12-control-plane.md`](../adr/0001-m12-control-plane.md). Wire schema: [`docs/specs/m12-events-asyncapi.yaml`](../specs/m12-events-asyncapi.yaml). Codepath: [`promptpotter/infrastructure/projections/event_stream/tail.py`](../../promptpotter/infrastructure/projections/event_stream/tail.py) (`CycleLedgerTail`, tails the on-disk ledger) → [`promptpotter/presentation/api/routers/campaigns/events.py`](../../promptpotter/presentation/api/routers/campaigns/events.py) (`stream_cycle_events`).
+Permanent contract: [`docs/adr/0001-m12-control-plane.md`](../adr/0001-m12-control-plane.md). Wire schema: [`docs/specs/m12-events-asyncapi.yaml`](../specs/m12-events-asyncapi.yaml). Codepath: [`promptpotter/infrastructure/projections/event_stream.py`](../../promptpotter/infrastructure/projections/event_stream.py) (`CycleLedgerTail`, tails the on-disk ledger) → [`promptpotter/presentation/api/routers/campaigns/events.py`](../../promptpotter/presentation/api/routers/campaigns/events.py) (`stream_cycle_events`).
 
 ## URL
 

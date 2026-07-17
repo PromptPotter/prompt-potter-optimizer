@@ -30,7 +30,7 @@ from fastapi import Query
 from sse_starlette import EventSourceResponse
 
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.infrastructure.projections.event_stream.tail import CycleLedgerTail
+from promptpotter.infrastructure.projections.event_stream import CycleLedgerTail
 from promptpotter.infrastructure.store.layout import cycle_dir_for
 from promptpotter.infrastructure.store.stores import resolve_cycle_path
 from promptpotter.presentation.api.deps import StoreDep, decode_descend

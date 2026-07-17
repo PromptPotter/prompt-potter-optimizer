@@ -143,7 +143,7 @@ The chat is the webapp's **first SSE consumer** (all other liveness is the 2s `d
 poll, `webapp/lib/poll.tsx`). Critically, the stream is **cross-process**: the endpoint tails
 the cycle's on-disk ledger (`.runtime/ledger.jsonl`) rather than an in-memory fan-out, so the
 chat sees a campaign no matter which process runs it (the API server, the CLI, a spawned
-runner). Codepath: `event_stream/tail.py::CycleLedgerTail` → `events.py::stream_cycle_events`.
+runner). Codepath: `event_stream.py::CycleLedgerTail` → `events.py::stream_cycle_events`.
 
 - **Stream:** subscribe to `GET /campaigns/{campaign_id}/cycles/{cycle_id}/events:subscribe`
   (contract in [`m12-events-asyncapi.yaml`](m12-events-asyncapi.yaml) + the certified

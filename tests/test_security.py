@@ -286,7 +286,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
     )
     from promptpotter.infrastructure.identity.session import SessionData
     from promptpotter.infrastructure.store.io import write_json
-    from promptpotter.presentation.api.middleware.command_dispatcher.dispatcher import (
+    from promptpotter.presentation.api.middleware.command_dispatcher import (
         CommandDispatcher,
     )
     from promptpotter.presentation.api.middleware.oidc import _delegated_identity

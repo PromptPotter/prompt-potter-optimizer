@@ -365,7 +365,7 @@ facade** — the free-function read/write surface (`measurements_for_sample`,
 every consumer goes through. Two raw call sites remain, both narrow
 dataset-lifecycle operations that predate the facade
 (`datasets/dataset_replace.py::restamp_dataset`,
-`output/writers.py::dataset_snapshot_path`); a third consumer is drift.
+`output.py::dataset_snapshot_path`); a third consumer is drift.
 Together the two pins capture event-sourcing's reasoning-clarity gain
 without paying replay-on-every-read.
 

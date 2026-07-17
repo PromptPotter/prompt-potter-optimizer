@@ -8,7 +8,7 @@ attribute reads); Pydantic serializes it to its wire dict on persist + SSE, so
 no hand-rolled reconstruction is needed.
 
 The ``score_entry_from_dict`` helper is also consumed by
-``application/output/writers.py`` for disk-derived ``log.md`` rendering.
+``application/output.py`` for disk-derived ``log.md`` rendering.
 """
 
 from __future__ import annotations
@@ -348,7 +348,7 @@ def from_phase_event(event: PhaseEvent, ctx: ViewContext) -> AnyView | None:
     return builder(event.data, ctx) if builder is not None else None
 
 
-# --- score-entry helpers (shared with application/output/writers disk render) ---
+# --- score-entry helpers (shared with application/output disk render) ---
 
 
 def score_entry_from_dict(s: dict[str, Any]) -> ScoreEntry:

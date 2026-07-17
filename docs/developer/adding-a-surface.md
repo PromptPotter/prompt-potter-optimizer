@@ -111,12 +111,12 @@ reconstructor to keep in sync** — that synchronized third edit is gone.
    `application/views/view_models.py`.
 2. Set it in the live builder `_<phase>_<event>` in
    `application/views/ingress.py` (`from_phase_event`).
-3. Render it in `presentation/views/render/text.py` (`to_text`) /
+3. Render it in `presentation/views/render.py` (`to_text`) /
    `application/views/render/` (`to_markdown`) and/or
    read it where the fact is surfaced — `LiveDashboardView._apply_phase` reads
    the typed view by attribute (`getattr`, presentation-agnostic).
 4. If the field also appears in post-hoc `log.md`, set it in `from_disk_log`
-   (`application/output/writers.py`) — that builder reads on-disk `index.json` for
+   (`application/output.py`) — that builder reads on-disk `index.json` for
    **cross-cycle** rendering and is a genuinely separate source, not a roundtrip shim.
 
 **A field on the ROUND document is not this recipe — it is one edit.** Declare it on

@@ -1,6 +1,6 @@
 """Frozen view-model dataclasses — unified type set across render targets.
 
-Producers: ``application.views.ingress`` (live PhaseEvents) + ``application.output.writers``
+Producers: ``application.views.ingress`` (live PhaseEvents) + ``application.output``
 (post-hoc disk round_data). Consumers: ``render`` (``to_text``/``to_markdown``).
 Pure data — no I/O, no methods that emit text.
 

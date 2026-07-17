@@ -22,7 +22,7 @@ tags: [security, identity, authorization, capabilities, delegation, multi-tenant
 >
 > **Shipped (2026-07-15): §3 enforcement seam + §1 sub-principal core.**
 > **§3:** `CAP_FOR_KIND` + `_require_capability_for` at the dispatcher's single
-> `_record_and_apply` chokepoint (`command_dispatcher/dispatcher.py`); an
+> `_record_and_apply` chokepoint (`command_dispatcher.py`); an
 > import-time exhaustiveness assert derives the closed kind set from the `*Kind`
 > `Literal`s so the map cannot drift. Six tier capabilities
 > (`CAMPAIGN_{STEP,RUN,CREATE,BUDGET,LIFECYCLE,BABYSIT}_CAP`, enumerated once as

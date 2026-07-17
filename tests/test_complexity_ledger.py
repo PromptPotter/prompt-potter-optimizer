@@ -288,8 +288,15 @@ LEDGER_BASELINE = {
     # functions over ``.workspace/active_session.json`` — a different file, root and shape.
     # ``reexport_shims`` 9 -> 8 pays for it, so TOTAL is flat: the win is that a fourth
     # back-edge is now impossible rather than likely, which this ledger cannot count.
-    "modules": 319,
-    "init_files": 60,
+    # 319 -> 312, ``init_files`` 60 -> 56 (2026-07-17): four packages that existed to hold a
+    # single thing were collapsed to one module each — ``presentation/views/render/``
+    # (``text`` + its only caller ``sp_diff``, one external consumer),
+    # ``api/middleware/command_dispatcher/`` (``dispatcher`` + ``helpers``, which had zero
+    # importers outside it), ``application/output/`` (``writers`` + ``review``), and
+    # ``projections/event_stream/`` (one module, one importer). A package around one call
+    # chain is a directory a reader must open to learn there was nothing to choose.
+    "modules": 312,
+    "init_files": 56,
     # 43 -> 9 (2026-07-16): 34 package ``__init__`` files that did nothing but re-export a
     # leaf's names were emptied to docstring-only namespace markers, and their ~190 consumer
     # sites now import the leaf they actually wanted. A shim is a hop a reader must take and

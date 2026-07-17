@@ -74,7 +74,7 @@ auth-off path. A **delegate** holds an attenuated subset — see below.
 control-plane command requires a **tier capability** — `CAMPAIGN_{STEP,RUN,CREATE,BUDGET,LIFECYCLE,BABYSIT}_CAP`
 (`shared/identity.py`, enumerated once as `CAMPAIGN_CAP_BY_TIER`). Enforcement is a
 **second one-chokepoint**: `_require_capability_for` reads `CAP_FOR_KIND[kind]` at the
-dispatcher's `_record_and_apply` (`command_dispatcher/dispatcher.py`) — the single site
+dispatcher's `_record_and_apply` (`command_dispatcher.py`) — the single site
 every command funnels through — before applying. An import-time assert keeps `CAP_FOR_KIND`
 exhaustive over the closed kind set. Same 404 posture. A first-class tenant owner holds the
 full `OWNER_COMMAND_CAPABILITIES`, so single-owner installs are unaffected.
@@ -185,14 +185,14 @@ not backend-supplied.
 | Host-admin capability set (one definition) | `shared/identity.py::ADMIN_CAPABILITIES` (empty; powers ride the ADR-0004 channel) |
 | Who-is-host-admin (two predicates, never merged) | `shared/identity.py::_admin_caps_from_env`, `middleware/oidc.py::_session_capabilities` |
 | Dataset resolution (NOT a capability gate) | `store/dataset_access.py::readable_dataset_dir` — tenant content, then install content |
-| Command-verb gate (the one chokepoint) | `command_dispatcher/dispatcher.py::_require_capability_for` + `CAP_FOR_KIND` |
+| Command-verb gate (the one chokepoint) | `command_dispatcher.py::_require_capability_for` + `CAP_FOR_KIND` |
 | Command tier caps (one enumeration) | `shared/identity.py::CAMPAIGN_CAP_BY_TIER`, `OWNER_COMMAND_CAPABILITIES` |
 | Sealed sub-principal grant store | `infrastructure/identity/grants.py` (`.promptpotter/identity/grants.json`) |
 | Delegation attenuation (enforced at read) | `grants.py::resolve_effective_capabilities`, `middleware/oidc.py::_delegated_identity` |
 | Dataset visibility gateway | `infrastructure/store/dataset_access.py` |
 | Tenant isolation (structural) | `infrastructure/store/stores.py::build_stores` |
 | Ownership rule (one definition) | `campaign_store/store.py::load_owned` |
-| Sole inbound writer | `middleware/command_dispatcher/dispatcher.py` |
+| Sole inbound writer | `middleware/command_dispatcher.py` |
 | AuthN resolver + 401 | `deps.py::resolve_identity`, `middleware/oidc.py` |
 | Out-of-band admin channel | `presentation/admin_bot.py` + [ADR-0004](../adr/0004-operator-admin-channels.md) |
 | Response security headers | `main.py::response_headers` |

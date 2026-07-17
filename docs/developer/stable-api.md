@@ -155,8 +155,8 @@ Operator-visible files inside `campaigns/{campaign_id}/cycles/{cycle_id}/`. Weba
 | Path | Writer | Description |
 |---|---|---|
 | `index.json` | `CampaignStore.create` / `update` | Per-cycle summary: header (dataset, lineage), rounds[], best. |
-| `log.md` | `application/output/writers.py::write_log_md` | Markdown digest of every closed round + forks + hard samples + final winner. |
-| `review.md` | `application/output/writers.py::write_review_md` | Per-round behavior-check + L1Stats narrative. |
+| `log.md` | `application/output.py::write_log_md` | Markdown digest of every closed round + forks + hard samples + final winner. |
+| `review.md` | `application/output.py::write_review_md` | Per-round behavior-check + L1Stats narrative. |
 | `rounds/round_NNNN.json` | `CampaignStore.save_round_file` | Full per-round detail: candidate scores, evaluators, prompt_fields, pipeline_params, OSP snapshot, decisions. |
 | `dashboard.json` (per cycle) | `LiveDashboardView._persist` | Live operator view; rewritten on every record. Refresh: 2 s. |
 | `langfuse/*.json` | `infrastructure/tracing/langfuse_push.py` | Per-cycle Langfuse export snapshots. |

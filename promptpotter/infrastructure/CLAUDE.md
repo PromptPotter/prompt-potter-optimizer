@@ -32,7 +32,7 @@ follow the same pattern.
 | `PoBBStreamView` | per cycle | `.runtime/streams/round_NNNN_p_best.jsonl` | Per-sample P(best) trajectory for post-hoc posterior analysis. Operator-tailable; webapp does not consume it. |
 
 The **Profile A outbound SSE highway is NOT a projection/subscriber** — it is
-served by *tailing* the on-disk ledger (`projections/event_stream/tail.py::CycleLedgerTail`)
+served by *tailing* the on-disk ledger (`projections/event_stream.py::CycleLedgerTail`)
 over `GET /campaigns/{c}/cycles/{cy}/events:subscribe`, **cross-process**: any
 reader (the API server, the CLI, a future MCP client) tails the cycle's
 `.runtime/ledger.jsonl` directly, so the stream no longer depends on the run
