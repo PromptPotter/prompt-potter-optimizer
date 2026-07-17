@@ -47,6 +47,13 @@ You've run a campaign. Pointers below for the next layer.
 
 ## Iterating on prompts manually
 
-Hand-tuning `l1_generate` (or another optimizer meta-prompt) is owned by [`/potter-l1-meta-campaign`](../../.claude/skills/potter-l1-meta-campaign/SKILL.md) — a same-command-every-tick strategist that reads cycle artifacts, applies the round-1 verdict + top-issue ranking, and writes one proposed edit per non-healthy cycle to `.promptpotter/meta_campaigns/{prompt_id}/proposed_edits/`. State persists on disk; ten ticks in a row produce ten consistent decisions.
+Hand-tuning `l1_generate` (or another optimizer meta-prompt) means editing
+`datasets/_optimizer/pipeline.json` directly — it is an operator-owned file that nothing
+writes. To measure whether an edit helped, run the optimizer **on itself**:
+`python -m promptpotter new promptpotter-self` (L4) scores meta-prompt variants against a
+cached origin on shared cells and reports a paired verdict.
+
+A hand-driven strategist skill used to own this; L4's recursion replaced it, because a
+loop that measures its own edits beats a checklist that proposes them.
 
 Full design spec: [`../specs/roadmap.md`](../specs/roadmap.md).

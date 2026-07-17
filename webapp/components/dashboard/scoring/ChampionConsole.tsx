@@ -1,20 +1,14 @@
 "use client";
 // Champion Console — the ranked table of candidate meta-prompt states, the
 // developer answer to "which meta-prompt is overall best?". Ranks by the
-// anchor-to-origin paired effect (cheap, always-available, provisional);
-// confirmation is earned by a coronation match (the row ops, wired in the
-// champion-selection slice). Reads the server-reduced registry; no recompute.
+// anchor-to-origin paired effect. Reads the server-reduced registry; no recompute.
 // Renders only for the outer pp-self loop (DashboardTab's isOuterSelfOpt gate).
+// Ranking is the whole surface: nothing here crowns a winner or graduates one into
+// datasets/_optimizer — that is a deliberate hand-edit.
 
 import type { ChampionCandidate, ChampionRegistryResponse } from "@/lib/api";
-import { CardFrame, Badge, type BadgeTone } from "@/components/ui";
+import { CardFrame } from "@/components/ui";
 import { cx } from "@/lib/cx";
-
-const STATUS_TONE: Record<string, BadgeTone> = {
-  champion: "success",
-  confirmed: "success",
-  provisional: "accent",
-};
 
 function effectClass(row: ChampionCandidate): string {
   // Colour the sign, but the number + CI carry the meaning (color is never alone).
@@ -25,15 +19,6 @@ function effectClass(row: ChampionCandidate): string {
 
 function fmt(n: number): string {
   return (n >= 0 ? "+" : "") + n.toFixed(4);
-}
-
-/** One preset data-collection operation — inert until the coronation slice lands. */
-function OpButton({ label, title }: { label: string; title: string }) {
-  return (
-    <button type="button" className="l4-op" disabled title={`${title} (coming)`}>
-      {label}
-    </button>
-  );
 }
 
 function ChampionRow({
@@ -47,11 +32,10 @@ function ChampionRow({
 }) {
   const prov = row.provenance[0];
   return (
-    <tr className={cx("l4-row", row.status === "champion" && "l4-row-champion")}>
+    <tr className="l4-row">
       <td className="l4-rank">{rank}</td>
       <td className="l4-state">
         <code>{row.state_hash}</code>
-        <Badge tone={STATUS_TONE[row.status] ?? "default"}>{row.status}</Badge>
       </td>
       <td className={cx("l4-effect", effectClass(row))}>
         <span className="l4-effect-mean">{fmt(row.anchor_effect)}</span>
@@ -79,25 +63,6 @@ function ChampionRow({
       <td className="l4-label" title={row.label}>
         {row.label}
       </td>
-      <td className="l4-ops">
-        {row.status === "champion" ? (
-          <OpButton
-            label="Apply"
-            title={
-              "Graduate this champion into the distributable datasets/_optimizer — " +
-              "run: champion apply. The shipped optimizer + the next pp-self inner origin " +
-              "both start from it."
-            }
-          />
-        ) : (
-          <OpButton
-            label="Coronation"
-            title={`Head-to-head vs the reigning champion — run: champion coronate ${row.state_hash}`}
-          />
-        )}
-        <OpButton label="+Seeds" title="Collect more seeds on this state's cells (run more pp-self)" />
-        <OpButton label="+Cells" title="Measure this state on more in-band cells" />
-      </td>
     </tr>
   );
 }
@@ -122,8 +87,8 @@ export function ChampionConsole({
     >
       <p className="l4-lede">
         Every candidate meta-prompt state on disk, ranked by anchor-to-origin effect (paired
-        candidate−origin over shared cells). Ranking is <strong>provisional</strong>; a coronation
-        match <strong>confirms</strong> a state against the reigning champion.
+        candidate−origin over shared cells). Absolute scores across runs are not comparable
+        — only these paired effects are.
       </p>
       {rows.length === 0 ? (
         <p className="l4-empty">
@@ -141,7 +106,6 @@ export function ChampionConsole({
                 <th scope="col">cells / n</th>
                 <th scope="col">seen</th>
                 <th scope="col">edit</th>
-                <th scope="col">collect</th>
               </tr>
             </thead>
             <tbody>

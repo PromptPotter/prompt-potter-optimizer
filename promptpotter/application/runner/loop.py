@@ -1,5 +1,6 @@
 """Round loop — generate → score → escalate → stop. Sweep/diag short-circuit after one round;
-``halt_at_accuracy`` + ``budget_gate`` are sweep-toolkit halts checked every clean round.
+``halt_at_accuracy`` + ``budget_gate`` are optional halts checked every clean round —
+reachable from ``new`` / ``resume``, the launcher, and the command dispatcher alike.
 
 Pause cooperation: at each iteration top the loop polls ``session.pause_check``
 (``.runtime/pause.flag`` per cycle dir, written by the ``pause-cycle`` command

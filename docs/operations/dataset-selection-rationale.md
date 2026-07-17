@@ -173,7 +173,7 @@ Candidates that may earn a slot pending an empirical check. Verify the open ques
 When a shortlisted dataset is trialed:
 1. Record measured 20b-low origin + observed ceiling in the row above.
 2. If it falls outside the projected band, move it to *Rejected* with the empirical reason.
-3. If it works, leave it shortlisted — at any time multiple datasets can serve as meta-campaign focus, rotated per-cycle.
-4. Once a dataset becomes the *primary* focus for a meta-campaign run, also update that campaign's NOTES.md (e.g. `.promptpotter/meta_campaigns/l1_generate/NOTES.md`) with the model + reference accuracy.
+3. If it works, leave it shortlisted — several datasets can serve as L4 inner cells at once.
+4. Once a dataset is wired as an L4 inner benchmark, record its model + reference accuracy in [`dataset-reasoning-matrix.md`](dataset-reasoning-matrix.md) — the canonical table.
 
 See also: [`dataset-reasoning-matrix.md`](dataset-reasoning-matrix.md) for per-dataset model defaults once a candidate graduates from shortlist to wired.

@@ -9,8 +9,8 @@ accuracy moved. That decoupling is what makes the metric a usable anchor
 for iterating the meta-prompt across many datasets.
 
 Adding a check is one function plus one entry in ``L2_CHECK_REGISTRY``.
-The registry is the single source of truth so ``review.md`` and the
-``potter-l1-meta-campaign`` skill enumerate the same check set.
+The registry is the single source of truth, so every surface that enumerates the
+checks (``review.md``, the round-1 verdict) reads the same set.
 
 The L2 output shape walked here is :class:`L2ContextOutput`
 (``dispatch/schemas.py``): ``task_context`` refinement dict,

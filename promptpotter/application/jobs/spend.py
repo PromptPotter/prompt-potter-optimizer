@@ -8,8 +8,10 @@ inherited spend, so anything that needs an additive figure over a time window �
 the daily-cap gate (:mod:`quota`) and the Activity pane (``/auth/activity``) — reads
 it here, from the ledger, filtered by record ``timestamp``.
 
-``cost_usd`` may be absent on a record (Groq doesn't return wire cost); we fall back
-to the rate table × tokens so historical spend isn't silently zero.
+``cost_usd`` may be absent on a record (Groq doesn't return wire cost); resolution
+falls back to the rate table × tokens so historical spend isn't silently zero. That
+resolution is ``shared/spend.py::compute_usd`` — the SAME function behind the sole
+``dashboard.json::spend`` writer. There is one cost policy, not one per consumer.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ from typing import Any
 
 from promptpotter.infrastructure.store.read_model import iter_jsonl
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.spend import lookup_rate
+from promptpotter.shared.spend import compute_usd
 
 
 def start_of_utc_day() -> float:
@@ -46,8 +48,8 @@ def iter_user_token_usage(*, store: Stores, since: float, until: float) -> list[
     against the serialized discriminator that would silently drop every row if the
     dump shape ever changed.
 
-    Returns ``cost_usd`` as ``None`` when the record didn't carry one; the caller
-    resolves it via :func:`record_cost_usd`.
+    Returns ``cost_usd`` as ``None`` when the record didn't carry one, and carries
+    ``cached`` through; the caller resolves both via :func:`record_cost_usd`.
     """
     out: list[dict[str, Any]] = []
     for ledger_path in store.campaigns.iter_cycle_ledgers():
@@ -73,28 +75,45 @@ def iter_user_token_usage(*, store: Stores, since: float, until: float) -> list[
                     "tokens": input_t + output_t,
                     "model": rec.get("model"),
                     "kind": rec.get("kind"),
+                    "cached": bool(rec.get("cached", False)),
                 }
             )
     return out
 
 
 def record_cost_usd(rec: dict[str, Any]) -> float:
-    """Resolve one usage record's USD cost: wire ``cost_usd`` if present, else the
-    rate table × tokens, else ``0.0`` (unknown model / no rate)."""
-    cost = rec.get("cost_usd")
-    if cost is not None:
-        return float(cost)
-    model = rec.get("model") or "unknown"
-    rate = lookup_rate(model if model != "unknown" else None)
-    if rate is None:
+    """Billed USD for one usage record — ``0.0`` for a call that never reached the wire.
+
+    Resolution is :func:`~promptpotter.shared.spend.compute_usd`, the same one the
+    ``dashboard.json::spend`` writer rides: wire ``cost_usd`` short-circuits, else the
+    rate table × tokens. This module used to re-implement that policy over the raw dict,
+    and the two copies had drifted apart in both directions.
+
+    ``cached`` is the split :class:`TokenUsageRecord` defines: only a call with
+    ``cached=False`` is money that left the account. Billing a cache hit made the daily
+    cap subtract phantom spend, so a resumed or forked run served from the
+    content-addressed cache — which costs $0 — shrank the next launch's budget, and could
+    floor it to ``0.0`` and halt a run against money nobody spent.
+
+    An unpriced model still resolves to ``0.0`` (``compute_usd`` says ``None``), which
+    under-counts the cap rather than over-counting it. The dashboard arms an "USD cap
+    inactive" warning on that case; this path has no channel to say so — filed on the
+    debt backlog, not papered over here.
+    """
+    if rec.get("cached"):
         return 0.0
-    input_t = int(rec.get("input_tokens", 0))
-    output_t = int(rec.get("output_tokens", 0))
-    return input_t * rate[0] + output_t * rate[1]
+    raw = rec.get("cost_usd")
+    usd = compute_usd(
+        rec.get("model"),
+        int(rec.get("input_tokens", 0)),
+        int(rec.get("output_tokens", 0)),
+        override_usd=float(raw) if isinstance(raw, int | float) else None,
+    )
+    return usd if usd is not None else 0.0
 
 
 def sum_user_spend(*, store: Stores, since: float, until: float) -> float:
-    """Total USD spend over ``[since, until)`` from the user's per-cycle ledgers."""
+    """Total billed USD over ``[since, until)`` from the user's per-cycle ledgers."""
     return sum(
         record_cost_usd(r) for r in iter_user_token_usage(store=store, since=since, until=until)
     )

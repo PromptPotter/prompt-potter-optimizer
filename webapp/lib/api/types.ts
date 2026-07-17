@@ -57,8 +57,6 @@ export type {
 // differ per dataset), so the heatmap tier stops at `dataset`.
 export type HardSamplesScope = "cycle" | "campaign" | "dataset";
 
-export type SiblingKind = "root" | "fork" | "diag" | "sweep";
-
 // Operator-facing unit kind — the time-horizon taxonomy the sidebar
 // badges by, derived server-side from (sibling_kind, fork trigger).
 // `session` = the root run (resume extends it); `divergent_resume` = a

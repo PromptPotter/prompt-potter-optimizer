@@ -23,7 +23,7 @@ intelligence; intelligence does not depend on either.
 | `views/` | The **emit contract**: frozen typed View dataclasses (`view_models.py`), the live `PhaseEvent → View` builder (`ingress.py::from_phase_event` — needs same-layer `optimizer_model` + scoring formula evaluators), and markdown rendering (`render/` — `to_markdown` + heatmap + `render_sweep_summary`). Producing these views *is* an orchestration job, so they live here; `presentation/views` imports them upward for terminal (`to_text`) rendering. |
 | `jobs/` | The launcher + job registry (capacity-1 machine slot), the spend cap, and the liveness reaper. `jobs/launcher/` is the shared mint/start seam CLI `new` and the web Start both funnel through. |
 | `mask/` | The mask projection — record / divergence / invariant-vs-divergent, plus `backprop.py::select_rewind_round` (UCB1 over the lineage tree; the layer decides *whether* to rewind, this decides *where*). **The code SoT** for `docs/specs/mask-projection.md`. |
-| `meta_champion/` | Promotes a winning meta-prompt: writes `datasets/_optimizer_meta/champion.json` and **rewrites `datasets/_optimizer/pipeline.json` in place**. CLI verb `champion`. A live write path into the shared optimizer pipeline — know it exists before you treat that file as frozen. |
+| `meta_champion/` | Ranks meta-prompt states by anchor-to-origin paired effect, recomputed from disk per read (`GET /champion-registry`). **Read-only, and deliberately so** — it names a winner; graduating one into `datasets/_optimizer/pipeline.json` is a hand-edit. The `champion` verb that used to write that file is gone, so treat `_optimizer/pipeline.json` as operator-owned. |
 | `resource_matrix/` | The `matrix` verb's cost/latency sweep across model × dataset. |
 
 ## Top-level modules

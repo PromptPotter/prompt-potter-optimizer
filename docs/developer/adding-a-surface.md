@@ -226,14 +226,15 @@ A new `python -m promptpotter <verb>`. The CLI is a **thin shell**: parse, call 
 **Recipe:**
 
 1. Write `presentation/cli/commands/<verb>.py` exporting one `cmd_<verb>(args)`
-   entry function (a subpackage instead of a module when the verb needs helpers —
-   see `commands/sweep/`).
+   entry function. Prefer a module; reach for a subpackage only when the verb has
+   genuinely separable parts (`lifecycle.py` holds three verbs in one module — a
+   directory per verb bought a reader a hop to learn there was nothing to choose).
 2. Add its argparse subparser in `presentation/cli/parsers.py`.
 3. Add the `"<verb>": cmd_<verb>` row to `COMMANDS` in
    `presentation/cli/campaign_runner.py`, importing the function at the top.
 4. Decide the verb's class and honor it: **write** (`new` / `resume` — these mint or
    extend a cycle), **lifecycle** (`archive` / `delete` / `unarchive` / `reset`), or
-   **diagnostic** (`ab` / `verify` / `sweep` / `noise-floor` / `champion` / `matrix` —
+   **diagnostic** (`ab` / `verify` / `noise-floor` / `matrix` —
    these must not perturb an existing cycle's measurements).
 5. Do **not** add a read verb. Reads happen by opening the artifact tree — the file
    tree *is* the dashboard. Nor an `ingest` verb: raw-file ingest is `new <file.csv>`.

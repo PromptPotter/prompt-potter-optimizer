@@ -329,8 +329,8 @@ class ConfigMapResponse(StrictModel):
     coupling flagged active/inactive against this campaign's frozen config.
 
     Server-authored from the single ``application.knobs`` registry — the same source
-    the CLI ``config_map`` diagnostic and the pre-run preflight warning read, so the
-    webapp panel never disagrees with the engine on which knobs collide.
+    the pre-run preflight warning reads, so the webapp panel never disagrees with the
+    engine on which knobs collide.
     """
 
     groups: list[ConfigEstimandGroup] = Field(description="Estimand groups, in declared order")

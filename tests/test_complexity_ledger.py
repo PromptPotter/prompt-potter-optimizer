@@ -49,10 +49,10 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # stays θ. A feature, justified, so the baseline rises (per the surface-ledger rule).
 # then ``modules`` 293→295 (the config coupling/provenance map — the SoT
 # ``application/config_coupling.py`` declaring which knob moves which statistical
-# estimand + which knobs collide, and its CLI ``diagnostics/config_map.py``. Lifts
+# estimand + which knobs collide, plus a CLI table (since deleted). Lifts
 # the "deferred-with-the-flip" knob interactions out of spec prose into one
-# machine-checked registry, read by the preflight gate, the diagnostic, and the
-# webapp config-map panel. A feature — operator-requested collision visibility).
+# machine-checked registry, read by the preflight gate and the webapp config-map
+# panel. A feature — operator-requested collision visibility).
 # then ``modules`` 295→293 (deleted the dead cross-cycle compare subsystem — the
 # unused ``compare`` CLI verb + ``pobb/elevation.py`` (elevate_to_decisive /
 # discover_compare_arms / the persisted δ-bank) + ``posterior_best_from_normals``.
@@ -327,8 +327,33 @@ LEDGER_BASELINE = {
     # write down. The bug it pays for shipped: ``ObservationMapping(obs_key=…)`` — the field is
     # ``output_field`` — rode a real ``pipeline.json`` for months, silently a no-op, with ruff,
     # mypy and pytest all green.
-    "modules": 311,
-    "init_files": 52,
+    # then 311 -> 309 (2026-07-17): the ``champion`` verb was deleted — ``cli/commands/
+    # champion.py`` + ``application/meta_champion/champion.py``. Operator call, made against
+    # a correction: the ChampionConsole panel CANNOT land a winner (its row ops are
+    # ``disabled`` placeholders whose tooltips say "run: champion apply"), so the verb was
+    # the only write path into ``datasets/_optimizer/pipeline.json``. Deleting it makes
+    # graduation a deliberate hand-edit — a once-per-winner action that did not earn ~560
+    # lines of promote/coronate/apply/replay machinery, none of which had ever run: no
+    # ``champion.json``, no ``meta_champion/registry.json`` exists on disk anywhere.
+    # ``reducer.py`` SURVIVES — the API recomputes it live for the panel. What went with the
+    # verb: the registry's persistence (``read``/``write_registry``, ``registry_path``) had no
+    # other caller, and ``CandidateRow.status`` collapsed to the constant ``"provisional"``
+    # once nothing could write ``"confirmed"`` (coronate) or ``"champion"`` (the pointer) —
+    # a field with one reachable value is not a field.
+    # then 309 -> 302 (2026-07-17): the ``sweep`` VERB (``cli/commands/sweep/`` 5 modules +
+    # ``application/sweep/toolkit.py``) and ``diagnostics/config_map.py``. Both operator calls.
+    # The sweep verb was the SECOND harness minting per-variant forks to A/B prompts -- the
+    # first is ``new --sweep-batch`` (``application/sweep/sweep_runner.py``, "one fork per
+    # OperatorSweepFile via _mint_fork"), which SURVIVES: it rides the shipped ``new`` mint
+    # seam and the shared fork primitive instead of hand-rolling its own batch ids. Neither
+    # had ever run -- no archive/sweeps/, no sweep_id, no OPERATOR_SWEEP fork exists on disk
+    # (three search shapes) -- so this is the "fold into the canonical mechanism, never add
+    # beside it" rule applied to a redundancy that never got exercised. ``config_map.py`` was
+    # the THIRD hand-maintained rendering of the ``knobs.py`` table; the preflight gate and
+    # GET /campaigns/{id}/config-map both survive untouched, and knobs.py stays the SoT.
+    "modules": 302,
+    # 52 -> 51 (2026-07-17): ``cli/commands/sweep`` went with the sweep verb.
+    "init_files": 51,
     # 43 -> 9 (2026-07-16): 34 package ``__init__`` files that did nothing but re-export a
     # leaf's names were emptied to docstring-only namespace markers, and their ~190 consumer
     # sites now import the leaf they actually wanted. A shim is a hop a reader must take and
@@ -348,10 +373,12 @@ LEDGER_BASELINE = {
     #   * ``presentation/api/routers/campaigns`` — IS the route registry: its submodule imports
     #     run the ``@campaigns_router`` decorators, so emptying it mounts a router with ZERO
     #     routes. The one that reads like a pure re-export and is not.
-    #   * ``shared``, ``application/scoring/formula``, ``application/views/render``,
-    #     ``cli/commands/sweep`` — real code in the body (the counter sees ``__all__`` + an
-    #     import and says "shim"; it is wrong).
-    "reexport_shims": 6,
+    #   * ``shared``, ``application/scoring/formula``, ``application/views/render`` — real
+    #     code in the body (the counter sees ``__all__`` + an import and says "shim"; it is
+    #     wrong).
+    #
+    # 6 -> 5 (2026-07-17): ``cli/commands/sweep`` left the floor with the sweep verb itself.
+    "reexport_shims": 5,
     "config_leaf_fields": 38,
     "settings_env": 16,
     "settings_const": 14,
@@ -375,7 +402,9 @@ LEDGER_BASELINE = {
     # Like ``reexport_shims``, this marches to a FLOOR, not to zero — ~30 are honest (raw JSON
     # pre-parse, provider SDK payloads behind `follow_imports="skip"`), and `**kwargs: Any`
     # is excluded outright.
-    "any_params": 73,
+    # 73 -> 69 (2026-07-17): four bare ``Any`` params rode the deleted sweep verb +
+    # config_map. Subtraction by deletion, not by retyping -- the debt left with its code.
+    "any_params": 69,
     # NEW dimension (2026-07-17), landing at 4 — a Pydantic model that does NOT end up
     # ``extra="forbid"``, so an unknown key is dropped instead of raised. 106 before the
     # ``StrictModel`` migration, 4 after. It is a conceptual surface because the alternative

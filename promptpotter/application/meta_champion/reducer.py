@@ -2,8 +2,9 @@
 
 Reduces the accumulated on-disk corpus of ``promptpotter-self`` outer cycles to one
 ranked table of candidate meta-prompt states. Zero LLM calls (the ``ab``-verb posture):
-every number is re-derived from ``rounds/round_NNNN.json`` on disk, so ``champion
-refresh`` is reproducible.
+every number is re-derived from ``rounds/round_NNNN.json`` on disk, so the table is
+reproducible. ``GET /champion-registry`` recomputes it per read — there is no persisted
+registry and no reigning-champion pointer; the ranking is the whole answer.
 
 The comparison metric here is the **anchor-to-origin** paired effect: for each candidate
 meta-prompt state, the per-cell ``(candidate − origin) composite`` diff, paired on the
@@ -11,8 +12,10 @@ shared cells the candidate was measured on, aggregated across every occurrence o
 state anywhere in the corpus. Origin (the un-edited meta-prompt) is the round-0 arm — the
 same cached control the per-round verdict (``domain/l4/verdict.py``) pairs
 against, never re-measured. Absolute scores across runs are not comparable — only these
-paired-on-shared-cells effects are — which is why the table ranks by anchor effect, and
-confirmation is earned separately by a coronation match.
+paired-on-shared-cells effects are — which is why the table ranks by anchor effect.
+
+Ranking a winner is where this stops: graduating one into
+``datasets/_optimizer/pipeline.json`` is a deliberate hand-edit, not a verb.
 """
 
 from __future__ import annotations
@@ -70,34 +73,14 @@ class CandidateRow(StrictModel):
     ci_hi: float
     n_cells: int
     n_measurements: int
-    status: str  # provisional | confirmed | champion
 
 
 class ChampionRegistry(StrictModel):
-    """The ranked champion table — regenerated wholesale by ``champion refresh``."""
+    """The ranked champion table — recomputed from disk on every read, never persisted."""
 
     generated_at: str
     n_cycles_scanned: int
     candidates: list[CandidateRow]  # ranked desc by anchor_effect
-
-
-def registry_path(base_dir: Path) -> Path:
-    """The per-tenant champion registry ledger path."""
-    return base_dir / "meta_champion" / "registry.json"
-
-
-def champion_pointer_path() -> Path:
-    """The committed reigning-champion pointer (shared across tenants)."""
-    from promptpotter.infrastructure.store.layout import REPO_ROOT
-
-    return REPO_ROOT / "datasets" / "_optimizer_meta" / "champion.json"
-
-
-def _reigning_champion_hash() -> str | None:
-    """The reigning champion's state_hash from the pointer (raw read, no model)."""
-    doc = _read_json(champion_pointer_path())
-    h = doc.get("state_hash")
-    return str(h) if isinstance(h, str) and h else None
 
 
 def _state_hash(prompt_state: dict[str, dict[str, str]]) -> str:
@@ -190,11 +173,6 @@ def reduce_corpus(store: Stores) -> ChampionRegistry:
                 )
 
     rows = [_finalize(state_hash, acc) for state_hash, acc in accums.items()]
-    champion_hash = _reigning_champion_hash()
-    if champion_hash is not None:
-        for row in rows:
-            if row.state_hash == champion_hash:
-                row.status = "champion"
     rows.sort(key=lambda r: r.anchor_effect, reverse=True)
     return ChampionRegistry(
         generated_at=datetime.now(UTC).isoformat(timespec="seconds"),
@@ -272,26 +250,4 @@ def _finalize(state_hash: str, acc: _Accum) -> CandidateRow:
         ci_hi=anchor + 1.96 * anchor_se,
         n_cells=len(per_cell),
         n_measurements=n_meas,
-        status="provisional",
     )
-
-
-def write_registry(base_dir: Path, registry: ChampionRegistry) -> Path:
-    """Persist the registry atomically; returns the written path."""
-    path = registry_path(base_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(registry.model_dump_json(indent=2), encoding="utf-8")
-    tmp.replace(path)
-    return path
-
-
-def read_registry(base_dir: Path) -> ChampionRegistry | None:
-    """Load the registry if present; ``None`` when it has never been built."""
-    path = registry_path(base_dir)
-    if not path.is_file():
-        return None
-    try:
-        return ChampionRegistry.model_validate_json(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None

@@ -113,15 +113,6 @@
   .lineage-node.mask-alt .lineage-stub,
   .lineage-node.mask-divergence .lineage-stub{animation:none;opacity:1}
 }
-/* Scoring-lens selector in the card header. */
-/* Red "mask active" tag in the card title — signals the lineage is showing a
-   counterfactual projection, not the realized record. */
-.lineage-title{display:inline-flex;align-items:center;gap:8px}
-.lineage-mask-tag{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:#fff;background:var(--color-danger);border-radius:4px;padding:1px 6px;line-height:1.5;font-family:var(--font-mono)}
-/* Header right-side cluster: badge + "Clean up N stubs" button. */
-.family-cladogram-cleanup-btn{background:transparent;border:1px solid var(--color-border);border-radius:4px;color:var(--color-text-secondary);cursor:pointer;font:inherit;font-size:11px;padding:2px 8px;text-transform:none;letter-spacing:0}
-.family-cladogram-cleanup-btn:hover{color:var(--color-danger);border-color:var(--color-danger)}
-.family-cladogram-cleanup-done{font-size:11px;color:var(--color-text-tertiary);font-style:italic;text-transform:none;letter-spacing:0}
 /* Cleanup-dialog body + error text. The dialog chrome (backdrop, card) comes
    from the Dialog primitive (components/ui/Dialog.module.css). */
 .family-tree-modal-body{font-size:13px;color:var(--color-text-secondary);margin:0 0 12px;line-height:1.4}

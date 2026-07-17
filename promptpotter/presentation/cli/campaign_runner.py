@@ -21,7 +21,6 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
 
 from promptpotter.presentation.cli.commands._shared import _DIVERGENCE_HINT, set_verbose
 from promptpotter.presentation.cli.commands.ab import cmd_ab
-from promptpotter.presentation.cli.commands.champion import cmd_champion
 from promptpotter.presentation.cli.commands.lifecycle import cmd_archive, cmd_delete, cmd_unarchive
 from promptpotter.presentation.cli.commands.matrix import cmd_matrix
 from promptpotter.presentation.cli.commands.new import cmd_new
@@ -29,7 +28,6 @@ from promptpotter.presentation.cli.commands.noise_floor import cmd_noise_floor
 from promptpotter.presentation.cli.commands.reindex import cmd_reindex
 from promptpotter.presentation.cli.commands.reset import cmd_reset
 from promptpotter.presentation.cli.commands.resume_command import cmd_resume
-from promptpotter.presentation.cli.commands.sweep import cmd_sweep
 from promptpotter.presentation.cli.commands.verify import cmd_verify
 from promptpotter.presentation.cli.parsers import build_parser
 
@@ -40,9 +38,7 @@ COMMANDS = {
     "new": cmd_new,
     "resume": cmd_resume,
     "ab": cmd_ab,
-    "champion": cmd_champion,
     "matrix": cmd_matrix,
-    "sweep": cmd_sweep,
     "reset": cmd_reset,
     "reindex": cmd_reindex,
     "verify": cmd_verify,
@@ -76,7 +72,6 @@ def main() -> None:
                 "  promptpotter new <file.csv>  ingest a raw file → resolve origin → mint + run\n"
                 "  promptpotter resume          continue the active campaign\n"
                 "  promptpotter verify          re-score a candidate on more samples\n"
-                "  promptpotter sweep           cheap A/B of optimizer meta-prompt edits\n"
                 "  promptpotter ab              re-derive the active cycle's decisions under the current engine\n\n"
                 "Run `promptpotter <verb> --help` for per-verb options.\n"
                 "Docs: https://github.com/runfish5/prompt-potter-optimizer"
@@ -84,7 +79,7 @@ def main() -> None:
             return
         args = parser.parse_args(["resume"])
 
-    if args.command in ("new", "resume", "sweep"):
+    if args.command in ("new", "resume"):
         from promptpotter.config.env_bootstrap import ensure_api_key
 
         ensure_api_key()

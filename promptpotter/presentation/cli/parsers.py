@@ -1,4 +1,4 @@
-"""Argparse schema for ``new`` / ``resume`` / ``sweep`` / ``reset`` / ``verify``.
+"""Argparse schema for ``new`` / ``resume`` / ``reset`` / ``verify``.
 
 Imported by ``campaign_runner.main()``. Help text is verbose by design — this
 is the operator-facing surface.
@@ -232,226 +232,6 @@ def _add_resume_args(p_resume: argparse.ArgumentParser) -> None:
     _add_runtime_halts(p_resume)
 
 
-def _add_sweep_slice_args(p: argparse.ArgumentParser) -> None:
-    """Shared ``--slice`` modifier — restricts the sample population."""
-    p.add_argument(
-        "--slice",
-        dest="slice_spec",
-        default="all",
-        help="Sample-population filter: 'all' (default), 'easy' (top hit-rate "
-        "quartile), 'hard' (bottom quartile), or 'samples=ID1,ID2,...' for an "
-        "explicit list. Easy/hard read the cross-cycle archive; fall back to "
-        "'all' when no measurements exist yet.",
-    )
-
-
-def _add_sweep_prompt_args(p: argparse.ArgumentParser, *, allow_multi: bool = True) -> None:
-    """Shared optimizer-meta-prompt selectors + labels for ``l1_generate``
-    and ``l2_context``. One node per sweep — ``_parse_variants`` rejects
-    passing both, so a 2-round sweep's conformance reading attributes
-    cleanly to the prompt under test.
-
-    ``allow_multi=True`` lets round1/round2 take a comma-list of variants;
-    each variant runs in its own fork. ``time-to`` keeps singular semantics
-    (only one halt-on-accuracy run makes sense per invocation).
-    """
-    for node, flag in (("l1", "l1_generate"), ("l2", "l2_context")):
-        if allow_multi:
-            p.add_argument(
-                f"--{node}-prompts",
-                dest=f"{node}_prompts",
-                default=None,
-                help="Comma-separated paths to prompt-template JSON files to A/B "
-                "in one invocation. Each variant runs in its own sweep "
-                "fork; results share a sweep_id. Omit to use the currently "
-                f"loaded {flag} template.",
-            )
-        else:
-            p.add_argument(
-                f"--{node}-prompt",
-                dest=f"{node}_prompt",
-                default=None,
-                help=f"Path to a prompt-template JSON to swap in for {flag}. "
-                "Omit to use the currently loaded template.",
-            )
-        p.add_argument(
-            f"--{node}-prompt-label",
-            dest=f"{node}_prompt_label",
-            default=None,
-            help=f"Operator label for the {flag} meta-prompt revision "
-            f"(e.g. '{node}_v3'). Recorded on the result.",
-        )
-
-
-def _add_sweep_args(p_sweep: argparse.ArgumentParser) -> None:
-    """Sweep-toolkit verbs. Wraps the optimizer with halt gates + per-round
-    panel stats and persists one result JSON per run under
-    ``archive/sweeps/{l1_meta_prompt_hash}/{dataset}/``.
-    """
-    sweep_sub = p_sweep.add_subparsers(dest="sweep_verb", required=True)
-
-    # time-to ----------------------------------------------------------------
-    p_time_to = sweep_sub.add_parser(
-        "time-to",
-        help="Run optimize, halt on target accuracy / max-rounds / spend-budget; write one result JSON.",
-    )
-    p_time_to.add_argument(
-        "target",
-        type=int,
-        metavar="N",
-        help="Target accuracy as a percent (e.g. 66 = halt when best ≥ 0.66).",
-    )
-    p_time_to.add_argument(
-        "--max-rounds",
-        dest="max_rounds",
-        type=int,
-        default=10,
-        help="Round ceiling (overrides campaign.json::optimization.max_rounds for this sweep).",
-    )
-    p_time_to.add_argument(
-        "--spend-budget",
-        dest="spend_budget_usd",
-        type=float,
-        default=None,
-        help="Halt when cumulative cycle spend (USD, optimizer + backend) ≥ this value.",
-    )
-    _add_sweep_prompt_args(p_time_to, allow_multi=False)
-    _add_sweep_slice_args(p_time_to)
-
-    # round1 -----------------------------------------------------------------
-    p_round1 = sweep_sub.add_parser(
-        "round1",
-        help="Run one scored round on a panel of `--panel-size` candidates; "
-        "record accuracy + parse-fail + entropy + cost.",
-    )
-    p_round1.add_argument(
-        "--panel-size",
-        dest="panel_size",
-        type=int,
-        default=6,
-        help="Number of candidates to generate (overrides campaign.json::optimization.n_variants).",
-    )
-    _add_sweep_prompt_args(p_round1)
-    _add_sweep_slice_args(p_round1)
-
-    # round2 -----------------------------------------------------------------
-    p_round2 = sweep_sub.add_parser(
-        "round2",
-        help="Run two scored rounds — round1 + one more. Records round1/round2 "
-        "accuracy and round2_lift.",
-    )
-    p_round2.add_argument(
-        "--panel-size",
-        dest="panel_size",
-        type=int,
-        default=6,
-        help="Candidates per round (overrides campaign.json::optimization.n_variants).",
-    )
-    p_round2.add_argument(
-        "--from-sweep",
-        dest="from_sweep",
-        default=None,
-        help="Sweep id of a prior round1 sweep. Reads its top-K variants by "
-        "round1_accuracy, re-runs each with 2 rounds (round1 + one more), "
-        "and anchors round2_lift against each variant's prior round1.",
-    )
-    p_round2.add_argument(
-        "--top",
-        dest="top_k",
-        type=int,
-        default=3,
-        help="With --from-sweep: number of top-K variants to re-run (default 3).",
-    )
-    _add_sweep_prompt_args(p_round2)
-    _add_sweep_slice_args(p_round2)
-
-    # rank -------------------------------------------------------------------
-    p_rank = sweep_sub.add_parser(
-        "rank",
-        help="Read sweep results from archive/sweeps/ and print a sorted table. "
-        "Pure read — does not run optimize.",
-    )
-    p_rank.add_argument(
-        "--by",
-        dest="rank_by",
-        default="final_accuracy",
-        help="Column to sort by: any field in the result JSON shape, or the "
-        "derived 'cost_per_lift'. Default: final_accuracy.",
-    )
-    p_rank.add_argument(
-        "--dataset",
-        dest="dataset",
-        default=None,
-        help="Filter to one dataset (matches result.dataset). Omit for all datasets.",
-    )
-    p_rank.add_argument(
-        "--verb",
-        dest="filter_verb",
-        default=None,
-        help="Filter to one verb (time-to, round1, round2). Omit for all.",
-    )
-    p_rank.add_argument(
-        "--last",
-        dest="last",
-        type=int,
-        default=10,
-        help="Show the most recent N rows after sort (default 10).",
-    )
-    p_rank.add_argument(
-        "--ascending",
-        dest="ascending",
-        action="store_true",
-        help="Sort ascending (default: descending — best first).",
-    )
-
-
-def _add_champion_args(p_champion: argparse.ArgumentParser) -> None:
-    """``champion <verb>`` — the L4 champion registry. Pure disk reads.
-
-    ``refresh`` reduces the pp-self corpus to a ranked table of candidate
-    meta-prompt states under ``<tenant>/meta_champion/registry.json``.
-    """
-    champion_sub = p_champion.add_subparsers(dest="champion_verb", required=True)
-    champion_sub.add_parser(
-        "refresh",
-        help="Rebuild the champion registry from every pp-self cycle on disk and "
-        "print the ranked table (anchor-to-origin effect). Zero LLM calls.",
-    )
-    p_promote = champion_sub.add_parser(
-        "promote",
-        help="Elect a state (by state_hash) as the reigning champion — writes the "
-        "datasets/_optimizer_meta/champion.json pointer. Uncontested.",
-    )
-    p_promote.add_argument("state_hash", help="The candidate state_hash to crown.")
-    p_coronate = champion_sub.add_parser(
-        "coronate",
-        help="Head-to-head a challenger vs the reigning champion on their shared "
-        "cells (paired, from the registry); crown it only if the pooled CI clears 0.",
-    )
-    p_coronate.add_argument("state_hash", help="The challenger state_hash.")
-    p_coronate.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Report the coronation verdict without writing the champion pointer.",
-    )
-    p_apply = champion_sub.add_parser(
-        "apply",
-        help="Graduate the reigning champion's prompt fields into the distributable "
-        "datasets/_optimizer/pipeline.json — the shipped optimizer + the next pp-self "
-        "run's inner origin both start from it. Review the git diff and commit deliberately.",
-    )
-    p_apply.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Show the field diff without writing _optimizer/pipeline.json.",
-    )
-    champion_sub.add_parser(
-        "replay",
-        help="Print the reigning champion + persisted registry from disk (zero "
-        "recompute) — the auditable current state.",
-    )
-
-
 def _add_matrix_args(p_matrix: argparse.ArgumentParser) -> None:
     """``matrix <verb>`` — the L4 resource matrix (capability grid).
 
@@ -577,7 +357,7 @@ def _add_reset_args(p_reset: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Argparse schema for ``new`` / ``resume`` / ``sweep`` / ``reset`` / ``verify``.
+    """Argparse schema for ``new`` / ``resume`` / ``reset`` / ``verify``.
 
     Bare ``python -m promptpotter`` (no subcommand) defaults to ``resume`` —
     the most common operator action gets the shortest invocation.
@@ -617,15 +397,6 @@ def build_parser() -> argparse.ArgumentParser:
         "scorer over the recorded measurements, and report where they flip. Zero LLM "
         "calls — run a cycle under one engine/scorer, then `ab` under another to diff.",
     )
-    _add_sweep_args(
-        sub.add_parser(
-            "sweep",
-            help="Sweep-toolkit verbs — cheap A/B of optimizer meta-prompt edits. "
-            "Each verb wraps the optimizer with halt gates and persists one "
-            "result JSON.",
-        )
-    )
-
     _add_reset_args(
         sub.add_parser(
             "reset",
@@ -634,15 +405,6 @@ def build_parser() -> argparse.ArgumentParser:
             "(recycle bin + optimizer_calls + sweeps). The escape hatch for cycles "
             "obsoleted by code changes — per-sample measurements survive so the "
             "next `new` hits cache immediately.",
-        )
-    )
-
-    _add_champion_args(
-        sub.add_parser(
-            "champion",
-            help="L4 champion registry — reduce the on-disk pp-self corpus to one ranked "
-            "table of candidate meta-prompt states. Pure disk read (zero LLM); developer "
-            "surface for 'which meta-prompt state is overall best?'.",
         )
     )
 

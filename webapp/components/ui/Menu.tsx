@@ -62,24 +62,6 @@ export function MenuCheck({
   );
 }
 
-// A plain action row (opens something, runs something).
-export function MenuItem({
-  onClick,
-  title,
-  children,
-}: {
-  onClick: () => void;
-  title?: string;
-  children: ReactNode;
-}) {
-  return (
-    <button type="button" role="menuitem" className={s.item} title={title} onClick={onClick}>
-      <span className={s.check} aria-hidden="true" />
-      <span className={s.label}>{children}</span>
-    </button>
-  );
-}
-
 // A row that picks one of N — renders the current value on the right, and the
 // options inline beneath when open. Keeps a submenu's affordance without a
 // submenu's hover-intent problems.

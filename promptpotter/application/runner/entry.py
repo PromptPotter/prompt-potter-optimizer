@@ -776,8 +776,8 @@ def _finalize_run(
         # StopReason value (no lossy collapse to "completed"). Operator-facing label + outcome
         # derive from the single STOP_REASON_INFO table; never re-encoded per surface.
         cycle_status = str(stop_reason)
-        # index.json::final — terminal-summary namespace the `potter-l1-meta-campaign` skill gates
-        # on; review.md + variant leaderboard read it for the frozen verdict.
+        # index.json::final — the terminal-summary namespace; review.md + the variant
+        # leaderboard read it for the frozen verdict.
         from promptpotter.application.optimization.dispatch.llm_call.prompts import (
             compute_optimizer_prompt_hashes,
         )

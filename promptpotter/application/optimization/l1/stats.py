@@ -1,7 +1,7 @@
 """L1Stats — per-cycle L1 fitness statistics. Pure aggregation over round_data + behaviour checks.
 
-Headline `rounds_to_95` (first round ≥ 0.95). `round_1_verdict` is the gate the
-`potter-l1-meta-campaign` skill reads after the round-1 halt.
+Headline `rounds_to_95` (first round ≥ 0.95). `round_1_verdict` is the round-1 halt
+gate, read by ``review.md`` and the L4 outer loop.
 """
 
 from __future__ import annotations

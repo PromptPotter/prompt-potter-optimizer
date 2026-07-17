@@ -607,7 +607,6 @@ export interface ChampionCandidate {
   ci_hi: number;
   n_cells: number;
   n_measurements: number;
-  status: string; // provisional | confirmed | champion
 }
 export interface ChampionRegistryResponse {
   generated_at: string;

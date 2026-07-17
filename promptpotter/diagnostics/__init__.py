@@ -1,4 +1,4 @@
-"""Cross-cutting diagnostics that read the whole package surface.
+"""The complexity ledger — a cross-cutting read over the whole package surface.
 
 Lives outside the layer tree on purpose: the complexity ledger imports from
 `domain/`, `application/`, `config/`, and `optimization/` to count their

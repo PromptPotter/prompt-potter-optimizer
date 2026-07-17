@@ -5,7 +5,7 @@
 - ``commands/`` — one module per verb. Two **write** verbs (``new`` / ``resume``);
   the rest are lifecycle (``archive`` / ``delete`` / ``unarchive`` / ``reset``,
   all in ``lifecycle.py``) or diagnostic (``ab`` / ``verify`` / ``sweep`` /
-  ``noise-floor`` / ``champion`` / ``matrix``).
+  ``noise-floor`` / ``matrix``).
 - ``parsers.py`` — argparse construction.
 - ``session.py`` — ``SessionCtx`` typed session-state accessors.
 

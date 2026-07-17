@@ -22,9 +22,9 @@ Two facets read the one registry:
   carries a predicate over the resolved config saying whether the combination is currently
   *violated*.
 
-Four consumers: resume (diff), ``run_preflight_checks`` (a pre-run CLI warning), the
-``diagnostics.config_map`` CLI table, and ``GET /campaigns/{id}/config-map`` — so a
-collision is visible on every operator surface, never just in the engine.
+Three consumers: resume (diff), ``run_preflight_checks`` (a pre-run CLI warning),
+and ``GET /campaigns/{id}/config-map`` — so a collision is visible on every operator
+surface, never just in the engine.
 
 One-way import — ``knobs`` depends on ``config``; never the reverse (``config`` imports
 it lazily inside ``run_preflight_checks``, keeping the statistical-constant imports off

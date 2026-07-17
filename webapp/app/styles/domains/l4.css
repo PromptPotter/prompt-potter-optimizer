@@ -59,10 +59,6 @@
   border-bottom: 1px solid var(--color-border);
   vertical-align: baseline;
 }
-.l4-row-champion {
-  background: var(--color-success-bg);
-}
-
 .l4-rank {
   color: var(--color-text-tertiary);
   width: 2ch;
@@ -127,25 +123,6 @@
 }
 .l4-open:hover {
   color: var(--color-accent-strong);
-}
-
-/* ── Preset collection ops (inert until the coronation slice) ── */
-.l4-ops {
-  display: flex;
-  gap: 6px;
-  white-space: nowrap;
-}
-.l4-op {
-  font-size: 0.72rem;
-  padding: 2px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--color-border);
-  background: transparent;
-  color: var(--color-text-tertiary);
-  cursor: not-allowed;
-}
-.l4-op:disabled {
-  opacity: 0.55;
 }
 
 /* ── Capability matrix grid ─────────────────────────────────── */
