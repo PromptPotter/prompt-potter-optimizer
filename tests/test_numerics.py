@@ -312,7 +312,7 @@ def _recall_schema() -> PipelineSchema:
                 node_type=NodeType.CANDIDATE_SOURCE,
                 observation_mappings=[
                     ObservationMapping(
-                        pipeline_key="candidate_ranking", obs_key="candidate_ranking"
+                        pipeline_key="candidate_ranking", output_field="candidate_ranking"
                     )
                 ],
             ),
@@ -320,7 +320,7 @@ def _recall_schema() -> PipelineSchema:
                 name="ranker",
                 node_type=NodeType.RANKER,
                 observation_mappings=[
-                    ObservationMapping(pipeline_key="final_ranking", obs_key="final_ranking")
+                    ObservationMapping(pipeline_key="final_ranking", output_field="final_ranking")
                 ],
             ),
         ],

@@ -12,17 +12,9 @@ function ranks(lines: { key: string; v: number | null }[]): Map<string, number> 
 
 // Top bar by composite value — NOT the campaign winner (the real crown is
 // θ-elected `isWinner`). This what-if panel ranks on composite; no θ-election claim.
-function topByFitness(lines: { key: string; v: number | null }[]): string | null {
-  let best: string | null = null;
-  let bestVal = -Infinity;
-  for (const l of lines) {
-    if (l.v == null) continue;
-    if (l.v > bestVal) {
-      bestVal = l.v;
-      best = l.key;
-    }
-  }
-  return best;
+function topByFitness(rank: Map<string, number>): string | null {
+  for (const [key, r] of rank) if (r === 1) return key;
+  return null;
 }
 
 // Rank-shift read-out for the what-if ablation — compares each candidate's
@@ -57,8 +49,8 @@ export function FitnessRankSummary({
   }));
   const rankActual = ranks(lines.map((l) => ({ key: l.key, v: l.actual })));
   const rankWhatif = ranks(lines.map((l) => ({ key: l.key, v: l.whatif })));
-  const wA = topByFitness(lines.map((l) => ({ key: l.key, v: l.actual })));
-  const wW = topByFitness(lines.map((l) => ({ key: l.key, v: l.whatif })));
+  const wA = topByFitness(rankActual);
+  const wW = topByFitness(rankWhatif);
   const topLabel = (k: string | null) =>
     k == null ? "—" : (lines.find((l) => l.key === k)?.label ?? "—");
   let movedUp = 0, movedDown = 0, flat = 0;

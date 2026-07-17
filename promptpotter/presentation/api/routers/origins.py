@@ -128,8 +128,7 @@ def _dataset_origin_id(store: Stores, dataset_dir: Path, dataset_name: str) -> s
         raw = read_json(dataset_dir / "pipeline.json")
         schema = parse_pipeline_response(raw)
         cfg = load_campaign_config(read_campaign_config_file(dataset_dir / "campaign.json"))
-        exclude = set(cfg.exclude_nodes)
-        active = [n for n in schema.active_steps if n not in exclude]
+        active = schema.active_steps_excluding(cfg.exclude_nodes)
         if not active:
             return None
         base_pp = resolve_pipeline_config_params(

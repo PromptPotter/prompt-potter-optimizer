@@ -3,7 +3,7 @@
 import enum
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
@@ -170,9 +170,6 @@ class NodeOutputSchema(BaseModel):
 
     fields: list[str] = Field(default_factory=list)
     field_descriptions: dict[str, str] = Field(default_factory=dict)
-    """Parsed, never read. RESERVED SURFACE — the anchor the target-side description
-    axis binds to (`docs/concepts/structured-output.md`). Deleting it as dead code
-    re-orphans exactly the seam a lever was once built against by mistake."""
     json_schema: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -223,7 +220,6 @@ class PipelineNode(BaseModel):
 
     name: str
     wire_type: str = ""
-    short_circuit: bool = False
     node_type: NodeType = NodeType.NONE
     param_keys: set[str] = Field(default_factory=set)
     param_descriptions: dict[str, str] = Field(default_factory=dict)
@@ -342,6 +338,14 @@ class PipelineSchema(BaseModel):
     def active_steps(self) -> tuple[str, ...]:
         """Node names in pipeline order."""
         return tuple(n.name for n in self.nodes)
+
+    def active_steps_excluding(self, exclude: Iterable[str]) -> list[str]:
+        """Node names surviving the campaign's ``exclude_nodes``, in pipeline order.
+
+        The complement `filter_to_steps` consumes: callers hold a drop-list but the
+        canonical projection takes a keep-list, so this owns the one inversion."""
+        dropped = set(exclude)
+        return [n for n in self.active_steps if n not in dropped]
 
     @property
     def is_single_node(self) -> bool:
@@ -483,17 +487,10 @@ class PipelineSchema(BaseModel):
             update={"nodes": [n for n in self.nodes if n.name in active]},
         )
 
-    def exclude(self, names: set[str] | None) -> "PipelineSchema":
-        if not names:
-            return self
-        return self.model_copy(
-            update={"nodes": [n for n in self.nodes if n.name not in names]},
-        )
-
     def narrow(self, narrowing: dict[str, NodeSearchNarrowing] | None) -> "PipelineSchema":
         """Return a copy with each node's optimizer search space narrowed to the
         campaign's per-node subset (the search-space lever beside
-        :meth:`exclude`; model/provider are always locked).
+        ``exclude_nodes``; model/provider are always locked).
 
         A node's ``param_keys`` intersect the campaign subset (``None`` = inherit
         the full set); prompt-decomposition fields are always kept tunable (the

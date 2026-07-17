@@ -918,9 +918,7 @@ def _resolve_active_schema(
     names (``RESERVED_PIPELINE_PARAM_KEYS``). Hence the ``s["name"]`` below.
     """
 
-    all_names = list(pipeline_schema.active_steps) if pipeline_schema else []
-
-    active = [n for n in all_names if n not in exclude]
+    active = pipeline_schema.active_steps_excluding(exclude) if pipeline_schema else []
 
     filtered = pipeline_schema
     if pipeline_schema and exclude:

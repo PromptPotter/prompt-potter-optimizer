@@ -123,7 +123,7 @@ def effective_l1_field_names() -> dict[str, str]:
 
 def _rename_variant_schema(variant: dict[str, Any], field_names: dict[str, str]) -> None:
     """Rewrite `properties` keys and the `required` list in place; order is preserved."""
-    props = variant.get("properties") or {}
+    props = variant["properties"]
     variant["properties"] = {field_names.get(k, k): v for k, v in props.items()}
     required = variant.get("required")
     if isinstance(required, list):

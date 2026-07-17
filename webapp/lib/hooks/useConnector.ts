@@ -254,7 +254,7 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
     const distinct: BackendInfo[] = [];
     const seenEndpoints = new Set<string>();
     for (const b of active ? [active, ...backends.filter((b) => b !== active)] : backends) {
-      const key = `${b.backend_type} ${b.base_url}`;
+      const key = `${b.backend_type}|${b.base_url}`;
       if (seenEndpoints.has(key)) continue;
       seenEndpoints.add(key);
       distinct.push(b);
