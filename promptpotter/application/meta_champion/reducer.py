@@ -32,6 +32,7 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.projections.live_dashboard.round_summary import (
     origin_cells_from_disk,
 )
+from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import campaign_cycles_dir
 from promptpotter.shared.statistics import paired_diff_posterior
 
@@ -104,14 +105,6 @@ def _cell_composites(round_doc: dict[str, Any], candidate_id: str) -> dict[str, 
     return cell_fitness(rows)
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        loaded = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return loaded if isinstance(loaded, dict) else {}
-
-
 class _Accum:
     """Mutable per-state accumulator collected during the disk walk."""
 
@@ -135,7 +128,7 @@ def _pp_self_campaign_dirs(store: Stores) -> list[Path]:
     kind_of: dict[str, str] = {}  # once per dataset, not once per campaign
     dirs: list[Path] = []
     for child in store.campaigns.iter_campaign_dirs():
-        cfg = _read_json(child / "campaign.json")
+        cfg = read_json_tolerant(child / "campaign.json", {})
         block_raw = cfg.get("campaign_config")
         block = block_raw if isinstance(block_raw, dict) else cfg
         dataset_name = str(block.get("dataset_name", ""))
@@ -169,7 +162,11 @@ def reduce_corpus(store: Stores) -> ChampionRegistry:
                 if round_file.name == "round_0000.json":
                     continue
                 _accumulate_round(
-                    _read_json(round_file), origin_cells, campaign_dir.name, cycle_dir.name, accums
+                    read_json_tolerant(round_file, {}),
+                    origin_cells,
+                    campaign_dir.name,
+                    cycle_dir.name,
+                    accums,
                 )
 
     rows = [_finalize(state_hash, acc) for state_hash, acc in accums.items()]

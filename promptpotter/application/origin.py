@@ -238,7 +238,7 @@ def try_inherit_fork_origin(
     # empty shell: round 0's health is assessed on real samples (so the strict origin gate
     # doesn't misfire "zero samples → critical" on an origin the parent already measured),
     # and round-1 hard-sample seeding inherits the origin's per-sample δ evidence. No
-    # re-measurement — these are the recorded parent rows, exactly the inherited baseline.
+    # re-measurement — these are the recorded parent rows, exactly the inherited origin measurement.
     inherited_results = list(parent_round.all_candidate_results.get(from_candidate_id) or [])
     if not inherited_results:
         inherited_results = list(parent_round.results)
