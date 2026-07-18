@@ -40,7 +40,7 @@ export interface ObserveConfig {
 // meta node (l1_generate / l1_critique / …) owns its own persona/instruction/…
 // rather than sharing one flat prompt. Only fields actually present are returned
 // (the round file carries only the optimizer's mutated delta, not the static
-// `prompts/{node}.json` baseline).
+// `prompts/{node}.json` origin).
 function nodePromptFields(
   resolved: Record<string, unknown> | undefined | null,
   nodeId: string | null | undefined,
