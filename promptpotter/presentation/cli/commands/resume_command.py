@@ -499,7 +499,7 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
     if status.get("status") == "unreachable":
         return backend_unreachable_result(ctx.backend_url)
 
-    train_data = session.samples or []
+    train_data = session.samples
     steering = bool(getattr(args, "steer_model", None))
     try:
         pipeline_params = _prepare_cycle_for_resume(

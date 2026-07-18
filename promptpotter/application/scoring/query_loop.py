@@ -212,7 +212,7 @@ def _classify_abort(
     """Abort reason on error or "" to continue. Mutates state.consecutive_errors."""
     cat = error_category(result)
     if cat in {ErrorCategory.CLIENT, ErrorCategory.PIPELINE}:
-        return f"skipped_after_{cat or 'pipeline'}_error"
+        return f"skipped_after_{cat}_error"
     state.consecutive_errors += 1
     if state.consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
         return "skipped_after_consecutive_errors"

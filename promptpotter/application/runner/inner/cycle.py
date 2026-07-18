@@ -467,7 +467,7 @@ async def _run_inner_campaign(
         store=store,
         enable_tracing=False,
     )
-    all_samples = session.samples or []
+    all_samples = session.samples
     if not all_samples:
         raise ValueError(f"inner dataset {spec.inner_dataset!r} loaded zero samples")
     n = min(spec.n_samples, len(all_samples))

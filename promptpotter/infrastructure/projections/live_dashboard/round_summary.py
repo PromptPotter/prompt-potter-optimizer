@@ -101,12 +101,12 @@ def build_round_summary(rr: RoundResult, origin_cells: dict[str, float]) -> Roun
         )
         for c in rr.candidate_scores
     ]
-    selection = _measurement_order(rr.all_candidate_results or {})
+    selection = _measurement_order(rr.all_candidate_results)
     verdict = (
         None
         if rr.round == 0
         else compute_outer_verdict(
-            rr.all_candidate_results or {},
+            rr.all_candidate_results,
             [
                 CandidateInfo(
                     **c.model_dump(include=_CANDIDATE_INFO_INCLUDE),

@@ -68,7 +68,7 @@ async def measure_cells(
 
     base_config = _base_config(session)
     node = session.llm_node_name()
-    samples = session.samples or []
+    samples = session.samples
     out: list[CellVerdict] = []
 
     for model in models:

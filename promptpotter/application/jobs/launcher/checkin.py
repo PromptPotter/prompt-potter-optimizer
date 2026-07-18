@@ -196,7 +196,7 @@ async def prepare_checkin_run(
     dataset_root = readable_dataset_dir(stores, dataset_name)
     campaign_config = build_cycle_config(session, dataset_root, pipeline_overlay=pipeline_overlay)
 
-    train_data = session.samples or []
+    train_data = session.samples
     plan = resolve_cycle_plan(session, campaign_config, train_data, origin_override=origin_override)
 
     index = stores.campaigns.load(campaign_id, cycle_id) or {}

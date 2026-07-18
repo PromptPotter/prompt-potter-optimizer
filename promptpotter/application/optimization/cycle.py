@@ -450,11 +450,11 @@ class Cycle:
             if rr.round == 0:
                 self.origin_health = rr.health
                 self.origin_critique = rr.critique
-                origin_results = list(rr.results or [])
+                origin_results = list(rr.results)
             else:
                 self.rounds.append(rr)
                 l1_rounds.append(rr)
-            for r in rr.results or []:
+            for r in rr.results:
                 if extract_warning_types(r) and (q := r.get("query")):
                     self.warned_queries.add(q)
         if not l1_rounds:

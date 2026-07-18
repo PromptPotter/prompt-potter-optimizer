@@ -239,11 +239,9 @@ def try_inherit_fork_origin(
     # doesn't misfire "zero samples → critical" on an origin the parent already measured),
     # and round-1 hard-sample seeding inherits the origin's per-sample δ evidence. No
     # re-measurement — these are the recorded parent rows, exactly the inherited baseline.
-    inherited_results = list(
-        (parent_round.all_candidate_results or {}).get(from_candidate_id) or []
-    )
+    inherited_results = list(parent_round.all_candidate_results.get(from_candidate_id) or [])
     if not inherited_results:
-        inherited_results = list(parent_round.results or [])
+        inherited_results = list(parent_round.results)
     logger.info(
         "Fork %s: inheriting C0 from branch-point candidate %s (parent %s round %d) "
         "acc=%.4f, %d per-sample rows — skipping origin re-score, straight to L1",

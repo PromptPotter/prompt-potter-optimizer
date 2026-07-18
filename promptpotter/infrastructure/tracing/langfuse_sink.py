@@ -253,7 +253,7 @@ class LangfuseSink:
         # Emit one Langfuse score per evaluator value. Each evaluator's name
         # is suffixed with the round number so the cloud UI shows them as a
         # per-round time series.
-        for ev_name, ev_value in (event.evaluators or {}).items():
+        for ev_name, ev_value in event.evaluators.items():
             try:
                 numeric = float(ev_value)
             except (TypeError, ValueError):

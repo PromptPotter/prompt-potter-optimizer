@@ -320,7 +320,7 @@ async def mint_campaign_command(
             session, dataset_root, pipeline_overlay=pipeline_overlay
         )
 
-        train_data = session.samples or []
+        train_data = session.samples
         # The one shared mint prologue — same seam CLI ``new`` runs (inline). See
         # ``application/jobs/mint.py``; the web path keeps only the gates + detached task.
         minted = prepare_fresh_cycle(
@@ -519,7 +519,7 @@ async def start_run_command(
             stores.campaigns.read_cycle_seed(campaign_id, cycle_id),
         )
 
-        train_data = session.samples or []
+        train_data = session.samples
         configure_and_apply_pipeline(session, campaign_config, log=lambda *_a, **_k: None)
         _t_framing0 = time.perf_counter()
         task_context = await load_or_build_task_context(

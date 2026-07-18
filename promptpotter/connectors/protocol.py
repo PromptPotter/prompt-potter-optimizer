@@ -159,9 +159,9 @@ class Connector:
     the backend's effective revision does. Receives the resolved dataset config
     dir so a connector can fold dataset-scoped inner behavior into the
     fingerprint. The canonical user is the in-process ``promptpotter``
-    connector: its backend IS the inner optimizer (meta-prompt baseline +
+    connector: its backend IS the inner optimizer (meta-prompt origin +
     layouts + engine + the dataset's ``inner_tasks.json`` inner-run config), so
-    without this a baseline edit silently reuses stale measurements recorded
+    without this an origin edit silently reuses stale measurements recorded
     under the old behavior. The connector's ``wire_adapter`` must strip these
     reserved keys from the outbound payload. ``None`` = the backend's revision
     is not part of identity (remote backends use the advisory ``version_check``

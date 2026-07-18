@@ -352,7 +352,7 @@ async def _mint_fresh_session(
     profile = session.store.backends.load_connector_profile(backend_id) or {}
     campaign_config = _load_cfg({**profile, **file_config})
 
-    train_data = session.samples or []
+    train_data = session.samples
 
     # The one shared mint prologue — same application seam the web mint runs
     # (detached). The CLI keeps only the inline check-in lines + task-context step.
@@ -472,7 +472,7 @@ async def cmd_new(args: argparse.Namespace) -> CommandResult:
         return backend_unreachable_result(args.backend_url)
     checkin_line("backend", f"reachable at {args.backend_url}")
 
-    train_data = session.samples or []
+    train_data = session.samples
     checkin_line("dataset", f"{dataset_name} ({len(train_data)} queries)")
     checkin_line("pipeline", pipeline_summary(session, session.pipeline_params))
 

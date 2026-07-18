@@ -168,7 +168,7 @@ def compute_degradation_health(
     the origin: a round-0 result only exists once scoring was attempted (the
     ``has_program`` gate), so an ``attempted == 0`` origin measured *nothing* where
     it was expected to, which is a broken floor (``critical`` / ``origin_unmeasured``),
-    not an abstention — candidates would otherwise be elected against no baseline.
+    not an abstention — candidates would otherwise be elected against no origin measurement.
 
     Precedence (first match wins), thresholds = the module constants:
       * **critical** — the backend was unreachable for ≥
@@ -203,7 +203,7 @@ def compute_degradation_health(
                 ci_lo=0.0,
                 ci_hi=1.0,
                 suggested_action=(
-                    "the origin scored zero samples — no baseline was measured, so "
+                    "the origin scored zero samples — no origin was measured, so "
                     "candidates would be elected against nothing. The pipeline/connector "
                     "produced no result rows for the origin (a crash or empty return, not "
                     "a wrong answer). Fix the pipeline so the origin scores, then rescore."

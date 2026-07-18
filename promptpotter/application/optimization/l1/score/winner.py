@@ -297,7 +297,7 @@ async def l1_score(
         best_osp = winner_ind
         best_results = list(all_candidate_results[winner_id])
         best_label = winner_ind.lineage.changes_description or winner_ind.lineage.id[:12]
-        best_scores = dict(winner_cs.evaluators or {})
+        best_scores = dict(winner_cs.evaluators)
         best_matched_origin_acc = matched["accuracy"]
         best_matched_origin_hits = matched["hits"]
         best_matched_origin_composite = matched["composite_fitness"]

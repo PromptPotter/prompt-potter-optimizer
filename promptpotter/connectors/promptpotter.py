@@ -68,7 +68,7 @@ def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
 
     origin_text = OPTIMIZER_PIPELINE_PATH.read_text(encoding="utf-8")
     layouts = {name: spec.model_dump(mode="json") for name, spec in sorted(NODE_LAYOUTS.items())}
-    # The inner-run config is part of the inner baseline's effective behavior, so it
+    # The inner-run config is part of the inner origin's effective behavior, so it
     # joins the fingerprint — changing `inner_optimizer_temperature` (or any geometry
     # knob) invalidates outer-sample rows measured under the prior value instead of
     # reusing them stale (the identity-joined plumbing l4-outer-loop.md § item 5 named).

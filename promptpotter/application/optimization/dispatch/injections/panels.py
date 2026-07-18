@@ -544,9 +544,7 @@ def _candidate_mutation(
     cannot render a re-proposal (an override restating the parent's value, or the
     parent's own schema prose echoed back) as a new mutation.
     """
-    pf, pp = candidate_delta(
-        cand.prompt_fields or {}, parent, cand.pipeline_params_override, parent_pp
-    )
+    pf, pp = candidate_delta(cand.prompt_fields, parent, cand.pipeline_params_override, parent_pp)
     pp_nested: dict[str, Any] = {}
     for (node, param), value in pp.items():
         pp_nested.setdefault(node, {})[param] = value
@@ -613,7 +611,7 @@ def _r_mutation_memory(b: InjectionBundle) -> str:
         "being proposed again):"
     ]
     for i, rr in rounds:
-        parent = rr.prompt_fields or {}
+        parent = rr.prompt_fields
         # The candidates' parent params = the PRIOR round's resolved pipeline_params
         # (the winner / retained incumbent this round mutated from).
         parent_pp = prior[i - 1].pipeline_params if i > 0 else None
