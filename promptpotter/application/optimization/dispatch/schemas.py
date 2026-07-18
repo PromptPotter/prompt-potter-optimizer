@@ -242,7 +242,7 @@ def _build_l1_response_model(items: tuple[tuple[str, str], ...]) -> type[L1Gener
     return create_model(
         f"L1GenerateOutput__{suffix}",
         __base__=L1GenerateOutput,
-        variants=(list[variant], ...),  # type: ignore[valid-type]  # runtime-built model
+        variants=(list[variant], ...),
     )
 
 
