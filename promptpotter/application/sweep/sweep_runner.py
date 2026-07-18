@@ -321,7 +321,6 @@ async def run_sweep_batch(
 
 
 __all__ = [
-    "existing_fork_source_files",
     "load_sweep_payloads",
     "resolve_sweep_dir",
     "run_sweep_batch",

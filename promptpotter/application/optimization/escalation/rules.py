@@ -84,5 +84,4 @@ DEFAULT_ESCALATION_RULES: list[EscalationRule] = [
 __all__ = [
     "DEFAULT_ESCALATION_RULES",
     "EscalationRule",
-    "PredicateFn",
 ]

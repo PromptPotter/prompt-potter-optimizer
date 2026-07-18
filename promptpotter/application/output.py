@@ -442,7 +442,6 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
 __all__ = [
-    "from_disk_log",
     "write_hard_samples_artifacts",
     "write_log_md",
     "write_review_md",

@@ -202,17 +202,14 @@ def reusable_results(
     is_fatal: Callable[[dict[str, Any]], bool] | None = None,
     *,
     dataset_name: str,
-    min_grade: str | None = None,
 ) -> dict[int, dict[str, Any]]:
     """Per-sample cache reuse from prior runs sharing *node_configs*, keyed by ``sample_id``.
     *dataset_name* is required — it scopes the slice, and ``sample_id`` only identifies a sample
-    within one dataset. *min_grade* drops runs below that provenance grade (clean-substrate
-    reads); default keeps all."""
+    within one dataset."""
     return stores.archive.load_reusable_results(
         node_configs,
         is_fatal=is_fatal,
         dataset_name=dataset_name,
-        min_grade=min_grade,
     )
 
 

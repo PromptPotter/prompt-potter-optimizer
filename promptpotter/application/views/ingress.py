@@ -49,7 +49,6 @@ from promptpotter.shared import truncate
 
 __all__ = [
     "from_phase_event",
-    "score_entry_from_dict",
 ]
 
 

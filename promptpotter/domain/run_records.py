@@ -18,7 +18,6 @@ from promptpotter.shared.clock import utcnow_iso
 
 __all__ = [
     "CandidateMintedRecord",
-    "CandidateState",
     "CommandAckRecord",
     "CommandRecord",
     "ConfigOverrides",
