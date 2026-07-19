@@ -91,6 +91,34 @@ export function fmtClock(s: unknown): string {
   }
 }
 
+// Local date + time of an ISO timestamp — bad input passes through.
+export function fmtDateTime(s: unknown): string {
+  if (!s) return "—";
+  try {
+    return new Date(String(s)).toLocaleString();
+  } catch {
+    return String(s);
+  }
+}
+
+// Coarse age of an ISO timestamp, largest sensible unit — "3 weeks ago",
+// "5 days ago", "2h ago", "just now". Empty on bad/absent input so a caller can
+// drop it silently.
+export function fmtAgo(s: unknown): string {
+  if (!s) return "";
+  const t = new Date(String(s)).getTime();
+  if (!Number.isFinite(t)) return "";
+  const mins = Math.floor((Date.now() - t) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} day${days === 1 ? "" : "s"} ago`;
+  const weeks = Math.floor(days / 7);
+  return `${weeks} week${weeks === 1 ? "" : "s"} ago`;
+}
+
 // Generic display fallback — null / empty → "—", else String(v).
 export function fmtText(v: unknown): string {
   if (v == null || v === "") return "—";

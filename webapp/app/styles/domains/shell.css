@@ -52,8 +52,10 @@
    under the tenant, each expanding to its unit-tree. Active per CLI
    bullet-marked; currently-viewed highlighted. The list is kept current
    by the shared workspace poll. */
-.unit-library{margin-top:14px;padding:0 8px;border-top:0.5px solid var(--color-border);padding-top:10px;display:flex;flex-direction:column;min-height:0;flex:1}
-.unit-library-head{display:flex;align-items:center;justify-content:space-between;padding:0 8px 6px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--color-text-tertiary)}
+.unit-library{margin-top:14px;padding:0 8px 0 3px;border-top:0.5px solid var(--color-border);padding-top:10px;display:flex;flex-direction:column;min-height:0;flex:1}
+/* Header keeps its original inset (compensating the container's tightened left pad) so
+   only the TREE moves left — the scroller's CAMPAIGNS header stays put. */
+.unit-library-head{display:flex;align-items:center;justify-content:space-between;padding:0 8px 6px 13px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--color-text-tertiary)}
 /* Filter button in the library header — folds the lifecycle + dataset filters
    into one popover so the sidebar body stays a clean forest. A dot marks a
    non-default filter without opening the panel. */
@@ -146,11 +148,22 @@
 /* The rail owns the whole indent — margin sets the rail's offset, padding the gap
    between rail and text. The child rows add none of their own; two rules each adding
    depth stacked to 25px a level and read as a double indent. */
-.unit-library-children{list-style:none;margin:2px 0 4px 12px;padding:0 0 0 8px;border-left:1px solid var(--color-border)}
-/* Campaign on-disk size hover card. position:fixed (set inline from the row
-   rect) escapes sidebar overflow clipping. */
-.csize-wrap{display:block}
-.csize-card{z-index:50;pointer-events:none;display:grid;grid-template-columns:auto auto;align-items:baseline;column-gap:14px;row-gap:4px;background:var(--color-background-secondary);border:0.5px solid var(--color-border);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.28);padding:8px 12px;min-width:96px}
+/* Tree guides — a trunk down each nested level, an elbow to each row, and the last child
+   closing the trunk into an └. Accent: orange in the dark operator register, cobalt in light. */
+.unit-library-children{list-style:none;margin:0;padding-left:11px}
+.unit-library-children>li{position:relative}
+.unit-library-children>li::before{content:"";position:absolute;left:-9px;top:0;bottom:0;border-left:1px solid var(--color-accent)}
+.unit-library-children>li:last-child::before{bottom:auto;height:20px}
+.unit-library-children>li::after{content:"";position:absolute;left:-9px;top:20px;width:9px;border-top:1px solid var(--color-accent)}
+/* The ONE sidebar-row hover card body (the shell — fixed-position, escaping
+   overflow — is the `HoverCard` primitive). Meta on every row; the on-disk
+   storage grid only where a campaign endpoint exists. */
+.rowhover{display:flex;flex-direction:column;gap:8px;max-width:320px}
+.rowhover-desc{font-size:11px;line-height:1.4;color:var(--color-text-secondary)}
+.rowhover-meta{display:grid;grid-template-columns:auto 1fr;column-gap:12px;row-gap:3px;align-items:baseline}
+.rowhover-key{font-size:10px;letter-spacing:0.04em;text-transform:uppercase;color:var(--color-text-tertiary)}
+.rowhover-val{font-size:11px;color:var(--color-text-primary);font-variant-numeric:tabular-nums;word-break:break-all}
+.csize-grid{display:grid;grid-template-columns:auto auto;align-items:baseline;column-gap:14px;row-gap:4px}
 .csize-label{justify-self:start;font-size:10px;letter-spacing:0.04em;text-transform:uppercase;color:var(--color-text-tertiary)}
 .csize-val{justify-self:end;font-size:13px;font-weight:700;color:var(--color-text-primary);font-variant-numeric:tabular-nums}
 .csize-label[data-indent]{padding-left:12px;text-transform:none;letter-spacing:0.02em}

@@ -322,12 +322,16 @@ def _load_dataset_cache(dataset_dir: Path) -> tuple[dict[str, Any], dict[int, di
     """Load ``cache.json`` from a resolved dataset dir; normalise sample-id keys to int.
 
     Sample-id key varies on disk (``id`` canonical, BBEH HF emits ``sample_id``) —
-    normalise at the read boundary. Raises ``NotFoundError`` when the resolved
-    dir carries no cache. The dir is already access-checked by :func:`_resolve_or_404`.
+    normalise at the read boundary. The dir is already access-checked by
+    :func:`_resolve_or_404`, so a MISSING cache is not an unknown dataset — it is a
+    resolvable one with no materialised sample bank (a pipeline-only / L4 meta-dataset
+    such as ``promptpotter-self``, which reports ``n_samples: 0`` in the list). Return an
+    empty bank so ``/preview`` + ``/measurement-series`` answer an honest empty 200 rather
+    than a 404 that reads as "unknown slug" and spams the webapp console every load.
     """
     cache_path = dataset_dir / "cache.json"
     if not cache_path.is_file():
-        raise NotFoundError(f"Dataset '{dataset_dir.name}' not found")
+        return {"name": dataset_dir.name, "items": []}, {}
     raw = read_json(cache_path)
     sample_lookup: dict[int, dict[str, Any]] = {}
     for item in raw["items"]:

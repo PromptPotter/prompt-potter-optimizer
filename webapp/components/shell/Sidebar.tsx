@@ -54,8 +54,6 @@ export function Sidebar({ onSelectPath, onNewCycle, collapsed, onToggleCollapse 
   // Cycle list + campaign registry + active pointer + current selection all
   // come from the shared workspace context — one poll for the whole app.
   const {
-    cycleId,
-    campaignId,
     viewedPath,
     viewedCandidateId,
     campaigns,
@@ -112,17 +110,18 @@ export function Sidebar({ onSelectPath, onNewCycle, collapsed, onToggleCollapse 
     return [...s].sort();
   }, [campaigns]);
 
-  // Auto-expand the course containing the viewed/active cycle — "where am I?"
-  // should be visible without a click. We never auto-collapse; explicit collapse
-  // beats helpfulness. Targets the campaign's ROOT course, since that's the node a
-  // viewed fork hides under.
+  // Auto-expand the ACTIVE run's root course so the live loop reveals itself without a
+  // click — "where's my run?". Keyed on the ACTIVE cycle ONLY, never the viewed one:
+  // clicking a row selects it (and moves the viewed path), but expanding is the triangle's
+  // job, so a manual selection must not pop a course open. We never auto-collapse; explicit
+  // collapse beats helpfulness. Targets the campaign's ROOT course, the node a fork hides under.
   const focusKey = useMemo(() => {
-    const cmpId = campaignId ?? activeCampaignId;
-    const cyId = cycleId ?? activeCycleId;
-    if (!cmpId || !cyId) return null;
-    const path = encodeCyclePath([{ campaignId: cmpId, cycleId: rootCycleId(cyId) }]);
+    if (!activeCampaignId || !activeCycleId) return null;
+    const path = encodeCyclePath([
+      { campaignId: activeCampaignId, cycleId: rootCycleId(activeCycleId) },
+    ]);
     return nodeKey("course", path);
-  }, [campaignId, activeCampaignId, cycleId, activeCycleId]);
+  }, [activeCampaignId, activeCycleId]);
 
   // The stored set is every node TOGGLED AWAY FROM ITS DEFAULT, and a course now
   // defaults CLOSED (opening one fetches its lineage) — so expanding means ADDING

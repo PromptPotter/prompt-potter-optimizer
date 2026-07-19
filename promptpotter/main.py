@@ -6,7 +6,7 @@ import asyncio
 import contextlib
 import logging
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI, Request, Response
@@ -15,6 +15,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from scalar_fastapi import get_scalar_api_reference
+from starlette.datastructures import MutableHeaders
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from promptpotter.application.jobs.reaper import periodic_sweep, reap_cycle_by_id
 from promptpotter.application.jobs.registry import Job, JobRegistry, default_jobs_dir
@@ -156,47 +158,60 @@ app.add_middleware(
 install_oidc_middleware(app)
 
 
-@app.middleware("http")
-async def response_headers(
-    request: Request, call_next: Callable[[Request], Awaitable[Response]]
-) -> Response:
-    """Security + freshness response headers, in one pass (the single
-    response-header seam — don't add a second middleware beside this).
+class SecurityHeadersMiddleware:
+    """Security + freshness response headers, in one pass (the single response-header
+    seam — don't add a second middleware beside this).
+
+    Pure ASGI, not ``BaseHTTPMiddleware``: the header set rides the ``http.response.start``
+    message via a wrapped ``send``, so a streaming ``EventSourceResponse`` passes through
+    untouched. ``BaseHTTPMiddleware`` buffers the body through an anyio memory stream and
+    breaks the SSE feed's disconnect/shutdown teardown (a lingering subscription then hangs
+    graceful shutdown and raises ``RuntimeError: No response returned``).
 
     Security headers on **every** response: ``X-Content-Type-Options: nosniff``,
-    ``X-Frame-Options: DENY`` + CSP ``frame-ancestors 'none'`` (clickjacking, both
-    header generations), ``Referrer-Policy``, and HSTS when the request arrived over
-    https (behind the Cloudflare tunnel uvicorn sees the forwarded proto via
-    ``--proxy-headers``; plain-http local dev gets no HSTS, correctly). The CSP is
-    **strict on JSON API paths** (``default-src 'none'`` — a JSON body is never a
-    document, so this only bites a direct browser navigation) and **frame-only on the
-    webapp document** so its own same-origin Next.js assets still load. A tighter
-    document CSP (``script-src``/``style-src`` with a nonce) is a follow-up — it needs
-    a webapp smoke test to avoid breaking the UI, so it is deliberately not set here.
-
-    Plus ``Cache-Control: no-store`` on ``/api/v1/*`` — the live polling surface
-    (``dashboard.json``, per-cycle round files, active-session pointer) must never be
-    cached: a freshness bug, not an optimization, since we serve from memory + tiny
-    on-disk files. Static webapp assets at the root keep StaticFiles' own caching.
+    ``X-Frame-Options: DENY`` + CSP ``frame-ancestors 'none'`` (clickjacking), ``Referrer-Policy``,
+    and HSTS when the request arrived over https (behind the Cloudflare tunnel uvicorn sees the
+    forwarded proto via ``--proxy-headers`` on ``scope["scheme"]``; plain-http local dev gets no
+    HSTS, correctly). The CSP is **strict on JSON API paths** (``default-src 'none'`` — a JSON
+    body is never a document) and **frame-only on the webapp document** so its own same-origin
+    Next.js assets still load. Plus ``Cache-Control: no-store`` on ``/api/v1/*`` — the live
+    polling surface must never be cached (a freshness bug, not an optimization).
     """
-    response = await call_next(request)
-    response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("X-Frame-Options", "DENY")
-    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-    if request.url.scheme == "https":
-        response.headers.setdefault(
-            "Strict-Transport-Security", "max-age=63072000; includeSubDomains"
-        )
-    is_api = request.url.path.startswith("/api/v1/")
-    response.headers.setdefault(
-        "Content-Security-Policy",
-        "default-src 'none'; frame-ancestors 'none'"
-        if is_api
-        else "frame-ancestors 'none'; base-uri 'self'; object-src 'none'",
-    )
-    if is_api:
-        response.headers["Cache-Control"] = "no-store"
-    return response
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        is_api = scope.get("path", "").startswith("/api/v1/")
+        is_https = scope.get("scheme") == "https"
+
+        async def send_with_headers(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                headers.setdefault("x-content-type-options", "nosniff")
+                headers.setdefault("x-frame-options", "DENY")
+                headers.setdefault("referrer-policy", "strict-origin-when-cross-origin")
+                if is_https:
+                    headers.setdefault(
+                        "strict-transport-security", "max-age=63072000; includeSubDomains"
+                    )
+                headers.setdefault(
+                    "content-security-policy",
+                    "default-src 'none'; frame-ancestors 'none'"
+                    if is_api
+                    else "frame-ancestors 'none'; base-uri 'self'; object-src 'none'",
+                )
+                if is_api:
+                    headers["cache-control"] = "no-store"
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
+
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 # Health check

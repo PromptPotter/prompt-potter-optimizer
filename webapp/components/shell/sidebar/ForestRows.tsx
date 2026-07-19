@@ -30,7 +30,7 @@ import { useCampaignTree, type CampaignTree } from "@/lib/hooks/useCampaignTree"
 import { isNodeOpen, nodeKey } from "./grouping";
 import type { OriginGroup, RunGroup } from "./grouping";
 import { CampaignMenu } from "./CampaignMenu";
-import { CampaignSizeHover } from "./CampaignSizeHover";
+import { RowHoverCard } from "./RowHoverCard";
 
 // What every row needs to render itself and answer clicks. Threaded down rather than
 // context'd so the tree stays a pure function of its props.
@@ -141,7 +141,6 @@ function RunRow({ run, at, ctx }: { run: RunGroup; at: CyclePath; ctx: TreeCtx }
       label={campaignDisplayName(campaign)}
       campaign={campaign}
       chrome={<CampaignMenu campaign={campaign} />}
-      hover
       // The campaign row answers for its whole family: the winner often lives in a fork,
       // and `/cycles` already knows the max across it.
       bestAccuracy={run.bestAccuracy}
@@ -162,7 +161,6 @@ function CourseRow({
   label,
   campaign,
   chrome,
-  hover = false,
   bestAccuracy,
 }: {
   node: LineageNode | null;
@@ -174,7 +172,6 @@ function CourseRow({
   // run is machine-minted into a sandbox and an operator never archives one.
   campaign?: CampaignSummary;
   chrome?: React.ReactNode;
-  hover?: boolean;
   bestAccuracy?: number | null;
 }) {
   const addr = encodeCyclePath(path);
@@ -186,10 +183,14 @@ function CourseRow({
   const lifted = originAccuracy != null && best != null && best !== originAccuracy;
 
   const archived = campaign?.lifecycle_status === "archived";
-  const leaf = ctx.viewedPath?.[ctx.viewedPath.length - 1];
+  // Compare the WHOLE (campaign, cycle) path, not just the leaf cycleId: `cycle_id` is a
+  // deterministic origin hash, so two campaigns of one origin (a re-`new`) share it. A
+  // cycleId-only match lit BOTH runs when one was selected — the exact "select one, another
+  // lights up" bug. The path carries campaignId at every hop, so encoded equality is the one
+  // unambiguous address (webapp/CLAUDE.md § Viewed identity).
   const selected =
-    leaf?.cycleId === path[path.length - 1]?.cycleId &&
-    ctx.viewedPath?.length === path.length &&
+    ctx.viewedPath != null &&
+    encodeCyclePath(ctx.viewedPath) === encodeCyclePath(path) &&
     ctx.viewedCandidateId == null;
   // The ● pointer. `run_phase` is the ONE server-owned run-state (I6) and rides the node,
   // so an inner run answers for itself — no second store read to ask "is it running?".
@@ -200,6 +201,14 @@ function CourseRow({
     node?.run_phase !== "checkin";
   const statusLabel =
     !live && node?.run_phase === "terminal" ? runPhaseLabel("terminal", node.state) : null;
+
+  // The one-line "what is this row" copy, shown in the hover card (it used to be a
+  // native `title=` that floated over the storage card).
+  const description = archived
+    ? "Archived — restore it from the ⋯ menu to open"
+    : node?.task
+      ? `Ran to measure a candidate of the course above (${node.task}).`
+      : "The campaign, and the course it ran. Its origin is the C0 row inside it.";
 
   const row = (
     <div className={cx("unit-library-family", selected && "selected", archived && "archived")}>
@@ -218,15 +227,6 @@ function CourseRow({
         className="unit-library-item"
         onClick={() => ctx.selectCyclePath(path, null)}
         aria-current={selected ? "true" : undefined}
-        title={
-          archived
-            ? "Archived — restore it from the ⋯ menu to open"
-            : `${path.map((h) => h.cycleId).join(" → ")}${
-                node?.task
-                  ? `\n\nRan to measure a candidate of the course above (${node.task}).`
-                  : "\n\nThe campaign, and the course it ran. Its origin is the C0 row inside it."
-              }`
-        }
         disabled={archived}
       >
         <span className="unit-library-row">
@@ -276,11 +276,15 @@ function CourseRow({
 
   return (
     <>
-      {hover && campaign ? (
-        <CampaignSizeHover campaignId={campaign.campaign_id}>{row}</CampaignSizeHover>
-      ) : (
-        row
-      )}
+      <RowHoverCard
+        cycleId={path[path.length - 1]!.cycleId}
+        description={description}
+        datasetName={campaign?.dataset_name ?? node?.dataset_name ?? null}
+        createdAt={campaign?.created_at ?? null}
+        campaignId={campaign?.campaign_id}
+      >
+        {row}
+      </RowHoverCard>
       {open && (
         <ul className="unit-library-children">
           {!tree.loaded && !tree.failed && <li className="inner-library-empty">Loading…</li>}
@@ -356,62 +360,65 @@ function CandidateRow({
     );
   };
 
+  const description = isOrigin
+    ? "C0 — this course's ORIGIN: the specification it started from, measured. Selects it; the ▶ twist expands what measured it."
+    : cand.course_kind
+      ? `${cand.label} — an attempt you cut as a fork (${shortFamilyTail(cycleId)}), on this campaign's one timeline. Selects it; the dashboard follows that fork.`
+      : `${cand.label} — a candidate this course proposed and measured. Selects it; the ▶ twist expands what measured it.`;
+
   return (
     <>
-      <div className={cx("unit-library-family", selected && "selected")}>
-        <button
-          type="button"
-          className="unit-library-twist"
-          onClick={() => ctx.toggleNode(nodeKey("cand", addr))}
-          aria-label={open ? "Collapse" : "Expand"}
-          aria-expanded={open}
-          disabled={!hasChildren}
-          tabIndex={-1}
-        >
-          {!hasChildren ? "" : open ? "▼" : "▶"}
-        </button>
-        <button
-          type="button"
-          className="unit-library-item candidate-label"
-          onClick={pick}
-          aria-pressed={selected}
-          title={
-            isOrigin
-              ? "C0 — this course's ORIGIN: the specification it started from, measured. Selects it; the ▶ twist expands what measured it."
-              : cand.course_kind
-                ? `${cand.label} — an attempt you cut as a fork (${shortFamilyTail(cycleId)}), on this campaign's one timeline. Selects it; the dashboard follows that fork.`
-                : `${cand.label} — a candidate this course proposed and measured. Selects it; the ▶ twist expands what measured it.`
-          }
-        >
-          <span className="unit-library-row">
-            <span className="unit-library-name">
-              {cand.label}
-              {cand.course_kind && (
-                <span
-                  className="unit-library-kind"
-                  title={`Cut as a fork (${cycleId})${cand.steered_by ? ` by ${cand.steered_by}` : ""} — it replays ${cutFrom ?? "its origin"} and searches on from there.`}
-                >
-                  ⑂{cutFrom ? ` from ${cutFrom}` : ""}
-                </span>
-              )}
-              {cand.is_winner && contested && (
-                <span className="unit-library-kind" title="Elected this round's winner">
-                  won
-                </span>
-              )}
+      <RowHoverCard cycleId={cycleId} description={description}>
+        <div className={cx("unit-library-family", selected && "selected")}>
+          <button
+            type="button"
+            className="unit-library-twist"
+            onClick={() => ctx.toggleNode(nodeKey("cand", addr))}
+            aria-label={open ? "Collapse" : "Expand"}
+            aria-expanded={open}
+            disabled={!hasChildren}
+            tabIndex={-1}
+          >
+            {!hasChildren ? "" : open ? "▼" : "▶"}
+          </button>
+          <button
+            type="button"
+            className="unit-library-item candidate-label"
+            onClick={pick}
+            aria-pressed={selected}
+          >
+            <span className="unit-library-row">
+              <span className="unit-library-name">
+                {cand.label}
+                {cand.course_kind && (
+                  <span
+                    className="unit-library-kind"
+                    title={`Cut as a fork (${cycleId})${cand.steered_by ? ` by ${cand.steered_by}` : ""} — it replays ${cutFrom ?? "its origin"} and searches on from there.`}
+                  >
+                    ⑂{cutFrom ? ` from ${cutFrom}` : ""}
+                  </span>
+                )}
+                {cand.is_winner && contested && (
+                  <span className="unit-library-kind" title="Elected this round's winner">
+                    won
+                  </span>
+                )}
+              </span>
+              <span className="unit-library-meta">
+                {/* A cut that broke before measuring anything has no number, and must not
+                    borrow the origin's — that would report a fitness nothing measured. */}
+                {cand.accuracy == null && cand.course_kind ? (
+                  <span className="unit-library-status">
+                    {runPhaseLabel("terminal", cand.state)}
+                  </span>
+                ) : (
+                  fmtPct0(cand.accuracy)
+                )}
+              </span>
             </span>
-            <span className="unit-library-meta">
-              {/* A cut that broke before measuring anything has no number, and must not
-                  borrow the origin's — that would report a fitness nothing measured. */}
-              {cand.accuracy == null && cand.course_kind ? (
-                <span className="unit-library-status">{runPhaseLabel("terminal", cand.state)}</span>
-              ) : (
-                fmtPct0(cand.accuracy)
-              )}
-            </span>
-          </span>
-        </button>
-      </div>
+          </button>
+        </div>
+      </RowHoverCard>
       {open && hasChildren && (
         <ul className="unit-library-children">
           {inner.map((course) => (

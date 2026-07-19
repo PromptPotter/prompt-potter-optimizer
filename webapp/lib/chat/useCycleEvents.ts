@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { cyclePathUrl } from "@/lib/api";
-import { encodeCyclePath, type CyclePath } from "@/lib/ids";
+import { encodeCyclePath, pathLeaf, type CyclePath } from "@/lib/ids";
 import {
   projectionToActivity,
   sampleScoredCandidate,
@@ -91,6 +91,14 @@ export function useCycleEvents(path: CyclePath | null): CycleEventsState {
   useEffect(() => {
     const p = pathRef.current;
     if (!p) return;
+    // The leaf cycle this subscription is FOR. Every frame is validated against it so a stale
+    // frame that slips through the EventSource teardown/reconnect window (a message already
+    // queued when the prior socket closed, an auto-reconnect race, a cross-process ledger
+    // replay) is DROPPED instead of upserted — the same drop-when-mismatched guard the
+    // dashboard poll has (`poll.tsx`). Without it, the render-phase reset clears the clean
+    // switch but a mis-stamped frame accumulates and lingers (append feed, no re-validation),
+    // which is how the chat activity feed drifted off the dashboard for a shared cycle_id.
+    const expectedCycleId = pathLeaf(p).cycleId;
     const es = new EventSource(cyclePathUrl(p, "/events:subscribe"), {
       withCredentials: true,
     });
@@ -105,6 +113,9 @@ export function useCycleEvents(path: CyclePath | null): CycleEventsState {
       } catch {
         return;
       }
+      // Drop a frame stamped for a different cycle (tolerant of a missing stamp, so an
+      // unstamped snapshot frame is never eaten) — the per-payload identity guard.
+      if (env.cycle_id && env.cycle_id !== expectedCycleId) return;
       if (env.kind === "stream_snapshot") {
         setSummaries(snapshotToActivity(env.payload));
         setTrail([]);

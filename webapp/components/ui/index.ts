@@ -10,6 +10,7 @@ export * from "./Dialog";
 export * from "./ErrorBoundary";
 export * from "./HeartIcon";
 export * from "./Hearts";
+export * from "./HoverCard";
 export * from "./Menu";
 export * from "./Popover";
 export * from "./SegmentedControl";

@@ -14,9 +14,9 @@ the rest of the codebase knows) — never raw tokens, never JWS frames.
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from promptpotter.domain.identity import Issuer, TenantId, UserId
 from promptpotter.infrastructure.identity.bundle import IdentityBundle
@@ -123,21 +123,40 @@ def _identity_context_from_session(
     )
 
 
-def install_oidc_middleware(app: FastAPI) -> None:
-    """Register the OIDC HTTP middleware. Called once from `main.py`."""
+class OIDCMiddleware:
+    """Pure-ASGI identity ingress — reads the session cookie, resolves an
+    ``IdentityContext``, stamps it on ``scope["state"]`` for the ``resolve_identity`` dep.
 
-    @app.middleware("http")
-    async def oidc_middleware(
-        request: Request, call_next: Callable[[Request], Awaitable[Response]]
-    ) -> Response:
+    ASGI, not ``BaseHTTPMiddleware``, on purpose: ``BaseHTTPMiddleware`` buffers the
+    whole response through an anyio memory stream, which breaks a streaming
+    ``EventSourceResponse`` on client-disconnect / server-shutdown — a lingering SSE
+    subscription then hangs graceful shutdown and raises ``RuntimeError: No response
+    returned``. A pass-through ASGI middleware forwards ``send`` untouched, so the SSE
+    highway keeps its own disconnect/shutdown teardown.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        request = Request(scope)
         bundle: IdentityBundle | None = getattr(request.app.state, "identity_bundle", None)
         identity_ctx: IdentityContext | None = None
         if bundle is not None:
             session_id = request.cookies.get(SESSION_COOKIE_NAME)
             if session_id:
                 identity_ctx = _identity_context_from_session(session_id, bundle)
-        request.state.identity_ctx = identity_ctx
-        return await call_next(request)
+        # request.state IS scope["state"] — set it here so the endpoint's Request reads it.
+        scope.setdefault("state", {})["identity_ctx"] = identity_ctx
+        await self.app(scope, receive, send)
+
+
+def install_oidc_middleware(app: FastAPI) -> None:
+    """Register the OIDC ASGI middleware. Called once from `main.py`."""
+    app.add_middleware(OIDCMiddleware)
 
 
 __all__ = ["SESSION_COOKIE_NAME", "install_oidc_middleware"]

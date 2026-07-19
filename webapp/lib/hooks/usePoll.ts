@@ -39,14 +39,23 @@ export function usePoll(
     tickRef.current = tick;
   });
 
-  // The single in-flight AbortController — a new tick aborts the prior one.
+  // The single in-flight AbortController; teardown (stop) aborts it.
   const abortRef = useRef<AbortController | null>(null);
+  // Is a tick still running? A timer that fires mid-tick SKIPS rather than aborting —
+  // else a tick slower than `intervalMs` (a large `/tree` under load: ~10s vs a 5s poll)
+  // is killed before it can ever resolve, and the surface hangs on "Loading…" forever.
+  // A unit switch still refreshes: the render-guarded consumer ignores a stale-key result,
+  // and the next timer tick (once this one settles) fetches the new key.
+  const inFlightRef = useRef(false);
 
   const runTick = useCallback(() => {
-    abortRef.current?.abort();
+    if (inFlightRef.current) return;
     const ctrl = new AbortController();
     abortRef.current = ctrl;
-    void tickRef.current(ctrl.signal);
+    inFlightRef.current = true;
+    void Promise.resolve(tickRef.current(ctrl.signal)).finally(() => {
+      inFlightRef.current = false;
+    });
   }, []);
 
   useEffect(() => {
@@ -64,6 +73,9 @@ export function usePoll(
       }
       abortRef.current?.abort();
       abortRef.current = null;
+      // The aborted tick is no longer in flight — clear synchronously so a following
+      // start() (tab re-show / re-enable) isn't skipped waiting on the abort's `.finally`.
+      inFlightRef.current = false;
     };
     const onVis = () => {
       if (!pauseWhenHidden) return;
