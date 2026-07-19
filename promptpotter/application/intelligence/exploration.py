@@ -50,6 +50,7 @@ __all__ = [
     "ruler_entry",
     "ruler_expected_accuracy",
     "select_round_subset",
+    "theta_accuracy_ci",
     "theta_lift_over_origin",
 ]
 
@@ -109,6 +110,37 @@ def ruler_expected_accuracy(theta: float | None, delta_scale: Ruler | None) -> f
 # below-SE lift survive to be pooled. This constant is the single knob if a validation run
 # over/under-corrects.
 _DISCOVERY_SE_DISCOUNT = 0.25
+
+
+def theta_accuracy_ci(
+    theta: float | None,
+    theta_se: float | None,
+    delta_scale: Ruler | None,
+    *,
+    alpha: float = 0.05,
+) -> tuple[float, float] | None:
+    """The candidate's ability θ re-projected to accuracy on the fixed ruler, as a CI band.
+
+    The decision-relevant whisker: ``ruler_expected_accuracy`` at ``θ ± z·θ_se``, the SAME
+    difficulty-adjusted, subset-invariant scale the round-winner election ranks on. Because it
+    borrows strength through the ruler's per-sample difficulty, it is tighter than the raw
+    mean-CLT band on the same evidence — the "throw away less info" the loop already computes
+    for its own decisions but never showed. ``ruler_expected_accuracy`` is monotone in θ, so the
+    lower θ maps to the lower accuracy; no sort needed.
+
+    ``None`` when θ / SE / ruler is absent (a COLD ruler, e.g. a fresh dataset or an inner
+    instrument) — the caller then keeps the raw composite CI, so a difficulty-blind round is
+    never dressed up as a difficulty-adjusted one."""
+    if theta is None or theta_se is None or not delta_scale:
+        return None
+    from scipy.stats import norm
+
+    z = float(norm.ppf(1 - alpha / 2))
+    lo = ruler_expected_accuracy(theta - z * theta_se, delta_scale)
+    hi = ruler_expected_accuracy(theta + z * theta_se, delta_scale)
+    if lo is None or hi is None:
+        return None
+    return (lo, hi)
 
 
 def candidate_lcb_ability(

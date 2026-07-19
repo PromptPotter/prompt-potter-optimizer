@@ -3298,3 +3298,31 @@ def test_mean_ci_bounds_and_degenerate_n() -> None:
     assert abs(mean - sum(values) / len(values)) < 1e-9
     assert lo < mean < hi
     assert lo < hi
+
+
+def test_theta_accuracy_ci_warm_vs_cold_ruler() -> None:
+    """The θ-implied whisker (the difficulty-adjusted band the candidate panel draws where the
+    ruler is warm). A wrong band is silent — it mislabels a real ability gap as noise on the
+    surface the operator reads to decide adoption. Pin that it brackets the θ point, stays in
+    [0,1], and that a COLD/empty ruler returns None so the caller keeps the raw composite CI
+    rather than dressing a difficulty-blind round as difficulty-adjusted."""
+    from promptpotter.application.intelligence.exploration import (
+        ruler_expected_accuracy,
+        theta_accuracy_ci,
+    )
+
+    ruler = {1: -1.0, 2: 0.0, 3: 1.0, 4: 0.5, 5: -0.5, 6: 0.2}
+    band = theta_accuracy_ci(0.3, 0.4, ruler)
+    assert band is not None
+    lo, hi = band
+    mid = ruler_expected_accuracy(0.3, ruler)
+    assert mid is not None
+    assert 0.0 <= lo <= mid <= hi <= 1.0
+    # A smaller SE gives a tighter band (the whole point — more evidence, narrower whisker).
+    tight = theta_accuracy_ci(0.3, 0.1, ruler)
+    assert tight is not None
+    assert (tight[1] - tight[0]) < (hi - lo)
+    # Cold ruler / missing θ or SE → None: the caller keeps the raw composite CI.
+    assert theta_accuracy_ci(0.3, 0.4, {}) is None
+    assert theta_accuracy_ci(None, 0.4, ruler) is None
+    assert theta_accuracy_ci(0.3, None, ruler) is None

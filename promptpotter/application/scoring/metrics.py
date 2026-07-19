@@ -103,8 +103,9 @@ def composite_ci(results: list[QueryMeasurement]) -> tuple[float | None, float |
     """95% normal-CLT CI on the mean per-cell composite ``fitness`` — the always-on
     whisker every scored candidate carries so no composite point estimate stands alone.
 
-    The **single home** for the CI idiom: every stamping site (``l1_score`` for L1
-    candidates, ``emit_origin_round`` for C0) routes through here.
+    The default CI, stamped for every scored candidate; ``l1_score`` overrides it with the
+    difficulty-adjusted θ band (``theta_accuracy_ci``) where the ruler is warm + the scorer is
+    plain accuracy — a tighter, honest whisker on the metric the election actually ranks by.
 
     It brackets the population ``compute_accuracy`` averages — **scoreable cells**
     (non-deprecated AND non-errored) — because that is the number it is drawn beside. It

@@ -485,10 +485,10 @@ class LedgerCandidate(StrictModel):
     onto the `candidate_scored` snapshot (measurement) by `(round, idx)`. Derived, not a
     record: `scan_ledger_candidates` builds it, nothing appends it.
 
-    The snapshot carries a whole `ScoredCandidate.model_dump()`, so the evaluator namespace,
-    the CI and the sample counts come free. **Election and θ do not appear here and cannot:**
-    both are stamped at round CLOSE, after this snapshot is emitted, and reach a reader
-    through `dashboard.json::rounds[]`.
+    The snapshot carries a whole `ScoredCandidate.model_dump()`, so the evaluator namespace
+    and the sample counts come free. **Election, θ and the composite CI do not appear here and
+    cannot:** all are stamped at round CLOSE, after this snapshot is emitted, and reach a
+    reader through `dashboard.json::rounds[]`.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -505,8 +505,6 @@ class LedgerCandidate(StrictModel):
     state: CandidateState = "minted"
     # The candidate's stored evaluator namespace — what a `score:` lens re-scores against.
     evaluators: dict[str, float] = Field(default_factory=dict)
-    composite_ci_lo: float | None = None
-    composite_ci_hi: float | None = None
     scored_samples: int | None = None
     expected_samples: int | None = None
 

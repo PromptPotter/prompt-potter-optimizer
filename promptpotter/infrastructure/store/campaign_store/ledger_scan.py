@@ -111,8 +111,9 @@ def scan_ledger_candidates(ledger_path: Path) -> list[LedgerCandidate]:
             # through this same event carrying no id and no label — anonymous as identity,
             # but it is still round 0's score, and the mint record above supplies the name.
             # `scores` IS a `ScoredCandidate.model_dump()` (the origin's aggregate is the one
-            # leaner sender) — so the evaluator namespace, the CI and the sample counts are
-            # already here, and no reader needs a second witness to ask for them.
+            # leaner sender) — so the evaluator namespace and the sample counts are already
+            # here. The composite CI is NOT: it is stamped at round close, after this snapshot,
+            # and reaches a reader through `dashboard.json::rounds[]` (like election + θ).
             _merge(
                 (rnd, idx),
                 candidate_id=scores.get("candidate_id"),
@@ -121,8 +122,6 @@ def scan_ledger_candidates(ledger_path: Path) -> list[LedgerCandidate]:
                 accuracy=scores.get("accuracy"),
                 composite_fitness=scores.get("composite_fitness"),
                 evaluators=scores.get("evaluators"),
-                composite_ci_lo=scores.get("composite_ci_lo"),
-                composite_ci_hi=scores.get("composite_ci_hi"),
                 scored_samples=scores.get("scored_samples"),
                 expected_samples=scores.get("expected_samples"),
                 state="measured",

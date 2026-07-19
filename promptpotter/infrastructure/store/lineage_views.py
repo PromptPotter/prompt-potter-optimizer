@@ -22,10 +22,11 @@ shape.
 
 **Two owners, and they cannot be collapsed.** IDENTITY comes from the ledger: it is the
 only witness independent of round close, and a round that died mid-flight still minted
-its candidates — at L4 their inner campaigns sit finished on disk under them. ELECTION, θ
-and ``cumulative_accuracy`` come from ``dashboard.json::rounds[]`` because the ledger does
-not carry them (:func:`_close_facts` says why) — do not try to fold them from a lookalike
-record. ``rounds/round_NNNN.json`` is the measurement record and is not a lineage source.
+its candidates — at L4 their inner campaigns sit finished on disk under them. ELECTION, θ,
+``cumulative_accuracy`` and the composite-fitness CI come from ``dashboard.json::rounds[]``
+because the ledger does not carry them (:func:`_close_facts` says why) — do not try to fold
+them from a lookalike record. ``rounds/round_NNNN.json`` is the measurement record and is not
+a lineage source.
 
 **This is a READ MODEL. It decides nothing.** The DECISION genealogy is a different system
 — ``mask/backprop.py``, ``mask/divergence.py`` and the resume replayers ride positional
@@ -275,10 +276,15 @@ class _CloseFacts(NamedTuple):
     theta: float | None
     theta_se: float | None
     cumulative_accuracy: float | None
+    # The composite-fitness CI whisker. Stamped at close alongside θ (the ruler warms then,
+    # and `l1_score` overrides the scoring-time default with the θ-implied band), so like θ
+    # it is null on the `candidate_scored` snapshot and rides the round summary instead.
+    composite_ci_lo: float | None
+    composite_ci_hi: float | None
 
 
 def _close_facts(store: Stores, hop: CycleHop) -> dict[str, _CloseFacts]:
-    """``candidate_id -> _CloseFacts`` off the cycle's ``dashboard.json::rounds[]``.
+    """``label -> _CloseFacts`` off the cycle's ``dashboard.json::rounds[]``.
 
     **The election and θ are not on the ledger and cannot be folded from it.** The
     ``ROUND_WINNER`` decision is appended to a plain list that lands in the round file
@@ -291,6 +297,14 @@ def _close_facts(store: Stores, hop: CycleHop) -> dict[str, _CloseFacts]:
     So these three ride ``dashboard.json::rounds[]``, the declared round-close projection —
     the same file this course already opens for ♥, asked one more question. Identity stays
     the ledger's; this is measurement, and measurement is what a closed round writes down.
+
+    **Keyed by ``label``, the POSITIONAL identity (``C{round}.{idx}``), not ``candidate_id``.**
+    ``candidate_id`` is a fresh ``IndividualLineage.id`` minted per run, so a re-run (resume,
+    rewind, a re-``new`` onto a deterministic ``cycle_id``) re-mints the same ``(round, idx)``
+    with a NEW id; the ledger fold keeps the last mint while this round summary kept the run
+    that closed it, and an id join then silently misses — C0 lost its own θ / winner / CI that
+    way. Position is the canonical genealogy (decisions + webapp ride it); the label is its
+    stable string form and both sides carry it, so the join holds across id churn.
 
     A round that never closed has no entry, so its candidates get no winner and no θ — which
     is the honest answer, and the one this tree exists to give.
@@ -306,15 +320,17 @@ def _close_facts(store: Stores, hop: CycleHop) -> dict[str, _CloseFacts]:
         cum = r.get("cumulative_accuracy")
         cands = r.get("candidates")
         for c in cands if isinstance(cands, list) else []:
-            if not isinstance(c, dict) or not isinstance(cid := c.get("candidate_id"), str):
+            if not isinstance(c, dict) or not isinstance(label := c.get("label"), str):
                 continue
             won = bool(c.get("is_winner"))
-            out[cid] = _CloseFacts(
+            out[label] = _CloseFacts(
                 is_winner=won,
                 theta=_float_or_none(c.get("theta")),
                 theta_se=_float_or_none(c.get("theta_se")),
                 # The frontier belongs to the spine: only the elected candidate advanced it.
                 cumulative_accuracy=_float_or_none(cum) if won else None,
+                composite_ci_lo=_float_or_none(c.get("composite_ci_lo")),
+                composite_ci_hi=_float_or_none(c.get("composite_ci_hi")),
             )
     return out
 
@@ -534,7 +550,14 @@ def _build(store: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Line
     hops = list(path)
 
     closed = _close_facts(store, leaf)
-    no_close = _CloseFacts(is_winner=False, theta=None, theta_se=None, cumulative_accuracy=None)
+    no_close = _CloseFacts(
+        is_winner=False,
+        theta=None,
+        theta_se=None,
+        cumulative_accuracy=None,
+        composite_ci_lo=None,
+        composite_ci_hi=None,
+    )
 
     # Every fork, resolved BEFORE our own candidates are built — a fork's replayed origin
     # grafts its runs onto the candidate it replays, so that candidate cannot be finished
@@ -555,7 +578,8 @@ def _build(store: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Line
     for cand in candidates:
         under = buckets.get(cand.candidate_id, [])
         replayed = grafts.get(cand.candidate_id, [])
-        close = closed.get(cand.candidate_id, no_close)
+        # Positional join (label = `C{round}.{idx}`), NOT candidate_id — see `_close_facts`.
+        close = closed.get(cand.label, no_close)
         kids.append(
             LineageNode(
                 kind="candidate",
@@ -568,8 +592,8 @@ def _build(store: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Line
                 composite_fitness=cand.composite_fitness,
                 state=cand.state,
                 evaluators=cand.evaluators,
-                composite_ci_lo=cand.composite_ci_lo,
-                composite_ci_hi=cand.composite_ci_hi,
+                composite_ci_lo=close.composite_ci_lo,
+                composite_ci_hi=close.composite_ci_hi,
                 scored_samples=cand.scored_samples,
                 expected_samples=cand.expected_samples,
                 is_winner=close.is_winner,

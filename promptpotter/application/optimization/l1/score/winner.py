@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
+from promptpotter.application.intelligence.exploration import theta_accuracy_ci
 from promptpotter.application.optimization.l1.population import parse_population
 from promptpotter.application.optimization.l1.score.loop import (
     replicate_survivors_pass,
@@ -272,9 +273,16 @@ async def l1_score(
         if theta_c is None:
             continue
         cs_idx = cs_by_id[cid]
-        candidate_scores[cs_idx] = candidate_scores[cs_idx].model_copy(
-            update={"theta": theta_c, "theta_se": abilities.theta_se.get(cid, 0.0)}
-        )
+        cs = candidate_scores[cs_idx]
+        theta_se_c = abilities.theta_se.get(cid, 0.0)
+        theta_update: dict[str, Any] = {"theta": theta_c, "theta_se": theta_se_c}
+        # Show the difficulty-adjusted ability band (what the election ranks on) as the whisker
+        # only where it brackets the bar's quantity: warm ruler AND composite == accuracy.
+        if abs(cs.composite_fitness - cs.accuracy) < 1e-9:
+            band = theta_accuracy_ci(theta_c, theta_se_c, cycle.delta_scale)
+            if band is not None:
+                theta_update["composite_ci_lo"], theta_update["composite_ci_hi"] = band
+        candidate_scores[cs_idx] = cs.model_copy(update=theta_update)
     record_decision(
         decisions,
         ResumeCheckpointKind.ROUND_WINNER,

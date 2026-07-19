@@ -83,12 +83,14 @@ const sampleCountPlugin: Plugin<"bar", { counts: (number | null)[] }> = {
   },
 };
 
-// Error-bar whisker on the composite bar — a vertical line from `ciLo` to `ciHi`
-// (mapped value→pixel via the y scale) with short end-caps, so no composite point
-// estimate stands alone. Drawn at the composite dataset's OWN rendered x (which
-// shifts within the bar group depending on how many series are showing), not the
-// category center — a whisker must sit on the bar it brackets. Bars with a null
-// CI (in-flight round, or composite itself null) are skipped.
+// Error-bar whisker on the primary metric bar — a vertical line from `ciLo` to
+// `ciHi` (mapped value→pixel via the left [0,1] y scale) with short end-caps, so
+// no point estimate stands alone. It rides whichever 0–1-scale bar is shown —
+// accuracy (the default-on metric) if present, else composite — so the CI is
+// visible by default without toggling the composite metric on. Drawn at that
+// dataset's OWN rendered x (which shifts within the bar group depending on how
+// many series show), not the category center — a whisker must sit on the bar it
+// brackets. Bars with a null CI (in-flight round) are skipped.
 const compositeCiWhiskerPlugin: Plugin<
   "bar",
   { ciLo: (number | null)[]; ciHi: (number | null)[] }
@@ -99,7 +101,13 @@ const compositeCiWhiskerPlugin: Plugin<
     const ciHi = opts?.ciHi;
     const yScale = chart.scales.y;
     if (!ciLo || !ciHi || !yScale) return;
-    const dsIndex = chart.data.datasets.findIndex((ds) => ds.label === "composite");
+    // The whisker data IS composite_ci_lo/hi — composite-scale by default, and the backend only
+    // rewrites it to the θ-accuracy band where composite == accuracy (`winner.py::l1_score`), in
+    // which case the accuracy bar carries the identical value. So sit on the COMPOSITE bar when
+    // it is drawn (a composite-formula run: bracketing the accuracy bar with a composite CI is the
+    // bug), and fall back to accuracy only when composite is hidden — exactly the θ-band case.
+    let dsIndex = chart.data.datasets.findIndex((ds) => ds.label === "composite");
+    if (dsIndex < 0) dsIndex = chart.data.datasets.findIndex((ds) => ds.label === "accuracy");
     if (dsIndex < 0) return;
     const meta = chart.getDatasetMeta(dsIndex);
     const { ctx, chartArea } = chart;
@@ -426,20 +434,11 @@ export const FitnessChart = memo(function FitnessChart({
         ...shared,
       });
     }
-    if (showComposite) {
-      datasets.push({
-        label: "composite",
-        data: compPlot,
-        backgroundColor: accentDim,
-        borderColor: borderArr(accentDim),
-        borderWidth: widthArr(),
-        ...shared,
-      });
-    }
     if (showAbility) {
-      // θ is a LOGIT, not a percent — it rides its own right-hand axis, which
-      // auto-ranges and may go negative. No `minBarLength`: on a negative θ that
-      // would paint a stub on the wrong side of zero.
+      // Second bar by default (the metric the winner is elected on). θ is a LOGIT,
+      // not a percent — it rides its own right-hand axis, which auto-ranges and may go
+      // negative. No `minBarLength`: on a negative θ that would paint a stub on the
+      // wrong side of zero.
       datasets.push({
         label: "ability",
         data: thetaRaw,
@@ -450,6 +449,16 @@ export const FitnessChart = memo(function FitnessChart({
         barPercentage: 0.95,
         categoryPercentage: cat,
         maxBarThickness: maxBar,
+      });
+    }
+    if (showComposite) {
+      datasets.push({
+        label: "composite",
+        data: compPlot,
+        backgroundColor: accentDim,
+        borderColor: borderArr(accentDim),
+        borderWidth: widthArr(),
+        ...shared,
       });
     }
     if (showWhatIf) {
@@ -532,6 +541,15 @@ export const FitnessChart = memo(function FitnessChart({
               position: "right" as const,
               grid: { display: false },
               ticks: { font: { size: 11 } },
+              // Labels the right axis as θ, sitting at the top next to the left axis's
+              // "1" — replaces the "(right axis)" caption the legend used to carry.
+              title: {
+                display: true,
+                text: "[θ]",
+                align: "end" as const,
+                color: getCss("--color-text-tertiary"),
+                font: { size: 11 },
+              },
             },
           }
         : {}),

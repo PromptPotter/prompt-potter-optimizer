@@ -267,14 +267,16 @@ export function CandidatesCard() {
     return built.slice().sort((a, b) => bucketOf(a) - bucketOf(b));
   }, [meta, realApplicable, inActive, selected, isPrestaging, singleNode]);
 
-  // Render-phase seed of the metric axis, once per cycle, from the SERVED campaign
-  // default (`CampaignConfig.headline_metric`). Gated on `dash` too: on the first
-  // poll the field isn't there yet, and seeding to accuracy without re-seeding
-  // would silently ignore the campaign's own choice. θ is offered, never forced —
-  // the engine always GATES on θ regardless of what's displayed here.
+  // Render-phase seed of the metric axis, once per cycle. Two bars per candidate by
+  // default: accuracy (a candidate is rarely bad on it, and it's the universal read)
+  // PLUS the campaign's ACTIVE metric — the served `CampaignConfig.headline_metric`,
+  // the one the loop actually follows (usually θ). Composite stays hidden unless it is
+  // the active metric. Gated on `dash`: on the first poll the field isn't there yet,
+  // and seeding without it would ignore the campaign's own choice. θ is offered, never
+  // forced — the engine always GATES on θ regardless of what's displayed here.
   if (cycleId && dash && metricsSeededForCycle !== cycleId) {
     setCandidatesState({
-      metrics: new Set([dash.headline_metric ?? "accuracy"]),
+      metrics: new Set<HeadlineMetric>(["accuracy", dash.headline_metric ?? "accuracy"]),
       metricsSeededForCycle: cycleId,
     });
   }
@@ -675,11 +677,11 @@ export function CandidatesCard() {
               {metrics.has("accuracy") && (
                 <span><span className="dot accuracy" />accuracy</span>
               )}
+              {metrics.has("ability") && (
+                <span><span className="dot ability" />ability θ</span>
+              )}
               {metrics.has("composite") && (
                 <span><span className="dot composite" />composite</span>
-              )}
-              {metrics.has("ability") && (
-                <span><span className="dot ability" />ability θ (right axis)</span>
               )}
               {showWhatIf && <span><span className="dot whatif" />what-if</span>}
             </div>

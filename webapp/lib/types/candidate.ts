@@ -34,9 +34,9 @@ export interface CandidateRow {
   // for candidates outside the round's election fit (eliminated / under the coverage floor).
   theta: number | null;
   theta_se: number | null;
-  // Normal-CLT CI on the mean of this candidate's per-sample composite fitness —
-  // always present once scored, unlike `theta_se` (fit-restricted). `null` for the
-  // in-flight round (stamped only at round close, alongside `theta`).
+  // The composite-fitness CI whisker (served, never recomputed): the difficulty-adjusted
+  // θ-implied accuracy band where the ruler is warm + the scorer is plain accuracy, else the
+  // raw normal-CLT mean CI. `null` for the in-flight round (stamped at round close, with `theta`).
   compositeCiLo: number | null;
   compositeCiHi: number | null;
   evaluators: Record<string, number>;

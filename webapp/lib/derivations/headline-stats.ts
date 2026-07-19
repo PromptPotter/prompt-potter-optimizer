@@ -25,6 +25,10 @@ export type HeadlineMetric = "accuracy" | "composite" | "ability";
 // The toggle's options, in display order, each with the teaching tooltip that
 // keeps θ from reading as an unexplained jargon number (the `AbilityInfo`
 // popover carries the long form).
+// Display order — accuracy first (always shown; a candidate is rarely bad on it),
+// then ability θ (the metric the winner is elected on, the usual second bar), then
+// composite. `primaryMetric` reads this order too, so accuracy is the node-label
+// metric whenever it is shown.
 export const HEADLINE_METRICS: { id: HeadlineMetric; chip: string; title: string }[] = [
   {
     id: "accuracy",
@@ -32,16 +36,16 @@ export const HEADLINE_METRICS: { id: HeadlineMetric; chip: string; title: string
     title: "Raw accuracy — correctness rate over the candidate's measured subset (subset-relative).",
   },
   {
-    id: "composite",
-    chip: "Comp",
-    title:
-      "Composite fitness under the active scoring formula (equals accuracy when no formula is set).",
-  },
-  {
     id: "ability",
     chip: "θ",
     title:
       "Difficulty-adjusted ability θ — the metric the winner is actually elected on. A logit (not a %): comparable within a round; cross-round comparison waits on the stable δ bank.",
+  },
+  {
+    id: "composite",
+    chip: "Comp",
+    title:
+      "Composite fitness under the active scoring formula (equals accuracy when no formula is set).",
   },
 ];
 
