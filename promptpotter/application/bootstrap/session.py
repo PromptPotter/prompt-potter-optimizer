@@ -131,7 +131,7 @@ class Session:
     budget_tripped: Callable[[], StopReason | None] | None = None
 
 
-def new_session_state(
+def _new_session_state(
     *,
     init_params: dict[str, Any],
     pipeline_params: dict[str, Any],
@@ -200,7 +200,7 @@ def auto_mint_session(
     campaign_id = mint_campaign_id(dataset_name)
     root_cycle = cycle_id
 
-    state = new_session_state(
+    state = _new_session_state(
         init_params={
             "backend_url": session.backend_client.base_url,
             "backend_id": session.backend_id,
@@ -369,7 +369,7 @@ def finalize_checkin_to_active(
     target_hash = cycle_plan.cycle_id.removeprefix("cycle_")
     plan_origin_fields = cycle_plan.origin.prompt_field_dict()
 
-    state = new_session_state(
+    state = _new_session_state(
         init_params={
             "backend_url": session.backend_client.base_url,
             "backend_id": session.backend_id,
@@ -454,5 +454,4 @@ __all__ = [
     "auto_mint_session",
     "finalize_checkin_to_active",
     "mint_checkin_skeleton",
-    "new_session_state",
 ]

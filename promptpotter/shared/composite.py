@@ -184,7 +184,7 @@ _FORMULA_BUILTINS = {
 }
 
 
-def extract_evaluator_names(formula: str, available: set[str]) -> list[str]:
+def _extract_evaluator_names(formula: str, available: set[str]) -> list[str]:
     """Return evaluator names present in *formula*, in first-appearance order.
 
     Only names that also appear in *available* are returned. Builtins,
@@ -282,7 +282,7 @@ def render_composite_fitness_block(
     if use_short_names:
         names = list(evaluators.keys())
     else:
-        names = extract_evaluator_names(formula, set(evaluators))
+        names = _extract_evaluator_names(formula, set(evaluators))
 
     if not names:
         return [line1, line2]

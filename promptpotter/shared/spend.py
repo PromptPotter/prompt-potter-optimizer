@@ -17,7 +17,7 @@ Three layers, in priority order:
    Run ``python scripts/refresh_rates.py`` to force a manual refresh.
 
 3. **Bundled floor** at ``promptpotter/shared/data/rates.json`` — checked
-   into the repo, same wrapped format. ``load_rates()`` falls back to
+   into the repo, same wrapped format. ``_load_rates()`` falls back to
    this when no cache is present, so a fresh install with no internet
    still resolves rates. Bumped via PR alongside ordinary releases.
 
@@ -52,7 +52,6 @@ __all__ = [
     "CACHE_PATH",
     "UPSTREAM_URL",
     "compute_usd",
-    "load_rates",
     "lookup_rate",
     "refresh_rates",
 ]
@@ -116,7 +115,7 @@ def refresh_rates(*, force: bool = False, timeout: float = _FETCH_TIMEOUT_S) -> 
     unless ``force=True``. Network failure logs a warning and leaves any
     prior cache in place so a startup with no internet still resolves
     rates from the last successful fetch — and if no cache exists yet,
-    ``load_rates`` falls through to the bundled floor.
+    ``_load_rates`` falls through to the bundled floor.
     """
     if not force and _cache_fresh():
         return True
@@ -144,7 +143,7 @@ def refresh_rates(*, force: bool = False, timeout: float = _FETCH_TIMEOUT_S) -> 
         json.dumps(_wrap(stripped), indent=0, separators=(",", ":")),
         encoding="utf-8",
     )
-    load_rates.cache_clear()
+    _load_rates.cache_clear()
     logger.info("spend: refreshed %d model rates → %s", len(stripped), CACHE_PATH)
     return True
 
@@ -178,7 +177,7 @@ def _models_to_rates(models: dict[str, Any]) -> dict[str, tuple[float, float]]:
 
 
 @functools.lru_cache(maxsize=1)
-def load_rates() -> dict[str, tuple[float, float]]:
+def _load_rates() -> dict[str, tuple[float, float]]:
     """Load rates with cache → bundled-floor → empty fallback chain.
 
     The cache (``CACHE_PATH``) wins when present so operators get fresh
@@ -215,7 +214,7 @@ def lookup_rate(model: str | None) -> tuple[float, float] | None:
     if not model:
         return None
     needle = model.lower().strip()
-    rates = load_rates()
+    rates = _load_rates()
     if needle in rates:
         return rates[needle]
     # Wire form "provider:model" → LiteLLM's "provider/model". Try the
