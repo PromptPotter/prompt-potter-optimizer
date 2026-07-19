@@ -6,23 +6,92 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Added
+## [0.8.8] — 2026-07-19
 
-- **Reuse-an-origin, end-to-end.** The New-Campaign picker reproduces a chosen prior origin's *exact* prompt fields and starts a fresh campaign from it (`campaign_origin` lineage) — via a new `POST /origins/{id}/draft` that prefills a draft, committed through the existing mint-from-draft path. Retires the dead workspace-mint `origin_override` branch (the HTTP route had been stripping it).
-- **Clickable Langfuse trace link.** When Langfuse is enabled, `dashboard.json` (rendered in the webapp TopStrip) and the notebook result box surface a deep link to the cycle's full nested trace — one click from a low-scoring round to its prompts/candidates/spans.
+> Continued 0.8.x beta-hardening toward the 0.9.0 broad launch. 292 commits since `v0.8.2` <!-- last published release was v0.8.2; 0.8.3–0.8.7 were internal version bumps with no separate notes, consolidated here -->. This is a **paired release** with the TermNorm backend (see BREAKING → Paired backend). Zero released-between and zero long-lived on-disk data, so on-disk and contract changes ship without compatibility shims — **start clean** (see BREAKING).
 
-### Changed
+### The build, in order of completion
 
-- **Ingest auto-mints on a clean check-in.** When the origin check-in confirms every gated field and asks nothing back, the campaign starts without the manual review step; the review panel still appears whenever any gap or resolver question remains.
+This release is a five-week arc, and the order the work landed *is* the story — each capability sat on the one before it. What follows walks that order rather than grouping by theme, so the shape of the release is legible: honest measurement first, then the loop that trusts it, then the recursion that optimizes the loop itself.
 
-### Planned for 0.8.3 (~2 weeks)
+**Search hygiene + honest round verdicts** *(Jun 11–14)*
+- **Search-space narrowing, per-node parameter locks, shape-aware prediction, origin identity** — the optimizer stops wandering dimensions a node can't move, holds a locked knob across resume/fork, and predicts in the shape the pipeline actually returns.
+- **Round-health verdicts** — a source-stamped warning kind + context-aware round health; the webapp surfaces the **degraded-round verdict** and danger-tints the Stop button, so a round that got *worse* can't read as progress.
 
-> Low-hanging fruit pulled ahead of the broad-launch milestones (BYO per-user keys, state-sync) — UI emphasis. To refine; shipped items will accrue under the usual sections below as they land.
+**Origin becomes a first-class halt-and-decide gate** *(Jun 16)*
+- The **origin is a real baseline, gated.** Before round 1, the loop stops on the origin as a checkpoint: an interactive **rescore / proceed / abort** decision, offered identically across CLI, webapp, and chat. A broken floor **halts the run** instead of manufacturing illusory improvement off a bad reference. This is the change that made every later score trustworthy — you cannot compare candidates to an origin you never actually measured.
+- **`candidate_library`** — the pipeline gains a node-typed *fourth* input alongside the prompt, params, and dataset; soft, so it informs the search without blocking a mint.
 
-- **Dashboard L2/L3-terminal loading bug** — fitness bars vanish + panel hangs when a cycle's last phase was L2/L3.
-- **UI-polish pass** over the lineage / fitness / samples surfaces (empty states, mobile, copy).
-- **Code-hygiene tail** — dead `Connector.to_dict`, `param_unlock_round` collapsed to a constant, `_compute_accuracy` deduped onto `compute_accuracy`, the two warming-up dashboard routes folded onto one `warming_payload` contract.
-- **`*_override → *_updates`** L1 delta-key rename (live-round-gated).
+**Pluggable mechanisms + the evidence-starvation cascade** *(Jun 17–18)*
+- **Pluggable campaign mechanism toggles** (sorting + early-abort), a `/lineage` conditional-`304` fast-path, a copy-to-clipboard icon on dashboard boxes.
+- **Evidence-starvation detection (R-48).** A round that can't gather enough signal to decide anything is now *detected*, routed to L2 for a strategy change, and — if still starved — terminated with a backend-supplied reason rather than emitting a confident-looking non-result. Round-1 critique and `exploration_budget` are seeded so the very first round's escalation signals are real, not placeholders.
+
+**The chat-first front door + one-source lineage** *(Jun 19–20)*
+- **Chat is the front door.** The webapp root is now a live **activity stream** with in-thread loop control — skip a searchpoint, watch babysat provenance land, drive a remote run from the bar — fed by **cross-process SSE via a ledger tail** so a run launched in one process streams live into a browser attached to another, with a running composite updating in place. Contract: `docs/specs/chat-foundation.md`.
+- **Live lineage as one source, two slices** — the tree and the data view stop diverging; plus three M10 levers (trace link, ingest auto-skip, origin reuse).
+
+**Durable check-in + security hardening** *(Jun 21)*
+- **Disk-backed check-in survives restart.** The origin check-in is persisted, so a killed server resumes mid-resolution instead of re-asking. A clean check-in **auto-mints** — the review panel appears *only* when a real gap or resolver question remains — and resolver degradation is surfaced to the operator rather than swallowed. A consent gate plus path/session hardening closes the perimeter around it.
+
+**Parameter locks, live focus, MECE storage** *(Jun 22–23)*
+- **Per-node param locks persist across resume/fork**; a live **Focus chain** with comparable samples and mint timing; a slimmed per-cycle ledger writer.
+- **MECE storage taxonomy.** Measurements relocate under a mutually-exclusive, collectively-exhaustive on-disk layout with a recycle-bin delete; the webapp renders storage as that one hierarchy with a Files-tab placement.
+
+**The θ ruler — one comparable scoring axis** *(Jun 23–24)*
+- **Every decision now reads Rasch ability θ, not subset accuracy.** This is the release's measurement backbone. A per-subset accuracy never compared across rounds — an easy sample set flattered a weak candidate. Round-winner election, promotion/elimination gates, and cross-cycle elevation all now compare on a **fixed-delta θ primitive**: the cross-round comparability ruler. Along the way: a **measurement-provenance grade** de-biases the archive (a cached score and a fresh one aren't weighed the same), θ is threaded onto the candidate read-models and shown **wherever a candidate is inspected**, a **θ-exact stall replay** unblocks `per_round_resubset`, and a fork seed can A/B a selection-policy knob, not just run limits. **Coherent θ measurement** ties it together — one δ ruler, resubset ON, an A/B engine — and the ruler **graduates 1PL→2PL where it wins on held-out data**. A config coupling/provenance map documents what each knob moves and what it clashes with.
+
+**L4 — the recursion goes live** *(Jun 24 – Jul 1)*
+- **PromptPotter optimizes its own meta-prompts.** An **in-process execution seam** plus the **`llm_only` connector** let a cycle spawn inner cycles with no second server, so the outer loop runs PromptPotter *as its own target* and searches the L1/L2/L3 meta-prompts that drive every campaign. **Inner-cycle recursion is live-validated end-to-end.** The outer meta-prompts reach the inner cycle (slice 3b); a **read-only bridge** lets you follow inner loops from the webapp (with sidebar filter/resize); and a per-node prompt layout lets L4 **edit the inner nodes' information flow and rewards lean layouts** — the optimizer learns to hand its inner self a shorter, denser prompt.
+
+**Outer-loop screening + the reaper** *(Jul 2–3)*
+- Practical-equivalence elimination gate; an **evidence-driven outer loop** with measurement-identity coherence; screening geometry with a NO-OP noise-floor probe; an un-starved evidence channel + pre-mint baseline batch; a heartbeat-verified **staleness reaper** with one terminal-stamp seam; and an honest connector/pipeline/samples UI for L4 self-optimization.
+
+**One paired-margin gate + the champion lifecycle** *(Jul 4)*
+- **Selection collapses to one gate.** A single **paired-margin gate** replaces the PoBB dominance+equivalence pair, and **one deterministic shared round order** replaces the online CAT picker (deleted). On top of it: a **champion registry** (`champion refresh`) selects the winning meta-prompt set, `champion apply` **graduates it into the distributable `_optimizer` config**, and a capability-gated **L4 Lab** (resource matrix, per-cell inner panel, Champion Console, blocked paired-outer verdict) lets a dev follow the recursion read-only. Outer fitness is **composed and delta-led** — a meta-prompt is scored on the *lift* it produces on a fixed inner benchmark, not the inner run's raw accuracy.
+
+**Bounded and cheap by default** *(Jul 5)*
+- A `noise-floor` diagnostic verb with **composite-CI whiskers**, opt-in **successive-halving replication**, an opt-in **lives/hearts round budget**, and a deterministic inner optimizer with composite-CI on C0 — so a self-optimization run stays inside a small, predictable spend.
+
+**The schema is the second prompt** *(Jul 8–9)*
+- **A structured-output schema teaches the model as much as the prompt does.** The `llm_only` output schema is now treated as a *second prompt*: the field **description axis** is made reachable, honest, and taught, and both `schema_field_rename` and the output-schema description become **unlockable optimizer axes** on `l1_generate` (L2/L3 unlock them by forking; nested params became a declared mechanism). `evidence_grounding` is hoisted so a variant can't cite what it wasn't shown. The webapp serves `backend_type` so the sidebar stops guessing L4 from a name, hearts gain a denominator, and webapp commits are gated on `tsc` + `eslint`.
+
+**Resolver proposals, archive perf, one candidates surface** *(Jul 10–13)*
+- The resolver **hands the operator its proposals** instead of applying them silently; the measurement index **appends instead of rewriting itself** and the archive stops re-folding on every read (two perf passes); the MCTS loop is closed and the block library nothing was reading is reattached; the unusable fastest route is fixed by **changing the model, not the route**; and the what-if grid and lineage forest **fold into one candidates surface**.
+
+**Three-tier access model + delegated capabilities (ADR-0005)** *(Jul 15)*
+- **Team-ready access control.** A **three-tier access model** (host-admin kept first-class) with perimeter hardening; **ADR-0005 delegated principals + capability scoping** so a steer can be handed out narrowly and attenuated; an **origin allow-list** that gates who can fork the human model-steer, with an allow-list-aware steer warning and a canonical node-config render; the allow-list is authored from one source (setup checklist + live edit).
+
+**One lineage tree + strict-by-default gates** *(Jul 16–17)*
+- **Lineage is served as one tree** — `course → candidate → (course | sample)` — and a candidate is **named when it is minted**, not when its round closes (the separate `/lineage` route is retired; a fork is a candidate, not a course). New CI gates **ratchet `Any` params and guard NUL bytes**, and `StrictModel` is **`forbid`-by-default** with any lax model written down and counted.
+
+**Final tuning for a distributable `promptpotter-self`** *(Jul 19)*
+- **Dispatch shaping** feeds the outer generator inner-run narratives and earned reasoning blocks; a **model reasoning-token floor** is enforced at preflight; an **origin eval-budget** and a whole-inner-spec identity fingerprint land; the **`justlogic-d234`** inner instrument replaces the retired cuts. The θ-implied accuracy CI is served on the candidate bar, and the sidebar consolidates onto one hover-card primitive.
+
+### Bug Fixes
+
+- **`0` is a value, not an absence** — four read surfaces that silently dropped a real zero now carry it; symmetrically, an **absent** verdict/measurement is *excluded* (and bounds the run), never floored to `0`.
+- **L1 grounding** — a variant could cite a panel it was never shown and still pass; the response schema never reached the provider. Both closed.
+- **L4 inner instrument measured nothing while four surfaces reported it fine** — the instrument-degeneracy class is fixed; a meta-prompt parse failure is now charged to the round, not to nobody.
+- **The round document loses twelve fields** — the round file now carries a typed model; five operator-read numbers the server never actually said, and five engine decisions taken from the wrong field, corrected.
+- **The dashboard stops overstating** — "best so far" no longer inflates past the evidence, and a single-source dashboard kills the two-state flicker between the live and persisted views.
+- Web check-in crash; SSE shutdown + framing via `sse-starlette`; mint pipeline-config setup errors surface as `422`, not a raw `500`; connection loss stops impersonating a run phase and the navbar indicator stops vanishing; `dashboard.json` rewind parity.
+- CI: deps pinned via `uv.lock`; `setup-uv` pinned to `v8.2.0`; prod installs the pinned lock graph.
+
+### BREAKING Changes
+
+- **Start clean — pre-0.8.8 measurements are not comparable.** Scoring decisions now read Rasch ability θ (not subset accuracy) and the on-disk cycle layout changed (session tier removed, `CycleLayout` owns layout, measurements relocated under the MECE taxonomy). By policy there are no compatibility shims: re-measure origins on a fresh workspace.
+- **`CampaignConfig` field renames remain data migrations.** Both on-disk surfaces now persist the **delta from defaults** (a knob nobody set is absent, so renaming it is free); a knob the operator *did* set is still written down. `deploy-linux/update.sh` runs `restamp_campaign_configs.py --apply` on every deploy.
+- **`CycleResult.n_rounds → n_l1_rounds`** (origin-exclusive count).
+- **Elimination config** — PoBB `pobb_epsilon` + dominance/equivalence are replaced by one `margin_elimination` paired-gate knob.
+- **Paired backend.** 0.8.8 pairs with the TermNorm backend on the web-search `strategy` axis + the structured-output seam (`llm_only` returns `content=""` with a `content_empty:` advisory rather than substituting the reasoning trace). <!-- TODO(release): stamp the exact paired TermNorm version once its minor release is cut. -->
+
+### Technical Details
+
+- **292 commits since `v0.8.2`** (2026-06-11 → 2026-07-19): 89 features, 82 fixes, 76 refactors, 23 docs, 5 chore, 2 perf, 1 build (+ merges).
+- Sustained complexity-ledger reduction (`567`→`510`-range across the cycle): 34 re-export shims collapsed, four one-thing packages folded, a store `__init__` that manufactured import cycles removed, and repeated double-ownership sweeps (one owner per fact).
+- `StrictModel` is `forbid`-by-default with `models_lax` counted; new CI gates ratchet `Any` params and guard NUL bytes; webapp commits gated on `tsc` + `eslint`.
+- `APP_VERSION` + `pyproject.toml` → 0.8.8.
+- See individual sections above for the full change set.
 
 ## [0.8.2] — 2026-06-11
 
