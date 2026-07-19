@@ -250,6 +250,13 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # fixes that, because the missing fact is not in the failures: it is in the HITS, in the shape of
 # the answer set as a whole. This panel is ~250 chars, renders empty on free-text answer spaces,
 # and is the only thing in the prompt that can tell a pipeline that reasons from one that gave up.
+# 2026-07-18 feed the L4 generator: ``injections`` 24->25 — ``inner_narratives`` on `l1_generate`'s
+# floor. Raised DELIBERATELY. Each outer sample of an L4 round IS a whole inner campaign, and the
+# authored story of what it tried / steered on / where it stalled (`_inner_narrative`) was reaching
+# only the outer CRITIQUE (`sample_transcripts`), never the outer GENERATOR — which saw one scalar
+# per-seed delta and re-proposed what the inner loop had already measured (the overnight flat loop).
+# The panel is silent off the recursion (no `reasoning_trace` on the row), so it costs a normal
+# campaign nothing.
 LEDGER_BASELINE = {
     # 312 -> 313: `shared/instrument.py`. Raised DELIBERATELY, and it is the honest number to
     # argue about: the pass it pays for removed three ambient ContextVars and three public
@@ -354,7 +361,12 @@ LEDGER_BASELINE = {
     # beside it" rule applied to a redundancy that never got exercised. ``config_map.py`` was
     # the THIRD hand-maintained rendering of the ``knobs.py`` table; the preflight gate and
     # GET /campaigns/{id}/config-map both survive untouched, and knobs.py stays the SoT.
-    "modules": 302,
+    # then 302 -> 303 (2026-07-18): ``intelligence/earned_blocks.py`` — the earned prompt-block
+    # library (dispatch-first phase). Mines run history for short field values that earned
+    # CREDIBLE lift on the same answer-space shape, replacing the static seed catalogue the
+    # ``guidance`` block mode served to every task. A feature: it turns a low-value, task-
+    # mismatched panel into earned-or-silent signal, so the baseline rises.
+    "modules": 303,
     # 52 -> 51 (2026-07-17): ``cli/commands/sweep`` went with the sweep verb.
     "init_files": 51,
     # 43 -> 9 (2026-07-16): 34 package ``__init__`` files that did nothing but re-export a
@@ -382,9 +394,19 @@ LEDGER_BASELINE = {
     #
     # 6 -> 5 (2026-07-17): ``cli/commands/sweep`` left the floor with the sweep verb itself.
     "reexport_shims": 5,
-    "config_leaf_fields": 38,
+    # 38 -> 39 (2026-07-19): a deliberate new operator knob -- ``CampaignConfig.sp_budget_origin``
+    # (origin eval breadth; None = sp_budget_ttest). Lets the origin be scored on MORE bank
+    # samples than each candidate: origin theta is the term every delta subtracts and its rows
+    # are shared cache, so breadth there is cheap precision, while candidate breadth is paid
+    # per-candidate. First user: the L4 inner instrument (inner_tasks.json::n_samples_origin,
+    # origin 40 vs candidates 28). A feature, justified, so the baseline rises.
+    "config_leaf_fields": 39,
     "settings_env": 16,
-    "settings_const": 14,
+    # 14 -> 15 (2026-07-18): ``ANSWER_SPACE_CAP`` moved out of ``dispatch/bundle.py`` into
+    # settings — now shared by the ``answer_distribution`` collapse detector and the earned-
+    # block library's task-fit signature, so both draw the enumerable-answer-space line from one
+    # constant. A relocation into the shared home, not a net-new concept (it left bundle.py).
+    "settings_const": 15,
     "opt_search_point_fields": 25,
     # NEW dimension (2026-07-17), landing at 73 — a bare ``x: Any`` parameter whose real type
     # exists and simply was not written. It belongs on a CONCEPTUAL-surface ledger because a
@@ -429,7 +451,7 @@ LEDGER_BASELINE = {
     # the whole reason this arc exists. All 10 committed ``pipeline.json`` files pass forbid.
     "models_lax": 4,
     "prompt_string_fields": 6,
-    "injections": 24,
+    "injections": 25,
     "escalation_rules": 6,
     "claude_md": 7,
 }

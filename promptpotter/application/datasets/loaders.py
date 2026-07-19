@@ -129,16 +129,18 @@ def load_bbeh(sample_size: int = 0, seed: int = 42) -> list[Sample]:
     return samples
 
 
+# Three JustLogic depth cuts, each a SEPARATE dataset name (cache-key discipline: the archive
+# keys a cell by (dataset_name, node_configs, sample_id) with query text OUT of the key, so
+# re-cutting in place would serve one cut's banked rows under another's sample_ids). `justlogic`
+# (6-7) and `justlogic-d23` (2-3) are dead/superseded, kept only so their banked measurements
+# stay addressable.
 _JUSTLOGIC_DEPTHS: tuple[int, ...] = (6, 7)
-# The live cut. Measured 2026-07-13 (n=96/depth, `gpt-oss-20b:nitro @ low`): the model's
-# capability wall on JustLogic sits between depth 2 and depth 3. Past it, it stops deriving and
-# emits "Uncertain" — 75% of answers at d3, 96% at d7 — so accuracy ties what a constant would
-# score and there is nothing to optimize. d2 is healthy (top answer 57%, all three labels live);
-# d3 is the frontier itself, collapsed but only just. The union is in-band with a +0.188 margin
-# over its constant floor, and its collapse excess (+0.271) sits right under the line — so
-# penetrating d3 moves the whole bank away from collapse, and a regression tips it over. That is
-# the point of including d3: it makes progress detectable in BOTH directions.
 _JUSTLOGIC_D23_DEPTHS: tuple[int, ...] = (2, 3)
+# The live L4 inner instrument: an iid mix of depths 2, 3, 4 (depths interleaved before
+# numbering, so every prefix is an iid d2/3/4 draw). The operator's bet is that the model's
+# `Uncertain`-hedging under low effort is an ADDRESSABLE behaviour the loop corrects, not a fixed
+# capability ceiling.
+_JUSTLOGIC_D234_DEPTHS: tuple[int, ...] = (2, 3, 4)
 _JUSTLOGIC_TRAIN_PER_DEPTH: int = 200
 
 
@@ -147,7 +149,7 @@ def load_justlogic_d23(
     sample_size: int = 0,
     seed: int = 42,
 ) -> list[Sample]:
-    """JustLogic at depths 2-3 — the live inner instrument. See ``_JUSTLOGIC_D23_DEPTHS``.
+    """JustLogic at depths 2-3 — a SUPERSEDED cut (the live instrument is ``justlogic-d234``).
 
     A SEPARATE dataset name from ``justlogic``, never a re-cut of it: the measurement archive
     keys a cell by ``(dataset_name, node_configs, sample_id)`` and the query text is NOT in that
@@ -157,6 +159,20 @@ def load_justlogic_d23(
     return _load_justlogic(_JUSTLOGIC_D23_DEPTHS, split, sample_size, seed)
 
 
+def load_justlogic_d234(
+    split: str = "train",
+    sample_size: int = 0,
+    seed: int = 42,
+) -> list[Sample]:
+    """JustLogic at depths 2-4 (iid mix) — the live L4 inner instrument (see ``_JUSTLOGIC_D234_DEPTHS``).
+
+    A SEPARATE dataset name from ``justlogic-d23``, never a re-cut of it: the archive keys a cell
+    by ``(dataset_name, node_configs, sample_id)`` with query text OUT of the key, so re-cutting in
+    place would serve d23's banked rows under the new sample_ids.
+    """
+    return _load_justlogic(_JUSTLOGIC_D234_DEPTHS, split, sample_size, seed)
+
+
 def load_justlogic(
     split: str = "train",
     sample_size: int = 0,
@@ -164,9 +180,8 @@ def load_justlogic(
 ) -> list[Sample]:
     """Load JustLogic (`michaelchenkj/JustLogic`) at reasoning depths 6-7.
 
-    **DEAD as an instrument** (measured 2026-07-13): at these depths the target model answers
-    "Uncertain" on 80-96% of samples and its accuracy ties the constant-answer floor. Kept only
-    so its banked measurements stay addressable; new work uses ``load_justlogic_d23``.
+    **DEAD / superseded cut.** Kept only so its already-banked measurements stay addressable
+    under their cache keys; new work uses ``load_justlogic_d234`` (the live L4 inner instrument).
 
     Authors (Chen 2025, arXiv 2501.14851) ship one HF split (`train`,
     4,900 rows, 700 per depth × 7 depths). The canonical test set is
@@ -176,8 +191,7 @@ def load_justlogic(
     public training fold per authors' intent.
 
     Operator-blessed cut (this loader): filter to **depths 6 and 7
-    only** (1,400 rows total — the recon-measured in-band stratum at
-    ~44% origin on `gpt-oss-20b @ low`). Per included depth,
+    only** (1,400 rows total). Per included depth,
     deterministic seed=42 shuffle → first 200 = ``train`` (400
     total), rest = ``test`` (1,000 total). NOT canonical (authors'
     test set is withheld); resulting numbers are non-leaderboard-
@@ -267,6 +281,7 @@ DATASET_LOADERS: dict[str, Callable[..., list[Sample]]] = {
     "bbeh": load_bbeh,
     "justlogic": load_justlogic,
     "justlogic-d23": load_justlogic_d23,
+    "justlogic-d234": load_justlogic_d234,
 }
 """Map dataset name → loader. ``load_potter_traces`` (prior-run replay) ships
 extra non-Sample fields and is direct-import only, not registry-routed."""

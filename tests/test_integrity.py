@@ -75,6 +75,93 @@ def test_render_does_not_leak_l3_plan_into_target_prompt() -> None:
     assert sentinel not in osp.render()
 
 
+def test_reasoning_model_below_token_floor_is_blocked_not_run() -> None:
+    """A reasoning model pinned below its ``ModelProfile`` token floor must be caught at
+    preflight, not after the money is spent. A gate that silently fails to fire lets the
+    inner optimizer spend its whole budget reasoning and emit zero content
+    (``reasoning_budget_exhausted``) — a paid-for, loop-stalling failure with no wrong-answer
+    symptom, so the gate NOT firing is the silent harm here."""
+    from promptpotter.application.config import check_model_reasoning_floors
+    from promptpotter.infrastructure.llm.registry import model_profile
+
+    prof = model_profile("deepseek/deepseek-v4-flash:nitro")
+    assert prof is not None and prof.is_reasoning and prof.min_max_tokens >= 8000
+    floor = prof.min_max_tokens
+
+    # Below-floor reasoning model with an EXPLICIT cap → blocked (the l1_critique bug).
+    below = check_model_reasoning_floors(
+        [("l1_critique", {"model": "deepseek/deepseek-v4-flash:nitro", "max_tokens": floor - 1})]
+    )
+    assert len(below) == 1 and "l1_critique" in below[0]
+
+    # None of these is a violation: at/above floor, absent cap (provider ceiling — the
+    # sanctioned default), non-reasoning suffix-normalized, and an unprofiled model.
+    clean = check_model_reasoning_floors(
+        [
+            ("at_floor", {"model": "deepseek/deepseek-v4-flash:nitro", "max_tokens": floor}),
+            ("absent_cap", {"model": "deepseek/deepseek-v4-flash:nitro"}),
+            ("unprofiled", {"model": "some/unknown-model", "max_tokens": 10}),
+        ]
+    )
+    assert clean == []
+
+
+def test_earned_blocks_gate_on_credible_lift_and_task_fit() -> None:
+    """The earned-block library must never feed the optimizer a noise-win or a cross-task block
+    — both are wrong-content-forward with no error. Built from real ``ScoredCandidate.model_dump()``
+    so it rides the SAME serialization a round file carries (the earlier fabricated
+    ``prompt_fields_override`` shape the model never emits made this test green while the feature
+    mined nothing): the changed reusable field is the candidate's RESOLVED ``prompt_fields`` diffed
+    against the round's parent ``prompt_fields``, kept only when ``composite_ci_lo`` clears the
+    matched origin, keyed by the run's answer-space signature so a logic block never reaches a
+    ranking run."""
+    from collections import defaultdict
+
+    from promptpotter.application.intelligence.earned_blocks import _accumulate
+    from promptpotter.domain.results import ScoredCandidate
+
+    parent = {"persona": "You answer.", "instruction": "Do the task."}
+
+    def scored(label: str, fields: dict[str, str], comp: float, ci_lo: float) -> dict[str, Any]:
+        return ScoredCandidate(
+            candidate_id=label,
+            label=label,
+            accuracy=comp,
+            composite_fitness=comp,
+            hits=round(comp * 10),
+            total=10,
+            prompt_fields={**parent, **fields},  # RESOLVED fields, parent + this candidate's change
+            matched_origin_composite=0.50,
+            composite_ci_lo=ci_lo,
+            composite_ci_hi=ci_lo + 0.1,
+        ).model_dump()
+
+    logic_run = {
+        "prompt_fields": parent,  # the round's parent — what each candidate is diffed against
+        "all_candidate_results": {
+            "c1": [
+                {"ground_truth": "TRUE"},
+                {"ground_truth": "FALSE"},
+                {"ground_truth": "Uncertain"},
+            ]
+        },
+        "candidate_scores": [
+            # credible: ci_lo 0.62 clears origin 0.50, changed a reusable field → kept
+            scored("c-good", {"persona": "Be a careful logician."}, 0.70, 0.62),
+            # noise win: composite up but ci_lo 0.48 below origin 0.50 → dropped
+            scored("c-noise", {"persona": "Guess fast."}, 0.55, 0.48),
+            # a long, task-specific field is never reusable material → dropped even if credible
+            scored("c-long", {"instruction": "step 1 ..."}, 0.70, 0.62),
+        ],
+    }
+    acc: dict[tuple[str, str, str], list[float]] = defaultdict(list)
+    _accumulate(logic_run, acc)
+    fit = "FALSE|TRUE|Uncertain"
+    assert (fit, "persona", "Be a careful logician.") in acc
+    assert (fit, "persona", "Guess fast.") not in acc
+    assert not any(field == "instruction" for _, field, _ in acc)
+
+
 def _archive(archive: MeasurementArchive, run_id: str, data: dict[str, Any]) -> None:
     """Seed one complete run — the whole measurement set is what is new."""
     archive.append_run(run_id, data, data["measurements"])

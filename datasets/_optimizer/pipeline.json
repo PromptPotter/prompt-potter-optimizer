@@ -39,8 +39,8 @@
         "schema_version": 1,
         "prompt_family": "l1_critique",
         "prompt_version": 1,
-        "reasoning_effort": "medium",
-        "max_tokens": 4000,
+        "reasoning_effort": "low",
+        "max_tokens": 12000,
         "provider": "openrouter",
         "model": "deepseek/deepseek-v4-flash:nitro"
       },
@@ -331,9 +331,9 @@
     },
     "l1_critique/1": {
       "fields": [
+        "failure_highlights",
         "priority_fix",
-        "suggested_axes",
-        "failure_highlights"
+        "suggested_axes"
       ],
       "json_schema": {
         "name": "l1_critique",
@@ -342,6 +342,15 @@
           "additionalProperties": false,
           "description": "Critique returned at round-end. Three load-bearing fields only:\n``priority_fix`` (the headline steer), ``failure_highlights`` (per-\nsample evidence quotes), ``suggested_axes`` (for L2's axis pick).\nProse ``summary`` + ``positive_critique`` + ``negative_critique``\nwere dropped — priority_fix already names axis+change, origin_strengths\npanel carries the preserve signal, failure_highlights enumerates the\nother open clusters.",
           "properties": {
+            "failure_highlights": {
+              "description": "≤3 failure diagnoses quoting the decisive transcript evidence — claim, broken reasoning step, predicted vs GT. Each item ≤320 chars (downstream truncates).",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 3,
+              "title": "Failure Highlights",
+              "type": "array"
+            },
             "priority_fix": {
               "default": "",
               "maxLength": 320,
@@ -355,15 +364,6 @@
               },
               "maxItems": 4,
               "title": "Suggested Axes",
-              "type": "array"
-            },
-            "failure_highlights": {
-              "description": "≤3 failure diagnoses quoting the decisive transcript evidence — claim, broken reasoning step, predicted vs GT. Each item ≤320 chars (downstream truncates).",
-              "items": {
-                "type": "string"
-              },
-              "maxItems": 3,
-              "title": "Failure Highlights",
               "type": "array"
             }
           },
@@ -606,40 +606,47 @@
           "$defs": {
             "CheckinTaskContext": {
               "additionalProperties": false,
-              "description": "Domain-context sub-object inside the checkin output.",
+              "description": "Domain-context sub-object inside the checkin output.\n\nEvery field renders into the ``task_context`` panel of EVERY optimizer prompt and is\nhard-capped per field (``TASK_CONTEXT_VALUE_CAP``): a field authored past it is silently\ntruncated on every render, losing its tail. So each is ONE tight sentence, never a\nparagraph — the descriptions below say so, and terse framing also keeps the prompt short\nenough that the reasoning model does not over-reason.",
               "properties": {
                 "domain": {
                   "default": "",
+                  "description": "One noun phrase — the task family, e.g. 'competition mathematics'.",
                   "title": "Domain",
                   "type": "string"
                 },
                 "pipeline_purpose": {
                   "default": "",
+                  "description": "One sentence: what this campaign produces, for an outside reader.",
                   "title": "Pipeline Purpose",
                   "type": "string"
                 },
                 "data_characteristics": {
                   "default": "",
+                  "description": "One sentence (<=40 words): the sample properties L1 must account for — length, modality, distribution skew, known bias.",
                   "title": "Data Characteristics",
                   "type": "string"
                 },
                 "optimization_goals": {
                   "default": "",
+                  "description": "One sentence (<=40 words): what we optimise for, in operator vocabulary.",
                   "title": "Optimization Goals",
                   "type": "string"
                 },
                 "key_challenges": {
                   "default": "",
+                  "description": "One sentence (<=40 words): the 1-2 dominant failure patterns to defend against THIS round — a single current challenge, never a growing list.",
                   "title": "Key Challenges",
                   "type": "string"
                 },
                 "upstream_context": {
                   "default": "",
+                  "description": "Short framing prepended around problem_description, or empty.",
                   "title": "Upstream Context",
                   "type": "string"
                 },
                 "downstream_context": {
                   "default": "",
+                  "description": "Short framing appended around problem_description, or empty.",
                   "title": "Downstream Context",
                   "type": "string"
                 }
@@ -798,9 +805,9 @@
   "resolved_prompts": {
     "l1_generate/1": {
       "persona": "You are a senior prompt engineer with taste. Before editing, you ask what cognitive stance this task needs — the mental move a strong solver would make — and shape the prompt to induce it. You trust a lean prompt that makes the model reason well over a long one that recites rules.",
-      "task_intent": "Propose up to {{n_variants}} candidates that beat the parent searchpoint. Read the context blocks below for the pipeline, domain, critique, and failures; assume no task type. A critique's priority_fix is your primary steer.",
+      "task_intent": "Propose up to {{n_variants}} candidates that beat the parent searchpoint. Read the context blocks below for the pipeline, domain, critique, and failures; let these define the fix rather than a presumed task type. A critique's priority_fix is your primary steer.",
       "problem_description": "",
-      "instruction": "THINK FIRST — diverge, then converge. Before writing any variant, name 2-3 genuinely distinct hypotheses for WHY the parent fails (different failure clusters or root causes from the panels), then develop only the {{n_variants}} strongest. Spread is across hypotheses, not slots: two candidates relocating one idea into different fields count as one. Steer at most half the batch to the critique's priority_fix; the rest attack a DIFFERENT hypothesis. On round 1 (no critique), spread across the two prose surfaces — the prompt-template fields and each node's `output_schema_descriptions` (its output-schema `description` strings, which steer harder per token than the instruction; see answer_format). An undescribed field is the cheapest win on the board. Scalar params (temperature, tokens, effort) are a last resort: at most one, and only when a panel or runtime failure points there.\n\nTEMPERAMENT — read escalation_panel.exploration_budget. At tight/normal, REFINE: edits are additive. The parent field carries scaffolding accuracy depends on (output directives, format anchors, role tokens) — preserve each verbatim, inject a complete instruction or reframing beside it, repair garbled tokens, never substitute. A lone keyword rarely clears scoring noise. At wide (measured stall), you are licensed to abandon the attractor and write a bold, categorically-different prompt — a new cognitive stance, not a tweak — but it MUST keep every output directive and format anchor, or it breaks scoring and hard-regresses. Either way the prompt becomes next round's parent and rides every call: keep it lean.\n\nGROUND EVERY CHOICE. Each evidence_grounding cites a real panel entry — no data justifying a mutation, no gamble. An axis_memory axis tagged PEAKED sits at its measured peak: leave it unless your citation names a real rebut (the critique naming it, or exploration_budget = wide).\n\nAUTO-REJECTED (wastes a slot), before any backend call: clones (a substring, paraphrase, or case-fold of the parent, or all-empty); params outside the catalogue; configs already in runtime_failures; fill-in-the-blank slots; unknown node or field names.\n\nCHAIN-BIND. When task_context says targeting L1 axis '<name>', at least one variant MUST target that axis, cited as evidence_grounding with field=task_context and the quoted failure cluster.",
+      "instruction": "THINK FIRST — diverge, then converge. Before writing any variant, name 2-3 genuinely distinct hypotheses for WHY the parent fails (different failure clusters or root causes from the panels), then develop only the {{n_variants}} strongest. Spread is across hypotheses AND fixes, not slots: two candidates relocating one idea into different fields — or applying one generic fix to different failures — count as one; when a panel names distinct failure modes, each candidate targets a different one, and a fix that helps every mode equally is not differentiating. Steer at most half the batch to the critique's priority_fix; the rest attack a DIFFERENT hypothesis. On round 1 (no critique), spread across the two prose surfaces — the prompt-template fields and each node's `output_schema_descriptions` (its output-schema `description` strings, which steer harder per token than the instruction; see answer_format). An undescribed field is the cheapest win on the board. Scalar params (temperature, tokens, effort) are a last resort: at most one, and only when a panel or runtime failure points there.\n\nTEMPERAMENT — read escalation_panel.exploration_budget AND mutation_memory. At tight/normal, REFINE — and refinement cuts BOTH ways: add a missing instruction, OR distill an overloaded one. The six fields concatenate VERBATIM into one prompt (the render does not dedupe) — each owns a distinct slice. Edit only the field that owns the change; NEVER restate another field's text inside it (persona copied into instruction, or a format rule repeated across fields) — that duplication costs the small model the exact tokens it needs to reason. Preserve a directive by leaving the field that holds it, not by copying it into the one you edit; beside your edit you may reframe, repair garbled tokens, OR cut instruction not paying its way. More words is not more skill — a small model drowns in rigor it cannot execute, and a prompt already refined once is the case where the next addition regresses. If mutation_memory shows a recent addition scored at or BELOW its parent, the prompt is over-saturated: cut the weakest addition or rewrite leaner — do NOT pile on more. At wide (a measured stall, OR any round whose candidates regressed below the parent), abandon the attractor for a bold, categorically-different AND leaner cognitive stance; it MUST leave answer_format's output directives intact in their own field or it hard-regresses. The prompt becomes next round's parent and rides every call: keep it lean.\n\nGROUND EVERY CHOICE. Each evidence_grounding cites a real panel entry — no data justifying a mutation, no gamble. An axis_memory axis tagged PEAKED sits at its measured peak: leave it unless your citation names a real rebut (the critique naming it, or exploration_budget = wide).\n\nAUTO-REJECTED (wastes a slot), before any backend call: clones (a substring, paraphrase, or case-fold of the parent, or all-empty); params outside the catalogue; configs already in runtime_failures; fill-in-the-blank slots; unknown node or field names.\n\nCHAIN-BIND. When task_context says targeting L1 axis '<name>', at least one variant MUST target that axis, cited as evidence_grounding with field=task_context and the quoted failure cluster.",
       "thinking_style": "",
       "answer_format": "Return JSON: {\"variants\": [...]}. Each variant, IN THIS ORDER:\n  - \"evidence_grounding\": {field, citation}. field one of {{citable_fields}} — nothing else is admissible; citation quotes the cited entry verbatim.\n  - Three override slots; AT LEAST ONE NON-EMPTY. A variant that overrides nothing mutates nothing and is rejected — describing a change is not making one. Never conflate the slots.\n    * \"pipeline_params_override\": nested {node: {param: value}} — scalar backend tunables, and \"output_schema_descriptions\": {field: prose}, which rewrites that node's output-schema `description` strings. output_schema_descriptions is a param NESTED UNDER ITS NODE (shape {node: {\"output_schema_descriptions\": {field: prose}}}), NEVER a top-level key beside the nodes. Field names are FIXED: you describe a field, never rename or invent one.\n    * \"prompt_fields_override\": flat {field: string}, field one of persona, task_intent, problem_description, instruction, thinking_style, answer_format.\n    * \"task_context_override\": flat {field: string}, field one of upstream_context, downstream_context.\n  - \"changes_description\": 1-2 sentences REPORTING the override you just emitted — the failure pattern it targets, the concrete change, and the expected directional effect (\"improve reasoning\" is too vague)."
     },
@@ -838,7 +845,7 @@
     "checkin/2": {
       "persona": "You are a prompt-engineering assistant who also helps operators set up a new optimization campaign.",
       "task_intent": "Structure user-provided context into Layer 1 prompt fields and domain context, AND — when the input is a draft-campaign origin being set up — assess it and propose values for any unresolved setup fields.",
-      "instruction": "Layer 1 fields (for prompt construction):\n- persona: Who the LLM should act as (e.g., 'You are a domain expert...')\n- task_intent: What the prompt needs to accomplish\n- problem_description: Description of the problem domain\n- instruction: Core instruction text (may contain template variables)\n- thinking_style: How to reason (e.g., 'Think step by step')\n- answer_format: Expected output format\n\nDomain context fields (for optimization guidance):\n- domain: Research/industry domain (e.g., 'Life Cycle Assessment', 'Medical NLP')\n- pipeline_purpose: What the pipeline does end-to-end in 1-2 sentences\n- data_characteristics: What kind of data flows through (input format, volume, language)\n- optimization_goals: What 'better' means in this context (accuracy metric, edge cases)\n- key_challenges: Known difficulties, ambiguities, or edge cases the optimizer should know about\n- upstream_context: What happens BEFORE this step — what data/processing feeds into it (e.g., 'Web search retrieves raw content from 7 pages'). Gets injected into the target prompt.\n- downstream_context: What happens AFTER this step — how the output is consumed (e.g., 'Output fields are tokenized into words and matched against a database index by shared token count'). Gets injected into the target prompt.\n\nIF THE USER MESSAGE IS A DRAFT-CAMPAIGN ORIGIN (it lists uploaded columns, sample rows, current field values with provenance, and open gaps), ALSO resolve the origin AND author the Layer 1 + task_context fields by decomposing the task_description you propose this turn — those Layer 1 fields seed the campaign's starting prompt, so they must not be empty:\n- assessment: one line on the current setup state.\n- findings: for each OPEN gap you can resolve from the data, propose {field, proposed_value, confidence, evidence}. 'field' is the gap's id (e.g. 'task_description', 'column.query', 'column.ground_truth'). 'evidence' MUST cite something concrete from the input — a header name, a sample value, or a stated operator preference; never propose without evidence. Use confidence 'high' only when the data makes the value unambiguous; otherwise 'low'.\n- For 'task_description', write a clear plain-language framing of what the prompt should do, grounded in the sample rows.\n- When the input carries an 'answer_space' (the target column is a closed label set), the task_description AND the answer_format you decompose it into MUST list every one of its labels verbatim and instruct the model to output exactly one of them — never collapse them to '(e.g., X)' or a partial list. Those labels are the ONLY valid outputs; if the committed prompt omits any, that label can never be produced and the campaign is unscoreable for it.\n- next_action: {kind, questions}. kind='ask' when the operator must decide — each question is {field, prompt, options?}: 'field' is the gap id it resolves (so the panel can apply the answer directly), 'prompt' is the short question, and 'options' is an optional closed set of acceptable answers (e.g. the candidate column headers) or empty for free text. kind='propose' when your findings stand on their own; kind='ready' when every gap is closed. The system re-checks readiness — do not claim 'ready' while any gap remains.\n- recap (only on a 'ready' turn): a jargon-free sentence restating what the campaign will do.",
+      "instruction": "Layer 1 fields (for prompt construction):\n- persona: Who the LLM should act as (e.g., 'You are a domain expert...')\n- task_intent: What the prompt needs to accomplish\n- problem_description: Description of the problem domain\n- instruction: Core instruction text (may contain template variables)\n- thinking_style: How to reason (e.g., 'Think step by step')\n- answer_format: Expected output format\n\nDomain context fields (for optimization guidance):\n- domain: Research/industry domain (e.g., 'Life Cycle Assessment', 'Medical NLP')\n- pipeline_purpose: What the pipeline does end-to-end in 1-2 sentences\n- data_characteristics: What kind of data flows through (input format, volume, language)\n- optimization_goals: What 'better' means in this context (accuracy metric, edge cases)\n- key_challenges: Known difficulties, ambiguities, or edge cases the optimizer should know about\n- upstream_context: What happens BEFORE this step — what data/processing feeds into it (e.g., 'Web search retrieves raw content from 7 pages'). Gets injected into the target prompt.\n- downstream_context: What happens AFTER this step — how the output is consumed (e.g., 'Output fields are tokenized into words and matched against a database index by shared token count'). Gets injected into the target prompt.\n\nIF THE USER MESSAGE IS A DRAFT-CAMPAIGN ORIGIN (it lists uploaded columns, sample rows, current field values with provenance, and open gaps), ALSO resolve the origin AND author the Layer 1 + task_context fields by decomposing the task_description you propose this turn — those Layer 1 fields seed the campaign's starting prompt, so they must not be empty:\n- assessment: one line on the current setup state.\n- findings: for each OPEN gap you can resolve from the data, propose {field, proposed_value, confidence, evidence}. 'field' is the gap's id (e.g. 'task_description', 'column.query', 'column.ground_truth'). 'evidence' MUST cite something concrete from the input — a header name, a sample value, or a stated operator preference; never propose without evidence. Use confidence 'high' only when the data makes the value unambiguous; otherwise 'low'.\n- For 'task_description', write a clear plain-language framing of what the prompt should do, grounded in the sample rows.\n- When the input carries an 'answer_space' (the target column is a closed label set), instruct the model to output exactly one of the provided labels — see ORIGIN INVARIANTS 1 below for how to handle the label list itself.\n- next_action: {kind, questions}. kind='ask' when the operator must decide — each question is {field, prompt, options?}: 'field' is the gap id it resolves (so the panel can apply the answer directly), 'prompt' is the short question, and 'options' is an optional closed set of acceptable answers (e.g. the candidate column headers) or empty for free text. kind='propose' when your findings stand on their own; kind='ready' when every gap is closed. The system re-checks readiness — do not claim 'ready' while any gap remains.\n- recap (only on a 'ready' turn): a jargon-free sentence restating what the campaign will do.\n\nORIGIN INVARIANTS — every field you emit must satisfy each rule below. This is the home for output-quality rules: append future ones as new numbered items, never inline elsewhere.\n1. Declare the answer space once. When the input carries a closed 'answer_space', the system appends its full label enumeration to answer_format deterministically — so never re-type, summarize, or invent a label list in answer_format or task_description. Author only the format prose (how to present the single chosen label) and refer to the labels as a set ('exactly one of the provided labels'). A second, partial, or invented list contradicts the appended one and pushes the model to answers outside the space — the failure this rule prevents.",
       "thinking_style": "Prefer the user's own wording for domain terms. Do not invent facts the source does not state — but the task description is dense source material: populate every task_context field the source supports, and leave a field empty only when the source genuinely says nothing about it. Restating source content in a field's own framing is not padding.",
       "answer_format": "Return a JSON object. Always populate the Layer 1 fields at the top level and a \"task_context\" object (the decomposed starting prompt). When the input is a draft-campaign origin, ALSO populate \"assessment\", \"findings\", \"next_action\", and (when ready) \"recap\". {{consultation_instruction}}"
     }

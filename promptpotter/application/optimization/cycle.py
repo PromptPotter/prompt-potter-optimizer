@@ -306,6 +306,11 @@ class Cycle:
     last_l2_axis: str = ""
     warned_queries: set[str] = field(default_factory=set)
     axes: AxisIndex | None = None
+    # Earned prompt-block library for this cycle's task shape — `{field: (block, ...)}` of short
+    # reusable field values that earned credible lift on a run with the SAME answer-space
+    # signature. Mined once at `start` (the walk is cross-campaign); the `guidance` block
+    # catalogue renders from it, silent when empty. Never the static seed set.
+    earned_blocks: dict[str, tuple[str, ...]] = field(default_factory=dict)
     escalation: EscalationFSM = field(default_factory=EscalationFSM)
     pending_decisions: list[ResumeCheckpointRecord] = field(default_factory=list)
     archive_observations: list[Observation] = field(default_factory=list)
@@ -380,9 +385,22 @@ class Cycle:
             enable_2pl=config.optimization.enable_2pl_graduation,
             archive_obs=archive_obs,
         )
+        from promptpotter.application.intelligence.earned_blocks import (
+            answer_space_signature,
+            earned_library_for,
+        )
+
+        # Mine the earned block library for THIS task's answer-space shape, once — the
+        # `guidance` catalogue renders it instead of the static seed set, silent when no block
+        # earned credible lift on a matching shape (the dispatch-first "signal or silence" rule).
+        earned_blocks = earned_library_for(
+            session.store,
+            answer_space_signature(r.get("ground_truth") for r in (origin_results or [])),
+        )
         return cls(
             session=session,
             config=config,
+            earned_blocks=earned_blocks,
             tracking=CycleRoundState(
                 current_sp=sp,
                 current_accuracy=origin_accuracy,

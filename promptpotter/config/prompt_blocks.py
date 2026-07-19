@@ -15,17 +15,29 @@ from pathlib import Path
 
 BUNDLED_PATH = Path(__file__).parent / "prompt_variants.json"
 
-HOUSE_SOURCE = "PromptPotter"
+# The imported Self-Discover reasoning modules — task-AGNOSTIC strategies ("break the problem
+# into parts", "what are the key assumptions", "imagine the best solution is wrong, what else").
+GENERAL_SOURCE = "PromptWizard"
+
+
+@cache
+def general_reasoning_blocks(per_field_cap: int = 8) -> dict[str, tuple[str, ...]]:
+    """Task-agnostic reasoning material — the `guidance` fallback when no EARNED block fits yet.
+
+    General reasoning strategies (Self-Discover modules + general personas) help ANY reasoning
+    task, unlike the house seeds, which were adopted from ranking runs and mis-cue a logic task.
+    Capped per field to stay compact — L1 needs grounding material, not the whole 38-module tail.
+    """
+    return {field: texts[:per_field_cap] for field, texts in prompt_blocks(GENERAL_SOURCE).items()}
 
 
 @cache
 def prompt_blocks(source: str | None = None) -> dict[str, tuple[str, ...]]:
     """Field name → its reusable block texts, in authored order.
 
-    Unfiltered, this is the library's *declared value space* — what ``restrict`` admits.
-    Filtered to ``HOUSE_SOURCE``, it is the far smaller set adopted from this project's own
-    runs — what ``guidance`` recommends, where the value space stays open anyway and the
-    imported long tail is a menu rather than evidence.
+    Unfiltered, this is the library's *declared value space* — what ``restrict`` admits
+    and the L1 validator checks against. Filtered to ``GENERAL_SOURCE``, it is the
+    task-agnostic subset behind :func:`general_reasoning_blocks`.
     """
     raw: dict[str, list[dict[str, str]]] = json.loads(BUNDLED_PATH.read_text(encoding="utf-8"))[
         "prompt_fields"

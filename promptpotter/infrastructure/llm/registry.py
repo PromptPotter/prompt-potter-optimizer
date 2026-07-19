@@ -28,6 +28,60 @@ class ProviderSpec:
     timeout: float | None = None
 
 
+@dataclass(frozen=True)
+class ModelProfile:
+    """Static, code-owned facts about one model's serving behaviour — the model-keyed
+    sibling of :class:`ProviderSpec`.
+
+    A **reasoning** model spends output-token budget on hidden reasoning tokens BEFORE it
+    emits any content, so a ``max_tokens`` pinned below ``min_max_tokens`` can be consumed
+    entirely by reasoning and return zero content (``finish_reason=length``,
+    ``content_chars=0`` — the ``reasoning_budget_exhausted`` class the runtime already
+    stamps post-hoc). ``min_max_tokens`` is the floor that turns that silent, paid-for
+    failure into a preflight block. Non-reasoning models leave the floor at 0."""
+
+    is_reasoning: bool
+    min_max_tokens: int = 0
+    notes: str = ""
+
+
+# Per-model profiles, keyed by the normalized ``org/model`` id (routing suffix like
+# ``:nitro`` stripped). ONLY the models we run today — extend as we add models. The floors
+# are first estimates from observed ``reasoning_budget_exhausted`` failures, meant to be
+# refined as we measure more; the per-model + per-provider quirks they encode are the prose
+# in ``docs/operations/dataset-reasoning-matrix.md`` given a code home. A floor of 8000
+# catches the egregious case (l1_critique @ 4000 → 0 content) without flagging the working
+# nodes (l2_context/l3_plan @ 8000, checkin @ 10000, l1_generate @ 12000); the complementary
+# lever for a reasoning model is keeping ``reasoning_effort`` low so reasoning stays bounded.
+_MODEL_PROFILES: dict[str, ModelProfile] = {
+    "deepseek/deepseek-v4-flash": ModelProfile(
+        is_reasoning=True,
+        min_max_tokens=8000,
+        notes="Emits ~4k reasoning tokens before content; a 4k cap returned 0 content on "
+        "l1_critique. Pair a >=8k budget with reasoning_effort=low.",
+    ),
+    "openai/gpt-oss-20b": ModelProfile(
+        is_reasoning=True,
+        min_max_tokens=8000,
+        notes="Groq route enforces a ~2048-tok output ceiling that COUNTS reasoning tokens — "
+        "keep reasoning_effort<=low; a numeric max_tokens is a per-cycle override, not a default.",
+    ),
+    "openai/gpt-oss-120b": ModelProfile(
+        is_reasoning=True,
+        min_max_tokens=8000,
+        notes="Over-reasons on long meta-prompts and returns empty content; keep effort low.",
+    ),
+}
+
+
+def model_profile(model: str) -> ModelProfile | None:
+    """Profile for a model string, normalizing the ``org/model`` id (a routing suffix like
+    ``:nitro`` is stripped). ``None`` when the model is unprofiled — an unknown model is not
+    assumed to be a reasoning model, so it never blocks a run."""
+    base = model.split(":", 1)[0].strip().lower()
+    return _MODEL_PROFILES.get(base)
+
+
 _OPENAI_COMPAT_SPECS: dict[str, ProviderSpec] = {
     "groq": ProviderSpec(
         "Groq",
@@ -111,4 +165,4 @@ def get_llm_client(provider: str) -> LLMClientBase:
     return factory()
 
 
-__all__ = ["ProviderSpec", "get_llm_client"]
+__all__ = ["ModelProfile", "ProviderSpec", "get_llm_client", "model_profile"]

@@ -56,6 +56,11 @@ PROMPT_STRING_FIELDS: list[str] = [
     "answer_format",
 ]
 
+# Above this many distinct ground truths a task's answer space is "open" (free-text /
+# ranking) — no enumerable label identity. Shared by the answer_distribution collapse
+# detector and the earned-block library's task-fit signature, so both draw the same line.
+ANSWER_SPACE_CAP: int = 10
+
 # task_context sub-fields that L1 may emit alongside prompt/node overrides.
 TASK_CONTEXT_OVERRIDES: frozenset[str] = frozenset({"upstream_context", "downstream_context"})
 
@@ -209,6 +214,7 @@ settings = Settings()
 
 
 __all__ = [
+    "ANSWER_SPACE_CAP",
     "APP_VERSION",
     "DATASET_NAME",
     "DEFAULT_BACKEND_ID",

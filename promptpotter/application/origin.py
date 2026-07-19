@@ -424,8 +424,7 @@ async def prepare_scoring_context(
     from promptpotter.shared.errors import graceful
 
     session: Session = svc
-    sp_budget = campaign_config.sp_budget_ttest
-    scoring_set = sample_dataset(dataset, sp_budget)
+    scoring_set = sample_dataset(dataset, campaign_config.origin_budget())
     spec = split_scoring_block(campaign_config.scoring)
 
     if session.index_terms:

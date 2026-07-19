@@ -242,7 +242,7 @@ def _build_l1_response_model(items: tuple[tuple[str, str], ...]) -> type[L1Gener
     return create_model(
         f"L1GenerateOutput__{suffix}",
         __base__=L1GenerateOutput,
-        variants=(list[variant], ...),
+        variants=(list[variant], ...),  # runtime-built model
     )
 
 
@@ -260,6 +260,18 @@ class L1CritiqueOutput(StrictModel):
     panel carries the preserve signal, failure_highlights enumerates the
     other open clusters."""
 
+    # First field on purpose: generation order = schema order, so the tail truncates first.
+    # failure_highlights carries the per-sample evidence quotes the NEXT round's L1 differentiates
+    # on — losing them to a long-output clip is the costliest drop, so it generates before the
+    # steers. The answer_format prose states this same order; the two must stay in lock-step.
+    failure_highlights: Annotated[list[str], BeforeValidator(_truncate(3))] = Field(
+        default_factory=list,
+        max_length=3,
+        description=(
+            "≤3 failure diagnoses quoting the decisive transcript evidence — claim, "
+            "broken reasoning step, predicted vs GT. Each item ≤320 chars (downstream truncates)."
+        ),
+    )
     # 320 (not 200): the mandated format `<axis>: <change> - addresses <quoted
     # pattern>` cannot hold a real verbatim quote in 200c — observed truncating
     # mid-quote, and the clipped steer still drove candidates (b786e9).
@@ -270,14 +282,6 @@ class L1CritiqueOutput(StrictModel):
         default_factory=list,
         max_length=4,
         description="≤4 short axis names. Each item ≤40 chars (downstream truncates).",
-    )
-    failure_highlights: Annotated[list[str], BeforeValidator(_truncate(3))] = Field(
-        default_factory=list,
-        max_length=3,
-        description=(
-            "≤3 failure diagnoses quoting the decisive transcript evidence — claim, "
-            "broken reasoning step, predicted vs GT. Each item ≤320 chars (downstream truncates)."
-        ),
     )
 
 
@@ -395,15 +399,40 @@ class L3PlanOutput(StrictModel):
 
 
 class CheckinTaskContext(StrictModel):
-    """Domain-context sub-object inside the checkin output."""
+    """Domain-context sub-object inside the checkin output.
 
-    domain: str = ""
-    pipeline_purpose: str = ""
-    data_characteristics: str = ""
-    optimization_goals: str = ""
-    key_challenges: str = ""
-    upstream_context: str = ""
-    downstream_context: str = ""
+    Every field renders into the ``task_context`` panel of EVERY optimizer prompt and is
+    hard-capped per field (``TASK_CONTEXT_VALUE_CAP``): a field authored past it is silently
+    truncated on every render, losing its tail. So each is ONE tight sentence, never a
+    paragraph — the descriptions below say so, and terse framing also keeps the prompt short
+    enough that the reasoning model does not over-reason."""
+
+    domain: str = Field(
+        "", description="One noun phrase — the task family, e.g. 'competition mathematics'."
+    )
+    pipeline_purpose: str = Field(
+        "", description="One sentence: what this campaign produces, for an outside reader."
+    )
+    data_characteristics: str = Field(
+        "",
+        description="One sentence (<=40 words): the sample properties L1 must account for — "
+        "length, modality, distribution skew, known bias.",
+    )
+    optimization_goals: str = Field(
+        "",
+        description="One sentence (<=40 words): what we optimise for, in operator vocabulary.",
+    )
+    key_challenges: str = Field(
+        "",
+        description="One sentence (<=40 words): the 1-2 dominant failure patterns to defend "
+        "against THIS round — a single current challenge, never a growing list.",
+    )
+    upstream_context: str = Field(
+        "", description="Short framing prepended around problem_description, or empty."
+    )
+    downstream_context: str = Field(
+        "", description="Short framing appended around problem_description, or empty."
+    )
 
 
 class OriginFinding(StrictModel):

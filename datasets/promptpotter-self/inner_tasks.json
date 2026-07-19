@@ -1,42 +1,47 @@
 {
-  "inner_benchmark": "justlogic-d23",
+  "inner_benchmark": "justlogic-d234",
   "inner_benchmark_config": {
     "n_samples_per_inner_round": 28,
-    "max_inner_rounds": 5,
+    "n_samples_origin": 40,
+    "max_inner_rounds": 8,
     "inner_n_variants": 2,
     "inner_lives": {
-      "start": 2,
-      "cap": 4
+      "start": 3,
+      "cap": 5
     },
     "inner_optimizer_temperature": 0.0
   },
   "tasks": [
     {
-      "id": "justlogic-d23/seed-0",
+      "id": "justlogic-d234/seed-0",
       "inner_dataset_seed": 0
     },
     {
-      "id": "justlogic-d23/seed-1",
+      "id": "justlogic-d234/seed-1",
       "inner_dataset_seed": 1
     },
     {
-      "id": "justlogic-d23/seed-2",
+      "id": "justlogic-d234/seed-2",
       "inner_dataset_seed": 2
     },
     {
-      "id": "justlogic-d23/seed-4",
+      "id": "justlogic-d234/seed-3",
+      "inner_dataset_seed": 3
+    },
+    {
+      "id": "justlogic-d234/seed-4",
       "inner_dataset_seed": 4
     },
     {
-      "id": "justlogic-d23/seed-5",
+      "id": "justlogic-d234/seed-5",
       "inner_dataset_seed": 5
     },
     {
-      "id": "justlogic-d23/seed-6",
+      "id": "justlogic-d234/seed-6",
       "inner_dataset_seed": 6
     },
     {
-      "id": "justlogic-d23/seed-7",
+      "id": "justlogic-d234/seed-7",
       "inner_dataset_seed": 7
     }
   ]

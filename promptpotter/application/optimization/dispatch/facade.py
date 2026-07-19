@@ -234,6 +234,7 @@ def build_bundle(
         delta_scale=cycle.delta_scale,
         prior_rounds=list(cycle.rounds),
         prompt_block_catalogue=cycle.config.optimization.prompt_block_catalogue,
+        earned_blocks=cycle.earned_blocks,
         rebase_capability=cycle.config.optimization.rebase_capability,
         terminate_capability=cycle.config.optimization.terminate_capability,
         schema_field_rename=cycle.config.optimization.schema_field_rename,

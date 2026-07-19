@@ -51,10 +51,10 @@ def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
     The backend this connector runs IS the inner optimizer, so a measurement's
     identity must change whenever the inner origin does: the shared meta-prompt
     text (``datasets/_optimizer/pipeline.json``), the per-node information-flow
-    layouts, the engine version, AND the dataset's ``inner_tasks.json``
-    ``inner_benchmark_config`` (the inner-run behavior — sample count, round /
-    variant geometry, target, and the ``inner_optimizer_temperature`` determinism
-    clamp). Otherwise an outer origin scored under an old origin/config is
+    layouts, the engine version, AND the dataset's WHOLE ``inner_tasks.json`` spec —
+    the inner benchmark NAME + task list (which bank, which seeds) plus
+    ``inner_benchmark_config`` (sample count, round / variant geometry, the
+    ``inner_optimizer_temperature`` clamp). Otherwise an outer origin scored under an old origin/config is
     silently reused against candidates run under the new one — a stale-vs-fresh
     comparison that fabricates (or masks) outer signal.
     """
@@ -72,10 +72,19 @@ def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
     # joins the fingerprint — changing `inner_optimizer_temperature` (or any geometry
     # knob) invalidates outer-sample rows measured under the prior value instead of
     # reusing them stale (the identity-joined plumbing l4-outer-loop.md § item 5 named).
-    inner_cfg = (read_json_optional(dataset_dir / "inner_tasks.json") or {}).get(
-        "inner_benchmark_config"
-    ) or {}
-    fingerprint = stable_hash([origin_text, layouts, APP_VERSION, inner_cfg])[:12]
+    # The WHOLE inner spec defines the inner baseline — the benchmark NAME and its task list
+    # (which bank + which seeds/cells), not only the numeric config. Switching
+    # justlogic-d23 → justlogic-d234 keeps the same `inner_benchmark_config` knobs but changes
+    # what is measured; hashing only the knobs let a d23-banked origin be served against a d234
+    # candidate — a stale-vs-fresh comparison that fabricates outer signal (the exact bug this
+    # fingerprint exists to prevent).
+    inner_tasks = read_json_optional(dataset_dir / "inner_tasks.json") or {}
+    inner_spec = {
+        "benchmark": inner_tasks.get("inner_benchmark"),
+        "config": inner_tasks.get("inner_benchmark_config") or {},
+        "tasks": inner_tasks.get("tasks") or [],
+    }
+    fingerprint = stable_hash([origin_text, layouts, APP_VERSION, inner_spec])[:12]
     return {"l1_generate": {INNER_ORIGIN_KEY: fingerprint}}
 
 

@@ -233,7 +233,7 @@ basic case). Implementation: `promptpotter/application/runner/inner/`.
 
 **The project is now in its closing phase: ship a *distributable* `promptpotter-self`.**
 The remaining work and the live-run learnings (gsm8k retired as the inner benchmark —
-no headroom; `justlogic` high-depth chosen; the specialized `_optimizer_meta/` outer
+no headroom; `justlogic-d234` (iid mix of depths 2-4) chosen; the specialized `_optimizer_meta/` outer
 prompt set is the gating slice; inner-spend rollup; bounded cheap default config) are
 the **living finish-line plan** in [`../specs/l4-outer-loop.md`](../specs/l4-outer-loop.md)
 § Finish line — the single SoT an AI agent driving L4 reads first.

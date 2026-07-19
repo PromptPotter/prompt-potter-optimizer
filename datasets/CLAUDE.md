@@ -35,7 +35,7 @@ The roster is the directory listing; each dataset's connector is read off its ow
 - **`lca-termnorm`** (`termnorm`) — the multi-node retrieval pipeline. Every other benchmark declares a single `llm_only` **node**, but that is a node name, not the `llm_only` *connector*: all of them are `backend_type: "termnorm"` and route over HTTP to the server exactly as `lca-termnorm` does. No committed dataset runs in-process.
 - **`aime_2025`** — its overlay routes to OpenRouter+Mistral, off the Groq default.
 - **`email-tagging`** — the built-in try-and-learn demo, surfaced while `User.demo_mode_enabled`.
-- **`justlogic`** — the L4 inner benchmark; **`promptpotter-self`** (`promptpotter` connector) — the one L4 dataset ([§ L4 below](#l4--promptpotter-self)).
+- **`justlogic-d234`** — the L4 inner benchmark (an iid mix of depths 2-4; `justlogic` (d6-7) and `justlogic-d23` are dead cuts kept only so their banked measurements stay addressable); **`promptpotter-self`** (`promptpotter` connector) — the one L4 dataset ([§ L4 below](#l4--promptpotter-self)).
 - **`_optimizer/` + `_optimizer_meta/`** — not datasets: the optimizer's own prompt homes. Which prompts live where → [`../docs/glossary.md`](../docs/glossary.md) **Prompt homes**. Both are **operator-owned files** — nothing writes them. `meta_champion/` ranks meta-prompt states; graduating a winner into `_optimizer/pipeline.json` is a deliberate hand-edit.
 
 ## L4 — `promptpotter-self`

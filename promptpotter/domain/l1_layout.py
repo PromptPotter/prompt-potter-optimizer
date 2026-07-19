@@ -44,6 +44,7 @@ L1_POSSIBLE: frozenset[str] = frozenset(
         "critique",
         "answer_distribution",
         "failing_samples",
+        "inner_narratives",
         "mutation_memory",
         "axis_memory",
         "origin_strengths",
@@ -146,9 +147,12 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
     # has collapsed onto one label needs that break, not a better-argued instruction, and no
     # other panel can say so), the DISTILLED failure signal (`critique`), the misses themselves
     # (`failing_samples`, one line each, ordered by difficulty — the evidence sits beside its
-    # own compression, so the generator can check one against the other), what it has ALREADY
-    # tried (`mutation_memory` — without it, round 4 re-proposes round 1's measured failure and
-    # nothing objects) + L1's own `l1_wounds` + `escalation_panel` + `origin_strengths`.
+    # own compression, so the generator can check one against the other), the per-sample RAW
+    # narrative when the sample is itself an inner campaign (`inner_narratives` — the L4 outer
+    # generator's window into what each inner loop tried and where it stalled; silent off the
+    # recursion), what it has ALREADY tried (`mutation_memory` — without it, round 4 re-proposes
+    # round 1's measured failure and nothing objects) + L1's own `l1_wounds` + `escalation_panel`
+    # + `origin_strengths`.
     # `sample_transcripts` (the RAW misses, three shown COMPLETE) stays OFF this
     # floor: it is the same evidence at ~5x the bytes, and the generator reading it alongside
     # the critique duplicated a ~10k-char payload every round. It stays in `L1_POSSIBLE` (and
@@ -170,6 +174,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "answer_distribution",
                 "critique",
                 "failing_samples",
+                "inner_narratives",
                 "mutation_memory",
                 "l1_wounds",
                 "escalation_panel",

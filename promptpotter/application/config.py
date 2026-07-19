@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Annotated, Any, Literal
@@ -516,6 +516,15 @@ class CampaignConfig(StrictModel):
         "adaptive queue mechanism (`select_round_subset`) selects this many "
         "informative samples from it. Not the dataset/pool size.",
     )
+    sp_budget_origin: Annotated[int | None, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
+        None,
+        ge=1,
+        description="Origin eval budget — how many bank samples the origin (C0) is "
+        "scored on at check-in. None ⇒ `sp_budget_ttest`. Setting it ABOVE "
+        "`sp_budget_ttest` buys a tighter origin θ / δ ruler while candidates keep "
+        "the per-round budget; every comparison downstream is matched by sample_id "
+        "or θ-space, so an origin scored on a superset stays like-for-like.",
+    )
     exclude_nodes: Annotated[list[str], Knob(Scope.DATA, Estimand.SEARCH)] = Field(
         default_factory=list
     )
@@ -563,6 +572,10 @@ class CampaignConfig(StrictModel):
 
     # No `Knob` — the walk descends into OptimizationConfig.
     optimization: OptimizationConfig
+
+    def origin_budget(self) -> int:
+        """Resolved origin eval budget — ``sp_budget_origin``, or the per-round budget."""
+        return self.sp_budget_origin or self.sp_budget_ttest
 
 
 def load_campaign_config(raw: dict[str, Any] | CampaignConfig) -> CampaignConfig:
@@ -648,16 +661,17 @@ class PreflightWarning:
 def _check_sp_budget_vs_dataset(
     config: CampaignConfig, dataset: list[Sample]
 ) -> PreflightWarning | None:
-    n = config.sp_budget_ttest
+    n = max(config.sp_budget_ttest, config.origin_budget())
     m = len(dataset)
     if m > 0 and n > m:
         return PreflightWarning(
             code="sp_budget_exceeds_dataset",
-            title=f"per-round eval budget sp_budget_ttest ({n}) exceeds bank size ({m})",
+            title=f"eval budget ({n}) exceeds bank size ({m})",
             detail=(
-                f"The bank (full train split) has only {m} samples, so each round "
-                f"scores on all {m}. Lower sp_budget_ttest to {m} or below, or grow "
-                f"the dataset, to give the adaptive queue mechanism a bank to select from."
+                f"The bank (full train split) has only {m} samples, so scoring runs "
+                f"on all {m}. Lower sp_budget_ttest / sp_budget_origin to {m} or "
+                f"below, or grow the dataset, to give the adaptive queue mechanism "
+                f"a bank to select from."
             ),
         )
     return None
@@ -742,6 +756,40 @@ def run_preflight_checks(
         warnings.append(w)
     warnings.extend(_check_config_couplings(config))
     return warnings
+
+
+def check_model_reasoning_floors(
+    node_configs: Iterable[tuple[str, Mapping[str, Any]]],
+) -> list[str]:
+    """HARD-block violations: a node pinning a reasoning model with an EXPLICIT
+    ``max_tokens`` below that model's profile floor (``ModelProfile.min_max_tokens``).
+
+    Below the floor a reasoning model can spend its whole output budget thinking and
+    emit zero content — a paid-for failure the runtime only ever catches post-hoc
+    (``classify_result`` → ``reasoning_budget_exhausted``). Gating it here turns that
+    into a refuse-to-start. An **absent** ``max_tokens`` is NOT a violation: that is the
+    sanctioned default (provider ceiling, governed via ``reasoning_effort``), so this
+    only fires on a config that deliberately set a too-low numeric cap. Pure — the
+    per-model facts live in ``infrastructure/llm/registry.py::_MODEL_PROFILES``."""
+    from promptpotter.infrastructure.llm.registry import model_profile
+
+    violations: list[str] = []
+    for node, cfg in node_configs:
+        model = cfg.get("model")
+        max_tokens = cfg.get("max_tokens")
+        if not model or max_tokens is None:
+            continue
+        profile = model_profile(str(model))
+        if profile is None or not profile.is_reasoning:
+            continue
+        if int(max_tokens) < profile.min_max_tokens:
+            violations.append(
+                f"node '{node}': reasoning model '{model}' is pinned to max_tokens="
+                f"{max_tokens}, below its floor {profile.min_max_tokens}. It will spend the "
+                f"budget reasoning and emit zero content (reasoning_budget_exhausted). Raise "
+                f"max_tokens to >= {profile.min_max_tokens} and keep reasoning_effort low."
+            )
+    return violations
 
 
 def apply_node_overlay(

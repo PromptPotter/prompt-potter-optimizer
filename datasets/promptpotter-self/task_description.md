@@ -6,8 +6,10 @@ converge **faster and further** on the proxy benchmark.
 
 ## What the inner cycle is solving (so you mutate toward the right behaviour)
 
-The inner benchmark is **justlogic, depth-6/7 deductive reasoning** (NOT
-arithmetic). Each inner sample is a set of premises plus a candidate conclusion;
+The inner benchmark is **justlogic deductive reasoning** (NOT
+arithmetic; the specific depth mix is the dataset's, in `inner_tasks.json` — not
+restated here, where a stale number would only anchor you). Each inner sample is
+a set of premises plus a candidate conclusion;
 the inner model must answer **TRUE / FALSE / Uncertain** — TRUE/FALSE when the
 premises strictly determine the conclusion, `Uncertain` only when they are
 genuinely indeterminate. The task is hard for the inner model *as currently

@@ -36,6 +36,13 @@ TRANSCRIPT_RENDER_CAP = 3
 TRANSCRIPT_QUERY_CAP = 2200
 TRANSCRIPT_REASONING_CAP = 1200
 TRANSCRIPT_PREDICTED_CAP = 200
+# `inner_narratives` — the L4 outer generator's raw evidence: the authored story
+# (`_inner_narrative`, <=1150c) of what each inner campaign tried, what steered it, and
+# what moved. One per outer sample (an inner run), every seed shown — the outer round's
+# whole sample set IS those runs, and the generator that never sees them re-proposes what
+# the inner loop already measured. Weakest-lift first, so a byte overrun drops the seeds
+# that least need attention. Silent on any non-recursive campaign (no reasoning_trace).
+INNER_NARRATIVE_CAP = 1150
 # Rows the `failing_samples` panel shows — the DENSE peer of the transcripts above:
 # one line per miss, so the generator can see the shape of what it is failing (the
 # same wrong label on the easy ones) rather than three failures in full.
@@ -49,12 +56,11 @@ MISS_GT_CAP = 40
 # mutations. What was actually changed is a fact; what it was called is not.
 MEMORY_ROUND_CAP = 4
 MEMORY_FIELD_CAP = 2
-MEMORY_VALUE_CAP = 90
-# `answer_distribution` only means anything on a SMALL, enumerable answer space: "you answer
-# one label for everything" is not a statement you can make about free-text outputs, where
-# every prediction is its own bucket. Above this many distinct ground truths the panel is
-# not applicable and renders empty rather than dumping a histogram of unique strings.
-ANSWER_SPACE_CAP = 10
+# Value-stem chars per changed field in `mutation_memory`. Short by design: the stem exists
+# so the generator RECOGNISES a prior attempt, not to reproduce it — 60 chars name it, and the
+# smaller stem is what lets every retained round fit one compact line each inside the panel cap
+# (so the anti-re-proposal record stays COMPLETE instead of dropping recent rounds to truncation).
+MEMORY_VALUE_CAP = 60
 # Worst-N nodes the evidence_health panel lists — enough to show a dead enricher
 # plus a couple of collateral nodes, never a full pipeline dump.
 NODE_FAILURE_RENDER_CAP = 3
@@ -181,6 +187,10 @@ class InjectionBundle:
     # Mirrors OptimizationConfig.prompt_block_catalogue; picks the block-library header
     # (guidance = reuse-or-invent, restrict = library-only) or renders nothing when off.
     prompt_block_catalogue: str = "guidance"
+    # The cycle's earned block library (`{field: (block, ...)}`), mined for this task's answer-
+    # space shape at cycle start. `guidance` mode renders these earned blocks — never the static
+    # seed set — and stays silent when empty. Carried from `Cycle.earned_blocks`.
+    earned_blocks: dict[str, tuple[str, ...]] = field(default_factory=dict)
     # Mirrors OptimizationConfig.rebase_capability; gates the rebase_capability
     # injection so L2/L3 prompts are bit-for-bit identical to a no-rebase ablation run.
     rebase_capability: bool = True
@@ -232,8 +242,8 @@ def injection_registry() -> dict[str, _Injection]:
 
 
 __all__ = [
-    "ANSWER_SPACE_CAP",
     "AXES_ENUM_PREVIEW",
+    "INNER_NARRATIVE_CAP",
     "MEMORY_FIELD_CAP",
     "MEMORY_ROUND_CAP",
     "MEMORY_VALUE_CAP",

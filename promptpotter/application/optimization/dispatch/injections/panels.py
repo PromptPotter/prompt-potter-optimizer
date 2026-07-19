@@ -13,7 +13,7 @@ from typing import Any
 
 from promptpotter.application.intelligence.exploration import ruler_entry
 from promptpotter.application.optimization.dispatch.bundle import (
-    ANSWER_SPACE_CAP,
+    INNER_NARRATIVE_CAP,
     MEMORY_FIELD_CAP,
     MEMORY_ROUND_CAP,
     MEMORY_VALUE_CAP,
@@ -33,6 +33,7 @@ from promptpotter.application.optimization.dispatch.bundle import (
     fence_untrusted,
     signal,
 )
+from promptpotter.config.settings import ANSWER_SPACE_CAP
 from promptpotter.domain.escalation_signals import ExplorationBudget
 from promptpotter.domain.opt_search_point import candidate_delta, flatten_sp_summary
 from promptpotter.domain.results import CritiqueReadout, ScoredCandidate
@@ -400,6 +401,65 @@ def _r_sample_transcripts(b: InjectionBundle) -> str:
     return "\n\n".join(sections)
 
 
+@signal(
+    "inner_narratives",
+    kind=InjectionKind.MEASUREMENT,
+    description=(
+        "One authored narrative per inner campaign an L4 outer round ran: what each inner "
+        "loop tried, the steer each round acted on, its winning edit, and where it stalled — "
+        "the raw evidence a meta-prompt mutation grounds itself in. Empty off the recursion."
+    ),
+    # Sized for the full outer-seed panel (8 today x <=1150c + fences); the narrative is authored
+    # to <=1150c upstream, so a per-section overrun is a safety rail, not an expected drop.
+    char_cap=13000,
+    citable=True,
+)
+def _r_inner_narratives(b: InjectionBundle) -> str:
+    """The L4 generator's one window into what the inner loop actually DID. Each outer sample
+    is a whole inner campaign; ``_inner_narrative`` (``runner/inner/cycle.py``) authors a
+    <=1150c story of its trajectory, carried on the sample row as ``reasoning_trace``. Without
+    this panel the outer generator sees only the critique's <=3x320c compression of that story
+    plus one scalar per-seed delta — so it re-proposes mutations the inner loop already measured
+    and lost, the exact "doesn't use the information" failure.
+
+    Fires ONLY on the recursion. The discriminator is ``after_N_rounds_delta`` — the outer-lift
+    proxy the ``promptpotter`` connector stamps on every inner-cycle row (``compute_outer_proxies``)
+    and nothing else writes. It is NOT ``reasoning_trace``: an ordinary backend returns one of
+    those on most samples (it is what ``sample_transcripts`` renders), so gating on the trace
+    alone flooded every non-L4 generator with its own task transcripts. Ordered weakest-lift-first
+    (delta ascending): the seeds whose inner loop improved LEAST are the ones a meta-prompt edit
+    must fix, so they lead and a byte overrun drops the strong performers at the tail.
+    """
+
+    def _proxy_lift(r: dict[str, Any]) -> float | None:
+        # The L4 discriminator: only the `promptpotter` connector stamps this proxy, and a
+        # zero-lift seed (a flat inner run — the ones a meta-prompt edit most needs to see)
+        # can round-trip as an int 0, so accept any real number, exclude bool.
+        d = (r.get("pipeline_data") or {}).get("after_N_rounds_delta")
+        return float(d) if isinstance(d, int | float) and not isinstance(d, bool) else None
+
+    scored = [
+        (lift, r)
+        for r in b.trajectory_results
+        if (lift := _proxy_lift(r)) is not None
+        and (r.get("pipeline_data") or {}).get("reasoning_trace")
+    ]
+    if not scored:
+        return ""
+    scored.sort(key=lambda dr: dr[0])
+    header = (
+        f"INNER RUN NARRATIVES ({len(scored)} inner campaigns this round, weakest lift first — "
+        "each is one outer sample; ground every candidate in a specific observation below):"
+    )
+    sections = [header]
+    for delta, r in scored:
+        pd = r.get("pipeline_data") or {}
+        label = str(r.get("query") or r.get("sample_id") or "inner")[:80]
+        narrative = _head_at_line(str(pd.get("reasoning_trace") or ""), INNER_NARRATIVE_CAP)
+        sections.append(fence_untrusted(f"[{label}] D{delta:+.3f}\n{narrative}"))
+    return "\n\n".join(sections)
+
+
 def _misses(b: InjectionBundle) -> list[dict[str, Any]]:
     """The current misses out of the live frontier — the one place that filter is spelled."""
     return [r for r in b.trajectory_results if not r.get("hit")]
@@ -444,7 +504,10 @@ def _r_answer_distribution(b: InjectionBundle) -> str:
     if not rows:
         return ""
     truth = _label_counts(rows, "ground_truth")
-    if len(truth) > ANSWER_SPACE_CAP:
+    # No collapse to detect when the answer space is large (free-text) OR every sample carries a
+    # distinct ground truth (identity-keyed — e.g. an L4 outer round's per-seed inner-result
+    # tokens): a "constant answer would score X" floor is meaningless with no repeated label.
+    if len(truth) > ANSWER_SPACE_CAP or len(truth) == len(rows):
         return ""
     said = _label_counts(rows, "predicted")
     n = len(rows)
@@ -597,6 +660,12 @@ def _r_mutation_memory(b: InjectionBundle) -> str:
     """L1's own record of itself. Without it the generator re-proposes a mutation that has
     already been measured and lost — it has never been shown one of its prior attempts.
 
+    ONE compact line per prior candidate — ``r{N} {outcome} · {field}:"{stem}"[; …]`` — so
+    every retained round fits and the record stays COMPLETE. The multi-line block it replaced
+    overflowed the panel cap on a 2-variant inner cycle, and the section-drop then cut the most
+    RECENT rounds — the exact attempts most likely to be re-proposed. The record's job is
+    recognition, not reproduction, so a short stem per field is enough.
+
     An accuracy is only quoted against ``matched_origin_accuracy``, the origin restricted to
     the samples that candidate actually saw. An eliminated candidate has none (it is `None`,
     deliberately, and must never read 0.0 — that reads as "beat the origin by its whole
@@ -618,12 +687,11 @@ def _r_mutation_memory(b: InjectionBundle) -> str:
         for cand in rr.candidate_scores:
             mutation = _candidate_mutation(cand, parent, parent_pp) or ["(no change recorded)"]
             scored = (
-                f"{cand.accuracy:.0%} vs origin {cand.matched_origin_accuracy:.0%} on its samples"
+                f"{cand.accuracy:.0%} vs origin {cand.matched_origin_accuracy:.0%}"
                 if cand.matched_origin_accuracy is not None
                 else _candidate_fate(cand)
             )
-            lines.append(f"  round {rr.round} — {scored}")
-            lines.extend(f"      {row}" for row in mutation)
+            lines.append(f"  r{rr.round} {scored} · {'; '.join(mutation)}")
     return fence_untrusted("\n".join(lines))
 
 

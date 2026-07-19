@@ -45,6 +45,11 @@ class InnerBenchmarkConfig(StrictModel):
     model_config = ConfigDict(frozen=True)
 
     n_samples_per_inner_round: int = Field(ge=1)
+    # Origin (inner round 0) eval breadth. None ⇒ same as the per-round count. Set ABOVE it to
+    # buy a tighter inner-origin θ — the term every outer delta subtracts — while candidates
+    # keep the per-round budget; the extra origin rows are content-addressed cache shared
+    # across every inner campaign on the same seed, so the cost is paid once per cell.
+    n_samples_origin: int | None = Field(default=None, ge=1)
     max_inner_rounds: int = Field(ge=1)
     # None ⇒ keep the inner dataset's own value.
     inner_n_variants: int | None = Field(default=None, ge=1)
@@ -96,6 +101,7 @@ class InnerTaskSpec(StrictModel):
     inner_dataset: str
     seed: int
     n_samples: int
+    n_samples_origin: int | None = None
     n_rounds: int
     n_variants: int | None
     lives: LivesConfig | None = None
@@ -133,6 +139,7 @@ def resolve_inner_task(ctx: InnerSpawnContext, query: str) -> InnerTaskSpec:
         ),
         seed=cell.inner_dataset_seed if cell else 0,
         n_samples=cfg.n_samples_per_inner_round,
+        n_samples_origin=cfg.n_samples_origin,
         n_rounds=(cell.n_inner_rounds if cell and cell.n_inner_rounds else cfg.max_inner_rounds),
         n_variants=cfg.inner_n_variants,
         lives=cfg.inner_lives,
@@ -157,10 +164,14 @@ def inner_instrument_config(
 
     - **Budget is the ROUND budget.** ``max_rounds`` caps the cell (the proxies are defined over
       exactly that many rounds), and ``spend_budget_usd`` / ``token_budget`` are cleared: a cap
-      that trips on measured tokens truncates the trajectory nondeterministically. ``sp_budget_ttest``
-      = the WHOLE bank, never a thinner per-round subset — the outer proxy reads each candidate's
-      θ-LCB, whose width is set by how many samples it was scored on, so a drawn-but-unscored bank
-      just widens the LCB and starves the outer signal.
+      that trips on measured tokens truncates the trajectory nondeterministically. The ORIGIN is
+      scored on the whole drawn bank (``sp_budget_origin``) — its θ is the term every outer delta
+      subtracts, and the extra rows are shared cache across the cell's campaigns. Candidates are
+      scored on the panel's declared per-round count (``sp_budget_ttest``): with ``n_samples_origin``
+      unset the bank IS that count and every arm runs the whole bank; declaring it larger widens
+      only the origin — the operator's cost/precision trade, since candidate spend is per-candidate
+      while a wider candidate budget would also widen every θ-LCB comparison basis for no shared
+      cache payback.
     - **CRN seed on the prompt-bearing node.** ``spec.seed`` is the per-cell data-draw seed, fixed
       per cell and identical across every outer arm, so one seed makes the inner's run-to-run noise
       common and cancel in the (variant − origin) paired diff — at zero extra spend. The node is
@@ -188,7 +199,8 @@ def inner_instrument_config(
     po[llm_node] = node
     return base.model_copy(
         update={
-            "sp_budget_ttest": n_scored,
+            "sp_budget_ttest": min(spec.n_samples, n_scored),
+            "sp_budget_origin": n_scored,
             "optimization": base.optimization.model_copy(update=opt_update),
             "pipeline_overrides": po,
         }

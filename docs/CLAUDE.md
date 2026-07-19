@@ -57,7 +57,7 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 L4 (PromptPotter optimizing its own meta-prompts) **recursion is SHIPPED & live-validated**; the project is now finishing it into a **distributable `promptpotter-self`**. An AI agent driving L4 reads **(2) first** — it is the living finish-line plan + the SoT.
 
 1. [`concepts/optimizer-of-the-optimizer.md`](concepts/optimizer-of-the-optimizer.md) — why, the composed outer fitness (lift × quality × efficiency + the candidate-gradient law), cost realism (status note points back to the plan).
-2. **[`specs/l4-outer-loop.md`](specs/l4-outer-loop.md) — the living finish-line plan: § Finish line (distributable goal), § Live-run learnings (MAX_PATH flat `.inner/` registry, gsm8k→`justlogic` headroom, slice-3-is-gating), and the slice order.** Read first.
+2. **[`specs/l4-outer-loop.md`](specs/l4-outer-loop.md) — the living finish-line plan: § Finish line (distributable goal), § Live-run learnings (MAX_PATH flat `.inner/` registry, gsm8k→`justlogic-d234` headroom, slice-3-is-gating), and the slice order.** Read first.
 3. [`../promptpotter/connectors/CLAUDE.md`](../promptpotter/connectors/CLAUDE.md) — the connector boundary + the shipped `in_process` seam + the flat sandbox registry.
 
 The dataset side: [`../datasets/CLAUDE.md`](../datasets/CLAUDE.md) § L4 — `promptpotter-self`.

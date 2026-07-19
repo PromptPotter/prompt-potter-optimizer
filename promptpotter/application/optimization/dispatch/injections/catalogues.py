@@ -10,7 +10,7 @@ from promptpotter.application.optimization.dispatch.bundle import (
     InjectionKind,
     signal,
 )
-from promptpotter.config.prompt_blocks import HOUSE_SOURCE, prompt_blocks
+from promptpotter.config.prompt_blocks import general_reasoning_blocks, prompt_blocks
 from promptpotter.domain.l1_layout import L1_POSSIBLE
 from promptpotter.domain.pipeline_schema import SCHEMA_DESCRIPTIONS_PARAM, PipelineNode
 
@@ -86,10 +86,7 @@ def _r_pipeline_param_catalogue(b: InjectionBundle) -> str:
 # The two modes that render. `off` is absent by construction: no header ⇒ no text ⇒ the
 # slot is bit-for-bit identical to a no-library ablation run (facade.py drops empty renders).
 _BLOCK_LIBRARY_HEADERS: dict[str, str] = {
-    "guidance": (
-        "PROMPT BLOCK LIBRARY — field values that have earned their keep here "
-        "(reuse one verbatim, adapt one, or write your own):"
-    ),
+    "guidance": "PROMPT BLOCK LIBRARY (reuse one verbatim, adapt one, or write your own):",
     "restrict": ("PROMPT BLOCK LIBRARY (use only these — do not invent):"),
 }
 
@@ -107,18 +104,24 @@ def _r_prompt_block_catalogue(b: InjectionBundle) -> str:
     Symmetric with `pipeline_param_catalogue` (the param menu): one names the value space
     of a pipeline param, this one the value space of a prompt field.
 
-    The two modes render different libraries because they make different claims.
-    `restrict` is a hard value space — an off-library value is a wound — so it must show
-    every admissible block or it rejects what it never offered. `guidance` leaves the
-    space open (L1 may write its own), so a block only earns its context by being worth
-    reusing; the imported Self-Discover tail is undifferentiated menu, and it was the
-    single largest section of the prompt.
+    `restrict` is a hard value space — an off-library value is a wound — so it shows every
+    admissible block from the static declared set or it rejects what it never offered.
+    `guidance` leaves the space open (L1 may write its own). It prefers the cycle's mined
+    `earned_blocks` (short field values that lifted a run of the same answer-space shape); when
+    none are earned yet it falls back to the task-AGNOSTIC general reasoning modules — NOT a
+    silence, because starving L1 of block context shifts its (temp-0) generation to weaker
+    mutations (the 2026-07-18 regression), and NOT the house seeds, which mis-cue off their
+    ranking origin. The old ranking-flavored default was the low-value-at-wrong-place this fixes.
     """
     mode = b.prompt_block_catalogue
     header = _BLOCK_LIBRARY_HEADERS.get(mode)
     if header is None:
         return ""
-    library = prompt_blocks() if mode == "restrict" else prompt_blocks(HOUSE_SOURCE)
+    library = (
+        prompt_blocks() if mode == "restrict" else (b.earned_blocks or general_reasoning_blocks())
+    )
+    if not library:
+        return ""
     lines = [header]
     for field, blocks in library.items():
         lines.append(f"  {field}:")

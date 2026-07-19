@@ -32,7 +32,7 @@ A focus dataset for L1 meta-prompt evolution must satisfy:
 | Role | Dataset(s) | Why |
 |---|---|---|
 | **Headline benchmark** (publication) | BBEH | Hardest reasoning benchmark, established competitor comparison, public leaderboards. |
-| **Meta-campaign focus** (L1/L2/L3 iteration) | **JustLogic depth ≥ 6** (`justlogic`) | Wired 2026-05-19 after 9-dataset recon trail. 400/1000 cut on depths 6-7 only. See "Wired — primary" below. BBEH-mini @ `low` held as secondary in-band candidate. **Next-priority queue (Round 8, 2026-05-19)**: **PlanBench task_1** (36%, PDDL planning — brand-new family) and **NaturalPlan** (36% macro; `meeting_planning`-only at 43% is the clean cut) — both diversify into planning, no overlap with current portfolio. |
+| **Meta-campaign focus** (L1/L2/L3 iteration) | **`justlogic-d234`** (iid mix of depths 2-4) | Live L4 inner instrument (`datasets/justlogic-d234/`). The earlier d6-7 wiring below + its recon numbers are **VOID** (data-deprecation-era). BBEH-mini @ `low` held as secondary in-band candidate. **Next-priority queue (Round 8, 2026-05-19)**: **PlanBench task_1** (36%, PDDL planning — brand-new family) and **NaturalPlan** (36% macro; `meeting_planning`-only at 43% is the clean cut) — both diversify into planning, no overlap with current portfolio. |
 | **Connector validation** | TermNorm (lca-termnorm) | Per-connector regression, not optimizer iteration. |
 
 When the optimizer matures enough that L1 prompts produce measurable lift on BBEH, the focus role collapses back into the headline role. Until then, they are separate jobs.
@@ -48,6 +48,8 @@ Operator-pinned model for the meta-campaign focus. Justification:
 Pinning is via `nodes.llm_only.config` overlay in each dataset's `pipeline.json`, not in `optimizer.param_keys` — L1 cannot propose `model` or `provider` mutations (operator-locked axes per `PARAM_FORBIDDEN_KEYS`).
 
 ## Wired — primary
+
+> **⚠️ SUPERSEDED / VOID (data-deprecation-era bug).** The JustLogic **d6-7** cut wired below — and every origin / latency / class-behaviour number in this section and in the dated recon rows further down — came from a data-deprecation-era bug and reproduces nothing. The live L4 inner instrument is **`justlogic-d234`**, an iid random mix of depths 2, 3, 4 (`datasets/justlogic-d234/`). The dated decisions are kept as history; do not cite their numbers.
 
 | Dataset | HF path | Cut | Measured origin | Latency | Class behavior | L1 attack surface |
 |---|---|---|---|---|---|---|
@@ -130,7 +132,7 @@ Two new in-band candidates from the colleague-triage recon (NaturalPlan + MuSiQu
 
 The systemic finding: model-strength projections from older proxies underpredict `gpt-oss-20b @ low` by 10-20pp. Reasoning benchmarks designed for the GPT-3.5 / Llama-3-8B era are ceiling-prone for our model. Language-transfer (Swahili) bypasses this — the model's strength on reasoning *in English* is bounded by its weakness in *reading Swahili technical prose*, which is empirically a 30-50pp gap. The bias rule going forward: **prefer measurement to projection; bias projections from <20B-class anchors upward 10-20pp.**
 
-**Wired**: JustLogic d≥6 (Round 7 outcome; MMLU-ProX-sw rejected in Round 7 — language-transfer, not English reasoning).
+**Wired** (2026-05-19 — since SUPERSEDED → `justlogic-d234`, the live instrument; the d≥6 numbers are VOID): JustLogic d≥6 (Round 7 outcome; MMLU-ProX-sw rejected in Round 7 — language-transfer, not English reasoning).
 
 This sequence is operator-revisable any time.
 

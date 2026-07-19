@@ -166,7 +166,7 @@ async def _rescore_and_reemit(
     from promptpotter.application.datasets.loaders import sample_dataset
     from promptpotter.application.origin import rescore_parent
 
-    scoring_set = sample_dataset(dataset, config.sp_budget_ttest)
+    scoring_set = sample_dataset(dataset, config.origin_budget())
     origin = await rescore_parent(cycle, scoring_set, 0, callbacks=cb, force_fresh=True)
     tr = cycle.tracking
     tr.origin_accuracy = origin.accuracy

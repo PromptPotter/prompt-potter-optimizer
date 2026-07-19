@@ -121,9 +121,11 @@ INNER_RESULT_KEY = "final_ranking"
 # MAX_429_ATTEMPTS, rounds <= HARD_CAP) — but nothing bounded their SUM, so sustained 429
 # throttling could stretch one sample across tens of minutes inside every one of those bounds,
 # silently truncating how many outer rounds completed. Measured over the 155 inner cycles on
-# disk that ran to a SUCCESS outcome: per-round p50 81s, p90 116s, max 245s. At 300s none of
-# them would have tripped, so the deadline catches only a genuinely stuck sample.
-OUTER_SAMPLE_WALL_S_PER_ROUND = 300.0
+# disk that ran to a SUCCESS outcome: per-round p50 81s, p90 116s, max 245s (none would have
+# tripped at 300s). Set to 600 so longer / slower campaigns (raised max_inner_rounds + lives, or a
+# 429 storm) keep that headroom — the wall only ever EXCLUDES a genuinely stuck sample, never a
+# live one; the operator's real cost ceiling is the OUTER spend budget every inner dollar rolls up.
+OUTER_SAMPLE_WALL_S_PER_ROUND = 600.0
 
 
 @dataclass(frozen=True)
@@ -470,7 +472,7 @@ async def _run_inner_campaign(
     all_samples = session.samples
     if not all_samples:
         raise ValueError(f"inner dataset {spec.inner_dataset!r} loaded zero samples")
-    n = min(spec.n_samples, len(all_samples))
+    n = min(max(spec.n_samples, spec.n_samples_origin or 0), len(all_samples))
     train_data = random.Random(spec.seed).sample(all_samples, n)
 
     file_config: dict[str, Any] = {}
