@@ -138,7 +138,7 @@ async def score_population(
         callbacks.on_candidate_started(
             idx,
             n,
-            osp_c.lineage.changes_description or "",
+            osp_c.lineage.changes_description,
             pipeline_params_override,
             osp_c.prompt_field_dict(),
             candidate_sp.config_params,

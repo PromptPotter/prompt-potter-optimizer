@@ -208,7 +208,7 @@ removed. What survives is *not* an entity:
 an unchanged declaration get distinct `campaign_id`s but share their root
 cycle id (content-addressed) and origin score (the dataset-scoped archive
 cache-hits every sample) — cross-campaign evidence pooling on a declaration
-rides the `archive/measurements/` layer, not campaign identity.
+rides the `measurements/` layer, not campaign identity.
 
 **`unit_kind` taxonomy.** An operator-facing label, computed
 server-side from `(sibling_kind, fork_trigger)`, used by the webapp
@@ -572,7 +572,7 @@ the PR description.
   the id. `dashboard.json` is per-cycle, at
   `cycles/{cycle_id}/dashboard.json`. Cross-campaign evidence
   pooling on the same declaration rides the dataset-scoped
-  `archive/measurements/` layer, so two `new` calls on an unchanged
+  `measurements/` layer, so two `new` calls on an unchanged
   declaration get distinct `campaign_id`s, share their root cycle id
   (content-addressed) and origin score (cache-served), and diverge
   from round 1 onward. The four-entity hierarchy (Workspace / Dataset

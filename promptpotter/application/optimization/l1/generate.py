@@ -68,7 +68,7 @@ def candidate_summaries(proposals: list[CandidateProposal], round_num: int) -> l
         summary: dict[str, Any] = {
             "idx": i,
             "label": candidate_label(round_num, i),
-            "changes_description": cp.osp.lineage.changes_description or "",
+            "changes_description": cp.osp.lineage.changes_description,
         }
         if cp.pipeline_params_override:
             summary["pipeline_params_override"] = cp.pipeline_params_override

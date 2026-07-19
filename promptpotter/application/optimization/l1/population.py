@@ -161,7 +161,7 @@ def build_score_report(
     return ScoredCandidate(
         candidate_id=osp.lineage.id,
         label=label,
-        changes_description=osp.lineage.changes_description or "",
+        changes_description=osp.lineage.changes_description,
         pipeline_params_override=pipeline_params_override,
         resolved_pipeline_params=resolved_pipeline_params,
         prompt_fields=osp.prompt_field_dict(),

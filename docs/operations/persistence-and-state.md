@@ -18,7 +18,7 @@ A **Session** is one `new` invocation; a campaign holds one. `resume` extends it
 
 ## Active session pointer
 
-`.promptpotter/active_session.json` (`{tenant_id, session_id, campaign_id, cycle_id}`) is your active tab.
+`.promptpotter/projects/{tenant_id}/.workspace/active_session.json` (`{session_id, campaign_id, cycle_id}`) is your active tab.
 
 - **`new`** mints a fresh campaign + session + root cycle and overwrites the pointer. Re-running `new` on an unchanged declaration reuses the content-addressed root-cycle id and origin score (cache-served), then diverges from round 1.
 - **`resume`** reads the pointer and picks up that cycle. No re-`new` needed.
@@ -32,8 +32,10 @@ Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [o
 
 ```
 .promptpotter/
-  active_session.json                  # { tenant_id, session_id, campaign_id, cycle_id }
   projects/{tenant_id}/
+    .workspace/
+      events.jsonl                     # workspace audit ledger (CommandRecord)
+      active_session.json              # { session_id, campaign_id, cycle_id }
     sessions/{session_id}/session.json
     campaigns/{campaign_id}/            # {dataset}__{rand6_hex}, fresh per `new`
       campaign.json                    # manifest (dataset, config snapshot, declaration hashes — no run state)

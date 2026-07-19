@@ -156,7 +156,7 @@ async def score_one_candidate(
         round_num=round_num,
         elim_check=elim_check,
         candidate_id=osp_c.lineage.id,
-        candidate_label=osp_c.lineage.changes_description or "",
+        candidate_label=osp_c.lineage.changes_description,
         priors_at_test=priors_at_test,
     )
     # Aborted candidates must NOT seed priors — their scores are synthetic 0s.

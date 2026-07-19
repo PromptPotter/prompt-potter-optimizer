@@ -164,7 +164,7 @@ def ab_replay_cycle(
     )
     return AbReport(
         cycle_id=cycle_id,
-        scorer_id=sc.scorer_id or "",
+        scorer_id=sc.scorer_id,
         n_rounds=len(rounds),
         divergences=divergences,
     )

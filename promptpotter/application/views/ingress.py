@@ -7,8 +7,6 @@ in-memory ledger fan-out — subscribers consume it directly (``to_text`` /
 attribute reads); Pydantic serializes it to its wire dict on persist + SSE, so
 no hand-rolled reconstruction is needed.
 
-The ``score_entry_from_dict`` helper is also consumed by
-``application/output.py`` for disk-derived ``log.md`` rendering.
 """
 
 from __future__ import annotations
@@ -214,7 +212,7 @@ def _l1_generate_exit(d: dict[str, Any], ctx: ViewContext) -> CandidatesGenerate
 
 
 def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
-    score_entries = [score_entry_from_dict(s) for s in d.get("candidate_scores") or []]
+    score_entries = [_score_entry_from_dict(s) for s in d.get("candidate_scores") or []]
 
     # The promoted winner is elected by `elect_round_winner` (paired-delta LCB);
     # read its identity straight off the round result, never re-elect by a
@@ -350,7 +348,7 @@ def from_phase_event(event: PhaseEvent, ctx: ViewContext) -> AnyView | None:
 # --- score-entry helpers (shared with application/output disk render) ---
 
 
-def score_entry_from_dict(s: dict[str, Any]) -> ScoreEntry:
+def _score_entry_from_dict(s: dict[str, Any]) -> ScoreEntry:
     """``ScoredCandidate`` dict (``model_dump``) → narrow ``ScoreEntry`` renderer row.
 
     ``ci_lo``/``ci_hi`` ride the validated candidate (sole Wilson site); the

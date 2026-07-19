@@ -346,7 +346,7 @@ class LiveDashboardView(DerivedView):
 
         if record.phase == "backend" and record.event == "warning":
             # Surface backend retries (429 / 5xx / transport) — retry behaviour itself is unchanged.
-            payload = dict(record.payload or {})
+            payload = dict(record.payload)
             self.state.backend_retry_count += 1
             warning = BackendWarning(
                 ts=utcnow_iso(),
@@ -366,7 +366,7 @@ class LiveDashboardView(DerivedView):
             return
 
         if record.phase == "round" and record.event == "display":
-            payload = record.payload or {}
+            payload = record.payload
             # Full RoundResult rides the in-memory-only field (the persisted
             # payload['round_result'] is the lean 3-scalar form for the SSE tail).
             round_result = record.live_round_result
@@ -397,7 +397,7 @@ class LiveDashboardView(DerivedView):
                 self._flush_pending_persist()
             return
 
-        payload = record.payload or {}
+        payload = record.payload
         view = payload.get("view")
         data = payload.get("data") or {}
         event = PhaseEvent(
@@ -415,7 +415,7 @@ class LiveDashboardView(DerivedView):
 
     def _handle_snapshot(self, record: SnapshotRecord) -> None:
         ev = record.event
-        payload = record.payload or {}
+        payload = record.payload
         ci = int(record.candidate_idx or 0)
         ct = int(record.candidate_total or 0)
         qi = int(record.sample_idx or 0)

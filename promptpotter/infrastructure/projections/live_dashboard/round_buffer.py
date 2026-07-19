@@ -76,7 +76,7 @@ class RoundBuffer:
         """
         entry = self.slot(idx, total)
         entry["total"] = total
-        entry["changes_description"] = changes_description or ""
+        entry["changes_description"] = changes_description
         entry["pp_override"] = pp_override
         entry["prompt_fields"] = prompt_fields
         entry["resolved_pipeline_params"] = resolved_pipeline_params
