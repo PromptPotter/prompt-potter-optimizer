@@ -454,5 +454,4 @@ __all__ = [
     "auto_mint_session",
     "finalize_checkin_to_active",
     "mint_checkin_skeleton",
-    "new_session_state",
 ]

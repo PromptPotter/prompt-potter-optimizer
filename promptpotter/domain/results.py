@@ -197,9 +197,8 @@ class ScoredCandidate(StrictModel):
     scored_samples: int = 0
     expected_samples: int = 0
     # Why a partial subset was scored (``scored_samples < expected_samples``):
-    # "" (full / not partial) | "pobb" (automatic elimination) | "skip" (operator
-    # early-abort — marks the cycle ``human_intervened``). Distinct from the
-    # ``elimination_stopped``/``escalation_aborted`` outcome booleans.
+    # "" (full / not partial) | "skip" (operator early-abort — marks the cycle
+    # ``human_intervened``). Distinct from ``elimination_stopped``/``escalation_aborted``.
     partial_reason: str = ""
     invalid: bool = False
     validation_failures: list[ValidationFailure] = Field(default_factory=list)
@@ -651,7 +650,7 @@ class RoundSummaryCandidate(StrictModel):
     is_winner: bool
     evaluators: dict[str, float] = Field(default_factory=dict)
     changes_description: str = ""
-    partial_reason: str = ""  # "" | "pobb" | "skip" — see ScoredCandidate.partial_reason
+    partial_reason: str = ""  # "" | "skip" — see ScoredCandidate.partial_reason
     # Difficulty-adjusted Rasch ability + SE (`ScoredCandidate.theta`) — the metric the winner
     # was elected on, so the chart can explain a lower-accuracy winner. `None` outside the fit.
     theta: float | None = None

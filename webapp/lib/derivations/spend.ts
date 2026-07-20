@@ -45,7 +45,7 @@ export function readSpend(dash: DashboardSnapshot | null): SpendView {
   const loop = block?.loop;
   const backendUsd = backend?.used_usd ?? 0;
   const loopUsd = loop?.used_usd ?? 0;
-  const totalUsd = block?.total_used_usd ?? backendUsd + loopUsd;
+  const totalUsd = block?.total_used_usd ?? 0;
   const backendTokens = backend ? backend.input_tokens + backend.output_tokens : 0;
   const loopTokens = loop ? loop.input_tokens + loop.output_tokens : 0;
   const unpricedTokens = (backend?.unpriced_tokens ?? 0) + (loop?.unpriced_tokens ?? 0);

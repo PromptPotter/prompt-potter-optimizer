@@ -111,7 +111,7 @@ def ab_replay_cycle(
     # ``load_rounds_range`` iterates ``range(0, end+1)`` — read the real max round from the
     # cycle index rather than scanning a huge fixed ceiling.
     index = campaign_store.load(campaign_id, cycle_id)
-    round_summaries = (index or {}).get("rounds") or []
+    round_summaries = index["rounds"] if index is not None else []
     max_round = max((int(r["round"]) for r in round_summaries), default=-1)
     rounds = (
         campaign_store.load_rounds_range(campaign_id, cycle_id, 0, max_round)

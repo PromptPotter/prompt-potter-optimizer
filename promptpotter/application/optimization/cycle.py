@@ -53,11 +53,10 @@ __all__ = ["Cycle", "CycleRoundState"]
 
 
 def _rf_dedup_key(rf_dict: dict[str, Any]) -> tuple[str, str, str]:
-    cfg = rf_dict.get("observed_config") or {}
     return (
-        rf_dict.get("source", ""),
-        rf_dict.get("dominant_warning", ""),
-        json.dumps(cfg, sort_keys=True, default=str),
+        rf_dict["source"],
+        rf_dict["dominant_warning"],
+        json.dumps(rf_dict["observed_config"], sort_keys=True, default=str),
     )
 
 

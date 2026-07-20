@@ -274,7 +274,7 @@ async def l1_score(
             continue
         cs_idx = cs_by_id[cid]
         cs = candidate_scores[cs_idx]
-        theta_se_c = abilities.theta_se.get(cid, 0.0)
+        theta_se_c = abilities.theta_se[cid]
         theta_update: dict[str, Any] = {"theta": theta_c, "theta_se": theta_se_c}
         # Show the difficulty-adjusted ability band (what the election ranks on) as the whisker
         # only where it brackets the bar's quantity: warm ruler AND composite == accuracy.

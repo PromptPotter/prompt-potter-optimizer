@@ -188,8 +188,8 @@ class InjectionBundle:
     # (guidance = reuse-or-invent, restrict = library-only) or renders nothing when off.
     prompt_block_catalogue: str = "guidance"
     # The cycle's earned block library (`{field: (block, ...)}`), mined for this task's answer-
-    # space shape at cycle start. `guidance` mode renders these earned blocks — never the static
-    # seed set — and stays silent when empty. Carried from `Cycle.earned_blocks`.
+    # space shape at cycle start. `guidance` mode renders these earned blocks; falls back to the
+    # task-agnostic PromptWizard set when empty. Carried from `Cycle.earned_blocks`.
     earned_blocks: dict[str, tuple[str, ...]] = field(default_factory=dict)
     # Mirrors OptimizationConfig.rebase_capability; gates the rebase_capability
     # injection so L2/L3 prompts are bit-for-bit identical to a no-rebase ablation run.

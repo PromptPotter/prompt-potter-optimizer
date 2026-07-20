@@ -417,6 +417,5 @@ def _resolution_wire(output: CheckinOutput) -> dict[str, Any]:
 
 __all__ = [
     "OriginResolutionResult",
-    "build_origin_consultation",
     "resolve_origin_turn",
 ]
