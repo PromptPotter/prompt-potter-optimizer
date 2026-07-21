@@ -13,7 +13,7 @@ import { shortFamilyTail } from "./ids";
 // Operator-facing unit-kind labels — the time-horizon taxonomy. A campaign
 // has exactly one root, which reads as "Session"; the others tag a fork /
 // diag / sweep branch.
-export const UNIT_KIND_LABEL: Record<UnitKind, string> = {
+const UNIT_KIND_LABEL: Record<UnitKind, string> = {
   session: "Session",
   divergent_resume: "divergent resume",
   user_fork: "user fork",

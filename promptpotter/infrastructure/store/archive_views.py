@@ -7,10 +7,10 @@ read/write lives behind this module; reaching ``stores.archive`` (or aliasing
 it) outside this file is drift, enforced by
 ``test_no_direct_archive_access_outside_facade``.
 
-Placement in ``infrastructure/store/`` (not ``application/scoring/``) because
-``tracing/replay.py`` is a consumer and ``infrastructure → application`` is
-forbidden. The three writes below (append / compact / reset) are the whole write
-surface — any new one means a new function here, not a sidecar."""
+Placement in ``infrastructure/store/`` (not ``application/scoring/``): the archive
+IS a store, so its single-writer facade lives beside the leaf it wraps. The three
+writes below (append / compact / reset) are the whole write surface — any new one
+means a new function here, not a sidecar."""
 
 from __future__ import annotations
 

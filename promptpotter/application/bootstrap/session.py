@@ -21,6 +21,7 @@ from promptpotter.shared.identity import IdentityContext, default_identity
 if TYPE_CHECKING:
     from promptpotter.application.config import CampaignConfig
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
+    from promptpotter.application.jobs.mint import CyclePlan
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.validators import StopRule
     from promptpotter.infrastructure.ledger import CycleEventLog
@@ -345,7 +346,7 @@ def finalize_checkin_to_active(
     campaign_id: str,
     cycle_id: str,
     session_id: str,
-    cycle_plan: Any,
+    cycle_plan: CyclePlan,
     dataset_size: int,
 ) -> None:
     """Flip a ``checkin`` campaign to ``active`` against its EXISTING ids — transition (b).
@@ -454,5 +455,4 @@ __all__ = [
     "auto_mint_session",
     "finalize_checkin_to_active",
     "mint_checkin_skeleton",
-    "new_session_state",
 ]

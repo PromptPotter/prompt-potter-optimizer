@@ -283,8 +283,7 @@ DATASET_LOADERS: dict[str, Callable[..., list[Sample]]] = {
     "justlogic-d23": load_justlogic_d23,
     "justlogic-d234": load_justlogic_d234,
 }
-"""Map dataset name → loader. ``load_potter_traces`` (prior-run replay) ships
-extra non-Sample fields and is direct-import only, not registry-routed."""
+"""Map dataset name → loader."""
 
 
 def resolve_dataset_items(

@@ -58,19 +58,10 @@ def _build_config(
             "l1_patience": patience,
             "max_rounds": rounds,
             "n_variants": variants,
-            "creativity": 0.7,
             "improvement_threshold": 0.01,
             "degradation_threshold": 0.4,
             "l2_patience": 1,
             "l3_patience": 1,
-            "l2_temperature": 0.3,
-            "l3_temperature": 0.5,
-        },
-        "optimizer_llm": {
-            "model": "openai/gpt-oss-120b",
-            "provider": "groq",
-            "temperature": 0.4,
-            "max_tokens": 2000,
         },
     }
 

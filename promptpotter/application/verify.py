@@ -24,6 +24,7 @@ from promptpotter.infrastructure.store.layout import REPO_ROOT
 from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
+    from promptpotter.domain.sample import Measurement
     from promptpotter.domain.scoring import QueryMeasurement
     from promptpotter.infrastructure.store.stores import Stores
     from promptpotter.shared.identity import IdentityContext
@@ -54,7 +55,7 @@ class VerifyOutcome:
     cache_replays: int = 0
 
 
-def _archive_measurement_to_qm(m: Any) -> QueryMeasurement:
+def _archive_measurement_to_qm(m: Measurement) -> QueryMeasurement:
     """Project a :class:`Measurement` archive row into a :class:`QueryMeasurement` dict."""
     return cast(
         "QueryMeasurement",

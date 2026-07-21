@@ -376,7 +376,7 @@ def compute_node_failure_rates(results: list[dict[str, Any]]) -> dict[str, float
     return {n: c / total for n, c in counts.items()}
 
 
-def collect_node_warnings(results: list[dict[str, Any]]) -> dict[str, list[str]]:
+def _collect_node_warnings(results: list[dict[str, Any]]) -> dict[str, list[str]]:
     """Distinct upstream warning reasons per node, harvested from each sample's
     ``pipeline_data.diagnostics.warnings`` — the verbatim ``[code] message`` the
     connector's :class:`StepWarning` carried (e.g. a backend web-search node
@@ -459,7 +459,7 @@ def compute_round_health(
     node_failure_rates = compute_node_failure_rates(results)
     # The verbatim reasons behind those rates — forwarded into the verdict so the
     # operator-facing banner names the connector's real error, not a generic guess.
-    node_warnings = collect_node_warnings(results)
+    node_warnings = _collect_node_warnings(results)
 
     # An ungraded prior (``None`` — a probe round, or a round that measured zero
     # samples) is TRANSPARENT to the track record: it is not a clean round (so it

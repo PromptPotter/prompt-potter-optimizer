@@ -229,7 +229,7 @@ The persisted world is a four-entity containment hierarchy
 - **Query** — the input-string field on a sample. Use `query` *only*
   as a field name; never as a synonym for "sample" elsewhere.
 - **Measurement** — one `(SearchPoint, sample) → result` record.
-  Lives in the MeasurementArchive (`archive/measurements/`).
+  Lives in the MeasurementArchive (`measurements/`).
 
 ## Scoring — facts vs policy
 
@@ -407,7 +407,7 @@ The persisted world is a four-entity containment hierarchy
   (`connectors/promptpotter.py`) + `runner/inner/cycle.py::run_inner_cycle`, driven
   by `datasets/promptpotter-self/`. Plan: `docs/specs/l4-outer-loop.md`.
 - **sweep** — a cheap A/B of L1 candidates ahead of full promotion: sibling cycles
-  under `campaigns/{id}/sweeps/{batch_id}`, run by `python -m promptpotter sweep`.
+  under `campaigns/{id}/sweeps/{batch_id}`, run by `python -m promptpotter new --sweep-batch`.
   `application/sweep/`. A sweep cycle carries no `CycleSeed`; `sibling_kind == "sweep"`.
 - **Second prompt** — a structured-output schema viewed as input; its three
   levers are names, order, `description=`. `docs/concepts/structured-output.md`.

@@ -549,7 +549,9 @@ async def _run_transition(
             raise StopLoop(StopReason.REBASED)
 
 
-def _stash_rebase_request(cycle: Cycle, layer_id: str, proposal: Any, round_num: int) -> bool:
+def _stash_rebase_request(
+    cycle: Cycle, layer_id: str, proposal: ForkProposal, round_num: int
+) -> bool:
     """Stash an L2/L3 fork_proposal as a Cycle.rebase_request. False ⇒ do not fork.
 
     **The layer decides WHETHER to rewind; UCB decides WHERE.** The layer sees that its

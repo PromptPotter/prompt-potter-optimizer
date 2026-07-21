@@ -1,4 +1,4 @@
-"""Tracing package — events + sinks + bridge + replay.
+"""Tracing package — events + sinks + bridge.
 
 Public API surface preserved across the previous monolithic
 ``infrastructure/tracing.py`` split. Submodule layout:
@@ -9,5 +9,4 @@ Public API surface preserved across the previous monolithic
 - :mod:`langfuse_sink` — ``LangfuseSink`` (cloud-forward + id state)
 - :mod:`mlflow_sink` — ``MLflowSink`` (opt-in MLflow integration)
 - :mod:`bridge` — ``ObservabilityBridge`` + ``observed_node`` (fan-out)
-- :mod:`replay` — historical-measurement backfill into Langfuse
 """

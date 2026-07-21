@@ -26,7 +26,7 @@ A **Session** is one `new` invocation; a campaign holds one. `resume` extends it
 - **`--session <id>`** overrides the pointer for one command.
 - **`--tenant <id>`** (default `"default"`) selects the partition under `projects/` for the command.
 
-Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [options]`. Loop-mint verbs: `new`, `resume`. Lifecycle verbs: `archive`, `delete`, `unarchive`, `reset`. Diagnostic verbs: `verify`, `ab`, `sweep`. Reads happen by opening the on-disk artifact tree — there is no read CLI.
+Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [options]`. Loop-mint verbs: `new`, `resume`. Lifecycle verbs: `archive`, `delete`, `unarchive`, `reset`. Diagnostic verbs: `verify`, `ab`, `matrix`, `reindex`, `noise-floor`. Reads happen by opening the on-disk artifact tree — there is no read CLI.
 
 ## Layout
 
@@ -135,7 +135,7 @@ python -m promptpotter new bbeh --backend-url http://127.0.0.1:8000
 python -m promptpotter new --sweep-batch   # dispatches sweep-mode against the freshly-minted cycle
 ```
 
-**Reading results.** Side-by-side: `python -m promptpotter sweep rank` (groups by parent root, sorts by `round_1_top_lift`, reports `proxy_lift_corr` once ≥4 paired sweep/full branches share an `l1_generate_hash`). **Sweep is screening, not validation** — promote winners to a full `new` run. L1-surface only; pipeline/scoring changes are intentionally absent from the operator file shape. Forks run sequentially (the active pointer doesn't tolerate concurrent mints).
+**Reading results.** The sweep branches are ordinary forks on the campaign tree — read them side-by-side in the webapp, or open each branch's `round_NNNN.json`. A batch groups by parent root and sorts by `round_1_top_lift`; `proxy_lift_corr` is meaningful once ≥4 paired sweep/full branches share an `l1_generate_hash`. **Sweep is screening, not validation** — promote winners to a full `new` run. L1-surface only; pipeline/scoring changes are intentionally absent from the operator file shape. Forks run sequentially (the active pointer doesn't tolerate concurrent mints).
 
 ## CLI flags — `new` and `resume`
 

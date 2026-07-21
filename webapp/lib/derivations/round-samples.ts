@@ -78,7 +78,6 @@ interface RawHistoricalSample {
   ground_truth?: string;
   hit?: boolean;
   cached?: boolean;
-  fitness?: number;
   scorer?: string;
   elapsed_s?: number;
   time_s?: number;

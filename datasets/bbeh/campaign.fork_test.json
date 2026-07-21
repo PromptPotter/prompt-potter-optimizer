@@ -11,10 +11,6 @@
       "n_variants": 1,
       "improvement_threshold": 0.01,
       "degradation_threshold": 0.0
-    },
-    "optimizer_llm": {
-      "model": "openai/gpt-oss-120b",
-      "provider": "groq"
     }
   }
 }

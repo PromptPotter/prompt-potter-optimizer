@@ -21,14 +21,14 @@ GENERAL_SOURCE = "PromptWizard"
 
 
 @cache
-def general_reasoning_blocks(per_field_cap: int = 8) -> dict[str, tuple[str, ...]]:
+def general_reasoning_blocks() -> dict[str, tuple[str, ...]]:
     """Task-agnostic reasoning material — the `guidance` fallback when no EARNED block fits yet.
 
     General reasoning strategies (Self-Discover modules + general personas) help ANY reasoning
     task, unlike the house seeds, which were adopted from ranking runs and mis-cue a logic task.
     Capped per field to stay compact — L1 needs grounding material, not the whole 38-module tail.
     """
-    return {field: texts[:per_field_cap] for field, texts in prompt_blocks(GENERAL_SOURCE).items()}
+    return {field: texts[:8] for field, texts in prompt_blocks(GENERAL_SOURCE).items()}
 
 
 @cache

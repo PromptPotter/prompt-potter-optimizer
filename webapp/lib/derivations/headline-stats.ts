@@ -101,7 +101,7 @@ export function headlineStats(dash: DashboardSnapshot | null): HeadlineStats {
 }
 
 export interface FitnessTrend {
-  // Per-round fitness (composite_fitness, falling back to accuracy), ascending.
+  // Per-round cumulative_accuracy, ascending.
   points: { round: number; composite: number }[];
   // Running-best composite, index-aligned with `points`.
   best: number[];

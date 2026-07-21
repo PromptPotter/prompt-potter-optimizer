@@ -366,7 +366,11 @@ LEDGER_BASELINE = {
     # CREDIBLE lift on the same answer-space shape, replacing the static seed catalogue the
     # ``guidance`` block mode served to every task. A feature: it turns a low-value, task-
     # mismatched panel into earned-or-silent signal, so the baseline rises.
-    "modules": 303,
+    # 303 -> 301 (2026-07-20 debt sweep): deleted two zero-importer dead modules —
+    # ``application/datasets/traces.py`` (the potter-trace loader; superseded by L4 inner-cycle
+    # recursion, never registry-routed) and ``infrastructure/tracing/replay.py`` (the historical
+    # Langfuse backfill; no CLI verb, no caller). Subtraction, so the baseline falls.
+    "modules": 301,
     # 52 -> 51 (2026-07-17): ``cli/commands/sweep`` went with the sweep verb.
     "init_files": 51,
     # 43 -> 9 (2026-07-16): 34 package ``__init__`` files that did nothing but re-export a
@@ -429,7 +433,12 @@ LEDGER_BASELINE = {
     # is excluded outright.
     # 73 -> 69 (2026-07-17): four bare ``Any`` params rode the deleted sweep verb +
     # config_map. Subtraction by deletion, not by retyping -- the debt left with its code.
-    "any_params": 69,
+    # 69 -> 65 (2026-07-20 debt sweep): four bare ``Any`` params retyped to the concrete
+    # type their sole caller already passes -- ``_archive_measurement_to_qm(m: Measurement)``
+    # (verify.py), ``finalize_checkin_to_active(cycle_plan: CyclePlan)`` (session.py),
+    # ``Cycle.start(round_scorer: RoundScorer | None)`` (cycle.py), and
+    # ``_stash_rebase_request(proposal: ForkProposal)`` (firing.py). Subtraction, baseline falls.
+    "any_params": 65,
     # NEW dimension (2026-07-17), landing at 4 — a Pydantic model that does NOT end up
     # ``extra="forbid"``, so an unknown key is dropped instead of raised. 106 before the
     # ``StrictModel`` migration, 4 after. It is a conceptual surface because the alternative

@@ -34,9 +34,7 @@ MEASUREMENT_GRADES = ("A", "B", "C")
 # `origin` = round-0 origin scoring; `optimization_loop` = an L1/L2/L3 candidate;
 # `feedback_cycle` = an operator-driven re-score. Anything else (a connector
 # backfill, a degradation re-check, a row written outside the loop) is incidental.
-# This is the quality-of-exploration taxonomy; it is deliberately separate from
-# `tracing.replay.classify_run_origin`, which buckets the same field for Langfuse
-# trace grouping — different consumer, different purpose.
+# This is the quality-of-exploration taxonomy.
 DELIBERATE_SOURCES = frozenset({"origin", "optimization_loop", "feedback_cycle"})
 
 # Fraction of a run's samples that must have run the deliberate LLM path for the
