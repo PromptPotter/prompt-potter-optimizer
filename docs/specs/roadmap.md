@@ -36,7 +36,7 @@ Sequenced into lanes by dependency, not milestone number. **Front priority = Lan
 | C2 | Composite fitness P2–P4 (P1 = spend, done) — data rollup anytime; **scatter panel after P3** | pending (see § Connectors + L4) |
 | C3 | L4 closure — the recursion + the L4 campaign + `proxy_lift_corr ≥ 0.6` re-validation | **recursion SHIPPED + live-validated** (`new promptpotter-self` mints + runs real inner campaigns via the in-process seam; the `llm_only` connector it also yielded is registered). Open: the specialized `_optimizer_meta/` outer prompts (gating), inner-spend rollup, the bounded cheap default config, and the `proxy_lift_corr` gate — [`l4-outer-loop.md`](l4-outer-loop.md) § Finish line |
 | C4 | Cross-user measurement panel (after P3) | pending (see § Ingest + chat-first web) |
-| C5 | MCP server mode · user-editable `pipeline.json` in UI | pending |
+| C5 | MCP server mode (= **agent-tool parity**, see § Agent-tool parity) · user-editable `pipeline.json` in UI | pending |
 | C6 | Public-service hardening (Docker, metrics, rate-limit, billing) — `/health` shipped; **pull rate-limit/metrics forward if the beta opens past the allowlist** | pending |
 | C7 | Non-prompt targets + evolutionary operators · multimodal · research extensions | pending |
 | C8 | **Mask abstraction** — backend organizing structure (alternative-criterion + transferability); M1 = scoring-function-swap divergence + minimal visual clues, then migrate every divergence trigger onto it | M1 + abort shipped (see § Lineage mask) |
@@ -77,6 +77,14 @@ Four nouns map to OIDC: Install=`iss`, User=`sub` (`user_id=f"{iss}:{sub}"`, SCI
 - **Execution mode (the L4 self-recursion seam) — SHIPPED:** `Connector.execution = remote_http (default) | in_process`, dispatched on the *declared mode*, never the connector name; the same seam yielded the in-process **`llm_only`** connector (no TermNorm server for the basic case). Mechanism + what's still open: [`l4-outer-loop.md`](l4-outer-loop.md) §1–§2 + § Finish line. Concept: [`optimizer-of-the-optimizer`](../concepts/optimizer-of-the-optimizer.md).
 - **Composite fitness phases:** P1 surface (done) · P2 per-candidate rollup + scatter · P3 `compile_post_aggregate_fitness(formula)` + `campaign.json::scoring_post_aggregate` · P4 Pareto-PoBB (stretch).
 - **Prompt-injection Phase 2:** `TrustedText`/`UntrustedText` renderer types + L1/critique injection-echo validators + a repeat-detection circuit breaker.
+
+### Agent-tool parity — PromptPotter as a callable tool inside an operating agent
+Today PromptPotter is driven by a human or by Claude via `/potter-run` (the entry-points list is § Three ways to run it at the top + README "Five ways to run it"). The next invocation surface is **parity as a first-class agent-callable tool**: an *operating agent* — the user's own, or an ML-research agent like NVIDIA's AutoResearch — calls PromptPotter as one move in its toolbox. Mechanism already on the board: **C5 MCP server mode**; this note is the *why* + the *shape*.
+- **PromptPotter as another agent's try-harness-first move.** An agent that improves models (NVIDIA's reaches straight for SFT/GRPO/DPO to change *weights*) would, given PromptPotter as a callable tool, often pick it first — cheaper (inference-only), faster, transferable across models, no weights to store. Its autoresearch loop already runs on markdown skills + a ledger, so PromptPotter drops in *beside* NeMo RL, not in place of it.
+- **Weight-training as our agent's escalation.** The mirror: an operating agent driving PromptPotter should, at the harness ceiling (a failure no prompt/pipeline change fixes), route to SFT/GRPO/DPO — a policy handed to the driving agent, not a new loop mechanism.
+- **Parity = the MCP tool exposes the CLI/skill lifecycle** — mint, run, supervise, read results — so an agent can operate a campaign end-to-end.
+
+Full argument + a same-dataset, same-base-model head-to-head experiment: [related-work.md](../research/related-work.md) § PromptPotter × NVIDIA AutoResearch. Tracked as **C5**.
 
 ### Prompt-iteration framework + exit gate — partially shipped (gate not yet met)
 - **Exit gate:** `rounds_to_95 ≤ 5` on `llm_only` AND TermNorm under the same `l1_generate_hash`; `behavior_pass_rate = 1.0` seeded; `proxy_lift_corr ≥ 0.6` over ≥4 paired branches (or modify the rules).

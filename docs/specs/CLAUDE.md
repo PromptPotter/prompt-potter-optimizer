@@ -6,7 +6,7 @@ Deliberately small: forward direction lives in one roadmap; the rest are living 
 
 | File | What |
 |---|---|
-| [roadmap.md](roadmap.md) | **Forward direction** — execution-ordered lanes + the folded per-milestone design notes (origin check-in, ingest/chat-web, connectors/L4, prompt-iteration framework, BYO keys, operator-steered fork, state-sync). The lane table's **Status column** is truth for what shipped. |
+| [roadmap.md](roadmap.md) | **Forward direction** — execution-ordered lanes + the folded per-milestone design notes (origin check-in, ingest/chat-web, connectors/L4, prompt-iteration framework, agent-tool parity, BYO keys, operator-steered fork, state-sync). The lane table's **Status column** is truth for what shipped. |
 | [code-debt-cleanup.md](code-debt-cleanup.md) | Living debt backlog — open items only; `git log` is the history layer. |
 | [verdict-resolution.md](verdict-resolution.md) | The single statistical model behind the live adaptive queue + the persisted `hard_samples_*.json` ranking. |
 | [frontend-surface-contract.md](frontend-surface-contract.md) | Per-control webapp behavior per auth/data state + **6 invariants** (I1–I6, incl. `I6_run_state_server_owned`); every user-facing PR is measured against it. |

@@ -22,17 +22,18 @@ Describe your 1️⃣ **task**, drop in a labeled 2️⃣ **dataset**, and 3️�
 Every measurement costs money, so the whole design is **most fitness per dollar**. The capabilities PromptPotter shares with the rest of the field are in the [comparison table](#scientific-framing) below; these are the ones it doesn't:
 
 - **💬 Chat-first** — talk to the Potter and watch it work inline, Perplexity-style: the searches, the tool calls, each round as it lands, and a button whenever a decision is yours. Ships as a reusable **chat-app template** — keep the chat core, delete the optimizer panes. [spec](docs/specs/chat-foundation.md)
-- **Recovers from dead ends** — when a branch is spent the search rewinds to a better ancestor instead of stalling there. Most evolutionary search is one-armed: it only ever expands the latest winner.
+- **Climbs the hill, escapes dead ends** — each round steps uphill on your metric; when a branch is spent the search rewinds to a better ancestor and climbs a different ridge instead of stalling. Most evolutionary search is one-armed: it only ever expands the latest winner.
 - **Hard-sample leaderboard** — score preferentially on the samples that actually separate variants; the ones everyone aces or fails are noise.
+- **Guards against self-validation** — the loop can't grade itself into a false win: scores are ability-based and subset-invariant (Rasch θ), constant-answer and other degenerate candidates are caught before they count, and the layer that *validates* a fix is never the one that proposed it.
 - **Optimizes itself** — point the optimizer at its own meta-prompts. [L4](docs/concepts/optimizer-of-the-optimizer.md)
 - **Pick your block library mode** — proven personas, thinking styles and answer formats (from PromptWizard and the *Self-Discover* modules it draws on, plus what our own runs turned up). Let the optimizer suggest from the library, restrict it to the library, or switch it off.
 
 ## Peer systems
 
-PromptPotter belongs to the **LLM-driven evolution** family: an LLM proposes variants, an evaluator scores them, and the winners breed. The peer systems — full comparison + benchmark notes in [`docs/research/related-work.md`](docs/research/related-work.md#eight-systems-under-the-umbrella):
+PromptPotter belongs to the **LLM-driven evolution** family: an LLM proposes variants, an evaluator scores them, and the winners breed. The peer systems — full comparison + benchmark notes in [`docs/research/related-work.md`](docs/research/related-work.md#systems-under-the-umbrella):
 
-- **Code evolution** — [AlphaEvolve](docs/research/related-work.md#eight-systems-under-the-umbrella) · [OpenEvolve](docs/research/related-work.md#eight-systems-under-the-umbrella) · [AlgoTuner](docs/research/related-work.md#eight-systems-under-the-umbrella) · [AutoResearch](docs/research/related-work.md#eight-systems-under-the-umbrella)
-- **Prompt evolution** — [PromptWizard](docs/research/related-work.md#eight-systems-under-the-umbrella) · [MIPROv2](docs/research/related-work.md#eight-systems-under-the-umbrella) · [GEPA](docs/research/related-work.md#eight-systems-under-the-umbrella) · **PromptPotter**
+- **Code evolution** — [AlphaEvolve](docs/research/related-work.md#systems-under-the-umbrella) · [OpenEvolve](docs/research/related-work.md#systems-under-the-umbrella) · [AlgoTuner](docs/research/related-work.md#systems-under-the-umbrella) · [AutoResearch](docs/research/related-work.md#systems-under-the-umbrella)
+- **Prompt evolution** — [PromptWizard](docs/research/related-work.md#systems-under-the-umbrella) · [MIPROv2](docs/research/related-work.md#systems-under-the-umbrella) · [GEPA](docs/research/related-work.md#systems-under-the-umbrella) · **PromptPotter**
 
 The code-evolution systems mutate source; the prompt-evolution systems mutate a prompt. PromptPotter evolves **both the prompt and the pipeline parameters around it**, jointly.
 
@@ -50,6 +51,7 @@ PromptPotter is a **tree search over prompt programs** — precisely, **AlphaZer
 
 | Capability | AlphaEvolve | PromptPotter |
 |---|:--:|:--:|
+| **Open & inspectable** — the code is on GitHub, and the statistical model (PoBB) is documented and yours to tune; AlphaEvolve is a closed hosted service | 🔴 | 🟢 |
 | **Evolutionary search** — a population breeds, the weak die | 🟢 | 🟢 |
 | **Automatic scoring** — define the formula once; it wires itself into every eval path, no glue code | 🟢 | 🟢 |
 | **Statistical pruning** — drop losers after a handful of queries, not the full budget ([PoBB](docs/methods/candidate-elimination.md)) | 🟢 | 🟢 |
@@ -133,6 +135,8 @@ PromptPotter's inner **generate → score → critique** loop mirrors the classi
 3. **Python / Jupyter notebook**.
 4. **REST API**.
 5. **WebApp** — read-only dashboard at `http://localhost:8001/`.
+
+**Direction — the sixth way: a tool another agent calls.** The aim is parity as a first-class **agent-callable tool** (MCP), so an *operating agent* — yours, or an ML-research agent like NVIDIA's AutoResearch — can invoke PromptPotter as its *try-harness-first* move before reaching for fine-tuning. Why + a same-dataset head-to-head: [related-work § PromptPotter × NVIDIA AutoResearch](docs/research/related-work.md); tracked as [roadmap § Agent-tool parity](docs/specs/roadmap.md) (C5, MCP server mode).
 
 # Roadmap
 
