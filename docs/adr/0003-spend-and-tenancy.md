@@ -148,7 +148,7 @@ The seam is where `IdentityContext` enters the process. Three entry points, two 
 
 | Entry point | Seam | Single-operator default (Stage 0) |
 |---|---|---|
-| CLI (`new` / `resume` / `verify` / `reset` / `sweep`) | `presentation/cli/commands/_shared.py::identity_from_args(args)` derives the `IdentityContext` from `args.tenant`; `init_services_cli(identity=…)` threads it into `init_services` and then `build_stores`. | `default_identity()` → `IdentityContext(user_id=UserId("default"), tenant_id=TenantId("default"), issuer=None, claims={}, capabilities=frozenset())`. |
+| CLI (`new` / `resume` / `verify` / `reset`) | `presentation/cli/commands/_shared.py::identity_from_args(args)` derives the `IdentityContext` from `args.tenant`; `init_services_cli(identity=…)` threads it into `init_services` and then `build_stores`. | `default_identity()` → `IdentityContext(user_id=UserId("default"), tenant_id=TenantId("default"), issuer=None, claims={}, capabilities=frozenset())`. |
 | FastAPI (`presentation/api/`) | `presentation/api/deps.py::resolve_identity` returns the Stage-0 default; `IdentityDep` / `build_stores_from_identity` / `StoreDep` chain it for routers. Stage-1 OIDC middleware replaces only `resolve_identity`. | Same `default_identity()` value; auth-off mode is one branch, not a feature flag. |
 | Background jobs (fork, sweep, sweep_restore) | Inherit from parent `Session.identity` — already populated; never re-resolved from disk. `application/sweep/sweep_runner.py`, `application/optimization/resume_and_fork/fork_siblings.py`. | Same `IdentityContext` flows through; no extra ceremony. |
 

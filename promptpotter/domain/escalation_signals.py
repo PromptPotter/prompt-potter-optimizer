@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import enum
+import json
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -196,6 +197,18 @@ class RuntimeFailure(StrictModel):
     )
 
 
+def rf_dedup_key(rf_dict: dict[str, Any]) -> tuple[str, str, str]:
+    """Dedup key for a serialized :class:`RuntimeFailure`: ``(source, dominant_warning,
+    observed_config)``. Pure and canonical, so intra-cycle dedup (``Cycle``) and cross-cycle
+    sibling-wound inheritance (``intelligence/sibling_wounds``) match without a hand-synced
+    mirror. All three components are required fields, so a serialized row always carries them."""
+    return (
+        rf_dict["source"],
+        rf_dict["dominant_warning"],
+        json.dumps(rf_dict["observed_config"], sort_keys=True, default=str),
+    )
+
+
 __all__ = [
     "EscalationSignal",
     "EscalationTarget",
@@ -204,4 +217,5 @@ __all__ = [
     "RuntimeFailure",
     "ValidationFailure",
     "exploration_budget",
+    "rf_dedup_key",
 ]

@@ -33,8 +33,9 @@ import argparse
 import json
 import pathlib
 import sys
+import types
 from collections import Counter
-from typing import Any
+from typing import Any, Union, get_args, get_origin
 
 from pydantic import BaseModel, ValidationError
 
@@ -45,13 +46,30 @@ from promptpotter.application.config import (
 )
 
 
+def _nested_model(ann: Any) -> type[BaseModel] | None:
+    """The nested ``BaseModel`` an annotation carries, unwrapping ``X | None`` / ``Optional[X]``.
+
+    A sub-model reached through an *optional* field (``DatasetSplit | None``) must still have its
+    stale keys pruned — otherwise a dropped sub-field survives and the re-stamp still raises
+    ``extra_forbidden`` on load, which is exactly the failure this script exists to remove.
+    """
+    if isinstance(ann, type) and issubclass(ann, BaseModel):
+        return ann
+    if get_origin(ann) in (Union, types.UnionType):
+        for arg in get_args(ann):
+            if isinstance(arg, type) and issubclass(arg, BaseModel):
+                return arg
+    return None
+
+
 def _prune_to_schema(
     raw: dict[str, Any], model_cls: type[BaseModel], prefix: tuple[str, ...] = ()
 ) -> tuple[dict[str, Any], list[tuple[str, Any]]]:
     """Drop keys ``model_cls`` no longer declares. Returns ``(pruned, [(dotted_path, value)])``.
 
-    Recurses only into nested *models*; a ``dict[str, X]`` field (``pipeline_overrides``,
-    ``optimizer_narrowing``) is free-form operator data and is passed through untouched.
+    Recurses into nested *models* (including optional ones); a ``dict[str, X]`` field
+    (``pipeline_overrides``, ``optimizer_narrowing``) is free-form operator data and is passed
+    through untouched.
     """
     pruned: dict[str, Any] = {}
     dropped: list[tuple[str, Any]] = []
@@ -61,9 +79,9 @@ def _prune_to_schema(
         if field is None:
             dropped.append((".".join(path), value))
             continue
-        ann = field.annotation
-        if isinstance(ann, type) and issubclass(ann, BaseModel) and isinstance(value, dict):
-            sub, sub_dropped = _prune_to_schema(value, ann, path)
+        nested = _nested_model(field.annotation)
+        if nested is not None and isinstance(value, dict):
+            sub, sub_dropped = _prune_to_schema(value, nested, path)
             pruned[key] = sub
             dropped.extend(sub_dropped)
         else:

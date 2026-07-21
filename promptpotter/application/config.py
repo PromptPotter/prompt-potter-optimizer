@@ -499,9 +499,8 @@ class OptimizationConfig(StrictModel):
 
 
 class DatasetSplit(StrictModel):
-    """Train/test fold sizes — display metadata. `train` is the bank; `test` stays off-bank, on-demand."""
+    """Held-out test fold size — display metadata for the dashboard footer."""
 
-    train: int = Field(description="Training-bank fold size — the cache.json row count")
     test: int = Field(description="Held-out test fold size — not in the bank or the table")
 
 

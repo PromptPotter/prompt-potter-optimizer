@@ -255,8 +255,9 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
         ),
     ),
     # Strategic replan — must see the current `plan` it rewrites, the framing it steers
-    # (`task_context`), and the raw evidence (`diagnostics`). Optional adds evidence_health
-    # + archive_top_runs.
+    # (`task_context`), and the raw evidence (`diagnostics`). The floor carries evidence_health
+    # so the shared terminate directive's "EVIDENCE STARVED panel above" reference resolves in an
+    # L3 prompt (L3 holds terminate authority too); optional adds archive_top_runs.
     "l3_plan": NodeLayoutSpec(
         editor="l4",
         possible=frozenset(
@@ -278,6 +279,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "plan",
                 "task_context",
                 "diagnostics",
+                "evidence_health",
                 "l1_wounds",
                 "axis_memory",
                 "guard_breaches",

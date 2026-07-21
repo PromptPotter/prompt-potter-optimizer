@@ -29,7 +29,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "ORIGIN_RESOLUTION_PRIORITY",
     "CampaignOrigin",
     "build_campaign_emitter",
     "establish_campaign_origin",
@@ -262,14 +261,6 @@ def try_inherit_fork_origin(
     )
 
 
-ORIGIN_RESOLUTION_PRIORITY = (
-    "seed",  # operator-steered fork OR campaign-from-origin: the chosen searchpoint IS the origin
-    "dataset",  # {dataset_dir}/prompts/{node}.json (tenant-first)
-    "empty",  # no prompt node active — param-only optimization
-)
-"""Origin-OSP resolution order, highest wins — the single legible statement of the
-precedence that ``resolve_origin_opt_search_point`` walks branch by branch."""
-
 # C0 lineage description per ``CycleSeed.origin_source`` — keyed lookup, no
 # branch: the seed declares its own provenance, the resolver stamps it.
 _SEED_ORIGIN_LINEAGE = {
@@ -284,8 +275,8 @@ def resolve_origin_opt_search_point(
     *,
     seed: CycleSeed | None = None,
 ) -> OptSearchPoint:
-    """Resolve the origin OptSearchPoint by :data:`ORIGIN_RESOLUTION_PRIORITY`
-    (seed → {dataset_dir}/prompts → empty).
+    """Resolve the origin OptSearchPoint by precedence, highest wins:
+    seed → {dataset_dir}/prompts → empty.
 
     A *seed* with non-empty ``origin_prompt_fields`` wins outright — an
     operator-steered fork's (or a campaign-from-origin's) origin *is* the chosen

@@ -4,7 +4,6 @@
   "description": "TermNorm AI terminology normalization pipeline",
   "backend_name": "TermNorm Local",
   "backend_type": "termnorm",
-  "required_step": "entity_profile",
   "template_variables": [
     "{{core_concept}}",
     "{{entity_profile_json}}",

@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.escalation_signals import RuntimeFailure
+from promptpotter.domain.escalation_signals import RuntimeFailure, rf_dedup_key
 from promptpotter.domain.phases import StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import campaign_cycles_dir
@@ -38,15 +37,6 @@ def _ran_to_completion(raw_stop_reason: Any) -> bool:
         )
         return False
     return stop_reason_outcome(reason) is StopOutcome.SUCCESS
-
-
-def _rf_dedup_key(rf_dict: dict[str, Any]) -> tuple[str, str, str]:
-    """Mirror of ``Cycle._rf_dedup_key`` so cross-cycle dedup matches intra-cycle."""
-    return (
-        rf_dict["source"],
-        rf_dict["dominant_warning"],
-        json.dumps(rf_dict["observed_config"], sort_keys=True, default=str),
-    )
 
 
 def gather_sibling_runtime_failures(
@@ -85,9 +75,10 @@ def gather_sibling_runtime_failures(
         if not isinstance(round_data, dict):
             continue
         osp = round_data.get("opt_search_point") or {}
-        wounds = osp.get("wounds") or {}
+        memory = osp.get("memory") or {}
+        wounds = memory.get("wounds") or {}
         for rf_dict in wounds.get("runtime_failures") or []:
-            key = _rf_dedup_key(rf_dict)
+            key = rf_dedup_key(rf_dict)
             if key in seen_keys:
                 continue
             seen_keys.add(key)

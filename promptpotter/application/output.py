@@ -353,7 +353,7 @@ def _render_round(
 
 def _render_l1_inputs(osp: dict[str, Any], lineage: dict[str, Any]) -> list[str]:
     parts: list[str] = ["", "**L1 inputs**", ""]
-    tc = osp.get("task_context") or {}
+    tc = (osp.get("memory") or {}).get("task_context") or {}
     if isinstance(tc, dict) and tc:
         keys = ", ".join(sorted(k for k, v in tc.items() if v))
         parts.append(f"- task_context fields: {keys or '_(empty)_'}")

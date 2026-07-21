@@ -11,7 +11,6 @@ added here instead is invisible to `derive()` and silently lost on fork.
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
@@ -25,6 +24,7 @@ from promptpotter.application.optimization.pobb.classification import (
 )
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
+from promptpotter.domain.escalation_signals import rf_dedup_key
 from promptpotter.domain.opt_search_point import OptSearchPoint, node_config_items
 from promptpotter.domain.rendering import display_fitness
 from promptpotter.domain.results import (
@@ -50,14 +50,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = ["Cycle", "CycleRoundState"]
-
-
-def _rf_dedup_key(rf_dict: dict[str, Any]) -> tuple[str, str, str]:
-    return (
-        rf_dict["source"],
-        rf_dict["dominant_warning"],
-        json.dumps(rf_dict["observed_config"], sort_keys=True, default=str),
-    )
 
 
 def _merge_into_cumulative(
@@ -594,11 +586,11 @@ class Cycle:
             if extract_warning_types(r) and (q := r.get("query")):
                 self.warned_queries.add(q)
         existing_keys = {
-            _rf_dedup_key(rf.model_dump()) for rf in self.opt_sp.memory.wounds.runtime_failures
+            rf_dedup_key(rf.model_dump()) for rf in self.opt_sp.memory.wounds.runtime_failures
         }
         for cs in rr.candidate_scores:
             for rf in cs.runtime_failures:
-                k = _rf_dedup_key(rf.model_dump())
+                k = rf_dedup_key(rf.model_dump())
                 if k in existing_keys:
                     continue
                 existing_keys.add(k)

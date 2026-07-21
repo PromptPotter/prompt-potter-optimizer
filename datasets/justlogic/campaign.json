@@ -7,7 +7,6 @@
     "exclude_nodes": [],
     "pipeline_overrides": {},
     "dataset_split": {
-      "train": 400,
       "test": 1000
     },
     "optimization": {
