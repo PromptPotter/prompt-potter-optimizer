@@ -6,7 +6,7 @@ Every round carries one record forward — the *individual* (`OptSearchPoint`, o
 
 Two parameter namespaces co-exist on the record: **prompt fields** (persona / task intent / problem description / instruction / thinking style / answer format / few-shot examples / plan) and **pipeline parameters** (thresholds / model / temperature / retrieval budgets — anything the pipeline's nodes expose). Names can overlap; the namespaces are independent. L1 mutates both in one proposal; routing happens at individual-creation time.
 
-L1 writes prompt fields + operational memory each round. L2 (when it fires) writes any subset of: `task_context`, `l1_layout` (the L1 surface lever), `l1_overrides` (optimizer params), `action` (`normal_round` / `probe_round`), `axis_targeted`. L3 writes `plan`. Lineage is set at creation; never mutated.
+L1 writes prompt fields + operational memory each round. L2 (when it fires) writes any subset of: `l1_layout` (the L1 attention lever) and `l1_overrides` (optimizer params) — plus `axis_targeted`, which is prose naming its evidence anchor, not a lever. L2 does **not** write `task_context` (the operator's framing is frozen) and has no `action` field (probe rounds are not wired). L3 writes `plan`. Lineage is set at creation; never mutated.
 
 The record is the optimizer's working memory for two independent reasons:
 

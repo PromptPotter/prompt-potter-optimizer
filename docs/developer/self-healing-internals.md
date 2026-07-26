@@ -146,7 +146,7 @@ Fields on `OptSearchPoint.memory` (the `L2L3Memory` sub-model in `domain/opt_sea
 | `wounds.l3_guard_breaches` | per-round, set by L3 post-parse | L3 self-heal |
 | `wounds.l3_note` | sticky free-text; set by L3, survives every incumbent swap (L1 win + L2/L3 transition) via the `Cycle.adopt` seam's `copy_memory_to` | L3→L2 steer (not a failure record) |
 
-The L1 critique itself lives on `RoundResult.critique` (a dict, not on `L2L3Memory`); the dispatch hub's `critique` injection reads it from `cycle.latest_round.critique`. Per-round trajectory + cumulative warned-query subset (probe-round source) live on `Cycle` (`Cycle.rounds`, `Cycle.warned_queries`), not OSP.
+The L1 critique itself lives on `RoundResult.critique` (a dict, not on `L2L3Memory`); the dispatch hub's `critique` injection reads it from `cycle.latest_round.critique`. Per-round trajectory lives on `Cycle` (`Cycle.rounds`), not OSP.
 
 ## Mid-eval termination — what is and isn't healing
 

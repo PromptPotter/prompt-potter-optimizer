@@ -187,12 +187,9 @@ def persist_round(
     round_result: RoundResult,
     round_num: int,
     session: Session,
-    *,
-    is_probe: bool = False,
 ) -> None:
     """Flush decisions, mirror to ledger, write round_data + log.md/review.md, flush recorder.
-    ``is_probe`` rides the ``round:complete`` payload so ``EscalationFSM.fold`` can ignore probe
-    rounds; the emit is unconditional (every completed round lands on the ledger)."""
+    The emit is unconditional — every completed round lands on the ledger."""
     flushed: list[ResumeCheckpointRecord] = []
     if cycle.pending_decisions:
         flushed = list(cycle.pending_decisions)
@@ -215,7 +212,6 @@ def persist_round(
                     "composite_fitness": round_result.composite_fitness,
                     "improved": round_result.improved,
                     "label": round_result.label,
-                    "is_probe": is_probe,
                 },
             )
         )
@@ -250,8 +246,6 @@ async def close_round(
     round_num: int,
     session: Session,
     cb: RunCallbacks,
-    *,
-    is_probe: bool = False,
 ) -> None:
     """Round-completion bookkeeping every completed round runs.
     Emits ``round:display`` (via ``cb.on_round_complete``) + ``round:complete`` (via ``persist_round``),
@@ -267,23 +261,18 @@ async def close_round(
     1-indexed L1 trajectory that omits it), so it's prepended explicitly and the
     round-0 entry that ``replay_priors`` leaves in ``cycle.rounds`` is excluded to
     avoid double-counting. The round being closed is excluded too (L1's
-    ``absorb_round`` already appended it to ``cycle.rounds``).
-
-    Probe rounds get NO verdict: they rescore a warned-query subset, not the round's
-    scoring set, so a grade over that biased slice would be meaningless — and they
-    must not seed the track record either. ``health`` stays ``None`` on a probe."""
-    if not is_probe:
-        round_result.health = compute_round_health(
-            hits=round_result.hits,
-            total=round_result.total,
-            results=round_result.results,
-            prior_healths=assemble_prior_healths(cycle.origin_health, cycle.rounds, round_num),
-            is_origin=round_num == 0,
-        )
-        if round_num == 0:
-            cycle.origin_health = round_result.health
+    ``absorb_round`` already appended it to ``cycle.rounds``)."""
+    round_result.health = compute_round_health(
+        hits=round_result.hits,
+        total=round_result.total,
+        results=round_result.results,
+        prior_healths=assemble_prior_healths(cycle.origin_health, cycle.rounds, round_num),
+        is_origin=round_num == 0,
+    )
+    if round_num == 0:
+        cycle.origin_health = round_result.health
     cb.on_round_complete(round_result, cycle.escalation.l1_stall_count, cycle.escalation.lives)
-    persist_round(cycle, round_result, round_num, session, is_probe=is_probe)
+    persist_round(cycle, round_result, round_num, session)
     if cycle.axes and session.store:
         cycle.axes.refresh(
             session.store,

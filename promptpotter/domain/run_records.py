@@ -52,7 +52,6 @@ class ResumeCheckpointKind(enum.StrEnum):
     LEADER_LOCK_IN = "leader_lock_in"
     L2_ESCALATION_TRIGGER = "l2_escalation_trigger"
     L3_ESCALATION_TRIGGER = "l3_escalation_trigger"
-    PROBE_ROUND_COMMITMENT = "probe_round_commitment"
     FORK_CUT = "fork_cut"
 
 

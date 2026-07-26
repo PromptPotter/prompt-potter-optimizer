@@ -242,11 +242,18 @@ class L2RefineEnterView:
 
 @dataclass(frozen=True)
 class L2RefineExitView:
+    # The two surfaces L2 still writes (`escalation/firing.py::_l2_exit`), plus its prose.
+    # Three fields sat here that `_l2_exit` had stopped emitting, so each rendered its
+    # default forever: `task_context_changed` (the framing is frozen — L2 has no
+    # task_context field), `action` (probe rounds are not wired — no `action` on
+    # `L2ContextOutput`), and `warned_samples` (the warned-query inventory was deleted).
+    # Meanwhile `l1_layout_changed` and `axis_targeted` WERE emitted and shown nowhere —
+    # so the operator's L2 line reported a param count and stayed silent about the
+    # attention edit, which is the move L2 is for.
     param_changes_count: int
-    task_context_changed: bool
-    action: str
+    l1_layout_changed: bool
+    axis_targeted: str
     changes_description: str
-    warned_samples: int
     l2_prompt: str
     l2_response_json: Any | None
 

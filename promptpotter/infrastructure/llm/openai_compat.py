@@ -9,6 +9,9 @@ from pydantic import BaseModel, ValidationError
 
 from promptpotter.infrastructure.llm.base import LLMClientBase
 from promptpotter.infrastructure.llm.json_parse import (
+    MIN_CONTENT_CHARS,
+    RETRY_CLEAN_REASK,
+    RETRY_SCHEMA_REPAIR,
     MetaPromptParseError,
     parse_response_content,
     try_groq_json_validate_repair,
@@ -26,28 +29,50 @@ from promptpotter.shared import truncate
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
+    from openai.types.chat import ChatCompletion
 
 logger = logging.getLogger(__name__)
 
 
-def _failure_diagnostics(response: Any, first_prompt: int, first_completion: int) -> dict[str, Any]:
-    """Provider's own account of a parse failure, for ``MetaPromptParseError``.
+def _attempt_usage(response: ChatCompletion) -> tuple[int, int, int]:
+    """``(prompt_tokens, completion_tokens, reasoning_tokens)`` for ONE round-trip.
 
-    ``reasoning_tokens`` is the tell: a reasoning model can spend the whole
-    ``max_tokens`` budget thinking and emit zero content tokens, which is a
-    prompt-size problem, not a flaky provider. Both round-trips are metered —
-    the caller bills them, and a failed call is billed the same as a good one."""
+    Per-attempt on purpose. ``reasoning_tokens`` is the tell: a reasoning model can spend
+    its whole ``max_tokens`` budget thinking and emit zero content tokens, which is a
+    prompt-size problem, not a flaky provider — but only if you read it off the attempt
+    that actually failed."""
     usage = getattr(response, "usage", None)
     details = getattr(usage, "completion_tokens_details", None)
+    return (
+        usage.prompt_tokens if usage else 0,
+        usage.completion_tokens if usage else 0,
+        int(getattr(details, "reasoning_tokens", 0) or 0),
+    )
+
+
+def _finish_reason(response: ChatCompletion) -> str | None:
+    return response.choices[0].finish_reason if getattr(response, "choices", None) else None
+
+
+def _failure_diagnostics(
+    response: ChatCompletion, first_prompt: int, first_completion: int
+) -> dict[str, Any]:
+    """The SECOND attempt's account + the billed totals, for ``MetaPromptParseError``.
+
+    ``prompt_tokens`` / ``completion_tokens`` are deliberately sums across both
+    round-trips: they are the billing contract (``dispatch/llm_call/call.py`` meters spend
+    off them, and a failed call is billed the same as a good one). Everything else here
+    describes the retry only — the failing attempt's own account is passed separately by
+    the caller, which still has it in scope."""
+    _, completion, reasoning_tokens = _attempt_usage(response)
+    usage = getattr(response, "usage", None)
     message = response.choices[0].message if getattr(response, "choices", None) else None
     return {
         "model": getattr(response, "model", None),
-        "finish_reason": (
-            response.choices[0].finish_reason if getattr(response, "choices", None) else None
-        ),
+        "finish_reason": _finish_reason(response),
         "prompt_tokens": (usage.prompt_tokens if usage else 0) + first_prompt,
-        "completion_tokens": (usage.completion_tokens if usage else 0) + first_completion,
-        "reasoning_tokens": int(getattr(details, "reasoning_tokens", 0) or 0),
+        "completion_tokens": completion + first_completion,
+        "reasoning_tokens": reasoning_tokens,
         "reasoning_chars": len(getattr(message, "reasoning", None) or "" if message else ""),
     }
 
@@ -158,43 +183,79 @@ class OpenAICompatibleClient(LLMClientBase):
         first_prompt = 0
         first_completion = 0
         if validation_err is not None:
-            first_usage = response.usage
-            first_prompt = first_usage.prompt_tokens if first_usage else 0
-            first_completion = first_usage.completion_tokens if first_usage else 0
-            # Repair retry: full second round-trip with the bad output + hint
-            # appended. Logged so the ~2× cost + latency isn't silent.
+            # The FAILING attempt's own account. Captured here because `response` is about
+            # to be rebound to the retry's, and the retry cannot answer why this one was
+            # rejected — `finish_reason="length"` here is the difference between "the
+            # meta-prompt outgrew max_tokens" and "the provider degraded", which classify
+            # to opposite owners and opposite fixes (`MetaPromptParseError.is_empty`).
+            first_prompt, first_completion, first_reasoning = _attempt_usage(response)
+            first_finish_reason = _finish_reason(response)
             schema_name = response_model.__name__ if response_model else "<schema>"
             content_len = len(content.strip())
+
+            # RETRY STRATEGY — chosen from how the first attempt failed, because one
+            # strategy is actively harmful to the other failure mode.
+            #
+            # The schema-repair retry re-sends the original prompt PLUS the entire failed
+            # output PLUS the error text, then asks for the same answer again under an
+            # unchanged `max_tokens`. When the failure was that the answer did not FIT
+            # (truncated at the cap) or that nothing came back at all, that is the one
+            # thing guaranteed not to help: the request grows by the size of the failure
+            # while the budget stays put. Measured: three L1 zero-candidate rounds whose
+            # first attempts returned 27,939 / 32 / 28,778 chars had repairs come back at
+            # 18 / 0 / 0 — the retry was likelier to fail than the call it was repairing.
+            #
+            # So a size- or emptiness-driven failure gets a CLEAN RE-ASK: the identical
+            # request, once more. No optimizer node pins a seed and all run at temperature
+            # 0.3-0.5, so that is a second independent sample — which both stands a real
+            # chance of succeeding AND answers the question the classifier would otherwise
+            # have to guess at. Fails the same way twice ⇒ a property of the prompt. Fails
+            # differently, or succeeds ⇒ the moment, not the prompt (`.reproduced`).
+            #
+            # Genuine schema-noncompliance — substantial content that parsed but did not
+            # bind — keeps the repair: there, showing the model its own error is the
+            # informative move, and the output is small enough that re-sending it is cheap.
+            clean_reask = first_finish_reason == "length" or content_len < MIN_CONTENT_CHARS
+            retry_kind = RETRY_CLEAN_REASK if clean_reask else RETRY_SCHEMA_REPAIR
             cause = (
-                "provider returned empty/truncated content"
-                if content_len < 20
+                "truncated at max_tokens — the prompt asks for more than the budget carries"
+                if first_finish_reason == "length"
+                else "provider returned empty/truncated content"
+                if content_len < MIN_CONTENT_CHARS
                 else "response is schema-noncompliant"
             )
             logger.warning(
-                "%s: %s parse failed (%d errors, %d content chars) on %s — %s. "
-                "Repair retry in flight (second full call; cost + latency ~2x).",
+                "%s: %s parse failed (%d errors, %d content chars, finish=%s) on %s — %s. "
+                "Retrying via %s (second full call; cost + latency ~2x).",
                 self._provider_name,
                 schema_name,
                 validation_err.error_count(),
                 content_len,
+                first_finish_reason,
                 request_params.get("model", "?"),
                 cause,
+                retry_kind,
             )
-            repair_messages = [
-                *request_params["messages"],
-                {"role": "assistant", "content": content},
-                {
-                    "role": "user",
-                    "content": (
-                        "Your previous response failed schema validation. Errors:\n"
-                        f"{truncate(str(validation_err), 600)}\n\n"
-                        "Return ONLY a JSON object that strictly matches the "
-                        "requested schema. No prose, no markdown fences, no "
-                        "extra fields."
-                    ),
-                },
-            ]
-            retry_params = {**request_params, "messages": repair_messages}
+            if clean_reask:
+                retry_params = dict(request_params)
+            else:
+                retry_params = {
+                    **request_params,
+                    "messages": [
+                        *request_params["messages"],
+                        {"role": "assistant", "content": content},
+                        {
+                            "role": "user",
+                            "content": (
+                                "Your previous response failed schema validation. Errors:\n"
+                                f"{truncate(str(validation_err), 600)}\n\n"
+                                "Return ONLY a JSON object that strictly matches the "
+                                "requested schema. No prose, no markdown fences, no "
+                                "extra fields."
+                            ),
+                        },
+                    ],
+                }
             result = await self._one_attempt(client, retry_params, response_model, response_schema)
             schema_repair_attempts = 1
             if isinstance(result, LLMResponse):
@@ -213,26 +274,34 @@ class OpenAICompatibleClient(LLMClientBase):
                 return result
             response, content, validation_err, parsed = result
             if validation_err is not None:
-                content_len = len(content.strip())
-                cause = (
-                    "provider degraded — empty/truncated response after repair retry"
-                    if content_len < 20
-                    else "schema-noncompliant after repair retry"
-                )
                 err = MetaPromptParseError(
                     raw=content,
                     error=validation_err,
                     attempts=2,
+                    first_finish_reason=first_finish_reason,
+                    first_content_chars=content_len,
+                    first_completion_tokens=first_completion,
+                    first_reasoning_tokens=first_reasoning,
+                    retry_kind=retry_kind,
                     **_failure_diagnostics(response, first_prompt, first_completion),
                 )
+                # The cause names the FIRST attempt's failure — the repair's own emptiness
+                # is downstream of it and is already in `diagnosis()`.
+                #
+                # This layer does NOT say what the caller will do about it. It used to end
+                # "Round will record the failure and continue with zero candidates", which
+                # is true only for `l1_generate`: an `l1_critique` failure is swallowed by
+                # `graceful(...)` and an L2/L3 one never touches candidates at all. Of the
+                # ten such lines on disk, seven came from `l1_critique` — so the logs
+                # reported ~10 zero-candidate rounds where the loop had 3, and the model
+                # swap that fixed the real ones looked like it had not worked.
                 logger.error(
                     "%s: %s parse failed AGAIN after repair retry (%d errors, "
-                    "%d content chars) — %s. Round will record the failure and "
-                    "continue with zero candidates. [%s]",
+                    "%d content chars on the repair) — %s. Raising to the caller. [%s]",
                     self._provider_name,
                     schema_name,
                     validation_err.error_count(),
-                    content_len,
+                    len(content.strip()),
                     cause,
                     err.diagnosis(),
                 )

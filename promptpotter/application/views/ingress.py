@@ -297,10 +297,9 @@ def _refine_enter(d: dict[str, Any], ctx: ViewContext) -> L2RefineEnterView:
 def _refine_exit(d: dict[str, Any], ctx: ViewContext) -> L2RefineExitView:
     return L2RefineExitView(
         param_changes_count=d.get("param_changes_count", 0),
-        task_context_changed=bool(d.get("task_context_changed", False)),
-        action=d.get("action", "continue"),
+        l1_layout_changed=bool(d.get("l1_layout_changed", False)),
+        axis_targeted=d.get("axis_targeted", ""),
         changes_description=d.get("changes_description", ""),
-        warned_samples=d.get("warned_samples", 0),
         l2_prompt=d["l2_prompt"],
         l2_response_json=d.get("l2_response"),
     )

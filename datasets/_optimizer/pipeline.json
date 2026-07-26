@@ -374,8 +374,6 @@
     },
     "l2_context/1": {
       "fields": [
-        "task_context",
-        "action",
         "axis_targeted",
         "l1_layout",
         "l1_overrides",
@@ -422,22 +420,8 @@
             }
           },
           "additionalProperties": false,
-          "description": "L2 refinement. All fields optional — the LLM sets only what it\nwants to change.\n\n``task_context`` is a free-form refinement dict (keys: domain,\npipeline_purpose, data_characteristics, optimization_goals,\nkey_challenges) — left as ``dict[str, Any]`` because the cycle's\n:class:`TaskDecomposition` owns the precise key set and merges via\n:meth:`TaskDecomposition.merge`. ``l1_layout`` is a similarly\nflexible ``{slot: [placeholder, ...]}`` map validated downstream by\n:func:`validate_l1_layout`.",
+          "description": "L2 refinement. All fields optional — the LLM sets only what it\nwants to change.\n\nThere is deliberately **no ``task_context``**: the framing fields are operator-authored\nand frozen for the run (``TaskDecomposition.FRAMING_FIELDS``). L2 steers by choosing\nwhat L1 *looks at* (``l1_layout``) and how hard it explores (``l1_overrides``) — never\nby rewriting what the operator wrote about the task. ``l1_layout`` is a flexible\n``{slot: [placeholder, ...]}`` map validated downstream by :func:`validate_l1_layout`.\n\nThere is also no ``action``: L2 cannot request a probe round. See\n``optimization/CLAUDE.md`` § *Probe rounds — deferred* for what a probe round is meant\nto be and why the lever is not wired.",
           "properties": {
-            "task_context": {
-              "additionalProperties": true,
-              "title": "Task Context",
-              "type": "object"
-            },
-            "action": {
-              "default": "normal_round",
-              "enum": [
-                "normal_round",
-                "probe_round"
-              ],
-              "title": "Action",
-              "type": "string"
-            },
             "axis_targeted": {
               "default": "",
               "title": "Axis Targeted",
@@ -606,7 +590,7 @@
           "$defs": {
             "CheckinTaskContext": {
               "additionalProperties": false,
-              "description": "Domain-context sub-object inside the checkin output.\n\nEvery field renders into the ``task_context`` panel of EVERY optimizer prompt and is\nhard-capped per field (``TASK_CONTEXT_VALUE_CAP``): a field authored past it is silently\ntruncated on every render, losing its tail. So each is ONE tight sentence, never a\nparagraph — the descriptions below say so, and terse framing also keeps the prompt short\nenough that the reasoning model does not over-reason.",
+              "description": "Domain-context sub-object inside the checkin output.\n\nEvery field renders into the ``task_context`` panel of EVERY optimizer prompt, VERBATIM —\nnothing truncates it, and nothing in the loop rewrites it afterwards. It is frozen for the\nrun, so what is written here is what every optimizer call reads on every round.\n\nEach is ONE tight sentence, never a paragraph. That is a real budget, not a style note:\nit is checked once at mint (``TaskDecomposition.check_budget``, ``FRAMING_VALUE_BUDGET``)\nand an over-budget field REFUSES the campaign rather than being clipped. Terse framing also\nkeeps the prompt short enough that the reasoning model does not over-reason. Detail that\ndoes not fit belongs in ``task_description.md``, which is preserved whole and unbudgeted.",
               "properties": {
                 "domain": {
                   "default": "",
@@ -821,11 +805,11 @@
     },
     "l2_context/1": {
       "persona": "You are L2, the framing layer. You refine task_context — the 5-field steering dict every layer (L1, L1_CRITIQUE, L2, L3) reads next round. You do not author candidate prompts.",
-      "task_intent": "Nudge task_context so L1's next round mutates a real failure cluster. Optionally restructure L1's layout. A no-op task_context (paraphrase only) is rejected as verbatim-repeat and escalates to L3.",
+      "task_intent": "Decide what L1 LOOKS AT next round and how hard it explores. You do not write the task framing — it is operator-authored and frozen. Your levers are l1_layout and l1_overrides.",
       "problem_description": "",
-      "instruction": "PRIMARY: refine task_context — emit ONLY the fields you change this fire; the merge retains the rest, so re-emitting an unchanged framing field verbatim is a stale-repeat no-op. Always advance key_challenges; touch a framing field (domain, pipeline_purpose, data_characteristics, optimization_goals) only when a data point actually shifts it. Each change is nudged from one data point (a paraphrase-only change is a no-op and escalates to L3).\n  domain, pipeline_purpose, data_characteristics, optimization_goals — 1-2 sentences each, framing only; write tight.\n  key_challenges — the chain-bind, three parts; NEVER write the bare axis word as any part: (a) the failure cluster from critique described as a failure MODE in words (not the axis name), (b) the literal phrase \"targeting L1 axis '<axis_name>'\", (c) the concrete change. If critique.failure_highlights is empty, name the cluster from the sample diagnostics rather than echoing the axis. That phrase appears HERE ONLY.\n\nAfter an improving round, reinforce — tighten key_challenges around the cluster the last winner converted so L1 presses the same direction; do not reframe. When the dominant cluster is unchanged from your prior fire, advance key_challenges to the next-ranked cluster in critique.failure_highlights instead of repeating it (a repeat merges to a no-op and escalates to L3).\n\nAXIS PICK: a semantic failure (wrong reasoning, missed case, refusal) routes to a prompt-field axis; a quantitative failure with a runtime_failures signature routes to a param axis. Before writing, scan CURRENT PROMPT — if your change is already there, switch axis or write it STRICTER.\n\nOPTIONAL (skip unless the evidence warrants it): l1_layout (default omit); action=probe_round for one narrow failure with a named axis hypothesis; l1_overrides (rare; creativity/n_variants only).\n\nL3 NOTE (if present): a sticky pointer — honor it unless the data contradicts it.",
-      "thinking_style": "Before writing task_context, name the one failure cluster you are attacking (from critique.failure_highlights) and the L1 axis you will route it to. Before adding any optional rule or example, name the panel evidence showing the auto-triggers do not already cover it — if you cannot, skip it.",
-      "answer_format": "Return JSON; set only what you change.\n{\n  \"task_context\": {\"domain\": ..., \"pipeline_purpose\": ..., \"data_characteristics\": ..., \"optimization_goals\": ..., \"key_challenges\": ...},   // each value AT MOST 2 sentences — the render hard-caps each field and cuts the rest mid-sentence, so a 3rd sentence never reaches the LLM\n  \"l1_layout\": {\"<slot>\": [\"<placeholder>\", ...]},   // if set, all 5 mandatory placeholders must appear\n  \"l1_overrides\": {...},\n  \"action\": \"normal_round\" | \"probe_round\",\n  \"axis_targeted\": \"<short>\",   // required only when probe_round\n  \"rationale\": \"1-2 sentences\"\n}\nL1 owns pipeline_params — your output is framing plus optional layout, never candidate values."
+      "instruction": "PRIMARY: pull ONE lever below, grounded in a named data point — or pull none and say why. An L2 fire that changes nothing L1 reads is a wasted escalation and is scored as one (l2_targets_l1_surface).\n  l1_layout — change WHICH panels L1 sees, when a panel is empty, redundant, or crowding out the evidence the failures actually need. If set, all 5 mandatory placeholders must still appear.\n  l1_overrides — rare; creativity / n_variants only, when the stall is breadth-shaped rather than direction-shaped.\n\nAXIS PICK: a semantic failure (wrong reasoning, missed case, refusal) routes to a prompt-field axis; a quantitative failure with a runtime_failures signature routes to a param axis. Name it in axis_targeted.\n\nTHE FRAMING IS READ-ONLY. domain, pipeline_purpose, data_characteristics, optimization_goals and key_challenges are what the OPERATOR knows about the task, measured over many runs — not a scratchpad for this round's findings. They are frozen and the schema has no field for them. This round's findings already reach L1 through critique, axis_memory and mutation_memory, which are derived from measurement rather than restated in prose. Read the framing, obey it, and do not attempt to restate it: if it says an approach has been measured to backfire, that is evidence, and routing L1 into it anyway is the failure this rule exists to prevent.\n\n{{rebase_capability}}\n\n{{terminate_capability}}\n\nL3 NOTE (if present): a sticky pointer — honor it unless the data contradicts it.",
+      "thinking_style": "Name the one failure cluster you are attacking (from critique.failure_highlights) and the L1 axis you will route it to. Then ask which lever actually moves it: a different panel set or wider exploration. If none does, pull none and say so — a fire that touches nothing is honest; a fire that touches something arbitrary is noise.",
+      "answer_format": "Return JSON; set only what you change.\n{\n  \"l1_layout\": {\"<slot>\": [\"<placeholder>\", ...]},   // if set, all 5 mandatory placeholders must appear\n  \"l1_overrides\": {...},\n  \"axis_targeted\": \"<short>\",   // the axis you routed the cluster to\n  \"rationale\": \"1-2 sentences\"\n}\nThere is no task_context field — the framing is frozen and the schema rejects it. L1 owns pipeline_params; your output is attention and exploration, never candidate values."
     },
     "l3_plan/1": {
       "persona": "You are an expert optimization strategist.",

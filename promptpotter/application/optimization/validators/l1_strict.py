@@ -258,8 +258,13 @@ def build_l1_response_schema(
     # the catalogue + validator share. It omits model/provider entirely (the LLM
     # cannot emit a key the schema doesn't declare, so the lock needs no per-round
     # rejection).
+    # No `model` branch here, deliberately. `node_param_keys()` has already stripped
+    # model/provider via PARAM_FORBIDDEN_KEYS, so `keys` cannot contain them and a
+    # `if param == "model": <emit available_models enum>` arm is unreachable. One stood
+    # here anyway, which is worse than useless: it read as though the campaign's model
+    # catalogue were an emittable axis, contradicting the lock the line above states.
+    # The lock is structural — the LLM cannot emit a key the schema never declares.
     npk = pipeline_schema.node_param_keys()
-    available_models = list(pipeline_schema.available_models)
     for node_name, keys in npk.items():
         node = pipeline_schema.get_node(node_name)
         if node is None:
@@ -271,9 +276,6 @@ def build_l1_response_schema(
         nested = {p for p in keys if node.param_types.get(p) in NESTED_PARAM_TYPES}
         param_props: dict[str, dict[str, Any]] = {}
         for param in sorted(keys - nested):
-            if param == "model" and available_models:
-                param_props[param] = {"type": "string", "enum": available_models}
-                continue
             allowed = node.param_allowed_values.get(param)
             declared_type = node.param_types.get(param)
             if allowed:

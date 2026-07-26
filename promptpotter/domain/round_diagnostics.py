@@ -56,16 +56,6 @@ class SampleDiag:
 
 
 @dataclass(frozen=True)
-class ProbeOutcome:
-    """Result of a probe round (warned-query subset re-run)."""
-
-    axis_tested: str
-    target_subset_size: int
-    hit_rate: float
-    delta_vs_full: float
-
-
-@dataclass(frozen=True)
 class RoundDiagnostics:
     """Post-scoring deterministics computed once per round.
 
@@ -100,14 +90,10 @@ class RoundDiagnostics:
     # Per-sample (used by L2 for tactical reasoning over actionable misses)
     samples: list[SampleDiag] = field(default_factory=list)
 
-    # Probe-round footprint (when last round was a probe; else None)
-    probe_outcome: ProbeOutcome | None = None
-
 
 __all__ = [
     "EvolutionRow",
     "NearMiss",
-    "ProbeOutcome",
     "RoundDiagnostics",
     "SampleDiag",
     "TrajectoryClass",

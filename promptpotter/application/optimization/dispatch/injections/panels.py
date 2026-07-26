@@ -204,12 +204,6 @@ def _r_diagnostics(b: InjectionBundle) -> str:
     if d.l1_diversity != 1.0:
         parts.append(f"POPULATION: diversity={d.l1_diversity:.2f}")
 
-    if (po := d.probe_outcome) is not None:
-        parts.append(
-            f"PROBE OUTCOME: axis={po.axis_tested} subset={po.target_subset_size} "
-            f"hit_rate={po.hit_rate:.0%} delta={po.delta_vs_full:+.1%}"
-        )
-
     # TRAJECTORY + EVOLUTION last (least actionable: historical narrative, first to be tail-cut).
     # Skipped at R1 — "too few rounds to classify" is dead weight.
     if len(d.evolution_rows) > 1:

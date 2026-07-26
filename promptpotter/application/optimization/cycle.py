@@ -19,14 +19,10 @@ from typing import TYPE_CHECKING, Any, cast
 # state type Cycle holds; importing it via escalation/__init__ would load the
 # firing driver, which depends back on Cycle → import cycle. See escalation/__init__.
 from promptpotter.application.optimization.escalation.state import EscalationFSM
-from promptpotter.application.optimization.pobb.classification import (
-    extract_warning_types,
-)
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.escalation_signals import rf_dedup_key
 from promptpotter.domain.opt_search_point import OptSearchPoint, node_config_items
-from promptpotter.domain.rendering import display_fitness
 from promptpotter.domain.results import (
     CritiqueReadout,
     DegradationHealth,
@@ -43,7 +39,6 @@ if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.results import CalibrationModel
-    from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement, RoundScorer
     from promptpotter.domain.search_point import TaskDecomposition
 
@@ -292,10 +287,6 @@ class Cycle:
     origin_critique: CritiqueReadout | None = None
     tracking: CycleRoundState = field(default_factory=CycleRoundState)
     opt_sp: OptSearchPoint = field(default_factory=OptSearchPoint)
-    # L2 inter-round bridge: probe_next_round set on action="probe_round" (consumed next round); last_l2_axis labels the probe.
-    probe_next_round: bool = False
-    last_l2_axis: str = ""
-    warned_queries: set[str] = field(default_factory=set)
     axes: AxisIndex | None = None
     # Earned prompt-block library for this cycle's task shape — `{field: (block, ...)}` of short
     # reusable field values that earned credible lift on a run with the SAME answer-space
@@ -463,9 +454,6 @@ class Cycle:
             else:
                 self.rounds.append(rr)
                 l1_rounds.append(rr)
-            for r in rr.results:
-                if extract_warning_types(r) and (q := r.get("query")):
-                    self.warned_queries.add(q)
         if not l1_rounds:
             # Resumed right after origin — no L1 trajectory to replay; the origin
             # floor was already seeded by Cycle.start (its verdict captured above).
@@ -581,10 +569,6 @@ class Cycle:
         schema = self.session.pipeline_schema
         tr = self.tracking
 
-        all_results: list[Any] = [r for rs in rr.all_candidate_results.values() for r in rs]
-        for r in all_results:
-            if extract_warning_types(r) and (q := r.get("query")):
-                self.warned_queries.add(q)
         existing_keys = {
             rf_dedup_key(rf.model_dump()) for rf in self.opt_sp.memory.wounds.runtime_failures
         }
@@ -633,31 +617,13 @@ class Cycle:
         rr.opt_search_point = self.opt_sp
         return rr
 
-    def parent_for_round(self, scoring_set: list[Sample], round_num: int) -> RoundParent:
-        """Build the round's parent; on probe rounds, rescore over the probe subset."""
-        schema = self.session.pipeline_schema
+    def parent_for_round(self, round_num: int) -> RoundParent:
+        """Build the round's parent — the current best, carried as-is."""
         tr = self.tracking
-        accuracy = tr.current_accuracy
-        composite_fitness = tr.current_composite_fitness
-        results: list[dict[str, Any]] = list(tr.current_results)
-        if self.probe_next_round and tr.current_results and schema is not None:
-            probe_queries = {s.query for s in scoring_set}
-            subset = [r for r in tr.current_results if r.get("query") in probe_queries]
-            if subset:
-                subset_scores = compute_composite_fitness(
-                    cast("list[QueryMeasurement]", subset),
-                    schema,
-                    round_scorer=self.session.scoring.round_scorer,
-                )
-                accuracy = subset_scores["accuracy"]
-                composite_fitness = display_fitness(
-                    subset_scores.get("composite_fitness"), accuracy
-                )
-                results = subset
         return RoundParent(
-            accuracy=accuracy,
-            composite_fitness=composite_fitness,
+            accuracy=tr.current_accuracy,
+            composite_fitness=tr.current_composite_fitness,
             osp=self.opt_sp,
-            results=results,
+            results=list(tr.current_results),
             label=f"round_{round_num}" if round_num > 0 else "origin",
         )

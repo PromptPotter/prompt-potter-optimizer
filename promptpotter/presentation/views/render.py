@@ -260,15 +260,14 @@ def _render_l2_refine_enter(v: L2RefineEnterView) -> str:
 
 
 def _render_l2_refine_exit(v: L2RefineExitView) -> str:
-    tc = f", {GREEN}task_context updated{RESET}" if v.task_context_changed else ""
-    probe = f", {CYAN}action={v.action}{RESET}" if v.action != "continue" else ""
-    out = [f"  {GREEN}✓{RESET} L2 decision: {v.param_changes_count} param changes{tc}{probe}"]
+    # The two L1 surfaces an L2 fire can touch — the same pair `l2_targets_l1_surface`
+    # scores it on, so what the operator reads matches what the validator judges. A fire
+    # showing neither is the wasted escalation that check exists to catch.
+    layout = f", {GREEN}l1_layout edited{RESET}" if v.l1_layout_changed else ""
+    axis = f", {CYAN}axis={v.axis_targeted}{RESET}" if v.axis_targeted else ""
+    out = [f"  {GREEN}✓{RESET} L2 decision: {v.param_changes_count} param changes{layout}{axis}"]
     if v.changes_description:
         out.append(f"    {v.changes_description}")
-    if v.warned_samples:
-        out.append(
-            f"    {YELLOW}⚠ {v.warned_samples} samples with recurring pipeline warnings{RESET}"
-        )
 
     if v.l2_prompt:
         out.append(f"\n  {CYAN}--- L2 PROMPT (sent to LLM) ---{RESET}")

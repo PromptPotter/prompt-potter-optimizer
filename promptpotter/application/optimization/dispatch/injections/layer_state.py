@@ -1,5 +1,5 @@
 """Narrative-state renderers — persistent state from prior LLM calls
-(L3 plan, L2 task_context + L3→L2 note, current prompt, L1 critique).
+(L3 plan, L3→L2 note, current prompt, L1 critique) plus the operator's frozen task framing.
 """
 
 from __future__ import annotations
@@ -8,14 +8,12 @@ import json
 import logging
 
 from promptpotter.application.optimization.dispatch.bundle import (
-    TASK_CONTEXT_VALUE_CAP,
     InjectionBundle,
     InjectionKind,
     signal,
 )
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM
 from promptpotter.domain.rendering import format_l1_critique_for_prompt
-from promptpotter.infrastructure.llm.models import emit_round_warning
 
 logger = logging.getLogger(__name__)
 
@@ -87,11 +85,24 @@ def _r_l1_overrides(b: InjectionBundle) -> str:
 @signal(
     "task_context",
     kind=InjectionKind.TRACE,
-    description="Persistent task framing dict refined by L2; broadcast to all four prompts.",
-    char_cap=None,  # _r_task_context caps each field at TASK_CONTEXT_VALUE_CAP
+    description="Operator-authored task framing, frozen for the run; broadcast to all four prompts.",
+    char_cap=None,  # verbatim BY CONTRACT — see below
     citable=True,  # the CHAIN-BIND rule requires citing it
 )
 def _r_task_context(b: InjectionBundle) -> str:
+    """The operator's framing, rendered VERBATIM — this panel never truncates.
+
+    It used to clip each field at 300 chars and log a warning. That silently amputated the
+    operator's own knowledge on ~95% of renders (244 of the 258 states `key_challenges` ever
+    held were over the cap), and what it cut was the tail — where a careful author puts the
+    conclusion. On `justlogic-d234` the severed tail said anti-hedging instructions have been
+    MEASURED to backfire, so L1 re-proposed exactly that, every round, for 248 rounds.
+
+    A renderer cannot know which half of an authored sentence matters, so it no longer
+    guesses: the budget is enforced where the text is written
+    (`TaskDecomposition.check_budget`, at mint), and by then a human can actually fix it. Truncation stays legitimate for the
+    DERIVED panels, which rank their rows and say what they dropped.
+    """
     tc = b.opt_sp.memory.task_context
     if not tc:
         return ""
@@ -99,35 +110,7 @@ def _r_task_context(b: InjectionBundle) -> str:
     pairs = [(k, v) for k, v in tc.to_dict().items() if v and k not in skip]
     if not pairs:
         return ""
-    lines: list[str] = []
-    truncated: list[str] = []
-    for k, v in pairs:
-        if len(v) > TASK_CONTEXT_VALUE_CAP:
-            truncated.append(f"{k}({len(v)}→{TASK_CONTEXT_VALUE_CAP})")
-            v = v[: TASK_CONTEXT_VALUE_CAP - 1].rsplit(" ", 1)[0] + "…"
-        lines.append(f"  {k}: {v}")
-    if truncated:
-        # L2-authored overrun — heal (truncate) but leave a DISK trace too, not just a log
-        # line: silently dropping L2's framing violates "material facts land on disk".
-        logger.warning(
-            "task_context field(s) over the %d-char cap — truncating: %s",
-            TASK_CONTEXT_VALUE_CAP,
-            ", ".join(truncated),
-        )
-        emit_round_warning(
-            kind="injection_budget_overrun",
-            severity="warning",
-            message=(
-                f"L2-authored task_context field(s) exceeded the {TASK_CONTEXT_VALUE_CAP}-char "
-                f"cap and were truncated: {', '.join(truncated)} — some framing didn't reach the LLM."
-            ),
-            detail={
-                "injection": "task_context",
-                "cap": TASK_CONTEXT_VALUE_CAP,
-                "fields": truncated,
-            },
-        )
-    return "TASK CONTEXT:\n" + "\n".join(lines)
+    return "TASK CONTEXT:\n" + "\n".join(f"  {k}: {v}" for k, v in pairs)
 
 
 @signal(

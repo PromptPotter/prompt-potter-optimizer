@@ -126,31 +126,26 @@ async def l1_score(
     # The parent floor, scored on the SAME samples the candidates ran. PoBB already
     # backfilled the parent (seed) onto every sample a candidate touched, so re-scoring
     # it over the touched union is all cache hits — a real matched floor at no added
-    # spend, and nothing wasted on subset samples no candidate reached. Probe rounds keep
-    # their cumulative re-scope (the parent already measured the warned-query set).
-    if cycle.probe_next_round:
-        parent_scoring_set = dataset
-        parent = cycle.parent_for_round(dataset, round_num)
-    else:
-        scored_sids = {
-            r["sample_id"]
-            for results in all_candidate_results.values()
-            for r in results
-            if r.get("sample_id") is not None
-        }
-        touched = [s for s in dataset if int(s.id) in scored_sids]
-        parent_scoring_set = touched or dataset
-        parent = await rescore_parent(cycle, parent_scoring_set, round_num, callbacks=callbacks)
+    # spend, and nothing wasted on subset samples no candidate reached.
+    scored_sids = {
+        r["sample_id"]
+        for results in all_candidate_results.values()
+        for r in results
+        if r.get("sample_id") is not None
+    }
+    touched = [s for s in dataset if int(s.id) in scored_sids]
+    parent_scoring_set = touched or dataset
+    parent = await rescore_parent(cycle, parent_scoring_set, round_num, callbacks=callbacks)
     # Opt-in replication of the PARENT reference — the shared comparison anchor for the
     # θ election + paired diff, so its single-draw noise floods every candidate's comparison
     # (correlated across arms — the 0.808 the variance read found). Give it `rep_k` extra
     # force_fresh draws too, but thread them ONLY into the decision estimators
     # (`parent_election_results`); the base single draw stays the matched DISPLAY floor so
-    # its cell count stays honest. Probe rounds keep their own re-scope (not replicated).
+    # its cell count stays honest.
     parent_election_results: list[QueryMeasurement] = list(
         cast("list[QueryMeasurement]", parent.results)
     )
-    if rep_k > 0 and not cycle.probe_next_round:
+    if rep_k > 0:
         for _ in range(rep_k):
             extra = await rescore_parent(
                 cycle, parent_scoring_set, round_num, callbacks=callbacks, force_fresh=True

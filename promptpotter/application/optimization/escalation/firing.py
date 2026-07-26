@@ -1,7 +1,8 @@
 """L2/L3 transition runner + `escalate_l2` cascade + per-layer parse/apply.
 
 V1 contract:
-* L2 writes `task_context` + `action` + optional `axis_targeted` / `l1_layout` / `l1_overrides`.
+* L2 writes optional `axis_targeted` / `l1_layout` / `l1_overrides`. It does NOT
+  write `task_context`: the framing is operator-authored and frozen (`FRAMING_FIELDS`).
 * L3 writes `plan` (required) + optional `note` (sticky L3→L2; wholesale-replaced on each L3 fire).
 
 `TransitionResult` (one fire's output) + `LayerStrategy` (static per-layer spec) are
@@ -31,17 +32,12 @@ from promptpotter.application.optimization.dispatch.schemas import (
     ForkProposal,
     L2ContextOutput,
     L3PlanOutput,
-    OptimizerAction,
     TerminateProposal,
 )
 from promptpotter.application.optimization.escalation.state import NextAction
 from promptpotter.application.optimization.resume_and_fork.decisions import (
     ResumeCheckpointKind,
     record_decision,
-)
-from promptpotter.application.optimization.validators.l2_output import (
-    L2_TASK_CONTEXT_STALE_REPEAT,
-    run_l2_output_validators,
 )
 from promptpotter.application.optimization.validators.l3_output import run_l3_output_validators
 from promptpotter.domain.l1_layout import (
@@ -58,7 +54,6 @@ from promptpotter.domain.run_records import (
     ForkTrigger,
     RebaseRequest,
 )
-from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.infrastructure.llm.json_parse import MetaPromptParseError
 from promptpotter.infrastructure.llm.models import emit_round_warning
@@ -76,20 +71,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# L2-output validator breaches whose remedy is ALREADY applied by the validator itself
-# (the malformed output is discarded/dropped before it can reach L1), so a SOLE breach of
-# this kind is self-correcting and must NOT force-trigger an L3 strategic replan — forcing
-# L3 on an inert output just layers escalations (the fork_f13331ff cascade: L3 short plan →
-# L1 malformed plan → empty L1). Breaches OUTSIDE this set (e.g. l2_duplicate_insert — the
-# genuine exhausted-refinement-surface signal) still force L3. Kept next to the consumer that
-# reads it; built from the validator ``.id`` attributes so a mistyped id fails loud at import.
-_L2_SOFT_REJECT_VALIDATOR_IDS: frozenset[str] = frozenset(
-    {
-        L2_TASK_CONTEXT_STALE_REPEAT.id,  # no-op / paraphrase merge — prior framing kept
-    }
-)
-
-
 # ---------------------------------------------------------------------------
 # Transition types — one L2/L3 fire's output + the static per-layer spec this
 # module fills. Provider/model/temperature are sourced from the layer's
@@ -102,21 +83,17 @@ _L2_SOFT_REJECT_VALIDATOR_IDS: frozenset[str] = frozenset(
 class TransitionResult:
     """L2/L3 transition result.
 
-    L2 writes ``task_context``/``l1_layout``/``l1_overrides`` + ``action``
-    (``normal_round`` default | ``probe_round`` for warned-query re-run on
-    the same OSP). L3 writes ``plan``, optional ``l3_note`` (sticky until
-    next L3 fire). Both layers may emit ``fork_proposal`` — the
-    ``_run_transition`` post-apply hook stashes it on ``cycle.rebase_request``
-    and raises ``StopLoop(StopReason.REBASED)``; ``runner.entry`` resolves
-    the request post-finalize into an automatic ``_mint_fork`` +
-    observer rebuild + loop re-entry on the new fork. ``axis_targeted``
-    is required prose when ``action='probe_round'``.
+    L2 writes ``l1_layout``/``l1_overrides`` + ``axis_targeted`` (prose naming the axis
+    it routed the failure cluster to — its evidence anchor, not a lever). L3 writes
+    ``plan``, optional ``l3_note`` (sticky until next L3 fire). Both layers may emit
+    ``fork_proposal`` — the ``_run_transition`` post-apply hook stashes it on
+    ``cycle.rebase_request`` and raises ``StopLoop(StopReason.REBASED)``;
+    ``runner.entry`` resolves the request post-finalize into an automatic
+    ``_mint_fork`` + observer rebuild + loop re-entry on the new fork.
     """
 
     opt_search_point: OptSearchPoint
-    task_context: TaskDecomposition | None = None
     l3_note: str = ""
-    action: OptimizerAction = "normal_round"
     axis_targeted: str = ""
     l1_layout: L1Layout | None = None
     l2_guard_breaches: list[ValidatorOutcome] = field(default_factory=list)
@@ -153,7 +130,8 @@ class LayerStrategy:
 
 # ---------------------------------------------------------------------------
 # L2 — parse + apply + enter/exit payloads + strategy constant.
-# L2 refines task_context (broadcast framing) + optionally edits l1_layout / l1_overrides.
+# L2 steers what L1 LOOKS AT (l1_layout) and how hard it explores (l1_overrides).
+# It does not rewrite the operator's framing — see domain/search_point.py::FRAMING_FIELDS.
 # No pipeline_params deltas — those belong to L1.
 # ---------------------------------------------------------------------------
 
@@ -163,11 +141,6 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, prompt: str) -> Tran
     changes: dict[str, Any] = {"changes_description": f"L2: {truncate(rationale, 80)}"}
     if raw.l1_overrides:
         changes["l1_overrides"] = {**opt_sp.memory.l1_overrides, **raw.l1_overrides}
-
-    new_task_context = None
-    proposed_tc = raw.task_context if raw.task_context else None
-    if proposed_tc and not opt_sp.memory.task_context.merge_changes_nothing(proposed_tc):
-        new_task_context = opt_sp.memory.task_context.merge(proposed_tc)
 
     proposed_layout = coerce_l1_layout(raw.l1_layout)
     layout_outcomes: list[ValidatorOutcome] = []
@@ -182,14 +155,7 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, prompt: str) -> Tran
         if layout_result.is_valid:
             accepted_layout = proposed_layout
 
-    failures = run_l2_output_validators(
-        {
-            "task_context_proposed": proposed_tc,
-            "task_context_applied": new_task_context,
-        },
-        opt_sp,
-    )
-    failures.extend(layout_outcomes)
+    failures = list(layout_outcomes)
     if failures:
         failed_ids = ", ".join(o.validator_id for o in failures)
         logger.warning(
@@ -197,20 +163,9 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, prompt: str) -> Tran
             len(failures),
             failed_ids,
         )
-        emit_round_warning(
-            kind="l2_validator_soft_reject",
-            severity="warning",
-            message=(
-                f"L2 framing update soft-rejected by {len(failures)} check(s) "
-                f"({failed_ids}) — the prior task_context was kept and L1 continues."
-            ),
-            detail={"validator_ids": [o.validator_id for o in failures]},
-        )
 
     return TransitionResult(
         opt_search_point=opt_sp.mutate(source="l2_context", **changes),
-        task_context=new_task_context,
-        action=raw.action,
         axis_targeted=raw.axis_targeted,
         l1_layout=accepted_layout,
         l2_guard_breaches=failures,
@@ -223,8 +178,6 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, prompt: str) -> Tran
 
 def _apply_l2(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
     osp = cycle.opt_sp
-    if result.task_context:
-        osp.memory.task_context = result.task_context
     if result.l1_layout is not None:
         osp.memory.l1_layout = result.l1_layout
     osp.memory.wounds.l2_guard_breaches = list(result.l2_guard_breaches)
@@ -232,26 +185,6 @@ def _apply_l2(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
         best_composite_fitness=cycle.tracking.best_composite_fitness,
         best_theta=cycle.tracking.best_theta,
     )
-    # Don't clobber prior axis when LLM omits it — stale axis beats empty for the next probe-outcome render.
-    if result.axis_targeted:
-        cycle.last_l2_axis = result.axis_targeted
-
-    is_probe = result.action == "probe_round"
-    record_decision(
-        cycle.pending_decisions,
-        ResumeCheckpointKind.PROBE_ROUND_COMMITMENT,
-        {"round_num": round_num, "l2_round": cycle.escalation.l2_round},
-        is_probe,
-        data={
-            "action": result.action,
-            "task_context_changed": result.task_context is not None,
-            "changes_description": result.opt_search_point.lineage.changes_description or "",
-            "axis_targeted": result.axis_targeted,
-        },
-        round=round_num,
-    )
-    if is_probe:
-        cycle.probe_next_round = True
 
 
 def _l2_enter(cycle: Cycle) -> dict[str, Any]:
@@ -272,12 +205,9 @@ def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
         "l2_best_composite_fitness_at_entry": cycle.escalation.l2_best_composite_fitness_at_entry,
         "l2_best_theta_at_entry": cycle.escalation.l2_best_theta_at_entry,
         "param_changes_count": len(result.opt_search_point.memory.l1_overrides),
-        "task_context_changed": result.task_context is not None,
         "l1_layout_changed": result.l1_layout is not None,
         "changes_description": result.opt_search_point.lineage.changes_description or "",
-        "action": result.action,
         "axis_targeted": result.axis_targeted,
-        "warned_samples": len(cycle.warned_queries),
         "l2_prompt": result.debug_prompt,
         "l2_response": result.debug_response,
     }
@@ -489,7 +419,7 @@ async def _run_transition(
 
     # Same adoption seam as an L1 win: identity advances (new_opt carries a fresh
     # lineage, parent = the outgoing incumbent) and the persistent memory carries
-    # forward. The frame surfaces L2/L3 own (task_context / l1_layout) are then
+    # forward. The frame surfaces L2/L3 own (l1_layout / plan) are then
     # installed by `transition.apply` below, so no `advanced` overlay is passed here.
     new_opt = result.opt_search_point
     cycle.adopt(new_opt, advanced={})
@@ -685,11 +615,13 @@ async def escalate_l2(
         )
         # Wound 4: post-L2 validator failure → L3 force-trigger. Deterministic from L2 output,
         # so resume reproduces without a separate decision record.
-        # Exception: when EVERY breach is a soft-reject (self-correcting — the validator already
-        # discarded the output: a stale task_context repeat kept the prior framing), L3 is skipped.
-        # See _L2_SOFT_REJECT_VALIDATOR_IDS — forcing L3 on an inert breach only layers escalations.
+        # Every breach reaching here is now a HARD l1_layout failure (mandatory placeholder
+        # missing, unknown name, dup within slot) — a real signal that L2 is thrashing inside
+        # the plan. The soft-reject exception is gone with the framing-rewrite surface it
+        # existed for: a stale task_context repeat is unrepresentable now that the framing
+        # is frozen, so there is no inert breach left to except.
         breaches = cycle.opt_sp.memory.wounds.l2_guard_breaches
-        if breaches and not all(b.validator_id in _L2_SOFT_REJECT_VALIDATOR_IDS for b in breaches):
+        if breaches:
             logger.warning(
                 "L3 force-triggered by %d L2-output validator failure(s) at round %d",
                 len(breaches),
@@ -704,14 +636,6 @@ async def escalate_l2(
                 on_phase,
                 obs=obs,
                 tracing_campaign_id=tracing_campaign_id,
-            )
-        elif breaches:
-            logger.info(
-                "L2 produced %d soft-reject breach(es) at round %d (%s) — skipping L3 "
-                "force-trigger; prior task_context retained, L1 continues next round",
-                len(breaches),
-                round_num,
-                ", ".join(b.validator_id for b in breaches),
             )
         return None
 

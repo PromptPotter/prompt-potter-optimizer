@@ -125,9 +125,15 @@ async def load_or_build_task_context(
     """
     if dataset_config_dir is None:
         return TaskDecomposition()
-    existing = read_json_optional(dataset_config_dir / "task_context.json")
+    tc_path = dataset_config_dir / "task_context.json"
+    existing = read_json_optional(tc_path)
     if existing:
-        return TaskDecomposition.from_dict(existing)
+        task_context = TaskDecomposition.from_dict(existing)
+        # The budget is enforced HERE — once, before the campaign starts — and nowhere else.
+        # The render used to clip instead, which meant an over-budget field was amputated on
+        # every prompt for the run's whole life and the operator only ever saw a log line.
+        task_context.check_budget(source=str(tc_path))
+        return task_context
     task_description = read_text_optional(dataset_config_dir / "task_description.md")
     if not task_description:
         return TaskDecomposition()
@@ -137,5 +143,8 @@ async def load_or_build_task_context(
     tc_dict = dict(result["task_context"])
     tc_dict["raw_description"] = task_description
     task_context = TaskDecomposition.from_dict(tc_dict)
-    write_json(dataset_config_dir / "task_context.json", task_context.to_dict())
+    # Persist BEFORE gating: the decomposition call is already paid for, so a verbose checkin
+    # leaves an editable file behind rather than burning the call and vanishing.
+    write_json(tc_path, task_context.to_dict())
+    task_context.check_budget(source=str(tc_path))
     return task_context

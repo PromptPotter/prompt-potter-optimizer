@@ -62,7 +62,7 @@ Capabilities are opt-in. A deterministic node declares none; an LLM node in the 
 - **Optimizer-discoverable parameters** — declare accepted parameters and valid values. PromptPotter picks these up automatically as optimisation axes.
 - **Self-healing Wound 1** — `ValidationFailure` caught at L1 parse time by `L1_SCHEMA_COMPLIANCE`; L2 teaches L1 not to repeat. See [`self-healing-internals.md`](self-healing-internals.md).
 - **Self-healing Wound 2** — `RuntimeFailure` attached to the candidate mid-eval; L2 adjusts; L3 replans on persistence.
-- **Warnings → optimizer context** — per-sample warnings drive probe-round subset selection on the cycle (`Cycle.warned_queries`).
+- **Warnings → optimizer context** — per-sample warnings surface to the optimizer through the round's `evidence_health` / `diagnostics` panels. They do **not** select samples: the cumulative warned-query subset that once fed probe-round selection is gone, along with the probe lever it served.
 - **Warnings → escalation counter** — sustained degradation increments a patience counter.
 - **Warnings → search-point attachment** — failures pin to the exact configuration that caused them, not the round.
 - **Skip** — a candidate producing too many degraded or empty results is eliminated mid-run.

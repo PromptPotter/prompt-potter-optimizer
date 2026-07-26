@@ -108,6 +108,39 @@ class JobSearchPoint(SearchPoint):
 # TaskDecomposition — structured domain context for optimizer LLM calls
 # ---------------------------------------------------------------------------
 
+# The FRAMING half: these render into the `task_context` panel of every optimizer prompt and
+# are never measured directly — no candidate carries them, so nothing scores them. They are
+# operator-authored knowledge about the task and are FROZEN for the run (`merge` refuses them).
+#
+# They used to be L2's rewrite surface, and the measurement said that was a bad trade: across
+# 143 `l2_context` fires on disk, prose was 100% of what L2 emitted, each rewrite shared only
+# 0.16 mean token overlap with the text it replaced (85% replacement, not the "accumulative
+# refinement" the field docs claim), and no accuracy effect was detectable. Worse, the render
+# capped each field and head-clipped the rest: 244 of the 258 states `key_challenges` ever held
+# were over that cap, so ~95% of the time the operator's tail was silently amputated — including,
+# on `justlogic-d234`, the measured finding that anti-hedging instructions BACKFIRE, which L1
+# then re-proposed every round.
+#
+# A round's findings still reach L1 — through `critique`, `axis_memory` and `mutation_memory`,
+# which are derived from measurement rather than paraphrased from the previous prompt.
+FRAMING_FIELDS: frozenset[str] = frozenset(
+    {
+        "domain",
+        "pipeline_purpose",
+        "data_characteristics",
+        "optimization_goals",
+        "key_challenges",
+    }
+)
+
+# Per-field authoring budget, enforced ONCE at mint (`TaskDecomposition.check_budget`) and
+# never at render. That is the whole point: a budget a renderer enforces is a budget the
+# author never sees until their words are already gone, and the author here is a human who
+# can simply edit the file. Sized off what real framing needs — the widest field authored
+# across the shipped datasets is ~420 chars, and 600 leaves room to say something without
+# inviting a page.
+FRAMING_VALUE_BUDGET = 600
+
 
 @dataclass
 class TaskDecomposition:
@@ -192,20 +225,50 @@ class TaskDecomposition:
         return cls.from_dict(v)
 
     def merge(self, overrides: dict[str, Any]) -> TaskDecomposition:
+        """Apply ``overrides``, refusing any FRAMING field.
+
+        The five framing fields are operator-authored and **frozen for the run** — the
+        loop reads them, nothing rewrites them. Enforced HERE, in the type, because it is
+        the one place every writer must pass through: a caller that means to re-frame the
+        task fails loud instead of quietly replacing curated knowledge with a paraphrase.
+
+        Only ``upstream_context`` / ``downstream_context`` (spliced into the TARGET prompt
+        by ``OptSearchPoint._field_value``, so a candidate carrying them is measured) and
+        ``raw_description`` remain mutable — that is L1's ``task_context_override`` surface.
+        """
+        if forbidden := sorted(FRAMING_FIELDS & overrides.keys()):
+            raise ValueError(
+                f"task_context framing is frozen for the run — refusing to overwrite "
+                f"{forbidden}. These fields are operator-authored evidence about the task; "
+                f"a round's findings belong in the critique / axis_memory / mutation_memory "
+                f"channels, which are derived from measurement. Mutable here: "
+                f"{sorted({f.name for f in fields(self)} - FRAMING_FIELDS)}."
+            )
         base = self.to_dict()
         base.update(overrides)
         return self.from_dict(base)
 
-    def merge_changes_nothing(self, overrides: dict[str, Any]) -> bool:
-        """True iff merging ``overrides`` leaves the framing unchanged.
+    def check_budget(self, *, source: str) -> None:
+        """Raise if any FRAMING field exceeds :data:`FRAMING_VALUE_BUDGET`.
 
-        The canonical "did the proposed task_context actually move?" predicate —
-        a no-op merge means the LLM repeated the prior framing. Used both live
-        (``escalation/firing.py`` deciding ``task_context_applied``) and
-        offline (``validators/l2_behavior.py`` scoring conformance), so the
-        verbatim-repeat verdict comes from one place rather than a re-derived loop.
+        Called once, at the run-start seam, so an over-budget field stops the campaign
+        before it starts instead of being clipped on every render for the campaign's whole
+        life. ``source`` names the file to edit — the error is only useful if it says where.
         """
-        return self.merge(overrides).to_dict() == self.to_dict()
+        over = [
+            (k, len(v))
+            for k, v in self.to_dict().items()
+            if k in FRAMING_FIELDS and len(v) > FRAMING_VALUE_BUDGET
+        ]
+        if not over:
+            return
+        detail = ", ".join(f"{k} is {n} chars" for k, n in sorted(over))
+        raise ValueError(
+            f"task_context framing exceeds the {FRAMING_VALUE_BUDGET}-char per-field budget "
+            f"in {source}: {detail}. These fields render verbatim into every optimizer "
+            f"prompt — edit them down rather than letting a renderer choose which half the "
+            f"model sees. Put the detail in task_description.md, which has no budget."
+        )
 
     def items(self) -> list[tuple[str, str]]:
         return [(f.name, getattr(self, f.name)) for f in fields(self)]

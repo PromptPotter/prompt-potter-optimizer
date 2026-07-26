@@ -13,12 +13,11 @@ The registry is the single source of truth, so every surface that enumerates the
 checks (``review.md``, the round-1 verdict) reads the same set.
 
 The L2 output shape walked here is :class:`L2ContextOutput`
-(``dispatch/schemas.py``): ``task_context`` refinement dict,
-``axis_targeted``, ``l1_layout``, ``l1_overrides``, supplemental
-rules / situational examples, and ``rationale``. ``L2ContextOutput`` has
-``extra="forbid"`` and carries no ``pipeline_params`` field, so the
-"L2 never touches pipeline_params" rule is enforced by the schema — no
-behaviour check needed for it.
+(``dispatch/schemas.py``): ``axis_targeted``, ``l1_layout``, ``l1_overrides``
+and ``rationale``. ``L2ContextOutput`` has ``extra="forbid"`` and carries no
+``pipeline_params`` field, so the "L2 never touches pipeline_params" rule is
+enforced by the schema — no behaviour check needed for it. Same for
+``task_context`` (frozen framing) and ``action`` (probe rounds are not wired).
 """
 
 from __future__ import annotations
@@ -31,7 +30,6 @@ from promptpotter.application.optimization.validators.l1_behavior import (
     CheckResult,
     ValidatorContext,
 )
-from promptpotter.domain.search_point import TaskDecomposition
 
 __all__ = [
     "L2_CHECK_REGISTRY",
@@ -108,45 +106,28 @@ def _check_evidence_anchored(round_dict: dict[str, Any], ctx: ValidatorContext) 
     )
 
 
-def _check_task_context_not_verbatim(
-    round_dict: dict[str, Any], ctx: ValidatorContext
-) -> CheckResult:
-    """A proposed ``task_context`` refinement must change ≥1 field vs the
-    prior OSP framing — a no-op refinement is a wasted L2 fire."""
-    proposed = extract_l2_output(round_dict).get("task_context")
-    if not isinstance(proposed, dict) or not proposed:
-        return CheckResult("l2_task_context_not_verbatim", True, "no task_context proposed")
-    prior_raw = (
-        (ctx.opt_search_point.get("memory") or {}).get("task_context")
-        if ctx.opt_search_point
-        else None
-    )
-    prior = TaskDecomposition.coerce(prior_raw)
-    if prior.merge_changes_nothing(proposed):
-        return CheckResult(
-            "l2_task_context_not_verbatim",
-            False,
-            f"all {len(proposed)} proposed task_context field(s) repeat the prior framing",
-        )
-    return CheckResult("l2_task_context_not_verbatim", True, "proposal carries a real delta")
-
-
 def _check_targets_l1_surface(round_dict: dict[str, Any], ctx: ValidatorContext) -> CheckResult:
-    """An L2 fire must change *something* L1 reads — ``task_context``,
-    ``l1_layout``, or ``l1_overrides``. A fire that changes nothing is a
-    wasted escalation."""
+    """An L2 fire must change *something* L1 reads — ``l1_layout`` or ``l1_overrides``.
+    A fire that changes nothing is a wasted escalation.
+
+    **This is the instrument that decides whether the L2 call earns its cost.** Two things
+    used to mask a null fire. ``task_context`` counted as a touched surface and L2 wrote it
+    on 100% of fires, so the check passed unconditionally; freezing the framing removed that.
+    Then ``probe_round`` counted, and L2 reached for it on 3 of 6 fires in the run that
+    followed — which is how the empty-probe bug stayed invisible: L2 scored 100% conformance
+    by picking the one action that measured nothing. Both are gone, so what remains are the
+    two surfaces L1 genuinely reads.
+
+    What the same 143 fires measured on those two: ``l1_layout`` 2%, ``l1_overrides`` 2%. If
+    the pass rate stays that low across a clean run, an ~11k-char optimizer call is buying
+    one bit and the rung should collapse to a computed gate. Read the rate off ``review.md``.
+
+    ``axis_targeted`` is deliberately NOT a surface: it is prose naming a direction, and L1
+    reads its axes from ``axis_memory``, which is derived from measurement."""
     out = extract_l2_output(round_dict)
     if not out:
         return CheckResult("l2_targets_l1_surface", True, "L2 did not fire")
-    touched = [
-        name
-        for name in (
-            "task_context",
-            "l1_layout",
-            "l1_overrides",
-        )
-        if out.get(name)
-    ]
+    touched = [name for name in ("l1_layout", "l1_overrides") if out.get(name)]
     if touched:
         return CheckResult("l2_targets_l1_surface", True, f"L2 touched: {touched}")
     return CheckResult("l2_targets_l1_surface", False, "L2 fired but changed nothing L1 reads")
@@ -157,7 +138,6 @@ def _check_targets_l1_surface(round_dict: dict[str, Any], ctx: ValidatorContext)
 L2_CHECK_REGISTRY: dict[str, CheckFn] = {
     "l2_rationale_substantive": _check_rationale_substantive,
     "l2_evidence_anchored": _check_evidence_anchored,
-    "l2_task_context_not_verbatim": _check_task_context_not_verbatim,
     "l2_targets_l1_surface": _check_targets_l1_surface,
 }
 

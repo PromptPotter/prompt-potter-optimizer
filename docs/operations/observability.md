@@ -63,16 +63,16 @@ The structured finding lives in `dashboard.json::last_scoring_metadata` — one 
 - `⚠ stale-data ladder exhausted → still degraded`
 - `↩ pipeline warning observed; X/Y toward rerun trigger` — only when no fatal warning fired
 
-Suppressing `↩` under a fatal warning is load-bearing: a fatal warning means the candidate is dead, so "1/3 toward rerun" would falsely promise more data. (The ladder's rescue step is *samplescan rescue* — "probe" is reserved for L2/L3 probe rounds.)
+Suppressing `↩` under a fatal warning is load-bearing: a fatal warning means the candidate is dead, so "1/3 toward rerun" would falsely promise more data. (The ladder's rescue step is *samplescan rescue*, never "probe".)
 
 ## Reading what L2 wrote
 
 In `cycles/{cycle_id}/rounds/round_NNNN.json`:
 
-- `opt_search_point.task_context` — refined task framing (broadcast to all layers next round).
-- `opt_search_point.l1_layout` — per-slot signal-name layout L2 stamped.
+- `opt_search_point.l1_layout` — per-slot signal-name layout L2 stamped. **The** thing to read: it and `l1_overrides` are the only two surfaces L2 can move, so a fire that changed neither bought nothing (`review.md`'s `l2_targets_l1_surface`).
 - `opt_search_point.l1_overrides` — L1 runtime knobs (creativity, n_variants).
-- `decisions[]` with `kind: "probe_round_commitment"` — `True` when L2 set `action = "probe_round"`.
 - `nodes.l2_context.input.prompt` / `.output` — rendered L2 prompt (incl. the field catalogue) / raw JSON.
+
+`opt_search_point.task_context` is operator-authored framing that L2 reads and cannot write — a change there came from the operator, not the loop. There is no `probe_round_commitment` decision: probe rounds are not wired.
 
 Deep dive: [`../developer/l2-internals.md`](../developer/l2-internals.md).

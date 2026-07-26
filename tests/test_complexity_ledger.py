@@ -435,7 +435,16 @@ LEDGER_BASELINE = {
     # settings — now shared by the ``answer_distribution`` collapse detector and the earned-
     # block library's task-fit signature, so both draw the enumerable-answer-space line from one
     # constant. A relocation into the shared home, not a net-new concept (it left bundle.py).
-    "settings_const": 15,
+    #
+    # 15 -> 16 (2026-07-26): ``DEFAULT_ORIGIN_BUDGET`` — the origin (C0) eval breadth every
+    # loop falls back to. It is a net-new constant but NOT a net-new concept: the number 40
+    # already existed, hardcoded in ``datasets/promptpotter-self/inner_tasks.json``, while the
+    # engine's own default was "whatever ``sp_budget_ttest`` happens to be". Naming it is what
+    # lets ``CampaignConfig.sp_budget_origin`` and ``InnerBenchmarkConfig.n_samples_origin``
+    # cite ONE value, which is the whole point — an outer recursion and its inner instrument
+    # measuring their origins on two different rulers is exactly the drift a shared constant
+    # makes unrepresentable. Same shape as POBB_DEFAULT_EPSILON's entry above it.
+    "settings_const": 16,
     "opt_search_point_fields": 25,
     # NEW dimension (2026-07-17), landing at 73 — a bare ``x: Any`` parameter whose real type
     # exists and simply was not written. It belongs on a CONCEPTUAL-surface ledger because a
@@ -463,7 +472,13 @@ LEDGER_BASELINE = {
     # (verify.py), ``finalize_checkin_to_active(cycle_plan: CyclePlan)`` (session.py),
     # ``Cycle.start(round_scorer: RoundScorer | None)`` (cycle.py), and
     # ``_stash_rebase_request(proposal: ForkProposal)`` (firing.py). Subtraction, baseline falls.
-    "any_params": 65,
+    # 65 -> 64 (2026-07-26): ``_failure_diagnostics(response: ChatCompletion)`` (openai_compat.py).
+    # Splitting the per-attempt parse-failure account out of it added two more helpers over the
+    # same object, so the ratchet asked the question it exists to ask — and the answer was that
+    # the SDK's own ``ChatCompletion`` is the real type for all three. Written, not baselined:
+    # ``openai`` sits behind ``follow_imports="skip"`` so mypy still resolves it to ``Any``, but
+    # the reader no longer has to. Three sites named, one net removed.
+    "any_params": 64,
     # NEW dimension (2026-07-17), landing at 4 — a Pydantic model that does NOT end up
     # ``extra="forbid"``, so an unknown key is dropped instead of raised. 106 before the
     # ``StrictModel`` migration, 4 after. It is a conceptual surface because the alternative

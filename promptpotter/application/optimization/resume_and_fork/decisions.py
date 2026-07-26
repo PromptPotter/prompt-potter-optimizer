@@ -66,7 +66,6 @@ RESUME_CHECKPOINT_GATING: dict[ResumeCheckpointKind, GatingMode] = {
     # trigger already shows up as a winner/cut divergence in the same round.
     ResumeCheckpointKind.L2_ESCALATION_TRIGGER: GatingMode.ARCHIVAL,
     ResumeCheckpointKind.L3_ESCALATION_TRIGGER: GatingMode.ARCHIVAL,
-    ResumeCheckpointKind.PROBE_ROUND_COMMITMENT: GatingMode.ARCHIVAL,
     # Fork is observable from the parent's history (the FORK_CUT record in
     # the parent ledger names the new cycle id and the offset that the
     # fork inherits from). It's archival because the fork's identity is

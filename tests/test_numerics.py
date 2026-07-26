@@ -16,6 +16,7 @@ Sections (Pass A — scorers, evaluators, IRT):
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1684,11 +1685,6 @@ from promptpotter.application.optimization.pobb.checks import (  # noqa: E402
 from promptpotter.application.optimization.validators.l1_strict import (  # noqa: E402
     detect_invariants,
 )
-from promptpotter.application.optimization.validators.l2_output import (  # noqa: E402
-    L2_DUPLICATE_INSERT,
-    L2_TASK_CONTEXT_STALE_REPEAT,
-    run_l2_output_validators,
-)
 from promptpotter.application.optimization.validators.l3_output import (  # noqa: E402
     L3_PLAN_LENGTH_FLOOR,
     L3_PLAN_VERBATIM_REPEAT,
@@ -1714,7 +1710,11 @@ from promptpotter.domain.results import (  # noqa: E402
     ScoredCandidate,
     is_leader_eligible,
 )
-from promptpotter.domain.search_point import TaskDecomposition  # noqa: E402
+from promptpotter.domain.search_point import (  # noqa: E402
+    FRAMING_FIELDS,
+    FRAMING_VALUE_BUDGET,
+    TaskDecomposition,
+)
 
 # ===========================================================================
 # 6. L1 invariant detectors
@@ -1866,9 +1866,12 @@ def test_parse_population_flags_dropped_mandatory_placeholder():
 
 
 def test_parse_population_flags_dropped_meta_prompt_port():
-    """An L4 candidate whose merged `l3_plan.instruction` drops the `{{terminate_capability}}`/
-    `{{rebase_capability}}` ports is invalid (synthetic-0) — a severed layer-control channel
-    once ran 4 inner campaigns as normal measurements, silently. Checked on MERGED params, so a
+    """An L4 candidate whose merged `l1_generate` prose drops an INLINE port
+    (`{{citable_fields}}` in `answer_format`, `{{n_variants}}` in `task_intent`+`instruction`)
+    is invalid (synthetic-0) — a severed channel once ran 4 inner campaigns as normal
+    measurements, silently. The capability directives now ride the layout (guarded by
+    `validate_l1_layout`'s mandatory set); the inline format ports guarded here can never
+    move there, so this is the guard's permanent scope. Checked on MERGED params, so a
     child inheriting the broken prose from its parent (no override of its own) flags too."""
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         base_optimizer_template,
@@ -1877,17 +1880,19 @@ def test_parse_population_flags_dropped_meta_prompt_port():
 
     schema = PipelineSchema(
         name="promptpotter-self",
-        nodes=[PipelineNode(name="l3_plan", param_keys={"instruction"})],
+        nodes=[PipelineNode(name="l1_generate", param_keys={"answer_format"})],
     )
     parent = _parent()
-    base_instruction = base_optimizer_template("l3_plan").instruction
+    base_answer_format = base_optimizer_template("l1_generate").answer_format
     dropped = CandidateProposal(
         osp=parent.mutate(),
-        pipeline_params_override={"l3_plan": {"instruction": "Generate a detailed plan."}},
+        pipeline_params_override={"l1_generate": {"answer_format": "Return JSON variants."}},
     )
     intact = CandidateProposal(
         osp=parent.mutate(),
-        pipeline_params_override={"l3_plan": {"instruction": base_instruction + " Be terse."}},
+        pipeline_params_override={
+            "l1_generate": {"answer_format": base_answer_format + " Be terse."}
+        },
     )
     inherits_broken = CandidateProposal(osp=parent.mutate(persona="Strict"))
 
@@ -1898,14 +1903,14 @@ def test_parse_population_flags_dropped_meta_prompt_port():
     )
     inherited_list, _ = parse_population(
         [inherits_broken],
-        pipeline_params={"l3_plan": {"instruction": "Plan without ports."}},
+        pipeline_params={"l1_generate": {"answer_format": "Answer without ports."}},
         schema=schema,
     )
 
     dropped_failures = osp_list[0].memory.wounds.validation_failures
     assert [vf.reason for vf in dropped_failures] == ["dropped_mandatory_placeholder"]
-    assert dropped_failures[0].axis == "l3_plan.prompt"
-    assert "terminate_capability" in dropped_failures[0].value
+    assert dropped_failures[0].axis == "l1_generate.prompt"
+    assert "citable_fields" in dropped_failures[0].value
     assert osp_list[1].memory.wounds.validation_failures == []
     assert [vf.reason for vf in inherited_list[0].memory.wounds.validation_failures] == [
         "dropped_mandatory_placeholder"
@@ -1931,109 +1936,6 @@ def _osp(**kwargs) -> OptSearchPoint:
     ):
         kwargs["memory"] = L2L3Memory(**mem_kwargs)
     return OptSearchPoint(persona="Expert", instruction="Rank items.", **kwargs)
-
-
-def test_task_context_stale_repeat_fires_verbatim_when_proposed_merge_is_no_op():
-    out = L2_TASK_CONTEXT_STALE_REPEAT.run(
-        {"task_context_proposed": {"domain": "biotech"}, "task_context_applied": None},
-        opt_sp=_osp(),
-    )
-    assert out is not None
-    assert out.evidence["mode"] == "verbatim"
-    assert out.evidence["proposed_keys"] == ["domain"]
-
-
-def test_run_l2_output_validators_aggregates_task_context_repeat():
-    outcomes = run_l2_output_validators(
-        {"task_context_proposed": {"domain": "x"}, "task_context_applied": None},
-        _osp(),
-    )
-    ids = {o.validator_id for o in outcomes}
-    assert "l2_task_context_stale_repeat" in ids
-
-
-def test_duplicate_insert_fires_when_proposed_lines_already_in_prior_framing():
-    osp = _osp(
-        task_context=TaskDecomposition(
-            domain="math",
-            key_challenges=(
-                "Step 1: read the problem\nStep 2: compute carefully\nStep 3: verify the result"
-            ),
-        )
-    )
-    proposed = {
-        "key_challenges": (
-            "Step 1: read the problem\n"
-            "Step 2: compute carefully\n"
-            "Step 3: verify the result\n"
-            "Step 4: emit the answer"  # genuinely new — merge succeeds
-        ),
-    }
-    merged = osp.memory.task_context.merge(proposed)
-    out = L2_DUPLICATE_INSERT.run(
-        {"task_context_proposed": proposed, "task_context_applied": merged},
-        opt_sp=osp,
-    )
-    assert out is not None
-    assert out.evidence["duplicate_lines"] == 3
-    assert out.evidence["fields"] == ["key_challenges"]
-
-
-def test_duplicate_insert_quiet_below_threshold():
-    """Below the 3-line floor ⇒ no fire."""
-    osp = _osp(task_context=TaskDecomposition(key_challenges="line A\nline B"))
-    out = L2_DUPLICATE_INSERT.run(
-        {
-            "task_context_proposed": {"key_challenges": "line A\nline B\nline C"},
-            "task_context_applied": osp.memory.task_context.merge(
-                {"key_challenges": "line A\nline B\nline C"}
-            ),
-        },
-        opt_sp=osp,
-    )
-    assert out is None
-
-
-def test_task_context_stale_repeat_fires_paraphrase_on_word_set_overlap_above_threshold():
-    """Paraphrase sharing ≥50% of words with prior framing ⇒ fire."""
-    prior = (
-        "Problem misreading (2/N): targeting L1 axis 'instruction' to add "
-        "a mandatory problem-restate and constraint-check step before solving."
-    )
-    paraphrase = (
-        "Problem misreading (2/N): targeting L1 axis 'instruction' to add "
-        "an explicit problem restatement followed by a constraint extraction "
-        "and self-check step before any solving begins."
-    )
-    osp = _osp(task_context=TaskDecomposition(key_challenges=prior))
-    out = L2_TASK_CONTEXT_STALE_REPEAT.run(
-        {
-            "task_context_proposed": {"key_challenges": paraphrase},
-            "task_context_applied": osp.memory.task_context.merge({"key_challenges": paraphrase}),
-        },
-        opt_sp=osp,
-    )
-    assert out is not None
-    assert out.evidence["mode"] == "paraphrase"
-    assert out.evidence["field"] == "key_challenges"
-    assert out.evidence["jaccard"] >= 0.5
-
-
-def test_task_context_stale_repeat_quiet_on_genuine_refinement():
-    prior = "Problem misreading on geometry: failing coordinate setup."
-    refinement = (
-        "Combinatorial enumeration failing: candidates skip casework on "
-        "the 27-cell grid; needs explicit decomposition by row pattern."
-    )
-    osp = _osp(task_context=TaskDecomposition(key_challenges=prior))
-    out = L2_TASK_CONTEXT_STALE_REPEAT.run(
-        {
-            "task_context_proposed": {"key_challenges": refinement},
-            "task_context_applied": osp.memory.task_context.merge({"key_challenges": refinement}),
-        },
-        opt_sp=osp,
-    )
-    assert out is None
 
 
 def test_l1_config_not_in_runtime_failures_fires_on_reproposal():
@@ -3015,16 +2917,18 @@ def test_l2_behavior_checks_score_conformant_vs_stub_fires():
             {
                 "rationale": "Axis instruction stalled 3 rounds; sample #14 regressed — refocus.",
                 "axis_targeted": "instruction",
-                "task_context": {"key_challenges": "a genuinely new framing of negation depth"},
+                # A real L1 surface — the framing is frozen, so prose no longer counts as a
+                # touch (which is exactly what made this check vacuous before).
+                "l1_overrides": {"n_variants": 3},
             }
         ),
         ctx,
     )
-    assert len(conformant) == 4
+    assert len(conformant) == 3
     assert all(c.passed for c in conformant)
 
     stub = run_all_l2_checks(
-        _round({"rationale": "ok", "axis_targeted": "", "task_context": {}}),
+        _round({"rationale": "ok", "axis_targeted": "", "l1_overrides": {}}),
         ctx,
     )
     failed = {c.check_id for c in stub if not c.passed}
@@ -3087,28 +2991,6 @@ def test_diag_trajectory_classification_picks_up_plateau():
     ]
     diag = compute_round_diagnostics(rounds[-1], rounds, pipeline_schema=None)
     assert diag.trajectory in {"plateau", "ceiling"}
-
-
-def test_diag_probe_outcome_gated_by_probe_just_completed_flag():
-    results = [_hit("q1", "a"), _hit("q2", "b"), _miss("q3", "c"), _miss("q4", "d")]
-    rr = _round_result(0, 0.5, results)
-
-    diag = compute_round_diagnostics(rr, [rr], pipeline_schema=None)
-    assert diag.probe_outcome is None
-
-    diag_probe = compute_round_diagnostics(
-        rr,
-        [rr],
-        pipeline_schema=None,
-        probe_just_completed=True,
-        axis_tested="persona",
-        prior_full_accuracy=0.7,
-    )
-    assert diag_probe.probe_outcome is not None
-    assert diag_probe.probe_outcome.axis_tested == "persona"
-    assert diag_probe.probe_outcome.target_subset_size == 4
-    assert diag_probe.probe_outcome.hit_rate == 0.5
-    assert diag_probe.probe_outcome.delta_vs_full == pytest.approx(-0.2)
 
 
 # ===========================================================================
@@ -3326,3 +3208,54 @@ def test_theta_accuracy_ci_warm_vs_cold_ruler() -> None:
     assert theta_accuracy_ci(0.3, 0.4, {}) is None
     assert theta_accuracy_ci(None, 0.4, ruler) is None
     assert theta_accuracy_ci(0.3, None, ruler) is None
+
+
+# --- task_context framing is frozen ------------------------------------------------------
+# The framing fields are operator-authored evidence about the task. They used to be L2's
+# rewrite surface AND were head-clipped at render, which silently amputated the operator's
+# own conclusions on ~95% of renders. Both halves of that are now unrepresentable.
+
+
+def test_merge_refuses_every_framing_field():
+    """Each framing key is refused by name, with the mutable set named in the error."""
+    tc = TaskDecomposition(key_challenges="the operator's measured finding")
+    for field_name in FRAMING_FIELDS:
+        with pytest.raises(ValueError, match="framing is frozen"):
+            tc.merge({field_name: "a paraphrase from one round's critique"})
+    # and the refusal never mutates the receiver
+    assert tc.key_challenges == "the operator's measured finding"
+
+
+def test_merge_still_accepts_the_spliced_fields_l1_owns():
+    """`upstream_context` / `downstream_context` are spliced into the TARGET prompt, so a
+    candidate carrying them is measured — that is L1's legitimate override surface."""
+    tc = TaskDecomposition(domain="logic", upstream_context="before")
+    out = tc.merge({"upstream_context": "after", "downstream_context": "then"})
+    assert (out.upstream_context, out.downstream_context) == ("after", "then")
+    assert out.domain == "logic"  # untouched framing survives the merge
+
+
+def test_check_budget_names_the_field_its_length_and_the_file():
+    over = TaskDecomposition(key_challenges="x" * (FRAMING_VALUE_BUDGET + 1))
+    with pytest.raises(ValueError) as err:
+        over.check_budget(source="datasets/foo/task_context.json")
+    msg = str(err.value)
+    assert "key_challenges" in msg and str(FRAMING_VALUE_BUDGET + 1) in msg
+    assert "datasets/foo/task_context.json" in msg
+
+
+def test_check_budget_ignores_non_framing_fields():
+    """`raw_description` is the verbatim operator document — deliberately unbudgeted, since
+    it is preserved on disk rather than rendered into a prompt."""
+    TaskDecomposition(
+        key_challenges="x" * FRAMING_VALUE_BUDGET,
+        raw_description="y" * (FRAMING_VALUE_BUDGET * 10),
+    ).check_budget(source="t")
+
+
+def test_shipped_datasets_are_within_the_framing_budget():
+    """The guard is only credible if what we ship passes it."""
+    for path in Path("datasets").glob("*/task_context.json"):
+        TaskDecomposition.from_dict(json.loads(path.read_text(encoding="utf-8"))).check_budget(
+            source=str(path)
+        )

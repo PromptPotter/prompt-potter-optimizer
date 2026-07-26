@@ -68,13 +68,10 @@ async def execute_round(
         with graceful("RoundStart emit failed"):
             obs.emit(RoundStart(campaign_id=session.state.tracing_campaign_id, round_num=round_num))
 
-    # Probe rounds use their warned-query set as-is; non-probe rounds narrow
-    # the train-split bank to ``sp_budget_ttest`` contested samples via the
+    # Narrow the train-split bank to ``sp_budget_ttest`` contested samples via the
     # adaptive queue mechanism. Origin + every candidate share this subset so PoBB compares
     # like-for-like.
-    if cycle.probe_next_round:
-        scoring_set = scoring_pool
-    elif not opt.mechanisms.selection.per_round_resubset or not cycle.delta_scale:
+    if not opt.mechanisms.selection.per_round_resubset or not cycle.delta_scale:
         # Frozen selection: ignore accumulating observations, so every round gets the
         # deterministic campaign-start subset (bank prefix) — one fixed sample basis.
         # Two triggers: resubset is OFF, OR the δ ruler is still COLD (empty) — a
@@ -172,17 +169,11 @@ async def execute_round(
     )
 
     # Round diagnostics feed dispatch's ``diagnostics`` signal (L1_CRITIQUE/L2/L3).
-    # ``probe_next_round`` is still True here — runner resets it after
-    # ``absorb_round``, so ``best_accuracy`` is the pre-probe full-set best.
     rounds_history = [*cycle.rounds, round_result]
-    prior_full_accuracy = cycle.tracking.best_accuracy if cycle.probe_next_round else 0.0
     round_result.diagnostics = compute_round_diagnostics(
         round_result,
         rounds_history,
         session.pipeline_schema,
-        probe_just_completed=cycle.probe_next_round,
-        axis_tested=cycle.last_l2_axis,
-        prior_full_accuracy=prior_full_accuracy,
     )
 
     critique_text = ""

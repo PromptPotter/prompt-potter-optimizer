@@ -141,7 +141,15 @@ async def generate_or_load_candidates(
         l1_parse_failure=parse_failure,
     )
 
-    if session.state.cycle_id:
+    # Persist a NON-EMPTY population only. The replay branch above tests `is not None`, and
+    # `read_json_optional` hands back the parsed `[]` — which is not None — so an empty file
+    # reads as a legitimate replay payload: the resumed round adopts zero candidates and
+    # never calls the LLM again. A parse failure would therefore become permanent, replaying
+    # identically on every resume, and the round's own healing (FIRE_L2 via
+    # `l1_generate_unusable`) would re-steer a generation that no longer happens. Writing no
+    # file is what makes the resume regenerate — which is the whole point of retrying a round
+    # that produced nothing.
+    if session.state.cycle_id and candidates:
         session.store.campaigns.save_round_candidates(
             session.campaign_id,
             session.state.cycle_id,

@@ -288,10 +288,7 @@ class EscalationFSM:
         if not isinstance(record, PhaseRecord):
             return
         if record.phase == "round" and record.event == "complete":
-            # Audit emit only; display fires under "display" and is never folded. Probe rounds
-            # emit "complete" so display + audit see them, but they aren't L1 progress evidence.
-            if record.payload.get("is_probe"):
-                return
+            # Audit emit only; display fires under "display" and is never folded.
             self._bank_round(bool(record.payload["improved"]), lives)
         elif record.phase == "l2_context" and record.event == "exit":
             escalation_state = record.payload["data"]

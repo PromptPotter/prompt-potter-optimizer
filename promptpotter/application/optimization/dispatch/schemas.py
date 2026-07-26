@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import functools
 from collections.abc import Callable, Mapping
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from pydantic import BaseModel, BeforeValidator, Field, create_model, model_validator
 
@@ -352,24 +352,22 @@ class TerminateProposal(StrictModel):
 # l2_context — refine task framing + optional layout/runtime knobs.
 # ---------------------------------------------------------------------------
 
-OptimizerAction = Literal["normal_round", "probe_round"]
-
 
 class L2ContextOutput(StrictModel):
     """L2 refinement. All fields optional — the LLM sets only what it
     wants to change.
 
-    ``task_context`` is a free-form refinement dict (keys: domain,
-    pipeline_purpose, data_characteristics, optimization_goals,
-    key_challenges) — left as ``dict[str, Any]`` because the cycle's
-    :class:`TaskDecomposition` owns the precise key set and merges via
-    :meth:`TaskDecomposition.merge`. ``l1_layout`` is a similarly
-    flexible ``{slot: [placeholder, ...]}`` map validated downstream by
-    :func:`validate_l1_layout`.
+    There is deliberately **no ``task_context``**: the framing fields are operator-authored
+    and frozen for the run (``TaskDecomposition.FRAMING_FIELDS``). L2 steers by choosing
+    what L1 *looks at* (``l1_layout``) and how hard it explores (``l1_overrides``) — never
+    by rewriting what the operator wrote about the task. ``l1_layout`` is a flexible
+    ``{slot: [placeholder, ...]}`` map validated downstream by :func:`validate_l1_layout`.
+
+    There is also no ``action``: L2 cannot request a probe round. See
+    ``optimization/CLAUDE.md`` § *Probe rounds — deferred* for what a probe round is meant
+    to be and why the lever is not wired.
     """
 
-    task_context: dict[str, Any] = Field(default_factory=dict)
-    action: OptimizerAction = "normal_round"
     axis_targeted: str = ""
     l1_layout: dict[str, list[str]] = Field(default_factory=dict)
     l1_overrides: dict[str, Any] = Field(default_factory=dict)
@@ -401,11 +399,15 @@ class L3PlanOutput(StrictModel):
 class CheckinTaskContext(StrictModel):
     """Domain-context sub-object inside the checkin output.
 
-    Every field renders into the ``task_context`` panel of EVERY optimizer prompt and is
-    hard-capped per field (``TASK_CONTEXT_VALUE_CAP``): a field authored past it is silently
-    truncated on every render, losing its tail. So each is ONE tight sentence, never a
-    paragraph — the descriptions below say so, and terse framing also keeps the prompt short
-    enough that the reasoning model does not over-reason."""
+    Every field renders into the ``task_context`` panel of EVERY optimizer prompt, VERBATIM —
+    nothing truncates it, and nothing in the loop rewrites it afterwards. It is frozen for the
+    run, so what is written here is what every optimizer call reads on every round.
+
+    Each is ONE tight sentence, never a paragraph. That is a real budget, not a style note:
+    it is checked once at mint (``TaskDecomposition.check_budget``, ``FRAMING_VALUE_BUDGET``)
+    and an over-budget field REFUSES the campaign rather than being clipped. Terse framing also
+    keeps the prompt short enough that the reasoning model does not over-reason. Detail that
+    does not fit belongs in ``task_description.md``, which is preserved whole and unbudgeted."""
 
     domain: str = Field(
         "", description="One noun phrase — the task family, e.g. 'competition mathematics'."

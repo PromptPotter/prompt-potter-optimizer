@@ -136,24 +136,18 @@ async def run_round_loop(
                 declare_run_phase(session, RunPhase.PAUSED)
                 return StopReason.PAUSED, None
 
-            is_probe = cycle.probe_next_round
-            if is_probe:
-                round_scoring_data = [s for s in dataset if s.query in cycle.warned_queries]
-                round_checks = None
-            else:
-                # Full bank — execute_round's adaptive queue mechanism narrows it to sp_budget_ttest per round.
-                round_scoring_data = session.scoring.scoring_set
-                round_checks = session.scoring.degradation_checks
+            # Full bank — execute_round's adaptive queue mechanism narrows it to sp_budget_ttest per round.
+            round_scoring_data = session.scoring.scoring_set
+            round_checks = session.scoring.degradation_checks
 
             logger.debug(
-                "Round %d (clean=%d/%d, acc=%.3f, stall=%d/%d%s)",
+                "Round %d (clean=%d/%d, acc=%.3f, stall=%d/%d)",
                 round_num,
                 clean_rounds,
                 max_rounds,
                 cycle.tracking.current_accuracy,
                 cycle.escalation.l1_stall_count,
                 opt.l1_patience,
-                ", PROBE" if is_probe else "",
             )
 
             cb.set_round(round_num)
@@ -181,14 +175,6 @@ async def run_round_loop(
 
             if cycle.axes and len(cycle.rounds) >= 2:
                 cycle.axes.record_flips_from_rounds(cycle.rounds, round_num)
-
-            if is_probe:
-                cycle.probe_next_round = False
-                await close_round(cycle, round_result, round_num, session, cb, is_probe=True)
-                await escalate_or_stop(cycle, config, session, round_num, cb)
-                round_num += 1
-                clean_rounds += 1
-                continue
 
             if round_result.escalation_signal:
                 signal = round_result.escalation_signal

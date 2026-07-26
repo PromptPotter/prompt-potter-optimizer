@@ -40,7 +40,10 @@ def _schema_description_block(node: PipelineNode) -> list[str]:
 @signal(
     "pipeline_param_catalogue",
     kind=InjectionKind.DERIVED,
-    description="Pipeline-param menu: name + ≤4-value enum hint per node, plus available models.",
+    # No "plus available models" — the renderer never emitted them and must not: the model
+    # axis is operator-owned, so advertising the catalogue here would teach a lever L1 cannot
+    # pull (`node_param_keys` strips model/provider before this ever sees them).
+    description="Pipeline-param menu: name + ≤4-value enum hint per node.",
     char_cap=None,
     # A value-space menu is what a mutation may SAY, never why it should be made.
     citable=False,

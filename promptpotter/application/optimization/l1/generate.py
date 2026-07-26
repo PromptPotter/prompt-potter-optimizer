@@ -149,16 +149,29 @@ async def l1_generate(
         )
     except MetaPromptParseError as parse_err:
         # Schema-noncompliant after one repair retry. Split provider-degraded (empty) vs
-        # structurally wrong — both wound the same channel but `reason` steers L2's heal direction.
+        # structurally wrong — both wound the same channel but `reason` steers L2's heal
+        # direction, and TOOLING additionally drops the round from L4 outer scoring
+        # (`domain/l4/proxies.py::_is_evidential`), so the split decides whether this round
+        # is evidence at all. `is_empty` reads the FIRST attempt and refuses to call a
+        # truncation "provider degraded" — a meta-prompt that outgrew max_tokens owns its
+        # failure. Truncation is called by name below: it is the one cause with an obvious
+        # operator fix (shrink the meta-prompt or raise the node's max_tokens).
         is_empty = parse_err.is_empty
+        truncated = parse_err.first_finish_reason == "length"
         reason = L1_PARSE_FAILURE_TOOLING if is_empty else L1_PARSE_FAILURE_MALFORMED
-        logger.error(
-            "L1 R%d: %s — zero candidates this round (raw=%d chars) [%s]",
-            round_num,
-            "provider returned empty/truncated content"
+        cause = (
+            "response truncated at max_tokens — the meta-prompt asks for more than the "
+            "budget carries"
+            if truncated
+            else "provider returned empty/truncated content"
             if is_empty
-            else "meta-prompt parse failure after retry",
-            parse_err.raw_chars,
+            else "meta-prompt parse failure after retry"
+        )
+        logger.error(
+            "L1 R%d: %s — zero candidates this round (failing attempt=%d chars) [%s]",
+            round_num,
+            cause,
+            parse_err.failing_chars,
             parse_err.diagnosis(),
         )
         opt_sp.memory.wounds.validation_failures.append(
@@ -175,7 +188,10 @@ async def l1_generate(
             message=(
                 "Optimizer produced 0 candidates this round — "
                 + (
-                    "the optimizer LLM returned empty/truncated output"
+                    "the optimizer LLM's response was cut off at max_tokens; shrink the "
+                    "meta-prompt or raise the node's max_tokens"
+                    if truncated
+                    else "the optimizer LLM returned empty/truncated output"
                     if is_empty
                     else "the optimizer LLM's response failed schema validation after a repair retry"
                 )

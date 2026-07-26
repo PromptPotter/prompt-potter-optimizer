@@ -6,8 +6,8 @@ backend's ``GET /pipeline`` response: ``nodes`` reference
 ``schema_family``/``schema_version`` + ``prompt_family``/``prompt_version``,
 and the bodies live in the top-level ``resolved_schemas`` /
 ``resolved_prompts`` registries. The optimizer is itself a pipeline.
-Prompt loading prefers a Langfuse ``production`` label and falls back to
-the local manifest registry.
+Run-scoped prompt mutation rides the per-node override channel
+(:func:`set_optimizer_prompt_overrides`), never a second prompt source.
 """
 
 from __future__ import annotations
@@ -365,8 +365,8 @@ def compute_optimizer_prompt_hashes() -> dict[str, str]:
     """SHA-256 (16-char prefix) of each optimizer prompt's effective content.
 
     Hashes the deterministic ``model_dump_json()`` of the loaded
-    ``PromptTemplate`` (so the hash reflects what was actually used,
-    Langfuse-overridden or local) plus the node's resolved injection layout —
+    ``PromptTemplate`` (so the hash reflects what was actually used — the
+    manifest base plus any bound per-node override) plus the node's resolved injection layout —
     a layout-only L4 edit changes which evidence a node sees, so it must move
     the node's hash (nodes without a ``NODE_LAYOUTS`` entry, e.g. ``checkin``,
     contribute the template alone). Persisted to
