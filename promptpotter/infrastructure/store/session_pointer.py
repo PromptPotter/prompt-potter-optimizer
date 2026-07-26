@@ -76,9 +76,20 @@ def save_active_pointer(
     )
 
 
+def clear_active_pointer_under(tenant_root: Path) -> None:
+    """Drop the pointer under an already-resolved tenant root. Idempotent.
+
+    The root-keyed core, same as :func:`read_active_pointer_under`: ``CampaignStore``
+    holds a resolved root and releases the pointer when the campaign it names is
+    archived or deleted, so it must not have to re-derive the tenant slug it already
+    resolved past.
+    """
+    _active_pointer_path_under(tenant_root).unlink(missing_ok=True)
+
+
 def clear_active_pointer(tenant_id: TenantId, *, projects_root: Path | None = None) -> None:
     """Delete the tenant's active-session pointer file, if present. Idempotent."""
-    _active_pointer_path_under(_tenant_root(tenant_id, projects_root)).unlink(missing_ok=True)
+    clear_active_pointer_under(_tenant_root(tenant_id, projects_root))
 
 
 def read_active_pointer_under(tenant_root: Path) -> tuple[str, str, str]:
@@ -111,6 +122,7 @@ def active_pointer_exists(tenant_id: TenantId, *, projects_root: Path | None = N
 __all__ = [
     "active_pointer_exists",
     "clear_active_pointer",
+    "clear_active_pointer_under",
     "mint_session_id",
     "read_active_pointer",
     "read_active_pointer_under",

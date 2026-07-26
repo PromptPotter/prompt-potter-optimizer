@@ -4,6 +4,8 @@ import contextlib
 import json
 import os
 import re
+import shutil
+import stat
 import tempfile
 import time
 from collections.abc import Callable, Iterable
@@ -46,6 +48,44 @@ def _long_path(p: str | Path) -> str:
 def ensure_parent_dir(path: Path) -> None:
     """``mkdir(parents=True, exist_ok=True)`` for *path*'s parent, long-path safe."""
     os.makedirs(_long_path(path.parent), exist_ok=True)
+
+
+def rmtree_robust(path: Path) -> None:
+    r"""Delete a tree — long-path safe, read-only tolerant, retried. **The one deleter.**
+
+    Every recursive delete in the package routes here, because a bare
+    ``shutil.rmtree`` cannot remove the trees this package actually writes. An L4
+    inner sandbox nests langfuse observation dirs past ``MAX_PATH=260`` — measured
+    at 668 chars — and a plain ``rmtree`` fails on them; with ``ignore_errors=True``
+    it fails *silently* and leaves the tree on disk, which is exactly how
+    ``.inner/`` reached 343 MB (60% of the store) with no code path able to reclaim
+    it. The ``\\?\`` prefix (``_long_path``) removes the same tree without a
+    registry change; the chmod dance handles Windows read-only bits, and the
+    backoff handles a virus scanner or an editor still holding a handle.
+
+    Raises on genuine failure rather than swallowing — a sandbox that could not be
+    reclaimed is a fact its caller has to be able to see.
+    """
+
+    def _onexc(func: Callable[[str], object], target: str, exc: BaseException) -> None:
+        if isinstance(exc, PermissionError):
+            try:
+                os.chmod(target, stat.S_IWRITE)
+                func(target)
+                return
+            except OSError:
+                pass
+        raise exc
+
+    target = _long_path(path)
+    for attempt in range(4):
+        try:
+            shutil.rmtree(target, onexc=_onexc)
+            return
+        except OSError:
+            if attempt == 3:
+                raise
+            time.sleep(0.1 * (attempt + 1))
 
 
 def _atomic_replace(tmp: str, path: Path) -> None:
@@ -172,6 +212,7 @@ __all__ = [
     "read_json_optional",
     "read_json_tolerant",
     "read_text_optional",
+    "rmtree_robust",
     "validate_path_component",
     "write_json",
     "write_jsonl",

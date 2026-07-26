@@ -80,9 +80,12 @@ controls:
   - id: jobs.dock
     do: The OS-style dock of open units — Potter glyph when one unit is in flight, glyph + count
         badge when several; ABSENT when idle (absence IS the "all quiet" signal). Lists liveCycles
-        (I6 membership + ordering, running/gate above paused); clicking an entry jumps the view to
-        that cycle's dashboard. Reads server run_phase only — a client connection blip never changes
-        the count.
+        (I6 membership + ordering). Ordered by WHAT NEEDS YOU, not by what is busy —
+        gate > running > paused (lib/run-phase.ts::dockPriority): a gated unit makes no progress
+        until the operator decides, so it leads. Both branches carry the phase class, so a held
+        gate is distinguishable from a healthy run in the single-unit case too. Clicking an entry
+        jumps the view to that cycle's dashboard. Reads server run_phase only — a client connection
+        blip never changes the count.
     status: ok
   - id: remote_bar
     do: Play/pause/skip remote for the VIEWED cycle; mounted iff its server run_phase is in-flight

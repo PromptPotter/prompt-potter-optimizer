@@ -21,6 +21,11 @@
    Potter glyph is the presence signal; a count badge rides the corner when
    several run, and the popover rows carry a shared .phase-chip (see shell.css). */
 .topbar-jobs{position:relative;display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:var(--border-radius-md);background:var(--color-background-secondary);border:0.5px solid var(--color-border);color:var(--color-accent);cursor:pointer;transition:background .15s,color .15s,border-color .15s;flex-shrink:0;padding:0;font-family:inherit}
+/* A unit held at the origin gate is blocked ON THE OPERATOR — it makes no
+   progress until they decide — so the dock button states it instead of looking
+   like any other live run. Pairs the accent with the `title`/`aria-label` phase
+   word, never colour alone (BRAND.md: accessibility is positioning). */
+.topbar-jobs.phase-gate{border-color:var(--color-accent);box-shadow:0 0 0 1px var(--color-accent)}
 .topbar-jobs:hover{background:var(--color-background-hover);border-color:var(--color-accent)}
 .topbar-jobs-count{position:absolute;top:-5px;right:-5px;min-width:15px;height:15px;padding:0 3px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;line-height:1;border-radius:8px;background:var(--color-accent-strong);color:#fff;border:1.5px solid var(--color-background-primary)}
 .topbar-jobs-list{list-style:none;margin:0;padding:4px;min-width:180px}

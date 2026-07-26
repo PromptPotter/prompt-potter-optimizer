@@ -15,7 +15,6 @@ own.
 
 from __future__ import annotations
 
-import shutil
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -24,6 +23,7 @@ from promptpotter.application.config import configure_and_apply_pipeline
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.runner.identity import build_origin_cycle_id
 from promptpotter.domain.run_records import CycleSeed
+from promptpotter.infrastructure.store.io import rmtree_robust
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -141,9 +141,14 @@ def prepare_fresh_cycle(
     # keeps a concurrent same-origin run from racing this. For a non-L4 mint (or an
     # inner-campaign mint, whose sandbox root sits one level deeper) the path is
     # absent, so this is a no-op.
+    # ``rmtree_robust``, never a bare ``shutil.rmtree``: these trees nest langfuse
+    # observation dirs past Windows MAX_PATH (measured at 668 chars), where a plain
+    # rmtree fails — and with ``ignore_errors=True``, which this call used to carry, it
+    # failed SILENTLY and left the stale sandbox exactly where the comment above promises
+    # it is gone. A sweep that cannot report its own failure is not a sweep.
     inner_sandbox = session.store.projects_root.parent / ".inner" / plan.cycle_id
     if inner_sandbox.exists():
-        shutil.rmtree(inner_sandbox, ignore_errors=True)
+        rmtree_robust(inner_sandbox)
     session_id, campaign_id, cycle_id = auto_mint_session(
         session,
         campaign_config,

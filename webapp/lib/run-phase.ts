@@ -31,10 +31,43 @@ const RUN_PHASE_LABEL: Record<string, string> = {
 // terminal, not shown as an open app. Every "is anything running" surface reads
 // THIS one set — the navbar dock, the RemoteBar, the workspace `liveCycles` — so
 // they can't disagree.
+//
+// `gate` was a member of this set for a long time without ever arriving: the
+// server DECLARES it (there is no `.runtime/` flag, only the runner can know it)
+// but `derive_run_phase` never read the declaration, so the cycle list reported
+// plain `running`. Worse, the gate's wait wrote nothing, so after 30s it read
+// `detached` and left the dock entirely — the operator's cue to decide vanished
+// while the run waited on that decision. Both halves are fixed server-side; this
+// set was right all along.
 const IN_FLIGHT_PHASES = new Set(["running", "paused", "gate"]);
 
 export function isInFlight(runPhase: string | null | undefined): boolean {
   return !!runPhase && IN_FLIGHT_PHASES.has(runPhase);
+}
+
+// Dock order, and it sorts by WHAT NEEDS YOU rather than by what is busy.
+//
+//   gate    — blocked ON THE OPERATOR. It makes no progress until you decide, so
+//             every second it is not at the top is a second wasted.
+//   running — making progress without you. Interesting, not urgent.
+//   paused  — suspended by you; it is where you left it and will wait.
+//
+// The old order was "executing first", which reads as a status board rather than
+// a queue of work. That was harmless only while `gate` was unreachable: the server
+// declared it but never derived it, so the cycle list reported an ordinary
+// `running` and this list could not distinguish the two. With the derivation fixed
+// (`runtime_flags.py::derive_run_phase`), "needs a decision" is finally a state the
+// dock can see, and it belongs first.
+const DOCK_PRIORITY: Record<string, number> = { gate: 0, running: 1, paused: 2 };
+
+// Unknown / absent phases sort last. Written as an explicit miss-check because the
+// terse `(runPhase && DOCK_PRIORITY[runPhase]) ?? 3` does not typecheck under
+// `noUncheckedIndexedAccess`: the `&&` yields `"" | number | undefined`, and `??`
+// passes `""` straight through as a non-number.
+export function dockPriority(runPhase: string | null | undefined): number {
+  if (!runPhase) return 3;
+  const p = DOCK_PRIORITY[runPhase];
+  return p === undefined ? 3 : p;
 }
 
 // Live view: reason lives in `dash.stop_reason`. Cycle list: reason lives in the

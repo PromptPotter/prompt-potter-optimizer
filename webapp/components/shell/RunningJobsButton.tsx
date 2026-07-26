@@ -50,14 +50,18 @@ export function RunningJobsButton({ onPicked }: Props) {
   const labelFor = (campaignId: string, dataset: string) =>
     campaigns.find((c) => c.campaign_id === campaignId)?.label || dataset || campaignId;
 
-  // Exactly one in flight → the button IS the direct link.
+  // Exactly one in flight → the button IS the direct link. It still carries its
+  // phase class: one live unit is the COMMON case, and dropping the phase here
+  // meant a run held at the origin gate — blocked on the operator, making no
+  // progress — was pixel-identical to one working fine. The phase now reads at a
+  // glance in both branches, not only in the multi-unit popover.
   const c = n === 1 ? liveCycles[0] : undefined;
   if (c) {
     const label = labelFor(c.campaign_id, c.dataset_name);
     return (
       <button
         type="button"
-        className="topbar-jobs"
+        className={cx("topbar-jobs", `phase-${c.run_phase}`)}
         aria-label={`1 active job — ${label} (${runPhaseLabel(c.run_phase, c.status)}). Go to it.`}
         title={`${runPhaseLabel(c.run_phase, c.status)}: ${label}`}
         onClick={() => pick(c.campaign_id, c.cycle_id)}

@@ -145,10 +145,20 @@ export async function postCleanupEmpty(
   });
 }
 
-// Campaign lifecycle — soft-marks `lifecycle_status` on the campaign
-// manifest. Measurements survive (cross-campaign cache-hits keep working).
-// Deletion is never physical at this site; `try_delete_stub_cycle` stays
-// the only physical-delete path and only applies to empty stub cycles.
+// Campaign lifecycle. Archive MOVES the tree into the `archive/` recycle bin
+// (reversible via unarchive); delete is PHYSICAL and irreversible — the server
+// defaults `keep_results` to false, so the whole campaign tree plus every L4
+// inner sandbox its cycles spawned is removed. Measurements survive either way:
+// `measurements/` belongs to no single campaign, so siblings still cache-hit.
+//
+// (This comment used to claim "deletion is never physical at this site" and name
+// `try_delete_stub_cycle` as the only physical-delete path. That described a
+// design the store had already left, and it is exactly the kind of reassurance
+// worth distrusting on a destructive verb.)
+//
+// Both verbs 409 while any cycle in the campaign has a LIVE producer — pause or
+// stop it first. Being the campaign you are currently looking at is NOT a
+// refusal: the server releases the active pointer and proceeds.
 
 export async function postArchiveCampaign(
   campaignId: string,

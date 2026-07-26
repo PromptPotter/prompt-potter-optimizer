@@ -23,12 +23,15 @@ Ctrl+C, ``.runtime/pause.flag``) always wins and exits the gate resumable.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import queue
 import sys
 import threading
+import time
 from typing import TYPE_CHECKING, Literal
 
+from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
 from promptpotter.application.run_phase_control import declare_run_phase, pause_requested
 from promptpotter.application.runner.round import emit_origin_round
 from promptpotter.application.runner.termination import OriginGateMode, origin_gate_tripped
@@ -134,22 +137,59 @@ async def _await_gate_decision(
     session: Session, stdin_q: queue.Queue[GateDecision] | None
 ) -> _GateOutcome:
     """Block until a decision lands on the flag file or stdin. A pause always
-    wins. A stale decision from a prior gate entry is cleared first."""
+    wins. A stale decision from a prior gate entry is cleared first.
+
+    **Heartbeated, and it is the whole reason this wait is safe.** This is the
+    longest await in the package — unbounded, since it ends only when a human
+    decides — and it writes nothing of its own. Without a heartbeat the cycle went
+    silent the moment it declared ``gate``, and three things followed, none of them
+    raising: after ``RUN_FRESH_S`` (30 s) ``derive_run_phase`` read DETACHED, so the
+    cycle **dropped out of the operator's dock** while waiting on that same
+    operator; after ``DEAD_AFTER_S`` (15 min) the liveness reaper stamped it
+    TERMINAL (``producer_vanished``) though the process was alive and still
+    polling; and a decision arriving afterwards resumed a run into a cycle already
+    marked finished.
+
+    So the gate rides the ONE shared heartbeat (``dispatch/llm_call/heartbeat.py``)
+    as its fourth caller, never a second loop of its own. The record is a pure
+    freshness tick — ``LiveDashboardView._handle_llm_call_progress`` mutates no
+    state, it only re-persists — so a held gate looks alive because it *is*.
+    """
     decision_path = _decision_path(session)
     decision_path.unlink(missing_ok=True)
-    while True:
-        if pause_requested(session):
-            return "pause"
-        from_file = _read_decision_file(decision_path)
-        if from_file is not None:
-            decision_path.unlink(missing_ok=True)
-            return from_file
-        if stdin_q is not None:
-            try:
-                return stdin_q.get_nowait()
-            except queue.Empty:
-                pass
-        await asyncio.sleep(_GATE_POLL_S)
+    ledger = session.state.ledger
+    beat = (
+        None
+        if ledger is None
+        else asyncio.create_task(
+            heartbeat(
+                ledger,
+                call_id=f"origin_gate:{session.state.cycle_id}",
+                node="origin_gate",
+                round_num=0,
+                start_monotonic=time.monotonic(),
+            )
+        )
+    )
+    try:
+        while True:
+            if pause_requested(session):
+                return "pause"
+            from_file = _read_decision_file(decision_path)
+            if from_file is not None:
+                decision_path.unlink(missing_ok=True)
+                return from_file
+            if stdin_q is not None:
+                try:
+                    return stdin_q.get_nowait()
+                except queue.Empty:
+                    pass
+            await asyncio.sleep(_GATE_POLL_S)
+    finally:
+        if beat is not None:
+            beat.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await beat
 
 
 async def _rescore_and_reemit(

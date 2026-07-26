@@ -31,15 +31,14 @@ import logging
 import os
 import shutil
 import stat
-import time
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 from promptpotter.config.settings import DEFAULT_CONNECTOR_TYPE
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleDir
-from promptpotter.domain.phases import StopReason
+from promptpotter.domain.phases import RunPhase, StopReason
 from promptpotter.domain.results import RoundResult, best_round_by_cumulative_accuracy
 from promptpotter.domain.run_records import CycleSeed, CycleSeedRecord
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -51,6 +50,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 from promptpotter.infrastructure.store.io import (
     read_json,
     read_json_optional,
+    rmtree_robust,
     validate_path_component,
     write_json,
 )
@@ -64,7 +64,10 @@ from promptpotter.infrastructure.store.layout import (
     root_cycle_id,
     sibling_kind,
 )
-from promptpotter.infrastructure.store.session_pointer import read_active_pointer_under
+from promptpotter.infrastructure.store.session_pointer import (
+    clear_active_pointer_under,
+    read_active_pointer_under,
+)
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import BadRequestError, ConflictError, NotFoundError
 
@@ -148,35 +151,8 @@ def fresh_sibling_index_blob(
     }
 
 
-def _rmtree_robust(path: Path) -> None:
-    """``shutil.rmtree`` with Windows-isms — long-path prefix, chmod-on-PermissionError, backoff."""
-    target_str = str(path.resolve())
-    if os.name == "nt" and not target_str.startswith("\\\\?\\"):
-        target_str = "\\\\?\\" + target_str
-
-    def _onexc(func: Callable[[str], object], target: str, exc: BaseException) -> None:
-        if isinstance(exc, PermissionError):
-            try:
-                os.chmod(target, stat.S_IWRITE)
-                func(target)
-                return
-            except OSError:
-                pass
-        raise exc
-
-    for attempt in range(4):
-        try:
-            shutil.rmtree(target_str, onexc=_onexc)
-            return
-        except OSError as exc:
-            if attempt == 3:
-                raise
-            logger.debug("rmtree retry %d for %s after %s", attempt + 1, path, exc)
-            time.sleep(0.1 * (attempt + 1))
-
-
 def _unlink_robust(path: Path) -> None:
-    """``Path.unlink`` with the Windows read-only chmod dance ``_rmtree_robust`` uses."""
+    """``Path.unlink`` with the Windows read-only chmod dance ``rmtree_robust`` uses."""
     try:
         path.unlink()
     except FileNotFoundError:
@@ -221,7 +197,7 @@ def _strip_to_keepsake(campaign_dir: Path) -> None:
             _prune_empty_dirs(cdir)
     sweeps = campaign_dir / "sweeps"
     if sweeps.exists():
-        _rmtree_robust(sweeps)
+        rmtree_robust(sweeps)
 
 
 def _unit_kind(sibling_kind: str, fork_trigger: str | None) -> str:
@@ -457,12 +433,58 @@ class CampaignStore:
         index = self.load(campaign_id, root_cycle_id) or {}
         return str(index.get("status") or "active")
 
-    def _is_active_campaign(self, campaign_id: str) -> bool:
-        """Whether *campaign_id* is the tenant's active-session campaign — the live
-        lens / running run. Archiving or deleting it would strand the pointer + its
-        open ``.runtime/`` handles, so the move + destructive verbs refuse it."""
+    def _live_cycle_ids(self, campaign_id: str) -> list[str]:
+        """Cycles of *campaign_id* with a producer attached RIGHT NOW.
+
+        ``RUNNING`` is the whole answer, and it is the only phase that means a process
+        is writing here: a cycle held at the origin ``GATE`` is still heartbeating, so
+        it derives ``RUNNING`` too. Each of the others is explicitly NOT a reason to
+        refuse a verb the operator asked for — ``PAUSED`` and ``CHECKIN`` are resumable
+        but unattended, ``DETACHED`` is a dead producer (the reaper's business), and
+        ``TERMINAL`` is finished. Derived through the one liveness function every other
+        reader uses, never a second "is it running?" of our own.
+        """
+        cycles_dir = campaign_cycles_dir(self._campaign_dir(campaign_id))
+        if not cycles_dir.is_dir():
+            return []
+        live: list[str] = []
+        for cdir in sorted(p for p in cycles_dir.iterdir() if p.is_dir()):
+            data = read_json_optional(cdir / "index.json")
+            if not isinstance(data, dict):
+                continue
+            if (
+                derive_run_phase(cdir, is_terminal=bool(data.get("finished_at")))
+                is RunPhase.RUNNING
+            ):
+                live.append(cdir.name)
+        return live
+
+    def _guard_and_release(self, campaign_id: str, verb: str) -> None:
+        """Refuse *verb* while a producer is attached; otherwise release the pointer.
+
+        **This used to refuse whenever the campaign was merely the ACTIVE one**, and
+        that made both destructive verbs unreachable from the web surface: in a
+        single-operator workspace the campaign in view IS the active one, so Archive
+        and Delete answered "switch first" — naming an escape that exists nowhere
+        (there is no switch/activate command in the vocabulary and no such gesture in
+        the webapp). Reproduced end-to-end: active ⇒ `ConflictError`, nothing removed;
+        pointer absent ⇒ clean removal including the inner sandbox.
+
+        The old guard conflated two facts its own docstring listed separately —
+        "would strand the pointer" and "open ``.runtime/`` handles". Only the second
+        is a hazard, and it is about a LIVE cycle, not a selected one. A stranded
+        pointer is a UI state to fix, not a reason to refuse; so the live check
+        refuses, and the pointer is simply released. Deleting what you are looking at
+        is the ordinary case, not the dangerous one.
+        """
+        if live := self._live_cycle_ids(campaign_id):
+            raise ConflictError(
+                f"refusing to {verb} {campaign_id}: cycle {live[0]} has a live producer "
+                "— pause or stop it first"
+            )
         _, active_campaign, _ = read_active_pointer_under(self._base_dir)
-        return bool(active_campaign) and active_campaign == campaign_id
+        if active_campaign == campaign_id:
+            clear_active_pointer_under(self._base_dir)
 
     def _lifecycle_updates(self, status: str, changed_at: str, reason: str) -> dict[str, str]:
         return {
@@ -474,14 +496,13 @@ class CampaignStore:
     def archive_campaign(self, campaign_id: str, *, changed_at: str, reason: str = "") -> bool:
         """Flag the manifest ``archived`` then MOVE the tree into the ``archive/``
         recycle bin. Returns ``False`` if the campaign isn't found; raises
-        ``ConflictError`` if it's the active campaign. ``unarchive_campaign``
-        reverses it. Measurements (``measurements/``) are untouched."""
+        ``ConflictError`` if any of its cycles has a LIVE producer (see
+        ``_guard_and_release``, which also releases the active pointer when it names
+        this campaign). ``unarchive_campaign`` reverses it. Measurements
+        (``measurements/``) are untouched."""
         if self.load_campaign(campaign_id) is None:
             return False
-        if self._is_active_campaign(campaign_id):
-            raise ConflictError(
-                f"refusing to archive {campaign_id}: active campaign — switch first"
-            )
+        self._guard_and_release(campaign_id, "archive")
         self.update_campaign(campaign_id, self._lifecycle_updates("archived", changed_at, reason))
         src = campaign_root_dir_for(self._base_dir, campaign_id)
         dst = archive_root_dir_for(self._base_dir, campaign_id)
@@ -528,13 +549,14 @@ class CampaignStore:
         Passed only on delete — NOT on archive, which is recoverable and must keep the
         sandboxes for a later unarchive + the self-potter-hop.
 
-        Returns ``False`` if the campaign isn't found; raises ``ConflictError`` if
-        it's the active campaign."""
+        Returns ``False`` if the campaign isn't found; raises ``ConflictError`` if any
+        of its cycles has a LIVE producer (``_guard_and_release``, which also releases
+        the active pointer when it names this campaign — deleting the campaign you are
+        looking at is the ordinary case)."""
         campaign_dir = self._campaign_dir(campaign_id)
         if not (campaign_dir / "campaign.json").is_file():
             return False
-        if self._is_active_campaign(campaign_id):
-            raise ConflictError(f"refusing to delete {campaign_id}: active campaign — switch first")
+        self._guard_and_release(campaign_id, "delete")
         # Enumerate cycle_ids BEFORE the tree is stripped/removed — the inner
         # sandboxes are keyed by cycle_id and live off-tree, so we need the ids first.
         inner_cycle_ids: list[str] = []
@@ -548,12 +570,12 @@ class CampaignStore:
             )
             _strip_to_keepsake(campaign_dir)
         else:
-            _rmtree_robust(campaign_dir)
+            rmtree_robust(campaign_dir)
         if inner_sandbox_root is not None:
             for cycle_id in inner_cycle_ids:
                 inner_dir = inner_sandbox_root / cycle_id
                 if inner_dir.exists():
-                    _rmtree_robust(inner_dir)
+                    rmtree_robust(inner_dir)
         return True
 
     # ------------------------------------------------------------------
@@ -798,14 +820,26 @@ class CampaignStore:
         guards below passed, not that it durably landed. Resumability is
         unaffected (admissibility is ledger-gated, `scan_ledger_max_round_complete`).
 
-        Never terminates a **paused** or **check-in** cycle — pause is an
-        intentional, resumable suspend and check-in is pre-loop origin authoring
-        (no ``dashboard.json``, no producer to go silent); both are distinct from
-        a dead producer, and both reaper paths defer to these two invariants here
-        (not just the sweep's staleness gate). A paused cycle stays a suspended
-        unit until the operator resumes or archives it."""
+        Never terminates a **paused**, **check-in**, or **origin-gated** cycle —
+        pause is an intentional, resumable suspend; check-in is pre-loop origin
+        authoring (no ``dashboard.json``, no producer to go silent); and a gated
+        cycle is a live process holding for an operator decision. None is a dead
+        producer, and both reaper paths defer to these invariants here (not just
+        the sweep's staleness gate).
+
+        The gate invariant is the newest and was bought with a real bug: the gate's
+        unbounded wait wrote nothing, so the cycle went stale in 30 s and was reaped
+        TERMINAL 15 minutes later while alive and still polling — and a decision
+        arriving after that resumed a run into a cycle marked finished. The wait now
+        heartbeats (``runner/origin_gate.py``), which is the fix; this check is the
+        second line, because a heartbeat can still lose a race a machine sleep
+        creates, and being reaped is not recoverable by asking again."""
         cycle_dir = self.cycle_dir(campaign_id, cycle_id)
-        if CycleLayout(cycle_dir).pause_flag.is_file() or is_checkin(cycle_dir):
+        layout = CycleLayout(cycle_dir)
+        if layout.pause_flag.is_file() or is_checkin(cycle_dir):
+            return False
+        dash = read_json_optional(layout.dashboard)
+        if isinstance(dash, dict) and dash.get("run_phase") == RunPhase.GATE:
             return False
         index_path = self._index_path(campaign_id, cycle_id)
         data = read_json_optional(index_path)
@@ -901,7 +935,7 @@ class CampaignStore:
             other_data = read_json_optional(other)
             if isinstance(other_data, dict) and other_data.get("parent_cycle_id") == cycle_id:
                 return False, f"has descendant {other_cycle}"
-        _rmtree_robust(cycle_dir)
+        rmtree_robust(cycle_dir)
         return True, ""
 
     # ------------------------------------------------------------------

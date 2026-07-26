@@ -52,7 +52,7 @@ import { usePoll } from "./hooks/usePoll";
 import { bumpRevalidation, useRevalidation } from "./revalidate";
 import { useAuthGate } from "./auth-context";
 import { isSelfOptimization } from "./derivations";
-import { isInFlight } from "./run-phase";
+import { isInFlight, dockPriority } from "./run-phase";
 
 interface WorkspaceState {
   sessionId: string | null;
@@ -380,14 +380,15 @@ export function WorkspaceProvider({
 
   // One workspace-wide "what is running" derivation — membership AND order,
   // so every dock reader shares both for free instead of re-sorting its own
-  // copy (frontend-surface-contract I6: one shared ordering). Executing units
-  // sort above suspended (paused) ones so "what's executing" reads first.
-  // Recomputed only when the list mutates.
+  // copy (frontend-surface-contract I6: one shared ordering). Recomputed only
+  // when the list mutates.
+  //
+  // Ordered by WHAT NEEDS YOU, not by what is busy — see `dockPriority`.
   const liveCycles = useMemo(
     () =>
       cycles
         .filter((c) => isInFlight(c.run_phase))
-        .sort((a, b) => (a.run_phase === "paused" ? 1 : 0) - (b.run_phase === "paused" ? 1 : 0)),
+        .sort((a, b) => dockPriority(a.run_phase) - dockPriority(b.run_phase)),
     [cycles],
   );
 

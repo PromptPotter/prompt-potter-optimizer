@@ -100,6 +100,19 @@ def _producer_fresh(cycle_dir: Path, *, fresh_s: float) -> bool:
         return False
 
 
+def _declared_phase(cycle_dir: Path) -> str:
+    """The phase the RUNNER declared, read off ``dashboard.json::run_phase``.
+
+    ``paused`` gets a ``.runtime/`` flag because the OPERATOR writes it; ``gate`` has
+    no flag because only the runner can know it, and it declares it onto the ledger →
+    this field. Consulted for that one phase (see :func:`derive_run_phase`), never as
+    a general second opinion: everything else here is derived, and reading a declared
+    value where a derived one exists is how two vocabularies start disagreeing.
+    """
+    data = read_json_tolerant(CycleLayout(cycle_dir).dashboard)
+    return str(data.get("run_phase", "")) if isinstance(data, dict) else ""
+
+
 def derive_run_phase(
     cycle_dir: Path, *, is_terminal: bool, fresh_s: float = RUN_FRESH_S
 ) -> RunPhase:
@@ -113,11 +126,19 @@ def derive_run_phase(
        ``finished_at``, so without this it would derive ``detached``.
     1. terminal — the cycle finished (a terminal record / ``finished_at`` exists).
     2. paused   — ``pause.flag`` present (operator interrupt; resumable).
-    3. running  — producer fresh (``_producer_fresh``: ``dashboard.json``'s
+    3. gate     — fresh AND the runner declared ``gate`` (held at the round-0
+       origin gate, awaiting an operator decision). Freshness is required so a
+       cycle that DIED while gated still derives ``detached`` and is reapable;
+       without that this would pin a dead cycle at ``gate`` forever. This branch
+       used to be unreachable — ``gate`` is declared, never flagged — so the one
+       phase that REQUIRES the operator to act was reported as ordinary
+       ``running`` to every non-live reader, including the dock whose job is to
+       surface exactly that.
+    4. running  — producer fresh (``_producer_fresh``: ``dashboard.json``'s
        mtime, falling back to ``index.json``'s only while no dashboard has
        been written yet — so a just-minted cycle reads ``running``, not
        ``detached``, before its first round closes).
-    4. detached — active but the producer stopped writing (died without a
+    5. detached — active but the producer stopped writing (died without a
        terminal record). The only branch that consults freshness.
 
     The live single-cycle view reads ``dashboard.json::run_phase`` directly
@@ -133,7 +154,10 @@ def derive_run_phase(
         return RunPhase.TERMINAL
     if is_paused(cycle_dir):
         return RunPhase.PAUSED
-    if _producer_fresh(cycle_dir, fresh_s=fresh_s):
+    fresh = _producer_fresh(cycle_dir, fresh_s=fresh_s)
+    if fresh and _declared_phase(cycle_dir) == RunPhase.GATE:
+        return RunPhase.GATE
+    if fresh:
         return RunPhase.RUNNING
     return RunPhase.DETACHED
 

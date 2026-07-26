@@ -1,5 +1,6 @@
 """Liveness reaper — the single owner reconciling on-disk cycle state with
-whether a producer is actually alive.
+whether a producer is actually alive, and disposable L4 scratch with whether
+anything can still reach it.
 
 Two launch paths leave a cycle non-terminal on disk after their producer is
 gone: an **API-launched** run whose asyncio task died mid-session (a torn task
@@ -27,6 +28,13 @@ by globbing ``projects_root`` — no identity/tenant mapping needed. The sweep
 walks ``projects_root`` PLUS every L4 inner sandbox (``<workspace>/.inner/<outer
 cycle_id>``, a sibling tree of the same shape — see :func:`_sweep_roots`), so an
 inner cycle's dead producer is reaped exactly like a top-level one.
+
+:func:`reclaim_orphan_sandboxes` is the third job, on the same tick: an
+``.inner/<cycle_id>`` whose owner cycle no longer exists is unreachable by every
+reader in the package and is deleted. Reclamation lives HERE, with liveness,
+because both answer the same shape of question — "does the thing this on-disk
+state belongs to still exist?" — and splitting them is how ``.inner`` came to have
+no owner at all.
 """
 
 from __future__ import annotations
@@ -39,7 +47,11 @@ from pathlib import Path
 from promptpotter.domain.phases import RunPhase
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-from promptpotter.infrastructure.store.io import read_json_optional, validate_path_component
+from promptpotter.infrastructure.store.io import (
+    read_json_optional,
+    rmtree_robust,
+    validate_path_component,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +126,50 @@ def _sweep_roots(projects_root: Path) -> list[Path]:
     return roots
 
 
+def reclaim_orphan_sandboxes(projects_root: Path) -> int:
+    """Delete every ``.inner/<cycle_id>`` whose owner cycle is gone; return the count.
+
+    A sandbox is **scratch owned by exactly one outer cycle** — named by it, written only
+    while it runs, reachable afterwards only by walking down from that cycle (the lineage
+    tree, the ``descend`` routes). So when the owner is no longer on disk, the sandbox is
+    not merely stale, it is *unreachable*: no lineage walk finds it, no route serves it,
+    and until now nothing deleted it. That is the whole accumulation mechanism — sandboxes
+    outlive their owners whenever a campaign is deleted through a path that doesn't pass
+    ``inner_sandbox_root``, or an outer cycle is rewound and re-minted under a new id.
+
+    Deliberately narrow: a sandbox whose owner still exists is KEPT, terminal or not.
+    "The owner finished" is not the same claim as "nobody can reach this" — an operator
+    drilling into a completed L4 campaign walks into exactly these trees — and a reaper
+    that guesses at the difference deletes measurement history to save disk. Absence of
+    the owner is a fact, not a policy, which is why it is the one this function acts on.
+
+    The disk pressure that made reclamation urgent is fixed upstream instead: an inner
+    cycle no longer dumps per-observation traces at all (``tracing/file_sink.py``), which
+    is where ~all of the measured 343 MB came from.
+    """
+    inner_dir = projects_root.parent / ".inner"
+    if not inner_dir.is_dir():
+        return 0
+    reclaimed = 0
+    for sandbox in inner_dir.iterdir():
+        if not sandbox.is_dir():
+            continue
+        # The owner is a cycle dir named by the sandbox, in ANY tenant. Its `index.json`
+        # is what every other reader treats as "this cycle exists".
+        if next(projects_root.glob(f"*/campaigns/*/cycles/{sandbox.name}/index.json"), None):
+            continue
+        try:
+            rmtree_robust(sandbox)
+        except OSError as exc:
+            # Reported, never swallowed: an unreclaimable sandbox is the exact silence
+            # this function exists to end.
+            logger.warning("could not reclaim orphan inner sandbox %s: %s", sandbox, exc)
+            continue
+        logger.info("reclaimed orphan inner sandbox %s (owner cycle gone)", sandbox.name)
+        reclaimed += 1
+    return reclaimed
+
+
 def sweep_dead_cycles(projects_root: Path, *, dead_after_s: float = DEAD_AFTER_S) -> int:
     """Reap every dead cycle across all tenants AND every L4 inner sandbox;
     return the count stamped.
@@ -185,7 +241,18 @@ async def periodic_sweep(
             sleep_for = initial_delay_s
             continue
         await asyncio.to_thread(sweep_dead_cycles, projects_root, dead_after_s=interval_s)
+        # Reclamation rides the same tick but stays a separate call: one judges LIVENESS
+        # (is this cycle's producer gone?), the other judges REACHABILITY (does this
+        # sandbox's owner still exist?). Same schedule, different question — folding them
+        # would make either count unreadable.
+        await asyncio.to_thread(reclaim_orphan_sandboxes, projects_root)
         sleep_for = interval_s
 
 
-__all__ = ["DEAD_AFTER_S", "periodic_sweep", "reap_cycle_by_id", "sweep_dead_cycles"]
+__all__ = [
+    "DEAD_AFTER_S",
+    "periodic_sweep",
+    "reap_cycle_by_id",
+    "reclaim_orphan_sandboxes",
+    "sweep_dead_cycles",
+]

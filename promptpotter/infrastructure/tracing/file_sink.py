@@ -38,6 +38,7 @@ from promptpotter.infrastructure.tracing.events import (
     generate_observation_id,
 )
 from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.instrument import instrument_depth
 
 logger = logging.getLogger(__name__)
 
@@ -110,8 +111,22 @@ class FileSink:
         }
         if parent_observation_id is not None:
             observation["parentObservationId"] = parent_observation_id
-        obs_dir = self._scope_dir() / "langfuse" / "observations" / trace_id
-        write_json(obs_dir / f"{observation_id}.json", observation)
+        # An INSTRUMENT does not dump per-observation traces. Same argument that already
+        # force-disables the cloud sink for an inner cycle (`runner/inner/cycle.py`:
+        # "per-(sample x candidate x round) traces have no operator value"), applied to the
+        # local one — and measured: `.inner/` reached 343 MB across 9 sandboxes, 60% of the
+        # whole store, essentially all of it this one write. Nothing in the repo reads
+        # `langfuse/observations/` back except `_finalize_observation` below, which already
+        # treats an absent file as "nothing to finalize". The path is also the deepest the
+        # package produces (`.inner/<cyid>/<tenant>/campaigns/…/observations/<trace>/<obs>.json`
+        # measured at 668 chars), so not writing it is also what keeps these trees under
+        # MAX_PATH rather than needing a special deleter to get rid of them.
+        #
+        # The id is still returned and still bookkept by callers: a skipped dump must not
+        # change control flow, only what lands on disk. Top-level campaigns are untouched.
+        if not instrument_depth():
+            obs_dir = self._scope_dir() / "langfuse" / "observations" / trace_id
+            write_json(obs_dir / f"{observation_id}.json", observation)
         return observation_id
 
     def _write_score(
