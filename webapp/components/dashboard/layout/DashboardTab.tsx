@@ -14,7 +14,6 @@ import { Lane } from "./Lane";
 import { LiveStateCard } from "@/components/dashboard/scoring/LiveStateCard";
 import { OuterVerdictPanel } from "@/components/dashboard/scoring/OuterVerdictPanel";
 import { ChampionConsole } from "@/components/dashboard/scoring/ChampionConsole";
-import { CapabilityMatrixPanel } from "@/components/dashboard/scoring/CapabilityMatrixPanel";
 import { MechanismsPanel } from "@/components/dashboard/control/MechanismsPanel";
 import { AllowedModelsPanel } from "@/components/dashboard/control/AllowedModelsPanel";
 import { ConfigMapPanel } from "@/components/dashboard/control/ConfigMapPanel";
@@ -111,7 +110,7 @@ export function DashboardTab() {
         <Lane
           id="l4-lab"
           title="L4 lab"
-          subtitle="Champion ranking + capability matrix — outer meta-optimization (dev surface)"
+          subtitle="Champion ranking — outer meta-optimization (dev surface)"
           defaultOpen={false}
         >
           <DashSpine>
@@ -120,9 +119,6 @@ export function DashboardTab() {
             ) : (
               <p className="l4-empty">Loading champion registry…</p>
             )}
-          </DashSpine>
-          <DashSpine>
-            <CapabilityMatrixPanel />
           </DashSpine>
         </Lane>
       )}

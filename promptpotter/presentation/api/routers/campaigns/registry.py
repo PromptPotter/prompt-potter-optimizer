@@ -23,13 +23,8 @@ from promptpotter.application.knobs import (
     resolve_knob_states,
 )
 from promptpotter.application.meta_champion.reducer import ChampionRegistry, reduce_corpus
-from promptpotter.application.resource_matrix.matrix import ResourceMatrix, read_matrix
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.dataset_access import (
-    DatasetAccessError,
-    readable_dataset_dir,
-)
 from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.presentation.api.deps import StoreDep, decode_descend
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
@@ -391,11 +386,11 @@ def get_campaign_config_map(store: StoreDep, campaign_id: str) -> ConfigMapRespo
     return ConfigMapResponse(groups=groups, couplings=couplings)
 
 
-# The two L4 read surfaces are tenant-scoped (a tenant sees only its own pp-self
-# cycles / matrix) and consumed by the outer-loop dashboard boxes, which render only
-# when the operator is viewing their own self-optimizing campaign — so the read is
-# self-gating on data. No capability gate: whitelabeled users never run a pp-self
-# campaign, so these return empty for them, and there is nothing to hide.
+# The L4 read surface is tenant-scoped (a tenant sees only its own pp-self cycles) and
+# consumed by the outer-loop dashboard box, which renders only when the operator is
+# viewing their own self-optimizing campaign — so the read is self-gating on data. No
+# capability gate: whitelabeled users never run a pp-self campaign, so it returns empty
+# for them, and there is nothing to hide.
 @campaigns_router.get("/champion-registry", response_model=ChampionRegistry)
 def get_champion_registry(store: StoreDep) -> ChampionRegistry:
     """The L4 champion table — every candidate meta-prompt state on disk, ranked by
@@ -403,17 +398,3 @@ def get_champion_registry(store: StoreDep) -> ChampionRegistry:
     fetch (on-demand, not the 2 s poll); zero LLM. Tenant-scoped; empty for a tenant
     with no pp-self cycles."""
     return reduce_corpus(store)
-
-
-@campaigns_router.get("/resource-matrix", response_model=ResourceMatrix)
-def get_resource_matrix(store: StoreDep) -> ResourceMatrix:
-    """The L4 resource matrix — the (target-model × dataset) capability grid the
-    operator built with ``matrix measure``. Read-only from the committed pp-self
-    ``resource_matrix.json``; empty when it has never been measured — or when the
-    install carries no pp-self dataset at all."""
-    try:
-        pp_self_dir = readable_dataset_dir(store, "promptpotter-self")
-    except DatasetAccessError:
-        return ResourceMatrix(generated_at="", cells=[])
-    matrix = read_matrix(pp_self_dir)
-    return matrix or ResourceMatrix(generated_at="", cells=[])

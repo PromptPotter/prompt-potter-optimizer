@@ -235,8 +235,10 @@ def get_optimizer_pipeline() -> dict[str, Any]:
     ``node_output_schema``) so the canvas node-detail renders the optimizer's own
     knobs (model / provider / reasoning_effort / temperature / …) through the same
     canonical config element the steer panel uses, not a hand-rolled chip + JSON
-    dump. Read-only: the install-global ``_optimizer`` pipeline is edited via the
-    champion/Lab write path, never a fork; model/provider are always optimizer-locked."""
+    dump. Read-only: the install-global ``_optimizer`` pipeline is operator-owned — a
+    hand-edit, never a fork and never a write path from here (the ``champion`` verb that
+    used to graduate a winner into it was deleted 2026-07-17); model/provider are always
+    optimizer-locked."""
     pipeline: dict[str, Any] = read_json(OPTIMIZER_PIPELINE_PATH)
     schema = parse_pipeline_response(pipeline)
     pipeline["node_config_schema"] = {

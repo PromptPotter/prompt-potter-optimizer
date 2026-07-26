@@ -370,9 +370,34 @@ LEDGER_BASELINE = {
     # ``application/datasets/traces.py`` (the potter-trace loader; superseded by L4 inner-cycle
     # recursion, never registry-routed) and ``infrastructure/tracing/replay.py`` (the historical
     # Langfuse backfill; no CLI verb, no caller). Subtraction, so the baseline falls.
-    "modules": 301,
+    # 301 -> 300 (2026-07-26): withdrew the ``llm_only`` CONNECTOR
+    # (``connectors/llm_only.py``, the 295->296 feature raise noted above). It shipped and
+    # then sat at ZERO dataset adopters for its whole life — every single-node benchmark
+    # names an ``llm_only`` *node* inside a ``termnorm`` pipeline and still needs the
+    # server. Its in-process answer extraction duplicated TermNorm's ``_step_llm_only``
+    # over the wire, and its own docstring warned the two arms "must agree on shape … or
+    # one measures a different thing than the other" — a standing divergence risk carried
+    # for a path nobody ran. Operator call: the single-node case is served by the TermNorm
+    # connector accepting an ``llm_only`` pipeline, so ``llm_only`` is now a node name
+    # only and the connector/sentinel name collision is gone. Subtraction, baseline falls.
+    # 300 -> 296 (2026-07-26): retired the resource-matrix arc — the `matrix` verb
+    # (``presentation/cli/commands/matrix.py`` + ``_add_matrix_args``), the
+    # ``application/resource_matrix/`` package (3 modules), the ``GET /resource-matrix``
+    # route, ``CapabilityMatrixPanel`` + its hand-written TS types, and the ``.cap-*``
+    # CSS. Structurally live end-to-end, but **no ``resource_matrix.json`` has ever
+    # existed in this repo** — the panel only ever rendered its empty state, so the
+    # write path (`matrix measure`) was never once run. Same "never ran" evidence that
+    # retired the `champion` verb (2026-07-17) and the `sweep` verb. Operator call.
+    # Consequence recorded honestly: ``classify_band`` + ``constant_answer_floor`` went
+    # with it, so the CONSTANT-ANSWER-floor criterion in
+    # ``docs/operations/dataset-selection-rationale.md`` is now read off the live
+    # ``answer_distribution`` panel instead (the enforcement never fired anyway —
+    # reaching it required the unrun verb). Subtraction, so the baseline falls.
+    "modules": 296,
     # 52 -> 51 (2026-07-17): ``cli/commands/sweep`` went with the sweep verb.
-    "init_files": 51,
+    # 51 -> 50 (2026-07-26): ``application/resource_matrix/__init__.py`` went with the
+    # retired arc above.
+    "init_files": 50,
     # 43 -> 9 (2026-07-16): 34 package ``__init__`` files that did nothing but re-export a
     # leaf's names were emptied to docstring-only namespace markers, and their ~190 consumer
     # sites now import the leaf they actually wanted. A shim is a hop a reader must take and

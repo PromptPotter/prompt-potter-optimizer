@@ -194,9 +194,9 @@ or `infrastructure/backend.py`.**
 `DEFAULT_CONNECTOR` naming an unregistered backend. An unknown connector raises
 `KeyError` at `get()`.
 
-**The `in_process` arm is SHIPPED**, and two connectors ride it: `llm_only` (one
-direct LLM call, no backend server) and `promptpotter` (an inner cycle — L4, via
-`runner/inner/cycle.py`). It does not raise `NotImplementedError`.
+**The `in_process` arm is SHIPPED**, and one connector rides it: `promptpotter` (an
+inner cycle — L4, via `runner/inner/cycle.py`). It does not raise
+`NotImplementedError`.
 
 Contract: [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md).
 
@@ -234,7 +234,7 @@ A new `python -m promptpotter <verb>`. The CLI is a **thin shell**: parse, call 
    `presentation/cli/campaign_runner.py`, importing the function at the top.
 4. Decide the verb's class and honor it: **write** (`new` / `resume` — these mint or
    extend a cycle), **lifecycle** (`archive` / `delete` / `unarchive` / `reset`), or
-   **diagnostic** (`ab` / `verify` / `noise-floor` / `matrix` —
+   **diagnostic** (`ab` / `verify` / `noise-floor` / `reindex` —
    these must not perturb an existing cycle's measurements).
 5. Do **not** add a read verb. Reads happen by opening the artifact tree — the file
    tree *is* the dashboard. Nor an `ingest` verb: raw-file ingest is `new <file.csv>`.

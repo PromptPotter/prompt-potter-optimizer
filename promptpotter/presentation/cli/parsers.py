@@ -232,40 +232,6 @@ def _add_resume_args(p_resume: argparse.ArgumentParser) -> None:
     _add_runtime_halts(p_resume)
 
 
-def _add_matrix_args(p_matrix: argparse.ArgumentParser) -> None:
-    """``matrix <verb>`` — the L4 resource matrix (capability grid).
-
-    ``measure <dataset> --models M [M ...]`` scores that dataset's ORIGIN under each
-    target model and upserts the verdicts into the pp-self ``resource_matrix.json``.
-    """
-    matrix_sub = p_matrix.add_subparsers(dest="matrix_verb", required=True)
-    p_measure = matrix_sub.add_parser(
-        "measure",
-        help="Score a dataset's origin under one or more target models; classify "
-        "each (model,dataset) cell floor/in-band/saturated and record it.",
-    )
-    p_measure.add_argument("dataset", help="Dataset name to measure (e.g. justlogic).")
-    p_measure.add_argument(
-        "--models",
-        nargs="+",
-        required=True,
-        help="One or more target-model ids to measure origin under (e.g. "
-        "openai/gpt-oss-20b:nitro).",
-    )
-    p_measure.add_argument(
-        "--provider",
-        default=None,
-        help="Provider to route every listed model through (e.g. openrouter). Omit "
-        "to use the dataset's own provider.",
-    )
-    p_measure.add_argument(
-        "--samples",
-        type=int,
-        default=20,
-        help="Number of samples to score origin on (default 20).",
-    )
-
-
 def _add_verify_args(p_verify: argparse.ArgumentParser) -> None:
     """Campaign + candidate selectors + sample budget for ``verify``."""
     p_verify.add_argument(
@@ -405,15 +371,6 @@ def build_parser() -> argparse.ArgumentParser:
             "(recycle bin + optimizer_calls + sweeps). The escape hatch for cycles "
             "obsoleted by code changes — per-sample measurements survive so the "
             "next `new` hits cache immediately.",
-        )
-    )
-
-    _add_matrix_args(
-        sub.add_parser(
-            "matrix",
-            help="L4 resource matrix — score a dataset's origin under target models to "
-            "classify (model,dataset) cells floor/in-band/saturated. The operator-set "
-            "capability grid the L4 panel draws its in-band cells from.",
         )
     )
 

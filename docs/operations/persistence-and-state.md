@@ -26,7 +26,7 @@ A **Session** is one `new` invocation; a campaign holds one. `resume` extends it
 - **`--session <id>`** overrides the pointer for one command.
 - **`--tenant <id>`** (default `"default"`) selects the partition under `projects/` for the command.
 
-Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [options]`. Loop-mint verbs: `new`, `resume`. Lifecycle verbs: `archive`, `delete`, `unarchive`, `reset`. Diagnostic verbs: `verify`, `ab`, `matrix`, `reindex`, `noise-floor`. Reads happen by opening the on-disk artifact tree — there is no read CLI.
+Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [options]`. Loop-mint verbs: `new`, `resume`. Lifecycle verbs: `archive`, `delete`, `unarchive`, `reset`. Diagnostic verbs: `verify`, `ab`, `reindex`, `noise-floor`. Reads happen by opening the on-disk artifact tree — there is no read CLI.
 
 ## Layout
 
