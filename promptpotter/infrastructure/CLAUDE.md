@@ -127,6 +127,13 @@ as instances (no subclasses) parameterized by a `ProviderSpec` registry.
 `llm/anthropic.py::AnthropicClient` is its peer. SDK `max_retries` handles 503/429 +
 Retry-After.
 
+**`LLMResponse.reasoning` is a core field with no code reader — by design.** It captures
+the model's own thinking channel; a model with nowhere to put its internal process
+answers without one, so the slot is part of the ask. It rides the ledger payload to
+`nodes[*].output.reasoning` (audit twin + live dashboard) and the operator's node-detail
+"Thinking" pane, and is **strictly analytical** — never a gate, metric, validator, scorer
+or cache key. Do not delete it as write-only surface; read its field note first.
+
 ## Backend wire
 
 `backend.py`: `BackendClient` is connector-agnostic; per-connector wire

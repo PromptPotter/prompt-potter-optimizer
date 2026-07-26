@@ -14,6 +14,17 @@ The second correction was costlier, and it was in the **required set**, not the 
 
 **3. The description.** The only natural language placed *inside* the field-filling loop. Root [`CLAUDE.md`](../../CLAUDE.md) says *never trim `Field(description=)` — LLM-facing copy*; that rule is a scar from trimming them as documentation. They are prompt.
 
+## A place to think is part of the ask
+
+Before any of those levers: does the model have **anywhere to put its reasoning**? A schema of `{answer}` alone does not just omit the rationale — it removes the room to derive one, and the model answers straight from the prompt. Hand it a bare classification slot and you get a label with nothing behind it. `{reasoning, answer}` is not instrumentation bolted onto `{answer}`; it is a different, better request, which is why lever 2 above is about order and this is about *existence*.
+
+Two mechanisms, one principle, and both are captured:
+
+- **The schema slot** — a `reasoning` field on a node's `output_schema` (justlogic's `{reasoning, answer}`). Ordered first, so thinking is in context before the answer commits.
+- **The provider's native channel** — `message.reasoning` on the OpenAI-compat wire, captured as `LLMResponse.reasoning` for reasoning models.
+
+**Both are strictly analytical.** They ride the ledger to the audit twin and the operator's node-detail pane, and they never reach a gate, metric, validator, scorer or cache key — score a model's narration of its work instead of its work, and the loop learns to narrate. The corollary that catches people: **neither has a code reader, and neither is dead.** `LLMResponse.reasoning` has been proposed for deletion by a dead-surface audit; its field note in `infrastructure/llm/models.py` is the standing answer. Do not remove a thinking channel because nothing branches on it — nothing branching on it is the design.
+
 ## Which levers are actually free
 
 | Lever | Who reads it | Safe to change? |

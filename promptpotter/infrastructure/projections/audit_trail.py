@@ -108,9 +108,18 @@ def _action_to_node_block(action: dict[str, Any]) -> dict[str, Any]:
     if not input_block and "messages" in action:
         input_block["messages"] = action["messages"]
 
+    output_block: dict[str, Any] = {"response": action.get("response")}
+    # The model's own thinking, beside the answer it produced. Present only when the
+    # provider returned one. Sits on `output` because that is what it is — the model's
+    # own account of the response — but it is READ BY HUMANS ONLY (see
+    # ``LLMResponse.reasoning``); no projection, gate or scorer consumes this key.
+    reasoning = action.get("reasoning")
+    if reasoning:
+        output_block["reasoning"] = reasoning
+
     block: dict[str, Any] = {
         "input": input_block,
-        "output": {"response": action.get("response")},
+        "output": output_block,
     }
     if "usage" in action:
         block["usage"] = action["usage"]

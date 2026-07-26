@@ -26,18 +26,28 @@ expensive mistake is never "couldn't find it" — it is "found the wrong one."
   non-root cycle begins from (`domain/run_records.py`). (2) the **incumbent
   candidate** a round measures against (`seed-MISS` stratum, `θ_seed`,
   `domain/results.py`). (3) an **RNG integer** on a node's wire config
-  (`cfg["seed"]`, `connectors/llm_only.py`). Only (1) is a fork concept.
+  (`cfg["seed"]` on a node's `pipeline.json` config). Only (1) is a fork concept.
 - **`campaign.json`** — two incompatible schemas, one filename. Under
   `datasets/{name}/` it is the **template** (a `campaign_config` wrapper, read by
   `application/datasets/authored.py`). Under `campaigns/{id}/` it is the minted
   **manifest** (a frozen `Campaign`, `extra="forbid"`, owned by `CampaignStore`).
   Check which tree the path is under before assuming a shape.
-- **`"llm_only"`** — a registered **connector** AND the **single-node pipeline
-  sentinel** (`terminated_at`, `LLM_ONLY_NODE`). A raw literal in scoring code is
-  usually the sentinel.
-- **answer extraction** — a **double seam**. The SHAPE arm
-  (`connectors/llm_only.py::_extract_answer`) destructures the structured-output slot
-  named by `answer_field`, before scoring. The LABEL arm
+- **`"llm_only"`** — the **single-node pipeline sentinel**, and nothing else
+  (`terminated_at`). It is a NODE name the six single-node benchmarks declare inside a
+  `termnorm` pipeline. It once also named a connector; that connector was deleted, so
+  the old two-meanings warning no longer applies.
+- **thinking channel** — where a model puts its internal process: a `reasoning` slot in a
+  node's `output_schema`, or the provider's native `message.reasoning` (captured as
+  `LLMResponse.reasoning`). **Not optional instrumentation** — a model given nowhere to
+  think answers without thinking. Captured to the ledger → audit twin →
+  the node-detail "Thinking" pane, and **strictly analytical**: never a gate, metric,
+  validator, scorer or cache key. Has no code reader by design; do not delete as dead
+  surface (`docs/concepts/structured-output.md` § A place to think is part of the ask).
+  Distinct from the backend's per-sample `reasoning_trace` (the TARGET model's thinking)
+  and from `reasoning_chars` (a truncation diagnostic that counts and discards).
+- **answer extraction** — a **double seam**, and only one arm is in this repo. The SHAPE
+  arm is the BACKEND's (TermNorm `_step_llm_only`): it destructures the structured-output
+  slot named by `answer_field` before the body is posted back. The LABEL arm
   (`scoring/formula/matchers.py`, `EXTRACTION_NOTES` + `SCORING_FUNCTIONS`) parses the
   answer prose and decides HIT/MISS. Display-side extraction is a third thing
   (`domain/rendering.py`). Shape first, label second.
@@ -427,7 +437,7 @@ The persisted world is a four-entity containment hierarchy
 
 - **Connector** — the bundled shape `{wire adapter, session lifecycle,
   experiment-data extract, ground-truth resolver}` registered under one
-  name in `CONNECTORS`. Three today: `termnorm`, `llm_only`, `promptpotter`
+  name in `CONNECTORS`. Two today: `termnorm` and `promptpotter`
   (L4). `DEFAULT_CONNECTOR` names the fresh-upload default.
   `promptpotter/connectors/`.
 - **Backend** — a connector's running service (TermNorm's FastAPI is

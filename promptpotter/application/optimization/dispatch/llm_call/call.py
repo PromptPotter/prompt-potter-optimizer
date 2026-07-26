@@ -87,6 +87,14 @@ _LLM_DEFAULTS: dict[str, Any] = {"temperature": 0.0}
 # though neither round-trip hung).
 _MAX_ROUND_TRIPS_PER_CALL = 2
 
+# Head-cap on the model's own thinking channel before it rides the ledger. A
+# reasoning model can emit tens of KB per call and this lands in every round file;
+# the head is where the approach is stated, so a cap keeps the audit twin readable
+# without losing the part an operator reads. Matches TermNorm's reasoning_trace_cap
+# so both thinking channels truncate alike. ANALYTICAL ONLY — see
+# ``LLMResponse.reasoning``: nothing may branch on this value.
+_REASONING_LEDGER_CAP = 4000
+
 
 async def _chat_under_deadline(
     llm_client: LLMClientBase,
@@ -433,6 +441,12 @@ async def llm_call(
             # ``review.md``.
             "schema_repair_attempts": response.schema_repair_attempts,
         }
+        # The model's own thinking, carried to the audit twin + the operator's node
+        # detail. Omitted when empty so a non-reasoning model's block stays clean.
+        # It is EVIDENCE FOR A HUMAN, never an input to the loop — nothing downstream
+        # reads this key, and nothing may start (see ``LLMResponse.reasoning``).
+        if response.reasoning:
+            payload["reasoning"] = response.reasoning[:_REASONING_LEDGER_CAP]
         if cached_payload is not None:
             payload["cached"] = True
         if trace_meta:

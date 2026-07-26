@@ -50,9 +50,14 @@ export function OptimizerNodeDetail({ id, pipeline, onClose }: Props) {
     | undefined;
   const templateName = (block?.input?.template_name as string | undefined) ?? null;
   const response = block?.output?.response;
+  // The model's own thinking channel, when the provider returned one. Rendered in
+  // its own pane rather than folded into the response blob: it is prose a human
+  // reads to understand HOW an answer was reached, and it is analytical only —
+  // nothing in the loop scores or gates on it (see `LLMResponse.reasoning`).
+  const reasoning = typeof block?.output?.reasoning === "string" ? block.output.reasoning : null;
   const otherOutput = block?.output
     ? Object.fromEntries(
-        Object.entries(block.output).filter(([k]) => k !== "response"),
+        Object.entries(block.output).filter(([k]) => k !== "response" && k !== "reasoning"),
       )
     : {};
   const usage = block?.usage;
@@ -193,6 +198,26 @@ export function OptimizerNodeDetail({ id, pipeline, onClose }: Props) {
               )}
             </div>
           </section>
+
+          {reasoning && (
+            <section
+              className="opt-detail-col opt-detail-col-reasoning"
+              aria-label="Model thinking"
+            >
+              <div className="opt-detail-col-head">
+                <span>Thinking</span>
+                <span
+                  className="opt-detail-col-note"
+                  title="The model's own reasoning, recorded for analysis. It never feeds the optimizer's decisions — no score, gate or selection reads it."
+                >
+                  analysis only
+                </span>
+              </div>
+              <div className="opt-detail-col-body">
+                <pre className="opt-detail-pre opt-detail-reasoning">{reasoning}</pre>
+              </div>
+            </section>
+          )}
         </div>
       )}
 
