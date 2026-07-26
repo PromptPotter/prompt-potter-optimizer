@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from promptpotter.config.settings import POBB_DEFAULT_EPSILON
+from promptpotter.domain.opt_search_point import flatten_sp_summary
 from promptpotter.presentation.views.display import (
     CYAN,
     DIM,
@@ -13,7 +14,6 @@ from promptpotter.presentation.views.display import (
     RESET,
     YELLOW,
     _fmt_delta,
-    _pp_val,
     fmt_ci,
 )
 from promptpotter.shared.composite import render_composite_fitness_oneliner
@@ -21,17 +21,17 @@ from promptpotter.shared.statistics import wilson_ci
 
 
 def fmt_pp_override(pp: dict[str, Any] | None) -> str:
-    """Flatten a nested pipeline_params override to ``node.key: val  …``; ``""`` when empty."""
-    if not pp:
-        return ""
-    parts: list[str] = []
-    for node, val in pp.items():
-        if isinstance(val, dict):
-            for k, v in val.items():
-                parts.append(f"{node}.{k}: {_pp_val(v)}")
-        else:
-            parts.append(f"{node}: {_pp_val(val)}")
-    return "  ".join(parts)
+    """Render a nested pipeline_params override as ``node.key: val  …``; ``""`` when empty.
+
+    One flattener, one float format: this is a JOIN over the canonical
+    ``flatten_sp_summary`` (`domain/opt_search_point.py`), not a second implementation of
+    it. The hand-rolled version this replaced also carried its own float formatter
+    (``_pp_val``), byte-identical to the domain one, and flattened only one level — so a
+    nested param printed as a dict repr here and as ``node.param.leaf`` on every other
+    surface. Routing through the domain helper also puts the "reserved key or non-dict"
+    question where ``node_config_items`` already owns it.
+    """
+    return "  ".join(f"{k}: {v}" for k, v in flatten_sp_summary(pp).items())
 
 
 def fmt_individual_header(

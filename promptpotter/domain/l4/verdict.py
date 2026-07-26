@@ -44,7 +44,15 @@ class CandidateInfo(StrictModel):
 
 
 class OuterCellEffect(StrictModel):
-    """One cell's paired (variant − origin) composite difference."""
+    """One cell's paired (variant − origin) composite difference.
+
+    ``variant_fitness`` / ``origin_fitness`` have **no reader today** — the panel renders
+    ``diff`` — and a dead-surface audit flagged them (2026-07-26). They stay, because this
+    record is DURABLE (it rides ``dashboard.json::rounds`` + the round files) and ``diff``
+    is lossy: the two levels cannot be recovered from their difference, so a verdict that
+    kept only ``diff`` could never answer "lifted from WHAT to what". Keep the measurement
+    whole; a reader is cheap to add later, a discarded measurement is not.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -55,7 +63,12 @@ class OuterCellEffect(StrictModel):
 
 
 class OuterVerdict(StrictModel):
-    """The pooled blocked-paired verdict for a round's target variant."""
+    """The pooled blocked-paired verdict for a round's target variant.
+
+    ``variant_id`` / ``variant_label`` likewise have no reader yet: they NAME the subject
+    this verdict is about. A durable measurement that cannot say which variant it measured
+    is not a measurement — do not strip them for lack of a consumer.
+    """
 
     model_config = ConfigDict(frozen=True)
 

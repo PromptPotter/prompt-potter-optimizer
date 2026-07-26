@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import random
+import re
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -36,11 +37,7 @@ def sample_dataset(dataset: list[Sample], sample_size: int) -> list[Sample]:
     return dataset[:sample_size]
 
 
-def load_gsm8k(
-    split: str = "train",
-    sample_size: int = 0,
-    seed: int = 42,
-) -> list[Sample]:
+def load_gsm8k(split: str = "train") -> list[Sample]:
     """Load GSM8K from HuggingFace.
 
     Requires the ``datasets`` library: ``pip install -e ".[benchmarks]"``.
@@ -60,17 +57,11 @@ def load_gsm8k(
         gt = f"#### {m.group(1)}" if m else row["answer"].strip()
         samples.append(Sample(id=i, query=row["question"], ground_truth=gt))
 
-    if sample_size > 0 and len(samples) > sample_size:
-        samples = random.Random(seed).sample(samples, sample_size)
-
     logger.info("Loaded GSM8K %s: %d items", split, len(samples))
     return samples
 
 
-def load_aime_2025(
-    sample_size: int = 0,
-    seed: int = 42,
-) -> list[Sample]:
+def load_aime_2025() -> list[Sample]:
     """Load AIME 2025 from HuggingFace.
 
     Requires the ``datasets`` library: ``pip install -e ".[benchmarks]"``.
@@ -89,9 +80,6 @@ def load_aime_2025(
         for i, row in enumerate(ds)
     ]
 
-    if sample_size > 0 and len(samples) > sample_size:
-        samples = random.Random(seed).sample(samples, sample_size)
-
     logger.info("Loaded AIME 2025: %d items", len(samples))
     return samples
 
@@ -99,7 +87,7 @@ def load_aime_2025(
 # --- Dataset loader registry ---
 
 
-def load_bbeh(sample_size: int = 0, seed: int = 42) -> list[Sample]:
+def load_bbeh() -> list[Sample]:
     """Load BBEH mini (460 examples, 23 tasks). No native per-sample id — assigned sequentially after flattening; per-task metadata dropped."""
     try:
         from datasets import load_dataset
@@ -122,98 +110,45 @@ def load_bbeh(sample_size: int = 0, seed: int = 42) -> list[Sample]:
             )
         )
 
-    if sample_size > 0 and len(samples) > sample_size:
-        samples = random.Random(seed).sample(samples, sample_size)
-
     logger.info("Loaded BBEH mini: %d items", len(samples))
     return samples
 
 
-# Three JustLogic depth cuts, each a SEPARATE dataset name (cache-key discipline: the archive
-# keys a cell by (dataset_name, node_configs, sample_id) with query text OUT of the key, so
-# re-cutting in place would serve one cut's banked rows under another's sample_ids). `justlogic`
-# (6-7) and `justlogic-d23` (2-3) are dead/superseded, kept only so their banked measurements
-# stay addressable.
-_JUSTLOGIC_DEPTHS: tuple[int, ...] = (6, 7)
-_JUSTLOGIC_D23_DEPTHS: tuple[int, ...] = (2, 3)
-# The live L4 inner instrument: an iid mix of depths 2, 3, 4 (depths interleaved before
-# numbering, so every prefix is an iid d2/3/4 draw). The operator's bet is that the model's
-# `Uncertain`-hedging under low effort is an ADDRESSABLE behaviour the loop corrects, not a fixed
-# capability ceiling.
-_JUSTLOGIC_D234_DEPTHS: tuple[int, ...] = (2, 3, 4)
+# ONE JustLogic loader for every depth cut. The cut is DERIVED FROM THE DATASET NAME
+# (`justlogic-d234` → depths 2,3,4), so measuring a new combination costs a dataset dir and
+# nothing else — no loader, no registry row, no depth constant. `justlogic` is the one
+# irregular name: it predates the `-dNNN` convention and means depths 6-7.
+#
+# Each cut MUST remain its own dataset NAME. The measurement archive keys a cell by
+# (dataset_name, node_configs, sample_id) with the query text OUT of the key, so re-cutting
+# in place would leave sample_id 0..N pointing at new queries while the archive still served
+# the old cut's rows under those keys. Deriving the cut from the name is what keeps one
+# loader from becoming one name.
 _JUSTLOGIC_TRAIN_PER_DEPTH: int = 200
+# Deterministic and fixed: the per-depth train/test split and the interleave shuffle must
+# reproduce byte-for-byte across processes, or a cut silently becomes a different bank.
+_JUSTLOGIC_SEED: int = 42
+_JUSTLOGIC_LEGACY_DEPTHS: tuple[int, ...] = (6, 7)
+_JUSTLOGIC_CUT_RE = re.compile(r"^justlogic-d(\d+)$")
 
 
-def load_justlogic_d23(
-    split: str = "train",
-    sample_size: int = 0,
-    seed: int = 42,
-) -> list[Sample]:
-    """JustLogic at depths 2-3 — a SUPERSEDED cut (the live instrument is ``justlogic-d234``).
+def justlogic_depths(dataset_name: str) -> tuple[int, ...] | None:
+    """The depth cut *dataset_name* denotes, or ``None`` when it names no JustLogic cut.
 
-    A SEPARATE dataset name from ``justlogic``, never a re-cut of it: the measurement archive
-    keys a cell by ``(dataset_name, node_configs, sample_id)`` and the query text is NOT in that
-    key. Re-cutting in place would leave sample_id 0..N pointing at new queries while the archive
-    still held the d6-7 rows under those keys, and it would serve them.
+    ``justlogic-d234`` → ``(2, 3, 4)`` — one digit per depth, since JustLogic ships depths
+    1-7. The bare ``justlogic`` → its historical ``(6, 7)``.
     """
-    return _load_justlogic(_JUSTLOGIC_D23_DEPTHS, split, sample_size, seed)
+    if dataset_name == "justlogic":
+        return _JUSTLOGIC_LEGACY_DEPTHS
+    m = _JUSTLOGIC_CUT_RE.match(dataset_name)
+    if m is None:
+        return None
+    depths = tuple(sorted({int(d) for d in m.group(1)}))
+    return depths or None
 
 
-def load_justlogic_d234(
-    split: str = "train",
-    sample_size: int = 0,
-    seed: int = 42,
-) -> list[Sample]:
-    """JustLogic at depths 2-4 (iid mix) — the live L4 inner instrument (see ``_JUSTLOGIC_D234_DEPTHS``).
-
-    A SEPARATE dataset name from ``justlogic-d23``, never a re-cut of it: the archive keys a cell
-    by ``(dataset_name, node_configs, sample_id)`` with query text OUT of the key, so re-cutting in
-    place would serve d23's banked rows under the new sample_ids.
-    """
-    return _load_justlogic(_JUSTLOGIC_D234_DEPTHS, split, sample_size, seed)
-
-
-def load_justlogic(
-    split: str = "train",
-    sample_size: int = 0,
-    seed: int = 42,
-) -> list[Sample]:
-    """Load JustLogic (`michaelchenkj/JustLogic`) at reasoning depths 6-7.
-
-    **DEAD / superseded cut.** Kept only so its already-banked measurements stay addressable
-    under their cache keys; new work uses ``load_justlogic_d234`` (the live L4 inner instrument).
-
-    Authors (Chen 2025, arXiv 2501.14851) ship one HF split (`train`,
-    4,900 rows, 700 per depth × 7 depths). The canonical test set is
-    deliberately withheld to prevent benchmark leakage — regenerate via
-    `create_split.py` (seed=0, 70/15/15 stratified per-depth) for a
-    leakage-free held-out, or request from authors. HF `train` IS the
-    public training fold per authors' intent.
-
-    Operator-blessed cut (this loader): filter to **depths 6 and 7
-    only** (1,400 rows total). Per included depth,
-    deterministic seed=42 shuffle → first 200 = ``train`` (400
-    total), rest = ``test`` (1,000 total). NOT canonical (authors'
-    test set is withheld); resulting numbers are non-leaderboard-
-    comparable. Documented in ``datasets/justlogic/dataset.md``.
-
-    Each row's query is formatted as
-    ``Premises:\\n{paragraph}\\n\\nClaim: {question}\\n\\nIs the claim
-    TRUE, FALSE, or Uncertain given the premises?``. Ground truth is
-    one of ``TRUE`` / ``FALSE`` / ``Uncertain`` — pair with the
-    existing ``exact_match`` scorer + the BBEH-style ``**X**`` answer
-    convention in ``prompts/default.json``.
-    """
-    return _load_justlogic(_JUSTLOGIC_DEPTHS, split, sample_size, seed)
-
-
-def _load_justlogic(
-    depths: tuple[int, ...],
-    split: str,
-    sample_size: int,
-    seed: int,
-) -> list[Sample]:
-    """Shared body: filter to *depths*, deterministic per-depth train/test split, format queries."""
+def _load_justlogic(depths: tuple[int, ...], split: str = "train") -> list[Sample]:
+    """Filter to *depths*, deterministic per-depth train/test split, format queries."""
     if split not in ("train", "test"):
         raise ValueError(f"JustLogic split must be 'train' or 'test', got {split!r}")
     try:
@@ -235,7 +170,7 @@ def _load_justlogic(
     for depth in sorted(by_depth):
         rows = by_depth[depth]
         indices = list(range(len(rows)))
-        random.Random(seed).shuffle(indices)
+        random.Random(_JUSTLOGIC_SEED).shuffle(indices)
         cut = _JUSTLOGIC_TRAIN_PER_DEPTH
         picked = indices[:cut] if split == "train" else indices[cut:]
         picked_rows.extend(rows[i] for i in picked)
@@ -247,7 +182,7 @@ def _load_justlogic(
     # and it is why a d2-3 campaign's origin came in near saturation while the full bank sat far
     # below it. Shuffling once, deterministically, makes any prefix a stratified draw — and the
     # same prefix every time, so origin and later rounds score the same samples.
-    random.Random(seed).shuffle(picked_rows)
+    random.Random(_JUSTLOGIC_SEED).shuffle(picked_rows)
 
     samples: list[Sample] = [
         Sample(
@@ -262,14 +197,11 @@ def _load_justlogic(
         for i, row in enumerate(picked_rows)
     ]
 
-    if sample_size > 0 and len(samples) > sample_size:
-        samples = random.Random(seed).sample(samples, sample_size)
-
     logger.info(
-        "Loaded JustLogic %s: %d items (operator-defined cut, depths %s, %d/depth)",
+        "Loaded JustLogic %s: %d items (depths %s, %d/depth)",
         split,
         len(samples),
-        list(_JUSTLOGIC_DEPTHS),
+        list(depths),
         _JUSTLOGIC_TRAIN_PER_DEPTH,
     )
     return samples
@@ -279,11 +211,36 @@ DATASET_LOADERS: dict[str, Callable[..., list[Sample]]] = {
     "gsm8k": load_gsm8k,
     "aime_2025": load_aime_2025,
     "bbeh": load_bbeh,
-    "justlogic": load_justlogic,
-    "justlogic-d23": load_justlogic_d23,
-    "justlogic-d234": load_justlogic_d234,
 }
-"""Map dataset name → loader."""
+"""Map dataset name → loader, for the benchmarks whose cut is fixed.
+
+JustLogic is deliberately absent: its cut is a *family* derived from the name, resolved by
+:func:`dataset_loader`. Read that, never this dict, to answer "can this name be loaded?" —
+a bare membership test here reports False for every valid ``justlogic-dNNN``.
+"""
+
+
+def dataset_loader(dataset_name: str) -> Callable[[], list[Sample]] | None:
+    """The zero-arg loader for *dataset_name*, or ``None`` when nothing can load it.
+
+    The one resolver over both shapes: the fixed-cut registry above, and the JustLogic
+    depth family, whose cut comes off the name (``justlogic-d234`` → depths 2,3,4). So a
+    new depth combination needs a dataset dir and no code at all.
+    """
+    fixed = DATASET_LOADERS.get(dataset_name)
+    if fixed is not None:
+        return fixed
+    depths = justlogic_depths(dataset_name)
+    if depths is None:
+        return None
+    return lambda: _load_justlogic(depths)
+
+
+def loadable_dataset_names() -> list[str]:
+    """Names a caller can offer today — the fixed cuts plus the JustLogic cuts that ship a
+    dataset dir. The family is open, so this is a *listing*, never a validity test; ask
+    :func:`dataset_loader` for that."""
+    return [*sorted(DATASET_LOADERS), "justlogic", "justlogic-d23", "justlogic-d234"]
 
 
 def resolve_dataset_items(
@@ -304,10 +261,11 @@ def resolve_dataset_items(
     ds: dict[str, Any] | None = stores.tenant_datasets.load_dataset(dataset_name)
     if not (ds and ds.get("items")):
         ds = stores.backends.load_dataset(dataset_name)
-    if not (ds and ds.get("items")) and dataset_name in DATASET_LOADERS:
+    loader = dataset_loader(dataset_name)
+    if not (ds and ds.get("items")) and loader is not None:
         if status:
             status(f"Loading dataset '{dataset_name}' from registry ...")
-        loader_items = DATASET_LOADERS[dataset_name]()
+        loader_items = loader()
         stores.backends.save_dataset(dataset_name, loader_items)
         ds = {"items": [s.model_dump() for s in loader_items]}
     if not (ds and ds.get("items")):

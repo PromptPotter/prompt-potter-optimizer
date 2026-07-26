@@ -16,7 +16,7 @@ from promptpotter.application.optimization.resume_and_fork.decisions import Resu
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.escalation_signals import EscalationSignal
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.results import CandidateProposal, SampleOrderStep, ScoredCandidate
+from promptpotter.domain.results import CandidateProposal, ScoredCandidate
 from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.validators import StopRule
 from promptpotter.infrastructure.tracing.events import CandidateScored
@@ -46,14 +46,8 @@ async def score_population(
     dict[str, list[QueryMeasurement]],
     list[ScoredCandidate],
     EscalationSignal | None,
-    list[SampleOrderStep],
 ]:
-    """Score each individual; per-candidate body in `score_one_candidate`. Owns the ESCALATED break.
-
-    The 4th return is the round's sample-order timeline — a single frozen step
-    holding the shared deterministic order every candidate walks (the trajectory
-    hover renders it as the round's plan).
-    """
+    """Score each individual; per-candidate body in `score_one_candidate`. Owns the ESCALATED break."""
     session = cycle.session
     obs = session.state.obs
     n = len(population)
@@ -116,15 +110,6 @@ async def score_population(
     samples_by_id = {int(s.id): s for s in dataset}
     dataset = [samples_by_id[sid] for sid in order]
     dataset_sample_ids = [int(s.id) for s in dataset]
-    # The round's frozen plan — a single step; there is no per-sample re-rank.
-    representative_timeline = [
-        SampleOrderStep(
-            step=0,
-            current_sample_id=order[0] if order else None,
-            computed=[],
-            planned=list(order),
-        )
-    ]
 
     for idx, osp_c in enumerate(population):
         pipeline_params_override = proposals[idx].pipeline_params_override or None
@@ -200,7 +185,7 @@ async def score_population(
             escalation_signal = cr_result.escalation_signal
             break  # true degradation — abort remaining candidates
 
-    return all_candidate_results, candidate_scores, escalation_signal, representative_timeline
+    return all_candidate_results, candidate_scores, escalation_signal
 
 
 async def replicate_survivors_pass(

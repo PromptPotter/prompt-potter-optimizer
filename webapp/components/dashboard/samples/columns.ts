@@ -18,7 +18,13 @@ const CELL_PADDING_PX = 22;
 const HEADER_PADDING_CH = 4;
 const MAX_AUTO_CH = 50;
 
-export interface MeasurementDot {
+// The heat-map's PROJECTION of a served `MeasurementDot` — the two fields the grid
+// actually plots, dropping the served `label`. Deliberately a narrower local type, not a
+// second declaration of the wire shape: `HardSamplesHeatmap` maps served dots down to
+// these. It was called `MeasurementDot` too, which collided with the generated wire type
+// hard enough that one file had to import BOTH and alias one (`as ArchiveDot`) to compile
+// — the collision the pre-flight gate's "names: distinct + self-describing" rule forbids.
+export interface HeatDot {
   hit: boolean;
   // Composite lex-sortable key. Equal ``ord`` values across rows share
   // a roster column so the Meas heat-map aligns vertically.
@@ -116,7 +122,7 @@ export interface CellValue {
 export function cellFor(
   col: ColId,
   item: DatasetItem,
-  meas: MeasurementDot[],
+  meas: HeatDot[],
 ): CellValue {
   switch (col) {
     case "rank":
@@ -250,7 +256,7 @@ export function cellFor(
 export function autoWidthFor(
   col: ColDef,
   items: DatasetItem[],
-  perSample: Map<number, MeasurementDot[]> | undefined,
+  perSample: Map<number, HeatDot[]> | undefined,
   ordColsCount: number,
 ): number {
   const headerCh = col.label.length + HEADER_PADDING_CH;

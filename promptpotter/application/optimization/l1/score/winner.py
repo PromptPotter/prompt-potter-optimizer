@@ -89,7 +89,6 @@ async def l1_score(
         all_candidate_results,
         candidate_scores,
         escalation_signal,
-        sample_order_timeline,
     ) = await score_population(
         cycle,
         osp_population,
@@ -185,9 +184,10 @@ async def l1_score(
     best_matched_origin_hits = parent_base["hits"]
     best_matched_origin_composite = parent.composite_fitness
     # Elect by confident improvement over MATCHED origin (origin on the candidate's own measured
-    # samples), NOT raw accuracy vs origin's full-set rate. The online picker scores each candidate
-    # on a different hard-first subset, so origin's full-set accuracy (inflated by the easy samples
-    # the candidate never ran) is the wrong comparison floor. ``elect_round_winner`` ranks the
+    # samples), NOT raw accuracy vs origin's full-set rate. Candidates share ONE round order but
+    # elimination truncates them at different depths, so each ends up measured on a different
+    # prefix of it — origin's full-set accuracy (inflated by the samples the candidate never
+    # reached) is the wrong comparison floor. ``elect_round_winner`` ranks the
     # paired-fitness LCB vs matched origin, tie-broken toward higher coverage — the ONE election
     # rule, shared with the resume divergence replayer so a resumed run re-elects the same winner.
     #
@@ -414,7 +414,6 @@ async def l1_score(
         else pipeline_params,
         results=best_results,
         all_candidate_results=dict(all_candidate_results),
-        sample_order_timeline=sample_order_timeline,
         candidates_scored=len(scored),
         candidate_scores=candidate_scores,
         decisions=[d.to_dict() for d in decisions],

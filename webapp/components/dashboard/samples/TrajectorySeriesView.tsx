@@ -1,17 +1,15 @@
 "use client";
 // Series grid for the Sample Trajectory: one row per round, one column per
 // sample (union, first-appearance order), each cell coloured by position
-// change. Hovering a cell lazy-fetches the round's picker order; clicking seeds
-// the fitness sample-set.
+// change. Hovering a cell shows the round's order around it; clicking seeds the
+// fitness sample-set. No round-file fetch — the order is positional over the
+// round's `selection`, which `dashboard.json` already carries.
 
 import { useMemo, useState } from "react";
 import type { CSSProperties } from "react";
-import { useRoundFile } from "@/lib/hooks/useRoundFile";
 import { useSelection } from "@/lib/SelectionContext";
-import { useWorkspace } from "@/lib/workspace";
 import {
   classifyCell,
-  historicalTimeline,
   orderAtStep,
   seedFromOrder,
   type CellKind,
@@ -61,10 +59,6 @@ export function SeriesView({
   selectMode?: SelectMode;
   maxHeight?: number;
 }) {
-  // Viewed leaf path self-sourced — the hover popup's lazy round-file fetch
-  // follows the viewed cycle (an L4 inner loop reads the inner cycle's dir),
-  // always under the workspace context, so no threading is needed.
-  const { viewedPath } = useWorkspace();
   const columns = useMemo(() => unionFirstAppearance(sorted.rounds), [sorted.rounds]);
   const { sampleSet, setSelectionForSampleSet } = useSelection();
   const [hover, setHover] = useState<HoverState | null>(null);
@@ -74,17 +68,15 @@ export function SeriesView({
   // get the NEW colour today, but kept separate so we can split later.
   const everSeen = cumulativeEverSeen(sorted.rounds);
 
-  // Lazy-fetch the hovered round's durable timeline (picker's intended order).
-  // Keyed on the round, so moving between cells in the same row never refetches.
-  const { doc } = useRoundFile(viewedPath, hover ? hover.round : null);
-  const timeline = useMemo(() => historicalTimeline(doc), [doc]);
-
+  // No round-file fetch here: the order is positional over the round's `selection`,
+  // which `dashboard.json` already carries. This used to lazy-fetch the whole
+  // `round_NNNN.json` on every hover purely to read a `sample_order_timeline` that
+  // held one step — and that one step only ever matched the round's FIRST cell, so
+  // the fetch bought a divergence rather than fixing one. Both are gone.
   const hoveredSelection = hover
     ? (sorted.rounds.find((r) => r.round === hover.round)?.selection ?? [])
     : [];
-  const order = hover
-    ? orderAtStep(timeline, hoveredSelection, hover.sampleId, hover.position)
-    : null;
+  const order = hover ? orderAtStep(hoveredSelection, hover.sampleId, hover.position) : null;
   // Clicking a cell loads this state into the fitness sample-set — measured-
   // through-here by default, or the whole round when selectMode is "all".
   const seedSet = order ? seedFromOrder(order, selectMode) : [];
@@ -168,18 +160,13 @@ export function SeriesView({
                       }}
                       onBlur={() => setHover((h) => (h?.round === r.round && h.sampleId === sid ? null : h))}
                       onClick={() => {
-                        const o = orderAtStep(
-                          historicalTimeline(doc),
-                          r.selection,
-                          sid,
-                          p,
-                        );
+                        const o = orderAtStep(r.selection, sid, p);
                         setSelectionForSampleSet(seedFromOrder(o, selectMode));
                       }}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
-                          const o = orderAtStep(historicalTimeline(doc), r.selection, sid, p);
+                          const o = orderAtStep(r.selection, sid, p);
                           setSelectionForSampleSet(seedFromOrder(o, selectMode));
                         }
                       }}

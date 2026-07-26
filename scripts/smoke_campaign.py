@@ -30,7 +30,10 @@ from promptpotter.application.config import (  # noqa: E402
     configure_and_apply_pipeline,
     load_campaign_config,
 )
-from promptpotter.application.datasets.loaders import DATASET_LOADERS  # noqa: E402
+from promptpotter.application.datasets.loaders import (  # noqa: E402
+    dataset_loader,
+    loadable_dataset_names,
+)
 from promptpotter.presentation.views.display import set_display_tags  # noqa: E402
 from promptpotter.presentation.views.notebook_run import (  # noqa: E402
     init_notebook_session,
@@ -83,11 +86,11 @@ def _infer_scoring(dataset: str) -> str:
 
 
 async def _run(args: argparse.Namespace) -> int:
-    if args.dataset not in DATASET_LOADERS:
-        known = ", ".join(sorted(DATASET_LOADERS)) or "(none)"
+    if dataset_loader(args.dataset) is None:
+        known = ", ".join(loadable_dataset_names()) or "(none)"
         print(
-            f"[smoke] ERROR: dataset {args.dataset!r} not registered in DATASET_LOADERS. "
-            f"Known: {known}",
+            f"[smoke] ERROR: no loader resolves dataset {args.dataset!r}. "
+            f"Known: {known} (plus any justlogic-d<depths>, e.g. justlogic-d34)",
             file=sys.stderr,
         )
         return 2
@@ -192,7 +195,11 @@ def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Smoke-test a dataset via one L1 optimization round.",
     )
-    p.add_argument("--dataset", required=True, help="Key in DATASET_LOADERS")
+    p.add_argument(
+        "--dataset",
+        required=True,
+        help="Dataset name any loader resolves (see loadable_dataset_names())",
+    )
     p.add_argument("--samples", type=int, default=5, help="Queries per candidate (sp_budget_ttest)")
     p.add_argument("--variants", type=int, default=3, help="L1 candidates per round")
     p.add_argument("--rounds", type=int, default=1, help="max_rounds")

@@ -3,14 +3,14 @@ import { useMemo, useState } from "react";
 import {
   type DatasetItem,
   type HardSamplesScope,
-  type MeasurementDot as ArchiveDot,
+  type MeasurementDot,
 } from "@/lib/api";
 import { parseSampleLine } from "@/lib/sample-line";
 import { liveL1Candidates, type DashboardSnapshot } from "@/lib/poll";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { HardSamplesTable } from "./HardSamplesTable";
 import { SampleTrajectory, SampleTrajectoryMiniButton } from "./SampleTrajectory";
-import { type MeasurementDot } from "./columns";
+import { type HeatDot } from "./columns";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
 import { compareHardSamples } from "./hard-sample-order";
 
@@ -24,7 +24,7 @@ interface Props {
   // /datasets/{name}/measurement-series. Scope toggle (this campaign vs
   // all campaigns on the dataset) is owned by AppShell and re-fetches
   // this map; the heat-map merges live mid-round samples on top.
-  archivePerSample: Map<number, ArchiveDot[]>;
+  archivePerSample: Map<number, MeasurementDot[]>;
   // True while the displayed dataset slice is from a prior (unit, scope).
   datasetStale: boolean;
   // Set when the roster read failed for the unit in view. Distinct from an empty
@@ -41,8 +41,8 @@ interface Props {
 function liveMeasurements(
   dash: DashboardSnapshot | null,
   dashRound: number | null,
-): Map<number, MeasurementDot[]> {
-  const out = new Map<number, MeasurementDot[]>();
+): Map<number, HeatDot[]> {
+  const out = new Map<number, HeatDot[]>();
   const round = dashRound ?? 0;
   liveL1Candidates(dash).forEach((c, ci) => {
     for (const s of c.samples ?? []) {
@@ -99,7 +99,7 @@ export function HardSamplesHeatmap({
   // mid-round samples (client-only, current cycle). De-dupe on (ord, hit)
   // in case a live measurement has already landed in the archive.
   const perSample = useMemo(() => {
-    const out = new Map<number, MeasurementDot[]>();
+    const out = new Map<number, HeatDot[]>();
     for (const [sid, ms] of archivePerSample) {
       out.set(
         sid,

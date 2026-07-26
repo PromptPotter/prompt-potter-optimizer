@@ -212,14 +212,6 @@ export interface ScoreboardRow {
   is_winner: boolean;
 }
 
-/** One measurement step in a round's adaptive sample-selection timeline. */
-export interface SampleOrderStep {
-  step: number;
-  current_sample_id: number | null;
-  computed: number[];
-  planned: number[];
-}
-
 /** An input/output pair used as a few-shot demonstration. */
 export interface FewShotExample {
   input: string;
@@ -332,7 +324,6 @@ export interface RoundResult {
   l1_n_no_op: number;
   l1_n_duplicate: number;
   l1_parse_failure: string | null;
-  sample_order_timeline: SampleOrderStep[];
   diagnostics: unknown | null;
   critique: unknown | null;
   health: DegradationHealth | null;
@@ -684,6 +675,42 @@ export interface CampaignListResponse {
   campaigns: CampaignSummary[];
   /** Total number of campaigns */
   total: number;
+}
+
+/** One environment cell's paired (candidate − origin) effect for a state. */
+export interface ChampionCellEffect {
+  cell: string;
+  mean_d: number;
+  n: number;
+}
+
+/** Where one occurrence of a candidate state was measured on disk. */
+export interface ChampionProvenance {
+  campaign_id: string;
+  cycle_id: string;
+  round: number;
+  candidate_id: string;
+}
+
+/** One unique meta-prompt state, aggregated across every occurrence in the corpus. */
+export interface ChampionCandidate {
+  state_hash: string;
+  label: string;
+  prompt_state: Record<string, Record<string, string>>;
+  provenance: ChampionProvenance[];
+  per_cell_effects: ChampionCellEffect[];
+  anchor_effect: number;
+  ci_lo: number;
+  ci_hi: number;
+  n_cells: number;
+  n_measurements: number;
+}
+
+/** The ranked champion table — recomputed from disk on every read, never persisted. */
+export interface ChampionRegistry {
+  generated_at: string;
+  n_cycles_scanned: number;
+  candidates: ChampionCandidate[];
 }
 
 export interface FileEntry {

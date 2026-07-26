@@ -1,6 +1,6 @@
 "use client";
 // Outer verdict — the blocked, paired L4 read of the viewed pp-self cycle's latest
-// round: per-cell (variant − noop) diffs as dots on a shared 0-centred axis, plus the
+// round: per-cell (variant − origin) diffs as dots on a shared 0-centred axis, plus the
 // pooled effect as a diamond with its CI whisker, and a 3-way decision. Net-new SVG
 // (no CI/forest primitive existed). Sign-coloured, but the number + label always carry
 // the meaning. Reads the served verdict off dash.rounds; never recomputes.
@@ -120,7 +120,7 @@ export const OuterVerdictPanel = memo(function OuterVerdictPanel() {
       {!verdict ? (
         <p className="l4-empty">
           Select a pp-self cycle with a completed round to see its blocked paired verdict
-          (per-cell variant−noop effects pooled across the panel).
+          (per-cell variant−origin effects pooled across the panel).
         </p>
       ) : (
         <>
@@ -128,7 +128,7 @@ export const OuterVerdictPanel = memo(function OuterVerdictPanel() {
             <Badge tone={DECISION_TONE[verdict.decision] ?? "default"}>{verdict.decision}</Badge>{" "}
             Variant lifts the optimizer <strong>{fmt(verdict.effect)}</strong> [{fmt(verdict.ci_lo)},{" "}
             {fmt(verdict.ci_hi)}] across {verdict.n_cells} cell
-            {verdict.n_cells === 1 ? "" : "s"} vs the no-op probe.
+            {verdict.n_cells === 1 ? "" : "s"} vs the cached round-0 origin.
             {verdict.decision === "inconclusive"
               ? ` CI spans 0 — MDE at this cell count ≈ ${verdict.mde_remaining.toFixed(3)}.`
               : ""}

@@ -6,7 +6,7 @@
 // Ranking is the whole surface: nothing here crowns a winner or graduates one into
 // datasets/_optimizer — that is a deliberate hand-edit.
 
-import type { ChampionCandidate, ChampionRegistryResponse } from "@/lib/api";
+import type { ChampionCandidate, ChampionRegistry } from "@/lib/api";
 import { CardFrame } from "@/components/ui";
 import { cx } from "@/lib/cx";
 
@@ -24,13 +24,10 @@ function fmt(n: number): string {
 function ChampionRow({
   row,
   rank,
-  onOpenCycle,
 }: {
   row: ChampionCandidate;
   rank: number;
-  onOpenCycle?: (campaignId: string, cycleId: string) => void;
 }) {
-  const prov = row.provenance[0];
   return (
     <tr className="l4-row">
       <td className="l4-rank">{rank}</td>
@@ -47,19 +44,7 @@ function ChampionRow({
         {row.n_cells}
         <span className="l4-dim"> / {row.n_measurements}</span>
       </td>
-      <td className="l4-num">
-        {row.provenance.length}
-        {prov && onOpenCycle ? (
-          <button
-            type="button"
-            className="l4-open"
-            title={`Open ${prov.campaign_id} · ${prov.cycle_id}`}
-            onClick={() => onOpenCycle(prov.campaign_id, prov.cycle_id)}
-          >
-            open
-          </button>
-        ) : null}
-      </td>
+      <td className="l4-num">{row.provenance.length}</td>
       <td className="l4-label" title={row.label}>
         {row.label}
       </td>
@@ -67,13 +52,7 @@ function ChampionRow({
   );
 }
 
-export function ChampionConsole({
-  registry,
-  onOpenCycle,
-}: {
-  registry: ChampionRegistryResponse;
-  onOpenCycle?: (campaignId: string, cycleId: string) => void;
-}) {
+export function ChampionConsole({ registry }: { registry: ChampionRegistry }) {
   const rows = registry.candidates;
   return (
     <CardFrame
@@ -110,12 +89,7 @@ export function ChampionConsole({
             </thead>
             <tbody>
               {rows.map((row, i) => (
-                <ChampionRow
-                  key={row.state_hash}
-                  row={row}
-                  rank={i + 1}
-                  onOpenCycle={onOpenCycle}
-                />
+                <ChampionRow key={row.state_hash} row={row} rank={i + 1} />
               ))}
             </tbody>
           </table>

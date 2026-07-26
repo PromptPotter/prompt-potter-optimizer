@@ -201,11 +201,6 @@ def _round_rule(label: str, label_right: str = "", width: int = _NW) -> str:
     return f"{rule}\n{inner}\n{rule}"
 
 
-def _pp_val(v: object) -> str:
-    """Format a pipeline param value for display (no truncation)."""
-    return f"{v:g}" if isinstance(v, float) else str(v)
-
-
 def _scoreboard(
     candidate_scores: Sequence[ScoreEntry],
     winner_label: str,

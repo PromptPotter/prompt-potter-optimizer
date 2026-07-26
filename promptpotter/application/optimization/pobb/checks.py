@@ -153,7 +153,7 @@ class PoBBConfig:
     margin_elimination: bool = True
     # The round's ADOPTION bar delta (OptimizationConfig.improvement_threshold): a
     # candidate must beat the seed by this to be crowned, so a candidate that
-    # probably won't reach seed+this is futile. 0.0 ⇒ bar == seed (equivalence gate
+    # probably won't reach seed+this is futile. 0.0 ⇒ bar == seed (the margin gate
     # reduces to "probably can't beat the seed").
     improvement_threshold: float = 0.0
 
@@ -214,10 +214,10 @@ class PoBBCheck:
         """Bind the candidate's sample budget (unordered set of ids).
 
         Called by ``score_population`` once per candidate so the
-        dominance check inside ``check()`` knows the candidate's
+        paired-margin check inside ``check()`` knows the candidate's
         intended budget (``len(_sample_universe)``) and which samples
         the seed prior must cover for the gate to fire. Passing
-        ``None`` clears the universe — the dominance check then
+        ``None`` clears the universe — ``_margin_stats`` then
         short-circuits to ``None`` (no abort), matching the
         no-explicit-budget unit-test path.
         """

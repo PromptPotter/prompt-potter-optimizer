@@ -678,18 +678,15 @@ def get_dataset_measurement_series(
         assert art_campaign is not None  # checked in resolver
         series = campaign_measurement_series(art_store, art_campaign, selected_set)
     else:
-        raw_series = measurement_series_for_samples(art_store, selected, dataset_name=name)
-        # Dataset-scope ord carries ts/run/idx; label = first 8 chars of run_id for tooltips.
+        # Dataset scope reads the ARCHIVE (cross-cycle run history, ord = ts/run/idx),
+        # where the two arms above read this cycle's round files (ord = round/cand). Three
+        # scopes, three sources, ONE dot shape — each producer emits `{ord, hit, label}`
+        # itself, so there is no re-map here.
         series = {
-            sid: [
-                {
-                    "ord": m["ord"],
-                    "hit": m["hit"],
-                    "label": f"run {str(m.get('run_id', ''))[:8]}",
-                }
-                for m in ms
-            ]
-            for sid, ms in raw_series.items()
+            sid: [{"ord": m["ord"], "hit": m["hit"], "label": m["label"]} for m in ms]
+            for sid, ms in measurement_series_for_samples(
+                art_store, selected, dataset_name=name
+            ).items()
         }
 
     items = [

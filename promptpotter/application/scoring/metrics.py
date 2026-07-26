@@ -438,7 +438,7 @@ def paired_fitness(
 ) -> tuple[list[float], list[float]]:
     """Per-cell mean composite fitness for the candidate and origin on the SAME cells,
     aligned by ``sample_id``. The matched pairs the round-significance test runs on — origin's
-    fitness restricted to whatever subset the online picker scored the candidate on. Replicate
+    fitness restricted to whatever prefix of the round order the candidate was scored on. Replicate
     rows per cell are averaged first (``_mean_fitness_by_cell``), so one paired point per shared
     cell regardless of replication depth; sorted by ``sample_id`` for replay determinism.
     """

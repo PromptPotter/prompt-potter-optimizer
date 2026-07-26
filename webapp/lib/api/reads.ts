@@ -5,6 +5,7 @@ import { encodeCyclePath, encodeDescend, pathRoot, type CyclePath } from "../ids
 import type {
   ActiveSessionResponse,
   CampaignListResponse,
+  ChampionRegistry,
   CyclesResponse,
   DatasetPreviewResponse,
   DiagnosticRunListResponse,
@@ -585,60 +586,12 @@ export function fetchConfigMap(
 // with no pp-self campaigns — i.e. every whitelabeled end-user; the dashboard
 // renders the box only when viewing the outer pp-self loop, so the read is
 // self-gating on data.
-export interface ChampionCellEffect {
-  cell: string;
-  mean_d: number;
-  n: number;
-}
-export interface ChampionProvenance {
-  campaign_id: string;
-  cycle_id: string;
-  round: number;
-  candidate_id: string;
-}
-export interface ChampionCandidate {
-  state_hash: string;
-  label: string;
-  prompt_state: Record<string, Record<string, string>>;
-  provenance: ChampionProvenance[];
-  per_cell_effects: ChampionCellEffect[];
-  anchor_effect: number;
-  ci_lo: number;
-  ci_hi: number;
-  n_cells: number;
-  n_measurements: number;
-}
-export interface ChampionRegistryResponse {
-  generated_at: string;
-  n_cycles_scanned: number;
-  candidates: ChampionCandidate[];
-}
-export function fetchChampionRegistry(signal?: AbortSignal): Promise<ChampionRegistryResponse> {
-  return jget<ChampionRegistryResponse>(`${API}/champion-registry`, signal);
-}
-
-// --- L4 resource matrix (outer-loop dashboard box) ----------------------------
-// The (target-model × dataset) capability grid the operator built with
-// `matrix measure`. Empty until measured.
-export interface ResourceCell {
-  dataset: string;
-  target_model: string;
-  provider: string | null;
-  origin_accuracy: number | null;
-  n: number;
-  wilson_lo: number;
-  wilson_hi: number;
-  band: string; // floor | in-band | saturated | error
-  active_in_panel: boolean;
-  measured_at: string;
-  note: string;
-}
-export interface ResourceMatrixResponse {
-  generated_at: string;
-  cells: ResourceCell[];
-}
-export function fetchResourceMatrix(signal?: AbortSignal): Promise<ResourceMatrixResponse> {
-  return jget<ResourceMatrixResponse>(`${API}/resource-matrix`, signal);
+// The four shapes are GENERATED from the Pydantic source (`ChampionRegistry` &c in
+// `application/meta_champion/reducer.py`) — they were hand-mirrored here and bypassed
+// `build_ts_types.py` entirely, the same setup that let the resource-matrix types drift
+// two fields behind their model before that arc was retired.
+export function fetchChampionRegistry(signal?: AbortSignal): Promise<ChampionRegistry> {
+  return jget<ChampionRegistry>(`${API}/champion-registry`, signal);
 }
 
 // THE lineage read — one recursive tree rooted at a COURSE, nodes alternating

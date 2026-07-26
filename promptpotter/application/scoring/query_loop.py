@@ -1,7 +1,7 @@
 """Per-sample query loop — the inner loop ``score_search_point`` drives.
 
-:func:`run_query_loop` walks a dataset sample by sample (online adaptive
-queue mechanism or insertion order), reusing prior-cache results where available,
+:func:`run_query_loop` walks a dataset sample by sample (the round's one
+deterministic shared order, or insertion order), reusing prior-cache results where available,
 running the stale-data recovery protocol on degraded results, and
 classifying client/pipeline errors into an abort reason. It returns a
 :class:`QueryLoopResult` — the gateway turns that into the archived run.

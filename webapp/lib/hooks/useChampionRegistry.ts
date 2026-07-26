@@ -8,14 +8,14 @@
 // hits the route.
 
 import { useFetch } from "@/lib/hooks/useFetch";
-import { fetchChampionRegistry, type ChampionRegistryResponse } from "@/lib/api";
+import { fetchChampionRegistry, type ChampionRegistry } from "@/lib/api";
 
 export function useChampionRegistry(enabled: boolean): {
-  registry: ChampionRegistryResponse | null;
+  registry: ChampionRegistry | null;
   loading: boolean;
   error: string | null;
 } {
-  const { data, loading, error } = useFetch<ChampionRegistryResponse>(
+  const { data, loading, error } = useFetch<ChampionRegistry>(
     enabled ? (signal) => fetchChampionRegistry(signal) : null,
     [enabled],
   );

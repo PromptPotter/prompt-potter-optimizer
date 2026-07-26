@@ -17,6 +17,12 @@ from pydantic.fields import ComputedFieldInfo, FieldInfo
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO))
 
+from promptpotter.application.meta_champion.reducer import (
+    ChampionCandidate,
+    ChampionCellEffect,
+    ChampionProvenance,
+    ChampionRegistry,
+)
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
 from promptpotter.domain.l1_layout import L1Layout
@@ -36,7 +42,6 @@ from promptpotter.domain.results import (
     RoundResult,
     RoundSummary,
     RoundSummaryCandidate,
-    SampleOrderStep,
     ScoreboardRow,
     ScoredCandidate,
 )
@@ -97,7 +102,6 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     RuntimeFailure,
     ScoredCandidate,
     ScoreboardRow,
-    SampleOrderStep,
     FewShotExample,
     EvidenceGrounding,
     IndividualLineage,
@@ -136,6 +140,11 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     # --- campaigns/registry router ---
     CampaignSummary,
     CampaignListResponse,
+    # --- the champion table (application/meta_champion) — nested types first ---
+    ChampionCellEffect,
+    ChampionProvenance,
+    ChampionCandidate,
+    ChampionRegistry,
     # --- campaigns/files router ---
     FileEntry,
     FilesResponse,

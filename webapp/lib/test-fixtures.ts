@@ -76,7 +76,6 @@ export function roundDoc(over: Partial<RoundResult> = {}): RoundResult {
     l1_n_no_op: 0,
     l1_n_duplicate: 0,
     l1_parse_failure: null,
-    sample_order_timeline: [],
     diagnostics: null,
     critique: null,
     health: null,

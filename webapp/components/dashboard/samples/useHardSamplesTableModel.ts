@@ -20,7 +20,7 @@ import {
   STORAGE_KEY,
   type ColDef,
   type ColId,
-  type MeasurementDot,
+  type HeatDot,
   type PersistedState,
 } from "./columns";
 
@@ -32,7 +32,7 @@ export function wrappable(col: ColDef): boolean {
 
 interface HardSamplesTableModelInput {
   datasetItems: DatasetItem[];
-  perSample?: Map<number, MeasurementDot[]>;
+  perSample?: Map<number, HeatDot[]>;
 }
 
 export function useHardSamplesTableModel({
@@ -185,16 +185,16 @@ export function useHardSamplesTableModel({
 
   // Per-sample ord → dot lookup, built once per stablePerSample change.
   const byOrdBySample = useMemo(() => {
-    const out = new Map<number, Map<string, MeasurementDot>>();
+    const out = new Map<number, Map<string, HeatDot>>();
     if (!stablePerSample) return out;
     for (const [sid, ms] of stablePerSample) {
-      const m = new Map<string, MeasurementDot>();
+      const m = new Map<string, HeatDot>();
       for (const x of ms) m.set(x.ord, x);
       out.set(sid, m);
     }
     return out;
   }, [stablePerSample]);
-  const EMPTY_BY_ORD = useMemo(() => new Map<string, MeasurementDot>(), []);
+  const EMPTY_BY_ORD = useMemo(() => new Map<string, HeatDot>(), []);
 
   const widthFor = (col: ColDef): number => {
     if (persisted.folded.includes(col.id)) return FOLDED_WIDTH;

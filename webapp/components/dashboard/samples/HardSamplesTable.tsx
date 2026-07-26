@@ -5,7 +5,7 @@ import { type DatasetItem, type HardSamplesScope } from "@/lib/api";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { MeasHeatCell } from "./MeasHeatCell";
 import { heatLayout, ordIndexToXCss } from "@/lib/heat-canvas";
-import { cellFor, RANK_HINT, type CellValue, type MeasurementDot } from "./columns";
+import { cellFor, RANK_HINT, type CellValue, type HeatDot } from "./columns";
 import { HardSamplesFooter } from "./HardSamplesFooter";
 import { HardSamplesHeatTip, HardSamplesPopover } from "./HardSamplesPopover";
 import { useHardSamplesTableModel, wrappable } from "./useHardSamplesTableModel";
@@ -14,7 +14,7 @@ interface Props {
   // Per-sample chronological measurement dots. When supplied, the table
   // shows a "measurements" column with one dot per measurement; when
   // omitted, the column is hidden.
-  perSample?: Map<number, MeasurementDot[]>;
+  perSample?: Map<number, HeatDot[]>;
   // Compact = tiny default height (~3 rows visible). User can still drag
   // the resize handle to grow it. Off = standard preset height.
   compact?: boolean;

@@ -51,7 +51,8 @@ async def rescore_parent(
     round's ``scoring_set``, so winner election compares candidate-vs-parent on the SAME
     hard-first samples the candidates ran.
 
-    The online picker scores each candidate on a different hard-first subset, while the
+    Elimination truncates each candidate at a different depth of the shared round order, so
+    each is scored on a different prefix, while the
     parent was only ever scored on its own earlier rounds; without this re-score,
     ``matched_origin_stats`` intersects disjoint sample sets and returns a fake ``0.0``
     floor. Re-scoring through the ``score_search_point`` gateway + content-hash cache

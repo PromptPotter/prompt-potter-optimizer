@@ -34,7 +34,7 @@ from promptpotter.infrastructure.projections.live_dashboard.round_summary import
 )
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import campaign_cycles_dir
-from promptpotter.shared.statistics import paired_diff_posterior
+from promptpotter.shared.statistics import paired_diff_posterior, t_critical
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
@@ -44,7 +44,7 @@ _PP_SELF_BACKEND_TYPE = "promptpotter"
 _ORIGIN_HASH = "origin"
 
 
-class CellEffect(StrictModel):
+class ChampionCellEffect(StrictModel):
     """One environment cell's paired (candidate − origin) effect for a state."""
 
     cell: str
@@ -52,7 +52,7 @@ class CellEffect(StrictModel):
     n: int
 
 
-class Provenance(StrictModel):
+class ChampionProvenance(StrictModel):
     """Where one occurrence of a candidate state was measured on disk."""
 
     campaign_id: str
@@ -61,15 +61,16 @@ class Provenance(StrictModel):
     candidate_id: str
 
 
-class CandidateRow(StrictModel):
+class ChampionCandidate(StrictModel):
     """One unique meta-prompt state, aggregated across every occurrence in the corpus."""
 
     state_hash: str
     label: str
     prompt_state: dict[str, dict[str, str]]  # {node: {field: text}} — the meta-prompt edit
-    provenance: list[Provenance]
-    per_cell_effects: list[CellEffect]
-    anchor_effect: float  # grand paired mean across all cells+occurrences
+    provenance: list[ChampionProvenance]
+    per_cell_effects: list[ChampionCellEffect]
+    anchor_effect: float  # mean of the PER-CELL paired diffs — one point per cell, not per
+    # occurrence, so an over-measured cell cannot outweigh uniform goodness (see _finalize)
     ci_lo: float
     ci_hi: float
     n_cells: int
@@ -81,7 +82,7 @@ class ChampionRegistry(StrictModel):
 
     generated_at: str
     n_cycles_scanned: int
-    candidates: list[CandidateRow]  # ranked desc by anchor_effect
+    candidates: list[ChampionCandidate]  # ranked desc by anchor_effect
 
 
 def _state_hash(prompt_state: dict[str, dict[str, str]]) -> str:
@@ -111,7 +112,7 @@ class _Accum:
     def __init__(self, prompt_state: dict[str, dict[str, str]], label: str) -> None:
         self.prompt_state = prompt_state
         self.label = label
-        self.provenance: list[Provenance] = []
+        self.provenance: list[ChampionProvenance] = []
         # cell -> paired (candidate_fit, origin_fit) lists across occurrences
         self.cand_by_cell: dict[str, list[float]] = {}
         self.orig_by_cell: dict[str, list[float]] = {}
@@ -203,7 +204,7 @@ def _accumulate_round(
             acc = _Accum(prompt_state, str(cand.get("label") or state_hash))
             accums[state_hash] = acc
         acc.provenance.append(
-            Provenance(
+            ChampionProvenance(
                 campaign_id=campaign_id, cycle_id=cycle_id, round=round_num, candidate_id=cand_id
             )
         )
@@ -223,28 +224,50 @@ def _coerce_state(raw: Any) -> dict[str, dict[str, str]]:
     return out
 
 
-def _finalize(state_hash: str, acc: _Accum) -> CandidateRow:
-    per_cell: list[CellEffect] = []
-    flat_cand: list[float] = []
-    flat_orig: list[float] = []
+def _finalize(state_hash: str, acc: _Accum) -> ChampionCandidate:
+    """Aggregate one meta-prompt state's measurements into its ranked row.
+
+    **Aggregation is PER CELL, then across cells** — the same two-stage shape
+    ``domain/l4/verdict.py::compute_outer_verdict`` uses, and for the same reasons. It used
+    to flatten every cell's every occurrence into ONE ``paired_diff_posterior`` call, which
+    broke the ranking two ways at once: the SE came out of n = total *measurements* rather
+    than n = *cells*, overstating confidence on what is really a ~7-point panel; and a cell
+    that happened to be measured five times outweighed five cells measured once, so
+    ``anchor_effect`` rewarded over-representation instead of uniform goodness. Both matter
+    because this ranking is the ONLY thing standing between the corpus and a human
+    hand-graduating a meta-prompt into ``datasets/_optimizer/`` (the ``champion`` verb that
+    used to do it automatically was deleted 2026-07-17), so an overstated CI misleads a
+    person making an irreversible edit.
+    """
+    per_cell: list[ChampionCellEffect] = []
+    cell_cand: list[float] = []
+    cell_orig: list[float] = []
+    n_meas = 0
     for cell in sorted(acc.cand_by_cell):
         cand_vals = acc.cand_by_cell[cell]
         orig_vals = acc.orig_by_cell[cell]
         mean_d, _se_d, n = paired_diff_posterior(cand_vals, orig_vals)
-        per_cell.append(CellEffect(cell=cell, mean_d=mean_d, n=n))
-        flat_cand.extend(cand_vals)
-        flat_orig.extend(orig_vals)
+        per_cell.append(ChampionCellEffect(cell=cell, mean_d=mean_d, n=n))
+        n_meas += n
+        # ONE paired point per cell — the cell's own mean level. Equal-length lists make
+        # the elementwise paired mean identical to the difference of means, so this is
+        # exactly ``mean_d`` re-expressed as a (candidate, origin) pair for stage two.
+        cell_cand.append(sum(cand_vals) / len(cand_vals) if cand_vals else 0.0)
+        cell_orig.append(sum(orig_vals) / len(orig_vals) if orig_vals else 0.0)
 
-    anchor, anchor_se, n_meas = paired_diff_posterior(flat_cand, flat_orig)
-    return CandidateRow(
+    anchor, anchor_se, n_cells = paired_diff_posterior(cell_cand, cell_orig)
+    # Student-t on the CELL count, not z: the SE is estimated from the same handful of
+    # cells it widens (≈7 cells → 2.45, not 1.96). Matches `compute_outer_verdict`.
+    crit = t_critical(max(n_cells - 1, 1))
+    return ChampionCandidate(
         state_hash=state_hash,
         label=acc.label,
         prompt_state=acc.prompt_state,
         provenance=acc.provenance,
         per_cell_effects=per_cell,
         anchor_effect=anchor,
-        ci_lo=anchor - 1.96 * anchor_se,
-        ci_hi=anchor + 1.96 * anchor_se,
+        ci_lo=anchor - crit * anchor_se,
+        ci_hi=anchor + crit * anchor_se,
         n_cells=len(per_cell),
         n_measurements=n_meas,
     )

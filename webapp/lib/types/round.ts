@@ -12,7 +12,6 @@ export type {
   RoundResult,
   RoundSummary,
   RoundSummaryCandidate,
-  SampleOrderStep,
   ScoreboardRow,
   ScoredCandidate,
 } from "@/lib/api/types";
@@ -45,6 +44,9 @@ export interface RoundAuditDoc {
 // Both surfaces share this shape — written by AuditTrailView
 // (`promptpotter/infrastructure/projections/audit_trail.py`).
 // `input`/`output` are loose dicts whose contents vary by node.
+// `output.reasoning` (when present) is the model's own thinking channel — prose for a
+// human, rendered in its own pane by `OptimizerNodeDetail`. It is ANALYTICAL ONLY:
+// never derive, score, sort or gate on it (see Python `LLMResponse.reasoning`).
 export interface NodeBlock {
   input?: Record<string, unknown>;
   output?: Record<string, unknown>;

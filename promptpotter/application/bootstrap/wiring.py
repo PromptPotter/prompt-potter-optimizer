@@ -119,10 +119,10 @@ async def _resolve_pipeline_schema(
     here before parsing — backend underneath, dataset on top. Backend
     unreachable → local file alone (offline mode).
 
-    ``in_process`` connectors (``llm_only`` / ``promptpotter``) have NO remote
-    backend, so the local ``pipeline.json`` IS the whole schema — skip the fetch
-    entirely (otherwise it would hit ``backend_url`` and merge an unrelated
-    backend's nodes, e.g. TermNorm's, under the dataset overlay)."""
+    An ``in_process`` connector (``promptpotter``) has NO remote backend, so the
+    local ``pipeline.json`` IS the whole schema — skip the fetch entirely
+    (otherwise it would hit ``backend_url`` and merge an unrelated backend's
+    nodes, e.g. TermNorm's, under the dataset overlay)."""
     backend_resp: dict[str, Any] | None = None
     if in_process:
         pass  # no remote backend — local pipeline.json is authoritative
@@ -203,7 +203,7 @@ def _load_dataset_into_session(
     """Populate session.samples + index_terms.
 
     Precedence: tenant Origin (``projects/{tenant}/datasets/{slug}/``) →
-    repo benchmark (``datasets/{name}/``) → ``DATASET_LOADERS`` registry
+    repo benchmark (``datasets/{name}/``) → the ``dataset_loader`` resolver's
     one-shot download into the benchmark tree. Tenant uploads never
     cross-contaminate the install-global benchmark slot.
 
@@ -220,7 +220,8 @@ def _load_dataset_into_session(
         status(f"Dataset '{dataset_name}' not available")
         raise ValueError(
             f"Dataset {dataset_name!r} not found in tenant uploads, repo benchmarks, "
-            f"or DATASET_LOADERS. Add a loader to DATASET_LOADERS in dataset_builder.py."
+            f"or any registered loader. Add one to DATASET_LOADERS in "
+            f"application/datasets/loaders.py."
         )
 
     valid = [item for item in items if item.get("query") and item.get("ground_truth")]

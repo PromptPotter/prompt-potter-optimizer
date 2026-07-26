@@ -72,10 +72,12 @@ behind the gateway / archive and is served; the webapp renders, never recomputes
    literally fork-from-divergence).
 7. **Don't roadmap-commit "migrate all 5".** Scoring + abort are both per-round
    predicates, so the two shipped consumers prove a **per-round verdict fold**,
-   not open-ended generality. **Order** is per-*step* (`SampleOrderStep`), and
-   whether it can host on this fold is **structurally unverified** — an open
-   question, not a scheduled migration. Constraint stays a hypothesis; extract
-   only when a real consumer lands.
+   not open-ended generality. **Order is no longer per-step at all** — the
+   per-step `SampleOrderStep` shape was deleted 2026-07-26, having outlived the
+   online picker it described (deleted 2026-07-04); every candidate now walks ONE
+   deterministic round order, so order is positional over the round's `selection`.
+   That closes the old "can order host on this fold?" question by removing its
+   subject. Constraint stays a hypothesis; extract only when a real consumer lands.
 
 ## Shipped read-side (code is the SoT)
 

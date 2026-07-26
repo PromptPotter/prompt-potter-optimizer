@@ -41,7 +41,6 @@ __all__ = [
     "RoundResult",
     "RoundSummary",
     "RoundSummaryCandidate",
-    "SampleOrderStep",
     "ScoreboardRow",
     "ScoredCandidate",
     "SweepBatchResult",
@@ -346,26 +345,6 @@ class RoundParent(StrictModel):
     evaluators: dict[str, float] = Field(default_factory=dict)
 
 
-class SampleOrderStep(StrictModel):
-    """One measurement step in a round's adaptive sample-selection timeline.
-
-    Frozen snapshot of the adaptive queue mechanism's state the moment it picked
-    the ``step``-th sample: ``computed`` are the samples already measured (in
-    measurement order), ``planned`` the picker's intended order for the remaining
-    samples under the posterior at that step, ``current_sample_id`` the one about
-    to be measured (``planned[0]``, or ``None`` at the terminal step). The
-    ``planned`` tail re-ranks every step, so each row is the *frozen* plan as it
-    was then — the trajectory hover reads one row per step.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    step: int
-    current_sample_id: int | None = None
-    computed: list[int] = Field(default_factory=list)
-    planned: list[int] = Field(default_factory=list)
-
-
 # The two reasons `RoundResult.l1_parse_failure` can carry. Opposite kinds of evidence,
 # so no reader may treat the field as a bool:
 #   MALFORMED — the meta-prompt drove the optimizer LLM to emit schema-noncompliant output.
@@ -452,13 +431,6 @@ class RoundResult(StrictModel):
     # the two are opposite kinds of evidence (see their docstrings) and must never be
     # collapsed to a bool by a reader.
     l1_parse_failure: str | None = None
-    # Adaptive-queue-mechanism sample-selection timeline for the round's
-    # representative (longest-surviving) candidate — one row per measurement
-    # step, each a frozen (computed, planned) split. Mirrors ``selection``'s
-    # longest-candidate rule (``round_summary._measurement_order``) so the
-    # executed prefix lines up. Empty on replay / cache paths that bypass the
-    # online picker.
-    sample_order_timeline: list[SampleOrderStep] = Field(default_factory=list)
     # --- computed post-scoring ---
     diagnostics: RoundDiagnostics | None = None
     critique: CritiqueReadout | None = None

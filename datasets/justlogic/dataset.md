@@ -4,9 +4,11 @@
 3-class deductive reasoning (`TRUE` / `FALSE` / `Uncertain`) over an **iid random mix of
 depths 2, 3, and 4**.
 
-The `justlogic` loader (depths 6-7, `load_justlogic` in
-`promptpotter/application/datasets/loaders.py`) is retained **only** so its already-banked
-measurements stay addressable under their cache keys — do not wire it for new work.
+The `justlogic` NAME (depths 6-7) is retained **only** so its already-banked measurements
+stay addressable under their cache keys — do not wire it for new work. There is no
+per-cut loader: one `_load_justlogic` serves every cut, and the depths come off the
+dataset name (`justlogic_depths` in `promptpotter/application/datasets/loaders.py`), with
+the bare `justlogic` mapping to its historical 6-7.
 
 Every origin score, depth-"band" verdict, and hedge-proportion number this cut once carried
 is **VOID**: a data-deprecation-era artifact that reproduces nothing. Do not cite them.

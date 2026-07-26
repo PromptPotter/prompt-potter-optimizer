@@ -7,7 +7,6 @@ import {
 } from "@/lib/sample-set";
 import { orderAtStep, seedFromOrder } from "@/lib/derivations";
 import type { RoundSummary } from "@/lib/api/types";
-import type { SampleOrderStep } from "@/lib/types";
 
 const round = (r: number, selection: number[]): RoundSummary =>
   ({
@@ -48,19 +47,21 @@ describe("sample-set primitives", () => {
 });
 
 describe("orderAtStep / seedFromOrder", () => {
-  const timeline: SampleOrderStep[] = [
-    { step: 0, current_sample_id: 9, computed: [], planned: [9, 4, 7] },
-    { step: 1, current_sample_id: 4, computed: [9], planned: [4, 7] },
-  ];
-
-  it("reads the frozen order from the timeline when present", () => {
-    const o = orderAtStep(timeline, [9, 4, 7], 4, 2);
-    expect(o).toEqual({ computed: [9], current: 4, planned: [7] });
+  it("splits the executed selection by position", () => {
+    expect(orderAtStep([9, 4, 7], 4, 2)).toEqual({ computed: [9], current: 4, planned: [7] });
+    expect(orderAtStep([9, 4, 7], 7, 3)).toEqual({ computed: [9, 4], current: 7, planned: [] });
   });
 
-  it("falls back to splitting executed selection by position", () => {
-    const o = orderAtStep([], [9, 4, 7], 7, 3);
-    expect(o).toEqual({ computed: [9, 4], current: 7, planned: [] });
+  // The regression this replaced: the round's FIRST cell used to be the only one a
+  // one-step `sample_order_timeline` matched, so it seeded from the round's INTENDED
+  // order (including samples elimination never reached) while every other cell seeded
+  // from the MEASURED order. One gesture, two different sample sets. Position 1 must
+  // now derive the same way as any other position.
+  it("treats the first cell like every other cell", () => {
+    expect(orderAtStep([9, 4, 7], 9, 1)).toEqual({ computed: [], current: 9, planned: [4, 7] });
+    const first = orderAtStep([9, 4, 7], 9, 1);
+    expect(seedFromOrder(first, "measured")).toEqual([9]);
+    expect(seedFromOrder(first, "all")).toEqual([9, 4, 7]);
   });
 
   it("seedFromOrder respects measured vs all", () => {
