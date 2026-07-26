@@ -585,7 +585,8 @@ def _rerun_would_repeat_token_budget_failure(
     # from the cached result itself, so the infra-code / token lookups key on the SAME
     # node classify_result stamped. The trailing `or "llm_only"` IS a literal coupling
     # to the single-node sentinel — it fires when the row carries no `terminated_at`.
-    # "llm_only" names two things (a connector AND the single-node pipeline sentinel);
+    # "llm_only" names ONE thing now — the single-node pipeline sentinel. The connector
+    # of that name was deleted, so the collision this comment used to warn about is gone;
     # folding the sentinel into a declared constant is an open design call, not an
     # absence of coupling.
     node = ((cached_result.get("pipeline_data") or {}).get("terminated_at")) or "llm_only"

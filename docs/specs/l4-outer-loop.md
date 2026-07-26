@@ -167,12 +167,18 @@ Standing invariants (verified — don't re-chase):
 `Connector.execution == "in_process"` dispatches `run_query` to a connector-supplied
 `Connector.in_process_run(query, payload)` returning the result shape the scorer already
 consumes; the HTTP arm is unchanged, and dispatch stays on the declared mode, never the
-connector name (`connectors/CLAUDE.md`). Two connectors ride the one seam: **`llm_only`**
-(`connectors/llm_only.py` — calls the LLM client directly on the rendered prompt; wired and
-dispatchable, but **no committed dataset declares `backend_type: "llm_only"`** — the six
-single-node benchmarks name an `llm_only` *node* inside a `termnorm` pipeline, which is a
-different thing and still needs the server, so the no-server case is shipped and unadopted)
-and **`promptpotter`** (delegates to the inner-cycle runner, §2).
+connector name (`connectors/CLAUDE.md`). One connector rides the seam: **`promptpotter`**
+(delegates to the inner-cycle runner, §2).
+
+**Feature A (the no-server `llm_only` connector) is WITHDRAWN, not deferred.** It shipped,
+then sat with **zero** dataset adopters for its whole life — the six single-node benchmarks
+name an `llm_only` *node* inside a `termnorm` pipeline, which still needs the server. Its
+in-process answer extraction duplicated what TermNorm's `_step_llm_only` already does over
+the wire, and `llm_only.py` itself warned the two arms "must agree on shape … or one
+measures a different thing than the other" — a standing divergence risk bought for a case
+nobody ran. Deleted (−267 LOC). The single-node case is served by the **TermNorm connector
+accepting an `llm_only` pipeline**; `llm_only` is now a node name only. Re-adding a
+no-server connector needs a dataset that actually declares it, not a spec claim.
 
 ## 2. In-process recursion isolation — SHIPPED; keep it depth-agnostic
 
@@ -287,7 +293,8 @@ measurement to run, not a module to write.**
 
 ## Implementation order
 
-1. **Shared `in_process` seam + `llm_only` connector — SHIPPED** (§1).
+1. **Shared `in_process` seam — SHIPPED** (§1). The `llm_only` connector it also yielded
+   is **withdrawn/deleted** (zero adopters; see §1).
 2. **`promptpotter` inner-cycle runner + isolation — SHIPPED & live-validated** (§2).
 3. **[GATING] Inner benchmark with headroom + specialized outer prompt set — MECHANISM SHIPPED; full-signal data run open.** `inner_tasks.json` → `justlogic-d234` (the origin headroom is **[VOID]/unmeasured**, finish-line item 1) + the `_optimizer_meta` set (§3), live-validated to emit per-node edits of the INNER meta-prompts. **Done when:** a real `new promptpotter-self` shows outer candidates with DIFFERENT proxies and outer best > outer origin.
 4. **Enriched outer fitness + inner-spend rollup — rollup, per-sample composed fitness, and delta-led display SHIPPED; cross-sample terms remain** (§4). Each inner cycle's spend returns as the outer sample's `step_tokens`, fanning onto the outer ledger via the existing backend-cost channel. **Done when:** `proxy_lift_corr ≥ 0.6` over ≥4 paired branches.

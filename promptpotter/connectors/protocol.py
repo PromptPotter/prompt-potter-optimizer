@@ -36,9 +36,8 @@ if TYPE_CHECKING:
 # How a connector's backend runs, so the loop dispatches on a *declared*
 # capability instead of branching on the connector name. ``remote_http`` posts
 # to a live ``/matches`` endpoint (TermNorm + any external backend);
-# ``in_process`` runs the query in this process with no HTTP transport — either an
-# in-process ``llm_only`` (a single direct LLM call, no backend server) or an inner
-# PromptPotter cycle (L4 self-recursion). ``BackendClient.run_query`` dispatches an
+# ``in_process`` runs the query in this process with no HTTP transport — today an
+# inner PromptPotter cycle (L4 self-recursion). ``BackendClient.run_query`` dispatches an
 # ``in_process`` connector to its ``in_process_run`` hook. A future hosted/worker
 # execution mode extends this enum without touching the loop.
 ConnectorExecution = Literal["remote_http", "in_process"]
@@ -123,9 +122,9 @@ class Connector:
     in_process_run: InProcessRun | None = None
     """The in-process execution arm — ``async (query, payload) -> {"data": {…}}``.
     Required iff ``execution == "in_process"`` (the registry guard enforces the
-    pairing); ``None`` for a ``remote_http`` connector. ``llm_only`` makes a single
-    direct LLM call; ``promptpotter`` runs an inner cycle (L4). ``BackendClient``
-    holds this and calls it from ``run_query`` when the mode is non-HTTP."""
+    pairing); ``None`` for a ``remote_http`` connector. ``promptpotter`` runs an
+    inner cycle (L4). ``BackendClient`` holds this and calls it from ``run_query``
+    when the mode is non-HTTP."""
 
     expected_revision: str | None = None
     """Backend revision (git SHA, semver, …) this PromptPotter rev expects.

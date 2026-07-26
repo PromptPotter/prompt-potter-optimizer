@@ -227,9 +227,7 @@ content hashes, so a hit is the same measurement by construction. Sandboxing the
 made every outer cycle re-score every inner origin — and an inner origin is
 stochastic, so each cycle subtracted a freshly-redrawn origin measurement (one searchpoint,
 one sample set, scored 0.375 in seven cycles and 0.417 in two) from the lift it was
-trying to measure. The shared `in_process`
-seam also yields the in-process `llm_only` connector (no TermNorm server for the
-basic case). Implementation: `promptpotter/application/runner/inner/`.
+trying to measure. Implementation: `promptpotter/application/runner/inner/`.
 
 **The project is now in its closing phase: ship a *distributable* `promptpotter-self`.**
 The remaining work and the live-run learnings (gsm8k retired as the inner benchmark —

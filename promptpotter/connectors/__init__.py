@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import typing
 
-from promptpotter.connectors.llm_only import CONNECTOR as _LLM_ONLY
 from promptpotter.connectors.promptpotter import CONNECTOR as _PROMPTPOTTER
 from promptpotter.connectors.protocol import (
     BackendUnreachableError,
@@ -23,7 +22,6 @@ __all__ = ["CONNECTORS", "DEFAULT_CONNECTOR", "BackendUnreachableError", "Connec
 CONNECTORS: dict[str, Connector] = {
     "termnorm": _TERMNORM,
     "promptpotter": _PROMPTPOTTER,
-    "llm_only": _LLM_ONLY,
 }
 
 DEFAULT_CONNECTOR = "termnorm"

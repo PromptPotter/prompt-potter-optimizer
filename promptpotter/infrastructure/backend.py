@@ -188,9 +188,9 @@ class BackendClient:
 
         if self._execution != "remote_http":
             # Declared-mode dispatch: a non-HTTP connector runs in this process
-            # via its own arm (``llm_only`` → one LLM call; ``promptpotter`` →
-            # an inner cycle). The connector owns *how* it runs; the registry
-            # guarantees the arm is present whenever the mode is ``in_process``.
+            # via its own arm (``promptpotter`` → an inner cycle). The connector
+            # owns *how* it runs; the registry guarantees the arm is present
+            # whenever the mode is ``in_process``.
             assert self._in_process_run is not None, (
                 f"execution={self._execution!r} but no in_process_run wired"
             )

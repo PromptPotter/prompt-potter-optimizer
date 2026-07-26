@@ -147,7 +147,7 @@ class MeasurementArchive:
     `PipelineSchema.node_configs()`, neither of which carries `backend_type`. So
     the archive is not backend-scoped at all — no read or write takes a
     `backend_id`, and repointing a dataset at a different connector (wire TermNorm
-    → in-process `llm_only`, say) does NOT invalidate rows measured under the old
+    → an in-process one, say) does NOT invalidate rows measured under the old
     one — it silently serves them. Change the connector and you must change the
     config the hash sees, or re-mint the campaign. (`dataset_snapshot_path` is the
     one exception: its FILENAME carries the backend, so it takes one.)

@@ -509,7 +509,12 @@ def test_evidence_channel_clips_are_visible_and_tail_preserving(
     # Under-cap text passes through whole.
     assert _edges_at_line("a\nb", 400) == "a\nb"
 
-    # (3) over-cap task_context field clips at a word boundary WITH a visible marker.
+    # (3) task_context is AUTHORED text, so it is rendered verbatim — never clipped.
+    # The two channels above are DERIVED (reasoning traces, sample rows): they rank their
+    # content and can say what they dropped. An authored field has no rankable rows and no
+    # principled cut, so a renderer that clips it is guessing which half the operator meant.
+    # It guessed wrong for 248 rounds on justlogic-d234. The budget moved to mint, where the
+    # author can act on it (`TaskDecomposition.check_budget`).
     long_field = "data_characteristics: " + "pattern word " * 30
     bundle = InjectionBundle(
         opt_sp=OptSearchPoint(
@@ -533,14 +538,10 @@ def test_evidence_channel_clips_are_visible_and_tail_preserving(
     )
     with caplog.at_level(logging.WARNING):
         rendered = _r_task_context(bundle)
-    assert "…" in rendered, "silent truncation is the defect being fixed"
-    clipped_field = rendered.split("key_challenges: ", 1)[1].split("\n", 1)[0]
-    clipped_prefix = clipped_field.removesuffix("…")
-    assert long_field.startswith(clipped_prefix)
-    next_char = long_field[len(clipped_prefix) : len(clipped_prefix) + 1]
-    assert next_char in (" ", ""), "mid-word cut"
-    assert any("over the" in r.getMessage() and "cap" in r.getMessage() for r in caplog.records), (
-        "injection_budget_overrun warning must still fire on truncation"
+    assert long_field in rendered, "authored framing must reach the LLM whole"
+    assert "…" not in rendered, "authored text is never clipped"
+    assert not any("cap" in r.getMessage() for r in caplog.records), (
+        "no truncation, so no overrun warning — the budget is enforced at mint instead"
     )
 
 
@@ -742,55 +743,6 @@ def test_nested_param_override_accumulates_instead_of_reverting_its_parent() -> 
         schema,
     )
     assert plain == {"l1_generate": {"persona": "z", "instruction": "y"}}
-
-
-def test_schema_violation_is_a_non_result_not_a_wrong_answer() -> None:
-    """A response that misses its declared answer slot yields `final_ranking: []`, not a MISS.
-
-    Projecting the whole `{reasoning, answer}` blob (or an empty string) into
-    `final_ranking[0]` makes every schema violation grade as a *confident wrong answer* — the
-    run completes, the score looks real, and a schema regression is indistinguishable from the
-    model getting the logic wrong. `sample_measurement` already yields NO_RESULT on an empty
-    ranking; the connector's job is to produce one, identically in both execution arms.
-    """
-    import asyncio
-
-    from promptpotter.connectors.llm_only import llm_only_in_process_run
-    from promptpotter.infrastructure.llm import models as llm_models
-
-    schema = {"type": "object", "properties": {"reasoning": {}, "answer": {}}}
-    base_cfg = {"provider": "p", "model": "m", "prompt": "q"}
-
-    def _run(parsed: Any, content: str = "", cfg_extra: dict[str, Any] | None = None) -> list[Any]:
-        resp = llm_models.LLMResponse(content=content, model="m", parsed=parsed)
-
-        class _Client:
-            async def chat(self, *_: Any, **__: Any) -> Any:
-                return resp
-
-        from promptpotter.infrastructure.llm import registry
-
-        original = registry.get_llm_client
-        registry.get_llm_client = lambda _p: _Client()  # type: ignore[assignment]
-        try:
-            payload = {"node_config": {"llm_only": {**base_cfg, **(cfg_extra or {})}}}
-            out = asyncio.run(llm_only_in_process_run("q", payload))
-        finally:
-            registry.get_llm_client = original  # type: ignore[assignment]
-        return list(out["data"]["final_ranking"])
-
-    schema_cfg = {"output_schema": schema, "answer_field": "answer"}
-    # The named slot is destructured — the reasoning never reaches the matcher.
-    assert _run({"reasoning": "because", "answer": "TRUE"}, cfg_extra=schema_cfg) == ["TRUE"]
-    # Slot absent, and response that never decoded to an object: both are NON-results.
-    assert _run({"reasoning": "because"}, cfg_extra=schema_cfg) == []
-    assert _run(None, content="TRUE", cfg_extra=schema_cfg) == []
-    # An `output_schema` without `answer_field` would silently grade the wrong slot.
-    with pytest.raises(ValueError, match="answer_field"):
-        _run({"answer": "TRUE"}, cfg_extra={"output_schema": schema})
-    # No schema declared → text mode, unchanged; an empty answer is still a non-result.
-    assert _run(None, content="**TRUE**") == ["**TRUE**"]
-    assert _run(None, content="   ") == []
 
 
 def test_schema_field_rename_is_locked_by_default_and_never_silently_half_applies() -> None:

@@ -9,7 +9,7 @@ Not excluded by a decision anyone defended — **invisible**, for one reason:
 - `OptSearchPoint` addresses prompt fields + `pipeline_params` (node-keyed config dicts). **Data.**
 - A node's `output_schema.description` strings are read by the model but by **no parser** — they were never on the tunable surface.
 
-But *no lift is needed*. Every target node already carries its schema (`NodeOutputSchema.field_descriptions`, `pipeline_schema.py`) and the connector already ships it to the model (`llm_only.py`). The strings need only be **reachable as an override** and **folded into the wire schema** — not stored as new data.
+But *no lift is needed*. Every target node already carries its schema (`NodeOutputSchema.field_descriptions`, `pipeline_schema.py`) and it already reaches the model — the node's `output_schema` rides the wire to the backend, which sends it as `response_schema`. The strings need only be **reachable as an override** and **folded into the wire schema** — not stored as new data.
 
 **Two schema-declaration shapes, not one.** A node declares its output schema either INLINE (`config.output_schema` — `justlogic`'s `llm_only`) or by REGISTRY IDENTITY (`config.schema_family` — TermNorm's `entity_profiling` / `llm_ranking`, resolved into the `resolved_schemas` block of `GET /pipeline`). Only the inline shape has a schema *in the node config* for the fold to write on. The registry shape must be materialized from `PipelineNode.output_schema.json_schema` at fold time — otherwise the descriptions are popped and silently dropped, and every proposal on those nodes hashes to its parent.
 

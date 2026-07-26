@@ -91,7 +91,8 @@ def _count_any_params(py_files: list[Path]) -> int:
     a parameter with a known type". And ``strict``'s own ``warn_return_any`` does NOT
     cover it — an ``Any`` param is a complete annotation, so ``disallow_untyped_defs``
     is satisfied, and ``no-any-return`` is defeated by any expression that unions ``Any``
-    with a concrete type. ``resp.content or ""`` (`connectors/llm_only.py`, pre-2026-07-17)
+    with a concrete type. ``resp.content or ""`` (the since-deleted
+    `connectors/llm_only.py`, pre-2026-07-17)
     was exactly that: the ``or`` had no runtime job, only a type-checker one, and deleting
     it made the error fire instantly. Nothing recorded that, so a debt sweep read the
     guard as a cosmetic no-op. This count is the only thing that sees the declaration.

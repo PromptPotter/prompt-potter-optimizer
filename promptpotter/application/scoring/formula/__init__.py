@@ -10,10 +10,10 @@
 
 **Answer extraction is a double seam; this is only one arm.** Here a matcher pulls
 the LABEL out of the model's prose (last bold span, last `\\boxed{N}`) and decides
-HIT/MISS. The other arm runs earlier and elsewhere: `connectors/llm_only.py::
-_extract_answer` destructures the structured-output SLOT named by `answer_field`,
-before any scoring. Slot first, label second — a task that returns JSON is shaped
-by the connector arm, and no matcher here will ever see the raw envelope.
+HIT/MISS. The other arm runs earlier and in the BACKEND: TermNorm's
+`_step_llm_only` destructures the structured-output SLOT named by `answer_field`
+before the body is posted back. Slot first, label second — a task that returns JSON
+is shaped over the wire, and no matcher here will ever see the raw envelope.
 Display-side extraction is a third thing again (`domain/rendering.py`).
 """
 

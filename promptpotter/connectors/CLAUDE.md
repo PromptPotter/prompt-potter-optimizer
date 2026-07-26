@@ -13,8 +13,15 @@ nodes.{name}.config`, never in the backend's repo.
 | Name | File | Wire shape | Session | Use |
 |---|---|---|---|---|
 | `termnorm` | `termnorm.py` | `{query, steps, node_config}` posted to `/matches` | `POST /sessions` handshake with terms array | TermNorm production backend |
-| `llm_only` | `llm_only.py` | `{query, node_config}` → in-process LLM call (`in_process_run`) | Noop (no remote service) | Basic single-LLM case, no backend server (l4-outer-loop § Feature A) |
 | `promptpotter` | `promptpotter.py` | `{query, meta_prompt_overrides}` → in-process inner cycle (`in_process_run` → `runner/inner/cycle.py`) | Noop (no remote service) | Optimizer-of-the-optimizer (L4) |
+
+> **`llm_only` is a NODE name, never a connector.** The six single-node benchmarks
+> declare an `llm_only` node inside a `termnorm` pipeline and route over HTTP to the
+> server like any other. A connector of that name once existed (the no-server "Feature
+> A" case) and was **deleted** — it had zero dataset adopters, and its in-process answer
+> extraction merely duplicated what TermNorm's `_step_llm_only` already does over the
+> wire. Do not re-add it: the single-node case is served by the TermNorm connector
+> accepting an `llm_only` pipeline.
 
 ## What the second connector taught the boundary
 
@@ -48,11 +55,8 @@ backend's transport is a capability it declares, not a branch in the core loop.
 connector-supplied `Connector.in_process_run(query, payload) -> {"data": {…}}` —
 the same shape the scorer parses from an HTTP `/matches` body. The registry guard
 (`__init__.py`) enforces the pairing: an `in_process` connector MUST supply
-`in_process_run`, a `remote_http` one MUST NOT. Two connectors ride the one seam:
+`in_process_run`, a `remote_http` one MUST NOT. One connector rides the seam today:
 
-- **`llm_only` (SHIPPED, Feature A)** — `in_process_run` makes one direct LLM call
-  (`get_llm_client(provider).chat(...)` on the rendered prompt) and projects the
-  answer onto the terminal ranking key. No TermNorm server for the basic case.
 - **`promptpotter` (Feature B, SHIPPED)** — `in_process_run` is a thin delegate to
   `application/runner/inner/cycle.py::run_inner_cycle` (running a whole inner
   campaign is heavy orchestration — it belongs in `application/runner`, not the
