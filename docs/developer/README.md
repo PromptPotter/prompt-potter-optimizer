@@ -123,7 +123,7 @@ Both files are append-only logs folded last-wins (`store/read_model.py`). The in
 
 **Read paths** (both return `list[Measurement]`):
 
-- `measurements_for_sample(sample_id)` — *"history of training example X"*. Caller: `archive_views.measurements_for_sample()` (sweep toolkit).
+- `measurements_for_sample(sample_id)` — *"history of training example X"*. Exposed through `archive_views.measurements_for_sample()`; **no caller today** — its one consumer was the sweep toolkit, deleted 2026-07-17. Kept because architecture.md §0 declares both keys first-class read surfaces of the archive.
 - `measurements_for_config(predicate)` — *"runs whose config matches this subset"*. Optional `run_ids` hint keeps the scan O(K + matches).
 
 The archive is tenant-global and **never backend-scoped** — no read or write takes a `backend_id`.

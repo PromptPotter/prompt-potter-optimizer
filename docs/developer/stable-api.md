@@ -132,7 +132,7 @@ The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no 
 
 **Mutual exclusions:** `--sweep-batch` and `--diag` mutually exclusive on `new`.
 
-Other subcommands (`sweep`, plus the maintenance verbs) have their own flag sets — see `presentation/cli/parsers.py`. Not part of v1 (M11 still touches them).
+The maintenance and diagnostic verbs have their own flag sets — see `presentation/cli/parsers.py`. Not part of v1 (M11 still touches them). There is no `sweep` verb: a sweep is `new --sweep-batch`, and `--sweep-batch` with no `sweep/*.json` payloads is a setup error, not a fall-through to a single unpaired cycle.
 
 ## 6. Ledger event types
 

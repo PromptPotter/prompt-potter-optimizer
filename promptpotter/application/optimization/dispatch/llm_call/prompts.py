@@ -220,8 +220,8 @@ def _resolved_prompt_for_node(name: str) -> dict[str, Any] | None:
 @functools.lru_cache(maxsize=32)
 def base_optimizer_template(name: str) -> PromptTemplate:
     """The manifest template for *name*, override-free — the base an L4 prose mutation
-    merges onto, and the declaration of the prose-embedded ``{{tokens}}`` (capability
-    directives, caller extras) such a mutation must preserve."""
+    merges onto, and the declaration of the inline ``{{tokens}}`` (caller extras such as
+    ``{{n_variants}}`` / ``{{citable_fields}}``) such a mutation must preserve."""
     body = _resolved_prompt_for_node(name)
     if body is None:
         raise KeyError(

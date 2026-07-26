@@ -30,6 +30,7 @@ from promptpotter.presentation.cli.commands._shared import (
 )
 from promptpotter.presentation.cli.session import load_session
 from promptpotter.presentation.views.startup_checklist import checkin_line
+from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
@@ -266,9 +267,8 @@ async def _checkin_task(
     ``{dataset_config_dir}/task_context.json`` is the canonical framing — written
     at commit from the check-in's decomposition, or decomposed once on first sight
     for a repo benchmark. ``--task-file``/``--task-text`` decompose an ad-hoc
-    override instead. Either way the result rides session state so ``resume`` /
-    ``sweep`` read it back; no second check-in call recomputes what ingest already
-    decomposed."""
+    override instead. Either way the result rides session state so ``resume`` reads it
+    back; no second check-in call recomputes what ingest already decomposed."""
     from promptpotter.application.optimization.task_context import (
         checkin_call_context,
         decompose_prompt_fields,
@@ -406,18 +406,29 @@ async def _maybe_dispatch_sweep_batch(
     train_data: list[Sample],
     dataset_config_dir: Path | None,
 ) -> CommandResult | None:
-    """Multi-fork sweep dispatch: with ``--sweep-batch`` AND ``{dataset_dir}/sweep/*.json``,
-    mint one fork per OperatorSweepFile. ``None`` falls through to the normal path."""
+    """Multi-fork sweep dispatch: with ``--sweep-batch``, mint one fork per OperatorSweepFile
+    under ``{dataset_dir}/sweep/``. ``None`` (no flag) falls through to the normal path.
+
+    Missing or empty payloads are a loud setup error, never a fall-through: the operator asked
+    for a paired batch, and silently running ONE unpaired cycle instead answers a different
+    question than the one they posed — the same reason a missing node model halts
+    ``configure_and_apply_pipeline`` rather than inheriting a hidden backend default."""
     if not getattr(args, "sweep", False):
         return None
     from promptpotter.application.sweep.sweep_runner import load_sweep_payloads, resolve_sweep_dir
 
     sweep_dir = resolve_sweep_dir(dataset_config_dir)
     if sweep_dir is None:
-        return None
+        raise PayloadInvalidError(
+            f"--sweep-batch needs a sweep/ directory of payloads, and {dataset_config_dir} "
+            "has none. Author one JSON OperatorSweepFile per arm there, or drop the flag."
+        )
     sweep_payloads = load_sweep_payloads(sweep_dir)
     if not sweep_payloads:
-        return None
+        raise PayloadInvalidError(
+            f"--sweep-batch found {sweep_dir} but no *.json payloads in it. Author one "
+            "OperatorSweepFile per arm, or drop the flag."
+        )
     ctx.save_phase("optimizing")
     return await _run_sweep_batch(args, ctx, campaign_config, train_data, sweep_payloads)
 

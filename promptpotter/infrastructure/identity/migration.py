@@ -61,8 +61,8 @@ def maybe_claim_default(
 def registered_or_default_identity(explicit_tenant: str | None = None) -> IdentityContext:
     """Resolve the CLI's identity: explicit ``--tenant`` > registered user > ``default``.
 
-    The single entry every CLI command (``new`` / ``resume`` / ``sweep``) uses
-    to decide which workspace a terminal run writes to. An explicit
+    The single entry every CLI command (``new`` / ``resume`` / the diagnostic
+    verbs) uses to decide which workspace a terminal run writes to. An explicit
     ``--tenant`` wins; otherwise a registered developer (default-claim marker)
     resolves to their own tenant so runs join the one workspace the
     authenticated web reads; otherwise anonymous ``default``.

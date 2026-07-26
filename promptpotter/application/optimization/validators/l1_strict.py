@@ -600,16 +600,19 @@ L1_CONFIG_NOT_IN_RUNTIME_FAILURES: LLMOutputValidator = LLMOutputValidator(
 
 
 def _meta_template_failures(pipeline_params: dict[str, Any]) -> list[ValidationFailure]:
-    """Prose-embedded injection ports dropped from an inner meta-prompt (the L4 surface).
+    """INLINE injection ports dropped from an inner meta-prompt's prose (the L4 surface).
 
-    A ``{{token}}`` in a meta-prompt's non-layout prose (``{{terminate_capability}}`` in
-    ``l3_plan.instruction``, ``{{citable_fields}}`` in ``l1_generate``) is a channel port, not
-    prose: layout-carried signals have their mandatory guard in ``validate_l1_layout``, and the
-    capability directives already have a sanctioned off-switch (the config bit renders them
-    empty) — so an L4 prose rewrite that deletes the token severs the channel while the schema
-    keeps accepting its proposals, and no measurement can see what went missing. Checks the
-    MERGED params, not the round's delta: a child of a broken incumbent inherits the token-less
-    prose without re-proposing it, and the program it would run is just as severed.
+    A ``{{token}}`` embedded mid-sentence in a meta-prompt field (``{{n_variants}}`` in
+    ``l1_generate.task_intent``/``instruction``, ``{{citable_fields}}`` in
+    ``l1_generate.answer_format``) is a channel port, not prose — an L4 rewrite that deletes
+    it severs the channel while the schema keeps accepting proposals, and no measurement can
+    see what went missing. This guard is PERMANENT, not transitional: these ports are inline
+    format variables inside the sentence that uses them, so they can never move to the layout
+    channel (whose mandatory guard is ``validate_l1_layout`` — the capability directives ride
+    there, appended blocks with no inline position to hold). Do not delete this on a "layout
+    covers it" argument; layout covers only block-shaped signals. Checks the MERGED params,
+    not the round's delta: a child of a broken incumbent inherits the token-less prose without
+    re-proposing it, and the program it would run is just as severed.
     """
     failures: list[ValidationFailure] = []
     for node_name, cfg in node_config_items(pipeline_params):

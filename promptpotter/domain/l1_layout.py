@@ -216,6 +216,10 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
     # Framing layer — must see the framing dict it refines (`task_context`), the distilled
     # failure signal (`critique`), its own edit vocabulary (`l1_signal_catalogue`), and the
     # raw round evidence (`diagnostics`). Everything else on the floor is excisable.
+    # The two layer-control directives (`rebase_capability` / `terminate_capability`) ride
+    # the layout — mandatory, so no L4 edit can sever the channel (the sanctioned
+    # off-switch stays the config bit, which renders them empty). They sit LAST so the
+    # terminate directive's "EVIDENCE STARVED panel above" reference resolves.
     "l2_context": NodeLayoutSpec(
         editor="l4",
         possible=frozenset(
@@ -233,9 +237,20 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "l1_overrides",
                 "task_context",
                 "l1_signal_catalogue",
+                "rebase_capability",
+                "terminate_capability",
             }
         ),
-        mandatory=frozenset({"task_context", "critique", "l1_signal_catalogue", "diagnostics"}),
+        mandatory=frozenset(
+            {
+                "task_context",
+                "critique",
+                "l1_signal_catalogue",
+                "diagnostics",
+                "rebase_capability",
+                "terminate_capability",
+            }
+        ),
         floor=L1Layout(
             problem_description=[
                 "plan",
@@ -251,6 +266,8 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "l1_overrides",
                 "task_context",
                 "l1_signal_catalogue",
+                "rebase_capability",
+                "terminate_capability",
             ],
         ),
     ),
@@ -271,9 +288,19 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "critique",
                 "evidence_health",
                 "archive_top_runs",
+                "rebase_capability",
+                "terminate_capability",
             }
         ),
-        mandatory=frozenset({"plan", "task_context", "diagnostics"}),
+        mandatory=frozenset(
+            {
+                "plan",
+                "task_context",
+                "diagnostics",
+                "rebase_capability",
+                "terminate_capability",
+            }
+        ),
         floor=L1Layout(
             problem_description=[
                 "plan",
@@ -284,6 +311,8 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "axis_memory",
                 "guard_breaches",
                 "critique",
+                "rebase_capability",
+                "terminate_capability",
             ],
         ),
     ),

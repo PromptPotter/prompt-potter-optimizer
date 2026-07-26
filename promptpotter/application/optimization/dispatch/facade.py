@@ -144,11 +144,13 @@ class DispatchHub:
         1. **Layout slots** (``L1_LAYOUT_SLOTS``): append the ``layout``-driven injection
            content to each slot's static text (empty static ⇒ the joined content *is*
            the slot). This is the searchable information-flow axis.
-        2. **Non-layout slots** (``instruction`` / ``answer_format`` — prose that embeds
-           ``{{token}}``s like ``rebase_capability``): scan the filled body and render any
-           remaining ``INJECTIONS`` token into a kwargs dict for ``compile_prompt``. Tokens
-           not in ``INJECTIONS`` (caller extras like ``n_variants``; a backend's own
-           ``{{query}}`` echoed inside ``rendered_prompt``) are left for the caller / backend.
+        2. **Non-layout slots** (``instruction`` / ``answer_format``): scan the filled body
+           and render any remaining ``INJECTIONS`` token into a kwargs dict for
+           ``compile_prompt``. The base manifest embeds no such tokens anymore (the capability
+           directives ride layout); this is the safety net for an override SET whose prose
+           still embeds one — without it the token would render literally. Tokens not in
+           ``INJECTIONS`` (caller extras like ``n_variants``; a backend's own ``{{query}}``
+           echoed inside ``rendered_prompt``) are left for the caller / backend.
 
         Returns ``(filled_template, injection_vars)``; the caller merges its own extras
         onto ``injection_vars`` and passes both to ``run_optimizer_node``.

@@ -38,6 +38,7 @@ from promptpotter.domain.escalation_signals import ExplorationBudget
 from promptpotter.domain.opt_search_point import candidate_delta, flatten_sp_summary
 from promptpotter.domain.results import CritiqueReadout, ScoredCandidate
 from promptpotter.domain.results_health import EVIDENCE_STARVED_RATE
+from promptpotter.shared.errors import is_error_result
 
 
 @signal(
@@ -461,8 +462,20 @@ def _r_inner_narratives(b: InjectionBundle) -> str:
 
 
 def _misses(b: InjectionBundle) -> list[dict[str, Any]]:
-    """The current misses out of the live frontier — the one place that filter is spelled."""
-    return [r for r in b.trajectory_results if not r.get("hit")]
+    """The current misses out of the live frontier — the one place that filter is spelled.
+
+    An errored sample is NOT a miss: the measurement never happened (``is_error_result`` — the
+    typed owner of that fact, which every other consumer of these rows already asks), so the
+    pipeline answered nothing wrongly and no mutation can win it back. Rendered as a miss it
+    reads as a winnable failure carrying a difficulty, and the generator invents a task-level
+    deficiency to attack it with — measured: an infra-dead round put 4 of 6 outer candidates
+    onto an output-format edit the meta-prompt explicitly forbids and prices at -2.2%."""
+    return [r for r in b.trajectory_results if not r.get("hit") and not is_error_result(r)]
+
+
+def _errored(b: InjectionBundle) -> list[dict[str, Any]]:
+    """The rows ``_misses`` drops — samples that never produced a measurement."""
+    return [r for r in b.trajectory_results if is_error_result(r)]
 
 
 def _label_counts(rows: list[dict[str, Any]], key: str) -> Counter[str]:
@@ -545,7 +558,8 @@ def _miss_difficulty(b: InjectionBundle, row: dict[str, Any]) -> float | None:
     description=(
         "Every current miss, one line each, ordered EASIEST-FIRST on the cycle's fixed "
         "δ ruler: which samples are still failing, how hard each is, what was answered "
-        "vs what was true."
+        "vs what was true. Errored samples are not misses and are reported as the "
+        "non-measurement they are, never as winnable failures."
     ),
     char_cap=2400,
     citable=True,
@@ -563,8 +577,19 @@ def _r_failing_samples(b: InjectionBundle) -> str:
     rather than quoting a difficulty that would move next round.
     """
     rows = _misses(b)
+    errored = _errored(b)
     if not rows:
-        return ""
+        # Silence here would leave the generator with no account of the round at all, so the
+        # panel reports the non-measurement in its own voice (unfenced — it is a directive
+        # about PromptPotter's state, not dataset content the fence tells L1 to distrust).
+        if not errored:
+            return ""
+        return (
+            f"NOT MEASURED — {len(errored)}/{len(b.trajectory_results)} samples errored before "
+            "producing an answer. The measurement never happened: there is no miss here to win "
+            "back and no prompt edit that reaches it. Do not propose a mutation to chase this "
+            "round — treat its score as ABSENT, not as a failure."
+        )
     scored = [(_miss_difficulty(b, r), r) for r in rows]
     graded = [(d, r) for d, r in scored if d is not None]
     ungraded = [r for d, r in scored if d is None]
@@ -592,7 +617,13 @@ def _r_failing_samples(b: InjectionBundle) -> str:
         )
     if len(ordered) > len(shown):
         lines.append(f"  (+{len(ordered) - len(shown)} harder misses not shown)")
-    return fence_untrusted("\n".join(lines))
+    body = fence_untrusted("\n".join(lines))
+    if errored:
+        body += (
+            f"\n({len(errored)} further samples errored before answering — not misses, and not "
+            "reachable by a prompt edit; the measurement never happened there.)"
+        )
+    return body
 
 
 def _candidate_mutation(

@@ -190,7 +190,8 @@ class PoBBCheck:
         # ``graded_response``) — the θ ε-gate fits on it directly (bit-identical to the
         # old hit vector on binary datasets, discriminating on graded backends where
         # hit is degenerate). The counting gates derive binary as ``grade >= 1.0`` —
-        # the same hit definition ``rescore`` applies — so they stay integer-exact.
+        # the same hit definition ``rescore`` applies — so they stay integer-exact, and
+        # abstain once any grade is fractional (``_margin_stats``).
         self.priors_by_sample: dict[str, dict[str, float]] = {}
         self.prior_sps: dict[str, JobSearchPoint] = {}
         self.prior_ids: list[str] = []
@@ -439,10 +440,14 @@ class PoBBCheck:
         per-sample backfill completes). Attempted-but-errored samples count in
         neither stratum and forfeit their opportunity, matching how errors score.
 
-        Hits derive from grades as ``grade >= 1.0`` (the rescore hit definition),
-        so on graded backends the gate self-weakens and the θ ε-gate carries the
-        load. Returns ``(stats, seed_hit_ids, seed_miss_ids)`` or ``None`` when
-        preconditions (a seed, a universe) are unmet.
+        Hits derive from grades as ``grade >= 1.0``, so this is an INTEGER gate and it
+        abstains on a fractional grade. It does not self-weaken there, it self-CONDEMNS:
+        no grade reaches 1.0, so ``wins`` is pinned at 0 and ``p_clear`` falls under ε for
+        every candidate. The θ ε-gate fits the graded response directly and carries the
+        load alone.
+
+        Returns ``(stats, seed_hit_ids, seed_miss_ids)`` or ``None`` when preconditions
+        (a seed, a universe, a binary grade scale) are unmet.
         """
         if not self.prior_ids:
             return None
@@ -450,6 +455,8 @@ class PoBBCheck:
         seed_full = self.priors_by_sample.get(seed_id, {})
         universe = self._sample_universe
         if not universe:
+            return None
+        if any(0.0 < g < 1.0 for g in (*seed_full.values(), *valid_grades)):
             return None
         budget = len(universe)
         margin = math.ceil(self.improvement_threshold * budget)

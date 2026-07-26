@@ -4,8 +4,8 @@
   one row there plus one module (or subpackage) under ``commands/``.
 - ``commands/`` — one module per verb. Two **write** verbs (``new`` / ``resume``);
   the rest are lifecycle (``archive`` / ``delete`` / ``unarchive`` / ``reset``,
-  all in ``lifecycle.py``) or diagnostic (``ab`` / ``verify`` / ``sweep`` /
-  ``noise-floor`` / ``matrix``).
+  all in ``lifecycle.py``) or diagnostic (``ab`` / ``verify`` / ``noise-floor`` /
+  ``matrix`` / ``reindex``). Sweeps are not a verb — they ride ``new --sweep-batch``.
 - ``parsers.py`` — argparse construction.
 - ``session.py`` — ``SessionCtx`` typed session-state accessors.
 
