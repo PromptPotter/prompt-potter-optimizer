@@ -16,7 +16,7 @@ drift back. The baseline records where the surface stands; it is not a target to
 reach and halt at.
 """
 
-from promptpotter.diagnostics.complexity_ledger import compute_ledger
+from promptpotter.diagnostics import compute_ledger
 
 # Captured 2026-06-19 after the unification-phase subtractions. Every edit to a
 # number carries a reason: down = a deletion earned it, up = a feature or a
@@ -353,7 +353,7 @@ LEDGER_BASELINE = {
     # then 309 -> 302 (2026-07-17): the ``sweep`` VERB (``cli/commands/sweep/`` 5 modules +
     # ``application/sweep/toolkit.py``) and ``diagnostics/config_map.py``. Both operator calls.
     # The sweep verb was the SECOND harness minting per-variant forks to A/B prompts -- the
-    # first is ``new --sweep-batch`` (``application/sweep/sweep_runner.py``, "one fork per
+    # first is ``new --sweep-batch`` (``application/sweep.py``, "one fork per
     # OperatorSweepFile via _mint_fork"), which SURVIVES: it rides the shipped ``new`` mint
     # seam and the shared fork primitive instead of hand-rolling its own batch ids. Neither
     # had ever run -- no archive/sweeps/, no sweep_id, no OPERATOR_SWEEP fork exists on disk
@@ -393,11 +393,30 @@ LEDGER_BASELINE = {
     # ``docs/operations/dataset-selection-rationale.md`` is now read off the live
     # ``answer_distribution`` panel instead (the enforcement never fired anyway —
     # reaching it required the unrun verb). Subtraction, so the baseline falls.
-    "modules": 296,
+    # 296 -> 292 (2026-07-26): the last three packages holding exactly ONE module were
+    # collapsed to modules — ``application/meta_champion/reducer.py`` ->
+    # ``application/meta_champion.py``, ``application/sweep/sweep_runner.py`` ->
+    # ``application/sweep.py``, ``diagnostics/complexity_ledger.py`` ->
+    # ``diagnostics.py``. Same subtraction as ``escalation/firing/``,
+    # ``pobb/elimination/``, ``dispatch/hub/`` and ``cli/commands/{champion,matrix}``
+    # before them, and the first two are here for the same *reason*: each is the lone
+    # survivor of a package whose sibling was deleted (the ``champion`` verb, the
+    # ``sweep`` verb), so the directory outlived the choice it existed to present. All
+    # three ``__init__`` files were docstring-only namespace markers, so their prose
+    # moved onto the module and nothing else changed. Each collapse drops one file, so
+    # ``modules`` and ``init_files`` fall together, -3 each.
+    #
+    # What the move surfaced, worth keeping: ``complexity_ledger`` located the package
+    # it counts as ``parents[1]``, so rising one directory silently re-aimed the whole
+    # ledger at the repo root — 4741 modules, ``node_modules`` and all, against a
+    # baseline of 296. It now derives the root by NAME and asserts it. A ratchet that
+    # can be pointed at the wrong tree by an unrelated file move is not a ratchet.
+    "modules": 292,
     # 52 -> 51 (2026-07-17): ``cli/commands/sweep`` went with the sweep verb.
     # 51 -> 50 (2026-07-26): ``application/resource_matrix/__init__.py`` went with the
     # retired arc above.
-    "init_files": 50,
+    # 50 -> 47 (2026-07-26): the three one-module packages above.
+    "init_files": 47,
     # 43 -> 9 (2026-07-16): 34 package ``__init__`` files that did nothing but re-export a
     # leaf's names were emptied to docstring-only namespace markers, and their ~190 consumer
     # sites now import the leaf they actually wanted. A shim is a hop a reader must take and

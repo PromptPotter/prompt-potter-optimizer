@@ -1,4 +1,9 @@
-"""Champion registry — the pure-disk reducer over pp-self outer cycles.
+"""Meta-champion — reduce the on-disk pp-self corpus to one ranked champion table.
+
+The developer-facing L4 "which meta-prompt state is overall best?" reducer. Ranking is
+the whole surface: it names a winner, it never crowns or graduates one — that is a
+deliberate hand-edit of ``datasets/_optimizer/pipeline.json``.
+
 
 Reduces the accumulated on-disk corpus of ``promptpotter-self`` outer cycles to one
 ranked table of candidate meta-prompt states. Zero LLM calls (the ``ab``-verb posture):

@@ -1,5 +1,10 @@
 """Complexity ledger — one exact number per dimension of the package's surface.
 
+Lives outside the layer tree on purpose: it imports from `domain/`, `application/`,
+`config/` and `optimization/` to count their surface, so it cannot sit inside any single
+layer without inverting an import direction. Read-only, never imported by the runtime loop.
+
+
 Why this exists: an AI told to "simplify" reaches for *additive-but-safe* moves
 (extract a helper, fold two copies into a shared util, split a big file). Each
 adds a module header + an import line at every call site, so the total grows
@@ -11,7 +16,7 @@ drift from reality), and a ratchet test (`tests/test_complexity_ledger.py`)
 fails CI if any dimension rises. A "simplification" pass that raises the ledger
 is a feature wearing a refactor's label.
 
-Run it: ``python -m promptpotter.diagnostics.complexity_ledger``
+Run it: ``python -m promptpotter.diagnostics``
 
 Each count is deliberately mechanical so two readers (and two LLM sessions) get
 the same number:
@@ -49,7 +54,13 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+# The `promptpotter/` package dir — this module's OWN parent. Derived by name rather
+# than by counting `parents[N]` hops: the hop count silently re-aims the whole ledger at
+# whatever directory happens to sit N levels up, which is exactly what happened when this
+# module moved up out of `diagnostics/` (it began counting the repo root, node_modules
+# and all, reporting 4741 modules against a baseline of 296).
+_PACKAGE_ROOT = Path(__file__).resolve().parent
+assert _PACKAGE_ROOT.name == "promptpotter", f"ledger root is not the package: {_PACKAGE_ROOT}"
 
 
 def _unwrap_optional(annotation: object) -> object:

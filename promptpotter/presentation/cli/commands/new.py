@@ -376,7 +376,7 @@ async def _run_sweep_batch(
     sweep_payloads: list[tuple[Path, Any]],
 ) -> CommandResult:
     """Thin shim → ``application.sweep.run_sweep_batch``; binds observer factory to CLI args + campaign_config."""
-    from promptpotter.application.sweep.sweep_runner import run_sweep_batch
+    from promptpotter.application.sweep import run_sweep_batch
 
     def observer_factory(session: Session, origin_acc: float) -> RunObservers:
         return build_observers(args, session, campaign_config, train_data, origin_acc)
@@ -415,7 +415,7 @@ async def _maybe_dispatch_sweep_batch(
     ``configure_and_apply_pipeline`` rather than inheriting a hidden backend default."""
     if not getattr(args, "sweep", False):
         return None
-    from promptpotter.application.sweep.sweep_runner import load_sweep_payloads, resolve_sweep_dir
+    from promptpotter.application.sweep import load_sweep_payloads, resolve_sweep_dir
 
     sweep_dir = resolve_sweep_dir(dataset_config_dir)
     if sweep_dir is None:

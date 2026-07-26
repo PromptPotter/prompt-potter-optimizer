@@ -22,7 +22,7 @@ from promptpotter.application.knobs import (
     check_couplings,
     resolve_knob_states,
 )
-from promptpotter.application.meta_champion.reducer import ChampionRegistry, reduce_corpus
+from promptpotter.application.meta_champion import ChampionRegistry, reduce_corpus
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.stores import Stores, descend_store

@@ -17,7 +17,7 @@ from pydantic.fields import ComputedFieldInfo, FieldInfo
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO))
 
-from promptpotter.application.meta_champion.reducer import (
+from promptpotter.application.meta_champion import (
     ChampionCandidate,
     ChampionCellEffect,
     ChampionProvenance,

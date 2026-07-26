@@ -1,4 +1,11 @@
-"""Sweep-batch orchestration — one fork per ``OperatorSweepFile`` via ``_mint_fork``."""
+"""Sweep-batch orchestration — one fork per ``OperatorSweepFile``.
+
+Each operator JSON file under ``datasets/{name}/sweep/`` parses into an
+:class:`~promptpotter.domain.run_records.OperatorSweepFile`; the orchestrator widens it
+to a ``ForkSpec(trigger=OPERATOR_SWEEP, ...)`` before calling the unified ``_mint_fork``
+primitive. Reached from CLI ``new --sweep-batch`` — the ``sweep`` VERB that was the
+second, hand-rolled harness for the same job is gone, and this is what survived it.
+"""
 
 from __future__ import annotations
 
