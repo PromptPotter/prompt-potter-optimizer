@@ -14,7 +14,7 @@ datasets/{name}/
 ├── task_description.md    # L1's framing input — what the task IS
 ├── dataset.md             # Human-facing description: source, split, sample shape
 ├── prompts/{node}.json    # Per-node PromptTemplate overrides (optional)
-└── cache.json             # Origin score cache (write-managed; don't hand-edit)
+└── cache.json             # The dataset ITEM BANK (write-managed; don't hand-edit)
 ```
 
 Optional:
@@ -57,6 +57,6 @@ Source of truth for wire / reject rationale, projection-bias findings, per-datas
 ## Conventions
 
 - **Origin = conservative floor** — the overlay starts at each tunable's floor; contract in [`../promptpotter/application/optimization/CLAUDE.md`](../promptpotter/application/optimization/CLAUDE.md).
-- **Don't hand-edit `cache.json`.** It's written by the origin scoring path.
+- **Don't hand-edit `cache.json`.** It is the **item bank** — `{name, created_at, source_file, row_count, items}`, written by `resolve_dataset_items` → `stores.backends.save_dataset`, and read into `session.samples` at wiring. It is NOT an origin score cache, though it was described as one here for a long time: measurements live in the tenant-global content-addressed `measurements/` archive (`infrastructure/store/archive_views.py`), which is what replays origin rows across cycles, forks and resumes. The distinction matters when reasoning about origin cost — `sp_budget_origin` breadth is cheap *because* of the archive, not because of this file.
 - **`task_description.md` is L1's framing input** — written for the LLM that will generate candidates, not for human readers (though it should be readable).
 - **`dataset.md` is operator-facing** — describes source, split, sample shape; cite the canonical evaluation protocol.

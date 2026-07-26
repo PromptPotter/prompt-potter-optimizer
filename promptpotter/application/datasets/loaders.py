@@ -31,9 +31,17 @@ def samples_from_dicts(items: list[dict[str, Any]]) -> list[Sample]:
 
 
 def sample_dataset(dataset: list[Sample], sample_size: int) -> list[Sample]:
-    """Top-``sample_size`` slice; datasets already shuffled at creation (deterministic prefix, no second RNG)."""
+    """Top-``sample_size`` slice; datasets already shuffled at creation (deterministic prefix, no second RNG).
+
+    A *sample_size* above ``len(dataset)`` yields the whole bank — deliberate, and what the
+    origin path relies on: ``sp_budget_origin`` defaults above ``sp_budget_ttest``, so on a
+    small bank "score the origin on everything" is the right answer, not an error.
+    """
     if sample_size <= 0:
-        raise ValueError(f"sp_budget_ttest must be > 0, got {sample_size}")
+        # Both budgets land here (`sp_budget_ttest` per round, `origin_budget()` at C0), so
+        # the message names neither — it named `sp_budget_ttest` and sent anyone hitting it
+        # off the origin path to the wrong knob.
+        raise ValueError(f"eval budget must be > 0, got {sample_size}")
     return dataset[:sample_size]
 
 

@@ -128,6 +128,23 @@ OPTIMIZER_PROMPT_WARN_CHARS: int = 8_000
 # 0.15 vs ≈9% at 0.20, measured on the archived round corpus).
 POBB_DEFAULT_EPSILON: float = 0.15
 
+# Origin (C0) eval breadth — how many bank samples the origin is scored on when
+# nothing declares otherwise. The single default BOTH loops reference:
+# ``CampaignConfig.sp_budget_origin`` (any campaign, inner or standalone) and
+# ``InnerBenchmarkConfig.n_samples_origin`` (the L4 panel's inner cells), so the
+# outer recursion and the inner instrument cannot drift onto different rulers.
+#
+# Deliberately ABOVE the ``sp_budget_ttest`` default (20): origin breadth is the
+# one breadth that is nearly free. θ_origin is the term every candidate delta
+# subtracts, so its variance lands in EVERY comparison — and its rows are
+# content-addressed cache, replayed into every candidate arm, fork and resume, so
+# the samples are paid for once per config. Candidate breadth is paid per
+# candidate, per round, and widening it would also widen every θ-LCB comparison
+# basis for no shared-cache payback. 40 is the value the L4 panel has run on
+# (``datasets/promptpotter-self/inner_tasks.json``); a bank smaller than this
+# scores the whole bank, which is the right answer there, not an error.
+DEFAULT_ORIGIN_BUDGET: int = 40
+
 # UCB1 exploration weight for the lineage rewind pick
 # (``application/mask/backprop.py::select_rewind_round``). sqrt(2) is UCB1's
 # regret-optimal constant for rewards in [0, 1] — which the θ values are
@@ -220,6 +237,7 @@ __all__ = [
     "DEFAULT_BACKEND_ID",
     "DEFAULT_BACKEND_URL",
     "DEFAULT_CONNECTOR_TYPE",
+    "DEFAULT_ORIGIN_BUDGET",
     "LOCK_TIMEOUT",
     "NO_RESULT",
     "OPTIMIZER_CALL_DEADLINE_S",

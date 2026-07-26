@@ -16,7 +16,11 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import Field
 
-from promptpotter.config.settings import POBB_DEFAULT_EPSILON, PROMPT_STRING_FIELDS
+from promptpotter.config.settings import (
+    DEFAULT_ORIGIN_BUDGET,
+    POBB_DEFAULT_EPSILON,
+    PROMPT_STRING_FIELDS,
+)
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.results import HeadlineMetric
 from promptpotter.domain.strict_model import StrictModel
@@ -516,13 +520,17 @@ class CampaignConfig(StrictModel):
         "informative samples from it. Not the dataset/pool size.",
     )
     sp_budget_origin: Annotated[int | None, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
-        None,
+        DEFAULT_ORIGIN_BUDGET,
         ge=1,
         description="Origin eval budget — how many bank samples the origin (C0) is "
-        "scored on at check-in. None ⇒ `sp_budget_ttest`. Setting it ABOVE "
-        "`sp_budget_ttest` buys a tighter origin θ / δ ruler while candidates keep "
-        "the per-round budget; every comparison downstream is matched by sample_id "
-        "or θ-space, so an origin scored on a superset stays like-for-like.",
+        "scored on at check-in. Explicit `null` ⇒ `sp_budget_ttest`. Defaults ABOVE "
+        "`sp_budget_ttest` because origin breadth is the one breadth that is nearly "
+        "free: θ_origin is the term EVERY delta subtracts, and its rows are "
+        "content-addressed cache replayed into every candidate arm, fork and resume — "
+        "paid once per config. Candidate breadth is paid per candidate, per round. "
+        "Every comparison downstream is matched by sample_id or θ-space, so an origin "
+        "scored on a superset stays like-for-like. A bank smaller than this scores on "
+        "the whole bank (`sample_dataset` is a prefix slice) — not an error.",
     )
     exclude_nodes: Annotated[list[str], Knob(Scope.DATA, Estimand.SEARCH)] = Field(
         default_factory=list
@@ -660,17 +668,24 @@ class PreflightWarning:
 def _check_sp_budget_vs_dataset(
     config: CampaignConfig, dataset: list[Sample]
 ) -> PreflightWarning | None:
-    n = max(config.sp_budget_ttest, config.origin_budget())
+    # Only the PER-ROUND budget is checked against the bank. An origin budget above the
+    # bank is not a misconfiguration: `sp_budget_origin` defaults ABOVE `sp_budget_ttest`
+    # (DEFAULT_ORIGIN_BUDGET), `sample_dataset` is a prefix slice, and "score the origin
+    # on everything there is" is exactly what a wide-origin default wants on a small bank.
+    # Warning on it told every small-bank dataset to lower a knob nobody set, on every run.
+    # `sp_budget_ttest > bank` IS a real finding — it means the adaptive queue mechanism
+    # has no bank to select from and every round re-scores the same full set.
+    n = config.sp_budget_ttest
     m = len(dataset)
     if m > 0 and n > m:
         return PreflightWarning(
             code="sp_budget_exceeds_dataset",
-            title=f"eval budget ({n}) exceeds bank size ({m})",
+            title=f"per-round eval budget ({n}) exceeds bank size ({m})",
             detail=(
-                f"The bank (full train split) has only {m} samples, so scoring runs "
-                f"on all {m}. Lower sp_budget_ttest / sp_budget_origin to {m} or "
-                f"below, or grow the dataset, to give the adaptive queue mechanism "
-                f"a bank to select from."
+                f"The bank (full train split) has only {m} samples, so every round "
+                f"scores on all {m} and `select_round_subset` has nothing to select "
+                f"from — the adaptive queue mechanism is inert. Lower sp_budget_ttest "
+                f"to below {m}, or grow the dataset."
             ),
         )
     return None

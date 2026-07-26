@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import ConfigDict, Field, ValidationError
 
 from promptpotter.application.config import CampaignConfig, LivesConfig
+from promptpotter.config.settings import DEFAULT_ORIGIN_BUDGET
 from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import read_json_optional
@@ -45,11 +46,18 @@ class InnerBenchmarkConfig(StrictModel):
     model_config = ConfigDict(frozen=True)
 
     n_samples_per_inner_round: int = Field(ge=1)
-    # Origin (inner round 0) eval breadth. None ⇒ same as the per-round count. Set ABOVE it to
-    # buy a tighter inner-origin θ — the term every outer delta subtracts — while candidates
-    # keep the per-round budget; the extra origin rows are content-addressed cache shared
-    # across every inner campaign on the same seed, so the cost is paid once per cell.
-    n_samples_origin: int | None = Field(default=None, ge=1)
+    # Origin (inner round 0) eval breadth. Explicit `null` ⇒ same as the per-round count.
+    # Defaults to DEFAULT_ORIGIN_BUDGET — the SAME constant `CampaignConfig.sp_budget_origin`
+    # defaults to, so the outer recursion and the inner instrument measure their origins on
+    # one ruler unless a panel says otherwise. Above the per-round count buys a tighter
+    # inner-origin θ — the term every outer delta subtracts — while candidates keep the
+    # per-round budget; the extra origin rows are content-addressed cache shared across every
+    # inner campaign on the same seed, so the cost is paid once per cell.
+    #
+    # Unlike `n_samples_per_inner_round` / `max_inner_rounds` above, defaulting this does NOT
+    # silently rescale a candidate's fitness: it widens the term BOTH arms of every paired
+    # delta subtract, which is a precision gain, not a change of ruler.
+    n_samples_origin: int | None = Field(default=DEFAULT_ORIGIN_BUDGET, ge=1)
     max_inner_rounds: int = Field(ge=1)
     # None ⇒ keep the inner dataset's own value.
     inner_n_variants: int | None = Field(default=None, ge=1)
