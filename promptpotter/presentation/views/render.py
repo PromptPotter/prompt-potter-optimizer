@@ -360,17 +360,20 @@ def render_sp_diff(view: SpDiffView) -> str:
     round_num = view.round_num
     n_no_op = view.l1_n_no_op
     n_duplicate = view.l1_n_duplicate
+    n_repeat = view.l1_n_repeat
     l1_yield = view.l1_yield
 
     warning_lines: list[str] = []
-    if n_no_op or n_duplicate:
+    if n_no_op or n_duplicate or n_repeat:
         n_total = sum(1 for label, _ in columns_in if label.startswith("C"))
-        n_valid = max(0, n_total - n_no_op - n_duplicate)
+        n_valid = max(0, n_total - n_no_op - n_duplicate - n_repeat)
         bits: list[str] = []
         if n_no_op:
             bits.append(f"{n_no_op} no-op")
         if n_duplicate:
             bits.append(f"{n_duplicate} duplicate")
+        if n_repeat:
+            bits.append(f"{n_repeat} repeat")
         bits_text = " / ".join(bits)
         cl_text = f" ({', '.join(sorted(clone_labels))})" if clone_labels else ""
         warning_lines.append(

@@ -321,8 +321,6 @@ export interface RoundResult {
   decisions: unknown[];
   evaluators: Record<string, number>;
   l1_yield: number;
-  l1_n_no_op: number;
-  l1_n_duplicate: number;
   l1_parse_failure: string | null;
   diagnostics: unknown | null;
   critique: unknown | null;
@@ -331,6 +329,12 @@ export interface RoundResult {
   axis_memory_peaked: string[];
   status: string;
   round_id: string;
+  /** Variants whose mutation was empty against the parent. */
+  l1_n_no_op: number;
+  /** Variants sig-equal to a sibling in the SAME population. */
+  l1_n_duplicate: number;
+  /** Variants re-proposing an idea an EARLIER round measured and lost. */
+  l1_n_repeat: number;
   /** Rank-ordered display table — composite-first, accuracy-tiebreak; winner
    * tagged.  Derived, never stored: it cannot drift from `candidate_scores`
    * the way a hand-built twin could. */

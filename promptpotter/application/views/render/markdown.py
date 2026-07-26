@@ -92,12 +92,14 @@ def _render_round(
         parts.append(f"- changes: {rd.changes_description}")
     if rd.l1_yield < 1.0:
         n_total = rd.candidates_scored
-        n_valid = max(0, n_total - rd.l1_n_no_op - rd.l1_n_duplicate)
+        n_valid = max(0, n_total - rd.l1_n_no_op - rd.l1_n_duplicate - rd.l1_n_repeat)
         bits: list[str] = []
         if rd.l1_n_no_op:
             bits.append(f"{rd.l1_n_no_op} no-op")
         if rd.l1_n_duplicate:
             bits.append(f"{rd.l1_n_duplicate} dup")
+        if rd.l1_n_repeat:
+            bits.append(f"{rd.l1_n_repeat} repeat")
         parts.append(f"- L1 yield: {n_valid}/{n_total} ({', '.join(bits)})")
     composite_fitness_block = render_composite_fitness_block(
         rd.composite_fitness,

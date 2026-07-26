@@ -901,6 +901,7 @@ def _fake_inner_round(
         ],
         l1_n_no_op=no_op,
         l1_n_duplicate=dup,
+        l1_n_repeat=0,
         l1_parse_failure=parse_failure,
     )
 
@@ -1741,6 +1742,108 @@ def test_no_op_clone_attaches_validation_failure():
     assert stats.l1_n_no_op == 1
     assert stats.l1_n_duplicate == 0
     assert stats.l1_yield == 0.5
+
+
+def _lost_round(round_num: int, field: str, value: str, *, total: int = 20, acc: float = 0.3):
+    """A prior round holding one candidate that was MEASURED and LOST."""
+    return SimpleNamespace(
+        round=round_num,
+        prompt_fields={},
+        pipeline_params=None,
+        candidate_scores=[
+            SimpleNamespace(
+                total=total,
+                accuracy=acc,
+                matched_origin_accuracy=0.5,
+                prompt_fields={field: value},
+                pipeline_params_override=None,
+            )
+        ],
+    )
+
+
+# The two strings differ in wording and, in the tests below, in the FIELD they are written
+# into — which is the invariant under test. They are close paraphrases on purpose: the gate is
+# a lexical overlap test (`IDEA_MATCH_REJECT`), so a pair that shares little vocabulary would
+# assert nothing about field-independence, only about the threshold.
+_DEAD_IDEA = (
+    "Derive new facts using modus ponens, modus tollens, disjunctive syllogism and chaining. "
+    "Exhaust every derivation branch before concluding Uncertain."
+)
+_DEAD_IDEA_REPHRASED = (
+    "Using modus ponens, modus tollens, disjunctive syllogism and chaining, derive new facts "
+    "and exhaust each derivation branch before concluding Uncertain."
+)
+
+
+def test_a_reproposed_idea_is_rejected_even_when_rewritten_into_another_field():
+    """The re-proposal that burned 8 rounds on `justlogic-d234` — same idea, new field.
+
+    Every exact-signature gate in the loop saw eight distinct mutations, because the generator
+    rewrites the idea into `instruction`, then `thinking_style`, then a schema description. The
+    round is charged for it either way, so a gate that only matches strings is a gate that never
+    fires on the failure it was built for.
+    """
+    parent = _parent()
+    prior = [_lost_round(1, "instruction", _DEAD_IDEA)]
+    proposals = [
+        _child(parent, thinking_style=_DEAD_IDEA_REPHRASED),  # same idea, different field
+        _child(parent, persona="A terse logician who commits to a label."),  # unrelated
+    ]
+
+    stats = detect_invariants(proposals, parent, {}, prior)
+
+    reasons = [vf.reason for vf in proposals[0].osp.memory.wounds.validation_failures]
+    assert "repeat_variant" in reasons, "a rewritten re-proposal must still be caught"
+    assert "round 1" in proposals[0].osp.memory.wounds.validation_failures[0].value
+    assert proposals[1].osp.memory.wounds.validation_failures == [], "unrelated idea survives"
+    assert stats.l1_n_repeat == 1
+
+
+def test_a_repeat_never_empties_the_round_and_unmeasured_history_never_convicts():
+    """Two ways the gate could do more harm than the disease, both silent.
+
+    (1) If EVERY proposal repeats, rejecting them all hands PoBB an empty population and the
+    loop forfeits the round — strictly worse than re-testing a dead idea, which the ALREADY
+    TRIED panel still marks. (2) A prior candidate that scored zero samples carries
+    ``accuracy == 0.0`` only because the field is a non-optional float; convicting a live
+    proposal on that is the loop punishing an idea nobody ever ran.
+    """
+    parent = _parent()
+    prior = [_lost_round(1, "instruction", _DEAD_IDEA)]
+
+    # (1) every proposal is a repeat → none rejected.
+    all_repeats = [
+        _child(parent, thinking_style=_DEAD_IDEA_REPHRASED),
+        _child(parent, answer_format=_DEAD_IDEA),
+    ]
+    stats = detect_invariants(all_repeats, parent, {}, prior)
+    assert stats.l1_n_repeat == 0, "a repeat may cost a candidate, never the whole round"
+    assert all(not p.osp.memory.wounds.validation_failures for p in all_repeats)
+
+    # (2) the same history, but never measured → no conviction even with a live alternative.
+    unmeasured = [_lost_round(1, "instruction", _DEAD_IDEA, total=0, acc=0.0)]
+    proposals = [
+        _child(parent, thinking_style=_DEAD_IDEA_REPHRASED),
+        _child(parent, persona="A terse logician who commits to a label."),
+    ]
+    stats = detect_invariants(proposals, parent, {}, unmeasured)
+    assert stats.l1_n_repeat == 0, "0/0 is absence of evidence, not a measured defeat"
+
+
+def test_an_idea_that_beat_its_origin_is_not_grounds_for_rejection():
+    """Refining a winner is the search working. Only measured LOSSES close a direction off."""
+    parent = _parent()
+    won = _lost_round(1, "instruction", _DEAD_IDEA, acc=0.9)  # 0.9 > matched origin 0.5
+    proposals = [
+        _child(parent, thinking_style=_DEAD_IDEA_REPHRASED),
+        _child(parent, persona="A terse logician who commits to a label."),
+    ]
+
+    stats = detect_invariants(proposals, parent, {}, [won])
+
+    assert stats.l1_n_repeat == 0
+    assert proposals[0].osp.memory.wounds.validation_failures == []
 
 
 def test_duplicate_signature_attaches_validation_failure():

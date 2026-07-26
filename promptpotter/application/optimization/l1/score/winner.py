@@ -417,8 +417,9 @@ async def l1_score(
         escalation_signal=escalation_signal,
         evaluators=best_scores,
         l1_yield=yield_stats.l1_yield,
-        l1_n_no_op=yield_stats.l1_n_no_op,
-        l1_n_duplicate=yield_stats.l1_n_duplicate,
+        # The collapse COUNTS are not passed: `RoundResult` derives them from
+        # `candidate_scores`, which already carries every collapsed candidate with its
+        # reason. Passing them here would be a second recording that could disagree.
         l1_parse_failure=yield_stats.l1_parse_failure,
     )
     return round_result, best_osp

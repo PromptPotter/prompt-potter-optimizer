@@ -149,9 +149,16 @@ def _self_heal_rate(rnd: RoundResult) -> float:
 
 def _round_mode_collapse_rate(rnd: RoundResult) -> float:
     """Per-round mode-collapse ∈ [0,1): share of generated variants the invariant detector nuked
-    as no-op / duplicate. A meta-prompt that induces the inner L1 to regurgitate the parent is not
-    exploring, and the outer loop should steer away from it."""
-    collapsed = rnd.l1_n_no_op + rnd.l1_n_duplicate
+    as no-op / duplicate / repeat. A meta-prompt that induces the inner L1 to regurgitate the
+    parent — or to keep re-proposing an idea the cycle already measured and lost — is not
+    exploring, and the outer loop should steer away from it.
+
+    ``l1_n_repeat`` belongs in this sum precisely BECAUSE it is the subtlest form of the same
+    disease: a meta-prompt can score a clean no-op/duplicate rate while driving the inner loop
+    to spend every round paraphrasing one dead hypothesis. That is the failure mode L4 exists
+    to detect, and until repeats were counted it was the one collapse the proxy could not see.
+    """
+    collapsed = rnd.l1_n_no_op + rnd.l1_n_duplicate + rnd.l1_n_repeat
     generated = collapsed + rnd.candidates_scored
     return collapsed / generated if generated else 0.0
 

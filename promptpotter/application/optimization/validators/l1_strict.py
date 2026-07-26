@@ -32,14 +32,17 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
 from promptpotter.application.optimization.dispatch.schemas import L1GenerateOutput, L1Variant
 from promptpotter.config.prompt_blocks import prompt_blocks
 from promptpotter.config.settings import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVERRIDES
-from promptpotter.domain.escalation_signals import ValidationFailure
+from promptpotter.domain.escalation_signals import INVARIANT_REASONS, ValidationFailure
 from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, NODE_LAYOUTS
 from promptpotter.domain.opt_search_point import (
+    IDEA_MATCH_REJECT,
     TEMPLATE_TOKEN_RE,
     OptSearchPoint,
     PromptTemplate,
     candidate_delta,
+    idea_fingerprint,
     node_config_items,
+    same_idea,
 )
 from promptpotter.domain.pipeline_schema import (
     NESTED_PARAM_TYPES,
@@ -711,31 +714,83 @@ class L1YieldStats:
     l1_yield: float  # n_valid / n_proposed (1.0 when no proposals)
     l1_n_no_op: int
     l1_n_duplicate: int
+    # Cross-ROUND collapses (the other two are round-local): re-proposals of an idea a prior
+    # round already measured and lost. Defaulted so the many construction sites that predate
+    # the gate stay valid — the count is only ever non-zero where prior rounds are passed.
+    l1_n_repeat: int = 0
     # Set when the meta-prompt made L1's own output unparseable — the round then holds zero
     # candidates. `detect_invariants` never sets it (it only sees proposals that exist); it is
     # stamped from `l1_generate`'s return in `generate_or_load_candidates`.
     l1_parse_failure: str | None = None
 
 
-# The two reasons `detect_invariants` emits — a synthetic-0 candidate that never burned an
-# LLM call. PUBLIC because `presentation/views/display.py` must filter on exactly this set
-# when it ranks candidates, and the private name forced it to hand-copy the strings; a
-# third invariant reason would then have been stripped from the wound list here while the
-# display kept ranking it as a real 0.0 candidate — the very distortion its comment says
-# it is preventing.
-INVARIANT_REASONS = frozenset({"no_op_variant", "duplicate_variant"})
+# The reasons `detect_invariants` emits — a synthetic-0 candidate that never burned an LLM
+# call. The SET now lives in `domain/escalation_signals.py`; this module writes the reasons,
+# `RoundResult` reads them back to derive its collapse counts, and `presentation/views/display.py`
+# filters on them when ranking. Re-exported here because three call sites already import it
+# from this module and it is still the validator's own vocabulary.
+
+
+def lost_ideas(prior_rounds: Sequence[Any]) -> list[tuple[int, frozenset[str]]]:
+    """``(round, idea fingerprint)`` for every prior candidate that was MEASURED and LOST.
+
+    The evidence base for ``repeat_variant``. Two filters, and both are load-bearing:
+
+    * **Measured** (``total > 0``). A candidate that scored no samples carries
+      ``accuracy == 0.0`` only because the field is a non-optional float — it is the absence
+      of evidence, not a defeat. Rejecting a live proposal because an unmeasured one "already
+      failed" would be the loop punishing an idea nobody ever ran. (Probe rounds manufactured
+      exactly these wholesale before the lever was removed.)
+    * **Lost.** An idea that BEAT its matched origin is not a dead end — refining a winner is
+      the search working. Only ideas measured against a matched origin and found no better
+      become grounds for rejection.
+    """
+    out: list[tuple[int, frozenset[str]]] = []
+    for i, rr in enumerate(prior_rounds):
+        parent = rr.prompt_fields
+        parent_pp = prior_rounds[i - 1].pipeline_params if i > 0 else None
+        for cand in rr.candidate_scores:
+            if not cand.total or cand.matched_origin_accuracy is None:
+                continue
+            if cand.accuracy > cand.matched_origin_accuracy:
+                continue
+            pf, pp = candidate_delta(
+                cand.prompt_fields, parent, cand.pipeline_params_override, parent_pp
+            )
+            values = [str(v) for v in pf.values() if v] + [str(v) for v in pp.values()]
+            if fp := idea_fingerprint(values):
+                out.append((rr.round, fp))
+    return out
 
 
 def detect_invariants(
     proposals: list[CandidateProposal],
     parent_osp: OptSearchPoint,
     parent_pipeline_params: dict[str, Any] | None,
+    prior_rounds: Sequence[Any] = (),
 ) -> L1YieldStats:
-    """Attach no_op_variant / duplicate_variant failures; return yield stats.
+    """Attach no_op_variant / duplicate_variant / repeat_variant failures; return yield stats.
 
     Failures route through score_population's synthetic-0 path (Path 1) so
     invariant variants don't burn LLM calls. Idempotent — pre-existing
     invariant failures are dropped first so resume-from-disk doesn't dup.
+
+    **``repeat_variant`` is the cross-ROUND arm** (the other two are round-local). A candidate
+    is rejected when it re-proposes an idea a prior round already measured and lost — matched
+    on content-word vocabulary (:func:`same_idea`), so it still fires when the idea has been
+    rewritten into a different field, which is the only form a re-proposal actually takes. On
+    `justlogic-d234` one idea was re-proposed for 8 consecutive rounds this way while every
+    exact-match gate saw eight distinct mutations and the cycle never tested a second
+    hypothesis.
+
+    Rejecting is destructive — the variant simply never exists, and a wrong rejection leaves no
+    trace — so four things bound it. (1) The evidence is filtered to measured losses only
+    (:func:`lost_ideas`). (2) The threshold is :data:`IDEA_MATCH_REJECT`, stricter than the
+    panel's marking threshold. (3) **A repeat is never allowed to empty the round**: if
+    rejecting them would leave no live proposal, they are all restored — a round that retries a
+    known-dead idea is a wasted round, but a round with zero candidates is a wasted round that
+    also loses the loop's turn. (4) Every rejection names the round it repeats, so it surfaces
+    on the wound channel and in ``review.md`` rather than vanishing into a yield number.
 
     All three components of the signature are DELTAS against the parent — *parent_pipeline_params*
     is the parent's resolved, folded config (``JobSearchPoint.pipeline_params``). The param
@@ -756,6 +811,11 @@ def detect_invariants(
     seen: dict[tuple[Any, ...], int] = {}
     n_no_op = 0
     n_duplicate = 0
+    tried = lost_ideas(prior_rounds)
+    # Repeats are collected, not applied inline: whether they may be rejected at all depends on
+    # how many proposals SURVIVE the other two gates, which is only known after the loop.
+    repeats: list[tuple[CandidateProposal, int]] = []
+    n_live = 0
     parent_tc = parent_osp.memory.task_context.to_dict()
     for i, cp in enumerate(proposals):
         child = cp.osp
@@ -798,6 +858,47 @@ def detect_invariants(
             n_duplicate += 1
             continue
         seen[sig] = i
+        n_live += 1
+        # The idea is fingerprinted from the mutated VALUES only — never the field names, which
+        # would turn the test into "touched the same field" (see `idea_fingerprint`).
+        fp = idea_fingerprint([str(v) for v in pf.values() if v] + [str(v) for v in pp.values()])
+        echo = next(
+            (rnd for rnd, prev in tried if same_idea(fp, prev, threshold=IDEA_MATCH_REJECT)),
+            None,
+        )
+        if echo is not None:
+            repeats.append((cp, echo))
+
+    # Safety valve — a repeat may cost the round a candidate, never the whole round. `n_live`
+    # counts proposals that cleared no-op + duplicate; if every one of them is also a repeat,
+    # none is rejected. The loop then re-tests a known-dead idea for one round, which the
+    # ALREADY TRIED panel still marks — strictly better than handing PoBB an empty population
+    # and burning the turn on nothing.
+    n_repeat = 0
+    if len(repeats) < n_live:
+        for cp, echo in repeats:
+            cp.osp.memory.wounds.validation_failures = [
+                *cp.osp.memory.wounds.validation_failures,
+                ValidationFailure(
+                    axis="variant",
+                    value=f"re-proposes the idea measured and lost in round {echo}",
+                    allowed=["an idea this cycle has not already lost with"],
+                    reason="repeat_variant",
+                ),
+            ]
+            n_repeat += 1
+    elif repeats:
+        logger.debug(
+            "repeat_variant: %d/%d proposals re-propose a lost idea — none rejected "
+            "(rejecting all would leave the round with no candidates)",
+            len(repeats),
+            n_live,
+        )
     n = len(proposals)
-    yield_ = (n - n_no_op - n_duplicate) / n if n else 1.0
-    return L1YieldStats(l1_yield=yield_, l1_n_no_op=n_no_op, l1_n_duplicate=n_duplicate)
+    yield_ = (n - n_no_op - n_duplicate - n_repeat) / n if n else 1.0
+    return L1YieldStats(
+        l1_yield=yield_,
+        l1_n_no_op=n_no_op,
+        l1_n_duplicate=n_duplicate,
+        l1_n_repeat=n_repeat,
+    )

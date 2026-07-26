@@ -7,6 +7,7 @@ from typing import Any, Literal, NotRequired, TypedDict
 from pydantic import ConfigDict, Field, computed_field
 
 from promptpotter.domain.escalation_signals import (
+    INVARIANT_REASONS,
     EscalationSignal,
     RuntimeFailure,
     ValidationFailure,
@@ -370,6 +371,46 @@ class RoundResult(StrictModel):
     stamped as the round closes. `diagnostics`/`critique`/`health` are computed
     post-scoring; read by dispatch's `diagnostics`/`critique` signals and rendered by
     every health surface.
+
+    **Audited 2026-07-26 for stored-but-derivable fields — the result, so it is not
+    re-derived every time this docstring's god-object line is read.** Three were removed
+    (the `l1_n_*` collapse counters, below); three more ARE derivable and were
+    deliberately KEPT, each for a different reason:
+
+    * `candidates_scored` == the `candidate_scores` rows that were measured
+      (`candidate_id in all_candidate_results`) and stayed leader-eligible — verified
+      exact at all three construction sites. Kept because converting it is not free the
+      way the counters were: `model_config` here is `extra="ignore"`, so every caller
+      still passing `candidates_scored=` would keep working **silently** while the value
+      changed underneath. On a lax model, promoting a field to `@computed_field` is a
+      quiet semantic change, not a mechanical one. One int does not buy that.
+    * `degraded_samples` == `sum(has_pipeline_warnings(r) for r in self.results)`, and
+      `shared/` is importable from here, so the derivation is cheap. It is kept because
+      it would not be a pure refactor: round 0 never passes the field, so deriving it
+      would start reporting a nonzero origin degradation count where the document has
+      always carried 0. That is probably a FIX, and it belongs in a change that says so
+      and is measured — not bundled into a simplification pass.
+    * `deprecated` is derivable only via `is_deprecated`, which lives in
+      `application/optimization/pobb/` — domain cannot import it. Structurally blocked.
+
+    And one genuine duplication that MUST NOT be collapsed — the reason is worth keeping
+    because the change looks obviously correct until you follow it. `results` is the
+    winner's rows, which also ride `all_candidate_results[winner_id]`, so a winning round
+    stores that payload twice; the tempting fix is to derive `results` from
+    `all_candidate_results[winner_id]` and, for the no-winner case (where `results`
+    carries the retained *incumbent's* rows and the incumbent is not a candidate), write
+    the incumbent in under its own lineage id.
+
+    That would silently corrupt the difficulty ruler. `exploration.build_observations`
+    — the Rasch fit's input — flattens `all_candidate_results` across EVERY round into
+    `(candidate_id, sample_id, response)` triples with no round filter and no dedup at
+    that seam. A retained incumbent keeps its lineage id across consecutive no-winner
+    rounds, so a lineage retained for k rounds would contribute each of its observations
+    k+1 times to a fit whose entire purpose is subset-invariance. The rows in the
+    no-winner case were also measured in a DIFFERENT round, so the key would assert a
+    measurement that did not happen here. `results` stays: it is a round-local headline
+    payload, and `all_candidate_results` means "measured in this round", which is a
+    property several cross-round readers depend on without restating it.
     """
 
     # `extra="ignore"`: `round_id`/`scoreboard` are computed fields — `model_dump()` writes
@@ -422,9 +463,11 @@ class RoundResult(StrictModel):
     decisions: list[DecisionRecord] = Field(default_factory=list)
     evaluators: dict[str, float] = Field(default_factory=dict)
     # L1 yield + failure counts; defaults assume "all valid" for replay paths bypassing the detector.
+    # STORED, not derived: `l1_yield` is an INPUT to scoring, not a summary of it. It reaches
+    # `score_population` as the `l1_diversity` evaluator before any candidate has a score, so
+    # there is nothing to derive it from at the moment it is needed. The collapse COUNTS below
+    # are the opposite — pure outputs — and are derived.
     l1_yield: float = 1.0
-    l1_n_no_op: int = 0
-    l1_n_duplicate: int = 0
     # Reason this round's L1 output was unparseable (zero candidates), or None. The round owns
     # it: a parse failure yields no candidate to charge, and `candidate_scores` is empty in
     # exactly that round. One of `L1_PARSE_FAILURE_MALFORMED` / `L1_PARSE_FAILURE_TOOLING` —
@@ -454,6 +497,54 @@ class RoundResult(StrictModel):
     @property
     def round_id(self) -> str:
         return f"round_{self.round}"
+
+    @property
+    def l1_collapsed(self) -> dict[str, int]:
+        """Candidates rejected before they could cost a backend call, keyed by reason.
+
+        DERIVED from ``candidate_scores``, never stored — the three scalars this replaced
+        (``l1_n_no_op`` / ``l1_n_duplicate`` / ``l1_n_repeat``) were a second recording of a
+        fact already in this same document: a collapsed candidate is not dropped, it rides
+        ``candidate_scores`` with ``invalid=True`` and its ``validation_failures``, which is
+        where ``invalid_reason`` and the display filter already read it from. Two recordings of
+        one fact can disagree, and nothing checked that they agreed; the counts also cost a
+        field apiece across ~20 sites, so a fourth reason was a twenty-file edit.
+
+        Verified against all 340 historical round files on disk before the scalars were
+        removed: the derived counts reproduced the stored ones exactly, 340/340.
+
+        One reason per candidate — a variant that trips several invariants collapsed once and
+        must be counted once, or the parts would sum past the population.
+        """
+        counts: dict[str, int] = {}
+        for cand in self.candidate_scores:
+            if not cand.invalid:
+                continue
+            reason = next(
+                (vf.reason for vf in cand.validation_failures if vf.reason in INVARIANT_REASONS),
+                None,
+            )
+            if reason:
+                counts[reason] = counts.get(reason, 0) + 1
+        return counts
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def l1_n_no_op(self) -> int:
+        """Variants whose mutation was empty against the parent."""
+        return self.l1_collapsed.get("no_op_variant", 0)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def l1_n_duplicate(self) -> int:
+        """Variants sig-equal to a sibling in the SAME population."""
+        return self.l1_collapsed.get("duplicate_variant", 0)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def l1_n_repeat(self) -> int:
+        """Variants re-proposing an idea an EARLIER round measured and lost."""
+        return self.l1_collapsed.get("repeat_variant", 0)
 
     @computed_field  # type: ignore[prop-decorator]
     @property

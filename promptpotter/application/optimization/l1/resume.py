@@ -84,7 +84,9 @@ async def generate_or_load_candidates(
         if persisted_raw is not None:
             persisted = [CandidateProposal.model_validate(d) for d in persisted_raw]
             logger.debug("Loaded %d persisted candidates for round %d", len(persisted), round_num)
-            yield_stats = detect_invariants(persisted, cycle.opt_sp, parent_pipeline_params)
+            yield_stats = detect_invariants(
+                persisted, cycle.opt_sp, parent_pipeline_params, cycle.rounds
+            )
             # llm_call never fires on this branch — synthesize an
             # ``LLMCallRecord(payload_kind="synthesized")`` so the audit
             # trail + dashboard see the node, without lying about a real
@@ -114,6 +116,7 @@ async def generate_or_load_candidates(
                 l1_yield=yield_stats.l1_yield,
                 l1_n_no_op=yield_stats.l1_n_no_op,
                 l1_n_duplicate=yield_stats.l1_n_duplicate,
+                l1_n_repeat=yield_stats.l1_n_repeat,
             )
             return persisted, yield_stats
 
@@ -137,7 +140,7 @@ async def generate_or_load_candidates(
     # `detect_invariants` only sees proposals that exist, so a parse failure (zero candidates)
     # is invisible to it. Carry the reason onto the round's L1-quality record instead.
     yield_stats = replace(
-        detect_invariants(candidates, cycle.opt_sp, parent_pipeline_params),
+        detect_invariants(candidates, cycle.opt_sp, parent_pipeline_params, cycle.rounds),
         l1_parse_failure=parse_failure,
     )
 
@@ -184,6 +187,7 @@ async def generate_or_load_candidates(
         l1_yield=yield_stats.l1_yield,
         l1_n_no_op=yield_stats.l1_n_no_op,
         l1_n_duplicate=yield_stats.l1_n_duplicate,
+        l1_n_repeat=yield_stats.l1_n_repeat,
     )
 
     return candidates, yield_stats

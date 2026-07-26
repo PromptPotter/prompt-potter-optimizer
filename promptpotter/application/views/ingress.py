@@ -192,6 +192,7 @@ def _l1_generate_exit(d: dict[str, Any], ctx: ViewContext) -> CandidatesGenerate
     l1_yield = float(d["l1_yield"])
     n_no_op = int(d["l1_n_no_op"])
     n_dup = int(d["l1_n_duplicate"])
+    n_rep = int(d.get("l1_n_repeat", 0))
     sp_diff = SpDiffView(
         columns=tuple(columns),
         node_param_keys=ctx.node_param_keys,
@@ -200,6 +201,7 @@ def _l1_generate_exit(d: dict[str, Any], ctx: ViewContext) -> CandidatesGenerate
         l1_yield=l1_yield,
         l1_n_no_op=n_no_op,
         l1_n_duplicate=n_dup,
+        l1_n_repeat=n_rep,
     )
     return CandidatesGeneratedView(
         n_candidates=d["n_candidates"],
@@ -208,6 +210,7 @@ def _l1_generate_exit(d: dict[str, Any], ctx: ViewContext) -> CandidatesGenerate
         l1_yield=l1_yield,
         l1_n_no_op=n_no_op,
         l1_n_duplicate=n_dup,
+        l1_n_repeat=n_rep,
         clone_labels=tuple(clone_labels),
         sp_diff=sp_diff,
     )

@@ -63,8 +63,7 @@ async def run_sweep_generation_only(
                     prompt_fields=cycle.opt_sp.prompt_field_dict(),
                     candidates_scored=0,
                     l1_yield=yield_stats.l1_yield,
-                    l1_n_no_op=yield_stats.l1_n_no_op,
-                    l1_n_duplicate=yield_stats.l1_n_duplicate,
+                    # Collapse counts derive from `candidate_scores` — see `RoundResult`.
                     opt_search_point=cycle.opt_sp,
                 ),
             )

@@ -623,6 +623,7 @@ def from_disk_log(
                 l1_yield=t.l1_yield,
                 l1_n_no_op=t.l1_n_no_op,
                 l1_n_duplicate=t.l1_n_duplicate,
+                l1_n_repeat=t.l1_n_repeat,
                 candidates_scored=t.candidates_scored,
                 evaluators=dict(t.evaluators),
                 p_best_trajectory=traj,

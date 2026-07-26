@@ -35,7 +35,13 @@ from promptpotter.application.optimization.dispatch.bundle import (
 )
 from promptpotter.config.settings import ANSWER_SPACE_CAP
 from promptpotter.domain.escalation_signals import ExplorationBudget
-from promptpotter.domain.opt_search_point import candidate_delta, flatten_sp_summary
+from promptpotter.domain.opt_search_point import (
+    IDEA_MATCH_MARK,
+    candidate_delta,
+    flatten_sp_summary,
+    idea_fingerprint,
+    same_idea,
+)
 from promptpotter.domain.results import CritiqueReadout, ScoredCandidate
 from promptpotter.domain.results_health import EVIDENCE_STARVED_RATE
 from promptpotter.shared.errors import is_error_result
@@ -622,8 +628,8 @@ def _r_failing_samples(b: InjectionBundle) -> str:
 
 def _candidate_mutation(
     cand: ScoredCandidate, parent: dict[str, Any], parent_pp: dict[str, Any] | None
-) -> list[str]:
-    """What this candidate actually changed, as ``field: "new value stem"`` rows.
+) -> list[tuple[str, str]]:
+    """What this candidate actually changed, as ``(field, full new value)`` pairs.
 
     Derived from the payload, never from ``changes_description``: a candidate's
     ``prompt_fields`` is its evolved prompt in full, and the round's own ``prompt_fields``
@@ -631,17 +637,20 @@ def _candidate_mutation(
     shared :func:`candidate_delta` — the same definition dedup hashes, so the panel
     cannot render a re-proposal (an override restating the parent's value, or the
     parent's own schema prose echoed back) as a new mutation.
+
+    Returns the values UNCLIPPED and unformatted: the render clips to
+    ``MEMORY_VALUE_CAP`` for the eye, while :func:`_idea_fingerprint` needs the whole value
+    to see the idea. One producer, two consumers with different appetites — clipping here
+    would silently starve the second (it did: the fingerprint over 60-char stems was mostly
+    field-name tokens).
     """
     pf, pp = candidate_delta(cand.prompt_fields, parent, cand.pipeline_params_override, parent_pp)
     pp_nested: dict[str, Any] = {}
     for (node, param), value in pp.items():
         pp_nested.setdefault(node, {})[param] = value
-    rows = [
-        f'{key}: "{value[:MEMORY_VALUE_CAP]}"'
-        for key, value in flatten_sp_summary(pp_nested).items()
-    ]
-    rows += [f'{field}: "{str(value)[:MEMORY_VALUE_CAP]}"' for field, value in pf.items() if value]
-    return rows[:MEMORY_FIELD_CAP]
+    pairs = [(key, str(value)) for key, value in flatten_sp_summary(pp_nested).items()]
+    pairs += [(field, str(value)) for field, value in pf.items() if value]
+    return pairs[:MEMORY_FIELD_CAP]
 
 
 def _candidate_fate(cand: ScoredCandidate) -> str:
@@ -657,6 +666,15 @@ def _candidate_fate(cand: ScoredCandidate) -> str:
     """
     if cand.invalid:
         return "invalid — rejected before it cost a sample"
+    if cand.total == 0:
+        # Zero samples means zero evidence, and `accuracy` is a non-optional float that
+        # defaults to 0.0 — so an unmeasured candidate is byte-identical to one that got
+        # everything wrong. It must never be quoted as an outcome. This is the same rule
+        # `matched_origin_accuracy` states one level up ("MUST NOT default to 0.0"),
+        # applied to the candidate's own score. Probe rounds used to manufacture these
+        # wholesale (empty scoring set → every candidate 0/0), and six of them reached L1
+        # reading "0% vs origin 58%" — a catastrophic loss for a mutation nobody ran.
+        return "never measured — no samples scored, its 0% is absence of evidence"
     if cand.elimination_stopped:
         ctx = cand.elimination_context
         cut = f"cut at {cand.scored_samples}/{cand.expected_samples} samples"
@@ -695,6 +713,13 @@ def _r_mutation_memory(b: InjectionBundle) -> str:
     the samples that candidate actually saw. An eliminated candidate has none (it is `None`,
     deliberately, and must never read 0.0 — that reads as "beat the origin by its whole
     accuracy"), so its row reports where it was cut instead of inventing a comparison.
+
+    Rows whose mutation carries an idea ALREADY tried in an earlier retained round are marked
+    ``↺ same idea as r{N} (Mx)``. Keyed on field+stem alone the panel could not see a
+    re-proposal at all — the generator rewrites the idea into a different field each round, so
+    every row looked new (see :func:`_idea_fingerprint`). The marker is the panel's whole point
+    made legible in one clause: the record does not just LIST prior attempts, it says which of
+    them are the same attempt.
     """
     prior = list(b.prior_rounds)
     rounds = [(i, r) for i, r in enumerate(prior) if r.candidate_scores][-MEMORY_ROUND_CAP:]
@@ -702,21 +727,42 @@ def _r_mutation_memory(b: InjectionBundle) -> str:
         return ""
     lines = [
         "ALREADY TRIED (this cycle — a mutation measured and lost here does not improve by "
-        "being proposed again):"
+        "being proposed again; ↺ marks an idea already tried in an earlier round, in whatever "
+        "field it was written into):"
     ]
+    # (round_label, fingerprint) per rendered row, oldest first — the pool each later row is
+    # matched against. First match wins, so a marker always points at the EARLIEST occurrence
+    # and a long repeat chain keeps naming one round rather than the previous link.
+    seen: list[tuple[int, frozenset[str]]] = []
     for i, rr in rounds:
         parent = rr.prompt_fields
         # The candidates' parent params = the PRIOR round's resolved pipeline_params
         # (the winner / retained incumbent this round mutated from).
         parent_pp = prior[i - 1].pipeline_params if i > 0 else None
         for cand in rr.candidate_scores:
-            mutation = _candidate_mutation(cand, parent, parent_pp) or ["(no change recorded)"]
+            changed = _candidate_mutation(cand, parent, parent_pp)
+            mutation = [f'{field}: "{value[:MEMORY_VALUE_CAP]}"' for field, value in changed] or [
+                "(no change recorded)"
+            ]
+            # `total == 0` is checked BEFORE the paired quote, not inside `_candidate_fate`'s
+            # fallback: a never-measured candidate can still carry a `matched_origin_accuracy`
+            # (the origin was scored even though the candidate was not), which would otherwise
+            # take the branch above and render a fully-formed comparison out of nothing.
             scored = (
                 f"{cand.accuracy:.0%} vs origin {cand.matched_origin_accuracy:.0%}"
-                if cand.matched_origin_accuracy is not None
+                if cand.total and cand.matched_origin_accuracy is not None
                 else _candidate_fate(cand)
             )
-            lines.append(f"  r{rr.round} {scored} · {'; '.join(mutation)}")
+            fp = idea_fingerprint([value for _, value in changed])
+            echo = next(
+                (r for r, prev in seen if same_idea(fp, prev, threshold=IDEA_MATCH_MARK)), None
+            )
+            repeats = (
+                sum(1 for r, prev in seen if same_idea(fp, prev, threshold=IDEA_MATCH_MARK)) + 1
+            )
+            mark = f"  ↺ same idea as r{echo} (x{repeats})" if echo is not None else ""
+            seen.append((rr.round, fp))
+            lines.append(f"  r{rr.round} {scored} · {'; '.join(mutation)}{mark}")
     return fence_untrusted("\n".join(lines))
 
 

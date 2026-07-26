@@ -151,6 +151,7 @@ class SpDiffView:
     l1_yield: float
     l1_n_no_op: int
     l1_n_duplicate: int
+    l1_n_repeat: int
 
 
 @dataclass(frozen=True)
@@ -163,6 +164,7 @@ class CandidatesGeneratedView:
     l1_yield: float
     l1_n_no_op: int
     l1_n_duplicate: int
+    l1_n_repeat: int
     clone_labels: tuple[str, ...]
     sp_diff: SpDiffView
 
@@ -309,6 +311,7 @@ class RoundDigestView:
     l1_yield: float
     l1_n_no_op: int
     l1_n_duplicate: int
+    l1_n_repeat: int
     candidates_scored: int
     evaluators: dict[str, float]
     # Per-candidate P(best) trajectory from ``.runtime/streams/round_NNNN_p_best.jsonl``;

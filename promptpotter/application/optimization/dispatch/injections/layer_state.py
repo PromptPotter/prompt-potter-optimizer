@@ -87,7 +87,11 @@ def _r_l1_overrides(b: InjectionBundle) -> str:
     kind=InjectionKind.TRACE,
     description="Operator-authored task framing, frozen for the run; broadcast to all four prompts.",
     char_cap=None,  # verbatim BY CONTRACT — see below
-    citable=True,  # the CHAIN-BIND rule requires citing it
+    # Citable because the operator's framing is real evidence a variant can be grounded in
+    # ("the framing records that anti-hedging backfires here"). It is NOT citable because
+    # anything instructs L1 to cite it: the CHAIN-BIND rule that once did was deleted with
+    # the channel it named — task_context is frozen and never carries an axis directive.
+    citable=True,
 )
 def _r_task_context(b: InjectionBundle) -> str:
     """The operator's framing, rendered VERBATIM — this panel never truncates.

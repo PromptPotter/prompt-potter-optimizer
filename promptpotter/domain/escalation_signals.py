@@ -87,6 +87,21 @@ class EscalationSignal:
         return self.target is EscalationTarget.LEADER_LOCKED
 
 
+# The reasons that mark a candidate COLLAPSED — generated, then rejected before it could cost
+# a backend call. Two are round-local (`no_op_variant`: the delta is empty; `duplicate_variant`:
+# two identical signatures in one population) and one is cross-round (`repeat_variant`: an idea
+# a prior round already measured and lost).
+#
+# The vocabulary lives in `domain/` beside `ValidationFailure` because it is domain language,
+# not a detail of the validator that happens to emit it. Two layers must agree on it: the
+# validator that WRITES these reasons (`validators/l1_strict.py`) and `RoundResult`, which
+# DERIVES its collapse counts by reading them back off `candidate_scores`. Left in the
+# application layer, the domain side could not name the set it counts without an upward import.
+INVARIANT_REASONS: frozenset[str] = frozenset(
+    {"no_op_variant", "duplicate_variant", "repeat_variant"}
+)
+
+
 class ValidationFailure(StrictModel):
     """L1-output parse-time invariant violation; drives synthetic-0 in ``score_search_point``.
 
@@ -210,6 +225,7 @@ def rf_dedup_key(rf_dict: dict[str, Any]) -> tuple[str, str, str]:
 
 
 __all__ = [
+    "INVARIANT_REASONS",
     "EscalationSignal",
     "EscalationTarget",
     "ExplorationBudget",

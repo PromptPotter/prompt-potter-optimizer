@@ -964,6 +964,141 @@ def test_a_forks_attempts_stay_separate_on_the_campaigns_timeline(built_stores) 
     assert "fork-c0" not in {k.id for k in kids}
 
 
+def test_collapse_counts_derive_from_candidate_scores_and_cannot_be_stamped() -> None:
+    """The collapse counts are ONE recording of one fact, and the round file proves it.
+
+    A collapsed candidate is not dropped — it rides ``candidate_scores`` with ``invalid=True``
+    and its ``validation_failures``. The counts used to ALSO be stored as three scalars, so the
+    same fact lived twice in one document with nothing checking they agreed; a disagreement is
+    silent (both numbers look plausible, and the round completes either way), and it is what
+    every reader — ``review.md``, the terminal, the L4 mode-collapse proxy — would report from.
+
+    Two things are pinned. (1) The counts come from ``candidate_scores``, keyed by reason, one
+    reason per candidate — a variant tripping several invariants collapsed once. (2) A caller
+    that still passes the old kwargs cannot override them: ``RoundResult`` is ``extra="ignore"``,
+    so a stale writer fails silently rather than loudly, and the derived value must win.
+    """
+    from promptpotter.domain.escalation_signals import ValidationFailure
+    from promptpotter.domain.results import RoundResult, ScoredCandidate
+
+    def collapsed(reason: str, *extra: str) -> ScoredCandidate:
+        return ScoredCandidate(
+            candidate_id=f"c-{reason}-{len(extra)}",
+            label=reason,
+            accuracy=0.0,
+            composite_fitness=0.0,
+            hits=0,
+            total=0,
+            invalid=True,
+            validation_failures=[
+                ValidationFailure(axis="variant", value="x", allowed=["y"], reason=r)
+                for r in (reason, *extra)
+            ],
+        )
+
+    def scored_ok() -> ScoredCandidate:
+        return ScoredCandidate(
+            candidate_id="c-live",
+            label="C1.9",
+            accuracy=0.6,
+            composite_fitness=0.6,
+            hits=6,
+            total=10,
+        )
+
+    rr = RoundResult(
+        round=1,
+        label="r1",
+        accuracy=0.6,
+        hits=6,
+        total=10,
+        improved=False,
+        prompt_fields={},
+        candidates_scored=5,
+        l1_n_no_op=99,  # a stale writer still stamping — must NOT win
+        l1_n_duplicate=99,
+        l1_n_repeat=99,
+        candidate_scores=[
+            collapsed("no_op_variant"),
+            collapsed("duplicate_variant"),
+            collapsed("repeat_variant"),
+            # trips two invariants — collapsed ONCE, counted once
+            collapsed("repeat_variant", "duplicate_variant"),
+            scored_ok(),
+        ],
+    )
+
+    assert rr.l1_collapsed == {
+        "no_op_variant": 1,
+        "duplicate_variant": 1,
+        "repeat_variant": 2,
+    }
+    assert (rr.l1_n_no_op, rr.l1_n_duplicate, rr.l1_n_repeat) == (1, 1, 2)
+    assert rr.l1_n_no_op != 99, "a stamped value must never beat the derivation"
+
+    # The counts still reach disk and the API (`computed_field`), and survive the round trip
+    # that `rounds/round_NNNN.json` is read back through.
+    dumped = rr.model_dump()
+    assert dumped["l1_n_repeat"] == 2
+    assert RoundResult.model_validate(dumped).l1_n_repeat == 2
+
+
+def test_repeat_marker_reads_the_idea_not_the_field_it_was_written_into() -> None:
+    """`mutation_memory`'s ↺ marker is the loop's only defence against re-proposal, and both
+    ways it can fail are SILENT — the panel still renders a full, plausible record either way.
+
+    The failure it exists to catch, measured on `justlogic-d234`: one idea ("exhaust modus
+    tollens / disjunctive syllogism before answering Uncertain") was re-proposed for 8 straight
+    rounds, each time rewritten into a DIFFERENT field — instruction, then thinking_style, then
+    output_schema_descriptions.reasoning, then task_intent. Keyed on field+value the rows look
+    unrelated, so nothing objected and the cycle burned 8 rounds on one hypothesis.
+
+    The inverse failure is what a first cut of this actually did: fingerprinting the rendered
+    `field: "value"` row made the field NAME part of the idea, so it paired two unrelated edits
+    to one field and still missed the cross-field repeat — the marker fires, reads plausibly,
+    and means the opposite of what it says.
+    """
+    from promptpotter.domain.opt_search_point import (
+        IDEA_MATCH_MARK,
+        same_idea,
+    )
+    from promptpotter.domain.opt_search_point import (
+        idea_fingerprint as _idea_fingerprint,
+    )
+
+    def _same_idea(a: frozenset[str], b: frozenset[str]) -> bool:
+        return same_idea(a, b, threshold=IDEA_MATCH_MARK)
+
+    # One idea, two fields — must match on vocabulary alone.
+    as_instruction = (
+        "Derive new facts using modus ponens, modus tollens, disjunctive syllogism and "
+        "chaining. Exhaust every derivation before concluding Uncertain."
+    )
+    as_reasoning = (
+        "Apply modus tollens, disjunctive syllogism and contrapositive to derive new facts, "
+        "exhausting each derivation branch before you conclude Uncertain."
+    )
+    assert _same_idea(_idea_fingerprint([as_instruction]), _idea_fingerprint([as_reasoning])), (
+        "the same idea rewritten into another field must still register as already tried"
+    )
+
+    # Genuinely different ideas that happen to share a field must NOT match.
+    other_idea = (
+        "Return the label as a bare token with no surrounding prose, punctuation or markdown "
+        "fence, so the parser reads exactly one word from the response body."
+    )
+    assert not _same_idea(_idea_fingerprint([as_instruction]), _idea_fingerprint([other_idea])), (
+        "distinct mutations must not be collapsed — a false ↺ hides a real attempt"
+    )
+
+    # The field name must contribute nothing: same value, different field, identical print.
+    assert _idea_fingerprint([as_instruction]) == _idea_fingerprint([as_instruction]), "unstable"
+    assert not (
+        _idea_fingerprint(["output_schema_descriptions.reasoning"])
+        & _idea_fingerprint([as_instruction])
+    ), "field-name tokens leaked into the idea fingerprint"
+
+
 # Binary formats legitimately full of NULs. Suffix-scoped so a NEW binary kind must be
 # named here deliberately rather than widening the guard by accident.
 _BINARY_SUFFIXES = frozenset(

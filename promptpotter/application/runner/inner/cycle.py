@@ -354,7 +354,14 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
             parts.append("no scored candidates")
         anomalies = [
             f"{tag} x{n}"
-            for tag, n in (("no-op", rnd.l1_n_no_op), ("dup", rnd.l1_n_duplicate))
+            # `repeat` rides the inner narrative because it is the anomaly the OUTER generator
+            # most needs: it says the inner loop stopped forming new hypotheses, which is a
+            # meta-prompt defect, not a task difficulty.
+            for tag, n in (
+                ("no-op", rnd.l1_n_no_op),
+                ("dup", rnd.l1_n_duplicate),
+                ("repeat", rnd.l1_n_repeat),
+            )
             if n
         ]
         if anomalies:
