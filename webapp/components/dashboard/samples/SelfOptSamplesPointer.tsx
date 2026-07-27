@@ -8,13 +8,17 @@
 // fire — one way to open an inner run, surfaced in three places.
 
 import { useWorkspace } from "@/lib/workspace";
-import { useCampaignTree } from "@/lib/hooks/useCampaignTree";
-import { candidatesOf, childCourses, pathOf } from "@/lib/derivations";
+import { useViewedLineage } from "@/lib/lineage";
+import { candidatesAtPath, childCourses, pathOf } from "@/lib/derivations";
 
 export function SelfOptSamplesPointer() {
   const { viewedPath, drillInto } = useWorkspace();
-  // The viewed course's own served tree — the inner runs filed under its candidates.
-  const { root } = useCampaignTree(viewedPath ?? [], viewedPath != null);
+  // The ONE served tree, addressed at the viewed course. `candidatesAtPath` rather than
+  // `candidatesOf(root)`: the tree is rooted at the campaign, so its top-level children
+  // are the campaign root's timeline — and when the viewed course is a FORK there is no
+  // course node to read at all (a fork is dissolved onto the parent's timeline), so its
+  // attempts must be addressed by their own path.
+  const { tree } = useViewedLineage();
 
   // Liveness has ONE server-owned answer — `run_phase` — so the live run is simply the
   // inner course reporting `running`. This used to intersect that with the sandbox's
@@ -22,11 +26,12 @@ export function SelfOptSamplesPointer() {
   // cleared on death: freshness-blind, so it could only ever narrow a `run_phase` the
   // server already owns, or contradict it. The tree serves `run_phase` per course; the
   // loop runs one inner cycle at a time. So the pointer was the redundant half.
-  const live = root
-    ? candidatesOf(root)
-        .flatMap(childCourses)
-        .find((c) => c.run_phase === "running")
-    : undefined;
+  const live =
+    tree && viewedPath
+      ? candidatesAtPath(tree, viewedPath)
+          .flatMap(childCourses)
+          .find((c) => c.run_phase === "running")
+      : undefined;
   const at = live ? pathOf(live).at(-1) : undefined;
 
   return (

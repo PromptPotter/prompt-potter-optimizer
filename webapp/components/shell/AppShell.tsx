@@ -10,6 +10,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { useDatasetPreview } from "@/lib/hooks/useDatasetPreview";
 import { useLeafCycleIndex } from "@/lib/hooks/useLeafCycleIndex";
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
+import { decodeCyclePath, encodeCyclePath, type CyclePath } from "@/lib/ids";
 import { applyChartDefaults } from "@/lib/theme";
 import { cx } from "@/lib/cx";
 import { Sidebar } from "@/components/shell/Sidebar";
@@ -17,7 +18,8 @@ import { SidebarResizer } from "@/components/shell/SidebarResizer";
 import { Topbar, type Tab } from "@/components/shell/Topbar";
 import { DashboardTab } from "@/components/dashboard/layout/DashboardTab";
 import { SelectionProvider } from "@/lib/SelectionContext";
-import { LineageOverlayProvider } from "@/lib/lineage-overlay";
+import { LineageProvider } from "@/lib/lineage";
+import { useViewMemory } from "@/lib/view-memory";
 import { CriticalAlertBanner } from "@/components/shell/CriticalAlertBanner";
 import { RemoteBar } from "@/components/shell/RemoteBar";
 
@@ -83,7 +85,55 @@ function AppShellInner() {
     selectCycle,
     selectCyclePath,
     leafCycleId,
+    viewedCandidateId,
   } = useWorkspace();
+
+  // ── Per-campaign view memory: remember where the operator was, put them back.
+  const { viewFor, recordView } = useViewMemory();
+
+  // RECORD. The navigation axis only — ids, no measurement (`lib/view-memory.tsx`).
+  // In an effect because it mirrors React state OUT to an external store, which is what
+  // effects are for; `useLocalStorage` writes through `useSyncExternalStore`, so this is a
+  // store emit rather than a setState cascade.
+  useEffect(() => {
+    if (!campaignId || !viewedPath) return;
+    recordView(campaignId, {
+      viewedPath: encodeCyclePath(viewedPath),
+      viewedCandidateId,
+    });
+  }, [campaignId, viewedPath, viewedCandidateId, recordView]);
+
+  // RESTORE. Clicking a campaign's ROOT row means "open this campaign", and what the
+  // operator means by that is where they left it — the inner run they had drilled into,
+  // parked on the node they were reading. Any deeper or more specific click is an explicit
+  // address and is honored as-is; memory never overrides a live intent.
+  //
+  // Guarded on the remembered leaf still being a cycle the workspace knows: a fork deleted
+  // between visits must open the campaign at its root, not spin on an address that 404s.
+  const restoreNavigation = useCallback(
+    (path: CyclePath, candidate?: string | null): [CyclePath, string | null] => {
+      if (path.length !== 1 || candidate) return [path, candidate ?? null];
+      const hop = path[0]!;
+      // Only a campaign SWITCH restores. Clicking the VIEWED campaign's own root row goes
+      // to the root — that click is the escape hatch, and without it there is none: the
+      // RECORD effect above re-records the restored path continuously, so a restore that
+      // also fired in-campaign would re-drill forever.
+      if (hop.campaignId === campaignId) return [path, null];
+      const mem = viewFor(hop.campaignId);
+      const remembered = decodeCyclePath(mem.viewedPath ?? "");
+      if (!remembered || remembered[0]?.campaignId !== hop.campaignId) return [path, null];
+      if (encodeCyclePath(remembered) === encodeCyclePath(path)) return [path, null];
+      // Inner hops live in a sandbox and never appear in `/cycles`; the ROOT hop still
+      // existing is what makes the whole address resolvable — a fork deleted between
+      // visits must open the campaign at its root, not spin on an address that 404s.
+      const root = remembered[0]!;
+      const known = cycles.some(
+        (c) => c.campaign_id === root.campaignId && c.cycle_id === root.cycleId,
+      );
+      return known ? [remembered, mem.viewedCandidateId] : [path, null];
+    },
+    [campaignId, viewFor, cycles],
+  );
   // The DISPLAY panes (connector, pipeline hero, hard-samples) follow the VIEWED
   // LEAF hop — the same hop the dashboard stream re-roots to — so drilling into an
   // L4 inner loop shows the inner run's connector + samples, not the outer meta
@@ -245,11 +295,12 @@ function AppShellInner() {
     // Keyed on the LEAF hop, like the dashboard stream — selection scopes the
     // inspector / samples / round files, and those read the leaf.
     <SelectionProvider cycleId={leafCycleId}>
-    {/* The served lineage tree + its mask/lens counterfactual — owned once at the
-        shell root (inside CycleStreamProvider + SelectionProvider it reads from),
-        consumed by the forest, the sidebar rows and the fitness panel. Rooted at the
-        ROOT hop: the tree's own recursion reaches every fork and inner run below it. */}
-    <LineageOverlayProvider campaignId={campaignId} cycleId={cycleId}>
+    {/* THE served lineage — ONE fetch owner for every consumer (the forest, the bars,
+        the sidebar rows, the L4 samples panel). Rooted at the ROOT hop: the tree's own
+        recursion reaches every fork and inner run below it, so drilling in re-addresses
+        rather than re-fetching. Sits inside SelectionProvider, whose `sampleSet` is one
+        of the masks it composes. */}
+    <LineageProvider campaignId={campaignId} cycleId={cycleId}>
     <ConnectorProvider datasetName={leafDatasetName}>
     <div
       className={cx(
@@ -270,7 +321,7 @@ function AppShellInner() {
       </a>
       <Sidebar
         onSelectPath={(path, candidate) => {
-          selectCyclePath(path, candidate);
+          selectCyclePath(...restoreNavigation(path, candidate));
           // The tab is the operator's axis — selecting a unit must NOT hijack it
           // (picking a campaign while reading the Chat stays on Chat). The one
           // exception is a check-in: it has no dashboard.json, so Dashboard/Verify
@@ -386,7 +437,7 @@ function AppShellInner() {
       )}
     </div>
     </ConnectorProvider>
-    </LineageOverlayProvider>
+    </LineageProvider>
     </SelectionProvider>
   );
 }

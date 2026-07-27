@@ -697,7 +697,7 @@ the PR description.
   **active** formula the run actually used; a **what-if** preview when the
   operator re-weights the evaluators; a **lens** that re-projects the lineage
   under an alternative criterion to show where rankings diverge
-  (`lineage-overlay`); a **replay** that re-scores the whole cycle under a new
+  (`lib/lineage.tsx`); a **replay** that re-scores the whole cycle under a new
   config — and mode-relative (`measured`, the samples that round actually ran,
   vs `all`, the full dataset). Two values appear in the data:
   `composite_fitness` (the score under the active formula, **served already

@@ -20,6 +20,9 @@ function node(
 ): LineageNode {
   return {
     parent_id: null,
+    // A candidate this course minted itself, so both labels agree. A fork-contributed
+    // attempt is the case where they diverge, and `over` names it when that is the point.
+    course_label: over.label,
     path: [],
     children: [],
     round: null,

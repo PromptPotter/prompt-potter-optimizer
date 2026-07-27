@@ -3,6 +3,7 @@ import { memo, useMemo } from "react";
 import { cx } from "@/lib/cx";
 import { fmtHeadlineValue, type HeadlineMetric } from "@/lib/derivations";
 import { useStableContent } from "@/lib/stable";
+import type { LineageNode } from "@/lib/api";
 import type { CandidateView } from "@/lib/types";
 import { dendrogram, type DendroRow } from "./dendrogram";
 import type { PlotGeometry } from "./FitnessChart";
@@ -28,12 +29,12 @@ interface Props {
   onSelect: (view: CandidateView | null) => void;
   // Candidates a sibling cycle was forked from → the ⑂ mark. Clicking it frees
   // the hierarchy: the card swaps to the Forest view with that cycle opened.
-  forkedFrom: ReadonlyMap<string, string>;
+  forkedFrom: ReadonlyMap<string, LineageNode>;
   // Which view keys are fork bars — sibling courses trailing the candidate
   // spine. They keep their bar slot but join no round band, and clicking one
   // opens that course rather than selecting a candidate.
   forkKeys: ReadonlySet<string>;
-  onFreeHierarchy: (cycleId: string) => void;
+  onFreeHierarchy: (course: LineageNode) => void;
 }
 
 export const DendrogramStrip = memo(function DendrogramStrip({

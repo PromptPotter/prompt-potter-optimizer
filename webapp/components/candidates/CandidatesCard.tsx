@@ -32,6 +32,7 @@ import { useSelection } from "@/lib/SelectionContext";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { WhatIfGrid } from "./WhatIfGrid";
 import { fetchDiagnosticRuns, type DiagnosticRunRecord } from "@/lib/api";
+import type { LineageNode } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useFetch } from "@/lib/hooks/useFetch";
 import {
@@ -40,15 +41,17 @@ import {
   nodeAt,
   nodeKeyOf,
   panelCellLabel,
+  pathOf,
   sortedRounds,
   type HeadlineMetric,
 } from "@/lib/derivations";
 import { isSelectedCandidate } from "@/lib/types";
 import { useWorkspace } from "@/lib/workspace";
+import { useViewMemory } from "@/lib/view-memory";
 import { useLineage } from "./useLineage";
 import { SampleSetControl } from "./SampleSetControl";
 import { measuredUniverse } from "@/lib/sample-set";
-import { useLineageOverlay, divergenceRoundsFor } from "@/lib/lineage-overlay";
+import { useViewedLineage, divergenceRoundsFor } from "@/lib/lineage";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { targetNodeIds } from "@/lib/terms";
 import { activeNodeId } from "@/components/workflow";
@@ -108,9 +111,10 @@ export function CandidatesCard() {
     leafCycleId,
     viewedPath,
     viewedCandidateId,
-    selectCycle: onSelectCycle,
     selectCyclePath,
   } = useWorkspace();
+  // Per-campaign view memory — the card records what the operator arranges here.
+  const { recordView } = useViewMemory();
   // Shared candidate selection — driving any of {bar, dendrogram node, forest
   // stub} sets this context slot; every other surface re-renders highlighted, and
   // the round axis in the optimizer card follows to the round that produced it.
@@ -333,7 +337,7 @@ export function CandidatesCard() {
 
   // The shared served overlay — the node's own `lens_value` is the What-If bar value
   // (R-36, never recomputed here), and its divergence facts drive the boundary below.
-  const overlay = useLineageOverlay();
+  const overlay = useViewedLineage();
   const { lens, setLens, maskActive, maskLabel, whatifActive } = overlay;
 
   // ── ONE RULE: the bars are the CHILDREN of the VIEWED node — the node the tree on the
@@ -416,7 +420,7 @@ export function CandidatesCard() {
   // Only what the BARS need from the lineage: the metric they paint, the fork
   // marks on the dendrogram, and the descendant count on the forest toggle. The
   // tree itself — forests, overlays, cleanup — moved out with `ForestCard`.
-  const { metric, forkedFrom, expanded, totalDescendants } = useLineage({
+  const { metric, forkedFrom, expanded, setShowForest, totalDescendants } = useLineage({
     campaignId,
     cycleId,
     path: viewedPath,
@@ -466,15 +470,19 @@ export function CandidatesCard() {
   // The ⑂ click: free the hierarchy. The bars plot one cycle, so a sibling has
   // nowhere to be drawn among them — reveal the forest below (which can draw it),
   // with that cycle expanded and in view. The bars stay put.
+  //
+  // `expanded` holds LANE KEYS (`nodeKeyOf` = `{encoded path}|{id}`), which is what
+  // `forest-layout::layout` matches on. This used to add the raw cycle id, so the set grew
+  // a key the layout could never match and the click silently did nothing but open an
+  // unexpanded forest. Navigation likewise rides the node's own path.
   const onFreeHierarchy = useCallback(
-    (forkCycleId: string) => {
-      setCandidatesState({
-        showForest: true,
-        expanded: new Set(expanded).add(forkCycleId),
-      });
-      if (campaignId) onSelectCycle(campaignId, forkCycleId);
+    (course: LineageNode) => {
+      const next = new Set(expanded).add(nodeKeyOf(course));
+      setCandidatesState({ showForest: true, expanded: next });
+      recordView(campaignId, { showForest: true, expandedLanes: [...next] });
+      selectCyclePath(pathOf(course), null);
     },
-    [expanded, campaignId, onSelectCycle],
+    [expanded, campaignId, recordView, selectCyclePath],
   );
 
   const selectedKey = useMemo(
@@ -533,7 +541,7 @@ export function CandidatesCard() {
           : `Show the lineage forest — the full campaign tree, ${totalDescendants} descendant${totalDescendants === 1 ? "" : "s"}`
       }
       title={`${showForest ? "Hide" : "Show"} the campaign tree — every cycle and fork side by side (${totalDescendants} descendant${totalDescendants === 1 ? "" : "s"})`}
-      onClick={() => setCandidatesState({ showForest: !showForest })}
+      onClick={() => setShowForest(!showForest)}
     >
       <span className="cand-forest-toggle">
         <IconTree />

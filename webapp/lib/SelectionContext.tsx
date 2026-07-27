@@ -72,6 +72,13 @@ const SelectionCtx = createContext<Ctx | null>(null);
 // picked for the cycle being navigated to, which is exactly the cross-cycle click
 // (a sidebar candidate row, an off-lane forest node) that this clear used to eat.
 // A candidate from any other cycle points into the wrong tree and still goes.
+// NOT restored from view memory, deliberately. A `SelectedCandidate` carries `is_winner`
+// and `accuracy`, and `ScoringInspector` RENDERS `is_winner` — so a value restored from
+// storage is a measurement claim the operator would read as current. Re-deriving it needs
+// the served tree, which this provider sits above (`LineageProvider` reads this context's
+// `sampleSet` for its mask). What view memory restores instead is the NAVIGATION axis —
+// `viewedPath` + `viewedCandidateId`, pure ids — which parks the tree on the same node and
+// re-plots the same bars. The lit bar is the part that stays un-restored.
 export function SelectionProvider({
   cycleId,
   children,

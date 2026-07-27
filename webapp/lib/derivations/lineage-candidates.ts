@@ -76,6 +76,29 @@ export function nodeAt(
   return visit(root);
 }
 
+// Every candidate whose OWN path is `path` — that course's timeline as THAT course minted
+// it, addressed inside the one served tree.
+//
+// This exists because `nodeAt(root, forkPath)` cannot answer for a fork: **a fork is not a
+// node.** The server dissolves it onto the parent's timeline, so its contributed attempts —
+// each carrying the fork's `path` — are the only trace of it in the tree, and a course
+// lookup finds nothing. Scanning for the fork's cycle_id would be the bug this file's header
+// warns about; the path is the address.
+//
+// For an ordinary course this returns its own candidates MINUS anything a fork contributed
+// to it, which is what a per-course reader wants: a fork's attempts belong to the fork's own
+// timeline, not to the course that renumbered them.
+export function candidatesAtPath(root: LineageNode, path: CyclePath): LineageNode[] {
+  const want = encodeCyclePath(path);
+  const out: LineageNode[] = [];
+  const visit = (node: LineageNode): void => {
+    if (node.kind === "candidate" && encodeCyclePath(pathOf(node)) === want) out.push(node);
+    for (const child of node.children) visit(child);
+  };
+  visit(root);
+  return out;
+}
+
 // A node's key, unique across the whole tree — unlike its `id`, since course ids collide
 // across sandboxes.
 export function nodeKeyOf(node: LineageNode): string {

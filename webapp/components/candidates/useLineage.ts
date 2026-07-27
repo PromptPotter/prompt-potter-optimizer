@@ -1,10 +1,10 @@
 "use client";
 // State for the candidates card's Forest view. Everything that is NOT geometry
 // (forest-layout.ts), NOT markup (CandidatesCard/Forest), and NOT the shared
-// fetch/overlay (lib/lineage-overlay) lives here: the per-candidate value overlays,
+// fetch/overlay (lib/lineage) lives here: the per-candidate value overlays,
 // the fork map, and the empty-stub cleanup mutation. The tree itself and the
-// mask/lens counterfactual are owned by `LineageOverlayProvider` and read via
-// `useLineageOverlay()` — the SINGLE source both this view and the bars render.
+// mask/lens counterfactual are owned by `LineageProvider` and read via
+// `useViewedLineage()` — the SINGLE source both this view and the bars render.
 //
 // **The structure is the served tree, and nothing else** — no source-by-cycle-role
 // merge. The tree rides the LEDGER, which mints a candidate the moment it exists, so
@@ -23,6 +23,7 @@ import { accuracyBasisValue } from "@/lib/fitness";
 import {
   primaryMetric,
   roundCandidates,
+  candidatesAtPath,
   candidatesOf,
   countDescendants,
   nodeAt,
@@ -33,7 +34,8 @@ import {
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { encodeCyclePath, rootCycleId, type CyclePath } from "@/lib/ids";
 import { bumpRevalidation } from "@/lib/revalidate";
-import { useLineageOverlay } from "@/lib/lineage-overlay";
+import { useViewedLineage } from "@/lib/lineage";
+import { useViewMemory } from "@/lib/view-memory";
 import type { CandidateRow } from "@/lib/types";
 import { setCandidatesState, useCandidatesState } from "./candidates-store";
 
@@ -66,13 +68,20 @@ export interface Lineage {
   // several metrics at once; a node paints one number, so it takes the first
   // selected in canonical order.
   metric: HeadlineMetric;
-  // `candidate_id` → the course hanging off it (in-view cycle only). Drives the ⑂
-  // mark in the Sequence view, whose click frees the hierarchy into the Forest.
-  forkedFrom: ReadonlyMap<string, string>;
+  // candidate id → the child COURSE NODE hanging off it (in-view cycle only) — drives the
+  // ⑂ mark in the Sequence view, whose click frees the hierarchy into the Forest. The
+  // node rather than its id: the consumer needs an address (`pathOf`) and a lane key
+  // (`nodeKeyOf`), and a bare cycle id can supply neither — inner ids repeat across
+  // sibling sandboxes.
+  forkedFrom: ReadonlyMap<string, LineageNode>;
   expanded: ReadonlySet<string>;
   // In-place expand/collapse toggle for one course's lane (pure view state —
   // never changes the dashboard's selected cycle).
   onLaneActivate: (courseKey: string) => void;
+  // THE write path for `showForest`: applies it and records it in one call, so no toggle
+  // site can set the store without the memory write (a missed record re-seeds stale state
+  // on the next campaign switch).
+  setShowForest: (open: boolean) => void;
   totalDescendants: number;
   // Empty-state facts for the in-view cycle.
   viewedHasRounds: boolean;
@@ -95,7 +104,10 @@ export function useLineage({
   // The shared tree from the single fetch both views render (R-36). The mask/lens
   // fields are NOT re-exposed here — the card and `Forest` read the counterfactual
   // off the nodes themselves, so this hook owns only the value/fork/cleanup state.
-  const { tree } = useLineageOverlay();
+  const { tree } = useViewedLineage();
+  // Per-campaign view memory — seeds the expand state below, and records what the operator
+  // changes here so the next visit opens the same way.
+  const { viewFor, recordView } = useViewMemory();
   // The in-view cycle's live dashboard — the same source the bars read, so the
   // active cycle's node values can't disagree with them.
   const { dash } = useDashboard();
@@ -127,11 +139,18 @@ export function useLineage({
   // Keyed on the LANE, which only the tree can name — so a campaign switch clears here
   // and the default expansion settles on the render the tree lands, rather than being
   // guessed from `cycleId` (which is not a lane key: inner ids repeat).
+  //
+  // On a campaign switch the seed is what the operator LEFT expanded here (view memory,
+  // lane keys — the same `nodeKeyOf` space `forest-layout::layout` matches), unioned with
+  // the in-view lane. Read during render via `useSyncExternalStore`, so the restore and the
+  // reset commit together and no frame shows the un-restored state.
   if (campaignId !== expandedForCampaign) {
+    const remembered = viewFor(campaignId).expandedLanes;
     setCandidatesState({
-      expanded: viewedLaneKey ? new Set([viewedLaneKey]) : new Set(),
+      expanded: new Set([...remembered, ...(viewedLaneKey ? [viewedLaneKey] : [])]),
       expandedForCampaign: campaignId,
       expandedForLane: viewedLaneKey,
+      showForest: viewFor(campaignId).showForest,
     });
   } else if (viewedLaneKey && viewedLaneKey !== expandedForLane) {
     setCandidatesState({
@@ -140,12 +159,26 @@ export function useLineage({
     });
   }
 
-  const onLaneActivate = useCallback((key: string) => {
-    const next = new Set(expanded);
-    if (next.has(key)) next.delete(key);
-    else next.add(key);
-    setCandidatesState({ expanded: next });
-  }, [expanded]);
+  // Toggling a lane both applies it and remembers it — recorded from the HANDLER, never
+  // from render, so a re-render can't write storage.
+  const onLaneActivate = useCallback(
+    (key: string) => {
+      const next = new Set(expanded);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      setCandidatesState({ expanded: next });
+      recordView(campaignId, { expandedLanes: [...next] });
+    },
+    [expanded, campaignId, recordView],
+  );
+
+  const setShowForest = useCallback(
+    (open: boolean) => {
+      setCandidatesState({ showForest: open });
+      recordView(campaignId, { showForest: open });
+    },
+    [campaignId, recordView],
+  );
 
   const courses = useMemo(() => (tree ? walkCourses(tree) : []), [tree]);
 
@@ -153,13 +186,15 @@ export function useLineage({
   // view has no lanes to show one in — it plots one course — so it marks the
   // candidate the course was cut from and offers the jump into the Forest, where the
   // sibling actually has somewhere to be drawn.
-  const forkedFrom = useMemo<ReadonlyMap<string, string>>(() => {
-    const m = new Map<string, string>();
-    const viewed = tree && path ? nodeAt(tree, path) : undefined;
-    if (!viewed) return m;
-    for (const cand of candidatesOf(viewed)) {
+  const forkedFrom = useMemo<ReadonlyMap<string, LineageNode>>(() => {
+    const m = new Map<string, LineageNode>();
+    if (!tree || !path) return m;
+    // `candidatesAtPath`, not `nodeAt(tree, path)` — a FORK has no course node to look up
+    // (the server dissolves it onto the parent's timeline), so a course lookup answers
+    // `undefined` and this map comes back empty for exactly the case it exists to serve.
+    for (const cand of candidatesAtPath(tree, path)) {
       for (const child of cand.children) {
-        if (child.kind === "course") m.set(cand.id, child.id);
+        if (child.kind === "course") m.set(cand.id, child);
       }
     }
     return m;
@@ -217,8 +252,12 @@ export function useLineage({
   // Empty-state facts for the in-view cycle (distinguishes an inherited fork
   // from a fresh cycle waiting for round 1).
   const viewedHasRounds = useMemo(() => {
-    const viewed = tree && path ? nodeAt(tree, path) : undefined;
-    return viewed ? candidatesOf(viewed).length > 0 : false;
+    // Addressed by PATH, not by a course lookup: a fork has no course node (the server
+    // dissolves it onto the parent's timeline), so `nodeAt` answers `undefined` for one and
+    // a fork that produced candidates reported "no rounds" — the empty state, on a course
+    // with results. `candidatesAtPath` answers for both shapes.
+    if (!tree || !path) return false;
+    return candidatesAtPath(tree, path).length > 0;
   }, [tree, path]);
   const parentId = cycleId ? rootCycleId(cycleId) : null;
   const isInheritedSibling = parentId != null && parentId !== cycleId;
@@ -277,6 +316,7 @@ export function useLineage({
     forkedFrom,
     expanded,
     onLaneActivate,
+    setShowForest,
     totalDescendants: tree ? countDescendants(tree) : 0,
     viewedHasRounds,
     isInheritedSibling,

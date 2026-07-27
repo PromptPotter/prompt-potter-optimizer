@@ -5,11 +5,13 @@ import {
   fmtHeadlineValue,
   headlineMetricLabel,
   nodeKeyOf,
+  pathOf,
   type HeadlineMetric,
 } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
-import { shortFamilyTail } from "@/lib/ids";
+import { encodeCyclePath, pathLeaf, shortFamilyTail } from "@/lib/ids";
 import { useSelection } from "@/lib/SelectionContext";
+import { useWorkspace } from "@/lib/workspace";
 import { isSelectedCandidate } from "@/lib/types";
 import { heartsText } from "@/lib/derivations";
 import type { LineageNode } from "@/lib/api";
@@ -129,20 +131,15 @@ const CandidateNode = memo(function CandidateNode({
 // math is never reconciled across surfaces.
 export function Forest({
   tree,
-  campaignId,
-  cycleId,
   valueByKey,
   thetaByKey,
   metric,
   expanded,
   onLaneActivate,
-  onSelectCycle,
 }: {
   // The served genealogy's root course. Nodes alternate course → candidate →
   // (course | sample), so forks and L4 inner runs need no special case here.
   tree: LineageNode;
-  campaignId: string;
-  cycleId: string | null;
   // Live per-candidate percent metric (accuracy/composite), keyed
   // Keyed by the candidate's address (`nodeKeyOf`) — painted onto nodes outside the geometry memo so a
   // value tick costs only a text re-render.
@@ -158,11 +155,12 @@ export function Forest({
   // between its expanded candidate cladogram and the compact summary row, in
   // place. Never changes the dashboard's selected cycle.
   onLaneActivate: (courseKey: string) => void;
-  // Navigate the dashboard to a cycle — fired when a candidate in a non-selected
-  // lane is clicked (the inspector/samples follow the searchpoint).
-  onSelectCycle: (campaignId: string, cycleId: string) => void;
 }) {
   const { candidate, setSelectionForCandidate } = useSelection();
+  // The viewed address, read here rather than threaded in: navigation is `selectCyclePath`
+  // on the node's OWN path, so nothing needs a campaignId + cycleId pair to rebuild one.
+  const { viewedPath, selectCyclePath } = useWorkspace();
+  const viewedKey = viewedPath ? encodeCyclePath(viewedPath) : null;
   // The live fitness painted on a node — the `valueByKey` overlay, looked up by
   // the same candidate identity the bars use. Outside the layout memo, so it
   // updates each poll without re-flowing the tree.
@@ -206,19 +204,23 @@ export function Forest({
   const bandH = (l: LaneLayout): number => l.laneSpan * LANE_H - 4;
 
   // Candidate click: inspect that searchpoint. A node in a non-selected lane also
-  // navigates the dashboard to its cycle, so the inspector/samples follow it — but
-  // it SELECTS either way: the selection names `n.cycleId`, which is the cycle
-  // being navigated to, so the provider's cycle-change clear keeps it. This used to
-  // navigate and drop the pick on the floor, because the clear ate any candidate
-  // written across a cycle change.
+  // navigates the dashboard to its course, so the inspector/samples follow it — but
+  // it SELECTS either way: the selection names the course being navigated to, so the
+  // provider's cycle-change clear keeps it. This used to navigate and drop the pick on
+  // the floor, because the clear ate any candidate written across a cycle change.
+  //
+  // Navigation rides the node's OWN `coursePath`. It used to rebuild an address as
+  // `(campaignId, n.cycleId)` — the card's campaign plus a bare cycle id — which names the
+  // wrong run for anything inside an `.inner/` sandbox, where cycle ids repeat.
   const onPickCandidate = (n: RoundNodePos): void => {
-    if (n.cycleId !== cycleId) onSelectCycle(campaignId, n.cycleId);
-    const isSel = isSelectedCandidate(candidate, n.cycleId, n.round, n.candidateId);
+    const nodeCycleId = pathLeaf(n.coursePath).cycleId;
+    if (encodeCyclePath(n.coursePath) !== viewedKey) selectCyclePath(n.coursePath, null);
+    const isSel = isSelectedCandidate(candidate, nodeCycleId, n.round, n.candidateId);
     setSelectionForCandidate(
       isSel
         ? null
         : {
-            cycle_id: n.cycleId,
+            cycle_id: nodeCycleId,
             round: n.round,
             candidate_id: n.candidateId,
             label: n.candidateLabel,
@@ -275,7 +277,7 @@ export function Forest({
 
           {/* Selected-lane highlight — covers the whole band when expanded. */}
           {laneList.map((l) => {
-            if (l.course.id !== cycleId) return null;
+            if (encodeCyclePath(pathOf(l.course)) !== viewedKey) return null;
             return (
               <rect
                 key={`hl-${l.course.id}`}
@@ -339,9 +341,10 @@ export function Forest({
           {nodes
             .filter((n) => !n.isExpanded)
             .map((n) => {
-              const cycleSelected = n.cycleId === cycleId;
+              const cycleSelected = encodeCyclePath(n.coursePath) === viewedKey;
               const layoutEntry = laneByKey.get(n.courseKey);
-              const cycName = layoutEntry ? courseName(layoutEntry.course) : n.cycleId;
+              const nodeCycleId = pathLeaf(n.coursePath).cycleId;
+              const cycName = layoutEntry ? courseName(layoutEntry.course) : nodeCycleId;
               const rowLabelText = n.isLastInLane && layoutEntry ? cycName : null;
               // The lane's ♥ bank, as glyphs — the cladogram is an <svg>, so the shared
               // <Hearts> component can't mount here; `heartsText` is the same derivation
@@ -409,7 +412,7 @@ export function Forest({
                     </text>
                   )}
                   <title>
-                    {n.cycleId} · R{n.round} · {fmtHeadlineValue(metric, valOf(n), thetaOf(n))}
+                    {nodeCycleId} · R{n.round} · {fmtHeadlineValue(metric, valOf(n), thetaOf(n))}
                     {metric !== "ability" && typeof thetaOf(n) === "number"
                       ? ` · ability θ ${thetaOf(n)!.toFixed(2)}`
                       : ""}
@@ -431,7 +434,12 @@ export function Forest({
                 accuracy={valOf(n)}
                 theta={thetaOf(n)}
                 metric={metric}
-                selected={isSelectedCandidate(candidate, n.cycleId, n.round, n.candidateId)}
+                selected={isSelectedCandidate(
+                  candidate,
+                  pathLeaf(n.coursePath).cycleId,
+                  n.round,
+                  n.candidateId,
+                )}
                 onPick={onPickCandidate}
                 dimmed={n.divergent}
                 alt={altIds.has(n.candidateId)}

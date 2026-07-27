@@ -364,7 +364,10 @@ function useCycleStreamSource(
       // descended), so the identity guard below is depth-agnostic.
       const resp = await fetchDashboardByPath(p, lastModifiedRef.current, signal);
       if (signal.aborted) return;
-      if (resp.lastModified) lastModifiedRef.current = resp.lastModified;
+      // This route validates on mtime, so the validator IS a Last-Modified date. The
+      // lineage-tree route validates on an ETag through the same helper — hence the
+      // neutral field name.
+      if (resp.validator) lastModifiedRef.current = resp.validator;
 
       // 304 — file mtime hasn't advanced since the last fetch. Skip the
       // setState entirely unless the age bucket crossed a threshold

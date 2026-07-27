@@ -4,16 +4,10 @@ import { useWorkspace } from "@/lib/workspace";
 import { useAuth } from "@/lib/auth-context";
 import { postLogout } from "@/lib/api";
 import { BRAND } from "@/lib/brand";
-import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { TERMS } from "@/lib/terms";
 import { encodeCyclePath, rootCycleId, type CyclePath } from "@/lib/ids";
-import {
-  COLLAPSED_STORAGE_KEY,
-  EMPTY_COLLAPSED,
-  buildForest,
-  collapsedCodec,
-  nodeKey,
-} from "./sidebar/grouping";
+import { useNodeToggle } from "@/lib/view-memory";
+import { buildForest, nodeKey } from "./sidebar/grouping";
 import type { TreeCtx } from "./sidebar/ForestRows";
 import { SidebarContent } from "./SidebarContent";
 
@@ -48,7 +42,7 @@ interface Props {
 // information.
 //
 // Only the tenant's own store is polled here; a course's subtree fetches on expand
-// via `useCampaignTree`.
+// via `useLineageTree` (one keyed store — a collapsed row subscribes to nothing).
 
 export function Sidebar({ onSelectPath, onNewCycle, collapsed, onToggleCollapse }: Props) {
   // Cycle list + campaign registry + active pointer + current selection all
@@ -65,13 +59,9 @@ export function Sidebar({ onSelectPath, onNewCycle, collapsed, onToggleCollapse 
     lifecycleFilter,
     setLifecycleFilter,
   } = useWorkspace();
-  // Campaign/session collapse state — nodes expand by default, so we
-  // persist the ones the operator explicitly collapsed.
-  const [collapsedNodes, setCollapsedNodes] = useLocalStorage<Set<string>>(
-    COLLAPSED_STORAGE_KEY,
-    EMPTY_COLLAPSED,
-    collapsedCodec,
-  );
+  // Expand/collapse, remembered PER CAMPAIGN (`lib/view-memory.tsx`) — the campaign a node
+  // belongs to is read off its own address, so nothing here has to carry one.
+  const nodes = useNodeToggle();
   // Dataset filter — null = all datasets. Not persisted; resets per visit.
   const [datasetFilter, setDatasetFilter] = useState<string | null>(null);
 
@@ -123,54 +113,33 @@ export function Sidebar({ onSelectPath, onNewCycle, collapsed, onToggleCollapse 
     return nodeKey("course", path);
   }, [activeCampaignId, activeCycleId]);
 
-  // The stored set is every node TOGGLED AWAY FROM ITS DEFAULT, and a course now
-  // defaults CLOSED (opening one fetches its lineage) — so expanding means ADDING
-  // the key. This deleted it while courses defaulted open; left as-is against the
-  // new default it would collapse the very row it exists to reveal.
+  // The stored set is every node TOGGLED AWAY FROM ITS DEFAULT, and a course defaults
+  // CLOSED (opening one fetches its lineage) — so revealing means ADDING the key.
+  //
+  // ONCE per (campaign, active cycle), latched on `autoExpandedFor`. Unlatched, this fires
+  // again on every sidebar remount and re-opens the very row the operator just collapsed —
+  // "we never auto-collapse; explicit collapse beats helpfulness" was the intent, but a
+  // reveal that keeps re-firing overrides an explicit collapse just as surely.
   useEffect(() => {
-    if (!focusKey) return;
-    setCollapsedNodes((prev) => {
-      if (prev.has(focusKey)) return prev;
-      const next = new Set(prev);
-      next.add(focusKey);
-      return next;
-    });
-  }, [focusKey, setCollapsedNodes]);
-
-  const toggleNode = useCallback(
-    (key: string) => {
-      setCollapsedNodes((prev) => {
-        const next = new Set(prev);
-        if (next.has(key)) next.delete(key);
-        else next.add(key);
-        return next;
-      });
-    },
-    [setCollapsedNodes],
-  );
+    if (!focusKey || !activeCampaignId || !activeCycleId) return;
+    if (nodes.autoExpandedFor(activeCampaignId) === activeCycleId) return;
+    nodes.markAutoExpanded(activeCampaignId, activeCycleId, focusKey);
+  }, [focusKey, activeCampaignId, activeCycleId, nodes]);
 
   // Everything the tree needs, at any depth. The pointer here is the TOP-LEVEL
   // store's; each inner forest overrides it with its own (a sandbox's live loop
   // is not the workspace's active session).
   const ctx: TreeCtx = useMemo(
     () => ({
-      collapsedNodes,
-      toggleNode,
+      isNodeOpen: nodes.isOpen,
+      toggleNode: nodes.toggle,
       viewedPath,
       viewedCandidateId,
       selectCyclePath: onSelectPath,
       activeCampaignId,
       activeCycleId,
     }),
-    [
-      collapsedNodes,
-      toggleNode,
-      viewedPath,
-      viewedCandidateId,
-      onSelectPath,
-      activeCampaignId,
-      activeCycleId,
-    ],
+    [nodes, viewedPath, viewedCandidateId, onSelectPath, activeCampaignId, activeCycleId],
   );
 
   // Wait for BOTH the cycle list and the campaign list for the CURRENT

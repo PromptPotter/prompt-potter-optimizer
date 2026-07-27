@@ -149,11 +149,22 @@ export function useWorkspace(): WorkspaceState {
 // RECONNECT_INTERVAL_MS so both polls retry a downed server on the same 5 s beat.
 const RECONNECT_INTERVAL_MS = 5000;
 
-// The `?path=` deep-link — one encoded CyclePath (see ids.ts). Malformed → null.
-function urlPath(): CyclePath | null {
+// The deep-link, read as ONE address. `webapp/CLAUDE.md` says the address is
+// `(path, candidateId)`, and the URL used to encode only the first half — so a reload
+// silently dropped the node the tree was parked on. Harmless-looking for an ordinary
+// course (its own path still names a node), but a FORK is not a node: its path names
+// something the server dissolved onto the parent's timeline, so a fork path with no
+// candidate names nothing at all and the bars came back empty.
+//
+// Two params rather than one encoded string: `encodeCyclePath` is also the wire format for
+// the server's `?descend=`, and a candidate has no business in that.
+function urlAddress(): { path: CyclePath; candidateId: string | null } | null {
   if (typeof window === "undefined") return null;
-  const raw = new URLSearchParams(window.location.search).get("path");
-  return raw ? decodeCyclePath(raw) : null;
+  const params = new URLSearchParams(window.location.search);
+  const path = params.get("path");
+  const decoded = path ? decodeCyclePath(path) : null;
+  if (!decoded) return null;
+  return { path: decoded, candidateId: params.get("cand") };
 }
 
 export function WorkspaceProvider({
@@ -219,9 +230,10 @@ export function WorkspaceProvider({
   // is the one place set-state-in-effect is deliberately waived.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    const deepLink = urlPath();
+    const deepLink = urlAddress();
     if (deepLink) {
-      setPinnedPath(deepLink);
+      setPinnedPath(deepLink.path);
+      setViewedCandidateId(deepLink.candidateId);
       setFollowing(false);
     }
     setInitialized(true);
@@ -341,7 +353,7 @@ export function WorkspaceProvider({
   // The viewed path: the server pointer (a top-level 1-hop cycle) while
   // following, else the explicit pin. Memoized because it is an ADDRESS, and an
   // address that changes identity every render is not one: consumers key polls,
-  // memos and callbacks on it (`useCampaignTree`, the candidates card's `onSelect` —
+  // memos and callbacks on it (`useLineageTree`, the candidates card's `onSelect` —
   // which rides the chart's `options` memo, so a fresh array here forced a
   // `chart.update()` on every 2 s pointer tick).
   const viewedPath: CyclePath | null = useMemo(
@@ -392,18 +404,22 @@ export function WorkspaceProvider({
     [cycles],
   );
 
-  // URL contract: `?path=<encoded CyclePath>` present ⇔ pinned to that address.
-  // Written only while pinned, stripped while following.
+  // URL contract: `?path=<encoded CyclePath>` (+ `?cand=<id>`) present ⇔ pinned to that
+  // address. Written only while pinned, stripped while following. BOTH halves, so a reload
+  // restores the same address rather than half of one.
   useEffect(() => {
     if (!initialized || typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
-    const want = following || !pinnedPath ? null : encodeCyclePath(pinnedPath);
-    if (params.get("path") === want) return;
-    if (want) params.set("path", want);
+    const wantPath = following || !pinnedPath ? null : encodeCyclePath(pinnedPath);
+    const wantCand = wantPath ? viewedCandidateId : null;
+    if (params.get("path") === wantPath && params.get("cand") === wantCand) return;
+    if (wantPath) params.set("path", wantPath);
     else params.delete("path");
+    if (wantCand) params.set("cand", wantCand);
+    else params.delete("cand");
     const qs = params.toString();
     window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
-  }, [initialized, following, pinnedPath]);
+  }, [initialized, following, pinnedPath, viewedCandidateId]);
 
   const selectCyclePath = useCallback(
     (path: CyclePath, candidate: string | null = null) => {

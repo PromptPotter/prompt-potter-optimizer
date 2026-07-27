@@ -139,13 +139,6 @@ export function buildForest(
   return origins;
 }
 
-// The persisted set is every node TOGGLED AWAY FROM ITS DEFAULT — so empty
-// storage means "every node as it comes," and one set covers all node kinds.
-// Keys are the node's full address, so a deep node's state survives a reload
-// exactly like a top-level one's (see nodeKey).
-export const COLLAPSED_STORAGE_KEY = "promptpotter.sidebar.collapsedNodes";
-export const EMPTY_COLLAPSED: Set<string> = new Set();
-
 // A node's stable key. `kind` separates the tiers that can share an address — a
 // declaration and its sole run — and `path` is the CyclePath-encoded address, so
 // keys are unique at any depth.
@@ -179,11 +172,7 @@ export function isNodeOpen(toggled: Set<string>, kind: NodeKind, path: string): 
   return toggled.has(nodeKey(kind, path)) ? !OPEN_BY_DEFAULT[kind] : OPEN_BY_DEFAULT[kind];
 }
 
-// A Set doesn't JSON round-trip — persist it as a string array.
-export const collapsedCodec = {
-  serialize: (s: Set<string>) => JSON.stringify([...s]),
-  deserialize: (raw: string): Set<string> => {
-    const parsed = JSON.parse(raw);
-    return new Set(Array.isArray(parsed) ? parsed : []);
-  },
-};
+// The toggled set is every node TOGGLED AWAY FROM ITS DEFAULT — so an empty set means
+// "every node as it comes," and one set covers all node kinds. Persistence is PER CAMPAIGN
+// (`lib/view-memory.tsx`); the keys were always campaign-partitioned by their address, so
+// the one global blob that used to hold them was sharing for no reason.

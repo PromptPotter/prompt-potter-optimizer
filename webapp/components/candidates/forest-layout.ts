@@ -17,7 +17,8 @@
 // one right of THAT candidate — the served tree's own shape answers it.
 
 import type { LineageDivergence, LineageNode } from "@/lib/api";
-import { candidatesOf, nodeKeyOf } from "@/lib/derivations";
+import { candidatesOf, nodeKeyOf, pathOf } from "@/lib/derivations";
+import type { CyclePath } from "@/lib/ids";
 
 // Cladogram dimensions. Each round is one column; each course gets its own
 // horizontal lane (one row collapsed, N rows expanded).
@@ -162,8 +163,11 @@ export interface RoundNodePos {
   // The lane this node sits on — `nodeKeyOf(course)`, the address. Every MAP is keyed
   // on this, never on `cycleId`: inner cycle ids repeat across sibling sandboxes.
   courseKey: string;
-  // The lane's cycle id — for SELECTION and display, which name a cycle. Not a key.
-  cycleId: string;
+  // The course's ADDRESS, read off the node. Selection and navigation both ride this:
+  // a bare cycle id cannot name a course (inner ids repeat across sibling sandboxes), and
+  // publishing one here is what made a forest click pin a path that named the wrong run.
+  // The display id is `pathLeaf(coursePath).cycleId` — derived, never a second field.
+  coursePath: CyclePath;
   round: number;
   col: number;
   x: number;
@@ -218,7 +222,7 @@ function placedNode(
 ): RoundNodePos {
   return {
     courseKey: nodeKeyOf(l.course),
-    cycleId: l.course.id,
+    coursePath: pathOf(l.course),
     round: cand.round ?? 0,
     col: l.baseCol + (cand.round ?? 0),
     x,

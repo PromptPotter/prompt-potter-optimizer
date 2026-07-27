@@ -2,29 +2,34 @@
 //
 // At L4 a "sample" is not a scored row — it is a whole inner campaign. The outer
 // round file records one result per panel cell, carrying the cell's name in
-// `query` (`justlogic-d23/seed-0`) and nothing else worth rendering: `is_hit` is
-// null, `predicted`/`ground_truth` are empty. The measurement it stands for lives
-// in the sandbox, as a campaign of its own.
+// `query` (`justlogic-d23/seed-0`) and nothing else worth rendering; the
+// measurement it stands for lives in the sandbox, as a campaign of its own.
 //
 // The join is the served tree's own edge — the course filed under the candidate —
-// so BOTH halves come from one namespace. Reading the runs' `spawned_by` stamps
-// instead got the fork case wrong: a fork's cells are stamped with the fork's
-// PRIVATE counter (`C1.1`), while the timeline they render on renumbers them
-// (`C1.4`). The tree does that renumbering; a raw stamp cannot.
+// so both halves come from one namespace. KEYED ON `course_label`, NOT `label`:
+// the rows joined against come from the LEAF's per-cycle `dashboard.json`, which
+// speaks the minting course's private counter — see `course_label` on the
+// generated `LineageNode` type for the full argument.
 //
 // A cell whose run carries no `task` has no key and drops out of the lookup — an
 // interrupted mint writes no provenance, and a wrong join is worse than an absent
 // one. The row still renders, saying so.
 
 import type { LineageNode } from "@/lib/api";
-import { candidatesOf, childCourses } from "./lineage-candidates";
+import type { CyclePath } from "@/lib/ids";
+import { candidatesAtPath, childCourses } from "./lineage-candidates";
 
-// `(candidate_label, cell)` → the inner run that measured it, over one course's timeline.
-export function innerPanelIndex(course: LineageNode | null): ReadonlyMap<string, LineageNode> {
+// `(course_label, cell)` → the inner run that measured it, over the timeline of the course
+// at `path` inside the one served `tree`.
+export function innerPanelIndex(
+  tree: LineageNode | null,
+  path: CyclePath | null,
+): ReadonlyMap<string, LineageNode> {
   const m = new Map<string, LineageNode>();
-  for (const cand of candidatesOf(course ?? undefined)) {
+  if (!tree || !path) return m;
+  for (const cand of candidatesAtPath(tree, path)) {
     for (const run of childCourses(cand)) {
-      if (run.task) m.set(panelCellKey(cand.label, run.task), run);
+      if (run.task) m.set(panelCellKey(cand.course_label, run.task), run);
     }
   }
   return m;

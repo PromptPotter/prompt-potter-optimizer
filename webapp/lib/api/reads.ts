@@ -14,6 +14,7 @@ import type {
   HardSamplesScope,
   LineageNode,
   MeasurementSeriesResponse,
+  RayResponse,
 } from "./types";
 
 export function fetchActive(signal?: AbortSignal): Promise<ActiveSessionResponse> {
@@ -603,22 +604,21 @@ export function fetchChampionRegistry(signal?: AbortSignal): Promise<ChampionReg
 // candidate) already reaches every one of them. `/campaigns` + `/cycles` stay the
 // flat registry the sidebar groups by.
 //
-// Conditional, like the dashboard poll: the unmasked request honors
-// `If-Modified-Since` → 304 so revalidation on the dashboard change-signal is
-// cheap during quiescent stretches. A masked request (lens/samples set) always
-// computes server-side — the server never 304s those.
+// Conditional on an **ETag**, not a date: the validator covers the lens/samples mask
+// as well as the subtree mtime, so a MASKED read gets its own 304 instead of
+// recomputing the whole tree on every poll while a lens is open.
+//
+// There is no `depth`: one tree per campaign serves every consumer, and the recursion
+// bound is the server's (`lineage_views._MAX_COURSE_DEPTH`). Two clients picking
+// different depths for the same served object is what let them disagree.
+//
 // `path` addresses the ROOT COURSE of the tree — the same CyclePath every other
 // path-addressed read uses, so an L4 inner course's tree rides `?descend=` through
 // the one URL builder rather than a second convention.
 export function fetchLineageTree(
   path: CyclePath,
-  opts: {
-    lens?: string | null;
-    samples?: number[] | null;
-    // Course-levels to expand — the caller's cost dial.
-    depth?: number;
-  } = {},
-  ifModifiedSince?: string | null,
+  opts: { lens?: string | null; samples?: number[] | null } = {},
+  etag?: string | null,
   signal?: AbortSignal,
 ): Promise<Conditional<LineageNode>> {
   // One `lens` value drives the counterfactual: `score:<formula>` = an alternative
@@ -626,16 +626,39 @@ export function fetchLineageTree(
   // `samples` = the sample-set mask (re-score accuracy over only these ids); it
   // composes with a `score:` lens and is ignored for an `abort:` lens. Both land
   // ON the node they describe — there is no parallel array to re-join.
-  const { lens = null, samples = null, depth } = opts;
+  const { lens = null, samples = null } = opts;
   const params = new URLSearchParams();
   if (lens) params.set("lens", lens);
   if (samples && samples.length > 0) params.set("samples", samples.join(","));
-  if (depth != null) params.set("depth", String(depth));
   const q = params.toString();
   return jgetConditional<LineageNode>(
     cyclePathUrl(path, `/tree${q ? `?${q}` : ""}`),
-    ifModifiedSince,
+    etag,
     signal,
+    "etag",
+  );
+}
+
+// THE CHRONOLOGY — one merged order across a course, its forks and its inner runs; also
+// the replay endpoint (the SSE tail seeks to EOF and has no `since=`). Not a second
+// `/tree`: genealogy vs sequence — see webapp/CLAUDE.md § "/ray is the CHRONOLOGY".
+// Windowed newest-first, delivered oldest-first; `before` = a prior `cursor_prev`.
+export function fetchTimeRay(
+  path: CyclePath,
+  opts: { limit?: number; before?: string | null } = {},
+  etag?: string | null,
+  signal?: AbortSignal,
+): Promise<Conditional<RayResponse>> {
+  const { limit = null, before = null } = opts;
+  const params = new URLSearchParams();
+  if (limit != null) params.set("limit", String(limit));
+  if (before) params.set("before", before);
+  const q = params.toString();
+  return jgetConditional<RayResponse>(
+    cyclePathUrl(path, `/ray${q ? `?${q}` : ""}`),
+    etag,
+    signal,
+    "etag",
   );
 }
 

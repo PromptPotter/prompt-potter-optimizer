@@ -89,8 +89,8 @@ never a fabricated score); the API-edge selector is `_resolve_verdict(lens)` in
 `presentation/api/routers/campaigns/cycles.py`, which serves the tree (**one** `lens`
 query param: `score:<formula>` | `abort:<variant>`; `samples=` composes with a `score:`
 lens; the assembly rules live in `store/lineage_views.py`); the webapp reads one fetch
-via `LineageOverlayProvider`
-(`webapp/lib/lineage-overlay.tsx`), rendered, never recomputed. Two verdicts are
+via `LineageProvider`
+(`webapp/lib/lineage.tsx`), rendered, never recomputed. Two verdicts are
 live: **scoring** (re-elected leader under a swapped formula ≠ `is_winner`; the
 only verdict with a value face) and **abort** (`make_abort_verdict(suppress)` —
 did a suppressed PoBB contributor fire, read off `elimination_context`; names no

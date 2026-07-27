@@ -5,7 +5,6 @@ import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
 import { shortFamilyTail } from "@/lib/ids";
 import { fmtPct0 } from "@/lib/format";
-import { setCandidatesState } from "./candidates-store";
 import { CleanupConfirmModal } from "./CleanupConfirmModal";
 import { Forest } from "./Forest";
 import { IconBroom } from "./toolbar-icons";
@@ -33,6 +32,7 @@ export function ForestCard() {
     metric,
     expanded,
     onLaneActivate,
+    setShowForest,
     totalDescendants,
     viewedHasRounds,
     isInheritedSibling,
@@ -67,7 +67,7 @@ export function ForestCard() {
             className="forest-close"
             aria-label="Close the lineage forest"
             title="Close"
-            onClick={() => setCandidatesState({ showForest: false })}
+            onClick={() => setShowForest(false)}
           >
             ×
           </button>
@@ -84,14 +84,11 @@ export function ForestCard() {
             {tree && (
               <Forest
                 tree={tree}
-                campaignId={campaignId ?? ""}
-                cycleId={cycleId}
                 valueByKey={valueByKey}
                 thetaByKey={thetaByKey}
                 metric={metric}
                 expanded={expanded}
                 onLaneActivate={onLaneActivate}
-                onSelectCycle={onSelectCycle}
               />
             )}
           </div>

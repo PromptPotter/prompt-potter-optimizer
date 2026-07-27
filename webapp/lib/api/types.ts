@@ -42,6 +42,8 @@ export type {
   NodeOutputSchema,
   OuterCellEffect,
   OuterVerdict,
+  RayItem,
+  RayResponse,
   RoundResult,
   RoundSummary,
   RoundSummaryCandidate,

@@ -7,7 +7,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { useEffectiveRound } from "@/lib/hooks/useEffectiveRound";
 import { useRoundSource } from "@/lib/hooks/useRoundSource";
 import { useRoundCandidates } from "@/lib/hooks/useRoundCandidates";
-import { useCampaignTree } from "@/lib/hooks/useCampaignTree";
+import { useViewedLineage } from "@/lib/lineage";
 import { innerPanelIndex, pathOf, samplesForRow } from "@/lib/derivations";
 import type { LineageNode } from "@/lib/api";
 import type { CandidateRow, SampleRow } from "@/lib/types";
@@ -32,11 +32,17 @@ export function RoundSamplesView() {
   // tally every null `is_hit` as a MISS. The declaration is the honest input; the
   // tree answers which run measured which cell, not what kind of course this is.
   const { viewedPath, leafCycleId, leafIsL4: isL4, drillInto } = useWorkspace();
-  // The viewed course's served tree — the runs filed under its candidates. Rooted at
-  // the VIEWED path, not the campaign root: a fork renders its own timeline, and its
-  // candidates wear its own labels, which is what the bars below are keyed on.
-  const { root } = useCampaignTree(viewedPath ?? [], isL4 && viewedPath != null);
-  const panel = useMemo(() => innerPanelIndex(root), [root]);
+  // The ONE served tree, addressed at the viewed course. It is rooted at the CAMPAIGN,
+  // so `innerPanelIndex` addresses into it by path rather than reading its top-level
+  // children — and it keys on `course_label`, the minting course's private position, which
+  // is what the rows below (read from the leaf's own `dashboard.json`) speak. A fork's
+  // attempts are renumbered onto the campaign timeline; that renumbering is exactly why
+  // the label the bars carry and the label the rows carry are two different strings.
+  const { tree } = useViewedLineage();
+  const panel = useMemo(
+    () => innerPanelIndex(isL4 ? tree : null, viewedPath),
+    [isL4, tree, viewedPath],
+  );
   const openRun = (run: LineageNode): void => {
     const at = pathOf(run).at(-1);
     if (at) drillInto(at.campaignId, at.cycleId);

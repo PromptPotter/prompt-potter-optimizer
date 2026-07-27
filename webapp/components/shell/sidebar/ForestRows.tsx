@@ -12,8 +12,7 @@
 // this course's timeline wearing the ⑂ stamp and its own `path`.
 
 import { cx } from "@/lib/cx";
-import { useSelection } from "@/lib/SelectionContext";
-import { isSelectedCandidate } from "@/lib/types";
+import { useSelectNode } from "@/lib/hooks/useSelectNode";
 import { campaignDisplayName } from "@/lib/names";
 import { fmtPct0 } from "@/lib/format";
 import { runPhaseLabel } from "@/lib/run-phase";
@@ -26,8 +25,8 @@ import {
 } from "@/lib/derivations";
 import { encodeCyclePath, shortFamilyTail, type CyclePath } from "@/lib/ids";
 import type { CampaignSummary, LineageNode } from "@/lib/api";
-import { useCampaignTree, type CampaignTree } from "@/lib/hooks/useCampaignTree";
-import { isNodeOpen, nodeKey } from "./grouping";
+import { useLineageTree, type CampaignTree } from "@/lib/lineage";
+import type { NodeKind } from "./grouping";
 import type { OriginGroup, RunGroup } from "./grouping";
 import { CampaignMenu } from "./CampaignMenu";
 import { RowHoverCard } from "./RowHoverCard";
@@ -35,8 +34,12 @@ import { RowHoverCard } from "./RowHoverCard";
 // What every row needs to render itself and answer clicks. Threaded down rather than
 // context'd so the tree stays a pure function of its props.
 export interface TreeCtx {
-  collapsedNodes: Set<string>;
-  toggleNode: (key: string) => void;
+  // Expand/collapse, resolved per campaign by the view-memory provider. Functions rather
+  // than a Set because the Set had to be GLOBAL to be passed as one value — and that is the
+  // only reason one campaign's toggles ever shared a blob with another's. The campaign is
+  // read off each node's own address.
+  isNodeOpen: (kind: NodeKind, path: string) => boolean;
+  toggleNode: (kind: NodeKind, path: string) => void;
   // The viewed address. `viewedPath` names the course; `viewedCandidateId` the node inside
   // it, or null for the course itself. Both are read off the node that was clicked —
   // nothing builds an address.
@@ -50,7 +53,7 @@ export interface TreeCtx {
 }
 
 function courseOpen(ctx: TreeCtx, path: CyclePath): boolean {
-  return isNodeOpen(ctx.collapsedNodes, "course", encodeCyclePath(path));
+  return ctx.isNodeOpen("course", encodeCyclePath(path));
 }
 
 export function ForestRows({
@@ -78,7 +81,7 @@ function OriginRow({ origin, at, ctx }: { origin: OriginGroup; at: CyclePath; ct
   if (origin.runs.length === 1) return <RunRow run={origin.runs[0]!} at={at} ctx={ctx} />;
 
   const addr = `${encodeCyclePath(at)}|${origin.originId}`;
-  const open = isNodeOpen(ctx.collapsedNodes, "org", addr);
+  const open = ctx.isNodeOpen("org", addr);
 
   return (
     <>
@@ -86,7 +89,7 @@ function OriginRow({ origin, at, ctx }: { origin: OriginGroup; at: CyclePath; ct
         <button
           type="button"
           className="unit-library-twist"
-          onClick={() => ctx.toggleNode(nodeKey("org", addr))}
+          onClick={() => ctx.toggleNode("org", addr)}
           aria-label={open ? "Collapse" : "Expand"}
           aria-expanded={open}
           tabIndex={-1}
@@ -130,7 +133,7 @@ function shortOrigin(originId: string): string {
 function RunRow({ run, at, ctx }: { run: RunGroup; at: CyclePath; ctx: TreeCtx }) {
   const { campaign, root } = run;
   const rootPath: CyclePath = [...at, { campaignId: root.campaign_id, cycleId: root.cycle_id }];
-  const tree = useCampaignTree(rootPath, courseOpen(ctx, rootPath));
+  const tree = useLineageTree(rootPath, courseOpen(ctx, rootPath));
 
   return (
     <CourseRow
@@ -215,7 +218,7 @@ function CourseRow({
       <button
         type="button"
         className="unit-library-twist"
-        onClick={() => ctx.toggleNode(nodeKey("course", addr))}
+        onClick={() => ctx.toggleNode("course", addr)}
         aria-label={open ? "Collapse" : "Expand"}
         aria-expanded={open}
         tabIndex={-1}
@@ -299,7 +302,7 @@ function CourseRow({
           {tree.loaded && rows.length === 0 && <li className="inner-library-empty">Never ran</li>}
           {rows.map((cand) => (
             <li key={cand.id}>
-              <CandidateRow cand={cand} siblings={rows} tree={tree} ctx={ctx} />
+              <CandidateRow cand={cand} siblings={rows} tree={tree} ctx={ctx} timeline={path} />
             </li>
           ))}
         </ul>
@@ -322,16 +325,21 @@ function CandidateRow({
   siblings,
   tree,
   ctx,
+  timeline,
 }: {
   cand: LineageNode;
   siblings: readonly LineageNode[];
   tree: CampaignTree;
   ctx: TreeCtx;
+  // The course whose TIMELINE this row renders on — not necessarily the course that minted
+  // the candidate. They differ for a fork's contribution, and that difference is what
+  // deselecting has to land on (see `pick`).
+  timeline: CyclePath;
 }) {
   const inner = childCourses(cand);
   const candPath = pathOf(cand);
   const addr = `${encodeCyclePath(candPath)}|${cand.id}`;
-  const open = isNodeOpen(ctx.collapsedNodes, "cand", addr);
+  const open = ctx.isNodeOpen("cand", addr);
   const hasChildren = inner.length > 0;
   const isOrigin = cand.label === "C0";
   const cutFrom = cutFromLabel(cand, siblings);
@@ -340,25 +348,12 @@ function CandidateRow({
   // achievement, and badging C0 "won" put two winners on one course.
   const contested = siblings.filter((s) => (s.round ?? 0) === (cand.round ?? 0)).length > 1;
 
-  const { candidate, setSelectionForCandidate } = useSelection();
+  // The navigate+inspect pair lives in `useSelectNode` — the time-ray fires the same
+  // gesture on a candidate step, and both have to resolve the measurement off the node
+  // rather than supply one.
   const cycleId = candPath[candPath.length - 1]!.cycleId;
-  const selected = isSelectedCandidate(candidate, cycleId, cand.round ?? 0, cand.id);
-  const pick = (): void => {
-    // The address, read straight off the node — its own `path` and its own `id`.
-    ctx.selectCyclePath(candPath, selected ? null : cand.id);
-    setSelectionForCandidate(
-      selected
-        ? null
-        : {
-            cycle_id: cycleId,
-            round: cand.round ?? 0,
-            candidate_id: cand.id,
-            label: cand.label,
-            accuracy: cand.accuracy,
-            is_winner: cand.is_winner,
-          },
-    );
-  };
+  const { isPicked, pick } = useSelectNode(ctx.selectCyclePath);
+  const selected = isPicked(cand);
 
   const description = isOrigin
     ? "C0 — this course's ORIGIN: the specification it started from, measured. Selects it; the ▶ twist expands what measured it."
@@ -373,7 +368,7 @@ function CandidateRow({
           <button
             type="button"
             className="unit-library-twist"
-            onClick={() => ctx.toggleNode(nodeKey("cand", addr))}
+            onClick={() => ctx.toggleNode("cand", addr)}
             aria-label={open ? "Collapse" : "Expand"}
             aria-expanded={open}
             disabled={!hasChildren}
@@ -384,7 +379,7 @@ function CandidateRow({
           <button
             type="button"
             className="unit-library-item candidate-label"
-            onClick={pick}
+            onClick={() => pick(cand, timeline)}
             aria-pressed={selected}
           >
             <span className="unit-library-row">
