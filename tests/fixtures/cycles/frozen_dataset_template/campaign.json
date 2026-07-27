@@ -15,7 +15,6 @@
         },
         "elimination": {
           "epsilon_elimination": true,
-          "margin_elimination": true,
           "degradation_fatal_fastpath": true,
           "leader_lock_in": false
         }

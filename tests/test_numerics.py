@@ -25,7 +25,6 @@ import pytest
 
 from promptpotter.application.intelligence.exploration import (
     Observation,
-    candidate_lcb_ability,
     discovered_level_trajectory,
     fit_rasch,
     fit_rasch_2pl,
@@ -239,7 +238,7 @@ def test_an_unmeasured_term_is_never_scored_as_zero() -> None:
     # 0/N (or an all-excluded round) hands ``compute_composite_fitness`` no rows. It records the
     # 0.0 floor with ``total`` 0 — the no-evidence marker that keeps the candidate out of winner
     # election — rather than run the fail-loud scorer and halt the whole cycle.
-    empty = compute_composite_fitness([], _single_node_schema())
+    empty = compute_composite_fitness([], _single_node_schema(), opt_sp=None)
     assert empty["composite_fitness"] == 0.0
     assert empty["accuracy"] == 0.0
     assert empty["total"] == 0
@@ -408,7 +407,7 @@ def test_composite_fitness_matches_default_formula():
     # block, not folded into fitness.
     schema = _single_node_schema()
     results = [_eval_result(score=1.0, total_time=100), _eval_result(score=0.0, total_time=200)]
-    scored = compute_composite_fitness(results, schema)
+    scored = compute_composite_fitness(results, schema, opt_sp=None)
     assert scored["composite_fitness"] == pytest.approx(scored["accuracy"], abs=1e-9)
     assert scored["composite_fitness"] == pytest.approx(0.5, abs=1e-4)
 
@@ -784,6 +783,32 @@ def test_fit_theta_given_delta_is_subset_invariant_unlike_accuracy() -> None:
     ghost = fit_theta_given_delta([Observation("ghost", 99, True)], ruler)
     assert "ghost" in ghost and ghost["ghost"][0] > 0.0
 
+    # θ_se carries the quasi-likelihood dispersion correction. `Observation.response` is a GRADED
+    # fitness, not a coin flip — a ranked-table answer at position 5 of 20, or the L4 outer
+    # composite — and a graded response varies far less about its mean than Bernoulli assumes.
+    # Measured against the true sampling spread of θ̂ at n=28: ×1.02 on binary, ×1.51 on
+    # reciprocal-rank, ×4.66 on the L4 outer. That inflation is what left the outer election
+    # unable to crown and PoBB unable to eliminate. SILENT: every gate reads a real signal as
+    # noise, the run completes, and the loop reports "no candidate separated".
+    graded = [Observation("g", sid, 0.5 + 0.02 * i) for i, sid in enumerate(easy * 6)]
+    spread = [Observation("b", sid, float(i % 2)) for i, sid in enumerate(easy * 6)]
+    assert (
+        fit_theta_given_delta(graded, ruler)["g"][1] < fit_theta_given_delta(spread, ruler)["b"][1]
+    )
+
+    # ...and it must NOT move binary data: φ ≈ 1 there, so a dichotomous dataset is unchanged.
+    # A correction that quietly re-scaled every existing campaign's SE would be the same class
+    # of silent harm in the other direction.
+    binary = measure("bin", 0.8, easy, n=60)
+    p_hat = 1.0 / (1.0 + np.exp(-(fit_theta_given_delta(binary, ruler)["bin"][0] - (-2.0))))
+    bern_se = 1.0 / np.sqrt(len(binary) * p_hat * (1 - p_hat) + 1 / 1.5**2)
+    assert abs(fit_theta_given_delta(binary, ruler)["bin"][1] - bern_se) < 0.15 * bern_se
+
+    # A response with NO residual spread carries no evidence about its own dispersion; the φ
+    # floor stops that silence from being read as infinite confidence (SE → 0 ⇒ every gate fires).
+    flat = [Observation("f", sid, 0.5) for sid in easy * 6]
+    assert fit_theta_given_delta(flat, ruler)["f"][1] > 0.1
+
 
 def test_ruler_expected_accuracy_refuses_subset_inflation() -> None:
     # RP-2 (L4 proxy honesty). The outer meta-fitness reads inner improvement as
@@ -811,59 +836,55 @@ def test_discovered_level_trajectory_is_honest_single_scale() -> None:
     # so a mis-built level is invisible — the run looks fine and the meta-fitness is wrong.
     ruler = {1: -1.0, 2: 0.0, 3: 1.0}
     origin_theta = 0.0
-    origin_ability = ruler_expected_accuracy(origin_theta, ruler)
-    assert origin_ability is not None
 
-    # Winner's-curse guard: a high-θ but high-SE candidate is discounted below its point θ,
-    # so a meta-prompt that makes the inner search FLAIL (high variance) can't win on luck.
-    lcb = candidate_lcb_ability(1.0, 0.8, ruler)
-    point = ruler_expected_accuracy(1.0, ruler)
-    assert lcb is not None and point is not None and lcb < point
-    assert candidate_lcb_ability(None, 0.2, ruler) is None  # no θ → no level
-    assert candidate_lcb_ability(1.0, None, ruler) is None  # no SE → no level
-
-    # F4 — discovery, not crowning: a round with a strong low-SE candidate lifts the level
-    # ABOVE origin even though the function never sees (needs) a crowned-winner flag.
+    # LOGITS, not expected accuracy. θ and the ruler's δ share one INTERVAL scale — the point of
+    # fitting Rasch at all — so an identical Δθ must read as an identical gain wherever the origin
+    # sits. Projecting each θ back through the ruler's sigmoid before differencing compressed the
+    # gain near the ceiling, so the strong-origin arm scored less for the same ability climb.
+    # SILENT: the outer ranks meta-prompts partly by which seed happened to draw an easy origin.
     o_lvl, levels = discovered_level_trajectory(origin_theta, [[(0.0, 0.2), (1.2, 0.2)]], ruler)
-    assert o_lvl is not None and abs(o_lvl - origin_ability) < 1e-9 and levels[0] > o_lvl
+    assert o_lvl == origin_theta
+    low_o, low = discovered_level_trajectory(-1.0, [[(-0.5, 0.2)]], ruler)
+    high_o, high = discovered_level_trajectory(1.5, [[(2.0, 0.2)]], ruler)
+    assert low_o is not None and high_o is not None
+    assert low[0] - low_o == pytest.approx(high[0] - high_o) == pytest.approx(0.5)
+
+    # MEAN of the round's candidates, not the max. A max over ~16 candidates at an inner
+    # θ_se ≈ 0.42 is an order statistic: it reads a lift above origin even when every candidate
+    # sits AT origin, and its spread across arms tracks the luckiest draw rather than the
+    # meta-prompt. SILENT: the outer optimizes a bias that is the same size as its own signal.
+    assert levels == [pytest.approx(0.6)]  # mean of {0.0, 1.2}, not the 1.2 max
+
+    # ...and the half a max cannot express at all: a peak followed by a collapse must read LOWER
+    # than a sustained peak. Under a cumulative max the two are byte-identical, so a meta-prompt
+    # that destroys the inner loop after one good round scored as its best round forever.
+    _, spike = discovered_level_trajectory(origin_theta, [[(1.2, 0.2)], [(-2.0, 0.2)]], ruler)
+    _, held = discovered_level_trajectory(origin_theta, [[(1.2, 0.2)], [(1.2, 0.2)]], ruler)
+    assert spike[1] < spike[0] and sum(spike) < sum(held)
 
     # SUBSET-INVARIANCE — the whole reason nothing here reads raw accuracy. θ is stamped onto
     # ELECTABLE candidates only, so a θ-less arm is one PoBB eliminated on a SHORT subset.
     # Reading its raw Wilson-LB instead put origin (full bank, n=24) and candidate (n=5) on
     # bounds whose WIDTH differs, so a candidate that merely MATCHED origin scored ~-0.1..-0.3
     # — a regression nobody committed, live on 4 of 11 real L4 cells. A θ-less candidate is
-    # skipped; a round of only such candidates discovered nothing and carries the prior level.
+    # skipped; a round of only such candidates measured nothing and carries the PRIOR ability.
     # SILENT: the outer optimizer steers away from meta-prompts that never regressed, and
     # toward whichever ones happened to survive elimination long enough to be scored.
     o2, lv2 = discovered_level_trajectory(origin_theta, [[(None, None)]], ruler)
     assert o2 is not None and lv2 == [o2]  # no evidence ⇒ no movement, NOT a phantom negative
+    _, carried = discovered_level_trajectory(origin_theta, [[(1.0, 0.2)], [(None, None)]], ruler)
+    assert carried == [pytest.approx(1.0), pytest.approx(1.0)]
 
-    # F5 — regression preserved: a round whose only candidates are worse-than-origin yields a
-    # level BELOW origin (a negative delta the outer steers away from), NOT floored at origin.
+    # Regression preserved: a round whose only candidates are worse-than-origin yields an ability
+    # BELOW origin (a negative delta the outer steers away from), NOT floored at origin.
     o3, lv3 = discovered_level_trajectory(origin_theta, [[(-2.0, 0.2)]], ruler)
     assert o3 is not None and lv3[0] < o3
 
-    # Thin-inner-budget signal survival (the identical-θ degeneracy fix). At production-scale
-    # θ_se≈0.6 a REAL inner lift (θ=0.4) is SMALLER than a full SE, so the old full-θ_se haircut
-    # projected θ−0.6=−0.2 BELOW origin → discovered level floored at origin → outer delta 0 →
-    # degenerate outer θ (p_best all 0.5). The residual fractional discount must keep a below-SE
-    # lift ABOVE origin so a genuine signal survives to be pooled (the guard is the outer
-    # election, not this thin per-inner-campaign proxy). SILENT: the outer optimizes a floored 0.
-    assert ruler_expected_accuracy(0.4 - 0.6, ruler) < origin_ability  # what a FULL SE floored to
-    _, lv6 = discovered_level_trajectory(origin_theta, [[(0.4, 0.6)]], ruler)
-    assert lv6[0] > origin_ability  # fix: the below-SE lift now clears origin
-    below_point = candidate_lcb_ability(0.4, 0.6, ruler)
-    point_04 = ruler_expected_accuracy(0.4, ruler)
-    assert below_point is not None and point_04 is not None and below_point < point_04
-
-    # Cumulative / monotone: a strong round then a weak round keeps the best DISCOVERED so far.
-    _, lv4 = discovered_level_trajectory(origin_theta, [[(1.2, 0.2)], [(-2.0, 0.2)]], ruler)
-    assert lv4[1] == lv4[0] > origin_ability
-
-    # An origin with NO ability on the ruler (every row errored, or a cold ruler) is a floor
-    # nobody measured. Standing its Wilson-LB over zero hits (0.0) in its place read every round
-    # as an enormous lift over nothing; `None` makes the caller EXCLUDE the cycle instead
-    # (`_no_evidence_reason`). SILENT: a dead inner campaign crowned as the round's best.
+    # An origin that was never fit, or a COLD ruler, yields `(None, [])` so the caller EXCLUDES
+    # the cycle (`_no_evidence_reason`). Cold matters on its own: `fit_theta_given_delta` puts
+    # every sample at δ=0 there, so θ collapses to that round's logit-accuracy and stops being
+    # subset-invariant — differencing it across rounds compares two different scales.
+    # SILENT: a dead inner campaign differenced against an invented floor reads as a huge lift.
     assert discovered_level_trajectory(None, [[(1.0, 0.2)]], ruler) == (None, [])
     assert discovered_level_trajectory(origin_theta, [[(1.0, 0.2)]], {}) == (None, [])
 
@@ -879,15 +900,23 @@ def _fake_inner_round(
     parse_failure: str | None = None,
     no_op: int = 0,
     dup: int = 0,
+    collapsed: int = 0,
 ) -> SimpleNamespace:
     """A RoundResult stand-in carrying only the fields ``compute_outer_proxies`` reads.
 
     A parse failure yields ZERO candidates by construction (``l1_generate`` returns ``[]``),
     so it is modelled on the round, never on a candidate — no ``ScoredCandidate`` can carry
     a ``meta_prompt_parse_failure``.
+
+    ``collapsed`` makes that many candidates answer ONE label to every sample (the constant
+    answerer ``_answer_collapse_rate`` charges). The truth list repeats deliberately: with as
+    many distinct truths as rows the answer space reads as identity-keyed and no collapse is
+    detectable — which is exactly the guard that keeps an L4 OUTER round, whose ground truths
+    are per-seed tokens, from being called collapsed.
     """
     if parse_failure:
         candidates_scored = 0
+    truth = ["TRUE", "FALSE", "TRUE", "FALSE"]
     return SimpleNamespace(
         round=rnd,
         improved=improved,
@@ -899,6 +928,12 @@ def _fake_inner_round(
             SimpleNamespace(validation_failures=[], runtime_failures=[])
             for _ in range(candidates_scored)
         ],
+        all_candidate_results={
+            f"c{i}": [
+                {"predicted": "Uncertain" if i < collapsed else t, "ground_truth": t} for t in truth
+            ]
+            for i in range(candidates_scored)
+        },
         l1_n_no_op=no_op,
         l1_n_duplicate=dup,
         l1_n_repeat=0,
@@ -952,11 +987,13 @@ def test_compute_proxies_composed_fitness_discriminates() -> None:
     # shape reappearing here (a declared target, or the room `max(origin, 1-origin)`) fails
     # loudly on these two pins.
     assert px["first_round_delta"] == pytest.approx(0.10)
-    assert px["after_N_rounds_delta"] == pytest.approx(0.25)
+    # MEAN over the trajectory, not max: mean(0.40, 0.55) - 0.30. A max would read 0.25 here
+    # and would be identical for a cycle that peaked at 0.55 then collapsed back to origin.
+    assert px["after_N_rounds_delta"] == pytest.approx(0.175)
     assert px["cleanliness"] == pytest.approx(1.0)
     assert px["diversity_health"] == pytest.approx(1.0)
     assert px["rounds_improved_frac"] == pytest.approx(1.0)
-    assert px["delta_per_dollar"] == pytest.approx(0.25 / 0.03)
+    assert px["delta_per_dollar"] == pytest.approx(0.175 / 0.03)
 
     # Same lift, but round 1 is warning-riddled and round 2 mode-collapses → quality drops.
     dirty = _fake_inner_result(
@@ -1073,6 +1110,29 @@ def test_compute_proxies_excludes_tooling_failures_from_cleanliness() -> None:
         compute_outer_proxies(failed_tooling)
 
 
+def test_constant_answer_collapse_dirties_a_round_that_scored_perfectly_clean() -> None:
+    # SILENT wrong-score, and the one the health rates structurally could not see. Every other
+    # term in `_round_problem_rate` counts PLUMBING — degraded transport, unscoreable results,
+    # self-heals — so a candidate emitting perfectly-formed constant garbage trips none of them.
+    # Measured live on `justlogic-d234__c4d832` round 2: BOTH candidates answered "Uncertain" to
+    # all 8 samples with `error_category: none`, and the round scored degraded_rate 0.0 /
+    # no_result 0 / structural 0 — a flawless 1.0 cleanliness for a round in which nothing was
+    # actually answered. Nothing errors; the meta-prompt that induced the collapse simply pays
+    # nothing for it, which is how a campaign that collapsed early out-ranked one that stayed
+    # alive and accumulated real observations.
+    from promptpotter.domain.l4.proxies import compute_outer_proxies
+
+    healthy = _fake_inner_result([0.40, 0.55], 0.30, [_fake_inner_round(1), _fake_inner_round(2)])
+    assert compute_outer_proxies(healthy).cleanliness == pytest.approx(1.0)
+
+    # One of round 1's two candidates collapses. The magnitude is not the contract — only that a
+    # collapsed arm can no longer be scored as a clean round.
+    collapsed = _fake_inner_result(
+        [0.40, 0.55], 0.30, [_fake_inner_round(1, collapsed=1), _fake_inner_round(2)]
+    )
+    assert compute_outer_proxies(collapsed).cleanliness < 1.0
+
+
 def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
     # SILENT wrong-score. Every aggregate here is TOTAL on an empty input (`_mean([])` is 0.0),
     # so a cycle that never ran an L1 round scores `cleanliness = diversity_health = 1.0` — an
@@ -1144,7 +1204,7 @@ def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
     # ...and a cycle that DID produce evidence still scores, on the same predicate.
     ok = _fake_inner_result([0.40, 0.55], 0.30, [_fake_inner_round(1), _fake_inner_round(2)])
     ok_px = compute_outer_proxies(ok)
-    assert ok_px.after_N_rounds_delta == pytest.approx(0.25)
+    assert ok_px.after_N_rounds_delta == pytest.approx(0.175)
 
 
 def test_unmeasured_cost_never_scores_as_maximal_efficiency() -> None:
@@ -1210,11 +1270,11 @@ def test_efficiency_divides_by_incurred_cost_not_the_bill() -> None:
         _fake_inner_result([0.40, 0.55], 0.30, rounds, cost=0.03, billed=0.03)
     ).model_dump()
     assert replayed == paid
-    assert replayed["delta_per_dollar"] == pytest.approx(0.25 / 0.03)
+    assert replayed["delta_per_dollar"] == pytest.approx(0.175 / 0.03)
 
     # And a fully-cached cycle is a MEASUREMENT, not an exclusion: it did the work, it just didn't
     # pay. Only a cycle that made no calls at all has nothing to divide by.
-    assert replayed["after_N_rounds_delta"] == pytest.approx(0.25)
+    assert replayed["after_N_rounds_delta"] == pytest.approx(0.175)
 
 
 def test_cached_calls_are_metered_but_not_billed(tmp_path: Path) -> None:
@@ -1709,6 +1769,7 @@ from promptpotter.domain.opt_search_point import (  # noqa: E402
 from promptpotter.domain.results import (  # noqa: E402
     CandidateProposal,
     ScoredCandidate,
+    best_round_by_measured_accuracy,
     is_leader_eligible,
 )
 from promptpotter.domain.search_point import (  # noqa: E402
@@ -2265,169 +2326,6 @@ def test_pobb_check_gates_elimination_on_posterior():
     assert cr["epsilon"] == pytest.approx(0.05)
 
 
-def test_pobb_margin_cuts_regressor_when_catch_up_impossible():
-    """Deterministic corner of the paired-margin gate: banked losses exceed the
-    win opportunities left ⇒ eliminate with p_clear == 0 (binom_sf's k > n arm)."""
-    check = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_samples=20, delta_scale={})
-    seed_scores = [1.0] * 10 + [0.0] * 10  # ids 0-9 seed-hit, 10-19 seed-miss
-    check.register_completed(
-        _measurements(seed_scores, sample_ids=list(range(20))), candidate_id="origin", sp=_DUMMY_SP
-    )
-    check.set_sample_universe(list(range(20)))
-    check.set_current("doomed")
-    # 11 straight misses: 10 losses on the seed-hit stratum + 1 unwon seed-miss.
-    # need = 0 - (0 - 10) = 10 > 9 opportunities left ⇒ impossible to net even.
-    sig = check.check(
-        _measurements([0.0] * 11, sample_ids=list(range(11))),
-        candidate_idx=1,
-        n_total_candidates=3,
-    )
-    assert sig is not None
-    assert sig.check_name == "elimination"
-    cr = sig.check_result
-    assert cr["leader_id"] == "origin"
-    assert cr["gate"] == "margin"
-    m = cr["margin"]
-    assert m["wins"] == 0
-    assert m["losses"] == 10
-    assert m["need"] == 10
-    assert m["opportunities"] == 9
-    assert m["p_clear"] == 0.0
-    assert m["deterministic"] == 1.0
-
-
-def test_pobb_margin_cuts_tie_at_exhaustion_and_futility_keeps_contender():
-    """Paired-margin futility on the C1.1 class: a candidate that mirrors the seed
-    banks only ties, so its win rate is estimated on the seed-MISS stratum alone —
-    a front-loaded block of seed-hit ties can no longer inflate the extrapolation.
-
-    Silent harm guarded: a wrong early cut drops a candidate that could win (wrong
-    round winner, no error), or a missed cut wastes the full panel confirming a tie."""
-    cfg = PoBBConfig(n_min=6, epsilon=0.05, improvement_threshold=0.02)  # margin=ceil(.48)=1
-    ids = list(range(24))
-    # Seed: ids 0-8 hit (9), ids 9-23 miss (15) — the live justlogic C1.1 shape.
-    seed_scores = [1.0] * 9 + [0.0] * 15
-    miss_ids = list(range(9, 24))
-
-    def _tie_check() -> PoBBCheck:
-        c = PoBBCheck(cfg, n_samples=24, delta_scale={})
-        c.register_completed(
-            _measurements(seed_scores, sample_ids=ids), candidate_id="origin", sp=_DUMMY_SP
-        )
-        c.set_sample_universe(ids)
-        c.set_current("tie")
-        return c
-
-    # Seed-miss samples first (the shared-order shape), all unwon. At 14 misses one
-    # opportunity remains: p_clear = p_w = 1/16 = 0.0625 ≥ ε=0.05 → still alive.
-    alive = _tie_check().check(
-        _measurements([0.0] * 14, sample_ids=miss_ids[:14]), candidate_idx=1, n_total_candidates=3
-    )
-    assert alive is None
-    # At 15 misses every win opportunity is spent: need 1 > 0 left ⇒ deterministic kill.
-    sig = _tie_check().check(
-        _measurements([0.0] * 15, sample_ids=miss_ids), candidate_idx=1, n_total_candidates=3
-    )
-    assert sig is not None
-    cr = sig.check_result
-    assert cr["gate"] == "margin"
-    m = cr["margin"]
-    assert (m["wins"], m["losses"], m["net"], m["need"]) == (0, 0, 0, 1)
-    assert m["opportunities"] == 0
-    assert m["p_clear"] == 0.0
-    assert m["deterministic"] == 1.0
-
-    # ε=0.15 (the code default posture) kills the same tie earlier — at 13 unwon
-    # misses, p_clear = 1 - (14/15)² ≈ 0.129 < 0.15.
-    cfg_hot = PoBBConfig(n_min=6, epsilon=0.15, improvement_threshold=0.02)
-    hot = PoBBCheck(cfg_hot, n_samples=24, delta_scale={})
-    hot.register_completed(
-        _measurements(seed_scores, sample_ids=ids), candidate_id="origin", sp=_DUMMY_SP
-    )
-    hot.set_sample_universe(ids)
-    hot.set_current("tie")
-    sig_hot = hot.check(
-        _measurements([0.0] * 13, sample_ids=miss_ids[:13]), candidate_idx=1, n_total_candidates=3
-    )
-    assert sig_hot is not None
-    assert sig_hot.check_result["margin"]["p_clear"] == pytest.approx(1 - (14 / 15) ** 2)
-
-    # A live candidate — one win on the miss stratum nets the margin (need ≤ 0):
-    # the futility gate must NOT fire at any prefix.
-    winner = _tie_check()
-    winner.set_current("rising")
-    win_scores = [1.0] + [0.0] * 12
-    assert (
-        winner.check(
-            _measurements(win_scores, sample_ids=miss_ids[:13]),
-            candidate_idx=1,
-            n_total_candidates=3,
-        )
-        is None
-    )
-
-    # Target-unreachable regime (L4 outer): the seed itself never hits, so every
-    # sample is a win opportunity and the Laplace-smoothed stratum rate self-disables
-    # the gate (a raw p=0 point rate would cut EVERY 0-hit candidate).
-    dead = PoBBCheck(cfg, n_samples=24, delta_scale={})
-    dead.register_completed(
-        _measurements([0.0] * 24, sample_ids=ids), candidate_id="origin", sp=_DUMMY_SP
-    )
-    dead.set_sample_universe(ids)
-    dead.set_current("zero_hit")
-    assert (
-        dead.check(
-            _measurements([0.0] * 8, sample_ids=list(range(8))),
-            candidate_idx=1,
-            n_total_candidates=3,
-        )
-        is None
-    )
-
-
-def test_pobb_margin_gate_is_order_agnostic():
-    """The gate is a pure function of the outcome MULTISET + seed map — any
-    permutation of the same measured set yields the identical verdict and stats.
-    This is the structural guarantee that scoring order can never re-create the
-    easy-prefix blindness the raw-rate gate had."""
-    cfg = PoBBConfig(n_min=6, epsilon=0.05, improvement_threshold=0.02)
-    ids = list(range(24))
-    seed_scores = [1.0] * 9 + [0.0] * 15
-
-    # Fixed measured set: 12 unwon seed-misses + 3 held seed-hits (survives), and
-    # the full 15-miss + 3-hit set (kills), each under several permutations.
-    survive_set = [(sid, 0.0) for sid in range(9, 21)] + [(sid, 1.0) for sid in range(0, 3)]
-    kill_set = [(sid, 0.0) for sid in range(9, 24)] + [(sid, 1.0) for sid in range(0, 3)]
-
-    def _verdict(measured: list[tuple[int, float]]) -> tuple[bool, tuple]:
-        c = PoBBCheck(cfg, n_samples=24, delta_scale={})
-        c.register_completed(
-            _measurements(seed_scores, sample_ids=ids), candidate_id="origin", sp=_DUMMY_SP
-        )
-        c.set_sample_universe(ids)
-        c.set_current("perm")
-        sig = c.check(
-            _measurements([s for _, s in measured], sample_ids=[sid for sid, _ in measured]),
-            candidate_idx=1,
-            n_total_candidates=2,
-        )
-        if sig is None or sig.check_result.get("gate") != "margin":
-            return False, ()
-        m = sig.check_result["margin"]
-        return True, (m["wins"], m["losses"], m["net"], m["opportunities"], m["p_clear"])
-
-    import random
-
-    rng = random.Random(7)
-    for base, expect_kill in ((survive_set, False), (kill_set, True)):
-        baseline = _verdict(base)
-        assert baseline[0] is expect_kill
-        for _ in range(4):
-            shuffled = list(base)
-            rng.shuffle(shuffled)
-            assert _verdict(shuffled) == baseline
-
-
 def test_pobb_locks_in_dominant_leader():
     """Current candidate dominating prior past lock_in_n_min fires LEADER_LOCKED."""
     check = PoBBCheck(
@@ -2542,7 +2440,7 @@ def _cs(
     )
 
 
-def test_leader_eligibility_excludes_fatal_degradation_and_pobb_loss():
+def test_leader_eligibility_bars_invalid_measurement_not_stops():
     """Winner-selection eligibility: fatal degradation disqualifies; a true PoBB *loss*
     (p_best < epsilon, lead not locked) disqualifies — the eliminator's own verdict that the
     candidate isn't the best; a LEADER_LOCKED stop stays eligible; a clean loser stays eligible.
@@ -2554,23 +2452,19 @@ def test_leader_eligibility_excludes_fatal_degradation_and_pobb_loss():
         elimination_stopped=True,
         degradation_context={"fatal": True, "dominant_warning": "llm_only:empty_response"},
     )
-    pobb_loss = _cs(
+    # A STOP IS NOT A VERDICT. A PoBB-stopped candidate stays electable: the stop said
+    # "more samples will not change the answer", which is a budget fact, not a ranking one.
+    # Reading it as a loss cost a real round — a candidate cut at 19/28 carried a genuine
+    # +0.099 theta lift over origin and was the best thing measured, but its stop recorded
+    # `p_best: 0.0` (a placeholder the futility gate never computed) and eligibility read
+    # that as "PoBB says it lost". Every candidate in that round stopped the same way, so
+    # the round crowned nobody. SILENT: `improved=False`, no winner, no reason recorded, and
+    # the loop reports a flat cycle rather than a discarded improvement.
+    pobb_stopped = _cs(
         candidate_id="C1.2",
         accuracy=0.40,
         elimination_stopped=True,
         elimination_context={"p_best": 0.048, "epsilon": 0.05, "leader_locked": False},
-    )
-    # Margin cut carries p_best: 0.0 by contract — the eligibility read must bar it.
-    margin_cut = _cs(
-        candidate_id="C1.5",
-        accuracy=0.375,
-        elimination_stopped=True,
-        elimination_context={
-            "p_best": 0.0,
-            "epsilon": 0.05,
-            "leader_locked": False,
-            "gate": "margin",
-        },
     )
     leader_locked = _cs(
         candidate_id="C1.1",
@@ -2580,9 +2474,9 @@ def test_leader_eligibility_excludes_fatal_degradation_and_pobb_loss():
     )
     clean_loser = _cs(candidate_id="C1.4", accuracy=0.45)
 
+    # Only INVALID measurement disqualifies; ranking is the election's job alone.
     assert not is_leader_eligible(fatal)
-    assert not is_leader_eligible(pobb_loss)
-    assert not is_leader_eligible(margin_cut)
+    assert is_leader_eligible(pobb_stopped)
     assert is_leader_eligible(leader_locked)
     assert is_leader_eligible(clean_loser)
 
@@ -3360,3 +3254,37 @@ def test_shipped_datasets_are_within_the_framing_budget():
         TaskDecomposition.from_dict(json.loads(path.read_text(encoding="utf-8"))).check_budget(
             source=str(path)
         )
+
+
+def test_headline_best_is_always_a_number_something_measured():
+    """The published headline may never exceed what the cycle actually measured.
+
+    The silent harm, measured live on `justlogic-d234__f3af53`: the headline argmaxed
+    `cumulative_accuracy`, a sample-keyed union of rows scored by DIFFERENT configurations.
+    Round 7's 0.775 was 12 rows from round 6's config glued to 28 from round 7's, while the
+    best candidate the run ever measured scored 0.679. The sidebar read `57%→78%`, the
+    candidate chart read 0.679, every gate was green, and nothing raised for months — the
+    docstrings on both sides asserted the union WAS "the incumbent rescored over every
+    sample probed so far", a rescore that never happened.
+
+    Because the round subset is the CONTESTED one, the carried rows are the easy tail the
+    previous config scored ~100% on, so the bias has a direction: each configuration
+    inherited its predecessor's perfect easy-tail score and a regression there was invisible.
+    """
+    # Shaped like `index.json::rounds[]`: each round's own measurement, plus the pooled
+    # number the old basis would have published (never `max`-ed by anything now).
+    rounds = [
+        {"round": 0, "accuracy": 0.575, "pooled": 0.575},
+        {"round": 6, "accuracy": 0.750, "pooled": 0.750},
+        {"round": 7, "accuracy": 0.679, "pooled": 0.775},  # pooled > anything measured
+    ]
+    best, best_round = best_round_by_measured_accuracy(rounds)
+
+    measured = {r["accuracy"] for r in rounds}
+    assert best in measured, "headline must be a value some round actually scored"
+    assert best == 0.750 and best_round == 6
+    assert best < max(r["pooled"] for r in rounds), "the pooled basis outran every measurement"
+
+    # A round with no accuracy doesn't back the headline (vs `or 0.0`, which could crown it).
+    assert best_round_by_measured_accuracy([{"round": 1, "accuracy": None}]) == (0.0, None)
+    assert best_round_by_measured_accuracy([]) == (0.0, None)

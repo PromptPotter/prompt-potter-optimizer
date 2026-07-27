@@ -257,6 +257,32 @@ from promptpotter.diagnostics import compute_ledger
 # per-seed delta and re-proposed what the inner loop had already measured (the overnight flat loop).
 # The panel is silent off the recursion (no `reasoning_trace` on the row), so it costs a normal
 # campaign nothing.
+# 2026-07-27 one comparator, one stop rule: ``config_leaf_fields`` 39->38 — deleted
+# ``mechanisms.elimination.margin_elimination`` and with it the paired-margin futility gate
+# (``PoBBCheck._margin_stats``, ``PoBBSnapshot.margin``, ``PoBBConfig.improvement_threshold``,
+# ``metrics.binom_sf``, ``ResumeCheckpointKind.MARGIN_CUT`` + its replayer, and the
+# ``epsilon_threshold_inert`` coupling's second reader). It was a SECOND comparator — binary
+# discordant win-counts vs the seed — beside the θ ruler every other gate reads, and a second
+# encoding of ``improvement_threshold`` (``ceil(threshold x budget)`` integer wins) beside the
+# θ-logit one ``delta_ok`` already uses. It abstained on fractional grades, so it was inert on
+# every graded backend, and on binary ones it recorded a placeholder ``p_best: 0.0`` that
+# ``is_leader_eligible`` read as a PoBB loss — disqualifying candidates it had merely STOPPED.
+# Measured on a live inner cycle: every candidate in rounds 2-3 margin-stopped, so the round
+# crowned nobody while the best carried a +0.099 θ lift over origin. The concept removed is
+# "stopping is a verdict"; what remains is one comparator (θ on the fixed ruler), one stop rule
+# (ε on p_best), and one election. ~430 LOC out; the ledger counts surface, not lines, so only
+# the knob shows.
+# 2026-07-27 stops are not verdicts, part 2: ``any_params`` 64->63 —
+# ``RunCallbacks.on_p_best_update`` took ``snapshot: Any``. It only destructures the
+# ``PoBBSnapshot``, so the ``Any`` bought nothing and hid everything: when the margin cut above
+# removed ``PoBBSnapshot.margin``, this body kept reading ``snapshot.margin`` and mypy stayed
+# green through a full gate. ``_on_snapshot`` is unguarded, so every candidate's first scored
+# sample would have raised ``AttributeError`` out of ``PoBBCheck.check``. Typed now, so the next
+# field removal is a compile error. Also cut in the same pass: ``n_ok`` (a second, UNCLAMPED copy
+# of ``coverage_floor`` in the ``improved`` gate — dead whenever a winner existed, and on a
+# dataset smaller than ``elimination_n_min`` it contradicted the clamp that exists to keep a tiny
+# set electable, crowning a winner and refusing to call the round improved) and the seven
+# margin-only ``EliminationContext`` fields.
 LEDGER_BASELINE = {
     # 312 -> 313: `shared/instrument.py`. Raised DELIBERATELY, and it is the honest number to
     # argue about: the pass it pays for removed three ambient ContextVars and three public
@@ -466,7 +492,7 @@ LEDGER_BASELINE = {
     # are shared cache, so breadth there is cheap precision, while candidate breadth is paid
     # per-candidate. First user: the L4 inner instrument (inner_tasks.json::n_samples_origin,
     # origin 40 vs candidates 28). A feature, justified, so the baseline rises.
-    "config_leaf_fields": 39,
+    "config_leaf_fields": 38,
     "settings_env": 16,
     # 14 -> 15 (2026-07-18): ``ANSWER_SPACE_CAP`` moved out of ``dispatch/bundle.py`` into
     # settings — now shared by the ``answer_distribution`` collapse detector and the earned-
@@ -515,7 +541,7 @@ LEDGER_BASELINE = {
     # the SDK's own ``ChatCompletion`` is the real type for all three. Written, not baselined:
     # ``openai`` sits behind ``follow_imports="skip"`` so mypy still resolves it to ``Any``, but
     # the reader no longer has to. Three sites named, one net removed.
-    "any_params": 64,
+    "any_params": 63,
     # NEW dimension (2026-07-17), landing at 4 — a Pydantic model that does NOT end up
     # ``extra="forbid"``, so an unknown key is dropped instead of raised. 106 before the
     # ``StrictModel`` migration, 4 after. It is a conceptual surface because the alternative

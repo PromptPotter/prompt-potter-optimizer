@@ -146,58 +146,6 @@ def test_elimination_cut_replay_flags_divergence_when_scores_flip() -> None:
     assert div.recorded_outcome is True and div.current_outcome is False
 
 
-def test_margin_cut_replay_rederives_and_flags_flip() -> None:
-    """A recorded paired-margin cut re-derives bit-for-bit from the recorded seed
-    strata + the RESCORED candidate hits; a scorer change that flips one candidate
-    hit into a win flips the verdict and flags divergence. Silent harm guarded: a
-    resumed run silently keeping (or re-killing) a candidate the current scorer
-    would judge differently."""
-
-    def _m(sid: int, hit: bool) -> dict:
-        return {**_r(1.0 if hit else 0.0), "sample_id": sid, "hit": hit}
-
-    def _round_data(candidate_results: list[dict]) -> RoundResult:
-        return _round(
-            round=1,
-            all_candidate_results={"c2": candidate_results},
-            decisions=[
-                {
-                    "kind": "margin_cut",
-                    "inputs_ref": {
-                        "candidate_id": "c2",
-                        "queries_scored": 5,
-                        "epsilon": 0.05,
-                        "n_min": 4,
-                        "round_num": 1,
-                        "gate": "margin",
-                        "margin": {
-                            "margin": 1,
-                            "budget": 8,
-                            "seed_hit_ids": ["0", "1", "2"],
-                            "seed_miss_ids": ["3", "4", "5", "6", "7"],
-                            "universe_ids": [str(i) for i in range(8)],
-                        },
-                    },
-                    "outcome": True,
-                    "data": {"candidate_sample_ids": ["3", "4", "5", "6", "7"]},
-                }
-            ],
-        )
-
-    # Unchanged scorer: every seed-miss attempted and unwon → need 1 > 0 left,
-    # the deterministic corner re-derives the cut → no divergence.
-    unchanged = _round_data([_m(i, False) for i in range(3, 8)])
-    assert replay_decisions(unchanged) is None
-
-    # Rescore flips sample 3 into a win → net clears the margin → cut no longer
-    # re-derives → divergence.
-    flipped = _round_data([_m(3, True)] + [_m(i, False) for i in range(4, 8)])
-    div = replay_decisions(flipped)
-    assert div is not None
-    assert div.kind == "margin_cut"
-    assert div.recorded_outcome is True and div.current_outcome is False
-
-
 def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Stores) -> None:
     """A no-modification operator fork inherits its branch-point candidate's RECORDED
     accuracy as C0 (no re-score under a nondeterministic backend); an edited prompt
@@ -223,7 +171,6 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
             round=1,
             label="C1.1",
             accuracy=0.4,
-            cumulative_accuracy=0.4,
             hits=4,
             total=10,
             improved=True,
@@ -271,7 +218,9 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
         resolved_origin=unmodified_osp,
     )
     assert inherited is not None
-    assert inherited.origin_acc == 0.2  # the branch point, NOT a re-rolled number
+    # The branch point's OWN measurement, carried whole — not a re-rolled number, and not
+    # an accuracy with the rest of the report re-derived around it.
+    assert inherited.report.accuracy == 0.2
     # C0 carries the OSP object, so the inherited origin keeps its fork_seed lineage.
     assert isinstance(inherited.resolved_origin, OptSearchPoint)
     assert inherited.resolved_origin.lineage.source == "fork_seed"
@@ -332,9 +281,14 @@ def test_rescored_prior_tail_filters_off_dataset_and_evicted() -> None:
     assert {r["sample_id"] for r in merge_with_unprocessed_priors([], tail)} == {1}
 
 
-def test_merge_into_cumulative_preserves_prior_on_untouched_samples() -> None:
-    """Subset-measured winner must not shrink the cumulative pool — prior samples are preserved."""
-    from promptpotter.application.optimization.cycle import _merge_into_cumulative
+def test_merge_known_outcomes_preserves_prior_on_untouched_samples() -> None:
+    """Subset-measured winner must not shrink the known-outcome pool — priors are preserved.
+
+    The pool seeds PoBB and resume's election floor; shrinking it loses measurement.
+    It is NOT a score — its rows come from different configurations, so a mean over it
+    belongs to no individual (``cycle.py::_merge_known_outcomes``).
+    """
+    from promptpotter.application.optimization.cycle import _merge_known_outcomes as _merge
 
     prior = [{"sample_id": i, "fitness": 1.0 if i < 10 else 0.0, "hit": i < 10} for i in range(20)]
     winner_hits = {10, 12, 15}
@@ -342,7 +296,7 @@ def test_merge_into_cumulative_preserves_prior_on_untouched_samples() -> None:
         {"sample_id": sid, "fitness": 1.0 if sid in winner_hits else 0.0, "hit": sid in winner_hits}
         for sid in range(10, 18)
     ]
-    merged = _merge_into_cumulative(prior, winner)
+    merged = _merge(prior, winner)
     by_sid = {r["sample_id"]: r for r in merged}
 
     assert set(by_sid.keys()) == set(range(20))
@@ -350,7 +304,7 @@ def test_merge_into_cumulative_preserves_prior_on_untouched_samples() -> None:
     assert by_sid[11]["hit"] is False
     assert by_sid[19]["hit"] is False
     assert all(by_sid[i]["hit"] is True for i in range(10))
-    assert _merge_into_cumulative(prior, []) == prior
+    assert _merge(prior, []) == prior
 
 
 # Minimal valid OptimizationConfig — the two thresholds are required (no default).
