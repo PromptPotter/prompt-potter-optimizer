@@ -368,7 +368,7 @@ class PipelineSchema(StrictModel):
     def to_pipeline_params(self) -> dict[str, Any]:
         """``{"steps": [...]}`` sparse scaffold — backend merges per-node config defaults.
 
-        This is the WIRE base only. The origin cycle id no longer derives from it:
+        This is the WIRE base only. The origin cycle id does not derive from it:
         ``build_origin_cycle_id`` hashes the overlay-merged ``session.pipeline_params``
         (connector config included), so the cycle id and the measurement key agree."""
         return {"steps": list(self.active_steps)}

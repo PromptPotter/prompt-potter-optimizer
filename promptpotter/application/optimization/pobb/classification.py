@@ -1,27 +1,12 @@
 """Result classification — three-bucket (advisory / infra / fatal) verdict.
 
-classify_result(result) → three-bucket classification (``<t>`` = the result's
-terminal LLM node — ``llm_only`` single-node, ``llm_ranking`` multi-node — read
-from ``pipeline_data.terminated_at``, never a literal node name):
-  <t>:content_empty + length + reasoning>0 → infra:reasoning_budget_exhausted
-  <t>:content_empty + length + reasoning=0 → infra:output_truncated
-  <t>:content_empty + stop                 → fatal:empty_response
-  *:content_filtered                       → fatal (passthrough)
-  *:<kind=structural>                      → fatal (source-stamped)
-
-The last rule reads the backend's **source-stamped** ``WarningKind`` (TermNorm owns
-the structural/transient verdict; ``domain.results.WarningDict.kind``): a warning the
-backend stamped ``structural`` is a deterministic-for-config break, so it fast-
-eliminates the candidate exactly as the degradation verdict grades it structural-
-critical — one source of truth, two consumers (no PromptPotter-side code taxonomy).
-A warning with no ``kind`` is NOT treated structural (no guessing). Transient codes
-are NOT blanket-routed to infra: ``infra`` means *deprecate the sample*, which a
-transient (e.g. low-document-count) measurement is not.
-
-``infra_codes`` mark the sample deprecated for accounting + display, but
-DegradationCheck's one-sighting fast-path (``dominant_fatal``) reads only
-from ``fatal_codes`` — truncation alone does not eliminate a candidate at
-n=1. Rate-based degradation still counts truncations toward elimination.
+Structural-vs-transient is the BACKEND's verdict, read from the source-stamped
+``WarningKind`` — one source of truth, two consumers, and no PromptPotter-side code
+taxonomy. A warning with no ``kind`` is therefore not structural: absence is not evidence,
+and guessing here eliminates candidates for free. Transient codes are likewise not
+blanket-routed to ``infra``, because ``infra`` means *deprecate the sample*, which a
+transient measurement is not. ``infra_codes`` mark a sample deprecated for accounting but
+stay out of the one-sighting fatal fast-path; rate-based degradation still counts them.
 """
 
 from __future__ import annotations

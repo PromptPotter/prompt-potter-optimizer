@@ -281,9 +281,7 @@ async def init_services(
     Preconditions: ``.promptpotter/`` tree + ``datasets/{dataset_name}/pipeline.json``
     declaring ``backend_type``. Returns a wired ``Session`` (no scoring yet).
     ``dataset_name`` is REQUIRED — the dataset resolves the config dir, which resolves
-    the connector, so there is no session without one. The old ``None`` arm synced an
-    "experiment" from the backend instead, a second way to populate samples that only a
-    notebook ever reached.
+    the connector, so there is no session without one.
     ``identity`` defaults to the Stage-0 single-operator :func:`default_identity`.
     Active-session pointers are per-tenant on disk, so two operators on the
     same machine cannot collide.

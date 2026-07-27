@@ -102,8 +102,6 @@ def _derive_node_kind(node: PipelineNode | None) -> str:
     broad "does this node run an LLM" predicate (``llm_only`` sentinel /
     ``generation`` wire/langfuse type / ``is_llm`` mapping), shared with the
     model-axis carrier so the render kind and the carrier never disagree.
-    Everything else falls back to the connector's ``wire_type``
-    (``tool`` / ``retriever``) and ultimately a plain ``tool`` dot.
     ``node_role`` of ``"ranker"`` / ``"candidate_source"`` is intentionally
     NOT checked — those roles can be LLM (``llm_ranking``) or pure algos
     (``fuzzy_matching``); ``runs_llm`` is what discriminates.
@@ -125,10 +123,7 @@ def derive_pipeline_view(schema: PipelineSchema) -> PipelineView:
     """Synthesize a webapp ``PipelineView`` from a ``PipelineSchema``.
 
     Wraps ``schema.active_steps`` with synthetic ``input``/``output`` IO
-    bookends and chains a forward edge through them. ``kind`` per interior
-    node comes from ``_derive_node_kind`` so the dot styling matches what
-    the node actually does (LLM nodes glow accent; retrievers/tools/caches
-    each get a distinct fill).
+    bookends and chains a forward edge through them.
     """
     interior_ids = list(schema.active_steps)
     nodes: list[PipelineViewNode] = [
@@ -188,7 +183,6 @@ def parse_resolved_schema(resolved: dict[str, Any]) -> NodeOutputSchema:
 
 
 def _parse_resolved_prompt(resolved: dict[str, Any]) -> NodePromptInfo:
-    """Convert a resolved prompt dict from the enriched response."""
     return NodePromptInfo(
         template_variables=resolved.get("template_variables", []),
     )
@@ -197,9 +191,7 @@ def _parse_resolved_prompt(resolved: dict[str, Any]) -> NodePromptInfo:
 def _extract_resolved_metadata(
     config: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
-    """Extract per-node resolved metadata from the pipeline response.
-
-    Uses top-level ``resolved_schemas``/``resolved_prompts`` dicts keyed by
+    """Uses top-level ``resolved_schemas``/``resolved_prompts`` dicts keyed by
     ``"{family}/{version}"``.  Each node references its schema/prompt via
     ``schema_family``/``prompt_family`` config keys.
 
@@ -286,9 +278,8 @@ def _infer_param_types(opt: dict[str, Any], node_config: dict[str, Any]) -> dict
 
 
 def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
-    """Parse a ``GET /pipeline`` JSON response into a PipelineSchema.
+    """Builds the schema entirely from the response — no hardcoded defaults.
 
-    Builds the schema entirely from the response — no hardcoded defaults.
     Each node may carry an ``optimizer`` sub-object with param_keys,
     observation_mappings, and other metadata consumed by PromptPotter
     services.

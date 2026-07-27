@@ -1,23 +1,13 @@
 """Deterministic A/B replay engine — re-derive a recorded cycle's decisions under the
 current engine/scorer and report every divergence.
 
-The honest A/B. A recorded round holds every candidate's per-sample measurements
-(``all_candidate_results``) + the decisions, and scoring / election / elimination is a
-**pure function** over them. So re-deriving the decisions over the recorded measurements
-under the current engine + scorer is fully deterministic — **zero LLM calls**. Run a cycle
-under engine/scorer A (it records its decisions to disk), then run this under engine/scorer
-B → every round-winner / elimination / escalation-trigger that flips is reported. (Running a
-campaign twice can't be an A/B: candidate generation is non-deterministic. Replaying recorded
-measurements can.)
-
-Arm A = what is on disk (the engine/scorer that recorded the cycle). Arm B = the current
-process (current code + the active campaign scorer). Same code + same scorer ⇒ no divergence
-(a self-consistency check); a code change (recorded by an older checkout) or a scorer change
-surfaces exactly where the decision flips.
-
-Caveat: the per-cycle δ ruler is re-calibrated here from the *current* grade-A archive
-(``_calibrate_delta_ruler``), not the exact start-of-cycle ruler (which is never persisted),
-so θ values are reconstructed, not bit-identical to the live run — fine for a decision diff.
+The honest A/B, and the reason it works: running a campaign twice cannot be one, because
+candidate generation is non-deterministic — but scoring, election and elimination are a
+pure function over a round's recorded measurements, so replaying those under a different
+engine/scorer is exact and costs zero LLM calls. Arm A is what is on disk, arm B is the
+current process; same code and scorer ⇒ no divergence, which makes it a self-consistency
+check too. Caveat: the δ ruler is re-calibrated from the current archive rather than the
+start-of-cycle one (never persisted), so θ is reconstructed — fine for a decision diff.
 """
 
 from __future__ import annotations

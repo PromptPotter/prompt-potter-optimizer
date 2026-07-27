@@ -74,7 +74,6 @@ def run_l3_output_validators(
     source_output: Mapping[str, Any],
     opt_sp: OptSearchPoint,
 ) -> list[ValidatorOutcome]:
-    """Run every registered L3-output validator; return non-None outcomes."""
     return run_validators(L3_OUTPUT_VALIDATORS, source_output, opt_sp)
 
 

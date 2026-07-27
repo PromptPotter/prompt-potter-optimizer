@@ -17,7 +17,6 @@ from promptpotter.shared.errors import is_error_result
 
 
 def _ellide(s: str, n: int) -> str:
-    """Truncate to *n* chars; append ``…`` when cut."""
     return s if len(s) <= n else s[: n - 1] + "…"
 
 

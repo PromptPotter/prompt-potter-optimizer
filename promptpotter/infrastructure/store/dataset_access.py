@@ -1,26 +1,12 @@
 """Dataset access gateway — the single seam that resolves a dataset directory.
 
-Two classes of dataset exist, and the split is by *ownership*, not by permission:
-
-* **Tenant content** — ``projects/{tenant}/datasets/{slug}/``. Whatever this
-  identity ingested. Isolated by path: a tenant's root is derived from its own
-  id, so one tenant cannot name its way into another's.
-* **Install content** — repo ``datasets/{name}/``. The benchmarks, demos and
-  ``promptpotter-self`` that SHIP WITH THE PRODUCT. Every one of them is tracked
-  in git, so anyone who has the install already has these bytes on disk.
-
-Install content therefore carries **no capability check**, and adding one back is
-the mistake to avoid: gating a read on bytes that arrive with the checkout
-protects nothing, while denying it blanks every panel bound to that campaign. A
-private cut is not install content — it belongs in the tenant, where path
-isolation already protects it, not in the repo dir.
-
-Resolution is tenant-first, so a tenant may shadow an install slug with its own.
-
-The *list* and the *resolver* share ONE rule, so the picker can never surface a
-dataset the read endpoints would deny. Presentation code MUST NOT read
-:attr:`Stores.benchmarks_root` directly — route every access through here; no
-standing test (see ``tests/CLAUDE.md``).
+Tenant content is isolated by path; install content ships in git, so it carries **no
+capability check** — gating a read on bytes that arrive with the checkout protects
+nothing and blanks every panel bound to that campaign. A private cut is tenant content,
+never a repo dir. Resolution is tenant-first, so a tenant may shadow an install slug, and
+the *list* and the *resolver* share one rule so the picker cannot surface what the read
+endpoints would deny. Presentation MUST NOT read :attr:`Stores.benchmarks_root` directly
+— every access comes through here, and no standing test enforces it.
 """
 
 from __future__ import annotations
@@ -47,8 +33,6 @@ class DatasetAccessError(Exception):
 
 @dataclass(frozen=True)
 class DatasetRef:
-    """One readable dataset and which tier it came from."""
-
     name: str
     title: str | None
     n_samples: int

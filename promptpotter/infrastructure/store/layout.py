@@ -104,7 +104,6 @@ def sweep_batch_dir_for(tenant_root: Path, campaign_id: str, batch_id: str) -> P
 
 
 def session_dir_for(tenant_root: Path, session_id: str) -> Path:
-    """Return ``{tenant_root}/sessions/{session_id}``."""
     validate_path_component(session_id)
     return tenant_root / "sessions" / session_id
 
@@ -120,12 +119,9 @@ class CycleLayout:
     """Every path *inside* one cycle dir, named once — the sole owner of the
     on-disk shape below ``campaigns/{c}/cycles/{cy}/``.
 
-    Before this, ``.runtime/ledger.jsonl``, the ``round_{n:04d}`` file naming,
-    and the flag names (``pause.flag`` / ``skip.flag`` / …) were each re-encoded
-    in a handful of independent modules — the read side and the write side
-    naming the same literal apart. They now derive from one ``CycleLayout``, so
-    a move on disk (e.g. Arc 2's ``.runtime/`` durability-class split) is a
-    one-line change here.
+    ``.runtime/ledger.jsonl``, the ``round_{n:04d}`` file naming, and the flag
+    names (``pause.flag`` / ``skip.flag`` / …) all derive from here, so a move
+    on disk (e.g. a ``.runtime/`` durability-class split) is a one-line change.
     """
 
     cycle_dir: Path
@@ -220,9 +216,7 @@ _REPORT_NAMES = frozenset(
 class FileKind(Enum):
     """The logical role of one file in a campaign tree — the single taxonomy behind
     BOTH the storage rollup's size leaf (:attr:`leaf`) and ``delete --keep-results``'
-    keepsake decision (:attr:`keepsake`). Before this, the rollup's ``_leaf`` and the
-    deleter's ``_HEAVY_CYCLE_SUBDIRS`` were two independent encodings of "what kind of
-    file is this".
+    keepsake decision (:attr:`keepsake`).
 
     :attr:`leaf` names the MECE size bucket (a human-facing figure — the sidebar cake).
     :attr:`keepsake` is whether ``delete --keep-results`` spares the file. ``trace`` is

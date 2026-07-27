@@ -1,49 +1,10 @@
 """Complexity ledger — one exact number per dimension of the package's surface.
 
-Lives outside the layer tree on purpose: it imports from `domain/`, `application/`,
-`config/` and `optimization/` to count their surface, so it cannot sit inside any single
-layer without inverting an import direction. Read-only, never imported by the runtime loop.
-
-
-Why this exists: an AI told to "simplify" reaches for *additive-but-safe* moves
-(extract a helper, fold two copies into a shared util, split a big file). Each
-adds a module header + an import line at every call site, so the total grows
-while every commit says "refactor". The moves that actually shrink the mental
-model — deleting a mechanism, re-inlining a single-use module, removing a dead
-knob — are riskier, so they get skipped. This ledger makes accretion *visible*:
-every dimension is computed exactly by introspection (no heuristics that can
-drift from reality), and a ratchet test (`tests/test_complexity_ledger.py`)
-fails CI if any dimension rises. A "simplification" pass that raises the ledger
-is a feature wearing a refactor's label.
-
-Run it: ``python -m promptpotter.diagnostics``
-
-Each count is deliberately mechanical so two readers (and two LLM sessions) get
-the same number:
-
-- ``modules`` / ``init_files`` — ``.py`` file counts under ``promptpotter/``.
-- ``reexport_shims`` — ``__init__.py`` files that BOTH declare ``__all__`` AND
-  contain an import statement (i.e. they re-export, so a reader must hop through
-  them). Empty namespace-marker ``__init__`` files are excluded.
-- ``config_leaf_fields`` — ``len(KNOBS)``, the knob registry walked off
-  ``CampaignConfig``'s own ``Knob`` metadata. The registry IS the leaf taxonomy, so
-  the ledger reads it rather than carrying a fourth opinion on what a config leaf is.
-- ``settings_env`` — ``len(Settings.model_fields)``.
-- ``settings_const`` — module-level constants exported by ``settings`` (the
-  upper-case names in its ``__all__``; excludes the ``Settings`` class + instance).
-- ``opt_search_point_fields`` — recursive leaf count of ``OptSearchPoint``.
-- ``any_params`` — bare ``x: Any`` named parameters (not ``*args``/``**kwargs``, not
-  ``dict[str, Any]``). A type the checker cannot see is surface a reader must carry in
-  their head, and it silently disarms ``warn_return_any`` — see ``_count_any_params``.
-  Like ``reexport_shims``, this one is meant to march to a floor, not sit at one.
-- ``models_lax`` — Pydantic models that do not end up ``extra="forbid"``, so an unknown
-  key is dropped instead of raised. The floor is the models that must stay lax and say
-  so on themselves — see ``_count_lax_models``.
-- ``prompt_string_fields`` — ``len(PROMPT_STRING_FIELDS)``.
-- ``injections`` — ``len(INJECTIONS)`` (the dispatch-hub registry self-validates).
-- ``escalation_rules`` — ``len(DEFAULT_ESCALATION_RULES)``, the policy surface
-  that replaced the FSM.
-- ``claude_md`` — ``CLAUDE.md`` count under ``promptpotter/``.
+Run: ``python -m promptpotter.diagnostics``. What a raise obliges you to write down:
+root ``CLAUDE.md`` § ``<surface-ledger>``. What a dimension counts — and which ones
+march to a floor rather than sit at one — is on its ``_count_*`` function. Every
+number is computed by introspection, never estimated, so two readers agree. Outside
+the layer tree because it counts every layer: inside one, an import would invert.
 """
 
 from __future__ import annotations
@@ -102,11 +63,7 @@ def _count_any_params(py_files: list[Path]) -> int:
     a parameter with a known type". And ``strict``'s own ``warn_return_any`` does NOT
     cover it — an ``Any`` param is a complete annotation, so ``disallow_untyped_defs``
     is satisfied, and ``no-any-return`` is defeated by any expression that unions ``Any``
-    with a concrete type. ``resp.content or ""`` (the since-deleted
-    `connectors/llm_only.py`, pre-2026-07-17)
-    was exactly that: the ``or`` had no runtime job, only a type-checker one, and deleting
-    it made the error fire instantly. Nothing recorded that, so a debt sweep read the
-    guard as a cosmetic no-op. This count is the only thing that sees the declaration.
+    with a concrete type. This count is the only thing that sees the declaration.
     """
     import ast
 
@@ -210,7 +167,6 @@ def _is_reexport_shim(init_file: Path) -> bool:
 
 
 def compute_ledger() -> dict[str, int]:
-    """Return the current surface count for every tracked dimension."""
     from promptpotter.application.knobs import KNOBS
     from promptpotter.application.optimization.dispatch.injections.registry import (
         INJECTIONS,

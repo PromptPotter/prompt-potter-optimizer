@@ -3,12 +3,7 @@
 Every archived run already carries the two signals that separate a
 deliberately-explored datapoint from an incidental one: ``source`` (who
 produced the run) and, per sample, ``pipeline_data.terminated_at`` (which node
-the pipeline ended at). Reuse (``MeasurementArchive.load_reusable_results``) and
-the ``AxisIndex`` digest historically ignored both, grouping by config-prefix +
-raw row count — so cheap connector short-circuits, which never ran the
-deliberate LLM evaluation, outnumbered and biased the few good explored points.
-That is why the cross-cycle digest the L1/L2/L3 prompts read drifts toward
-connector noise, and why reuse had to be switched off wholesale.
+the pipeline ended at).
 
 This module turns those existing signals into one ordinal grade
 (``A`` > ``B`` > ``C``) stamped on each run at the single write path
@@ -63,7 +58,6 @@ class RunProvenance:
 
 
 def is_deliberate_source(source: str) -> bool:
-    """True iff *source* marks the run as deliberate optimizer exploration."""
     return source in DELIBERATE_SOURCES
 
 

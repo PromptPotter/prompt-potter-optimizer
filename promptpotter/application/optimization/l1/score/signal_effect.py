@@ -109,7 +109,6 @@ def decode_signal_effect(
     candidate_label: str,
     priors_at_test: list[str],
 ) -> SignalEffect:
-    """Decode all per-candidate signal effects in one pass over ``check_result``."""
     if signal is None:
         return SignalEffect(False, False, False, False, "", None, None, None, None, None)
 

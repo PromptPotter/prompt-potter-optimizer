@@ -5,9 +5,7 @@ Producers: ``application.views.ingress`` (live PhaseEvents) + ``application.outp
 Pure data — no I/O, no methods that emit text.
 
 ``RoundCompleteView`` is the one event that lands on disk; live-only events
-(refine/plan/escalation) have no disk counterpart. There used to be a round-trip
-invariant here against ``from_disk_round`` — an untested invariant over a function
-nothing called. Both are gone.
+(refine/plan/escalation) have no disk counterpart.
 """
 
 from __future__ import annotations

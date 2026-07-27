@@ -36,7 +36,6 @@ _ROUNDS_SUBPATH = (".runtime", "cache", "rounds")
 
 
 def audit_rounds_dir(cycle_dir: Path) -> Path:
-    """``{cycle_dir}/.runtime/cache/rounds`` — per-round audit folder."""
     return CycleLayout(cycle_dir).audit_rounds
 
 
@@ -94,7 +93,6 @@ def read_most_recent_round_nodes(rounds_dir: Path) -> dict[str, dict[str, Any]]:
 
 
 def _action_to_node_block(action: dict[str, Any]) -> dict[str, Any]:
-    """Project an LLM action dict into the ``nodes[*]`` block shape."""
     input_block: dict[str, Any] = {}
     template_fields = action.get("template_fields")
     if template_fields is not None:
@@ -166,7 +164,6 @@ class AuditTrailView(DerivedView):
 
     @classmethod
     def from_cycle_dir(cls, cycle_dir: CycleDir) -> AuditTrailView:
-        """Build a projection rooted at ``{cycle_dir}/.runtime/cache/rounds``."""
         return cls(CycleLayout(Path(cycle_dir)).audit_rounds)
 
     def begin_round(self, round_num: int, started_at: str = "") -> None:
@@ -206,7 +203,6 @@ class AuditTrailView(DerivedView):
         self._nodes[record.node] = build_node_block(record)
 
     def _handle_round_warning(self, record: RoundWarningRecord) -> None:
-        """Accumulate round degradations into the ``round_NNNN.json::warnings`` block."""
         self._warnings.append(
             {
                 "kind": record.kind,

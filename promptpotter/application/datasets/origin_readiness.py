@@ -1,44 +1,11 @@
 """``origin_readiness`` — the deterministic gate between ingest and mint, plus the
 projection of what a draft would commit (``origin_projection`` / ``origin_delta``).
 
-Pure functions, no I/O. The proposer/gate split (spec:
-``docs/specs/roadmap.md``) puts *two* parties on
-"is this origin complete": an LLM resolver *proposes* (the ``checkin`` node,
-origin-aware version), and this checklist *gates*. Mint is blocked until the
-checklist passes; a false ``ready`` from the resolver is rejected and the open
-gaps are fed back.
-
-The checklist gates only what the operator (or the resolver) must genuinely
-state — not config that has a sane default:
-
-* **Column mapping** (``column.query`` / ``column.ground_truth``) — satisfied
-  only when CONFIRMED *and* a member of the uploaded headers.
-* **Task framing** (``task_description``) — satisfied when CONFIRMED *and*
-  non-blank. It's the one field with no default; the operator states it or the
-  resolver proposes it high-confidence.
-* **Answer space** — a closed-label target must enumerate every label in the
-  committed prompt. The check-in resolver authors ``answer_format`` (handed the
-  full label set in its raw context); this is the *gate* that trips when the
-  resolver drops a label, nudging it rather than minting a campaign whose prompt
-  can never emit that label.
-* **Answer format** — when the scorer extracts a label from the raw output (it
-  carries an ``EXTRACTION_NOTES`` entry — ``exact_match`` bolds, ``aime_match``
-  boxes, …), the committed ``answer_format`` must be non-empty: the commit
-  instruction is what makes a prediction extractable. The resolver can satisfy
-  "Answer space" by listing labels in ``task_intent`` while leaving ``answer_format``
-  empty — present labels, but no commit instruction → every prediction misses. See
-  :func:`_check_commit_format`.
-* **Node model** — every active node configured as an LLM call (its connector-
-  merged ``config`` block carries an LLM-call axis) must own a ``model``. The one
-  config axis that IS gated, because a missing model has no sane default — the
-  dataset owns its task model, and the absence crashes at mint rather than
-  defaulting. Model-only (provider is connector-derivable). See
-  :func:`_check_node_models`.
-
-Other config (connector, scorer, round cap, optimizer provider/model, the rest of
-the backend node overlay) is NOT gated: each carries a sane default the operator
-edits in the optional Advanced block. A default is not a hidden gap — it's a
-default.
+Pure, no I/O. Two parties answer "is this origin complete": an LLM resolver *proposes*
+(the ``checkin`` node) and this checklist *gates* — a false ``ready`` is rejected and the
+open gaps fed back. What each item requires is on its ``_check_*`` helper. Only what the
+operator must genuinely state is gated; config carrying a sane default (connector,
+scorer, round cap, optimizer model) is not, because a default is not a hidden gap.
 """
 
 from __future__ import annotations

@@ -1,40 +1,10 @@
 """``CommandDispatcher`` — sole writer of ``CommandRecord`` at the API seam.
 
-Validates the inbound HTTP command, opens the target ledger, dedupes by
-``Idempotency-Key``, appends one ``CommandRecord`` through
-``emit_command``, applies inline, then appends ``CommandAckRecord``
-through ``emit_command_ack`` once applied.
-
-Three dispatch shapes:
-
-- ``dispatch_lifecycle`` — campaign lifecycle commands (archive / delete /
-  unarchive). Target is a campaign; ``CommandRecord`` lands on the
-  campaign's root cycle ledger. No ``Expected-Version``.
-
-- ``dispatch_cycle_command`` — cycle-scoped sanctioned-POST commands (the
-  ``CycleScopedKind`` set: fork-cycle, pause-cycle, skip-searchpoint,
-  delete-cycle, cleanup-empty-cycles, origin-gate-decision,
-  change-spend-budget, start-run). Target is a specific cycle;
-  ``CommandRecord`` lands on that cycle's ledger. ``Expected-Version``
-  validated when present (v0 relaxation per the ``ExpectedVersion``
-  parameter component note in ``docs/specs/m12-api-openapi.yaml``).
-
-- ``dispatch_workspace_command`` — workspace-scoped commands (the
-  ``WorkspaceBackendKind`` set: register-backend,
-  mint-campaign). Target is the tenant workspace, not any cycle;
-  ``CommandRecord`` lands on the workspace ledger at
-  ``projects/{tenant}/.workspace/events.jsonl`` per the §0 Persistence
-  sibling amendment. No ``Expected-Version``.
-
-- ``dispatch_checkin_command`` — the origin-authoring commands (the
-  ``CheckinScopedKind`` set: edit-draft-campaign, resolve-origin,
-  start-checkin). Target is the check-in campaign's root cycle
-  (``cycle_chk_*``); the caller supplies the applier because each answers a
-  domain object, carried back on ``CommandOutcome.result``. No
-  ``Expected-Version``.
-
-Closed inbound set: ``docs/specs/m12-api-openapi.yaml``. Permanent contract:
-``docs/adr/0001-m12-control-plane.md``.
+One order, always: validate, dedupe by ``Idempotency-Key``, append the
+``CommandRecord``, apply inline, append the ``CommandAckRecord``. Which ledger a
+kind lands on, and whether it honours ``Expected-Version``, is on each
+``dispatch_*`` method. Closed inbound set: ``docs/specs/m12-api-openapi.yaml``;
+permanent contract: ``docs/adr/0001-m12-control-plane.md``.
 """
 
 from __future__ import annotations

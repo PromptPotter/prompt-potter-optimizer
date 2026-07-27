@@ -1,8 +1,7 @@
 """The two check-in transitions — drop/pick → CHECKIN skeleton, Start → active+run.
 
-Splits the old atomic ``mint_campaign_from_draft_command`` at the seam between
-"establish identity + persist working state" (transition a, free, no slot) and
-"irreversibly commit + run" (transition b, the gate + commit + loop). A check-in
+Transition a establishes identity + persists working state (free, no slot);
+transition b irreversibly commits + runs (the gate + commit + loop). A check-in
 is a real disk-backed campaign in the ``checkin`` lifecycle, so it shows in the
 sidebar, follows the active pointer, and survives a restart — the working state
 lives under the campaign dir (``checkin/draft.json`` + ``checkin/cache.json``)
@@ -136,10 +135,8 @@ class PreparedCheckinRun:
 def load_checkin_for_start(stores: Stores, campaign_id: str) -> tuple[str, DraftCampaign]:
     """Load + gate a check-in for Start — the shared front of both run tails.
 
-    Heals pending Replaces, asserts the campaign is owned + still in ``checkin``,
-    rehydrates the draft, and runs the deterministic origin-readiness gate (raises
-    :class:`OriginIncompleteError` → 422 with the open gaps, leaving the campaign in
-    check-in). Returns ``(cycle_id, draft)``."""
+    An incomplete origin raises :class:`OriginIncompleteError` → 422 with the open
+    gaps, leaving the campaign in check-in. Returns ``(cycle_id, draft)``."""
     recover_pending_replacements(stores=stores)
     campaign = stores.campaigns.load_campaign(campaign_id)
     if campaign is None or campaign.owner_user_id != str(stores.identity.user_id):
@@ -246,10 +243,9 @@ async def start_checkin_campaign(
 ) -> Any:
     """Transition (b), web tail — flip a CHECKIN campaign to ``active`` and DETACH.
 
-    Gate the origin (incomplete → 422, stays ``checkin``), reserve the machine slot,
-    run the shared :func:`prepare_checkin_run`, then spawn the runner as a detached
-    task. The webapp's "Start campaign" (``POST /commands/start-checkin``) calls
-    this; the CLI ``new <file>`` shares :func:`prepare_checkin_run` but runs inline."""
+    Reserves the machine slot before the runner spawns as a detached task. The
+    webapp's "Start campaign" (``POST /commands/start-checkin``) calls this; the
+    CLI ``new <file>`` shares :func:`prepare_checkin_run` but runs inline."""
     cycle_id, draft = load_checkin_for_start(stores, campaign_id)
 
     user = stores.users.get_or_create(

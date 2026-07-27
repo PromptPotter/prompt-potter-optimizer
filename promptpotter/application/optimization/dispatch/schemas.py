@@ -1,41 +1,14 @@
 """Pydantic response models for every optimizer LLM node.
 
-One Pydantic model per node in ``datasets/_optimizer/pipeline.json::nodes``. These are
-the source of truth for what each ``l1_generate`` / ``l1_critique`` /
-``l2_context`` / ``l3_plan`` / ``checkin`` LLM call is allowed to
-return. The provider validates server-side via the JSON Schema emitted by
-``Model.model_json_schema()``; the SDK populates the typed instance on
-``response.choices[0].message.parsed`` — no hand-rolled regex repair on
-the hot path.
+**Every class docstring below is PROMPT TEXT.** It reaches the model as the JSON Schema
+``description``, so editing one is a prompt edit: regenerate with
+``scripts/build_optimizer_schemas.py`` and flag the commit.
 
-The JSON Schemas embedded in ``datasets/_optimizer/pipeline.json::resolved_schemas``
-are a regenerated export of these models (run
-``scripts/build_optimizer_schemas.py`` after editing a model). Pydantic is
-the SoT; the JSON file is for any non-Python consumer (Langfuse, webapp).
-
-``model_config = ConfigDict(extra="forbid")`` is load-bearing — OpenAI's
-structured-output requires ``additionalProperties: false`` for strict
-mode, and ``extra="forbid"`` emits exactly that. Without it the SDK
-silently falls back to lenient parsing.
-
-:class:`L1Variant` is **three-slot by contract**:
-
-- ``pipeline_params_override`` — per-node tunables (e.g. ``{"llm_only":
-  {"temperature": 0.7}}``). Inner shape is grafted at runtime by
-  :func:`l1_validators.build_l1_response_schema` from the active
-  ``PipelineSchema``.
-- ``prompt_fields_override`` — the six top-level prompt fields (``persona``,
-  ``task_intent``, ``problem_description``, ``instruction``,
-  ``thinking_style``, ``answer_format``). Each is a string. Constrained
-  by ``PROMPT_STRING_FIELDS``.
-- ``task_context_override`` — the two pipeline-context strings
-  (``upstream_context``, ``downstream_context``). Constrained by
-  ``TASK_CONTEXT_OVERRIDES``.
-
-Splitting these into distinct slots is what makes the shape statically
-validatable — before the split, prompt fields kept landing inside
-``pipeline_params_override.llm_only`` and the runner had to un-nest them
-on every round. With distinct slots the LLM cannot conflate the buckets.
+Pydantic is the SoT; ``datasets/_optimizer/pipeline.json::resolved_schemas`` is a
+regenerated export for non-Python consumers. ``extra="forbid"`` is load-bearing — it is
+what emits ``additionalProperties: false``, without which the SDK silently falls back to
+lenient parsing. :class:`L1Variant`'s three override slots are separate so the LLM cannot
+conflate the buckets, which is what makes the shape statically validatable.
 """
 
 from __future__ import annotations

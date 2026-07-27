@@ -148,7 +148,6 @@ class Stores:
 
     @property
     def tenant_id(self) -> TenantId:
-        """Convenience accessor — equals ``self.identity.tenant_id``."""
         return self.identity.tenant_id
 
 

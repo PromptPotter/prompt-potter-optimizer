@@ -43,7 +43,6 @@ def _schema_description_block(node: PipelineNode) -> list[str]:
     # No "plus available models" — the renderer never emitted them and must not: the model
     # axis is operator-owned, so advertising the catalogue here would teach a lever L1 cannot
     # pull (`node_param_keys` strips model/provider before this ever sees them).
-    description="Pipeline-param menu: name + ≤4-value enum hint per node.",
     char_cap=None,
     # A value-space menu is what a mutation may SAY, never why it should be made.
     citable=False,
@@ -97,7 +96,6 @@ _BLOCK_LIBRARY_HEADERS: dict[str, str] = {
 @signal(
     "prompt_block_catalogue",
     kind=InjectionKind.DERIVED,
-    description="Reusable prompt-field blocks (persona / task_intent / thinking_style / answer_format) L1 recombines.",
     char_cap=None,
     citable=False,
 )
@@ -113,8 +111,7 @@ def _r_prompt_block_catalogue(b: InjectionBundle) -> str:
     `earned_blocks` (short field values that lifted a run of the same answer-space shape); when
     none are earned yet it falls back to the task-AGNOSTIC general reasoning modules — NOT a
     silence, because starving L1 of block context shifts its (temp-0) generation to weaker
-    mutations (the 2026-07-18 regression), and NOT the house seeds, which mis-cue off their
-    ranking origin. The old ranking-flavored default was the low-value-at-wrong-place this fixes.
+    mutations, and NOT the house seeds, which mis-cue off their ranking origin.
     """
     mode = b.prompt_block_catalogue
     header = _BLOCK_LIBRARY_HEADERS.get(mode)
@@ -135,7 +132,6 @@ def _r_prompt_block_catalogue(b: InjectionBundle) -> str:
 @signal(
     "l1_signal_catalogue",
     kind=InjectionKind.DERIVED,
-    description="L1 SIGNAL MENU: sorted L1_POSSIBLE placeholder names L2 may use in l1_layout.",
     char_cap=None,
     citable=False,
 )

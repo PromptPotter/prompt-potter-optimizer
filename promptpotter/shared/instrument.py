@@ -1,26 +1,10 @@
 """Instrument mode — this task's cycle is a MEASUREMENT, not a campaign.
 
-L4 uses "run a full PromptPotter campaign" as a measurement function,
-``f(meta_prompt, seed) -> proxies``. For the outer optimizer to learn anything ``f`` must
-be a *function*: same inputs, same output. But a campaign is a stateful process — it reads
-tenant-global mutable memory, it is bounded by rails, it retries on live provider
-conditions — so without help ``f`` is a function of the meta-prompt AND of the whole
-history and mood of the machine it ran on. It leaks by construction.
-
-An inner cycle is therefore made hermetic by *subtracting* campaign features — recursion
-depth, the optimizer decoding clamp, the evidence epoch. This is the ONE declared mode
-that binds them: a cycle either IS an instrument, with every hermetic property holding
-together, or it is not. Never re-split them into properties a spawn site sets by hand —
-forgetting one silently reintroduces the leak, and the resulting number still looks
-exactly like a measurement.
-
-**Not a fourth LayerStrategy.** The ladder is closed at L1/L2/L3 and L4 is recursion (see
-``application/optimization/CLAUDE.md``). This declares what a cycle *is*, not a new tier of
-agent that decides anything.
-
-Lives in ``shared/`` because its readers span layers that cannot import each other:
-``infrastructure/store/archive_views`` (the evidence epoch) and
-``application/optimization/dispatch/llm_call`` (the decoding clamp).
+L4 runs a whole campaign as ``f(meta_prompt, seed) -> proxies``, and a campaign is a
+stateful process, so ``f`` leaks unless features are *subtracted*: recursion depth, the
+optimizer decoding clamp, the evidence epoch. This is the ONE declared mode that binds
+them — never re-split it into properties a spawn site sets by hand, because forgetting
+one reintroduces the leak and the number still looks exactly like a measurement.
 """
 
 from __future__ import annotations

@@ -72,13 +72,7 @@ async def score_one_candidate(
     l1_diversity: float,
     force_fresh: bool = False,
 ) -> CandidateRunResult:
-    """Run one candidate through the three-exit-path lifecycle.
-
-    Path 1 — validation-skip: synthetic-0 score (no eval).
-    Path 2 — cache-replay: full-run cache hit (no backend calls).
-    Path 3 — scored: full eval; classifies signal into SCORED / LEADER_LOCKED /
-    ESCALATED, builds RuntimeFailure on degradation, records ELIMINATION_CUT
-    / LEADER_LOCK_IN decisions on ``decisions``.
+    """Run one candidate through the three-exit-path lifecycle (module docstring).
 
     ``candidate_scores`` is read for prior_label resolution (already-scored
     candidates only — caller appends the current report after this returns).

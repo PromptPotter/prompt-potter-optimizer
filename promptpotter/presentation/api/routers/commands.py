@@ -1,40 +1,11 @@
 """``POST /commands/{kind}`` — closed inbound command surface.
 
-The HTTP-side shell: parse the envelope, enforce the trust-boundary
-headers (``Idempotency-Key`` always; ``Expected-Version`` when supplied
-on cycle-scoped commands — v0 relaxation per the YAML), delegate to
-``CommandDispatcher``. Per the m12-api-openapi.yaml closed set: every
-wired kind is declared in the YAML *before* a handler lands here.
-
-Wired kinds, by scope:
-
-* Workspace-scoped lifecycle (no ``Expected-Version``, inline-applied):
-  ``archive-campaign``, ``delete-campaign``, ``unarchive-campaign``.
-* Cycle-scoped sanctioned-POST migrations (``Expected-Version`` validated
-  when present, inline-applied): ``fork-cycle``,
-  ``delete-cycle``, ``cleanup-empty-cycles``.
-* Workspace-backend (no ``Expected-Version``, inline-applied;
-  ``CommandRecord`` lands on the workspace ledger at
-  ``projects/{tenant}/.workspace/events.jsonl``): ``register-backend``,
-* Runtime-cooperative cycle commands, writing to the target cycle's
-  ``.runtime/`` and re-read at the next checkpoint: ``pause-cycle``
-  (``pause.flag``, the single operator-interrupt flag polled by
-  ``Session.pause_check`` — the worker exits cleanly and resumes via the
-  ``start-run``/``resume`` launcher), ``change-spend-budget``
-  (``spend_cap.json`` ``{max_usd, max_tokens}``, re-read by the round
-  loop's ``BudgetGate``).
-* Launcher (workspace-scoped): ``mint-campaign`` mints a fresh
-  campaign+cycle and spawns the runner via :class:`JobRegistry` in one
-  inline-apply; ``start-run`` (cycle-scoped) launches the runner against
-  an existing cycle with ``kind ∈ {new, resume}``.
-* Check-in scoped (origin authoring): ``edit-draft-campaign``,
-  ``resolve-origin``, ``start-checkin``. Typed routes rather than generic
-  ``/{kind}`` arms because each answers a 200 domain object instead of a 202
-  ``CommandAcceptedBody`` — but each dispatches through
-  ``CommandDispatcher.dispatch_checkin_command`` onto the check-in cycle's
-  ledger. A response shape must never again pick the ingress path: these
-  three once applied inline, and nothing on disk recorded that an origin had
-  been edited, or by whom.
+The HTTP-side shell: parse the envelope, enforce the trust-boundary headers
+(``Idempotency-Key`` always, ``Expected-Version`` when supplied on a cycle-scoped
+command), delegate to ``CommandDispatcher``. The closed set is declared in
+``docs/specs/m12-api-openapi.yaml`` — a kind is declared there *before* its handler
+lands here. A few kinds get typed routes because they answer a domain object rather
+than ``CommandAcceptedBody``; a response shape never buys its own write path.
 """
 
 from __future__ import annotations

@@ -43,15 +43,9 @@ class OuterSampleProxies(StrictModel):
     bounded in (−1, 1) BY CONSTRUCTION, and ``ge``/``le`` below state that fact rather than
     clamping toward it.
 
-    It used to be divided by ``max(origin, 1−origin)`` ("the room available to move"). That term
-    is gone. It could not do the one job it claimed — the bound already held without it — and it
-    carried no information: the divisor lies in [0.5, 1.0], so the quotient was this same delta
-    rescaled by a per-cell factor in [1, 2]. What it *did* do was mis-scale: above a half-way
-    origin the divisor is the DOWNWARD room, so a strong-origin cell's improvement was divided by
-    room it was not moving into. Per-cell difficulty is already modelled where it belongs — the
-    round-winner election and PoBB elimination fit a Rasch θ with an explicit per-cell δ, and the
-    outer verdict pairs within-cell against the cached origin. A room-heuristic beside a
-    purpose-built estimator is a second mechanism doing the same kind of work, done worse.
+    Per-cell difficulty is already modelled where it belongs — the round-winner election and
+    PoBB elimination fit a Rasch θ with an explicit per-cell δ, and the outer verdict pairs
+    within-cell against the cached origin.
 
     The quality terms are ``1 − mean(rate ∈ [0,1])`` and ``rounds_improved_frac`` is a share. The
     efficiency ratios are genuinely unbounded — lift-per-dollar has no ceiling — so they carry the
@@ -68,7 +62,7 @@ class OuterSampleProxies(StrictModel):
 
     There is deliberately no ``delta_per_second``. Wall-clock cannot be made cache-invariant the
     way cost can — a replayed cycle really did take four seconds instead of five minutes, and
-    there is no "notional" elapsed time to recover. A per-second term therefore measured our cache
+    there is no "notional" elapsed time to recover. A per-second term therefore measures our cache
     rather than the meta-prompt, and unlike cost there is nothing to divide by instead. Lift per
     unit of *work* survives as ``delta_per_candidate``, which counts candidates and so is
     cache-invariant by construction.
@@ -81,7 +75,7 @@ class OuterSampleProxies(StrictModel):
 
     There is deliberately no ``rounds_to_N`` and no *target* anywhere in this vector. Counting
     rounds-to-a-threshold requires asserting up front how much room the inner benchmark has — an
-    assumption that carried no candidate gradient and was wrong to make: a task the inner model
+    assumption that carries no candidate gradient and is wrong to make: a task the inner model
     looks bad at is a task it has not been tuned for yet, not a task with no headroom.
     """
 
@@ -256,9 +250,7 @@ def _floor_proxies() -> OuterSampleProxies:
 
     ``after_N_rounds_delta = -1`` zeroes the formula's lift core and the modulators sit at their
     floors, so the composed fitness is exactly 0.0. The floor rides the LIFT CORE, whichever field
-    that is: it used to sit on ``normalized_gain`` while the delta was pinned at 0.0, so promoting
-    the delta without moving the −1 with it would have scored a floored cell 0.21 and quietly
-    retired the penalty.
+    that is.
 
     This is the ONLY route to a zeroed cell: a *measured* cycle reaches −1 only by collapsing the
     inner ability to nothing, so a zero means "the meta-prompt broke its own measurement", never

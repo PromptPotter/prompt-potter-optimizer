@@ -1,28 +1,11 @@
 """Origin-resolution loop — one resolver turn against a ``DraftCampaign``.
 
-The proposer half of the proposer/gate split (spec:
-``docs/specs/roadmap.md``). One turn:
-
-1. Assemble a deterministic origin-context message from the draft + open gaps +
-   the operator's latest message (``build_origin_consultation`` — no LLM
-   summarisation of its own data).
-2. Run the origin-aware ``checkin`` node (``checkin/2``) — the same node CLI
-   ``new`` uses for task decomposition, reused here per the operator's steer
-   rather than a parallel ``origin_resolve`` node. Wrapped in ``observed_node``;
-   token/cost ride the **check-in cycle's own ledger** (``cycle_chk_*``, minted
-   by ``mint_checkin_skeleton`` at the first ingest action and retained across
-   the flip to ``active``), beside the ``CommandRecord`` the dispatcher writes
-   for the turn — so an origin's authoring spend belongs to the campaign that
-   incurred it.
-3. Apply the resolver's evidence-cited findings: ``confidence=="high"``
-   auto-confirms (``CONFIRMED``); ``"low"`` lands the field ``PROPOSED`` and
-   waits for an operator click. Findings citing no evidence are rejected.
-4. Re-run the deterministic ``origin_readiness`` checklist — the checklist, not
-   the resolver, decides completeness. Persist provenance + the last resolution
-   to the draft ``cache.json`` (AI-readable on disk).
-
-One turn per call: the operator/UI drives subsequent turns, so the loop is
-bounded by interaction rather than an internal auto-spin.
+The proposer half of the proposer/gate split: it runs the origin-aware ``checkin`` node —
+the same node CLI ``new`` uses, never a parallel one — and applies its evidence-cited
+findings, but :func:`origin_readiness` and not the resolver decides completeness. The
+turn's token spend rides the check-in cycle's OWN ledger, so an origin's authoring cost
+belongs to the campaign that incurred it. One turn per call: the operator drives the
+next, which is what bounds the loop instead of an internal auto-spin.
 """
 
 from __future__ import annotations
@@ -198,10 +181,7 @@ async def resolve_origin_turn(
     draft: DraftCampaign,
     message: str | None = None,
 ) -> OriginResolutionResult:
-    """Run one resolver turn, apply findings, re-gate, persist. Returns the
-    resolution + post-apply draft.
-
-    Persists the mutated draft + resolution block to the check-in store under the
+    """Persists the mutated draft + resolution block to the check-in store under the
     draft's ``draft_id`` (which IS the owning ``campaign_id``)."""
     user_content, consultation_instruction = build_origin_consultation(draft, message)
 

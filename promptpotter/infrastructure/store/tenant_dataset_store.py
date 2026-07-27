@@ -33,15 +33,12 @@ if TYPE_CHECKING:
 
 
 class TenantDatasetStore:
-    """Reads + writes tenant-scoped Origins under ``{tenant_root}/datasets/``."""
-
     def __init__(self, base_dir: Path):
         self._base_dir = base_dir
 
     # -- Path helpers ---------------------------------------------------------
 
     def datasets_root(self) -> Path:
-        """Tenant's ``datasets/`` dir — parent of every committed slug."""
         return self._base_dir / "datasets"
 
     def dataset_dir(self, slug: str) -> Path:
@@ -72,7 +69,6 @@ class TenantDatasetStore:
         return out
 
     def slug_exists(self, slug: str) -> bool:
-        """Whether a committed dataset already holds this slug."""
         try:
             return self.dataset_dir(slug).is_dir()
         except ValueError:
@@ -111,11 +107,9 @@ class TenantDatasetStore:
     # -- Committed dataset I/O ------------------------------------------------
 
     def load_dataset(self, slug: str) -> dict[str, Any] | None:
-        """Read ``{slug}/cache.json`` from the committed tenant tree, or ``None``."""
         return read_json_optional(self.dataset_dir(slug) / "cache.json")
 
     def task_description(self, slug: str) -> str | None:
-        """Read ``{slug}/task_description.md`` or ``None`` when absent."""
         path = self.dataset_dir(slug) / "task_description.md"
         if not path.is_file():
             return None

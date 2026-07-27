@@ -16,8 +16,6 @@ if TYPE_CHECKING:
 
 @dataclass
 class SessionCtx:
-    """Loaded session state with typed accessors over the raw state dict."""
-
     store: Stores
     state: dict[str, Any]
     backend_id: str
@@ -83,7 +81,6 @@ class SessionCtx:
         return self.state.get("task_context")
 
     def save_phase(self, phase: str) -> None:
-        """Set phase and persist the session state."""
         self.state["phase"] = phase
         self.store.sessions.update(self.session_id, dict(self.state))
 

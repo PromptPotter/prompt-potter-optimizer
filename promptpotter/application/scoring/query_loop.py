@@ -189,7 +189,6 @@ async def _maybe_recover_degraded(
     sample: Sample,
     ctx: QueryLoopState,
 ) -> QueryMeasurement:
-    """Run the stale-data protocol if the result is degraded."""
     from promptpotter.application.scoring.sample_measurement import STALE_DATA_LOAD_PROTOCOL
 
     if not _has_pipeline_warnings(result):
@@ -227,7 +226,6 @@ async def _process_cache_hit(
     ctx: QueryLoopState,
     check_escalation: Callable[[], EscalationSignal | None],
 ) -> _SampleOutcome:
-    """Materialize a prior-cache result, append, and check escalation."""
     cached_r = _materialize_cached(
         ctx.cached_sample_results[sample.id],
         ctx.scorer,
@@ -263,7 +261,6 @@ async def _process_fresh_sample(
     ctx: QueryLoopState,
     check_escalation: Callable[[], EscalationSignal | None],
 ) -> _SampleOutcome:
-    """Backend-measure one sample; render rescored DEPR row before retry; classify errors."""
     if (cached_deprecated := ctx.deprecated_samples.get(sample.id)) is not None:
         display_cached = _materialize_cached(
             cached_deprecated, ctx.scorer, ctx.scorer_id, ctx.scorer_formula

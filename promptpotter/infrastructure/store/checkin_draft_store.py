@@ -1,23 +1,11 @@
 """Durable check-in working-state under ``campaigns/{campaign_id}/checkin/``.
 
-Replaces the restart-wiped in-memory ``DraftCampaignRegistry`` + the
-``datasets/.drafts/{id}/cache.json`` bank: an in-progress origin authoring lives
-under the campaign it belongs to, so a check-in survives a server restart and is
-resumable from disk like any other campaign. Two files:
-
-  * ``draft.json`` — the lossless ``DraftCampaign.to_disk()`` dict (every gated
-    field + provenance). The readiness gate at Start rehydrates from this.
-  * ``cache.json`` — the pre-commit sample bank (raw header-keyed rows + the
-    ``resolution`` breadcrumb), same shape the old draft cache wrote. Start reads
-    it and writes ``datasets/{slug}/`` fresh; nothing under ``campaigns/{id}/``
-    ever moves.
-
-The ``checkin/`` subdir is invisible to the ``campaigns/*/cycles/*/index.json``
-cycle scan, so it never pollutes cycle/campaign enumeration. Tenant scope is by
-path — the store is rooted at the tenant's ``base_dir``, so a cross-tenant
-``campaign_id`` simply isn't found. Stores dicts, not ``DraftCampaign``: the
-dataclass conversion (``to_disk`` / ``from_disk``) happens in the application
-caller, keeping this leaf free of application/domain imports.
+An in-progress origin authoring lives under the campaign it belongs to, so a check-in
+survives a restart and resumes from disk like any other campaign. The ``checkin/`` subdir
+is invisible to the cycle scan, so it never pollutes campaign enumeration, and tenant
+scope is by path — a cross-tenant ``campaign_id`` simply isn't found. Stores dicts rather
+than ``DraftCampaign``: the conversion happens in the application caller, which is what
+keeps this leaf free of application/domain imports.
 """
 
 from __future__ import annotations
@@ -38,8 +26,6 @@ if TYPE_CHECKING:
 
 
 class CheckinDraftStore:
-    """Reads + writes the check-in working-state under ``campaigns/{id}/checkin/``."""
-
     def __init__(self, base_dir: Path):
         self._base_dir = base_dir
 

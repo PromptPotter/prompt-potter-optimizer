@@ -20,13 +20,10 @@ from promptpotter.infrastructure.store.io import read_json_optional, write_json
 
 
 def _ts_filename_part(ts: str) -> str:
-    """Convert an ISO timestamp to a filename-safe slug (no colons)."""
     return ts.replace(":", "-")
 
 
 class DiagnosticRunStore:
-    """File-backed list of :class:`DiagnosticRunRecord`s under ``archive/diagnostic_runs/``."""
-
     def __init__(self, base_dir: Path):
         self._base_dir = base_dir
 
@@ -38,7 +35,6 @@ class DiagnosticRunStore:
         return self._dir() / f"{slug}_{config_hash[:12]}.json"
 
     def save(self, record: DiagnosticRunRecord) -> Path:
-        """Persist *record*; returns the on-disk path."""
         path = self._path(record.ts, record.config_hash)
         write_json(path, record.model_dump())
         return path

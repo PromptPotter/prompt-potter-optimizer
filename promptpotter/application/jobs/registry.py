@@ -143,7 +143,7 @@ class JobRegistry:
 
         The slot count read and the reservation write happen under one lock with
         **no ``await`` between them** — that atomicity is what closes the launch
-        race (two near-simultaneous launches can no longer both pass the gate
+        race (two near-simultaneous launches cannot both pass the gate
         before either's record lands). At ``capacity = 1`` any in-flight run
         blocks a new admit (strictly sequential). The reservation is a ``pending``
         :class:`Job`; the mint path fills real ids later via :meth:`update_target`,

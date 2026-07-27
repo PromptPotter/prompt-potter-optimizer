@@ -156,9 +156,8 @@ class StoredConfigInvalidError(PotterError):
 
     Without this class such a failure reaches the catch-all as a bare
     ``internal_error``, and the key that broke it lives only in a traceback in
-    journald — which is exactly how one stale toggle cost an afternoon. ``path``
-    and ``reason`` are required because a corrupt-file error that names neither
-    is the shrug this exists to replace.
+    journald. ``path`` and ``reason`` are required because a corrupt-file error
+    that names neither is the shrug this exists to replace.
     """
 
     http_status = 500

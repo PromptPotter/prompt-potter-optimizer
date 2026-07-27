@@ -1,22 +1,9 @@
 """Unified fork-mint primitive — :func:`_mint_fork` dispatches on trigger.
 
-All :class:`ForkTrigger` variants wired:
-
-* ``SCORING_DIVERGENCE`` — resume-detected divergence; needs ``surviving_rounds``.
-* ``L2_REBASE`` / ``L3_REBASE`` / ``OPERATOR_REWIND`` — in-loop rebase or
-  operator-initiated rewind; needs ``fork_from_round > 0`` (rounds 0..N-1
-  copied from parent). All three share the same on-disk shape; the
-  ``ForkSpec.trigger`` value is the audit-trail discriminator.
-* ``OPERATOR_DIAG`` — clean offshoot from root (``fork_from_round=0``).
-* ``OPERATOR_SWEEP`` — clean offshoot with sweep metadata
-  (``fork_from_round=0`` + ``sweep_batch_id`` + ``sweep_source_file``).
-* ``OPERATOR_STEERED`` — operator fork from the lineage/control panel
-  (``fork_from_round=0``, ``_fork_`` id), carrying an edited-searchpoint
-  ``CycleSeed`` appended to the fork's ledger as a ``CycleSeedRecord``. Application
-  entry: :func:`mint_operator_fork` (below).
-
-A fork is a new *cycle* inside the **same campaign** — all cycles land
-flat under ``campaigns/{campaign_id}/cycles/``.
+Every trigger mints through here; the rebase-family triggers share one on-disk shape and
+differ only as an audit discriminator, which is why they cannot each grow a mint path. A
+fork is a new *cycle* inside the **same campaign** — every cycle lands flat under
+``campaigns/{campaign_id}/cycles/``, never nested under its parent.
 """
 
 from __future__ import annotations

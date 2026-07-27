@@ -13,7 +13,6 @@ from promptpotter.domain.identity import UserId, safe_name
 
 
 def derive_user_id(issuer: str, subject: str) -> UserId:
-    """Derive a stable `UserId` from `(iss, sub)`."""
     digest = hashlib.sha256(f"{issuer}|{subject}".encode()).hexdigest()[:16]
     return UserId(safe_name(digest))
 

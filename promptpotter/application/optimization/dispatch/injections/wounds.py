@@ -90,7 +90,6 @@ def _runtime_block(b: InjectionBundle) -> str:
 @signal(
     "l1_wounds",
     kind=InjectionKind.MEASUREMENT,
-    description="L1-owned wounds — parse-time validation + mid-eval runtime failures (owner-tagged).",
     # Fenced (echoes LLM-proposed values + pipeline warnings). Cap fits one
     # RUNTIME_FAILURE_RECENCY_WINDOW of runtime + the validation list; runtime is
     # already window-bounded ("… N older suppressed"). Truncating runtime mid-list
@@ -118,7 +117,6 @@ def _render_guard_breaches(outcomes: list[ValidatorOutcome], layer: str) -> str:
 @signal(
     "guard_breaches",
     kind=InjectionKind.MEASUREMENT,
-    description="Post-parse guard breaches on L2 + L3 output — both owner=L3 (replan). Plain ids.",
     char_cap=400,
     citable=True,
 )

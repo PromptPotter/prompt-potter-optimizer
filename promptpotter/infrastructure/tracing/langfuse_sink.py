@@ -31,8 +31,6 @@ logger = logging.getLogger(__name__)
 
 
 class LangfuseSink:
-    """Forwards events to ``LangfuseLogger`` and persists id state."""
-
     def __init__(
         self,
         store_base_dir: str | Path,

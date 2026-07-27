@@ -1,22 +1,11 @@
 """Measurement archive — DB core. Append-only, content-addressed, cross-cycle/session/tenant.
 
-Two views: by sample (`measurements_for_sample`) and by config (`measurements_for_config`).
-Cache reuse → positional prefix-exact; discovery → `_matches_subset`. Sole source of truth —
-derived views (AxisIndex, SampleIndex) refresh from `list_all`, not a parallel stream.
-
-**Both files are append-only logs over `store/read_model.py`, folded last-wins.** The index
-is `measurements/index.jsonl`, keyed by `content_hash`; each run's detail is
-`measurements/runs/{run_id}.jsonl`, keyed by `k` — one `"run"` header row (rewritten whole
-per save, so the fold always serves the latest) and one `"m:{sample_id}"` row per
-measurement. A save appends only what is new: the scoring walk re-saves after every sample,
-and rewriting the whole detail each time cost O(samples²) bytes (measured: 90 MB of archive
-took 839 MB of writes; 67× worse at 200 samples).
-
-No read-whole / O(n)-scan / rewrite-whole per save — and, since the loop reads the index
-many times per round, none per READ either: `_live_rows` keeps the fold in memory and tails
-only the bytes appended since the last read, re-folding whole only when the file shrinks or
-is rewritten under it. Correctness rides on stat-ing the file every read, never on trusting
-our own writes — see `_live_rows`.
+Sole source of truth: the derived views (AxisIndex, SampleIndex) refresh from `list_all`,
+never a parallel stream. Both files are append-only logs folded last-wins, and the rule
+that keeps them cheap is **nothing whole, in either direction** — a save appends only what
+is new (the scoring walk re-saves per sample, so rewriting is quadratic), and a read tails
+only the bytes added since the last one. `_live_rows` stats the file every read rather
+than trusting our own writes; that is what makes the in-memory fold safe.
 """
 
 from __future__ import annotations
@@ -113,7 +102,6 @@ def _matches_subset(
 
 
 def _entry_dataset(entry: dict[str, Any]) -> str | None:
-    """Extract the dataset_name from an archive entry; empty / missing → None."""
     val = entry.get("dataset_name")
     return val if isinstance(val, str) and val else None
 
@@ -136,11 +124,8 @@ class MeasurementArchive:
     logs are reached by explicit `run_id` (`load_by_id`) or via the index (`list_all`); only
     `reindex` globs the dir, so the index shares it safely.
 
-    **`runs/` is load-bearing, not cosmetic.** The details used to sit directly in
-    `measurements/`, so every scan of them carried a name filter (`.json` suffix AND a
-    `hard_samples_` prefix blocklist) — and the only reason it did not also swallow
-    `index.jsonl` was the accident that `".jsonl".endswith(".json")` is False. A dir holding
-    nothing but detail logs retires the whole membership test for one suffix check.
+    **`runs/` holds nothing but detail logs** — that keeps their membership test one
+    suffix check, so no other file kind may land there.
 
     **Identity does not include the execution path.** A measurement is keyed by
     `content_hash(prompt, dataset, pipeline_params)` and reused by
@@ -240,7 +225,7 @@ class MeasurementArchive:
 
         The caller passes ONLY the rows it has not appended yet. The measurement rows
         already on disk are not rewritten — that is the whole point: the scoring walk calls
-        this once per sample, and rewriting the accumulated detail each time is what cost
+        this once per sample, and rewriting the accumulated detail each time would cost
         O(samples²) bytes.
 
         Measurements land before the header, so the header is the commit marker: a crash
@@ -544,11 +529,9 @@ class MeasurementArchive:
 
         *dataset_name* is REQUIRED. ``sample_id`` identifies a sample WITHIN a dataset, so a
         pooled slice (the ``None`` the index treats as forensic/admin) would serve one dataset's
-        measurement under another's sample — the bleed ``test_integrity`` guards. Keying on the
-        raw ``query`` text used to hide that, and bought a different silent collision instead:
-        two samples that phrase the same question shared one cell, and a sample with an empty
-        query was dropped from reuse entirely. The writer stamps ``sample_id`` on every
-        measurement (``sample_measurement.py``), so it is the cell's one identity.
+        measurement under another's sample — the bleed ``test_integrity`` guards. The writer
+        stamps ``sample_id`` on every measurement (``sample_measurement.py``), so it is the
+        cell's one identity.
 
         Operating consequence (the answer to "will changing a connector tunable re-score?"):
         `node_configs` carries each node's effective config INCLUDING `model`, so a change at
@@ -621,7 +604,6 @@ def _to_measurement(
     detail: dict[str, Any],
     item: dict[str, Any],
 ) -> Measurement:
-    """Project a stored item + its enclosing run into a flat Measurement row."""
     raw_configs = detail.get("node_configs") or []
     node_configs: list[tuple[str, dict[str, Any]]] = [
         (pair[0], pair[1])

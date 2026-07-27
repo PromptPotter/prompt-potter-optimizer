@@ -49,8 +49,7 @@ class MetaPromptParseError(RuntimeError):
     whole failed output and demands the same large answer again under the same
     ``max_tokens``, so for a size-driven failure it is more likely to come back empty than
     the first call was — and an empty repair says nothing about why the first attempt was
-    rejected. Measured: three L1 zero-candidate rounds whose first attempts returned
-    27,939 / 32 / 28,778 chars all reported ``raw_chars`` 18 / 0 / 0 off the repair.
+    rejected.
     """
 
     def __init__(
@@ -133,8 +132,7 @@ class MetaPromptParseError(RuntimeError):
 
         1. ``finish_reason == "length"`` on the failing attempt is NOT provider
            degradation, however empty the content. Truncation means the meta-prompt asked
-           for more than the token budget could carry — its own fault, and exactly the
-           round L4 was discarding as "provider flakiness".
+           for more than the token budget could carry — its own fault.
         2. **The failure reproduced under a clean re-ask.** This is measured, not inferred:
            the same request was sent twice and failed the same way both times, so it is a
            property of the prompt. The whole point of choosing that retry strategy
@@ -173,11 +171,7 @@ class MetaPromptParseError(RuntimeError):
         """One-line, disk-bound account of the failure — the wound's ``value`` and the log.
 
         Per ATTEMPT, because the two are different events with different causes and the
-        fix differs by which one you are reading. This line used to fold them: it reported
-        the repair's ``finish_reason`` and ``reasoning_tokens`` beside a ``completion_tokens``
-        summed across both, so a first attempt truncated at a 12,000-token cap logged as
-        ``finish_reason=stop completion_tokens=12481`` — three numbers, no two describing
-        the same call, and the one that named the cause absent.
+        fix differs by which one you are reading.
         """
         return (
             f"attempt1(finish={self.first_finish_reason} chars={self.first_content_chars} "

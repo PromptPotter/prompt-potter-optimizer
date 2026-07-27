@@ -15,8 +15,6 @@ from promptpotter.infrastructure.store.layout import DEFAULT_PROJECTS_ROOT
 
 @dataclass(frozen=True)
 class IdentityPaths:
-    """Path bundle rooted at `.promptpotter/identity/`."""
-
     root: Path
 
     @property
@@ -51,7 +49,6 @@ class IdentityPaths:
 
 
 def default_identity_paths() -> IdentityPaths:
-    """Identity data dir sibling of the default `projects/` root."""
     return IdentityPaths(root=DEFAULT_PROJECTS_ROOT.parent / "identity")
 
 

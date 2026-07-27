@@ -28,7 +28,6 @@ async def run_sweep_generation_only(
     *,
     label: str = "sweep_gen_only",
 ) -> None:
-    """L1 variants without scoring; round_data JSON is minimal status='generation_only'."""
     cb.set_round(round_num)
     if (ledger := session.state.ledger) is not None:
         ledger.append(PhaseRecord(phase="round", event="enter", round=round_num))

@@ -108,11 +108,8 @@ def composite_ci(results: list[QueryMeasurement]) -> tuple[float | None, float |
     plain accuracy — a tighter, honest whisker on the metric the election actually ranks by.
 
     It brackets the population ``compute_accuracy`` averages — **scoreable cells**
-    (non-deprecated AND non-errored) — because that is the number it is drawn beside. It
-    used to read every row through the bare ``_mean_fitness_by_cell`` (deprecated/errored
-    rows entering at 0.0) while ``composite_fitness`` averaged only the scoreable ones, so a
-    single such sample pulled the whisker's centre off the bar it brackets. That is *not* a
-    reason to filter ``_mean_fitness_by_cell`` itself: ``paired_fitness`` needs the
+    (non-deprecated AND non-errored) — because that is the number it is drawn beside. Do
+    *not* filter ``_mean_fitness_by_cell`` itself: ``paired_fitness`` needs the
     un-predicated version — ``elect_round_winner``'s origin-**overlap** guard deliberately
     grades an errored row as a 0.0 cell so an all-errored origin still yields overlap
     (``theta_lift_over_origin`` is the guard for the ability itself).
@@ -134,7 +131,6 @@ def composite_ci(results: list[QueryMeasurement]) -> tuple[float | None, float |
 
 
 def count_degraded_samples(results: Sequence[Mapping[str, Any]]) -> int:
-    """Count samples that have pipeline degradation warnings."""
     return sum(1 for r in results if has_pipeline_warnings(r))
 
 

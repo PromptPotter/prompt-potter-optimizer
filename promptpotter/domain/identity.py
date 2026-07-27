@@ -2,9 +2,7 @@
 
 Three :pep:`484` :class:`~typing.NewType`s the rest of the codebase uses in
 preference to bare ``str``: :data:`TenantId`, :data:`UserId`, :data:`Issuer`.
-Plus :func:`safe_name` for path-segment validation (replaces the old
-``DEFAULT_TENANT_ID`` constant + ad-hoc ``validate_path_component`` calls at
-identity boundaries).
+Plus :func:`safe_name` for path-segment validation.
 
 The composite :class:`promptpotter.shared.identity.IdentityContext` carries
 these — no code outside the identity layer constructs a raw ``TenantId``

@@ -41,8 +41,6 @@ _NEXT_ACTION_TO_STOP: dict[NextAction, StopReason] = {
 
 @dataclass(frozen=True)
 class EscalationEvent:
-    """Escalation-observation outcome."""
-
     next_action: NextAction
 
     @property

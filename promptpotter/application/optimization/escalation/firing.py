@@ -488,10 +488,7 @@ def _stash_rebase_request(
     subtree is exhausted — a judgment no rule makes well — and says so. Which ancestor
     to re-expand from is then a statistical question with a right answer, and it is
     answered by :func:`select_rewind_round`: UCB1 over the backpropagated lineage,
-    balancing each ancestor's mean θ against how little it has been explored. That the
-    layer no longer names a round is the point: it never had the evidence to. No panel
-    ever enumerated the ancestors and their fitness, so a free-form ``round_offset`` was
-    an unanchored guess wearing the costliest decision in the loop.
+    balancing each ancestor's mean θ against how little it has been explored.
 
     The runner resolves the request post-finalize: ``_mint_fork`` then rebuilds observers
     around the new fork's ledger and re-enters the optimize loop (capped at

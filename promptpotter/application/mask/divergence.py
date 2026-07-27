@@ -68,9 +68,7 @@ class DivergenceResult(StrictModel):
 
 
 def find_divergences(record: MaskRecord, verdict: Verdict) -> DivergenceResult:
-    """Walk the forest; return the divergence markers + the divergent subtree.
-
-    Per-branch and tree-recursive: within a cycle the *first* diverging round is the
+    """Per-branch and tree-recursive: within a cycle the *first* diverging round is the
     divergence point and every later round on that spine is divergent; a fork rooted
     *before* the divergence stays in the invariant prefix and is analyzed for its
     own divergence, while a fork rooted *at or after* it is wholly counterfactual.

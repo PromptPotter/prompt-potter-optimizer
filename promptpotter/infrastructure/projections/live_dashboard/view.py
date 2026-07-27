@@ -684,8 +684,8 @@ class LiveDashboardView(DerivedView):
     def _handle_round_warning(self, record: RoundWarningRecord) -> None:
         """Sole writer of ``dashboard.json::recent_loop_warnings``.
 
-        Mirrors ``recent_backend_warnings`` — a rolling, capped list of the
-        optimizer-loop degradations that previously logged only to stdout.
+        Mirrors ``recent_backend_warnings`` — a rolling, capped list of
+        optimizer-loop degradations.
         Flushed immediately: a zero-candidate round is a material fact the
         operator (or the file-tree reader) must see without waiting on the
         debounce.

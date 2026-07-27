@@ -188,8 +188,7 @@ def persist_round(
     round_num: int,
     session: Session,
 ) -> None:
-    """Flush decisions, mirror to ledger, write round_data + log.md/review.md, flush recorder.
-    The emit is unconditional — every completed round lands on the ledger."""
+    """The ledger emit is unconditional — every completed round lands on the ledger."""
     flushed: list[ResumeCheckpointRecord] = []
     if cycle.pending_decisions:
         flushed = list(cycle.pending_decisions)

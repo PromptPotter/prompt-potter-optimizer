@@ -98,7 +98,6 @@ class OpenAICompatibleClient(LLMClientBase):
         self._client: AsyncOpenAI | None = None
 
     def _ensure_client(self) -> AsyncOpenAI:
-        """Lazy-initialize the async OpenAI client."""
         if self._client is None:
             try:
                 from openai import AsyncOpenAI

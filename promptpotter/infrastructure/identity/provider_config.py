@@ -1,34 +1,10 @@
 """OIDC provider configuration — Google + GitHub.
 
-Loaded from `.promptpotter/identity/oidc.json`. Schema:
-
-```json
-{
-  "google": {
-    "client_id": "...",
-    "client_secret": "...",
-    "redirect_uri": "https://your-tunnel.example.com/api/v1/auth/callback/google"
-  },
-  "github": {
-    "client_id": "...",
-    "client_secret": "...",
-    "redirect_uri": "https://your-tunnel.example.com/api/v1/auth/callback/github"
-  }
-}
-```
-
-`redirect_uri` is provider-registered on the OAuth app page; the
-middleware verifies the inbound `state` token but the provider verifies
-the redirect URI matches what was registered. Either provider may be
-omitted — the login page hides buttons for unconfigured providers.
-
-**Discovery overrides (Google slot only).** The Google slot accepts
-four optional fields (`issuer`, `authorize_url`, `token_url`,
-`jwks_url`) so any OIDC-conformant IdP — Dex, Keycloak, Auth0, Okta —
-can ride the Google client. When unset, the production Google URLs
-apply. This is the local-dev harness path (`dev/oidc-local/`) and the
-forward seam for swapping the corporate IdP without a code change.
-GitHub is OAuth-2.0-only and ignores these fields if set.
+Loaded from `.promptpotter/identity/oidc.json`, whose shape is
+:class:`ProviderConfigBundle` / :class:`OIDCProviderConfig` below. ``redirect_uri`` must
+match what was registered on the provider's OAuth app page — the provider checks that,
+we only verify the inbound ``state``. Omitting a provider is supported; the login page
+hides buttons for the ones that are absent.
 """
 
 from __future__ import annotations

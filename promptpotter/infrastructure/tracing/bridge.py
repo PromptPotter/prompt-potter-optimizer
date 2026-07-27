@@ -61,8 +61,6 @@ class NodeTrace:
 
 
 class ObservabilityBridge:
-    """Fans events out to file + Langfuse sinks under :func:`graceful`."""
-
     def __init__(
         self,
         *,

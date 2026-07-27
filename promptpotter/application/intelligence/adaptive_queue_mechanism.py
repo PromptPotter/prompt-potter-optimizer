@@ -1,26 +1,13 @@
 """Between-round CAT primitives + the round-static scoring-order builder.
 
-Two mechanisms live here:
-
-- **``pick_value(s) = decision_information_gain(s) + delta_learning_gain(s)``** —
-  the 1PL Rasch acquisition score used BETWEEN rounds (``select_round_subset``
-  subset picking) and for display (the hard-samples artifact's contestedness
-  column). ``decision_information_gain`` = MI between next outcome and verdict
-  ``θ_c > θ_s`` (means-known limit recovers Bernoulli Chernoff information,
-  Garivier-Kaufmann 2016 Track-and-Stop); ``delta_learning_gain`` restores the
-  parameter-information the verdict-only term omits so under-measured samples
-  stay maximally informative while resolved ones (``p(1-p)→0``) are never
-  re-promoted.
-
-- **``build_round_order``** — the WITHIN-round scoring order: one deterministic
-  shared order per round, built from the seed's per-sample outcomes. It replaced
-  the online per-sample CAT re-fit, which empirically front-loaded the seed's
-  hit set (zero-information ties: every early paired comparison ties, p_best
-  pins at 0.5, and the elimination gates go blind until the tail). The round's
-  actual decision is "can this candidate NET the adoption margin against the
-  seed" — and that evidence lives only in discordance-potential samples, so the
-  shared order front-loads seed-MISS samples (win opportunities) with a seed-HIT
-  regression probe interleaved every 4th slot.
+``pick_value = decision_information_gain + delta_learning_gain`` is the BETWEEN-round 1PL
+Rasch acquisition score: the first term is MI between the next outcome and the verdict
+``θ_c > θ_s`` (Garivier-Kaufmann 2016 Track-and-Stop in the means-known limit), the
+second restores the parameter-information a verdict-only term omits, so under-measured
+samples stay informative while resolved ones are never re-promoted. ``build_round_order``
+is the WITHIN-round order and front-loads seed-MISS samples because the round's real
+question — can this candidate NET the adoption margin — is only answerable from
+discordance-potential samples; a seed-HIT regression probe rides every 4th slot.
 """
 
 from __future__ import annotations

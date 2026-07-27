@@ -2,39 +2,13 @@
 whether a producer is actually alive, and disposable L4 scratch with whether
 anything can still reach it.
 
-Two launch paths leave a cycle non-terminal on disk after their producer is
-gone: an **API-launched** run whose asyncio task died mid-session (a torn task
-in the ``--workers 1`` server), and a **CLI-launched** run (``python -m
-promptpotter …``, never in the :class:`JobRegistry`) that crashed / was killed /
-slept without stamping a terminal record. Post in-flight-heartbeat a genuinely
-alive cycle can never go stale (it heartbeats its ledger → ``dashboard.json``
-within ``RUN_FRESH_S``), so a persistently-detached cycle is *dead*, not quiet —
-and must be reaped to ``TERMINAL`` (``PRODUCER_VANISHED``) so the OS-style dock
-and the on-disk truth agree instead of showing a ghost open-app forever.
-
-Two callers, one write seam (``CampaignStore.mark_producer_vanished``, idempotent):
-
-- :func:`reap_cycle_by_id` — the :class:`JobRegistry` ``on_reap`` callback fires
-  it the instant an API job's task is proven gone (immediate stamp).
-- :func:`sweep_dead_cycles` — the per-tick body of :func:`periodic_sweep`, a
-  background loop (started at server boot, cancelled at shutdown) that catches
-  CLI-launched dead cycles the registry never saw. Gated on a long
-  ``DEAD_AFTER_S`` staleness, plus :func:`periodic_sweep`'s own initial-delay +
-  suspend-skip guard, so a live run — even one whose MACHINE just slept — is
-  never falsely reaped.
-
-Tenant-agnostic: ``campaign_id`` is globally unique, so cycle dirs are resolved
-by globbing ``projects_root`` — no identity/tenant mapping needed. The sweep
-walks ``projects_root`` PLUS every L4 inner sandbox (``<workspace>/.inner/<outer
-cycle_id>``, a sibling tree of the same shape — see :func:`_sweep_roots`), so an
-inner cycle's dead producer is reaped exactly like a top-level one.
-
-:func:`reclaim_orphan_sandboxes` is the third job, on the same tick: an
-``.inner/<cycle_id>`` whose owner cycle no longer exists is unreachable by every
-reader in the package and is deleted. Reclamation lives HERE, with liveness,
-because both answer the same shape of question — "does the thing this on-disk
-state belongs to still exist?" — and splitting them is how ``.inner`` came to have
-no owner at all.
+The whole thing rests on one fact: a genuinely alive cycle cannot go stale, because it
+heartbeats within ``RUN_FRESH_S``. So a persistently-detached cycle is *dead*, not quiet,
+and stamping it TERMINAL is what stops the dock showing a ghost forever. Both callers
+write through the one idempotent seam ``CampaignStore.mark_producer_vanished``, and the
+sweep's staleness + suspend-skip guards are why a live run whose MACHINE slept is not
+falsely reaped. Sandbox reclamation lives here too because it answers the same shape of
+question — does the thing this on-disk state belongs to still exist?
 """
 
 from __future__ import annotations
@@ -132,20 +106,16 @@ def reclaim_orphan_sandboxes(projects_root: Path) -> int:
     A sandbox is **scratch owned by exactly one outer cycle** — named by it, written only
     while it runs, reachable afterwards only by walking down from that cycle (the lineage
     tree, the ``descend`` routes). So when the owner is no longer on disk, the sandbox is
-    not merely stale, it is *unreachable*: no lineage walk finds it, no route serves it,
-    and until now nothing deleted it. That is the whole accumulation mechanism — sandboxes
-    outlive their owners whenever a campaign is deleted through a path that doesn't pass
-    ``inner_sandbox_root``, or an outer cycle is rewound and re-minted under a new id.
+    not merely stale, it is *unreachable*: no lineage walk finds it, no route serves it.
+    Sandboxes outlive their owners whenever a campaign is deleted through a path that
+    doesn't pass ``inner_sandbox_root``, or an outer cycle is rewound and re-minted under
+    a new id.
 
     Deliberately narrow: a sandbox whose owner still exists is KEPT, terminal or not.
     "The owner finished" is not the same claim as "nobody can reach this" — an operator
     drilling into a completed L4 campaign walks into exactly these trees — and a reaper
     that guesses at the difference deletes measurement history to save disk. Absence of
     the owner is a fact, not a policy, which is why it is the one this function acts on.
-
-    The disk pressure that made reclamation urgent is fixed upstream instead: an inner
-    cycle no longer dumps per-observation traces at all (``tracing/file_sink.py``), which
-    is where ~all of the measured 343 MB came from.
     """
     inner_dir = projects_root.parent / ".inner"
     if not inner_dir.is_dir():
@@ -201,8 +171,8 @@ async def periodic_sweep(
     initial_delay_s: float = 120.0,
 ) -> None:
     """Background sweep loop — runs for the server's lifetime (the lifespan
-    cancels it at shutdown), replacing the old startup-only one-shot so a
-    CLI-launched death is reaped mid-uptime, not only at the next restart.
+    cancels it at shutdown), so a CLI-launched death is reaped mid-uptime, not
+    only at the next restart.
 
     Two protections against a false reap across a MACHINE sleep (the process
     freezes too, so nothing runs to distinguish "still asleep" from "just

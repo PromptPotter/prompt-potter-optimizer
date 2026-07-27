@@ -23,8 +23,6 @@ logger = logging.getLogger(__name__)
 
 
 class SweepStore:
-    """File I/O for sweep-batch artifacts (``index.json`` + ``summary.md``)."""
-
     def __init__(self, base_dir: Path) -> None:
         self._base_dir = base_dir  # tenant root
 
@@ -64,7 +62,6 @@ class SweepStore:
         status_by_source: dict[str, str],
         cycle_by_source: dict[str, str],
     ) -> Path:
-        """Read the running index, mark complete, fill per-payload status+cycle, write back."""
         path = self.batch_dir(campaign_id, batch_id) / "index.json"
         index = read_json(path)
         index["status"] = "completed"
@@ -88,13 +85,11 @@ class SweepStore:
         batch_id: str,
         content: str,
     ) -> Path:
-        """Write the pre-rendered batch summary markdown."""
         path = self.batch_dir(campaign_id, batch_id) / "summary.md"
         write_text(path, content)
         return path
 
     def load_batch(self, campaign_id: str, batch_id: str) -> dict[str, Any] | None:
-        """Read the batch index; ``None`` if it doesn't exist."""
         return read_json_optional(self.batch_dir(campaign_id, batch_id) / "index.json")
 
 

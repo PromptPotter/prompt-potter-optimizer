@@ -1,21 +1,9 @@
 """Connector protocol — bundles backend-specific hooks under one shape.
 
-A connector packages everything PromptPotter needs to talk to a specific
-backend kind. Additional connectors are added by writing one new file in
-this package.
-
-Hooks:
-
-- ``wire_adapter`` — outbound HTTP body shape for ``BackendClient.run_query``.
-- ``session_factory`` — fresh ``SessionProtocol`` instance per ``BackendClient``.
-- ``extract_experiment`` — backend experiment-data → ``(queries, index_terms)``.
-- ``preflight`` — async reachability probe invoked before any command that
-  needs the backend live (R2). Raises :class:`BackendUnreachableError`
-  when the connector reports the backend is down; in-process connectors
-  (e.g. ``promptpotter``) opt out by leaving the field ``None``.
-
-Adding a connector is intentionally local to ``connectors/<name>.py`` — no
-edits to ``application/config.py`` or ``infrastructure/backend.py``.
+Adding a connector is intentionally local to ``connectors/<name>.py`` — no edits to
+``application/config.py`` or ``infrastructure/backend.py``, and the loop dispatches on a
+connector's *declared* capability rather than on its name. Each hook's contract is on its
+type alias below.
 """
 
 from __future__ import annotations
@@ -91,8 +79,6 @@ class BackendUnreachableError(PotterError):
 
 @dataclass(frozen=True)
 class Connector:
-    """Frozen bundle of the backend-specific hooks."""
-
     name: str
     """Lowercase id matching ``pipeline.json::backend_type`` and
     ``pipeline_schema.name.lower()``."""

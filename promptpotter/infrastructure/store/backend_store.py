@@ -41,18 +41,15 @@ class BackendStore:
     # -- backend CRUD ---------------------------------------------------------
 
     def register(self, backend: BackendConnection) -> Path:
-        """Write backend.json for a new backend."""
         path = self._backend_dir(backend.id) / "backend.json"
         write_json(path, backend.model_dump())
         return path
 
     def get(self, backend_id: str) -> BackendConnection | None:
-        """Read backend.json, return None if not found."""
         data = read_json_optional(self._backend_dir(backend_id) / "backend.json")
         return BackendConnection(**data) if data is not None else None
 
     def list_all(self) -> list[BackendConnection]:
-        """List all registered backends."""
         root = self._backends_root()
         if not root.exists():
             return []
@@ -64,7 +61,6 @@ class BackendStore:
         return backends
 
     def update(self, backend: BackendConnection) -> None:
-        """Overwrite backend.json with updated data."""
         path = self._backend_dir(backend.id) / "backend.json"
         write_json(path, backend.model_dump())
 
@@ -98,13 +94,11 @@ class BackendStore:
         return path
 
     def load_dataset(self, name: str) -> dict[str, Any] | None:
-        """Load a named dataset. Returns ``None`` if not found."""
         return read_json_optional(self._dataset_cache_path(name))
 
     # -- connector profile (persistent per-backend defaults) -------------------
 
     def load_connector_profile(self, backend_id: str) -> dict[str, Any] | None:
-        """Load connector profile. Returns None if no profile saved."""
         return read_json_optional(
             self._backend_dir(backend_id) / "connector_profile.json",
         )

@@ -23,9 +23,7 @@ def content_hash(
     dataset: list[Any],
     pipeline_params: dict[str, Any] | None = None,
 ) -> str:
-    """Content-addressed hash for measurement deduplication.
-
-    ``sha256(rendered_prompt + sorted_query_gt_pairs
+    """``sha256(rendered_prompt + sorted_query_gt_pairs
     + pipeline_params)[:HASH_TRUNCATE]``
 
     Order of dataset samples does not affect the hash.

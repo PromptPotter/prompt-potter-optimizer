@@ -135,9 +135,6 @@ class Knob:
     nested model is descended into; a field without one that is *not* a model is an
     undeclared knob and fails the walk in :mod:`promptpotter.application.knobs`.
 
-    Scope and estimands used to live in two name-keyed side tables beside the model,
-    each with its own walker and its own import guard — and they drifted exactly as a
-    hand-written name-set does, disagreeing on whether ``lives`` was one leaf or two.
     Metadata on the field cannot go stale against the field.
     """
 
@@ -586,7 +583,6 @@ class CampaignConfig(StrictModel):
 
 
 def load_campaign_config(raw: dict[str, Any] | CampaignConfig) -> CampaignConfig:
-    """Normalize raw dict / Pydantic input into a validated ``CampaignConfig``."""
     if isinstance(raw, CampaignConfig):
         return raw
     return CampaignConfig.model_validate(raw)
@@ -759,7 +755,7 @@ def run_preflight_checks(
     dataset: list[Sample],
     target_models: tuple[str, ...] = (),
 ) -> list[PreflightWarning]:
-    """Run all preflight checks. Pure — no mutation, no I/O.
+    """Pure — no mutation, no I/O.
 
     ``target_models`` are the resolved per-node target/scoring model ids (from
     ``session.pipeline_params``); empty when the backend owns the model."""
@@ -821,15 +817,14 @@ def apply_node_overlay(
     stacks dataset < campaign-override < cycle-seed.
 
     **A param declared ``param_types: object`` merges one level deeper**: the incoming
-    keys win, the siblings it did not name SURVIVE. Without this, a nested param is a
-    single key in the node config and an incoming partial dict replaces it whole — so a
-    candidate that improved one ``output_schema_descriptions`` entry silently reverted
-    every entry its parent earned, and the description axis could not accumulate across
-    generations. Depth is bounded by the DECLARATION, never by sniffing ``isinstance``:
-    an undeclared param keeps the node-level shallow semantics, and ``array`` replaces
-    wholesale because a merged ordering is meaningless. This is the same per-slot
-    contract ``resolve_node_layout`` hand-rolls (named slot replaces, unnamed keeps the
-    floor) — one nesting contract, not two.
+    keys win, the siblings it did not name SURVIVE — a candidate improving one
+    ``output_schema_descriptions`` entry cannot revert the entries its parent earned, so
+    the description axis accumulates across generations. Depth is bounded by the
+    DECLARATION, never by sniffing ``isinstance``: an undeclared param keeps the
+    node-level shallow semantics, and ``array`` replaces wholesale because a merged
+    ordering is meaningless. This is the same per-slot contract ``resolve_node_layout``
+    hand-rolls (named slot replaces, unnamed keeps the floor) — one nesting contract,
+    not two.
 
     ``schema`` supplies those declarations; ``None`` (the schema-less
     backend-default path) declares nothing, so every param stays shallow.

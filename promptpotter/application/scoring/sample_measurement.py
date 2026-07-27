@@ -365,7 +365,6 @@ async def measure_sample(
     session: Session,
     pipeline_params: dict[str, Any] | None = None,
 ) -> QueryMeasurement:
-    """Measure one Sample: run query through pipeline, score against ground truth."""
     query = sample.query
     ground_truth = sample.ground_truth
 
@@ -539,7 +538,6 @@ def find_gt_rank(result: Mapping[str, Any]) -> int | None:
 def compare_rerun(
     cached_result: Mapping[str, Any], rerun_result: Mapping[str, Any]
 ) -> dict[str, Any]:
-    """Compare rerun to cached result. Returns improvement summary."""
     cached_hit = cached_result.get("hit", False)
     rerun_hit = rerun_result.get("hit", False)
     hit_change = f"{'HIT' if cached_hit else 'MISS'}->{'HIT' if rerun_hit else 'MISS'}"

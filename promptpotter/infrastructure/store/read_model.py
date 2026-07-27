@@ -1,21 +1,12 @@
 """Append-only JSONL read model — the stdlib primitives that retire the
 read-whole / O(n)-scan / rewrite-whole persistence pattern.
 
-A writer appends one line (`append_row`); a reader folds the file into a
-last-wins `dict` keyed on one field (`fold_jsonl`); the log is rewritten without
-superseded lines only when it has grown past a factor of the live set
-(`compact`). A save is one `O_APPEND` write — no read, no rewrite. Readers do a
-single fold instead of hand-rolling upsert semantics over a whole-file scan.
-
-These are the ONLY primitives for derived-index persistence. A second mechanism
-doing the same job is a bug — fold it into these.
-
-A reader that folds the same log many times per round tails it instead
-(`fold_jsonl_from`): re-fold only the bytes appended since the last read, keyed
-off the file's `(mtime_ns, size)`. Two `MeasurementArchive` instances share one
-file — an L4 inner cycle runs in-process with its own `Stores` over the same
-`measurements/` dir — so a memo that trusts its own writes alone would go blind
-to the sibling's appends. The stat check is what makes the memo safe.
+A save is one `O_APPEND` write and a read is one last-wins fold, so neither side
+hand-rolls upsert semantics over a whole-file scan. These are the ONLY primitives for
+derived-index persistence; a second mechanism doing the same job is a bug. The tailing
+reader keys its memo off the file's `(mtime_ns, size)` rather than its own writes — two
+`MeasurementArchive` instances share one file when an L4 inner cycle runs in-process, so
+a memo trusting only itself goes blind to the sibling's appends.
 """
 
 from __future__ import annotations
@@ -74,9 +65,9 @@ def iter_jsonl(path: Path, *, record_types: frozenset[str] | None = None) -> lis
 
 
 def fold_jsonl(path: Path, key: str) -> dict[str, dict[str, Any]]:
-    """Fold *path* into ``{row[key]: row}``, last line wins (the upsert semantics
-    the old O(n) scan hand-rolled). First-seen order is preserved; a later line
-    updates the value in place. Rows lacking a string *key* are skipped."""
+    """Fold *path* into ``{row[key]: row}``, last line wins. First-seen order is
+    preserved; a later line updates the value in place. Rows lacking a string
+    *key* are skipped."""
     out: dict[str, dict[str, Any]] = {}
     for row in iter_jsonl(path):
         k = row.get(key)

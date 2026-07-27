@@ -267,8 +267,6 @@ class CycleRoundState:
 
 @dataclass
 class Cycle:
-    """Mutable orchestration state for the feedback cycle round loop."""
-
     session: Session
     config: CampaignConfig
 
@@ -520,9 +518,8 @@ class Cycle:
 
         Re-reading the archive is what re-warms it: this fires from ``absorb_round`` *after* the
         round closed, so every candidate it scored is already banked grade-A — under its own
-        searchpoint identity. Feeding the in-cycle rounds in beside the archive read (they used to
-        arrive as ``extra_obs``, keyed on the cycle-local ``lineage.id``) only re-entered the same
-        measurements under a second name.
+        searchpoint identity. Feeding the in-cycle rounds in beside the archive read would only
+        re-enter the same measurements under a second name.
         """
         from promptpotter.application.intelligence.hard_sample_archive import (
             build_archive_observations,

@@ -1,21 +1,8 @@
 """Profile A — Server-Sent Events highway for a per-cycle ledger stream.
 
-Single endpoint: ``GET /campaigns/{c}/cycles/{cy}/events:subscribe``.
-
-The handler tails the cycle's on-disk ledger (``.runtime/ledger.jsonl``) — the
-append-only source of truth — so the stream works regardless of which process
-runs the campaign (API server, CLI, spawned runner). On attach it emits one
-``stream_snapshot`` envelope carrying the cycle's ``dashboard.json`` content +
-``snapshot_at_offset``; then it polls the ledger file and fans out every newly
-appended record as live tail, with a 15 s SSE-comment heartbeat.
-
-Wire shape (closed set): every frame's ``data`` is a
-:class:`~promptpotter.domain.projection_envelope.ProjectionEnvelope`
-serialized with ``model_dump_json``. ``EventSourceResponse`` (sse-starlette)
-owns the ``data:`` framing, the heartbeat ping, and teardown on both client
-disconnect and server shutdown (it patches uvicorn's ``handle_exit``, so a
-single Ctrl+C finishes graceful shutdown). The certified contract — colon-suffix
-URL, snapshot-then-tail semantics, sequence gaps — lives in
+The HTTP shell over :class:`projections.event_stream.CycleLedgerTail`; ``sse-starlette``
+owns the framing, heartbeat and teardown. The certified contract — colon-suffix URL,
+snapshot-then-tail, sequence gaps, the ``ProjectionEnvelope`` frame — is
 ``docs/developer/event-stream.md``.
 """
 

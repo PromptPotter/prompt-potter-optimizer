@@ -1,58 +1,26 @@
 """L4 inner-cycle runner — the recursion arm of the ``promptpotter`` connector.
 
-The ``promptpotter`` connector declares ``execution="in_process"``; its
-``in_process_run`` delegates here. One outer "sample" = one inner PromptPotter
-campaign on a cheap proxy benchmark, scored by **how much the inner loop
-improved** — a composed fitness (``compute_outer_proxies``) over endpoint deltas,
-normalized headroom, bounded quality (cleanliness / diversity), and efficiency
-ratios (lift per $/candidate/second). Decided in
-``docs/specs/l4-outer-loop.md`` § 2 + § 4.
+One outer "sample" = one inner campaign on a cheap proxy benchmark, scored by how much
+the inner loop improved (``domain/l4/proxies.py`` is that law; nothing restates it).
+Design: ``docs/specs/l4-outer-loop.md`` § 2 + § 4.
 
-Two isolations make the recursion safe **and re-entrant** (so L5+ nests by
-construction — never a depth-1 assumption):
+Two isolations make the recursion re-entrant, so L5+ nests by construction and no code
+here may assume depth 1:
 
-- **Own ``asyncio.Task`` per inner cycle.** The per-task ContextVars the runner
-  binds (``_CYCLE_LEDGER`` / ``_CURRENT_ROUND`` in ``infrastructure/llm/models``;
-  ``_ABORT_CHECK`` in ``rate_limit``) isolate per task, not per call — a naïve
-  nested ``await run_optimization`` in the outer's own task would clobber the
-  outer's ledger binding / round stamp / abort predicate. We spawn a fresh task,
-  which copies the context, so each level gets its own copies.
-- **Sandboxed stores in a flat, shallow per-cycle home** —
-  ``<workspace>/.inner/<spawn_cycle_id>`` (sibling of ``projects/``, NOT physically
-  nested under the deep outer cycle dir). The inner campaign's ``cycles/`` tree,
-  ledger, active-pointer, and dashboards live there, so they never touch the outer
-  campaign's listing / active pointer / SSE stream. The home is named by (owned by)
-  the spawning cycle, but kept flat because physical nesting
-  (``…/.runtime/inner/…/.runtime/inner/…``) blows past Windows' 260-char
-  ``MAX_PATH`` at depth 1 and is hopeless by L5. A flat registry stays shallow at
-  EVERY depth, so the re-entrancy invariant holds without the path-length trap.
+- **Its own ``asyncio.Task``.** The runner's ContextVars (ledger, round stamp, abort
+  predicate) isolate per task, not per call — a nested ``await run_optimization`` in the
+  outer's task would clobber all three. Spawning copies the context instead.
+- **A FLAT sandbox home**, ``<workspace>/.inner/<spawn_cycle_id>``, a sibling of
+  ``projects/`` rather than a child of the outer cycle dir. Physical nesting blows past
+  Windows' ``MAX_PATH`` at depth 1 and is hopeless by L5; flat stays shallow at every
+  depth. The inner tree never touches the outer's listing, pointer or SSE stream.
 
-What makes the inner cycle a *measurement* rather than a campaign is declared in ONE place —
-:func:`~promptpotter.shared.instrument.enter_instrument_mode`, called inside the inner task.
-It binds recursion depth, the evidence epoch (the archive stays shared as a content-addressed
-CACHE, but is hidden as cross-run MEMORY, so the instrument does not depend on how often it has
-been used) and the optimizer decoding clamp, together. Read that module before changing any of
-them.
-
-The spawning cycle publishes its context (:func:`publish_inner_spawn_context`,
-called from ``runner/entry.py::run_optimization`` for every cycle) so the
-connector — which only receives ``(query, payload)`` — can find where to sandbox
-and which inner benchmark to run. The outer L1's meta-prompt mutations ride
-``payload["meta_prompt_overrides"]`` and are applied to the inner cycle's
-``_optimizer/`` prompts via the per-run override ContextVar
-(``dispatch/llm_call/prompts.py``), set inside the inner task so it can't leak to
-the outer. Those are the SPECIMEN under test, not part of the instrument — the same
-channel carries a normal outer cycle's own meta-prompt set.
-
-The process-global rate limiter is shared: inner spend competes with the outer
-for TPM/RPM (flagged, not blocked). Inner LLM cost (optimizer + backend) is
-tracked in the sandbox ledger AND rolled up onto the OUTER dashboard: each inner
-cycle's total spend rides its :class:`CycleResult.spend` (read from the inner
-run's live dashboard state at finalize — never the debounced ``dashboard.json``,
-which would race the read) and is returned as this outer sample's ``step_tokens``,
-so it fans onto the outer ledger through the existing backend-cost channel
-(``sample_measurement``) — the inner cost IS the outer sample's backend cost, so
-"spend is the headline" holds at the outer level.
+Instrument mode — what makes this a measurement rather than a campaign — is declared in
+``shared/instrument.py`` alone; read it before changing any of what it binds. The outer's
+meta-prompt overrides are the SPECIMEN under test, not part of the instrument, and are
+applied inside the inner task so they cannot leak outward. Inner spend rolls up as the
+outer sample's backend cost, read from live state at finalize rather than the debounced
+``dashboard.json``, which would race.
 """
 
 from __future__ import annotations

@@ -2,25 +2,12 @@
 account storage panel show. Read-only.
 
 ONE taxonomy, MECE: every byte in a campaign tree lands in exactly one of six leaves
-that sum to the on-disk total. The top-level axis is the operator's mental model —
-**Connector vs Loop vs Dataset** — and **Loop** breaks into four:
-
-- ``dataset``   — the langfuse ground-truth mirror (the input-data copy; biggest chunk)
-- ``connector`` — what the backend produced/consumed (its per-node I/O cache + the
-                  per-sample result arrays it wrote into the public round files)
-- ``state``     — the loop's resume point (the non-array remainder of the round files)
-- ``trace``     — loop telemetry (``streams``, rendered ``prompts``, the langfuse loop trace)
-- ``history``   — the durable event spine (``ledger.jsonl``)
-- ``reports``   — the readable output (manifest + dashboard/index/log/review + hard_samples)
-
-The "keepsake" that ``delete --keep-results`` spares (``reports`` + the langfuse loop
-trace) is a cross-cutting subset, not a leaf — surfaced as a UI note, never a summed
-figure, so the partition stays MECE.
-
-The workspace rollup (`GET /workspace/storage`) additionally accounts for the shared,
-cross-campaign caches (``measurements/`` + ``archive/optimizer_calls/``) and a residual
-``other`` slice (sessions, the workspace ledger, dataset/backend stores, …) so the grand
-total equals the tenant's real on-disk footprint — nothing excluded.
+that sum to the on-disk total, each defined by its ``Field(description=…)`` below;
+the axis is the operator's mental model, **Connector vs Loop vs Dataset**. The
+"keepsake" that ``delete --keep-results`` spares is a cross-cutting SUBSET, not a
+leaf — surface it as a UI note, never a summed figure, or the partition stops being
+MECE. The workspace rollup adds the shared cross-campaign caches plus an ``other``
+residual, so its grand total is the tenant's real footprint with nothing excluded.
 """
 
 from __future__ import annotations

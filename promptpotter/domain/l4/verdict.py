@@ -47,11 +47,11 @@ class OuterCellEffect(StrictModel):
     """One cell's paired (variant − origin) composite difference.
 
     ``variant_fitness`` / ``origin_fitness`` have **no reader today** — the panel renders
-    ``diff`` — and a dead-surface audit flagged them (2026-07-26). They stay, because this
-    record is DURABLE (it rides ``dashboard.json::rounds`` + the round files) and ``diff``
-    is lossy: the two levels cannot be recovered from their difference, so a verdict that
-    kept only ``diff`` could never answer "lifted from WHAT to what". Keep the measurement
-    whole; a reader is cheap to add later, a discarded measurement is not.
+    ``diff``. They stay, because this record is DURABLE (it rides ``dashboard.json::rounds``
+    + the round files) and ``diff`` is lossy: the two levels cannot be recovered from their
+    difference, so a verdict that kept only ``diff`` could never answer "lifted from WHAT
+    to what". Keep the measurement whole; a reader is cheap to add later, a discarded
+    measurement is not.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -105,10 +105,9 @@ def cell_fitness(rows: list[dict[str, Any]]) -> dict[str, float]:
 def _pick_variant(candidates: list[CandidateInfo]) -> CandidateInfo | None:
     """The variant the verdict scores: the round's elected winner, or nothing.
 
-    It used to fall back to ``max(composite_fitness)`` when no candidate was crowned — so
-    ``OuterVerdict.decision`` could read ``adopt`` for an arm the θ election specifically
-    declined, on the very surface the operator reads to judge a meta-prompt edit. A round
-    that crowned nothing has no verdict; ``None`` is already a legal return.
+    A round that crowned nothing has no verdict — no ``max(composite_fitness)`` fallback,
+    which could read ``adopt`` for an arm the θ election declined. ``None`` is a legal
+    return.
     """
     return next((c for c in candidates if c.is_winner), None)
 

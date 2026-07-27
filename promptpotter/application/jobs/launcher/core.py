@@ -587,7 +587,6 @@ async def _run_in_background(
     spend_budget_usd: float | None,
     stop_after_rounds: int | None = None,
 ) -> None:
-    """Asyncio task body — drives the run, updates registry on transitions."""
     from promptpotter.application.run_observers import build_run_observers
     from promptpotter.infrastructure.llm.models import set_cycle_ledger
 

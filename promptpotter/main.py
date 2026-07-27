@@ -43,7 +43,6 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Application startup and shutdown lifecycle."""
     logger.info("Starting %s v%s", app.title, app.version)
     logger.info("Environment: %s", settings.ENVIRONMENT)
     # Quiet the benign Windows ProactorEventLoop disconnect noise (bpo-39010)

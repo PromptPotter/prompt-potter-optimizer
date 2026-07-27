@@ -31,13 +31,10 @@ class GitHubTokenExchangeError(RuntimeError):
 
 
 class GitHubProviderClient:
-    """GitHub OAuth client — token exchange + profile fetch."""
-
     def __init__(self, config: OIDCProviderConfig) -> None:
         self._config = config
 
     def authorize_url(self, *, state: str) -> str:
-        """Build the user-facing redirect URL to GitHub's consent screen."""
         params = {
             "client_id": self._config.client_id,
             "redirect_uri": self._config.redirect_uri,
@@ -48,7 +45,6 @@ class GitHubProviderClient:
         return f"{GITHUB_AUTH_URL}?{urlencode(params)}"
 
     async def exchange_code(self, *, code: str) -> ProviderIdentity:
-        """Exchange the auth code for an access token, fetch profile."""
         async with httpx.AsyncClient(timeout=15.0) as client:
             token_response = await client.post(
                 GITHUB_TOKEN_URL,

@@ -1,31 +1,12 @@
 """``version_and_repoint`` — the data-critical *Replace* path for dataset-name collisions.
 
-Replacing the data under an existing dataset name must never overwrite it: a
-campaign reads its dataset **live** by name at every run, and measurements are
-stamped by that name, so an in-place overwrite would falsify every prior
-result. Instead we *version-and-repoint*: move the old data to an archival
-``{slug}-vN`` name, move every
-dependent campaign's pin + measurement stamp with it, then free the canonical
-name for the freshly-dropped data.
-
-Three on-disk facts move together, each via its owning store (so this module
-holds orchestration, not path knowledge):
-
-1. **Data** — ``TenantDatasetStore.version_dataset`` renames ``{slug}/`` →
-   ``{slug}-vN/`` and fixes its self-reference.
-2. **Campaign pins** — ``CampaignStore.repoint_dataset`` rewrites each
-   ``campaign.json::dataset_name`` (the one owner; cycle readers derive from it).
-3. **Measurements** — ``MeasurementArchive.restamp_dataset`` re-stamps the
-   archive index + detail files.
-
-**Crash-safety.** A ``datasets/.migrations/{id}.json`` marker is written
-*before* any move and flipped to ``completed`` after. Every step is idempotent,
-so :func:`recover_pending_replacements` can re-run a half-finished migration
-from the marker — it is invoked at the top of every replace *and* by the
-launcher before any run resolves a dataset, so a campaign never resolves to a
-stale or missing pin. The order (version → repoint) guarantees the only
-reachable crash state is "old data under ``-vN``, name free, some campaigns not
-yet repointed" — recoverable, never *wrong* data.
+An in-place overwrite would falsify every prior result: a campaign reads its dataset
+**live** by name, and measurements are stamped with that name. So the old data moves to
+an archival ``{slug}-vN`` and its dependents move with it — data, campaign pins,
+measurement stamps, each through its owning store — freeing the canonical name last. A
+``datasets/.migrations/{id}.json`` marker is written *before* any move and every step is
+idempotent, so :func:`recover_pending_replacements` finishes a half-done migration; the
+version → repoint order makes the only reachable crash state recoverable, never *wrong*.
 """
 
 from __future__ import annotations
@@ -66,11 +47,8 @@ class NothingToReplaceError(Exception):
 
 
 def version_and_repoint(*, stores: Stores, slug: str) -> ReplaceResult:
-    """Version the data under *slug*, repoint its dependents, free the name. Returns
-    the :class:`ReplaceResult`. Heals any prior crashed replace first.
-
-    Does **not** land the new data — the caller re-ingests under the now-free
-    *slug* through the normal draft/check-in flow.
+    """Heals any prior crashed replace first. Does **not** land the new data — the
+    caller re-ingests under the now-free *slug* through the normal draft/check-in flow.
     """
     recover_pending_replacements(stores=stores)
     if not stores.tenant_datasets.slug_exists(slug):

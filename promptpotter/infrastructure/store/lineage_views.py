@@ -1,37 +1,15 @@
 """The lineage tree — the served genealogy, read at any depth.
 
-Nodes alternate, forever::
-
-    Course -> Candidate -> Course -> ...
-
-A **course** is a cycle (a campaign root or an L4 inner run). A **candidate** is C0 /
-C1.1 — a searchpoint the loop minted. At L4 a candidate's children ARE courses; that is
-the recursion, so L5+ needs no new tier.
-
-**A course's children are its TIMELINE:** the candidates it minted, plus every attempt
-its forks contributed, renumbered here. ``C{round}.{n}`` is a position in a course's
-private sequence — every course mints its own ``C0``/``C1.1`` — so a fork's own counter
-names nothing campaign-wide and the renumber is what makes the label mean something. A
-candidate this course minted is never renumbered.
-
-**A fork is not a node.** It survives as a provenance stamp (``course_kind``,
-``steered_by``, ``path``) on the candidates it contributed; its ``path`` is what reaches
-its own dashboard. Its ``C0`` is a replay and merges into what it replays
-(:func:`_is_replay`). ``parent_id`` is a column hint for the dendrogram, never the tree's
-shape.
-
-**Two owners, and they cannot be collapsed.** IDENTITY comes from the ledger: it is the
-only witness independent of round close, and a round that died mid-flight still minted
-its candidates — at L4 their inner campaigns sit finished on disk under them. ELECTION, θ,
-``cumulative_accuracy`` and the composite-fitness CI come from ``dashboard.json::rounds[]``
-because the ledger does not carry them (:func:`_close_facts` says why) — do not try to fold
-them from a lookalike record. ``rounds/round_NNNN.json`` is the measurement record and is not
-a lineage source.
-
-**This is a READ MODEL. It decides nothing.** The DECISION genealogy is a different system
-— ``mask/backprop.py``, ``mask/divergence.py`` and the resume replayers ride positional
-``(cycle_id, round)`` + ``parent_cycle_id``. Do not move them onto this: it is hardened, it
-cannot be ``ab``-validated, and there is no functional gain.
+Nodes alternate ``Course -> Candidate -> Course`` forever — at L4 a candidate's children
+ARE courses, which is why L5+ needs no new tier. A course's children are its TIMELINE:
+the candidates it minted plus every attempt its forks contributed, **renumbered here**,
+because ``C{round}.{n}`` is a position in one course's private sequence and a fork's own
+counter names nothing campaign-wide. **A fork is not a node** — it survives as a
+provenance stamp on the candidates it contributed. Identity comes from the ledger,
+election/θ/CI from ``dashboard.json::rounds[]`` (:func:`_close_facts` says why); the two
+owners cannot be collapsed. **This is a READ MODEL and decides nothing** — the decision
+genealogy (``mask/backprop.py``, ``mask/divergence.py``, the resume replayers) rides
+positional ``(cycle_id, round)`` and must not be moved onto it.
 """
 
 from __future__ import annotations
@@ -261,7 +239,6 @@ class _Reads:
         self.seen: set[tuple[Path, str]] = set()
 
     def cycles(self, store: Stores) -> list[dict[str, object]]:
-        """One store's cycle registry."""
         if (key := store.base_dir) not in self._cycles:
             self._cycles[key] = store.campaigns.enumerate_cycles()
         return self._cycles[key]

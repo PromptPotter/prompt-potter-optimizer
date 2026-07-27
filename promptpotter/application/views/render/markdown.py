@@ -149,7 +149,6 @@ def _render_forks(forks: tuple[ForkSummaryView, ...]) -> list[str]:
 
 
 def to_markdown(view: LogMdView) -> str:
-    """Render a ``LogMdView`` into the full ``log.md`` document."""
     status = view.status
     parts: list[str] = [
         f"# Campaign {status.campaign_id or '(unknown cycle)'}",

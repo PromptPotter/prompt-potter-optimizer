@@ -14,7 +14,6 @@ from promptpotter.application.views.view_models import SweepSummaryView
 
 
 def render_sweep_summary(view: SweepSummaryView) -> str:
-    """Markdown summary for a sweep batch — header + payload table."""
     lines = [
         f"# Sweep batch {view.batch_id}",
         "",

@@ -145,11 +145,6 @@ class CampaignOrigin(NamedTuple):
     """The scored origin. ``resolved_origin`` is the origin OptSearchPoint —
     carrying its full lineage/memory, not just prompt strings — so the C0
     individual keeps its ``source`` marker (e.g. ``fork_seed``) downstream.
-
-    ``prepare_scoring_context`` returns this directly. It used to hand back a
-    one-element list of round-shaped dicts, which a second function then walked
-    (in reverse, with two fallbacks) to rebuild exactly this tuple — over a list
-    that could never hold more than one entry.
     """
 
     resolved_origin: OptSearchPoint | None
@@ -330,13 +325,9 @@ async def establish_campaign_origin(
     seed: CycleSeed | None,
     listener: Any | None,
 ) -> CampaignOrigin:
-    """The single origin-establishment seam: resolve the origin OSP once, then either
-    inherit it (no-modification operator fork) or score it.
-
-    A no-edit operator fork inherits its branch-point candidate's recorded C0 and skips
-    the scoring pass (straight to L1); everything else scores the origin via
-    ``prepare_scoring_context``. Both branches share the one resolved OSP, so the origin
-    is resolved exactly once and both paths return the same ``CampaignOrigin`` shape."""
+    """The single origin-establishment seam. The origin OSP is resolved exactly once and
+    shared by both branches (inherit a no-edit fork's recorded C0 vs score), which return
+    the same ``CampaignOrigin`` shape."""
     resolved_origin = resolve_origin_opt_search_point(
         prompt_node_names=(
             session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
@@ -373,9 +364,7 @@ async def prepare_scoring_context(
     seed: CycleSeed | None = None,
     resolved_origin: OptSearchPoint | None = None,
 ) -> tuple[CampaignOrigin, list[Sample]]:
-    """Resolve the origin (fork-seed wins), set the dataset, score the origin.
-
-    *resolved_origin* lets the caller pass an already-resolved origin OSP (so it isn't
+    """*resolved_origin* lets the caller pass an already-resolved origin OSP (so it isn't
     resolved twice on the runner path); when ``None`` it's resolved here (the notebook path)."""
     from promptpotter.application.datasets.loaders import sample_dataset
 

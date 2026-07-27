@@ -138,7 +138,6 @@ def _decode(blob: bytes) -> str:
 
 
 def _read_delimited(text: str, delimiter: str) -> Table:
-    """Parse CSV/TSV text into a :class:`Table` via ``csv.DictReader``."""
     try:
         reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
         fieldnames = list(reader.fieldnames or [])
@@ -184,7 +183,6 @@ def _read_json_records(text: str) -> Table:
 
 
 def _records_from_json(doc: Any) -> list[dict[str, Any]]:
-    """Normalise a parsed JSON document to a list of record dicts."""
     if isinstance(doc, list):
         return [r for r in doc if isinstance(r, dict)]
     if isinstance(doc, dict):

@@ -97,11 +97,8 @@ class Session:
         """The dataset's prompt-bearing LLM node — the override target for a per-cell
         seed / model pin.
 
-        Derived from the pipeline schema, never a literal. The L4 inner runner used to
-        hardcode ``"llm_only"``: an inner dataset naming its node anything else had the CRN
-        seed written under a key that did not exist, so the seed never landed and the outer
-        paired (variant − origin) diff silently lost its variance cancellation. Raises rather
-        than guessing — a missing schema means the caller ran before bootstrap.
+        Derived from the pipeline schema, never a literal. Raises rather than
+        guessing — a missing schema means the caller ran before bootstrap.
         """
         names = self.pipeline_schema.prompt_node_names() if self.pipeline_schema else []
         if not names:
@@ -351,11 +348,7 @@ def finalize_checkin_to_active(
 ) -> None:
     """Flip a ``checkin`` campaign to ``active`` against its EXISTING ids — transition (b).
 
-    The deferred half of the mint: the origin is now resolved (``cycle_plan``), so
-    write the real ``config`` + ``root_content_hash`` onto the provisional
-    ``campaign.json`` and flip ``lifecycle_status`` ``checkin`` → ``active``,
-    overwrite the placeholder session with the full run state, fill the cycle index
-    header, pre-seed ``dashboard.json``, and clear ``.runtime/checkin.flag``. The
+    The deferred half of the mint: the origin is now resolved (``cycle_plan``). The
     cycle id stays the provisional ``cycle_chk_*`` (option 2b — drift reads
     ``root_content_hash``, not the parsed id). Unlike ``auto_mint_session`` this
     mints nothing new; the caller binds the session + detaches the run."""

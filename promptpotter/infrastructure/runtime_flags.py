@@ -7,10 +7,10 @@ single read surface for them.
 :func:`derive_run_phase` is the *one* place run-state is computed for the cycle
 list and any non-live reader — there is no second "is it running?" derivation.
 It composes lifecycle (terminal, from ``index.json::finished_at``) with the
-control flags and a freshness fallback. Freshness (``is_running``) is no longer
-the *definition* of running — the runner declares ``running`` / ``paused`` onto
-the ledger and the dashboard projection writes them — it survives only as the
-signal that splits ``running`` from ``detached`` (an active cycle whose producer
+control flags and a freshness fallback. Freshness (``is_running``) is not the
+*definition* of running — the runner declares ``running`` / ``paused`` onto
+the ledger and the dashboard projection writes them — it is only the signal
+that splits ``running`` from ``detached`` (an active cycle whose producer
 vanished without a terminal record).
 """
 
@@ -55,11 +55,7 @@ def read_spend_caps(cycle_dir: Path) -> tuple[float | None, int | None]:
     """Live ``(usd, tokens)`` ceilings from ``spend_cap.json``; ``None`` per key when
     absent / unreadable / the wrong type.
 
-    **The one place that knows this file's shape.** Its predecessor read only ``max_usd``
-    and had zero callers, while the runner hand-rolled its own inline reader of the SAME
-    file for both keys — so the module docstring's "single read surface" claim was false,
-    and a key rename in the ``change-spend-budget`` applier would have had to be chased
-    into two readers, one of which nothing exercised."""
+    **The one place that knows this file's shape.**"""
     data = read_json_tolerant(CycleLayout(cycle_dir).spend_cap)
     if not isinstance(data, dict):
         return None, None
@@ -127,13 +123,10 @@ def derive_run_phase(
     1. terminal — the cycle finished (a terminal record / ``finished_at`` exists).
     2. paused   — ``pause.flag`` present (operator interrupt; resumable).
     3. gate     — fresh AND the runner declared ``gate`` (held at the round-0
-       origin gate, awaiting an operator decision). Freshness is required so a
-       cycle that DIED while gated still derives ``detached`` and is reapable;
-       without that this would pin a dead cycle at ``gate`` forever. This branch
-       used to be unreachable — ``gate`` is declared, never flagged — so the one
-       phase that REQUIRES the operator to act was reported as ordinary
-       ``running`` to every non-live reader, including the dock whose job is to
-       surface exactly that.
+       origin gate, awaiting an operator decision; ``gate`` is declared, never
+       flagged). Freshness is required so a cycle that DIED while gated still
+       derives ``detached`` and is reapable; without that this would pin a dead
+       cycle at ``gate`` forever.
     4. running  — producer fresh (``_producer_fresh``: ``dashboard.json``'s
        mtime, falling back to ``index.json``'s only while no dashboard has
        been written yet — so a just-minted cycle reads ``running``, not

@@ -557,11 +557,7 @@ def _check_l1_config_in_runtime_failures(
 ) -> ValidatorOutcome | None:
     """Reject candidates that re-propose a config already proven to fail.
 
-    Pure wire-level check — for each (param, value) in the candidate's
-    ``pipeline_params_override``, scan ``opt_sp.memory.wounds.runtime_failures``
-    for an entry whose ``observed_config`` carries that same (param, value).
-    If matched, emit ``ValidationFailure(reason="reproposes_known_failing_config")``.
-    No LLM evidence judgment — just "we already proved this fails."
+    Pure wire-level check — no LLM evidence judgment, just "we already proved this fails."
 
     Sibling-fork inheritance (``Cycle.start`` → ``gather_sibling_runtime_failures``)
     populates ``runtime_failures`` from prior cycles' terminal wounds, so
@@ -778,10 +774,7 @@ def detect_invariants(
     **``repeat_variant`` is the cross-ROUND arm** (the other two are round-local). A candidate
     is rejected when it re-proposes an idea a prior round already measured and lost — matched
     on content-word vocabulary (:func:`same_idea`), so it still fires when the idea has been
-    rewritten into a different field, which is the only form a re-proposal actually takes. On
-    `justlogic-d234` one idea was re-proposed for 8 consecutive rounds this way while every
-    exact-match gate saw eight distinct mutations and the cycle never tested a second
-    hypothesis.
+    rewritten into a different field, which is the only form a re-proposal actually takes.
 
     Rejecting is destructive — the variant simply never exists, and a wrong rejection leaves no
     trace — so four things bound it. (1) The evidence is filtered to measured losses only
@@ -793,13 +786,9 @@ def detect_invariants(
     on the wound channel and in ``review.md`` rather than vanishing into a yield number.
 
     All three components of the signature are DELTAS against the parent — *parent_pipeline_params*
-    is the parent's resolved, folded config (``JobSearchPoint.pipeline_params``). The param
-    component used to be the raw override, so a variant re-proposing a value the parent already
-    held — ``temperature: 0.0`` onto a parent at ``0.0``, or the parent's own ``answer``
-    description echoed back verbatim — counted as a mutation, cleared the no-op gate, and burned
-    a full scoring pass on a searchpoint identical to its parent. ``None`` is the honest
-    "parent declared no node config" case (:attr:`JobSearchPoint.pipeline_params`), where every
-    override is by definition a real delta.
+    is the parent's resolved, folded config (``JobSearchPoint.pipeline_params``). ``None`` is the
+    honest "parent declared no node config" case (:attr:`JobSearchPoint.pipeline_params`), where
+    every override is by definition a real delta.
     """
     parent_pp = parent_pipeline_params or {}
     for cp in proposals:

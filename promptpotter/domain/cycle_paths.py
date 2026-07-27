@@ -1,30 +1,9 @@
-"""Typed addresses + projection protocol for the run ledger.
+"""Typed addresses + the projection protocol for the run ledger.
 
-Two newtype guards for ledger / projection write targets:
-
-* ``CycleDir`` — the per-cycle dir (``campaigns/{campaign_id}/cycles/{cycle_id}``).
-  Every cycle (root, fork, sweep, diag) owns its own ``dashboard.json`` +
-  audit tree here; telemetry and audit projections both bind to it.
-  Constructed from ``cycle_dir_for(...)``.
-* ``WorkspaceDir`` — the tenant root (``projects/{tenant}/``). Used by
-  the workspace-scoped ``CycleEventLog`` (the Persistence sibling at
-  ``projects/{tenant}/.workspace/events.jsonl`` per ``docs/architecture.md``
-  §0) — the ledger backend-scoped commands (``register-backend``,
-  ``mint-campaign``) ride. Construct from ``Stores.base_dir``.
-
-…and the one ADDRESS a cycle answers to at any depth:
-
-* ``CycleHop`` / ``CyclePath`` — root → leaf. A bare ``cycle_id`` is ambiguous
-  across campaigns, and a ``(campaign, cycle)`` pair is ambiguous across stores
-  once an L4 inner forest is open (``.inner/<cycle_id>`` is a whole projects tree
-  of its own, and inner cycle ids repeat across sibling sandboxes). The path is
-  what disambiguates: every hop but the last is a DESCENT into that hop's
-  sandbox, and the last names the entity. This is the wire's ``descend`` chain
-  and the webapp's ``CyclePath`` as one type, so no reader re-derives it.
-
-These types live in :mod:`promptpotter.domain` so both ``application``
-(``CycleEventLog``-side) and ``infrastructure`` (projection-side) can import
-them without crossing hexagonal layers.
+A cycle's address is a ``CyclePath``, never an id: cycle ids repeat across
+sibling ``.inner`` sandboxes, so only the root → leaf hop chain (every hop but
+the last a DESCENT) names one entity. ``CycleDir`` / ``WorkspaceDir`` are
+newtypes so a write target can never be an unmarked ``Path``.
 """
 
 from __future__ import annotations

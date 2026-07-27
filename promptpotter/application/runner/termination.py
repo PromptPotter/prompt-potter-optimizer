@@ -1,24 +1,11 @@
 """The cycle's budget guardrail, in one legible place.
 
-`run_round_loop` ends a cycle for several reasons; the *budget* ones used to be
-an inline `if spend_probe() >= cap` buried in the loop body. They now live here
-behind names that say what they are, so a developer reading the loop sees
-`budget_gate.tripped()` and a developer reading *this* file sees exactly which
-ceilings exist and how each is read.
-
-Two ceilings, one gate:
-
-- **USD** — cumulative optimizer + backend dollars. Brittle alone: a free
-  backend reports $0, so this sees only optimizer cost.
-- **Tokens** — cumulative optimizer + backend tokens. The model-portable twin;
-  it counts backend work the USD ceiling misses.
-
-Whichever trips first halts the cycle at the next clean round boundary. Each
-ceiling is a *pair* of zero-arg callables — a `spent` probe and a `cap` probe —
-so the gate re-reads the cap every tick (the `change-spend-budget` command
-rewrites `.runtime/spend_cap.json` mid-flight) and never caches a stale ceiling.
-A ceiling whose probes are `None` is disarmed; a gate with both disarmed never
-trips.
+Two ceilings, one gate, whichever trips first halting at the next clean round boundary.
+They are twins because neither is sufficient alone: a free backend reports $0, so the USD
+ceiling would see only optimizer cost, while tokens count the backend work it misses.
+Each ceiling is a PAIR of zero-arg probes (`spent`, `cap`) so the gate re-reads the cap
+every tick — `change-spend-budget` rewrites it mid-flight — and can never cache a stale
+ceiling. Probes of `None` disarm a ceiling; both disarmed never trips.
 """
 
 from __future__ import annotations

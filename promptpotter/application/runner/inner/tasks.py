@@ -4,12 +4,8 @@ The file IS the declaration: which inner benchmark the panel measures on, how mu
 cell may buy, and one entry per cell. A dataset that owns this file IS an outer dataset — no name
 test recognises one.
 
-**The type is the validator.** This file used to be hand-parsed through a ``.get()`` ladder guarded
-by a hand-written required-key tuple, which is the only config in the package with no schema — and
-so the only one that could silently accumulate keys nobody read. It had two: an 8k-char
-``description`` (a comment field invented because JSON has no comment syntax, read by nothing) and
-a ``dataset_path`` that no code has ever resolved. ``extra="forbid"`` makes both unrepresentable
-rather than merely tidy.
+**The type is the validator** — ``extra="forbid"``, so a key nobody reads is
+unrepresentable rather than merely tidy.
 """
 
 from __future__ import annotations

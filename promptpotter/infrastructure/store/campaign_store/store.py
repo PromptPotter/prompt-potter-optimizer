@@ -1,26 +1,10 @@
 """Campaign + cycle file I/O under ``campaigns/{campaign_id}/`` — one cohesive store.
 
-``CampaignStore`` owns the whole ``campaigns/`` tree: the ``campaign.json``
-manifest, per-cycle ``index.json`` CRUD, fork-sibling index writers, round +
-candidate detail files, and the per-cycle cycle-seed ledger I/O. Path
-resolution + cross-cutting reads (``load_campaign``, index enumeration) sit at
-the top of the class; the no-subscriber pure ledger scans live in their own
-``ledger_scan.py`` module (imported here for ``rewind_to_round`` + the seed read).
-
-The **cycle seed** — declared-at-mint, read-once-at-bootstrap data (chosen origin
-prompt + pipeline overlay + reconciled limits), written for an operator-steered fork
-OR a campaign-from-origin root mint — rides the ledger as the read-once
-:class:`CycleSeedRecord` (``write_cycle_seed`` appends it, ``read_cycle_seed`` scans
-for it), NOT a ``.overrides/`` sidecar. It joins the replayable spine, so a
-resume/fork recovers it by construction. Contrast the ``.runtime/`` control flags
-(``pause.flag`` / ``skip.flag`` / ``spend_cap.json``) — **mutated-during-run,
-polled-every-tick** by the round loop (read via ``infrastructure/runtime_flags.py``).
-
-For a fork, the seed is one of the fork's on-disk projections: the ledger
-``FORK_CUT`` record is the lineage SoT, the ``CycleSeedRecord`` carries the chosen
-starting point the origin resolver consumes, ``index.json::fork`` is the
-lineage-read copy (seed-excluded). Writers: ``_mint_fork`` (forks) and the mint
-seam (campaign-from-origin).
+One store owns the whole tree, so no sibling writer can disagree about its shape. The
+cycle seed rides the ledger as a read-once ``CycleSeedRecord``, never a ``.overrides/``
+sidecar, which is what makes a resume or fork recover it by construction; the pure,
+no-subscriber ledger scans it needs live in ``ledger_scan.py``. Fork projections and
+the ``.runtime/`` flags it must not be confused with: ``infrastructure/CLAUDE.md``.
 """
 
 from __future__ import annotations
@@ -94,9 +78,8 @@ def origin_accuracy_of(index: dict[str, Any]) -> float | None:
 
     Round 0 IS the origin, and every path that (re)scores it — bootstrap, a diag
     fork's re-measure, the interactive origin-gate rescore — re-emits round 0
-    through ``save_round_file``, so the round row is always fresh. The old
-    top-level ``origin_accuracy`` was stamped once at bootstrap and went stale on
-    a gate rescore. ``None`` until round 0 lands (fresh mint / pre-origin fork)."""
+    through ``save_round_file``, so the round row is always fresh. ``None`` until
+    round 0 lands (fresh mint / pre-origin fork)."""
     rounds = index.get("rounds") or []
     return next((float(r["accuracy"]) for r in rounds if r.get("round") == 0), None)
 
@@ -462,20 +445,10 @@ class CampaignStore:
     def _guard_and_release(self, campaign_id: str, verb: str) -> None:
         """Refuse *verb* while a producer is attached; otherwise release the pointer.
 
-        **This used to refuse whenever the campaign was merely the ACTIVE one**, and
-        that made both destructive verbs unreachable from the web surface: in a
-        single-operator workspace the campaign in view IS the active one, so Archive
-        and Delete answered "switch first" — naming an escape that exists nowhere
-        (there is no switch/activate command in the vocabulary and no such gesture in
-        the webapp). Reproduced end-to-end: active ⇒ `ConflictError`, nothing removed;
-        pointer absent ⇒ clean removal including the inner sandbox.
-
-        The old guard conflated two facts its own docstring listed separately —
-        "would strand the pointer" and "open ``.runtime/`` handles". Only the second
-        is a hazard, and it is about a LIVE cycle, not a selected one. A stranded
-        pointer is a UI state to fix, not a reason to refuse; so the live check
-        refuses, and the pointer is simply released. Deleting what you are looking at
-        is the ordinary case, not the dangerous one.
+        The only hazard is a LIVE cycle's open ``.runtime/`` handles; a stranded
+        pointer is a UI state to fix, not a reason to refuse. So the live check
+        refuses, and the pointer is simply released — deleting what you are looking
+        at is the ordinary case, not the dangerous one.
         """
         if live := self._live_cycle_ids(campaign_id):
             raise ConflictError(
@@ -773,12 +746,8 @@ class CampaignStore:
 
         ``best_accuracy`` / ``best_round`` / ``n_rounds`` are NOT written here — they
         are owned by the ``rounds[]``-writer (``save_round_file`` → ``_apply_best``) on
-        the origin-inclusive / full-population ``cumulative_accuracy`` basis. The old
-        copy-from-``CycleResult`` here maxed on a different (origin-EXCLUSIVE) round
-        count, so a now-deleted ``no_advance`` guard fired on every origin-bearing
-        cycle and silently dropped the whole block — leaving ``final`` permanently
-        unwritten. ``final`` is written unconditionally now (a crash finalize records a
-        valid crash verdict)."""
+        the origin-inclusive / full-population ``cumulative_accuracy`` basis. ``final``
+        is written unconditionally (a crash finalize records a valid crash verdict)."""
         from promptpotter.shared.errors import graceful
 
         updates: dict[str, Any] = {
@@ -856,11 +825,7 @@ class CampaignStore:
         return True
 
     def _entry_from_index(self, index_path: Path) -> dict[str, Any]:
-        """THE decoder of ``index.json`` into the served ``CycleListEntry`` shape.
-
-        The cycle-detail route used to hold a second one, which is how its list
-        twin came to serve ``origin_accuracy`` as structurally null.
-        """
+        """THE decoder of ``index.json`` into the served ``CycleListEntry`` shape."""
         campaign_id, cycle_id = self._ids_from_index_path(index_path)
         try:
             data = read_json_optional(index_path)
@@ -952,9 +917,8 @@ class CampaignStore:
         forked_at: str,
         **blob_kwargs: Any,
     ) -> Path:
-        """Read parent index → fresh sibling blob → write child index. The single
-        writer for the diag / operator-steered / sweep fork triggers (``kind`` ∈
-        ``{"diag", "fork", "sweep"}``; numbering restarts at round 1, no
+        """The single writer for the diag / operator-steered / sweep fork triggers
+        (``kind`` ∈ ``{"diag", "fork", "sweep"}``; numbering restarts at round 1, no
         parent-round inheritance — that's ``save_rebase_fork``'s job)."""
         parent_index = read_json_optional(self._index_path(campaign_id, parent_cycle_id)) or {}
         blob = fresh_sibling_index_blob(
@@ -981,9 +945,8 @@ class CampaignStore:
         ``OPERATOR_REWIND``). The issuer is recorded on the FORK_CUT
         ledger record via ``ForkSpec.trigger``.
 
-        ``rounds[]`` is the index SUMMARY shape, projected here — the divergence path
-        used to hand whole round documents straight through, burying every per-sample
-        row in ``index.json``.
+        ``rounds[]`` is the index SUMMARY shape, projected here — never whole round
+        documents, which would bury every per-sample row in ``index.json``.
         """
         parent_index = read_json_optional(self._index_path(campaign_id, parent_cycle_id)) or {}
         index = {

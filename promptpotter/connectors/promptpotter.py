@@ -1,26 +1,10 @@
 """PromptPotter-as-connector — the optimizer-of-the-optimizer.
 
-Self-referential connector: an outer PromptPotter cycle optimizes an inner
-PromptPotter cycle's meta-prompts (``l1_generate`` / ``l1_critique`` /
-``l2_context`` / ``l3_plan``). Each inner cycle is a real campaign run on a
-cheap proxy benchmark; the outer L1's mutation surface is the inner
-meta-prompt template fields, exposed via ``pipeline_params``.
-
-See ``docs/specs/roadmap.md`` for the full design — five-hook contract, the composed
-inner-cycle proxy vector (:class:`~promptpotter.domain.l4.proxies.OuterSampleProxies`),
-inner isolation in the flat ``<workspace>/.inner/`` registry, cost-realism warning.
-
-The five hooks are wired to the protocol; ``promptpotter_wire_adapter`` shapes
-the inner-cycle payload; ``PromptPotterSession`` is the in-process noop session.
-The connector declares ``execution="in_process"`` — the capability the loop
-dispatches on. ``_in_process_run`` delegates to the inner-cycle runner in
-``application/runner/inner/cycle.py`` (the recursion is heavy orchestration;
-the connector stays a thin adapter), which mints + runs a sandboxed inner campaign
-in its own asyncio task and returns the three proxy metrics. Decided in
-``docs/specs/l4-outer-loop.md`` § 2 (in-process recursion, re-entrant isolation).
-
-Exports the ``CONNECTOR`` binding consumed by
-:data:`promptpotter.connectors.CONNECTORS`.
+An outer cycle optimizes an inner cycle's meta-prompts, and each inner cycle is a real
+campaign run on a cheap proxy benchmark. The connector stays a THIN adapter: it declares
+``execution="in_process"`` — the capability the loop dispatches on — and delegates to
+``application/runner/inner/cycle.py``, because the recursion is heavy orchestration and
+does not belong in a wire binding. Design: ``docs/specs/l4-outer-loop.md`` § 2.
 """
 
 from __future__ import annotations

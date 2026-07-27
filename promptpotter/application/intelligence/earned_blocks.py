@@ -1,9 +1,6 @@
 """Earned prompt-block library — the reusable field values that MEASURED lift, task-fit.
 
-The `guidance` block catalogue used to serve a static seed set (`config/prompt_blocks.py`)
-to every task, so a logic run saw ranking blocks ("identify the single best match from the
-candidates"): low-value information in the wrong place. This mines the library from run
-history instead — a short field value (`persona` / `task_intent` / `thinking_style` /
+Mined from run history — a short field value (`persona` / `task_intent` / `thinking_style` /
 `answer_format`) that a candidate *changed* AND that beat its matched origin by a
 **credible** margin (`composite_ci_lo` clears the origin, not a noise win), tagged by the
 run's **answer-space signature** so a block earned on one task shape never lands on another.

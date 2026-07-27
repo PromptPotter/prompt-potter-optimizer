@@ -42,9 +42,7 @@ class VerifyError(Exception):
 
 @dataclass(frozen=True)
 class VerifyOutcome:
-    """Result of :func:`verify_candidate`.
-
-    ``record`` is ``None`` on the "every sample already measured" path — both
+    """``record`` is ``None`` on the "every sample already measured" path — both
     human-readable verdict strings are formatted by the CLI shell from this
     outcome, never here.
     """
@@ -56,7 +54,6 @@ class VerifyOutcome:
 
 
 def _archive_measurement_to_qm(m: Measurement) -> QueryMeasurement:
-    """Project a :class:`Measurement` archive row into a :class:`QueryMeasurement` dict."""
     return cast(
         "QueryMeasurement",
         {

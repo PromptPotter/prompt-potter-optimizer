@@ -1,23 +1,10 @@
 """The per-tenant active-session pointer — which campaign + cycle the operator is on.
 
-The file lives at ``projects/{tenant}/.workspace/active_session.json`` (alongside the
-workspace ledger); the tenant slug is the path key, not a JSON field, so the on-disk shape
-is ``{session_id, campaign_id, cycle_id}``. The session is the operator's lens into the
-workspace: which campaign + cycle are live.
-
-``read_active_pointer_under`` is the tenant-root-keyed core the id-keyed readers wrap —
-``CampaignStore`` holds a resolved root, so it reads through that seam rather than
-re-encoding the path.
-
-No global pointer — by construction, no tenant can read or clobber another tenant's
-active session.
-
-Distinct from :class:`store.session_store.SessionStore`, which owns per-session artifacts
-under ``sessions/{session_id}/``: a different file, a different root, a different shape.
-This module answers *which* session is live; that one stores *what* a session holds.
-
-Depends only on ``store.io`` + ``store.layout`` (both pure leaves), so it stays importable
-from anywhere without dragging a store in.
+The tenant slug is the path key, never a JSON field, so there is no global pointer and by
+construction no tenant can read or clobber another's. Distinct from
+:class:`store.session_store.SessionStore`: this answers *which* session is live, that
+stores *what* a session holds. Depends only on the pure leaves ``store.io`` +
+``store.layout``, so it stays importable from anywhere without dragging a store in.
 """
 
 from __future__ import annotations
@@ -115,7 +102,6 @@ def read_active_pointer(
 
 
 def active_pointer_exists(tenant_id: TenantId, *, projects_root: Path | None = None) -> bool:
-    """Public predicate — whether the tenant's active-session pointer is on disk."""
     return _active_pointer_path_under(_tenant_root(tenant_id, projects_root)).exists()
 
 

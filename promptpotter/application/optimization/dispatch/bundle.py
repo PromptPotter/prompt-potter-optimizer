@@ -113,7 +113,6 @@ class _Injection:
     name: str
     kind: InjectionKind
     render: Callable[[InjectionBundle], str]
-    description: str
     char_cap: int | None
     citable: bool
 
@@ -208,7 +207,6 @@ def signal(
     name: str,
     *,
     kind: InjectionKind,
-    description: str,
     char_cap: int | None,
     citable: bool,
 ) -> Callable[[Renderer], Renderer]:
@@ -223,7 +221,7 @@ def signal(
     def deco(fn: Renderer) -> Renderer:
         if name in _REGISTRY:
             raise ValueError(f"duplicate injection signal {name!r}")
-        _REGISTRY[name] = _Injection(name, kind, fn, description, char_cap, citable)
+        _REGISTRY[name] = _Injection(name, kind, fn, char_cap, citable)
         return fn
 
     return deco

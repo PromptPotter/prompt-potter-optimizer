@@ -57,7 +57,6 @@ class GoogleProviderClient:
         self._jwks_url = config.jwks_url or GOOGLE_JWKS_URL
 
     def authorize_url(self, *, state: str, nonce: str) -> str:
-        """Build the user-facing redirect URL to the IdP's consent screen."""
         params = {
             "response_type": "code",
             "client_id": self._config.client_id,
@@ -71,7 +70,6 @@ class GoogleProviderClient:
         return f"{self._authorize_url}?{urlencode(params)}"
 
     async def exchange_code(self, *, code: str, expected_nonce: str) -> ProviderIdentity:
-        """Exchange the auth code for an ID token, verify, return identity."""
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.post(
                 self._token_url,

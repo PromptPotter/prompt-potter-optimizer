@@ -53,7 +53,6 @@ class JWKSCache:
         self._lock = threading.Lock()
 
     async def get_key(self, jwks_uri: str, kid: str) -> RSAPublicKey:
-        """Return the RSA public key for *kid* at *jwks_uri*; refresh on miss."""
         cached = self._lookup(jwks_uri, kid)
         if cached is not None:
             return cached

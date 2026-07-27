@@ -83,8 +83,6 @@ def _open_goldmine() -> Path | None:
 
 
 class LiveDisplay(DerivedView):
-    """Live ``RunCallbacks`` adapter — CLI + notebook share this one class."""
-
     def __init__(
         self,
         *,

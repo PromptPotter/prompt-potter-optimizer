@@ -53,7 +53,6 @@ class PoBBStreamView(DerivedView):
 
     @classmethod
     def from_cycle_dir(cls, cycle_dir: CycleDir) -> PoBBStreamView:
-        """Build a projection rooted at ``{cycle_dir}/.runtime/streams``."""
         return cls(CycleLayout(Path(cycle_dir)).streams)
 
     def _handle_snapshot(self, record: SnapshotRecord) -> None:

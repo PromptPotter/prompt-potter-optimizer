@@ -87,9 +87,7 @@ def ingest_draft(
     filename: str,
     slug: str | None = None,
 ) -> DraftCampaign:
-    """Parse ``blob`` → build a draft → mint a durable check-in campaign.
-
-    The format is detected from ``filename`` (CSV/TSV/JSON/JSONL/XLSX). Raises
+    """The format is detected from ``filename`` (CSV/TSV/JSON/JSONL/XLSX). Raises
     :class:`~promptpotter.application.datasets.csv_ingest.IngestError`
     (bad/empty/oversized/unsupported upload, or hardened-mode-blocked Excel),
     :class:`ValueError` (bad slug), or :class:`SlugTakenError` (slug collision —

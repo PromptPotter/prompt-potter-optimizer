@@ -26,8 +26,6 @@ logger = logging.getLogger(__name__)
 
 
 class AnthropicClient(LLMClientBase):
-    """Anthropic API client."""
-
     _schema_warned = False
 
     def __init__(

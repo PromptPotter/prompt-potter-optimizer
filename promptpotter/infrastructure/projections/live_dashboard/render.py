@@ -40,7 +40,7 @@ def _trim(text: str, n: int) -> str:
 def _partial_hit_rate(samples: list[dict[str, Any]]) -> float | None:
     """Running hit-rate over scored-so-far samples (hits/total), or None when none scored.
     Bridges the gap before a candidate's final ``accuracy`` lands so the dashboard shows
-    in-flight progress; matches the hit-rate the webapp used to recompute from sample lines."""
+    in-flight progress."""
     if not samples:
         return None
     return sum(1 for s in samples if s.get("hit")) / len(samples)

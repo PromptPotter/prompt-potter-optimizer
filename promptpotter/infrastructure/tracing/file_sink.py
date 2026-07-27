@@ -44,8 +44,6 @@ logger = logging.getLogger(__name__)
 
 
 class FileSink:
-    """Append-only Langfuse-style file log per cycle."""
-
     def __init__(self, store_base_dir: str | Path, campaign_id: str = "") -> None:
         self._tenant_root = Path(store_base_dir)
         self._campaign_id = campaign_id

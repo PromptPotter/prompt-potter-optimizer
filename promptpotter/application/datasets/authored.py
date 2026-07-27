@@ -3,10 +3,9 @@
 An authored dataset dir (``datasets/{name}/`` or a tenant upload at
 ``projects/{tenant}/datasets/{slug}/``) carries ``campaign.json`` (config
 wrapped under the outer ``campaign_config`` key), ``pipeline.json``
-(``backend_type`` + per-node overlay), and ``task_description.md``. Four call
-sites used to parse these their own way — the CLI ``new`` config-read, the
-launcher web-launch read, ``draft_from_dataset``, and ``SessionCtx``. This is
-the single reader they share.
+(``backend_type`` + per-node overlay), and ``task_description.md``. The CLI
+``new`` config-read, the launcher web-launch read, ``draft_from_dataset``, and
+``SessionCtx`` all share this single reader.
 
 Rows (``cache.json``) are deliberately NOT read here: the three row consumers
 source them differently (the draft reads a dir's ``cache.json`` directly;
@@ -122,9 +121,7 @@ def load_dataset_campaign_config(path: Path) -> CampaignConfig:
 
 
 def read_authored_dataset(dataset_dir: Path) -> AuthoredDataset:
-    """Parse an authored dataset dir's config files into an :class:`AuthoredDataset`.
-
-    Validates ``campaign.json`` through :class:`CampaignConfig` (``extra="forbid"``)
+    """Validates ``campaign.json`` through :class:`CampaignConfig` (``extra="forbid"``)
     — a malformed/extra-key config raises :class:`StoredConfigInvalidError` naming the
     file and the key, rather than silently defaulting. Does not read ``cache.json`` /
     rows (see module docstring).

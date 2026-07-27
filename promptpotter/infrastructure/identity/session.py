@@ -27,8 +27,6 @@ DEFAULT_SESSION_TTL_S = 60 * 60 * 24 * 7  # 7 days
 
 @dataclass(frozen=True)
 class SessionData:
-    """Persisted session record. `claims` carries the post-verification envelope."""
-
     user_id: str
     tenant_id: str
     issuer: str

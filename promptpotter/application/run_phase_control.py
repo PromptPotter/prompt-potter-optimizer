@@ -3,10 +3,9 @@
 The runner is the *sole declarer* of control state (``running`` / ``paused``);
 :class:`~promptpotter.infrastructure.projections.live_dashboard.view.LiveDashboardView`
 projects the declaration into ``dashboard.json::run_phase`` (the ``terminal``
-phase is set by ``mark_stopped`` at finalize, never declared here). This is the
-fix for the run-state bug: a paused run used to stop writing ``dashboard.json``
-and read as "running" off file freshness — now it *declares* ``paused`` once, so
-every surface reads the truth even after the file goes stale.
+phase is set by ``mark_stopped`` at finalize, never declared here). A paused run
+*declares* ``paused`` once, so every surface reads the truth even after
+``dashboard.json`` goes stale.
 
 Vocabulary: :class:`~promptpotter.domain.phases.RunPhase`.
 """

@@ -42,10 +42,7 @@ def t_critical(df: int, alpha: float = 0.05) -> float:
 
 
 def min_detectable_effect(n: int, alpha: float = 0.05, power: float = 0.8) -> float:
-    """Minimum detectable effect size for a given sample size.
-
-    Uses worst-case variance (p=0.5). Returns MDE as a fraction.
-    """
+    """Uses worst-case variance (p=0.5). Returns MDE as a fraction."""
     if n <= 0:
         return 1.0
 

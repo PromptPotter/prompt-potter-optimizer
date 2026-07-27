@@ -1,35 +1,11 @@
 """On-box admin bot — the first operator-admin channel (ADR-0004).
 
-Long-polls Telegram **outbound only** and edits the local sign-in allowlist
-(`.promptpotter/identity/allowlist.json`, re-read on every callback — edits are
-instant). Opens no inbound port; the privileged auth-gate mutation never leaves
-the protected zone. This is the secure-by-default alternative to exposing an
-admin HTTP endpoint (the threat model is `docs/adr/0004-operator-admin-channels.md`).
-
-Run as a systemd service (`deploy-linux/install-allowlist-bot.sh`) or directly::
-
-    python -m promptpotter.presentation.admin_bot
-
-Config (environment / `.env`):
-
-* ``ADMIN_BOT_TELEGRAM_TOKEN`` — bot token from @BotFather (required).
-* ``ADMIN_BOT_CHAT_ID`` — the numeric chat id the bot obeys; messages from any
-  other chat are silently ignored (required; locks the bot to the operator).
-* ``ADMIN_BOT_PASSPHRASE`` — optional command prefix as a second factor.
-
-Commands (only from the locked chat)::
-
-    /allow <email>   add to the allowlist
-    /deny  <email>   remove from the allowlist
-    /list            show the current allowlist
-
-    /grant  <sub_user_id> <tiers>   delegate an attenuated sub-principal (ADR-0005)
-    /revoke <sub_user_id>           remove a delegation
-    /grants                         show current delegations
-
-``<tiers>`` is a comma-separated slice of {step, run, create, budget, lifecycle,
-babysit}; the delegator is the registered operator (default-claim marker). A
-``<sub_user_id>`` is the canonical id from the delegate's own /auth/me.
+Long-polls Telegram **outbound only** and edits the local sign-in allowlist +
+ADR-0005 delegations. It opens no inbound port, which is the entire point: the
+privileged auth-gate mutation never leaves the protected zone, and an admin HTTP
+endpoint is the thing this exists instead of (threat model:
+``docs/adr/0004-operator-admin-channels.md``). Run it as the deploy-linux systemd
+unit or directly with ``python -m promptpotter.presentation.admin_bot``.
 """
 
 from __future__ import annotations

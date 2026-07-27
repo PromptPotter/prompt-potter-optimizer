@@ -3,8 +3,6 @@
 Pure function over already-computed scoring data — rank analysis,
 pipeline-health distributions, failure categorization, cycle evolution,
 trajectory classification, cross-candidate diff, per-sample diagnostics.
-Replaces the inline ``compile_critique_context`` + ``_section_l1c_*``
-compute paths that today live across ``dispatch.py`` and ``l1_critique.py``.
 """
 
 from __future__ import annotations

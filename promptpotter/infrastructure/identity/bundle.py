@@ -42,8 +42,6 @@ class PendingAuth:
 
 @dataclass
 class IdentityBundle:
-    """Identity singletons. Constructed at FastAPI lifespan startup."""
-
     paths: IdentityPaths
     config: ProviderConfigBundle
     session_store: OIDCSessionStore
@@ -54,7 +52,6 @@ class IdentityBundle:
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     def register_state(self, state: str, provider: str, nonce: str) -> None:
-        """Park the authorize→callback binding under *state*."""
         now = time.monotonic()
         with self.lock:
             self._sweep_expired(now)
@@ -63,7 +60,6 @@ class IdentityBundle:
             self.pending_states[state] = PendingAuth(provider=provider, nonce=nonce, created_at=now)
 
     def consume_state(self, state: str) -> PendingAuth | None:
-        """Look up + remove *state* (single-use)."""
         now = time.monotonic()
         with self.lock:
             self._sweep_expired(now)

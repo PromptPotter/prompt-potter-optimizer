@@ -426,7 +426,7 @@ class PoBBCheck:
         only if it nets ≥ ``margin`` more hits than the seed, and net movement can
         only come from discordant pairs — ``wins`` (candidate HIT where the seed
         missed) minus ``losses`` (candidate MISS where the seed hit). Ties carry
-        nothing, so a front-loaded block of seed-hit ties can no longer inflate
+        nothing, so a front-loaded block of seed-hit ties cannot inflate
         the futility estimate: ``p_w`` is the Laplace-smoothed win rate on the
         MEASURED SEED-MISS STRATUM alone, extrapolated over the remaining win
         opportunities via ``binom_sf``. ``need > opportunities`` ⇒ ``binom_sf``

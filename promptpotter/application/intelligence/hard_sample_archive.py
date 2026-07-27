@@ -86,16 +86,14 @@ def build_archive_observations(
 
     **The candidate is the searchpoint, not the run.** ``prompt_fields_id`` (= ``sp_hash``) is
     prompt-inclusive and dataset-independent; ``content_hash`` folds in the sample subset, so
-    keying on it made one prompt re-scored against N round subsets into N "candidates" — up to
-    29 phantom copies of a single origin, each weighting its samples again in δ.
+    keying on it would turn one prompt re-scored against N round subsets into N "candidates",
+    each weighting its samples again in δ.
 
     ``origin_sp_hash`` renames that candidate to ``ORIGIN_ABILITY_ID`` so the archive's copy of
     the origin and the caller's own ``origin_obs`` are one candidate with one θ, not two.
 
-    Grade A only, always. This used to be an optional ``min_grade``: the δ-ruler passed
-    ``"A"`` while the two display callers omitted it and got A+B+C, so one dataset carried
-    TWO difficulty scales — the grade-A δ that decides which candidates PoBB kills, and an
-    A+B+C δ the operator reads off the heatmap. One substrate, by construction.
+    Grade A only, always — one substrate, by construction: the δ that decides which candidates
+    PoBB kills and the δ the operator reads off the heatmap are the same grade-A scale.
     """
     obs: list[Observation] = []
     sigs = archive_views.run_signatures(stores)

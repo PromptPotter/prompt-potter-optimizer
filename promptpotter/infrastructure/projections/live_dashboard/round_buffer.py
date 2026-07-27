@@ -18,15 +18,6 @@ from promptpotter.infrastructure.projections.live_state import top_n_p_best
 
 @dataclass
 class RoundBuffer:
-    """Round-local candidate buffer + per-sample tally.
-
-    Owns the data structure that
-    ``dashboard.json::current_round.nodes.l1_score`` projects from.
-    Snapshot-record fan-out (``candidate_started`` / ``sample_scored`` /
-    ``candidate_scored`` / ``p_best_update``) lands here; the block
-    builders read these fields verbatim.
-    """
-
     round_num: int = 0
     candidates: dict[int, dict[str, Any]] = field(default_factory=dict)
     p_best_top: list[dict[str, Any]] = field(default_factory=list)
@@ -89,7 +80,6 @@ class RoundBuffer:
         qt: int,
         result: dict[str, Any],
     ) -> None:
-        """Append one scored sample to its candidate slot."""
         pd = result.get("pipeline_data") or {}
         query_time = float(pd.get("total_time", 0.0) or 0.0)
         # Tokens may live on result or pd; prefer result, preserve 0 vs None.

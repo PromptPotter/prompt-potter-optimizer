@@ -34,12 +34,10 @@ def load_dataset_node_overlay(dataset_dir: Path) -> dict[str, dict[str, Any]]:
 
 
 def dataset_prompt_dir(dataset_dir: Path) -> Path:
-    """Return the expected ``prompts/`` directory under *dataset_dir*."""
     return dataset_dir / "prompts"
 
 
 def has_dataset_prompts(dataset_dir: Path) -> bool:
-    """Whether *dataset_dir* ships a ``prompts/`` directory."""
     return dataset_prompt_dir(dataset_dir).is_dir()
 
 

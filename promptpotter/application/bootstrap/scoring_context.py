@@ -48,7 +48,7 @@ def bootstrap_cycle(
     resume_from_round_override: int | None = None,
 ) -> tuple[str | None, int]:
     """Resolve cycle (step 3 of bootstrap) → ``(cycle_id, resumed_from_round)``.
-    Opens, optionally rewinds, reports next L1 round. Drift handling in ``resume_with_divergence_check``.
+    Drift handling lives in ``resume_with_divergence_check``.
 
     A genuinely-absent cycle is the ``existing is None`` branch (``store.load``
     returns ``None`` for a missing index) → a fresh start at round 1. A
@@ -113,7 +113,6 @@ async def _emit_preflight_and_init_session(
     cb: RunCallbacks,
     session: Session,
 ) -> None:
-    """Preflight + emit INIT.enter + backend.init_session."""
     from promptpotter.application.config import (
         check_model_reasoning_floors,
         run_preflight_checks,
@@ -288,7 +287,6 @@ def _finalize_loop_state(
     tracing_campaign_id: str,
     resumed_from_round: int,
 ) -> None:
-    """Init AxisIndex, write final session/cycle state, emit ``INIT.exit``."""
     from promptpotter.application.bootstrap.session import _open_cycle_ledger
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
     from promptpotter.application.optimization.pobb.checks import (
@@ -344,7 +342,6 @@ async def init_optimization_loop(
     session: Session,
     started_at: str,
 ) -> Cycle:
-    """Build Cycle + attach loop infra: origin, resume/fork, obs, scoring, axes."""
     await _emit_preflight_and_init_session(config, dataset, cb, session)
 
     cycle, resolved_cycle_id, resumed_from_round = _build_cycle_and_bootstrap(

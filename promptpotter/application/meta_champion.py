@@ -1,26 +1,11 @@
 """Meta-champion — reduce the on-disk pp-self corpus to one ranked champion table.
 
-The developer-facing L4 "which meta-prompt state is overall best?" reducer. Ranking is
-the whole surface: it names a winner, it never crowns or graduates one — that is a
-deliberate hand-edit of ``datasets/_optimizer/pipeline.json``.
-
-
-Reduces the accumulated on-disk corpus of ``promptpotter-self`` outer cycles to one
-ranked table of candidate meta-prompt states. Zero LLM calls (the ``ab``-verb posture):
-every number is re-derived from ``rounds/round_NNNN.json`` on disk, so the table is
-reproducible. ``GET /champion-registry`` recomputes it per read — there is no persisted
-registry and no reigning-champion pointer; the ranking is the whole answer.
-
-The comparison metric here is the **anchor-to-origin** paired effect: for each candidate
-meta-prompt state, the per-cell ``(candidate − origin) composite`` diff, paired on the
-shared cells the candidate was measured on, aggregated across every occurrence of that
-state anywhere in the corpus. Origin (the un-edited meta-prompt) is the round-0 arm — the
-same cached control the per-round verdict (``domain/l4/verdict.py``) pairs
-against, never re-measured. Absolute scores across runs are not comparable — only these
-paired-on-shared-cells effects are — which is why the table ranks by anchor effect.
-
-Ranking a winner is where this stops: graduating one into
-``datasets/_optimizer/pipeline.json`` is a deliberate hand-edit, not a verb.
+Zero LLM calls, every number re-derived from the on-disk round files, recomputed per read
+— no persisted registry, no reigning-champion pointer, and naming a winner is where this
+stops (graduating one is a hand-edit, not a verb). It ranks by the **anchor-to-origin**
+paired effect: the per-cell ``candidate − origin`` composite diff, paired on the shared
+cells that candidate was measured on. Absolute scores across runs are not comparable and
+only these paired effects are, which is the whole reason the metric looks like this.
 """
 
 from __future__ import annotations
@@ -101,11 +86,9 @@ def _state_hash(prompt_state: dict[str, dict[str, str]]) -> str:
 def _cell_composites(round_doc: dict[str, Any], candidate_id: str) -> dict[str, float]:
     """Per-cell composite fitness for one candidate: ``{cell_query: fitness}``.
 
-    Reads the per-sample rows under ``all_candidate_results[candidate_id]`` — one row per
-    outer sample, whose ``query`` is the cell id and whose ``fitness`` is that cell's
-    composite (its mean equals the candidate's round ``composite_fitness``). Thin adapter
-    over the shared pure extraction (``domain.l4.cell_fitness``) — this module's
-    input is an already-loaded round doc, not a fresh disk read.
+    One row per outer sample: ``query`` is the cell id, ``fitness`` that cell's composite
+    (its mean equals the candidate's round ``composite_fitness``). Thin adapter over the
+    pure ``domain.l4.cell_fitness`` — input is an already-loaded round doc, not a disk read.
     """
     rows = (round_doc.get("all_candidate_results") or {}).get(candidate_id) or []
     return cell_fitness(rows)
@@ -148,7 +131,6 @@ def _pp_self_campaign_dirs(store: Stores) -> list[Path]:
 
 
 def reduce_corpus(store: Stores) -> ChampionRegistry:
-    """Walk every pp-self cycle in *store*'s workspace and build the ranked champion table."""
     accums: dict[str, _Accum] = {}
     n_cycles = 0
 
@@ -233,16 +215,12 @@ def _finalize(state_hash: str, acc: _Accum) -> ChampionCandidate:
     """Aggregate one meta-prompt state's measurements into its ranked row.
 
     **Aggregation is PER CELL, then across cells** — the same two-stage shape
-    ``domain/l4/verdict.py::compute_outer_verdict`` uses, and for the same reasons. It used
-    to flatten every cell's every occurrence into ONE ``paired_diff_posterior`` call, which
-    broke the ranking two ways at once: the SE came out of n = total *measurements* rather
-    than n = *cells*, overstating confidence on what is really a ~7-point panel; and a cell
-    that happened to be measured five times outweighed five cells measured once, so
-    ``anchor_effect`` rewarded over-representation instead of uniform goodness. Both matter
-    because this ranking is the ONLY thing standing between the corpus and a human
-    hand-graduating a meta-prompt into ``datasets/_optimizer/`` (the ``champion`` verb that
-    used to do it automatically was deleted 2026-07-17), so an overstated CI misleads a
-    person making an irreversible edit.
+    ``domain/l4/verdict.py::compute_outer_verdict`` uses, and for the same reasons: the SE
+    comes from n = *cells* (a ~7-point panel), not n = total *measurements*, and a cell
+    measured five times cannot outweigh five cells measured once. Both matter because this
+    ranking is the ONLY thing standing between the corpus and a human hand-graduating a
+    meta-prompt into ``datasets/_optimizer/``, so an overstated CI misleads a person
+    making an irreversible edit.
     """
     per_cell: list[ChampionCellEffect] = []
     cell_cand: list[float] = []

@@ -27,7 +27,6 @@ class SessionStore:
     # -- Path helpers ---------------------------------------------------------
 
     def session_dir(self, session_id: str) -> Path:
-        """Public accessor for ``{tenant_root}/sessions/{session_id}``."""
         return session_dir_for(self._base_dir, session_id)
 
     def _state_path(self, session_id: str) -> Path:

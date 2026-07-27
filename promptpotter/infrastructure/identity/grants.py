@@ -1,36 +1,12 @@
 """Sealed sub-principal grant store — `.promptpotter/identity/grants.json`.
 
-The authority file that turns an authenticated user into a delegator's
-*sub-principal*: a friendly sub-user who acts inside the delegator's tenant with
-an **attenuated** slice of the delegator's rights (ADR-0005). It lives in the
-identity zone — alongside the sign-in allowlist and the default-claim marker —
-which the tenant's own API surface cannot write, so a delegate can never edit its
-own grant to self-escalate (the sealed-grant-store invariant).
-
-Schema:
-
-```json
-{
-  "grants": {
-    "<sub_principal_user_id>": {
-      "delegated_by": "<delegator_user_id>",
-      "capabilities": ["campaign.step", "campaign.create"],
-      "spend_ceiling_usd": 5.0,
-      "note": "claude-assistant"
-    }
-  }
-}
-```
-
-Keyed by the canonical ``user_id`` (``derive_user_id(issuer, subject)``), never
-email — the identity that owns campaigns is issuer+subject-derived and cannot be
-changed, whereas an email can. Resolution is **fail-secure**: a grant that names
-no delegator, or a malformed file, yields a principal that acts only in its own
-(empty) tenant with no command capabilities — never a fall-through to full owner.
-
-Attenuation is enforced at *read* time, not merely at write time
-(:func:`resolve_effective_capabilities` intersects with the delegator's own set),
-so even a hand-edited over-grant can never exceed the delegator's authority.
+Sealed means the tenant's own API surface cannot write this file, so a delegate can never
+edit its own grant to self-escalate (ADR-0005). Keyed by the canonical ``user_id``, never
+email: the identity that owns campaigns is issuer+subject-derived and cannot be changed.
+Resolution is fail-secure — a malformed file or an unnamed delegator yields a principal
+alone in its own empty tenant, never a fall-through to owner — and attenuation is enforced
+at READ time (:func:`resolve_effective_capabilities`), so even a hand-edited over-grant
+cannot exceed the delegator's own authority.
 """
 
 from __future__ import annotations

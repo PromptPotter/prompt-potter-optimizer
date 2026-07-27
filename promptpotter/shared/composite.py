@@ -1,28 +1,10 @@
 """Composite-score utilities — the short-code vocabulary + render primitives.
 
-This module is the **single source** for the evaluator short codes (``acc``,
-``H``, ``lat``, ``R``, ``pc``, …). It lives in ``shared/`` because all three
-caller layers use it — application (``views``), presentation (``live``) and
-infrastructure (``live_dashboard``) — and infrastructure must not import the
-application-layer evaluator registry. The vocabulary is therefore data here, not
-a field on ``Evaluator``; ``evaluators.py::default_per_round_formula_short``
-derives its short form from this table (``to_short_formula``) rather than
-hand-syncing a literal.
-
-Two concerns share the module:
-
-1. **Short-form formula inlining** (``inline_short_formula_values``) — transforms
-   ``0.65*acc + 0.15*H + ...`` into ``0.65*acc|0.667 + 0.15*H|0.972 + ...`` for
-   ``dashboard.json`` so the operator sees the formula and its resolved inputs on
-   one line.
-2. **Composite-score render primitives** (``render_composite_fitness_oneliner`` /
-   ``render_composite_fitness_block``) — operator-facing forms surfaces share.
-   Without the inputs the operator can't tell *why* composite_fitness moved when
-   accuracy didn't.
-
-Both read the one ``SHORT_NAMES`` table (+ ``AGGREGATES`` for the synthesized
-``H``/``R`` terms); the code regex and the short↔full inversion are derived, so
-adding or renaming an evaluator is a single edit here. Pure functions; no I/O.
+``SHORT_NAMES`` (+ ``AGGREGATES``) is the single source for the evaluator short
+codes; the code regex and the short↔full inversion are derived from it, so adding
+or renaming an evaluator is one edit here and never a hand-synced literal
+elsewhere. In ``shared/`` because all three caller layers render these and
+infrastructure must not import the application-layer evaluator registry.
 """
 
 from __future__ import annotations

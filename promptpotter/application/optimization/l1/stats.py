@@ -43,7 +43,6 @@ def compute_l1_stats(
     behavior_results: list[list[CheckResult]],
     l2_behavior_results: list[list[CheckResult]] | None = None,
 ) -> L1Stats:
-    """Aggregate rounds + behaviour checks → L1Stats."""
     rounds_to_95 = first_round_at_threshold(rounds, HEADLINE_ACC)
     yield_rate = _mean_yield_rate(rounds)
     top_lifts = _top_lifts(rounds, origin_composite_fitness)
@@ -80,13 +79,12 @@ def _compute_round_1_verdict(
     - `broken` — ≥ 2 ✗, **or L1 emitted no variants at all**.
     - `unknown` — no round 1 yet, or its checks never ran.
 
-    The two guards below are not defensive padding — each closes a path that used to reach
-    the ``failed_total == 0`` branch and report ``healthy``:
+    Two guards close the paths where ``failed_total == 0`` would report a false ``healthy``:
 
     1. **L1 yielded nothing.** Zero variants is the WORST L1 outcome, not the cleanest — the
-       meta-prompt made its own children unreadable. It scored ``healthy`` because each check
-       short-circuits to ``passed=True`` on an empty variant list. ``run_all_checks`` now
-       returns ``[]`` there, which lands in guard 2, so this reads the round's own signal.
+       meta-prompt made its own children unreadable. Each check short-circuits to
+       ``passed=True`` on an empty variant list, so ``run_all_checks`` returns ``[]`` there,
+       landing in guard 2.
     2. **The checks never ran** (empty list — L1 yielded nothing, or the round's audit dict was
        missing entirely). Zero failures out of zero checks is not a clean bill of health; the
        same rule ``L1Stats`` states for every rate it carries.

@@ -60,8 +60,8 @@ class Observation(NamedTuple):
     **graded** per-sample fitness ∈ [0,1] — the same continuous score accuracy
     (mean fitness) and ``paired_fitness`` read, NOT a binarized ``hit``. The
     logistic MAP maximizes cross-entropy ``Σ y·log p + (1−y)·log(1−p)`` (valid for
-    any y ∈ [0,1]), so a binary dataset (y ∈ {0,1}) is bit-identical to the old
-    ``hit`` path while a continuous-fitness backend (reciprocal-rank matching, the
+    any y ∈ [0,1]), so a binary dataset (y ∈ {0,1}) is bit-identical to a binarized
+    ``hit`` while a continuous-fitness backend (reciprocal-rank matching, the
     L4 outer proxy) keeps its gradient instead of collapsing to all-miss θ."""
 
     candidate_id: str
@@ -72,8 +72,7 @@ class Observation(NamedTuple):
 def graded_response(result: Mapping[str, Any]) -> float:
     """The per-sample graded response for a result dict — its ``fitness`` clamped to
     [0,1] (the logistic likelihood needs y ∈ [0,1]). One reader so every θ/δ fit
-    sees the same graded signal the composite does; supersedes the old
-    ``bool(result.get("hit"))`` binarization at every ``Observation`` build site."""
+    sees the same graded signal the composite does."""
     return min(max(float(result.get("fitness", 0.0) or 0.0), 0.0), 1.0)
 
 

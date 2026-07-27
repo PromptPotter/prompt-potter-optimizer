@@ -223,7 +223,6 @@ def _parse_tpm_overflow(err_str: str) -> tuple[int, int] | None:
 
 
 def _parse_int_header(headers: Mapping[str, Any] | Any, key: str) -> int | None:
-    """Read ``key`` from a headers mapping and coerce to int, else ``None``."""
     if headers is None:
         return None
     val = headers.get(key) if hasattr(headers, "get") else None

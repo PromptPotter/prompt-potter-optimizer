@@ -1,28 +1,12 @@
 """The one in-flight heartbeat loop — shared by the optimizer call and L4.
 
-``heartbeat`` periodically appends :class:`LLMCallProgressRecord` while a slow
-awaitable is open, so the CLI display + webapp dashboard show a live elapsed
-counter (and freshness stays fresh) instead of looking frozen for 30-200s.
+Appends :class:`LLMCallProgressRecord` while a slow awaitable is open, so a call that
+takes 30-200s reads as working rather than frozen. Every slow await in the package rides
+this ONE loop; a second heartbeat is a bug.
 
-Four callers ride this ONE loop (no duplicate heartbeat):
-
-- ``llm_call`` (``call.py``) — the optimizer LLM call, ``detail_fn=None``.
-- ``run_inner_cycle`` (``runner/inner/cycle.py``) — the L4 outer cycle awaiting
-  a multi-minute inner campaign, with ``detail_fn`` reading the inner run's live
-  ``dashboard.json`` so the outer chat shows ``"inner rX/Y · best Z%"``.
-- ``measure_sample`` (``scoring/sample_measurement.py``) — the backend scoring
-  query, ``detail_fn=None``. Backend ``QUERY_TIMEOUT`` (120s) exceeds
-  ``RUN_FRESH_S`` (30s), so without this a slow sample reads as a dead producer.
-- ``_await_gate_decision`` (``runner/origin_gate.py``) — the round-0 origin gate
-  holding for an operator decision. The longest await in the package and the only
-  UNBOUNDED one, since it ends only when a human acts. It was missing here, and
-  the cost was not cosmetic: the cycle went stale in 30s, dropped out of the
-  operator's dock, and was reaped TERMINAL 15 minutes later while alive.
-
-**The rule the fourth caller establishes: an await that outlasts ``RUN_FRESH_S``
-and writes nothing of its own MUST heartbeat.** Silence is how this package says
-"the producer died", so a live wait that stays silent is claiming to be dead —
-and every liveness reader downstream believes it.
+**The rule: an await that outlasts ``RUN_FRESH_S`` and writes nothing of its own MUST
+heartbeat.** Silence is how this package says "the producer died", so a live wait that
+stays silent is claiming to be dead — and every liveness reader downstream believes it.
 """
 
 from __future__ import annotations

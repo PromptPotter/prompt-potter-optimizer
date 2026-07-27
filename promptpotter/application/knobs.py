@@ -1,34 +1,11 @@
 """The knob layer — what each ``CampaignConfig`` knob shapes, and which knobs collide.
 
-Every knob declares its own :class:`~promptpotter.application.config.Scope` and
-:class:`~promptpotter.application.config.Estimand` as ``Knob`` metadata on its field
-(``config.py``), so ``KNOBS`` below is **walked** off the model, never re-listed. It
-replaces two name-keyed side tables — one mapping paths to a policy/data scope, one
-mapping paths to estimands — that each carried their own leaf-walker and their own
-import guard to police the gap between themselves and the model. They drifted anyway,
-exactly as a hand-written name-set does: their walkers disagreed on whether ``lives``
-was one leaf (subtree-as-unit) or two (``start`` + ``cap``). Metadata on a field cannot
-go stale against that field.
-
-Two facets read the one registry:
-
-- **Diff** (``classify_config_diff``) — resume asks *did the operator edit the dataset's
-  authored ``campaign.json`` since this campaign was minted, and does that edit invalidate
-  the data trace?* Answered from each diffed leaf's ``Scope``.
-- **Couplings** (``COUPLINGS`` / ``check_couplings``) + **provenance**
-  (``resolve_knob_states``) — the knobs do not act independently: several co-determine
-  the same ``Estimand`` (the scored subset, the difficulty ruler δ, the ability θ, the
-  gate), so flipping one in isolation can quietly make another ill-defined. Each coupling
-  carries a predicate over the resolved config saying whether the combination is currently
-  *violated*.
-
-Three consumers: resume (diff), ``run_preflight_checks`` (a pre-run CLI warning),
-and ``GET /campaigns/{id}/config-map`` — so a collision is visible on every operator
-surface, never just in the engine.
-
-One-way import — ``knobs`` depends on ``config``; never the reverse (``config`` imports
-it lazily inside ``run_preflight_checks``, keeping the statistical-constant imports off
-its module-load path).
+``KNOBS`` is **walked** off each field's own ``Knob`` metadata, never re-listed, because
+metadata on a field cannot go stale against that field. Couplings exist because knobs do
+not act independently: several co-determine one ``Estimand``, so flipping one in isolation
+can quietly make another ill-defined — each coupling is a predicate saying whether the
+resolved combination is currently violated. Consumers and the one-way ``knobs`` →
+``config`` import: ``application/CLAUDE.md``.
 """
 
 from __future__ import annotations
@@ -188,9 +165,9 @@ def classify_config_diff(
     stale path survives the walk and lands in the unclassified branch below, which names it and
     classifies DATA_AFFECTING — a divergence replay, zero spend, loud.
 
-    ⚠ The trade-off of comparing deltas: a change to a *code* default no longer surfaces as a
-    config diff. It never should have — pinning a stale default while the surrounding code moved
-    is a false reproducibility, and `ab`/`verify` re-derive under the current engine by design.
+    ⚠ The trade-off of comparing deltas: a change to a *code* default does not surface as a
+    config diff — deliberately: pinning a stale default while the surrounding code moved is a
+    false reproducibility, and `ab`/`verify` re-derive under the current engine by design.
     """
     if not frozen:
         # A check-in skeleton (`mint_checkin_skeleton`) carries `config: {}` — the campaign has

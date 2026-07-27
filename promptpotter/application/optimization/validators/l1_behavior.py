@@ -108,13 +108,7 @@ _PHRASE_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z_\-]{2,}")
 
 
 def _variant_text_blob(variant: dict[str, Any]) -> str:
-    """All free-form variant text checks may scan against.
-
-    Includes changes_description plus the textual content of every mutation
-    slot the schema split exposes: ``prompt_fields_override`` (the six
-    PROMPT_STRING_FIELDS as a flat dict) and ``task_context_override``
-    (the two splice strings as a flat dict).
-    """
+    """All free-form variant text checks may scan against."""
     parts = [str(variant.get("changes_description") or "")]
     for value in (variant.get("prompt_fields_override") or {}).values():
         parts.append(str(value or ""))
@@ -406,7 +400,6 @@ def _has_peaked_rebut(variant: dict[str, Any], citation: str, ctx: ValidatorCont
 
 
 def _touches_param_scope(pp_override: dict[str, Any]) -> bool:
-    """Recursively scan a pipeline_params_override for PARAM_SCOPE_KEYS."""
     if not isinstance(pp_override, dict):
         return False
     for key, value in pp_override.items():
@@ -420,10 +413,8 @@ def _touches_param_scope(pp_override: dict[str, Any]) -> bool:
 def _stale_prompt_field(ctx: ValidatorContext) -> str | None:
     """Return a prompt-string field name unchanged for the past 2 rounds, or None.
 
-    Inspects ``prior_rounds`` (most-recent last) and looks at each round's
-    ``l1_generate`` variants for which prompt fields they mutated. A field
-    that appears in zero variants for the last two rounds is "stale" and
-    triggers the param-scope lock.
+    A field that appears in zero variants for the last two rounds is "stale"
+    and triggers the param-scope lock.
     """
     if len(ctx.prior_rounds) < 2:
         return None

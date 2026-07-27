@@ -21,7 +21,6 @@ def render_hard_sample_heatmap(
     *,
     sample_query_lookup: dict[int, str] | None = None,
 ) -> str:
-    """Pretty-print the hard-sample-sorter heatmap + hardness leaderboard."""
     if not artifact or not artifact.get("n_observations"):
         return ""
 

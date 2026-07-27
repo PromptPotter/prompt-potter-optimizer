@@ -40,13 +40,9 @@ def iter_user_token_usage(*, store: Stores, since: float, until: float) -> list[
     ``[since, until)``.
 
     Reads through ``iter_jsonl``, which is corruption-tolerant but NOT
-    failure-tolerant: an unreadable ledger raises. This function used to hand-parse
-    the file behind ``except OSError: continue``, so any I/O error reported that
-    cycle's spend as zero — and :func:`sum_user_spend` feeds the daily cap, which
-    turns a zero into a *full remaining budget*. The gate failed open. It also
-    pre-filtered lines with ``'"token_usage"' not in line``, a raw-bytes test
-    against the serialized discriminator that would silently drop every row if the
-    dump shape ever changed.
+    failure-tolerant: an unreadable ledger raises rather than reporting that
+    cycle's spend as zero — :func:`sum_user_spend` feeds the daily cap, and a
+    zero fails open into a full remaining budget.
 
     Returns ``cost_usd`` as ``None`` when the record didn't carry one, and carries
     ``cached`` through; the caller resolves both via :func:`record_cost_usd`.
@@ -86,19 +82,14 @@ def record_cost_usd(rec: dict[str, Any]) -> float:
 
     Resolution is :func:`~promptpotter.shared.spend.compute_usd`, the same one the
     ``dashboard.json::spend`` writer rides: wire ``cost_usd`` short-circuits, else the
-    rate table × tokens. This module used to re-implement that policy over the raw dict,
-    and the two copies had drifted apart in both directions.
+    rate table × tokens.
 
     ``cached`` is the split :class:`TokenUsageRecord` defines: only a call with
-    ``cached=False`` is money that left the account. Billing a cache hit made the daily
-    cap subtract phantom spend, so a resumed or forked run served from the
-    content-addressed cache — which costs $0 — shrank the next launch's budget, and could
-    floor it to ``0.0`` and halt a run against money nobody spent.
+    ``cached=False`` is money that left the account.
 
     An unpriced model still resolves to ``0.0`` (``compute_usd`` says ``None``), which
     under-counts the cap rather than over-counting it. The dashboard arms an "USD cap
-    inactive" warning on that case; this path has no channel to say so — filed on the
-    debt backlog, not papered over here.
+    inactive" warning on that case; this path has no channel to say so.
     """
     if rec.get("cached"):
         return 0.0

@@ -67,7 +67,6 @@ def render_review_md(
     context_object: list[str] | None = None,
     l1_patience: int,
 ) -> str:
-    """Render ``review.md`` from index + rounds + per-round audit dicts."""
     audits = list(round_audits or [None] * len(rounds))
     if len(audits) < len(rounds):
         audits.extend([None] * (len(rounds) - len(audits)))
@@ -546,7 +545,6 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict[str, An
 def _load_p_best_trajectory(
     streams_dir: Path | None, round_num: int
 ) -> tuple[dict[str, list[float]], dict[str, int]]:
-    """Load per-sample P(best) snapshots from the JSONL stream for a single round."""
     if streams_dir is None:
         return {}, {}
     trajectory: dict[str, list[float]] = {}
@@ -560,13 +558,8 @@ def _load_p_best_trajectory(
 
 
 def _sample_queries(rounds: list[RoundResult]) -> dict[int, str]:
-    """``{sample_id: query}`` harvested from the rounds already in hand.
-
-    This used to be a ``sample_query_lookup`` PARAMETER, and neither caller of
-    :func:`from_disk_log` passed it — so ``HardSamplesView.sample_query_lookup`` was
-    permanently ``{}`` and the ``query`` column of the hardness leaderboard rendered BLANK in
-    every ``log.md`` ever written. Asking the caller for data the function is already holding
-    is what let that go unnoticed: the rounds carry every sample's ``query``, so derive it."""
+    """``{sample_id: query}`` harvested from the rounds already in hand — the rounds carry
+    every sample's ``query``, so derive it rather than asking the caller."""
     out: dict[int, str] = {}
     for rr in rounds:
         for row in rr.results:
@@ -584,9 +577,7 @@ def from_disk_log(
     streams_dir: Path | None = None,
     fork_indices: list[dict[str, Any]] | None = None,
 ) -> LogMdView:
-    """Build a ``log.md`` view from ``index.json`` + the cycle's rounds.
-
-    ``fork_indices`` is the list of sibling-cycle ``index.json`` blobs;
+    """``fork_indices`` is the list of sibling-cycle ``index.json`` blobs;
     rendered as the ``## Cycles`` section on the campaign digest. The
     per-cycle log.md passes ``None``.
     """
@@ -775,7 +766,6 @@ def _load_sibling_indices(
 
 
 def write_review_md(session: Session, cycle: Cycle) -> None:
-    """Render review.md from index + rounds + per-round audit JSONs."""
     if not session.state.cycle_id or session.store is None:
         return
     with graceful("review.md render failed"):

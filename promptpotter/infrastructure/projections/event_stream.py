@@ -1,25 +1,10 @@
 """Cross-process tail of a cycle's on-disk ledger → ``ProjectionEnvelope`` frames.
 
-The cycle ledger (``.runtime/ledger.jsonl``) is the append-only, on-disk source
-of truth for everything that happens in a run — the same record that makes a run
-reproducible. This turns it into the outbound SSE projection by *tailing the
-file*, so the stream works no matter which process runs the campaign (the API
-server, the CLI, a spawned runner). It replaces the old in-memory
-``EventStreamView`` fan-out, which only existed inside the runner process and so
-404'd for every reader in any other process — the bug that left the webapp chat
-blank against a CLI-launched run.
-
-Reads are incremental: a byte cursor seeks past everything already streamed, so a
-long ledger is never re-scanned. ``offset`` everywhere in this system is a 0-based
-line index, so the tail stamps ``ProjectionEnvelope.sequence`` with the line index
-the writer assigned. The leading ``stream_snapshot`` frame carries the cycle's
-current ``dashboard.json`` (read as-is, never extended) so a client opening
-mid-run paints the state-so-far and then appends the live tail.
-
-This same primitive is what an MCP "watch this run" resource would consume.
-
-The certified Profile-A contract (snapshot-then-tail semantics, heartbeat cadence,
-sequence-gap detection) is documented in ``docs/developer/event-stream.md``.
+Tailing the file rather than subscribing in-process is what makes the stream work no
+matter which process runs the campaign (API server, CLI, spawned runner). Reads are
+incremental — a byte cursor seeks past what was already streamed — and ``sequence`` is
+stamped with the writer's own 0-based line index, the same thing ``offset`` means
+everywhere else here. Certified Profile-A contract: ``docs/developer/event-stream.md``.
 """
 
 from __future__ import annotations

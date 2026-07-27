@@ -81,7 +81,7 @@ is a pure `(InjectionBundle) -> str`.
 
 1. Write a `_r_<name>(bundle) -> str` renderer in `dispatch/injections/`
    (returns `""` when its source field is empty — empty injections are skipped).
-2. Decorate it with `@signal("<name>", kind=…, description=…)` — registration
+2. Decorate it with `@signal("<name>", kind=…, char_cap=…, citable=…)` — registration
    happens at the definition site; key and body are co-located, no separate
    `INJECTIONS` edit.
 3. To make it reachable, add it to the node's `NODE_LAYOUTS[node].possible`

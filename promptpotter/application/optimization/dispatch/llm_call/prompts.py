@@ -127,14 +127,6 @@ def load_optimizer_set_overrides(opt_set: str) -> dict[str, dict[str, Any]]:
 
 @functools.lru_cache(maxsize=1)
 def _load_optimizer_manifest() -> dict[str, Any]:
-    """Read the on-disk optimizer-pipeline manifest (cached).
-
-    Single source of truth for nodes, schemas, and prompts. Same shape as
-    a backend's ``GET /pipeline`` response: ``nodes`` reference
-    ``schema_family``/``schema_version`` + ``prompt_family``/``prompt_version``,
-    and the bodies live in the top-level ``resolved_schemas`` /
-    ``resolved_prompts`` registries.
-    """
     manifest: dict[str, Any] = json.loads(OPTIMIZER_PIPELINE_PATH.read_text(encoding="utf-8"))
     return manifest
 

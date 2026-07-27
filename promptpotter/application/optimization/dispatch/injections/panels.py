@@ -50,7 +50,6 @@ from promptpotter.shared.errors import is_error_result
 @signal(
     "escalation_panel",
     kind=InjectionKind.DERIVED,
-    description="L1 stall depth + exploration_budget — gates the stall_exploration citation and PEAKED-axis rebut.",
     char_cap=400,
     citable=True,
 )
@@ -72,8 +71,6 @@ def _r_escalation_panel(b: InjectionBundle) -> str:
 @signal(
     "evidence_health",
     kind=InjectionKind.DERIVED,
-    description="Round-level per-node failure rates; flags an evidence-starved enricher (a node "
-    "failing across the round) so the critique names the dead node instead of chasing a param.",
     char_cap=500,
     citable=True,
 )
@@ -108,7 +105,6 @@ def _r_evidence_health(b: InjectionBundle) -> str:
 @signal(
     "diagnostics",
     kind=InjectionKind.DERIVED,
-    description="Layer-agnostic round readout: STATUS header + RoundDiagnostics body.",
     char_cap=2000,
     citable=True,
 )
@@ -271,10 +267,6 @@ def _filter_axis_rankings_to_prompt(value: str) -> str:
 @signal(
     "axis_memory",
     kind=InjectionKind.DERIVED,
-    description=(
-        "Cross-cycle axis-keyed digest from AxisIndex: rankings, persistent failures, "
-        "failure clusters, value trends, exhausted axes."
-    ),
     char_cap=1200,  # digest() already caps to top-5 axes; this is the hard backstop.
     citable=True,
 )
@@ -356,10 +348,6 @@ def _edges_at_line(text: str, cap: int, head_frac: float = 0.55) -> str:
 @signal(
     "sample_transcripts",
     kind=InjectionKind.MEASUREMENT,
-    description=(
-        "Complete failing samples: full query + the task model's own reasoning + "
-        "predicted vs GT — the raw evidence the critique's failure_highlights quote from."
-    ),
     # Sized for TRANSCRIPT_RENDER_CAP=3 typical transcripts (~2.6-3k each on
     # justlogic); worst case (~3.8k each) degrades by section-drop of the whole
     # 3rd transcript — today's behavior, never a severed fence.
@@ -405,11 +393,6 @@ def _r_sample_transcripts(b: InjectionBundle) -> str:
 @signal(
     "inner_narratives",
     kind=InjectionKind.MEASUREMENT,
-    description=(
-        "One authored narrative per inner campaign an L4 outer round ran: what each inner "
-        "loop tried, the steer each round acted on, its winning edit, and where it stalled — "
-        "the raw evidence a meta-prompt mutation grounds itself in. Empty off the recursion."
-    ),
     # Sized for the full outer-seed panel (8 today x <=1150c + fences); the narrative is authored
     # to <=1150c upstream, so a per-section overrun is a safety rail, not an expected drop.
     char_cap=13000,
@@ -491,12 +474,6 @@ def _tally(counts: Counter[str], total: int) -> str:
 @signal(
     "answer_distribution",
     kind=InjectionKind.MEASUREMENT,
-    description=(
-        "What the pipeline actually ANSWERS versus what is true, as label tallies, plus "
-        "the score a constant single-label answer would earn. Exposes a pipeline that has "
-        "collapsed onto one label — an accuracy that merely ties the constant is not a "
-        "measurement. Empty on free-text answer spaces."
-    ),
     char_cap=700,
     citable=True,
 )
@@ -555,12 +532,6 @@ def _miss_difficulty(b: InjectionBundle, row: dict[str, Any]) -> float | None:
 @signal(
     "failing_samples",
     kind=InjectionKind.MEASUREMENT,
-    description=(
-        "Every current miss, one line each, ordered EASIEST-FIRST on the cycle's fixed "
-        "δ ruler: which samples are still failing, how hard each is, what was answered "
-        "vs what was true. Errored samples are not misses and are reported as the "
-        "non-measurement they are, never as winnable failures."
-    ),
     char_cap=2400,
     citable=True,
 )
@@ -639,7 +610,7 @@ def _candidate_mutation(
     parent's own schema prose echoed back) as a new mutation.
 
     Returns the values UNCLIPPED and unformatted: the render clips to
-    ``MEMORY_VALUE_CAP`` for the eye, while :func:`_idea_fingerprint` needs the whole value
+    ``MEMORY_VALUE_CAP`` for the eye, while :func:`idea_fingerprint` needs the whole value
     to see the idea. One producer, two consumers with different appetites — clipping here
     would silently starve the second (it did: the fingerprint over 60-char stems was mostly
     field-name tokens).
@@ -692,10 +663,6 @@ def _candidate_fate(cand: ScoredCandidate) -> str:
 @signal(
     "mutation_memory",
     kind=InjectionKind.DERIVED,
-    description=(
-        "What this cycle has ALREADY tried, per round: the changed field and its value, "
-        "what it scored against its own matched origin, and how it ended."
-    ),
     char_cap=1800,
     citable=True,
 )
@@ -704,9 +671,7 @@ def _r_mutation_memory(b: InjectionBundle) -> str:
     already been measured and lost — it has never been shown one of its prior attempts.
 
     ONE compact line per prior candidate — ``r{N} {outcome} · {field}:"{stem}"[; …]`` — so
-    every retained round fits and the record stays COMPLETE. The multi-line block it replaced
-    overflowed the panel cap on a 2-variant inner cycle, and the section-drop then cut the most
-    RECENT rounds — the exact attempts most likely to be re-proposed. The record's job is
+    every retained round fits and the record stays COMPLETE. The record's job is
     recognition, not reproduction, so a short stem per field is enough.
 
     An accuracy is only quoted against ``matched_origin_accuracy``, the origin restricted to
@@ -715,11 +680,10 @@ def _r_mutation_memory(b: InjectionBundle) -> str:
     accuracy"), so its row reports where it was cut instead of inventing a comparison.
 
     Rows whose mutation carries an idea ALREADY tried in an earlier retained round are marked
-    ``↺ same idea as r{N} (Mx)``. Keyed on field+stem alone the panel could not see a
-    re-proposal at all — the generator rewrites the idea into a different field each round, so
-    every row looked new (see :func:`_idea_fingerprint`). The marker is the panel's whole point
-    made legible in one clause: the record does not just LIST prior attempts, it says which of
-    them are the same attempt.
+    ``↺ same idea as r{N} (Mx)`` — matched on idea vocabulary, never field+stem, because the
+    generator rewrites an idea into a different field each round (see :func:`idea_fingerprint`).
+    The marker is the panel's whole point made legible in one clause: the record does not just
+    LIST prior attempts, it says which of them are the same attempt.
     """
     prior = list(b.prior_rounds)
     rounds = [(i, r) for i, r in enumerate(prior) if r.candidate_scores][-MEMORY_ROUND_CAP:]
@@ -769,7 +733,6 @@ def _r_mutation_memory(b: InjectionBundle) -> str:
 @signal(
     "origin_strengths",
     kind=InjectionKind.MEASUREMENT,
-    description="Round-0 origin's per-sample hits — the floor variants must preserve.",
     char_cap=None,
     citable=True,
 )
@@ -792,10 +755,6 @@ def _r_origin_strengths(b: InjectionBundle) -> str:
 @signal(
     "archive_top_runs",
     kind=InjectionKind.MEASUREMENT,
-    description=(
-        "Top-K historical runs across the dataset's archive — anchor the optimizer "
-        "against the best composite ever scored instead of re-discovering it."
-    ),
     char_cap=None,
     citable=True,
 )
@@ -820,10 +779,6 @@ def _r_archive_top_runs(b: InjectionBundle) -> str:
 @signal(
     "rare_hit_samples",
     kind=InjectionKind.MEASUREMENT,
-    description=(
-        "Samples cracked by ≤3 of ≥10 attempts — names the run(s) that hit them "
-        "(recipe pointers). Zero-hit samples surface as capacity-bound."
-    ),
     char_cap=None,
     citable=True,
 )

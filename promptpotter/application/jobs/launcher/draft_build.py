@@ -153,7 +153,6 @@ def draft_pipeline_dependencies(draft: DraftCampaign) -> tuple[PipelineDependenc
 
 
 def _dependency_fulfilled(dep: PipelineDependency, draft: DraftCampaign) -> bool:
-    """Whether the draft already carries the input ``dep`` asks for."""
     if dep.kind == CANDIDATE_LIBRARY:
         return bool(draft.candidate_library)
     return False
@@ -219,11 +218,10 @@ def _build_default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:
     on-disk ``campaign_config`` outer key per the repo convention
     (see ``datasets/{benchmark}/campaign.json``).
 
-    Per R4, ``exclude_nodes`` and the ``optimization`` knob overrides come
-    from the connector (:attr:`Connector.default_exclude_nodes` +
-    :attr:`Connector.default_optimization`) — the launcher no longer
-    hard-codes ``["llm_ranking"]`` or ``n_variants=3``. Connectors that
-    leave the fields empty get the schema defaults.
+    ``exclude_nodes`` and the ``optimization`` knob overrides come from the
+    connector (:attr:`Connector.default_exclude_nodes` +
+    :attr:`Connector.default_optimization`); connectors that leave the fields
+    empty get the schema defaults.
 
     Written as the **delta from defaults** (``freeze_campaign_config``), the same
     shape the minted snapshot persists: a knob nobody chose never reaches disk, so
@@ -231,9 +229,9 @@ def _build_default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:
     here because ``CampaignConfig`` is ``extra="forbid"`` and three endpoints read
     this one file — ``/datasets/{name}/pipeline``, ``/preview``, and the draft
     mint. ``draft.optimization_overrides`` is a *full* dump of every knob
-    (``OptimizationOverrides().model_dump()``), so passing it through verbatim
-    spelled every mechanism toggle onto disk at its default and made every
-    ingested dataset a hostage to the next rename.
+    (``OptimizationOverrides().model_dump()``) and must not pass through
+    verbatim — that would spell every mechanism toggle onto disk at its default
+    and hold every ingested dataset hostage to the next rename.
 
     Validating before freezing also means a connector whose ``default_optimization``
     omits a required knob fails at mint, where the cause is legible — not on the

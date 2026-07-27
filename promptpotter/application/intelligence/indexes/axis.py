@@ -353,20 +353,18 @@ class AxisIndex:
         the formula names a term they predate. ``rescore_results`` is deliberately fail-loud, and
         for the LIVE scorer that is exactly right: there the namespace is materialized fresh, so a
         missing name IS a broken formula. Here it is not — it is a row from another era, and
-        letting it raise killed the cycle *after* its measurement had already been paid for.
+        letting it raise would kill the cycle *after* its measurement has already been paid for.
 
         Only a MISSING TERM is skipped (``ScoringTermMissingError``). A divide-by-zero or a
         non-numeric result is a broken formula wherever it fires, and stays fatal — catching the
-        parent here would have swallowed a typo made five minutes ago.
+        parent here would swallow a typo made five minutes ago.
 
         Skips are COUNTED and LOGGED, never silent and never scored 0.0 — a fake zero would
         poison the very digest the L1/L2/L3 prompts read. The run is still marked seen, so a
         permanently-unscoreable row is not re-tried (and re-logged) on every refresh. **And the
         skip binds BOTH halves of the refresh:** the axis fold below reads the same skip set, so
         a run this formula cannot score reaches neither the per-sample index nor the axis
-        rankings and the top-runs leaderboard. It used to reach the latter two — ranked by
-        composite fitness computed under a formula from another era — while the summary below
-        claimed the digest was built only from the runs that scored."""
+        rankings and the top-runs leaderboard."""
         added = 0
         skipped: list[str] = []
         for run_id, detail in archive_views.runs_since(

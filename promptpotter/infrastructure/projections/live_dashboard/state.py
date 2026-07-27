@@ -127,9 +127,8 @@ class LoopWarning(StrictModel):
     """One entry in ``recent_loop_warnings`` — an optimizer-loop degradation the
     self-healing rails recovered from (zero-candidate round, L2 framing
     soft-reject, injection budget truncation). Projected from the canonical
-    :class:`~promptpotter.domain.run_records.RoundWarningRecord`. Previously
-    log-only; now visible on the dashboard / file-tree alongside
-    ``recent_backend_warnings``."""
+    :class:`~promptpotter.domain.run_records.RoundWarningRecord`; visible on the
+    dashboard / file-tree alongside ``recent_backend_warnings``."""
 
     ts: str
     kind: str

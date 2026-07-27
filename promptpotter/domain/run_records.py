@@ -510,11 +510,11 @@ class LedgerCandidate(StrictModel):
 
 class CycleSeedRecord(StrictModel):
     """The cycle's read-once starting point (`CycleSeed`) as a ledger record — appended
-    at mint / operator-steered fork / check-in flip, re-read at bootstrap. Folds the old
-    `.overrides/seed.json` sidecar into the replayable spine: a fork inherits its parent's
-    seed record *virtually* (`inherit_from`) but appends its OWN, so a scan of the cycle's
-    own ledger file returns that cycle's seed — and `None` for a cycle that carries none
-    (sweep / diag). Not a progress event: the SSE tail skips it (not in `ProjectionKind`)."""
+    at mint / operator-steered fork / check-in flip, re-read at bootstrap. A fork inherits
+    its parent's seed record *virtually* (`inherit_from`) but appends its OWN, so a scan of
+    the cycle's own ledger file returns that cycle's seed — and `None` for a cycle that
+    carries none (sweep / diag). Not a progress event: the SSE tail skips it (not in
+    `ProjectionKind`)."""
 
     model_config = ConfigDict(frozen=True)
 

@@ -1,35 +1,10 @@
 """Token → USD resolution — bundled floor + runtime refresh, no third-party dep.
 
-Three layers, in priority order:
-
-1. **Wire passthrough.** When the LLM call reports a USD cost on the
-   wire — currently only OpenRouter does this via
-   ``response.usage.cost``/``total_cost`` — the value is forwarded as
-   ``override_usd`` and the rate lookup is bypassed. This is the path
-   that matches the operator's actual provider invoice.
-
-2. **Runtime cache** at ``~/.promptpotter/rates.json``. ``refresh_rates()``
-   fetches LiteLLM's public
-   ``model_prices_and_context_window_backup.json``, strips it, and writes
-   it wrapped as ``{"fetched_at": <iso>, "models": {...}}``. Subsequent
-   calls within ``_TTL_SECONDS`` (24 h) are no-ops; the CLI calls this
-   once per ``optimize`` start, so a fresh cache survives across runs.
-   Run ``python scripts/refresh_rates.py`` to force a manual refresh.
-
-3. **Bundled floor** at ``promptpotter/shared/data/rates.json`` — checked
-   into the repo, same wrapped format. ``load_rates()`` falls back to
-   this when no cache is present, so a fresh install with no internet
-   still resolves rates. Bumped via PR alongside ordinary releases.
-
-Threat surface is intentionally narrow: only ``urllib`` + ``json`` from
-the standard library; no PyPI cost-tracking lib (LiteLLM's March 2026
-incident motivated this stance, and ``tokencost`` pulls in unnecessary
-``aiohttp`` + ``anthropic`` deps). The fetched JSON is treated as pure
-data — keys become dict lookups, values become floats; nothing is ever
-``eval`` / ``exec``-ed.
-
-Source: ``https://raw.githubusercontent.com/BerriAI/litellm/main/litellm/model_prices_and_context_window_backup.json``
-(MIT, BerriAI).
+Resolution order is wire cost (``override_usd``, currently OpenRouter only) → runtime
+cache → the checked-in floor; see :func:`compute_usd` and :func:`load_rates`. Only
+``urllib`` + ``json``, by choice — a cost-tracking package is a supply-chain surface for
+a table we can vendor from LiteLLM's public price backup (MIT, BerriAI). The fetched
+JSON stays data: keys become dict lookups, values floats, nothing is ever ``eval``-ed.
 """
 
 from __future__ import annotations
@@ -83,7 +58,6 @@ def _strip_upstream(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def _wrap(models: dict[str, Any]) -> dict[str, Any]:
-    """Wrap the stripped models dict with a fetched-at timestamp for TTL."""
     return {"fetched_at": utcnow_iso(), "models": models}
 
 

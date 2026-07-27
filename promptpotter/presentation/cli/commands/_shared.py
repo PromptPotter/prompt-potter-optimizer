@@ -10,7 +10,7 @@
 
 The mint prologue (pipeline → origin → cycle_id → mint) lives in the
 application layer at ``application/jobs/mint.py`` — both CLI ``new`` and the
-web mint call it; the CLI commands no longer assemble it here.
+web mint call it.
 """
 
 from __future__ import annotations
@@ -294,10 +294,8 @@ def cycle_result_command(
 def _build_divergence_hint() -> str:
     """Derive the divergence-checked-kinds list from the RESUME_CHECKPOINT_GATING table.
 
-    The hint used to hardcode the gated kinds, which silently rotted
-    every time a new ``ResumeCheckpointKind`` member landed. Now it walks the
-    enum so adding a kind (with its gating choice) updates the operator
-    message automatically.
+    Walking the enum means adding a kind (with its gating choice) updates the
+    operator message automatically.
     """
     from promptpotter.application.optimization.resume_and_fork.decisions import (
         RESUME_CHECKPOINT_GATING,

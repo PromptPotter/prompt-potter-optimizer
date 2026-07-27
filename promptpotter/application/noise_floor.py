@@ -37,8 +37,6 @@ class NoiseFloorError(Exception):
 
 @dataclass(frozen=True)
 class NoiseFloorOutcome:
-    """Result of :func:`measure_noise_floor`."""
-
     record: DiagnosticRunRecord
     artifact_path: str
 

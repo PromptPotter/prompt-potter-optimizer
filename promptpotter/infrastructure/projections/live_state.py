@@ -57,8 +57,6 @@ def backfill_spend_rates(spend: dict[str, Any]) -> dict[str, Any]:
 
 @dataclass
 class LiveStateCore:
-    """Shared per-cycle scalars for live ledger subscribers."""
-
     round_num: int = 0
     origin_acc: float = 0.0
     best_acc: float = 0.0

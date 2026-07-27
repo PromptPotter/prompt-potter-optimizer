@@ -21,10 +21,6 @@ def _ran_to_completion(raw_stop_reason: Any) -> bool:
     runtime_failures.
 
     Classified through the canonical ``StopReason`` table, never a hand-written name allowlist.
-    The frozenset this replaced had gone stale in BOTH directions and nothing could notice:
-    three of its five strings matched no ``StopReason`` at all, and it dropped seven real
-    SUCCESS outcomes — among them ``target_hit`` and ``lives_exhausted``, which is the dominant
-    stop for an L4 inner cycle. Siblings that stopped well were silently denied their wounds.
     """
     if not isinstance(raw_stop_reason, str):
         return False

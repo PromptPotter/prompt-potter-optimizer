@@ -38,9 +38,7 @@ class Sample(StrictModel):
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], fallback_id: int | None = None) -> Sample:
-        """Construct from a plain dict.
-
-        ``id`` falls back to ``fallback_id`` (positional) when absent.
+        """``id`` falls back to ``fallback_id`` (positional) when absent.
         Extra keys (``task``, ``source_sheet``, etc.) are ignored.
         """
         if "id" not in data and fallback_id is not None:

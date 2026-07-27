@@ -1,22 +1,10 @@
 """Resume-checkpoint policy — gating modes + ledger-append helper.
 
-``RESUME_CHECKPOINT_GATING`` is the single source of truth for whether a
-:class:`ResumeCheckpointKind` drives resume-divergence checking
-(``REPLAYED`` — re-derived under the active scorer; mismatch halts or
-forks) or is archival only (``ARCHIVAL`` — written for audit, never
-compared on resume). Every member of :class:`ResumeCheckpointKind` MUST appear
-here exactly once; an import-time check fires before this module loads
-otherwise.
-
-Adding a kind: extend :class:`ResumeCheckpointKind` in
-``promptpotter.domain.run_records`` (the data shape) AND extend
-``RESUME_CHECKPOINT_GATING`` in the same commit. ``REPLAYED`` kinds also need a
-registered replayer in :mod:`.replayers`.
-
-The ``ResumeCheckpointRecord`` and ``ResumeCheckpointKind`` types stay in
-``domain.run_records`` so the ``CycleRecord`` discriminated union owns
-them; this module re-exports them so callers reach for one resume+fork
-package instead of mixing imports.
+``RESUME_CHECKPOINT_GATING`` is the sole source of truth for ``REPLAYED`` (re-derived on
+resume; a mismatch halts or forks) vs ``ARCHIVAL`` (audit only, never compared). Every
+kind must appear exactly once or import fails here. **Adding a kind is two edits in one
+commit** — the enum in ``domain.run_records`` and this table — plus a registered replayer
+if it is ``REPLAYED``.
 """
 
 from __future__ import annotations

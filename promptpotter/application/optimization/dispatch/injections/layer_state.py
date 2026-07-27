@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 @signal(
     "plan",
     kind=InjectionKind.TRACE,
-    description="L3's strategic plan text. Persistent until next L3 fire.",
     # A RAIL, not a budget the writer honours. Stating the char budget in l3_plan's
     # answer_format did not work and could not: a model cannot count the characters it is
     # emitting, so "<=2000 chars" was an instruction it had no way to comply with — live
@@ -40,7 +39,6 @@ def _r_plan(b: InjectionBundle) -> str:
 @signal(
     "l3_to_l2_note",
     kind=InjectionKind.DIRECTIVE,
-    description="Sticky L3→L2 pointer. Mounted only in L2's template; absent from L1.",
     char_cap=400,
     citable=False,
 )
@@ -53,7 +51,6 @@ def _r_l3_to_l2_note(b: InjectionBundle) -> str:
 @signal(
     "rendered_prompt",
     kind=InjectionKind.TRACE,
-    description="Current best searchpoint's compiled prompt body.",
     # The cap is a runaway backstop, NOT a budget knob — this is the exact prompt
     # L1 is editing, so it must never arrive truncated (a cut-off prompt makes L1
     # mis-edit or hallucinate the missing tail). Sized above a fully-evolved
@@ -72,7 +69,6 @@ def _r_rendered_prompt(b: InjectionBundle) -> str:
 @signal(
     "l1_overrides",
     kind=InjectionKind.TRACE,
-    description="Current L1 runtime knobs (creativity, n_variants, etc.) as JSON.",
     char_cap=None,
     citable=False,
 )
@@ -85,7 +81,6 @@ def _r_l1_overrides(b: InjectionBundle) -> str:
 @signal(
     "task_context",
     kind=InjectionKind.TRACE,
-    description="Operator-authored task framing, frozen for the run; broadcast to all four prompts.",
     char_cap=None,  # verbatim BY CONTRACT — see below
     # Citable because the operator's framing is real evidence a variant can be grounded in
     # ("the framing records that anti-hedging backfires here"). It is NOT citable because
@@ -96,16 +91,10 @@ def _r_l1_overrides(b: InjectionBundle) -> str:
 def _r_task_context(b: InjectionBundle) -> str:
     """The operator's framing, rendered VERBATIM — this panel never truncates.
 
-    It used to clip each field at 300 chars and log a warning. That silently amputated the
-    operator's own knowledge on ~95% of renders (244 of the 258 states `key_challenges` ever
-    held were over the cap), and what it cut was the tail — where a careful author puts the
-    conclusion. On `justlogic-d234` the severed tail said anti-hedging instructions have been
-    MEASURED to backfire, so L1 re-proposed exactly that, every round, for 248 rounds.
-
-    A renderer cannot know which half of an authored sentence matters, so it no longer
-    guesses: the budget is enforced where the text is written
-    (`TaskDecomposition.check_budget`, at mint), and by then a human can actually fix it. Truncation stays legitimate for the
-    DERIVED panels, which rank their rows and say what they dropped.
+    A renderer cannot know which half of an authored sentence matters, so it never guesses:
+    the budget is enforced where the text is written (`TaskDecomposition.check_budget`, at
+    mint), where a human can actually fix it. Truncation stays legitimate for the DERIVED
+    panels, which rank their rows and say what they dropped.
     """
     tc = b.opt_sp.memory.task_context
     if not tc:
@@ -120,7 +109,6 @@ def _r_task_context(b: InjectionBundle) -> str:
 @signal(
     "critique",
     kind=InjectionKind.TRACE,
-    description="Compact view of the most recent L1_CRITIQUE LLM output dict.",
     # Sized for failure_highlights <=3x320c + priority_fix 320c + axes — the
     # distiller's whole output quota; an 800 cap silently re-truncated it.
     char_cap=2000,
@@ -159,13 +147,6 @@ _SCHEMA_RENAME_UNLOCK_TEXT = (
 @signal(
     "rebase_capability",
     kind=InjectionKind.DIRECTIVE,
-    description=(
-        "Conditional fork_proposal escape-hatch instruction (renders into L2 + "
-        "L3 prompts), plus the schema_field_rename unlock clause where that lever "
-        "exists and is still locked. Empty when ``OptimizationConfig.rebase_capability`` "
-        "is off — keeps prompt body bit-for-bit identical to a no-rebase "
-        "ablation so the input distribution doesn't drift on prompt text."
-    ),
     char_cap=None,
     citable=False,
 )
@@ -214,11 +195,6 @@ _TERMINATE_CAPABILITY_TEXT = (
 @signal(
     "terminate_capability",
     kind=InjectionKind.DIRECTIVE,
-    description=(
-        "Conditional terminate_proposal instruction (renders into L2 + L3 prompts). "
-        "Empty when ``OptimizationConfig.terminate_capability`` is off — keeps the "
-        "prompt body bit-for-bit identical to an ablation run without it."
-    ),
     char_cap=None,
     citable=False,
 )

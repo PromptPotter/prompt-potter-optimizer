@@ -132,7 +132,6 @@ def _make_anthropic_client() -> AnthropicClient:
 
 
 def _make_mock_client() -> LLMClientBase:
-    """Lazy-load MockLLMClient (lives in tests package)."""
     try:
         from tests.mock_llm_client import MockLLMClient
     except ImportError as err:

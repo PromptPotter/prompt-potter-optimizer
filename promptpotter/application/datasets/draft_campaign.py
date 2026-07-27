@@ -1,23 +1,11 @@
 """Server-held ``DraftCampaign`` — the mutable working state of a check-in-lifecycle campaign.
 
-Wire shape pinned in ``docs/specs/m12-api-openapi.yaml::DraftCampaign``;
-prose at ``docs/specs/roadmap.md § Draft-campaign object``.
-
-A draft is the mutable target of both surfaces (chat tool-calls + the
-panel "Apply" button). The Origin-shaped subset (slug, task_description,
-pipeline_overlay) materializes into the four content-hashed files on
-commit; the campaign-config subset (connector, scoring_composite,
-max_rounds) materializes into the sibling ``campaign.json``.
-
-Storage: a draft is the working state of a campaign in the ``checkin``
-lifecycle. :class:`~promptpotter.infrastructure.store.CheckinDraftStore`
-persists the lossless dict (:meth:`DraftCampaign.to_disk`) at
-``campaigns/{campaign_id}/checkin/draft.json`` and the sample bank at
-``checkin/cache.json``. The draft's ``draft_id`` IS the owning ``campaign_id``
-(re-keyed at :func:`~promptpotter.application.jobs.launcher.create_checkin_campaign`),
-so a multi-step ingest survives a restart and is resumable like any other
-campaign — there is no in-memory registry. :func:`new_draft` builds the fresh
-draft the first ingest action mints a check-in campaign from.
+Wire shape: ``docs/specs/m12-api-openapi.yaml::DraftCampaign``; prose:
+``docs/specs/roadmap.md § Draft-campaign object``. The ``draft_id`` IS the owning
+``campaign_id``, and ``CheckinDraftStore`` persists the draft under that campaign's
+``checkin/`` dir — so a multi-step ingest survives a restart and resumes like any other
+campaign. There is no in-memory registry; adding one would put the operator's
+half-authored origin somewhere a restart can silently lose it.
 """
 
 from __future__ import annotations
@@ -414,10 +402,7 @@ def merge_pipeline_overlay(draft: DraftCampaign, connector: Connector) -> dict[s
     :meth:`DraftCampaign.to_wire`).
 
     The layering itself is :func:`merge_node_blocks`, shared with the dataset overlay
-    in ``bootstrap/wiring.py``. This used to spell it a second time, merging dict
-    sub-blocks by TYPE where the other merged by NAME — so an operator's partial
-    ``output_schema`` edit shallow-merged here and could emit a schema whose
-    ``required`` named a field its own ``properties`` no longer had."""
+    in ``bootstrap/wiring.py``."""
     return merge_node_blocks(dict(connector.default_node_config), draft.pipeline_overlay or {})
 
 
@@ -530,12 +515,6 @@ def dataset_source_of(source_file: str) -> str | None:
 
 
 def default_slug_from_filename(filename: str) -> str:
-    """Derive a tentative slug from an uploaded filename's stem.
-
-    Lowercased + stripped of extension + run through ``safe_name`` for
-    validation. Trailing/leading separators are folded; an all-bad-chars
-    name (e.g. ``__.csv``) falls back to ``upload``.
-    """
     stem = filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     if "." in stem:
         stem = stem.rsplit(".", 1)[0]

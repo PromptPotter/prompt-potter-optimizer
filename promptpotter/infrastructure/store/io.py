@@ -16,7 +16,6 @@ _SAFE_PATH_RE = re.compile(r"^[a-zA-Z0-9_\-\.]+$")
 
 
 def validate_path_component(name: str) -> str:
-    """Validate that *name* is safe for use as a filesystem path component."""
     # An all-dots component (``.``/``..``/``...``) matches the dot-allowing regex
     # but is a traversal segment — reject it so a user-supplied id/slug/filename
     # can never climb out of the dir the caller rooted it under.
@@ -145,7 +144,6 @@ def write_text(path: Path, content: str) -> None:
 
 
 def read_json(path: Path) -> Any:
-    """Read and parse JSON from *path*."""
     with open(_long_path(path), encoding="utf-8") as f:
         return json.load(f)
 
@@ -182,10 +180,7 @@ def read_text_optional(path: Path, default: str = "") -> str:
 
 
 def append_jsonl(path: Path, item: dict[str, Any]) -> Path:
-    """Append one JSON object as a line to a JSONL file.
-
-    Creates parent directories if needed.  Returns *path*.
-    """
+    """Creates parent directories if needed; returns *path*."""
     ensure_parent_dir(path)
     with open(_long_path(path), "a", encoding="utf-8") as f:
         f.write(json.dumps(item, ensure_ascii=False) + "\n")

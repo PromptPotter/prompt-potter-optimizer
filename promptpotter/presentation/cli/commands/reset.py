@@ -114,7 +114,6 @@ def _render_summary(tenants: list[tuple[Path, list[Path], list[Path], list[Path]
 
 
 def _remove(path: Path) -> None:
-    """Remove *path* — directories recursively, files directly."""
     if path.is_dir() and not path.is_symlink():
         shutil.rmtree(path)
     elif path.exists() or path.is_symlink():

@@ -143,16 +143,9 @@ def is_round_winner(candidate_id: str, winner_id: str) -> bool:
     dashboard round summary (`build_round_summary`) and the terminal readout all call this,
     so the operator-visible winner flag can't diverge between surfaces.
 
-    **It used to compare `changes_description` — LLM-authored prose — against the round's
-    label, and that broke two ways.** The label is `lineage.changes_description or
-    lineage.id[:12]` (`l1/score/winner.py`), and the `or` fallback exists precisely because
-    the description can be EMPTY: when it was, the label became the id, the prose comparison
-    matched nothing, and **no row at all** was flagged winner. `mask/verdicts.py` reads its
-    `recorded_winner` from this flag and reports `diverged = leader_id != recorded_winner`,
-    so every such round was reported as a divergence — on the surface that feeds the UCB
-    rewind. Conversely, two candidates can carry IDENTICAL descriptions (`detect_invariants`
-    dedups on the mutation SIGNATURE, not the prose), and then both were flagged winner and
-    the consumer's `next(...)` could pick the wrong one.
+    Prose is not an identity: `changes_description` can be EMPTY (the label falls back to
+    `lineage.id[:12]`) and IDENTICAL across candidates (`detect_invariants` dedups on the
+    mutation SIGNATURE, not the prose).
 
     The elected id is already on disk in two places — the `ROUND_WINNER` decision record and
     `RoundResult.prompt_fields["lineage"]["id"]`. Ask it; don't re-derive it from prose."""
@@ -363,8 +356,7 @@ class RoundResult(StrictModel):
     ``model_dump()`` IS ``rounds/round_NNNN.json``; ``model_validate()`` reads it back.
     There is no second, hand-mirrored payload dict: a new field here reaches disk, the
     `GET /rounds/{n}` route, and every reader by declaring it, not by being copied into
-    a builder that can forget it (it did — twelve fields were computed, dropped at the
-    disk edge, and silently reconstructed as defaults on resume).
+    a builder that can forget it.
 
     Three field groups: checkpoint-critical scalars (the resume/diff surface), the raw
     payload (per-candidate detail for replay, audit, full rendering), and the fields
@@ -372,17 +364,13 @@ class RoundResult(StrictModel):
     post-scoring; read by dispatch's `diagnostics`/`critique` signals and rendered by
     every health surface.
 
-    **Audited 2026-07-26 for stored-but-derivable fields — the result, so it is not
-    re-derived every time this docstring's god-object line is read.** Three were removed
-    (the `l1_n_*` collapse counters, below); three more ARE derivable and were
-    deliberately KEPT, each for a different reason:
+    Three fields ARE derivable yet deliberately stored, each for a different reason:
 
     * `candidates_scored` == the `candidate_scores` rows that were measured
-      (`candidate_id in all_candidate_results`) and stayed leader-eligible — verified
-      exact at all three construction sites. Kept because converting it is not free the
-      way the counters were: `model_config` here is `extra="ignore"`, so every caller
+      (`candidate_id in all_candidate_results`) and stayed leader-eligible — exact at all
+      three construction sites. `model_config` here is `extra="ignore"`, so every caller
       still passing `candidates_scored=` would keep working **silently** while the value
-      changed underneath. On a lax model, promoting a field to `@computed_field` is a
+      changed underneath: on a lax model, promoting a field to `@computed_field` is a
       quiet semantic change, not a mechanical one. One int does not buy that.
     * `degraded_samples` == `sum(has_pipeline_warnings(r) for r in self.results)`, and
       `shared/` is importable from here, so the derivation is cheap. It is kept because
@@ -502,16 +490,10 @@ class RoundResult(StrictModel):
     def l1_collapsed(self) -> dict[str, int]:
         """Candidates rejected before they could cost a backend call, keyed by reason.
 
-        DERIVED from ``candidate_scores``, never stored — the three scalars this replaced
-        (``l1_n_no_op`` / ``l1_n_duplicate`` / ``l1_n_repeat``) were a second recording of a
-        fact already in this same document: a collapsed candidate is not dropped, it rides
-        ``candidate_scores`` with ``invalid=True`` and its ``validation_failures``, which is
-        where ``invalid_reason`` and the display filter already read it from. Two recordings of
-        one fact can disagree, and nothing checked that they agreed; the counts also cost a
-        field apiece across ~20 sites, so a fourth reason was a twenty-file edit.
-
-        Verified against all 340 historical round files on disk before the scalars were
-        removed: the derived counts reproduced the stored ones exactly, 340/340.
+        DERIVED from ``candidate_scores``, never stored: a collapsed candidate is not
+        dropped, it rides ``candidate_scores`` with ``invalid=True`` and its
+        ``validation_failures``, which is where ``invalid_reason`` and the display filter
+        already read it from.
 
         One reason per candidate — a variant that trips several invariants collapsed once and
         must be counted once, or the parts would sum past the population.
@@ -730,10 +712,9 @@ class WarningDict(TypedDict):
     ``kind`` is **source-stamped by the backend** (TermNorm's ``WarningKind`` enum —
     ``structural`` = config/schema fault the operator must fix, ``transient`` =
     recoverable noise). PromptPotter reads it directly and keeps NO shadow code→kind
-    taxonomy: an absent or unrecognized ``kind`` is SKIPPED, never guessed. That
-    inverts the old failure mode safely — a backend site that forgets to stamp
-    under-counts (and surfaces in the live smoke), instead of silently grading a
-    transient blip as an abort-worthy ``structural`` break."""
+    taxonomy: an absent or unrecognized ``kind`` is SKIPPED, never guessed. A backend
+    site that forgets to stamp under-counts (and surfaces in the live smoke), instead
+    of silently grading a transient blip as an abort-worthy ``structural`` break."""
 
     step: str
     code: str

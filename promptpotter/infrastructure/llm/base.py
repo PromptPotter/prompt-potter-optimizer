@@ -11,8 +11,6 @@ from promptpotter.infrastructure.llm.models import LLMResponse
 
 
 class LLMClientBase(ABC):
-    """Abstract base class for LLM clients."""
-
     @abstractmethod
     async def chat(
         self,

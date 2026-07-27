@@ -35,10 +35,7 @@ def build_backend_client(connector: Connector, base_url: str) -> BackendClient:
     """The ONE ``BackendClient`` construction — every wire fact comes off the connector.
 
     Transport, payload shape, session AND credential are per-backend facts, so they are
-    all read from the one place that declares them. Constructing the client by hand
-    instead let the credential be named at the call site, where four sites each passed
-    TermNorm's bearer token to whatever connector had been resolved — a second
-    ``remote_http`` backend would have received it.
+    all read from the one place that declares them.
     """
     return BackendClient(
         base_url,
@@ -102,7 +99,6 @@ class BackendClient:
         self._http: httpx.AsyncClient | None = None
 
     def _get_http(self) -> httpx.AsyncClient:
-        """Return a shared async httpx client, creating lazily on first use."""
         if self._http is None or self._http.is_closed:
             headers = {"Authorization": f"Bearer {self._auth_token}"} if self._auth_token else None
             self._http = httpx.AsyncClient(timeout=self.timeout, headers=headers)
@@ -130,7 +126,6 @@ class BackendClient:
         return data
 
     async def aclose(self) -> None:
-        """Close the shared HTTP client."""
         if self._http and not self._http.is_closed:
             await self._http.aclose()
             self._http = None

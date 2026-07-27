@@ -1,23 +1,12 @@
 """Origin gate — the round-0 HITL checkpoint.
 
-After the origin is emitted as round 0, ``origin_gate_tripped`` (``termination.py``)
-may decide the verdict is not healthy enough to optimize against. Instead of
-silently entering L1 against a broken floor — the common case while a developer
-brings up a new connector whose ``pipeline.json`` or backend code is still buggy
-— the loop blocks here at ``run_phase: gate`` until the operator decides:
-
-- **rescore** — re-score the origin *force-fresh* (bypassing the measurement
-  cache so a backend-code fix is reflected), re-emit round 0 (re-stamping
-  ``cycle.origin_health``), and re-evaluate the gate in place. The iterate loop:
-  fix the connector, rescore, watch the verdict — no re-mint.
-- **proceed** — override the gate and enter L1 knowingly.
-- **abort** — end the cycle with ``StopReason.ORIGIN_GATE``.
-
-One decision channel, every surface: the decision arrives as
-``.runtime/gate_decision.json`` (written by the ``origin-gate-decision`` command
-applier — webapp modal, notebook, or any remote surface) or, on an attached TTY,
-typed at the CLI prompt. The runner polls that file; a pause (the pause button or
-Ctrl+C, ``.runtime/pause.flag``) always wins and exits the gate resumable.
+When round 0's verdict is too unhealthy to optimize against, the loop blocks here at
+``run_phase: gate`` rather than entering L1 against a broken floor — the usual case while
+a developer brings up a connector whose backend is still buggy. ``rescore`` re-scores
+force-fresh so a code fix is actually reflected, which is what makes fix-rescore-watch an
+iterate loop with no re-mint. One decision channel for every surface,
+``.runtime/gate_decision.json``, polled here; a pause always wins and leaves the gate
+resumable. The wait is unbounded, so it heartbeats — see ``dispatch/llm_call/heartbeat``.
 """
 
 from __future__ import annotations

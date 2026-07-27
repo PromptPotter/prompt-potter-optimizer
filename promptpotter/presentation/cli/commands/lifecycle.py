@@ -9,10 +9,7 @@ cache-hit. The active campaign is refused (switch first). Operator-facing shape:
 ``docs/operations/persistence-and-state.md`` § Beta hosting state.
 
 The three are a thin shell over ``CommandDispatcher.dispatch_lifecycle`` — the
-seam ``POST /commands/{kind}`` uses. They used to call ``CampaignStore`` directly,
-which made the CLI a second writer of campaign lifecycle state: it re-spelled the
-owner gate, and nothing on disk recorded that a campaign had been archived or
-destroyed, or by whom. ``CommandDispatcher`` is the sole writer of
+seam ``POST /commands/{kind}`` uses. ``CommandDispatcher`` is the sole writer of
 ``CommandRecord`` (``docs/architecture.md`` §0) — from the terminal as from the web.
 """
 

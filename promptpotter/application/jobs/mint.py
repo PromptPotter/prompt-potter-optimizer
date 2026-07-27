@@ -76,9 +76,7 @@ def resolve_cycle_plan(
     origin_override: dict[str, Any] | None = None,
     log: Callable[..., None] | None = None,
 ) -> CyclePlan:
-    """Apply the pipeline overlay, resolve the origin OSP, derive its cycle_id.
-
-    ``origin_override`` (campaign-from-origin) is a chosen prior origin's prompt
+    """``origin_override`` (campaign-from-origin) is a chosen prior origin's prompt
     fields — when set it *is* the origin, so the cycle_id derives from it, not the
     dataset's authored origin. No disk mint — ``resume`` calls this (with no
     override) to recompute the expected cycle_id and compare it against

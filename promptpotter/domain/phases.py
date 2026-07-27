@@ -87,9 +87,7 @@ class RunPhase(enum.StrEnum):
     Composes two orthogonal facts — *lifecycle* (is the cycle active or
     finished) and *control + liveness* (is a process driving it, and what is
     the operator's intent) — into one value derived in exactly one place
-    (``derive_run_phase``). Replaces the five independent "is it running?"
-    derivations that disagreed (a paused run read as running by one and not
-    another).
+    (``derive_run_phase``).
 
     - ``CHECKIN`` — the campaign is still authoring its origin (pre-loop); a
       real disk-backed campaign in the ``checkin`` lifecycle, minted on the
@@ -106,14 +104,14 @@ class RunPhase(enum.StrEnum):
       operator decision (rescore / proceed / abort) because the origin
       verdict was not ``healthy``. Reversible (``origin-gate-decision``).
     - ``DETACHED`` — active lifecycle but no live producer (CLI exited or
-      ``kill -9`` left no terminal record). The *only* phase that still uses
-      the freshness heuristic; never written into ``dashboard.json`` (a dead
-      producer can't write) — only emitted by ``derive_run_phase``. Post
-      in-flight-heartbeat this is a *dead* producer, not a quiet-but-alive one
-      (a live cycle heartbeats its ledger → dashboard within ``RUN_FRESH_S``),
-      so the liveness reaper (``application/jobs/reaper.py``) stamps a
-      persistently-detached cycle ``TERMINAL`` (``PRODUCER_VANISHED``); it is
-      not an in-flight unit and drops out of the dock.
+      ``kill -9`` left no terminal record). The *only* phase that uses the
+      freshness heuristic; never written into ``dashboard.json`` (a dead
+      producer can't write) — only emitted by ``derive_run_phase``. This is
+      a *dead* producer, not a quiet-but-alive one (a live cycle heartbeats
+      its ledger → dashboard within ``RUN_FRESH_S``), so the liveness reaper
+      (``application/jobs/reaper.py``) stamps a persistently-detached cycle
+      ``TERMINAL`` (``PRODUCER_VANISHED``); it is not an in-flight unit and
+      drops out of the dock.
     - ``TERMINAL`` — the cycle finished; the reason is the cycle's
       :class:`StopReason` (labelled via the :data:`STOP_REASON_INFO` table).
     """
@@ -162,14 +160,7 @@ class StopReasonInfo(NamedTuple):
     ``has_traceback`` — the stop stashed a formatted traceback to surface.
 
     **No defaults, on purpose.** A new ``StopReason`` must state both facts, and the
-    exhaustiveness raise below is what forces it. This is exactly the fail-open that
-    bit us: ``_finalize_run`` used to re-derive "did this halt mid-round?" as a private
-    ``or``-chain of four reasons, with no exhaustiveness check — so when the budget gate
-    learned to stop INSIDE the per-sample loop (``scoring/query_loop.py``, carrying
-    SPEND_BUDGET / TOKEN_BUDGET), neither reason was in the chain. A budget-halted round
-    that scored 1 of 20 samples was written to ``round_NNNN.json`` with no ``interrupted``
-    marker and no ``index.json::interrupted_round`` — indistinguishable from a full one.
-    Observed live on ``justlogic__b2529a`` before this was folded in.
+    exhaustiveness raise below is what forces it.
     """
 
     label: str

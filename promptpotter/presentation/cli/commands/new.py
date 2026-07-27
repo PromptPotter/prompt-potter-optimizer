@@ -440,7 +440,6 @@ async def _run_loop(
     session: Session,
     train_data: list[Sample],
 ) -> CommandResult:
-    """Drive the optimization loop via the shared CLI driver."""
     from promptpotter.application.runner.entry import RunMode
 
     cycle_result, _ = await drive_cycle(

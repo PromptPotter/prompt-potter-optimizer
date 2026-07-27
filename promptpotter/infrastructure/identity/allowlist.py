@@ -29,8 +29,6 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class AllowlistDecision:
-    """Result of an allowlist check."""
-
     allowed: bool
     reason: str
 
@@ -107,7 +105,6 @@ def _write_emails(path: Path, emails: list[str]) -> None:
 def _append_audit(
     audit_path: Path, *, action: str, email: str, actor: str, before: int, after: int
 ) -> None:
-    """Append one change record to the identity-zone audit log."""
     append_jsonl(
         audit_path,
         {

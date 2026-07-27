@@ -67,8 +67,6 @@ class User(StrictModel):
 
 
 class UserStore:
-    """File-backed user-quota store; one ``user.json`` per tenant directory."""
-
     def __init__(self, base_dir: Path) -> None:
         self._base_dir = base_dir
 
@@ -85,7 +83,6 @@ class UserStore:
         write_json(self._path(), user.model_dump())
 
     def get_or_create(self, *, user_id: str, tenant_id: str, email: str | None = None) -> User:
-        """Return the persisted ``User`` or mint one with defaults."""
         existing = self.load()
         if existing is not None:
             return existing

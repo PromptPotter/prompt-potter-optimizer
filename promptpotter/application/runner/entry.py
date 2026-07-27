@@ -219,8 +219,7 @@ async def _prepare_run(
     task_context: TaskDecomposition | dict[str, Any] | None,
     spend_budget_usd: float | None,
 ) -> _PreparedRun:
-    """Resolve seed overlay + run limits, establish C0, and normalize scoring +
-    task_context — the once-per-launch prep ahead of the rebase loop."""
+    """The once-per-launch prep ahead of the rebase loop."""
     cb = observers.callbacks
 
     # A fresh launch supersedes any prior run-control intent: drop a consumed
@@ -744,9 +743,7 @@ def _finalize_run(
     *,
     sweep: bool = False,
 ) -> str | None:
-    """Mark cycle finished, fold summary into index.json::final, render log.md, drain projections.
-
-    Returns the Langfuse trace id from the terminal ``end_campaign`` emit (``None`` when
+    """Returns the Langfuse trace id from the terminal ``end_campaign`` emit (``None`` when
     no tracing bridge is active) so the caller can stamp it onto the returned ``CycleResult``.
     """
     stop_reason = cycle_result.stop_reason

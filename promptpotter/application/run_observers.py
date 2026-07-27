@@ -344,12 +344,7 @@ def build_run_observers(
     ``origin_accuracy`` is a seed; real value lands on the next ``INIT/exit``
     event.
 
-    This used to auto-mint when it found no session — a second mint path beside
-    ``jobs/mint.py::prepare_fresh_cycle``, and a DIVERGENT one: it skipped the pipeline
-    overlay, ``pipeline_params``, ``active_steps`` and the ``CycleSeed`` seam, so the
-    cycle it produced was subtly not the one the real prologue makes. Every caller
-    pre-mints, so it only ever fired as a silent fallback. An unminted session is now a
-    loud programming error.
+    An unminted session is a loud programming error.
     """
     if session.state.cycle_id is None or session.store is None:
         raise RuntimeError(

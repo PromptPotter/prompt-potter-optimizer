@@ -57,10 +57,7 @@ def resolve_resume_state(
     is re-derived from what is left via the shared ``best_round_by_cumulative_accuracy``
     (the cycle index's ``_apply_best`` rides the same helper) — never trusted from the
     prior scalar, whose rolling max is monotonic and would keep a high-water mark from a
-    round that no longer exists. The cut used to be applied to ``best`` only, while the
-    full ``rounds`` list was handed on intact: a fork's first dashboard therefore showed
-    the parent's post-cut rounds under a ``best`` that excluded them, and the campaign
-    store carried a second, schema-bypassing writer to paper over the resume half of it.
+    round that no longer exists.
     """
     raw = read_json_tolerant(CycleLayout(seed_dir).dashboard)
     if not isinstance(raw, dict):

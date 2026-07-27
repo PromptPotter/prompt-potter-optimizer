@@ -1,32 +1,13 @@
 """MCTS backpropagation + UCB selection over the lineage forest.
 
-The third and final phase of AlphaZero-shaped MCTS over the lineage. The other two
-were already here: *expansion* is a round (L1 proposes, the population is scored),
-and *simulation* is the deterministic forward pass on the eval set — the same swap
-AlphaZero makes when it replaces random rollouts with a learned value. What was
-missing is what this module supplies: **backpropagation** (a round's outcome updates
-its ancestors' statistics) and **selection** (a rule, not a guess, picks which node to
-re-expand when the current subtree is exhausted).
-
-**The tree.** A node is one round on a cycle's spine. A fork physically copies its
-parent's rounds ``0..fork_from_round-1`` forward, so those rounds exist twice on
-disk under two ``cycle_id``s — the *same* logical node. :func:`_canonical_rounds`
-keeps only a cycle's own new rounds (``round >= fork_from_round``) and re-attaches
-its spine to the parent's branch-point, so each logical node is counted exactly once.
-Counting the copies would inflate every ancestor's visit count by its own descendants'
-inherited prefixes — the deeper the lineage, the more the bias compounds.
-
-**The value.** ``cumulative_theta`` (Rasch ability). Averaging accuracy up a lineage is
-not sound: rounds score different sample subsets, so accuracy is subset-relative and a
-deep branch that drifted onto easier samples would out-rank a shallow honest one. θ is
-subset-invariant by construction — it is why the frontier is persisted at all.
-
-**The rule.** UCB1 over an ancestor's children. θ is unbounded (logits), while UCB1's
-exploration term assumes rewards in [0, 1] — so Q is min-max normalized across the
-forest before the bonus is added, which is what keeps ``UCB_EXPLORATION_C`` meaningful
-rather than arbitrary. Rollouts here cost a full round of LLM calls, so exploration is
-deliberately cheap-side: this is closer to AlphaZero's sample-efficient PUCT in spirit
-than to vanilla UCT over free rollouts.
+AlphaZero-shaped: *expansion* is a round, *simulation* is the deterministic forward pass
+on the eval set. Three choices carry this module. Only a cycle's OWN rounds are nodes —
+a fork copies its parent's prefix forward, and counting those copies inflates every
+ancestor's visit count by its descendants' inherited prefixes, compounding with depth.
+The value is θ, not accuracy, because rounds score different sample subsets and a branch
+that drifted onto easier samples would out-rank an honest one. And Q is min-max
+normalized before the UCB1 bonus, because θ is unbounded logits where UCB1 assumes
+[0, 1] — that is what keeps ``UCB_EXPLORATION_C`` meaningful rather than arbitrary.
 """
 
 from __future__ import annotations
