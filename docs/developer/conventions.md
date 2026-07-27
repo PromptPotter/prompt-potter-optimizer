@@ -18,12 +18,21 @@ collects everything else.
   contract, lean on it.
 - **Comments default to none.** Only non-obvious *why*. Never explain *what*
   the code does — the names already do that.
-- **Docstring trimming is out of charter for LOC-shrink work.** Existing
-  module/class/function docstrings explain WHY (invariants, contracts,
-  hidden constraints) and are user-facing value. Real LOC wins come from
-  pattern unification, dead-code removal, inlining single-use helpers,
-  fixing god-objects — never from shrinking explainers. If a docstring is
-  genuinely an essay restating what the code does, ask first.
+- **Docstrings carry a budget: ≤3 lines, stating the one invariant,
+  constraint, or caller obligation the signature cannot.** One that restates
+  the name gets deleted, not shortened. **Past tense is a smell** — "used
+  to", "its predecessor", a date: a docstring describes what the code *is*;
+  how it got that way is git's job (commit message, `CHANGELOG.md`), and
+  architecture facts belong in the layer's CLAUDE.md or `docs/`.
+  `__init__.py` gets a one-line namespace marker plus a pointer, never a
+  package essay. Three named carve-outs are **product surfaces with their
+  own budget**, not documentation: the optimizer response models in
+  `dispatch/schemas.py` (class docstring → JSON-Schema `description` → the
+  LLM prompt; editing one is a prompt change — regenerate via
+  `scripts/build_optimizer_schemas.py`), the `EXPORTED_MODELS` docstring
+  FIRST lines (→ generated TS JSDoc — regenerate via
+  `scripts/build_ts_types.py`), and FastAPI route docstrings (→ the OpenAPI
+  descriptions the docs UI serves).
 - **Pipeline components are nodes** — never "building blocks", never
   "services".
 
