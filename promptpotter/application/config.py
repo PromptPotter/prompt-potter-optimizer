@@ -183,20 +183,6 @@ class EliminationMechanisms(StrictModel):
             "the round's best falls below `pobb_epsilon`. The main loser-elimination rule."
         ),
     )
-    margin_elimination: Annotated[bool, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
-        True,
-        description=(
-            "Arms the paired-margin gate: abort a candidate once it cannot, or probably "
-            "cannot, net `improvement_threshold` more hits than the seed. Two corners, one "
-            "gate — the deterministic one (remaining win opportunities < the net still "
-            "needed) fires under any ε; the probabilistic one fires when P(netting "
-            "`improvement_threshold` more hits) < `pobb_epsilon`, counting wins ONLY on "
-            "samples the seed missed (stratified — a front-loaded block of seed-hit ties "
-            "can't inflate the estimate). Kills ties and regressors early: a candidate that "
-            "can't clear the adoption margin can never be crowned, so confirming it on the "
-            "whole panel is wasted spend. Off = no margin gate, ε-stop only."
-        ),
-    )
     degradation_fatal_fastpath: Annotated[bool, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
         True,
         description=(

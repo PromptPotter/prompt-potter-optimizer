@@ -167,23 +167,18 @@ def _build_cycle_and_bootstrap(
 ) -> tuple[Cycle, str | None, int]:
     """Build origin OSP + Cycle.start + bootstrap storage; raise on missing resolved_origin."""
     from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.application.scoring.formula import compile_round_scorer
 
     if origin.resolved_origin is None:
         raise ValueError("origin.resolved_origin is required; run origin scoring first.")
     # resolved_origin is the resolved origin OptSearchPoint (lineage + memory intact) — use it
     # directly; no re-roundtrip through from_prompt_fields, which would drop the lineage.
     resolved_origin = origin.resolved_origin
-    origin_round_scorer = (
-        compile_round_scorer(scoring_round_formula) if scoring_round_formula else None
-    )
     cycle = Cycle.start(
         resolved_origin,
-        origin.origin_acc,
+        origin.report,
         task_context=task_context,
         schema=session.pipeline_schema,
         origin_results=origin.origin_results,
-        round_scorer=origin_round_scorer,
         session=session,
         config=config,
     )
@@ -226,7 +221,7 @@ def _start_observability_and_scoring(
         session.project_root,
         session.backend_id,
         config_snapshot=config.model_dump(mode="json"),
-        origin_accuracy=origin.origin_acc,
+        origin_accuracy=origin.report.accuracy,
         dataset=dataset,
         tracing_campaign_id=tracing_campaign_id,
         campaign_id=session.campaign_id,

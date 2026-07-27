@@ -270,24 +270,27 @@ class PipelineNode(StrictModel):
 
 
 class NodeConfigParam(StrictModel):
-    """One operator-editable config param of a node — the FULL config surface the
-    operator-steer panel renders, NOT the optimizer-permutation subset
-    (`optimizer_locks`). `kind` drives the input widget (`model`/`enum` → a
-    select, `number`/`bool`/`string` → a typed input); `options` lists the
-    choices for `model` (from `available_models`) and `enum` (from
-    `param_allowed_values`). `optimizer_locked` flags a param the *optimizer* may
-    not permute (model/provider under a strict campaign) — shown for the operator,
-    who may still set it on a steered fork via the seed overlay. `optimizer_tunable`
-    is the inverse permission the lock editor renders: whether the optimizer may
-    currently MOVE this param (it sits in the node's `param_keys`, model gated by
-    the campaign-wide strict flag). A config-only key is not tunable; a node whose
-    every param is non-tunable is optimizer-fixed (origin-locked)."""
+    """One param a node carries — the COMPLETE per-node list, which is what lets
+    `optimizer_tunable` sum to the node's whole search space.
+
+    `kind` names the surface that OWNS the param: `model`/`enum` → a select,
+    `number`/`bool`/`string` → a typed input, `prompt` → the prompt editor's (a
+    `PromptTemplate` decomposition field), `nested` → structured, no scalar widget
+    (`NESTED_PARAM_TYPES`). Only the first five are config-editor rows; the last two
+    are listed but not rendered. They are listed because dropping them made
+    `every(!optimizer_tunable)` answer "optimizer-locked" for a node whose every
+    axis is prose — do not re-filter this list at the source.
+
+    `optimizer_locked` = never an optimizer axis (`PARAM_FORBIDDEN_KEYS`), though a
+    cap-holding operator may still set it on a steered fork. `optimizer_tunable` =
+    the optimizer may currently MOVE it (sits in `param_keys`). A config-only key is
+    neither; a node with no tunable param is optimizer-fixed (origin-locked)."""
 
     model_config = ConfigDict(frozen=True)
 
     key: str
     value: Any = None
-    kind: str  # "model" | "enum" | "number" | "bool" | "string"
+    kind: str  # "model" | "enum" | "number" | "bool" | "string" | "prompt" | "nested"
     options: list[str] = Field(default_factory=list)
     description: str = ""
     optimizer_locked: bool = False
@@ -374,27 +377,24 @@ class PipelineSchema(StrictModel):
         return {"steps": list(self.active_steps)}
 
     def node_config_schema(self) -> dict[str, list[NodeConfigParam]]:
-        """The operator-editable config surface per node — the FULL config the
-        node carries (the UNION of ``param_keys`` and the node's actual
-        ``current_config``) except the prompt-decomposition fields (the prompt
-        editor owns those) and the structured-output schema fields (the
-        ``NodeOutputSchemaView`` tree owns ``output_schema`` / ``schema_family`` /
-        ``schema_version`` — see ``SCHEMA_OWNED_FIELDS``). Config-only keys not advertised as tunable (e.g.
-        ``provider: groq``) bundle in too, so the operator sees the WHOLE node as
-        one unit. Unlike :meth:`optimizer_locks`, model/provider are INCLUDED
-        (the operator isn't the optimizer — the seed overlay outranks the
-        dataset). Widget ``kind`` resolves from ``model`` (→ ``available_models``)
-        → ``param_allowed_values`` (→ enum) → ``param_types`` (number/bool/string;
-        ``param_types`` covers config-only keys too, see ``_infer_param_types``).
-        model/provider are ALWAYS ``optimizer_locked`` (operator-owned axes the
-        optimizer never searches) — a cap-holding operator may still edit them on a
-        fork, which taints the branch babysat (ADR-0005 §4).
+        """Every param each node carries — the UNION of ``param_keys`` and the node's
+        actual ``current_config``, keyed by node.
 
-        A param declared ``object``/``array`` (:data:`NESTED_PARAM_TYPES`) carries no
-        widget and is skipped: the three widget kinds are all scalar, and a nested
-        value in a text box is a corrupt edit waiting to happen. These params are
-        optimizer-only (L4's ``layout`` / ``output_schema_descriptions``); the operator
-        reads them in the searchpoint diff, not here.
+        COMPLETE by contract, so a reader can answer "may the optimizer move anything
+        here?" by summing ``optimizer_tunable``. Each param's ``kind`` names the surface
+        that owns it (see :class:`NodeConfigParam`); the config editor renders the five
+        widget kinds and skips ``prompt``/``nested``, which is where the filtering
+        belongs — a param this method drops is invisible to every caller, and dropping
+        the prose fields is what made pp-self's four meta-prompt nodes — whose entire
+        search space IS prose — report themselves optimizer-locked.
+
+        The lone exclusion is :data:`SCHEMA_OWNED_FIELDS` (``output_schema`` /
+        ``schema_family`` / ``schema_version``): the ``NodeOutputSchemaView`` tree owns
+        those AND the optimizer is locked out of them, so they belong to neither
+        question. Config-only keys (``provider: groq``) bundle in, so the operator sees
+        the WHOLE node as one unit; model/provider are always ``optimizer_locked`` yet
+        still listed — the operator isn't the optimizer, and a cap-holding one may edit
+        them on a fork, which taints the branch babysat (ADR-0005 §4).
 
         When NO node declares ``model`` natively (an install-global-model pipeline —
         pp-self's meta-prompt nodes run the shared optimizer model, own none) the model
@@ -409,12 +409,13 @@ class PipelineSchema(StrictModel):
         out: dict[str, list[NodeConfigParam]] = {}
         for n in self.nodes:
             params: list[NodeConfigParam] = []
-            for key in sorted(
-                (n.param_keys | set(n.current_config)) - _PROMPT_OWNED_FIELDS - SCHEMA_OWNED_FIELDS
-            ):
-                if n.param_types.get(key) in NESTED_PARAM_TYPES:
-                    continue
-                if key == "model":
+            for key in sorted((n.param_keys | set(n.current_config)) - SCHEMA_OWNED_FIELDS):
+                options: list[str] = []
+                if key in _PROMPT_OWNED_FIELDS:
+                    kind = "prompt"
+                elif n.param_types.get(key) in NESTED_PARAM_TYPES:
+                    kind = "nested"
+                elif key == "model":
                     kind, options = "model", list(self.available_models)
                 elif key in n.param_allowed_values:
                     kind, options = "enum", list(n.param_allowed_values[key])
@@ -427,7 +428,6 @@ class PipelineSchema(StrictModel):
                         if t == "boolean"
                         else "string"
                     )
-                    options = []
                 # Tunable = the optimizer may MOVE this param. model/provider are
                 # operator-owned axes the optimizer never searches (always locked);
                 # every other param is tunable iff the node advertises it in

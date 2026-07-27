@@ -70,6 +70,10 @@ async def score_population(
             samples,
             cycle.session,
             label="pobb_backfill",
+            # A backfill catches a PRIOR up on a sample the current candidate reached; it
+            # feeds the paired posterior, not that prior's own report. Its opt_sp-aware
+            # evaluators would describe optimizer state from the round it was scored in.
+            opt_sp=None,
             degradation_checks=None,
             n_total_candidates=0,
             axes=cycle.axes,
@@ -101,15 +105,14 @@ async def score_population(
             int(sid): grade for sid, grade in elim_check.priors_by_sample[seed_id].items()
         }
 
-    # ONE deterministic shared order per round — seed-MISS (win-opportunity)
-    # samples front-loaded, a seed-HIT regression probe every 4th slot — so the
-    # paired-margin gate sees decision evidence immediately instead of a
-    # zero-information tie prefix. Every candidate walks the same order: shared
-    # prefixes keep paired stats comparable and the running display honest.
+    # ONE deterministic shared order per round — seed-MISS samples front-loaded, a
+    # seed-HIT regression probe every 4th slot — so the ε-gate sees discriminating
+    # evidence immediately instead of a zero-information tie prefix. Every candidate
+    # walks the same order: shared prefixes keep paired stats comparable and the
+    # running display honest.
     order = build_round_order(seed_grades, cycle.delta_scale or {}, [int(s.id) for s in dataset])
     samples_by_id = {int(s.id): s for s in dataset}
     dataset = [samples_by_id[sid] for sid in order]
-    dataset_sample_ids = [int(s.id) for s in dataset]
 
     for idx, osp_c in enumerate(population):
         pipeline_params_override = proposals[idx].pipeline_params_override or None
@@ -141,9 +144,6 @@ async def score_population(
             n_priors=len(elim_check.priors_by_sample),
             sample_order=order,
         )
-
-        # Universe for the paired-margin gate's win-opportunity count; unordered.
-        elim_check.set_sample_universe(dataset_sample_ids)
 
         cr_result = await score_one_candidate(
             idx=idx,

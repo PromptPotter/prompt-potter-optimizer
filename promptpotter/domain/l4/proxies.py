@@ -19,6 +19,7 @@ from pydantic import ConfigDict, Field
 from promptpotter.domain.escalation_signals import NurseOwner
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.results import L1_PARSE_FAILURE_TOOLING, CycleResult, RoundResult
+from promptpotter.domain.scoring import is_answer_collapsed
 from promptpotter.domain.strict_model import StrictModel
 
 logger = logging.getLogger(__name__)
@@ -83,8 +84,15 @@ class OuterSampleProxies(StrictModel):
 
     # `after_N_rounds_delta` is a wire key naming the pipeline_data observation the outer
     # scoring formula reads, so its spelling is not ours to normalize.
-    first_round_delta: float = Field(ge=-1.0, le=1.0)
-    after_N_rounds_delta: float = Field(ge=-1.0, le=1.0)  # noqa: N815
+    #
+    # The ±4 rail is a PLAUSIBILITY bound, not a structural one. These were differences of two
+    # probabilities and so bounded in (−1,1) by construction; they are now differences of two
+    # abilities in LOGITS, where ±1 is a value a strongly-regressing inner cycle really can
+    # exceed — and `extra="forbid"` + `Field` would then raise mid-run and kill the outer sample
+    # rather than record the regression. ±4 spans well past the ruler's own reach, so it never
+    # binds on live data while still stopping a runaway fit at the scoring clamp.
+    first_round_delta: float = Field(ge=-4.0, le=4.0)
+    after_N_rounds_delta: float = Field(ge=-4.0, le=4.0)  # noqa: N815
     cleanliness: float = Field(ge=0.0, le=1.0)
     diversity_health: float = Field(ge=0.0, le=1.0)
     rounds_improved_frac: float = Field(ge=0.0, le=1.0)
@@ -157,9 +165,30 @@ def _round_mode_collapse_rate(rnd: RoundResult) -> float:
     return collapsed / generated if generated else 0.0
 
 
+def _answer_collapse_rate(rnd: RoundResult) -> float:
+    """Share of the round's measured candidates that answered ONE label to every sample ∈ [0,1].
+
+    The SEMANTIC half of round dirtiness. Everything else in :func:`_round_problem_rate` counts
+    plumbing — degraded transport, unscoreable results, self-heals — and a candidate that emits
+    perfectly-formed constant garbage trips none of it. Measured live: a round whose BOTH
+    candidates answered ``Uncertain`` to all 8 samples scored ``degraded_rate 0.0``,
+    ``no_result_count 0``, ``structural_count 0`` — a flawless 1.0 cleanliness for a round in
+    which nothing was actually answered.
+
+    Charged to the ROUND rather than the candidate because that is the fact the outer loop needs:
+    the candidates themselves are dropped before the election (``l1/score/winner.py``, where a
+    collapsed arm stops being electable), so without this the meta-prompt that induced the
+    collapse would pay nothing at all for it."""
+    measured = [rows for rows in rnd.all_candidate_results.values() if rows]
+    if not measured:
+        return 0.0
+    return sum(1 for rows in measured if is_answer_collapsed(rows)) / len(measured)
+
+
 def _round_problem_rate(rnd: RoundResult) -> float:
     """Per-round dirtiness ∈ [0,1] for an evidential round: inner samples that degraded or came
-    back unscoreable, the meta-fault self-heal load, or a round the meta-prompt made unparseable.
+    back unscoreable, candidates that collapsed to a constant answer, the meta-fault self-heal
+    load, or a round the meta-prompt made unparseable.
 
     A parse failure is charged to the ROUND, not to a candidate: ``l1_generate`` returns zero
     candidates in exactly that case, so any per-candidate scan is structurally empty and the
@@ -172,6 +201,7 @@ def _round_problem_rate(rnd: RoundResult) -> float:
     if health and health.samples:
         struct = health.degraded_rate + health.no_result_count / health.samples
     struct += _self_heal_rate(rnd)
+    struct += _answer_collapse_rate(rnd)
     return _clamp(struct, 0.0, 1.0)
 
 
@@ -270,17 +300,21 @@ def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
     """The composed outer signal from a finished inner cycle — subset-invariant, bounded raw
     terms the outer scoring formula re-weights (the backend never hides the composite).
 
-    - ``after_N_rounds_delta`` — **the lift core.** Best discovered level minus origin level, on
-      the single-scale θ-LCB trajectory (``origin_level`` / ``round_discovered_levels``, built
-      upstream in ``discovered_level_trajectory``). One estimator, so no delta ever subtracts
-      across scales, and both terms sit in (0,1) — the difference is bounded with no denominator.
-    - ``first_round_delta`` — the same, for round 1 alone: early speed rather than best depth.
+    - ``after_N_rounds_delta`` — **the lift core.** MEAN level over the trajectory minus origin
+      level, in LOGITS on the cycle's locked ruler (``origin_level`` / ``round_discovered_levels``,
+      built upstream in ``discovered_level_trajectory``). One estimator and one interval scale, so
+      no delta subtracts across scales and none is compressed by where its origin sat. Mean, not
+      max: a max over ~16 candidates at θ_se ≈ 0.42 reads a lift where there is none and cannot
+      see a regression at all. Averaging also measures RATE — a fast climber spends more rounds
+      high — which is why no early-speed term is composed beside it.
+    - ``first_round_delta`` — round 1 alone. Two candidates' evidence against a signal several
+      times smaller than one candidate's θ_se, so it is emitted for the record, not composed.
     - ``cleanliness`` / ``diversity_health`` — bounded quality: ``1 − mean`` per-round problem /
       mode-collapse rate. The formula uses them as a modulator that discounts a warning-riddled
       or collapsing campaign without diluting the lift core.
     - ``rounds_improved_frac`` — share of L1 rounds that beat their predecessor.
-    - ``delta_per_dollar`` / ``delta_per_candidate`` — efficiency: best depth over incurred cost /
-      over candidates burned. A verbose meta-prompt pays more for the same lift and scores lower.
+    - ``delta_per_dollar`` / ``delta_per_candidate`` — efficiency: the lift core over incurred
+      cost / over candidates burned. A verbose meta-prompt pays more for the same lift, scores lower.
       Both divisors are cache-invariant; wall-time is not, which is why there is no per-second twin.
 
     Each composed term must carry a candidate gradient; a flat term earns nothing and gets cut.
@@ -306,7 +340,12 @@ def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
     # Both levels are abilities on the fixed ruler, so each is in (0,1) and each delta is in
     # (-1,1) BY CONSTRUCTION — structural, so there is no clamp and nothing to divide by.
     first = levels[0] - origin
-    after_n = max(levels) - origin
+    # MEAN over the trajectory, not max. A max is an order statistic: at an inner θ_se ≈ 0.42
+    # over ~16 candidates it reads a lift above origin even when every candidate sits AT origin,
+    # and it cannot see a regression at all — one good round hides every bad round after it.
+    # The mean is unbiased, and it doubles as the RATE measurement: a meta-prompt that climbs
+    # fast spends more of its rounds at high ability than a slow climber with the same asymptote.
+    after_n = _mean(levels) - origin
 
     # Rounds carrying no evidence are dropped, not scored — an all-tooling cycle already left via
     # `no_evidence_reason`, so `evidential` is non-empty here.

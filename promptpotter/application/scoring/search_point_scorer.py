@@ -278,7 +278,7 @@ async def score_search_point(
     n_total_candidates: int = 1,
     axes: AxisIndex | None = None,
     l1_diversity: float = 1.0,
-    opt_sp: OptSearchPoint | None = None,
+    opt_sp: OptSearchPoint | None,
     on_sample_pre_check: Callable[[Sample], Awaitable[None]] | None = None,
     force_fresh: bool = False,
 ) -> tuple[list[QueryMeasurement], dict[str, Any], EscalationSignal | None]:
@@ -294,15 +294,24 @@ async def score_search_point(
     would leave a franken-run — post-fix rows for the samples it reached, pre-fix rows
     for the rest, under one header, and nothing would error.
 
-    ``opt_sp`` is the candidate's ``OptSearchPoint``; threading it makes the
-    composite the gateway computes (and archives) opt_sp-aware — so the archived
-    composite matches the round-file one for any formula weighting an opt_sp-aware
-    evaluator (e.g. ``prompt_compactness``). ``None`` (origin / PoBB backfill) keeps
-    those evaluators on their vacuous fallback.
+    ``opt_sp`` is the candidate's ``OptSearchPoint``, and it is a **required keyword
+    without a default** for the same reason the callbacks below are: it decides what the
+    numbers MEAN, so every call site must say which it wants. Threading it makes the
+    composite this gateway computes (and archives) opt_sp-aware, matching the round-file
+    one for any formula weighting an opt_sp-aware evaluator (``prompt_compactness`` off the
+    rendered prompt, ``runtime_failure_rate`` off the wounds). ``None`` keeps those on their
+    vacuous fallback, which is right whenever the pass measures something other than one
+    individual's own report — a paired floor, a prior's backfill, a diagnostic replay: there
+    both sides must sit on the same fallback or the delta reads prompt length as behaviour.
+
+    It carried a ``= None`` default until an agent reading ``score_origin`` could not tell
+    that the origin's evaluator namespace was a deliberate choice rather than an oversight —
+    the fact lived in an ABSENT argument, a distant default and a docstring clause, three
+    hops from the call it governs. Five of seven call sites were relying on it silently.
 
     Per-sample callbacks ``on_sample_scored`` and ``on_sample_starting`` are
-    **required keywords without a default** — every call site must declare its
-    visibility choice (wire a callback, or pass ``None`` with documented
+    **required keywords without a default** for the same reason — every call site must
+    declare its visibility choice (wire a callback, or pass ``None`` with documented
     intent). The class of bug being guarded: a backend running
     ``measure_sample`` for tens of seconds while the CLI stays silent,
     burning LLM credits with the operator unable to tell the front-end

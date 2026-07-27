@@ -143,6 +143,10 @@ async def measure_noise_floor(
             scoring_set,
             session,
             label=f"noise_floor_{i}",
+            # ONE fixed config re-scored k times: the spread between runs IS the measurement,
+            # and an opt_sp-aware term is identical across all k, so it can only add a
+            # constant offset to a band that exists to isolate backend noise.
+            opt_sp=None,
             on_sample_scored=lambda *_a, **_k: None,
             on_sample_starting=lambda *_a, **_k: None,
             source=f"noise_floor:{campaign_id}:C0:{i}",

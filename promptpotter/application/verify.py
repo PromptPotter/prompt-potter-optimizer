@@ -199,6 +199,10 @@ async def verify_candidate(
         picked,
         session,
         label="verify",
+        # `verify` replays a RECORDED config against fresh samples; the optimizer state that
+        # produced it is not in scope here, and the workspace side it is compared against
+        # (`compute_composite_fitness` below) has none either.
+        opt_sp=None,
         on_sample_scored=lambda *_a, **_k: None,
         on_sample_starting=lambda *_a, **_k: None,
         source=f"verify:{campaign_id}:{label}",
@@ -225,6 +229,10 @@ async def verify_candidate(
     workspace_scores = compute_composite_fitness(
         workspace_qms,
         schema,
+        # The source campaign's side of this comparison has no opt_sp either (see the
+        # `score_search_point` call above) — a lift read across two different bases is not
+        # a lift.
+        opt_sp=None,
         round_scorer=session.scoring.round_scorer,
     )
 

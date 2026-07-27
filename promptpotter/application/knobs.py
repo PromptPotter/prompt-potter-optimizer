@@ -282,29 +282,16 @@ COUPLINGS: tuple[Coupling, ...] = (
         knobs=(
             "optimization.pobb_epsilon",
             "optimization.mechanisms.elimination.epsilon_elimination",
-            "optimization.mechanisms.elimination.margin_elimination",
         ),
         estimand=Estimand.STOPPING,
-        # `pobb_epsilon` is SHARED by two gates, and this coupling used to name only the
-        # first: the paired-margin fold (`72b410df`) made the margin gate read the same ε
-        # (`pobb/checks.py::check` — `p_clear < self.epsilon`). While it said otherwise,
-        # a campaign with `epsilon_elimination` off and `margin_elimination` on (the
-        # default) was told its tuned ε was inert and that every round ran full budget —
-        # both false, and served straight to the operator's config-map panel. The knob is
-        # inert only when BOTH readers are off.
-        relation=(
-            "pobb_epsilon is shared: the Bayesian best-test (epsilon_elimination) and the "
-            "paired-margin futility test (margin_elimination) both read it."
-        ),
+        relation="pobb_epsilon is read only by the Bayesian best-test (epsilon_elimination).",
         consequence=(
-            "pobb_epsilon was tuned away from its default but BOTH epsilon_elimination "
-            "and margin_elimination are OFF, so nothing reads it — the knob is inert and "
-            "every round runs full budget."
+            "pobb_epsilon was tuned away from its default but epsilon_elimination is OFF, "
+            "so nothing reads it — the knob is inert and every round runs full budget."
         ),
         severity="inert",
         predicate=lambda c: (
             (not _elim(c).epsilon_elimination)
-            and (not _elim(c).margin_elimination)
             and c.optimization.pobb_epsilon != POBB_DEFAULT_EPSILON
         ),
     ),

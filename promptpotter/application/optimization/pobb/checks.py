@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import math
 from collections import Counter
-from collections.abc import Awaitable, Callable, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -13,7 +12,7 @@ from promptpotter.application.optimization.pobb.classification import (
     extract_warning_types,
     is_deprecated,
 )
-from promptpotter.application.scoring.metrics import binom_sf, elimination_p_best
+from promptpotter.application.scoring.metrics import elimination_p_best
 from promptpotter.config.settings import POBB_DEFAULT_EPSILON
 from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
 from promptpotter.domain.rendering import classify_result
@@ -124,18 +123,12 @@ class DegradationCheck:
 
 @dataclass(frozen=True)
 class PoBBSnapshot:
-    """Per-sample PoBB snapshot. ``p_best[current_id] = min(per-prior values)``.
-
-    ``margin`` carries the paired-margin gate's running stats (wins/losses/net/
-    opportunities/p_clear …) so the stream shows a candidate's approach to the
-    kill, not just the θ posterior. ``None`` when the gate's preconditions
-    aren't met (no seed / no universe)."""
+    """Per-sample PoBB snapshot. ``p_best[current_id] = min(per-prior values)``."""
 
     p_best: dict[str, float]
     current_id: str
     n_samples: int
     paired_breakdown: dict[str, dict[str, float]]
-    margin: dict[str, float] | None = None
 
 
 @dataclass(frozen=True)
@@ -146,16 +139,9 @@ class PoBBConfig:
     epsilon: float = POBB_DEFAULT_EPSILON
     lock_in: float = 0.95  # threshold only; leader_lock_in owns on/off
     lock_in_n_min: int = 8
-    # Mechanism toggles (OptimizationConfig.mechanisms.elimination.*). Defaults
-    # preserve today's behavior: ε + margin on, lock-in off.
+    # Mechanism toggles (OptimizationConfig.mechanisms.elimination.*).
     epsilon_elimination: bool = True
     leader_lock_in: bool = False
-    margin_elimination: bool = True
-    # The round's ADOPTION bar delta (OptimizationConfig.improvement_threshold): a
-    # candidate must beat the seed by this to be crowned, so a candidate that
-    # probably won't reach seed+this is futile. 0.0 ⇒ bar == seed (the margin gate
-    # reduces to "probably can't beat the seed").
-    improvement_threshold: float = 0.0
 
 
 class PoBBCheck:
@@ -183,23 +169,18 @@ class PoBBCheck:
         self.lock_in_n_min = config.lock_in_n_min
         self.epsilon_elimination = config.epsilon_elimination
         self.leader_lock_in = config.leader_lock_in
-        self.margin_elimination = config.margin_elimination
-        self.improvement_threshold = config.improvement_threshold
         self.n_samples = n_samples
         # Per-prior per-sample GRADED response (fitness clamped to [0,1], via
         # ``graded_response``) — the θ ε-gate fits on it directly (bit-identical to the
         # old hit vector on binary datasets, discriminating on graded backends where
         # hit is degenerate). The counting gates derive binary as ``grade >= 1.0`` —
         # the same hit definition ``rescore`` applies — so they stay integer-exact, and
-        # abstain once any grade is fractional (``_margin_stats``).
         self.priors_by_sample: dict[str, dict[str, float]] = {}
         self.prior_sps: dict[str, JobSearchPoint] = {}
         self.prior_ids: list[str] = []
         self._current_id: str = ""
         self._on_snapshot: Callable[[PoBBSnapshot], None] | None = None
         self._backfill_fn = backfill_fn
-        # Candidate's sample budget; set per candidate via ``set_sample_universe``.
-        self._sample_universe: frozenset[str] = frozenset()
 
     def set_current(
         self,
@@ -209,19 +190,6 @@ class PoBBCheck:
         """Bind the candidate-under-evaluation; reset per-candidate snapshot state."""
         self._current_id = candidate_id
         self._on_snapshot = on_snapshot
-
-    def set_sample_universe(self, sample_ids: Iterable[int | str] | None) -> None:
-        """Bind the candidate's sample budget (unordered set of ids).
-
-        Called by ``score_population`` once per candidate so the
-        paired-margin check inside ``check()`` knows the candidate's
-        intended budget (``len(_sample_universe)``) and which samples
-        the seed prior must cover for the gate to fire. Passing
-        ``None`` clears the universe — ``_margin_stats`` then
-        short-circuits to ``None`` (no abort), matching the
-        no-explicit-budget unit-test path.
-        """
-        self._sample_universe = frozenset(str(sid) for sid in (sample_ids or []))
 
     def register_completed(
         self,
@@ -310,38 +278,6 @@ class PoBBCheck:
         candidate_sample_ids = [int(r.get("sample_id", 0)) for r in fit_results]
         candidate_grades = [graded_response(r) for r in fit_results]
 
-        # Paired-margin gate: wins/losses vs the SEED on the shared universe.
-        # Order-agnostic (pure function of the outcome multiset + seed map), so
-        # it stays honest under any scoring order — the fix for the easy-prefix
-        # rate inflation that kept the old dominance/equivalence pair silent.
-        attempted_ids = {str(r.get("sample_id")) for r in results if r.get("sample_id") is not None}
-        margin_eval = self._margin_stats(attempted_ids, candidate_samples, candidate_grades)
-        margin_stats = margin_eval[0] if margin_eval is not None else None
-        if self.margin_elimination and margin_eval is not None:
-            stats, seed_hit_ids, seed_miss_ids = margin_eval
-            if stats["need"] > 0 and stats["p_clear"] < self.epsilon:
-                return _eliminate(
-                    self.name,
-                    {
-                        "queries_scored": n,
-                        "total_samples": self.n_samples,
-                        "n_priors": len(self.prior_ids),
-                        "p_best": 0.0,
-                        "epsilon": float(self.epsilon),
-                        "p_best_snapshot": {},
-                        "leader_id": self.prior_ids[0],
-                        "gate": "margin",
-                        "margin": {
-                            **stats,
-                            "seed_hit_ids": seed_hit_ids,
-                            "seed_miss_ids": seed_miss_ids,
-                            "universe_ids": sorted(self._sample_universe),
-                        },
-                    },
-                    candidate_idx,
-                    n_total_candidates,
-                )
-
         # Exclude priors with sample-set gaps rather than substitute — the θ comparison
         # pairs each prior to the candidate on the candidate's exact samples.
         paired_priors: dict[str, list[float]] = {}
@@ -370,7 +306,6 @@ class PoBBCheck:
             current_id=cid,
             n_samples=n,
             paired_breakdown=paired_breakdown,
-            margin=margin_stats,
         )
         if self._on_snapshot is not None:
             self._on_snapshot(snap)
@@ -413,96 +348,6 @@ class PoBBCheck:
             n_total_candidates,
         )
 
-    def _margin_stats(
-        self,
-        attempted_ids: set[str],
-        valid_sample_ids: list[str],
-        valid_grades: list[float],
-    ) -> tuple[dict[str, float], list[str], list[str]] | None:
-        """Running paired-margin stats vs the SEED (``prior_ids[0]`` — origin R1,
-        prior winner R2+) on the shared ``_sample_universe``.
-
-        The adoption question, asked on the pairing itself: a candidate is crowned
-        only if it nets ≥ ``margin`` more hits than the seed, and net movement can
-        only come from discordant pairs — ``wins`` (candidate HIT where the seed
-        missed) minus ``losses`` (candidate MISS where the seed hit). Ties carry
-        nothing, so a front-loaded block of seed-hit ties cannot inflate
-        the futility estimate: ``p_w`` is the Laplace-smoothed win rate on the
-        MEASURED SEED-MISS STRATUM alone, extrapolated over the remaining win
-        opportunities via ``binom_sf``. ``need > opportunities`` ⇒ ``binom_sf``
-        is exactly 0 — the deterministic "cannot clear the bar" corner rides the
-        same formula (no second code path). Losses enter through banked ``net``
-        only (one-sided bound: future losses only hurt, so the gate never kills a
-        candidate the full two-stratum convolution would keep).
-
-        Universe samples the seed hasn't been backfilled on yet are counted as
-        win opportunities (conservative upper bound — converges to exact as the
-        per-sample backfill completes). Attempted-but-errored samples count in
-        neither stratum and forfeit their opportunity, matching how errors score.
-
-        Hits derive from grades as ``grade >= 1.0``, so this is an INTEGER gate and it
-        abstains on a fractional grade. It does not self-weaken there, it self-CONDEMNS:
-        no grade reaches 1.0, so ``wins`` is pinned at 0 and ``p_clear`` falls under ε for
-        every candidate. The θ ε-gate fits the graded response directly and carries the
-        load alone.
-
-        Returns ``(stats, seed_hit_ids, seed_miss_ids)`` or ``None`` when preconditions
-        (a seed, a universe, a binary grade scale) are unmet.
-        """
-        if not self.prior_ids:
-            return None
-        seed_id = self.prior_ids[0]
-        seed_full = self.priors_by_sample.get(seed_id, {})
-        universe = self._sample_universe
-        if not universe:
-            return None
-        if any(0.0 < g < 1.0 for g in (*seed_full.values(), *valid_grades)):
-            return None
-        budget = len(universe)
-        margin = math.ceil(self.improvement_threshold * budget)
-        seed_hit_ids = sorted(sid for sid in universe if sid in seed_full and seed_full[sid] >= 1.0)
-        seed_miss_ids = sorted(sid for sid in universe if sid in seed_full and seed_full[sid] < 1.0)
-        seed_hit_set = set(seed_hit_ids)
-        seed_miss_set = set(seed_miss_ids)
-
-        wins = 0
-        losses = 0
-        measured_miss = 0
-        measured_hit = 0
-        for sid, grade in zip(valid_sample_ids, valid_grades, strict=True):
-            if sid in seed_miss_set:
-                measured_miss += 1
-                if grade >= 1.0:
-                    wins += 1
-            elif sid in seed_hit_set:
-                measured_hit += 1
-                if grade < 1.0:
-                    losses += 1
-        net = wins - losses
-        need = margin - net
-        # Unattempted seed-misses + unattempted unclassified = remaining win chances.
-        opportunities = sum(
-            1 for sid in universe if sid not in attempted_ids and sid not in seed_hit_set
-        )
-        p_w = (wins + 1) / (measured_miss + 2)
-        p_clear = 1.0 if need <= 0 else binom_sf(opportunities, need, p_w)
-        stats: dict[str, float] = {
-            "wins": wins,
-            "losses": losses,
-            "net": net,
-            "margin": margin,
-            "need": need,
-            "opportunities": opportunities,
-            "measured_miss": measured_miss,
-            "measured_hit": measured_hit,
-            "p_w": p_w,
-            "p_clear": p_clear,
-            "budget": budget,
-            "seed_hits": len(seed_hit_ids),
-            "deterministic": float(need > 0 and need > opportunities),
-        }
-        return stats, seed_hit_ids, seed_miss_ids
-
 
 def build_degradation_checks(config: CampaignConfig) -> list[StopRule]:
     """Per-sample checks (degradation). PoBBCheck is built by the runner."""
@@ -530,7 +375,7 @@ def build_elimination_check(
     **Swap point for alternative elimination strategies.** The mid-round
     contract is the ``StopRule`` Protocol (``domain/validators.py``), but
     PoBBCheck also exposes the per-candidate lifecycle the round loop drives
-    (``register_completed``, ``set_current``, ``set_sample_universe``,
+    (``register_completed``, ``set_current``,
     ``backfill_for_sample``, ``snapshot_priors``, ``priors_by_sample``).
     A fundamentally different strategy may not match that lifecycle shape;
     when one ships, this builder branches on config and the round loop gains

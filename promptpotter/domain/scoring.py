@@ -9,9 +9,11 @@ Missing ``scoring`` raises in ``compile_scorer`` — no implicit default.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections import Counter
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, NamedTuple, NotRequired, TypedDict
 
+from promptpotter.config.settings import ANSWER_SPACE_CAP
 from promptpotter.shared.errors import ErrorCategory
 
 
@@ -83,6 +85,43 @@ class ScoringSpec(NamedTuple):
     scorer_id: str
 
 
+def enumerable_truth_labels(rows: Sequence[Mapping[str, Any]]) -> Counter[str] | None:
+    """The ground-truth label tally, or ``None`` where the answer space has no repeated label.
+
+    ``None`` means "collapse is not a meaningful question here": above ``ANSWER_SPACE_CAP``
+    distinct truths the output is free-text, and when every row carries a DISTINCT truth the
+    answers are identity-keyed (an L4 outer round's per-seed inner-result tokens) — in both
+    cases every prediction is its own bucket and a constant answer cannot be detected.
+
+    One definition, three consumers: the ``answer_distribution`` panel that reports the constant
+    floor, and :func:`is_answer_collapsed`'s two gates. Deriving the rule twice is how the panel
+    could call a round collapsed while the scorer called it clean."""
+    truth = Counter(str(v) for r in rows if (v := r.get("ground_truth")) not in (None, ""))
+    if not truth or len(truth) > ANSWER_SPACE_CAP or len(truth) == len(rows):
+        return None
+    return truth
+
+
+def is_answer_collapsed(rows: Sequence[Mapping[str, Any]]) -> bool:
+    """True when a candidate answered the SAME label to every sample while the truth varied.
+
+    This is **not** a low score — it is the ABSENCE of a measurement. A constant answerer's
+    responses carry no information about ability, so fitting θ to them reports an artifact: its
+    accuracy is decided by how much of the label it happens to emit appears in the drawn subset,
+    not by the candidate. Measured live: a candidate answering ``Uncertain`` to all 8 samples of a
+    4-TRUE/4-FALSE subset scored 0.0 and drew θ=-1.87, where the same behaviour scores ~0.27 on
+    the full bank. One such arm dragged its round 0.8 logits below origin.
+
+    Deliberately says nothing about WHY it collapsed, and carries no minimum sample count: the
+    ``len(truth) > 1`` clause self-normalizes, since a single-sample or single-truth round cannot
+    distinguish a constant answer from a correct one."""
+    truth = enumerable_truth_labels(rows)
+    if truth is None or len(truth) < 2:
+        return False
+    said = Counter(str(v) for r in rows if (v := r.get("predicted")) not in (None, ""))
+    return len(said) == 1
+
+
 __all__ = [
     "DEFAULT_SCORER_ID",
     "PipelineData",
@@ -90,4 +129,6 @@ __all__ = [
     "RoundScorer",
     "Scorer",
     "ScoringSpec",
+    "enumerable_truth_labels",
+    "is_answer_collapsed",
 ]

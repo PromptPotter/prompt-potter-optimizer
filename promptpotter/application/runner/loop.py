@@ -29,6 +29,7 @@ from promptpotter.application.runner.round import (
     close_round,
     emit_origin_round,
     escalate_or_stop,
+    persist_round,
     post_round,
 )
 from promptpotter.application.runner.sweep import run_sweep_generation_only
@@ -171,7 +172,15 @@ async def run_round_loop(
                 skip_critique=sweep,
                 is_final_round=is_final_round,
             )
+            # A cold ruler warms inside `absorb_round`, and the warm fit gives round 0 the θ
+            # it could not have had at its own close. Round 0's document was written back
+            # then, so without this the origin's ability lives only in memory: the file and
+            # the ledger keep the cold value, and every non-live reader shows a θ-less C0
+            # beside candidates that have one.
+            ruler_was_cold = not cycle.delta_scale
             cycle.absorb_round(round_result, round_num)
+            if ruler_was_cold and cycle.delta_scale:
+                persist_round(cycle, cycle.origin_round, 0, session)
 
             if cycle.axes and len(cycle.rounds) >= 2:
                 cycle.axes.record_flips_from_rounds(cycle.rounds, round_num)

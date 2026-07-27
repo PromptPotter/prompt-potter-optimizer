@@ -16,7 +16,7 @@ from promptpotter.domain.opt_search_point import (
     OptSearchPoint,
     overlay_is_locked_axis_only,
 )
-from promptpotter.domain.results import RoundParent, candidate_label
+from promptpotter.domain.results import RoundParent, ScoredCandidate, candidate_label
 from promptpotter.domain.run_records import CandidateMintedRecord, CycleSeed
 from promptpotter.domain.sample import Sample
 
@@ -68,18 +68,21 @@ async def rescore_parent(
     spend rides the token ledger; ``degradation_checks=None`` blocks the floor from
     aborting itself.
     """
-    from promptpotter.application.scoring.metrics import compute_composite_fitness
+    from promptpotter.application.optimization.l1.population import build_score_report
     from promptpotter.application.scoring.search_point_scorer import score_search_point
 
     session = cycle.session
-    schema = session.pipeline_schema
     tr = cycle.tracking
     assert tr.current_sp is not None
-    results, _scores, _signal = await score_search_point(
+    results, scores, _signal = await score_search_point(
         tr.current_sp,
         scoring_set,
         session,
         label="round_parent",
+        # The parent is one half of a PAIRED diff; the candidates it is differenced against
+        # are scored with their own. Both sides must sit on the same vacuous fallback or the
+        # delta reads a prompt-length difference as a behaviour difference.
+        opt_sp=None,
         degradation_checks=None,
         n_total_candidates=0,
         axes=cycle.axes,
@@ -88,25 +91,25 @@ async def rescore_parent(
         on_sample_starting=None,
         force_fresh=force_fresh,
     )
-    accuracy = tr.current_accuracy
-    composite_fitness = tr.current_composite_fitness
-    if schema is not None and results:
-        s = compute_composite_fitness(
-            results,
-            schema,
-            round_scorer=session.scoring.round_scorer,
-        )
-        accuracy = s["accuracy"]
-        composite_fitness = s["composite_fitness"]
     return RoundParent(
-        # The parent INDIVIDUAL's label (``C0``, ``C3.1``, …), read off the round it won.
-        # It reaches disk — a held round persists the parent's label as its own — so a
-        # synthesized round name here ("origin", "round_2") names no candidate.
-        label=cycle.rounds[-1].label,
-        accuracy=accuracy,
-        composite_fitness=composite_fitness,
         osp=cycle.opt_sp,
         results=results,
+        # The gateway's OWN answer, not a second computation of it. This used to discard
+        # `scores` and re-run `compute_composite_fitness` over the same rows with the same
+        # scorer — a second code path producing what the single scoring gateway had just
+        # returned, and one that dropped the evaluator namespace on the way (leaving
+        # `RoundParent.evaluators` a declared field with no writer).
+        report=build_score_report(
+            cycle.opt_sp,
+            None,
+            scores,
+            results,
+            scoring_set,
+            # The parent INDIVIDUAL's label (``C0``, ``C3.1``, …), read off the round it won.
+            # It reaches disk — a held round persists the parent's label as its own — so a
+            # synthesized round name here ("origin", "round_2") names no candidate.
+            label=cycle.rounds[-1].label,
+        ),
     )
 
 
@@ -148,10 +151,15 @@ class CampaignOrigin(NamedTuple):
     """The scored origin. ``resolved_origin`` is the origin OptSearchPoint —
     carrying its full lineage/memory, not just prompt strings — so the C0
     individual keeps its ``source`` marker (e.g. ``fork_seed``) downstream.
+
+    ``report`` is C0's measurement in the one shape every individual's measurement takes —
+    the same object deposited on the ledger, so round 0's row and the ledger's cannot be two
+    computations of one thing. A nothing-to-score origin still gets one, carrying the
+    ``total=0`` no-evidence marker the round-0 gate is there to catch.
     """
 
     resolved_origin: OptSearchPoint | None
-    origin_acc: float
+    report: ScoredCandidate
     origin_results: list[Any] | None
 
 
@@ -251,7 +259,13 @@ def try_inherit_fork_origin(
     # its lineage(source=seed.origin_source) — same shape the re-score path produces.
     return CampaignOrigin(
         resolved_origin=resolved_origin,
-        origin_acc=origin_acc,
+        # The inherited C0's measurement IS the branch-point candidate's report, re-identified
+        # onto this fork's own C0. Carrying only the accuracy and re-deriving the rest is what
+        # "faithful copy" cannot mean — composite, evaluators, counts and whisker are the
+        # parent's measurement or they are a new one.
+        report=cand.model_copy(
+            update={"candidate_id": resolved_origin.lineage.id, "label": candidate_label(0, 0)}
+        ),
         origin_results=inherited_results,
     )
 
@@ -384,13 +398,23 @@ async def prepare_scoring_context(
     # that genuinely cannot be scored is caught LOUD by the round-0 origin gate (total=0 →
     # critical → halt-and-decide), never hidden here. The remaining guard is the
     # no-session notebook/test path, which has nothing to score.
+    from promptpotter.application.optimization.l1.population import (
+        INVALID_SCORES,
+        build_score_report,
+    )
+
     if not (campaign_config is not None and svc is not None and dataset):
         # Nothing to score. The resolved origin still travels — the old empty-list branch
         # dropped it and handed back a blank OptSearchPoint(instruction="").
         return (
             CampaignOrigin(
                 resolved_origin=resolved_origin,
-                origin_acc=0.0,
+                # An unmeasured origin reports as unmeasured, in the same shape a measured
+                # one uses: `total=0` is the no-evidence marker every reader already knows,
+                # where a bare 0.0 accuracy is indistinguishable from a real floor of zero.
+                report=build_score_report(
+                    resolved_origin, None, INVALID_SCORES, [], [], label=candidate_label(0, 0)
+                ),
                 origin_results=None,
             ),
             dataset,
@@ -435,9 +459,8 @@ async def prepare_scoring_context(
     if listener is not None:
         emit_phase(listener.on_phase, CampaignPhase.ORIGIN, "enter", round=0)
 
-    # C0 is a minted candidate like any other, and it is the ONE the ledger could never
-    # name: `on_candidate_scored` below passes a raw aggregate, not a `ScoredCandidate`,
-    # so only `emit_origin_round` — at round close — ever wrote "C0" down.
+    # C0 is a minted candidate like any other: named on the ledger before it is measured,
+    # then measured through the same report every candidate deposits below.
     if (ledger := session.state.ledger) is not None:
         ledger.append(
             CandidateMintedRecord(
@@ -466,6 +489,11 @@ async def prepare_scoring_context(
                 scoring_set,
                 session,
                 label="Origin",
+                # C0 is the reference every later delta is taken against, so it sits on the
+                # same vacuous fallback as the matched floor above. Threading the origin's
+                # own OSP here would give the reference an opt_sp-aware composite that no
+                # candidate's matched floor shares.
+                opt_sp=None,
                 force_fresh=attempt > 0,
                 on_sample_starting=(
                     partial(listener.on_sample_started, 0, 1) if listener is not None else None
@@ -479,11 +507,23 @@ async def prepare_scoring_context(
             logger.warning(
                 "Origin scoring hit a transient transport abort — re-scoring once fresh."
             )
-        # Origin is candidate 0 of round 0 — deposit its aggregate score so the live
-        # round buffer (→ round_0000.json node block) carries the same stats every
-        # round's candidates do.
+        # Origin is candidate 0 of round 0, and it is measured ONCE, here, into the same
+        # `ScoredCandidate` report every L1 candidate gets. This object is both what the
+        # ledger receives and what round 0's row is built from, so the two cannot be two
+        # computations of one measurement — `Cycle.start` used to re-derive the composite
+        # and the evaluator namespace from these same rows, beside the gateway that had
+        # just returned them.
+        report = build_score_report(
+            resolved_origin,
+            None,
+            scores,
+            origin_results,
+            scoring_set,
+            label=candidate_label(0, 0),
+            resolved_pipeline_params=sp.config_params,
+        )
         if listener is not None:
-            listener.on_candidate_scored(0, 1, scores)
+            listener.on_candidate_scored(0, 1, report.model_dump())
     finally:
         if listener is not None:
             emit_phase(listener.on_phase, CampaignPhase.ORIGIN, "exit", round=0)
@@ -492,7 +532,7 @@ async def prepare_scoring_context(
     return (
         CampaignOrigin(
             resolved_origin=resolved_origin,
-            origin_acc=scores["accuracy"],
+            report=report,
             origin_results=origin_results,
         ),
         dataset,

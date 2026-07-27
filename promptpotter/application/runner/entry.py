@@ -287,7 +287,7 @@ async def _prepare_run(
             session, dataset, campaign_config, seed=seed, listener=cb
         )
         if observers.display is not None and hasattr(observers.display, "set_origin"):
-            observers.display.set_origin(origin.origin_acc)
+            observers.display.set_origin(origin.report.accuracy)
 
     resolved_task_context = TaskDecomposition.coerce(task_context)
 
@@ -368,7 +368,7 @@ def _build_cycle_result(
         n_l1_rounds=len(cycle_rounds),
         best_accuracy=cycle.tracking.best_accuracy if cycle is not None else 0.0,
         best_round=cycle.tracking.best_round if cycle is not None else 0,
-        origin_accuracy=origin.origin_acc,
+        origin_accuracy=origin.report.accuracy,
         origin_composite_fitness=(
             cycle.origin_round.composite_fitness if cycle is not None else 0.0
         ),
@@ -460,7 +460,7 @@ async def _run_single_cycle(
                 dataset=dataset,
                 display=observers.display,
                 resumed_from_round=session.state.resumed_from_round,
-                origin_accuracy=origin.origin_acc,
+                origin_accuracy=origin.report.accuracy,
                 fork=ForkInfo(parent_cycle_id=pre_loop_cycle_id),
             )
             observers.callbacks._phase_ctx = parent_phase_ctx
@@ -633,7 +633,7 @@ def _mint_and_rebase_fork(
         dataset=dataset,
         display=observers.display,
         resumed_from_round=rebase_req.fork_from_round,
-        origin_accuracy=prep.origin.origin_acc,
+        origin_accuracy=prep.origin.report.accuracy,
         fork=ForkInfo(parent_cycle_id=parent_cycle_id),
     )
     observers.callbacks._phase_ctx = parent_phase_ctx

@@ -16,7 +16,6 @@ from promptpotter.application.optimization.l1.score.loop import (
 from promptpotter.application.optimization.pobb.checks import PoBBConfig
 from promptpotter.application.optimization.resume_and_fork.decisions import (
     ResumeCheckpointKind,
-    ResumeCheckpointRecord,
     record_decision,
 )
 from promptpotter.application.optimization.validators.l1_strict import L1YieldStats
@@ -36,7 +35,7 @@ from promptpotter.domain.results import (
     RoundResult,
     is_leader_eligible,
 )
-from promptpotter.domain.scoring import QueryMeasurement
+from promptpotter.domain.scoring import QueryMeasurement, is_answer_collapsed
 from promptpotter.domain.validators import StopRule
 from promptpotter.shared.statistics import paired_diff_posterior
 
@@ -84,7 +83,12 @@ async def l1_score(
         ind.lineage.id: pp
         for ind, pp in zip(osp_population, effective_pipeline_params, strict=True)
     }
-    decisions: list[ResumeCheckpointRecord] = []
+    # THE cycle's decision sink — the same list every escalation decision uses, which
+    # `persist_round` flushes to the ledger and folds into the round file. A local list here
+    # meant the election reached the round file only: the ledger, the declared sole ingress,
+    # never learned who won, so a served view had to read another projection's output to
+    # find out.
+    decisions = cycle.pending_decisions
     (
         all_candidate_results,
         candidate_scores,
@@ -153,31 +157,39 @@ async def l1_score(
             parent_election_results.extend(cast("list[QueryMeasurement]", extra.results))
     # Full-set parent stats — fallback for `matched_origin` when every candidate ran every sample.
     parent_base = _compute_accuracy(cast("list[QueryMeasurement]", parent.results))
-    # No-winner headline = the RETAINED incumbent's standing (the cumulative frontier the cycle
-    # already tracks), NOT the incumbent re-scored on this round's hard touched subset
-    # (`parent.accuracy`). That subset re-score is the election's matched floor (kept below); leaking
-    # it into the round headline deflates a HELD round — e.g. 20% shown for a prompt truly at 42%,
-    # because the touched subset is the incumbent's own hard failures. `results`/`hits`/`total` source
-    # from the SAME frontier so they stay mutually consistent (the round-health Wilson CI pairs
-    # `hits` with `total`; the health failure rates + the evidence-starved→L2 rate denominate over
-    # `results` — the attempted rows — internally). All nine are overwritten when a
-    # winner is elected, so this only shapes the no-winner round record.
-    tr = cycle.tracking
-    best_acc = tr.current_accuracy
-    best_comp = tr.current_composite_fitness
+    # No-winner headline = the RETAINED incumbent re-scored on THIS round's touched subset
+    # (`rescore_parent`, above) — one configuration, on named samples, actually measured.
+    #
+    # It used to be `tracking.current_*`, the cumulative frontier, on the argument that the
+    # subset re-score deflates a held round (the touched subset is the incumbent's own hard
+    # failures, so ~20% can stand for a prompt whose full-set rate is ~42%). That is a real
+    # effect, but the cure was worse: the frontier is a sample-keyed union of rows measured by
+    # DIFFERENT configurations, so a held round published a number no individual ever scored.
+    # Measured on `justlogic-d234__f3af53` round 6 — candidates at 0.0 and 0.481, nobody
+    # crowned — the record read `accuracy 0.75` over 40 samples and became the cycle's best
+    # round. A deflated real measurement beats a flattering fabricated one, and the round's own
+    # `total` carries the denominator that explains it.
+    #
+    # It also makes the series ONE quantity: a winner round already reports the winner on this
+    # round's subset, so every round now reads "whoever holds the lineage, measured on the
+    # samples this round drew" instead of alternating between two incomparable things.
+    # `results`/`hits`/`total` source from the SAME re-score so they stay mutually consistent
+    # (the round-health Wilson CI pairs `hits` with `total`; the health failure rates + the
+    # evidence-starved→L2 rate denominate over `results` — the attempted rows — internally).
+    # All nine are overwritten when a winner is elected, so this only shapes the no-winner record.
+    best_acc = parent.report.accuracy
+    best_comp = parent.report.composite_fitness
     # The parent reference shown beside the headline must share its sample basis, or a held
     # round renders "accuracy 58% (origin 18%)" — a phantom lift. No winner ⇒ both are the
     # incumbent's standing (lift 0); a winner keeps the touched matched reference (set below).
-    best_origin_accuracy = tr.current_accuracy
+    best_origin_accuracy = parent.report.accuracy
     best_osp: OptSearchPoint = parent.osp
-    best_results: list[QueryMeasurement] = list(
-        cast("list[QueryMeasurement]", tr.current_results or parent.results)
-    )
-    best_label = parent.label
-    best_scores: dict[str, float] = dict(parent.evaluators)
-    best_matched_origin_acc = parent.accuracy
+    best_results: list[QueryMeasurement] = list(cast("list[QueryMeasurement]", parent.results))
+    best_label = parent.report.label
+    best_scores: dict[str, float] = dict(parent.report.evaluators)
+    best_matched_origin_acc = parent.report.accuracy
     best_matched_origin_hits = parent_base["hits"]
-    best_matched_origin_composite = parent.composite_fitness
+    best_matched_origin_composite = parent.report.composite_fitness
     # Elect by confident improvement over MATCHED origin (origin on the candidate's own measured
     # samples), NOT raw accuracy vs origin's full-set rate. Candidates share ONE round order but
     # elimination truncates them at different depths, so each ends up measured on a different
@@ -216,27 +228,34 @@ async def l1_score(
                 "matched_origin_composite": matched["composite_fitness"],
             }
         )
+        # A candidate that answered ONE label to every sample is not a weak candidate — it carries
+        # no measurement of ability at all, and its accuracy is decided by how much of that label
+        # the drawn subset happens to contain. Leaving it electable fits θ to that artifact and
+        # feeds it to the L4 trajectory, where one such arm dragged its round 0.8 logits below
+        # origin. It keeps its matched-origin stamp above (the record stays honest); it just stops
+        # being a thing the election, the ruler, or the outer proxy can read. The round-level fact
+        # — that this meta-prompt made its children stop answering — is charged separately, to
+        # `cleanliness` (`domain/l4/proxies.py::_round_problem_rate`).
+        if is_answer_collapsed(cand_results):
+            continue
         electable.append(ind.lineage.id)
 
-    # Composite-fitness CI — always stamped for any candidate with ≥1 scored sample (broader
-    # than ``electable``: eliminated/under-coverage candidates still get one). No composite
-    # point estimate should stand alone in the round record or the dashboard.
-    osp_by_id = {ind.lineage.id: ind for ind in osp_population}
-    for cs_idx, cs in enumerate(candidate_scores):
-        rows = all_candidate_results.get(cs.candidate_id)
-        if not rows:
-            continue
-        ci_lo, ci_hi = composite_ci(rows)
-        if ci_lo is None:
-            continue
-        update: dict[str, Any] = {"composite_ci_lo": ci_lo, "composite_ci_hi": ci_hi}
-        # Replicated candidate: its pass-1 composite/accuracy predate the extra draws, but the θ
-        # election read every row — recompute the displayed point over ALL rows so it matches the
-        # decision. Guarded on genuine replication (rows > distinct cells), so the n=1 default is
-        # byte-identical; same opt_sp + l1_diversity as the gateway's pass-1 compute.
-        n_cells = len({r.get("sample_id") for r in rows if r.get("sample_id") is not None})
-        osp = osp_by_id.get(cs.candidate_id)
-        if rep_k > 0 and len(rows) > n_cells and osp is not None:
+    # Replicated candidate: its pass-1 composite/accuracy/CI predate the extra draws, but the θ
+    # election read every row — recompute the displayed point, and the whisker around it, over
+    # ALL rows so they match the decision. Guarded on genuine replication (rows > distinct
+    # cells); at the ``rep_k=0`` default nothing here fires and every candidate keeps the CI
+    # its OWN report stamped when it finished scoring (``build_score_report``), which is what
+    # lets a mid-round bar carry a whisker at all.
+    if rep_k > 0:
+        osp_by_id = {ind.lineage.id: ind for ind in osp_population}
+        for cs_idx, cs in enumerate(candidate_scores):
+            rows = all_candidate_results.get(cs.candidate_id)
+            osp = osp_by_id.get(cs.candidate_id)
+            if not rows or osp is None:
+                continue
+            n_cells = len({r.get("sample_id") for r in rows if r.get("sample_id") is not None})
+            if len(rows) <= n_cells:
+                continue
             s = compute_composite_fitness(
                 rows,
                 schema,
@@ -244,11 +263,17 @@ async def l1_score(
                 round_scorer=session.scoring.round_scorer,
                 l1_diversity=yield_stats.l1_yield,
             )
-            update["composite_fitness"] = s["composite_fitness"]
-            update["accuracy"] = s["accuracy"]
-            update["hits"] = s["hits"]
-            update["total"] = s["total"]
-        candidate_scores[cs_idx] = cs.model_copy(update=update)
+            ci_lo, ci_hi = composite_ci(rows)
+            candidate_scores[cs_idx] = cs.model_copy(
+                update={
+                    "composite_fitness": s["composite_fitness"],
+                    "accuracy": s["accuracy"],
+                    "hits": s["hits"],
+                    "total": s["total"],
+                    "composite_ci_lo": ci_lo,
+                    "composite_ci_hi": ci_hi,
+                }
+            )
 
     # ``coverage_floor`` is persisted so the replayer applies the same electability floor — without
     # it a resumed run could elect a thin candidate the live path rejected, manufacturing divergence.
@@ -270,7 +295,7 @@ async def l1_score(
         cs_idx = cs_by_id[cid]
         cs = candidate_scores[cs_idx]
         theta_se_c = abilities.theta_se[cid]
-        theta_update: dict[str, Any] = {"theta": theta_c, "theta_se": theta_se_c}
+        theta_update: dict[str, float] = {"theta": theta_c, "theta_se": theta_se_c}
         # Show the difficulty-adjusted ability band (what the election ranks on) as the whisker
         # only where it brackets the bar's quantity: warm ruler AND composite == accuracy.
         if abs(cs.composite_fitness - cs.accuracy) < 1e-9:
@@ -287,7 +312,7 @@ async def l1_score(
             "coverage_floor": coverage_floor,
         },
         winner_id,
-        data={"current_best_accuracy_at_record": parent.accuracy},
+        data={"current_best_accuracy_at_record": parent.report.accuracy},
         round=round_num,
     )
     if winner_id:
@@ -296,7 +321,7 @@ async def l1_score(
         matched = matched_by_id[winner_id]
         best_acc = winner_cs.accuracy
         best_comp = winner_cs.composite_fitness
-        best_origin_accuracy = parent.accuracy
+        best_origin_accuracy = parent.report.accuracy
         best_osp = winner_ind
         best_results = list(all_candidate_results[winner_id])
         best_label = winner_ind.lineage.changes_description or winner_ind.lineage.id[:12]
@@ -351,8 +376,15 @@ async def l1_score(
         theta_lift = theta_lift_over_origin(abilities, winner_id)
         slope = max(best_matched_origin_acc * (1.0 - best_matched_origin_acc), _GATE_SLOPE_FLOOR)
         delta_ok = theta_lift is not None and theta_lift > improvement_threshold / slope
-    n_min = pobb_config.n_min
-    n_ok = base["total"] >= n_min
+    # There is deliberately NO second sample-count gate here. ``coverage_floor`` (above) is the
+    # ONE under-probing guard, and ``delta_ok`` requires a winner — so by this line the election
+    # has already refused to crown anything below it. A re-check against the UNCLAMPED
+    # ``elimination_n_min`` only ever differed where the floor was clamped (``min(n_min,
+    # len(dataset))``, so "a tiny set stays electable"), and there it contradicted that clamp
+    # outright: on a dataset smaller than ``elimination_n_min`` the election crowned a winner and
+    # this gate then refused to call the round improved — forever, since the samples do not
+    # exist. One number cannot be both a stopping floor and an election floor with two different
+    # clampings; the election owns electability.
     # Anchor the promotion verdict to the FROZEN round-0 origin (C0), not just the current
     # incumbent's matched floor. The incumbent re-anchors to whatever won last round, so each
     # promotion lowers the bar; requiring the winner to also clear C0 stops the lineage from
@@ -376,15 +408,8 @@ async def l1_score(
         # floor against, so c0_ok can't block (delta_ok already gates a real winner).
         c0_ok = True
         c0_desc = ""
-    improved = delta_ok and n_ok and c0_ok
-    improved_reason: str | None = None
-    if delta_ok and not improved:
-        reasons: list[str] = []
-        if not n_ok:
-            reasons.append(f"n={base['total']} < elimination_n_min={n_min}")
-        if not c0_ok:
-            reasons.append(c0_desc)
-        improved_reason = "; ".join(reasons)
+    improved = delta_ok and c0_ok
+    improved_reason: str | None = None if improved or not delta_ok else c0_desc
     round_result = RoundResult(
         round=round_num,
         label=best_label,
@@ -410,7 +435,8 @@ async def l1_score(
         all_candidate_results=dict(all_candidate_results),
         candidates_scored=len(scored),
         candidate_scores=candidate_scores,
-        decisions=[d.to_dict() for d in decisions],
+        # `decisions` is NOT set here: `persist_round` flushes the cycle's sink onto this
+        # round and onto the ledger in one act, so the round file has one writer.
         degraded_samples=count_degraded_samples(best_results),
         deprecated=base["deprecated"],
         escalation_signal=escalation_signal,

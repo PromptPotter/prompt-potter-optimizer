@@ -34,6 +34,7 @@ from promptpotter.shared.errors import graceful
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.optimization.pobb.checks import PoBBSnapshot
     from promptpotter.domain.sample import Sample
     from promptpotter.presentation.views.live.display import LiveDisplay
 
@@ -205,8 +206,14 @@ class RunCallbacks:
     def on_sample_scored(self, ci: int, ct: int, result: dict[str, Any], qi: int, qt: int) -> None:
         self._snapshot("sample_scored", ci, ct, {"result": result}, sample_idx=qi, sample_total=qt)
 
-    def on_p_best_update(self, round_num: int, ci: int, ct: int, snapshot: Any) -> None:
-        """Per-sample PoBB snapshot — archive-only, not divergence-gated."""
+    def on_p_best_update(self, round_num: int, ci: int, ct: int, snapshot: PoBBSnapshot) -> None:
+        """Per-sample PoBB snapshot — archive-only, not divergence-gated.
+
+        ``snapshot`` is TYPED, and that is load-bearing: it was ``Any``, so when
+        ``PoBBSnapshot.margin`` was deleted this body kept reading it and mypy stayed
+        green. Every candidate's first scored sample would have raised ``AttributeError``
+        at runtime — an `Any` on a seam that only destructures is a silent break waiting
+        for the next field removal."""
         self._snapshot(
             "p_best_update",
             ci,
@@ -216,7 +223,6 @@ class RunCallbacks:
                 "n_samples": int(snapshot.n_samples),
                 "p_best": dict(snapshot.p_best),
                 "paired_breakdown": dict(snapshot.paired_breakdown or {}),
-                "margin": dict(snapshot.margin or {}),
             },
             round_num=round_num,
             sample_idx=int(snapshot.n_samples) - 1,

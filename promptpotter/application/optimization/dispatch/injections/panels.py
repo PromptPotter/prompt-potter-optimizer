@@ -33,7 +33,6 @@ from promptpotter.application.optimization.dispatch.bundle import (
     fence_untrusted,
     signal,
 )
-from promptpotter.config.settings import ANSWER_SPACE_CAP
 from promptpotter.domain.escalation_signals import ExplorationBudget
 from promptpotter.domain.opt_search_point import (
     IDEA_MATCH_MARK,
@@ -44,6 +43,7 @@ from promptpotter.domain.opt_search_point import (
 )
 from promptpotter.domain.results import CritiqueReadout, ScoredCandidate
 from promptpotter.domain.results_health import EVIDENCE_STARVED_RATE
+from promptpotter.domain.scoring import enumerable_truth_labels
 from promptpotter.shared.errors import is_error_result
 
 
@@ -491,13 +491,10 @@ def _r_answer_distribution(b: InjectionBundle) -> str:
     on free-text outputs every prediction is its own bucket and the panel renders empty.
     """
     rows = [r for r in b.trajectory_results if r.get("ground_truth") not in (None, "")]
-    if not rows:
-        return ""
-    truth = _label_counts(rows, "ground_truth")
-    # No collapse to detect when the answer space is large (free-text) OR every sample carries a
-    # distinct ground truth (identity-keyed — e.g. an L4 outer round's per-seed inner-result
-    # tokens): a "constant answer would score X" floor is meaningless with no repeated label.
-    if len(truth) > ANSWER_SPACE_CAP or len(truth) == len(rows):
+    # `None` = no repeated label to be constant about (free-text, or identity-keyed answers such
+    # as an L4 outer round's per-seed tokens). Same rule the scorer's collapse gate reads.
+    truth = enumerable_truth_labels(rows)
+    if truth is None:
         return ""
     said = _label_counts(rows, "predicted")
     n = len(rows)
@@ -630,8 +627,7 @@ def _candidate_fate(cand: ScoredCandidate) -> str:
     An eliminated candidate has no ``matched_origin_accuracy`` (it left the election fit), so
     its raw partial accuracy is unpaired and must never be quoted as a comparison — that is
     precisely the reading that told the outer optimizer a cut candidate had crushed the
-    origin. The **margin** cut, though, already carries a paired one: ``wins`` / ``losses``
-    are the discordant pairs against the seed, so it can say WHY without inventing anything.
+    origin. So a stop reports WHERE it stopped and that it stopped, never a standing.
     Not keyed on ``partial_reason``: its documented ``"pobb"`` arm is dead — nothing writes
     it — so every eliminated candidate on disk carries the empty string.
     """
@@ -647,14 +643,8 @@ def _candidate_fate(cand: ScoredCandidate) -> str:
         # reading "0% vs origin 58%" — a catastrophic loss for a mutation nobody ran.
         return "never measured — no samples scored, its 0% is absence of evidence"
     if cand.elimination_stopped:
-        ctx = cand.elimination_context
         cut = f"cut at {cand.scored_samples}/{cand.expected_samples} samples"
-        if ctx.get("gate") == "margin":
-            return (
-                f"{cut} — {ctx.get('wins', 0)} won / {ctx.get('losses', 0)} lost against the "
-                f"seed on the samples they split, and it could no longer net the adoption margin"
-            )
-        return f"{cut} — P(best) fell below ε"
+        return f"{cut} — P(best) fell below ε; measurement stopped, NOT a verdict"
     if cand.escalation_aborted:
         return "aborted mid-run"
     return "scored in full"

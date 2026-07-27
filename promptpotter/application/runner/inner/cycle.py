@@ -260,10 +260,15 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
     assert result.origin_level is not None
     origin = result.origin_level
     levels = result.round_discovered_levels
-    best = max(levels)
+    # Lead with the MEAN — the quantity the outer formula actually scores. Leading with
+    # `max(levels)` showed the generator a headline it was not graded on, so a meta-prompt
+    # that spiked once and collapsed read as this campaign's best. The peak still rides
+    # along, because "mean well below peak" is exactly the collapse worth reading.
+    mean = sum(levels) / len(levels)
     lines = [
-        f"INNER {spec.inner_dataset} seed-{spec.seed}: origin {origin:.3f}"
-        f" -> best-discovered {best:.3f} (D{best - origin:+.3f})"
+        f"INNER {spec.inner_dataset} seed-{spec.seed}: origin {origin:+.2f}"
+        f" -> mean-over-rounds {mean:+.2f} (D{mean - origin:+.3f}, the scored lift)"
+        f", peak {max(levels):+.2f}"
         f" over {result.n_l1_rounds} rounds; stop={result.stop_reason}."
     ]
     by_round = {rnd.round: rnd for rnd in result.rounds}
@@ -625,10 +630,18 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
     heartbeat_task: asyncio.Task[None] | None = None
     if outer_ledger is not None:
         heartbeat_task = asyncio.create_task(
+            # NOT an optimizer node name. What is running here is a whole inner campaign
+            # — many rounds, every optimizer node inside it — so naming it after one of
+            # them charges that node with the entire campaign's wall clock: a healthy
+            # 8-round run read as `l1_critique still waiting · 1444s`, and the obvious
+            # conclusion was that critique had hung (it averages 30s). The
+            # `step_timings`/`step_tokens` keying below is a different question with a
+            # real answer (spend attribution to the ranker node) — do not re-align this
+            # display label to it.
             heartbeat(
                 outer_ledger,
                 call_id=f"inner:{query}",
-                node="l1_critique",
+                node="inner_campaign",
                 round_num=_CURRENT_ROUND.get(),
                 start_monotonic=start,
                 detail_fn=_inner_detail,

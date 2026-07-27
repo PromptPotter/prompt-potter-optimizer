@@ -196,18 +196,9 @@ async def score_one_candidate(
 
     if decisions is not None and effect.elimination_decision is not None:
         inputs_ref, data = effect.elimination_decision
-        # Paired-margin (futility) cuts need their own replayer — a tied candidate
-        # they cut has p_best≈0.5, so the ε-gate replayer wouldn't re-derive it.
-        # The θ ε-gate rides ELIMINATION_CUT (an ε-cut candidate has p_best≈0,
-        # which the ε replayer reproduces).
-        elim_kind = (
-            ResumeCheckpointKind.MARGIN_CUT
-            if inputs_ref.get("gate") == "margin"
-            else ResumeCheckpointKind.ELIMINATION_CUT
-        )
         record_decision(
             decisions,
-            elim_kind,
+            ResumeCheckpointKind.ELIMINATION_CUT,
             inputs_ref,
             True,
             data=data,

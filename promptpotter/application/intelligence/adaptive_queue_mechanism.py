@@ -5,9 +5,10 @@ Rasch acquisition score: the first term is MI between the next outcome and the v
 ``θ_c > θ_s`` (Garivier-Kaufmann 2016 Track-and-Stop in the means-known limit), the
 second restores the parameter-information a verdict-only term omits, so under-measured
 samples stay informative while resolved ones are never re-promoted. ``build_round_order``
-is the WITHIN-round order and front-loads seed-MISS samples because the round's real
-question — can this candidate NET the adoption margin — is only answerable from
-discordance-potential samples; a seed-HIT regression probe rides every 4th slot.
+is the WITHIN-round order and front-loads seed-MISS samples because a DISCORDANT pair
+carries nearly all the information about a candidate's ability RELATIVE to the seed —
+a shared hit or a shared miss moves the paired posterior barely at all; a seed-HIT
+regression probe rides every 4th slot.
 """
 
 from __future__ import annotations
@@ -171,12 +172,11 @@ def build_round_order(
     positions take the next MISS-stratum sample; when either stratum runs dry
     the remainder of the other follows.
 
-    Why k=4: pure miss-first defers all regression evidence past the miss
-    block; proportional interleave spreads the misses so thin the paired-margin
-    gate's deterministic-exhaustion kill lands at the very end. k=4 costs a
-    pure-tie kill a handful of extra samples and buys a regression probe inside
-    the first ``elimination_n_min`` window plus steady loss accrual for
-    regressors.
+    Why k=4: pure miss-first defers all regression evidence past the miss block,
+    so a candidate that is winning its discordant pairs while quietly regressing on
+    the seed's hits looks strong for most of the round. k=4 costs a decisive ε-stop a
+    handful of extra samples and buys a regression probe inside the first
+    ``elimination_n_min`` window plus steady loss accrual for regressors.
 
     Within the MISS-stratum: ascending δ (easiest win opportunities first — a
     live candidate proves itself immediately, and a dead one's misses on the

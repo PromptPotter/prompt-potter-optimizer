@@ -156,9 +156,21 @@ def build_score_report(
     ``label`` is the persisted display identity (``C0`` origin / ``CN.M`` L1).
     ``elimination_context`` (PoBB cut) and ``degradation_context``
     (DegradationCheck abort) are mutually exclusive — renderer branches on which is non-empty.
+
+    The composite CI is stamped HERE, from this candidate's own rows, because that is what
+    it is a fact about — it reads nothing else in the round. Computed at the round-close
+    election instead, it missed the ``candidate_scored`` payload and therefore the ledger,
+    so a finished candidate carried no whisker until its round ended. ``l1_score`` still
+    overrides it with the tighter θ-implied band where the ruler is warm.
     """
+    # Lazy: scoring → optimization circular.
+    from promptpotter.application.scoring.metrics import composite_ci
+
     evaluators = {**(score_summary.get("evaluators") or {}), "l1_diversity": l1_diversity}
+    ci_lo, ci_hi = composite_ci(query_results)
     return ScoredCandidate(
+        composite_ci_lo=ci_lo,
+        composite_ci_hi=ci_hi,
         candidate_id=osp.lineage.id,
         label=label,
         changes_description=osp.lineage.changes_description or "",

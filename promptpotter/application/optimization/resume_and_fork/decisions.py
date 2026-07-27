@@ -41,7 +41,6 @@ class GatingMode(enum.StrEnum):
 RESUME_CHECKPOINT_GATING: dict[ResumeCheckpointKind, GatingMode] = {
     ResumeCheckpointKind.ROUND_WINNER: GatingMode.REPLAYED,
     ResumeCheckpointKind.ELIMINATION_CUT: GatingMode.REPLAYED,
-    ResumeCheckpointKind.MARGIN_CUT: GatingMode.REPLAYED,
     ResumeCheckpointKind.LEADER_LOCK_IN: GatingMode.REPLAYED,
     # A layer trigger is a FOLD over the cycle's escalation history, not a function of
     # one round's measurements — the counter bumps once per escalation *request*, resets

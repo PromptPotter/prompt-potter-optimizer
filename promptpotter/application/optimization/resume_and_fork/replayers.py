@@ -19,7 +19,6 @@ from promptpotter.application.optimization.resume_and_fork.decisions import (
     ResumeCheckpointKind,
 )
 from promptpotter.application.scoring.metrics import (
-    binom_sf,
     elect_round_winner,
     elimination_p_best,
 )
@@ -222,51 +221,6 @@ def _replay_elimination_cut(
     return float(snapshot[candidate_id]) < float(inputs_ref["epsilon"])
 
 
-def _replay_margin_cut(
-    ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
-) -> bool:
-    """Paired-margin futility re-derived from the RECORDED seed strata + the
-    RESCORED candidate hits (stratified binomial vs the adoption margin;
-    deterministic).
-
-    Mirrors ``PoBBCheck._margin_stats``: the seed's hit/miss strata, the universe,
-    margin and budget were fixed at decision time and ride ``inputs_ref.margin``;
-    only the candidate's hits move under a new scorer. Uses the SAME ``binom_sf``
-    the live gate did so the cut re-derives bit-for-bit."""
-    m = inputs_ref.get("margin") or {}
-    margin = int(m.get("margin", 0))
-    epsilon = float(inputs_ref.get("epsilon", 0.0))
-    seed_hit_set = {str(s) for s in (m.get("seed_hit_ids") or [])}
-    seed_miss_set = {str(s) for s in (m.get("seed_miss_ids") or [])}
-    universe_ids = [str(s) for s in (m.get("universe_ids") or [])]
-    candidate_sample_ids = [str(s) for s in (data.get("candidate_sample_ids") or [])]
-    if not universe_ids or not candidate_sample_ids:
-        return False
-    candidate_id = str(inputs_ref.get("candidate_id", ""))
-    all_results = ctx.round_data.all_candidate_results
-    cur_by_sample = {
-        str(r.get("sample_id")): bool(r.get("hit"))
-        for r in (all_results.get(candidate_id) or [])
-        if r.get("sample_id") is not None
-    }
-    if not all(sid in cur_by_sample for sid in candidate_sample_ids):
-        return False
-    attempted = set(candidate_sample_ids)
-    wins = sum(1 for sid in candidate_sample_ids if sid in seed_miss_set and cur_by_sample[sid])
-    losses = sum(
-        1 for sid in candidate_sample_ids if sid in seed_hit_set and not cur_by_sample[sid]
-    )
-    measured_miss = sum(1 for sid in candidate_sample_ids if sid in seed_miss_set)
-    need = margin - (wins - losses)
-    if need <= 0:
-        return False
-    opportunities = sum(
-        1 for sid in universe_ids if sid not in attempted and sid not in seed_hit_set
-    )
-    # Laplace-smoothed stratum win rate — MUST match PoBBCheck._margin_stats exactly.
-    return binom_sf(opportunities, need, (wins + 1) / (measured_miss + 2)) < epsilon
-
-
 def _replay_leader_lock_in(
     ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
 ) -> bool:
@@ -286,7 +240,6 @@ def _replay_leader_lock_in(
 REPLAYERS: dict[ResumeCheckpointKind, Replayer] = {
     ResumeCheckpointKind.ROUND_WINNER: _replay_round_winner,
     ResumeCheckpointKind.ELIMINATION_CUT: _replay_elimination_cut,
-    ResumeCheckpointKind.MARGIN_CUT: _replay_margin_cut,
     ResumeCheckpointKind.LEADER_LOCK_IN: _replay_leader_lock_in,
 }
 

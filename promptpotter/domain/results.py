@@ -46,7 +46,7 @@ __all__ = [
     "ScoredCandidate",
     "SweepBatchResult",
     "WarningDict",
-    "best_round_by_cumulative_accuracy",
+    "best_round_by_measured_accuracy",
     "candidate_label",
     "is_leader_eligible",
     "is_round_winner",
@@ -67,20 +67,6 @@ class EliminationContext(TypedDict, total=False):
     n_priors: int
     leader_locked: bool
     leader_label: str
-    # Set only on a paired-margin (futility) cut: which gate fired (``"margin"``),
-    # the discordant-pair tallies vs the seed (wins = cand hit where seed missed,
-    # losses = cand miss where seed hit), the net still needed to clear the
-    # adoption margin, the win opportunities left, and the probability of clearing.
-    # The renderer branches on ``gate`` so a margin cut reads as "can't net the
-    # margin against the seed", not "p_best < ε".
-    gate: str
-    p_clear: float
-    wins: int
-    losses: int
-    net: int
-    margin: int
-    need: int
-    opportunities_left: int
 
 
 class DegradationContext(TypedDict, total=False):
@@ -115,25 +101,35 @@ def candidate_label(round_num: int, idx: int) -> str:
     return f"C{round_num}.{idx + 1}"
 
 
-def best_round_by_cumulative_accuracy(
+def best_round_by_measured_accuracy(
     rounds: list[dict[str, Any]],
 ) -> tuple[float, int | None]:
-    """Highest full-population ``cumulative_accuracy`` across ``rounds`` → ``(accuracy, round)``.
+    """Highest round ``accuracy`` across ``rounds`` → ``(accuracy, round)``.
     Ties keep the earliest round (``max`` returns the first). Empty ⇒ ``(0.0, None)``.
+
+    Every round's ``accuracy`` is ONE configuration measured on the samples that round drew
+    — the elected winner's, or on a held round the retained incumbent's re-score
+    (``rescore_parent``). So the headline is always a number something actually scored, and
+    the round's ``total`` states what it was scored over.
+
+    This replaced an argmax over ``cumulative_accuracy``, a sample-keyed union of rows
+    measured by DIFFERENT configurations. That published ``57%→78%`` for a cycle whose best
+    candidate ever measured 0.679, and crowned a round whose two candidates scored 0.0 and
+    0.481. See ``cycle.py::_merge_known_outcomes``.
 
     Sole definition of the headline-best derivation — the cycle index (`_apply_best`) and
     the resume/fork trajectory rebuild (`resolve_resume_state`) both call this so
     ``index.json::best_accuracy`` and ``dashboard.json::best`` agree by construction rather
-    than by two hand-copied ``max`` folds. NOT the winner export (that argmaxes cumulative
+    than by two hand-copied ``max`` folds. NOT the winner export (that argmaxes
     ``composite_fitness`` — the optimizer's objective); this is the formula-independent
     accuracy operators recognize. See ``architecture.md`` §0.5."""
-    # `or 0.0` would rank a round that never recorded a cumulative accuracy alongside one that
+    # `or 0.0` would rank a round that never recorded an accuracy alongside one that
     # genuinely scored 0% — and could crown it. A round with no number doesn't back the headline.
-    scored = [r for r in rounds if r.get("cumulative_accuracy") is not None]
-    best = max(scored, key=lambda r: float(r["cumulative_accuracy"]), default=None)
+    scored = [r for r in rounds if r.get("accuracy") is not None]
+    best = max(scored, key=lambda r: float(r["accuracy"]), default=None)
     if best is None:
         return (0.0, None)
-    return (float(best["cumulative_accuracy"]), best.get("round"))
+    return (float(best["accuracy"]), best.get("round"))
 
 
 def is_round_winner(candidate_id: str, winner_id: str) -> bool:
@@ -239,11 +235,21 @@ class ScoredCandidate(StrictModel):
 
 
 def is_leader_eligible(cs: ScoredCandidate) -> bool:
-    """Eligibility for round-leader election. Disqualifies (a) escalation-aborted-without-PoBB
-    (mid-run failure outside measured-comparison), (b) degradation/scoring_error_abort
-    (partial subset accuracy can fake-inflate above origin), and (c) a true PoBB *loss* — the
-    eliminator's own verdict that this candidate is not the round's best. A LEADER_LOCKED stop
-    (the candidate that locked the lead) is the opposite verdict and stays eligible.
+    """Eligibility for round-leader election — a **validity** predicate, never a ranking one.
+
+    Disqualifies exactly the two shapes whose measurement cannot be trusted: (a)
+    escalation-aborted-without-PoBB (mid-run failure outside measured comparison) and (b)
+    degradation/scoring_error_abort (partial subset accuracy can fake-inflate above origin).
+
+    **A stop is not a disqualification.** A PoBB stop — ε, futility, lock-in — is a BUDGET
+    decision: "more samples will not change the answer". It says nothing about whether the
+    candidate is the round's best, and the election is the thing that answers that, on θ over
+    the fixed ruler with ``coverage_floor`` guarding thin arms. Conflating the two cost a real
+    round: a candidate stopped at 19/28 carried a genuine +0.099 θ lift over origin and was the
+    best thing measured, but its stop wrote ``p_best: 0.0`` (a placeholder the gate never
+    computed) and this predicate read that as "PoBB says it lost". Every candidate in the round
+    stopped the same way, so the round crowned nobody — silently, with `improved=False` and no
+    reason recorded.
 
     Lives beside the model it judges, not in the L1 scoring module: it is a pure predicate
     over recorded facts, and every reader of a recorded round needs it — the live election,
@@ -252,13 +258,7 @@ def is_leader_eligible(cs: ScoredCandidate) -> bool:
     """
     if cs.escalation_aborted and not cs.elimination_stopped:
         return False
-    if cs.degradation_context:
-        return False
-    ec = cs.elimination_context
-    # elim_context is populated only for the "elimination" check, carrying the candidate's own
-    # P(best) and epsilon; a loss is p_best < epsilon with the lead NOT locked. Honoring it stops
-    # a PoBB-eliminated candidate (p_best below epsilon on a thin subset) from winning the round.
-    return not (ec and not ec["leader_locked"] and ec["p_best"] < ec["epsilon"])
+    return not cs.degradation_context
 
 
 # ``ScoredCandidate``'s display subset, spelled once. Deliberately narrower than the full
@@ -324,19 +324,22 @@ class CandidateProposal(StrictModel):
 class RoundParent(StrictModel):
     """The individual this round's candidates were mutated from, scored over the samples they
     touched so every paired diff is matched. It is the origin only at round 0; after that it is
-    the prior winner. On probe rounds, scalars reflect the probe subset, not the full set."""
+    the prior winner. On probe rounds it reflects the probe subset, not the full set.
+
+    Its measurement is a `ScoredCandidate` like any other individual's — same shape, same
+    single builder, straight from the scoring gateway. It carried loose `accuracy` /
+    `composite_fitness` / `evaluators` / `label` copies instead, which is what let a
+    re-score drop the evaluator namespace with nothing to notice.
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
 
-    accuracy: float
-    composite_fitness: float
     osp: OptSearchPoint
+    report: ScoredCandidate
     # Per-sample ``QueryMeasurement`` rows plus open-ended stale-data protocol
     # markers (``retry_of_degraded`` etc.) — kept ``dict`` so the markers survive
     # serialization (a closed model would strip them); readers cast at hot sites.
     results: list[dict[str, Any]] = Field(default_factory=list)
-    label: str
-    evaluators: dict[str, float] = Field(default_factory=dict)
 
 
 # The two reasons `RoundResult.l1_parse_failure` can carry. Opposite kinds of evidence,
@@ -426,11 +429,14 @@ class RoundResult(StrictModel):
     matched_origin_accuracy: float = 0.0
     matched_origin_hits: int = 0
     matched_origin_composite: float = 0.0
-    # Per-sample best-so-far accuracy across rounds; dashboard renders "current best" without walking priors.
-    cumulative_accuracy: float = 0.0
-    # θ-peer of `cumulative_accuracy`: ability of the cumulative frontier on the cycle's
-    # fixed δ ruler (subset-invariant). None when the ruler is cold. Feeds the L4 outer
-    # proxy so a drifting per-round subset can't inflate the meta-fitness signal.
+    # Subset-invariant peer of this round's own `accuracy`: ability of the cumulative frontier
+    # on the cycle's fixed δ ruler. None when the ruler is cold. Feeds the L4 outer proxy so a
+    # drifting per-round subset can't inflate the meta-fitness signal.
+    #
+    # There is deliberately no `cumulative_accuracy` beside it. θ is an ability fitted against
+    # an explicit per-sample δ, so pooling rows of mixed provenance is a modelled operation;
+    # a plain mean over the same rows is not — it silently attributes one configuration's
+    # score to another. See `cycle.py::_merge_known_outcomes`.
     cumulative_theta: float | None = None
     # Which IRT model the δ ruler above was fitted under ("1PL" | "2PL"), so the operator
     # reads the model the engine chose. None = the ruler is cold (flat δ) and θ is plain
@@ -778,9 +784,10 @@ class DegradationHealth(StrictModel):
 class RoundSummary(StrictModel):
     """Display row for `dashboard.json::rounds[]` — webapp's completed-round source.
 
-    Top-level `accuracy`/`composite_fitness` mirror the winner's subset score;
-    `cumulative_accuracy`/`cumulative_theta` are the cross-round-comparable frontier
-    the trend/sparkline plot. In-flight round rides `current_round`.
+    Top-level `accuracy`/`composite_fitness` are what the round MEASURED (the winner on
+    its subset, or a held round's incumbent re-score); `cumulative_theta` is the
+    subset-invariant cross-round series the trend/sparkline plot. In-flight round rides
+    `current_round`.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -788,16 +795,16 @@ class RoundSummary(StrictModel):
     round: int
     accuracy: float
     composite_fitness: float
-    # The honest, cross-round-comparable frontier: the incumbent lineage rescored over
-    # EVERY sample probed so far (full growing pool), not this round's hard-first subset.
-    # `accuracy`/`composite_fitness` above are subset-relative — under `per_round_resubset`
-    # they swing round-to-round on a fresh 6–16 sample draw, which reads as a false
-    # "great start → decay". The trend/sparkline plot THIS series so progress is honest;
-    # the per-round subset number stays on `candidates[]` (badged with its sample count).
-    # Mirrors `RoundResult.cumulative_accuracy` / `.cumulative_theta`.
-    cumulative_accuracy: float = 0.0
-    # θ-peer of `cumulative_accuracy` — ability of the cumulative frontier on the cycle's
-    # fixed δ ruler (subset-invariant). None when the ruler is cold (thin inner-budget banks).
+    # The cross-round-comparable series: ability on the cycle's fixed δ ruler, which is
+    # subset-invariant. `accuracy`/`composite_fitness` above are subset-relative — under
+    # `per_round_resubset` they swing round-to-round on a fresh 6–16 sample draw, which reads
+    # as a false "great start → decay". The trend/sparkline plot THIS series so progress is
+    # honest; the per-round measured number stays on `candidates[]` (badged with its count).
+    #
+    # It used to be a `cumulative_accuracy` beside it — a mean over a sample-keyed union of
+    # rows from DIFFERENT configurations, which fixed the swing by fabricating a number no
+    # individual scored. θ solves the same problem legitimately, by modelling per-sample
+    # difficulty instead of averaging across provenance. Mirrors `RoundResult.cumulative_theta`.
     cumulative_theta: float | None = None
     # Mirrors `RoundResult.calibration_model` — the model the webapp's ability popover reads.
     calibration_model: CalibrationModel | None = None

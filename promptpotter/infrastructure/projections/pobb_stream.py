@@ -93,9 +93,6 @@ class PoBBStreamView(DerivedView):
             "p_best": p_best,
             "p_best_delta": deltas,
             "paired_breakdown": paired_breakdown,
-            # Paired-margin gate trajectory (wins/losses/net/opportunities/p_clear)
-            # — lets the operator watch a candidate converge on the kill.
-            "margin": {str(k): float(v) for k, v in (payload.get("margin") or {}).items()},
         }
 
         self._append(record.round, line)

@@ -43,7 +43,6 @@ if TYPE_CHECKING:
 __all__ = [
     "Evaluator",
     "all_evaluators",
-    "binom_sf",
     "compute_composite_fitness",
     "count_degraded_samples",
     "elect_round_winner",
@@ -262,7 +261,7 @@ def compute_composite_fitness(
     results: list[QueryMeasurement],
     pipeline_schema: PipelineSchema,
     *,
-    opt_sp: OptSearchPoint | None = None,
+    opt_sp: OptSearchPoint | None,
     round_scorer: RoundScorer | str | None = None,
     l1_diversity: float = 1.0,
 ) -> dict[str, Any]:
@@ -278,10 +277,13 @@ def compute_composite_fitness(
       ``None``. ``None`` uses the default formula produced by
       ``default_per_round_formula(schema)`` — plain ``accuracy``
       (no latency/recall/self-heal blend; degradation is gated separately).
-    - ``opt_sp`` is an optional ``OptSearchPoint``; when provided, its
-      ``memory.validation_failures`` forces composite_fitness to 0.0 (structurally
-      invalid candidates), and ``memory.runtime_failures`` feeds the
-      ``runtime_failure_rate`` evaluator.
+    - ``opt_sp`` is a **required keyword without a default** — it changes what the
+      composite means, so no caller may take a silent one. Given an ``OptSearchPoint``, its
+      ``memory.validation_failures`` forces composite_fitness to 0.0 (structurally invalid
+      candidates) and ``memory.runtime_failures`` feeds the ``runtime_failure_rate``
+      evaluator; ``None`` puts every opt_sp-aware evaluator on its vacuous fallback, which
+      is what a paired floor or a cross-searchpoint pool needs. Same rule, same reason as
+      the gateway's (``score_search_point``).
     - ``l1_diversity`` is the round-level fraction of valid (non-no-op,
       non-duplicate) L1 variants; defaults to 1.0 for non-L1 calls.
 
@@ -528,23 +530,6 @@ def elect_round_winner(
             best_rank = rank
             winner_id = cid
     return winner_id, abilities
-
-
-def binom_sf(n: int, k: int, p: float) -> float:
-    """``P(X >= k)`` for ``X ~ Binomial(n, p)`` — exact survival, ``n`` small (≤ the
-    per-round sample budget). Shared by the live paired-margin gate
-    (``PoBBCheck._margin_stats``) and its resume replayer so both re-derive the
-    futility cut bit-for-bit (the same live/replay-determinism contract that keeps
-    ``elimination_p_best`` closed-form).
-    """
-    if k <= 0:
-        return 1.0
-    if k > n:
-        return 0.0
-    from math import comb
-
-    q = 1.0 - p
-    return sum(comb(n, j) * p**j * q ** (n - j) for j in range(k, n + 1))
 
 
 def elimination_p_best(

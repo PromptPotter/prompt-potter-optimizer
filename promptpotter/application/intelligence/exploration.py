@@ -167,12 +167,26 @@ def discovered_level_trajectory(
     rounds: Sequence[Sequence[tuple[float | None, float | None]]],
     delta_scale: Ruler | None,
 ) -> tuple[float | None, list[float]]:
-    """Origin level + per-round **cumulative best-discovered** conservative level — the
-    honest, single-scale signal an outer L4 cycle scores inner search quality by.
+    """Origin ability + per-round **mean candidate ability** — the single-scale signal an
+    outer L4 cycle scores inner search quality by. Every level is a θ in LOGITS on the
+    cycle's locked δ ruler, the one estimator that is subset-invariant.
 
-    Every level is an **ability on the cycle's fixed δ ruler**, the one estimator that is
-    subset-invariant. Origin level is ``ruler_expected_accuracy(origin_theta, ·)``; each
-    candidate's is its :func:`candidate_lcb_ability`.
+    **Why logits, and not expected accuracy.** θ and the ruler's δ share one *interval*
+    scale — that is the point of fitting a Rasch model at all: equal Δθ is equal difficulty
+    of gain wherever the origin sits. Projecting each θ back through
+    :func:`ruler_expected_accuracy` *before* differencing throws that property away, because
+    the sigmoid is flat near the ruler's ceiling: the same ability gain then reads smaller for
+    a strong origin than for a weak one, and the outer loop ranks meta-prompts partly by which
+    seed drew an easy origin. So the ruler is still what puts every θ on one scale; it just
+    stops being applied a second time on the way out.
+
+    **Why the mean, and not the best.** A max over the trajectory is an order statistic: at an
+    inner θ_se ≈ 0.42 over ~16 candidates it reads a lift above origin even when every
+    candidate sits *at* origin, and its spread across arms is driven by how lucky the luckiest
+    draw was rather than by the meta-prompt. It also cannot see a regression at all — one good
+    round hides every bad round after it. Averaging is what makes the estimate unbiased, and it
+    doubles as the RATE measurement: a meta-prompt that climbs fast spends more of its rounds at
+    high ability, so it out-scores a slow climber with the same asymptote.
 
     **Why nothing here reads raw accuracy.** Each round scores its candidates on a different
     signal-chased subset, and a Wilson bound over raw accuracy moves with the subset's SIZE as
@@ -186,37 +200,36 @@ def discovered_level_trajectory(
     A candidate with **no fitted θ is skipped**. That is not data-dropping: θ is stamped onto
     exactly the *electable* candidates (``l1/score/winner.py``), so a θ-less arm is one PoBB
     already eliminated or held under the coverage floor — one the loop itself judged to carry no
-    reliable measurement. Runner-ups the election declined to crown keep their θ, so the
-    sub-crowning signal this proxy exists to recover survives. A round whose candidates were all
-    eliminated discovered nothing, and carries the prior level.
+    reliable measurement. A round that measured no candidate at all carries the PRIOR round's
+    ability (the incumbent persists; nothing says it moved), falling back to the origin at round 1.
 
-    ``running`` is the cumulative max of discovered levels — the best the inner search has found
-    *through* round i, noise-discounted. It is **not** floored at the origin: a round that
-    surfaced only worse-than-origin candidates yields a level *below* origin, so the deltas stay
-    negative on a genuinely regressing meta-prompt (the gradient the outer optimizer needs to
-    *avoid* bad mutations).
+    Levels are **not** floored at the origin: a round that surfaced only worse-than-origin
+    candidates lands *below* it, so the deltas stay negative on a genuinely regressing
+    meta-prompt (the gradient the outer optimizer needs to *avoid* bad mutations).
 
-    ``(None, [])`` when the origin has no ability on the ruler — an origin whose rows all errored
-    is a floor nobody measured, and standing its Wilson bound over zero hits (0.0) in its place
-    reported every round as an enormous lift over nothing. The caller excludes the cycle instead
-    (``_no_evidence_reason``)."""
-    origin_level = ruler_expected_accuracy(origin_theta, delta_scale)
-    if origin_level is None:
+    ``delta_scale`` is read only as the WARM-RULER GATE, not by the arithmetic — where the ruler
+    is cold ``fit_theta_given_delta`` places every sample at δ=0, so θ collapses to that round's
+    logit-accuracy and stops being subset-invariant, and differencing across rounds would compare
+    two different scales. ``(None, [])`` there and when the origin was never fit; the caller
+    excludes the cycle (``_no_evidence_reason``)."""
+    if origin_theta is None or not delta_scale:
         return None, []
-    running: float | None = None
+    prev = origin_theta
     out: list[float] = []
     for cands in rounds:
-        round_best: float | None = None
-        for theta, theta_se in cands:
-            lvl = candidate_lcb_ability(theta, theta_se, delta_scale)
-            if lvl is None:
-                continue  # eliminated / under the coverage floor — no comparable evidence
-            round_best = lvl if round_best is None else max(round_best, lvl)
-        if round_best is not None:
-            running = round_best if running is None else max(running, round_best)
-        out.append(running if running is not None else origin_level)
-    return origin_level, out
+        thetas = [t for t, _ in cands if t is not None]
+        if thetas:
+            prev = sum(thetas) / len(thetas)
+        out.append(prev)
+    return origin_theta, out
 
+
+# Floor on the quasi-likelihood dispersion φ (`fit_theta_given_delta`). A response with no
+# residual spread — a constant, a single observation — says nothing about its own dispersion,
+# and an unfloored φ→0 would turn that silence into infinite confidence in θ. 0.05 caps the
+# precision claim at ~4.5x the Bernoulli one, comfortably past the ×4.66 measured on the
+# most underdispersed real backend (the L4 outer composite) so it never binds on live data.
+_MIN_DISPERSION = 0.05
 
 # Broad EB starting priors — first inner MAP fit is barely regularized.
 _INIT_SIGMA_THETA = 1.5
@@ -434,7 +447,25 @@ def fit_theta_given_delta(
     "one ruler, θ always, flat where cold" contract (fitness-comparability slices 2–3):
     an empty ruler ``{}`` ⇒ every θ is plain logit-accuracy. Returns
     ``{candidate_id: (theta, theta_se)}``; only a candidate with *no* observation is omitted.
-    """
+
+    **``theta_se`` carries a quasi-likelihood dispersion correction, and it is load-bearing
+    for every graded backend.** The Bernoulli information ``Σ a²·p(1−p)`` is the variance of a
+    COIN FLIP, but ``Observation.response`` is a graded fitness ∈ [0,1]: a ranked-table answer
+    at position 5 of 20 is neither a hit nor a miss, and the L4 outer proxy is a composite
+    score. A graded response varies far less than a coin flip about the same mean, so assuming
+    Bernoulli variance OVERSTATES the uncertainty — measured at n=28 against the true sampling
+    spread of θ̂: ×1.02 on binary hit/miss, ×1.51 on reciprocal-rank-of-20, **×4.66** on the
+    low-dispersion L4 outer composite. That inflation is what left the outer election unable to
+    crown and PoBB unable to eliminate (p_best pinned at a tie): the loop was discarding ~4.7×
+    the precision it had actually paid for.
+
+    So the SE is scaled by ``√φ``, with ``φ`` the Pearson dispersion ``Σ (y−p)²/(p(1−p)) / (n−1)``
+    (Wedderburn 1974). This is an ESTIMATE off the same residuals, not a knob — φ ≈ 1 on genuinely
+    binary data, so a dichotomous dataset is unchanged; φ < 1 hands a graded backend its real
+    precision back; and φ > 1 on an OVERDISPERSED backend widens the SE instead, so it fails safe
+    in both directions. Floored at ``_MIN_DISPERSION``: a response with no residual variance at
+    all (a constant, or a single observation) carries no evidence about its own dispersion, and
+    an unfloored φ→0 would report infinite confidence from it."""
     by_c: dict[str, list[tuple[float, float, float]]] = {}
     for o in observations:
         d, a = ruler_entry(delta.get(o.sample_id, 0.0))
@@ -457,7 +488,13 @@ def fit_theta_given_delta(
                 break
         p = 1.0 / (1.0 + np.exp(-np.clip(a_arr * (theta - d_arr), -50, 50)))
         info = float(np.sum(a_arr * a_arr * p * (1.0 - p))) + inv_var
-        out[cid] = (theta, float(1.0 / np.sqrt(max(info, 1e-9))))
+        # Quasi-likelihood dispersion off this candidate's own residuals (see docstring):
+        # ≈1 on binary data, <1 on a graded one, >1 on an overdispersed one. `n - 1` because
+        # θ was estimated from these same rows; a single row has no spare df and takes the floor.
+        var = np.clip(p * (1.0 - p), 1e-6, None)
+        dof = max(len(rows) - 1, 1)
+        phi = max(float(np.sum((h_arr - p) ** 2 / var)) / dof, _MIN_DISPERSION)
+        out[cid] = (theta, float(np.sqrt(phi) / np.sqrt(max(info, 1e-9))))
     return out
 
 
