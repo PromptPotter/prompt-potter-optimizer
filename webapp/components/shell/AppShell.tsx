@@ -49,6 +49,11 @@ const CheckinReopenPane = dynamic(
 );
 
 // Sidebar resize bounds. Default matches the CSS base (.shell{--sidebar-width}).
+// How long the "this no longer exists" notice stays up. Long enough to read after
+// glancing back at the tab, short enough that it never becomes furniture — the
+// recovery it describes is already complete, so it owes the operator nothing.
+const GONE_NOTICE_MS = 8000;
+
 const SIDEBAR_DEFAULT = 200;
 const SIDEBAR_MIN = 160;
 const SIDEBAR_MAX = 480;
@@ -86,6 +91,8 @@ function AppShellInner() {
     selectCyclePath,
     leafCycleId,
     viewedCandidateId,
+    goneAddress,
+    dismissGoneNotice,
   } = useWorkspace();
 
   // ── Per-campaign view memory: remember where the operator was, put them back.
@@ -102,6 +109,20 @@ function AppShellInner() {
       viewedCandidateId,
     });
   }, [campaignId, viewedPath, viewedCandidateId, recordView]);
+
+  // FORGET + auto-dismiss. Memory is what made the dead address survive a reload —
+  // the operator refreshed and landed right back on it — so the record that names
+  // it has to go with it. Only the NAVIGATION fields are cleared: for a reaped
+  // `.inner/` leaf the root campaign is still alive, and its toggles and lanes are
+  // still worth keeping. Then the notice retires itself; it reports a recovery that
+  // is already done, so it must not need a click.
+  useEffect(() => {
+    if (!goneAddress) return;
+    const rootCampaign = decodeCyclePath(goneAddress)?.[0]?.campaignId;
+    if (rootCampaign) recordView(rootCampaign, { viewedPath: null, viewedCandidateId: null });
+    const t = window.setTimeout(dismissGoneNotice, GONE_NOTICE_MS);
+    return () => window.clearTimeout(t);
+  }, [goneAddress, recordView, dismissGoneNotice]);
 
   // RESTORE. Clicking a campaign's ROOT row means "open this campaign", and what the
   // operator means by that is where they left it — the inner run they had drilled into,
@@ -265,7 +286,16 @@ function AppShellInner() {
   let bannerStatus = dashState.status;
   let bannerText = dashState.statusText;
   let bannerHint = dashState.statusHint;
-  if (noUnit && netDown) {
+  if (goneAddress) {
+    // Rides the WORKSPACE's verdict, not the poll's, and wins outright. The
+    // recovery already happened — the pin was dropped the moment it was confirmed
+    // dead — so `dashState` has since reset onto a different address and would
+    // otherwise replace this notice within a frame. The announcement has to
+    // outlive the transition it explains, or the view just silently jumps.
+    bannerStatus = "gone";
+    bannerText = "This campaign no longer exists";
+    bannerHint = "It was deleted, or its store was reset — returning to the active run.";
+  } else if (noUnit && netDown) {
     bannerStatus = "offline";
     bannerText = "Server unreachable — retrying";
     bannerHint = activeError ?? cyclesError ?? "";

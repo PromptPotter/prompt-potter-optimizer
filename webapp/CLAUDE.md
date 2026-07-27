@@ -7,12 +7,13 @@ Next.js 16.2.7 + React 19.2.4 + TypeScript, static export at `out/` mounted at t
 What each user-facing control **must do**, per auth/data state, lives in
 [`../docs/specs/frontend-surface-contract.md`](../docs/specs/frontend-surface-contract.md).
 This file owns *implementation* invariants; that one owns *behavior* — read it
-before changing any control's states. Its **six** invariants — `I1_state_complete`,
+before changing any control's states. Its **seven** invariants — `I1_state_complete`,
 `I2_no_raw_transport`, `I3_affordance_honest`, `I4_auth_coherent`,
 `I5_no_anon_noise` (anon fires no auth-gated request — don't fire it, not merely
 "keep the console clean"), `I6_run_state_server_owned` (`run_phase` has ONE
-server-owned answer; `IN_FLIGHT_PHASES` in `lib/run-phase.ts`) — are the bar for
-user-facing PRs. Drive the surface against it with the
+server-owned answer; `IN_FLIGHT_PHASES` in `lib/run-phase.ts`),
+`I7_failure_traceable` (every failure identified, classified and traceable — see
+§ Failure handling below) — are the bar for user-facing PRs. Drive the surface against it with the
 two-harness recipe in § Testing posture below (anon = `:8001`; authed+live =
 `PROMPTPOTTER_AUTH=off`).
 
@@ -98,6 +99,39 @@ If you find yourself adding a "merge in-flight with historical" or "fall back to
 - **`/ray` is the CHRONOLOGY, and it is not a second tree.** `lib/hooks/useTimeRay.ts`, 5 s, ETag. The tree answers *what descends from what* (a fork sits beside its parent); the ray answers *what happened when* (a fork's records interleave with its parent's, which is the only way to see it ran concurrently). Server-side they share one family walk, so they cannot disagree about which cycles a campaign holds. Two windows, one validator: the HEAD is polled; an OLDER window is fetched once and held in memory, and revalidates like any window (`If-None-Match` against the family's mtimes — the server does not claim deep windows immutable).
 - **The ray has no SSE join, and the tail has no `since=`.** Those are two halves of one rule: there is exactly one live channel (`useCycleEvents`) and exactly one history channel (`/ray`). A second `EventSource` on the same URL, or a replay parameter on the tail, would each be a redundant mechanism; the ledger mtime bumps on every append, so the conditional poll surfaces a new event within one tick anyway.
 - **`llm_call_progress` rides the ray on purpose.** The client uses a bare heartbeat to prove the process was alive across a silent stretch and then drops it from the rendered steps (`projectionToActivity` already returns null for one). Stop sending them and every heartbeated 120 s backend query grows a spurious gap marker. The coupling is commented at `format.ts::fmtGap`, `derivations/time-ray.ts` and `store/family_ray_views.py`.
+
+## Failure handling — classify, don't bucket
+
+**A bare `catch` is the bug.** Every read-path failure is classified once at the
+transport seam by `failureKind(err)` (`lib/api/client.ts`) into
+`transient | auth | gone | denied | invalid`, and callers branch on that rather than on a
+status literal. `transient` is the safe default — 5xx, network and parse errors all land
+there — because the failure directions are asymmetric: mistaking transient for `gone`
+destroys the operator's view, mistaking `gone` for transient costs one retry.
+
+**`gone` (404) is terminal and must stop the poll.** The server answered; the address does
+not exist. This is ordinary, not exotic: `delete-campaign` removes the campaign you are
+looking at (root `CLAUDE.md` calls that the ordinary case), the reaper deletes an
+`.inner/` sandbox with no user action at all, and a store reset invalidates every
+bookmark. One owner acts on it — `workspace.tsx::reportAddressGone` unpins and resumes
+following — and **only the address's own authoritative read may report it**: an L4 inner
+hop is absent from `/cycles` and an archived campaign is absent from the `active` filter,
+so list membership would kill two live addresses. **Archived is not gone.**
+
+The detector is the dashboard poll, because it is the one read that speaks for the address:
+its route answers `warming_up` at 200 while a cycle exists without a dashboard, so a 404
+there means the cycle dir itself is gone. It confirms over `GONE_CONFIRM_LIMIT` consecutive
+misses (a single 404 is a mint race) before unpinning. Everyone else reacts locally without
+voting: `lineage-registry::markGone` retires the key from `live()`, `useTimeRay` latches
+`gone` and stops, and `useCycleEvents` — whose `EventSource` **cannot see a status**, so it
+would auto-reconnect a 404 forever — subscribes only while the address is live.
+
+**Every failure is reportable.** `lib/diagnostics.ts` records each one with the `error_id`
+the API stamps on its envelope, bounded and localStorage-backed so it survives the reload
+the bug provokes. Ids, codes and paths only — **never** measurements or prompt text, the
+same rule `view-memory.tsx` states. Account → *Copy diagnostics* emits it as markdown for a
+bug report; each `error_id` greps the server log. Shipping that anywhere is a deployment
+concern (ADR-0004), never the app's.
 
 ## State reset on prop change
 

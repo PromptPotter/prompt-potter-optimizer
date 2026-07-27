@@ -37,6 +37,10 @@
   color:var(--color-danger);box-shadow:inset 4px 0 0 var(--color-danger);animation:critical-pulse 1.4s ease-in-out infinite}
 .critical-alert.warn{background:var(--color-warn-bg);border-bottom-color:var(--color-warn-border);
   color:var(--color-warn);box-shadow:inset 4px 0 0 var(--color-warn)}
+/* `info` — nothing is wrong; the app recovered and is saying why. Deliberately
+   neutral chrome + the accent rule: no danger/warn palette, no pulse. */
+.critical-alert.info{background:var(--color-background-secondary);border-bottom-color:var(--color-border);
+  color:var(--color-text-primary);box-shadow:inset 4px 0 0 var(--color-accent)}
 .critical-alert-icon{font-size:15px;line-height:1;flex-shrink:0}
 .critical-alert-body{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-width:0;flex:1}
 .critical-alert-title{font-weight:700;letter-spacing:.01em;color:currentColor}

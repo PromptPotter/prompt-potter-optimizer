@@ -2356,7 +2356,7 @@ components:
 
     ErrorEnvelope:
       type: object
-      required: [error, message]
+      required: [error, message, error_id]
       additionalProperties: false
       properties:
         error:
@@ -2407,6 +2407,17 @@ components:
         message:
           type: string
           description: Human-readable explanation; never load-bearing for clients.
+        error_id:
+          type: string
+          description: |
+            Short hex handle stamped on EVERY error response and written to the
+            same server log line (`api error [<id>] <method> <path> -> <status>
+            <code>`; a 500 logs its traceback under the same handle). It is the
+            one thing that ties an opaque client-side failure to its server-side
+            cause, so a bug report quotes it instead of a wall-clock guess — the
+            webapp surfaces it through Account → Copy diagnostics. Minted at the
+            single `main.py::_error_response` seam; never reused, never
+            client-supplied.
         details:
           type: object
           additionalProperties: true
@@ -2455,10 +2466,8 @@ components:
               nothing wrong and cannot fix it; the remedy is
               `scripts/restamp_campaign_configs.py`, which `deploy-linux/update.sh`
               runs on every deploy.
-            * `internal_error` (500, the catch-all) — `error_id`, a short hex
-              handle also logged with the traceback. The one thing that ties the
-              opaque client-side string to the server-side cause; quote it when
-              reporting a 500.
+            (`internal_error` carries no `details`: its trace handle is the
+            top-level `error_id`, which every error now has.)
 
     # ---- Read-surface shapes (the forest's cycle list, at any depth) ----
     # Mirrors promptpotter/presentation/api/routers/active.py::CycleListEntry

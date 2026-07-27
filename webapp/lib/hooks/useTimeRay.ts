@@ -8,7 +8,8 @@
 // (webapp/CLAUDE.md § "/ray is the CHRONOLOGY").
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import { fetchTimeRay } from "@/lib/api";
+import { failureKind, fetchTimeRay } from "@/lib/api";
+import { reportIncident } from "@/lib/diagnostics";
 import { useAuthGate } from "@/lib/auth-context";
 import { usePoll } from "@/lib/hooks/usePoll";
 import { useRevalidation } from "@/lib/revalidate";
@@ -30,6 +31,9 @@ interface RayState {
   cursor: string | null;
   loaded: boolean;
   failed: boolean;
+  // The server said 404 for this course — terminal, so the poll stops. Scoped to
+  // `key` like everything else here, so a switch clears it for free.
+  gone: boolean;
 }
 
 const EMPTY: Omit<RayState, "key"> = {
@@ -38,6 +42,7 @@ const EMPTY: Omit<RayState, "key"> = {
   cursor: null,
   loaded: false,
   failed: false,
+  gone: false,
 };
 
 export interface TimeRayState {
@@ -109,13 +114,25 @@ export function useTimeRay(path: CyclePath | null, enabled: boolean): TimeRaySta
             cursor: prev.older.length > 0 ? prev.cursor : res.data.cursor_prev,
             loaded: true,
             failed: false,
+            gone: false,
           };
         });
       } catch (e) {
         if (signal.aborted) return;
         onAuthError(e);
+        reportIncident(e, { surface: "ray", address: key });
         setState((prev) =>
-          prev.key !== key ? prev : { ...prev, loaded: true, failed: true },
+          prev.key !== key
+            ? prev
+            : {
+                ...prev,
+                loaded: true,
+                failed: true,
+                // 404 — this course's chronology does not exist. Latch it so the poll
+                // stops asking; the render-phase key guard clears it on any switch, so
+                // the latch can never outlive the address that earned it.
+                gone: failureKind(e) === "gone",
+              },
         );
       }
     },
@@ -124,7 +141,9 @@ export function useTimeRay(path: CyclePath | null, enabled: boolean): TimeRaySta
 
   usePoll(tick, {
     intervalMs: POLL_MS,
-    enabled: enabled && authed && !!path,
+    // A dead address is not polled. Nothing to reconnect to, and the operator's view
+    // is being moved off it by the dashboard's own verdict (lib/workspace.tsx).
+    enabled: enabled && authed && !!path && !state.gone,
     tickOnFocus: true,
     revalidateOn: useRevalidation() + seq,
   });

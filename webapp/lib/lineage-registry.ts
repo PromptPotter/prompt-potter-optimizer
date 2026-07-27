@@ -26,11 +26,21 @@ export interface Registry {
   has: (key: string) => boolean;
   etag: (key: string) => string | null;
   setEtag: (key: string, value: string | null) => void;
+  /**
+   * The server answered 404 for this key — the address does not exist. Retiring it
+   * from {@link Registry.live} is the whole point: a subscriber can stay mounted
+   * (the sidebar row is still on screen) while the thing it names is gone, and
+   * without this the tick re-asks every interval, forever. Sticky per key, because
+   * a deleted campaign does not come back — a re-mint gets a new id, hence a new key.
+   */
+  markGone: (key: string) => void;
+  isGone: (key: string) => boolean;
 }
 
 export function createRegistry(onDrop: (key: string) => void): Registry {
   const counts = new Map<string, { count: number; path: CyclePath; opts: TreeFetchOpts }>();
   const etags = new Map<string, string>();
+  const gone = new Set<string>();
   const listeners = new Set<() => void>();
   let version = 0;
   const bump = (): void => {
@@ -48,6 +58,10 @@ export function createRegistry(onDrop: (key: string) => void): Registry {
         if (entry.count <= 1) {
           counts.delete(key);
           etags.delete(key);
+          // The gone mark dies with the last subscriber, like the body and the
+          // validator: it describes a fetch nobody is asking for any more, and
+          // leaking it would make a re-subscribe silently unfetchable.
+          gone.delete(key);
           onDrop(key);
         } else {
           counts.set(key, { ...entry, count: entry.count - 1 });
@@ -60,12 +74,24 @@ export function createRegistry(onDrop: (key: string) => void): Registry {
       return () => listeners.delete(listener);
     },
     version: () => version,
-    live: () => [...counts].map(([k, v]) => [k, { path: v.path, opts: v.opts }]),
+    live: () =>
+      [...counts]
+        .filter(([k]) => !gone.has(k))
+        .map(([k, v]) => [k, { path: v.path, opts: v.opts }]),
     has: (key) => counts.has(key),
     etag: (key) => etags.get(key) ?? null,
     setEtag: (key, value) => {
       if (value) etags.set(key, value);
       else etags.delete(key);
     },
+    markGone: (key) => {
+      if (!counts.has(key) || gone.has(key)) return;
+      gone.add(key);
+      // The validator goes with it — a body we will never fetch again must not
+      // leave an ETag behind to 304 against.
+      etags.delete(key);
+      bump();
+    },
+    isGone: (key) => gone.has(key),
   };
 }

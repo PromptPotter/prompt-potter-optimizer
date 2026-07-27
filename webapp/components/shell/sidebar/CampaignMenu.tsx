@@ -7,6 +7,7 @@ import {
   type CampaignSummary,
 } from "@/lib/api";
 import { bumpRevalidation } from "@/lib/revalidate";
+import { useWorkspace } from "@/lib/workspace";
 import { Modal, type ModalAction } from "@/components/shell/Modal";
 import { Popover } from "@/components/ui";
 
@@ -25,6 +26,9 @@ export function CampaignMenu({ campaign }: Props) {
   const [pending, setPending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // The ROOT hop's campaign — a drilled-in inner leaf still belongs to the campaign
+  // being deleted, so this is the id that decides whether the view is affected.
+  const { campaignId: viewedCampaignId, followActive } = useWorkspace();
 
   const runArchive = useCallback(async () => {
     setPending(true);
@@ -58,13 +62,18 @@ export function CampaignMenu({ campaign }: Props) {
     setErr(null);
     try {
       await postDeleteCampaign(campaign.campaign_id);
+      // Deleting what you are looking at is the ordinary case (root CLAUDE.md), so
+      // the view must let go of it HERE rather than wait to discover it by 404. The
+      // reconciliation in `workspace.tsx` is the safety net for every other way an
+      // address dies; this is the one we authored and can act on immediately.
+      if (viewedCampaignId === campaign.campaign_id) followActive();
       bumpRevalidation();
     } catch (e) {
       setErr((e as Error).message);
     } finally {
       setPending(false);
     }
-  }, [campaign.campaign_id]);
+  }, [campaign.campaign_id, viewedCampaignId, followActive]);
 
   const archived = campaign.lifecycle_status === "archived";
   const deleteActions: ModalAction[] = [

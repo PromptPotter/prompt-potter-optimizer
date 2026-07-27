@@ -15,24 +15,27 @@ import { useState } from "react";
 import { BRAND, softwareApplicationLd } from "@/lib/brand";
 import { fetchHealth } from "@/lib/api";
 import { useFetch } from "@/lib/hooks/useFetch";
+import { formatDiagnostics, useIncidents } from "@/lib/diagnostics";
 
 export function AboutUnit() {
   const [showHow, setShowHow] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"ld" | "diag" | null>(null);
 
   // Health unreachable → version stays null (we render blank, never invent one).
   const { data: health } = useFetch(() => fetchHealth(), []);
   const version = health?.version ?? null;
+  const incidents = useIncidents();
 
   const verified = BRAND.verification === "verified";
   const raw = JSON.stringify(softwareApplicationLd(), null, 2);
 
-  const copy = async () => {
+  const copy = async (what: "ld" | "diag") => {
+    const text = what === "ld" ? raw : formatDiagnostics({ version });
     try {
-      await navigator.clipboard.writeText(raw);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
+      await navigator.clipboard.writeText(text);
+      setCopied(what);
+      window.setTimeout(() => setCopied(null), 1600);
     } catch {
       // Clipboard blocked — the <pre> below stays selectable as the fallback.
     }
@@ -163,8 +166,8 @@ export function AboutUnit() {
               View JSON-LD
             </button>
             {showRaw ? (
-              <button type="button" className="about-unit-copy" onClick={() => void copy()}>
-                {copied ? "Copied" : "Copy"}
+              <button type="button" className="about-unit-copy" onClick={() => void copy("ld")}>
+                {copied === "ld" ? "Copied" : "Copy"}
               </button>
             ) : null}
           </div>
@@ -177,6 +180,36 @@ export function AboutUnit() {
               </p>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Reporting a bug should not require a screenshot. Every failed read is
+          recorded with the `error_id` the server stamped on it, so this blob
+          greps straight to the log line that caused it. */}
+      <div className="account-row">
+        <span className="account-label">Diagnostics</span>
+        <div className="account-row-main">
+          <div className="about-unit-manifest-controls">
+            <span className="about-unit-mono">
+              {incidents.length === 0
+                ? "No recent failures"
+                : `${incidents.length} recent failure${incidents.length === 1 ? "" : "s"}`}
+            </span>
+            <button
+              type="button"
+              className="about-unit-copy"
+              onClick={() => void copy("diag")}
+              disabled={incidents.length === 0}
+            >
+              {copied === "diag" ? "Copied" : "Copy diagnostics"}
+            </button>
+          </div>
+          <p className="account-muted">
+            The last 24 hours of failed requests — ids, codes and paths only, never
+            measurements or prompt text. Paste it into a bug report: each row carries the{" "}
+            <span className="about-unit-mono">error_id</span> that names the matching line
+            in the server log.
+          </p>
         </div>
       </div>
     </>

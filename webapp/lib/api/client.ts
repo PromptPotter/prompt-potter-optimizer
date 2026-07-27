@@ -3,18 +3,69 @@
 
 export const API = "/api/v1";
 
-// A non-2xx read. Carries the status as a field so callers branch on it
-// (`err.status === 401` → needs-auth state; see lib/auth-context.tsx) instead
-// of parsing the message string. The message stays technical for logs — a
-// user-facing surface must render its own copy, never `err.message` raw
-// (frontend-surface-contract.md § I2).
+// A non-2xx read. Carries the server's own classification so callers branch on
+// data instead of parsing the message string. The message stays technical for
+// logs — a user-facing surface must render its own copy, never `err.message`
+// raw (frontend-surface-contract.md § I2).
+//
+// `code` and `errorId` come from the `ErrorEnvelope` the API serializes at ONE
+// seam (`main.py::_error_response`, schema in m12-api-openapi.yaml). The server
+// already classifies every failure precisely; this type is what stops that
+// classification being thrown away on arrival. `errorId` is the handle that
+// reaches the server log line — quote it in a bug report.
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     readonly url: string,
+    readonly code: string | null = null,
+    readonly errorId: string | null = null,
+    readonly details: Record<string, unknown> | null = null,
   ) {
     super(`${status} ${url}`);
     this.name = "ApiError";
+  }
+}
+
+// How a caller must REACT to a failure — the five reactions that differ, not a
+// restatement of HTTP. Deliberately coarse: a poll needs to know "retry",
+// "re-probe auth" or "stop, this address is dead", and nothing finer changes
+// what it does.
+//
+// `transient` is the SAFE DEFAULT, and that direction matters: an unrecognised
+// failure keeps retrying rather than destroying client state. Only an explicit
+// 404 — the server answering, definitively, "no such thing" — is `gone`.
+export type FailureKind = "transient" | "auth" | "gone" | "denied" | "invalid";
+
+export function failureKind(e: unknown): FailureKind {
+  if (!(e instanceof ApiError)) return "transient"; // network, parse, abort
+  if (e.status === 401) return "auth";
+  if (e.status === 403) return "denied";
+  if (e.status === 404) return "gone";
+  if (e.status === 400 || e.status === 422) return "invalid";
+  return "transient"; // 5xx and anything unmapped
+}
+
+// Parse the `ErrorEnvelope` off a failed response. Tolerant by construction: a
+// proxy 502 or a static-export 404 answers HTML, and a transport helper that
+// throws while building an error is how one failure becomes two.
+async function toApiError(r: Response, url: string): Promise<ApiError> {
+  try {
+    const body = (await r.json()) as {
+      error?: unknown;
+      error_id?: unknown;
+      details?: unknown;
+    };
+    return new ApiError(
+      r.status,
+      url,
+      typeof body.error === "string" ? body.error : null,
+      typeof body.error_id === "string" ? body.error_id : null,
+      body.details && typeof body.details === "object"
+        ? (body.details as Record<string, unknown>)
+        : null,
+    );
+  } catch {
+    return new ApiError(r.status, url);
   }
 }
 
@@ -25,7 +76,7 @@ export async function jget<T>(url: string, signal?: AbortSignal): Promise<T> {
   const init: RequestInit = { cache: "no-store" };
   if (signal) init.signal = signal;
   const r = await fetch(url, init);
-  if (!r.ok) throw new ApiError(r.status, url);
+  if (!r.ok) throw await toApiError(r, url);
   return (await r.json()) as T;
 }
 
@@ -62,7 +113,7 @@ async function jgetWithValidator<T>(
   const r = await fetch(url, init);
   const next = r.headers.get(responseHeader);
   if (r.status === 304) return { kind: "not_modified", validator: next };
-  if (!r.ok) throw new ApiError(r.status, url);
+  if (!r.ok) throw await toApiError(r, url);
   return { kind: "ok", data: (await r.json()) as T, validator: next };
 }
 

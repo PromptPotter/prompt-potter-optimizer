@@ -13,14 +13,21 @@ import {
   type ReactNode,
 } from "react";
 import { liveCandidateId } from "@/lib/candidate-label";
-import { fetchDashboardByPath } from "./api";
+import { reportIncident } from "@/lib/diagnostics";
+import { failureKind, fetchDashboardByPath } from "./api";
 import { encodeCyclePath, pathLeaf, type CyclePath } from "./ids";
 import { useAuthGate } from "./auth-context";
 import { ageTextSeconds } from "./format";
 import type { LiveDashboardState } from "./api/types";
 import { usePoll } from "./hooks/usePoll";
+import { useWorkspace } from "./workspace";
 
-export type StatusKind = "live" | "stale" | "offline";
+// `gone` is NOT a flavour of `offline`, and conflating them is the bug this
+// vocabulary exists to prevent: "the server didn't answer" and "the server
+// answered, and says this no longer exists" call for opposite reactions — retry
+// vs stop — and reporting the second as the first sends an operator to restart a
+// server that was never down (frontend-surface-contract.md § I7).
+export type StatusKind = "live" | "stale" | "offline" | "gone";
 
 // `dashboard.json` IS `LiveDashboardState` — generated from the Pydantic model, not
 // re-declared here. The hand-written version made every field optional and ended with
@@ -204,6 +211,12 @@ const INITIAL_STATE: CycleStreamState = {
 // staring at "Connecting…" with no reason.
 const STAMP_MISMATCH_LIMIT = 3;
 
+// Consecutive 404s before this poll declares its address dead. Same reasoning and
+// same number as the stamp guard: one miss is a mint race (a cycle dir appearing
+// under a pointer that already names it), three across ~6 s is a fact. The floor
+// matters in the destructive direction — this verdict unpins the operator's view.
+const GONE_CONFIRM_LIMIT = 3;
+
 // Reconnect cadence while the API is unreachable — slower than the live poll so
 // a downed server is retried efficiently (every 5 s) rather than hammered. See
 // the two-cadence note at the `usePoll` call.
@@ -291,6 +304,10 @@ function useCycleStreamSource(
   // Poll only with a confirmed session; a 401 mid-run re-probes /auth/me so
   // the loop halts instead of storming the server (see useAuthGate).
   const { authed, onAuthError } = useAuthGate();
+  // This poll is the authoritative existence read for the viewed address, so it
+  // is the one that gets to declare it dead. `reportAddressGone` is identity-
+  // stable by construction (workspace.tsx) — the tick must not re-arm on it.
+  const { reportAddressGone } = useWorkspace();
   // Bumped on every unit switch so `usePoll` fires an immediate tick — the
   // hand-rolled loop used to restart (and tick at once) on each cycle change.
   const [revalCount, setRevalCount] = useState(0);
@@ -300,6 +317,10 @@ function useCycleStreamSource(
   // the polled unit. Once it crosses STAMP_MISMATCH_LIMIT the banner says
   // so — a never-matching stamp can't leave the UI silently on "Connecting…".
   const stampMismatchRef = useRef(0);
+  // Consecutive 404s for the polled unit — see GONE_CONFIRM_LIMIT. Reset by the
+  // unit-key guard below and by any answered tick, so only an UNBROKEN run of
+  // misses counts.
+  const goneRef = useRef(0);
   // Last server-issued `Last-Modified` for this unit's dashboard.json.
   // Sent back as `If-Modified-Since` next tick so the server can short-
   // circuit with 304 when the file mtime hasn't advanced. Reset on unit
@@ -326,6 +347,7 @@ function useCycleStreamSource(
     cycleRef.current = leaf?.cycleId ?? null;
     campaignRef.current = leaf?.campaignId ?? null;
     stampMismatchRef.current = 0;
+    goneRef.current = 0;
     lastModifiedRef.current = null;
     // Identity changed — hard-reset every cycle-scoped field so the prior
     // unit's dash snapshot and `● Live` badge can't linger for a frame
@@ -364,6 +386,9 @@ function useCycleStreamSource(
       // descended), so the identity guard below is depth-agnostic.
       const resp = await fetchDashboardByPath(p, lastModifiedRef.current, signal);
       if (signal.aborted) return;
+      // Any answer at all proves the address exists, so only an UNBROKEN run of
+      // 404s can reach the confirm limit.
+      goneRef.current = 0;
       // This route validates on mtime, so the validator IS a Last-Modified date. The
       // lineage-tree route validates on an ETag through the same helper — hence the
       // neutral field name.
@@ -465,6 +490,35 @@ function useCycleStreamSource(
       // A 401 means the session died — re-probe /auth/me so the gate flips
       // unauthed and this loop stops instead of 401-storming the server.
       onAuthError(e);
+      reportIncident(e, { surface: "dashboard", address: unitKeyRef.current });
+
+      // THE dashboard read is this address's authoritative existence oracle: the
+      // route answers `warming_up` at 200 while a cycle exists without a dashboard
+      // yet, so a 404 here means the cycle dir itself is gone — deleted, reaped, or
+      // reset away. That is terminal, and retrying it forever is what left the app
+      // pinned to a dead campaign while announcing the SERVER was down.
+      if (failureKind(e) === "gone") {
+        goneRef.current += 1;
+        if (goneRef.current >= GONE_CONFIRM_LIMIT && unitKeyRef.current) {
+          reportAddressGone(unitKeyRef.current);
+        }
+        setState((prev) => ({
+          ...prev,
+          // Drop the snapshot with the address. It was fetched before the campaign
+          // stopped existing, so every number in it now describes something that is
+          // not on disk — rendering it would present a measurement for a deleted run.
+          dash: null,
+          status: "gone",
+          statusText: "This campaign no longer exists",
+          statusHint:
+            "It was deleted, or its store was reset. Returning to the active run.",
+          termKey: "status_gone",
+          error: null,
+          isLive: false,
+        }));
+        return;
+      }
+      goneRef.current = 0;
       setState((prev) => ({
         ...prev,
         status: "offline",
@@ -487,7 +541,11 @@ function useCycleStreamSource(
   const effectiveInterval = state.status === "offline" ? RECONNECT_INTERVAL_MS : intervalMs;
   usePoll(tick, {
     intervalMs: effectiveInterval,
-    enabled: !!path && authed,
+    // A confirmed `gone` STOPS the loop — there is nothing to reconnect to, and a
+    // retry cadence would be a lie about the state. The unit-key guard resets
+    // `status` on any address change, so the poll re-arms the moment the view
+    // moves somewhere real (including the unpin this verdict just triggered).
+    enabled: !!path && authed && state.status !== "gone",
     revalidateOn: revalCount,
   });
 

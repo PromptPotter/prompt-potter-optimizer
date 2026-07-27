@@ -26,6 +26,11 @@ states:
   loading:   a fetch is in flight — transient, MUST resolve to live/empty/error.
   error:     a fetch failed for a non-auth reason (5xx, network, parse).
   offline:   poll stale / server unreachable.
+  gone:      'the server ANSWERED and says this address does not exist (404) — deleted
+             campaign, reaped .inner/ sandbox, reset store. Terminal, not retryable.
+             Distinct from offline on purpose: the absence of that distinction is what
+             once reported a deleted campaign as "API unreachable, check the server is
+             running", sending an operator to restart a perfectly healthy server.'
 ```
 
 ## Invariants (cross-cutting — the refinement directives)
@@ -66,6 +71,23 @@ invariants:
                       a RunPhase member, and it must not become one. `gate` is excluded from
                       the test, because the origin gate legitimately heartbeats with zero
                       progress until a human decides, and it already has a state that says so.'
+  I7_failure_traceable: 'Every user-visible failure is IDENTIFIED, CLASSIFIED and TRACEABLE.
+                      IDENTIFIED — the API stamps `error_id` on every error envelope and logs
+                      it under the same handle (one seam, main.py::_error_response), so a
+                      report quotes an id instead of a wall-clock guess; the webapp keeps a
+                      bounded incident ring (ids/codes/paths only, never measurements) behind
+                      Account -> Copy diagnostics. CLASSIFIED — callers branch on
+                      failureKind(err), never a bare catch; `transient` is the safe default,
+                      so an unrecognised failure retries rather than destroying state.
+                      TRACEABLE — a surface whose address the server says is GONE stops
+                      polling it, names what happened (never "server unreachable" — that is a
+                      different fact), and recovers to a live address rather than resting in a
+                      dead one. Detection is the address''s OWN authoritative read: list
+                      membership is NOT an existence test, because an L4 inner hop is absent
+                      from /cycles and an archived campaign is absent from the active filter
+                      while both are alive. Archived is not gone. The server side of this is
+                      the same rule: `warming_up` means "no dashboard YET" and a missing cycle
+                      dir means GONE, and one route must never answer both with the same body.'
 ```
 
 ## Surfaces

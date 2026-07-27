@@ -56,6 +56,7 @@ export function CriticalAlertBanner({
   if (!alert) return null;
 
   const critical = alert.severity === "critical";
+  const info = alert.severity === "info";
   return (
     <div
       className={cx("critical-alert", alert.severity)}
@@ -64,7 +65,7 @@ export function CriticalAlertBanner({
       aria-atomic="true"
     >
       <span className="critical-alert-icon" aria-hidden="true">
-        {critical ? "⛔" : "⚠"}
+        {critical ? "⛔" : info ? "ⓘ" : "⚠"}
       </span>
       <span className="critical-alert-body">
         <strong className="critical-alert-title">{alert.title}</strong>
@@ -80,14 +81,19 @@ export function CriticalAlertBanner({
           Pause campaign
         </button>
       ) : null}
-      <button
-        type="button"
-        className="critical-alert-jump"
-        onClick={onOpenFiles}
-        aria-label="Open files pane"
-      >
-        Files →
-      </button>
+      {/* No jump on an `info` verdict: it fires when the address stopped existing,
+          so there are no files to open — an operable-looking control that lands on
+          nothing is exactly what I3_affordance_honest forbids. */}
+      {info ? null : (
+        <button
+          type="button"
+          className="critical-alert-jump"
+          onClick={onOpenFiles}
+          aria-label="Open files pane"
+        >
+          Files →
+        </button>
+      )}
     </div>
   );
 }

@@ -94,16 +94,42 @@ async def scalar_docs() -> Response:
 
 # Every API error serializes to the ONE flat envelope declared in
 # docs/specs/m12-api-openapi.yaml#/components/schemas/ErrorEnvelope —
-# `{"error", "message", "details"?}` at the top level (no `detail` wrapper).
-# Three handlers feed it: typed PotterError (the application taxonomy), FastAPI's
-# request-validation 422, and the catch-all 500. No route raises HTTPException.
-def _envelope(
-    code: str, message: str, details: dict[str, object] | None = None
-) -> dict[str, object]:
-    body: dict[str, object] = {"error": code, "message": message}
+# `{"error", "message", "error_id", "details"?}` at the top level (no `detail`
+# wrapper). Three handlers feed it: typed PotterError (the application taxonomy),
+# FastAPI's request-validation 422, and the catch-all 500. No route raises
+# HTTPException.
+def _error_response(
+    request: Request,
+    *,
+    status: int,
+    code: str,
+    message: str,
+    details: dict[str, object] | None = None,
+    exc_info: bool = False,
+) -> JSONResponse:
+    """Mint the trace id, log it, and serialize the envelope — one seam, all errors.
+
+    ``error_id`` is what ties the string a user sees to the line logged here.
+    That argument was always true for the catch-all 500; it is just as true for
+    the 404 that sends an operator to restart a server that was never down. So
+    EVERY error carries one, and a bug report quotes it instead of a wall-clock
+    guess (frontend-surface-contract.md § I7_failure_traceable).
+    """
+    error_id = uuid.uuid4().hex[:12]
+    logger.log(
+        logging.ERROR if exc_info else logging.WARNING,
+        "api error [%s] %s %s -> %d %s",
+        error_id,
+        request.method,
+        request.url.path,
+        status,
+        code,
+        exc_info=exc_info,
+    )
+    body: dict[str, object] = {"error": code, "message": message, "error_id": error_id}
     if details:
         body["details"] = details
-    return body
+    return JSONResponse(status_code=status, content=body)
 
 
 @app.exception_handler(PotterError)
@@ -111,8 +137,12 @@ async def potter_error_handler(request: Request, exc: PotterError) -> JSONRespon
     # The one mapping seam for the application error taxonomy: each subclass
     # carries its own status + code + optional structured details. Routes that
     # need extra context still catch the specific subclass and add it first.
-    return JSONResponse(
-        status_code=exc.http_status, content=_envelope(exc.code, exc.message, exc.details)
+    return _error_response(
+        request,
+        status=exc.http_status,
+        code=exc.code,
+        message=exc.message,
+        details=exc.details,
     )
 
 
@@ -120,25 +150,25 @@ async def potter_error_handler(request: Request, exc: PotterError) -> JSONRespon
 async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     # FastAPI's request-shape validation (bad body/query/header) → the same
     # envelope; the per-field error list rides `details.errors`.
-    return JSONResponse(
-        status_code=422,
-        content=_envelope(
-            "request_invalid", "Request failed validation.", {"errors": exc.errors()}
-        ),
+    return _error_response(
+        request,
+        status=422,
+        code="request_invalid",
+        message="Request failed validation.",
+        details={"errors": exc.errors()},
     )
 
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    # An unhandled error is by definition one we can't describe — but the operator
-    # must still be able to reach the traceback that describes it. The id ties the
-    # string they see to the `logger.exception` line here; without it the only way
-    # back is a hand-grep of journald against a wall-clock guess.
-    error_id = uuid.uuid4().hex[:12]
-    logger.exception("Unhandled error [%s] on %s %s", error_id, request.method, request.url.path)
-    return JSONResponse(
-        status_code=500,
-        content=_envelope("internal_error", "Internal server error", {"error_id": error_id}),
+    # An unhandled error is by definition one we can't describe, so the id is the
+    # only way back to the traceback — `exc_info` puts it beside the same handle.
+    return _error_response(
+        request,
+        status=500,
+        code="internal_error",
+        message="Internal server error",
+        exc_info=True,
     )
 
 

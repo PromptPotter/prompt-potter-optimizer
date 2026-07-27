@@ -65,6 +65,13 @@ def serve_dashboard_response(
     between the outer and inner dashboards.
     """
     cycle_path = cycle_dir_for(base_dir, campaign_id, cycle_id)
+    # WARMING is "no dashboard YET"; a cycle dir that isn't there is GONE. Answering
+    # both with the warming placeholder conflates a transient state with a terminal
+    # one: a deleted campaign then reads "initialising" forever, and the webapp gets
+    # no signal that it is polling an address which will never resolve. Every sibling
+    # read (`/tree`, `/ray`, `/events:subscribe`, `/file`) already 404s here.
+    if not cycle_path.is_dir():
+        raise NotFoundError(f"Cycle '{campaign_id}/{cycle_id}' not found")
     path = cycle_path / "dashboard.json"
     present = path.is_file()
 
@@ -116,10 +123,10 @@ def get_cycle_dashboard(
 
     Honors ``If-Modified-Since`` and returns ``304 Not Modified`` when the
     on-disk mtime hasn't advanced — keeps the 2 s webapp poll cheap during
-    quiescent stretches. When ``dashboard.json`` does not yet exist (fresh
-    campaign before origin has flushed its first snapshot), returns a
-    ``warming_up`` payload at 200 instead of 404 so the webapp can render a
-    "campaign initialising" placeholder rather than appear offline.
+    quiescent stretches. A cycle that exists but has not yet flushed its first
+    ``dashboard.json`` answers ``warming_up`` at 200 so the webapp renders
+    "initialising" rather than appearing offline; a cycle that does not exist
+    answers 404, because those are different facts.
     """
     stores, leaf = resolve_cycle_path(
         store, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))

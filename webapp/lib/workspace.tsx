@@ -133,6 +133,20 @@ interface WorkspaceState {
   // pinned. No-op at depth 1.
   backToOuter: () => void;
   followActive: () => void; // un-pin → snap back to the active pointer
+  // The address the server says no longer exists — reported by whichever poll owns
+  // the AUTHORITATIVE read for it, acted on here. This is the only way a pin dies
+  // without the operator clicking: a campaign can be deleted (root CLAUDE.md calls
+  // deleting what you are looking at "the ordinary case"), an `.inner/` sandbox can
+  // be reaped with no user action at all, or a store can be reset under a bookmark.
+  //
+  // Detection is the address's OWN read, never list membership: an L4 inner hop is
+  // absent from `/cycles` (it lives in a sandbox) and an archived campaign is absent
+  // from the `active` filter, so membership would kill two live addresses.
+  // Archived ≠ gone.
+  reportAddressGone: (address: string) => void;
+  // Set for the surface that announces the recovery; null once acknowledged.
+  goneAddress: string | null;
+  dismissGoneNotice: () => void;
 }
 
 const WorkspaceContext = createContext<WorkspaceState | null>(null);
@@ -207,6 +221,8 @@ export function WorkspaceProvider({
   const [activeError, setActiveError] = useState<string | null>(null);
   const [lifecycleFilter, setLifecycleFilter] =
     useState<LifecycleFilter>("active");
+  // The address that just stopped existing — drives the one-shot recovery notice.
+  const [goneAddress, setGoneAddress] = useState<string | null>(null);
 
   // Poll only with a confirmed session; a 401 on any of the three reads
   // re-probes /auth/me so the loop halts when the session dies (useAuthGate).
@@ -458,6 +474,33 @@ export function WorkspaceProvider({
     setViewedCandidateId(null);
   }, []);
 
+  // The pin, mirrored into a ref so `reportAddressGone` keeps a STABLE identity.
+  // Its callers are poll ticks, and `usePoll` restarts its loop when the tick's
+  // identity changes — a callback that churned with every pin would re-arm the
+  // very polls this exists to quiet.
+  const pinnedRef = useRef<CyclePath | null>(pinnedPath);
+  useEffect(() => {
+    pinnedRef.current = pinnedPath;
+  });
+
+  // The ONE place a dead address dies. Unpins and resumes following, so the view
+  // lands somewhere real instead of hanging on an address that will never answer.
+  //
+  // The caller has already CONFIRMED the verdict (one 404 during a mint race is
+  // normal; see `poll.tsx`'s consecutive-miss guard) — this only checks that the
+  // report still describes what we are actually viewing, so a late report from a
+  // superseded address cannot yank a pin the operator has since moved on from.
+  const reportAddressGone = useCallback((address: string) => {
+    const pinned = pinnedRef.current;
+    if (!pinned || encodeCyclePath(pinned) !== address) return;
+    setPinnedPath(null);
+    setViewedCandidateId(null);
+    setFollowing(true);
+    setGoneAddress(address);
+  }, []);
+
+  const dismissGoneNotice = useCallback(() => setGoneAddress(null), []);
+
   // Switching tabs re-queries `/campaigns?lifecycle=` — bump revalidation so the
   // registry loop re-ticks at once instead of waiting out its 10 s interval.
   const selectLifecycle = useCallback((f: LifecycleFilter) => {
@@ -492,6 +535,9 @@ export function WorkspaceProvider({
     drillInto,
     backToOuter,
     followActive,
+    reportAddressGone,
+    goneAddress,
+    dismissGoneNotice,
   };
   return (
     <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>

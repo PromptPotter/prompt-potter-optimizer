@@ -33,8 +33,9 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { fetchLineageTree } from "@/lib/api";
+import { failureKind, fetchLineageTree } from "@/lib/api";
 import type { LineageNode } from "@/lib/api/types";
+import { reportIncident } from "@/lib/diagnostics";
 import { indexLineage, type LineageIndex } from "@/lib/derivations";
 import { createRegistry, type TreeFetchOpts } from "@/lib/lineage-registry";
 import { useCandidatesState } from "@/components/candidates/candidates-store";
@@ -237,6 +238,13 @@ export function LineageProvider({
           } catch (e) {
             if (signal.aborted) return;
             onAuthError(e);
+            reportIncident(e, { surface: "lineage", address: key });
+            // 404 — this tree's address does not exist. Retire the key so the tick
+            // stops asking; a transient failure keeps retrying, which is why the
+            // classification and not the bare catch decides. Whether the VIEW moves
+            // is not this poll's call: the dashboard read owns that verdict, and a
+            // subscriber here may be some other campaign's sidebar row.
+            if (failureKind(e) === "gone") registry.markGone(key);
             // A failed tick invalidates the validator: the next attempt must ask for a
             // full body rather than 304 into a tree it never received.
             registry.setEtag(key, null);

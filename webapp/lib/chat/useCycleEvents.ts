@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { cyclePathUrl } from "@/lib/api";
 import { encodeCyclePath, pathLeaf, type CyclePath } from "@/lib/ids";
+import { useWorkspace } from "@/lib/workspace";
 import {
   projectionToActivity,
   sampleScoredCandidate,
@@ -88,9 +89,17 @@ export function useCycleEvents(path: CyclePath | null): CycleEventsState {
     pathRef.current = path;
   });
 
+  // `EventSource` cannot see a response status — a 404 endpoint surfaces only as
+  // `onerror`, which is indistinguishable from a dropped connection, and the browser
+  // then auto-reconnects it forever. So this channel is NOT a detector: it subscribes
+  // only while the address is known live, and the workspace's own verdict (driven by
+  // the dashboard read, which CAN see the status) takes it down.
+  const goneAddress = useWorkspace().goneAddress;
+  const addressGone = goneAddress !== null && goneAddress === key;
+
   useEffect(() => {
     const p = pathRef.current;
-    if (!p) return;
+    if (!p || addressGone) return;
     // The leaf cycle this subscription is FOR. Every frame is validated against it so a stale
     // frame that slips through the EventSource teardown/reconnect window (a message already
     // queued when the prior socket closed, an auto-reconnect race, a cross-process ledger
@@ -147,7 +156,7 @@ export function useCycleEvents(path: CyclePath | null): CycleEventsState {
     };
 
     return () => es.close();
-  }, [key]);
+  }, [key, addressGone]);
 
   return { activity: [...summaries, ...trail], progress, connected };
 }

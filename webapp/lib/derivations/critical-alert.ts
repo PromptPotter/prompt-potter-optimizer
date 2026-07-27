@@ -14,9 +14,10 @@ import type { DashboardSnapshot, StatusKind } from "@/lib/poll";
 
 export interface CriticalAlert {
   // `critical` = blocking failure (server gone, run crashed); `warn` = the run
-  // is technically alive but its producer went silent. Drives tone + a11y
-  // live-region politeness.
-  severity: "critical" | "warn";
+  // is technically alive but its producer went silent; `info` = nothing is
+  // wrong and nothing is owed — the app already recovered and is saying why.
+  // Drives tone + a11y live-region politeness.
+  severity: "critical" | "warn" | "info";
   title: string;
   detail?: string;
   // When set, the banner offers a one-click operator action. `"pause"` = the
@@ -59,6 +60,14 @@ export function criticalAlert({
   machineBusyHolder,
   machineBusySince,
 }: Args): CriticalAlert | null {
+  // GONE outranks everything, including a crash. Any `dash` still in hand was
+  // fetched before the address stopped existing, so its `error` describes a run
+  // whose campaign is no longer on disk — announcing "Run crashed" there would
+  // report a stale fact about a deleted thing. This branch is also not a failure:
+  // the recovery has already happened and this only says why the view moved.
+  if (bannerStatus === "gone") {
+    return { severity: "info", title: bannerText, detail: bannerHint };
+  }
   // Crash/abort wins — a terminal run with a projected ErrorRecord is the most
   // actionable failure. The full multi-line message + remediation stays in the
   // dashboard-tab RunErrorBanner; here we show only the can't-miss headline.
