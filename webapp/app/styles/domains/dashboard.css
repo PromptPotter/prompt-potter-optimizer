@@ -233,3 +233,72 @@
 .cmap-knob-label{flex:1 1 auto;font-family:var(--font-mono);color:var(--color-text-secondary);overflow-wrap:anywhere}
 .cmap-knob-value{font-family:var(--font-mono);font-weight:600;color:var(--color-text-primary)}
 .cmap-knob-source-default{font-size:11px;color:var(--color-text-tertiary)}
+
+/* ── The TIME-RAY ────────────────────────────────────────────────────────────
+   The chronology strip above the optimizer. Full-bleed by construction: it is
+   mounted OUTSIDE .dash-spine-narrow, so it must not inherit that stripe's
+   max-width or its sidebar-centering transform.
+
+   Steps are EVEN — one width per event, never proportional to elapsed time.
+   Time is not the x-axis; sequence is. A proportional axis squashes a night's
+   work into a pixel and stretches a lunch break across the screen, which is
+   exactly the reading the gap markers give instead, in words.
+
+   The strip scrolls horizontally inside itself; the page body never does. */
+.dash-time-ray{display:flex;align-items:stretch;gap:0;margin-bottom:var(--dash-zone-gap);
+  border:0.5px solid var(--color-border);border-radius:10px;
+  background:var(--color-background-secondary);overflow:hidden}
+.dash-time-ray-track{flex:1;min-width:0;display:flex;align-items:center;gap:6px;
+  padding:8px 10px;overflow-x:auto;scroll-snap-type:x proximity;scrollbar-width:thin}
+.dash-time-ray-slot{display:inline-flex;scroll-snap-align:end}
+.dash-time-ray-step{display:inline-flex;align-items:center;gap:5px;flex-shrink:0;
+  max-width:180px;padding:4px 9px;border-radius:12px;cursor:pointer;
+  background:var(--color-background-primary);border:0.5px solid var(--color-border);
+  color:var(--color-text-secondary);font-family:inherit;font-size:11px;
+  transition:color .12s,border-color .12s}
+.dash-time-ray-step:hover{color:var(--color-accent);border-color:var(--color-accent)}
+.dash-time-ray-step:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
+.dash-time-ray-step-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* A step from a fork or an inner run — dashed, so "somewhere else in the family"
+   is a SHAPE and not only a hue. */
+.dash-time-ray-step.is-elsewhere{border-style:dashed}
+.dash-time-ray-step.tone-good{color:var(--color-text-primary)}
+.dash-time-ray-step.tone-warn{color:var(--color-warn);border-color:var(--color-warn-border)}
+.dash-time-ray-step.tone-bad{color:var(--color-danger-border);border-color:var(--color-danger-border)}
+.dash-time-ray-x{font-variant-numeric:tabular-nums;color:var(--color-text-tertiary)}
+/* A SILENCE. Non-interactive on purpose — it is a fact about the gaps between
+   events, not an event, so it takes no tab stop on the way to the next step. */
+.dash-time-ray-gap{flex-shrink:0;padding:0 2px;color:var(--color-text-tertiary);
+  font-size:10px;letter-spacing:0.04em;white-space:nowrap;font-variant-numeric:tabular-nums}
+.dash-time-ray-more{flex-shrink:0;padding:4px 8px;border-radius:12px;cursor:pointer;
+  background:transparent;border:0.5px dashed var(--color-border);
+  color:var(--color-text-tertiary);font-family:inherit;font-size:11px}
+.dash-time-ray-more:hover{color:var(--color-accent);border-color:var(--color-accent)}
+.dash-time-ray-empty{padding:4px 6px;color:var(--color-text-tertiary);font-size:11px}
+/* The head cap — where the ray points NOW. Sticky at the right edge because the
+   newest event is the one you came to read; the track scrolls under it. */
+.dash-time-ray-head{position:sticky;right:0;flex-shrink:0;display:inline-flex;align-items:baseline;
+  gap:7px;padding:8px 14px;border-left:0.5px solid var(--color-border);
+  background:var(--color-background-tertiary);color:var(--color-text-primary);
+  font-family:inherit;font-size:11px;text-align:left}
+button.dash-time-ray-head{cursor:pointer}
+.dash-time-ray-head-label{font-weight:700;letter-spacing:0.03em;text-transform:uppercase}
+.dash-time-ray-head-detail{color:var(--color-text-secondary)}
+.dash-time-ray-head.phase-running{box-shadow:inset 3px 0 0 var(--color-success)}
+.dash-time-ray-head.phase-gate{box-shadow:inset 3px 0 0 var(--color-accent)}
+.dash-time-ray-head.phase-paused{box-shadow:inset 3px 0 0 var(--color-warn)}
+.dash-time-ray-head.phase-waiting{box-shadow:inset 3px 0 0 var(--color-text-tertiary)}
+.dash-time-ray-head.phase-finished,
+.dash-time-ray-head.phase-detached,
+.dash-time-ray-head.phase-idle{box-shadow:inset 3px 0 0 var(--color-border)}
+/* `wedged` is the ONE head state with no `phase-*` peer, and that is deliberate: it
+   is not a RunPhase member and must never become one (I6 — one server-owned run
+   state). It is a ray-local reading of "the server still says running, and nothing
+   has progressed". The hatch is its own shape so it cannot be mistaken for a phase
+   the server can produce. */
+.ray-head-wedged{color:var(--color-warn);box-shadow:inset 3px 0 0 var(--color-warn);
+  background-image:repeating-linear-gradient(135deg,transparent 0 6px,
+    rgba(var(--color-warn-rgb),0.10) 6px 12px)}
+@media (prefers-reduced-motion:reduce){
+  .dash-time-ray-track{scroll-behavior:auto}
+}

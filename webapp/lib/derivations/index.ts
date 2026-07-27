@@ -19,3 +19,4 @@ export * from "./round-timeline";
 export * from "./sample-trajectory";
 export * from "./searchPoint";
 export * from "./spend";
+export * from "./time-ray";

@@ -37,6 +37,26 @@ export function fmtDuration(sec: number): string {
   return rm === 0 ? `${h}h` : `${h}h ${rm}m`;
 }
 
+// A SILENCE on the time-ray — "2m" / "14h" / "3d". Distinct from fmtDuration because it
+// answers a different question: fmtDuration measures how long something took, this measures
+// how long nothing happened, so it renders nothing at all below the gap threshold.
+//
+// Under 90 s is deliberately empty, and the number is load-bearing rather than taste. The
+// in-flight heartbeat fires every 15 s during every long await this package makes — the
+// optimizer call, an L4 inner campaign, and `measure_sample`'s backend query, whose
+// QUERY_TIMEOUT is 120 s. The ray keeps those heartbeats as gap SUPPRESSORS (it drops them
+// from the rendered steps but counts them as proof of life), so a heartbeated 120 s query
+// grows no gap at all. 90 s = six missed heartbeats: it cannot be ordinary in-run latency.
+//
+// If anyone ever makes the server stop sending `llm_call_progress` on the ray, every backend
+// query sprouts a spurious gap here. The coupling is commented at both ends.
+export function fmtGap(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 90) return "";
+  if (seconds < 90 * 60) return `${Math.round(seconds / 60)}m`;
+  if (seconds < 36 * 3600) return `${Math.round(seconds / 3600)}h`;
+  return `${Math.round(seconds / 86_400)}d`;
+}
+
 // USD spend — 4dp under a cent, else 2dp. "$0.0042" / "$1.30".
 export function fmtUsd(n: number): string {
   return n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;

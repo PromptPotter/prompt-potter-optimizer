@@ -9,6 +9,7 @@ import { DashSpine } from "./DashSpine";
 import { CyclePicker } from "@/components/shell/CyclePicker";
 import { RunErrorBanner } from "./RunErrorBanner";
 import { TopStrip } from "./TopStrip";
+import { TimeRay } from "./TimeRay";
 import { NowTriad } from "./NowTriad";
 import { Lane } from "./Lane";
 import { LiveStateCard } from "@/components/dashboard/scoring/LiveStateCard";
@@ -63,6 +64,11 @@ export function DashboardTab() {
           <OuterVerdictPanel />
         </DashSpine>
       )}
+      {/* Full-bleed, and deliberately OUTSIDE DashSpine: the spine is a 980px stripe that
+          also translates left by half the sidebar width, so a chronology inside it reads as
+          a widget rather than an axis. It sits above the optimizer + candidates because it
+          answers the question you ask first — what happened, in order. */}
+      <TimeRay />
       <DashSpine>
         <NowTriad pipeline={pipeline} />
       </DashSpine>

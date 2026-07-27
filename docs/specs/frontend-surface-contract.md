@@ -55,7 +55,17 @@ invariants:
                       stale affordance) and MUST NOT impersonate a run phase or unmount run controls
                       while the last-known server phase is in-flight. Every "running" surface — the
                       topbar jobs dock, the RemoteBar, workspace liveCycles — reads this one set AND
-                      one shared ordering (executing before suspended).'
+                      one shared ordering (executing before suspended).
+                      COROLLARY (the time-ray). run_phase provably cannot express running vs
+                      WEDGED: every await outlasting RUN_FRESH_S must heartbeat (heartbeat.py
+                      states the rule, four callers), so a live cycle can never go stale and a
+                      wedged process reads "running" forever. Freshness proves ATTACHMENT,
+                      never PROGRESS. The ray head derives `wedged` from the other input —
+                      progress = a non-heartbeat ledger append — gated on the server still
+                      saying `running`, and it is a DISPLAY state: nothing writes it, it is not
+                      a RunPhase member, and it must not become one. `gate` is excluded from
+                      the test, because the origin gate legitimately heartbeats with zero
+                      progress until a human decides, and it already has a state that says so.'
 ```
 
 ## Surfaces

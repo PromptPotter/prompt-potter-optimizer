@@ -15,6 +15,14 @@
 // torrent folds into one progress chip; diagnostics + spend telemetry map to null.
 // Items carry stable ids so the snapshot paint, the candidate start/scored, and
 // the per-sample running update all upsert to one row.
+//
+// `projectionToActivity` has a SECOND caller now: the time-ray (`lib/derivations/time-ray.ts`)
+// maps a `RayItem` through it unchanged, because a RayItem's `kind` + `payload` are
+// byte-identical to an envelope's. That is deliberate — one curated event vocabulary, two
+// surfaces — and it means a change here moves the ray too. At depth 0 the server's ray
+// filter is kept strictly COARSER than this one (it drops only by kind, never by payload)
+// so this file stays the single place deciding what is worth showing; at depth >= 1 the
+// server deliberately cuts inner runs to milestones (`store/family_ray_views.py`).
 
 import { candidateLabel } from "@/lib/candidate-label";
 import { fmtPct0 } from "@/lib/format";
@@ -232,9 +240,34 @@ export function projectionToActivity(env: ProjectionEnvelope): ActivityItem | nu
       // counter rides freshness, not the thread). The L4 inner-campaign heartbeat
       // sets `detail` ("inner rX/Y · best Z%"), which becomes one ticking chip
       // (stable id ⇒ one upserted row) so the outer chat never reads as silent.
+      //
+      // The ray relies on this returning null for a bare heartbeat: it keeps those items
+      // to prove the process was alive across a silent stretch, then drops them here so
+      // they never become steps. Making them items would fill the ray with nothing.
       const detail = str(p.detail);
       if (!detail) return null;
       return { id: "inner-progress", kind: "progress", icon: "·", label: detail, tone: "muted" };
+    }
+    case "candidate_minted": {
+      // The candidate exists but has not been scored — the earliest point anything can
+      // name it, and on the ray the first step that says "this attempt was proposed".
+      // Upserts to the SAME `cand-{label}` id the later `candidate_started` snapshot
+      // writes, so the row simply appears one beat earlier and nothing duplicates.
+      return candidateItem(str(p.label) ?? "candidate", undefined);
+    }
+    case "cycle_seed": {
+      // At most one per cycle, at the head of its ledger — a fork or a
+      // campaign-from-origin declaring what it starts from. Reads as one marker at the
+      // top of that cycle's thread, which is exactly where it sits.
+      const source = str(asRec(p.seed).origin_source);
+      return {
+        id,
+        kind: "merge",
+        icon: "⚡",
+        label: "cycle seeded",
+        detail: source || undefined,
+        tone: "muted",
+      };
     }
     // token_usage, decision, stream_snapshot — non-items here.
     default:

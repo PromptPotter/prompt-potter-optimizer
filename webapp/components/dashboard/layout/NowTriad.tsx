@@ -24,7 +24,7 @@ import { useSelection } from "@/lib/SelectionContext";
 // re-anchors the others through `useSelection`: picking a candidate moves the
 // round axis, so the Optimizer card follows to the round that PRODUCED it. The
 // lineage fetch + its mask/lens divergence overlay are owned by
-// `LineageOverlayProvider` at the shell root.
+// `LineageProvider` at the shell root.
 
 interface Props {
   pipeline: PipelineDoc | null;
