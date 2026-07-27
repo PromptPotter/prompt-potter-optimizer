@@ -101,10 +101,10 @@ other positions take the next MISS-stratum sample; when a stratum runs dry the
 other's remainder follows.
 
 **Why k=4.** Pure miss-first defers all regression evidence past the miss block.
-A proportional interleave spreads the misses so thin that the paired-margin
-gate's deterministic-exhaustion kill lands at the very end. k=4 costs a pure-tie
-kill a handful of extra samples and buys a regression probe inside the first
-`elimination_n_min` window, plus steady loss accrual for regressors.
+A proportional interleave spreads the misses so thin that a futility kill lands
+at the very end. k=4 costs a pure-tie kill a handful of extra samples and buys a
+regression probe inside the first `elimination_n_min` window, plus steady loss
+accrual for regressors.
 
 It is a **pure function** of (seed grades, ruler, sample ids), so a resumed round
 re-derives the identical order with no recorded sidecar.

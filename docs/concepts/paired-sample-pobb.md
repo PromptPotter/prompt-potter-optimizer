@@ -198,6 +198,18 @@ L4 outer proxy) keeps its gradient instead of collapsing to an all-miss θ where
 pins at 0.5 and PoBB never discriminates. Recorded booleans from pre-graded decisions coerce
 to 0.0/1.0, the identical values the live path fed.
 
+Being graded costs a correction the point estimate does not need but `θ_se` does. The logistic
+information `Σ a²·p(1−p)` is the variance of a COIN FLIP, and a graded response varies far less
+about the same mean — a ranked-table answer at position 5 of 20 is neither a hit nor a miss. So
+assuming Bernoulli variance OVERSTATES the uncertainty, measured against the true sampling
+spread of θ̂ at n=28: ×1.02 on binary hit/miss, ×1.51 on reciprocal-rank-of-20, ×4.66 on the
+low-dispersion L4 outer composite. `fit_theta_given_delta` therefore scales the SE by `√φ`, the
+Pearson dispersion off the fit's own residuals (Wedderburn 1974) — an estimate, not a knob:
+`φ ≈ 1` on binary data leaves a dichotomous campaign unchanged, `φ < 1` returns a graded
+backend's real precision, and `φ > 1` on an overdispersed one widens the SE instead. Without it
+the graded path escaped the all-miss collapse above only to hit its quieter twin: every
+conservative gate — PoBB elimination, the θ-LCB election — reading a real signal as noise.
+
 No cross-round "find R1_winner in prior rounds" logic, no backfill
 during replay. The decision record is the entire input, and the θ rule is
 closed-form + deterministic (the θ fit is pure, no MC seed) so replay is
@@ -218,36 +230,25 @@ Backfill makes the paired comparison statistically valid; the shared
 so decision evidence arrives before the budget is spent. Split out to its
 own page: [`adaptive-queue-mechanism.md`](adaptive-queue-mechanism.md).
 
-## Elimination ladder: margin before posterior
+## Elimination: one gate, on the θ ruler
 
-`PoBBCheck.check()` runs two gates in order. The first is the
-**paired-margin gate** — integer pairing arithmetic on the shared universe:
+`PoBBCheck.check()` runs a single gate — the θ-ability posterior, `p_best <
+ε`, where `p_best = min over priors of P(θ_cand > θ_prior)` on the cycle's
+fixed δ ruler. Seed is the origin (R1) or the prior round's winner (R2+);
+coverage of the candidate's measured samples is guaranteed by the backfill
+above.
 
-```
-wins   = candidate HIT where the seed missed
-losses = candidate MISS where the seed hit
-need   = ⌈improvement_threshold · budget⌉ − (wins − losses)
-kill when binom_sf(unattempted win opportunities, need, p_w) < ε
-```
-
-`p_w` is the Laplace-smoothed win rate on the measured seed-MISS stratum
-alone — ties carry nothing, so an easy prefix can't inflate the estimate,
-and the statistic is order-agnostic (a pure function of the outcome
-multiset + the seed's map). When `need` exceeds the remaining win
-opportunities, `binom_sf` is exactly 0 — the deterministic can't-catch-up
-corner (the old separate dominance gate) rides the same formula. Seed is
-the origin (R1) or the prior round's winner (R2+); coverage of the
-candidate's measured samples is guaranteed by the backfill above, and
-still-unclassified universe samples count as win opportunities (the gate
-under-kills, never over-kills, while backfill catches up).
-
-The second gate is the θ-ability posterior — `p_best < ε`, where `p_best =
-min over priors of P(θ_cand > θ_prior)` on the cycle's fixed δ ruler. The two
-gates are complementary: the margin gate asks "can it still be ADOPTED"
-(exact pairing arithmetic, ε-futility, deterministic at the corner); the θ
-gate asks "is it credibly the BEST" (difficulty-adjusted evidence
-accumulation). Margin fires first because it is integer-exact and needs no
-θ fit.
+**A paired-margin futility gate ran ahead of it until 2026-07-27.** It counted
+discordant binary wins against the seed and killed on a stratified-binomial
+ε-test. It was deleted as a second comparator: the election ranks on
+difficulty-adjusted ability, so a gate answering "can it still be ADOPTED" in
+binary win-counts disagreed with the ruler by construction, re-encoded
+`improvement_threshold` a second time, and went inert on a graded backend
+where a per-sample fitness of 0.63 is neither a win nor a loss. Its kill
+payload also stamped a hardcoded `p_best: 0.0`, which `is_leader_eligible`
+read as a PoBB loss — so a margin-cut candidate was silently barred from the
+round election. Full account + the measured cost:
+[`../methods/candidate-elimination.md`](../methods/candidate-elimination.md).
 
 ## Related concepts
 

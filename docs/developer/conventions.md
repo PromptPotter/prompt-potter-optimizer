@@ -53,6 +53,17 @@ collects everything else.
   Put reasoning/evidence fields *above* the fields they justify — below, they
   are structurally post-hoc. Which levers are free and which are wire contract:
   `docs/concepts/structured-output.md`.
+- **A parameter that changes what a number MEANS takes no default.** Make it a
+  required keyword; the signature is the enforcement (a caller that omits it fails
+  typecheck, so there is no standing test to keep). The bug class: the decision then
+  lives in an *absent* argument, and reading the call site tells you nothing — you must
+  notice the absence, jump to a distant default, and find a docstring clause naming the
+  intended callers. `score_search_point` / `compute_composite_fitness` take `opt_sp` this
+  way, having spent time on exactly that three-hop trail; the same function's per-sample
+  callbacks were already required for the weaker reason of display honesty.
+  A default is fine when it is a *derivation* every caller would repeat identically
+  (`round_scorer=None` → the schema's own default formula), not when the right value
+  genuinely differs per call site.
 - **String-keyed *call* dispatch is a defect** — it hides the caller→handler
   edge from `grep`, so "is this method live?" costs a multi-hop tour.
   Fix by template: key is internal → explicit `match` with literal calls;

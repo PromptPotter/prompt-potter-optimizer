@@ -225,7 +225,8 @@ concept doc, and in an 8k-char JSON blob, and the four copies drifted.
 
 What lives HERE is the composition, because that is `campaign.json`'s fact, not the type's: the
 formula in `datasets/promptpotter-self/campaign.json::scoring` composes **lift core**
-(`after_N_rounds_delta`, recentred `(x+1)/2` so regression < no-op < improvement stay distinct)
+(`after_N_rounds_delta` — a MEAN-over-trajectory ability gain in logits, recentred `(x+1)/2`
+and clamped so regression < no-op < improvement stay distinct)
 × **bounded quality** (`cleanliness · diversity_health`, floored 0.6 — a broken campaign is
 discounted, never sign-flipped) × **efficiency** (`delta_per_dollar`, floored 0.7).
 
@@ -233,9 +234,10 @@ discounted, never sign-flipped) × **efficiency** (`delta_per_dollar`, floored 0
 deleted rounds-to-target counter; the per-seed cost multiplier; and now the `normalized_gain`
 divisor, which was the lift core rescaled by a per-cell factor in [1,2] and carried no
 information the delta did not already have). Held emitted-but-out-of-formula pending the
-validation read: `rounds_improved_frac`, `delta_per_candidate`, `first_round_delta` (largely
-collinear with the lift core — `max(levels)` includes `levels[0]`, so whenever round 1 is the best
-round the two double-count one number).
+validation read: `rounds_improved_frac`, `delta_per_candidate`, `first_round_delta` (round 1
+alone is two candidates' evidence against a signal several times smaller than one candidate's
+θ_se — mostly noise, and it degrades a blend with the lift core at every weight; averaging the
+whole trajectory already measures early speed, since a fast climber spends more rounds high).
 
 **A term must also be blind to our measurement history, and one was not.** The measurement and
 optimizer-call caches are tenant-global and content-addressed, so an inner cycle we have run

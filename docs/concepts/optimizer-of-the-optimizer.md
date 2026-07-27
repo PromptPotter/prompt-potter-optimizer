@@ -35,15 +35,18 @@ connector reports a **vector** of bounded, subset-invariant signals per inner cy
 signal-rich campaign is never distilled to one number — **lift core × quality modulator ×
 efficiency**:
 
-- **Lift core** — `after_N_rounds_delta` (how far the inner search climbed above where it
-  started, on one ability ruler), recentred `(x+1)/2` so regression < no-op < improvement stay
-  distinct. **Its definition, its bound and why it needs no denominator are the type's, not
-  this doc's — read
+- **Lift core** — `after_N_rounds_delta` (the inner search's MEAN ability across its rounds
+  minus its origin, in LOGITS on one ability ruler), recentred `(x+1)/2` and clamped so
+  regression < no-op < improvement stay distinct. **Its definition, its bound and why it needs
+  no denominator are the type's, not this doc's — read
   `domain/l4/proxies.py`.** There is no `target_score` any more, anywhere; see *No declared
   headroom*, below.
 - **Quality modulator** — `cleanliness · diversity_health`, floored at 0.6: discounts a
-  campaign with unscoreable/degraded inner samples, malformed candidate output, or mode
-  collapse — **without** diluting the lift core (a floor, not an additive term).
+  campaign with unscoreable/degraded inner samples, malformed candidate output, mode collapse,
+  or candidates that **answered one constant label** — **without** diluting the lift core (a
+  floor, not an additive term). That last term is the semantic half: every other one counts
+  plumbing, so a candidate emitting perfectly-formed constant garbage trips none of them and
+  used to score a flawless round.
 - **Efficiency** — `delta_per_dollar`, floored at 0.7: rewards cheap lift. It divides by the
   **incurred** cost, not the bill — see *The bill is not the cost*, below.
 
@@ -66,9 +69,9 @@ above; and a raw per-seed cost multiplier, which measured the *seed*, not the ca
 Efficiency's `delta_per_dollar` passes the law precisely because its numerator is
 candidate-specific — a verbose meta-prompt burns more
 for the same lift. Emitted but held out of the formula until a validation run confirms their
-gradient here: `rounds_improved_frac`, `delta_per_candidate`,
-and `first_round_delta` (largely collinear with the lift core — `max(levels)` includes
-`levels[0]`, so whenever round 1 is the best round the two terms double-count one number).
+gradient here: `rounds_improved_frac`, `delta_per_candidate`, and `first_round_delta` (round 1
+alone is two candidates' evidence against a signal several times smaller than one candidate's
+θ_se — mostly noise, and it degrades a blend with the lift core at every weight).
 
 Acceptance is empirical: the composed fitness must hold `proxy_lift_corr ≥ 0.6` — a term that
 degrades it is cut, not kept for tidiness.

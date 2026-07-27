@@ -329,13 +329,12 @@ The persisted world is a four-entity containment hierarchy
   every 4th slot (desc δ), unknowns riding the miss stratum. Pure
   function of (seed grades, δ ruler, ids) — resume re-derives it.
   `application/intelligence/adaptive_queue_mechanism.py`.
-- **Paired-margin gate** — the PoBB futility gate: kill a candidate
-  when `P(net ≥ margin wins vs the seed) < ε`, wins/losses counted on
-  discordant pairs only, win rate estimated on the measured seed-MISS
-  stratum (order-agnostic). `need > opportunities` ⇒ `binom_sf` = 0 =
-  the deterministic can't-catch-up corner. Records as `margin_cut`.
-  Folded the old dominance + equivalence gates.
-  `application/optimization/pobb/checks.py::_margin_stats`.
+- **Paired-margin gate** — DELETED 2026-07-27. A second comparator
+  beside the θ ruler (discordant binary wins vs difficulty-adjusted
+  ability), inert on graded backends, and its hardcoded `p_best: 0.0`
+  kill payload barred cut candidates from the round election. One
+  comparator now: PoBB's paired `P(best) < ε`. See
+  [`methods/candidate-elimination.md`](methods/candidate-elimination.md).
 - **pick-value** — the between-round CAT acquisition objective:
   `decision_information_gain + delta_learning_gain` (in nats). Drives
   `select_round_subset` ranking and the `pick_score` snapshot.

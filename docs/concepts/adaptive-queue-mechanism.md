@@ -24,7 +24,7 @@ winner in round 2+):
   discordant pairs — a candidate can only *win* where the seed missed. A
   live candidate proves itself immediately; a dead one's misses on the
   easiest wins are the strongest futility evidence the
-  [paired-margin gate](../methods/candidate-elimination.md) can get.
+  [θ ε-gate](../methods/candidate-elimination.md) can get.
 - **A seed-HIT regression probe every 4th slot** (descending δ — likeliest
   regression points first), so losses accrue steadily and the θ ε-gate can
   kill regressors early instead of waiting for the tail.
@@ -68,7 +68,7 @@ nats) survives for **between-round** uses:
 * [`paired-sample-pobb.md`](paired-sample-pobb.md) — why the comparison
   needs backfilled, sample-keyed priors in the first place.
 * [`../methods/candidate-elimination.md`](../methods/candidate-elimination.md) —
-  the paired-margin gate + θ ε-gate this order feeds.
+  the θ ε-gate this order feeds.
 * [`../methods/exploration-exploitation.md`](../methods/exploration-exploitation.md) —
   sample selection across the hard-sample leaderboard.
 * [`../specs/verdict-resolution.md`](../specs/verdict-resolution.md) — the
