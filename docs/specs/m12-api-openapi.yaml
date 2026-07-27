@@ -1285,7 +1285,7 @@ paths:
         are finished on disk under a parent that a positional read cannot name. The ledger
         is the only witness independent of round close.
 
-        The round-CLOSE facts (`is_winner`, `theta`, `cumulative_accuracy`) come from
+        The round-CLOSE facts (`is_winner`, `theta`, `cumulative_theta`) come from
         `dashboard.json::rounds[]`, the declared projection for them — the ledger genuinely
         does not carry them. A round that never closed reports **no winner** rather than
         promoting its lone candidate.
@@ -2225,13 +2225,14 @@ components:
         composite_ci_hi: { type: [number, "null"] }
         scored_samples: { type: [integer, "null"] }
         expected_samples: { type: [integer, "null"] }
-        cumulative_accuracy:
+        cumulative_theta:
           type: [number, "null"]
           description: |
-            The adopted lineage rescored over EVERY sample probed so far — the
-            cross-round-comparable frontier the trend plots. Carried by the round's WINNER
+            Ability of the adopted lineage on the cycle's fixed δ ruler — the
+            subset-invariant, cross-round-comparable series. Carried by the round's WINNER
             only: it is a property of the advancing spine, and a losing sibling never
-            joined it.
+            joined it. Its accuracy-space predecessor was a mean over rows measured by
+            DIFFERENT configurations and is gone; `accuracy` is what this node MEASURED.
         lens_value:
           type: [number, "null"]
           description: |
@@ -3358,9 +3359,14 @@ components:
           type: object
           additionalProperties: true
           description: |
-            Per-node operator-editable config surface (model / temperature /
-            thinking / max_tokens / provider, minus prompt fields), keyed by node
-            id. Boundary-added beside `pipeline_view`, same draft-derived parse.
+            Every param each node carries, keyed by node id — COMPLETE, because
+            clients sum `optimizer_tunable` across it to answer "is this node
+            optimizer-locked". Each param's `kind` names the surface that owns it:
+            the five widget kinds (`model`/`enum`/`number`/`bool`/`string`) are
+            config-editor rows; `prompt` (a PromptTemplate decomposition field) and
+            `nested` (object/array) are listed but carry no widget, and a `prompt`
+            param carries no value — the prose lives in `prompts/{node}.json`.
+            Boundary-added beside `pipeline_view`, same draft-derived parse.
         node_output_schema:
           type: object
           additionalProperties: true

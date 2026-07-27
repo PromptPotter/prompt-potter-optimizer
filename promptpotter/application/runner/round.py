@@ -6,6 +6,7 @@ The ledger is the sole persistence ingress; display projections subscribe to it
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.config import CampaignConfig
@@ -24,7 +25,7 @@ from promptpotter.application.output import (
 )
 from promptpotter.application.run_observers import RunCallbacks
 from promptpotter.domain.phases import StopLoop
-from promptpotter.domain.results import RoundResult
+from promptpotter.domain.results import RoundResult, is_round_winner
 from promptpotter.domain.results_health import (
     assemble_prior_healths,
     compute_node_failure_rates,
@@ -104,6 +105,51 @@ async def escalate_or_stop(
         raise StopLoop(stop)
 
 
+def _round_close_facts(round_result: RoundResult) -> dict[str, Any]:
+    """What the CLOSE knows and no candidate could — the adopted individual, and each
+    scored row's ``{theta, theta_se, composite_ci_lo, composite_ci_hi}`` (absent keys
+    omitted, rows with nothing to say dropped).
+
+    Those four are the only values a candidate's own ``candidate_scored`` snapshot cannot
+    carry in final form: θ comes from the round's joint fit (or, at round 0, from the ruler
+    calibration), and a warm ruler OVERRIDES the candidate's Wilson whisker with the tighter
+    θ-implied band. Reading them off ``candidate_scores`` rather than off the election is
+    what lets round 0 — which elects nothing — still report the origin's ability.
+
+    **Keyed by LABEL, the positional identity (`C{round}.{idx}`), never `candidate_id`.**
+    A lineage id is a fresh uuid per construction (`IndividualLineage.id`), so a resume
+    re-mints round 0's C0 under a new id while this round's already-written close still
+    names the old one — an id join then silently drops the crown and θ of every re-minted
+    candidate, C0 first. Position is the canonical genealogy and both sides carry it.
+
+    A held round's adopted individual is the retained incumbent, which is not among this
+    round's rows, so ``winner_label`` comes back empty and nobody is crowned.
+    """
+    abilities: dict[str, dict[str, float]] = {}
+    for cs in round_result.candidate_scores:
+        vals = {
+            key: value
+            for key, value in (
+                ("theta", cs.theta),
+                ("theta_se", cs.theta_se),
+                ("composite_ci_lo", cs.composite_ci_lo),
+                ("composite_ci_hi", cs.composite_ci_hi),
+            )
+            if value is not None
+        }
+        if vals:
+            abilities[cs.label] = vals
+    winner_label = next(
+        (
+            cs.label
+            for cs in round_result.candidate_scores
+            if is_round_winner(cs.candidate_id, round_result.winner_id)
+        ),
+        "",
+    )
+    return {"winner_label": winner_label, "abilities": abilities}
+
+
 def persist_round(
     cycle: Cycle,
     round_result: RoundResult,
@@ -133,6 +179,15 @@ def persist_round(
                     "composite_fitness": round_result.composite_fitness,
                     "improved": round_result.improved,
                     "label": round_result.label,
+                    # Everything the CLOSE knows and no candidate could: the frontier it
+                    # advanced, the individual it adopted, and the ability fit. All read off
+                    # the `RoundResult` being persisted, so one writer serves every round —
+                    # round 0 included, which holds no election but does have a C0 and a θ
+                    # from the ruler fit. Without this the only on-disk home of θ and the
+                    # crown was `dashboard.json`, and a served view had to open another
+                    # projection's output to find them.
+                    "cumulative_theta": round_result.cumulative_theta,
+                    **_round_close_facts(round_result),
                 },
             )
         )

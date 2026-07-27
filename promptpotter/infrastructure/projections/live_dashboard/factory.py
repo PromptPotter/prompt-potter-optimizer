@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from promptpotter.domain.results import best_round_by_cumulative_accuracy
+from promptpotter.domain.results import best_round_by_measured_accuracy
 from promptpotter.infrastructure.projections.live_dashboard.state import LiveDashboardState
 from promptpotter.infrastructure.projections.live_state import backfill_spend_rates
 from promptpotter.infrastructure.store.io import read_json_tolerant
@@ -54,7 +54,7 @@ def resolve_resume_state(
 
     **This is the one place the surviving trajectory is cut.** Rounds at or past
     ``resumed_from_round`` are about to be re-run, so they are dropped here and ``best``
-    is re-derived from what is left via the shared ``best_round_by_cumulative_accuracy``
+    is re-derived from what is left via the shared ``best_round_by_measured_accuracy``
     (the cycle index's ``_apply_best`` rides the same helper) — never trusted from the
     prior scalar, whose rolling max is monotonic and would keep a high-water mark from a
     round that no longer exists.
@@ -71,7 +71,7 @@ def resolve_resume_state(
     surviving = [
         r for r in prior.rounds if resumed_from_round is None or r.round < resumed_from_round
     ]
-    best, _ = best_round_by_cumulative_accuracy([r.model_dump() for r in surviving])
+    best, _ = best_round_by_measured_accuracy([r.model_dump() for r in surviving])
     return prior.model_copy(
         update={
             "rounds": surviving,

@@ -23,7 +23,7 @@ from promptpotter.config.settings import DEFAULT_CONNECTOR_TYPE
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.phases import RunPhase, StopReason
-from promptpotter.domain.results import RoundResult, best_round_by_cumulative_accuracy
+from promptpotter.domain.results import RoundResult, best_round_by_measured_accuracy
 from promptpotter.domain.run_records import CycleSeed, CycleSeedRecord
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.runtime_flags import derive_run_phase, is_checkin
@@ -65,7 +65,6 @@ def round_summary(rr: RoundResult) -> dict[str, Any]:
         "round": rr.round,
         "label": rr.label,
         "accuracy": rr.accuracy,
-        "cumulative_accuracy": rr.cumulative_accuracy,
         "hits": rr.hits,
         "total": rr.total,
         "improved": rr.improved,
@@ -86,20 +85,27 @@ def origin_accuracy_of(index: dict[str, Any]) -> float | None:
 
 def _apply_best(data: dict[str, Any]) -> None:
     """Set the index's ``best_accuracy`` / ``best_round`` from ``data["rounds"]`` via the
-    shared ``best_round_by_cumulative_accuracy`` (which resume/fork rebuild also rides, so
+    shared ``best_round_by_measured_accuracy`` (which resume/fork rebuild also rides, so
     ``index.json`` and ``dashboard.json::best`` agree by construction).
 
-    Best = highest **full-population** ``cumulative_accuracy`` (the incumbent rescored over
-    every sample probed so far), NOT the round winner's hard-first/PoBB subset ``accuracy``
-    (a lucky 6/8 subset is 0.75 but not comparable to a full-set round). Deliberately a
-    DIFFERENT basis from the winner export: ``cycle.py::absorb_round`` / ``replay_priors``
-    argmax ``best_sp``/``best_round`` on cumulative ``composite_fitness`` — the optimizer's
-    objective, also the L2/L3 stall comparator (``escalation/firing.py``). This headline
-    argmaxes plain cumulative ``accuracy`` — the formula-independent number operators
+    Best = the highest ``accuracy`` any round actually MEASURED — the elected winner on the
+    samples that round drew, or on a held round the retained incumbent's re-score. It is
+    therefore always a number some individual scored, over a stated ``total``.
+
+    It used to argmax ``cumulative_accuracy``, described here as "the incumbent rescored over
+    every sample probed so far". No such rescore ever happened: the series was a sample-keyed
+    union of rows measured by DIFFERENT configurations, so the headline routinely exceeded
+    anything the cycle had measured — ``57%→78%`` on a run whose best candidate reached 0.679.
+    That claim is what kept the defect invisible; do not reintroduce a pooled mean here.
+
+    Deliberately a DIFFERENT basis from the winner export: ``cycle.py::absorb_round`` /
+    ``replay_priors`` argmax ``best_sp``/``best_round`` on ``composite_fitness`` — the
+    optimizer's objective, also the L2/L3 stall comparator (``escalation/firing.py``). This
+    headline argmaxes plain ``accuracy`` — the formula-independent number operators
     recognize. Under a non-accuracy formula the two ``best_round``s can legitimately
     disagree; flipping either to match would break the objective (winner side) or the
     display contract (this side). See ``architecture.md`` §0.5."""
-    data["best_accuracy"], data["best_round"] = best_round_by_cumulative_accuracy(data["rounds"])
+    data["best_accuracy"], data["best_round"] = best_round_by_measured_accuracy(data["rounds"])
 
 
 def fresh_sibling_index_blob(
@@ -709,7 +715,7 @@ class CampaignStore:
         # No dashboard.json repair here. `resolve_resume_state` cuts the surviving
         # trajectory when the resumed run's view is constructed — the one cut, off the
         # schema. A second writer here re-spelled that rule against the raw dict, with
-        # its own `max(cumulative_accuracy)` fold in place of the domain helper.
+        # its own `max(...)` fold in place of the domain helper.
         self._rebuild_round_index(campaign_id, cycle_id, survivors)
 
     def _rebuild_round_index(
@@ -746,8 +752,8 @@ class CampaignStore:
 
         ``best_accuracy`` / ``best_round`` / ``n_rounds`` are NOT written here — they
         are owned by the ``rounds[]``-writer (``save_round_file`` → ``_apply_best``) on
-        the origin-inclusive / full-population ``cumulative_accuracy`` basis. ``final``
-        is written unconditionally (a crash finalize records a valid crash verdict)."""
+        the origin-inclusive measured-``accuracy`` basis. ``final`` is written
+        unconditionally (a crash finalize records a valid crash verdict)."""
         from promptpotter.shared.errors import graceful
 
         updates: dict[str, Any] = {

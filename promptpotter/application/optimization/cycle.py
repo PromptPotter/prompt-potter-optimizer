@@ -19,11 +19,7 @@ from typing import TYPE_CHECKING, Any, cast
 # state type Cycle holds; importing it via escalation/__init__ would load the
 # firing driver, which depends back on Cycle → import cycle. See escalation/__init__.
 from promptpotter.application.optimization.escalation.state import EscalationFSM
-from promptpotter.application.scoring.metrics import (
-    _compute_accuracy,
-    composite_ci,
-    compute_composite_fitness,
-)
+from promptpotter.application.scoring.metrics import _compute_accuracy
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.escalation_signals import rf_dedup_key
 from promptpotter.domain.opt_search_point import OptSearchPoint, node_config_items
@@ -31,7 +27,6 @@ from promptpotter.domain.results import (
     RoundParent,
     RoundResult,
     ScoredCandidate,
-    candidate_label,
 )
 from promptpotter.domain.run_records import RebaseRequest, ResumeCheckpointRecord
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
@@ -43,7 +38,7 @@ if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.results import CalibrationModel
-    from promptpotter.domain.scoring import QueryMeasurement, RoundScorer
+    from promptpotter.domain.scoring import QueryMeasurement
     from promptpotter.domain.search_point import TaskDecomposition
 
 logger = logging.getLogger(__name__)
@@ -51,11 +46,22 @@ logger = logging.getLogger(__name__)
 __all__ = ["Cycle", "CycleRoundState"]
 
 
-def _merge_into_cumulative(
+def _merge_known_outcomes(
     prior: list[dict[str, Any]], incoming: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
     """Sample-keyed merge: incoming overwrites prior; entries without ``sample_id`` dropped.
-    Keeps ``tr.current_results`` a non-shrinking cumulative origin across rounds."""
+
+    **This pool is not a score, and must never be scored.** Its rows are measured by
+    DIFFERENT configurations — round N's winner on the samples it ran, whatever ran them
+    last everywhere else — so an accuracy over it belongs to no individual. It exists to
+    decide what to measure NEXT (PoBB seeding, resume's election floor, replay parity),
+    which is a question the pool's mixed provenance does not spoil.
+
+    Scoring it is what published ``57%→78%`` on a cycle whose best candidate ever measured
+    0.679: the round-7 number was 12 rows from round 6's config glued to 28 from round 7's,
+    and because the round subset is the CONTESTED one, the carried rows are the easy tail
+    the previous config scored 12/12 on. Every configuration inherited its predecessor's
+    perfect easy-tail score, so a mutation that regressed there was invisible."""
     by_sid: dict[Any, dict[str, Any]] = {
         r.get("sample_id"): r for r in prior if r.get("sample_id") is not None
     }
@@ -70,70 +76,59 @@ def _origin_round(
     osp: OptSearchPoint,
     sp: JobSearchPoint,
     *,
+    report: ScoredCandidate,
     results: list[dict[str, Any]],
-    accuracy: float,
-    composite_fitness: float,
-    evaluators: dict[str, float],
     theta: float | None,
     calibration_model: CalibrationModel | None,
 ) -> RoundResult:
     """Round 0 as an ordinary ``RoundResult`` — one candidate, C0, no rivals.
 
-    C0 is enriched through the SAME shared derivations every L1 candidate uses, so the
-    origin row can't silently omit a field the L1 path stamps: ``composite_ci`` (the
-    always-on whisker), its ability θ on the cycle's δ ruler, and the per-evaluator
-    breakdown. The origin changed nothing, so it describes no change — winner identity
-    is ``candidate_id``, which both this row and the round stamp from the same lineage."""
-    base = _compute_accuracy(cast("list[QueryMeasurement]", results))
-    ci_lo, ci_hi = composite_ci(cast("list[QueryMeasurement]", results))
+    C0's row IS the report the scoring gateway produced, with the two facts only a round
+    close can add stamped on: its ability θ on the cycle's δ ruler, and — because it faced
+    nobody — a matched origin that is itself. Nothing is re-derived here; a second
+    computation of an already-measured number is how the row and the ledger came to hold
+    different answers about the same candidate.
+
+    The origin changed nothing, so it describes no change — winner identity is
+    ``candidate_id``, which both this row and the round stamp from the same lineage.
+    """
     prompt_fields = {**osp.prompt_field_dict(), "lineage": osp.lineage.model_dump()}
-    label = candidate_label(0, 0)
+    deprecated = _compute_accuracy(cast("list[QueryMeasurement]", results))["deprecated"]
+    row = report.model_copy(
+        update={
+            "theta": theta,
+            "prompt_fields": prompt_fields,
+            "resolved_pipeline_params": sp.config_params,
+            "matched_origin_accuracy": report.accuracy,
+            "matched_origin_hits": report.hits,
+            "matched_origin_composite": report.composite_fitness,
+        }
+    )
     return RoundResult(
         round=0,
-        label=label,
-        accuracy=accuracy,
-        composite_fitness=composite_fitness,
-        hits=base["hits"],
-        total=base["total"],
+        label=row.label,
+        accuracy=row.accuracy,
+        composite_fitness=row.composite_fitness,
+        hits=row.hits,
+        total=row.total,
         improved=False,
-        origin_accuracy=accuracy,
-        matched_origin_accuracy=accuracy,
-        matched_origin_hits=base["hits"],
-        matched_origin_composite=composite_fitness,
+        origin_accuracy=row.accuracy,
+        matched_origin_accuracy=row.accuracy,
+        matched_origin_hits=row.hits,
+        matched_origin_composite=row.composite_fitness,
         prompt_fields=prompt_fields,
         pipeline_params=sp.pipeline_params,
         results=results,
         all_candidate_results={osp.lineage.id: results},
         candidates_scored=1,
-        candidate_scores=[
-            ScoredCandidate(
-                candidate_id=osp.lineage.id,
-                label=label,
-                changes_description="",
-                accuracy=accuracy,
-                composite_fitness=composite_fitness,
-                composite_ci_lo=ci_lo,
-                composite_ci_hi=ci_hi,
-                theta=theta,
-                evaluators=dict(evaluators),
-                hits=base["hits"],
-                total=base["total"],
-                prompt_fields=prompt_fields,
-                resolved_pipeline_params=sp.config_params,
-                scored_samples=base["total"],
-                expected_samples=base["total"],
-                matched_origin_accuracy=accuracy,
-                matched_origin_hits=base["hits"],
-                matched_origin_composite=composite_fitness,
-            )
-        ],
-        deprecated=base["deprecated"],
-        cumulative_accuracy=accuracy,
-        # Round 0's frontier θ is the origin's θ — the θ-peer of `cumulative_accuracy`,
-        # so the trend line starts on the θ scale too, and the one place θ is read from.
+        candidate_scores=[row],
+        deprecated=deprecated,
+        # Round 0's frontier θ is the origin's θ — the subset-invariant peer of the round's
+        # own `accuracy`, so the trend line starts on the θ scale too, and the one place θ
+        # is read from.
         cumulative_theta=theta,
         calibration_model=calibration_model,
-        evaluators=dict(evaluators),
+        evaluators=dict(row.evaluators),
         opt_search_point=osp,
     )
 
@@ -371,27 +366,22 @@ class Cycle:
     def start(
         cls,
         resolved_origin: OptSearchPoint,
-        origin_accuracy: float,
+        origin_report: ScoredCandidate,
         *,
         task_context: TaskDecomposition,
         schema: PipelineSchema | None,
         origin_results: list[dict[str, Any]] | None = None,
-        round_scorer: RoundScorer | None = None,
         session: Session,
         config: CampaignConfig,
     ) -> Cycle:
-        """Construct a fresh Cycle from a scored origin."""
-        if origin_results and schema is not None:
-            origin_score = compute_composite_fitness(
-                origin_results,  # type: ignore[arg-type]
-                schema,
-                round_scorer=round_scorer,
-            )
-            composite_fitness = origin_score["composite_fitness"]
-            origin_evaluators = dict(origin_score["evaluators"])
-        else:
-            composite_fitness = origin_accuracy
-            origin_evaluators = {}
+        """Construct a fresh Cycle from a scored origin.
+
+        The origin arrives ALREADY measured — ``origin_report`` is what the scoring gateway
+        returned, so nothing here recomputes its accuracy, composite or evaluator namespace.
+        Doing so was a second code path onto the same rows with the same scorer, and it fed
+        round 0's row while the ledger got the gateway's answer.
+        """
+        origin_accuracy = origin_report.accuracy
         opt_sp = _build_initial_opt_sp(resolved_origin, task_context)
         # Pass session.pipeline_params (carries dataset overlay) — schema.to_pipeline_params() is sparse and strips operator config.
         sp = opt_sp.to_job_search_point(
@@ -440,10 +430,8 @@ class Cycle:
                 _origin_round(
                     opt_sp,
                     sp,
+                    report=origin_report,
                     results=list(origin_results or []),
-                    accuracy=origin_accuracy,
-                    composite_fitness=composite_fitness,
-                    evaluators=origin_evaluators,
                     theta=origin_theta,
                     calibration_model=calibration_model,
                 )
@@ -451,10 +439,10 @@ class Cycle:
             tracking=CycleRoundState(
                 current_sp=sp,
                 current_accuracy=origin_accuracy,
-                current_composite_fitness=composite_fitness,
+                current_composite_fitness=origin_report.composite_fitness,
                 current_results=origin_results or [],
                 best_accuracy=origin_accuracy,
-                best_composite_fitness=composite_fitness,
+                best_composite_fitness=origin_report.composite_fitness,
                 best_sp=sp,
                 best_theta=origin_theta,
             ),
@@ -481,35 +469,11 @@ class Cycle:
         self.rounds[0] = _origin_round(
             self.opt_sp,
             self.tracking.current_sp,
+            report=parent.report,
             results=list(parent.results),
-            accuracy=parent.accuracy,
-            composite_fitness=parent.composite_fitness,
-            evaluators=dict(parent.evaluators),
             theta=self.origin_round.cumulative_theta,
             calibration_model=self.calibration_model,
         )
-
-    def _cumulative_scores(
-        self,
-        results: list[dict[str, Any]],
-        schema: PipelineSchema | None,
-        fallback: tuple[float, float],
-    ) -> tuple[float, float]:
-        """``(accuracy, composite_fitness)`` over the cumulative frontier — the one
-        scoring call the L1 trajectory folds through (``replay_priors`` +
-        ``absorb_round``). ``fallback`` (the round's own subset scalars) stands in
-        when the cycle has no schema. ``opt_sp=None``: the cumulative pool mixes
-        multiple searchpoints, so opt_sp-aware evaluators take their vacuous fallback
-        (per the ``matched_origin_stats`` convention)."""
-        if schema is None:
-            return fallback
-        scores = compute_composite_fitness(
-            cast("list[QueryMeasurement]", results),
-            schema,
-            opt_sp=None,
-            round_scorer=self.session.scoring.round_scorer,
-        )
-        return scores["accuracy"], scores["composite_fitness"]
 
     def replay_priors(self, priors: list[RoundResult]) -> None:
         """Reconstruct round-loop state from persisted prior rounds (in-place).
@@ -550,17 +514,17 @@ class Cycle:
         tr.current_sp = self.opt_sp.to_job_search_point(
             base_pipeline_params=last_rr.pipeline_params, schema=schema
         )
-        # best_round = cumulative-state high-water-mark, walked from round 0 (the
-        # origin floor) forward. It is the round NUMBER, which is now also its index.
+        # best_round = high-water-mark over what each round actually MEASURED, walked from
+        # round 0 (the origin floor) forward. It is the round NUMBER, which is now also its
+        # index. Each round's own scalars — never a score over `acc_cum`, whose rows come
+        # from different configurations (see `_merge_known_outcomes`); the pool is rebuilt
+        # here only to reseed `current_results` and `best_theta` below.
         acc_cum: list[dict[str, Any]] = []
         for rr in self.rounds:
-            acc_cum = _merge_into_cumulative(acc_cum, list(rr.results))
-            cum_acc, cum_comp = self._cumulative_scores(
-                acc_cum, schema, (rr.accuracy, rr.composite_fitness)
-            )
-            if cum_comp > tr.best_composite_fitness:
-                tr.best_composite_fitness = cum_comp
-                tr.best_accuracy = cum_acc
+            acc_cum = _merge_known_outcomes(acc_cum, list(rr.results))
+            if rr.composite_fitness > tr.best_composite_fitness:
+                tr.best_composite_fitness = rr.composite_fitness
+                tr.best_accuracy = rr.accuracy
                 tr.best_round = rr.round
                 # Build best_sp from THIS round's prompts, not self.opt_sp (pinned to the last
                 # prior above) — else a resumed best≠last cycle pairs best params with last text.
@@ -577,9 +541,9 @@ class Cycle:
             if cum_theta is not None and (tr.best_theta is None or cum_theta > tr.best_theta):
                 tr.best_theta = cum_theta
         tr.current_results = acc_cum
-        tr.current_accuracy, tr.current_composite_fitness = self._cumulative_scores(
-            tr.current_results, schema, (last_rr.accuracy, last_rr.composite_fitness)
-        )
+        # Mirrors `absorb_round`: "current" is the last round's OWN measurement.
+        tr.current_accuracy = last_rr.accuracy
+        tr.current_composite_fitness = last_rr.composite_fitness
 
     def _maybe_warm_ruler(self) -> None:
         """Warm the δ ruler from a cold start, then LOCK it. While ``delta_scale`` is
@@ -676,10 +640,12 @@ class Cycle:
             rr.pipeline_params if rr.pipeline_params is not None else tr.current_sp.pipeline_params
         )
         tr.current_sp = self.opt_sp.to_job_search_point(base_pipeline_params=_pp, schema=schema)
-        tr.current_results = _merge_into_cumulative(tr.current_results, list(rr.results))
-        tr.current_accuracy, tr.current_composite_fitness = self._cumulative_scores(
-            tr.current_results, schema, (rr.accuracy, rr.composite_fitness)
-        )
+        tr.current_results = _merge_known_outcomes(tr.current_results, list(rr.results))
+        # "Current" is what the incumbent SCORED — its own measurement on its own samples,
+        # never an accuracy over the mixed-provenance pool above (see `_merge_known_outcomes`).
+        # On a held round `rr` already carries the incumbent's re-score for this round's
+        # subset (`rescore_parent`), so this stays a real measurement either way.
+        tr.current_accuracy, tr.current_composite_fitness = rr.accuracy, rr.composite_fitness
         if tr.current_composite_fitness > tr.best_composite_fitness:
             tr.best_composite_fitness = tr.current_composite_fitness
             tr.best_accuracy = tr.current_accuracy
@@ -689,7 +655,6 @@ class Cycle:
         if cur_theta is not None and (tr.best_theta is None or cur_theta > tr.best_theta):
             tr.best_theta = cur_theta
 
-        rr.cumulative_accuracy = tr.current_accuracy
         rr.cumulative_theta = cur_theta
         rr.calibration_model = self.calibration_model
         rr.opt_search_point = self.opt_sp

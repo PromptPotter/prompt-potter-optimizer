@@ -374,7 +374,7 @@ class LiveDashboardView(DerivedView):
             hearts_raw = payload.get("hearts")
             hearts = None if hearts_raw is None else int(hearts_raw)
             if round_result is not None:
-                self._absorb_round_complete(round_result.cumulative_accuracy, l1_stall, hearts)
+                self._absorb_round_complete(round_result.accuracy, l1_stall, hearts)
                 if self._recorder is not None:
                     self._recorder.set_l1_score(self._l1_score_block(round_result))
                 # Append round summary; re-firing the same round (replay / sweep) replaces in place.
@@ -388,9 +388,7 @@ class LiveDashboardView(DerivedView):
                 self.state.rounds = rounds_list
                 # Settle the served headline lift AFTER the append so round 0's own
                 # summary is present when it computes its first value.
-                origin = next(
-                    (r.cumulative_accuracy for r in self.state.rounds if r.round == 0), None
-                )
+                origin = next((r.accuracy for r in self.state.rounds if r.round == 0), None)
                 self.state.headline_delta = (
                     round(self.state.best - origin, 4) if origin is not None else None
                 )
@@ -710,18 +708,23 @@ class LiveDashboardView(DerivedView):
             self.state.current_acc = round(float(acc), 4)
 
     def _absorb_round_complete(
-        self, cumulative_accuracy: float, l1_stall_count: int, hearts: int | None = None
+        self, round_accuracy: float, l1_stall_count: int, hearts: int | None = None
     ) -> None:
-        """Settle the headline ``current_acc``/``best`` to the incumbent's **cumulative** accuracy
-        (``RoundResult.cumulative_accuracy`` — the incumbent rescored over every sample probed so
-        far), the same honest full-population figure the console GENERATE header shows. The
-        per-round winner's ``round_result.accuracy`` is a hard-first *subset* score used for
-        election; surfacing it as the headline overstated progress (e.g. 47% subset vs 28% full).
-        During scoring ``current_acc`` still ticks the in-flight candidate via ``_update_current_acc``;
-        this is the round-boundary settle.
+        """Settle the headline ``current_acc``/``best`` to what the round actually MEASURED
+        (``RoundResult.accuracy`` — the elected winner on the samples this round drew, or on a
+        held round the retained incumbent's re-score). One configuration, over a stated
+        ``total``. During scoring ``current_acc`` still ticks the in-flight candidate via
+        ``_update_current_acc``; this is the round-boundary settle.
+
+        It used to settle to ``cumulative_accuracy``, described as "the incumbent rescored over
+        every sample probed so far". Nothing rescored: that series pooled rows measured by
+        different configurations, so the headline could exceed everything the cycle measured.
+        The concern it was answering is real — a hard-first subset score is not the full-set
+        rate — but the answer is the round's own ``total`` beside the number, and
+        ``cumulative_theta`` for the cross-round-comparable series, not a pooled mean.
         """
         s = self.state
-        acc = round(cumulative_accuracy, 4)
+        acc = round(round_accuracy, 4)
         s.current_acc = acc
         if acc > s.best:
             s.best = acc

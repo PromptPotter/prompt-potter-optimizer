@@ -16,8 +16,26 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from promptpotter.domain.run_records import CandidateMintedRecord, CycleSeed, LedgerCandidate
+from promptpotter.domain.run_records import (
+    CandidateMintedRecord,
+    CycleSeed,
+    LedgerCandidate,
+    LedgerRoundClose,
+)
 from promptpotter.infrastructure.store.read_model import iter_jsonl
+
+# The `ScoredCandidate` keys the fold copies verbatim — `LedgerCandidate`'s own field list
+# minus the ones identity and the fold itself supply. DERIVED from `model_fields`, the same
+# rule `build_round_summary` follows, so a field added to `LedgerCandidate` flows here with
+# no second edit. Hand-written per-key reads are how the tree ended up silently missing a
+# field the round summary already had.
+_SCORED_INCLUDE = frozenset(LedgerCandidate.model_fields) - {
+    "round",
+    "idx",
+    "parent_id",
+    "source",
+    "state",
+}
 
 
 def scan_ledger_max_round_complete(ledger_path: Path) -> int:
@@ -107,24 +125,15 @@ def scan_ledger_candidates(ledger_path: Path) -> list[LedgerCandidate]:
                 continue
             if not isinstance(scores, dict):
                 continue
-            # `(round, idx)` is the join, NOT the id. The origin deposits its aggregate
-            # through this same event carrying no id and no label — anonymous as identity,
-            # but it is still round 0's score, and the mint record above supplies the name.
-            # `scores` IS a `ScoredCandidate.model_dump()` (the origin's aggregate is the one
-            # leaner sender) — so the evaluator namespace and the sample counts are already
-            # here. The composite CI is NOT: it is stamped at round close, after this snapshot,
-            # and reaches a reader through `dashboard.json::rounds[]` (like election + θ).
+            # `(round, idx)` is the join, NOT the id — a re-run re-mints ids, position is
+            # stable. `scores` IS a `ScoredCandidate.model_dump()` from EVERY sender, C0
+            # included, so everything the candidate knows about itself is already here and
+            # is copied by name. Election and θ are not: they belong to the ROUND, and the
+            # round says so on its own close record (`scan_ledger_round_closes`).
             _merge(
                 (rnd, idx),
-                candidate_id=scores.get("candidate_id"),
-                label=scores.get("label"),
-                changes_description=scores.get("changes_description"),
-                accuracy=scores.get("accuracy"),
-                composite_fitness=scores.get("composite_fitness"),
-                evaluators=scores.get("evaluators"),
-                scored_samples=scores.get("scored_samples"),
-                expected_samples=scores.get("expected_samples"),
                 state="measured",
+                **{key: scores.get(key) for key in _SCORED_INCLUDE},
             )
 
     # An `id` + a `label` are what make a candidate a NODE. A fold that saw neither event
@@ -139,8 +148,44 @@ def scan_ledger_candidates(ledger_path: Path) -> list[LedgerCandidate]:
     return out
 
 
+def scan_ledger_round_closes(ledger_path: Path) -> dict[int, LedgerRoundClose]:
+    """``round -> LedgerRoundClose`` for every round that CLOSED in ``ledger_path``.
+
+    ONE record carries the whole close — the ``(phase="round", event="complete")``
+    ``PhaseRecord`` ``persist_round`` writes, filled from the ``RoundResult`` it is
+    persisting. Last write per round wins, so a rewind's re-close supersedes, and so does the
+    round-0 re-persist a warming δ ruler triggers. The ``ROUND_WINNER`` decision rides the
+    ledger too, but as the audit of the ELECTION; it is deliberately not this fold's source,
+    because round 0 adopts a C0 without electing anything and reading the crown off a
+    decision would leave the origin uncrownable.
+
+    **A round with no entry never closed, and that is the honest answer** — its candidates
+    get no crown, no θ, and nothing invents one. These facts used to be recovered by opening
+    ``dashboard.json``: a projection reading another projection's output, because the close
+    never reached the ingress.
+    """
+    out: dict[int, LedgerRoundClose] = {}
+    for rec in iter_jsonl(ledger_path, record_types=frozenset({"phase"})):
+        if rec.get("phase") != "round" or rec.get("event") != "complete":
+            continue
+        rnd, payload = rec.get("round"), rec.get("payload")
+        if not isinstance(rnd, int) or not isinstance(payload, dict):
+            continue
+        try:
+            out[rnd] = LedgerRoundClose(
+                round=rnd,
+                winner_label=payload.get("winner_label") or "",
+                cumulative_theta=payload.get("cumulative_theta"),
+                abilities=payload.get("abilities") or {},
+            )
+        except ValidationError:
+            continue
+    return out
+
+
 __all__ = [
     "scan_ledger_candidates",
     "scan_ledger_cycle_seed",
     "scan_ledger_max_round_complete",
+    "scan_ledger_round_closes",
 ]

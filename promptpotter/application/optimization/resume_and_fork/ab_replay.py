@@ -92,7 +92,7 @@ def ab_replay_cycle(
     )
     from promptpotter.application.optimization.cycle import (
         _calibrate_delta_ruler,
-        _merge_into_cumulative,
+        _merge_known_outcomes,
     )
 
     sc = session.scoring
@@ -117,12 +117,13 @@ def ab_replay_cycle(
         for items in t.all_candidate_results.values():
             _rescore(items)
 
-    # Cumulative winner frontier — the same sample-keyed fold the live loop keeps in
+    # Known per-sample outcomes — the same sample-keyed fold the live loop keeps in
     # ``Cycle.tracking.current_results`` (resume's election origin floor), so replay and live
-    # agree by construction rather than by two hand-copied merges.
+    # agree by construction rather than by two hand-copied merges. A pool, never a score:
+    # see ``cycle.py::_merge_known_outcomes``.
     origin_frontier: list[dict[str, Any]] = []
     for t in rounds:
-        origin_frontier = _merge_into_cumulative(origin_frontier, t.results)
+        origin_frontier = _merge_known_outcomes(origin_frontier, t.results)
     # Round 0 = the origin scored; its results calibrate the ruler, exactly as Cycle.start did —
     # including its searchpoint identity, which folds the archive's copies of the origin into the
     # one ``ORIGIN_ABILITY_ID`` candidate the live ruler saw.

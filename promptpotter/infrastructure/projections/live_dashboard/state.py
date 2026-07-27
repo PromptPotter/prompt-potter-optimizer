@@ -254,8 +254,9 @@ class LiveDashboardState(StrictModel):
 
     best: float = 0.0
     current_acc: float = 0.0
-    # Served headline lift: ``best − rounds[0].cumulative_accuracy`` (one basis on
-    # both sides). The ONE derivation of "how far above origin is the incumbent" —
+    # Served headline lift: ``best − rounds[0].accuracy`` (one basis on both sides —
+    # each side a real measurement of ONE configuration). The ONE derivation of
+    # "how far above origin is the incumbent" —
     # the webapp headline chip and the L4 inner progress line read it, neither
     # recomputes it. ``None`` until round 0 has settled.
     headline_delta: float | None = None

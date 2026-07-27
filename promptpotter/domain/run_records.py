@@ -32,6 +32,7 @@ __all__ = [
     "LLMCallRecord",
     "LLMCallStartRecord",
     "LedgerCandidate",
+    "LedgerRoundClose",
     "OperatorSweepFile",
     "PhaseRecord",
     "ResumeCheckpointKind",
@@ -48,7 +49,6 @@ class ResumeCheckpointKind(enum.StrEnum):
 
     ROUND_WINNER = "round_winner"
     ELIMINATION_CUT = "elimination_cut"
-    MARGIN_CUT = "margin_cut"
     LEADER_LOCK_IN = "leader_lock_in"
     L2_ESCALATION_TRIGGER = "l2_escalation_trigger"
     L3_ESCALATION_TRIGGER = "l3_escalation_trigger"
@@ -484,10 +484,15 @@ class LedgerCandidate(StrictModel):
     onto the `candidate_scored` snapshot (measurement) by `(round, idx)`. Derived, not a
     record: `scan_ledger_candidates` builds it, nothing appends it.
 
-    The snapshot carries a whole `ScoredCandidate.model_dump()`, so the evaluator namespace
-    and the sample counts come free. **Election, θ and the composite CI do not appear here and
-    cannot:** all are stamped at round CLOSE, after this snapshot is emitted, and reach a
-    reader through `dashboard.json::rounds[]`.
+    The snapshot carries a whole `ScoredCandidate.model_dump()`, so everything the candidate
+    knows about ITSELF comes free — the evaluator namespace, the sample counts, the composite
+    CI. **Election and θ do not appear here:** they are products of the round's joint fit, so
+    they arrive on the round's own close record (`LedgerRoundClose`), not on a candidate's.
+
+    Every field below is copied verbatim from the snapshot by name (`_SCORED_INCLUDE` in
+    `campaign_store/ledger_scan.py`), so adding one here is all it takes to carry it — the
+    hand-written per-key reads that used to sit there are how the tree silently lacked a
+    field the round summary had.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -506,6 +511,30 @@ class LedgerCandidate(StrictModel):
     evaluators: dict[str, float] = Field(default_factory=dict)
     scored_samples: int | None = None
     expected_samples: int | None = None
+    # The always-on whisker, over this candidate's own rows. A warm-ruler round OVERRIDES it
+    # at close with the tighter θ-implied band (`LedgerRoundClose.abilities`).
+    composite_ci_lo: float | None = None
+    composite_ci_hi: float | None = None
+
+
+class LedgerRoundClose(StrictModel):
+    """What a round's CLOSE tells the ledger: which individual it adopted, the frontier it
+    advanced, and the ability fit. Derived, not a record — `scan_ledger_round_closes` folds
+    it from the closing `PhaseRecord`.
+
+    These are the facts no candidate can know alone, which is why they live here rather than
+    on `LedgerCandidate`. Both `winner_label` and the `abilities` keys are the POSITIONAL
+    identity (`C{round}.{idx}`), not `candidate_id`: a lineage id is a fresh uuid per
+    construction, so a resume re-mints a candidate under a new id while the close already
+    written names the old one.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    round: int
+    winner_label: str = ""
+    cumulative_theta: float | None = None
+    abilities: dict[str, dict[str, float]] = Field(default_factory=dict)
 
 
 class CycleSeedRecord(StrictModel):
