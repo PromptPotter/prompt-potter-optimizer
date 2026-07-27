@@ -109,7 +109,7 @@ async def run_round_loop(
                 # operator decides — rescore (re-measure force-fresh after a backend
                 # fix) / proceed (override) / abort — across webapp + CLI + notebook.
                 # ``None`` ⇒ proceed into L1; a StopReason ⇒ end the cycle.
-                if origin_gate_tripped(cycle.origin_health, opt.origin_gate) is not None:
+                if origin_gate_tripped(cycle.origin_round.health, opt.origin_gate) is not None:
                     gate_stop = await run_origin_gate(
                         cycle, dataset, config, session, cb, opt.origin_gate
                     )

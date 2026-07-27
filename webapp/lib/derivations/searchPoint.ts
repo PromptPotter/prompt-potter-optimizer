@@ -1,8 +1,14 @@
 // Observe-side resolver: the read-only "what config does THIS searchpoint run"
-// view behind the chat-hero LLM node. Three searchpoint states — the dataset
-// origin, the live in-flight candidate, the last completed round's winner —
-// each reading the SAME server-resolved, config-only `resolved_pipeline_params`
-// (origin floor ⊕ candidate delta, prompt stripped; JobSearchPoint.config_params).
+// view behind the chat-hero LLM node. Two states — the live in-flight candidate
+// and a completed one out of its round file — each reading the SAME
+// server-resolved, config-only `resolved_pipeline_params` (origin floor ⊕
+// candidate delta, prompt stripped; JobSearchPoint.config_params).
+//
+// The ORIGIN is not a third state. C0 is a candidate of round 0, located by
+// `candidate_id` in `round_0000.json` like any other — so it rides
+// `candidateObserveConfig` and needs no branch here. Typing it as a state of its
+// own makes the origin a mode of LOOKING rather than a thing to look AT.
+//
 // No client re-merge: the server computes the effective config once and projects
 // it; this module only selects which searchpoint's resolved config to show. Pure
 // data → data. The STEER fork seed (`candidateSearchPoint.ts`) reads the same
@@ -20,7 +26,7 @@ import { candidateLabel } from "@/lib/candidate-label";
 import { PROMPT_STRING_FIELDS } from "@/lib/prompt-fields";
 import type { RoundResult } from "@/lib/types";
 
-export type ObserveState = "origin" | "live" | "historical";
+export type ObserveState = "live" | "historical";
 
 export interface ObserveConfig {
   // The searchpoint's evolved prompt fields (OptSearchPoint.prompt_field_dict()
@@ -80,7 +86,7 @@ function rowConfig(
 // The candidate buffer persists THROUGH L2/L3 (the backend resets it only at the
 // next `L1_GENERATE:enter`, view.py:374), so this stays non-null there. The one
 // null window is l1_generate-after-reset-before-first-candidate-started; the
-// OBSERVE view falls back to origin for that brief gap.
+// OBSERVE view falls back to the last completed searchpoint for that brief gap.
 export function liveObserveConfig(
   dash: DashboardSnapshot | null,
   nodeId?: string | null,
@@ -93,19 +99,6 @@ export function liveObserveConfig(
   }
   const label = latest.label || candidateLabel(roundOf(dash), latest.idx);
   return rowConfig(latest, `live — ${label}`, nodeId);
-}
-
-// Origin: the round-0 C0 row — the sole origin candidate, always index 0. Its
-// resolved config is the dataset's starting program, born complete server-side;
-// this is what retired the `{}` origin fake that dropped model/provider whenever
-// the overlay file was thin. Null until round 0 has been written.
-export function originObserveConfig(
-  round0: RoundResult | null,
-  nodeId?: string | null,
-): ObserveConfig | null {
-  const scores = round0?.candidate_scores;
-  if (!Array.isArray(scores)) return null;
-  return rowConfig(scores[0] as LiveInputCandidate, "origin", nodeId);
 }
 
 // Live, by id: the SELECTED in-flight candidate out of the live l1_score input
@@ -123,8 +116,9 @@ export function liveCandidateObserveConfig(
   return rowConfig(liveInputCandidate(dash, liveRound, candidateId), `live — ${label}`, nodeId);
 }
 
-// Historical: a specific past candidate (the last completed round's winner) out
-// of its lazily-loaded round file, located by `candidate_id`.
+// Historical: a specific past candidate out of its lazily-loaded round file,
+// located by `candidate_id`. Any round including 0 — C0 resolves through here,
+// which is what makes the origin an ordinary observe target.
 export function candidateObserveConfig(
   doc: RoundResult | null,
   candidateId: string,

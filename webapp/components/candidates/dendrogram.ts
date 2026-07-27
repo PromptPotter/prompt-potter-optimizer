@@ -21,6 +21,8 @@
 // centers, published by its `xBridge` plugin) and leaves untouched, so this
 // module is pure numbers and unit-testable without a canvas.
 
+import { roundSizes, wasElected } from "@/lib/derivations";
+
 export const NODE_ROW_Y = 7; // candidate dot cy, px from the strip top
 export const NODE_R = 3;
 export const FIRST_ROW_Y = 16; // the first bracket beam
@@ -32,7 +34,13 @@ export interface DendroNode {
   candidateId: string;
   round: number;
   label: string;
+  // The served incumbency fact — who the round advanced. Structural: bracket
+  // parentage rides this.
   isWinner: boolean;
+  // Whether that crown was won over RIVALS (`wasElected`). Display-only: a
+  // single-arm round (round 0, whose one arm is the origin) advances without an
+  // election, so filling its dot and saying "elected" claims what never happened.
+  isElected: boolean;
   // A fork bar — a sibling COURSE trailing the candidate spine. It keeps its bar
   // slot (the alignment contract is over ALL categories) but joins no round band:
   // its descent is cross-cycle, which the Forest draws, not this strip.
@@ -99,6 +107,10 @@ export function dendrogram(
     return { nodes, stubs, brackets, height: FLOOR_H };
   }
 
+  // Arms per round, forks excluded — they trail the spine and join no band, so they
+  // are not rivals. Feeds `isElected`: a crown is only an achievement against rivals.
+  const sizes = roundSizes(rows.filter((r) => !r.is_fork));
+
   rows.forEach((r, i) => {
     nodes.push({
       key: r.key,
@@ -106,6 +118,7 @@ export function dendrogram(
       round: r.round,
       label: r.label,
       isWinner: r.is_winner,
+      isElected: wasElected(r.is_winner, sizes.get(r.round) ?? 1),
       isFork: r.is_fork,
       i,
       xf: centers[i]!,

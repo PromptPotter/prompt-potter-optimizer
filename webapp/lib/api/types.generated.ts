@@ -542,7 +542,6 @@ export interface DatasetPipelineResponse {
   view: Record<string, unknown> | null;
   node_config_schema: Record<string, NodeConfigParam[]>;
   node_output_schema: Record<string, NodeOutputSchema | null>;
-  origin_prompt_fields: Record<string, unknown> | null;
 }
 
 export interface ActiveSessionResponse {

@@ -42,7 +42,7 @@
 
 ## Running & supervising a live `promptpotter-self`
 
-**The infrastructure is done; the optimizer *application* is not — close it bug-by-bug, not by adding infrastructure.** The loop, seams, recursion, and scoring gateway all exist and are green. What remains is making the optimizer *behave well*, and that is found empirically: **run `new promptpotter-self` on `justlogic`, collect the data, read what the loop actually produced, fix the bug, re-run.** Expect several restarts; this is the loop, not a failure.
+**The infrastructure is done; the optimizer *application* is not.** The loop, seams, recursion, and scoring gateway all exist and are green. What remains is making the optimizer *behave well*, and that is found empirically: **run `new promptpotter-self` on `justlogic`, collect the data, read what the loop actually produced, fix the bug at its ROOT, re-run.** Expect several restarts; this is the loop, not a failure. Most roots in this phase turn out to be prompts rather than code — that is where the causes have been, not a rule that the fix must be small.
 
 **The cadence must be SELF-FIRING, not event-driven.** A supervising agent schedules its own
 wake-ups (the harness's ScheduleWakeup / self-paced loop, ~150–270 s) the moment a run starts,

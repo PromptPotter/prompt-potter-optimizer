@@ -684,30 +684,29 @@ def _r_mutation_memory(b: InjectionBundle) -> str:
     generator rewrites an idea into a different field each round (see :func:`idea_fingerprint`).
     The marker is the panel's whole point made legible in one clause: the record does not just
     LIST prior attempts, it says which of them are the same attempt.
+
+    A candidate that changed NOTHING is not an attempt and gets no row — C0 (round 0 mutated
+    nothing by definition) and the occasional no-op variant. Rows are built before the
+    retained window is taken, so such a round costs no slot and an empty panel renders
+    silent rather than as a header over nothing.
     """
     prior = list(b.prior_rounds)
-    rounds = [(i, r) for i, r in enumerate(prior) if r.candidate_scores][-MEMORY_ROUND_CAP:]
-    if not rounds:
-        return ""
-    lines = [
-        "ALREADY TRIED (this cycle — a mutation measured and lost here does not improve by "
-        "being proposed again; ↺ marks an idea already tried in an earlier round, in whatever "
-        "field it was written into):"
-    ]
-    # (round_label, fingerprint) per rendered row, oldest first — the pool each later row is
-    # matched against. First match wins, so a marker always points at the EARLIEST occurrence
-    # and a long repeat chain keeps naming one round rather than the previous link.
-    seen: list[tuple[int, frozenset[str]]] = []
-    for i, rr in rounds:
+    # Attempts per round, oldest first. Built for EVERY prior round before the retained
+    # window is taken, because a round's row count is not knowable from the round: C0 and
+    # a no-op variant both carry a candidate that changed nothing. Windowing on rounds
+    # that merely HAVE candidates spends a retained slot rendering nothing.
+    by_round: list[tuple[int, list[tuple[str, frozenset[str]]]]] = []
+    for i, rr in enumerate(prior):
         parent = rr.prompt_fields
         # The candidates' parent params = the PRIOR round's resolved pipeline_params
         # (the winner / retained incumbent this round mutated from).
         parent_pp = prior[i - 1].pipeline_params if i > 0 else None
+        attempts: list[tuple[str, frozenset[str]]] = []
         for cand in rr.candidate_scores:
             changed = _candidate_mutation(cand, parent, parent_pp)
-            mutation = [f'{field}: "{value[:MEMORY_VALUE_CAP]}"' for field, value in changed] or [
-                "(no change recorded)"
-            ]
+            if not changed:
+                continue
+            mutation = [f'{field}: "{value[:MEMORY_VALUE_CAP]}"' for field, value in changed]
             # `total == 0` is checked BEFORE the paired quote, not inside `_candidate_fate`'s
             # fallback: a never-measured candidate can still carry a `matched_origin_accuracy`
             # (the origin was scored even though the candidate was not), which would otherwise
@@ -717,17 +716,31 @@ def _r_mutation_memory(b: InjectionBundle) -> str:
                 if cand.total and cand.matched_origin_accuracy is not None
                 else _candidate_fate(cand)
             )
-            fp = idea_fingerprint([value for _, value in changed])
-            echo = next(
-                (r for r, prev in seen if same_idea(fp, prev, threshold=IDEA_MATCH_MARK)), None
+            attempts.append(
+                (f"{scored} · {'; '.join(mutation)}", idea_fingerprint([v for _, v in changed]))
             )
-            repeats = (
-                sum(1 for r, prev in seen if same_idea(fp, prev, threshold=IDEA_MATCH_MARK)) + 1
-            )
-            mark = f"  ↺ same idea as r{echo} (x{repeats})" if echo is not None else ""
-            seen.append((rr.round, fp))
-            lines.append(f"  r{rr.round} {scored} · {'; '.join(mutation)}{mark}")
-    return fence_untrusted("\n".join(lines))
+        if attempts:
+            by_round.append((rr.round, attempts))
+    if not by_round:
+        return ""
+    lines: list[str] = []
+    # (round, fingerprint) per rendered row, oldest first — the pool each later row is
+    # matched against. First match wins, so a marker always points at the EARLIEST occurrence
+    # and a long repeat chain keeps naming one round rather than the previous link. Matched
+    # only within the window, so a marker never names a round the panel does not show.
+    seen: list[tuple[int, frozenset[str]]] = []
+    for round_num, attempts in by_round[-MEMORY_ROUND_CAP:]:
+        for body, fp in attempts:
+            echoes = [r for r, prev in seen if same_idea(fp, prev, threshold=IDEA_MATCH_MARK)]
+            mark = f"  ↺ same idea as r{echoes[0]} (x{len(echoes) + 1})" if echoes else ""
+            seen.append((round_num, fp))
+            lines.append(f"  r{round_num} {body}{mark}")
+    header = (
+        "ALREADY TRIED (this cycle — a mutation measured and lost here does not improve by "
+        "being proposed again; ↺ marks an idea already tried in an earlier round, in whatever "
+        "field it was written into):"
+    )
+    return fence_untrusted("\n".join([header, *lines]))
 
 
 @signal(

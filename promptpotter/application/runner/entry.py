@@ -349,14 +349,17 @@ def _build_cycle_result(
     # excluded as an outer sample rather than differenced against an invented floor.
     from promptpotter.application.intelligence.exploration import discovered_level_trajectory
 
-    cycle_rounds = cycle.rounds if cycle is not None else []
+    # ``CycleResult.rounds`` is what the SEARCH found, so it is the L1 trajectory:
+    # round 0 is the reference the whole result is differenced against, carried
+    # beside it as ``origin_accuracy`` / ``origin_level``. Counting it as a search
+    # result would credit the outer loop with the floor it started from.
+    cycle_rounds = [rr for rr in cycle.rounds if rr.round > 0] if cycle is not None else []
     ds = cycle.delta_scale if cycle is not None else None
-    tr = cycle.tracking if cycle is not None else None
     origin_level: float | None = None
     round_levels: list[float] = []
-    if tr is not None:
+    if cycle is not None:
         origin_level, round_levels = discovered_level_trajectory(
-            tr.origin_theta,
+            cycle.origin_round.cumulative_theta,
             [[(c.theta, c.theta_se) for c in rr.candidate_scores] for rr in cycle_rounds],
             ds,
         )
@@ -366,6 +369,9 @@ def _build_cycle_result(
         best_accuracy=cycle.tracking.best_accuracy if cycle is not None else 0.0,
         best_round=cycle.tracking.best_round if cycle is not None else 0,
         origin_accuracy=origin.origin_acc,
+        origin_composite_fitness=(
+            cycle.origin_round.composite_fitness if cycle is not None else 0.0
+        ),
         origin_level=origin_level,
         round_discovered_levels=round_levels,
         winner_prompt_fields=(best_sp.prompt_fields or {}) if best_sp else {},
@@ -789,7 +795,10 @@ def _finalize_run(
             "stop_reason": stop_reason,
             "rounds_to_95": rounds_to_95,
             "prompt_hashes": compute_optimizer_prompt_hashes(),
-            "origin_composite_fitness": (rounds[0].matched_origin_composite if rounds else 0.0),
+            # The ORIGIN's composite, on the origin's own samples. This used to read
+            # `rounds[0].matched_origin_composite` — round 1's winner's matched floor,
+            # a different sample basis under the origin's name.
+            "origin_composite_fitness": cycle_result.origin_composite_fitness,
             "mode": "sweep" if sweep else "full",
             # The winner artifact, serialized for the disk readers: log.md's FinalWinnerView
             # (writers.py) fetches these from `final`. Basis: the COMPOSITE-fitness high-water

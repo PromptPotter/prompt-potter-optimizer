@@ -63,6 +63,8 @@ export function ScoringInspector({ selected, onClose }: Props) {
   // CandidateRow carries the `source` tag, so `samplesForRow` routes live vs
   // historical the same way RoundSamplesView does (no merge, no second reader).
   const { byRound } = useRoundCandidates();
+  // Arms in this candidate's round — the same rows the sample list slices below.
+  const arms = selected ? (byRound.get(selected.round) ?? []).length : 0;
   const row = useMemo<CandidateRow | undefined>(() => {
     if (!selected) return undefined;
     return (byRound.get(selected.round) ?? []).find(
@@ -151,7 +153,12 @@ export function ScoringInspector({ selected, onClose }: Props) {
         )}
         <div className="inspector-row">
           <span className="inspector-key">winner</span>
-          <span className="inspector-val">{selected.is_winner ? "yes" : "no"}</span>
+          {/* A crown over no rivals is not an election (`derivations/election.ts`):
+              round 0 runs one arm. `arms === 0` means the rows have not loaded, so
+              it reports the served fact rather than guessing. */}
+          <span className="inspector-val">
+            {!selected.is_winner ? "no" : arms === 1 ? "yes — uncontested" : "yes"}
+          </span>
         </div>
         {data == null && (
           <div className="inspector-note">

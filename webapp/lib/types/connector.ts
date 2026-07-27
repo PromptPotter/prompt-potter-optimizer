@@ -58,5 +58,4 @@ export interface ConnectorView {
   // The per-node structured-output contract (read-only), shown beside the config
   // so the operator sees the whole node. Same fetch.
   nodeOutputSchema: Record<string, NodeOutputSchema | null> | null;
-  originPromptFields: Record<string, unknown> | null;
 }

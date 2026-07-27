@@ -58,12 +58,7 @@ def render_progress_table(rounds: list[dict[str, Any]], window: int = 8) -> str:
                 trend = f"+{d:.1%}"
             else:
                 trend = f"{d:.1%}"
-        if rd.get("round") == "grid":
-            rl = "G"
-        elif rd.get("label") == "origin":
-            rl = "0"
-        else:
-            rl = str(rd.get("round", "?"))
+        rl = "G" if rd.get("round") == "grid" else str(rd.get("round", "?"))
         comp = display_fitness(rd.get("composite_fitness"), acc)
         row = f"  {rl:<5s} {acc:>8.1%} {comp:>9.4f} {rolling:>12.1%}  {trend}"
         lines.append(_node_line(row))

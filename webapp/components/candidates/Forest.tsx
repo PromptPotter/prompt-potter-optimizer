@@ -84,7 +84,7 @@ const CandidateNode = memo(function CandidateNode({
       role="button"
       tabIndex={0}
       aria-pressed={selected}
-      aria-label={`Round ${n.round} candidate ${n.candidateLabel}, ${headlineMetricLabel(metric)} ${fmtHeadlineValue(metric, accuracy, theta)}${n.isWinner ? ", round winner" : ""}${divergence ? ", divergence point under the lens" : ""}${alt ? ", would be elected under the scoring lens" : ""}${dimmed ? ", counterfactual under the scoring lens" : ""}`}
+      aria-label={`Round ${n.round} candidate ${n.candidateLabel}, ${headlineMetricLabel(metric)} ${fmtHeadlineValue(metric, accuracy, theta)}${n.isElected ? ", round winner" : ""}${divergence ? ", divergence point under the lens" : ""}${alt ? ", would be elected under the scoring lens" : ""}${dimmed ? ", counterfactual under the scoring lens" : ""}`}
       onClick={() => onPick(n)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -99,9 +99,11 @@ const CandidateNode = memo(function CandidateNode({
         {metric !== "ability" && typeof theta === "number"
           ? ` · ability θ ${theta.toFixed(2)}`
           : ""}
-        {n.isWinner
+        {n.isElected
           ? "\nround winner — elected on difficulty-adjusted ability θ, not raw accuracy"
-          : ""}
+          : n.isWinner
+            ? "\nthe round's only arm — it advances without an election"
+            : ""}
       </title>
       {/* The alternative candidate is marked by its own branch line glowing red
           (`.mask-alt .lineage-stub`) — no glyph. */}

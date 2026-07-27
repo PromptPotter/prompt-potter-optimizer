@@ -324,23 +324,15 @@ def compute_degradation_health(
 
 
 def assemble_prior_healths(
-    origin_health: DegradationHealth | None,
     rounds: Sequence[RoundResult],
     round_num: int,
 ) -> list[DegradationHealth | None]:
-    """The track record for the round being closed: the origin's verdict first
-    (round 0 — the floor every L1 round improves on), then the prior L1 rounds in
-    order. The origin lives on ``Cycle.origin_health`` because ``Cycle.rounds`` is
-    the 1-indexed L1 trajectory that omits it; the round-0 entry that resume's
-    ``replay_priors`` leaves in ``rounds`` is dropped here so it isn't double-counted,
-    and the round being closed (``round_num``, already appended by ``absorb_round``)
-    is dropped too. Ordering is oldest→newest so ``compute_round_health``'s reversed
-    consecutive-degraded walk reads most-recent-first."""
-    prior: list[DegradationHealth | None] = []
-    if origin_health is not None:
-        prior.append(origin_health)
-    prior.extend(r.health for r in rounds if r.round not in (0, round_num))
-    return prior
+    """The track record for the round being closed: every OTHER round's verdict,
+    starting at the origin's (round 0 — the floor every L1 round improves on). The
+    round being closed is already in ``rounds``, so it is dropped by number. Ordering
+    is oldest→newest so ``compute_round_health``'s reversed consecutive-degraded walk
+    reads most-recent-first."""
+    return [r.health for r in rounds if r.round != round_num]
 
 
 def compute_node_failure_rates(results: list[dict[str, Any]]) -> dict[str, float]:

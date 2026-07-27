@@ -66,8 +66,10 @@ export function LiveStateCard() {
       items.push(["origin_acc", origin]);
       seen.add("origin_acc");
     }
+    // The origin's own row, located the way every other candidate is — off the
+    // round's incumbency stamp, never by position.
     const round0 = dash.rounds.find((r) => r.round === 0);
-    const originSamples = round0?.candidates[0]?.scored_samples;
+    const originSamples = round0?.candidates.find((c) => c.is_winner)?.scored_samples;
     if (typeof originSamples === "number") {
       items.push(["origin_samples", originSamples]);
       seen.add("origin_samples");

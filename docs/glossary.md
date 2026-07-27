@@ -152,12 +152,13 @@ The persisted world is a four-entity containment hierarchy
   the two gates: `docs/architecture.md` §0.5. The data a campaign starts
   from is a **Dataset**, never an "origin".
   - **origin's round-0 score** (`origin_accuracy` / round 0) — C0's
-    measurement. Persisted solely as `rounds[0]`; readers derive it via
-    `origin_accuracy_of` (`campaign_store/store.py`).
+    measurement. Held solely as `rounds[0]`, in memory (`Cycle.origin_round`)
+    and on disk alike; readers derive it via `origin_accuracy_of`
+    (`campaign_store/store.py`). It has no sidecar on `Cycle`.
 - **Parent** — the individual a candidate was mutated from, scored over the
   samples that candidate touched so every paired diff is matched
-  (`RoundParent`, `domain/results.py`; built by `rescore_parent` /
-  `Cycle.parent_for_round`). **At round 0 the parent is the origin; after
+  (`RoundParent`, `domain/results.py`; built by `rescore_parent`, labelled
+  with the parent individual's own label). **At round 0 the parent is the origin; after
   that it is the prior winner** — so "origin" is reserved for offset 0 and
   the fork point, and every other round says *parent*.
 - **Campaign** — one declared optimization effort: a dataset, a

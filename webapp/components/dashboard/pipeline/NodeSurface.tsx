@@ -8,8 +8,8 @@ import { NodeOutputSchemaView } from "@/components/dashboard/control/NodeOutputS
 
 // The one node surface: config → prompt → output, rendered as an inseparable
 // unit so config can never be gated away from its prompt. It renders exactly
-// ONE runnable specification — which searchpoint that is (origin, live,
-// historical) is the host's decision, made outside this box. Used everywhere
+// ONE runnable specification — WHICH searchpoint that is, is the host's
+// decision, made outside this box. Used everywhere
 // a node's program is shown or edited:
 //   - a concrete view node (`node` set) → config scoped to that node;
 //   - the whole pipeline (`node === null`) → config across every node + the

@@ -45,15 +45,8 @@ export function PipelineSetupSection({
       view: draft.pipeline_view,
       nodeConfigSchema: draft.node_config_schema,
       nodeOutputSchema: draft.node_output_schema,
-      originPromptFields: draft.origin_prompt_fields,
     }),
-    [
-      draft.connector,
-      draft.pipeline_view,
-      draft.node_config_schema,
-      draft.node_output_schema,
-      draft.origin_prompt_fields,
-    ],
+    [draft.connector, draft.pipeline_view, draft.node_config_schema, draft.node_output_schema],
   );
   return (
     <StaticConnectorProvider fields={fields}>

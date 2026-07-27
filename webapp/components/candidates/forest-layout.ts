@@ -17,7 +17,7 @@
 // one right of THAT candidate — the served tree's own shape answers it.
 
 import type { LineageDivergence, LineageNode } from "@/lib/api";
-import { candidatesOf, nodeKeyOf, pathOf } from "@/lib/derivations";
+import { candidatesOf, nodeKeyOf, pathOf, wasElected } from "@/lib/derivations";
 import { encodeCyclePath, type CyclePath } from "@/lib/ids";
 
 // Cladogram dimensions. Each round is one column; each course gets its own
@@ -186,7 +186,14 @@ export interface RoundNodePos {
   candKey: string;
   // Stable id for selection routing — the MINTED candidate id, never a position.
   candidateId: string;
+  // The served incumbency fact — who the round advanced. Structural: the spine and
+  // the next round's parent ride this.
   isWinner: boolean;
+  // Whether that crown was won over RIVALS (`wasElected`). Display-only, and distinct
+  // from `isWinner` on purpose: a single-arm round (round 0, whose one arm is the
+  // origin) advances its candidate without an election, so drawing it as a victor —
+  // bold label, filled dot, "elected on θ" copy — states something that never happened.
+  isElected: boolean;
   isExpanded: boolean;
   // Carries the lane (course) label — the last node of the course's last round.
   isLastInLane: boolean;
@@ -227,6 +234,7 @@ function placedNode(
   y: number,
   isExpanded: boolean,
   label: string,
+  roundSize: number,
 ): RoundNodePos {
   return {
     courseKey: laneKey,
@@ -242,6 +250,7 @@ function placedNode(
     candKey: nodeKeyOf(cand),
     candidateId: cand.id,
     isWinner: cand.is_winner,
+    isElected: wasElected(cand.is_winner, roundSize),
     isExpanded,
     isLastInLane: false,
     courseKind: l.course.course_kind ?? "root",
@@ -280,7 +289,16 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
         // the position, but never the crown — `isWinner` rides the real fact.
         const stand = winner ?? cands[0];
         if (!stand) continue;
-        const node = placedNode(laneKey, l, stand, colX(round), y, false, winner?.label ?? "");
+        const node = placedNode(
+          laneKey,
+          l,
+          stand,
+          colX(round),
+          y,
+          false,
+          winner?.label ?? "",
+          cands.length,
+        );
         nodes.push(node);
         spineByKeyRound.set(`${laneKey}::r${round}`, node);
         if (winner) nodeByCandidate.set(winner.id, node);
@@ -309,7 +327,7 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
       const roundNodes: RoundNodePos[] = [];
       cands.forEach((cand, i) => {
         const y = TOP_PAD + (l.laneOffset + topRow + i) * LANE_H;
-        const node = placedNode(laneKey, l, cand, x, y, true, cand.label);
+        const node = placedNode(laneKey, l, cand, x, y, true, cand.label, cands.length);
         nodes.push(node);
         roundNodes.push(node);
         nodeByCandidate.set(cand.id, node);

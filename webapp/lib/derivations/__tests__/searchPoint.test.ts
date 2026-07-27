@@ -3,7 +3,6 @@ import {
   candidateObserveConfig,
   liveCandidateObserveConfig,
   liveObserveConfig,
-  originObserveConfig,
 } from "../searchPoint";
 import type { DashboardSnapshot } from "@/lib/poll";
 import { dash, roundDoc, scored } from "@/lib/test-fixtures";
@@ -67,22 +66,27 @@ describe("liveCandidateObserveConfig", () => {
   });
 });
 
-describe("originObserveConfig", () => {
-  it("reads the round-0 C0 row (index 0) resolved config", () => {
-    const doc = roundDoc({
-      candidate_scores: [
-        scored({ candidate_id: "c0", prompt_fields: { instruction: "o" }, resolved_pipeline_params: { llm: { model: "m0" } } }),
-      ],
-    });
-    const r = originObserveConfig(doc);
-    expect(r?.label).toBe("origin");
+// The origin has no reader of its own. C0 is a candidate of round 0, so it
+// resolves through the SAME id-keyed join every other candidate does — which is
+// the whole premise of deleting `originObserveConfig`.
+describe("the origin as an ordinary candidate", () => {
+  const round0 = roundDoc({
+    round: 0,
+    candidate_scores: [
+      scored({ candidate_id: "c0", prompt_fields: { instruction: "o" }, resolved_pipeline_params: { llm: { model: "m0" } } }),
+    ],
+  });
+
+  it("resolves C0 out of round 0 by candidate_id", () => {
+    const r = candidateObserveConfig(round0, "c0", "selected · C0");
+    expect(r?.label).toBe("selected · C0");
     expect(r?.config).toEqual({ llm: { model: "m0" } });
     expect(r?.promptFields).toEqual({ instruction: "o" });
   });
 
-  it("returns null without a round-0 doc / candidate_scores", () => {
-    expect(originObserveConfig(null)).toBeNull();
-    expect(originObserveConfig(roundDoc({ round: 0 }))).toBeNull();
+  it("returns null before round 0 is written", () => {
+    expect(candidateObserveConfig(null, "c0", "C0")).toBeNull();
+    expect(candidateObserveConfig(roundDoc({ round: 0 }), "c0", "C0")).toBeNull();
   });
 });
 

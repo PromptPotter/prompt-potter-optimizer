@@ -66,7 +66,6 @@ const EMPTY: ConnectorView = {
   health: null,
   nodeConfigSchema: null,
   nodeOutputSchema: null,
-  originPromptFields: null,
   phase: null,
 };
 
@@ -96,7 +95,6 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
     string,
     NodeOutputSchema | null
   > | null>(null);
-  const [originPromptFields, setOriginPromptFields] = useState<Record<string, unknown> | null>(null);
 
   // Render-phase guarded reset — drops every dataset-keyed slot together
   // the same render the dataset id changes, so no consumer ever sees a
@@ -110,7 +108,6 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
     setBackendType(null);
     setNodeConfigSchema(null);
     setNodeOutputSchema(null);
-    setOriginPromptFields(null);
   }
 
   // Drop the backend list when `authed` goes false (logout / dead
@@ -161,7 +158,6 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
           backend_type?: string | null;
           node_config_schema?: Record<string, NodeConfigParam[]> | null;
           node_output_schema?: Record<string, NodeOutputSchema | null> | null;
-          origin_prompt_fields?: Record<string, unknown> | null;
         };
         if (!cancelled) {
           setView(resp?.view ?? null);
@@ -169,7 +165,6 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
           setBackendType(resp?.backend_type ?? null);
           setNodeConfigSchema(resp?.node_config_schema ?? null);
           setNodeOutputSchema(resp?.node_output_schema ?? null);
-          setOriginPromptFields(resp?.origin_prompt_fields ?? null);
           setLoaded({ key: datasetName, failed: false });
         }
       } catch {
@@ -179,7 +174,6 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
           setBackendType(null);
           setNodeConfigSchema(null);
           setNodeOutputSchema(null);
-          setOriginPromptFields(null);
           setLoaded({ key: datasetName, failed: true });
         }
       }
@@ -273,7 +267,6 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
       health,
       nodeConfigSchema,
       nodeOutputSchema,
-      originPromptFields,
       phase,
     };
   }, [
@@ -288,7 +281,6 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
     health,
     nodeConfigSchema,
     nodeOutputSchema,
-    originPromptFields,
     phase,
   ]);
 }
@@ -313,7 +305,7 @@ export function ConnectorProvider({
 // health poll. The ingest "ready" panel uses it to seed the pipeline `view` +
 // node schemas straight off the draft wire (a pre-commit check-in has no committed
 // dataset dir to fetch). `fields` overlays the empty connector shape, so the caller
-// supplies only what it has (view + schemas + originPromptFields); the live-run
+// supplies only what it has (the pipeline view + the node schemas); the live-run
 // streams (backends, health, currentNodes) stay empty — setup needs none of them.
 export function StaticConnectorProvider({
   fields,

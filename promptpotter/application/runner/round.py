@@ -6,7 +6,6 @@ The ledger is the sole persistence ingress; display projections subscribe to it
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, cast
 
 from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.config import CampaignConfig
@@ -24,13 +23,8 @@ from promptpotter.application.output import (
     write_review_md,
 )
 from promptpotter.application.run_observers import RunCallbacks
-from promptpotter.application.scoring.metrics import _compute_accuracy, composite_ci
 from promptpotter.domain.phases import StopLoop
-from promptpotter.domain.results import (
-    RoundResult,
-    ScoredCandidate,
-    candidate_label,
-)
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.results_health import (
     assemble_prior_healths,
     compute_node_failure_rates,
@@ -41,9 +35,6 @@ from promptpotter.domain.run_records import PhaseRecord, ResumeCheckpointRecord
 from promptpotter.infrastructure.tracing.bridge import observed_node
 from promptpotter.shared.errors import graceful
 
-if TYPE_CHECKING:
-    from promptpotter.domain.scoring import QueryMeasurement
-
 logger = logging.getLogger(__name__)
 
 
@@ -52,92 +43,26 @@ async def emit_origin_round(
     session: Session,
     cb: RunCallbacks,
 ) -> None:
-    """Emit the scored origin as **round 0** through the standard completion path.
+    """Close **round 0** — the origin's measurement — through the standard path.
 
-    Origin is not a lesser, separate entity — it's the first round. This builds a
-    one-candidate ``RoundResult`` from the cycle's frozen origin state
-    (``cycle.tracking.origin_*`` + ``cycle.opt_sp``) and closes it via the same
-    ``close_round`` seam every L1 round uses, so the public round file
-    (``rounds/round_0000.json``), the ``index.json::rounds[]`` entry, and the live
-    ``dashboard.json::rounds[]`` summary all carry round 0 in the identical shape.
+    The round itself is ``cycle.rounds[0]``, built by ``Cycle.start`` like any other
+    round is built by the L1 path. This runs the two things a round does at its close
+    and nothing else: seed the next round's critique, then ``close_round``, so the
+    public round file (``rounds/round_0000.json``), the ``index.json::rounds[]`` entry,
+    and the live ``dashboard.json::rounds[]`` summary all carry it in one shape.
 
-    It deliberately does **not** call ``cycle.absorb_round`` — ``cycle.rounds``
-    stays the 1-indexed L1 trajectory (origin is the floor it improves on, not a
-    member of it) — and does **not** feed escalation (``close_round`` never does;
-    only ``post_round`` observes). Idempotent at the call site: the loop guards on
-    the round-0 file already existing.
+    Like every ``close_round`` caller it does **not** feed escalation (only
+    ``post_round`` observes). Idempotent at the call site: the loop guards on the
+    round-0 file already existing.
     """
-    tr = cycle.tracking
-    osp = cycle.opt_sp
-    results = list(tr.origin_per_sample_results)
-    base = _compute_accuracy(cast("list[QueryMeasurement]", results))
-    prompt_fields = {**osp.prompt_field_dict(), "lineage": osp.lineage.model_dump()}
-    label = candidate_label(0, 0)  # "C0"
-    # C0 is enriched through the SAME shared derivations every L1 candidate uses, so
-    # the origin row can't silently omit a field the L1 path stamps: ``composite_ci``
-    # (the always-on whisker, one reader home in metrics.py), its difficulty-adjusted
-    # ability θ (the frozen round-0 ``origin_theta`` on the cycle's δ ruler — the exact
-    # floor ``c0_ok`` judges every winner against), and the per-evaluator ``evaluators``
-    # breakdown. All three are already-computed values (``tracking``); the origin round
-    # bypasses ``l1_score`` only for population/election, not for these.
-    ci_lo, ci_hi = composite_ci(cast("list[QueryMeasurement]", results))
-    sc = ScoredCandidate(
-        candidate_id=osp.lineage.id,
-        label=label,
-        # The origin changed nothing, so it describes no change. This used to be coaxed to
-        # equal the round label, purely so the old prose-matching ``is_round_winner`` would
-        # flag C0 as its own round's winner; that rule is now identity on ``candidate_id``
-        # (both this row and the round stamp ``osp.lineage.id``), so the coaxing is gone.
-        changes_description="",
-        accuracy=tr.origin_accuracy,
-        composite_fitness=tr.origin_composite_fitness,
-        composite_ci_lo=ci_lo,
-        composite_ci_hi=ci_hi,
-        theta=tr.origin_theta,
-        evaluators=dict(tr.origin_evaluators),
-        hits=base["hits"],
-        total=base["total"],
-        prompt_fields=prompt_fields,
-        resolved_pipeline_params=(tr.current_sp.config_params if tr.current_sp else None),
-        scored_samples=base["total"],
-        expected_samples=base["total"],
-        matched_origin_accuracy=tr.origin_accuracy,
-        matched_origin_hits=base["hits"],
-        matched_origin_composite=tr.origin_composite_fitness,
-    )
-    round_result = RoundResult(
-        round=0,
-        label=label,
-        accuracy=tr.origin_accuracy,
-        composite_fitness=tr.origin_composite_fitness,
-        hits=base["hits"],
-        total=base["total"],
-        improved=False,
-        origin_accuracy=tr.origin_accuracy,
-        matched_origin_accuracy=tr.origin_accuracy,
-        matched_origin_hits=base["hits"],
-        matched_origin_composite=tr.origin_composite_fitness,
-        prompt_fields=prompt_fields,
-        pipeline_params=(tr.current_sp.pipeline_params if tr.current_sp else None),
-        results=results,
-        all_candidate_results={osp.lineage.id: results},
-        candidates_scored=1,
-        candidate_scores=[sc],
-        deprecated=base["deprecated"],
-        cumulative_accuracy=tr.origin_accuracy,
-        # Round 0's frontier θ is the origin's θ (what ``best_theta`` seeds to), the θ-peer of
-        # ``cumulative_accuracy=origin_accuracy`` — so the trend line starts on the θ scale too.
-        cumulative_theta=tr.origin_theta,
-        calibration_model=cycle.calibration_model,
-        evaluators=dict(tr.origin_evaluators),
-    )
+    round_result = cycle.origin_round
     # Seed round 1's L1 with a critique over the origin's misses. The loop runs
     # critique only at round end (``l1/execute.py``), so without this seed round 1
     # opens blind — it never sees the per-sample failure pattern (here: predicted
     # material vs ground-truth process) and falls back to surface-axis guesses.
     # Sweep/diag forks inherit round 0 and never call this path, so the seed is
     # automatically off there (round 1 stays bit-identical across cheap forks).
-    if results:
+    if round_result.results:
         round_result.diagnostics = compute_round_diagnostics(
             round_result,
             [round_result],
@@ -151,13 +76,10 @@ async def emit_origin_round(
                 campaign_id=session.state.tracing_campaign_id,
                 round_num=0,
             ):
-                critique_result = await run_l1_critique(
+                round_result.critique = await run_l1_critique(
                     cycle, round_result, round_num=0, ledger=session.state.ledger
                 )
-            round_result.critique = critique_result
-            cycle.origin_critique = critique_result
 
-    round_result.opt_search_point = osp
     await close_round(cycle, round_result, 0, session, cb)
 
 
@@ -255,21 +177,15 @@ async def close_round(
     ``rr.health``) and the round-file write (``persist_round``), so the verdict reaches
     every surface in one shape.
 
-    Track record = prior rounds' verdicts: the origin (round 0) first, then the prior
-    L1 rounds. The origin lives on ``cycle.origin_health`` (``cycle.rounds`` is the
-    1-indexed L1 trajectory that omits it), so it's prepended explicitly and the
-    round-0 entry that ``replay_priors`` leaves in ``cycle.rounds`` is excluded to
-    avoid double-counting. The round being closed is excluded too (L1's
-    ``absorb_round`` already appended it to ``cycle.rounds``)."""
+    Track record = the prior rounds' verdicts, oldest first, starting at the origin's.
+    The round being closed is excluded (it is already in ``cycle.rounds``)."""
     round_result.health = compute_round_health(
         hits=round_result.hits,
         total=round_result.total,
         results=round_result.results,
-        prior_healths=assemble_prior_healths(cycle.origin_health, cycle.rounds, round_num),
+        prior_healths=assemble_prior_healths(cycle.rounds, round_num),
         is_origin=round_num == 0,
     )
-    if round_num == 0:
-        cycle.origin_health = round_result.health
     cb.on_round_complete(round_result, cycle.escalation.l1_stall_count, cycle.escalation.lives)
     persist_round(cycle, round_result, round_num, session)
     if cycle.axes and session.store:

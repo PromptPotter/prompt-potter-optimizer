@@ -632,7 +632,8 @@ the PR description.
   - **Origin is the parent at offset 0.** The general relation is *parent* —
     the individual a candidate was mutated from, scored over the samples that
     candidate touched so the diff is matched (`RoundParent`,
-    `domain/results.py`; built by `rescore_parent` / `Cycle.parent_for_round`).
+    `domain/results.py`; built by `rescore_parent`, which labels it with the
+    parent individual's own label — `cycle.rounds[-1].label`).
     At round 0 the parent is the origin; after that it is the prior winner.
     **Reserve "origin" for offset 0 and the fork point; everywhere else say
     parent.** Two names for one relation is how this word drifted before.

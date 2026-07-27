@@ -129,13 +129,15 @@ def _init_exit(d: dict[str, Any], ctx: ViewContext) -> InitExitView:
             ctx.original_sp_flat[field_name] = str(value)
 
     return InitExitView(
-        origin_acc=cycle.tracking.origin_accuracy,
+        origin_acc=cycle.origin_round.accuracy,
         cycle_id_short=(session.state.cycle_id or "?")[:12],
         samples=len(session.scoring.scoring_set),
-        origin_samples=len(cycle.tracking.origin_per_sample_results),
+        origin_samples=len(cycle.origin_round.results),
         obs_on=session.state.obs is not None,
         resumed_from_round=session.state.resumed_from_round,
-        cached_rounds_count=len(cycle.rounds),
+        # Rounds replayed off disk — round 0 is built fresh by `Cycle.start`, so it is
+        # only "cached" when a resume's priors superseded it.
+        cached_rounds_count=sum(1 for rr in cycle.rounds if rr.round > 0),
         task_context_keys=len(cycle.opt_sp.memory.task_context),
         l2_round=cycle.escalation.l2_round,
         composite_fitness_formula=full,

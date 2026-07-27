@@ -19,15 +19,19 @@ from typing import TYPE_CHECKING, Any, cast
 # state type Cycle holds; importing it via escalation/__init__ would load the
 # firing driver, which depends back on Cycle → import cycle. See escalation/__init__.
 from promptpotter.application.optimization.escalation.state import EscalationFSM
-from promptpotter.application.scoring.metrics import compute_composite_fitness
+from promptpotter.application.scoring.metrics import (
+    _compute_accuracy,
+    composite_ci,
+    compute_composite_fitness,
+)
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.escalation_signals import rf_dedup_key
 from promptpotter.domain.opt_search_point import OptSearchPoint, node_config_items
 from promptpotter.domain.results import (
-    CritiqueReadout,
-    DegradationHealth,
     RoundParent,
     RoundResult,
+    ScoredCandidate,
+    candidate_label,
 )
 from promptpotter.domain.run_records import RebaseRequest, ResumeCheckpointRecord
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
@@ -60,6 +64,78 @@ def _merge_into_cumulative(
         if sid is not None:
             by_sid[sid] = r
     return list(by_sid.values())
+
+
+def _origin_round(
+    osp: OptSearchPoint,
+    sp: JobSearchPoint,
+    *,
+    results: list[dict[str, Any]],
+    accuracy: float,
+    composite_fitness: float,
+    evaluators: dict[str, float],
+    theta: float | None,
+    calibration_model: CalibrationModel | None,
+) -> RoundResult:
+    """Round 0 as an ordinary ``RoundResult`` — one candidate, C0, no rivals.
+
+    C0 is enriched through the SAME shared derivations every L1 candidate uses, so the
+    origin row can't silently omit a field the L1 path stamps: ``composite_ci`` (the
+    always-on whisker), its ability θ on the cycle's δ ruler, and the per-evaluator
+    breakdown. The origin changed nothing, so it describes no change — winner identity
+    is ``candidate_id``, which both this row and the round stamp from the same lineage."""
+    base = _compute_accuracy(cast("list[QueryMeasurement]", results))
+    ci_lo, ci_hi = composite_ci(cast("list[QueryMeasurement]", results))
+    prompt_fields = {**osp.prompt_field_dict(), "lineage": osp.lineage.model_dump()}
+    label = candidate_label(0, 0)
+    return RoundResult(
+        round=0,
+        label=label,
+        accuracy=accuracy,
+        composite_fitness=composite_fitness,
+        hits=base["hits"],
+        total=base["total"],
+        improved=False,
+        origin_accuracy=accuracy,
+        matched_origin_accuracy=accuracy,
+        matched_origin_hits=base["hits"],
+        matched_origin_composite=composite_fitness,
+        prompt_fields=prompt_fields,
+        pipeline_params=sp.pipeline_params,
+        results=results,
+        all_candidate_results={osp.lineage.id: results},
+        candidates_scored=1,
+        candidate_scores=[
+            ScoredCandidate(
+                candidate_id=osp.lineage.id,
+                label=label,
+                changes_description="",
+                accuracy=accuracy,
+                composite_fitness=composite_fitness,
+                composite_ci_lo=ci_lo,
+                composite_ci_hi=ci_hi,
+                theta=theta,
+                evaluators=dict(evaluators),
+                hits=base["hits"],
+                total=base["total"],
+                prompt_fields=prompt_fields,
+                resolved_pipeline_params=sp.config_params,
+                scored_samples=base["total"],
+                expected_samples=base["total"],
+                matched_origin_accuracy=accuracy,
+                matched_origin_hits=base["hits"],
+                matched_origin_composite=composite_fitness,
+            )
+        ],
+        deprecated=base["deprecated"],
+        cumulative_accuracy=accuracy,
+        # Round 0's frontier θ is the origin's θ — the θ-peer of `cumulative_accuracy`,
+        # so the trend line starts on the θ scale too, and the one place θ is read from.
+        cumulative_theta=theta,
+        calibration_model=calibration_model,
+        evaluators=dict(evaluators),
+        opt_search_point=osp,
+    )
 
 
 def _build_initial_opt_sp(
@@ -234,7 +310,8 @@ def _inherit_sibling_runtime_failures(opt_sp: OptSearchPoint, session: Session) 
 
 @dataclass
 class CycleRoundState:
-    """Current/best/origin searchpoint trajectory; ``origin_*`` is round-0 frozen."""
+    """Current/best searchpoint trajectory. The origin's own scalars are NOT here —
+    they are round 0's, read off ``Cycle.origin_round``."""
 
     current_sp: JobSearchPoint | None = None
     current_accuracy: float = 0.0
@@ -242,20 +319,8 @@ class CycleRoundState:
     current_results: list[dict[str, Any]] = field(default_factory=list)
     best_accuracy: float = 0.0
     best_composite_fitness: float = 0.0
-    best_round: int = -1
+    best_round: int = 0
     best_sp: JobSearchPoint | None = None
-    origin_accuracy: float = 0.0
-    origin_composite_fitness: float = 0.0
-    # The origin's per-evaluator breakdown (same namespace every L1 candidate carries) —
-    # computed at ``start`` and kept so C0 shows the same evaluator columns as C1+ rather
-    # than blank. ``{}`` for a degenerate empty origin.
-    origin_evaluators: dict[str, float] = field(default_factory=dict)
-    origin_per_sample_results: list[dict[str, Any]] = field(default_factory=list)
-    # The frozen C0 origin's ability θ on the cycle's fixed δ ruler (slice 2) —
-    # the θ-space peer of ``origin_accuracy``, the cross-round floor ``c0_ok``
-    # compares each round's winner against. None when the ruler is cold-started
-    # (thin grade-A archive); ``c0_ok`` then falls back to ``origin_accuracy``.
-    origin_theta: float | None = None
     # Running-max ability θ of the cumulative frontier on the fixed ruler — the
     # θ-space peer of ``best_composite_fitness``, the comparator the L2/L3 stall
     # ladder reads (slice 2). Seeded from ``origin_theta``, re-maxed each round
@@ -270,19 +335,9 @@ class Cycle:
     session: Session
     config: CampaignConfig
 
+    # The whole trajectory, 0-indexed: ``rounds[0]`` IS the origin's measurement.
+    # ``start`` builds it before the loop opens, so it is never absent.
     rounds: list[RoundResult] = field(default_factory=list)
-    # Round-0 (origin) degradation verdict, stashed at origin close. ``cycle.rounds``
-    # is the 1-indexed L1 trajectory and omits the origin, but the origin's verdict
-    # still belongs to every L1 round's track record (``prior_clean`` / consecutive-
-    # degraded counting). ``close_round`` folds this in for L1 rounds; on resume,
-    # ``replay_priors`` repopulates it from the persisted round-0 file.
-    origin_health: DegradationHealth | None = None
-    # Critique generated over round 0 (origin) so round 1's L1 opens on the real
-    # per-sample failure signal instead of flying blind (the loop runs critique at
-    # round end, so without this seed round 1 has no prior critique). Same lifecycle
-    # as ``origin_health``: stashed at origin close, lives outside the 1-indexed
-    # ``cycle.rounds`` trajectory, rebuilt by ``replay_priors`` from the round-0 file.
-    origin_critique: CritiqueReadout | None = None
     tracking: CycleRoundState = field(default_factory=CycleRoundState)
     opt_sp: OptSearchPoint = field(default_factory=OptSearchPoint)
     axes: AxisIndex | None = None
@@ -381,6 +436,18 @@ class Cycle:
             session=session,
             config=config,
             earned_blocks=earned_blocks,
+            rounds=[
+                _origin_round(
+                    opt_sp,
+                    sp,
+                    results=list(origin_results or []),
+                    accuracy=origin_accuracy,
+                    composite_fitness=composite_fitness,
+                    evaluators=origin_evaluators,
+                    theta=origin_theta,
+                    calibration_model=calibration_model,
+                )
+            ],
             tracking=CycleRoundState(
                 current_sp=sp,
                 current_accuracy=origin_accuracy,
@@ -389,11 +456,6 @@ class Cycle:
                 best_accuracy=origin_accuracy,
                 best_composite_fitness=composite_fitness,
                 best_sp=sp,
-                origin_accuracy=origin_accuracy,
-                origin_composite_fitness=composite_fitness,
-                origin_evaluators=origin_evaluators,
-                origin_per_sample_results=list(origin_results or []),
-                origin_theta=origin_theta,
                 best_theta=origin_theta,
             ),
             opt_sp=opt_sp,
@@ -401,6 +463,30 @@ class Cycle:
             origin_sp_hash=origin_sp_hash,
             delta_scale=delta_scale,
             calibration_model=calibration_model,
+        )
+
+    @property
+    def origin_round(self) -> RoundResult:
+        """Round 0 — the origin's measurement, located like any round. Its accuracy,
+        composite, evaluators, per-sample results, θ, verdict and critique are round
+        fields; none of them is a sidecar on this object."""
+        return self.rounds[0]
+
+    def restamp_origin_round(self, parent: RoundParent) -> None:
+        """Replace round 0 with a fresh measurement of the same origin — the origin
+        gate's rescore. A whole round in, a whole round out: re-measuring C0 cannot
+        leave one of its fields (evaluators, the CI whisker, the verdict) reading
+        from the run before the fix. θ is carried, not re-fit: the ruler is locked."""
+        assert self.tracking.current_sp is not None
+        self.rounds[0] = _origin_round(
+            self.opt_sp,
+            self.tracking.current_sp,
+            results=list(parent.results),
+            accuracy=parent.accuracy,
+            composite_fitness=parent.composite_fitness,
+            evaluators=dict(parent.evaluators),
+            theta=self.origin_round.cumulative_theta,
+            calibration_model=self.calibration_model,
         )
 
     def _cumulative_scores(
@@ -430,31 +516,22 @@ class Cycle:
 
         ``EscalationFSM`` is NOT touched — caller rebuilds via ``from_ledger``.
 
-        The origin (round 0) is the floor, not an L1 round: it seeds the cumulative
-        base + the verdict track record but stays OUT of ``cycle.rounds`` (the
-        1-indexed L1 trajectory), so a resumed cycle reconstructs exactly what a
-        fresh ``Cycle.start`` + ``absorb_round`` holds. Resume loads round 0 in
-        ``priors`` (origin is a persisted round file post-unification), so it's
-        peeled off here rather than silently swelling the trajectory (which would
-        drift ``best_round`` by one and double-count the origin).
+        A persisted round supersedes the same-numbered one already in memory: round 0
+        is the only one ``start`` builds, and the file it was written to is the record
+        of what actually ran (its verdict, its critique, a gate rescore). A fork whose
+        priors begin at round 1 keeps the round 0 it inherited.
         """
         if not priors:
             return
         schema = self.session.pipeline_schema
         tr = self.tracking
-        origin_results: list[dict[str, Any]] = []
-        l1_rounds: list[RoundResult] = []
-        for rr in priors:
-            if rr.round == 0:
-                self.origin_health = rr.health
-                self.origin_critique = rr.critique
-                origin_results = list(rr.results)
-            else:
-                self.rounds.append(rr)
-                l1_rounds.append(rr)
+        by_round = {rr.round: rr for rr in self.rounds}
+        by_round.update({rr.round: rr for rr in priors})
+        self.rounds = [by_round[n] for n in sorted(by_round)]
+        l1_rounds = [rr for rr in self.rounds if rr.round > 0]
         if not l1_rounds:
-            # Resumed right after origin — no L1 trajectory to replay; the origin
-            # floor was already seeded by Cycle.start (its verdict captured above).
+            # Resumed right after the origin — no L1 trajectory to replay, and
+            # ``start`` already seeded tracking from round 0.
             return
         last_rr = l1_rounds[-1]
         if last_rr.opt_search_point is None or last_rr.pipeline_params is None:
@@ -473,11 +550,9 @@ class Cycle:
         tr.current_sp = self.opt_sp.to_job_search_point(
             base_pipeline_params=last_rr.pipeline_params, schema=schema
         )
-        # best_round = cumulative-state high-water-mark over the L1 trajectory,
-        # seeded from the origin floor (mirrors absorb_round). best_round is the
-        # round NUMBER, not a positional index — origin sits outside cycle.rounds, so
-        # a positional counter would drift one ahead of the real round.
-        acc_cum: list[dict[str, Any]] = list(origin_results)
+        # best_round = cumulative-state high-water-mark, walked from round 0 (the
+        # origin floor) forward. It is the round NUMBER, which is now also its index.
+        acc_cum: list[dict[str, Any]] = []
         for rr in self.rounds:
             acc_cum = _merge_into_cumulative(acc_cum, list(rr.results))
             cum_acc, cum_comp = self._cumulative_scores(
@@ -529,7 +604,7 @@ class Cycle:
             return
         delta_scale, origin_theta, calibration_model = _calibrate_delta_ruler(
             self.session,
-            self.tracking.origin_per_sample_results,
+            self.origin_round.results,
             self.config.optimization.elimination_n_min,
             enable_2pl=self.config.optimization.enable_2pl_graduation,
             archive_obs=build_archive_observations(
@@ -541,7 +616,13 @@ class Cycle:
         if delta_scale:  # warmed — lock the ruler + re-read origin θ on it
             self.delta_scale = delta_scale
             self.calibration_model = calibration_model
-            self.tracking.origin_theta = origin_theta
+            # Round 0 carries θ twice — its own frontier and C0's row — and a warm fit
+            # must move both, or the round file reports the origin at two abilities.
+            self.origin_round.cumulative_theta = origin_theta
+            self.origin_round.candidate_scores = [
+                c.model_copy(update={"theta": origin_theta})
+                for c in self.origin_round.candidate_scores
+            ]
 
     def adopt(self, new_incumbent: OptSearchPoint, *, advanced: dict[str, Any]) -> None:
         """Make ``new_incumbent`` the cycle's searchpoint — the ONE adoption seam for
@@ -613,14 +694,3 @@ class Cycle:
         rr.calibration_model = self.calibration_model
         rr.opt_search_point = self.opt_sp
         return rr
-
-    def parent_for_round(self, round_num: int) -> RoundParent:
-        """Build the round's parent — the current best, carried as-is."""
-        tr = self.tracking
-        return RoundParent(
-            accuracy=tr.current_accuracy,
-            composite_fitness=tr.current_composite_fitness,
-            osp=self.opt_sp,
-            results=list(tr.current_results),
-            label=f"round_{round_num}" if round_num > 0 else "origin",
-        )

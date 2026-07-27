@@ -5,6 +5,7 @@ export * from "./allowedModels";
 export * from "./candidateSearchPoint";
 export * from "./connector-state";
 export * from "./critical-alert";
+export * from "./election";
 export * from "./forkReconcile";
 export * from "./headline-stats";
 export * from "./hearts";

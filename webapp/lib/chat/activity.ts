@@ -98,14 +98,7 @@ function roundItem(round: number, detail: string | undefined): ActivityItem {
 // One candidate row, keyed by its canonical label so snapshot + started + scored
 // + per-sample running update all upsert to the same line.
 function candidateItem(label: string, detail: string | undefined): ActivityItem {
-  return {
-    id: `cand-${label}`,
-    kind: "candidate",
-    icon: "◆",
-    label: label === "C0" ? "Origin (C0)" : label,
-    detail,
-    tone: "good",
-  };
+  return { id: `cand-${label}`, kind: "candidate", icon: "◆", label, detail, tone: "good" };
 }
 
 // Paint history from the leading stream_snapshot frame (the cycle's
@@ -119,15 +112,17 @@ export function snapshotToActivity(payload: Record<string, unknown>): ActivityIt
     const r = asRec(rr);
     const round = num(r.round);
     if (round == null) continue;
-    if (round === 0) out.push(candidateItem("C0", pct0(num(r.cumulative_accuracy))));
-    else out.push(roundItem(round, pct0(num(r.cumulative_accuracy))));
+    out.push(roundItem(round, pct0(num(r.cumulative_accuracy))));
   }
 
   // The in-flight round: every planned candidate (so the one being scored shows
-  // immediately), fitness from the scored set where available.
+  // immediately), fitness from the scored set where available. Round 0 is a round
+  // like any other here; it enumerates nothing only because the engine scores the
+  // origin without firing `candidate_started`, so no C0 row reaches the l1_score
+  // input. That is an engine gap, not a rule of this reader.
   const cr = asRec(payload.current_round);
   const crRound = num(cr.round);
-  if (crRound != null && crRound > 0) {
+  if (crRound != null && crRound >= 0) {
     const l1 = asRec(asRec(cr.nodes).l1_score);
     const inputs = Array.isArray(asRec(l1.input).candidates) ? asRec(l1.input).candidates : [];
     const outputs = Array.isArray(asRec(l1.output).candidates) ? asRec(l1.output).candidates : [];

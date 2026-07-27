@@ -121,7 +121,7 @@ export const DendrogramStrip = memo(function DendrogramStrip({
                 aria-label={
                   n.isFork
                     ? `Fork ${n.label} — a sibling course cut from this cycle; opens it — ${value}`
-                    : `Candidate ${n.label}${n.isWinner ? ", round winner" : ""} — ${value}`
+                    : `Candidate ${n.label}${n.isElected ? ", round winner" : ""} — ${value}`
                 }
                 className={cx("cand-dendro-hit", selected && "selected")}
                 onClick={() => onSelect(selected ? null : (view ?? null))}
@@ -135,9 +135,11 @@ export const DendrogramStrip = memo(function DendrogramStrip({
                   {n.label}
                   {n.isFork
                     ? " · a fork — a sibling course cut from this cycle. Click to open it."
-                    : n.isWinner
+                    : n.isElected
                       ? " · round winner (the incumbent this round elected)"
-                      : " · eliminated"}
+                      : n.isWinner
+                        ? " · the round's only arm — it advances without an election"
+                        : " · eliminated"}
                 </title>
                 {/* Transparent backing rect — the 3px dot alone is an unfair
                     click/focus target. Mirrors the workflow node's hit rect. */}

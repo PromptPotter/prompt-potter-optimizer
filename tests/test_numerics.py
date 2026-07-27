@@ -2909,15 +2909,13 @@ def test_origin_verdict_is_first_in_the_l1_track_record():
             health=(_health(grade) if grade else None),
         )
 
-    origin_h = _health("critical")
-    # Fresh run: origin lives only on origin_health, rounds = [R1, R2].
-    fresh = assemble_prior_healths(origin_h, [_round(1, "degraded"), _round(2, "degraded")], 3)
-    # Resume: replay_priors left a round-0 entry in rounds — must not double-count.
-    resumed = assemble_prior_healths(
-        origin_h, [_round(0, "critical"), _round(1, "degraded"), _round(2, "degraded")], 3
-    )
-    assert fresh == resumed, "resume's round-0 entry must not double-count the origin"
-    assert fresh[0] is origin_h and len(fresh) == 3
+    # Round 0 IS a round: its verdict is read off the trajectory, never a sidecar,
+    # and it is first because it is oldest. Fresh and resumed hold the same list.
+    rounds = [_round(0, "critical"), _round(1, "degraded"), _round(2, "degraded")]
+    fresh = assemble_prior_healths(rounds, 3)
+    assert fresh[0] is rounds[0].health and len(fresh) == 3
+    # The round being CLOSED is the only one dropped — closing R1 still counts the origin.
+    assert assemble_prior_healths(rounds, 1) == [rounds[0].health, rounds[2].health]
 
     # Degrading R3 on top of (critical origin, degraded R1, degraded R2) → 3 consecutive.
     transient_rows = [

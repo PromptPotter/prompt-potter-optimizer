@@ -21,7 +21,6 @@ from promptpotter.application.datasets.ingest import (
     draft_from_dataset,
     ingest_draft,
 )
-from promptpotter.application.datasets.prompts import load_node_prompt
 from promptpotter.application.intelligence.adaptive_queue_mechanism import marginal_hit_probability
 from promptpotter.application.intelligence.measurement_series import (
     campaign_measurement_series,
@@ -702,8 +701,7 @@ def get_dataset_measurement_series(
 class DatasetPipelineResponse(StrictModel):
     """Target pipeline view for a dataset overlay. `view` drives the webapp chat-pane hero;
     `pipeline` is the full parsed schema for consumers needing per-node config; `connector` is
-    the original-cased name for chip labelling; `origin_prompt_fields` is the origin PromptTemplate
-    for the primary node (None when the dataset ships no `prompts/`).
+    the original-cased name for chip labelling.
     """
 
     name: str
@@ -725,13 +723,12 @@ class DatasetPipelineResponse(StrictModel):
     # beside the config so the operator sees the WHOLE node (model + params +
     # prompt + the structured output it produces). None for nodes with no schema.
     node_output_schema: dict[str, NodeOutputSchema | None]
-    origin_prompt_fields: dict[str, Any] | None
 
 
 @datasets_router.get("/{name}/pipeline", response_model=DatasetPipelineResponse)
 def get_dataset_pipeline(name: str, store: StoreDep) -> DatasetPipelineResponse:
-    """Return the dataset overlay's parsed pipeline schema, graph view, per-node
-    config + output schema, and origin prompt.
+    """Return the dataset overlay's parsed pipeline schema, graph view, and per-node
+    config + output schema.
 
     Identity-gated through the same resolver as the other dataset reads — there is
     no unauthenticated path to a benchmark's pipeline/overlay config.
@@ -755,16 +752,6 @@ def get_dataset_pipeline(name: str, store: StoreDep) -> DatasetPipelineResponse:
     if campaign_path.is_file():
         cfg = load_dataset_campaign_config(campaign_path)
         schema = schema.narrow(cfg.optimizer_narrowing)
-    # Origin prompt for the first pipeline step — read-only seed the node panel
-    # shows. `load_node_prompt` resolves `{node}.json` → `default.json`; absent a
-    # `prompts/` dir it raises, which we surface as null origin_prompt_fields.
-    origin_prompt_fields: dict[str, Any] | None = None
-    steps = schema.active_steps
-    if steps:
-        try:
-            origin_prompt_fields = load_node_prompt(dataset_dir, steps[0]).model_dump()
-        except FileNotFoundError:
-            origin_prompt_fields = None
     return DatasetPipelineResponse(
         name=name,
         connector=connector,
@@ -773,7 +760,6 @@ def get_dataset_pipeline(name: str, store: StoreDep) -> DatasetPipelineResponse:
         view=schema.view.model_dump(by_alias=True) if schema.view is not None else None,
         node_config_schema=schema.node_config_schema(),
         node_output_schema=schema.node_output_schemas(),
-        origin_prompt_fields=origin_prompt_fields,
     )
 
 

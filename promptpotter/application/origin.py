@@ -99,11 +99,14 @@ async def rescore_parent(
         accuracy = s["accuracy"]
         composite_fitness = s["composite_fitness"]
     return RoundParent(
+        # The parent INDIVIDUAL's label (``C0``, ``C3.1``, …), read off the round it won.
+        # It reaches disk — a held round persists the parent's label as its own — so a
+        # synthesized round name here ("origin", "round_2") names no candidate.
+        label=cycle.rounds[-1].label,
         accuracy=accuracy,
         composite_fitness=composite_fitness,
         osp=cycle.opt_sp,
         results=results,
-        label=f"round_{round_num}" if round_num > 0 else "origin",
     )
 
 
@@ -150,9 +153,6 @@ class CampaignOrigin(NamedTuple):
     resolved_origin: OptSearchPoint | None
     origin_acc: float
     origin_results: list[Any] | None
-    instruction: str
-    hits: int = 0
-    total: int = 0
 
 
 def try_inherit_fork_origin(
@@ -253,7 +253,6 @@ def try_inherit_fork_origin(
         resolved_origin=resolved_origin,
         origin_acc=origin_acc,
         origin_results=inherited_results,
-        instruction=resolved_origin.instruction,
     )
 
 
@@ -309,7 +308,6 @@ def resolve_origin_opt_search_point(
                 )
 
     return OptSearchPoint(
-        instruction="",
         lineage=IndividualLineage(
             changes_description="Origin (no prompt node active — param-only optimization)",
             source="origin",
@@ -394,7 +392,6 @@ async def prepare_scoring_context(
                 resolved_origin=resolved_origin,
                 origin_acc=0.0,
                 origin_results=None,
-                instruction=resolved_origin.instruction,
             ),
             dataset,
         )
@@ -497,9 +494,6 @@ async def prepare_scoring_context(
             resolved_origin=resolved_origin,
             origin_acc=scores["accuracy"],
             origin_results=origin_results,
-            instruction=resolved_origin.instruction,
-            hits=scores["hits"],
-            total=scores["total"],
         ),
         dataset,
     )

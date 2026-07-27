@@ -359,12 +359,11 @@ async def l1_score(
     # decaying below where it started while still stamping `improved=True`.
     #
     # Slice 2 (fitness-comparability): ``c0_ok`` compares in θ on the cycle's FIXED δ ruler —
-    # the origin's frozen θ (``cycle.tracking.origin_theta``) vs the winner's θ on that same
-    # ruler (``fit_theta_given_delta`` → one shared scale). The ruler is flat (δ≡0) where cold,
-    # so θ degenerates to logit-accuracy there: ALWAYS θ, never a separate accuracy branch
-    # (one ruler, θ always). Holds up once per-round subsets drift, where raw accuracy stops
-    # being cross-round comparable.
-    origin_theta = cycle.tracking.origin_theta
+    # round 0's θ vs the winner's θ on that same ruler (``fit_theta_given_delta`` → one shared
+    # scale). The ruler is flat (δ≡0) where cold, so θ degenerates to logit-accuracy there:
+    # ALWAYS θ, never a separate accuracy branch (one ruler, θ always). Holds up once
+    # per-round subsets drift, where raw accuracy stops being cross-round comparable.
+    origin_theta = cycle.origin_round.cumulative_theta
     # Same decoupling: the winner's θ on the fixed ruler is the election's ``abilities`` value —
     # the c0_ok floor compares it against the FROZEN round-0 ``origin_theta`` (a different,
     # cross-round number kept as-is), so only the winner-θ side is the deduplicated refit.

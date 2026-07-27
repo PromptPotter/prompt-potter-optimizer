@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.views.view_models import AnyView, InitExitView
+from promptpotter.application.views.view_models import AnyView
 from promptpotter.config.settings import OPTIMIZER_PROMPT_WARN_CHARS
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
@@ -125,21 +125,14 @@ class LiveDisplay(DerivedView):
         return self._core.origin_acc
 
     def set_origin(self, fresh: float) -> None:
-        """Post-origin rewire; seeds the round-0 ``origin`` row in ``campaign_rounds``."""
+        """Post-origin rewire — the headline scalars only.
+
+        It does NOT seed a row: round 0 arrives through ``on_round_complete`` like every
+        round. Inserting a synthetic ``origin`` row here put the origin in the table
+        twice (once as itself, once as C0) and, because the row numbers were positional,
+        pushed every later round's number one ahead of the round it reported."""
         self._core.origin_acc = fresh
-        if fresh > self._core.best_acc:
-            self._core.best_acc = fresh
-        if not any(rd.get("label") == "origin" for rd in self.campaign_rounds):
-            self.campaign_rounds.insert(
-                0,
-                {
-                    "round": 0,
-                    "label": "origin",
-                    "accuracy": fresh,
-                    "composite_fitness": self._phase_ctx.get("origin_composite_fitness"),
-                },
-            )
-            self.initial_len = max(self.initial_len, 1)
+        self._core.best_acc = max(self._core.best_acc, fresh)
 
     # --- Ledger subscription (via DerivedView) ---------------------
 
@@ -270,13 +263,6 @@ class LiveDisplay(DerivedView):
             self._round_best_acc = None
             self._round_best_label = None
             self._round_started_at = time.monotonic()
-        # Patch the origin row's composite once INIT:exit surfaces it.
-        if isinstance(view, InitExitView):
-            origin_comp = view.origin_composite_fitness
-            for rd in self.campaign_rounds:
-                if rd.get("label") == "origin" and rd.get("composite_fitness") is None:
-                    rd["composite_fitness"] = origin_comp
-                    break
         if event.phase == CampaignPhase.ESCALATION and event.event == "exit":
             self.sample_counter = 0
         # Resume-rewind rebuild needs the live ``env``/``state`` objects, which
@@ -295,7 +281,7 @@ class LiveDisplay(DerivedView):
             for rr in getattr(cycle_state, "rounds", None) or []:
                 self.campaign_rounds.append(
                     {
-                        "round": len(self.campaign_rounds),
+                        "round": rr.round,
                         "label": rr.label,
                         "accuracy": rr.accuracy,
                         "composite_fitness": rr.composite_fitness,
@@ -465,7 +451,7 @@ class LiveDisplay(DerivedView):
 
         self.campaign_rounds.append(
             {
-                "round": len(self.campaign_rounds),
+                "round": round_result.round,
                 "label": round_result.label,
                 "accuracy": round_result.accuracy,
                 "composite_fitness": round_result.composite_fitness,

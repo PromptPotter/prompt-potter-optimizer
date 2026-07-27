@@ -93,7 +93,7 @@ async def score_population(
     seed_sp = cycle.tracking.current_sp
     seed_grades: dict[int, float] = {}
     if seed_results and seed_sp is not None:
-        seed_id = f"R{cycle.rounds[-1].round}_winner" if cycle.rounds else "origin"
+        seed_id = f"R{cycle.rounds[-1].round}_winner"
         elim_check.register_completed(
             cast("list[QueryMeasurement]", seed_results), candidate_id=seed_id, sp=seed_sp
         )

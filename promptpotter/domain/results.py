@@ -605,7 +605,11 @@ class CycleResult(StrictModel):
     n_l1_rounds: int
     best_accuracy: float
     best_round: int
+    # The origin's own two headline scalars, on the origin's own sample basis. They
+    # travel together because a consumer reading one against a composite computed on
+    # some other basis is comparing two different measurements.
     origin_accuracy: float
+    origin_composite_fitness: float = 0.0
     # The L4 outer proxy's honest, single-scale inner-search signal (built by
     # `exploration.discovered_level_trajectory` at finalize). `origin_level` is the origin's
     # level and `round_discovered_levels` the cumulative best-DISCOVERED conservative level

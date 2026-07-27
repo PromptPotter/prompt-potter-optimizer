@@ -186,13 +186,6 @@ def build_bundle(
         latest_round = cycle.rounds[-1]
     latest_diag = latest_round.diagnostics if latest_round else None
     latest_crit = latest_round.critique if latest_round else None
-    # Round 1 has no prior L1 round (origin stays out of ``cycle.rounds``): seed L1
-    # with the origin critique so it opens on the real material-vs-process failure
-    # signal rather than the round-1 "no critique" path. ``origin_critique`` is None
-    # while the origin critique is itself being generated (latest_round passed
-    # explicitly there) — so this is a no-op on that call, not a feedback loop.
-    if latest_crit is None and not cycle.rounds:
-        latest_crit = cycle.origin_critique
     round_num = latest_round.round + 1 if latest_round else 1
 
     current_sp = cycle.tracking.current_sp
@@ -216,7 +209,7 @@ def build_bundle(
     # Trajectory pair: frozen origin hits + the live cumulative frontier. The frontier ships
     # WHOLE — the failure panels take the misses out of it themselves, and `answer_distribution`
     # needs the hits to see a pipeline that has collapsed onto a single label.
-    origin_per_sample = list(cycle.tracking.origin_per_sample_results)
+    origin_per_sample = list(cycle.origin_round.results)
     trajectory_results = list(cycle.tracking.current_results)
 
     return InjectionBundle(

@@ -69,7 +69,7 @@ async def run_origin_gate(
     returned a stop for the freshly-emitted round 0."""
     stdin_q = _spawn_stdin_reader()
     while True:
-        grade = cycle.origin_health.grade if cycle.origin_health else "unknown"
+        grade = cycle.origin_round.health.grade if cycle.origin_round.health else "unknown"
         logger.warning(
             "Origin gate (%s): round-0 verdict is %s — holding before L1. Decide via "
             "the webapp modal, the CLI prompt, or the origin-gate-decision command.",
@@ -114,8 +114,8 @@ async def run_origin_gate(
                 "Fix the backend and decide again."
             )
             continue
-        if origin_gate_tripped(cycle.origin_health, mode) is None:
-            new_grade = cycle.origin_health.grade if cycle.origin_health else "unknown"
+        if origin_gate_tripped(cycle.origin_round.health, mode) is None:
+            new_grade = cycle.origin_round.health.grade if cycle.origin_round.health else "unknown"
             logger.warning("Origin gate: re-scored origin is %s — entering L1.", new_grade)
             declare_run_phase(session, RunPhase.RUNNING)
             return None
@@ -190,20 +190,16 @@ async def _rescore_and_reemit(
 ) -> None:
     """Re-score the origin force-fresh over the same-sized sample set the origin
     used, then re-emit round 0 through the standard ``close_round`` seam so the
-    verdict re-stamps ``cycle.origin_health`` and every round-0 surface
-    (``round_0000.json``, ``dashboard.json::rounds[0]``) updates in one shape."""
+    fresh verdict and every round-0 surface (``round_0000.json``,
+    ``dashboard.json::rounds[0]``) update in one shape."""
     from promptpotter.application.datasets.loaders import sample_dataset
     from promptpotter.application.origin import rescore_parent
 
     scoring_set = sample_dataset(dataset, config.origin_budget())
     origin = await rescore_parent(cycle, scoring_set, 0, callbacks=cb, force_fresh=True)
-    tr = cycle.tracking
-    tr.origin_accuracy = origin.accuracy
-    tr.origin_composite_fitness = origin.composite_fitness
-    tr.origin_per_sample_results = list(origin.results)
-    # Re-grade round 0 as a fresh floor (no prior track record), exactly as the
-    # first origin emit did; close_round re-stamps cycle.origin_health.
-    cycle.origin_health = None
+    # A fresh round replaces round 0 outright, so it is re-graded as a fresh floor
+    # (no prior track record) exactly as the first origin emit was.
+    cycle.restamp_origin_round(origin)
     await emit_origin_round(cycle, session, cb)
 
 

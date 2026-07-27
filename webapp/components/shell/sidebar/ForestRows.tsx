@@ -22,6 +22,8 @@ import {
   cutFromLabel,
   panelCellLabel,
   pathOf,
+  roundSizes,
+  wasElected,
 } from "@/lib/derivations";
 import { encodeCyclePath, shortFamilyTail, type CyclePath } from "@/lib/ids";
 import type { CampaignSummary, LineageNode } from "@/lib/api";
@@ -341,12 +343,11 @@ function CandidateRow({
   const addr = `${encodeCyclePath(candPath)}|${cand.id}`;
   const open = ctx.isNodeOpen("cand", addr);
   const hasChildren = inner.length > 0;
-  const isOrigin = cand.label === "C0";
+  // Keyed on the ROUND, not the label: a fork's C0 is a replay of the candidate it was
+  // cut from, and label-matching handed it this course's origin copy.
+  const isOrigin = (cand.round ?? 0) === 0;
   const cutFrom = cutFromLabel(cand, siblings);
-  // A round with rivals. Round 0 runs one candidate — the origin — so its `is_winner` is
-  // true by having nobody to beat. That is a fact about the round's shape, not an
-  // achievement, and badging C0 "won" put two winners on one course.
-  const contested = siblings.filter((s) => (s.round ?? 0) === (cand.round ?? 0)).length > 1;
+  const elected = wasElected(cand.is_winner, roundSizes(siblings).get(cand.round ?? 0) ?? 1);
 
   // The navigate+inspect pair lives in `useSelectNode` — the time-ray fires the same
   // gesture on a candidate step, and both have to resolve the measurement off the node
@@ -393,7 +394,7 @@ function CandidateRow({
                     ⑂{cutFrom ? ` from ${cutFrom}` : ""}
                   </span>
                 )}
-                {cand.is_winner && contested && (
+                {elected && (
                   <span className="unit-library-kind" title="Elected this round's winner">
                     won
                   </span>

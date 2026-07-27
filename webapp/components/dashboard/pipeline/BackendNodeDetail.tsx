@@ -4,10 +4,9 @@ import type { DraftCampaignWire, DraftPatch } from "@/lib/api";
 import {
   candidateObserveConfig,
   liveObserveConfig,
-  originObserveConfig,
   roundHasCandidates,
   sortedRounds,
-  type ObserveConfig,
+  wasElected,
   type ObserveState,
 } from "@/lib/derivations";
 import { candidateLabel } from "@/lib/candidate-label";
@@ -26,14 +25,17 @@ import { NodeSurface } from "./NodeSurface";
 //     (the draft-backed lock/allow editor) + prompt + output;
 //   - setup + the whole-pipeline chip → read-only draft preview (no toggle);
 //   - a RUN (no draft) → OBSERVE the resolved config the searchpoint executes,
-//     read-only. The 3-way origin ↔ live ↔ historical selector sits ABOVE the
-//     surface — it picks WHICH searchpoint the box shows; the box itself always
-//     renders exactly one runnable spec.
+//     read-only. The live ↔ historical selector sits ABOVE the surface — it picks
+//     WHICH searchpoint the box shows; the box itself always renders exactly one
+//     runnable spec.
 // AUTHOR (lock editing) is a setup act; OBSERVE (read-only resolved config) is a
 // run act — so a concrete node during a run shows OBSERVE, never the lock editor.
-// All three OBSERVE states read ONE server-resolved field
-// (`resolved_pipeline_params`) — never a client re-merge. Steering is a separate
-// act with its own home (`ScoringInspector` → `SteerForkPanel`); this never forks.
+// Both OBSERVE states read ONE server-resolved field (`resolved_pipeline_params`)
+// — never a client re-merge. Steering is a separate act with its own home
+// (`ScoringInspector` → `SteerForkPanel`); this never forks.
+//
+// The ORIGIN is not a state here. C0 is a candidate of round 0 and observes
+// through the historical path by `candidate_id`, exactly like C2.3.
 
 interface Props {
   // The active draft while a campaign is being set up; null otherwise.
@@ -43,7 +45,7 @@ interface Props {
   onPromptApply?: (patch: DraftPatch) => void;
 }
 
-const OBSERVE_STATES: ObserveState[] = ["origin", "live", "historical"];
+const OBSERVE_STATES: ObserveState[] = ["live", "historical"];
 
 // The historical observe target: a specific past candidate located by id in its
 // round file. `{round, candidateId, label}` — the shape `candidateObserveConfig`
@@ -54,21 +56,23 @@ interface HistTarget {
   label: string;
 }
 
-// The last completed round (≥1) carrying a flagged winner — the default
-// "historical" observe target when the operator hasn't selected a candidate.
-// Round 0 is excluded (it == origin). Null when no such round has closed yet.
-function lastWinner(dash: DashboardSnapshot | null): HistTarget | null {
-  const rounds = sortedRounds(dash)
-    .filter((r) => r.round >= 1 && roundHasCandidates(r))
-    .reverse();
+// The last completed round's incumbent — the default "historical" observe target
+// when the operator hasn't selected a candidate. Round 0 is INCLUDED: on a
+// campaign that has only measured its origin, C0 is the last completed
+// searchpoint, and it is reached the same way every other one is. It is only
+// badged `winner` when the round it won had rivals (`wasElected`) — round 0
+// crowns its sole arm by default and must not claim an election.
+function lastIncumbent(dash: DashboardSnapshot | null): HistTarget | null {
+  const rounds = sortedRounds(dash).filter(roundHasCandidates).reverse();
   for (const r of rounds) {
     const idx = r.candidates.findIndex((c) => c.is_winner);
     const w = idx >= 0 ? r.candidates[idx] : null;
     if (w?.candidate_id) {
+      const label = candidateLabel(r.round, idx);
       return {
         round: r.round,
         candidateId: w.candidate_id,
-        label: `winner · ${candidateLabel(r.round, idx)}`,
+        label: wasElected(true, r.candidates.length) ? `winner · ${label}` : label,
       };
     }
   }
@@ -94,21 +98,20 @@ export function BackendNodeDetail({ draft, onClose, onPromptApply }: Props) {
   const liveCfg = liveObserveConfig(dash, nodeId);
   // Viewed leaf path from the synchronous workspace, NOT from `dash` (which
   // hard-nulls on a soft unit switch and stays null during `warming_up`) —
-  // otherwise the round-0 / historical observe-config fetches below starve and
-  // the panel blanks even though the round files exist on disk. It follows the
+  // otherwise the historical observe-config fetch below starves and the
+  // panel blanks even though the round files exist on disk. It follows the
   // viewed leaf, so an L4 inner loop reads the inner cycle's round files.
   // `liveObserveConfig(dash)` above stays on `dash`: live-snapshot data,
   // correctly sourced.
   const { viewedPath } = useWorkspace();
 
-  // Historical target: the operator's selected candidate (round ≥1) if any, else
-  // the last completed round's winner. The run-observe branch reads its round file.
-  const histTarget: HistTarget | null =
-    selCand && selCand.round >= 1
-      ? { round: selCand.round, candidateId: selCand.candidate_id, label: `selected · ${selCand.label}` }
-      : lastWinner(dash);
+  // Historical target: the operator's selected candidate if any — C0 included, it
+  // is a candidate of round 0 — else the last completed round's incumbent. ONE
+  // fetch, following the target.
+  const histTarget: HistTarget | null = selCand
+    ? { round: selCand.round, candidateId: selCand.candidate_id, label: `selected · ${selCand.label}` }
+    : lastIncumbent(dash);
   const runObserve = !draft;
-  const round0 = useRoundFile(viewedPath, runObserve ? 0 : null);
   const histFile = useRoundFile(viewedPath, runObserve ? histTarget?.round ?? null : null);
 
   // The explicit toggle pref, reset whenever the selected candidate changes so the
@@ -161,55 +164,35 @@ export function BackendNodeDetail({ draft, onClose, onPromptApply }: Props) {
     );
   }
 
-  // --- OBSERVE (run): one read-only resolved config, selected across the three
-  // searchpoint states. Each reads the served `resolved_pipeline_params`; the
-  // origin fallback (round 0 not yet written) is the schema-declared config. A
+  // --- OBSERVE (run): one read-only resolved config, selected across the two
+  // searchpoint states. Each reads the served `resolved_pipeline_params`. A
   // concrete node scopes the header/prompt; the config stays whole-pipeline.
   const histCfg = histTarget
     ? candidateObserveConfig(histFile.doc, histTarget.candidateId, histTarget.label, nodeId)
     : null;
-  const originCfg = originObserveConfig(round0.doc, nodeId);
   // `live` is available only while the cycle is actually running — `current_round`
   // candidates linger in dashboard.json after a stop, so gate on `isLive`, not on
   // their mere presence (else a stopped run still offers a stale "live").
   const avail: Record<ObserveState, boolean> = {
-    origin: true,
     live: isLive && !!liveCfg,
     historical: !!histCfg,
   };
-  // Auto-follow the operator's selection (a selected candidate → its searchpoint);
-  // else the live in-flight candidate while running; else the last completed
-  // searchpoint (historical); else origin. A selected candidate in the STILL-LIVE
-  // round has no round file yet (it's written at round close), so its historical
-  // config is unavailable — fall to the live searchpoint, never origin (which would
-  // wrongly show the dataset floor instead of the candidate actually running).
-  const noSelection: ObserveState = avail.live
-    ? "live"
-    : avail.historical
+  // Auto-follow the operator's selection to that candidate's own round file. A
+  // candidate in the STILL-LIVE round has no round file yet (it's written at round
+  // close), so fall to the live searchpoint — the one actually running. With no
+  // selection, prefer the in-flight candidate, else the last completed one.
+  const auto: ObserveState = selCand
+    ? avail.historical
       ? "historical"
-      : "origin";
-  const auto: ObserveState = !selCand
-    ? noSelection
-    : selCand.round < 1
-      ? "origin"
-      : avail.historical
-        ? "historical"
-        : avail.live
-          ? "live"
-          : "origin";
-  const state: ObserveState = pref && avail[pref] ? pref : avail[auto] ? auto : "origin";
-  // Origin's resolved config is born at round 0; until that file lands it is genuinely
-  // unknown. Don't present the empty config as the resolved origin program (that's the
-  // retired `{}` origin-fake, searchPoint.ts) — when running and round 0 hasn't been
-  // written, label it as resolving so the blank reads "not yet resolved", not "no params".
-  const originResolving = isLive && originCfg == null;
-  const fallbackOrigin: ObserveConfig = {
-    promptFields: cv.originPromptFields ?? {},
-    config: {},
-    label: originResolving ? "origin — resolving (round 0)" : "origin",
-  };
-  const cfg =
-    (state === "live" ? liveCfg : state === "historical" ? histCfg : originCfg) ?? fallbackOrigin;
+      : "live"
+    : avail.live
+      ? "live"
+      : "historical";
+  const state: ObserveState = pref && avail[pref] ? pref : auto;
+  // Null only when NOTHING has been measured yet — no closed round, nothing in
+  // flight. Say so; never seed the surface with `{}`, which draws an empty config
+  // table that reads as "this program has no params" rather than "not resolved yet".
+  const cfg = avail[state] ? (state === "live" ? liveCfg : histCfg) : null;
 
   const toggle =
     avail.live || avail.historical ? (
@@ -219,7 +202,7 @@ export function BackendNodeDetail({ draft, onClose, onPromptApply }: Props) {
           options={OBSERVE_STATES.map((s) => ({ value: s, label: s, disabled: !avail[s] }))}
           value={state}
           onChange={setPref}
-          ariaLabel="Searchpoint view — origin, live, or historical"
+          ariaLabel="Searchpoint view — live or historical"
         />
       </div>
     ) : null;
@@ -227,17 +210,28 @@ export function BackendNodeDetail({ draft, onClose, onPromptApply }: Props) {
   return (
     <>
       {toggle}
-      <NodeSurface
-        node={node}
-        point={{ origin_prompt_fields: cfg.promptFields, pipeline_overlay: {} }}
-        configSeed={cfg.config}
-        schema={cv.nodeConfigSchema}
-        outputSchema={cv.nodeOutputSchema}
-        label={cfg.label}
-        mode="values"
-        readOnly
-        onClose={onClose}
-      />
+      {cfg ? (
+        <NodeSurface
+          node={node}
+          point={{ origin_prompt_fields: cfg.promptFields, pipeline_overlay: {} }}
+          configSeed={cfg.config}
+          schema={cv.nodeConfigSchema}
+          outputSchema={cv.nodeOutputSchema}
+          label={cfg.label}
+          mode="values"
+          readOnly
+          onClose={onClose}
+        />
+      ) : (
+        // Nothing has been MEASURED yet — no closed round, nothing in flight. Name
+        // the state rather than implying a fetch that never lands: on a fresh
+        // campaign this is the whole of round 0, which on an L4 run is hours.
+        <p className="inspector-note">
+          {isLive
+            ? "Scoring in progress — the resolved spec appears when the round closes."
+            : "No measured searchpoint yet."}
+        </p>
+      )}
     </>
   );
 }
