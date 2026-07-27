@@ -585,6 +585,13 @@ export const FitnessChart = memo(function FitnessChart({
             if (typeof ciLo === "number" && typeof ciHi === "number") {
               lines.push(`composite 95% CI [${ciLo.toFixed(3)}, ${ciHi.toFixed(3)}]`);
             }
+            // Say why there is no crown and no θ, rather than leaving the absence to be
+            // read as a loss. The election is a round-scoped fit over every arm, so it
+            // cannot exist until the round closes — an uncrowned bar in an open round has
+            // nothing yet to have lost to.
+            if (views[idx]?.roundOpen) {
+              lines.push("round still open — no election yet");
+            }
             return lines.join("\n");
           },
         },

@@ -79,7 +79,7 @@ function pct0(v: number | null | undefined): string | undefined {
 }
 
 // A candidate's subset-relative fitness as a %. Per-candidate rows only — round/origin
-// headlines read `cumulative_accuracy` (the header/trend basis) so the thread agrees.
+// headlines read the round's measured `accuracy` (the header/trend basis) so the thread agrees.
 function fitPct(rec: Record<string, unknown>): string | undefined {
   return pct0(num(rec.composite_fitness));
 }
@@ -112,7 +112,7 @@ export function snapshotToActivity(payload: Record<string, unknown>): ActivityIt
     const r = asRec(rr);
     const round = num(r.round);
     if (round == null) continue;
-    out.push(roundItem(round, pct0(num(r.cumulative_accuracy))));
+    out.push(roundItem(round, pct0(num(r.accuracy))));
   }
 
   // The in-flight round: every planned candidate (so the one being scored shows
@@ -212,7 +212,7 @@ export function projectionToActivity(env: ProjectionEnvelope): ActivityItem | nu
       if (str(p.phase) !== "round" || str(p.event) !== "display") return null;
       const rr = asRec(asRec(p.payload).round_result);
       const round = num(p.round) ?? num(rr.round) ?? 0;
-      return roundItem(round, pct0(num(rr.cumulative_accuracy)));
+      return roundItem(round, pct0(num(rr.accuracy)));
     }
     case "round_warning": {
       const error = str(p.severity) === "error";

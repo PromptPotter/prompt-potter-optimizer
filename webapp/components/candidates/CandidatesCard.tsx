@@ -37,6 +37,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useFetch } from "@/lib/hooks/useFetch";
 import {
   HEADLINE_METRICS,
+  closedRoundNumbers,
   headlineMetricLabel,
   nodeKeyOf,
   panelCellLabel,
@@ -373,6 +374,10 @@ export function CandidatesCard() {
 
   const views = useMemo<CandidateView[]>(() => {
     const sliced = sampleSet != null;
+    // Which rounds have CLOSED — the one signal that separates "not elected" from
+    // "no election has run yet". The election is a round-scoped fit, so a bar in an
+    // open round has nothing to have lost to, and must not read as though it did.
+    const closed = closedRoundNumbers(dash);
     return (viewedNode?.children ?? []).map<CandidateView>((n, i) => {
       const isCourse = n.kind === "course";
       // A course shows what it reached, else what it started from. A cut that broke before
@@ -398,16 +403,17 @@ export function CandidatesCard() {
         compositeCiHi: sliced ? null : n.composite_ci_hi,
         evaluators: n.evaluators,
         is_winner: n.is_winner,
-        cumulative_accuracy: n.cumulative_accuracy,
         n_samples: sliced ? n.sample_set_n : (n.scored_samples ?? live?.stats?.total ?? null),
         n_expected: sliced ? (sampleSet?.length ?? null) : n.expected_samples,
         source: live && own == null ? "inflight" : "history",
         whatif: sliced ? null : n.lens_value,
         started: accuracy != null,
+        // A course is not a round and holds no election of its own.
+        roundOpen: !isCourse && !closed.has(n.round ?? 0),
         diag: diagView(diagByLabel.get(label)),
       };
     });
-  }, [viewedNode, inflightByLabel, sampleSet, diagByLabel]);
+  }, [viewedNode, inflightByLabel, sampleSet, diagByLabel, dash]);
 
   // A fork's attempt is a course under the hood — the ⑂ marks lead there.
   const forkKeys = useMemo(

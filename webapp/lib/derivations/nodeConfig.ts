@@ -49,6 +49,25 @@ export interface ConfigRow {
   description: string;
 }
 
+// The kinds this editor draws a widget for. The served param list is COMPLETE per
+// node (that is what makes `optimizer_tunable` summable into "is this node
+// optimizer-locked"), so it also carries `prompt` (a PromptTemplate decomposition
+// field, owned by the prompt editor) and `nested` (object/array — a nested value in
+// a text box is a corrupt edit waiting to happen). Those are listed, not rendered:
+// the filter belongs here, at the surface that knows what it can draw, not at the
+// server, where dropping them blinds every other reader.
+export const WIDGET_KINDS: ReadonlySet<string> = new Set([
+  "model",
+  "enum",
+  "number",
+  "bool",
+  "string",
+]);
+
+export function isWidgetParam(p: { kind: string }): boolean {
+  return WIDGET_KINDS.has(p.kind);
+}
+
 function asObj(v: unknown): Record<string, unknown> {
   return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 }
@@ -87,6 +106,7 @@ export function configRows(
     const overlayKeys = opt?.param_keys;
     const overlayAllowed = opt?.param_allowed_values ?? {};
     for (const p of params) {
+      if (!isWidgetParam(p)) continue;
       const baseValue = p.value == null ? "" : String(p.value);
       const narrowed = overlayAllowed[p.key];
       if (mode === "search-space") {

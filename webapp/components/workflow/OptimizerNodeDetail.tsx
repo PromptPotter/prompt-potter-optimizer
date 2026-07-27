@@ -1,7 +1,7 @@
 "use client";
 import { nodeKindLabel, type PipelineDoc } from "./types";
 import { RoundSamplesView } from "@/components/dashboard/samples/RoundSamplesView";
-import { availableRounds } from "@/lib/derivations";
+import { availableRounds, isWidgetParam } from "@/lib/derivations";
 import { useRoundNodes } from "@/lib/hooks/useRoundNodes";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { activeNodeId } from "./layout";
@@ -33,7 +33,10 @@ export function OptimizerNodeDetail({ id, pipeline, onClose }: Props) {
   // the steer panel uses, so the operator sees every knob the backend exposes instead of
   // a hand-rolled chip strip. Empty for phase / measurement nodes (no config to show).
   const configSchema = pipeline?.node_config_schema ?? null;
-  const configParams = configSchema?.[id] ?? [];
+  // Widget-kind only, so the gate + count below agree with what `NodeConfigEditor`
+  // actually draws — the served list is complete and also carries prompt/nested
+  // params, which no widget renders.
+  const configParams = (configSchema?.[id] ?? []).filter(isWidgetParam);
 
   // The round's node blocks come from the one resolver this card shares with the
   // canvas above it (`useRoundNodes`) — same round, same source-selection rule.

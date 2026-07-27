@@ -25,9 +25,31 @@ export function roundSizes(
   return sizes;
 }
 
-// True only for a crown won over rivals. `candidatesInRound` is that round's arm
-// count — from `roundSizes` when walking a timeline, or the round's own
-// candidate array when you already hold one round.
+// What a crown means here — or why there isn't one yet.
+//
+//   elected     — won over rivals. The only state the θ-election copy may claim.
+//   uncontested — crowned with nobody to beat (round 0, or any single-arm round).
+//   open        — the round has not closed, so no election has RUN. Distinct from
+//                 `none`, and the distinction is the point: the election is a
+//                 round-scoped fit that cannot exist mid-round, so a candidate
+//                 still scoring is not a candidate that lost.
+//   none        — the round closed and this candidate was not the one adopted.
+export type CrownState = "elected" | "uncontested" | "open" | "none";
+
+// `candidatesInRound` is that round's arm count — from `roundSizes` when walking a
+// timeline, or the round's own candidate array when you already hold one round.
+// `roundClosed` defaults true for the callers that only ever hold closed rounds.
+export function crownState(
+  isWinner: boolean,
+  candidatesInRound: number,
+  roundClosed = true,
+): CrownState {
+  if (!roundClosed) return "open";
+  if (!isWinner) return "none";
+  return candidatesInRound > 1 ? "elected" : "uncontested";
+}
+
+// True only for a crown won over rivals — the badge predicate, unchanged.
 export function wasElected(isWinner: boolean, candidatesInRound: number): boolean {
-  return isWinner && candidatesInRound > 1;
+  return crownState(isWinner, candidatesInRound) === "elected";
 }

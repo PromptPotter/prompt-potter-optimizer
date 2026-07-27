@@ -47,12 +47,12 @@ interface Props {
 
 const OBSERVE_STATES: ObserveState[] = ["live", "historical"];
 
-// The historical observe target: a specific past candidate located by id in its
-// round file. `{round, candidateId, label}` — the shape `candidateObserveConfig`
-// reads.
+// The historical observe target: a past candidate located in its round file by
+// `courseLabel`, the positional identity (`C{round}.{idx}`) that survives the id re-mint a
+// resume performs. `label` is the decorated header string, never the join key.
 interface HistTarget {
   round: number;
-  candidateId: string;
+  courseLabel: string;
   label: string;
 }
 
@@ -71,7 +71,7 @@ function lastIncumbent(dash: DashboardSnapshot | null): HistTarget | null {
       const label = candidateLabel(r.round, idx);
       return {
         round: r.round,
-        candidateId: w.candidate_id,
+        courseLabel: label,
         label: wasElected(true, r.candidates.length) ? `winner · ${label}` : label,
       };
     }
@@ -109,7 +109,7 @@ export function BackendNodeDetail({ draft, onClose, onPromptApply }: Props) {
   // is a candidate of round 0 — else the last completed round's incumbent. ONE
   // fetch, following the target.
   const histTarget: HistTarget | null = selCand
-    ? { round: selCand.round, candidateId: selCand.candidate_id, label: `selected · ${selCand.label}` }
+    ? { round: selCand.round, courseLabel: selCand.label, label: `selected · ${selCand.label}` }
     : lastIncumbent(dash);
   const runObserve = !draft;
   const histFile = useRoundFile(viewedPath, runObserve ? histTarget?.round ?? null : null);
@@ -168,7 +168,7 @@ export function BackendNodeDetail({ draft, onClose, onPromptApply }: Props) {
   // searchpoint states. Each reads the served `resolved_pipeline_params`. A
   // concrete node scopes the header/prompt; the config stays whole-pipeline.
   const histCfg = histTarget
-    ? candidateObserveConfig(histFile.doc, histTarget.candidateId, histTarget.label, nodeId)
+    ? candidateObserveConfig(histFile.doc, histTarget.courseLabel, histTarget.label, nodeId)
     : null;
   // `live` is available only while the cycle is actually running — `current_round`
   // candidates linger in dashboard.json after a stop, so gate on `isLive`, not on

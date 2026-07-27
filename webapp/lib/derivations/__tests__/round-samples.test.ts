@@ -26,7 +26,6 @@ function row(source: CandidateRow["source"]): CandidateRow {
     compositeCiHi: null,
     evaluators: {},
     is_winner: false,
-    cumulative_accuracy: null,
     n_samples: null,
     n_expected: null,
     source,

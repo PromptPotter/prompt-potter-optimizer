@@ -195,9 +195,9 @@ async def prepare_origin_notebook(
         listener=observers.callbacks,
     )
     if hasattr(display, "set_origin"):
-        display.set_origin(origin.origin_acc)
+        display.set_origin(origin.report.accuracy)
 
-    print(f"\nEvaluation data: {len(dataset)} queries  |  Origin: {origin.origin_acc:.1%}")
+    print(f"\nEvaluation data: {len(dataset)} queries  |  Origin: {origin.report.accuracy:.1%}")
     return observers, dataset, origin
 
 

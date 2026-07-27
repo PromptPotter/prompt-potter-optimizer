@@ -19,6 +19,7 @@ import {
   liveCandidateSearchPoint,
   forkReconcileDefaults,
   configOverridesFromDefaults,
+  isWidgetParam,
   overlaySetsModelOutsideAllowed,
   searchPoint,
 } from "@/lib/derivations";
@@ -79,12 +80,13 @@ export function SteerForkPanel({
     : candidateSearchPoint(doc, candidate.candidate_id);
   const seedPrompt = seed?.origin_prompt_fields ?? {};
   const overlay = seed?.pipeline_overlay ?? {};
-  // Nodes with a lockable param — a served param that isn't the model (model/provider
-  // are always optimizer-locked, never a per-node lock). A prompt-only pipeline serves
-  // none, so the lock block below hides entirely rather than printing a "no
-  // configurable params" box per node.
+  // Nodes with a lockable param — a param this editor can DRAW that isn't the model
+  // (model/provider are always optimizer-locked, never a per-node lock). The served
+  // list also carries the prompt + nested params, which have no widget, so the
+  // widget filter is what keeps a prompt-only pipeline (pp-self) hiding the lock
+  // block entirely rather than printing a "no configurable params" box per node.
   const lockableNodes = Object.entries(cv.nodeConfigSchema ?? {})
-    .filter(([, params]) => params.some((p) => p.kind !== "model"))
+    .filter(([, params]) => params.some((p) => isWidgetParam(p) && p.kind !== "model"))
     .map(([nodeId]) => nodeId);
   // The origin's declared model allow-list (`CampaignConfig.allowed_models`). Absent /
   // empty in the snapshot = nothing sanctioned = the restrictive default, so ANY model

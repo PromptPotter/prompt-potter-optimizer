@@ -26,12 +26,17 @@ export function PipelineNodeList() {
   return (
     <ol className="pipeline-node-list" aria-label="Pipeline nodes">
       {nodes.map((n, i) => {
-        // Optimizer-locked = the optimizer may move nothing on this node: it has
-        // a served config schema and no param in it is tunable (a paramless node
-        // like cache_lookup is `[].every` → locked too). web_search /
-        // entity_profiling keep tunable params → open. Mirror the lock the
-        // search-space config editor shows inside, on the collapsed toggle. Null schema
-        // (demo / not-yet-loaded) → no badge, not a false "open".
+        // Optimizer-locked = the optimizer may move nothing on this node: it has a
+        // served param list and no param in it is tunable (a paramless node like
+        // cache_lookup is `[].every` → locked too). web_search / entity_profiling
+        // keep tunable params → open. Null schema (demo / not-yet-loaded) → no
+        // badge, not a false "open".
+        //
+        // This sums a per-param flag into a per-NODE fact, so it is only true while
+        // the served list stays COMPLETE (`NodeConfigParam`). It used to be the
+        // widget list: prose and nested params were dropped at the server, so
+        // pp-self's four meta-prompt nodes — whose whole search space is prose —
+        // summed to `[].every` and wore a padlock while the optimizer rewrote them.
         const params = schema?.[n.id];
         const locked = params != null && params.every((p) => !p.optimizer_tunable);
         const isSelected = selected?.scope === "target" && selected.id === n.id;

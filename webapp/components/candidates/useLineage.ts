@@ -19,7 +19,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { postCleanupEmpty } from "@/lib/api";
 import type { LineageNode } from "@/lib/api";
-import { accuracyBasisValue } from "@/lib/fitness";
 import {
   primaryMetric,
   roundCandidates,
@@ -209,15 +208,15 @@ export function useLineage({
   const usesComposite = metric === "composite";
   const valueByKey = useMemo<ReadonlyMap<string, number | null>>(() => {
     const m = new Map<string, number | null>();
-    // Accuracy view: the WINNER (lineage spine) paints the round's cumulative
-    // frontier — the cross-round-comparable series the trend plots — so the spine
-    // reads as honest progress, not the per-round subset swing. Losers keep their
-    // own subset score.
+    // Accuracy view: every node paints what IT measured. The winner used to paint the
+    // round's "cumulative frontier" instead — a pool of rows scored by different
+    // configurations — so the spine read higher than anything the run had measured, and
+    // a bar's height disagreed with the node text beneath it. One basis now: `accuracy`.
     for (const course of courses) {
       for (const cand of candidatesOf(course)) {
         const value = usesComposite
           ? cand.composite_fitness
-          : accuracyBasisValue(cand.is_winner, cand.cumulative_accuracy, cand.accuracy);
+          : cand.accuracy ?? null;
         m.set(nodeKeyOf(cand), value);
       }
     }
@@ -227,7 +226,7 @@ export function useLineage({
       for (const row of liveRows) {
         const value = usesComposite
           ? row.composite ?? null
-          : accuracyBasisValue(row.is_winner, row.cumulative_accuracy, row.accuracy);
+          : row.accuracy ?? null;
         m.set(`${viewedKey}|${row.candidate_id}`, value);
       }
     }

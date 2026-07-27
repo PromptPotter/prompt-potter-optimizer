@@ -1,20 +1,22 @@
-// Single source of truth for "which candidates exist per round, in
-// display order". Sole consumer of `liveL1Candidates` / `roundOf` /
-// `dash.rounds[]` for candidate-list purposes — every surface that
-// lists, plots, or selects candidates (the candidates card's bars +
-// dendrogram + forest, RoundSamplesView) reads through this helper.
+// The LEAF cycle's per-round candidate rows, in display order — sole consumer of
+// `liveL1Candidates` / `roundOf` / `dash.rounds[]` for candidate-list purposes, and the
+// only list whose rows carry the `source` tag that routes a per-sample read live vs
+// historical (`samplesForRow`). Its consumers are the sample-scoped surfaces:
+// `ScoringInspector` and `RoundSamplesView`.
 //
-// Origin is not special: it's round 0 in `dash.rounds[]`, a one-candidate
-// round labelled "C0", and flows through the same history loop as every
-// other round.
+// **It is not the bars.** The candidates card plots the children of the VIEWED node
+// straight off the served tree (`CandidatesCard`), because only the tree can express what
+// hangs off a candidate — a fork's contributed attempts, an L4 inner run, a course. This
+// module cannot: `dashboard.json` knows one cycle's own rounds and nothing below them.
 //
-// Why centralized: before this module, the bars and the tree
-// each ran their own history-vs-inflight switch with subtly different
-// guards, and each picked its own label scheme (the bars honored
-// `c.label`, the tree hardcoded `R{round}.{idx+1}`). That drift
-// produced the operator-visible bug where R1.1 in lineage and C1.1
-// in fitness pointed at different candidates. With one derivation,
-// the two surfaces cannot disagree.
+// The two are not a stitch and not a drift: both are projections of the same
+// `ScoredCandidate`, through field lists derived from a model rather than hand-copied
+// (`RoundSummaryCandidate` here, `LedgerCandidate` on the tree side), so a field added to
+// the candidate report reaches both or fails loud. What they answer differs — "this
+// cycle's rows, with their samples" vs "what descends from what" — which is why both exist.
+//
+// Origin is not special: it's round 0 in `dash.rounds[]`, a one-candidate round labelled
+// "C0", and flows through the same history loop as every other round.
 
 import { candidateLabel, liveCandidateId } from "@/lib/candidate-label";
 import {
@@ -95,9 +97,6 @@ export function roundCandidates(dash: DashboardSnapshot | null): CandidateRow[] 
         compositeCiHi: c.composite_ci_hi,
         evaluators: c.evaluators,
         is_winner: c.is_winner,
-        // Winner carries the round's cumulative frontier (the spine value the lineage
-        // paints); losers keep their own subset accuracy (null here).
-        cumulative_accuracy: c.is_winner ? r.cumulative_accuracy : null,
         n_samples: c.scored_samples,
         n_expected: c.expected_samples,
         source: "history",
@@ -136,8 +135,6 @@ export function roundCandidates(dash: DashboardSnapshot | null): CandidateRow[] 
         compositeCiHi: null,
         evaluators,
         is_winner: false,
-        // In-flight round hasn't closed — no cumulative frontier yet.
-        cumulative_accuracy: null,
         n_samples: c.samples?.length ?? null,
         n_expected: null,
         source: "inflight",

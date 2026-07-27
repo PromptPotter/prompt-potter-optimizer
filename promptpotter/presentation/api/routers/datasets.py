@@ -713,11 +713,11 @@ class DatasetPipelineResponse(StrictModel):
     backend_type: str | None
     pipeline: dict[str, Any]
     view: dict[str, Any] | None
-    # The full operator-editable config surface per node (model/temperature/
-    # thinking/max_tokens/provider — the node's whole config minus prompt fields),
-    # the steer + read-only node-detail control surface. The `optimizer_locked`
-    # flag per param marks what the optimizer may not permute (model/provider
-    # under a strict campaign), which the operator may still set on a fork seed.
+    # Every param each node carries, keyed by node — COMPLETE (prompt + nested params
+    # included, carrying no value), because `optimizer_tunable` is summed per node to
+    # answer "is this node optimizer-locked". The config editor filters to the widget
+    # kinds; `optimizer_locked` marks what the optimizer may never permute
+    # (model/provider), which the operator may still set on a fork seed.
     node_config_schema: dict[str, list[NodeConfigParam]]
     # Per-node structured-output contract (read-only) — the steer panel shows it
     # beside the config so the operator sees the WHOLE node (model + params +

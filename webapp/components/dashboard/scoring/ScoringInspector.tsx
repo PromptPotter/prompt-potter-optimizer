@@ -83,7 +83,7 @@ export function ScoringInspector({ selected, onClose }: Props) {
     ? null
     : isLive
       ? liveCandidateObserveConfig(dash, selected.candidate_id, selected.label)
-      : candidateObserveConfig(doc, selected.candidate_id, selected.label);
+      : candidateObserveConfig(doc, selected.label, selected.label);
 
   if (!selected) return null;
 

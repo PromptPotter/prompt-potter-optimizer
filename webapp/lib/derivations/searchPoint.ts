@@ -116,17 +116,27 @@ export function liveCandidateObserveConfig(
   return rowConfig(liveInputCandidate(dash, liveRound, candidateId), `live — ${label}`, nodeId);
 }
 
-// Historical: a specific past candidate out of its lazily-loaded round file,
-// located by `candidate_id`. Any round including 0 — C0 resolves through here,
-// which is what makes the origin an ordinary observe target.
+// Historical: a specific past candidate out of its lazily-loaded round file, located by its
+// POSITIONAL label (`C{round}.{idx}`) — `courseLabel`, the identity the minting course gave
+// it. Any round including 0; C0 resolves through here, which is what makes the origin an
+// ordinary observe target.
+//
+// **Not `candidate_id`, and the difference is only visible after a resume.** A lineage id is
+// a fresh uuid per construction, and a resumed run re-scores the origin — so the tree serves
+// C0 under a NEW id while `round_0000.json`, written by the earlier run, still holds the old
+// one. An id join then finds nothing and the config table blanks with no error. The live
+// sibling above may join on id precisely because it cannot cross a run.
+//
+// `display` is what the header reads (`selected · C0`, `winner · C2.1`); it is decoration and
+// must never be the join key.
 export function candidateObserveConfig(
   doc: RoundResult | null,
-  candidateId: string,
-  label: string,
+  courseLabel: string,
+  display: string,
   nodeId?: string | null,
 ): ObserveConfig | null {
   const scores = doc?.candidate_scores;
-  if (!Array.isArray(scores) || !candidateId) return null;
-  const row = (scores as LiveInputCandidate[]).find((c) => c.candidate_id === candidateId);
-  return rowConfig(row, label, nodeId);
+  if (!Array.isArray(scores) || !courseLabel) return null;
+  const row = (scores as LiveInputCandidate[]).find((c) => c.label === courseLabel);
+  return rowConfig(row, display, nodeId);
 }

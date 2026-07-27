@@ -13,7 +13,6 @@ const round = (r: number, selection: number[]): RoundSummary =>
     round: r,
     accuracy: 0,
     composite_fitness: 0,
-    cumulative_accuracy: 0,
     cumulative_theta: null,
     calibration_model: null,
     outer_verdict: null,

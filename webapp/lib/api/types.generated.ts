@@ -66,7 +66,6 @@ export interface RoundSummary {
   round: number;
   accuracy: number;
   composite_fitness: number;
-  cumulative_accuracy: number;
   cumulative_theta: number | null;
   calibration_model: '1PL' | '2PL' | null;
   candidates: RoundSummaryCandidate[];
@@ -308,7 +307,6 @@ export interface RoundResult {
   matched_origin_accuracy: number;
   matched_origin_hits: number;
   matched_origin_composite: number;
-  cumulative_accuracy: number;
   cumulative_theta: number | null;
   calibration_model: '1PL' | '2PL' | null;
   prompt_fields: Record<string, unknown>;
@@ -515,7 +513,7 @@ export interface MeasurementSeriesResponse {
   items: SampleSeries[];
 }
 
-/** One operator-editable config param of a node — the FULL config surface the */
+/** One param a node carries — the COMPLETE per-node list, which is what lets */
 export interface NodeConfigParam {
   key: string;
   value: unknown;
@@ -806,11 +804,13 @@ export interface LineageNode {
   composite_ci_hi: number | null;
   scored_samples: number | null;
   expected_samples: number | null;
-  /** The adopted lineage rescored over EVERY sample probed so far — the cross-
-   * round-comparable frontier the trend plots. Carried by the round's WINNER
-   * only: it is a property of the advancing spine, and a losing sibling never
-   * joined it. */
-  cumulative_accuracy: number | null;
+  /** Ability of the adopted lineage on the cycle's fixed δ ruler — the subset-
+   * invariant, cross-round-comparable series the trend plots. Carried by the
+   * round's WINNER only: it is a property of the advancing spine, and a
+   * losing sibling never joined it. Its accuracy-space predecessor was a mean
+   * over rows measured by different configurations and is gone; `accuracy` is
+   * what this node MEASURED. */
+  cumulative_theta: number | null;
   /** This candidate's fitness under the request's `score:` lens, re-scored server-
    * side from its stored evaluator namespace. Null without a lens, or when
    * the namespace can't satisfy the formula. */

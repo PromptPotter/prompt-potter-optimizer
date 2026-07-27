@@ -41,11 +41,6 @@ export interface CandidateRow {
   compositeCiHi: number | null;
   evaluators: Record<string, number>;
   is_winner: boolean;
-  // The round's cumulative frontier accuracy (the adopted lineage rescored over every
-  // sample probed so far) — set ONLY on the winner, `null` otherwise. The lineage paints
-  // the winner (spine) node with this so it reads as honest cross-round progress instead
-  // of the per-round subset swing; the trend chart plots the same series.
-  cumulative_accuracy: number | null;
   // Samples scored so far for this candidate; null when unknown.
   n_samples: number | null;
   // Total sample budget for this candidate; null when not yet announced
@@ -68,6 +63,10 @@ export interface CandidateView extends CandidateRow {
   // Any sign of activity. `false` = the slot exists but nothing is scored yet,
   // which the chart must render as a BLANK, never as a 0.
   started: boolean;
+  // This candidate's round has not closed, so no election has run. Without it an
+  // uncrowned bar reads as "lost" whether it lost or is still scoring — and the
+  // election is a round-scoped fit, so mid-round there is nothing to have lost to.
+  roundOpen: boolean;
   // Latest `verify` diagnostic run whose source label matches this candidate.
   diag?: { accuracy: number; workspaceN: number; samplesAdded: number };
 }

@@ -75,9 +75,9 @@ export function fmtHeadlineValue(
 }
 
 export interface HeadlineStats {
-  // Served rolling-max cumulative_accuracy, finite or null.
+  // Served rolling-max of what each round MEASURED, finite or null.
   best: number | null;
-  // Origin's round-0 cumulative_accuracy (same basis as `best`), finite or null.
+  // Origin's round-0 measured accuracy (same basis as `best`), finite or null.
   origin: number | null;
   // best − origin when both are present; null otherwise.
   delta: number | null;
@@ -88,20 +88,20 @@ function finite(v: unknown): number | null {
 }
 
 export function headlineStats(dash: DashboardSnapshot | null): HeadlineStats {
-  // `best` is the server-side rolling max of `rounds[].cumulative_accuracy` — the
-  // incumbent's full-population score (LiveDashboardView._absorb_round_complete is
-  // the sole writer; it is NOT composite-based). `delta` is SERVED
-  // (`headline_delta`, the same basis) — never recomputed here, so this chip and
-  // the L4 inner progress line read one number (R-36).
+  // `best` is the server-side rolling max of `rounds[].accuracy` — what each round
+  // actually MEASURED (LiveDashboardView._absorb_round_complete is the sole writer;
+  // it is NOT composite-based). `delta` is SERVED (`headline_delta`, the same basis)
+  // — never recomputed here, so this chip and the L4 inner progress line read one
+  // number (R-36).
   const best = finite(dash?.best);
   const round0 = (dash?.rounds ?? []).find((r) => r.round === 0);
-  const origin = round0 ? finite(round0.cumulative_accuracy) : null;
+  const origin = round0 ? finite(round0.accuracy) : null;
   const delta = finite(dash?.headline_delta);
   return { best, origin, delta };
 }
 
 export interface FitnessTrend {
-  // Per-round cumulative_accuracy, ascending.
+  // Per-round measured accuracy, ascending.
   points: { round: number; composite: number }[];
   // Running-best composite, index-aligned with `points`.
   best: number[];
@@ -111,20 +111,26 @@ export interface FitnessTrend {
 // TrendChart best-line, so they can't drift on the source rule or the
 // running-best fold. Takes `rounds` so callers memo on `dash?.rounds`.
 //
-// Plots `cumulative_accuracy` — the incumbent lineage rescored over EVERY sample
-// probed so far — NOT the per-round `accuracy`/`composite_fitness`. Those are
-// subset-relative: under `per_round_resubset` each round scores a fresh 6–16
-// hard-first sample draw, so the same prompt swings ±0.2–0.3 and reads as a
-// false "great start → decay". The cumulative frontier is the honest,
-// cross-round-comparable progress line (it matches the Best/current tiles, which
-// already settle to cumulative). The per-round subset number stays visible on the
-// candidate rows, badged with its sample count.
+// Plots each round's MEASURED `accuracy` — the elected winner on the samples that
+// round drew, or a held round's retained incumbent re-scored on them. It matches the
+// Best/current tiles, which settle to the same basis.
+//
+// It used to plot `cumulative_accuracy`, "the incumbent lineage rescored over EVERY
+// sample probed so far". No rescore happened: that series pooled rows measured by
+// DIFFERENT configurations, so the line could sit above everything the cycle had
+// measured (`57%→78%` on a run whose best candidate reached 0.679).
+//
+// The concern it was answering is real — under `per_round_resubset` each round scores
+// a fresh hard-first draw, so the same prompt swings and can read as a false "great
+// start → decay". The honest fix is the round's own sample count beside the number,
+// and `RoundSummary.cumulative_theta` (ability on the cycle's fixed δ ruler, which IS
+// subset-invariant) once this chart grows a logit axis to plot it on.
 export function fitnessTrend(
   rounds: readonly RoundSummary[] | undefined,
   servedBest?: number | null,
 ): FitnessTrend {
   const points = (rounds ?? [])
-    .map((r) => ({ round: r.round, composite: r.cumulative_accuracy }))
+    .map((r) => ({ round: r.round, composite: r.accuracy }))
     .sort((a, b) => a.round - b.round);
   const best: number[] = [];
   let runningBest = 0;

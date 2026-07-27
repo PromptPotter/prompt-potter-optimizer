@@ -186,10 +186,20 @@ class LiveDisplay(DerivedView):
         self._write(f"  {YELLOW}{prefix}{record.message}{RESET}")
 
     def _handle_llm_call_progress(self, record: LLMCallProgressRecord) -> None:
-        """Heartbeat tick (``HEARTBEAT_INTERVAL_S``); cached replays skip this path."""
+        """Heartbeat tick (``HEARTBEAT_INTERVAL_S``); cached replays skip this path.
+
+        Same split the webapp draws (``derivations/time-ray.ts::isHeartbeat``): a BARE
+        tick proves only that the process is alive, one carrying ``detail`` reports
+        progress. ``detail`` is composed operator-readable at the emit site, so print it
+        verbatim — dropping it is what let a healthy inner campaign, which was reporting
+        ``inner r6/8 · Δ+18%`` into the ledger every 15s, read as a frozen call.
+        """
         round_tag = f"r{record.round}" if record.round is not None else ""
         node_label = f"{record.node}_{round_tag}" if round_tag else record.node
-        self._write(f"  {DIM}  · {node_label} still waiting · {record.elapsed_s:.0f}s{RESET}")
+        line = f"  · {node_label} still waiting · {record.elapsed_s:.0f}s"
+        if record.detail:
+            line += f" · {record.detail}"
+        self._write(f"  {DIM}{line}{RESET}")
 
     def _handle_llm_call(self, record: LLMCallRecord) -> None:
         """Paired LLM-completion marker; reports duration + tokens; tags cached."""

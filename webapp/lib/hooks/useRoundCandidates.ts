@@ -1,9 +1,11 @@
 "use client";
-// The candidate-spine hook. Computes `roundCandidates` once and groups it
-// (`groupByRound`) so the same memoized list backs every surface that lists or
-// selects candidates (the candidates card's bars + dendrogram + forest,
-// RoundSamplesView). Components don't import the derivation directly — they ask
-// this hook, which guarantees the spine merge runs once per `dash` snapshot.
+// The leaf cycle's per-round rows, computed once and grouped (`groupByRound`) so the
+// sample-scoped surfaces — `ScoringInspector` and `RoundSamplesView` — share one memoized
+// list per `dash` snapshot. Components ask this hook rather than importing the derivation,
+// which is what guarantees the merge runs once.
+//
+// The candidates card's bars do NOT read this: they plot the served tree's children. See
+// `derivations/round-candidates.ts` for why both exist and why they cannot diverge.
 
 import { useMemo } from "react";
 import { useCycleStream } from "@/lib/poll";
