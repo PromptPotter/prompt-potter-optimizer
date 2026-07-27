@@ -105,6 +105,40 @@ export function nodeKeyOf(node: LineageNode): string {
   return `${encodeCyclePath(pathOf(node))}|${node.id}`;
 }
 
+// ONE walk, indexed by encoded path. `nodeAt` / `candidatesAtPath` each re-walk the whole
+// tree per call; a surface that looks up per render (or holds several lookups) rides an
+// index built once per tree instead. Semantics per entry:
+//   `course`     — the course node AT that address (null for a fork: a fork is not a node).
+//   `candidates` — the candidates whose OWN path it is (`candidatesAtPath` semantics: a
+//                  fork's attempts under the fork's address, a course's own timeline minus
+//                  fork contributions under its).
+export interface LineageAddress {
+  course: LineageNode | null;
+  candidates: LineageNode[];
+}
+export type LineageIndex = ReadonlyMap<string, LineageAddress>;
+
+export function indexLineage(root: LineageNode | null): LineageIndex {
+  const index = new Map<string, LineageAddress>();
+  if (!root) return index;
+  const at = (key: string): LineageAddress => {
+    let entry = index.get(key);
+    if (!entry) {
+      entry = { course: null, candidates: [] };
+      index.set(key, entry);
+    }
+    return entry;
+  };
+  const visit = (node: LineageNode): void => {
+    const key = encodeCyclePath(pathOf(node));
+    if (node.kind === "course") at(key).course = node;
+    else if (node.kind === "candidate") at(key).candidates.push(node);
+    for (const child of node.children) visit(child);
+  };
+  visit(root);
+  return index;
+}
+
 // The label of the candidate a fork was CUT FROM — a badge, never the name. Null for
 // anything this course minted itself.
 export function cutFromLabel(node: LineageNode, siblings: readonly LineageNode[]): string | null {

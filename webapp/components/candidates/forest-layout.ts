@@ -18,7 +18,7 @@
 
 import type { LineageDivergence, LineageNode } from "@/lib/api";
 import { candidatesOf, nodeKeyOf, pathOf } from "@/lib/derivations";
-import type { CyclePath } from "@/lib/ids";
+import { encodeCyclePath, type CyclePath } from "@/lib/ids";
 
 // Cladogram dimensions. Each round is one column; each course gets its own
 // horizontal lane (one row collapsed, N rows expanded).
@@ -89,6 +89,9 @@ export function expandedLaneSpan(cands: readonly LineageNode[]): number {
 // shifts down.
 export interface LaneLayout {
   course: LineageNode;
+  // The course's encoded address, computed once here — render loops compare it against
+  // the viewed key per lane/per node, and re-encoding there is what this field deletes.
+  coursePathKey: string;
   candidates: LineageNode[];
   expanded: boolean;
   // Starting row (in LANE_H units) of this course's band, and its height.
@@ -135,6 +138,7 @@ export function layout(
     if (rightmost > maxCol) maxCol = rightmost;
     laneByKey.set(key, {
       course,
+      coursePathKey: encodeCyclePath(pathOf(course)),
       candidates: cands,
       expanded: isExpanded,
       laneOffset,
@@ -168,6 +172,9 @@ export interface RoundNodePos {
   // publishing one here is what made a forest click pin a path that named the wrong run.
   // The display id is `pathLeaf(coursePath).cycleId` — derived, never a second field.
   coursePath: CyclePath;
+  // `encodeCyclePath(coursePath)`, once — the selected/viewed comparisons run per node
+  // per render.
+  coursePathKey: string;
   round: number;
   col: number;
   x: number;
@@ -213,6 +220,7 @@ function bandLeftX(l: LaneLayout): number {
 // One placed node. Named for what it builds — `nodeAt` in `lineage-candidates.ts` is
 // THE address lookup, and two different things must not wear one name.
 function placedNode(
+  laneKey: string,
   l: LaneLayout,
   cand: LineageNode,
   x: number,
@@ -221,8 +229,9 @@ function placedNode(
   label: string,
 ): RoundNodePos {
   return {
-    courseKey: nodeKeyOf(l.course),
+    courseKey: laneKey,
     coursePath: pathOf(l.course),
+    coursePathKey: l.coursePathKey,
     round: cand.round ?? 0,
     col: l.baseCol + (cand.round ?? 0),
     x,
@@ -256,7 +265,7 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
   // course to its parent candidate at any depth — no per-cycle key scoping.
   const nodeByCandidate = new Map<string, RoundNodePos>();
 
-  for (const l of layouts.values()) {
+  for (const [laneKey, l] of layouts) {
     const rounds = [...groupRounds(l.candidates).entries()].sort((a, b) => a[0] - b[0]);
     const lastRound = rounds.at(-1)?.[0] ?? 0;
     const colX = (round: number): number => LEFT_PAD + (l.baseCol + round) * COL_W;
@@ -271,9 +280,9 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
         // the position, but never the crown — `isWinner` rides the real fact.
         const stand = winner ?? cands[0];
         if (!stand) continue;
-        const node = placedNode(l, stand, colX(round), y, false, winner?.label ?? "");
+        const node = placedNode(laneKey, l, stand, colX(round), y, false, winner?.label ?? "");
         nodes.push(node);
-        spineByKeyRound.set(`${nodeKeyOf(l.course)}::r${round}`, node);
+        spineByKeyRound.set(`${laneKey}::r${round}`, node);
         if (winner) nodeByCandidate.set(winner.id, node);
         if (round === lastRound) node.isLastInLane = true;
         if (prev) {
@@ -300,7 +309,7 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
       const roundNodes: RoundNodePos[] = [];
       cands.forEach((cand, i) => {
         const y = TOP_PAD + (l.laneOffset + topRow + i) * LANE_H;
-        const node = placedNode(l, cand, x, y, true, cand.label);
+        const node = placedNode(laneKey, l, cand, x, y, true, cand.label);
         nodes.push(node);
         roundNodes.push(node);
         nodeByCandidate.set(cand.id, node);
@@ -315,14 +324,14 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
       if (winnerNode) {
         // Advancing round: this winner becomes the spine node and the parent of the
         // next round's fan.
-        spineByKeyRound.set(`${nodeKeyOf(l.course)}::r${round}`, winnerNode);
+        spineByKeyRound.set(`${laneKey}::r${round}`, winnerNode);
         if (round === lastRound) winnerNode.isLastInLane = true;
         parent = { x: winnerNode.x, y: winnerNode.y };
         lastWinnerNode = winnerNode;
       } else if (lastWinnerNode) {
         // Held (or never-closed) round: no new winner. Leave `parent` on the last real
         // winner so the next round fans from it — this round contributes no spine node.
-        spineByKeyRound.set(`${nodeKeyOf(l.course)}::r${round}`, lastWinnerNode);
+        spineByKeyRound.set(`${laneKey}::r${round}`, lastWinnerNode);
         if (round === lastRound) lastWinnerNode.isLastInLane = true;
       }
     }
@@ -332,7 +341,7 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
   // names the anchor outright, so there is no `fork_from_round` semantics to
   // re-derive: resolve the candidate's node, else fall back to the parent lane's
   // band. Child stub never goes LEFT of its anchor: clamp childX to (anchorX + COL_W).
-  for (const l of layouts.values()) {
+  for (const [laneKey, l] of layouts) {
     if (!l.parentKey) continue;
     const parentLayout = layouts.get(l.parentKey);
     if (!parentLayout) continue;
@@ -353,7 +362,7 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
       : null;
     let childX = minChildX;
     if (firstRound != null) {
-      const firstNode = spineByKeyRound.get(`${nodeKeyOf(l.course)}::r${firstRound}`);
+      const firstNode = spineByKeyRound.get(`${laneKey}::r${firstRound}`);
       if (firstNode) childX = firstNode.x;
     }
     if (childX < minChildX) childX = minChildX;

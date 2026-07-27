@@ -23,12 +23,9 @@ import { accuracyBasisValue } from "@/lib/fitness";
 import {
   primaryMetric,
   roundCandidates,
-  candidatesAtPath,
   candidatesOf,
   countDescendants,
-  nodeAt,
   nodeKeyOf,
-  walkCourses,
   type HeadlineMetric,
 } from "@/lib/derivations";
 import { useDashboard } from "@/lib/hooks/useDashboard";
@@ -104,7 +101,7 @@ export function useLineage({
   // The shared tree from the single fetch both views render (R-36). The mask/lens
   // fields are NOT re-exposed here — the card and `Forest` read the counterfactual
   // off the nodes themselves, so this hook owns only the value/fork/cleanup state.
-  const { tree } = useViewedLineage();
+  const { tree, index } = useViewedLineage();
   // Per-campaign view memory — seeds the expand state below, and records what the operator
   // changes here so the next visit opens the same way.
   const { viewFor, recordView } = useViewMemory();
@@ -127,9 +124,9 @@ export function useLineage({
   // The viewed course's LANE key. Null before the tree lands, and null when the viewed
   // course is a FORK — a fork is not a node, its candidates ride the parent's lane.
   const viewedLaneKey = useMemo(() => {
-    const viewed = tree && path ? nodeAt(tree, path) : undefined;
+    const viewed = index.get(viewedKey)?.course;
     return viewed ? nodeKeyOf(viewed) : null;
-  }, [tree, path]);
+  }, [index, viewedKey]);
 
   // Render-phase expand reset (React's sanctioned adjust-state-on-prop-change).
   // A campaign switch resets to the clean view (the in-view lane expanded); selecting
@@ -180,7 +177,11 @@ export function useLineage({
     [campaignId, recordView],
   );
 
-  const courses = useMemo(() => (tree ? walkCourses(tree) : []), [tree]);
+  // Every course, root first — the index preserves the walk's DFS order.
+  const courses = useMemo(
+    () => [...index.values()].flatMap((e) => (e.course ? [e.course] : [])),
+    [index],
+  );
 
   // Which candidates of the IN-VIEW course a child course hangs off. The Sequence
   // view has no lanes to show one in — it plots one course — so it marks the
@@ -188,17 +189,16 @@ export function useLineage({
   // sibling actually has somewhere to be drawn.
   const forkedFrom = useMemo<ReadonlyMap<string, LineageNode>>(() => {
     const m = new Map<string, LineageNode>();
-    if (!tree || !path) return m;
-    // `candidatesAtPath`, not `nodeAt(tree, path)` — a FORK has no course node to look up
+    // The entry's own-path `candidates`, never its `course` — a FORK has no course node
     // (the server dissolves it onto the parent's timeline), so a course lookup answers
-    // `undefined` and this map comes back empty for exactly the case it exists to serve.
-    for (const cand of candidatesAtPath(tree, path)) {
+    // `undefined` and this map would come back empty for exactly the case it serves.
+    for (const cand of index.get(viewedKey)?.candidates ?? []) {
       for (const child of cand.children) {
         if (child.kind === "course") m.set(cand.id, child);
       }
     }
     return m;
-  }, [tree, path]);
+  }, [index, viewedKey]);
 
   // Per-candidate percent-metric overlay, keyed by `nodeKeyOf`. The tree
   // serves `composite_fitness` per candidate, so settled/sibling courses honor the
@@ -250,15 +250,9 @@ export function useLineage({
   }, [courses, cycleId, dash, liveRows, viewedKey]);
 
   // Empty-state facts for the in-view cycle (distinguishes an inherited fork
-  // from a fresh cycle waiting for round 1).
-  const viewedHasRounds = useMemo(() => {
-    // Addressed by PATH, not by a course lookup: a fork has no course node (the server
-    // dissolves it onto the parent's timeline), so `nodeAt` answers `undefined` for one and
-    // a fork that produced candidates reported "no rounds" — the empty state, on a course
-    // with results. `candidatesAtPath` answers for both shapes.
-    if (!tree || !path) return false;
-    return candidatesAtPath(tree, path).length > 0;
-  }, [tree, path]);
+  // from a fresh cycle waiting for round 1). Own-path candidates, not a course lookup —
+  // a fork has no course node, and one that produced candidates must not read as empty.
+  const viewedHasRounds = (index.get(viewedKey)?.candidates.length ?? 0) > 0;
   const parentId = cycleId ? rootCycleId(cycleId) : null;
   const isInheritedSibling = parentId != null && parentId !== cycleId;
 

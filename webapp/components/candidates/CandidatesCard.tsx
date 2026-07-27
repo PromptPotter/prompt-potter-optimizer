@@ -38,7 +38,6 @@ import { useFetch } from "@/lib/hooks/useFetch";
 import {
   HEADLINE_METRICS,
   headlineMetricLabel,
-  nodeAt,
   nodeKeyOf,
   panelCellLabel,
   pathOf,
@@ -46,6 +45,7 @@ import {
   type HeadlineMetric,
 } from "@/lib/derivations";
 import { isSelectedCandidate } from "@/lib/types";
+import { encodeCyclePath } from "@/lib/ids";
 import { useWorkspace } from "@/lib/workspace";
 import { useViewMemory } from "@/lib/view-memory";
 import { useLineage } from "./useLineage";
@@ -351,13 +351,14 @@ export function CandidatesCard() {
   // tree. It is deliberately not `selectedCandidate` (INSPECTION, written by a bar click):
   // one slot for both makes the chart its own input, so clicking a bar re-plots it under
   // the cursor.
-  const viewedNode = useMemo(
-    () =>
-      overlay.tree && viewedPath
-        ? nodeAt(overlay.tree, viewedPath, viewedCandidateId)
-        : undefined,
-    [overlay.tree, viewedPath, viewedCandidateId],
-  );
+  const viewedNode = useMemo(() => {
+    if (!viewedPath) return undefined;
+    const entry = overlay.index.get(encodeCyclePath(viewedPath));
+    if (!entry) return undefined;
+    return viewedCandidateId
+      ? entry.candidates.find((c) => c.id === viewedCandidateId)
+      : (entry.course ?? undefined);
+  }, [overlay.index, viewedPath, viewedCandidateId]);
 
   // The one thing the tree cannot answer: the candidate being scored RIGHT NOW. The ledger
   // mints a candidate before measuring it but only snapshots the score at completion, so a
@@ -503,14 +504,14 @@ export function CandidatesCard() {
     // Parked on a candidate, the bars are sibling courses inside ONE round — no round
     // boundary to draw.
     if (viewedCandidateId) return null;
-    const { points, subtree } = divergenceRoundsFor(overlay, viewedPath);
+    const { points, subtree } = divergenceRoundsFor(overlay.index, viewedPath);
     let firstRound = Infinity;
     for (const r of points) firstRound = Math.min(firstRound, r);
     for (const r of subtree) firstRound = Math.min(firstRound, r);
     if (!Number.isFinite(firstRound)) return null;
     const idx = views.findIndex((v) => v.round >= firstRound);
     return idx >= 0 ? idx : null;
-  }, [overlay, viewedPath, views, viewedCandidateId]);
+  }, [overlay.maskActive, overlay.index, viewedPath, views, viewedCandidateId]);
 
   // The bar of the candidate currently accumulating samples — it blinks while
   // live. The scoring candidate is `dash.candidate` ("C2.3/4"); gate on the

@@ -5,7 +5,6 @@ import {
   fmtHeadlineValue,
   headlineMetricLabel,
   nodeKeyOf,
-  pathOf,
   type HeadlineMetric,
 } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
@@ -214,7 +213,7 @@ export function Forest({
   // wrong run for anything inside an `.inner/` sandbox, where cycle ids repeat.
   const onPickCandidate = (n: RoundNodePos): void => {
     const nodeCycleId = pathLeaf(n.coursePath).cycleId;
-    if (encodeCyclePath(n.coursePath) !== viewedKey) selectCyclePath(n.coursePath, null);
+    if (n.coursePathKey !== viewedKey) selectCyclePath(n.coursePath, null);
     const isSel = isSelectedCandidate(candidate, nodeCycleId, n.round, n.candidateId);
     setSelectionForCandidate(
       isSel
@@ -277,7 +276,7 @@ export function Forest({
 
           {/* Selected-lane highlight — covers the whole band when expanded. */}
           {laneList.map((l) => {
-            if (encodeCyclePath(pathOf(l.course)) !== viewedKey) return null;
+            if (l.coursePathKey !== viewedKey) return null;
             return (
               <rect
                 key={`hl-${l.course.id}`}
@@ -341,7 +340,7 @@ export function Forest({
           {nodes
             .filter((n) => !n.isExpanded)
             .map((n) => {
-              const cycleSelected = encodeCyclePath(n.coursePath) === viewedKey;
+              const cycleSelected = n.coursePathKey === viewedKey;
               const layoutEntry = laneByKey.get(n.courseKey);
               const nodeCycleId = pathLeaf(n.coursePath).cycleId;
               const cycName = layoutEntry ? courseName(layoutEntry.course) : nodeCycleId;

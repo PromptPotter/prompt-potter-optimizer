@@ -35,7 +35,8 @@ import {
 } from "react";
 import { fetchLineageTree } from "@/lib/api";
 import type { LineageNode } from "@/lib/api/types";
-import { nodeAt, walkCourses } from "@/lib/derivations";
+import { indexLineage, type LineageIndex } from "@/lib/derivations";
+import { createRegistry, type TreeFetchOpts } from "@/lib/lineage-registry";
 import { useCandidatesState } from "@/components/candidates/candidates-store";
 import { formulaFromWeights } from "@/components/candidates/fitness-bars";
 import { useAuthGate } from "@/lib/auth-context";
@@ -76,6 +77,9 @@ const EMPTY: CampaignTree = { root: null, loaded: false, failed: false };
 export interface ViewedLineage {
   // THE served genealogy, rooted at the viewed campaign's root course.
   tree: LineageNode | null;
+  // The tree's address index (`indexLineage`), built once per served tree — the surfaces'
+  // per-render lookups ride this instead of re-walking with `nodeAt`/`candidatesAtPath`.
+  index: LineageIndex;
   // The PRESET lens dropdown value: "" (off), "score:<formula>", or "abort:<variant>".
   // The What-If card overrides it as the master when open.
   lens: string;
@@ -87,99 +91,30 @@ export interface ViewedLineage {
   whatifActive: boolean;
 }
 
-interface Store {
+interface LineageData {
   entries: Map<string, CampaignTree>;
   // Ref-counted interest per key. A key with no subscribers is not polled — that is what
   // keeps a collapsed sidebar free, and what stops a dead campaign's loop from outliving
   // the row that opened it.
-  subscribe: (key: string, path: CyclePath) => () => void;
-  viewed: ViewedLineage;
+  subscribe: (key: string, path: CyclePath, opts?: TreeFetchOpts) => () => void;
+  // The viewed campaign's bare address and its mask-carrying key, so a consumer that names
+  // the same tree by address can ride the viewed entry (see `useLineageTree`).
+  viewedAddr: string | null;
+  viewedKey: string | null;
 }
 
-const LineageContext = createContext<Store | null>(null);
-
-// Who currently wants which tree — an EXTERNAL store, read through `useSyncExternalStore`.
-//
-// It has to be external rather than `useState` because the writers are mount/unmount
-// effects: a sidebar row opening is a subscription, and calling setState synchronously from
-// an effect body is the cascading-render pattern React (and `react-hooks/set-state-in-effect`)
-// rejects. The same shape `useLocalStorage` already uses here — mutate, then notify.
-//
-// The version counter is what feeds `usePoll`'s `revalidateOn`, so a newly opened row
-// fetches within a frame instead of waiting out the 5 s interval.
-// It also owns each key's ETag. Nothing renders a validator, and it must die exactly when
-// its body does — replaying an ETag against a tree we no longer hold would 304 into an
-// empty entry. Keeping both in the registry makes that one deletion instead of two that
-// have to be remembered together.
-interface Registry {
-  subscribe: (key: string, path: CyclePath) => () => void;
-  onVersionChange: (listener: () => void) => () => void;
-  version: () => number;
-  live: () => [string, CyclePath][];
-  has: (key: string) => boolean;
-  etag: (key: string) => string | null;
-  setEtag: (key: string, value: string | null) => void;
-}
-
-function createRegistry(onDrop: (key: string) => void): Registry {
-  const counts = new Map<string, { count: number; path: CyclePath }>();
-  const etags = new Map<string, string>();
-  const listeners = new Set<() => void>();
-  let version = 0;
-  const bump = (): void => {
-    version += 1;
-    for (const l of listeners) l();
-  };
-  return {
-    subscribe(key, path) {
-      const cur = counts.get(key);
-      counts.set(key, { count: (cur?.count ?? 0) + 1, path });
-      bump();
-      return () => {
-        const entry = counts.get(key);
-        if (!entry) return;
-        if (entry.count <= 1) {
-          counts.delete(key);
-          etags.delete(key);
-          onDrop(key);
-        } else {
-          counts.set(key, { count: entry.count - 1, path: entry.path });
-        }
-        bump();
-      };
-    },
-    onVersionChange(listener) {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-    version: () => version,
-    live: () => [...counts].map(([k, v]) => [k, v.path]),
-    has: (key) => counts.has(key),
-    etag: (key) => etags.get(key) ?? null,
-    setEtag: (key, value) => {
-      if (value) etags.set(key, value);
-      else etags.delete(key);
-    },
-  };
-}
+// Two contexts, one provider: `entries` changes identity every time ANY subscribed tree
+// lands, and the viewed-only surfaces (the bars, the forest, the mask tag) must not
+// re-render for a sidebar row's refetch. They read the second context, whose value moves
+// only when the viewed tree or its mask state does.
+const LineageDataContext = createContext<LineageData | null>(null);
+const ViewedLineageContext = createContext<ViewedLineage | null>(null);
 
 // The viewed campaign's key carries its mask; every other key is the bare address. Kept in
 // one function so a subscriber and the fetcher can never disagree about what they named.
 function treeKey(path: CyclePath, lens: string | null, samples: string): string {
   const addr = encodeCyclePath(path);
   return lens || samples ? `${addr}|${lens ?? ""}|${samples}` : addr;
-}
-
-// Every (course, candidate) pair in the tree — the one walk the overlay maps ride.
-function candidatePairs(tree: LineageNode | null): { courseId: string; cand: LineageNode }[] {
-  if (!tree) return [];
-  const out: { courseId: string; cand: LineageNode }[] = [];
-  for (const course of walkCourses(tree)) {
-    for (const cand of course.children) {
-      if (cand.kind === "candidate") out.push({ courseId: course.id, cand });
-    }
-  }
-  return out;
 }
 
 export function LineageProvider({
@@ -243,10 +178,14 @@ export function LineageProvider({
     if (!campaignId || !rootId) return null;
     return [{ campaignId, cycleId: rootId }];
   }, [campaignId, rootId]);
+  const viewedAddr = viewedPath ? encodeCyclePath(viewedPath) : null;
   const viewedKey = viewedPath ? treeKey(viewedPath, lensParam, samplesKey) : null;
 
   const [entries, setEntries] = useState<Map<string, CampaignTree>>(() => new Map());
 
+  // The registry is EXTERNAL state read through `useSyncExternalStore`, because its writers
+  // are mount/unmount effects — setState from an effect body is the cascading-render
+  // pattern React rejects. Mechanics + invariants: `lib/lineage-registry.ts`.
   // Last subscriber left: drop the body along with the subscription. Keeping it would grow
   // unboundedly as the operator browses campaigns, and the next open refetches in one tick.
   const [registry] = useState(() =>
@@ -267,30 +206,23 @@ export function LineageProvider({
   const subscribe = registry.subscribe;
 
   // The provider self-subscribes the viewed key: it owns the masks, so no consumer can
-  // name that key correctly on its own.
+  // name that key correctly on its own. The spec it latches is what the tick fetches.
   useEffect(() => {
     if (!viewedKey || !viewedPath) return;
-    return subscribe(viewedKey, viewedPath);
-  }, [viewedKey, viewedPath, subscribe]);
+    return subscribe(viewedKey, viewedPath, { lens: lensParam, samples: samplesParam });
+  }, [viewedKey, viewedPath, subscribe, lensParam, samplesParam]);
 
   // ONE tick for every subscribed key. Each replays its own ETag, so a quiescent campaign
-  // costs one conditional request per interval and no body.
+  // costs one conditional request per interval and no body. What to fetch is the key's own
+  // latched spec — the tick never infers it from whose key this is.
   const tick = useCallback(
     async (signal: AbortSignal) => {
       const live = registry.live();
       await Promise.all(
-        live.map(async ([key, path]) => {
+        live.map(async ([key, spec]) => {
           const prior = registry.etag(key);
-          // The viewed key is the only one that carries a mask; every other subscriber
-          // asked for the raw read, and its key says so.
-          const masked = key === viewedKey;
           try {
-            const res = await fetchLineageTree(
-              path,
-              masked ? { lens: lensParam, samples: samplesParam } : {},
-              prior,
-              signal,
-            );
+            const res = await fetchLineageTree(spec.path, spec.opts, prior, signal);
             if (signal.aborted) return;
             // A key unsubscribed mid-flight must not be resurrected by its own response.
             if (!registry.has(key)) return;
@@ -321,9 +253,9 @@ export function LineageProvider({
         }),
       );
     },
-    // `viewedKey` moves only on a campaign switch or a mask change — both of which the
-    // other two deps already track, and both of which should re-tick anyway.
-    [registry, viewedKey, lensParam, samplesParam, onAuthError],
+    // Mask changes reach the poll as a re-keyed subscription (a registry version bump),
+    // never through this callback's identity.
+    [registry, onAuthError],
   );
 
   usePoll(tick, {
@@ -334,27 +266,46 @@ export function LineageProvider({
   });
 
   const viewedTree = viewedKey ? (entries.get(viewedKey)?.root ?? null) : null;
-  const pairs = useMemo(() => candidatePairs(viewedTree), [viewedTree]);
+  // The ONE walk over the viewed tree. Every candidate appears under its own address
+  // exactly once, so derivations over "all candidates" iterate the index too.
+  const index = useMemo(() => indexLineage(viewedTree), [viewedTree]);
 
   // "Active" (red tag) only when the served tree actually carries a divergence — NOT merely
   // because a lens/chip is requested.
-  const maskActive = useMemo(
-    () => pairs.some(({ cand }) => cand.divergence !== null || cand.divergent),
-    [pairs],
-  );
+  const maskActive = useMemo(() => {
+    for (const { candidates } of index.values()) {
+      if (candidates.some((c) => c.divergence !== null || c.divergent)) return true;
+    }
+    return false;
+  }, [index]);
 
   const viewed = useMemo<ViewedLineage>(
-    () => ({ tree: viewedTree, lens, setLens, maskActive, maskLabel, whatifActive: showWhatIf }),
-    [viewedTree, lens, maskActive, maskLabel, showWhatIf],
+    () => ({
+      tree: viewedTree,
+      index,
+      lens,
+      setLens,
+      maskActive,
+      maskLabel,
+      whatifActive: showWhatIf,
+    }),
+    [viewedTree, index, lens, maskActive, maskLabel, showWhatIf],
   );
 
-  const value = useMemo<Store>(() => ({ entries, subscribe, viewed }), [entries, subscribe, viewed]);
+  const data = useMemo<LineageData>(
+    () => ({ entries, subscribe, viewedAddr, viewedKey }),
+    [entries, subscribe, viewedAddr, viewedKey],
+  );
 
-  return <LineageContext.Provider value={value}>{children}</LineageContext.Provider>;
+  return (
+    <LineageDataContext.Provider value={data}>
+      <ViewedLineageContext.Provider value={viewed}>{children}</ViewedLineageContext.Provider>
+    </LineageDataContext.Provider>
+  );
 }
 
-function useStore(): Store {
-  const ctx = useContext(LineageContext);
+function useLineageData(): LineageData {
+  const ctx = useContext(LineageDataContext);
   if (ctx === null) throw new Error("useLineage* must be used within a LineageProvider");
   return ctx;
 }
@@ -362,15 +313,20 @@ function useStore(): Store {
 // The VIEWED campaign's tree plus its mask state — the surfaces that render the
 // counterfactual (the bars, the forest, the What-If tag).
 export function useViewedLineage(): ViewedLineage {
-  return useStore().viewed;
+  const ctx = useContext(ViewedLineageContext);
+  if (ctx === null) throw new Error("useLineage* must be used within a LineageProvider");
+  return ctx;
 }
 
 // ANY campaign's tree, by address. Subscribing is what starts its poll; `enabled` false
 // (a collapsed sidebar row) subscribes to nothing and fetches nothing.
 export function useLineageTree(path: CyclePath, enabled: boolean): CampaignTree {
-  const { entries, subscribe } = useStore();
+  const { entries, subscribe, viewedAddr, viewedKey } = useLineageData();
   const addr = encodeCyclePath(path);
-  const key = enabled ? addr : null;
+  // An address naming the VIEWED campaign rides its mask-carrying entry instead of opening
+  // a second fetch of the same tree — a masked body is a strict superset (module header),
+  // so everything an address-only consumer reads is present either way.
+  const key = enabled ? (addr === viewedAddr && viewedKey ? viewedKey : addr) : null;
 
   useEffect(() => {
     if (key === null) return;
@@ -392,15 +348,15 @@ export function useLineageTree(path: CyclePath, enabled: boolean): CampaignTree 
 // candidate the lens would have replaced), and every candidate of a counterfactual round
 // carries `divergent`.
 export function divergenceRoundsFor(
-  viewed: ViewedLineage,
+  index: LineageIndex,
   path: CyclePath | null,
 ): { points: ReadonlySet<number>; subtree: ReadonlySet<number> } {
   const points = new Set<number>();
   const subtree = new Set<number>();
-  if (!path || !viewed.tree) return { points, subtree };
+  if (!path) return { points, subtree };
   // Addressed, not scanned: a bare cycle id names more than one course (inner ids repeat
   // across sandboxes), and `find` would answer with whichever came first.
-  const course = nodeAt(viewed.tree, path);
+  const course = index.get(encodeCyclePath(path))?.course;
   for (const cand of course?.children ?? []) {
     if (cand.round == null) continue;
     if (cand.divergence) points.add(cand.round);

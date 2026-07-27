@@ -25,13 +25,13 @@ import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useTimeRay } from "@/lib/hooks/useTimeRay";
 import { useSelectNode } from "@/lib/hooks/useSelectNode";
 import { useViewedLineage } from "@/lib/lineage";
-import { candidatesAtPath, rayHead, raySteps, type RayStep } from "@/lib/derivations";
+import { rayHead, raySteps, type RayStep } from "@/lib/derivations";
 import { encodeCyclePath } from "@/lib/ids";
 
 export const TimeRay = memo(function TimeRay() {
   const { viewedPath, selectCyclePath } = useWorkspace();
   const { setSelectionForRound } = useSelection();
-  const { tree } = useViewedLineage();
+  const { index } = useViewedLineage();
   const { dash } = useDashboard();
   const { pick } = useSelectNode(selectCyclePath);
   const { items, loaded, failed, hasMore, loadOlder, nowMs } = useTimeRay(viewedPath, !!viewedPath);
@@ -68,13 +68,13 @@ export const TimeRay = memo(function TimeRay() {
   //     fork and an inner run alike, because it takes a whole path).
   const onStep = (step: RayStep): void => {
     const elsewhere = step.pathKey !== rootKey;
-    if (step.candidateLabel && tree) {
+    if (step.candidateLabel) {
       // Join on `course_label`, the MINTING course's private position. `candidate_id` is
       // re-minted on every re-run, so an id join silently misses — and a fork's contribution
       // wears a renumbered `label` on this timeline while its own ledger speaks the old one.
-      const node = candidatesAtPath(tree, step.path).find(
-        (c) => c.course_label === step.candidateLabel,
-      );
+      const node = index
+        .get(step.pathKey)
+        ?.candidates.find((c) => c.course_label === step.candidateLabel);
       if (node) {
         pick(node, step.path);
         return;

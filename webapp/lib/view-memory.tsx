@@ -117,12 +117,17 @@ export const viewMemoryCodec = {
 interface ViewMemory {
   // The record for a campaign — defaults when absent, expired, or a stale version.
   viewFor: (campaignId: string | null) => CampaignView;
+  // A campaign's toggled set, as a Set. `isOpen` runs per sidebar row per render, so the
+  // array→Set build happens once per store change here, not per call.
+  toggledFor: (campaignId: string | null) => ReadonlySet<string>;
   // Merge a patch into a campaign's record and stamp `at`. Called from the handler that
   // changed the axis, never during render.
   recordView: (campaignId: string | null, patch: Partial<CampaignView>) => void;
 }
 
 const ViewMemoryContext = createContext<ViewMemory | null>(null);
+
+const EMPTY_TOGGLED: ReadonlySet<string> = new Set();
 
 export function ViewMemoryProvider({ children }: { children: ReactNode }) {
   const [store, setStore] = useLocalStorage<Store>(VIEW_MEMORY_KEY, EMPTY_STORE, viewMemoryCodec);
@@ -133,6 +138,17 @@ export function ViewMemoryProvider({ children }: { children: ReactNode }) {
       return store[campaignId] ?? emptyView();
     },
     [store],
+  );
+
+  const toggledByCampaign = useMemo(() => {
+    const m = new Map<string, ReadonlySet<string>>();
+    for (const [cid, view] of Object.entries(store)) m.set(cid, new Set(view.toggled));
+    return m;
+  }, [store]);
+  const toggledFor = useCallback(
+    (campaignId: string | null): ReadonlySet<string> =>
+      (campaignId ? toggledByCampaign.get(campaignId) : undefined) ?? EMPTY_TOGGLED,
+    [toggledByCampaign],
   );
 
   const recordView = useCallback(
@@ -151,7 +167,10 @@ export function ViewMemoryProvider({ children }: { children: ReactNode }) {
     [setStore],
   );
 
-  const value = useMemo<ViewMemory>(() => ({ viewFor, recordView }), [viewFor, recordView]);
+  const value = useMemo<ViewMemory>(
+    () => ({ viewFor, toggledFor, recordView }),
+    [viewFor, toggledFor, recordView],
+  );
   return <ViewMemoryContext.Provider value={value}>{children}</ViewMemoryContext.Provider>;
 }
 
@@ -176,12 +195,12 @@ export interface NodeToggle {
 }
 
 export function useNodeToggle(): NodeToggle {
-  const { viewFor, recordView } = useViewMemory();
+  const { viewFor, toggledFor, recordView } = useViewMemory();
 
   const isOpen = useCallback(
     (kind: NodeKind, path: string) =>
-      isNodeOpen(new Set(viewFor(campaignOfEncodedPath(path)).toggled), kind, path),
-    [viewFor],
+      isNodeOpen(toggledFor(campaignOfEncodedPath(path)), kind, path),
+    [toggledFor],
   );
 
   const toggle = useCallback(
@@ -189,12 +208,12 @@ export function useNodeToggle(): NodeToggle {
       const campaignId = campaignOfEncodedPath(path);
       if (!campaignId) return;
       const key = nodeKey(kind, path);
-      const toggled = new Set(viewFor(campaignId).toggled);
+      const toggled = new Set(toggledFor(campaignId));
       if (toggled.has(key)) toggled.delete(key);
       else toggled.add(key);
       recordView(campaignId, { toggled: [...toggled] });
     },
-    [viewFor, recordView],
+    [toggledFor, recordView],
   );
 
   const autoExpandedFor = useCallback(
@@ -204,11 +223,11 @@ export function useNodeToggle(): NodeToggle {
 
   const markAutoExpanded = useCallback(
     (campaignId: string, cycleId: string, key: string) => {
-      const toggled = new Set(viewFor(campaignId).toggled);
+      const toggled = new Set(toggledFor(campaignId));
       toggled.add(key);
       recordView(campaignId, { toggled: [...toggled], autoExpandedFor: cycleId });
     },
-    [viewFor, recordView],
+    [toggledFor, recordView],
   );
 
   return useMemo(

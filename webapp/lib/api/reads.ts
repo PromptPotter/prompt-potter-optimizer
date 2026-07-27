@@ -1,6 +1,6 @@
 // Read endpoints — thin GET wrappers over the FastAPI surface.
 
-import { API, jget, jgetConditional, type Conditional } from "./client";
+import { API, jget, jgetIfModified, jgetIfNoneMatch, type Conditional } from "./client";
 import { encodeCyclePath, encodeDescend, pathRoot, type CyclePath } from "../ids";
 import type {
   ActiveSessionResponse,
@@ -385,7 +385,7 @@ export function fetchDashboardByPath(
   ifModifiedSince?: string | null,
   signal?: AbortSignal,
 ): Promise<Conditional<Record<string, unknown>>> {
-  return jgetConditional<Record<string, unknown>>(
+  return jgetIfModified<Record<string, unknown>>(
     cyclePathUrl(path, "/dashboard"),
     ifModifiedSince,
     signal,
@@ -631,12 +631,7 @@ export function fetchLineageTree(
   if (lens) params.set("lens", lens);
   if (samples && samples.length > 0) params.set("samples", samples.join(","));
   const q = params.toString();
-  return jgetConditional<LineageNode>(
-    cyclePathUrl(path, `/tree${q ? `?${q}` : ""}`),
-    etag,
-    signal,
-    "etag",
-  );
+  return jgetIfNoneMatch<LineageNode>(cyclePathUrl(path, `/tree${q ? `?${q}` : ""}`), etag, signal);
 }
 
 // THE CHRONOLOGY — one merged order across a course, its forks and its inner runs; also
@@ -654,12 +649,7 @@ export function fetchTimeRay(
   if (limit != null) params.set("limit", String(limit));
   if (before) params.set("before", before);
   const q = params.toString();
-  return jgetConditional<RayResponse>(
-    cyclePathUrl(path, `/ray${q ? `?${q}` : ""}`),
-    etag,
-    signal,
-    "etag",
-  );
+  return jgetIfNoneMatch<RayResponse>(cyclePathUrl(path, `/ray${q ? `?${q}` : ""}`), etag, signal);
 }
 
 // Workspace-scope diagnostic-run records — sidecars written by `verify` CLI.

@@ -34,32 +34,27 @@ export async function jget<T>(url: string, signal?: AbortSignal): Promise<T> {
 // `304 Not Modified` (no body) when nothing changed. Returns a discriminated union
 // so the caller cleanly skips work on the 304 path.
 //
-// TWO validator modes, because the two polls validate different things:
-//   "mtime" — `Last-Modified` / `If-Modified-Since`. The dashboard poll, whose body
-//             IS one file: an mtime says everything there is to say about it.
-//   "etag"  — `ETag` / `If-None-Match`. The lineage-tree poll, whose body depends on
-//             an mtime AND the request's lens/samples mask. A time validator cannot
-//             express query-dependence, which is why masked tree reads used to be
-//             carved out of the fast path and rebuilt on every single poll.
-// One helper, one 304 path; the mode picks the header pair. The stored value is
-// called a `validator` rather than a `lastModified` because under "etag" it is not
-// a date, and a field that lies about what it holds is how the two got conflated.
-export type ConditionalMode = "mtime" | "etag";
-
+// TWO wrappers, because the two polls validate different things:
+//   `jgetIfModified`  — `Last-Modified` / `If-Modified-Since`. The dashboard poll, whose
+//                       body IS one file: an mtime says everything there is to say.
+//   `jgetIfNoneMatch` — `ETag` / `If-None-Match`. The tree/ray polls, whose bodies depend
+//                       on mtimes AND the request's query (lens/samples mask, ray window).
+//                       A time validator cannot express query-dependence, which is why
+//                       masked tree reads used to be rebuilt on every single poll.
+// One body, one 304 path; the wrapper picks the header pair. The stored value is called
+// a `validator` rather than a `lastModified` because under ETag it is not a date, and a
+// field that lies about what it holds is how the two got conflated.
 export type Conditional<T> =
   | { kind: "ok"; data: T; validator: string | null }
   | { kind: "not_modified"; validator: string | null };
 
-export async function jgetConditional<T>(
+async function jgetWithValidator<T>(
   url: string,
+  requestHeader: "If-Modified-Since" | "If-None-Match",
+  responseHeader: "Last-Modified" | "ETag",
   validator?: string | null,
   signal?: AbortSignal,
-  mode: ConditionalMode = "mtime",
 ): Promise<Conditional<T>> {
-  const [requestHeader, responseHeader] =
-    mode === "etag"
-      ? (["If-None-Match", "ETag"] as const)
-      : (["If-Modified-Since", "Last-Modified"] as const);
   const headers: Record<string, string> = {};
   if (validator) headers[requestHeader] = validator;
   const init: RequestInit = { cache: "no-store", headers };
@@ -69,4 +64,20 @@ export async function jgetConditional<T>(
   if (r.status === 304) return { kind: "not_modified", validator: next };
   if (!r.ok) throw new ApiError(r.status, url);
   return { kind: "ok", data: (await r.json()) as T, validator: next };
+}
+
+export function jgetIfModified<T>(
+  url: string,
+  validator?: string | null,
+  signal?: AbortSignal,
+): Promise<Conditional<T>> {
+  return jgetWithValidator<T>(url, "If-Modified-Since", "Last-Modified", validator, signal);
+}
+
+export function jgetIfNoneMatch<T>(
+  url: string,
+  validator?: string | null,
+  signal?: AbortSignal,
+): Promise<Conditional<T>> {
+  return jgetWithValidator<T>(url, "If-None-Match", "ETag", validator, signal);
 }

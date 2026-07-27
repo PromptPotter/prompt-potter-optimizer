@@ -168,7 +168,7 @@ const OPEN_BY_DEFAULT: Record<NodeKind, boolean> = {
   cand: true,
 };
 
-export function isNodeOpen(toggled: Set<string>, kind: NodeKind, path: string): boolean {
+export function isNodeOpen(toggled: ReadonlySet<string>, kind: NodeKind, path: string): boolean {
   return toggled.has(nodeKey(kind, path)) ? !OPEN_BY_DEFAULT[kind] : OPEN_BY_DEFAULT[kind];
 }
 
