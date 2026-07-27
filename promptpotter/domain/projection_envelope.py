@@ -7,9 +7,10 @@ Every Server-Sent Events frame on the cycle stream is a ``ProjectionEnvelope``
 (``stream_snapshot`` at subscribe time).
 
 ``sequence`` is the ledger offset at which the underlying record was
-appended; subscribers detect gaps by sequence and request replay from a
-later profile's replay endpoint. ``cycle_id`` redundantly stamps the
-target cycle so multi-cycle clients can demultiplex a fan-in subscription.
+appended; subscribers detect gaps by sequence and request replay from
+``GET /campaigns/{c}/cycles/{cy}/ray`` — the family-wide chronology.
+``cycle_id`` redundantly stamps the target cycle so multi-cycle clients can
+demultiplex a fan-in subscription.
 """
 
 from __future__ import annotations
@@ -24,15 +25,26 @@ __all__ = ["ProjectionEnvelope", "ProjectionKind"]
 
 
 # Closed enum mirroring ``ProjectionEnvelope.kind`` in
-# ``docs/specs/m12-events-asyncapi.yaml``. Eleven entries match
-# ``record_type`` literals on ``CycleRecord``; one is projection-only.
+# ``docs/specs/m12-events-asyncapi.yaml``. It MUST cover the whole ``CycleRecord``
+# union — all thirteen ``record_type`` literals — plus one projection-only kind.
 # Keep this set in sync with the YAML by hand — drift fails loud (an
 # unknown kind raises on dispatch); no standing test (see tests/CLAUDE.md).
+#
+# **A missing kind is a HOLE, not a filter, and that is why coverage is the rule.**
+# ``CycleLedgerTail.read_new`` advances ``_line_index`` for every line it reads,
+# including one whose kind it cannot map — so an unlisted record is skipped while
+# still consuming an offset, and the client sees a ``sequence`` gap and fires the
+# reconnect recipe in ``docs/developer/event-stream.md``. ``candidate_minted`` and
+# ``cycle_seed`` were absent here for exactly that reason and produced exactly that.
+# With full coverage, ``_to_envelope`` returns ``None`` only for a genuinely
+# malformed line — which IS a gap worth noticing.
 ProjectionKind = Literal[
-    # record_type literals (11)
+    # record_type literals (13) — the complete `CycleRecord` union
+    "candidate_minted",
     "decision",
     "command",
     "command_ack",
+    "cycle_seed",
     "error",
     "llm_call_progress",
     "llm_call",
@@ -57,7 +69,7 @@ class ProjectionEnvelope(StrictModel):
     model_config = ConfigDict(frozen=True)
 
     kind: ProjectionKind = Field(
-        description="Closed-set discriminator; one of seven record_type literals or three projection-only kinds.",
+        description="Closed-set discriminator; every CycleRecord record_type, plus stream_snapshot.",
     )
     version: int = Field(
         default=1,

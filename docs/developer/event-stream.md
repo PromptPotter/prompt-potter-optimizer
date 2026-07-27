@@ -27,7 +27,7 @@ data: {"kind": "phase", "version": 1, "cycle_id": "cycle_abc123",
 
 | Field | Type | Notes |
 |---|---|---|
-| `kind` | string | Closed enum. One of seven record-derived kinds (`decision`, `phase`, `snapshot`, `token_usage`, `llm_call_start`, `llm_call_progress`, `llm_call`) or three projection-only kinds (`stream_snapshot`, `command`, `command_ack`). |
+| `kind` | string | Closed enum covering the **whole** `CycleRecord` union — `decision`, `phase`, `snapshot`, `token_usage`, `llm_call_start`, `llm_call_progress`, `llm_call`, `command`, `command_ack`, `error`, `round_warning`, `candidate_minted`, `cycle_seed` — plus the projection-only `stream_snapshot` synthesized by the tail. Coverage is not optional: see § Sequence semantics. |
 | `version` | integer | Envelope shape version. Bumps only on a breaking restructure (which requires a §0 amendment). Profile A ships v1. |
 | `cycle_id` | string | Target cycle. Redundant with the URL path, stamped per-frame so multi-cycle clients can demultiplex a fan-in subscription. |
 | `sequence` | integer | Ledger offset. Snapshot frame carries the high-water mark the snapshot reflects; live tail strictly greater. Gap = missed frames. |
@@ -53,7 +53,17 @@ The runtime guarantees, in order:
 
 `sequence` is the per-cycle ledger offset, monotonic and dense for live tail (no holes between consecutive records). A client observing `sequence` jumping from N to N+2 missed offset N+1. Recovery: re-subscribe; the new snapshot covers the gap.
 
+**Density depends on the `kind` enum covering every ledger `record_type`, and that is the whole reason coverage is mandatory.** `CycleLedgerTail.read_new` advances `_line_index` for every line it reads, including one it cannot map — so a record whose kind is missing from the enum is *silently skipped while consuming an offset*, which reaches the client as a gap and drives the reconnect above. `candidate_minted` and `cycle_seed` sat outside the enum for exactly this reason and produced exactly this: two spurious holes per round. With full coverage, `_to_envelope` returns `None` only for a genuinely malformed line — which is a gap worth noticing.
+
 The `Last-Event-ID` header is reserved for a future profile's resume-from-sequence semantics (declared in the AsyncAPI HTTP binding, not yet honored by the handler).
+
+## History lives on the ray, not here
+
+This stream has **no replay**, by construction: `snapshot_frame` unconditionally calls `_seek_to_eof()`, so a subscriber always starts at the current end of the ledger and never receives what came before.
+
+That is correct, and it is correct because history has its own home — `GET /campaigns/{c}/cycles/{cy}/ray`, the **time-ray**: one merged chronology across a course, its forks, and its inner runs, windowed and paged backwards. This is the "later profile's replay endpoint" named in [`projection_envelope.py`](../../promptpotter/domain/projection_envelope.py); it is now that endpoint. Its items carry `kind` + `payload` byte-identical to a `ProjectionEnvelope`'s, so one client translator serves both, plus a `path` the envelope cannot carry (an inner `cycle_id` repeats across sibling sandboxes, so it does not identify a cycle in a family).
+
+**Do not add a `since=` parameter to this stream.** A second replay mechanism is exactly what the ray exists to avoid. The two objects have different scopes and that is deliberate: the tail is per-cycle and live, the ray is family-wide and historical. A client joins them on `(path, offset)` — a live frame's `sequence` IS a ray item's `offset`, because both are the physical line index of that cycle's own ledger file.
 
 ## Writer / reader split
 

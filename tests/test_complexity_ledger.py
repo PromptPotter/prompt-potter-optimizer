@@ -411,7 +411,25 @@ LEDGER_BASELINE = {
     # ledger at the repo root — 4741 modules, ``node_modules`` and all, against a
     # baseline of 296. It now derives the root by NAME and asserts it. A ratchet that
     # can be pointed at the wrong tree by an unrelated file move is not a ratchet.
-    "modules": 292,
+    #
+    # 292 -> 294 (2026-07-26): the TIME-RAY —
+    # ``infrastructure/store/family_ray_views.py`` (the merge) + its thin route
+    # ``presentation/api/routers/campaigns/ray.py``. Raised DELIBERATELY: this is a
+    # feature, and per ``<surface-ledger>`` a raise that ships one is fine as long as it
+    # is booked with a reason.
+    #
+    # The reason it could not be folded into something existing, since that is the only
+    # question this ratchet is really asking. The ray is a CHRONOLOGY; every axis the
+    # package already served is round-indexed, tree-structured, or spend-only, and none of
+    # them can answer "what happened, in order, and is it still happening." It could not
+    # ride ``lineage_views`` (that is a genealogy — a fork sits BESIDE its parent, and the
+    # ray's whole point is that it sits INTERLEAVED with it), nor ``event_stream`` (that is
+    # one cycle's live edge and unconditionally seeks to EOF, so it structurally cannot
+    # serve history). What it did NOT add is the thing that would have been the real cost:
+    # a second family walk. ``lineage_views.iter_family_courses`` was promoted out of the
+    # tree's private recursion so both readers ask one function which cycles a campaign
+    # contains — a copy of ``_child_courses`` would have been two answers to that.
+    "modules": 294,
     # 52 -> 51 (2026-07-17): ``cli/commands/sweep`` went with the sweep verb.
     # 51 -> 50 (2026-07-26): ``application/resource_matrix/__init__.py`` went with the
     # retired arc above.

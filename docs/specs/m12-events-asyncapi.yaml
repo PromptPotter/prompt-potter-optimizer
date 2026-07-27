@@ -12,10 +12,13 @@
 # Permanent contract: docs/adr/0001-m12-control-plane.md
 # §0 definition: docs/architecture.md (§0 "State + persistence" — Five I/O kinds)
 #
-# Status: Profile -1 scaffold. The closed outbound set is the seven existing
-# CycleRecord kinds; Profile B adds CommandRecord + CommandAckRecord. No SSE
-# handler ships at Profile -1 — the channel + ProjectionEnvelope envelope land
-# at Profile A.
+# Status: Profile A shipped. The closed outbound set is the FULL `CycleRecord`
+# union — every `record_type` on the ledger is streamable — plus the
+# projection-only `stream_snapshot`. It reached parity late: `candidate_minted`
+# and `cycle_seed` were on disk but absent from the enum, so `CycleLedgerTail`
+# dropped them while still advancing its line index, which showed up to clients
+# as a `sequence` gap and tripped the reconnect recipe in clause 4 below.
+# **A record kind that is not listed here is not "filtered", it is a hole.**
 
 asyncapi: 3.0.0
 
@@ -78,7 +81,18 @@ channels:
            `EventSource` clients ignore it automatically; do not wait on it.
         4. Missed frames are detectable via `sequence` gap. Clients SHOULD
            re-subscribe to receive a fresh snapshot if a gap is observed.
-        5. **404 ONLY for an unknown cycle** (the cycle directory does not
+           This only works because the `kind` enum covers EVERY ledger
+           `record_type`: the tail advances its line index for a line it
+           cannot map, so an unlisted kind would read as a gap and drive a
+           spurious reconnect. A gap now means a genuinely malformed line.
+        5. **This channel is the live tail only — it has no replay.**
+           `snapshot_frame` unconditionally seeks to EOF, so a subscriber
+           never receives history through it. History is served by
+           `GET /campaigns/{c}/cycles/{cy}/ray` (the family-wide, windowed,
+           paged chronology), which is the replay endpoint referenced by
+           `domain/projection_envelope.py`. Do not add a `since=` parameter
+           here; that would be a second replay mechanism.
+        6. **404 ONLY for an unknown cycle** (the cycle directory does not
            exist). A *running*, *paused*, and *finished* cycle all subscribe
            successfully. There is no process-wide registry and no "live stream
            to attach to": the stream is a **cross-process tail of the on-disk
@@ -151,8 +165,10 @@ components:
             corresponding record class is then added to
             `promptpotter/domain/run_records.py::CycleRecord`.
           enum:
-            # Profile -1: the existing seven ledger record kinds. Values
-            # mirror `record_type: Literal[...]` in `promptpotter/domain/run_records.py`.
+            # The ledger record kinds. Values mirror `record_type: Literal[...]`
+            # in `promptpotter/domain/run_records.py`, and the set MUST cover the
+            # whole `CycleRecord` union — see the status note at the top of this
+            # file for why an omission is a sequence hole rather than a filter.
             - decision
             - llm_call_progress
             - llm_call
@@ -160,6 +176,14 @@ components:
             - phase
             - snapshot
             - token_usage
+            # A candidate's IDENTITY at mint time — the only witness that a
+            # candidate exists BEFORE it is scored, and so the earliest point a
+            # chronology can name it. `CandidateMintedRecord`.
+            - candidate_minted
+            # The cycle's read-once starting point (`CycleSeedRecord`). One
+            # record at the head of a non-root cycle's own ledger; reads as
+            # "this cycle was seeded from X" at the top of a fork's thread.
+            - cycle_seed
             # Profile A: snapshot-then-tail boundary marker (projection-only,
             # no underlying record class - synthesized by the tail).
             - stream_snapshot
@@ -220,6 +244,8 @@ components:
             - $ref: '#/components/schemas/CommandAckPayload'
             - $ref: '#/components/schemas/ErrorPayload'
             - $ref: '#/components/schemas/RoundWarningPayload'
+            - $ref: '#/components/schemas/CandidateMintedPayload'
+            - $ref: '#/components/schemas/CycleSeedPayload'
 
     # ---- Profile A: projection-synthesized payload ----
 
@@ -437,6 +463,86 @@ components:
             Per-kind structured context (e.g. `reason` + `model` for
             `l1_zero_candidates`, `validator_ids` for the L2 soft-reject,
             `injection`/`rendered_chars`/`cap` for the budget overrun).
+        timestamp:
+          type: string
+          format: date-time
+
+    CandidateMintedPayload:
+      type: object
+      description: |
+        CandidateMintedRecord — a candidate's IDENTITY, appended the moment it
+        is minted and BEFORE it is scored. Identity does not share the
+        measurement's durability: `rounds/round_NNNN.json` and its
+        `dashboard.json` projection exist only where a round CLOSED, so a cycle
+        whose producer dies mid-flight still leaves its candidates nameable
+        through this record alone.
+
+        Subscribers:
+          * `scan_ledger_candidates` — folds it onto the `candidate_scored`
+            snapshot by `(round, idx)` to build `LedgerCandidate`, which is the
+            identity half of the served lineage tree.
+          * `CycleLedgerTail` — tails this record to SSE subscribers.
+          * `FamilyRay` — the earliest step a chronology can show for a
+            candidate; the ray's `candidate_minted` item upserts to the same
+            `cand-{label}` row the later `candidate_started` snapshot writes.
+      required: [round, idx, candidate_id, label, timestamp]
+      additionalProperties: false
+      properties:
+        round:
+          type: integer
+          minimum: 0
+        idx:
+          type: integer
+          minimum: 0
+        candidate_id:
+          type: string
+          minLength: 1
+          description: |
+            The searchpoint id (`IndividualLineage.id`) minted with this
+            candidate. **Re-minted per run**, so a resume/rewind re-mints the
+            same `(round, idx)` under a NEW id — join on `label`, not on this.
+        parent_id:
+          type: [string, 'null']
+          description: The individual this candidate was mutated from; null at the origin.
+        label:
+          type: string
+          minLength: 1
+          description: |
+            `C{round}.{idx+1}` (`C0` at the origin) — a MINTED fact, not a
+            read-time one. The canonical positional identity every projection
+            joins on.
+        changes_description:
+          type: string
+        source:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    CycleSeedPayload:
+      type: object
+      description: |
+        CycleSeedRecord — the cycle's read-once starting point (`CycleSeed`),
+        appended at mint / operator-steered fork / check-in flip and re-read
+        once at bootstrap. A fork inherits its parent's seed record *virtually*
+        (`CycleEventLog.inherit_from`) but appends its OWN, so a scan of the
+        cycle's own ledger file returns that cycle's seed. Sweep and diag
+        cycles carry none.
+
+        Not progress, and deliberately at most one per cycle: it reads as a
+        single "cycle seeded" marker at the head of a non-root cycle's thread.
+      required: [seed, timestamp]
+      additionalProperties: false
+      properties:
+        seed:
+          type: object
+          additionalProperties: true
+          description: |
+            The `CycleSeed` model dump — `origin_prompt_fields`,
+            `pipeline_overlay`, `optimizer_narrowing`, `config_overrides`, and
+            the `origin_source` provenance stamp (`fork_seed` |
+            `campaign_origin`; empty when an L2/L3 rebase replays its own
+            origin).
         timestamp:
           type: string
           format: date-time

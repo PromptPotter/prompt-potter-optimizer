@@ -772,6 +772,15 @@ export interface LineageNode {
    * keep their minted label; an attempt a fork contributed takes the next
    * free index of its round, by mint time. */
   label: string;
+  /** This candidate's label in the course that MINTED it. Equal to `label` for a
+   * candidate this course minted itself; a fork-contributed attempt keeps the
+   * fork's private `C{round}.{n}` here while `label` carries its renumbered
+   * position on this course's timeline. JOIN ON THIS, never on
+   * `candidate_id`, when matching a node against a per-cycle projection:
+   * `dashboard.json` is per-cycle and speaks the minting course's private
+   * counter, while `candidate_id` is re-minted per run (see `_close_facts`),
+   * so an id join silently misses. */
+  course_label: string;
   /** THE address, root → leaf: the course this node belongs to. A candidate a fork
    * contributed carries the FORK's path, so selecting it re-roots onto that
    * fork. */
@@ -839,6 +848,36 @@ export interface LineageNode {
   origin_accuracy: number | null;
   hearts: number | null;
   lives_cap: number | null;
+}
+
+/** One event on the ray: a projection envelope plus its address. */
+export interface RayItem {
+  /** The cycle this record belongs to, root → leaf — THE address. */
+  path: CycleHop[];
+  /** Physical 0-based line index in this cycle's own ledger — the same space as
+   * ProjectionEnvelope.sequence, so a live SSE frame de-duplicates against a
+   * ray item on (path, offset). SPARSE: server curation drops kinds, so
+   * consecutive items may skip offsets; a gap between ray offsets is not a
+   * missing record. */
+  offset: number;
+  /** Effective timestamp: the record's own, raised to its file predecessor's when
+   * the two invert (records are stamped at construction but appended later). */
+  ts: string;
+  /** The ledger record_type — ProjectionEnvelope.kind. */
+  kind: 'candidate_minted' | 'decision' | 'command' | 'command_ack' | 'cycle_seed' | 'error' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'round_warning' | 'snapshot' | 'token_usage' | 'stream_snapshot';
+  /** The record's model_dump — ProjectionEnvelope.payload. */
+  payload: Record<string, unknown>;
+}
+
+/** One ordered window of a family's chronology, oldest-first. */
+export interface RayResponse {
+  /** The window, oldest-first. Includes llm_call_progress heartbeats — the client
+   * proves liveness across a silent stretch with them before dropping them
+   * from the rendered steps. */
+  items: RayItem[];
+  /** Opaque cursor for the window immediately older than this one; null when this
+   * window already reaches the family's beginning. */
+  cursor_prev: string | null;
 }
 
 /** One page of diagnostic-run records, newest first. */

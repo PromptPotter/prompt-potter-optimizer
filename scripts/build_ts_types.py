@@ -56,6 +56,7 @@ from promptpotter.infrastructure.projections.live_dashboard.state import (
     SpendBucket,
     SpendRollup,
 )
+from promptpotter.infrastructure.store.family_ray_views import RayItem, RayResponse
 from promptpotter.infrastructure.store.lineage_views import (
     LineageDivergence,
     LineageNode,
@@ -150,9 +151,12 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     FilesResponse,
     FileContentResponse,
     # --- the lineage tree (store/lineage_views) ---
-    CycleHop,  # nested in LineageNode.path — the emitter does not recurse, so register it
+    CycleHop,  # nested in LineageNode.path AND RayItem.path — the emitter does not recurse
     LineageDivergence,
     LineageNode,
+    # --- the time-ray (store/family_ray_views) ---
+    RayItem,
+    RayResponse,
     # --- verify router ---
     DiagnosticRunListResponse,
 ]

@@ -1290,11 +1290,19 @@ paths:
         does not carry them. A round that never closed reports **no winner** rather than
         promoting its lone candidate.
 
-        `depth` expands N course-levels. Conditional-GET
-        rides the newest mtime across the subtree's `ledger.jsonl` + `index.json` — the
-        ledger bumps per candidate, so a 2 s poll sees an in-flight candidate the moment
-        it starts, which `dashboard.json`'s mtime never guaranteed. A `lens`/`samples`
-        request always recomputes (those cannot ride `If-Modified-Since`).
+        ONE tree per campaign, and every consumer reads it. There is no `depth` dial:
+        two clients choosing different depths for the same served object is how they
+        came to disagree. Course recursion is bounded by a server constant instead
+        (`lineage_views.py::_MAX_COURSE_DEPTH`) — a cost bound, not a caller knob.
+
+        Conditional-GET is a **weak ETag** over the newest mtime across the subtree's
+        `ledger.jsonl` + `index.json` **plus the `lens`/`samples` query**. The ledger
+        bumps per candidate, so a 5 s poll sees an in-flight candidate the moment it
+        starts, which `dashboard.json`'s mtime never guaranteed. Folding the query into
+        the validator is what lets a MASKED read 304: `Last-Modified` cannot express
+        query-dependence, so a lens request used to recompute the whole tree on every
+        poll. `Cache-Control: no-store` applies, so the browser cache never replays the
+        validator — the client holds the ETag itself and sends `If-None-Match`.
       tags: [cycles]
       parameters:
         - name: campaignId
@@ -1315,12 +1323,6 @@ paths:
             as on the dashboard route. Empty/absent → the caller's own tree. Send back a
             node's own `path` verbatim to root the tree at that node.
           schema: { type: string }
-        - name: depth
-          in: query
-          required: false
-          description: |
-            How many COURSE levels to expand. `0` = this course + its candidates only.
-          schema: { type: integer, minimum: 0, maximum: 8, default: 1 }
         - name: lens
           in: query
           required: false
@@ -1339,20 +1341,155 @@ paths:
             over only those samples into `sample_set_accuracy` / `sample_set_n`. Composes
             with a `score:` lens; ignored for an `abort:` lens. A non-integer token → 400.
           schema: { type: string }
-        - name: If-Modified-Since
+        - name: If-None-Match
           in: header
           required: false
-          description: Standard conditional-GET validator; the route 304s when unchanged.
+          description: |
+            The `ETag` from a prior response for this exact query; the route 304s when
+            neither the subtree nor the mask has changed. Replaces `If-Modified-Since`
+            here — a single validator that covers both, rather than a time validator
+            plus a "masked reads always recompute" carve-out.
           schema: { type: string }
       responses:
         '200':
           description: The course at the resolved path, and its subtree.
+          headers:
+            ETag:
+              description: |
+                Weak validator over `(subtree mtime, lens, samples)`. Send it back as
+                `If-None-Match`. Distinct per mask, so a lens view has its own 304.
+              schema: { type: string }
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/LineageNode'
         '304':
-          description: Unchanged since `If-Modified-Since`.
+          description: Unchanged since `If-None-Match` — same subtree, same mask.
+        '404':
+          description: Unknown cycle (or cross-tenant), or a `descend` hop names no sandbox.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /campaigns/{campaignId}/cycles/{cycleId}/ray:
+    get:
+      operationId: getFamilyRay
+      summary: The time-ray — one chronology across a course and everything below it.
+      description: |
+        **The absolute linear sequence of what happened.** Every other axis this API
+        serves is round-indexed (`/rounds`), tree-structured (`/tree`), or spend-only —
+        none of them answers "what happened, in order, and is it still happening." The
+        ray does, and it is the only surface that can, because it is the only one that
+        merges the ledgers of a course AND its forks AND its inner runs into one order.
+
+        **This is also the replay endpoint** that `domain/projection_envelope.py`
+        promises. The SSE tail (`events:subscribe`) unconditionally seeks to EOF, so it
+        can never serve history; the ray is where history lives. Do NOT add a `since=`
+        parameter to the tail — that would be a second replay mechanism.
+
+        ### Ordering, and its stated limits
+
+        Records merge on one key: `(ts_eff, encoded_path, offset)`. `ts_eff` applies a
+        per-file monotonic clamp: each ledger is read in FILE order carrying `last_ts`,
+        and `ts_eff = max(parsed_ts, last_ts)`. Records are stamped at construction but
+        appended later, so a raw-timestamp sort can place a record BEFORE the record
+        that caused it; append order is the one authority a single file has, and the
+        clamp repairs the inversion with it rather than inventing time. A record
+        arriving before its file's first parseable timestamp is skipped (a fabricated
+        time would corrupt the order), while still consuming its physical offset.
+
+        Limits, deliberately on the record:
+          * Two records in different cycles inside the clock's resolution are ordered
+            by encoded path — arbitrarily but stably, not by truth.
+          * A clamped record displays at its predecessor's time. Gap durations use
+            `ts_eff` deltas, so a clamped record contributes a zero gap — correct.
+          * Clocks are one machine's. A distributed runner would need a family-scoped
+            Lamport counter; that does not exist and must not be faked.
+
+        ### The two offset spaces — never merge them
+
+        `offset` is the **physical** 0-based line index in THAT cycle's own
+        `.runtime/ledger.jsonl` — the same space as `ProjectionEnvelope.sequence` from
+        the SSE tail, which is what lets a client join a live frame onto a ray item
+        (`path == leafPath && offset == sequence`). It is NOT the space
+        `CycleEventLog.iter(since=N)` indexes: that walks a fork's virtual
+        parent-prefix + own appends. The ray reads each ledger's own FILE and never
+        goes through `iter()`, because a fork's `iter()` replays the parent prefix and
+        the ray already reads the parent — every parent record would appear twice.
+
+        Ray offsets are **sparse**: server curation drops kinds, so consecutive items
+        may skip offsets, and a gap between ray offsets is not a missing record.
+
+        ### Windowing
+
+        Newest-first selection, oldest-first delivery. `before` is an opaque cursor
+        encoding the merge key of the oldest item a prior window returned; a deeper
+        page is every record with a key strictly below it, so consecutive windows
+        partition the key space — no overlap, no hole. A cycle discovered after the
+        head fetch (a new fork) has only keys above every outstanding cursor: it
+        enters at the next head fetch and can never corrupt a deep page.
+
+        Any window revalidates with `If-None-Match` against the family's mtimes.
+      tags: [cycles]
+      parameters:
+        - name: campaignId
+          in: path
+          required: true
+          description: The top-level (root) campaign id.
+          schema: { type: string, minLength: 8, maxLength: 128 }
+        - name: cycleId
+          in: path
+          required: true
+          description: The top-level (root) cycle id.
+          schema: { type: string, minLength: 8, maxLength: 128 }
+        - name: descend
+          in: query
+          required: false
+          description: |
+            `~`-joined `campaign::cycle` hops to descend into before resolving the leaf,
+            as on the `tree`/`dashboard` routes. The resolved leaf is the ray's ROOT —
+            the family below it is what gets merged.
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          description: How many items to return. The window bound.
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 200 }
+        - name: before
+          in: query
+          required: false
+          description: |
+            An opaque cursor from a prior response's `cursor_prev`. Returns the window
+            immediately older than that one. Absent = the head (newest) window.
+          schema: { type: string }
+        - name: If-None-Match
+          in: header
+          required: false
+          description: |
+            The `ETag` from a prior response for this exact window. Every window —
+            head or deep — revalidates against the family's newest ledger + index
+            mtimes.
+          schema: { type: string }
+      responses:
+        '200':
+          description: One ordered window of the family's chronology.
+          headers:
+            ETag:
+              description: Weak validator over `(limit, before, each course's path + mtimes)`.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RayResponse'
+        '304':
+          description: Unchanged since `If-None-Match`.
+        '400':
+          description: A malformed `before` cursor.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '404':
           description: Unknown cycle (or cross-tenant), or a `descend` hop names no sandbox.
           content:
@@ -2012,7 +2149,7 @@ components:
         strictly alternate. Declared in full here rather than as an open object: the
         `/lineage` response this replaces was `additionalProperties: true`, and that hole
         is exactly how five disagreeing lineage shapes went unnoticed.
-      required: [kind, id, label, path, children]
+      required: [kind, id, label, course_label, path, children]
       additionalProperties: false
       properties:
         kind:
@@ -2030,7 +2167,25 @@ components:
             needs no lane geometry.
         label:
           type: string
-          description: Minted at mint time, never derived from list position.
+          description: |
+            This node's position on THIS course's one timeline. Minted at mint time, never
+            derived from list position — except for a fork-contributed attempt, which is
+            renumbered onto this course's sequence (`C{round}.{n}` is a course's PRIVATE
+            counter, so four forks cut off C0 each mint their own `C1.1` and only the
+            renumber makes the label mean something campaign-wide).
+        course_label:
+          type: string
+          description: |
+            This candidate's label in the course that MINTED it. Equal to `label` for a
+            candidate this course minted itself; a fork-contributed attempt keeps the
+            fork's private `C{round}.{n}` here while `label` carries its renumbered
+            position on this course's timeline.
+
+            Join on THIS, not on `candidate_id`, when matching a node against a
+            per-cycle projection: `dashboard.json` is per-cycle and speaks the minting
+            course's private counter, and `candidate_id` is re-minted per run (a resume,
+            a rewind, a re-`new` onto a deterministic cycle_id all re-mint the same
+            `(round, idx)` under a new id), so an id join silently misses.
         path:
           type: array
           description: |
@@ -2131,6 +2286,73 @@ components:
         origin_accuracy: { type: [number, "null"] }
         hearts: { type: [integer, "null"] }
         lives_cap: { type: [integer, "null"] }
+
+    RayItem:
+      type: object
+      description: |
+        One event on the time-ray: an **envelope plus an address**.
+
+        `kind` + `payload` are byte-identical to a `ProjectionEnvelope`'s, deliberately —
+        the client's `projectionToActivity` translator maps a `RayItem` unchanged, so the
+        ray reuses the chat's curated event vocabulary instead of minting a second one.
+        What the envelope cannot carry is WHICH cycle in the family: `cycle_id` alone is
+        ambiguous, because inner cycle ids repeat across sibling `.inner/` sandboxes.
+        Hence `path`, the same full address `LineageNode.path` carries.
+      required: [path, offset, ts, kind, payload]
+      additionalProperties: false
+      properties:
+        path:
+          type: array
+          items:
+            $ref: '#/components/schemas/CycleHop'
+          minItems: 1
+          description: The cycle this record belongs to, root → leaf. THE address.
+        offset:
+          type: integer
+          minimum: 0
+          description: |
+            Physical 0-based line index in THIS cycle's own `.runtime/ledger.jsonl` —
+            the same space as `ProjectionEnvelope.sequence`, which is what lets a live
+            SSE frame de-duplicate against a ray item on `(path, offset)`. Not the
+            `CycleEventLog.iter(since=)` virtual space. SPARSE: server curation drops
+            kinds, so a gap between ray offsets is not a missing record.
+        ts:
+          type: string
+          format: date-time
+          description: |
+            The effective timestamp — the record's own, clamped upward to its
+            predecessor's within the same file. See the endpoint description.
+        kind:
+          type: string
+          description: |
+            The ledger `record_type`, identical to `ProjectionEnvelope.kind`. The set is
+            the same closed set declared in `m12-events-asyncapi.yaml`.
+        payload:
+          type: object
+          additionalProperties: true
+          description: The record's `model_dump`, identical to `ProjectionEnvelope.payload`.
+
+    RayResponse:
+      type: object
+      description: One ordered window of a family's chronology, oldest-first.
+      required: [items, cursor_prev]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RayItem'
+          description: |
+            The window, oldest-first. Includes `llm_call_progress` heartbeats: the client
+            uses them to prove the process was alive across a silent stretch (so a
+            heartbeated 120 s backend query grows no gap marker) and THEN drops them from
+            the rendered step list. A server that stopped sending them would give every
+            long backend query a spurious gap.
+        cursor_prev:
+          type: [string, "null"]
+          description: |
+            Opaque cursor for the window immediately older than this one; null when this
+            window already reaches the family's beginning.
 
     ErrorEnvelope:
       type: object

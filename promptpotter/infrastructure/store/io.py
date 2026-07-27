@@ -205,9 +205,27 @@ def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
     )
 
 
+def newest_mtime_ns(*paths: Path) -> int | None:
+    """Newest ``st_mtime_ns`` across *paths*; missing files skipped, all missing → None.
+
+    Nanoseconds, not float seconds: a conditional-GET validator built on the float can
+    collide for a same-tick append and serve a spurious 304.
+    """
+    newest: int | None = None
+    for p in paths:
+        try:
+            m = p.stat().st_mtime_ns
+        except OSError:
+            continue
+        if newest is None or m > newest:
+            newest = m
+    return newest
+
+
 __all__ = [
     "append_jsonl",
     "ensure_parent_dir",
+    "newest_mtime_ns",
     "read_json",
     "read_json_optional",
     "read_json_tolerant",

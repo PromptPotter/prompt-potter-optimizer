@@ -937,7 +937,11 @@ def test_a_forks_attempts_stay_separate_on_the_campaigns_timeline(built_stores) 
             )
         )
 
-    write(root, [(0, "root-c0", None)])
+    # The root mints its OWN round-1 candidate, so the fork's round-1 attempt has a rival for
+    # the `C1.n` slot and the renumber actually has to move it. Without this the fork's
+    # attempts are each first-of-round on the parent's timeline too, every private label
+    # survives unchanged, and the renumber this test exists to pin is a silent no-op.
+    write(root, [(0, "root-c0", None), (1, "root-c1", "root-c0")])
     write(
         f"{root}_fork_beef",
         [
@@ -954,14 +958,202 @@ def test_a_forks_attempts_stay_separate_on_the_campaigns_timeline(built_stores) 
     )
 
     kids = build_lineage_tree(
-        built_stores, (CycleHop(campaign_id=campaign_id, cycle_id=root),), depth=1
+        built_stores, (CycleHop(campaign_id=campaign_id, cycle_id=root),)
     ).children
 
-    # Three attempts, each keeping its own identity — not one node wearing 0.42.
-    assert [k.id for k in kids] == ["root-c0", "fork-c1", "fork-c2", "fork-c3"]
-    assert [k.label for k in kids] == ["C0", "C1.1", "C2.1", "C3.1"]
+    # Every attempt keeps its own identity — not one node wearing 0.42.
+    assert [k.id for k in kids] == ["root-c0", "root-c1", "fork-c1", "fork-c2", "fork-c3"]
+    # THE RENUMBER: the fork minted its round-1 attempt as `C1.1`, but the root already owns
+    # that slot, so on the campaign's one sequence it is `C1.2`.
+    assert [k.label for k in kids] == ["C0", "C1.1", "C1.2", "C2.1", "C3.1"]
     # The replayed origin IS `root-c0`, measured again — it is not a second node.
     assert "fork-c0" not in {k.id for k in kids}
+
+    # `course_label` keeps the MINTING course's private position through that renumber, and
+    # this is the silent-harm half: `dashboard.json` is per-cycle, so a fork's own projection
+    # speaks the fork's counter — `C1.1`, the label the campaign timeline just took away.
+    # Drop the field (or fold it into the renumber's update dict) and every join against a
+    # fork's own projection — the L4 samples panel's cell → inner-run lookup — resolves
+    # nothing: no error, no empty state, just cells that quietly report no run.
+    assert [k.course_label for k in kids] == ["C0", "C1.1", "C1.1", "C2.1", "C3.1"]
+    fork_attempt = kids[2]
+    assert (fork_attempt.label, fork_attempt.course_label) == ("C1.2", "C1.1")
+    # A candidate this course minted itself has one position, so its two labels agree.
+    assert all(k.label == k.course_label for k in kids if k.id.startswith("root-"))
+
+
+def test_the_time_ray_pages_without_a_hole_and_never_doubles_a_forks_parent(
+    built_stores,
+) -> None:
+    """Paging the ray covers every record exactly once — under churn — and a fork does not
+    replay its parent.
+
+    Every failure mode here is silent, which is why this rides here: a chronology is
+    *plausible* with a record missing, doubled, or misplaced — nothing errors, the operator
+    simply reads a wrong story and has no way to know. The variants pinned:
+
+      * **A hole or overlap between windows.** The cursor is the merge key
+        ``(ts_eff, encoded_path, offset)`` of the oldest returned item; consecutive windows
+        must partition the key space exactly.
+      * **A cycle discovered between two windows.** A fork minted AFTER the head fetch has
+        only keys above every outstanding cursor, so it must enter at the next head fetch —
+        never inside a deep page, where it would displace genuinely-older records that then
+        surface nowhere.
+      * **A fork replaying its parent.** ``CycleEventLog.iter()`` virtually walks the
+        parent's prefix before a fork's own appends; the ray reads the parent too, so going
+        through ``iter()`` would emit every parent record twice. It reads each ledger's own
+        FILE for exactly this reason.
+      * **The monotonic clamp.** Records are stamped at construction and appended later, so
+        a raw-timestamp sort can place a record *before* the record that caused it.
+      * **A record before the file's first parseable timestamp.** A fabricated epoch would
+        sort below every outstanding cursor and mutate already-served windows; it is
+        skipped, while still consuming its physical offset.
+    """
+    from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.cycle_paths import CycleHop
+    from promptpotter.infrastructure.store.family_ray_views import (
+        build_family_ray,
+        decode_ray_cursor,
+        ray_validator_parts,
+    )
+    from promptpotter.infrastructure.store.lineage_views import iter_family_courses
+
+    campaign_id, root = "ray__aaaaaa", "cycle_ray1"
+    base = built_stores.base_dir / "campaigns" / campaign_id
+    base.mkdir(parents=True, exist_ok=True)
+    (base / "campaign.json").write_text(
+        Campaign(
+            campaign_id=campaign_id,
+            dataset_name="demo",
+            created_at="2026-01-01T00:00:00",
+            root_cycle_id=root,
+        ).model_dump_json()
+    )
+
+    def write(cycle_id: str, stamps: list[str], **index: Any) -> None:
+        cdir = base / "cycles" / cycle_id
+        (cdir / ".runtime").mkdir(parents=True, exist_ok=True)
+        (cdir / "index.json").write_text(json.dumps({"status": "finished", **index}))
+        (cdir / ".runtime" / "ledger.jsonl").write_text(
+            "".join(
+                json.dumps(
+                    {
+                        "record_type": "phase",
+                        "phase": "round",
+                        "event": "display",
+                        "round": i,
+                        "payload": {},
+                        "timestamp": ts,
+                    }
+                )
+                + "\n"
+                for i, ts in enumerate(stamps)
+            )
+        )
+
+    def stamp(second: int) -> str:
+        return f"2026-01-01T00:00:{second:02d}Z"
+
+    # Interleaved in TIME but separate on disk — the fork ran concurrently with its parent,
+    # which is the thing only a chronology can show. Offset 3 of the root is stamped BEFORE
+    # offset 2: the inversion the clamp exists to repair. The fork's offset 0 has no
+    # parseable timestamp: skipped, but its physical offset still counts.
+    write(root, [stamp(0), stamp(2), stamp(8), stamp(4)])
+    write(
+        f"{root}_fork_beef",
+        ["not-a-timestamp", stamp(1), stamp(3), stamp(5)],
+        parent_cycle_id=root,
+        fork={"from_candidate_id": "root-c0"},
+    )
+
+    path = (CycleHop(campaign_id=campaign_id, cycle_id=root),)
+    courses = iter_family_courses(built_stores, path)
+
+    def window(before: str | None, limit: int):
+        return build_family_ray(courses, limit=limit, before=decode_ray_cursor(before))
+
+    whole = window(None, 50)
+    assert len(whole.items) == 7, "every timestamped family record rides the ray once"
+    assert whole.cursor_prev is None
+
+    # A fork's own file is its own records — the parent's four are not replayed into it —
+    # and the unparseable-timestamp record consumed offset 0 without riding.
+    seen = [(item.path[-1].cycle_id, item.offset) for item in whole.items]
+    assert len(seen) == len(set(seen)), "no record appears at two positions"
+    assert [off for cyc, off in seen if cyc == root] == [0, 1, 2, 3]
+    assert [off for cyc, off in seen if cyc != root] == [1, 2, 3]
+
+    # THE CLAMP. The root's 4th record is stamped 4s but was appended after the one stamped
+    # 8s; append order is the only authority the file has, so it displays at 8s and stays put.
+    assert [item.ts for item in whole.items if item.path[-1].cycle_id == root] == [
+        stamp(0),
+        stamp(2),
+        stamp(8),
+        stamp(8),
+    ]
+
+    # PAGING. Three windows of three; the union must reconstruct `whole` exactly — no
+    # duplicate (the operator would read one event twice) and no hole (they would read a
+    # story with an event removed, and nothing anywhere would say so).
+    paged: list[tuple[str, int]] = []
+    cursor, guard = None, 0
+    while True:
+        page = window(cursor, 3)
+        paged = [(i.path[-1].cycle_id, i.offset) for i in page.items] + paged
+        cursor = page.cursor_prev
+        guard += 1
+        assert guard < 10, "paging did not terminate"
+        if cursor is None:
+            break
+    assert paged == seen
+
+    # CHURN. A fork minted AFTER a head fetch must not enter a deep page served under an
+    # older cursor — its records are newer than everything served, and a deep page that
+    # admitted them would evict genuinely-older records into nowhere. It enters the next
+    # HEAD fetch instead. (The validator must move too, or the new fork 304s into
+    # invisibility.)
+    head = window(None, 3)
+    parts_before = ray_validator_parts(courses, limit=3, before=None)
+    write(
+        f"{root}_fork_cafe",
+        [stamp(20), stamp(21)],
+        parent_cycle_id=root,
+        fork={"from_candidate_id": "root-c0"},
+    )
+    courses = iter_family_courses(built_stores, path)  # the route re-walks per request
+    assert ray_validator_parts(courses, limit=3, before=None) != parts_before
+
+    deep = window(head.cursor_prev, 3)
+    assert all(item.ts < stamp(20) for item in deep.items)
+    assert [(i.path[-1].cycle_id, i.offset) for i in deep.items] == paged[1:4]
+
+    fresh = window(None, 3)
+    assert [item.ts for item in fresh.items] == [stamp(8), stamp(20), stamp(21)]
+
+
+def test_a_conditional_validator_moves_when_its_inputs_do(built_stores) -> None:
+    """A validator that misses an input 304s a changed body FOREVER — the operator reads a
+    stale tree or ray as current, and nothing anywhere errors. The two ways that happens,
+    both pinned: a query value not folded into the ETag ("no lens" colliding with
+    ``lens=""``), and an mtime that does not move on an append.
+    """
+    import os
+
+    from promptpotter.infrastructure.store.io import newest_mtime_ns
+    from promptpotter.presentation.api.routers.campaigns._conditional import weak_etag
+
+    assert weak_etag(1, None, None) != weak_etag(1, "", None), "'no lens' must not collide"
+
+    probe = built_stores.base_dir / "probe.jsonl"
+    probe.parent.mkdir(parents=True, exist_ok=True)
+    probe.write_text("x")
+    os.utime(probe, ns=(1_700_000_000_000_000_000,) * 2)
+    first = newest_mtime_ns(probe)
+    os.utime(probe, ns=(1_700_000_000_001_000_000,) * 2)  # +1 ms: a same-second append
+    second = newest_mtime_ns(probe)
+    assert first is not None and second is not None and second > first
+    assert weak_etag(first) != weak_etag(second)
+    assert newest_mtime_ns(built_stores.base_dir / "absent.jsonl") is None
 
 
 def test_collapse_counts_derive_from_candidate_scores_and_cannot_be_stamped() -> None:

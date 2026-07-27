@@ -243,9 +243,8 @@ def _build_l1_response_model(items: tuple[tuple[str, str], ...]) -> type[L1Gener
         f"L1GenerateOutput__{suffix}",
         __base__=L1GenerateOutput,
         # `variant` is built by `create_model` above, so it is a value at type-check time
-        # and a class only at runtime — exactly what this error is for, and here it is the
-        # intended construction rather than a mistake.
-        variants=(list[variant], ...),  # type: ignore[valid-type]
+        # and a class only at runtime. That is the intended construction here, not a mistake.
+        variants=(list[variant], ...),
     )
 
 

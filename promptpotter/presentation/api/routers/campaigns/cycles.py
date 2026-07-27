@@ -22,8 +22,8 @@ from promptpotter.application.mask.verdicts import make_abort_verdict, make_scor
 from promptpotter.application.scoring.formula import compile_round_scorer
 from promptpotter.application.scoring.metrics import value_with_mask_applied
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.infrastructure.store.io import read_json_tolerant
-from promptpotter.infrastructure.store.layout import cycle_dir_for
+from promptpotter.infrastructure.store.io import newest_mtime_ns, read_json_tolerant
+from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.lineage_views import (
     LineageDivergence,
     LineageNode,
@@ -36,8 +36,10 @@ from promptpotter.presentation.api.deps import (
     warming_payload,
 )
 from promptpotter.presentation.api.routers.campaigns._conditional import (
+    client_has_etag,
     client_seen_at_or_after,
     http_date,
+    weak_etag,
 )
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import BadRequestError, NotFoundError
@@ -125,7 +127,7 @@ def get_cycle_dashboard(
     return serve_dashboard_response(request, stores.base_dir, leaf.campaign_id, leaf.cycle_id)
 
 
-def _subtree_mtime(base_dir: Path, campaign_id: str, cycle_id: str) -> float | None:
+def _subtree_mtime(base_dir: Path, campaign_id: str, cycle_id: str) -> int | None:
     """Newest mtime across this course's lineage inputs.
 
     The **ledger** is the validator that matters: it bumps the moment a candidate is
@@ -134,16 +136,8 @@ def _subtree_mtime(base_dir: Path, campaign_id: str, cycle_id: str) -> float | N
     ``index.json`` covers a fork or an inner run appearing beneath. Scoped to this course:
     a child course's own poll validates itself.
     """
-    cdir = cycle_dir_for(base_dir, campaign_id, cycle_id)
-    newest: float | None = None
-    for p in (cdir / ".runtime" / "ledger.jsonl", cdir / "index.json"):
-        try:
-            m = p.stat().st_mtime
-        except OSError:
-            continue
-        if newest is None or m > newest:
-            newest = m
-    return newest
+    layout = CycleLayout(cycle_dir_for(base_dir, campaign_id, cycle_id))
+    return newest_mtime_ns(layout.ledger, layout.manifest)
 
 
 def _resolve_verdict(lens: str | None) -> Verdict:
@@ -259,7 +253,6 @@ def get_lineage_tree(
     campaign_id: str,
     cycle_id: str,
     descend: str | None = Query(None),
-    depth: int = Query(1, ge=0, le=8),
     lens: str | None = Query(None),
     samples: str | None = Query(None),
 ) -> Response:
@@ -267,7 +260,8 @@ def get_lineage_tree(
 
     Nodes alternate ``course -> candidate -> (course | sample)`` forever, so an L4 inner
     run is the same shape one level down rather than a special case, and L5+ needs no new
-    tier. ``depth`` expands N course-levels.
+    tier. There is no ``depth`` parameter: one tree per campaign serves every consumer,
+    and the recursion bound is ``lineage_views._MAX_COURSE_DEPTH``.
 
     An optional **lens** decorates the nodes with a counterfactual. ``lens=score:<formula>``
     = an alternative scoring formula (each candidate's ``lens_value``, plus a ``divergence``
@@ -284,20 +278,16 @@ def get_lineage_tree(
     if not cycle_dir_for(stores.base_dir, leaf.campaign_id, leaf.cycle_id).is_dir():
         raise NotFoundError(f"Cycle '{leaf.campaign_id}/{leaf.cycle_id}' not found")
 
-    # Conditional fast-path — only on the UNMASKED poll. A masked body depends on
-    # `lens`/`samples`, which `If-Modified-Since` can't capture, so those always recompute;
-    # the 2 s webapp poll never carries a lens.
-    mtime_epoch = _subtree_mtime(stores.base_dir, leaf.campaign_id, leaf.cycle_id)
-    headers = {"Last-Modified": http_date(mtime_epoch)} if mtime_epoch is not None else {}
-    if (
-        lens is None
-        and samples is None
-        and mtime_epoch is not None
-        and client_seen_at_or_after(request.headers.get("if-modified-since"), mtime_epoch)
-    ):
+    # ONE conditional path for every query: the validator folds the mask in with the
+    # mtime, so a masked read gets its own 304 (see `_conditional.py`). A 304 costs two
+    # `stat()`s.
+    mtime_ns = _subtree_mtime(stores.base_dir, leaf.campaign_id, leaf.cycle_id)
+    etag = weak_etag(mtime_ns, lens, samples)
+    headers = {"ETag": etag}
+    if mtime_ns is not None and client_has_etag(request.headers.get("if-none-match"), etag):
         return Response(status_code=304, headers=headers)
 
-    tree = build_lineage_tree(store, path, depth=depth)
+    tree = build_lineage_tree(store, path)
     sample_ids = _parse_samples(samples)
     if lens or sample_ids:
         # One record read: an `abort:` lens reads the firing log rather than evaluators, so it

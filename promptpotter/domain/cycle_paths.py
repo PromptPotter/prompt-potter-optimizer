@@ -37,7 +37,14 @@ from pydantic import ConfigDict
 from promptpotter.domain.run_records import CycleRecord
 from promptpotter.domain.strict_model import StrictModel
 
-__all__ = ["CycleDir", "CycleHop", "CyclePath", "Projection", "WorkspaceDir"]
+__all__ = [
+    "CycleDir",
+    "CycleHop",
+    "CyclePath",
+    "Projection",
+    "WorkspaceDir",
+    "encode_cycle_path",
+]
 
 
 CycleDir = NewType("CycleDir", Path)
@@ -62,6 +69,17 @@ class CycleHop(StrictModel):
 
 
 CyclePath = tuple[CycleHop, ...]
+
+
+def encode_cycle_path(path: CyclePath) -> str:
+    """A path as its one string form: ``~``-joined ``campaign::cycle``, root → leaf.
+
+    The same codec as the wire's ``descend`` tail (:func:`presentation.api.deps.decode_descend`)
+    and the webapp's ``encodeCyclePath`` — the difference is only which slice is encoded, never
+    the grammar. Used wherever a path has to be a dict key or a cursor component, because a
+    ``list[CycleHop]`` is not hashable and a bare ``cycle_id`` is not unique across sandboxes.
+    """
+    return "~".join(f"{hop.campaign_id}::{hop.cycle_id}" for hop in path)
 
 
 class Projection(Protocol):

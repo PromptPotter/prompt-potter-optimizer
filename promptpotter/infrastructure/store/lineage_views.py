@@ -52,11 +52,29 @@ from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.infrastructure.store.layout import cycle_dir_for, sibling_kind
 from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store, resolve_cycle_path
 
-__all__ = ["LineageDivergence", "LineageNode", "build_lineage_tree"]
+__all__ = [
+    "FamilyCourse",
+    "LineageDivergence",
+    "LineageNode",
+    "build_lineage_tree",
+    "iter_family_courses",
+]
 
 
 NodeKind = Literal["course", "candidate"]
 CourseKind = Literal["root", "fork", "diag", "sweep", "inner"]
+
+# How many COURSE levels a family walk expands. A COST BOUND, not a caller's dial — there is
+# one served tree per campaign and every consumer reads the same one, so a per-caller depth is
+# just two clients disagreeing about the same object (which is exactly what it was: the
+# sidebar asked for 1 and the overlay for 3, measured byte-identical only because today's L4
+# inner runs spawn no inner runs of their own).
+#
+# It stays a bound rather than being removed: `_child_courses` walks `.inner/` sandboxes,
+# which nest re-entrantly (`stores.py::inner_sandbox_store`), so an unbounded walk is
+# unbounded on disk too. 3 covers L4 (depth 1) with room for L5+ before the bound is the
+# thing that has to change.
+_MAX_COURSE_DEPTH = 3
 
 
 class LineageDivergence(StrictModel):
@@ -90,6 +108,15 @@ class LineageNode(StrictModel):
         description="`C{round}.{n}` on the campaign's ONE timeline: this course's own "
         "candidates keep their minted label; an attempt a fork contributed takes the next "
         "free index of its round, by mint time.",
+    )
+    course_label: str = Field(
+        description="This candidate's label in the course that MINTED it. Equal to `label` "
+        "for a candidate this course minted itself; a fork-contributed attempt keeps the "
+        "fork's private `C{round}.{n}` here while `label` carries its renumbered position "
+        "on this course's timeline. JOIN ON THIS, never on `candidate_id`, when matching a "
+        "node against a per-cycle projection: `dashboard.json` is per-cycle and speaks the "
+        "minting course's private counter, while `candidate_id` is re-minted per run (see "
+        "`_close_facts`), so an id join silently misses.",
     )
     path: list[CycleHop] = Field(
         default_factory=list,
@@ -189,8 +216,14 @@ class LineageNode(StrictModel):
     lives_cap: int | None = None
 
 
-class _Course(NamedTuple):
-    """A child course and how to reach it — the recursion's unit of work."""
+class FamilyCourse(NamedTuple):
+    """A course in the family and how to reach it — the recursion's unit of work.
+
+    Public because the tree is not the only reader of the family: the time-ray
+    (``store/family_ray_views.py``) merges the same set of cycles into one chronology, via
+    :func:`iter_family_courses` — a second family walk would be a second answer to "who
+    hangs off whom", and the fork-vs-inner distinction is exactly the part that would drift.
+    """
 
     store: Stores
     path: CyclePath
@@ -199,6 +232,10 @@ class _Course(NamedTuple):
     # An L4 inner run (a sandbox root) vs a fork/sweep/diag of THIS course. Both hang off a
     # candidate by the same edge; only a fork contributes attempts to this course's timeline.
     inner: bool
+    # Hop count off the family root — stamped by `iter_family_courses` (a fork replaces the
+    # leaf hop, so it costs no depth; an inner run extends the path and costs one). Left 0
+    # by `_build`'s recursion, which tracks depth itself.
+    depth: int = 0
 
     @property
     def created_at(self) -> str:
@@ -218,6 +255,10 @@ class _Reads:
     def __init__(self) -> None:
         self._cycles: dict[Path, list[dict[str, object]]] = {}
         self._campaigns: dict[tuple[Path, str], Campaign | None] = {}
+        # Cycles already visited this build. The guard against a corrupt `parent_cycle_id`
+        # pointing back up the chain, which would otherwise make BOTH walkers
+        # (`_build`'s recursion and `iter_family_courses`) non-terminating.
+        self.seen: set[tuple[Path, str]] = set()
 
     def cycles(self, store: Stores) -> list[dict[str, object]]:
         """One store's cycle registry."""
@@ -381,7 +422,7 @@ def _course_scalars(
     }
 
 
-def _child_courses(store: Stores, path: CyclePath, reads: _Reads) -> list[_Course]:
+def _child_courses(store: Stores, path: CyclePath, reads: _Reads) -> list[FamilyCourse]:
     """Every course hanging off the course at *path* — forks AND inner runs, one list.
 
     Collapse #1 in code: a fork is a sibling cycle in the SAME store whose
@@ -391,15 +432,22 @@ def _child_courses(store: Stores, path: CyclePath, reads: _Reads) -> list[_Cours
 
     Only sandbox ROOTS are taken: an inner run's own forks are that course's children, and
     lifting them here would attach a grandchild to us and draw it twice.
+
+    ``reads.seen`` de-duplicates across the whole build, so both walkers terminate on a
+    corrupt ``parent_cycle_id`` pointing back up the chain.
     """
     leaf = path[-1]
-    out: list[_Course] = []
+    reads.seen.add((store.base_dir, leaf.cycle_id))
+    out: list[FamilyCourse] = []
     for entry in reads.cycles(store):
         if entry.get("parent_cycle_id") != leaf.cycle_id:
             continue
         hop = CycleHop(campaign_id=str(entry["campaign_id"]), cycle_id=str(entry["cycle_id"]))
+        if (key := (store.base_dir, hop.cycle_id)) in reads.seen:
+            continue
+        reads.seen.add(key)
         out.append(
-            _Course(
+            FamilyCourse(
                 store=store,
                 path=(*path[:-1], hop),
                 manifest=_read_index(store, hop),
@@ -413,8 +461,11 @@ def _child_courses(store: Stores, path: CyclePath, reads: _Reads) -> list[_Cours
             if entry.get("parent_cycle_id"):
                 continue
             hop = CycleHop(campaign_id=str(entry["campaign_id"]), cycle_id=str(entry["cycle_id"]))
+            if (key := (sandbox.base_dir, hop.cycle_id)) in reads.seen:
+                continue
+            reads.seen.add(key)
             out.append(
-                _Course(
+                FamilyCourse(
                     store=sandbox,
                     path=(*path, hop),
                     manifest=_read_index(sandbox, hop),
@@ -424,7 +475,44 @@ def _child_courses(store: Stores, path: CyclePath, reads: _Reads) -> list[_Cours
     return out
 
 
-def _parent_candidate_of(course: _Course, candidates: list[LedgerCandidate]) -> str:
+def iter_family_courses(store: Stores, path: CyclePath) -> list[FamilyCourse]:
+    """The whole family rooted at *path*, root first, then breadth-first below it.
+
+    The FLAT view of what :func:`_build` walks recursively — same :func:`_child_courses`,
+    same ``reads.seen`` guard, so "who belongs to this family" has exactly one answer. The
+    time-ray needs the set without the tree's alternating shape (it merges ledgers, it does
+    not nest them).
+
+    Order is stable — root, then each level sorted by ``(created_at, cycle_id)`` — so the
+    ray's ETag, which folds the courses in walk order, holds across identical requests.
+    :data:`_MAX_COURSE_DEPTH` bounds ``.inner/`` NESTING exactly as ``_build`` does: a fork
+    replaces its parent's leaf hop rather than extending the path, so it costs no depth.
+    """
+    reads = _Reads()
+    root_store, _ = resolve_cycle_path(store, path)
+    root = FamilyCourse(
+        store=root_store,
+        path=path,
+        manifest=_read_index(root_store, path[-1]),
+        inner=False,
+    )
+    out = [root]
+    frontier = [root]
+    while frontier:
+        level: list[FamilyCourse] = []
+        for course in frontier:
+            for child in _child_courses(course.store, course.path, reads):
+                depth = len(child.path) - len(path)
+                if depth > _MAX_COURSE_DEPTH:
+                    continue
+                level.append(child._replace(depth=depth))
+        level.sort(key=lambda c: (c.created_at, c.path[-1].cycle_id))
+        out.extend(level)
+        frontier = level
+    return out
+
+
+def _parent_candidate_of(course: FamilyCourse, candidates: list[LedgerCandidate]) -> str:
     """The candidate this course descends from.
 
     Resolution order — id, then label, then the origin. The label join is scoped to THIS
@@ -441,10 +529,10 @@ def _parent_candidate_of(course: _Course, candidates: list[LedgerCandidate]) -> 
 
 
 def _bucket_by_parent(
-    courses: list[_Course], candidates: list[LedgerCandidate]
-) -> dict[str, list[_Course]]:
+    courses: list[FamilyCourse], candidates: list[LedgerCandidate]
+) -> dict[str, list[FamilyCourse]]:
     """``candidate_id -> the inner runs filed under it``."""
-    out: dict[str, list[_Course]] = {}
+    out: dict[str, list[FamilyCourse]] = {}
     for course in courses:
         if target := _parent_candidate_of(course, candidates):
             out.setdefault(target, []).append(course)
@@ -467,7 +555,10 @@ def _empty_attempt(course: LineageNode, *, cut_from: str, round_: int) -> Lineag
     hand its index to the next real attempt.
 
     ``accuracy`` is None on purpose: ``index.json::best_accuracy`` on such a fork is seeded
-    from the parent, so painting it would report a number nothing here measured.
+    from the parent, so painting it would report a number nothing here measured. Its
+    ``course_label`` stays the fork's cycle_id (it minted no candidate, so no private
+    position exists) — join-safe, because a cycle_id never matches a label in a per-cycle
+    projection.
     """
     return course.model_copy(
         update={
@@ -493,7 +584,7 @@ class _Contribution(NamedTuple):
 
 
 def _contributions(
-    fork: _Course, *, cut_from: str, cut_round: int, depth: int, reads: _Reads
+    fork: FamilyCourse, *, cut_from: str, cut_round: int, depth: int, reads: _Reads
 ) -> _Contribution:
     """A fork, resolved onto the timeline of the course it was cut in.
 
@@ -586,6 +677,9 @@ def _build(store: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Line
                 id=cand.candidate_id,
                 parent_id=cand.parent_id,
                 label=cand.label,
+                # This course minted it, so the two labels agree. They diverge only where
+                # the renumber below rewrites `label` on a fork's contribution.
+                course_label=cand.label,
                 path=hops,
                 round=cand.round,
                 accuracy=cand.accuracy,
@@ -615,6 +709,11 @@ def _build(store: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Line
     # campaign-wide (four forks cut off C0 each minted a `C1.1`). Renumbering onto this
     # sequence is what makes the label mean something. Nothing renumbers a candidate this
     # course minted itself.
+    #
+    # `course_label` deliberately survives this untouched, and that is the whole point of the
+    # field: the renumber is the ONLY place the fork's private position was ever lost, and a
+    # consumer joining against the fork's own per-cycle `dashboard.json` needs it back. Do not
+    # add `course_label` to the update dict below.
     by_round: dict[int, int] = {}
     for k in kids:
         by_round[k.round or 0] = by_round.get(k.round or 0, 0) + 1
@@ -634,17 +733,20 @@ def _build(store: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Line
         id=leaf.cycle_id,
         parent_id=edge_id or (candidates[0].parent_id if candidates else None),
         label=leaf.cycle_id,
+        # A course is never renumbered — nothing folds it onto another course's timeline —
+        # so its two labels are the same fact. Set rather than defaulted: the field is
+        # required, and a course that omitted it would be a hole a candidate join falls into.
+        course_label=leaf.cycle_id,
         path=hops,
         children=kids,
         **_course_scalars(store, leaf, index, reads),
     )
 
 
-def build_lineage_tree(store: Stores, path: CyclePath, *, depth: int = 1) -> LineageNode:
-    """The course at *path* and its subtree, expanded *depth* course-levels down.
+def build_lineage_tree(store: Stores, path: CyclePath) -> LineageNode:
+    """The course at *path* and its subtree, expanded to :data:`_MAX_COURSE_DEPTH`.
 
-    Each level costs one ledger scan plus two small JSON reads per course, so depth is the
-    caller's cost dial and never a hidden recursion.
+    Each level costs one ledger scan plus two small JSON reads per course.
     """
     store_at, _ = resolve_cycle_path(store, path)
-    return _build(store_at, path, depth=depth, reads=_Reads())
+    return _build(store_at, path, depth=_MAX_COURSE_DEPTH, reads=_Reads())

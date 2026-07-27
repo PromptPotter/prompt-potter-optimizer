@@ -103,7 +103,18 @@ class CycleEventLog:
         """Yield records from disk starting at offset ``since``.
         Inherited ledger: walks parent up to the inherit offset first, then own appends;
         ``since`` indexes the combined space (offset 0 = parent's first record).
-        Walks the file every call — projections that need streaming should ``bind`` instead."""
+        Walks the file every call — projections that need streaming should ``bind`` instead.
+
+        **Two offset spaces exist and they MUST NOT be mixed.** ``since`` here indexes the
+        COMBINED VIRTUAL space (parent prefix + own appends) and exists for replay/rebuild,
+        where a fork must be re-read as the whole run it represents. ``CycleLedgerTail.sequence``
+        and ``RayItem.offset`` index the PHYSICAL line number of this cycle's OWN file — that
+        is what makes a live SSE frame joinable onto a historical ray item.
+
+        Concretely, this is why the family ray reads each ledger's file directly and never
+        calls this method: it already reads the parent, so a fork's virtual prefix would
+        duplicate every parent record. ``scan_ledger_candidates`` and ``CycleLedgerTail``
+        read the file for the same reason."""
         produced = 0
         if self._inherit_parent is not None:
             for rec in self._inherit_parent.iter():
