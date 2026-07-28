@@ -25,7 +25,7 @@ import yaml
 
 from promptpotter.application.intelligence.exploration import (
     Observation,
-    discovered_level_trajectory,
+    adopted_level_trajectory,
     fit_rasch,
     fit_rasch_2pl,
     fit_theta_given_delta,
@@ -830,7 +830,7 @@ def test_ruler_expected_accuracy_refuses_subset_inflation() -> None:
     assert ruler_expected_accuracy(None, ruler) is None
 
 
-def test_discovered_level_trajectory_is_honest_single_scale() -> None:
+def test_adopted_level_trajectory_is_honest_single_scale() -> None:
     # The L4 outer proxy's inner-search signal. Every branch here is a SILENT wrong-number
     # class: a completed inner run reports a plausible number and the outer optimizes on it,
     # so a mis-built level is invisible — the run looks fine and the meta-fitness is wrong.
@@ -842,51 +842,52 @@ def test_discovered_level_trajectory_is_honest_single_scale() -> None:
     # sits. Projecting each θ back through the ruler's sigmoid before differencing compressed the
     # gain near the ceiling, so the strong-origin arm scored less for the same ability climb.
     # SILENT: the outer ranks meta-prompts partly by which seed happened to draw an easy origin.
-    o_lvl, levels = discovered_level_trajectory(origin_theta, [[(0.0, 0.2), (1.2, 0.2)]], ruler)
-    assert o_lvl == origin_theta
-    low_o, low = discovered_level_trajectory(-1.0, [[(-0.5, 0.2)]], ruler)
-    high_o, high = discovered_level_trajectory(1.5, [[(2.0, 0.2)]], ruler)
+    low_o, low = adopted_level_trajectory(-1.0, [-0.5], ruler)
+    high_o, high = adopted_level_trajectory(1.5, [2.0], ruler)
     assert low_o is not None and high_o is not None
     assert low[0] - low_o == pytest.approx(high[0] - high_o) == pytest.approx(0.5)
 
-    # MEAN of the round's candidates, not the max. A max over ~16 candidates at an inner
-    # θ_se ≈ 0.42 is an order statistic: it reads a lift above origin even when every candidate
-    # sits AT origin, and its spread across arms tracks the luckiest draw rather than the
-    # meta-prompt. SILENT: the outer optimizes a bias that is the same size as its own signal.
-    assert levels == [pytest.approx(0.6)]  # mean of {0.0, 1.2}, not the 1.2 max
+    # THE INCUMBENT THE ROUND ADOPTED — never a statistic over the round's proposals. A round's
+    # value to the search is what it CROWNS; the arms it discards are the price of finding that,
+    # and averaging them prices exploration as damage. For any mutation operator with mass below
+    # the parent (all of them — that is why selection exists) E[mean θ] < θ_parent, so the mean
+    # is negative for an exploring generator and ~0 for an inert one: the gradient inverted.
+    # Measured on promptpotter-self__d8b5be before the fix: an inner round that adopted a
+    # 28-sample winner at θ +0.27 while PoBB killed a dud at 6 samples (θ -1.84) recorded a level
+    # of -0.79 — a 0.88-logit REGRESSION stamped on a round the loop marked improved=True. Over
+    # the campaign the seed that gained 30 accuracy points scored 2.9x WORSE than one that gained
+    # 4.6. SILENT throughout: every run completed and every number looked plausible.
+    o_lvl, levels = adopted_level_trajectory(origin_theta, [0.2702], ruler)
+    assert o_lvl == origin_theta
+    assert levels == [pytest.approx(0.2702)]
 
-    # ...and the half a max cannot express at all: a peak followed by a collapse must read LOWER
-    # than a sustained peak. Under a cumulative max the two are byte-identical, so a meta-prompt
-    # that destroys the inner loop after one good round scored as its best round forever.
-    _, spike = discovered_level_trajectory(origin_theta, [[(1.2, 0.2)], [(-2.0, 0.2)]], ruler)
-    _, held = discovered_level_trajectory(origin_theta, [[(1.2, 0.2)], [(1.2, 0.2)]], ruler)
+    # A peak followed by a collapse must read LOWER than a sustained peak. Under a running max
+    # the two are byte-identical, so a meta-prompt that destroys the inner loop after one good
+    # round scored as its best round forever.
+    _, spike = adopted_level_trajectory(origin_theta, [1.2, -2.0], ruler)
+    _, held = adopted_level_trajectory(origin_theta, [1.2, 1.2], ruler)
     assert spike[1] < spike[0] and sum(spike) < sum(held)
 
-    # SUBSET-INVARIANCE — the whole reason nothing here reads raw accuracy. θ is stamped onto
-    # ELECTABLE candidates only, so a θ-less arm is one PoBB eliminated on a SHORT subset.
-    # Reading its raw Wilson-LB instead put origin (full bank, n=24) and candidate (n=5) on
-    # bounds whose WIDTH differs, so a candidate that merely MATCHED origin scored ~-0.1..-0.3
-    # — a regression nobody committed, live on 4 of 11 real L4 cells. A θ-less candidate is
-    # skipped; a round of only such candidates measured nothing and carries the PRIOR ability.
-    # SILENT: the outer optimizer steers away from meta-prompts that never regressed, and
-    # toward whichever ones happened to survive elimination long enough to be scored.
-    o2, lv2 = discovered_level_trajectory(origin_theta, [[(None, None)]], ruler)
-    assert o2 is not None and lv2 == [o2]  # no evidence ⇒ no movement, NOT a phantom negative
-    _, carried = discovered_level_trajectory(origin_theta, [[(1.0, 0.2)], [(None, None)]], ruler)
+    # A round whose frontier could not be fit (every row errored) carries the PRIOR level: the
+    # incumbent persists, and nothing says it moved. SILENT otherwise: a phantom negative, or a
+    # dropped round that shortens the series the mean divides by.
+    o2, lv2 = adopted_level_trajectory(origin_theta, [None], ruler)
+    assert o2 is not None and lv2 == [o2]
+    _, carried = adopted_level_trajectory(origin_theta, [1.0, None], ruler)
     assert carried == [pytest.approx(1.0), pytest.approx(1.0)]
 
-    # Regression preserved: a round whose only candidates are worse-than-origin yields an ability
-    # BELOW origin (a negative delta the outer steers away from), NOT floored at origin.
-    o3, lv3 = discovered_level_trajectory(origin_theta, [[(-2.0, 0.2)]], ruler)
+    # Regression preserved: an incumbent below origin yields a level BELOW origin (the negative
+    # delta the outer steers away from), NOT floored at origin.
+    o3, lv3 = adopted_level_trajectory(origin_theta, [-2.0], ruler)
     assert o3 is not None and lv3[0] < o3
 
     # An origin that was never fit, or a COLD ruler, yields `(None, [])` so the caller EXCLUDES
-    # the cycle (`_no_evidence_reason`). Cold matters on its own: `fit_theta_given_delta` puts
+    # the cycle (`no_evidence_reason`). Cold matters on its own: `fit_theta_given_delta` puts
     # every sample at δ=0 there, so θ collapses to that round's logit-accuracy and stops being
     # subset-invariant — differencing it across rounds compares two different scales.
     # SILENT: a dead inner campaign differenced against an invented floor reads as a huge lift.
-    assert discovered_level_trajectory(None, [[(1.0, 0.2)]], ruler) == (None, [])
-    assert discovered_level_trajectory(origin_theta, [[(1.0, 0.2)]], {}) == (None, [])
+    assert adopted_level_trajectory(None, [1.0], ruler) == (None, [])
+    assert adopted_level_trajectory(origin_theta, [1.0], {}) == (None, [])
 
 
 def _fake_inner_round(
@@ -901,6 +902,7 @@ def _fake_inner_round(
     no_op: int = 0,
     dup: int = 0,
     collapsed: int = 0,
+    cut: int = 0,
 ) -> SimpleNamespace:
     """A RoundResult stand-in carrying only the fields ``compute_outer_proxies`` reads.
 
@@ -913,6 +915,10 @@ def _fake_inner_round(
     many distinct truths as rows the answer space reads as identity-keyed and no collapse is
     detectable — which is exactly the guard that keeps an L4 OUTER round, whose ground truths
     are per-seed tokens, from being called collapsed.
+
+    ``cut`` makes that many candidates *also* stop after 2 rows — an arm PoBB eliminated before
+    it earned a verdict. They are collapsed by construction (a 2-row constant answerer), which
+    is the point: below ``elimination_n_min`` we cannot tell collapse from small-n noise.
     """
     if parse_failure:
         candidates_scored = 0
@@ -930,7 +936,8 @@ def _fake_inner_round(
         ],
         all_candidate_results={
             f"c{i}": [
-                {"predicted": "Uncertain" if i < collapsed else t, "ground_truth": t} for t in truth
+                {"predicted": "Uncertain" if i < collapsed or i < cut else t, "ground_truth": t}
+                for t in (truth[:2] if i < cut else truth)
             ]
             for i in range(candidates_scored)
         },
@@ -956,10 +963,14 @@ def _fake_inner_result(
 
     ``cost`` is the INCURRED cost — what the search would cost cold, and the only divisor the
     proxies read. ``billed`` (the bill; defaults to the same) is deliberately independent: they
-    diverge exactly when a cycle replays the tenant-global cache."""
+    diverge exactly when a cycle replays the tenant-global cache.
+
+    ``elimination_n_min`` matches ``_fake_inner_round``'s 4-row full arms, so an uncut candidate
+    earns a verdict and a ``cut`` one does not."""
     return SimpleNamespace(
         origin_level=origin,
-        round_discovered_levels=levels,
+        round_adopted_levels=levels,
+        elimination_n_min=4,
         rounds=rounds,
         spend=SimpleNamespace(
             cost_usd=cost if billed is None else billed,
@@ -987,13 +998,18 @@ def test_compute_proxies_composed_fitness_discriminates() -> None:
     # shape reappearing here (a declared target, or the room `max(origin, 1-origin)`) fails
     # loudly on these two pins.
     assert px["first_round_delta"] == pytest.approx(0.10)
-    # MEAN over the trajectory, not max: mean(0.40, 0.55) - 0.30. A max would read 0.25 here
-    # and would be identical for a cycle that peaked at 0.55 then collapsed back to origin.
+    # Three readings of ONE series — the incumbent each round adopted. `final_delta` is what the
+    # search DELIVERED and is the primary term; the mean is the rate reading (a fast climber
+    # holds a high mean). Collapsing them back to one number is what let a warning-riddled or
+    # slow campaign tie a clean fast one.
+    assert px["final_delta"] == pytest.approx(0.25)
     assert px["after_N_rounds_delta"] == pytest.approx(0.175)
     assert px["cleanliness"] == pytest.approx(1.0)
     assert px["diversity_health"] == pytest.approx(1.0)
     assert px["rounds_improved_frac"] == pytest.approx(1.0)
-    assert px["delta_per_dollar"] == pytest.approx(0.175 / 0.03)
+    # Efficiency divides `final` — what you got for what you paid. Dividing the MEAN answered a
+    # different question (how fast you got there), which the formula already reads separately.
+    assert px["delta_per_dollar"] == pytest.approx(0.25 / 0.03)
 
     # Same lift, but round 1 is warning-riddled and round 2 mode-collapses → quality drops.
     dirty = _fake_inner_result(
@@ -1035,6 +1051,52 @@ def test_compute_proxies_composed_fitness_discriminates() -> None:
     )
     score = compile_scorer(cfg["campaign_config"]["scoring"])
     assert score({"pipeline_data": px}) > score({"pipeline_data": pd})
+
+
+def test_exploring_beats_inert_and_a_cut_arm_is_not_dirt() -> None:
+    # THE inversion this proxy vector exists to prevent, and the one it actually shipped with.
+    # Measured on promptpotter-self__d8b5be: the inner campaign that climbed 52.5% -> 82.1%
+    # (theta +0.85) scored 0.069, while one that climbed 52.5% -> 57.1% (theta +0.46) scored
+    # 0.199 — 2.9x higher for a quarter of the gain. Two independent terms charged the SAME
+    # thing (exploration), and both are pinned here because either alone re-inverts the ranking:
+    #   1. the lift core averaged the round's PROPOSALS, so every arm the search correctly
+    #      discarded pulled it down;
+    #   2. `cleanliness` denominated over every proposal, so an arm PoBB cut at 6 samples was
+    #      charged as dirt.
+    # SILENT both ways: every run completes, every number is plausible, and the outer optimizer
+    # spends real money steering toward meta-prompts that make the inner loop stop exploring.
+    from pathlib import Path
+
+    from promptpotter.domain.l4.proxies import compute_outer_proxies
+
+    # Explored hard: climbed, and spent two of its four arms per round on probes PoBB cut early.
+    explorer = _fake_inner_result(
+        [0.40, 0.85],
+        0.30,
+        [
+            _fake_inner_round(1, candidates_scored=4, cut=2),
+            _fake_inner_round(2, candidates_scored=4, cut=2),
+        ],
+    )
+    # Inert: proposed two safe near-copies per round and went nowhere. Perfectly clean.
+    inert = _fake_inner_result(
+        [0.30, 0.30], 0.30, [_fake_inner_round(1, improved=False), _fake_inner_round(2)]
+    )
+
+    ex = compute_outer_proxies(explorer).model_dump()
+    it = compute_outer_proxies(inert).model_dump()
+
+    assert ex["final_delta"] == pytest.approx(0.55)  # what it DELIVERED, not what it discarded
+    assert it["final_delta"] == pytest.approx(0.0)
+    # An arm cut below `elimination_n_min` is the search working — it cannot be told apart from
+    # small-n noise, so it is not charged. Charging it put the explorer on the formula's floor.
+    assert ex["cleanliness"] == pytest.approx(1.0)
+
+    cfg = yaml.safe_load(
+        Path("datasets/promptpotter-self/campaign.yaml").read_text(encoding="utf-8")
+    )
+    score = compile_scorer(cfg["campaign_config"]["scoring"])
+    assert score({"pipeline_data": ex}) > score({"pipeline_data": it})
 
 
 def test_compute_proxies_excludes_tooling_failures_from_cleanliness() -> None:
@@ -1273,7 +1335,7 @@ def test_efficiency_divides_by_incurred_cost_not_the_bill() -> None:
         _fake_inner_result([0.40, 0.55], 0.30, rounds, cost=0.03, billed=0.03)
     ).model_dump()
     assert replayed == paid
-    assert replayed["delta_per_dollar"] == pytest.approx(0.175 / 0.03)
+    assert replayed["delta_per_dollar"] == pytest.approx(0.25 / 0.03)
 
     # And a fully-cached cycle is a MEASUREMENT, not an exclusion: it did the work, it just didn't
     # pay. Only a cycle that made no calls at all has nothing to divide by.
@@ -1352,6 +1414,8 @@ def test_pp_self_scoring_composed_and_gradient_bearing() -> None:
         pd: dict[str, float] = {
             "first_round_delta": 0.1,
             "after_N_rounds_delta": 0.5,
+            "final_delta": 0.5,
+            "rounds_improved_frac": 0.5,
             "cleanliness": 0.9,
             "diversity_health": 0.9,
             "delta_per_dollar": 6.0,
@@ -1360,11 +1424,21 @@ def test_pp_self_scoring_composed_and_gradient_bearing() -> None:
         return score({"pipeline_data": pd})
 
     base = s()
-    assert s(after_N_rounds_delta=0.9) > base  # monotone in the lift core
+    assert s(final_delta=0.9) > base  # monotone in the PRIMARY lift term (what it delivered)
+    assert s(after_N_rounds_delta=0.9) > base  # and in the rate term beside it
+    # `final_delta` outweighs the rate term: the same 0.4 movement must buy more on what the
+    # search DELIVERED than on how quickly it got there. Equal weights would let a campaign that
+    # peaked early and regressed tie one that ended higher.
+    assert s(final_delta=0.9) > s(after_N_rounds_delta=0.9)
+    assert s(rounds_improved_frac=1.0) > base  # sustained discovery earns a bonus
     assert s(first_round_delta=0.3) == base  # collinear early-speed term held out of formula
     assert s(cleanliness=0.4) < base  # quality penalty modulates down
     assert s(diversity_health=0.4) < base  # mode-collapse penalty modulates down
     assert s(delta_per_dollar=0.5) < base  # efficiency rewards cheap lift
+    # Efficiency must still be LIVE at a real inner cell's ratio (~$0.07 for a +0.4..+0.9 logit
+    # climb => 6..13). The prior /6.0 divisor clamped every one of those to the same 1.0, so the
+    # term was constant on exactly the campaigns that worked — a flat term earning nothing.
+    assert s(delta_per_dollar=13.0) > s(delta_per_dollar=6.0)
     # Quality floor at 0.6: a maximally broken campaign keeps 60% of the quality factor, not 0.
     assert s(cleanliness=0.0, diversity_health=0.0) == pytest.approx(
         s(cleanliness=1.0, diversity_health=1.0) * 0.6

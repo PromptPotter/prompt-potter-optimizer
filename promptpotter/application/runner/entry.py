@@ -52,7 +52,7 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import ScoringSpec
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.llm.models import emit_error_record
-from promptpotter.infrastructure.llm.rate_limit import set_abort_check
+from promptpotter.infrastructure.llm.rate_limit import get_abort_check, set_abort_check
 from promptpotter.infrastructure.runtime_flags import clear_run_control_flags, read_spend_caps
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.clock import utcnow_iso
@@ -228,10 +228,19 @@ def _bind_run_controls(session: Session, cycle_dir: Path) -> None:
         return
     layout = CycleLayout(cycle_dir)
     skip_flag = layout.skip_flag
-    session.pause_check = layout.pause_flag.is_file
+    own_pause = layout.pause_flag.is_file
+    # An inner cycle is an INSTRUMENT of the cycle that spawned it, so it must not outlive a
+    # stop request on its owner. It runs in a child asyncio task and gets its own sandbox dir
+    # — whose pause flag nobody writes — so on its own it would run to completion while the
+    # outer sat "pausing". Since the child task inherits a copy of the outer's context, the
+    # outer's predicate is readable here: compose rather than overwrite. On L4 that is the
+    # difference between a pause landing in seconds and one waiting out a whole inner campaign.
+    # Top-level cycles inherit nothing, so this is exactly `own_pause` for them.
+    inherited = get_abort_check()
+    session.pause_check = own_pause if inherited is None else lambda: own_pause() or inherited()
     # Let a pause break a long rate-limit countdown mid-wait — the one blocking seam that
     # otherwise ignores the pause channel. Same predicate, bound into the per-task ContextVar
-    # the wait polls.
+    # the wait polls (and the copy a nested cycle will inherit).
     set_abort_check(session.pause_check)
     # Skip is one-shot: poll the flag, then the loop deletes it the instant it fires so
     # exactly one searchpoint is cut.
@@ -373,28 +382,27 @@ def _build_cycle_result(
     overwritten each round by absorb_round, so reading prompts off it would pair the
     best params with the last round's text."""
     best_sp = cycle.tracking.best_sp if cycle is not None else None
-    # The L4 outer proxy's single-scale inner-search signal: origin level + each round's MEAN
-    # candidate ability, every one of them a θ in logits on the cycle's fixed δ ruler — the only
-    # subset-invariant estimator — read off the candidates the inner search *found* rather than
-    # the frontier it *crowned*. (Neither cumulative nor a conservative θ-LCB bound: a running
-    # max is an order statistic that reads lift where there is none and cannot see a regression,
-    # which is exactly why ``discovered_level_trajectory`` averages. Say what it computes.) An origin with no ability on that
-    # ruler (every row errored) is a floor nobody measured: it yields `None`, and the cycle is
-    # excluded as an outer sample rather than differenced against an invented floor.
-    from promptpotter.application.intelligence.exploration import discovered_level_trajectory
+    # The L4 outer proxy's single-scale inner-search signal: origin level + the ability of the
+    # incumbent each round ADOPTED, every one a θ in logits on the cycle's fixed δ ruler — the
+    # only subset-invariant estimator. What the search delivers is what it crowns; the arms it
+    # discarded are the price of finding that, and pricing them as damage made the metric
+    # negative for exactly the generators that explore (``adopted_level_trajectory``). An origin
+    # with no ability on that ruler (every row errored) is a floor nobody measured: it yields
+    # `None`, and the cycle is excluded as an outer sample rather than differenced against an
+    # invented floor.
+    from promptpotter.application.intelligence.exploration import adopted_level_trajectory
 
-    # ``CycleResult.rounds`` is what the SEARCH found, so it is the L1 trajectory:
-    # round 0 is the reference the whole result is differenced against, carried
-    # beside it as ``origin_accuracy`` / ``origin_level``. Counting it as a search
-    # result would credit the outer loop with the floor it started from.
+    # Round 0 is the reference the whole result is differenced against, carried beside it as
+    # ``origin_accuracy`` / ``origin_level``. Counting it as a search result would credit the
+    # outer loop with the floor it started from.
     cycle_rounds = [rr for rr in cycle.rounds if rr.round > 0] if cycle is not None else []
     ds = cycle.delta_scale if cycle is not None else None
     origin_level: float | None = None
     round_levels: list[float] = []
     if cycle is not None:
-        origin_level, round_levels = discovered_level_trajectory(
+        origin_level, round_levels = adopted_level_trajectory(
             cycle.origin_round.cumulative_theta,
-            [[(c.theta, c.theta_se) for c in rr.candidate_scores] for rr in cycle_rounds],
+            [rr.cumulative_theta for rr in cycle_rounds],
             ds,
         )
     return CycleResult(
@@ -407,7 +415,8 @@ def _build_cycle_result(
             cycle.origin_round.composite_fitness if cycle is not None else 0.0
         ),
         origin_level=origin_level,
-        round_discovered_levels=round_levels,
+        round_adopted_levels=round_levels,
+        elimination_n_min=(cycle.config.optimization.elimination_n_min if cycle is not None else 0),
         winner_prompt_fields=(best_sp.prompt_fields or {}) if best_sp else {},
         winner_pipeline_params=best_sp.pipeline_params if best_sp else None,
         stop_reason=stop_reason,

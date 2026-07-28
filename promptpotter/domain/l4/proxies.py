@@ -38,7 +38,15 @@ class OuterSampleProxies(StrictModel):
     """One outer sample's observation vector — what a finished inner cycle says about the
     meta-prompt that ran it. **This type is the governing law**; nothing restates it.
 
-    **The lift core is ``after_N_rounds_delta``, and it needs no denominator.** Every level is an
+    **The lift terms read the incumbent the inner search ADOPTED, never its proposals** — what a
+    round delivers is what it crowns, and the arms it discarded are the price of finding that.
+    ``final_delta`` is what the search ended up with and is the primary reading; the other two
+    are the same series sampled differently (``after_N_rounds_delta`` averages it, so a fast
+    climber that holds outscores a slow one with the same asymptote; ``first_round_delta`` is
+    round 1 alone). The full argument, and the measurement that forced it, sit on
+    ``exploration.adopted_level_trajectory``.
+
+    **The lift terms need no denominator.** Every level is an
     ability θ in LOGITS on the cycle's fixed δ ruler, and the delta is one level minus another —
     so it is a difference on one interval scale, which is the property that makes it comparable
     across seeds of different origin strength. It is NOT bounded by construction: the projection
@@ -96,6 +104,7 @@ class OuterSampleProxies(StrictModel):
     # binds on live data while still stopping a runaway fit at the scoring clamp.
     first_round_delta: float = Field(ge=-4.0, le=4.0)
     after_N_rounds_delta: float = Field(ge=-4.0, le=4.0)  # noqa: N815
+    final_delta: float = Field(ge=-4.0, le=4.0)
     cleanliness: float = Field(ge=0.0, le=1.0)
     diversity_health: float = Field(ge=0.0, le=1.0)
     rounds_improved_frac: float = Field(ge=0.0, le=1.0)
@@ -132,11 +141,32 @@ def _is_evidential(rnd: RoundResult) -> bool:
     return rnd.l1_parse_failure != L1_PARSE_FAILURE_TOOLING
 
 
+def _judged(rnd: RoundResult, n_min: int) -> list[str]:
+    """Candidate ids that earned a verdict — those measured on at least ``n_min`` samples.
+
+    The denominator for every ``cleanliness`` rate, and the reason it is not simply "every
+    candidate". PoBB cuts a bad arm after a handful of draws, which is the search WORKING; below
+    ``elimination_n_min`` we stopped before we could tell a collapse from small-n noise, so
+    charging that arm as dirt prices exploration as damage — the same defect that made the lift
+    core negative for exploring generators. Measured on ``promptpotter-self__d8b5be``: the seed
+    that gained 30 accuracy points sat on the formula's cleanliness FLOOR while the seed that
+    gained 4.6 scored 0.79, purely because the first explored harder and its duds were cut sooner.
+
+    Empty when no arm cleared the floor — the round then charges nothing rather than dividing by
+    a set nobody measured."""
+    return [cid for cid, rows in rnd.all_candidate_results.items() if len(rows) >= n_min]
+
+
 def _self_heal_rate(rnd: RoundResult) -> float:
     """Share of the round's candidates that tripped the inner self-healing machinery for a
     META-PROMPT-owned reason ∈ [0,1]: a malformed L1 variant (any ``ValidationFailure``) or an
     operator-terminal ``RuntimeFailure`` (a config-deterministic break). A transient-transport
     ``RuntimeFailure`` is provider noise, not the meta-prompt's fault, and is excluded.
+
+    No ``n_min`` gate, unlike :func:`_answer_collapse_rate`: both numerators here are structural
+    facts known before a single sample runs — a variant is malformed or it is not — so sample
+    count says nothing about whether the verdict is trustworthy, and filtering on it would simply
+    hide the arms that broke earliest.
 
     Whatever the inner loop had to self-heal is evidence about the meta-prompt under test, so it
     rides the ``cleanliness`` penalty to the outer optimizer."""
@@ -168,8 +198,8 @@ def _round_mode_collapse_rate(rnd: RoundResult) -> float:
     return collapsed / generated if generated else 0.0
 
 
-def _answer_collapse_rate(rnd: RoundResult) -> float:
-    """Share of the round's measured candidates that answered ONE label to every sample ∈ [0,1].
+def _answer_collapse_rate(rnd: RoundResult, n_min: int) -> float:
+    """Share of the round's JUDGED candidates that answered ONE label to every sample ∈ [0,1].
 
     The SEMANTIC half of round dirtiness. Everything else in :func:`_round_problem_rate` counts
     plumbing — degraded transport, unscoreable results, self-heals — and a candidate that emits
@@ -181,14 +211,18 @@ def _answer_collapse_rate(rnd: RoundResult) -> float:
     Charged to the ROUND rather than the candidate because that is the fact the outer loop needs:
     the candidates themselves are dropped before the election (``l1/score/winner.py``, where a
     collapsed arm stops being electable), so without this the meta-prompt that induced the
-    collapse would pay nothing at all for it."""
-    measured = [rows for rows in rnd.all_candidate_results.values() if rows]
-    if not measured:
+    collapse would pay nothing at all for it.
+
+    Gated on ``_judged`` — see there for why an arm PoBB cut early is not evidence of collapse."""
+    judged = _judged(rnd, n_min)
+    if not judged:
         return 0.0
-    return sum(1 for rows in measured if is_answer_collapsed(rows)) / len(measured)
+    return sum(1 for cid in judged if is_answer_collapsed(rnd.all_candidate_results[cid])) / len(
+        judged
+    )
 
 
-def _round_problem_rate(rnd: RoundResult) -> float:
+def _round_problem_rate(rnd: RoundResult, n_min: int) -> float:
     """Per-round dirtiness ∈ [0,1] for an evidential round: inner samples that degraded or came
     back unscoreable, candidates that collapsed to a constant answer, the meta-fault self-heal
     load, or a round the meta-prompt made unparseable.
@@ -204,7 +238,7 @@ def _round_problem_rate(rnd: RoundResult) -> float:
     if health and health.samples:
         struct = health.degraded_rate + health.no_result_count / health.samples
     struct += _self_heal_rate(rnd)
-    struct += _answer_collapse_rate(rnd)
+    struct += _answer_collapse_rate(rnd, n_min)
     return _clamp(struct, 0.0, 1.0)
 
 
@@ -235,8 +269,8 @@ def no_evidence_reason(result: CycleResult) -> str | None:
         return f"it ran no L1 rounds (stop_reason={result.stop_reason})"
     if result.origin_level is None:
         return "its origin was never scored, so there is no floor to difference its rounds against"
-    if not result.round_discovered_levels:
-        return "it discovered no levels to difference against its origin"
+    if not result.round_adopted_levels:
+        return "it adopted no levels to difference against its origin"
     # Unmeasured cost is not cheap cost. `delta_per_dollar` divides by it, so a cost of 0.0 pins
     # efficiency to its MAXIMUM — under-reporting would make a run score fitter, which is the
     # incentive exactly backwards. Unpriced tokens are the same harm partially applied.
@@ -291,6 +325,7 @@ def _floor_proxies() -> OuterSampleProxies:
     return OuterSampleProxies(
         first_round_delta=-1.0,
         after_N_rounds_delta=-1.0,
+        final_delta=-1.0,
         cleanliness=0.0,
         diversity_health=0.0,
         rounds_improved_frac=0.0,
@@ -303,22 +338,28 @@ def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
     """The composed outer signal from a finished inner cycle — subset-invariant, bounded raw
     terms the outer scoring formula re-weights (the backend never hides the composite).
 
-    - ``after_N_rounds_delta`` — **the lift core.** MEAN level over the trajectory minus origin
-      level, in LOGITS on the cycle's locked ruler (``origin_level`` / ``round_discovered_levels``,
-      built upstream in ``discovered_level_trajectory``). One estimator and one interval scale, so
-      no delta subtracts across scales and none is compressed by where its origin sat. Mean, not
-      max: a max over ~16 candidates at θ_se ≈ 0.42 reads a lift where there is none and cannot
-      see a regression at all. Averaging also measures RATE — a fast climber spends more rounds
-      high — which is why no early-speed term is composed beside it.
-    - ``first_round_delta`` — round 1 alone. Two candidates' evidence against a signal several
-      times smaller than one candidate's θ_se, so it is emitted for the record, not composed.
+    Three readings of ONE series, the ability of the incumbent each round adopted, in LOGITS on
+    the cycle's locked ruler (``origin_level`` / ``round_adopted_levels``, built upstream in
+    ``adopted_level_trajectory``). One estimator and one interval scale, so no delta subtracts
+    across scales and none is compressed by where its origin sat:
+
+    - ``final_delta`` — where the search ENDED, minus origin. The primary lift reading: it is
+      what the meta-prompt actually delivered.
+    - ``after_N_rounds_delta`` — the same series averaged, so it measures RATE: a meta-prompt
+      that climbs fast spends more of its rounds high and out-scores a slow climber with the
+      same asymptote.
+    - ``first_round_delta`` — round 1 alone; a signal several times smaller than one candidate's
+      θ_se, so it is emitted for the record rather than leaned on.
+
     - ``cleanliness`` / ``diversity_health`` — bounded quality: ``1 − mean`` per-round problem /
       mode-collapse rate. The formula uses them as a modulator that discounts a warning-riddled
-      or collapsing campaign without diluting the lift core.
+      or collapsing campaign without diluting the lift. Cleanliness charges only arms that earned
+      a verdict — ``result.elimination_n_min`` samples (:func:`_judged`) — because an arm PoBB cut
+      after a handful of draws is the search working, not dirt.
     - ``rounds_improved_frac`` — share of L1 rounds that beat their predecessor.
-    - ``delta_per_dollar`` / ``delta_per_candidate`` — efficiency: the lift core over incurred
-      cost / over candidates burned. A verbose meta-prompt pays more for the same lift, scores lower.
-      Both divisors are cache-invariant; wall-time is not, which is why there is no per-second twin.
+    - ``delta_per_dollar`` / ``delta_per_candidate`` — efficiency: lift over incurred cost / over
+      candidates burned. A verbose meta-prompt pays more for the same lift, scores lower. Both
+      divisors are cache-invariant; wall-time is not, which is why there is no per-second twin.
 
     Each composed term must carry a candidate gradient; a flat term earns nothing and gets cut.
 
@@ -339,23 +380,20 @@ def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
 
     assert result.origin_level is not None  # guaranteed by no_evidence_reason
     origin = result.origin_level
-    levels = result.round_discovered_levels
-    # Both levels are abilities in LOGITS on the fixed ruler, so a delta is a difference of two
+    levels = result.round_adopted_levels
+    # Every level is an ability in LOGITS on the fixed ruler, so a delta is a difference of two
     # unbounded quantities — plausibly within a couple of logits, structurally within none. The
     # field's +/-4 rail is what states that (see `OuterSampleProxies`); there is still nothing to
     # divide by.
     first = levels[0] - origin
-    # MEAN over the trajectory, not max. A max is an order statistic: at an inner θ_se ≈ 0.42
-    # over ~16 candidates it reads a lift above origin even when every candidate sits AT origin,
-    # and it cannot see a regression at all — one good round hides every bad round after it.
-    # The mean is unbiased, and it doubles as the RATE measurement: a meta-prompt that climbs
-    # fast spends more of its rounds at high ability than a slow climber with the same asymptote.
+    final = levels[-1] - origin
     after_n = _mean(levels) - origin
 
     # Rounds carrying no evidence are dropped, not scored — an all-tooling cycle already left via
     # `no_evidence_reason`, so `evidential` is non-empty here.
     evidential = [r for r in result.rounds if _is_evidential(r)]
-    cleanliness = 1.0 - _mean([_round_problem_rate(r) for r in evidential])
+    n_min = result.elimination_n_min
+    cleanliness = 1.0 - _mean([_round_problem_rate(r, n_min) for r in evidential])
     diversity_health = 1.0 - _mean([_round_mode_collapse_rate(r) for r in evidential])
     rounds_improved_frac = _mean([1.0 if r.improved else 0.0 for r in evidential])
 
@@ -364,15 +402,19 @@ def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
     assert result.spend is not None  # guaranteed by no_evidence_reason
     cost = result.spend.incurred_usd
     n_cand = sum(r.candidates_scored for r in result.rounds)
-    delta_per_dollar = after_n / cost
+    # Both ratios divide `final` — the lift the search DELIVERED — not the rate-flavoured mean:
+    # "improvement per dollar" asks what you got for what you paid, and the mean answers a
+    # different question (how fast you got there), which the formula already reads separately.
+    delta_per_dollar = final / cost
     # n_cand == 0 only when no candidate was ever scored — and then the trajectory never rose
-    # above origin, so `after_n` is 0.0 and this is 0/0. Say 0.0 outright instead of letting a
+    # above origin, so `final` is 0.0 and this is 0/0. Say 0.0 outright instead of letting a
     # `max(n_cand, 1)` divisor pretend one candidate existed.
-    delta_per_candidate = after_n / n_cand if n_cand else 0.0
+    delta_per_candidate = final / n_cand if n_cand else 0.0
 
     return OuterSampleProxies(
         first_round_delta=first,
         after_N_rounds_delta=after_n,
+        final_delta=final,
         cleanliness=cleanliness,
         diversity_health=diversity_health,
         rounds_improved_frac=rounds_improved_frac,

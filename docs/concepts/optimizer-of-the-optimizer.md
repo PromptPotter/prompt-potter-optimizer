@@ -35,12 +35,14 @@ connector reports a **vector** of bounded, subset-invariant signals per inner cy
 signal-rich campaign is never distilled to one number — **lift core × quality modulator ×
 efficiency**:
 
-- **Lift core** — `after_N_rounds_delta` (the inner search's MEAN ability across its rounds
-  minus its origin, in LOGITS on one ability ruler), recentred `(x+1)/2` and clamped so
-  regression < no-op < improvement stay distinct. **Its definition, its bound and why it needs
-  no denominator are the type's, not this doc's — read
-  `domain/l4/proxies.py`.** There is no `target_score` any more, anywhere; see *No declared
-  headroom*, below.
+- **Lift core** — `final_delta` (where the inner search ENDED minus its origin) weighted with
+  `after_N_rounds_delta` (the same series averaged, so it reads how *fast* it got there and
+  held), both in LOGITS on one ability ruler over the incumbent each round ADOPTED. Re-anchored
+  and clamped so regression < no-op < improvement stay distinct. Reading the round's *proposals*
+  instead priced exploration as damage and inverted the whole metric — see
+  `exploration.adopted_level_trajectory`. **Its definition, its bound and why it needs no
+  denominator are the type's, not this doc's — read `domain/l4/proxies.py`.** There is no
+  `target_score` any more, anywhere; see *No declared headroom*, below.
 - **Quality modulator** — `cleanliness · diversity_health`, floored at 0.6: discounts a
   campaign with unscoreable/degraded inner samples, malformed candidate output, mode collapse,
   or candidates that **answered one constant label** — **without** diluting the lift core (a

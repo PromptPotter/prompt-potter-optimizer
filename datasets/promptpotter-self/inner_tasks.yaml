@@ -1,9 +1,18 @@
 inner_benchmark: justlogic-d234
+# The panel is 6 cells because the OUTER loop's elimination floor is 4: at 2 cells PoBB could
+# never reach it, so nothing was ever eliminated, the outer δ ruler never warmed, and a dud
+# variant cost exactly as much as the winner. 6 > 4 makes all three work — and elimination is
+# what keeps the wider panel from costing proportionally more, since a dud is cut at 4 cells.
+#
+# The cell itself is trimmed to pay for that width: 4 rounds x 3 variants instead of 5 x 4 is
+# ~40% off a cell (~11 min / ~$0.045 at the measured rate). Both observed peaks landed by inner
+# round 3 (promptpotter-self__d8b5be: seed-0 at r2, seed-3 at r3), and `inner_lives` stopped
+# seed-0 on its own at 4 — so the cap that was cut was headroom nothing reached.
 inner_benchmark_config:
   n_samples_per_inner_round: 28
   n_samples_origin: 40
-  max_inner_rounds: 5
-  inner_n_variants: 4
+  max_inner_rounds: 4
+  inner_n_variants: 3
   inner_lives:
     start: 2
     cap: 3
@@ -11,5 +20,13 @@ inner_benchmark_config:
 tasks:
   - id: justlogic-d234/seed-0
     inner_dataset_seed: 0
+  - id: justlogic-d234/seed-1
+    inner_dataset_seed: 1
+  - id: justlogic-d234/seed-2
+    inner_dataset_seed: 2
   - id: justlogic-d234/seed-3
     inner_dataset_seed: 3
+  - id: justlogic-d234/seed-4
+    inner_dataset_seed: 4
+  - id: justlogic-d234/seed-5
+    inner_dataset_seed: 5

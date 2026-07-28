@@ -78,6 +78,7 @@ nodes:
         - pipeline_key: final_ranking
         - pipeline_key: first_round_delta
         - pipeline_key: after_N_rounds_delta
+        - pipeline_key: final_delta
         - pipeline_key: cleanliness
         - pipeline_key: diversity_health
         - pipeline_key: rounds_improved_frac

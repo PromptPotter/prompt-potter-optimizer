@@ -37,11 +37,10 @@ __all__ = [
     "RaschPosterior",
     "Ruler",
     "RulerEntry",
+    "adopted_level_trajectory",
     "build_observations",
     "candidate_abilities",
-    "candidate_lcb_ability",
     "dedup_observations",
-    "discovered_level_trajectory",
     "fit_rasch",
     "fit_rasch_2pl",
     "fit_theta_given_delta",
@@ -97,20 +96,6 @@ def ruler_expected_accuracy(theta: float | None, delta_scale: Ruler | None) -> f
     return float(np.mean(1.0 / (1.0 + np.exp(-np.clip(etas, -50, 50)))))
 
 
-# Residual per-candidate winner's-curse discount on the L4 *discovery* proxy. A FULL θ_se
-# haircut per inner candidate asks "is each candidate individually 1-SE above origin?" — too
-# strict at the thin inner budget (24 samples ⇒ θ_se ≈ 0.55–0.64, LARGER than a real
-# meta-prompt lift ≈ 0.05–0.45), so every genuine inner improvement floored to ~0 and the
-# outer θ went degenerate (p_best a 3-way tie at 0.5). The load-bearing winner's-curse guard
-# is the OUTER θ-LCB election, which pools the whole panel (√panel lower effective SE);
-# re-subtracting a full SE here double-counts it (discount-then-pool destroys what
-# pool-then-discount keeps). So keep only a light residual fraction (~1/√8, the outer panel
-# size): enough to penalize a wildly-uncertain inner candidate, small enough to let a real
-# below-SE lift survive to be pooled. This constant is the single knob if a validation run
-# over/under-corrects.
-_DISCOVERY_SE_DISCOUNT = 0.25
-
-
 def theta_accuracy_ci(
     theta: float | None,
     theta_se: float | None,
@@ -142,84 +127,54 @@ def theta_accuracy_ci(
     return (lo, hi)
 
 
-def candidate_lcb_ability(
-    theta: float | None, theta_se: float | None, delta_scale: Ruler | None
-) -> float | None:
-    """A candidate's lightly-discounted ability on the fixed ruler: project
-    ``θ − _DISCOVERY_SE_DISCOUNT · θ_se`` through :func:`ruler_expected_accuracy`.
-
-    Reads the best candidate a meta-prompt's inner search *found* — not just the one it
-    *crowned* — to recover the sub-crowning-threshold signal the conservative θ-LCB election
-    throws away at a small inner sample budget. A naïve max over candidates' point θ rewards
-    *variance* (the max of noisy estimates is upward-biased), so each candidate's point θ is
-    discounted by a *fraction* of its SE — a residual guard only; the primary winner's-curse
-    guard is the outer pooled θ-LCB election (see :data:`_DISCOVERY_SE_DISCOUNT` for why the
-    full-SE haircut here was double-counting and floored the signal). ``None`` when θ / SE /
-    ruler is absent — the caller then either skips the candidate (ability space) or reads its
-    accuracy Wilson-LB instead (raw space)."""
-    if theta is None or theta_se is None:
-        return None
-    return ruler_expected_accuracy(theta - _DISCOVERY_SE_DISCOUNT * theta_se, delta_scale)
-
-
-def discovered_level_trajectory(
+def adopted_level_trajectory(
     origin_theta: float | None,
-    rounds: Sequence[Sequence[tuple[float | None, float | None]]],
+    incumbent_thetas: Sequence[float | None],
     delta_scale: Ruler | None,
 ) -> tuple[float | None, list[float]]:
-    """Origin ability + per-round **mean candidate ability** — the single-scale signal an
-    outer L4 cycle scores inner search quality by. Every level is a θ in LOGITS on the
-    cycle's locked δ ruler, the one estimator that is subset-invariant.
+    """Origin ability + the per-round ability of the **incumbent the search adopted** — the
+    single-scale signal an outer L4 cycle grades inner search quality by. Every level is a θ in
+    LOGITS on the cycle's locked δ ruler, the one estimator that is subset-invariant.
 
-    **Why logits, and not expected accuracy.** θ and the ruler's δ share one *interval*
-    scale — that is the point of fitting a Rasch model at all: equal Δθ is equal difficulty
-    of gain wherever the origin sits. Projecting each θ back through
-    :func:`ruler_expected_accuracy` *before* differencing throws that property away, because
-    the sigmoid is flat near the ruler's ceiling: the same ability gain then reads smaller for
-    a strong origin than for a weak one, and the outer loop ranks meta-prompts partly by which
-    seed drew an easy origin. So the ruler is still what puts every θ on one scale; it just
-    stops being applied a second time on the way out.
+    **Why the incumbent, and not the round's proposals.** A round's value to the search is what
+    it *crowns*; the arms it discards are the price of finding that. Averaging proposals prices
+    exploration as damage — for any mutation operator with mass below the parent (all of them,
+    which is why selection exists) ``E[mean θ] < θ_parent``, so the mean is negative for an
+    exploring generator and ≈0 for an inert one, exactly backwards. Measured on
+    ``promptpotter-self__d8b5be``: an inner round that adopted a 28-sample winner at θ +0.27 and
+    let PoBB kill a dud at 6 samples (θ −1.84) recorded a level of −0.79 — a 0.88-logit
+    *regression* stamped on a round the loop itself marked ``improved: True``.
 
-    **Why the mean, and not the best.** A max over the trajectory is an order statistic: at an
-    inner θ_se ≈ 0.42 over ~16 candidates it reads a lift above origin even when every
-    candidate sits *at* origin, and its spread across arms is driven by how lucky the luckiest
-    draw was rather than by the meta-prompt. It also cannot see a regression at all — one good
-    round hides every bad round after it. Averaging is what makes the estimate unbiased, and it
-    doubles as the RATE measurement: a meta-prompt that climbs fast spends more of its rounds at
-    high ability, so it out-scores a slow climber with the same asymptote.
+    This is not the max-order-statistic the mean was chosen to avoid. ``cumulative_theta`` is a
+    re-fit over the adopted frontier's own measured rows (``optimization/cycle.py``), and it moves
+    only when the election adopts — a θ-LCB gate that already needs two arms. The winner's-curse
+    discount is applied there, pooled over the whole panel; re-applying a per-candidate haircut
+    here would double-count it, and discount-then-pool destroys what pool-then-discount keeps.
 
-    **Why nothing here reads raw accuracy.** Each round scores its candidates on a different
-    signal-chased subset, and a Wilson bound over raw accuracy moves with the subset's SIZE as
-    much as with the candidate's skill: the origin runs the full bank while an eliminated arm
-    may carry five samples, and at *identical* accuracy the shorter arm's bound sits ~0.1–0.2
-    lower. Differencing those two bounds reports a regression no candidate ever committed, and
-    rewards the meta-prompts whose candidates merely survived long enough to be scored. The
-    election already rejects raw subset accuracy for exactly this reason
-    (``elect_round_winner``); the proxy that *grades* the election must not be laxer than it.
+    **Why logits, and not expected accuracy.** θ and the ruler's δ share one *interval* scale —
+    that is the point of fitting a Rasch model at all: equal Δθ is equal difficulty of gain
+    wherever the origin sits. Projecting each θ back through :func:`ruler_expected_accuracy`
+    *before* differencing throws that property away, because the sigmoid is flat near the ruler's
+    ceiling: the same ability gain then reads smaller for a strong origin than for a weak one, and
+    the outer loop would rank meta-prompts partly by which seed drew an easy origin.
 
-    A candidate with **no fitted θ is skipped**. That is not data-dropping: θ is stamped onto
-    exactly the *electable* candidates (``l1/score/winner.py``), so a θ-less arm is one PoBB
-    already eliminated or held under the coverage floor — one the loop itself judged to carry no
-    reliable measurement. A round that measured no candidate at all carries the PRIOR round's
-    ability (the incumbent persists; nothing says it moved), falling back to the origin at round 1.
-
-    Levels are **not** floored at the origin: a round that surfaced only worse-than-origin
-    candidates lands *below* it, so the deltas stay negative on a genuinely regressing
-    meta-prompt (the gradient the outer optimizer needs to *avoid* bad mutations).
+    A round whose frontier could not be fit (every row errored) carries the PRIOR level — the
+    incumbent persists; nothing says it moved — falling back to the origin at round 1. Levels are
+    **not** floored at the origin, so a genuinely regressing meta-prompt still reads negative,
+    which is the gradient the outer optimizer needs to avoid bad mutations.
 
     ``delta_scale`` is read only as the WARM-RULER GATE, not by the arithmetic — where the ruler
     is cold ``fit_theta_given_delta`` places every sample at δ=0, so θ collapses to that round's
     logit-accuracy and stops being subset-invariant, and differencing across rounds would compare
     two different scales. ``(None, [])`` there and when the origin was never fit; the caller
-    excludes the cycle (``_no_evidence_reason``)."""
+    excludes the cycle (``no_evidence_reason``)."""
     if origin_theta is None or not delta_scale:
         return None, []
     prev = origin_theta
     out: list[float] = []
-    for cands in rounds:
-        thetas = [t for t, _ in cands if t is not None]
-        if thetas:
-            prev = sum(thetas) / len(thetas)
+    for theta in incumbent_thetas:
+        if theta is not None:
+            prev = theta
         out.append(prev)
     return origin_theta, out
 

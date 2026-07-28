@@ -440,7 +440,7 @@ def test_inner_narrative_carries_evidence_within_budget() -> None:
             best_round=1,
             origin_accuracy=0.458,
             origin_level=0.458,
-            round_discovered_levels=levels,
+            round_adopted_levels=levels,
             winner_prompt_fields={},
             stop_reason="max_rounds",
             started_at="t0",
@@ -984,6 +984,83 @@ def test_a_forks_attempts_stay_separate_on_the_campaigns_timeline(built_stores) 
     assert (fork_attempt.label, fork_attempt.course_label) == ("C1.2", "C1.1")
     # A candidate this course minted itself has one position, so its two labels agree.
     assert all(k.label == k.course_label for k in kids if k.id.startswith("root-"))
+
+
+def test_two_inner_runs_of_one_benchmark_cell_both_reach_the_tree(built_stores) -> None:
+    """A cycle_id is not an identity, and inside an L4 sandbox that is not a corner case.
+
+    An inner cycle's id is the content hash of the BENCHMARK CELL's origin, so every outer
+    candidate measured on the same cell mints the identical one — `C0` on seed-0 and `C1.1`
+    on seed-0 are two runs, one cycle_id, told apart only by their campaign. The family walk
+    de-duplicates visited cycles (its guard against a corrupt `parent_cycle_id` looping), and
+    keyed on the cycle_id alone that guard silently ATE the second run: the tree served one
+    course, the operator's sidebar showed the candidate measured on one cell out of two, and
+    the `/ray` chronology — which shares this walk — lost its records too.
+
+    Silent in the way this file exists for. Nothing errors; a candidate simply reports a
+    smaller panel than it ran, and reads as complete.
+    """
+    from promptpotter.domain.cycle_paths import CycleHop
+    from promptpotter.infrastructure.store.lineage_views import build_lineage_tree
+
+    outer_campaign, outer_cycle = "l4__aaaaaa", "cycle_outer"
+    cell = "cycle_seed0"  # ONE id, minted twice — the whole point
+
+    outer = built_stores.base_dir / "campaigns" / outer_campaign / "cycles" / outer_cycle
+    (outer / ".runtime").mkdir(parents=True, exist_ok=True)
+    (outer / "index.json").write_text(json.dumps({"status": "finished"}))
+    (outer / ".runtime" / "ledger.jsonl").write_text(
+        "".join(
+            json.dumps(
+                {
+                    "record_type": "candidate_minted",
+                    "round": rnd,
+                    "idx": 0,
+                    "candidate_id": cid,
+                    "parent_id": parent,
+                    "label": label,
+                }
+            )
+            + "\n"
+            for rnd, cid, parent, label in [
+                (0, "outer-c0", None, "C0"),
+                (1, "outer-c11", "outer-c0", "C1.1"),
+            ]
+        )
+    )
+
+    # The sandbox is `<workspace>/.inner/<outer cycle>` — flat, and shared by every candidate
+    # this course measured, which is what puts the two colliding ids in one store.
+    sandbox = built_stores.shared_root.parent / ".inner" / outer_cycle / built_stores.tenant_id
+    for inner_campaign, spawned, best in [
+        ("bench__aaaaaa", {"candidate_label": "C0", "task": "bench/seed-0"}, 0.57),
+        (
+            "bench__bbbbbb",
+            {"candidate_id": "outer-c11", "candidate_label": "C1.1", "task": "bench/seed-0"},
+            0.61,
+        ),
+    ]:
+        cdir = sandbox / "campaigns" / inner_campaign / "cycles" / cell
+        (cdir / ".runtime").mkdir(parents=True, exist_ok=True)
+        (cdir / "index.json").write_text(
+            json.dumps({"status": "finished", "spawned_by": spawned, "best_accuracy": best})
+        )
+        (cdir / ".runtime" / "ledger.jsonl").write_text("")
+
+    kids = build_lineage_tree(
+        built_stores, (CycleHop(campaign_id=outer_campaign, cycle_id=outer_cycle),)
+    ).children
+
+    assert [k.label for k in kids] == ["C0", "C1.1"]
+    # Each candidate keeps the run that measured IT — one course each, not one course and a
+    # hole, and not both piled under whichever campaign sorted first.
+    runs = {k.label: k.children for k in kids}
+    assert [c.path[-1].campaign_id for c in runs["C0"]] == ["bench__aaaaaa"]
+    assert [c.path[-1].campaign_id for c in runs["C1.1"]] == ["bench__bbbbbb"]
+    # …carrying its own number. The two share `id`, so only the PATH tells them apart.
+    assert [c.best_accuracy for c in runs["C0"]] == [0.57]
+    assert [c.best_accuracy for c in runs["C1.1"]] == [0.61]
+    assert {c.id for c in runs["C0"]} == {c.id for c in runs["C1.1"]} == {cell}
 
 
 def test_the_time_ray_pages_without_a_hole_and_never_doubles_a_forks_parent(

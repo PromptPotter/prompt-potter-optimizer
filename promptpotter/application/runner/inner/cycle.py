@@ -9,7 +9,9 @@ here may assume depth 1:
 
 - **Its own ``asyncio.Task``.** The runner's ContextVars (ledger, round stamp, abort
   predicate) isolate per task, not per call — a nested ``await run_optimization`` in the
-  outer's task would clobber all three. Spawning copies the context instead.
+  outer's task would clobber all three. Spawning copies the context instead, and the abort
+  predicate is the one the inner run READS back (`_bind_run_controls` composes rather than
+  overwrites), so a pause on the owner stops the instrument.
 - **A FLAT sandbox home**, ``<workspace>/.inner/<spawn_cycle_id>``, a sibling of
   ``projects/`` rather than a child of the outer cycle dir. Physical nesting blows past
   Windows' ``MAX_PATH`` at depth 1 and is hopeless by L5; flat stays shallow at every
@@ -262,16 +264,17 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
     # raised otherwise). No `or 0.0`: an origin that was never scored has no level to narrate.
     assert result.origin_level is not None
     origin = result.origin_level
-    levels = result.round_discovered_levels
-    # Lead with the MEAN — the quantity the outer formula actually scores. Leading with
-    # `max(levels)` showed the generator a headline it was not graded on, so a meta-prompt
-    # that spiked once and collapsed read as this campaign's best. The peak still rides
-    # along, because "mean well below peak" is exactly the collapse worth reading.
+    levels = result.round_adopted_levels
+    # Lead with where the search ENDED — `final_delta`, the primary term the outer formula
+    # scores. Showing the generator a headline it is not graded on teaches the wrong lesson:
+    # this line led with the mean while the mean was the scored lift, and must move with it.
+    # The mean rides along as the rate reading (a fast climber holds a high mean), and the peak
+    # beside it, because "ended well below peak" is exactly the collapse worth reading.
     mean = sum(levels) / len(levels)
     lines = [
         f"INNER {spec.inner_dataset} seed-{spec.seed}: origin {origin:+.2f}"
-        f" -> mean-over-rounds {mean:+.2f} (D{mean - origin:+.3f}, the scored lift)"
-        f", peak {max(levels):+.2f}"
+        f" -> ended {levels[-1]:+.2f} (D{levels[-1] - origin:+.3f}, the scored lift)"
+        f", mean-over-rounds D{mean - origin:+.3f}, peak {max(levels):+.2f}"
         f" over {result.n_l1_rounds} rounds; stop={result.stop_reason}."
     ]
     by_round = {rnd.round: rnd for rnd in result.rounds}

@@ -627,23 +627,33 @@ class CycleResult(StrictModel):
     # some other basis is comparing two different measurements.
     origin_accuracy: float
     origin_composite_fitness: float = 0.0
-    # The L4 outer proxy's honest, single-scale inner-search signal (built by
-    # `exploration.discovered_level_trajectory` at finalize). `origin_level` is the origin's
-    # level and `round_discovered_levels` the cumulative best-DISCOVERED conservative level
-    # per round — both in ONE space (θ-implied ability when the ruler is warm, else raw
-    # accuracy), so no proxy delta ever subtracts across scales. "Discovered" (best candidate
-    # the inner search found, θ-LCB-discounted), not "crowned" (best candidate the inner
-    # election deployed): at a small inner sample budget the conservative election rarely
-    # crowns, so reading the crowned frontier gave the outer ~zero signal. Levels are NOT
-    # floored at origin — a regressing meta-prompt yields a level below origin so the outer
-    # keeps a gradient to avoid it.
+    # The L4 outer proxy's single-scale inner-search signal (built by
+    # `exploration.adopted_level_trajectory` at finalize). `origin_level` is the origin's level
+    # and `round_adopted_levels` the ability of the incumbent each round ADOPTED — both in ONE
+    # space (θ on the cycle's fixed δ ruler when warm, else the cycle is excluded), so no proxy
+    # delta ever subtracts across scales. Levels are NOT floored at origin — a regressing
+    # meta-prompt yields a level below origin so the outer keeps a gradient to avoid it.
+    #
+    # These read the CROWNED frontier. They once read the round's proposals instead, on the
+    # argument that a conservative election rarely crowns at a small inner budget and so gave
+    # the outer ~zero signal. `5f6bcb44` fixed the election (a Rasch fit needs two arms; c0_ok
+    # was gating rounds it never should have), and crowning is now routine — while averaging
+    # proposals had turned the metric NEGATIVE for exactly the generators that explore, since
+    # every arm the search correctly discarded pulled the mean down.
     #
     # `origin_level` is `None`, not `0.0`, when the origin was never scored (an init-crash, a
-    # cycle that halted before round 0). A zero floor is not a low floor: every round's
-    # discovered lift is differenced against it, so a fabricated 0.0 reports the whole
-    # trajectory as an enormous improvement over nothing. Absent ⇒ the cycle is excluded.
+    # cycle that halted before round 0). A zero floor is not a low floor: every round's lift is
+    # differenced against it, so a fabricated 0.0 reports the whole trajectory as an enormous
+    # improvement over nothing. Absent ⇒ the cycle is excluded.
     origin_level: float | None = None
-    round_discovered_levels: list[float] = Field(default_factory=list)
+    round_adopted_levels: list[float] = Field(default_factory=list)
+    # The cycle's `optimization.elimination_n_min` — the one min-samples floor PoBB, the ruler
+    # and the election all read. The L4 law needs it to tell an arm that earned a verdict from
+    # one cut early (`domain/l4/proxies.py::_judged`), and it belongs on the result rather than
+    # as a second argument: the law is pure over ONE input, and "how many samples counted as
+    # evidence" is a fact about the finished cycle. 0 = no floor, reachable only on a cycle with
+    # no rounds — which `no_evidence_reason` has already excluded before the law reads this.
+    elimination_n_min: int = 0
     winner_prompt_fields: dict[str, Any]
     winner_pipeline_params: dict[str, Any] | None = None
     stop_reason: StopReason

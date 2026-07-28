@@ -106,8 +106,8 @@ any optimizer call > 2 min; a headline Δ that disagrees with `matched_origin_*`
 - **No knob changes mid-run** — the JSON baselines are read per inner mint, so a mid-run edit
   splits the run into two fingerprint families.
 - **`max_inner_rounds` ≥ 2** — at 1 the inner `levels` trajectory is length-1, so
-  `after_N_rounds_delta` equals `first_round_delta` byte-for-byte and the formula's two delta
-  terms silently double-count one number.
+  `first_round_delta`, `after_N_rounds_delta` and `final_delta` are all byte-for-byte the same
+  number and the formula's two weighted delta terms silently double-count one measurement.
 - **`elimination_n_min` is the panel-size floor** — keep the inner-task count at least one
   above it, or crowning starves.
 - **`replicate_survivors` stays 0 in the distributable** (opt-in dev-stage successive-halving
@@ -223,12 +223,35 @@ does not restate it.** What each term means, what it is bounded by and why, and 
 floor / exclude / measure trichotomy all live there; they used to be restated here, in the
 concept doc, and in an 8k-char JSON blob, and the four copies drifted.
 
-What lives HERE is the composition, because that is `campaign.json`'s fact, not the type's: the
+What lives HERE is the composition, because that is `campaign.yaml`'s fact, not the type's: the
 formula in `datasets/promptpotter-self/campaign.yaml::scoring` composes **lift core**
-(`after_N_rounds_delta` — a MEAN-over-trajectory ability gain in logits, recentred `(x+1)/2`
-and clamped so regression < no-op < improvement stay distinct)
+(`0.6·final_delta + 0.4·after_N_rounds_delta` — ability gain in logits over the incumbent the
+inner search ADOPTED, weighted toward what it delivered over how fast it got there, re-anchored
+`(x+0.5)/1.5` and clamped so regression < no-op < improvement stay distinct)
+× **sustained discovery** (`0.85 + 0.15·rounds_improved_frac`)
 × **bounded quality** (`cleanliness · diversity_health`, floored 0.6 — a broken campaign is
 discounted, never sign-flipped) × **efficiency** (`delta_per_dollar`, floored 0.7).
+
+**Why the lift core reads the ADOPTED incumbent and not the round's proposals.** It averaged
+proposals until 2026-07-28, and that made the metric anti-correlated with inner success: a round's
+value to the search is what it *crowns*, so averaging in the arms it discarded prices exploration
+as damage. Measured on `promptpotter-self__d8b5be`, both cells of the SAME meta-prompt: the inner
+campaign that climbed 52.5%→82.1% (θ +0.85) scored **0.069** while one that climbed 52.5%→57.1%
+(θ +0.46) scored **0.199** — 2.9× higher for a quarter of the gain, because the first explored
+harder. `delta_per_dollar` was dead for the same reason: `max(0.0, …)` of a numerator that could
+not be positive, so the efficiency factor was constant at its floor on every run. Replayed through
+the current law those two cells score **0.343** and **0.413** in the right order, against a
+**0.198** do-nothing bar, with `delta_per_dollar` live at 6.1 and 12.5 (the `/6.0` divisor was
+recalibrated to `/20.0` — a real inner cell is ~$0.07 for a +0.4…+0.9 logit climb, which the old
+divisor clamped flat).
+
+**Open, measured, undecided: `cleanliness` may be measuring the seed, not the meta-prompt.** Those
+same two cells — same meta-prompt, different data seed — scored 0.79 and 0.60. A term whose spread
+*within* one arm is 0.19 cannot discriminate between meta-prompts whose real differences are
+smaller. Its answer-collapse half is also all-or-nothing in practice: every collapsed arm in both
+campaigns was cut at exactly `elimination_n_min`, so gating on "earned a verdict" charges all of
+them or none. Left charging them (the conservative read) pending a run with a real meta-prompt
+contrast; the governing law below says what to do if it stays flat.
 
 **Governing law: every term carries a candidate gradient** — terms without one stay out (the
 deleted rounds-to-target counter; the per-seed cost multiplier; and now the `normalized_gain`
