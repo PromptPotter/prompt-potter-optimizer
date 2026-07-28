@@ -7,7 +7,7 @@
 // never re-derived from a list position.
 
 import type { LineageNode } from "@/lib/api";
-import { encodeCyclePath, type CyclePath } from "@/lib/ids";
+import { encodeCyclePath, nodeAddress, type CyclePath } from "@/lib/ids";
 
 // A node's address. The served hops are the wire's snake_case; `CyclePath` is the app's.
 // ONE conversion, here, so no surface re-maps a served path into an address by hand.
@@ -100,9 +100,10 @@ export function candidatesAtPath(root: LineageNode, path: CyclePath): LineageNod
 }
 
 // A node's key, unique across the whole tree — unlike its `id`, since course ids collide
-// across sandboxes.
+// across sandboxes. It IS the sidebar's node address, so it is minted by the one builder
+// (`lib/ids.ts`) that `ownerOfNodeAddress` reads back.
 export function nodeKeyOf(node: LineageNode): string {
-  return `${encodeCyclePath(pathOf(node))}|${node.id}`;
+  return nodeAddress(pathOf(node), node.id);
 }
 
 // ONE walk, indexed by encoded path. `nodeAt` / `candidatesAtPath` each re-walk the whole

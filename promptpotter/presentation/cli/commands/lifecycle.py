@@ -1,4 +1,9 @@
-"""``archive`` / ``unarchive`` / ``delete`` — campaign lifecycle verbs.
+"""``archive`` / ``unarchive`` / ``delete`` / ``pause`` — the dispatcher-shell verbs.
+
+All four are thin shells over ``CommandDispatcher``, which is why they share a module:
+the verb is the only thing that differs. ``pause`` is cycle-scoped run control rather
+than campaign lifecycle, but routing it anywhere else would mean a second way to reach
+the same seam.
 
 ``archive`` MOVES the campaign tree into the ``archive/`` recycle bin (hidden from
 the default sidebar, restorable by ``unarchive``); ``delete`` is destructive — it
@@ -20,6 +25,7 @@ import logging
 import uuid
 
 from promptpotter.infrastructure.store.layout import DEFAULT_PROJECTS_ROOT
+from promptpotter.infrastructure.store.session_pointer import read_active_pointer
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.api.middleware.command_dispatcher import (
     CommandDispatcher,
@@ -30,7 +36,7 @@ from promptpotter.shared.errors import ConflictError, NotFoundError
 
 logger = logging.getLogger("promptpotter.presentation.cli.lifecycle")
 
-__all__ = ["cmd_archive", "cmd_delete", "cmd_unarchive"]
+__all__ = ["cmd_archive", "cmd_delete", "cmd_pause", "cmd_unarchive"]
 
 
 async def _dispatch(args: argparse.Namespace, kind: LifecycleKind) -> CommandResult | None:
@@ -89,6 +95,62 @@ async def cmd_unarchive(args: argparse.Namespace) -> CommandResult:
     return CommandResult(
         data={"campaign_id": campaign_id, "lifecycle_status": "active"},
         human=f"{campaign_id} -> active (restored)",
+    )
+
+
+async def cmd_pause(args: argparse.Namespace) -> CommandResult:
+    """Ask a running cycle to stop at its next checkpoint. Resumable by ``resume``.
+
+    The terminal's half of the webapp's pause control — the SAME ``pause-cycle``
+    command, through the same dispatcher, so the interrupt lands on the cycle's ledger
+    as a ``CommandRecord`` naming who asked. Writing ``.runtime/pause.flag`` by hand
+    has the same effect on the loop and leaves no such record, which is the difference
+    between a pause you can audit and one that merely happened.
+
+    Targets the active cycle unless ``--campaign`` / ``--cycle`` name another.
+    """
+    identity = identity_from_args(args)
+    store = build_stores(identity, projects_root=DEFAULT_PROJECTS_ROOT)
+    campaign_id: str = getattr(args, "campaign", None) or ""
+    cycle_id: str = getattr(args, "cycle", None) or ""
+    if not (campaign_id and cycle_id):
+        _sid, pointer_cid, pointer_cyid = read_active_pointer(
+            identity.tenant_id, projects_root=store.projects_root
+        )
+        campaign_id = campaign_id or pointer_cid
+        cycle_id = cycle_id or pointer_cyid
+    if not (campaign_id and cycle_id):
+        return CommandResult(
+            data={"status": "no_target"},
+            human="No active cycle to pause — name one with --campaign/--cycle.",
+        )
+
+    try:
+        await CommandDispatcher(store).dispatch_cycle_command(
+            kind="pause-cycle",
+            campaign_id=campaign_id,
+            cycle_id=cycle_id,
+            payload_extras={"reason": getattr(args, "reason", None) or ""},
+            idempotency_key=uuid.uuid4().hex,
+            expected_version=None,
+        )
+    except NotFoundError:
+        return CommandResult(
+            data={"campaign_id": campaign_id, "cycle_id": cycle_id, "status": "not_found"},
+            human=f"cycle not found: {campaign_id}/{cycle_id}",
+        )
+    except ConflictError as exc:
+        return CommandResult(
+            data={"campaign_id": campaign_id, "cycle_id": cycle_id, "status": "conflict"},
+            human=str(exc),
+        )
+    logger.info("run control: %s/%s -> pause requested", campaign_id, cycle_id)
+    return CommandResult(
+        data={"campaign_id": campaign_id, "cycle_id": cycle_id, "run_phase": "pausing"},
+        human=(
+            f"{campaign_id}/{cycle_id} -> pause requested{_reason_suffix(args)}. "
+            "The loop exits at its next checkpoint; `resume` picks it up."
+        ),
     )
 
 

@@ -3,6 +3,8 @@ import {
   decodeCyclePath,
   encodeCyclePath,
   encodeDescend,
+  nodeAddress,
+  ownerOfNodeAddress,
   pathLeaf,
   pathRoot,
   type CyclePath,
@@ -47,5 +49,42 @@ describe("CyclePath", () => {
   it("encodes descend as empty at depth 1, the inner hops when deep", () => {
     expect(encodeDescend(depth1)).toBe("");
     expect(encodeDescend(depth2)).toBe("justlogic__ff00aa::cycle_1122ab_s3");
+  });
+
+  // A sidebar node address is a path plus an optional in-course id, and `ownerOfNodeAddress`
+  // names the view-memory record it files under. Silent when wrong: a null owner makes
+  // `toggle` a no-op and pins the row at its default — the twist renders, the click does
+  // nothing, nothing logs. That is exactly what feeding a suffixed address to
+  // `decodeCyclePath` produced (`|` is not a legal id char, so the whole parse answered
+  // null) and every candidate and origin row in the tree went inert.
+  describe("node addresses", () => {
+    it("owns a course address by its root-hop campaign, at any depth", () => {
+      expect(ownerOfNodeAddress(nodeAddress(depth1))).toBe("justlogic__ab12cd");
+      expect(ownerOfNodeAddress(nodeAddress(depth2))).toBe("justlogic__ab12cd");
+    });
+
+    it("owns a candidate address by its campaign, suffix and all", () => {
+      const addr = nodeAddress(depth2, "0d3d5cd5adf74270b194d23cad09e022");
+      expect(addr).toBe(
+        "justlogic__ab12cd::cycle_9f3a1b~justlogic__ff00aa::cycle_1122ab_s3" +
+          "|0d3d5cd5adf74270b194d23cad09e022",
+      );
+      expect(ownerOfNodeAddress(addr)).toBe("justlogic__ab12cd");
+    });
+
+    it("owns an origin address by the origin id — it names no campaign", () => {
+      // The tier groups the runs of ONE declaration across campaigns, so there is no path
+      // and no campaign to file it under. `cycle_<hash>` and `{dataset}__{rand6}` cannot
+      // collide, so the two owner shapes share one store safely.
+      expect(ownerOfNodeAddress(nodeAddress([], "cycle_47d99f21ef84"))).toBe(
+        "cycle_47d99f21ef84",
+      );
+    });
+
+    it("answers null on a malformed address rather than a wrong owner", () => {
+      expect(ownerOfNodeAddress("")).toBeNull();
+      expect(ownerOfNodeAddress("no-separator|cand")).toBeNull();
+      expect(ownerOfNodeAddress("|bad/slash")).toBeNull();
+    });
   });
 });

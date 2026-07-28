@@ -7,11 +7,15 @@
 // inspecting, which round, whether the forest was open, which lanes were expanded — was
 // dropped on every campaign switch and rebuilt by hand on the way back.
 //
-// The blob had to be global for one reason: `collapsedNodes` was a flat Set with no
-// campaign in it. But a node key is `{kind}:{encodedPath}`, and every path opens with its
-// own `(campaignId, cycleId)` hop — so the keys were ALREADY campaign-partitioned and the
-// Set never needed to be shared. Splitting per campaign is what makes the rest of this
-// possible; it is not a new mechanism beside the old one.
+// The blob had to be global for one reason: `collapsedNodes` was a flat Set with no owner in
+// it. But a node key is `{kind}:{address}`, and an address names the record it belongs to
+// (`ids.ts::ownerOfNodeAddress`) — so the keys were ALREADY partitioned and the Set never
+// needed to be shared. Splitting per owner is what makes the rest of this possible; it is
+// not a new mechanism beside the old one.
+//
+// An OWNER is a campaign for every axis here but one: the sidebar's origin tier groups the
+// runs of a declaration ACROSS campaigns, so it is filed under its own `cycle_<hash>` id.
+// Same store, same TTL and LRU — the two id shapes cannot collide.
 //
 // WHAT IS DELIBERATELY NOT REMEMBERED, and why — the rule is that memory may restore a
 // VIEW, never a claim about a measurement:
@@ -35,7 +39,7 @@
 import { createContext, useCallback, useContext, useMemo, type ReactNode } from "react";
 import { isNodeOpen, nodeKey, type NodeKind } from "@/components/shell/sidebar/grouping";
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
-import { decodeCyclePath } from "@/lib/ids";
+import { ownerOfNodeAddress } from "@/lib/ids";
 
 export const VIEW_MEMORY_KEY = "promptpotter.view.byCampaign";
 
@@ -114,15 +118,16 @@ export const viewMemoryCodec = {
   },
 };
 
+// `owner` is a campaign id everywhere but the sidebar's origin tier — see the header.
 interface ViewMemory {
-  // The record for a campaign — defaults when absent, expired, or a stale version.
-  viewFor: (campaignId: string | null) => CampaignView;
-  // A campaign's toggled set, as a Set. `isOpen` runs per sidebar row per render, so the
+  // The record for an owner — defaults when absent, expired, or a stale version.
+  viewFor: (owner: string | null) => CampaignView;
+  // An owner's toggled set, as a Set. `isOpen` runs per sidebar row per render, so the
   // array→Set build happens once per store change here, not per call.
-  toggledFor: (campaignId: string | null) => ReadonlySet<string>;
-  // Merge a patch into a campaign's record and stamp `at`. Called from the handler that
+  toggledFor: (owner: string | null) => ReadonlySet<string>;
+  // Merge a patch into an owner's record and stamp `at`. Called from the handler that
   // changed the axis, never during render.
-  recordView: (campaignId: string | null, patch: Partial<CampaignView>) => void;
+  recordView: (owner: string | null, patch: Partial<CampaignView>) => void;
 }
 
 const ViewMemoryContext = createContext<ViewMemory | null>(null);
@@ -133,31 +138,31 @@ export function ViewMemoryProvider({ children }: { children: ReactNode }) {
   const [store, setStore] = useLocalStorage<Store>(VIEW_MEMORY_KEY, EMPTY_STORE, viewMemoryCodec);
 
   const viewFor = useCallback(
-    (campaignId: string | null): CampaignView => {
-      if (!campaignId) return emptyView();
-      return store[campaignId] ?? emptyView();
+    (owner: string | null): CampaignView => {
+      if (!owner) return emptyView();
+      return store[owner] ?? emptyView();
     },
     [store],
   );
 
-  const toggledByCampaign = useMemo(() => {
+  const toggledByOwner = useMemo(() => {
     const m = new Map<string, ReadonlySet<string>>();
-    for (const [cid, view] of Object.entries(store)) m.set(cid, new Set(view.toggled));
+    for (const [key, view] of Object.entries(store)) m.set(key, new Set(view.toggled));
     return m;
   }, [store]);
   const toggledFor = useCallback(
-    (campaignId: string | null): ReadonlySet<string> =>
-      (campaignId ? toggledByCampaign.get(campaignId) : undefined) ?? EMPTY_TOGGLED,
-    [toggledByCampaign],
+    (owner: string | null): ReadonlySet<string> =>
+      (owner ? toggledByOwner.get(owner) : undefined) ?? EMPTY_TOGGLED,
+    [toggledByOwner],
   );
 
   const recordView = useCallback(
-    (campaignId: string | null, patch: Partial<CampaignView>) => {
-      if (!campaignId) return;
+    (owner: string | null, patch: Partial<CampaignView>) => {
+      if (!owner) return;
       setStore((prev) => ({
         ...prev,
-        [campaignId]: {
-          ...(prev[campaignId] ?? emptyView()),
+        [owner]: {
+          ...(prev[owner] ?? emptyView()),
           ...patch,
           v: RECORD_VERSION,
           at: Date.now(),
@@ -180,12 +185,13 @@ export function useViewMemory(): ViewMemory {
   return ctx;
 }
 
-// The sidebar's expand/collapse, resolved per campaign.
+// The sidebar's expand/collapse, resolved per owner.
 //
-// A node key is `{kind}:{encodedPath}` and every path opens with its own
-// `(campaignId, cycleId)` hop, so the campaign that owns a node is read straight off its
-// address — no second lookup, and no way for one campaign's toggles to reach another's.
-// That is what let the old blob be global without being obviously wrong.
+// Every node address carries the record it belongs to — `ownerOfNodeAddress` reads it — so
+// there is no second lookup and no way for one campaign's toggles to reach another's. That
+// is what let the old blob be global without being obviously wrong. Owner is the ROOT hop's
+// campaign for a course or a candidate; an ORIGIN groups the runs of one declaration across
+// campaigns, so it owns its own record under its `cycle_<hash>` id.
 export interface NodeToggle {
   isOpen: (kind: NodeKind, path: string) => boolean;
   toggle: (kind: NodeKind, path: string) => void;
@@ -198,20 +204,19 @@ export function useNodeToggle(): NodeToggle {
   const { viewFor, toggledFor, recordView } = useViewMemory();
 
   const isOpen = useCallback(
-    (kind: NodeKind, path: string) =>
-      isNodeOpen(toggledFor(campaignOfEncodedPath(path)), kind, path),
+    (kind: NodeKind, path: string) => isNodeOpen(toggledFor(ownerOfNodeAddress(path)), kind, path),
     [toggledFor],
   );
 
   const toggle = useCallback(
     (kind: NodeKind, path: string) => {
-      const campaignId = campaignOfEncodedPath(path);
-      if (!campaignId) return;
+      const owner = ownerOfNodeAddress(path);
+      if (!owner) return;
       const key = nodeKey(kind, path);
-      const toggled = new Set(toggledFor(campaignId));
+      const toggled = new Set(toggledFor(owner));
       if (toggled.has(key)) toggled.delete(key);
       else toggled.add(key);
-      recordView(campaignId, { toggled: [...toggled] });
+      recordView(owner, { toggled: [...toggled] });
     },
     [toggledFor, recordView],
   );
@@ -234,11 +239,4 @@ export function useNodeToggle(): NodeToggle {
     () => ({ isOpen, toggle, autoExpandedFor, markAutoExpanded }),
     [isOpen, toggle, autoExpandedFor, markAutoExpanded],
   );
-}
-
-// The campaign a node key's address belongs to — its ROOT hop, because that is the campaign
-// whose sidebar row owns the whole subtree (an L4 inner run is filed under it, in its
-// sandbox, and is not a campaign an operator browses to on its own).
-function campaignOfEncodedPath(encoded: string): string | null {
-  return decodeCyclePath(encoded)?.[0]?.campaignId ?? null;
 }

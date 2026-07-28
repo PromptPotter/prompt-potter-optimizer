@@ -54,6 +54,17 @@ def set_abort_check(predicate: Callable[[], bool] | None) -> None:
     _ABORT_CHECK.set(predicate)
 
 
+def get_abort_check() -> Callable[[], bool] | None:
+    """The abort predicate bound in THIS task's context, or ``None``.
+
+    Exists so a nested run can compose the predicate it inherits instead of
+    overwriting it. An L4 inner cycle is spawned as a child asyncio task, so it
+    receives a copy of the outer's context — reading it here is how the inner
+    campaign learns that its owner was told to stop.
+    """
+    return _ABORT_CHECK.get()
+
+
 # Standard OpenAI/Groq rate-limit header keys.
 OPENAI_RPM_HEADER = "x-ratelimit-limit-requests"
 OPENAI_TPM_HEADER = "x-ratelimit-limit-tokens"
@@ -414,6 +425,7 @@ __all__ = [
     "decide_429_wait",
     "diagnose_rate_limit_scope",
     "estimate_tokens",
+    "get_abort_check",
     "parse_retry_after",
     "raise_if_request_too_large",
     "set_abort_check",

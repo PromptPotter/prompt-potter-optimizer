@@ -20,12 +20,13 @@ import {
   candidatesOf,
   childCourses,
   cutFromLabel,
+  nodeKeyOf,
   panelCellLabel,
   pathOf,
   roundSizes,
   wasElected,
 } from "@/lib/derivations";
-import { encodeCyclePath, shortFamilyTail, type CyclePath } from "@/lib/ids";
+import { encodeCyclePath, nodeAddress, shortFamilyTail, type CyclePath } from "@/lib/ids";
 import type { CampaignSummary, LineageNode } from "@/lib/api";
 import { useLineageTree, type CampaignTree } from "@/lib/lineage";
 import type { NodeKind } from "./grouping";
@@ -58,19 +59,11 @@ function courseOpen(ctx: TreeCtx, path: CyclePath): boolean {
   return ctx.isNodeOpen("course", encodeCyclePath(path));
 }
 
-export function ForestRows({
-  origins,
-  at,
-  ctx,
-}: {
-  origins: OriginGroup[];
-  at: CyclePath;
-  ctx: TreeCtx;
-}) {
+export function ForestRows({ origins, ctx }: { origins: OriginGroup[]; ctx: TreeCtx }) {
   return (
     <>
       {origins.map((origin) => (
-        <OriginRow key={origin.originId} origin={origin} at={at} ctx={ctx} />
+        <OriginRow key={origin.originId} origin={origin} ctx={ctx} />
       ))}
     </>
   );
@@ -79,10 +72,14 @@ export function ForestRows({
 // A declaration and the runs that measure it. Renders as a tier only when it groups MORE
 // than one run (at L4: mode collapse — two candidates whose meta-prompts came out
 // identical); a lone run wears its own row.
-function OriginRow({ origin, at, ctx }: { origin: OriginGroup; at: CyclePath; ctx: TreeCtx }) {
-  if (origin.runs.length === 1) return <RunRow run={origin.runs[0]!} at={at} ctx={ctx} />;
+//
+// Its address carries NO path — a declaration is not an address inside any one campaign, it
+// is the set of campaigns measuring it — so the origin id is what owns its view memory
+// (`ids.ts::ownerOfNodeAddress`).
+function OriginRow({ origin, ctx }: { origin: OriginGroup; ctx: TreeCtx }) {
+  if (origin.runs.length === 1) return <RunRow run={origin.runs[0]!} ctx={ctx} />;
 
-  const addr = `${encodeCyclePath(at)}|${origin.originId}`;
+  const addr = nodeAddress([], origin.originId);
   const open = ctx.isNodeOpen("org", addr);
 
   return (
@@ -115,7 +112,7 @@ function OriginRow({ origin, at, ctx }: { origin: OriginGroup; at: CyclePath; ct
         <ul className="unit-library-children">
           {origin.runs.map((run) => (
             <li key={run.campaign.campaign_id}>
-              <RunRow run={run} at={at} ctx={ctx} />
+              <RunRow run={run} ctx={ctx} />
             </li>
           ))}
         </ul>
@@ -132,9 +129,9 @@ function shortOrigin(originId: string): string {
 // ONE campaign: its root course, wearing the campaign's name. `/tree` answers that course
 // and everything below it in one conditional round-trip, so it is fetched once here (gated
 // on the course being open) and the whole subtree renders off it — no fetch below this.
-function RunRow({ run, at, ctx }: { run: RunGroup; at: CyclePath; ctx: TreeCtx }) {
+function RunRow({ run, ctx }: { run: RunGroup; ctx: TreeCtx }) {
   const { campaign, root } = run;
-  const rootPath: CyclePath = [...at, { campaignId: root.campaign_id, cycleId: root.cycle_id }];
+  const rootPath: CyclePath = [{ campaignId: root.campaign_id, cycleId: root.cycle_id }];
   const tree = useLineageTree(rootPath, courseOpen(ctx, rootPath));
 
   return (
@@ -340,7 +337,7 @@ function CandidateRow({
 }) {
   const inner = childCourses(cand);
   const candPath = pathOf(cand);
-  const addr = `${encodeCyclePath(candPath)}|${cand.id}`;
+  const addr = nodeKeyOf(cand);
   const open = ctx.isNodeOpen("cand", addr);
   const hasChildren = inner.length > 0;
   // Keyed on the ROUND, not the label: a fork's C0 is a replay of the candidate it was

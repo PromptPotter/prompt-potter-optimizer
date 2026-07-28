@@ -21,7 +21,12 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
 
 from promptpotter.presentation.cli.commands._shared import _DIVERGENCE_HINT, set_verbose
 from promptpotter.presentation.cli.commands.ab import cmd_ab
-from promptpotter.presentation.cli.commands.lifecycle import cmd_archive, cmd_delete, cmd_unarchive
+from promptpotter.presentation.cli.commands.lifecycle import (
+    cmd_archive,
+    cmd_delete,
+    cmd_pause,
+    cmd_unarchive,
+)
 from promptpotter.presentation.cli.commands.new import cmd_new
 from promptpotter.presentation.cli.commands.noise_floor import cmd_noise_floor
 from promptpotter.presentation.cli.commands.reindex import cmd_reindex
@@ -44,6 +49,7 @@ COMMANDS = {
     "archive": cmd_archive,
     "delete": cmd_delete,
     "unarchive": cmd_unarchive,
+    "pause": cmd_pause,
 }
 
 

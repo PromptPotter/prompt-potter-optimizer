@@ -402,6 +402,18 @@ def build_parser() -> argparse.ArgumentParser:
         )
     )
 
+    p_pause = sub.add_parser(
+        "pause",
+        help="Ask a running cycle to stop at its next checkpoint (resumable by `resume`). "
+        "Fires the same pause-cycle command the webapp's pause control does, so the "
+        "interrupt is recorded on the cycle's ledger. Defaults to the active cycle.",
+    )
+    p_pause.add_argument("--campaign", default="", help="Campaign id (default: the active one).")
+    p_pause.add_argument("--cycle", default="", help="Cycle id (default: the active one).")
+    p_pause.add_argument(
+        "--reason", default="", help="Optional operator-supplied reason, recorded with the command."
+    )
+
     for verb, summary in (
         (
             "archive",

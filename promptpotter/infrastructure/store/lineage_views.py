@@ -238,10 +238,15 @@ class _Reads:
     def __init__(self) -> None:
         self._cycles: dict[Path, list[dict[str, object]]] = {}
         self._campaigns: dict[tuple[Path, str], Campaign | None] = {}
-        # Cycles already visited this build. The guard against a corrupt `parent_cycle_id`
-        # pointing back up the chain, which would otherwise make BOTH walkers
-        # (`_build`'s recursion and `iter_family_courses`) non-terminating.
-        self.seen: set[tuple[Path, str]] = set()
+        # Cycle DIRS already visited this build — `(base_dir, campaign_id, cycle_id)`, the
+        # full identity, because a cycle_id alone is not one: it is a content hash of the
+        # origin, so every campaign on a declaration shares it, and inside one L4 sandbox
+        # every candidate that ran the same benchmark cell mints it again. Keyed on the id
+        # alone this dropped the SECOND inner run of a cell and its candidate then reported
+        # a panel it never measured. The guard it exists for survives untouched: a corrupt
+        # `parent_cycle_id` pointing back up the chain revisits the same dir, so both walkers
+        # (`_build`'s recursion and `iter_family_courses`) still terminate.
+        self.seen: set[tuple[Path, str, str]] = set()
 
     def cycles(self, store: Stores) -> list[dict[str, object]]:
         if (key := store.base_dir) not in self._cycles:
@@ -407,17 +412,21 @@ def _child_courses(store: Stores, path: CyclePath, reads: _Reads) -> list[Family
     Only sandbox ROOTS are taken: an inner run's own forks are that course's children, and
     lifting them here would attach a grandchild to us and draw it twice.
 
-    ``reads.seen`` de-duplicates across the whole build, so both walkers terminate on a
-    corrupt ``parent_cycle_id`` pointing back up the chain.
+    Both matches are on the full ``(campaign_id, cycle_id)`` identity, never the cycle_id
+    alone — see ``_Reads.seen``. A fork lives in its parent's OWN campaign dir, so a bare
+    ``parent_cycle_id`` match reaches into every other campaign minted on the same
+    declaration (they share the root cycle id) and hands us a branch we never cut.
     """
     leaf = path[-1]
-    reads.seen.add((store.base_dir, leaf.cycle_id))
+    reads.seen.add((store.base_dir, leaf.campaign_id, leaf.cycle_id))
     out: list[FamilyCourse] = []
     for entry in reads.cycles(store):
         if entry.get("parent_cycle_id") != leaf.cycle_id:
             continue
+        if entry.get("campaign_id") != leaf.campaign_id:
+            continue
         hop = CycleHop(campaign_id=str(entry["campaign_id"]), cycle_id=str(entry["cycle_id"]))
-        if (key := (store.base_dir, hop.cycle_id)) in reads.seen:
+        if (key := (store.base_dir, hop.campaign_id, hop.cycle_id)) in reads.seen:
             continue
         reads.seen.add(key)
         out.append(
@@ -435,7 +444,7 @@ def _child_courses(store: Stores, path: CyclePath, reads: _Reads) -> list[Family
             if entry.get("parent_cycle_id"):
                 continue
             hop = CycleHop(campaign_id=str(entry["campaign_id"]), cycle_id=str(entry["cycle_id"]))
-            if (key := (sandbox.base_dir, hop.cycle_id)) in reads.seen:
+            if (key := (sandbox.base_dir, hop.campaign_id, hop.cycle_id)) in reads.seen:
                 continue
             reads.seen.add(key)
             out.append(
@@ -457,8 +466,10 @@ def iter_family_courses(store: Stores, path: CyclePath) -> list[FamilyCourse]:
     time-ray needs the set without the tree's alternating shape (it merges ledgers, it does
     not nest them).
 
-    Order is stable — root, then each level sorted by ``(created_at, cycle_id)`` — so the
-    ray's ETag, which folds the courses in walk order, holds across identical requests.
+    Order is stable — root, then each level sorted by ``(created_at, campaign_id, cycle_id)``
+    — so the ray's ETag, which folds the courses in walk order, holds across identical
+    requests. The campaign is part of the key because the cycle_id is not unique among
+    siblings: two inner runs of the same benchmark cell carry the same one.
     :data:`_MAX_COURSE_DEPTH` bounds ``.inner/`` NESTING exactly as ``_build`` does: a fork
     replaces its parent's leaf hop rather than extending the path, so it costs no depth.
     """
@@ -480,7 +491,7 @@ def iter_family_courses(store: Stores, path: CyclePath) -> list[FamilyCourse]:
                 if depth > _MAX_COURSE_DEPTH:
                     continue
                 level.append(child._replace(depth=depth))
-        level.sort(key=lambda c: (c.created_at, c.path[-1].cycle_id))
+        level.sort(key=lambda c: (c.created_at, c.path[-1].campaign_id, c.path[-1].cycle_id))
         out.extend(level)
         frontier = level
     return out

@@ -77,6 +77,36 @@ export function decodeCyclePath(s: string): CyclePath | null {
   return hops.length ? hops : null;
 }
 
+// A NODE's address in the sidebar tree: an encoded path, optionally suffixed with the id of
+// something INSIDE that course — a candidate. Both halves are optional, and the empty-path
+// form is real: an origin groups the runs of one declaration, which is a set of campaigns
+// rather than an address in any of them.
+const NODE_SEP = "|";
+
+export function nodeAddress(path: CyclePath, nodeId?: string): string {
+  const encoded = encodeCyclePath(path);
+  return nodeId ? `${encoded}${NODE_SEP}${nodeId}` : encoded;
+}
+
+// Who OWNS a node address — the key its view memory files under (`lib/view-memory.tsx`).
+// The root hop's campaign when the address names one, because that campaign's sidebar row
+// owns the whole subtree; otherwise the id itself, which is the origin case (`cycle_<hash>`
+// vs a campaign's `{dataset}__{rand6}` — the two key spaces cannot collide).
+//
+// This has to read the SUFFIX FORM, and that is the whole point of it existing: feeding a
+// candidate's address to `decodeCyclePath` puts `|<id>` inside the cycle_id, fails `ID_RE`,
+// and answers null — which read as "no campaign", so every candidate and origin twist went
+// inert and stuck at its default. Silent: the button renders, the click does nothing.
+export function ownerOfNodeAddress(addr: string): string | null {
+  const cut = addr.indexOf(NODE_SEP);
+  const encoded = cut < 0 ? addr : addr.slice(0, cut);
+  if (!encoded) {
+    const nodeId = cut < 0 ? "" : addr.slice(cut + NODE_SEP.length);
+    return ID_RE.test(nodeId) ? nodeId : null;
+  }
+  return decodeCyclePath(encoded)?.[0]?.campaignId ?? null;
+}
+
 // The root hop — what chat, dataset, and files bind to (the top-level cycle that
 // owns the operator conversation).
 export function pathRoot(path: CyclePath): CycleHop {

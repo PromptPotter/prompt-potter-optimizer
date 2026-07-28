@@ -206,7 +206,8 @@ async def _in_process_run(query: str, payload: dict[str, Any]) -> dict[str, Any]
     ``application/runner/inner/cycle.py`` (the connector stays a thin adapter).
     That runner calls ``run_optimization`` in its **own asyncio task** (so the
     per-task ContextVars — ``_CYCLE_LEDGER`` / ``_CURRENT_ROUND`` / ``_ABORT_CHECK``
-    — don't clobber the outer's) under a store sandbox rooted at
+    — don't clobber the outer's; the inherited copy is what lets a pause on the outer
+    reach the inner loop) under a store sandbox rooted at
     ``<workspace>/.inner/<this cycle_id>/`` — a FLAT registry, named by this cycle but
     never nested under it, so the tree stays shallow at every depth and L5+ nests
     logically rather than on disk (physical nesting blew Windows' ``MAX_PATH``). The spawning
