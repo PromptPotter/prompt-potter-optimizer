@@ -1301,6 +1301,7 @@ def test_cached_calls_are_metered_but_not_billed(tmp_path: Path) -> None:
         l1_patience=2,
         n_variants=2,
         sp_budget_ttest=5,
+        headline_metric="accuracy",
     )
 
     def usage(*, cached: bool) -> TokenUsageRecord:

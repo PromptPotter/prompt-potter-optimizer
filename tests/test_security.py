@@ -227,13 +227,32 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
         cycle_dir_box: dict[str, Path],
         spawned_by: dict[str, Any],
     ) -> CycleResult:
+        """Models the campaign as it BEHAVED, not as it should: it outlives the deadline and
+        then SWALLOWS the cancellation, returning a normal result.
+
+        That is what the real inner chain did for months — three seams answered
+        ``CancelledError`` with a plain return — and it made this entire guard vanish.
+        ``asyncio.timeout`` raises TimeoutError only when a CancelledError travels back up,
+        so a swallowing callee let the await complete, no deadline fired, and an over-budget
+        campaign was scored as a genuine measurement of the meta-prompt that ran it. A stub
+        that politely re-raises cannot catch that, which is why this one does not.
+        """
         started.set()
         try:
             await asyncio.sleep(30)  # far past the deadline
         except asyncio.CancelledError:
             cancelled.set()
-            raise
-        raise AssertionError("unreachable — the deadline must cancel this")
+        return CycleResult(
+            stop_reason="max_rounds",
+            rounds=[],
+            n_l1_rounds=0,
+            best_accuracy=0.0,
+            best_round=0,
+            origin_accuracy=0.0,
+            winner_prompt_fields={},
+            started_at="",
+            finished_at="",
+        )
 
     monkeypatch.setattr(cycle, "_run_inner_campaign", _hanging_inner)
     # `_resolve_inner_task` has no default ladder — the benchmark, its sample count,

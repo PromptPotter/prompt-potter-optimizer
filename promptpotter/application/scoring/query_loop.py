@@ -9,7 +9,6 @@ classifying client/pipeline errors into an abort reason. It returns a
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from collections.abc import Awaitable, Callable, Mapping
@@ -454,10 +453,20 @@ async def run_query_loop(
 
             scored_ids.add(sid)
             i += 1
-    except (KeyboardInterrupt, asyncio.CancelledError):
+    except KeyboardInterrupt:
         logger.warning(
             "Query loop force-interrupted at query %d/%d.", len(state.results), len(dataset)
         )
         return QueryLoopResult(state.results, completed=False, stop_reason="force")
+    # ``asyncio.CancelledError`` is deliberately NOT caught beside it. The two arrive from
+    # opposite directions: a KeyboardInterrupt is the operator asking to stop, a
+    # CancelledError is this program's own machinery stopping us — a deadline, a supervisor,
+    # an aborted parent. Answering a cancellation with a normal return tells the canceller it
+    # succeeded when the work is still running, which is how the L4 sample wall clock became
+    # unenforceable: ``asyncio.timeout`` cancels the awaiting task and raises TimeoutError only
+    # if a CancelledError comes back, so an inner campaign that swallowed it here returned a
+    # value, the deadline raised nothing, and the guard's own error message was unreachable.
+    # Samples already measured are on disk (``persist_fresh`` runs per fresh sample), so
+    # propagating loses no measurement.
 
     return QueryLoopResult(state.results)

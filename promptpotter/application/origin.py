@@ -140,6 +140,7 @@ def build_campaign_emitter(
         l1_patience=opt.l1_patience,
         n_variants=opt.n_variants,
         sp_budget_ttest=campaign_config.sp_budget_ttest,
+        headline_metric=campaign_config.headline_metric,
         langfuse_trace_url=langfuse_trace_url,
         resumed_from_round=resumed_from_round,
         recorder=recorder,

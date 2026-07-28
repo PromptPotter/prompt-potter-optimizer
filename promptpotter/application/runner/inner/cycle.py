@@ -653,23 +653,45 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
     # both detach the campaign from the cancellation, orphaning it to keep calling the optimizer
     # and billing tokens against a sample nobody will read.
     deadline_s = OUTER_SAMPLE_WALL_S_PER_ROUND * (spec.n_rounds + 1)
+    # ``None`` once the deadline has bitten — the one state both exits below funnel into, so
+    # the guard has a single answer to "is there a measurement here" and a single raise.
+    result: CycleResult | None = None
     try:
         try:
-            async with asyncio.timeout(deadline_s):
+            async with asyncio.timeout(deadline_s) as deadline:
                 result = await inner_task
+            # The deadline does not take the callee's word for it. ``asyncio.timeout``
+            # converts its cancellation into TimeoutError only if a CancelledError comes back
+            # up; anything in the inner chain that answers a cancellation with a normal return
+            # therefore makes the whole guard vanish silently — the await completes, no
+            # TimeoutError is raised, and an over-deadline campaign is scored as a real
+            # measurement. Three sites used to do exactly that (see
+            # ``scoring/query_loop.py``'s note) and are fixed at their root, but the guard
+            # asks the clock rather than trusting that no fourth appears.
+            if deadline.expired():
+                result = None
         except TimeoutError:
-            raise InnerCycleUnscoreableError(
-                f"it ran past its {deadline_s:.0f}s wall-clock deadline "
-                f"({spec.n_rounds} rounds + origin, at {OUTER_SAMPLE_WALL_S_PER_ROUND:.0f}s each) "
-                "and was cancelled"
-            ) from None
+            result = None
     finally:
+        # A campaign that outlived its deadline without answering the cancellation is still
+        # running, still calling the optimizer, and still billing tokens against a sample
+        # nobody will read. Insist.
+        if result is None and not inner_task.done():
+            inner_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await inner_task
         # Cancel the heartbeat whether the inner run returned or raised — an
         # in-flight task would otherwise keep appending against a finished sample.
         if heartbeat_task is not None:
             heartbeat_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await heartbeat_task
+    if result is None:
+        raise InnerCycleUnscoreableError(
+            f"it ran past its {deadline_s:.0f}s wall-clock deadline "
+            f"({spec.n_rounds} rounds + origin, at {OUTER_SAMPLE_WALL_S_PER_ROUND:.0f}s each) "
+            "and was cancelled"
+        )
     inner_spend: CycleSpend | None = result.spend
     elapsed = time.monotonic() - start
     # No exclusion decision here: `compute_outer_proxies` asks `no_evidence_reason` and raises

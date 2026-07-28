@@ -39,10 +39,13 @@ class OuterSampleProxies(StrictModel):
     meta-prompt that ran it. **This type is the governing law**; nothing restates it.
 
     **The lift core is ``after_N_rounds_delta``, and it needs no denominator.** Every level is an
-    ability on the cycle's fixed δ ruler — ``ruler_expected_accuracy`` is a mean of logistic
-    sigmoids, so it lands in (0,1) — and the delta is one level minus another. It is therefore
-    bounded in (−1, 1) BY CONSTRUCTION, and ``ge``/``le`` below state that fact rather than
-    clamping toward it.
+    ability θ in LOGITS on the cycle's fixed δ ruler, and the delta is one level minus another —
+    so it is a difference on one interval scale, which is the property that makes it comparable
+    across seeds of different origin strength. It is NOT bounded by construction: the projection
+    back through ``ruler_expected_accuracy`` that once made these probabilities in (0,1) was
+    dropped precisely because the sigmoid is flat near the ceiling and compressed the same gain
+    for a strong origin. ``ge``/``le`` below are therefore a plausibility rail, not a statement
+    of structure — read the field note.
 
     Per-cell difficulty is already modelled where it belongs — the round-winner election and
     PoBB elimination fit a Rasch θ with an explicit per-cell δ, and the outer verdict pairs
@@ -337,8 +340,10 @@ def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
     assert result.origin_level is not None  # guaranteed by no_evidence_reason
     origin = result.origin_level
     levels = result.round_discovered_levels
-    # Both levels are abilities on the fixed ruler, so each is in (0,1) and each delta is in
-    # (-1,1) BY CONSTRUCTION — structural, so there is no clamp and nothing to divide by.
+    # Both levels are abilities in LOGITS on the fixed ruler, so a delta is a difference of two
+    # unbounded quantities — plausibly within a couple of logits, structurally within none. The
+    # field's +/-4 rail is what states that (see `OuterSampleProxies`); there is still nothing to
+    # divide by.
     first = levels[0] - origin
     # MEAN over the trajectory, not max. A max is an order statistic: at an inner θ_se ≈ 0.42
     # over ~16 candidates it reads a lift above origin even when every candidate sits AT origin,

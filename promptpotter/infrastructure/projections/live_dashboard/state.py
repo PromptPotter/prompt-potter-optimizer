@@ -322,6 +322,7 @@ class LiveDashboardState(StrictModel):
         n_variants: int,
         sp_budget_ttest: int,
         langfuse_trace_url: str | None,
+        headline_metric: HeadlineMetric,
     ) -> LiveDashboardState:
         """The state a starting run writes — ``prior`` (a resume/fork seed) carried
         forward wholesale, with only this process's own facts stamped over it.
@@ -347,6 +348,12 @@ class LiveDashboardState(StrictModel):
             "n_variants": n_variants,
             "sp_budget_ttest": sp_budget_ttest,
             "patience": f"0/{l1_patience}",
+            # Stamped by the STARTING process, not carried from `prior`, and not waiting
+            # for INIT:exit. Round 0 runs before any INIT event reaches the ledger, so a
+            # campaign whose headline is `ability` used to publish `accuracy` for the whole
+            # origin pass — hours of it on the L4 panel, and the one stretch where the two
+            # disagree most, since round 0 is the only round measured on the full bank.
+            "headline_metric": headline_metric,
             "run_phase": RunPhase.RUNNING,
             "stop_reason": None,
             "error": None,

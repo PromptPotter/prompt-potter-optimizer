@@ -188,6 +188,14 @@ def inner_instrument_config(
         "max_rounds": spec.n_rounds,
         "spend_budget_usd": None,
         "token_budget": None,
+        # An instrument cannot ask a human anything. The origin gate halts round 0 on a
+        # non-healthy origin and waits for an operator decision — the package's one unbounded
+        # await — which inside an outer sample is a deadlock nothing but the sample wall clock
+        # can end, and the operator is never shown a prompt because the gate belongs to a cycle
+        # buried in `.inner/`. A bad inner origin is not lost either way: it lands as a poor
+        # trajectory or an `InnerCycleUnscoreableError`, which is exactly the measurement the
+        # outer loop is there to take.
+        "origin_gate": "off",
     }
     if spec.n_variants is not None:
         opt_update["n_variants"] = spec.n_variants

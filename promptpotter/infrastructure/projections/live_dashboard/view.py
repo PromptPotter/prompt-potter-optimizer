@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent, RunPhase
-from promptpotter.domain.results import candidate_label
+from promptpotter.domain.results import HeadlineMetric, candidate_label
 from promptpotter.domain.run_records import (
     CycleRecord,
     ErrorRecord,
@@ -111,6 +111,7 @@ class LiveDashboardView(DerivedView):
         l1_patience: int,
         n_variants: int,
         sp_budget_ttest: int,
+        headline_metric: HeadlineMetric,
         langfuse_trace_url: str | None = None,
         resume_from: LiveDashboardState | None = None,
         recorder: AuditTrailView | None = None,
@@ -134,6 +135,7 @@ class LiveDashboardView(DerivedView):
             n_variants=n_variants,
             sp_budget_ttest=sp_budget_ttest,
             langfuse_trace_url=langfuse_trace_url,
+            headline_metric=headline_metric,
         )
         self.short_formula_template: str | None = None
         self._buffer = RoundBuffer()
@@ -170,6 +172,7 @@ class LiveDashboardView(DerivedView):
         l1_patience: int,
         n_variants: int,
         sp_budget_ttest: int,
+        headline_metric: HeadlineMetric,
         langfuse_trace_url: str | None = None,
         resumed_from_round: int | None = None,
         recorder: AuditTrailView | None = None,
@@ -214,6 +217,7 @@ class LiveDashboardView(DerivedView):
             l1_patience=l1_patience,
             n_variants=n_variants,
             sp_budget_ttest=sp_budget_ttest,
+            headline_metric=headline_metric,
             langfuse_trace_url=langfuse_trace_url,
             resume_from=resume_from,
             recorder=recorder,
@@ -499,9 +503,6 @@ class LiveDashboardView(DerivedView):
             opt = config.optimization
             self.patience_max = opt.l1_patience
             s.patience = f"0/{self.patience_max}"
-            # Campaign default for the operator's headline-metric toggle (display
-            # config; the gate stays θ). Re-emitted by a fork at its own INIT.
-            s.headline_metric = config.headline_metric
             # Static run-limit surface — the operator-facing source for the
             # fork reconcile dialog ("3 of 6 rounds left"). `patience` above is
             # the live stall counter ("N/max"); this is the declared ceilings.

@@ -33,12 +33,13 @@ from promptpotter.application.run_observers import (
     RunObservers,
     build_run_observers,
 )
+from promptpotter.application.run_phase_control import declare_run_phase
 from promptpotter.application.runner.inner.cycle import publish_inner_spawn_context
 from promptpotter.application.runner.loop import run_round_loop
 from promptpotter.application.runner.termination import BudgetGate
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.domain.opt_search_point import overlay_sets_model_outside_allowed
-from promptpotter.domain.phases import STOP_REASON_INFO, StopOutcome, StopReason
+from promptpotter.domain.phases import STOP_REASON_INFO, RunPhase, StopOutcome, StopReason
 from promptpotter.domain.results import CycleResult, CycleSpend
 from promptpotter.domain.run_records import (
     ConfigOverrides,
@@ -209,6 +210,35 @@ class _PreparedRun:
     task_context: TaskDecomposition
 
 
+def _bind_run_controls(session: Session, cycle_dir: Path) -> None:
+    """Bind the control-local hooks (pause / skip) onto *cycle_dir*'s ``.runtime/`` flags.
+
+    The ONE binding seam for run control, called once per cycle the run touches: the launch
+    cycle in ``_prepare_run`` and again per fork in the rebase loop (a fork has its own dir).
+    The CLI used to set these in new.py/resume.py, which left the API launcher's runs unable
+    to pause — the flag was written but never polled.
+
+    It binds BEFORE origin scoring because origin scoring is the longest interruptible phase
+    the package has (on the L4 panel, hours), and it is the one the hooks used to miss: bound
+    inside the rebase loop, ``session.pause_check`` was still ``None`` throughout round 0, so
+    the per-sample pause checkpoint in ``run_query_loop`` could not fire and the operator's
+    only way out of a running origin was to kill the process.
+    """
+    if not session.state.cycle_id:
+        return
+    layout = CycleLayout(cycle_dir)
+    skip_flag = layout.skip_flag
+    session.pause_check = layout.pause_flag.is_file
+    # Let a pause break a long rate-limit countdown mid-wait — the one blocking seam that
+    # otherwise ignores the pause channel. Same predicate, bound into the per-task ContextVar
+    # the wait polls.
+    set_abort_check(session.pause_check)
+    # Skip is one-shot: poll the flag, then the loop deletes it the instant it fires so
+    # exactly one searchpoint is cut.
+    session.skip_check = skip_flag.is_file
+    session.skip_consume = partial(skip_flag.unlink, missing_ok=True)
+
+
 async def _prepare_run(
     dataset: list[Sample],
     campaign_config: CampaignConfig,
@@ -225,12 +255,14 @@ async def _prepare_run(
     # A fresh launch supersedes any prior run-control intent: drop a consumed
     # pause flag left on this cycle's `.runtime/` by an earlier paused run, else
     # a stale pause.flag pauses this very resume on its first poll (a paused
-    # cycle could never be resumed). Once, here at the seam every launch funnels
-    # through — before the pause_check hook binds in the rebase loop below.
+    # cycle could never be resumed). Then bind the hooks, so the origin pass below
+    # is pausable like every other phase.
     if session.state.cycle_id:
-        clear_run_control_flags(
-            session.store.campaigns.cycle_dir(session.campaign_id, session.state.cycle_id)
+        launch_cycle_dir = session.store.campaigns.cycle_dir(
+            session.campaign_id, session.state.cycle_id
         )
+        clear_run_control_flags(launch_cycle_dir)
+        _bind_run_controls(session, launch_cycle_dir)
 
     # Cycle seed: the chosen searchpoint, declared at mint, rides the ledger as a
     # `CycleSeedRecord` (read-once-at-bootstrap, keyed by the known cycle_id —
@@ -341,10 +373,12 @@ def _build_cycle_result(
     overwritten each round by absorb_round, so reading prompts off it would pair the
     best params with the last round's text."""
     best_sp = cycle.tracking.best_sp if cycle is not None else None
-    # The L4 outer proxy's single-scale inner-search signal: origin level + per-round cumulative
-    # best-DISCOVERED conservative (θ-LCB) level, every one of them an ability on the cycle's
-    # fixed δ ruler — the only subset-invariant estimator — read off the candidates the inner
-    # search *found* rather than the frontier it *crowned*. An origin with no ability on that
+    # The L4 outer proxy's single-scale inner-search signal: origin level + each round's MEAN
+    # candidate ability, every one of them a θ in logits on the cycle's fixed δ ruler — the only
+    # subset-invariant estimator — read off the candidates the inner search *found* rather than
+    # the frontier it *crowned*. (Neither cumulative nor a conservative θ-LCB bound: a running
+    # max is an order statistic that reads lift where there is none and cannot see a regression,
+    # which is exactly why ``discovered_level_trajectory`` averages. Say what it computes.) An origin with no ability on that
     # ruler (every row errored) is a floor nobody measured: it yields `None`, and the cycle is
     # excluded as an outer sample rather than differenced against an invented floor.
     from promptpotter.application.intelligence.exploration import discovered_level_trajectory
@@ -421,6 +455,7 @@ async def _run_single_cycle(
 
     # Outer try/except: init-phase crashes (stale OSP rejected by extra="forbid", etc.) land in CRASHED with stashed traceback.
     cycle: Cycle | None = None
+    cancelled = False
     try:
         cycle = await init_optimization_loop(
             origin,
@@ -479,25 +514,9 @@ async def _run_single_cycle(
             if session.state.cycle_id
             else Path()
         )
-        # Control-local hooks (pause) bind HERE — the single runner seam
-        # every launch path funnels through — not at the entry points. The
-        # CLI used to set these in new.py/resume.py, which left the API
-        # launcher's runs (mint / start-run) unable to pause: the flag was
-        # written but never polled. Binding per rebase/fork iteration also
-        # tracks a fork's own cycle dir (the entry-point version bound once
-        # and went stale across forks).
-        if session.state.cycle_id:
-            layout = CycleLayout(cycle_dir_for_probe)
-            skip_flag = layout.skip_flag
-            session.pause_check = layout.pause_flag.is_file
-            # Let a pause break a long rate-limit countdown mid-wait — the one
-            # blocking seam that otherwise ignores the pause channel. Same
-            # predicate, bound into the per-task ContextVar the wait polls.
-            set_abort_check(session.pause_check)
-            # Skip is one-shot: poll the flag, then the loop deletes it the
-            # instant it fires so exactly one searchpoint is cut.
-            session.skip_check = skip_flag.is_file
-            session.skip_consume = partial(skip_flag.unlink, missing_ok=True)
+        # Re-bind per rebase/fork iteration so the hooks track a fork's OWN cycle dir
+        # (`_prepare_run` bound the launch cycle's; a fork mints a different one).
+        _bind_run_controls(session, cycle_dir_for_probe)
         budget_gate = _build_budget_gate(
             observers,
             cycle_dir_for_probe,
@@ -521,13 +540,20 @@ async def _run_single_cycle(
             stop_after_rounds=mode.stop_after_rounds,
             budget_gate=budget_gate,
         )
-    except (KeyboardInterrupt, asyncio.CancelledError) as exc:
-        cause = (
-            "user-initiated" if isinstance(exc, KeyboardInterrupt) else "programmatic cancellation"
-        )
-        logger.warning("Optimization paused before round loop entered (%s).", cause)
+    except KeyboardInterrupt:
+        logger.warning("Optimization paused before round loop entered (user-initiated).")
         stop_reason = StopReason.PAUSED
         cycle_error = None
+    except asyncio.CancelledError:
+        # A cancellation still finalizes — the cycle's own state must land on disk exactly as a
+        # pause does, or a cancelled inner campaign leaves a dashboard reading `running`
+        # forever. But it must also REACH the canceller, so it is re-raised past the finalize
+        # below; answering a cancellation with a return is what made the L4 sample deadline
+        # unenforceable (see `scoring/query_loop.py`).
+        logger.warning("Optimization cancelled before round loop entered; finalizing as paused.")
+        stop_reason = StopReason.PAUSED
+        cycle_error = None
+        cancelled = True
     except ResumeDivergenceError as exc:
         # Operator-recoverable; fix is ``--fork-on-divergence``.
         message = str(exc) or type(exc).__name__
@@ -560,6 +586,9 @@ async def _run_single_cycle(
     langfuse_trace_id = _finalize_run(session, observers, cycle_result, sweep=mode.sweep)
     if langfuse_trace_id is not None:
         cycle_result = cycle_result.model_copy(update={"langfuse_trace_id": langfuse_trace_id})
+    if cancelled:
+        # Everything above has landed on disk; now let the cancellation finish travelling.
+        raise asyncio.CancelledError
 
     # Stub-fork cleanup: if this run forked during init but never completed a round, delete the
     # empty dir so interrupts between fork-mint and round-1 don't accumulate stubs.
@@ -687,15 +716,28 @@ async def run_optimization(
         set_optimizer_prompt_overrides(
             load_optimizer_set_overrides(campaign_config.optimization.optimizer_set)
         )
-    prep = await _prepare_run(
-        dataset,
-        campaign_config,
-        session=session,
-        observers=observers,
-        origin=origin,
-        task_context=task_context,
-        spend_budget_usd=spend_budget_usd,
-    )
+    try:
+        prep = await _prepare_run(
+            dataset,
+            campaign_config,
+            session=session,
+            observers=observers,
+            origin=origin,
+            task_context=task_context,
+            spend_budget_usd=spend_budget_usd,
+        )
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        # Prep is the only phase outside `_run_single_cycle`'s finalize, and it is also the
+        # longest: origin scoring on the L4 panel runs for hours. An interrupt landing here
+        # used to escape the whole function, so nothing declared a phase and nothing drained —
+        # the cycle's `dashboard.json` kept the last flushed `run_phase: "running"` and the
+        # `index.json` its `active`, and every non-live reader reported a dead run as healthy
+        # until the liveness reaper eventually stamped `producer_vanished` over it. Declaring
+        # + draining here is the whole fix: PAUSED is not terminal, so the cycle stays
+        # resumable and `resume` replays the seeds already banked at no cost.
+        declare_run_phase(session, RunPhase.PAUSED)
+        observers.drain_all()
+        raise
     # Rebase loop: run one cycle to completion; if it finalized REBASED with a
     # stashed request (and we're under the cap), mint the fork and run the next
     # cycle on it. Every other stop reason — or the cap / a missing cycle_id —

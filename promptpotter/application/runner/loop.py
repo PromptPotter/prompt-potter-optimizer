@@ -13,7 +13,6 @@ raise / lower a ceiling mid-flight without restarting the loop."""
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import traceback
 
@@ -250,15 +249,11 @@ async def run_round_loop(
 
     except StopLoop as sl:
         return sl.reason, None
-    except (KeyboardInterrupt, asyncio.CancelledError) as exc:
-        # Ctrl+C / cancellation is an operator pause: the worker exits but the
-        # cycle stays resumable. Distinguish the cause for the operator's benefit.
-        cause = (
-            "user-initiated"
-            if isinstance(exc, KeyboardInterrupt)
-            else ("programmatic cancellation")
-        )
-        logger.warning("Optimization paused at round %d (%s).", round_num, cause)
+    except KeyboardInterrupt:
+        # Ctrl+C is an operator pause: the worker exits but the cycle stays resumable.
+        # ``asyncio.CancelledError`` is NOT caught with it — see the query loop's note; a
+        # cancellation is our own machinery stopping this run and must reach whoever asked.
+        logger.warning("Optimization paused at round %d (user-initiated).", round_num)
         return StopReason.PAUSED, None
     except InjectionRenderError as exc:
         # Renderer raised (code drift) — distinct from CRASHED so the operator can pinpoint a broken renderer.
