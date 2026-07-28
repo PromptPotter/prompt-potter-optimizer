@@ -452,6 +452,17 @@ class RoundResult(StrictModel):
     # Per-candidate scored results — lets resume rescore under a changed scorer + replay decisions.
     all_candidate_results: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
     candidates_scored: int
+    # How many candidates actually entered the election — measured, leader-eligible, and not
+    # answer-collapsed. `candidates_scored` counts one step earlier, so the gap between them is
+    # exactly the candidates that answered a single label to everything and carry no measurement
+    # of ability at all.
+    #
+    # Zero is a DIFFERENT round from "everyone lost": nothing was compared against the
+    # incumbent, so the round says nothing about whether the search has stalled — it says
+    # l1_generate failed to produce a testable variant. The life bank reads this to tell those
+    # two apart (`EscalationFSM._bank_round`); the escalation rules already route the generator
+    # failure to L2 on their own signals.
+    electable_count: int = 0
     candidate_scores: list[ScoredCandidate] = Field(default_factory=list)
     # ResumeCheckpoint records consumed by the divergence-replay walker.
     decisions: list[DecisionRecord] = Field(default_factory=list)
@@ -808,6 +819,14 @@ class RoundSummary(StrictModel):
     cumulative_theta: float | None = None
     # Mirrors `RoundResult.calibration_model` — the model the webapp's ability popover reads.
     calibration_model: CalibrationModel | None = None
+    # The round's verdict and the evidence it rests on — the two bits that decide how long the
+    # cycle lives, so they are the two an operator most needs to see. `improved` moves the stall
+    # counter and the life bank; `electable_count` decides whether the bank moves AT ALL, since a
+    # round no candidate reached measured nothing about the search (`EscalationFSM._bank_round`).
+    # Both were engine-only, which is why a campaign could visibly climb while its bank drained
+    # and the dashboard showed neither number. Round 0 holds no election, so both stay unset there.
+    improved: bool | None = None
+    electable_count: int | None = None
     candidates: list[RoundSummaryCandidate] = Field(default_factory=list)
     # Per-round selection from the adaptive queue mechanism — sample ids
     # in measurement order (longest candidate sequence carries the full

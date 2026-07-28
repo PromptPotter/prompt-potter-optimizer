@@ -92,22 +92,45 @@ class EscalationFSM:
         return self._lives
 
     @staticmethod
-    def _bank_life(current: int | None, improved: bool, lives: LivesConfig) -> int:
+    def _bank_life(
+        current: int | None, improved: bool, lives: LivesConfig, *, compared: bool = True
+    ) -> int:
         """Bank the round's ``improved`` verdict: +1 if improved, -1 if not, seeded
-        from ``start`` on the first round, clamped to ``[0, cap]``."""
+        from ``start`` on the first round, clamped to ``[0, cap]``.
+
+        ``compared=False`` — no candidate reached the election, so the round measured nothing
+        against the incumbent — banks NOTHING. The bank is a budget of rounds that failed to
+        find an improvement, and a round with no comparison in it is not evidence about the
+        search; it is evidence about l1_generate, which the escalation rules route to L2 on
+        their own signals (``l1_zero_candidates``, ``l1_mandatory_breach``). Charging it here
+        too meant the faster of the two mechanisms killed the cycle before the slower one's
+        heal could be measured. On the 2026-07-27 `justlogic-d234` inner campaigns this was
+        roughly half the total drain — one campaign spent its last two lives on consecutive
+        rounds where every proposal was rejected as a repeat before it was ever scored, and
+        died at round 3 with its accuracy still climbing. ``max_rounds`` remains the backstop
+        for a generator that never recovers.
+        """
         base = lives.start if current is None else current
+        if not compared:
+            return max(0, min(lives.cap, base))
         return max(0, min(lives.cap, base + (1 if improved else -1)))
 
-    def _bank_round(self, improved: bool, lives: LivesConfig | None) -> None:
-        """Advance the L1 accumulators from one round's ``improved`` verdict — the stall
-        counter and (when enabled) the life bank, which read the SAME bit. The live
-        ``observe_round`` and the resume ``fold`` both land here, so a run and its
-        replay cannot bank the round differently."""
+    def _bank_round(self, improved: bool, lives: LivesConfig | None, *, compared: bool) -> None:
+        """Advance the L1 accumulators from one round's outcome — the stall counter and (when
+        enabled) the life bank. The live ``observe_round`` and the resume ``fold`` both land
+        here, so a run and its replay cannot bank the round differently.
+
+        The two accumulators read the same ``improved`` bit but diverge on ``compared``: an
+        uncompared round still advances the STALL counter (the loop is not progressing, and
+        that is precisely what should escalate to L2) while costing no life.
+        """
         self._l1_stall_count = 0 if improved else self._l1_stall_count + 1
         if lives is not None:
-            self._lives = self._bank_life(self._lives, improved, lives)
+            self._lives = self._bank_life(self._lives, improved, lives, compared=compared)
 
-    def would_exhaust_lives(self, improved: bool, lives: LivesConfig | None) -> bool:
+    def would_exhaust_lives(
+        self, improved: bool, lives: LivesConfig | None, *, compared: bool = True
+    ) -> bool:
         """Would banking this round's verdict empty the bank (i.e. stop the loop)?
 
         Pure lookahead — banks nothing. Lets a caller know THIS round is the last one
@@ -116,7 +139,7 @@ class EscalationFSM:
         never disagree with what ``observe_round`` is about to do."""
         if lives is None:
             return False
-        return self._bank_life(self._lives, improved, lives) == 0
+        return self._bank_life(self._lives, improved, lives, compared=compared) == 0
 
     @property
     def l2_round(self) -> int:
@@ -174,6 +197,7 @@ class EscalationFSM:
         self,
         *,
         improved: bool,
+        compared: bool,
         current_accuracy: float,
         l1_patience: int,
         lives: LivesConfig | None = None,
@@ -192,7 +216,7 @@ class EscalationFSM:
             decide_escalation,
         )
 
-        self._bank_round(improved, lives)
+        self._bank_round(improved, lives, compared=compared)
 
         inputs = EscalationInputs(
             current_accuracy=current_accuracy,
@@ -287,7 +311,11 @@ class EscalationFSM:
             return
         if record.phase == "round" and record.event == "complete":
             # Audit emit only; display fires under "display" and is never folded.
-            self._bank_round(bool(record.payload["improved"]), lives)
+            self._bank_round(
+                bool(record.payload["improved"]),
+                lives,
+                compared=int(record.payload["electable_count"]) > 0,
+            )
         elif record.phase == "l2_context" and record.event == "exit":
             escalation_state = record.payload["data"]
             self._l1_stall_count = 0

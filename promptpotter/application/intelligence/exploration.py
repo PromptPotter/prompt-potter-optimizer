@@ -845,12 +845,23 @@ def select_round_subset(
 
     Prior ``N(θ_leader, σ_θ²)``; peaks on the contested band (δ ≈ leader θ).
     Cold start → bank-order prefix.
+
+    **A δ fit needs at least two arms, or selecting on it is a difficulty ratchet.** With a
+    single arm the Rasch likelihood cannot separate ability from difficulty: θ is pinned by the
+    identifiability anchor and δ collapses to that one arm's hit pattern, shrunk — two values,
+    "it passed" and "it failed". Selecting the contested band off that ruler then means "give me
+    everything the incumbent got wrong", which is not the most-informative subset, it is the
+    incumbent's own worst 28. Measured on all four ``justlogic-d234`` inner campaigns of
+    2026-07-27: round 1 dropped 12 samples versus round 0 and **all 12 were C0 hits, zero were
+    misses**, in every campaign — C0's own rate on the round-1 panel fell 0.525 → 0.321. Every
+    one of those campaigns then read round 1 as a regression. So one arm falls back to the
+    bank prefix, alongside the no-observation cold start it is a special case of.
     """
     if budget <= 0 or not bank:
         return []
     if budget >= len(bank):
         return list(bank)
-    if not observations:
+    if len({o.candidate_id for o in observations}) < 2:
         return list(bank[:budget])
     posterior = fit_rasch(observations)
     if not posterior.delta:

@@ -68,6 +68,8 @@ export interface RoundSummary {
   composite_fitness: number;
   cumulative_theta: number | null;
   calibration_model: '1PL' | '2PL' | null;
+  improved: boolean | null;
+  electable_count: number | null;
   candidates: RoundSummaryCandidate[];
   selection: number[];
   health: DegradationHealth | null;
@@ -315,6 +317,7 @@ export interface RoundResult {
   results: Record<string, unknown>[];
   all_candidate_results: Record<string, Record<string, unknown>[]>;
   candidates_scored: number;
+  electable_count: number;
   candidate_scores: ScoredCandidate[];
   decisions: unknown[];
   evaluators: Record<string, number>;

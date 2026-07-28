@@ -178,6 +178,10 @@ def persist_round(
                     "accuracy": round_result.accuracy,
                     "composite_fitness": round_result.composite_fitness,
                     "improved": round_result.improved,
+                    # Banked beside `improved` because the life bank needs both to replay a
+                    # round identically on resume (`EscalationFSM.fold`): `improved` says which
+                    # way to move the bank, this says whether to move it at all.
+                    "electable_count": round_result.electable_count,
                     "label": round_result.label,
                     # Everything the CLOSE knows and no candidate could: the frontier it
                     # advanced, the individual it adopted, and the ability fit. All read off
@@ -293,6 +297,7 @@ async def post_round(
     )
     event = cycle.escalation.observe_round(
         improved=round_result.improved,
+        compared=round_result.electable_count > 0,
         current_accuracy=cycle.tracking.current_accuracy,
         l1_patience=config.optimization.l1_patience,
         lives=config.optimization.lives,

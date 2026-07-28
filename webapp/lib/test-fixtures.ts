@@ -52,6 +52,7 @@ export function roundDoc(over: Partial<RoundResult> = {}): RoundResult {
     hits: 0,
     total: 0,
     improved: false,
+    electable_count: 0,
     p_value: null,
     improved_reason: null,
     degraded_samples: 0,

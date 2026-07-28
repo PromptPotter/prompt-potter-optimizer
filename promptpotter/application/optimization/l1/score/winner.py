@@ -127,19 +127,22 @@ async def l1_score(
             dataset,
             rep_k,
         )
-    # The parent floor, scored on the SAME samples the candidates ran. PoBB already
-    # backfilled the parent (seed) onto every sample a candidate touched, so re-scoring
-    # it over the touched union is all cache hits — a real matched floor at no added
-    # spend, and nothing wasted on subset samples no candidate reached.
-    scored_sids = {
-        r["sample_id"]
-        for results in all_candidate_results.values()
-        for r in results
-        if r.get("sample_id") is not None
-    }
-    touched = [s for s in dataset if int(s.id) in scored_sids]
-    parent_scoring_set = touched or dataset
-    parent = await rescore_parent(cycle, parent_scoring_set, round_num, callbacks=callbacks)
+    # The parent floor, scored on the round's WHOLE panel — the samples this round drew, not
+    # the union the candidates happened to reach before elimination truncated them.
+    #
+    # The matched floor does not need the narrower set: ``matched_origin_stats`` builds each
+    # candidate's comparison by RESTRICTING these rows to that candidate's own measured
+    # samples, so a wider parent leaves every election comparison byte-identical. What the
+    # narrow set changed was the round's published headline, which on a held round IS this
+    # re-score — and it inherited the collapse of whatever PoBB cut. Measured on the
+    # 2026-07-27 inner campaigns: two of four terminated reporting ``accuracy 0.250`` over
+    # **n=8**, because every candidate was cut at 8 samples and the unchanged champion that had
+    # read 0.571 the round before was re-scored over that 8-sample union. Both then stopped on
+    # an exhausted life bank, so the number the operator was handed as the collapse was in fact
+    # a denominator. A round's headline denominates over the round's panel or it is not a
+    # series. The added spend is the truncated tail only, and a retained champion replays from
+    # cache whatever it has already measured.
+    parent = await rescore_parent(cycle, dataset, round_num, callbacks=callbacks)
     # Opt-in replication of the PARENT reference — the shared comparison anchor for the
     # θ election + paired diff, so its single-draw noise floods every candidate's comparison
     # (correlated across arms — the 0.808 the variance read found). Give it `rep_k` extra
@@ -152,7 +155,7 @@ async def l1_score(
     if rep_k > 0:
         for _ in range(rep_k):
             extra = await rescore_parent(
-                cycle, parent_scoring_set, round_num, callbacks=callbacks, force_fresh=True
+                cycle, dataset, round_num, callbacks=callbacks, force_fresh=True
             )
             parent_election_results.extend(cast("list[QueryMeasurement]", extra.results))
     # Full-set parent stats — fallback for `matched_origin` when every candidate ran every sample.
@@ -358,10 +361,13 @@ async def l1_score(
     # the same subset-invariant θ scale the election ranks by, not raw subset accuracy. The
     # accuracy-space ``improvement_threshold`` is recalibrated to θ-logits per round by local
     # linearization at the matched-origin operating point (σ' = p(1−p)), so the knob keeps
-    # meaning "min accuracy delta" while the comparison happens in θ. Under the default
-    # (``per_round_resubset`` OFF) winner and origin share samples, so this tracks the old
-    # accuracy gate to first order; it diverges — correctly — only once subsets drift per
-    # candidate, the exact case where subset accuracy is no longer comparable.
+    # meaning "min accuracy delta" while the comparison happens in θ. Winner and origin share
+    # this round's panel either way (``rescore_parent`` above re-scores the parent on it), so
+    # this tracks an accuracy gate to first order; it diverges — correctly — once elimination
+    # truncates candidates to different prefixes of that panel, the exact case where subset
+    # accuracy stops being comparable. (``per_round_resubset`` defaults ON —
+    # ``config.py::SelectionMechanisms`` — so subsets also drift BETWEEN rounds; the fixed ruler
+    # is what keeps θ comparable across them.)
     delta_ok = False
     if winner_id:
         from promptpotter.application.intelligence.exploration import theta_lift_over_origin
@@ -385,31 +391,33 @@ async def l1_score(
     # this gate then refused to call the round improved — forever, since the samples do not
     # exist. One number cannot be both a stopping floor and an election floor with two different
     # clampings; the election owns electability.
-    # Anchor the promotion verdict to the FROZEN round-0 origin (C0), not just the current
-    # incumbent's matched floor. The incumbent re-anchors to whatever won last round, so each
-    # promotion lowers the bar; requiring the winner to also clear C0 stops the lineage from
-    # decaying below where it started while still stamping `improved=True`.
     #
-    # Slice 2 (fitness-comparability): ``c0_ok`` compares in θ on the cycle's FIXED δ ruler —
-    # round 0's θ vs the winner's θ on that same ruler (``fit_theta_given_delta`` → one shared
-    # scale). The ruler is flat (δ≡0) where cold, so θ degenerates to logit-accuracy there:
-    # ALWAYS θ, never a separate accuracy branch (one ruler, θ always). Holds up once
-    # per-round subsets drift, where raw accuracy stops being cross-round comparable.
-    origin_theta = cycle.origin_round.cumulative_theta
-    # Same decoupling: the winner's θ on the fixed ruler is the election's ``abilities`` value —
-    # the c0_ok floor compares it against the FROZEN round-0 ``origin_theta`` (a different,
-    # cross-round number kept as-is), so only the winner-θ side is the deduplicated refit.
-    winner_theta = abilities.theta.get(winner_id) if winner_id else None
-    if winner_theta is not None and origin_theta is not None:
-        c0_ok = winner_theta >= origin_theta
-        c0_desc = f"θ={winner_theta:.3f} < origin_c0_θ={origin_theta:.3f}"
-    else:
-        # No winner / no measured obs / no origin θ (degenerate empty origin) — nothing to
-        # floor against, so c0_ok can't block (delta_ok already gates a real winner).
-        c0_ok = True
-        c0_desc = ""
-    improved = delta_ok and c0_ok
-    improved_reason: str | None = None if improved or not delta_ok else c0_desc
+    # ``delta_ok`` is the WHOLE verdict. A second floor used to sit beside it, ``c0_ok``,
+    # requiring the winner to also clear the FROZEN round-0 origin's theta — justified in a
+    # comment as "stops the lineage from decaying below where it started". It never did that:
+    # this verdict feeds the stall counter and the life bank and nothing else, while adoption
+    # happens unconditionally in ``absorb_round``. A winner below C0 was crowned, adopted and
+    # mutated from regardless of what this line said, so the protection was described but not
+    # implemented.
+    #
+    # What it did do was compare across evidence bases. The winner's theta was fit on THIS
+    # round's panel; ``origin_round.cumulative_theta`` was fit on round 0's; and both sat on a
+    # ruler calibrated from C0 alone, where C0 is 0.000 by the identifiability anchor. So the
+    # floor asked "does this candidate agree with round 0's hit pattern", and it was strictly
+    # harder to clear than the same-panel comparison ``delta_ok`` already runs. Measured on
+    # `justlogic-d234`, 2026-07-27: two rounds carrying +14.3pp over their matched parent at
+    # p=0.017 and p=0.046 were stamped `improved=False` here, each costing a life, and both
+    # campaigns then died on the empty bank while still holding a real lift over C0. The ruler
+    # is now identified before it is trusted (``cycle.py::_calibrate_delta_ruler``), which fixes
+    # the scale — but two floors on one verdict, one of them cross-panel, is one mechanism too
+    # many. The lineage's standing against C0 stays RECORDED, not gated: ``origin_accuracy`` and
+    # the ``matched_origin_*`` triple ride every round.
+    improved = delta_ok
+    improved_reason: str | None = (
+        None
+        if improved
+        else f"no winner cleared the matched parent by {improvement_threshold} accuracy"
+    )
     round_result = RoundResult(
         round=round_num,
         label=best_label,
@@ -434,6 +442,7 @@ async def l1_score(
         results=best_results,
         all_candidate_results=dict(all_candidate_results),
         candidates_scored=len(scored),
+        electable_count=len(electable),
         candidate_scores=candidate_scores,
         # `decisions` is NOT set here: `persist_round` flushes the cycle's sink onto this
         # round and onto the ledger in one act, so the round file has one writer.

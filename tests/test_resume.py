@@ -447,29 +447,47 @@ def test_lives_resume_fold_matches_live_observe() -> None:
     from promptpotter.domain.run_records import PhaseRecord
 
     cfg = LivesConfig(start=2, cap=4)
-    sequence = [True, True, True, True, False, False, False]  # streak saturates at cap, then drains
+    # (improved, electable_count) — the streak saturates at cap, then a round where NOTHING
+    # reached the election (every proposal rejected before it was scored) must cost no life,
+    # then real stalls drain. Both halves must replay identically: an uncompared round banked
+    # as a stall on one side and skipped on the other silently hands the resumed run a
+    # different round budget, which is the whole harm this test exists for.
+    sequence = [(True, 2), (True, 2), (True, 2), (True, 2), (False, 0), (False, 2), (False, 2)]
 
     live = EscalationFSM()
     live_trace: list[int | None] = []
     last_event = None
-    for improved in sequence:
+    for improved, electable in sequence:
         last_event = live.observe_round(
-            improved=improved, current_accuracy=0.5, l1_patience=99, lives=cfg
+            improved=improved,
+            compared=electable > 0,
+            current_accuracy=0.5,
+            l1_patience=99,
+            lives=cfg,
         )
         live_trace.append(live.lives)
 
     replay = EscalationFSM()
     replay_trace: list[int | None] = []
-    for improved in sequence:
+    for improved, electable in sequence:
         replay.fold(
-            PhaseRecord(phase="round", event="complete", payload={"improved": improved}),
+            PhaseRecord(
+                phase="round",
+                event="complete",
+                payload={"improved": improved, "electable_count": electable},
+            ),
             lives=cfg,
         )
         replay_trace.append(replay.lives)
 
-    assert replay_trace == live_trace == [3, 4, 4, 4, 3, 2, 1]
+    assert replay_trace == live_trace == [3, 4, 4, 4, 4, 3, 2]
     # And exhausting the bank on the resumed FSM stops with the same reason the live loop uses.
-    exhaust = replay.observe_round(improved=False, current_accuracy=0.5, l1_patience=99, lives=cfg)
+    replay.observe_round(
+        improved=False, compared=True, current_accuracy=0.5, l1_patience=99, lives=cfg
+    )
+    exhaust = replay.observe_round(
+        improved=False, compared=True, current_accuracy=0.5, l1_patience=99, lives=cfg
+    )
     assert replay.lives == 0
     assert exhaust.next_action is NextAction.STOP_LIVES
     assert exhaust.stop_reason is StopReason.LIVES_EXHAUSTED

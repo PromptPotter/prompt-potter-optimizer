@@ -188,7 +188,9 @@ async def execute_round(
     # now, from this round's `improved` verdict — asked through the FSM so the lookahead can
     # never disagree with the banking `post_round` is about to do).
     will_stop = is_final_round or cycle.escalation.would_exhaust_lives(
-        round_result.improved, config.optimization.lives
+        round_result.improved,
+        config.optimization.lives,
+        compared=round_result.electable_count > 0,
     )
     if candidates and round_result.results and not skip_critique and not will_stop:
         # Critique is round-over-round feedback — survive a malformed response.

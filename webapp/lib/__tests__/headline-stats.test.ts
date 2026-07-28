@@ -9,6 +9,8 @@ const round = (r: number, accuracy: number, composite_fitness: number): RoundSum
     composite_fitness,
     cumulative_theta: null,
     calibration_model: null,
+    improved: null,
+    electable_count: null,
     outer_verdict: null,
     candidates: [],
     selection: [],

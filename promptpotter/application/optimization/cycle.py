@@ -222,13 +222,25 @@ def _calibrate_delta_ruler(
     obs = dedup_observations(archive_obs, origin_obs)
     if not obs:
         return {}, None, None
-    # Both fits key δ on ``sorted({o.sample_id})``, so the adoption test below is a
-    # statement about the DISTINCT-sample count — knowable without fitting. Below the
-    # floor the fit is discarded unread (the cold branch reads only ``origin_obs``), so
-    # skip it: a cold ruler re-attempts every round and an L4 inner cycle never clears
-    # the floor at all, which had it paying a 1PL + 2PL + 5-fold-CV storm each round to
-    # throw the result away.
-    if len({o.sample_id for o in obs}) < n_min:
+    # Two warmth conditions, both knowable without fitting — below either, the fit would be
+    # discarded unread (the cold branch reads only ``origin_obs``), so skip it entirely rather
+    # than pay a 1PL + 2PL + 5-fold-CV storm per round to throw the result away.
+    #
+    # DISTINCT SAMPLES ≥ n_min: both fits key δ on ``sorted({o.sample_id})``.
+    #
+    # DISTINCT ARMS ≥ 2: δ is only identified against a second ability. One arm and the
+    # likelihood has nothing to separate — the anchor pins θ, and δ becomes that arm's own
+    # hit pattern shrunk to two values, one for what it passed and one for what it failed.
+    # Adopting that as THE ruler makes every later θ in the cycle a restatement of whether
+    # round 0 happened to get the sample right, on a scale where the origin sits at exactly
+    # 0.000 by construction. It is what a fresh campaign always hands this function: 40 origin
+    # rows from one candidate clears any sample floor on its own, so the L4 inner cycles were
+    # locking a two-valued ruler at ``Cycle.start`` and then judging eight rounds of promotion
+    # against it (`justlogic-d234`, 2026-07-27 — two rounds carrying +14.3pp at p<0.05 were
+    # stamped `improved=False` on it, and both campaigns died of the lives that cost them).
+    # One arm therefore stays FLAT and re-attempts next round, by which time the round's own
+    # candidates are banked grade-A and the fit has arms to compare.
+    if len({o.sample_id for o in obs}) < n_min or len({o.candidate_id for o in obs}) < 2:
         origin_row = fit_theta_given_delta(origin_obs, {}).get(ORIGIN_ABILITY_ID)
         return {}, (origin_row[0] if origin_row is not None else None), None
     model, post = graduate_ruler_model(obs, enable=enable_2pl)
@@ -552,8 +564,13 @@ class Cycle:
         ``elimination_n_min`` warmth floor is adopted and never re-fit — so warm rounds
         all compare on one shared ruler (comparability preserved), while the cold rounds
         that preceded it already compared on the frozen subset's raw accuracy. Repeat/
-        reference-backed campaigns start warm at ``Cycle.start`` and skip this entirely;
-        L4 inner cycles stay thin, never clear the floor, and stay frozen — all correct.
+        reference-backed campaigns start warm at ``Cycle.start`` and skip this entirely.
+
+        A fresh campaign is cold for exactly one round: ``Cycle.start`` sees only C0, which is
+        one arm and so cannot identify δ (``_calibrate_delta_ruler``), and the first re-attempt
+        after round 1 closes reads that round's candidates back out of the archive. Round 1 is
+        therefore always measured on the frozen bank prefix — the deliberate consequence, since
+        an adaptive subset drawn against a one-arm ruler selects the incumbent's own failures.
 
         Re-reading the archive is what re-warms it: this fires from ``absorb_round`` *after* the
         round closed, so every candidate it scored is already banked grade-A — under its own
