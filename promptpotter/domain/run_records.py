@@ -404,7 +404,7 @@ class CycleSeed(StrictModel):
     `PromptTemplate.prompt_field_dict()` shape → becomes the origin `OptSearchPoint`
     at bootstrap. `pipeline_overlay` merges ON TOP of the dataset overlay
     (seed > dataset > backend default) for this cycle only — the dataset
-    `pipeline.json` stays immutable. `origin_source` stamps the C0 lineage
+    `pipeline.yaml` stays immutable. `origin_source` stamps the C0 lineage
     provenance: `fork_seed` for an operator-steered fork, `campaign_origin` for a
     fresh campaign minted from a chosen prior origin, and **empty when the cycle
     recovers its origin by replay** — an L2/L3 auto-rebase seeds a config delta,

@@ -1,0 +1,17 @@
+campaign_config:
+  dataset_name: frozen-template-fixture
+  scoring: exact_match(predicted, ground_truth)
+  exclude_nodes: []
+  optimization:
+    max_rounds: 5
+    n_variants: 3
+    improvement_threshold: 0.01
+    degradation_threshold: 0.4
+    prompt_block_catalogue: guidance
+    mechanisms:
+      selection:
+        per_round_resubset: false
+      elimination:
+        epsilon_elimination: true
+        degradation_fatal_fastpath: true
+        leader_lock_in: false

@@ -128,7 +128,7 @@ async def _emit_preflight_and_init_session(
     # HARD block before any spend: a reasoning model pinned below its token floor (e.g. the
     # inner optimizer's l1_critique) burns its whole budget reasoning and emits zero content,
     # stalling the loop silently. Both surfaces carry model+max_tokens: the dataset/target
-    # nodes (session.pipeline_params) and the optimizer nodes (datasets/_optimizer/pipeline.json).
+    # nodes (session.pipeline_params) and the optimizer nodes (datasets/_optimizer/pipeline.yaml).
     optimizer_node_configs = [(n.name, n.current_config) for n in get_optimizer_schema().nodes]
     if floor_violations := check_model_reasoning_floors(
         target_node_configs + optimizer_node_configs

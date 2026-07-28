@@ -3,7 +3,7 @@
 import type { NodeOutputSchema } from "@/lib/api";
 
 // Read-only view of a node's structured-output contract (from the server's
-// `node_output_schema`, resolved from `pipeline.json`). Shown beside the config
+// `node_output_schema`, resolved from `pipeline.yaml`). Shown beside the config
 // + prompt so the operator sees the WHOLE node as one unit: model + params +
 // prompt + the structured output it produces. Lists each output field with its
 // description; nodes with no schema are skipped. Read-only by definition — the

@@ -1,4 +1,4 @@
-"""``inner_tasks.json`` — the panel an outer dataset declares, and the spec one cell resolves to.
+"""``inner_tasks.yaml`` — the panel an outer dataset declares, and the spec one cell resolves to.
 
 The file IS the declaration: which inner benchmark the panel measures on, how much evidence each
 cell may buy, and one entry per cell. A dataset that owns this file IS an outer dataset — no name
@@ -18,7 +18,7 @@ from promptpotter.application.config import CampaignConfig, LivesConfig
 from promptpotter.config.settings import DEFAULT_ORIGIN_BUDGET
 from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.io import read_json_optional
+from promptpotter.infrastructure.store.io import read_yaml_optional
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -114,10 +114,21 @@ class InnerTaskSpec(StrictModel):
     inner_optimizer_temperature: float | None = None
 
 
+def inner_tasks_path(dataset_dir: Path) -> Path:
+    """The dataset's inner-task panel, named by the connector that reads it.
+
+    One spelling, so the is-this-L4 probe and the loader cannot drift apart — a drift
+    that skips the observation contract rather than raising.
+    """
+    from promptpotter.connectors import CONNECTORS
+
+    return dataset_dir / CONNECTORS["promptpotter"].experiment_file
+
+
 def load_inner_tasks(path: Path) -> InnerTasks:
-    """Read + validate ``inner_tasks.json``. The panel is the source of truth; an unreadable or
+    """Read + validate the inner-task panel. The panel is the source of truth; an unreadable or
     non-conforming one is unscoreable, never defaulted."""
-    raw = read_json_optional(path)
+    raw = read_yaml_optional(path)
     if raw is None:
         raise InnerCycleUnscoreableError(
             f"{path} is missing — the inner benchmark, its sample count and its round cap are "
@@ -134,7 +145,7 @@ def load_inner_tasks(path: Path) -> InnerTasks:
 def resolve_inner_task(ctx: InnerSpawnContext, query: str) -> InnerTaskSpec:
     """Map an outer query to its inner-campaign spec: the top-level benchmark + budget, overlaid
     by the matching cell's overrides. A query with no matching cell runs the panel's default."""
-    panel = load_inner_tasks(ctx.dataset_config_dir / "inner_tasks.json")
+    panel = load_inner_tasks(inner_tasks_path(ctx.dataset_config_dir))
     cfg = panel.inner_benchmark_config
     cell = next((t for t in panel.tasks if t.id == query), None)
     return InnerTaskSpec(

@@ -1,0 +1,463 @@
+name: TermNorm
+version: v1.1
+description: TermNorm AI terminology normalization pipeline
+backend_name: TermNorm Local
+backend_type: termnorm
+template_variables:
+  - '{{core_concept}}'
+  - '{{entity_profile_json}}'
+  - '{{matches}}'
+dataset_name: termnorm_ground_truth
+available_models:
+  - openai/gpt-oss-120b
+  - meta-llama/llama-4-scout-17b-16e-instruct
+nodes:
+  cache_lookup:
+    type: cache
+    runtime: frontend
+    short_circuit: true
+    node_role: cache
+    description: Checks the cache for previously resolved queries. Short-circuits the pipeline on hit.
+    config: {}
+    optimizer:
+      langfuse_type: span
+  fuzzy_matching:
+    type: retriever
+    runtime: frontend
+    short_circuit: true
+    node_role: candidate_source
+    description: >-
+      Fuzzy string matching against the database index. Short-circuits on high-confidence matches, bypassing
+      web search and LLM profiling entirely.
+    config:
+      threshold: 70
+      scorer: WRatio
+      limit: 5
+    optimizer:
+      display_tag: fuzz
+      param_keys:
+        - threshold
+        - scorer
+      param_descriptions:
+        threshold: Minimum similarity score (0-100) to accept a fuzzy match
+        scorer: Scoring algorithm for fuzzy string comparison
+      langfuse_type: span
+  web_search:
+    type: tool
+    runtime: backend
+    node_role: enricher
+    description: "Searches the web for contextual information about the input query. Retrieved content\
+      \ provides the primary raw context that entity_profiling uses to generate structured profiles Ã¢â‚¬â€\uDC9D\
+      \ the quality of web results directly determines profiling quality."
+    config:
+      strategy: snippets
+      scrape_budget: 20
+      extract_pdf: true
+      pdf_max_pages: 10
+      pdf_max_bytes: 5000000
+      max_sites: 7
+      num_results: 20
+      content_char_limit: 800
+      fallback_keywords_limit: 8
+      query_prefix: ''
+      query_suffix: ''
+      brave_api_timeout: 10
+      scrape_timeout: 5
+      http_content_limit: 50000
+      min_page_text_length: 100
+      max_page_text_length: 10000
+      title_truncate_length: 100
+      scrape_workers: 10
+      scrape_max_retries: 1
+      scrape_retry_delay: 1.0
+      scrape_retry_status_codes:
+        - 429
+        - 500
+        - 502
+        - 503
+        - 504
+      scrape_jitter: 0.5
+      scrape_headers:
+        Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8
+        DNT: '1'
+        Upgrade-Insecure-Requests: '1'
+        Sec-Fetch-Dest: document
+        Sec-Fetch-Mode: navigate
+        Sec-Fetch-Site: none
+        Sec-Fetch-User: ?1
+      user_agents:
+        - >-
+          Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0
+          Safari/537.36
+        - >-
+          Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0
+          Safari/537.36
+        - >-
+          Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0
+          Safari/537.36
+        - >-
+          Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36
+        - Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:138.0) Gecko/20100101 Firefox/138.0
+        - Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:138.0) Gecko/20100101 Firefox/138.0
+        - Mozilla/5.0 (X11; Linux x86_64; rv:138.0) Gecko/20100101 Firefox/138.0
+        - >-
+          Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0
+          Safari/537.36 Edg/136.0.0.0
+        - >-
+          Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3
+          Safari/605.1.15
+        - >-
+          Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0
+          Safari/537.36 Edg/135.0.0.0
+      skip_extensions:
+        - .pdf
+        - .doc
+        - .docx
+        - .ppt
+        - .pptx
+        - .xls
+        - .xlsx
+      skip_domains:
+        - academia.edu
+        - researchgate.net
+        - arxiv.org
+        - ieee.org
+        - linkedin.com
+        - facebook.com
+        - instagram.com
+        - twitter.com
+        - x.com
+      search_language: en
+      search_country: US
+      accept_language: en-US,en;q=0.9
+      html_strip_tags:
+        - script
+        - style
+        - nav
+        - header
+        - footer
+      min_keyword_length: 3
+      keyword_split_chars:
+        - /
+        - '-'
+      spellcheck: true
+      result_filter: ''
+      extra_snippets: true
+      freshness: ''
+    optimizer:
+      display_tag: webS
+      param_keys:
+        - strategy
+        - max_sites
+        - num_results
+        - content_char_limit
+        - query_prefix
+        - query_suffix
+      param_allowed_values:
+        strategy:
+          - snippets
+          - scrape
+          - hybrid
+      param_descriptions:
+        strategy: >-
+          How the single Brave query becomes evidence: 'snippets' (Brave's returned text - instant, never
+          hangs, fewer LLM tokens), 'scrape' (full-page fetch under scrape_budget - deepest evidence,
+          slower), 'hybrid' (scrape with per-source snippet fallback). Swept on ground truth to pick most-efficiently-true.
+        query_prefix: "Text prepended to the input query before web search Ã¢â‚¬â€\uDC9D controls search\
+          \ focus, domain targeting, and terminology framing (e.g. 'LCA database' narrows to domain)"
+        query_suffix: "Text appended to the input query before web search Ã¢â‚¬â€\uDC9D adds qualifiers,\
+          \ constraints, or context keywords (e.g. 'material composition' adds specificity)"
+        num_results: Number of search engine results to request
+        max_sites: Maximum number of evidence sources kept (scraped pages or snippets)
+        content_char_limit: Maximum characters of content kept per evidence source
+      observation_name: web_search
+      observation_mappings:
+        - pipeline_key: web_sources
+          output_field: sources
+        - pipeline_key: web_search_status
+          output_field: status
+        - pipeline_key: web_cost
+          output_field: cost
+      langfuse_type: tool
+  entity_profiling:
+    type: generation
+    runtime: backend
+    node_role: enricher
+    description: >-
+      LLM-driven step that generates a structured entity profile from the input query and web-sourced
+      raw content. Produces the required pipeline output (entity_profile). Profile quality depends on
+      both the LLM configuration and the quality of upstream web_search results.
+    config:
+      model: openai/gpt-oss-120b
+      temperature: 0.3
+      max_tokens: null
+      raw_content_limit: 5000
+      per_site_content_limit: 500
+      schema_family: entity_profile
+      schema_version: 1
+    prompt_info:
+      family: entity_profiling
+      template_variables:
+        - query
+        - format_string
+        - combined_text
+      description: System prompt for entity-profile extraction from web research data
+    optimizer:
+      param_keys:
+        - raw_content_limit
+        - temperature
+        - max_tokens
+        - model
+        - persona
+        - task_intent
+        - problem_description
+        - instruction
+        - thinking_style
+        - answer_format
+      param_descriptions:
+        raw_content_limit: "Maximum characters of web-sourced raw content passed as context to the profiling\
+          \ LLM Ã¢â‚¬â€\uDC9D bounds how much of web_search output is visible to the model"
+        temperature: LLM sampling temperature for profile generation
+        max_tokens: Maximum tokens in the LLM profile generation response
+      input_keys:
+        - web_sources
+      observation_name: entity_profiling
+      observation_mappings:
+        - pipeline_key: entity_profile
+          output_field: null
+          is_llm: true
+      langfuse_type: generation
+  token_matching:
+    type: retriever
+    runtime: backend
+    node_role: candidate_source
+    description: >-
+      Token-level retrieval matching entity profile fields against database entries. Candidate pool quality
+      depends on the entity profile generated upstream.
+    config:
+      max_token_candidates: 20
+      tokenization_regex: '[a-zA-Z0-9]+'
+    optimizer:
+      display_tag: rank
+      param_keys:
+        - max_token_candidates
+      param_descriptions:
+        max_token_candidates: Maximum number of candidates to return from token matching
+      input_keys:
+        - entity_profile
+      observation_name: token_matching
+      observation_mappings:
+        - pipeline_key: candidate_ranking
+          output_field: candidates
+      langfuse_type: retriever
+  llm_ranking:
+    type: generation
+    runtime: backend
+    node_role: ranker
+    description: >-
+      LLM-driven re-ranking of token-matched candidates using a ranking prompt. Selects the best match
+      from the candidate pool.
+    config:
+      model: openai/gpt-oss-120b
+      temperature: 0.0
+      max_tokens: null
+      sample_size: 20
+      debug_output_limit: 20
+      relevance_weight_core: 0.7
+      schema_family: llm_ranking_output
+      schema_version: 1
+    prompt_info:
+      family: llm_ranking
+      template_variables:
+        - core_concept
+        - entity_profile_json
+        - matches
+      description: System prompt for LLM-driven candidate re-ranking
+    optimizer:
+      param_keys:
+        - temperature
+        - max_tokens
+        - sample_size
+        - model
+        - relevance_weight_core
+        - persona
+        - task_intent
+        - problem_description
+        - instruction
+        - thinking_style
+        - answer_format
+      param_descriptions:
+        temperature: LLM sampling temperature for ranking
+        max_tokens: Maximum tokens in the LLM ranking response
+        sample_size: Number of candidates sampled from the pool for LLM ranking
+        relevance_weight_core: Weight given to core-concept relevance in ranking score
+      input_keys:
+        - candidate_ranking
+        - entity_profile
+      observation_name: llm_ranking
+      observation_mappings:
+        - pipeline_key: final_ranking
+          output_field: ranked_items
+          is_llm: true
+      langfuse_type: generation
+  direct_prompt:
+    type: generation
+    runtime: backend
+    node_role: ''
+    description: "Direct LLM prompt for simple queries Ã¢â‚¬â€\uDC9D bypasses the full pipeline."
+    config:
+      model: openai/gpt-oss-120b
+      temperature: 0.0
+      max_tokens: null
+      accept_threshold: 0.75
+      correction_top_n: 10
+    optimizer:
+      langfuse_type: generation
+pipelines:
+  default:
+    - cache_lookup
+    - fuzzy_matching
+    - web_search
+    - entity_profiling
+    - token_matching
+    - llm_ranking
+cache:
+  high_confidence_threshold: 0.8
+  verified_methods:
+    - UserChoice
+    - DirectEdit
+    - cached
+    - fuzzy
+resolved_schemas:
+  entity_profile/1:
+    family: entity_profile
+    version: 1
+    description: Entity profile extraction schema for web research pipeline
+    fields:
+      - entity_name
+      - core_concept
+      - distinguishing_features
+      - key_properties
+      - technical_specifications
+      - alternative_names
+      - classification_aliases
+      - constituent_materials
+      - manufacturing_processes
+      - applications
+      - notes
+    json_schema:
+      type: object
+      properties:
+        entity_name:
+          type: string
+        core_concept:
+          type: string
+          description: The single word that defines what this expression represents
+        distinguishing_features:
+          type: array
+          items:
+            type: string
+        key_properties:
+          type: array
+          items:
+            type: string
+        technical_specifications:
+          type: array
+          items:
+            type: string
+          description: Explicit technical specs, dimensions, codes, ratings, tolerances
+        alternative_names:
+          type: array
+          items:
+            type: string
+        classification_aliases:
+          type: array
+          items:
+            type: string
+          description: >-
+            Full spectrum of valid ways this entity could be referenced using expert-level terminology,
+            from precise to generic
+        constituent_materials:
+          type: array
+          items:
+            type: string
+          description: >-
+            All materials that make up this product, both explicit and standard/typical materials inferred
+            from domain knowledge
+        manufacturing_processes:
+          type: array
+          items:
+            type: string
+          description: >-
+            Both stated and inferred manufacturing processes based on product type, materials, and industry
+            standards
+        applications:
+          type: array
+          items:
+            type: string
+          description: Direct and derived applications based on product characteristics
+        notes:
+          type: array
+          items:
+            type: string
+      required:
+        - entity_name
+        - core_concept
+        - distinguishing_features
+        - key_properties
+        - technical_specifications
+        - alternative_names
+        - classification_aliases
+        - constituent_materials
+        - manufacturing_processes
+        - applications
+        - notes
+  llm_ranking_output/1:
+    family: llm_ranking_output
+    version: 1
+    description: LLM ranking step output schema â€” structured candidate evaluation
+    fields:
+      - profile_summary
+      - core_concept_description
+      - ranked_items
+    json_schema:
+      type: object
+      properties:
+        profile_summary:
+          type: string
+          description: 1-2 sentence summary of the entity profile
+        core_concept_description:
+          type: string
+          description: Description of the core concept match
+        ranked_items:
+          type: array
+          description: Candidates ranked by relevance score
+          items:
+            type: object
+            properties:
+              candidate:
+                type: string
+              core_concept_score:
+                type: number
+              spec_score:
+                type: number
+              evaluation_reasoning:
+                type: string
+              key_match_factors:
+                type: array
+                items:
+                  type: string
+              spec_gaps:
+                type: array
+                items:
+                  type: string
+            required:
+              - candidate
+              - core_concept_score
+              - spec_score
+              - evaluation_reasoning
+              - key_match_factors
+      required:
+        - profile_summary
+        - core_concept_description
+        - ranked_items

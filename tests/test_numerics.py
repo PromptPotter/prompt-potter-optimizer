@@ -16,12 +16,12 @@ Sections (Pass A — scorers, evaluators, IRT):
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
+import yaml
 
 from promptpotter.application.intelligence.exploration import (
     Observation,
@@ -1028,10 +1028,11 @@ def test_compute_proxies_composed_fitness_discriminates() -> None:
     assert pb["cleanliness"] < pd["cleanliness"]  # and dirtier than mere sample degradation
 
     # The whole point: the composed formula ranks the clean campaign above the dirty one.
-    import json
     from pathlib import Path
 
-    cfg = json.loads(Path("datasets/promptpotter-self/campaign.json").read_text(encoding="utf-8"))
+    cfg = yaml.safe_load(
+        Path("datasets/promptpotter-self/campaign.yaml").read_text(encoding="utf-8")
+    )
     score = compile_scorer(cfg["campaign_config"]["scoring"])
     assert score({"pipeline_data": px}) > score({"pipeline_data": pd})
 
@@ -1091,10 +1092,11 @@ def test_compute_proxies_excludes_tooling_failures_from_cleanliness() -> None:
     assert floor["after_N_rounds_delta"] == -1.0  # the -1 rides the LIFT CORE
     assert floor["cleanliness"] == 0.0
 
-    import json
     from pathlib import Path
 
-    cfg = json.loads(Path("datasets/promptpotter-self/campaign.json").read_text(encoding="utf-8"))
+    cfg = yaml.safe_load(
+        Path("datasets/promptpotter-self/campaign.yaml").read_text(encoding="utf-8")
+    )
     score = compile_scorer(cfg["campaign_config"]["scoring"])
     assert score({"pipeline_data": floor}) == pytest.approx(0.0)
     assert score({"pipeline_data": floor}) < score({"pipeline_data": px})
@@ -1214,7 +1216,6 @@ def test_unmeasured_cost_never_scores_as_maximal_efficiency() -> None:
     # 1.0 — so the LESS a run recorded, the fitter it scored. Two ways to record nothing: no calls
     # at all, and tokens under a model with no USD rate on file, where the cost is a floor rather
     # than a total. Both must EXCLUDE, never default to zero.
-    import json
     from pathlib import Path
 
     from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError, compute_outer_proxies
@@ -1232,7 +1233,9 @@ def test_unmeasured_cost_never_scores_as_maximal_efficiency() -> None:
 
     # The gradient the exclusion protects: at equal lift, the CHEAPER run scores higher — and no
     # run may reach the efficiency ceiling by reporting nothing.
-    cfg = json.loads(Path("datasets/promptpotter-self/campaign.json").read_text(encoding="utf-8"))
+    cfg = yaml.safe_load(
+        Path("datasets/promptpotter-self/campaign.yaml").read_text(encoding="utf-8")
+    )
     score = compile_scorer(cfg["campaign_config"]["scoring"])
     cheap = compute_outer_proxies(
         _fake_inner_result([0.40, 0.55], 0.30, rounds, cost=0.01)
@@ -1338,10 +1341,11 @@ def test_pp_self_scoring_composed_and_gradient_bearing() -> None:
     # What guards a divisor from coming back is the pinned raw delta in
     # `test_compute_proxies_composed_fitness_discriminates` — a target-shaped OR room-shaped
     # denominator fails there, loudly.
-    import json
     from pathlib import Path
 
-    cfg = json.loads(Path("datasets/promptpotter-self/campaign.json").read_text(encoding="utf-8"))
+    cfg = yaml.safe_load(
+        Path("datasets/promptpotter-self/campaign.yaml").read_text(encoding="utf-8")
+    )
     score = compile_scorer(cfg["campaign_config"]["scoring"])
 
     def s(**kw: float) -> float:
@@ -3234,10 +3238,10 @@ def test_merge_still_accepts_the_spliced_fields_l1_owns():
 def test_check_budget_names_the_field_its_length_and_the_file():
     over = TaskDecomposition(key_challenges="x" * (FRAMING_VALUE_BUDGET + 1))
     with pytest.raises(ValueError) as err:
-        over.check_budget(source="datasets/foo/task_context.json")
+        over.check_budget(source="datasets/foo/task_context.yaml")
     msg = str(err.value)
     assert "key_challenges" in msg and str(FRAMING_VALUE_BUDGET + 1) in msg
-    assert "datasets/foo/task_context.json" in msg
+    assert "datasets/foo/task_context.yaml" in msg
 
 
 def test_check_budget_ignores_non_framing_fields():
@@ -3251,8 +3255,8 @@ def test_check_budget_ignores_non_framing_fields():
 
 def test_shipped_datasets_are_within_the_framing_budget():
     """The guard is only credible if what we ship passes it."""
-    for path in Path("datasets").glob("*/task_context.json"):
-        TaskDecomposition.from_dict(json.loads(path.read_text(encoding="utf-8"))).check_budget(
+    for path in Path("datasets").glob("*/task_context.yaml"):
+        TaskDecomposition.from_dict(yaml.safe_load(path.read_text(encoding="utf-8"))).check_budget(
             source=str(path)
         )
 

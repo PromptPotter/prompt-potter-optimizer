@@ -17,7 +17,7 @@ expensive mistake is never "couldn't find it" — it is "found the wrong one."
 
 - **`output_schema`** — (1) the **target** node's wire schema: what a backend node
   is asked to return. `domain/pipeline_schema.py::NodeOutputSchema`, edited at
-  `datasets/{name}/pipeline.json::nodes.{node}.config.output_schema`. (2) the
+  `datasets/{name}/pipeline.yaml::nodes.{node}.config.output_schema`. (2) the
   **optimizer's own** response schema: what `l1_generate` returns, built by
   `validators/l1_strict.py::build_l1_response_schema`. The L4 levers named
   `output_schema_*` act on (2). Sense (1) is where a "describe the fields" axis
@@ -26,12 +26,14 @@ expensive mistake is never "couldn't find it" — it is "found the wrong one."
   non-root cycle begins from (`domain/run_records.py`). (2) the **incumbent
   candidate** a round measures against (`seed-MISS` stratum, `θ_seed`,
   `domain/results.py`). (3) an **RNG integer** on a node's wire config
-  (`cfg["seed"]` on a node's `pipeline.json` config). Only (1) is a fork concept.
-- **`campaign.json`** — two incompatible schemas, one filename. Under
-  `datasets/{name}/` it is the **template** (a `campaign_config` wrapper, read by
-  `application/datasets/authored.py`). Under `campaigns/{id}/` it is the minted
-  **manifest** (a frozen `Campaign`, `extra="forbid"`, owned by `CampaignStore`).
-  Check which tree the path is under before assuming a shape.
+  (`cfg["seed"]` on a node's `pipeline.yaml` config). Only (1) is a fork concept.
+- **campaign template vs manifest** — two incompatible schemas that once shared the
+  filename `campaign.json`. `datasets/{name}/campaign.yaml` is the operator-authored
+  **template** (a `campaign_config` wrapper, read by `application/datasets/authored.py`);
+  `campaigns/{id}/campaign.json` is the minted **manifest** (a frozen `Campaign`,
+  `extra="forbid"`, owned by `CampaignStore`). The extension now tells them apart —
+  config an operator types is YAML, state code writes is JSON — but still check which
+  tree a path is under before assuming a shape.
 - **`"llm_only"`** — the **single-node pipeline sentinel**, and nothing else
   (`terminated_at`). It is a NODE name the six single-node benchmarks declare inside a
   `termnorm` pipeline. It once also named a connector; that connector was deleted, so
@@ -127,9 +129,9 @@ The persisted world is a four-entity containment hierarchy
   `projects/{tenant}/`.
 - **Dataset** — an immutable bank of labeled examples
   (`cache.json::items[]` of `{query, ground_truth}`) plus its origin
-  config: starting prompt (`prompts/default.json`), pipeline overlay
-  (`pipeline.json`), task framing (`task_description.md`), and the
-  sibling default `campaign.json`. Lives at `datasets/{name}/` (repo
+  config: starting prompt (`prompts/default.yaml`), pipeline overlay
+  (`pipeline.yaml`), task framing (`task_description.md`), and the
+  sibling default `campaign.yaml`. Lives at `datasets/{name}/` (repo
   benchmark) or `projects/{tenant}/datasets/{name}/` (tenant upload).
   Data a campaign has touched is **never mutated in place** — see
   **Dataset name**.
@@ -137,7 +139,7 @@ The persisted world is a four-entity containment hierarchy
   dataset (`email-tagging-eval`), validated `^[a-z][a-z0-9_-]*$` and used
   as the directory segment. A *mutable alias*: it points at data, it is
   **not** the data's identity. A campaign resolves its dataset live by
-  this name (`campaign.json::dataset_name`), so moving/replacing it is the
+  this name (`campaign.yaml::dataset_name`), so moving/replacing it is the
   version-and-repoint contract, not an in-place overwrite (the old data
   is preserved under `{slug}-vN`; orchestration in
   `application/datasets/dataset_replace.py`).
@@ -248,7 +250,7 @@ The persisted world is a four-entity containment hierarchy
 - **Score** — continuous, formula-driven; feeds the optimizer.
   `application/scoring/formula/`.
 - **Fitness / composite** — the scorer expression compiled from
-  `campaign.json::scoring.per_sample` and `per_round`. Each measurement
+  `campaign.yaml::scoring.per_sample` and `per_round`. Each measurement
   carries `{scorer_id: {score, hit, formula}}`. Rescored on every load.
   `application/scoring/search_point_scorer.py`.
 - **metric / basis** — the cell any fitness number occupies: *metric* ∈ {accuracy,
@@ -261,7 +263,7 @@ The persisted world is a four-entity containment hierarchy
 - **score_search_point()** — the single scoring gateway. Every scoring
   call MUST go through it. `application/scoring/search_point_scorer.py`.
 - **Round scorer** — the optional `per_round` formula compiled from
-  `campaign.json::scoring`. Recompiled on hot-swap. Lives on
+  `campaign.yaml::scoring`. Recompiled on hot-swap. Lives on
   `session.scoring.round_scorer`.
 
 ## Elimination + ranking
@@ -404,12 +406,12 @@ The persisted world is a four-entity containment hierarchy
 - **Meta-prompt** — synonym for "optimizer prompt" (L1/L2/L3/Critique
   LLM template). Field-standard from PromptWizard / DSPy / OPRO.
 - **Prompt homes** — three, don't confuse them. The **target** prompt the optimizer
-  evolves: `datasets/{name}/prompts/{node}.json`. The **optimizer's** meta-prompts
-  (install-global): `datasets/_optimizer/pipeline.json::resolved_prompts` — keyed
+  evolves: `datasets/{name}/prompts/{node}.yaml`. The **optimizer's** meta-prompts
+  (install-global): `datasets/_optimizer/pipeline.yaml::resolved_prompts` — keyed
   `{node}/{n}`, so check-in's second mode lives at `resolved_prompts.checkin/2`. The
-  **outer** L4 meta-prompts: `datasets/_optimizer_meta/prompts.json` (prompt fields only,
-  deliberately no `pipeline.json`; selected per-cycle by `OptimizationConfig.optimizer_set`).
-  A per-node **overlay** (`pipeline.json::nodes.{name}.config.prompt`) is a fourth, and is
+  **outer** L4 meta-prompts: `datasets/_optimizer_meta/prompts.yaml` (prompt fields only,
+  deliberately no `pipeline.yaml`; selected per-cycle by `OptimizationConfig.optimizer_set`).
+  A per-node **overlay** (`pipeline.yaml::nodes.{name}.config.prompt`) is a fourth, and is
   a tunable, not a home.
 - **L4** — PromptPotter optimizing its own meta-prompts: an outer cycle whose backend
   is an inner cycle. **Recursion, not a fourth layer** — the ladder is closed at
@@ -449,7 +451,7 @@ The persisted world is a four-entity containment hierarchy
 - **Node** — one step in the pipeline. Has runtime, node_type, and
   `optimizer.param_keys`. NEVER "service" or "building block."
 - **Overlay** — per-dataset operator delta merged onto each wire
-  payload. Lives at `datasets/{name}/pipeline.json::nodes.{name}.config`.
+  payload. Lives at `datasets/{name}/pipeline.yaml::nodes.{name}.config`.
   The sole route for changing a backend tunable.
 - **pipeline_params** — node-keyed config dicts plus the reserved `steps`
   list of active node names (`{"steps": [...], "llm_only": {"model": …}}`).

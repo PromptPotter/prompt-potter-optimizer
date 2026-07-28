@@ -6,8 +6,8 @@ asyncio. Split off :mod:`.core` so the launch / commit orchestration stays
 readable; the core module imports these.
 
 * ``_build_origin_pipeline_json`` / ``_build_default_campaign_json`` /
-  ``_build_task_context`` — the committed dataset's ``pipeline.json`` overlay,
-  ``campaign.json`` sibling, and ``task_context.json`` framing. The seed⊕overlay
+  ``_build_task_context`` — the committed dataset's ``pipeline.yaml`` overlay,
+  ``campaign.json`` sibling, and ``task_context.yaml`` framing. The seed⊕overlay
   node merge they build on is ``draft_campaign.merge_pipeline_overlay`` (its
   conceptual owner — shared with the origin readiness model gate).
 * ``split_overlay`` — split a reused-dataset overlay into its two
@@ -40,7 +40,7 @@ from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, TaskDecomposi
 def _build_origin_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
     """Slice-1 pipeline overlay seeded from the connector's first-tenant default.
 
-    The committed file is the dataset's ``pipeline.json`` overlay; the
+    The committed file is the dataset's ``pipeline.yaml`` overlay; the
     backend's live ``GET /pipeline`` response is the actual schema.
     ``backend_type`` is mandatory for connector resolution
     (``_read_backend_type`` reads it on bootstrap); ``pipelines.default``
@@ -81,7 +81,7 @@ def split_overlay(
     search-space narrowing (→ ``CampaignConfig.optimizer_narrowing``). A reused
     dataset's mint applies this split onto the per-campaign snapshot so the
     shared, immutable dataset is never mutated. Fresh uploads instead fold the
-    whole overlay into the committed ``pipeline.json`` (``merge_pipeline_overlay``)
+    whole overlay into the committed ``pipeline.yaml`` (``merge_pipeline_overlay``)
     — the dataset is theirs to author."""
     overrides: dict[str, Any] = {}
     narrowing: dict[str, NodeSearchNarrowing] = {}
@@ -164,7 +164,7 @@ def _draft_pipeline_render(draft: DraftCampaign) -> dict[str, Any]:
 
     A check-in has no committed ``datasets/{slug}/`` yet, so its pipeline can't be
     read from disk; it is fully determined by the draft (``_build_origin_pipeline_json``
-    yields the byte-identical ``pipeline.json`` that Start commits). Riding the draft
+    yields the byte-identical ``pipeline.yaml`` that Start commits). Riding the draft
     wire means the ingest node editor renders directly from the draft — no
     fetch-by-slug, no 404, no second pipeline endpoint. Mirrors
     ``datasets.get_dataset_pipeline`` for the committed-dataset case: one render path,
@@ -256,7 +256,7 @@ def _build_default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:
 
 
 def _build_task_context(draft: DraftCampaign) -> dict[str, Any]:
-    """The run-start domain framing, written to ``task_context.json``.
+    """The run-start domain framing, written to ``task_context.yaml``.
 
     The check-in already decomposed the task into the 7-field ``task_context``
     (carried on :attr:`DraftCampaign.decomposed_task_context`); normalize it through

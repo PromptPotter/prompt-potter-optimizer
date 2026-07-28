@@ -49,20 +49,20 @@ dataset.
 
 Two architectural commitments shape every bucket on this page:
 
-- **Pipeline-agnostic.** Any backend that publishes a `pipeline.json`
+- **Pipeline-agnostic.** Any backend that publishes a `pipeline.yaml`
   describing its tunable parameters is optimizable. Node names,
   parameter shapes, and prompt slots all come from the backend's
   self-description — PromptPotter has zero hardcoded knowledge of the
-  target system. New backend = new `pipeline.json`, no PromptPotter
-  code change. The `pipeline.json` contract is pinned in
-  [`docs/developer/pipeline-json-contract.md`](developer/pipeline-json-contract.md).
+  target system. New backend = new `pipeline.yaml`, no PromptPotter
+  code change. The `pipeline.yaml` contract is pinned in
+  [`docs/developer/pipeline-contract.md`](developer/pipeline-contract.md).
 - **Two-layer searchpoints + self-optimization.** `JobSearchPoint` is
   the frozen target spec being measured (prompt + pipeline params,
   content-hashed). `OptSearchPoint` is the optimizer's own working
   state (lineage, memory, escalation history) that projects into a
   `JobSearchPoint` for scoring. PromptPotter itself runs on a
-  `datasets/_optimizer/pipeline.json` — same shape as a target backend's
-  `pipeline.json` — so accumulated `OptSearchPoint` data is the
+  `datasets/_optimizer/pipeline.yaml` — same shape as a target backend's
+  `pipeline.yaml` — so accumulated `OptSearchPoint` data is the
   dataset for **optimizing the optimizer**.
 
 **Central loop.** One round = generate → score → critique.
@@ -117,7 +117,7 @@ it, ignore it, and keep accumulating evidence on the same candidate.
 A candidate is aborted only when its **`DegradationCheck`**
 (`application/optimization/pobb/checks.py::DegradationCheck`) fires — i.e. when its
 fraction of failed measurements crosses the per-campaign
-`degradation_threshold` (`campaign.json::degradation_threshold`,
+`degradation_threshold` (`campaign.yaml::degradation_threshold`,
 e.g. `0.4` on gsm8k). Aggregated failures surface at round end and
 flow upward: cadence/escalation rules route them (L1 validation
 failures → L2 next round; L2 output-validator failures → L3); the
@@ -159,8 +159,8 @@ world is a strict containment hierarchy:
   `_optimizer_meta`) — install-scoped,
   read-only, admin-visible only via the `GET /datasets` list endpoint
   identity filter. The two tiers serve different purposes (operator
-  benchmarking vs tenant work); both share the `pipeline.json` /
-  `campaign.json` / `task_description.md` shape. **One resolution
+  benchmarking vs tenant work); both share the `pipeline.yaml` /
+  `campaign.yaml` / `task_description.md` shape. **One resolution
   seam:** `readable_dataset_dir` picks the dir (tenant slug first,
   repo benchmark second) once at bootstrap and stamps it on
   `Session.dataset_config_dir`; every downstream dataset-file loader
@@ -552,7 +552,7 @@ the PR description.
   we don't use Langfuse cloud yet."
 - **`axis_memory` injection** — the one new injection from the
   recent arc that earned its keep. Cross-round AxisIndex digest.
-- **`pipeline.json` contract** for connector self-description — the
+- **`pipeline.yaml` contract** for connector self-description — the
   backend's API surface to PromptPotter. Don't simplify "because
   TermNorm is the only consumer today."
 - **Hexagonal layer separation** (fails loud at import; see `tests/CLAUDE.md`)
@@ -673,9 +673,9 @@ the PR description.
   `measurements_for_sample()` / `measurements_for_config()`)** — the
   actual cross-cycle database. Per §0 it's a separate persistence
   layer from the ledger; never collapse the two.
-- **Per-dataset configs in `datasets/{name}/`** (`pipeline.json`,
-  `campaign.json`, `prompts/{node}.json`, `recon_variants.json`,
-  `task_context.json`, `dataset.md`, `task_description.md`) — the operator's primary
+- **Per-dataset configs in `datasets/{name}/`** (`pipeline.yaml`,
+  `campaign.yaml`, `prompts/{node}.yaml`,
+  `task_context.yaml`, `dataset.md`, `task_description.md`) — the operator's primary
   interface for adding a new dataset. Configs are the source of truth —
   no parallel default ladders elsewhere.
   A cleanup PR cannot move a default into PromptPotter code; if a
@@ -736,9 +736,9 @@ the PR description.
 - **`observed_node()` context manager** — the trace-emission seam
   every optimizer LLM call wraps. Cutting it removes Langfuse-shape
   compatibility (the Tracing bucket's foundation collapses).
-- **`datasets/_optimizer/pipeline.json`** — the self-optimization claim in §0
+- **`datasets/_optimizer/pipeline.yaml`** — the self-optimization claim in §0
   depends on this file having the same shape as a backend
-  `pipeline.json`. Drift (special-case fields, parallel registries)
+  `pipeline.yaml`. Drift (special-case fields, parallel registries)
   invalidates the claim.
 
 §0.5 is binary: surface is either load-bearing (named above, can't

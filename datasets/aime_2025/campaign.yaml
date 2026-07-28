@@ -1,0 +1,19 @@
+campaign_config:
+  dataset_name: aime_2025
+  scoring: aime_match(predicted, ground_truth)
+  sp_budget_ttest: 20
+  exclude_nodes: []
+  pipeline_overrides:
+    llm_only:
+      max_tokens: 16384
+  optimization:
+    l1_patience: 0
+    max_rounds: 5
+    n_variants: 6
+    improvement_threshold: 0.01
+    degradation_threshold: 0.4
+    l2_patience: 2
+    l3_patience: 1
+    elimination_n_min: 4
+    pobb_epsilon: 0.2
+    seed_heatmap_from_archive: true

@@ -165,7 +165,7 @@ def draft_from_dataset(
 
     # One validated parse of the dataset's config files. The `or` ladders below
     # fire only where the authored file leaves a field empty. (The optimizer LLM
-    # is install-global — datasets/_optimizer/pipeline.json — so the draft no
+    # is install-global — datasets/_optimizer/pipeline.yaml — so the draft no
     # longer carries provider/model.)
     authored = read_authored_dataset(dataset_dir)
     cc = authored.campaign_config

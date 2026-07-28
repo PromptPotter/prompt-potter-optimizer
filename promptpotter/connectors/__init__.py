@@ -25,7 +25,7 @@ CONNECTORS: dict[str, Connector] = {
 }
 
 DEFAULT_CONNECTOR = "termnorm"
-"""Connector a fresh upload drafts against when its ``pipeline.json`` names none.
+"""Connector a fresh upload drafts against when its ``pipeline.yaml`` names none.
 Lives beside :data:`CONNECTORS` because that is what knows a name is registered;
 the import-time guard below keeps the two from drifting."""
 

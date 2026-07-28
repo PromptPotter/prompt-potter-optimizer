@@ -1,0 +1,40 @@
+domain: Competition Mathematics (AIME)
+pipeline_purpose: Solve competition-level math problems and output a single integer answer in [0, 999].
+data_characteristics: >-
+  Input: a competition math problem (algebra, number theory, combinatorics, geometry). Output: a single
+  integer answer in [0, 999]. No multiple choice, multi-step reasoning required.
+optimization_goals: Exact Match accuracy of predicted integer to gold integer.
+key_challenges: >-
+  Multi-step reasoning with advanced mathematical concepts. Different problem types (algebra, number theory,
+  combinatorics, geometry) have distinct failure modes; a single generic verification instruction is insufficient.
+  Format-level failures: premature rounding, answer outside [0, 999].
+upstream_context: ''
+downstream_context: >-
+  Output is extracted by a scorer that looks for \boxed{} first, then falls back to the last number.
+raw_description: |
+  # AIME 2025 — Competition Mathematics
+
+  Solve competition-level math problems from the American Invitational Mathematics Examination (2025). These are significantly harder than grade school math — they require deep mathematical reasoning, creative problem solving, and precise computation.
+
+  ## Domain
+
+  - Input: a competition math problem (algebra, number theory, combinatorics, geometry)
+  - Output: a single integer answer in [0, 999]
+  - Challenge: multi-step reasoning with advanced mathematical concepts, no multiple choice
+
+  ## Success criteria
+
+  - Exact Match: predicted integer equals gold integer
+  - All AIME answers are integers between 0 and 999 inclusive
+  - Standard answer format: `\boxed{N}` (scorer extracts from `\boxed{}` first, falls back to last number)
+
+  ## Key failure modes
+
+  Problems come from four distinct types and each one fails differently — a single generic "verify each step" instruction unlocks none of them. Mutations that address one type's failure mode (e.g. combinatorial overcounting) routinely regress on other types. Differentiate the verification step by problem type:
+
+  - **Algebra**: polynomial expansion, factoring, simplification errors
+  - **Number theory**: modular arithmetic mistakes (wrong modulus, sign errors), divisibility/prime factorization gaps
+  - **Combinatorics**: overcounting or undercounting; decomposition into structured sub-cases (e.g. 3×3 blocks of a 3×9 grid) is often the unlock
+  - **Geometry**: coordinate geometry errors, trigonometric identity misuse
+
+  Format-level failures cut across all four types: premature rounding losing precision; answer outside [0, 999].

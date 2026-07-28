@@ -337,7 +337,7 @@ def _apply_findings(
     # The same check-in node returns the decomposition half (the six Layer-1
     # prompt strings) alongside the origin findings — see the CheckinOutput
     # two-mode contract. Capture it as the draft's starting prompt; the operator
-    # edits it in the review step and it's written to prompts/default.json at
+    # edits it in the review step and it's written to prompts/default.yaml at
     # mint. A turn that only authored the prompt (no findings) still applies.
     prompt_fields = {
         name: getattr(output, name)
@@ -348,7 +348,7 @@ def _apply_findings(
         values["origin_prompt_fields"] = {**draft.origin_prompt_fields, **prompt_fields}
         provenance["origin_prompt_fields"] = Provenance.CONFIRMED
     # The check-in also decomposes the task into a 7-field ``task_context`` domain
-    # framing. Capture it onto the draft (it rides commit → ``task_context.json``)
+    # framing. Capture it onto the draft (it rides commit → ``task_context.yaml``)
     # so the run reads it instead of recomputing via a second LLM call at run-start.
     decomposed = output.task_context.model_dump()
     if any(str(value).strip() for value in decomposed.values()):

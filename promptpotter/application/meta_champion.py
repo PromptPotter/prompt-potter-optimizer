@@ -109,7 +109,7 @@ class _Accum:
 def _pp_self_campaign_dirs(store: Stores) -> list[Path]:
     """Campaign dirs whose bound dataset drives the L4 recursion connector.
 
-    Asks each dataset's ``pipeline.json::backend_type`` — the same predicate the sidebar's
+    Asks each dataset's ``pipeline.yaml::backend_type`` — the same predicate the sidebar's
     ``isSelfOptimization`` reads — never a list of dataset NAMES. A name allowlist silently
     skipped an A/B arm, a fork, or a renamed dataset instead of loudly rejecting it, and
     widening it by hand is what made it wrong twice.

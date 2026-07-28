@@ -283,7 +283,7 @@ class OptimizationConfig(StrictModel):
         description=(
             "Which optimizer meta-prompt set this cycle uses. Empty (default) → the "
             "standard `datasets/_optimizer/` task-tuning loop. `meta` → the L4 outer "
-            "set `datasets/_optimizer_meta/prompts.json`, whose L1 emits per-node "
+            "set `datasets/_optimizer_meta/prompts.yaml`, whose L1 emits per-node "
             "edits to the INNER optimizer's meta-prompts (`pipeline_params_override`) "
             "instead of tuning its own template. Applied per-cycle at the runner seam "
             "through the same per-node override channel the inner runner uses, so an "
@@ -694,7 +694,7 @@ def _check_optimizer_below_target(target_models: tuple[str, ...]) -> PreflightWa
     accidental inversion — the bug class behind the email-tagging 20b optimizer
     pin. Both sides must parse a ``<N>b`` size or the check is skipped (no guess).
     The optimizer model is read from the install-global optimizer node config
-    (``datasets/_optimizer/pipeline.json``), not a per-campaign copy."""
+    (``datasets/_optimizer/pipeline.yaml``), not a per-campaign copy."""
     from promptpotter.application.optimization.dispatch.llm_call.prompts import optimizer_model
 
     opt_model = optimizer_model()
@@ -713,7 +713,7 @@ def _check_optimizer_below_target(target_models: tuple[str, ...]) -> PreflightWa
             "The optimizer is the strong model that improves the pipeline; running "
             "it on a model smaller than the target it optimizes is usually an "
             "accidental inversion. Raise the optimizer node `model` in "
-            "`datasets/_optimizer/pipeline.json` to a larger tier."
+            "`datasets/_optimizer/pipeline.yaml` to a larger tier."
         ),
     )
 
@@ -848,7 +848,7 @@ def resolve_pipeline_config_params(
     schema: PipelineSchema | None,
 ) -> dict[str, Any]:
     """The dataset→effective node-config merge, pure: the sparse ``{"steps": active}``
-    base layered with the per-dataset overlay (``pipeline.json::nodes.{name}.config``) and
+    base layered with the per-dataset overlay (``pipeline.yaml::nodes.{name}.config``) and
     the campaign's ``pipeline_overrides``, restricted to *active* nodes. Prompts and
     model validation are NOT here — they ride the ``OptSearchPoint`` / live ``Session``.
 
@@ -904,14 +904,15 @@ def resolve_pipeline_config_params(
 def _connector_identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
     """The dataset's connector ``identity_config`` contribution, or ``{}``.
 
-    Reads ``backend_type`` from the dataset's ``pipeline.json`` (tolerant — a
+    Reads ``backend_type`` from the dataset's ``pipeline.yaml`` (tolerant — a
     dataset dir without one contributes nothing) and asks the registered
     connector. Import is local to keep ``config.py`` free of a module-level
     connectors dependency."""
     from promptpotter.connectors import CONNECTORS
-    from promptpotter.infrastructure.store.io import read_json_tolerant
+    from promptpotter.infrastructure.store.dataset_access import dataset_pipeline_path
+    from promptpotter.infrastructure.store.io import read_yaml_optional
 
-    raw = read_json_tolerant(dataset_dir / "pipeline.json")
+    raw = read_yaml_optional(dataset_pipeline_path(dataset_dir))
     connector = CONNECTORS.get(str((raw or {}).get("backend_type") or ""))
     if connector is None or connector.identity_config is None:
         return {}
@@ -1014,14 +1015,14 @@ def _apply_starting_prompts(
                 f"template variables {missing} — the backend injects these by literal "
                 f"{{{{name}}}} substitution, so without them the query / research / output "
                 f"schema never reach the model. Add the placeholders to "
-                f"datasets/{dataset_name}/prompts/[{pnode}|default].json "
+                f"datasets/{dataset_name}/prompts/[{pnode}|default].yaml "
                 f"(node declares: {declared}).",
                 code="pipeline_config_invalid",
             )
         # Starting prompt lands on the sparse wire payload, on top of the merged
         # config above — never on `current_config`.
         pipeline_params.setdefault(pnode, {})["prompt"] = rendered
-        log(f"Starting prompt: {dataset_name}/prompts/[{pnode}|default].json → {pnode}")
+        log(f"Starting prompt: {dataset_name}/prompts/[{pnode}|default].yaml → {pnode}")
 
 
 def _validate_model_ownership(
@@ -1047,7 +1048,7 @@ def _validate_model_ownership(
         if node_obj and node_obj.is_llm and not pipeline_params.get(name, {}).get("model"):
             raise PayloadInvalidError(
                 f"dataset {dataset_name!r}: LLM node {name!r} has no owned model. "
-                f"Declare it in the dataset's pipeline.json::nodes.{name}.config.model "
+                f"Declare it in the dataset's pipeline.yaml::nodes.{name}.config.model "
                 f"— the dataset owns its task model, never the backend default.",
                 code="pipeline_config_invalid",
             )
@@ -1082,7 +1083,7 @@ def configure_and_apply_pipeline(
         active, campaign_config.pipeline_overrides, dataset_dir, filtered
     )
 
-    # Starting prompts from `{dataset_dir}/prompts/[<node>|default].json`, per prompt-bearing node.
+    # Starting prompts from `{dataset_dir}/prompts/[<node>|default].yaml`, per prompt-bearing node.
     if dataset_dir is not None and filtered and has_dataset_prompts(dataset_dir):
         _apply_starting_prompts(
             pipeline_params,

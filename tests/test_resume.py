@@ -427,7 +427,7 @@ def test_a_dataset_template_frozen_before_todays_config_still_loads() -> None:
     from promptpotter.application.datasets.authored import load_dataset_campaign_config
 
     fixture = (
-        Path(__file__).parent / "fixtures" / "cycles" / "frozen_dataset_template" / "campaign.json"
+        Path(__file__).parent / "fixtures" / "cycles" / "frozen_dataset_template" / "campaign.yaml"
     )
     # The real reader the three endpoints share — unwraps `campaign_config`, validates through
     # the live `CampaignConfig` (extra="forbid"). A dropped knob raises here.

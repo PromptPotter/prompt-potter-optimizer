@@ -49,7 +49,7 @@ def origin_gate_tripped(
 
     The round-0 sibling of :meth:`BudgetGate.tripped`. A non-healthy origin means
     candidates would be measured against a broken floor (the common case while a
-    developer brings up a new connector whose ``pipeline.json`` or backend code is
+    developer brings up a new connector whose ``pipeline.yaml`` or backend code is
     still buggy). ``strict`` halts on ``critical`` and on a ``degraded`` floor whose
     degradation the rescore remedy can re-measure away (transient backend noise) —
     but NOT on a purely ``untested`` degraded grade (a wide-CI low-sample round 0),

@@ -11,7 +11,7 @@ Frozen dataclass at `promptpotter/connectors/protocol.py::Connector`:
 ```python
 @dataclass(frozen=True)
 class Connector:
-    name: str                                                       # lowercase id; matches pipeline.json::backend_type
+    name: str                                                       # lowercase id; matches pipeline.yaml::backend_type
     wire_adapter: Callable[[str, dict | None], dict]                # outbound HTTP body shaper
     session_factory: Callable[[], SessionProtocol]                  # fresh session per BackendClient
     extract_experiment: Callable[[dict], tuple[list[dict], list[str]]]  # → (queries, index_terms)
@@ -31,7 +31,7 @@ Each connector self-registers at import via `promptpotter/connectors/__init__.py
 
 ## 2. Scoring formula DSL
 
-Configured per dataset via `campaign.json::scoring`:
+Configured per dataset via `campaign.yaml::scoring`:
 
 ```jsonc
 {
@@ -59,7 +59,7 @@ Two stable signals every measurement carries: **`hit`** (boolean, rank-1 exact �
 
 Each dataset lives at `datasets/{name}/` with:
 
-### `pipeline.json`
+### `pipeline.yaml`
 
 Connector-described pipeline (the shape `GET /pipeline` exposes, plus an operator overlay). Required top-level keys:
 
@@ -69,13 +69,15 @@ Connector-described pipeline (the shape `GET /pipeline` exposes, plus an operato
 - `nodes` — node graph. Per-node: `runtime` (`backend`/`frontend`/`in_process`) · `node_type` (`candidate_source`/`ranker`/`enricher`/`cache`/`""`) · `optimizer.param_keys` (list — operator-tunable knobs) · `optimizer.observation_mappings` (wire-name → optimizer-name) · `optimizer.langfuse_type` · `config` (per-dataset overlay merged onto the wire payload).
 - `pipelines` — named pipeline variants.
 - `available_models` — model menu shown to L1.
-- `resolved_schemas`, `resolved_prompts` — JSON-Schema and prompt-template maps keyed by version.
+- `resolved_prompts` — prompt-template map keyed by version. (`resolved_schemas` is a
+  sibling file, not a key: for `_optimizer` it is generated into
+  `resolved_schemas.json` by `scripts/build_optimizer_schemas.py`.)
 
-### `campaign.json`
+### `campaign.yaml`
 
 Campaign knobs + scoring + optimizer LLM. Validated by `application/config.py::CampaignConfig` with `extra="forbid"` — unknown keys raise at boot. See `CampaignConfig` for the full field list.
 
-**Top-level keys.** `dataset_name`, `scoring`, `sp_budget_ttest`, `exclude_nodes` (drop pipeline nodes by name), `pipeline_overrides` (per-node config overlay), `optimization`. (The optimizer LLM is install-global — `datasets/_optimizer/pipeline.json` — not a campaign key.)
+**Top-level keys.** `dataset_name`, `scoring`, `sp_budget_ttest`, `exclude_nodes` (drop pipeline nodes by name), `pipeline_overrides` (per-node config overlay), `optimization`. (The optimizer LLM is install-global — `datasets/_optimizer/pipeline.yaml` — not a campaign key.)
 
 **`optimization` knobs:** the stable contract is the mechanism, not a
 frozen key/default table (same rule as §4). Every knob is a
@@ -86,19 +88,18 @@ taxonomy. Only `improvement_threshold` and `degradation_threshold` are
 required; everything else defaults. Read defaults off the fields, never
 off a doc.
 
-**Optimizer LLM:** install-global, **not** in `campaign.json`. Provider, model, temperature, `reasoning_effort`, and `max_tokens` are per-node config in `datasets/_optimizer/pipeline.json` (`nodes.{l1_generate|l1_critique|l2_context|l3_plan|checkin}.config`), resolved inside `llm_call` like any other node tunable. One file configures the optimizer for every campaign.
+**Optimizer LLM:** install-global, **not** in `campaign.yaml`. Provider, model, temperature, `reasoning_effort`, and `max_tokens` are per-node config in `datasets/_optimizer/pipeline.yaml` (`nodes.{l1_generate|l1_critique|l2_context|l3_plan|checkin}.config`), resolved inside `llm_call` like any other node tunable. One file configures the optimizer for every campaign.
 
-Constants moved out of `campaign.json` (they live next to their consumer): L1 candidate-generation temperature (the `creativity` arg in `l1/generate.py`, driven by `l1_overrides.creativity`, defaulting to the `l1_generate` node temperature), L2/L3 transition temperatures (the `l2_context`/`l3_plan` node temperatures), PoBB lock-in (`l1/execute.py::POBB_LOCK_IN`), runaway-loop ceiling (`runner/loop.py::HARD_CAP`), stale-data recovery ladder (`scoring/sample_measurement.py`).
+Constants moved out of `campaign.yaml` (they live next to their consumer): L1 candidate-generation temperature (the `creativity` arg in `l1/generate.py`, driven by `l1_overrides.creativity`, defaulting to the `l1_generate` node temperature), L2/L3 transition temperatures (the `l2_context`/`l3_plan` node temperatures), PoBB lock-in (`l1/execute.py::POBB_LOCK_IN`), runaway-loop ceiling (`runner/loop.py::HARD_CAP`), stale-data recovery ladder (`scoring/sample_measurement.py`).
 
 The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no opt-in flag. L2 and L3 are always-on architecture.
 
 ### Other files
 
-- **`prompts/{node}.json`** — 8-field `PromptTemplate` JSON per node. Schema: `domain/opt_search_point.py::PromptTemplate`. Loaded by `application/datasets/prompts.py::load_node_prompt`.
+- **`prompts/{node}.yaml`** — 8-field `PromptTemplate` per node. Schema: `domain/opt_search_point.py::PromptTemplate`. Loaded by `application/datasets/prompts.py::load_node_prompt`.
 - **`task_description.md`** — free-form markdown; decomposed at `init` into the `task_context` dict on `OptSearchPoint`.
 - **`dataset.md`** — operator guide; free-form, not parsed.
-- **`recon_variants.json`** *(optional)* — per-dataset axis-mutation library: the pre-computed L1 sweep variants a recon run reads.
-- **`task_context.json`** — the committed task framing; written once by the `checkin` decomposition (or by web ingest at commit) and read free on every later run. See `application/optimization/task_context.py::load_or_build_task_context`.
+- **`task_context.yaml`** — the committed task framing; written once by the `checkin` decomposition (or by web ingest at commit) and read free on every later run. See `application/optimization/task_context.py::load_or_build_task_context`.
 
 ---
 
@@ -117,7 +118,7 @@ The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no 
 | Verb | Flag | Meaning |
 |---|---|---|
 | `new` | `<name>` (positional) | Mint a fresh session+cycle from `datasets/<name>/`. |
-| `new` | `--config <path>` | Override the dataset's default `campaign.json`. |
+| `new` | `--config <path>` | Override the dataset's default `campaign.yaml`. |
 | `new` | `--dataset-name <name>` | Alternative to the positional `<name>`. |
 | `new` | `--sweep-batch` | Sweep mode: round 1 scored, round 2 generation-only. Mints siblings under `sweeps/`. |
 | `new` | `--diag` | Diag mode: round 1 scored, force L2 on round-1 evidence, round 2 generation-only. |
@@ -160,7 +161,7 @@ Operator-visible files inside `campaigns/{campaign_id}/cycles/{cycle_id}/`. Weba
 | `rounds/round_NNNN.json` | `CampaignStore.save_round_file` | Full per-round detail: candidate scores, evaluators, prompt_fields, pipeline_params, OSP snapshot, decisions. |
 | `dashboard.json` (per cycle) | `LiveDashboardView._persist` | Live operator view; rewritten on every record. Refresh: 2 s. |
 | `langfuse/*.json` | `infrastructure/tracing/langfuse_push.py` | Per-cycle Langfuse export snapshots. |
-| `prompts/{node}.json` | `infrastructure/tracing/langfuse_push.py` (and CLI `init`) | Resolved prompt templates for this cycle's runs. |
+| `prompts/{node}.yaml` | `infrastructure/tracing/langfuse_push.py` (and CLI `init`) | Resolved prompt templates for this cycle's runs. |
 | `.runtime/ledger.jsonl` | `CycleEventLog.append` | The sole-ingress event log. Internal-but-stable shape (see §6). |
 | `.runtime/cache/rounds/round_NNNN.json` | `AuditTrailView.flush` | Per-round audit cache (writer-buffered until round close). |
 | `.runtime/cache/candidates/round_NNNN.json` | `CampaignStore.save_round_candidates` | Mid-round candidates checkpoint (deleted after L1 score on escalation). |
@@ -175,6 +176,6 @@ Sibling cycles (forks, diag, sweeps) live flat under `cycles/` alongside the roo
 - **Private types** (`_Injection`, `_TEMPLATE_EXTRAS`, etc., plus any `_`-prefixed name). Package `__init__` files are namespace markers that re-export nothing — §1–§7 is the whole public surface, not whatever a package surfaces.
 - **Runtime dataclass shapes** not in §1–§7 (`CycleSlice`, `RoundDigest`, `InjectionBundle`, `LiveStateCore`, etc.).
 - **In-memory caches** and their invalidation strategies (optimizer LRU caches, the dispatch hub's pipeline-param-catalogue cache, etc.).
-- **Prompt templates** at `datasets/_optimizer/pipeline.json::resolved_prompts` — data, intentionally tunable. Forks may edit; we may also edit on any release.
+- **Prompt templates** at `datasets/_optimizer/pipeline.yaml::resolved_prompts` — data, intentionally tunable. Forks may edit; we may also edit on any release.
 - **Test helpers** (`tests/_helpers.py`).
 - **The `webapp/` layout.** The webapp + control plane ship and serve users; internal component layout stays free to move.

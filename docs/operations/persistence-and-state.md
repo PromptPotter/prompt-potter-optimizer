@@ -144,7 +144,7 @@ python -m promptpotter new --sweep-batch   # dispatches sweep-mode against the f
 | `new` flag | Purpose |
 |---|---|
 | `<name\|file>` (positional) | Dataset name under `./datasets/` (auto-loads its `campaign.json`) **or** a path to a raw CSV to ingest |
-| `--config` | Campaign config JSON — overrides the dataset's default `campaign.json` (name form) |
+| `--config` | Campaign config JSON — overrides the dataset's default `campaign.yaml` (name form) |
 | `--dataset-name` | Alternative to the positional name |
 | `--slug` | *(file form)* Dataset slug under `projects/{tenant}/datasets/` (default: derived from the filename) |
 | `--set FIELD=VALUE` | *(file form)* Confirm an origin field directly (operator-stated), repeatable. Fields: `task_description`, `column.query`, `column.ground_truth`, `connector`, `scoring_composite`, `max_rounds`. Applied before the resolver, so it seeds the rest |
@@ -187,7 +187,7 @@ score?"* Three facts answer it; together they're why editing a file can feel ine
 
 2. **A running/resumed campaign uses its FROZEN `CampaignConfig` snapshot.** The
    `Campaign` manifest (`campaign.json`) owns the config; editing
-   `datasets/{name}/campaign.json` or `pipeline.json` does **not** change an existing
+   `datasets/{name}/campaign.yaml` or `pipeline.yaml` does **not** change an existing
    campaign. To apply a connector-config change you mint a **fresh `new`** — it reads the
    edited dataset configs, gets a fresh random `campaign_id`, and re-scores a new origin
    on the changed config (the old campaign is untouched — campaigns are never mutated).

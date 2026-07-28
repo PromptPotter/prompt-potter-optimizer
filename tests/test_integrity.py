@@ -12,6 +12,8 @@ them out with the loud-breakage shape/contract bulk.
 
 from __future__ import annotations
 
+import dataclasses
+import io
 import json
 import logging
 import subprocess
@@ -21,6 +23,7 @@ from typing import Any
 
 import pydantic
 import pytest
+import yaml
 
 from promptpotter.domain.measurement_provenance import grade_run
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -28,15 +31,16 @@ from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import JobSearchPoint
+from promptpotter.infrastructure.store.io import _YamlDumper, read_yaml, write_yaml
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
 from promptpotter.shared.hashing import content_hash
 
 
 def _pipeline_schema(dataset: str) -> PipelineSchema:
-    """The committed `datasets/{dataset}/pipeline.json`, parsed. `promptpotter-self` is the
+    """The committed `datasets/{dataset}/pipeline.yaml`, parsed. `promptpotter-self` is the
     outer L4 campaign (it declares the schema levers); `justlogic` is a plain inner one."""
-    path = Path(__file__).resolve().parents[1] / "datasets" / dataset / "pipeline.json"
-    return parse_pipeline_response(json.loads(path.read_text(encoding="utf-8")))
+    path = Path(__file__).resolve().parents[1] / "datasets" / dataset / "pipeline.yaml"
+    return parse_pipeline_response(yaml.safe_load(path.read_text(encoding="utf-8")))
 
 
 def _emittable_l1_params(schema: dict[str, Any], node: str = "l1_generate") -> set[str]:
@@ -1292,6 +1296,202 @@ def test_repeat_marker_reads_the_idea_not_the_field_it_was_written_into() -> Non
 
 
 # Binary formats legitimately full of NULs. Suffix-scoped so a NEW binary kind must be
+_YAML_1_1_HAZARDS = (
+    "TRUE",
+    "FALSE",
+    "True",
+    "no",
+    "No",
+    "yes",
+    "on",
+    "off",
+    "OFF",
+    "y",
+    "n",
+    "null",
+    "~",
+    "1",
+    "1.5",
+    "0755",
+    "1e5",
+    "2026-07-26",
+    "v1.0",
+)
+
+
+def test_yaml_emitter_never_reinterprets_a_string_it_wrote(tmp_path: Path) -> None:
+    """A config value that survives the write as a *different type* is silent harm.
+
+    YAML 1.1 — which PyYAML implements — resolves bare ``off``/``no``/``TRUE`` to
+    booleans and ``0755`` to an int. Two live values sit on that edge: the JustLogic
+    label enum is ``["TRUE", "FALSE"]`` and ``promptpotter-self`` sets
+    ``prompt_block_catalogue: "off"``. If the emitter ever stopped quoting them, a
+    written config would come back with a boolean where a label belongs and the
+    pipeline would grade every sample against it — no error, wrong numbers.
+    """
+    path = tmp_path / "hazards.yaml"
+    payload = {k: k for k in _YAML_1_1_HAZARDS} | {"nested": {"labels": list(_YAML_1_1_HAZARDS)}}
+    write_yaml(path, payload)
+    assert read_yaml(path) == payload
+
+
+def test_yaml_emitter_keeps_prose_in_block_scalars() -> None:
+    """The format exists so prose folds; a quoted blob is the failure it replaces.
+
+    Not cosmetic in one direction: the emitter must reach block style *without*
+    rewriting the string, because prompt text is hashed into measurement identity.
+    So this pins both halves — the style is block, and the value is untouched.
+    """
+    paragraphs = (
+        "A paragraph long enough that it must wrap somewhere, which is the whole reason the "
+        "config tier moved off JSON in the first place.\n\n"
+        "A second paragraph, equally long, so the emitter has to fold both of them and keep "
+        "the blank line that separates them intact."
+    )
+    bullets = "Consider:\n- one\n- two"
+    out = io.StringIO()
+    yaml.dump(
+        {"paragraphs": paragraphs, "bullets": bullets},
+        out,
+        Dumper=_YamlDumper,
+        sort_keys=False,
+        allow_unicode=True,
+        width=100,
+    )
+    text = out.getvalue()
+    assert "\\n" not in text, f"fell back to a quoted blob instead of a block scalar:\n{text}"
+    assert "paragraphs: >-" in text
+    assert "bullets: |-" in text
+    assert yaml.safe_load(text) == {"paragraphs": paragraphs, "bullets": bullets}
+
+
+# Every boolean-valued path in the operator-authored config tier, keyed by
+# ``{dataset}/{stem}::{dotted.path}`` so the entry survives the file's extension.
+# ``_optimizer/resolved_schemas.json`` is out of scope by construction — it is
+# generated, so it cannot grow a boolean by the hand-edit slip this census catches.
+_CONFIG_TIER_BOOLEANS = frozenset(
+    {
+        "aime_2025/campaign::campaign_config.optimization.seed_heatmap_from_archive",
+        "aime_2025/pipeline::nodes.llm_only.optimizer.observation_mappings[0].is_llm",
+        "bbeh/pipeline::nodes.llm_only.optimizer.observation_mappings[0].is_llm",
+        "bbeh/sweep/03_no_axes_focused_task::l1_section_overrides.axes_l1",
+        "email-tagging/pipeline::nodes.llm_only.optimizer.observation_mappings[0].is_llm",
+        "gsm8k/pipeline::nodes.llm_only.optimizer.observation_mappings[0].is_llm",
+        "justlogic-d23/pipeline::nodes.llm_only.config.output_schema.additionalProperties",
+        "justlogic-d23/pipeline::nodes.llm_only.optimizer.observation_mappings[0].is_llm",
+        "justlogic-d234/pipeline::nodes.llm_only.config.output_schema.additionalProperties",
+        "justlogic-d234/pipeline::nodes.llm_only.optimizer.observation_mappings[0].is_llm",
+        "justlogic/pipeline::nodes.llm_only.config.output_schema.additionalProperties",
+        "justlogic/pipeline::nodes.llm_only.optimizer.observation_mappings[0].is_llm",
+        "lca-termnorm/pipeline::nodes.cache_lookup.short_circuit",
+        "lca-termnorm/pipeline::nodes.entity_profiling.optimizer.observation_mappings[0].is_llm",
+        "lca-termnorm/pipeline::nodes.fuzzy_matching.short_circuit",
+        "lca-termnorm/pipeline::nodes.llm_ranking.optimizer.observation_mappings[0].is_llm",
+        "lca-termnorm/pipeline::nodes.web_search.config.extra_snippets",
+        "lca-termnorm/pipeline::nodes.web_search.config.extract_pdf",
+        "lca-termnorm/pipeline::nodes.web_search.config.spellcheck",
+    }
+)
+
+_CONFIG_TIER_GLOBS = (
+    "*/pipeline.*",
+    "*/campaign.*",
+    "*/task_context.*",
+    "*/inner_tasks.*",
+    "*/prompts/*.*",
+    "*/prompts.*",
+    "*/sweep/*.*",
+)
+
+
+def _config_tier_files(root: Path) -> list[Path]:
+    return sorted({p for g in _CONFIG_TIER_GLOBS for p in root.glob(g) if p.is_file()})
+
+
+def _load_config(path: Path) -> Any:
+    # Mid-migration the tier is part JSON, part YAML. Once it is all YAML this
+    # collapses to read_yaml.
+    raw = path.read_text(encoding="utf-8")
+    return json.loads(raw) if path.suffix == ".json" else yaml.safe_load(raw)
+
+
+def _boolean_paths(node: Any, prefix: str) -> list[str]:
+    if isinstance(node, bool):
+        return [prefix]
+    if isinstance(node, dict):
+        return [
+            p for k, v in node.items() for p in _boolean_paths(v, f"{prefix}.{k}" if prefix else k)
+        ]
+    if isinstance(node, list):
+        return [p for i, v in enumerate(node) for p in _boolean_paths(v, f"{prefix}[{i}]")]
+    return []
+
+
+def test_every_shipped_dataset_dir_is_recognized(built_stores) -> None:
+    """A dataset that stops being a dataset does not raise — it just disappears.
+
+    "Is this directory a dataset" is answered by probing for a config file. Rename that
+    file and the probe answers no: the resolver 404s a shipped benchmark and the picker
+    silently drops it, with nothing in any log. The install tier IS the directory
+    listing, so derive the expectation from disk rather than authoring a name set
+    (``promptpotter/CLAUDE.md``: a membership test over NAMES is a bug).
+    """
+    from promptpotter.infrastructure.store.dataset_access import (
+        list_readable_datasets,
+        readable_dataset_dir,
+    )
+
+    root = Path(__file__).resolve().parents[1] / "datasets"
+    store = dataclasses.replace(built_stores, benchmarks_root=root)
+    shipped = {d.name for d in root.iterdir() if d.is_dir() and not d.name.startswith((".", "_"))}
+    listed = {r.name for r in list_readable_datasets(store) if r.tier == "install"}
+    assert listed == shipped, (
+        f"shipped but unlisted: {sorted(shipped - listed)}; listed but absent: "
+        f"{sorted(listed - shipped)}"
+    )
+    for name in sorted(shipped):
+        assert readable_dataset_dir(store, name).is_dir()
+
+
+def test_the_l4_dataset_is_recognized_as_one() -> None:
+    """The is-this-L4 probe and the loader must agree — a disagreement is silent.
+
+    ``runner/inner/cycle.py`` decides whether to verify the outer observation contract
+    by probing for the inner-task spec. Miss it and the check is skipped, undeclared
+    inner keys are dropped, and the outer formula scores a measurement nobody took.
+    """
+    from promptpotter.application.runner.inner.tasks import load_inner_tasks
+    from promptpotter.connectors import CONNECTORS
+
+    d = Path(__file__).resolve().parents[1] / "datasets" / "promptpotter-self"
+    spec = d / CONNECTORS["promptpotter"].experiment_file
+    assert spec.is_file(), f"the L4 probe would read {d.name} as a plain dataset ({spec})"
+    assert load_inner_tasks(spec).tasks
+
+
+def test_shipped_config_booleans_match_the_pinned_census() -> None:
+    """A dropped quote in a hand-edited config is a type change, and it is silent.
+
+    Pydantic catches it wherever a field is typed, but the tier is full of
+    ``dict[str, Any]`` regions — ``nodes.*.config``, ``param_allowed_values`` — where
+    nothing does. There ``prompt_block_catalogue: off`` parses happily as ``False``
+    and the run reads a knob nobody set. Census, not a schema: the set of places a
+    boolean legitimately lives is small and stable, so anything new is a slip.
+    """
+    root = Path(__file__).resolve().parents[1] / "datasets"
+    found: set[str] = set()
+    for path in _config_tier_files(root):
+        data = _load_config(path)
+        stem = path.relative_to(root).with_suffix("").as_posix()
+        found |= {f"{stem}::{p}" for p in _boolean_paths(data, "")}
+
+    assert found == _CONFIG_TIER_BOOLEANS, (
+        "boolean census moved. A NEW entry is usually an unquoted YAML 1.1 word "
+        f"(off/no/yes/on/TRUE) that used to be a string: {sorted(found - _CONFIG_TIER_BOOLEANS)}. "
+        f"A MISSING entry means a real boolean was removed: {sorted(_CONFIG_TIER_BOOLEANS - found)}."
+    )
+
+
 # named here deliberately rather than widening the guard by accident.
 _BINARY_SUFFIXES = frozenset(
     {".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", ".pdf", ".woff", ".woff2"}

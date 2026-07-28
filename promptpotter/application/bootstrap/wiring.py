@@ -28,9 +28,10 @@ from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.infrastructure.backend import BackendClient, build_backend_client
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
+    dataset_pipeline_path,
     readable_dataset_dir,
 )
-from promptpotter.infrastructure.store.io import read_json_optional
+from promptpotter.infrastructure.store.io import read_yaml_optional
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.shared.identity import IdentityContext, default_identity
 from promptpotter.shared.instrument import instrument_mode
@@ -41,7 +42,7 @@ logger = logging.getLogger(__name__)
 def _apply_dataset_overlay(
     backend_resp: dict[str, Any], local_raw: dict[str, Any]
 ) -> dict[str, Any]:
-    """Merge dataset ``pipeline.json`` overlay onto the backend response.
+    """Merge dataset ``pipeline.yaml`` overlay onto the backend response.
     Overlay carries ``pipelines.default`` / per-node config deltas / metadata; backend stays SoT for runtime defaults."""
     out = copy.deepcopy(backend_resp.get("data") or backend_resp)
     if "pipelines" in local_raw:
@@ -115,17 +116,17 @@ async def _resolve_pipeline_schema(
     in_process: bool = False,
 ) -> PipelineSchema | None:
     """Backend ``GET /pipeline`` is authoritative for runtime defaults; local
-    ``{dataset_config_dir}/pipeline.json`` is the operator overlay. Merged
+    ``{dataset_config_dir}/pipeline.yaml`` is the operator overlay. Merged
     here before parsing — backend underneath, dataset on top. Backend
     unreachable → local file alone (offline mode).
 
     An ``in_process`` connector (``promptpotter``) has NO remote backend, so the
-    local ``pipeline.json`` IS the whole schema — skip the fetch entirely
+    local ``pipeline.yaml`` IS the whole schema — skip the fetch entirely
     (otherwise it would hit ``backend_url`` and merge an unrelated backend's
     nodes, e.g. TermNorm's, under the dataset overlay)."""
     backend_resp: dict[str, Any] | None = None
     if in_process:
-        pass  # no remote backend — local pipeline.json is authoritative
+        pass  # no remote backend — local pipeline.yaml is authoritative
     else:
         try:
             backend_resp = await client.fetch_pipeline()
@@ -136,7 +137,7 @@ async def _resolve_pipeline_schema(
 
     local_raw: dict[str, Any] | None = None
     if dataset_config_dir is not None:
-        local_raw = read_json_optional(dataset_config_dir / "pipeline.json")
+        local_raw = read_yaml_optional(dataset_pipeline_path(dataset_config_dir))
 
     if backend_resp:
         merged = _apply_dataset_overlay(backend_resp, local_raw or {})
@@ -155,20 +156,20 @@ async def _resolve_pipeline_schema(
             status(f"Pipeline: {schema.name} ({len(schema.nodes)} nodes, offline)")
             return schema
         except Exception as exc:
-            logger.warning("Failed to parse offline pipeline.json: %s", exc)
+            logger.warning("Failed to parse offline pipeline.yaml: %s", exc)
 
     status("Pipeline: unavailable")
     return None
 
 
 def _read_backend_type(dataset_config_dir: Path | None, dataset_name: str | None) -> str:
-    """Resolve backend_type from ``{dataset_config_dir}/pipeline.json``. Required field."""
+    """Resolve backend_type from ``{dataset_config_dir}/pipeline.yaml``. Required field."""
     if not dataset_name or dataset_config_dir is None:
         raise ValueError("dataset_name required to resolve backend_type for connector lookup")
-    raw = read_json_optional(dataset_config_dir / "pipeline.json")
+    raw = read_yaml_optional(dataset_pipeline_path(dataset_config_dir))
     bt = (raw or {}).get("backend_type")
     if not isinstance(bt, str) or not bt:
-        raise ValueError(f"backend_type missing or empty in {dataset_config_dir}/pipeline.json")
+        raise ValueError(f"backend_type missing or empty in {dataset_config_dir}/pipeline.yaml")
     return bt.lower()
 
 
@@ -186,7 +187,7 @@ def backend_type_of_dataset(store: Stores, dataset_name: str) -> str:
     there a missing kind means the run cannot pick a connector at all.
     """
     try:
-        raw = read_json_optional(readable_dataset_dir(store, dataset_name) / "pipeline.json")
+        raw = read_yaml_optional(dataset_pipeline_path(readable_dataset_dir(store, dataset_name)))
     except (OSError, ValueError, DatasetAccessError):
         return ""
     bt = (raw or {}).get("backend_type")
@@ -209,7 +210,7 @@ def _load_dataset_into_session(
 
     A connector that declares an :attr:`~Connector.experiment_file` (the
     in-process ``promptpotter`` L4 dataset, whose outer "samples" ARE the inner
-    tasks in ``inner_tasks.json``) loads through ``extract_experiment`` when no
+    tasks in ``inner_tasks.yaml``) loads through ``extract_experiment`` when no
     CSV/loader samples exist — so the same ``new <dataset>`` path serves it.
     """
     items = resolve_dataset_items(session.store, dataset_name, status=status)
@@ -249,11 +250,11 @@ def _load_experiment_file_into_session(
     status: Callable[[str], None],
 ) -> None:
     """Load samples from the connector's on-disk experiment doc (L4: the inner
-    tasks in ``inner_tasks.json``) via ``extract_experiment`` — the same seam the
+    tasks in ``inner_tasks.yaml``) via ``extract_experiment`` — the same seam the
     experiment-sync path uses, but reading the dataset dir instead of a backend."""
     config_dir = session.dataset_config_dir
     exp_path = (config_dir / connector.experiment_file) if config_dir else None
-    data = read_json_optional(exp_path) if exp_path else None
+    data = read_yaml_optional(exp_path) if exp_path else None
     if not data:
         status(f"Experiment file '{connector.experiment_file}' missing or empty")
         raise ValueError(
@@ -278,7 +279,7 @@ async def init_services(
 ) -> Session:
     """Init store, client, pipeline schema, scoring data — step 1 of bootstrap.
 
-    Preconditions: ``.promptpotter/`` tree + ``datasets/{dataset_name}/pipeline.json``
+    Preconditions: ``.promptpotter/`` tree + ``datasets/{dataset_name}/pipeline.yaml``
     declaring ``backend_type``. Returns a wired ``Session`` (no scoring yet).
     ``dataset_name`` is REQUIRED — the dataset resolves the config dir, which resolves
     the connector, so there is no session without one.

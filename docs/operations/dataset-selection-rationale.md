@@ -45,7 +45,7 @@ Operator-pinned model for the meta-campaign focus. Justification:
 - **Very cheap** — $0.03 in / $0.14 out per Mtok. A full-cycle eval on the 420-sample MMLU-ProX-sw train pool with 5 candidates × 6 rounds ≈ 12.6k calls fits well inside Groq's daily volume.
 - **Conservative-floor at `reasoning_effort: low`** per `promptpotter/CLAUDE.md` — optimizer climbs from the floor. `medium` / `high` are L1-reachable mutations when sibling-yield supports.
 
-Pinning is via `nodes.llm_only.config` overlay in each dataset's `pipeline.json`, not in `optimizer.param_keys` — L1 cannot propose `model` or `provider` mutations (operator-locked axes per `PARAM_FORBIDDEN_KEYS`).
+Pinning is via `nodes.llm_only.config` overlay in each dataset's `pipeline.yaml`, not in `optimizer.param_keys` — L1 cannot propose `model` or `provider` mutations (operator-locked axes per `PARAM_FORBIDDEN_KEYS`).
 
 ## Wired — primary
 
@@ -55,7 +55,7 @@ Pinning is via `nodes.llm_only.config` overlay in each dataset's `pipeline.json`
 |---|---|---|---|---|---|---|
 | **JustLogic depth ≥ 6** | `michaelchenkj/JustLogic` (single `train` split, 4,900 rows) | Operator-defined: depths 6+7 only, 200/depth train (400) + 500/depth test (1,000). Authors' canonical test set is withheld; HF `train` IS the public training fold. See `datasets/justlogic/dataset.md`. | **44% (11/25)** on 25-sample d≥6 recon, OpenRouter `:nitro` | **~0.3s/sample** — very fast, very cheap | 3-class `TRUE`/`FALSE`/`Uncertain`, all used (no class-collapse). Hedge bias: ~17/25 preds = `Uncertain`; per-depth gold distribution is balanced ~33% each → hedge bias is real reasoning failure, not label-skew coast. | **Break the hedge**: prompt mutations saying "commit to TRUE/FALSE when premises strictly determine the conclusion; reserve `Uncertain` for genuine indeterminacy." Synthetic generation = zero contamination. Random baseline 33.3%; human avg 73%; ceiling per o1-preview 81% (paper). |
 
-**Wire commit 2026-05-19**: `datasets/justlogic/` + `load_justlogic(split=...)` shipped. `pipeline.json` pins `openai/gpt-oss-20b:nitro` @ `low` via OpenRouter (matches recon conditions exactly).
+**Wire commit 2026-05-19**: `datasets/justlogic/` + `load_justlogic(split=...)` shipped. `pipeline.yaml` pins `openai/gpt-oss-20b:nitro` @ `low` via OpenRouter (matches recon conditions exactly).
 
 ## Next-priority after JustLogic (Round 8, 2026-05-19)
 
@@ -89,7 +89,7 @@ Two new in-band candidates from the colleague-triage recon (NaturalPlan + MuSiQu
 
 ## Trialed and rejected — 2026-05-19 recon trail
 
-7 datasets trialed, 7 rejected before MMLU-ProX-sw landed. **Default recon conditions: `openai/gpt-oss-20b @ reasoning_effort: low`, `temperature: 0.0`** (matches every dataset's wired `pipeline.json` — the operator's pinned meta-campaign setting). Provider was Groq for the first wave (until rate-limits), then OpenRouter `:nitro` routing for the rest. The `effort` column below flags any deviation from the `low` default.
+7 datasets trialed, 7 rejected before MMLU-ProX-sw landed. **Default recon conditions: `openai/gpt-oss-20b @ reasoning_effort: low`, `temperature: 0.0`** (matches every dataset's wired `pipeline.yaml` — the operator's pinned meta-campaign setting). Provider was Groq for the first wave (until rate-limits), then OpenRouter `:nitro` routing for the rest. The `effort` column below flags any deviation from the `low` default.
 
 | Dataset | Slice trialed | Effort | Measured origin | Why rejected |
 |---|---|---|---|---|

@@ -5,14 +5,16 @@ still carries that field, so ``load_campaign_config`` raises ``extra_forbidden``
 can no longer be read — silently, until someone tries to resume it. Re-stamping is the sanctioned
 remedy. Never ``extra="allow"``, never an alias, never a migration shim.
 
-Two trees, two shapes, two treatments — they share a filename and nothing else:
+Two trees, two shapes, two formats, two treatments — related by nothing but a stem:
 
-- **The minted snapshot**, ``campaigns/{id}/campaign.json::config``. Machine-written. Rewritten
-  as the **delta from today's defaults** (``freeze_campaign_config``), which is the shape the
-  engine now persists.
-- **The dataset template**, ``datasets/{slug}/campaign.json::campaign_config``. Human-authored.
-  Stale keys are pruned and *nothing else changes* — an operator who wrote a default value out
-  in full meant to see it there. A delta would silently reformat their file.
+- **The minted snapshot**, ``campaigns/{id}/campaign.json::config``. Machine-written, so JSON.
+  Rewritten as the **delta from today's defaults** (``freeze_campaign_config``), which is the
+  shape the engine now persists.
+- **The dataset template**, ``datasets/{slug}/campaign.yaml::campaign_config``. Human-authored,
+  so YAML. Stale keys are pruned and *nothing else changes* — an operator who wrote a default
+  value out in full meant to see it there. A delta would silently reformat their file. The
+  rewrite goes back through the package emitter, so an operator's block scalars survive; YAML
+  comments do not, which is the one thing this script destroys and cannot help.
 
 Both: every dropped key is reported with the value it held, never silently. Whether that value
 *was* the default of the day is unknowable — a deleted field leaves no default behind — so this
@@ -37,6 +39,7 @@ import types
 from collections import Counter
 from typing import Any, Union, get_args, get_origin
 
+import yaml
 from pydantic import BaseModel, ValidationError
 
 from promptpotter.application.config import (
@@ -44,6 +47,7 @@ from promptpotter.application.config import (
     freeze_campaign_config,
     load_campaign_config,
 )
+from promptpotter.infrastructure.store.io import write_yaml
 
 
 def _nested_model(ann: Any) -> type[BaseModel] | None:
@@ -106,10 +110,15 @@ class _Tally:
 def _process(
     path: pathlib.Path, key_path: tuple[str, ...], *, delta: bool, apply: bool, tally: _Tally
 ) -> None:
-    """Prune (and for a snapshot, delta-ify) the config at *key_path* inside the JSON at *path*."""
+    """Prune (and for a snapshot, delta-ify) the config at *key_path* inside the doc at *path*.
+
+    Format follows the tree: ``.yaml`` templates in and out, ``.json`` snapshots in and out.
+    """
+    is_yaml = path.suffix == ".yaml"
     try:
-        doc = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        text = path.read_text(encoding="utf-8")
+        doc = yaml.safe_load(text) if is_yaml else json.loads(text)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, yaml.YAMLError) as exc:
         tally.skipped += 1
         print(f"  SKIP  {path}: {type(exc).__name__}: {exc}")
         return
@@ -145,7 +154,10 @@ def _process(
     tally.rewritten += 1
     if apply:
         holder[key_path[-1]] = new
-        path.write_text(json.dumps(doc, indent=2, ensure_ascii=False), encoding="utf-8")
+        if is_yaml:
+            write_yaml(path, doc)
+        else:
+            path.write_text(json.dumps(doc, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def main() -> int:
@@ -167,8 +179,8 @@ def main() -> int:
         _process(path, ("config",), delta=True, apply=args.apply, tally=snapshots)
 
     templates = _Tally()
-    for path in sorted(root.glob("*/datasets/*/campaign.json")) + sorted(
-        pathlib.Path(args.datasets).glob("*/campaign.json")
+    for path in sorted(root.glob("*/datasets/*/campaign.yaml")) + sorted(
+        pathlib.Path(args.datasets).glob("*/campaign.yaml")
     ):
         _process(path, ("campaign_config",), delta=False, apply=args.apply, tally=templates)
 
@@ -177,7 +189,7 @@ def main() -> int:
         "re-stamped" if args.apply else "would re-stamp",
     )
     templates.report(
-        "Dataset templates (datasets/*/campaign.json::campaign_config) — pruned only",
+        "Dataset templates (datasets/*/campaign.yaml::campaign_config) — pruned only",
         "pruned" if args.apply else "would prune",
     )
 

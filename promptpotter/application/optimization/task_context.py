@@ -1,6 +1,6 @@
 """Task-description check-in: raw context → Layer-1 prompt fields + task_context.
 
-One LLM decomposition, cached on disk as the dataset's ``task_context.json``.
+One LLM decomposition, cached on disk as the dataset's ``task_context.yaml``.
 The web ingest path writes that file at commit (from the check-in it already ran);
 :func:`load_or_build_task_context` is the single run-start seam that reads it — or
 decomposes a repo benchmark's ``task_description.md`` once on first sight. No second
@@ -29,9 +29,9 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.models import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store.io import (
-    read_json_optional,
     read_text_optional,
-    write_json,
+    read_yaml_optional,
+    write_yaml,
 )
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.tracing.bridge import observed_node
@@ -61,7 +61,7 @@ async def decompose_prompt_fields(
     """LLM check-in: raw context → Layer 1 prompt fields + task_context sub-dict.
 
     Provider + model come from the ``checkin`` optimizer node config
-    (``datasets/_optimizer/pipeline.json``), resolved inside :func:`llm_call`."""
+    (``datasets/_optimizer/pipeline.yaml``), resolved inside :func:`llm_call`."""
     if isinstance(context_input, dict):
         user_content = (
             "The user has provided partial Layer 1 fields for a prompt. "
@@ -113,11 +113,11 @@ async def load_or_build_task_context(
     campaign_id: str,
     context: LLMCallContext,
 ) -> TaskDecomposition:
-    """Run-start task framing — read the committed ``{dir}/task_context.json``, or
+    """Run-start task framing — read the committed ``{dir}/task_context.yaml``, or
     decompose ``task_description.md`` once on first sight and persist it.
 
     The single seam both the web mint path and CLI ``new`` funnel through: an
-    ingested dataset already carries ``task_context.json`` (written at commit from
+    ingested dataset already carries ``task_context.yaml`` (written at commit from
     the check-in's decomposition), so the run reads it with no LLM call. A repo
     benchmark / pre-change dataset has only ``task_description.md`` — decompose it
     once, write the file, and every later run is a free read. Empty framing when
@@ -125,8 +125,8 @@ async def load_or_build_task_context(
     """
     if dataset_config_dir is None:
         return TaskDecomposition()
-    tc_path = dataset_config_dir / "task_context.json"
-    existing = read_json_optional(tc_path)
+    tc_path = dataset_config_dir / "task_context.yaml"
+    existing = read_yaml_optional(tc_path)
     if existing:
         task_context = TaskDecomposition.from_dict(existing)
         # The budget is enforced HERE — once, before the campaign starts — and nowhere else.
@@ -145,6 +145,6 @@ async def load_or_build_task_context(
     task_context = TaskDecomposition.from_dict(tc_dict)
     # Persist BEFORE gating: the decomposition call is already paid for, so a verbose checkin
     # leaves an editable file behind rather than burning the call and vanishing.
-    write_json(tc_path, task_context.to_dict())
+    write_yaml(tc_path, task_context.to_dict())
     task_context.check_budget(source=str(tc_path))
     return task_context

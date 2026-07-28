@@ -52,7 +52,10 @@ class SessionCtx:
         from promptpotter.application.config import (
             load_campaign_config as validate_campaign_config,
         )
-        from promptpotter.application.datasets.authored import read_campaign_config_file
+        from promptpotter.application.datasets.authored import (
+            dataset_campaign_path,
+            read_campaign_config_file,
+        )
         from promptpotter.infrastructure.store.dataset_access import (
             DatasetAccessError,
             readable_dataset_dir,
@@ -66,7 +69,7 @@ class SessionCtx:
             except DatasetAccessError:
                 pass  # campaign outlives its dataset dir — resume off the snapshot
             else:
-                raw = read_campaign_config_file(ds_dir / "campaign.json")
+                raw = read_campaign_config_file(dataset_campaign_path(ds_dir))
         config = validate_campaign_config(raw)
         campaign = (
             self.store.campaigns.load_campaign(self.campaign_id) if self.campaign_id else None
@@ -87,7 +90,7 @@ class SessionCtx:
 
 def no_dataset_hint() -> str:
     """Formatted list of discovered datasets + exact fresh-init commands."""
-    datasets = sorted(p.parent.name for p in Path("datasets").glob("*/campaign.json"))
+    datasets = sorted(p.parent.name for p in Path("datasets").glob("*/campaign.yaml"))
     lines = [f"  python -m promptpotter new {name}" for name in datasets]
     body = "\n".join(lines) if lines else "  (no datasets found under ./datasets/)"
     return "Available datasets:\n\n" + body

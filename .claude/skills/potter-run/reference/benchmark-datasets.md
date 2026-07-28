@@ -43,7 +43,7 @@ def _aime_match(predicted: str, ground_truth: str) -> float:
 | File | Purpose |
 |------|---------|
 | `campaign.json` | `dataset_name`, `scoring` formula, `sp_budget_ttest`, optimizer settings |
-| `pipeline.json` | Pipeline definition — `llm_only` node with LLM defaults, prompt template variables, optimizer metadata |
+| `pipeline.yaml` | Pipeline definition — `llm_only` node with LLM defaults, prompt template variables, optimizer metadata |
 | `dataset.md` | Type, status, prerequisites, `new` verb flags |
 | `task_description.md` | Domain context for L2/L3 optimization layers |
 

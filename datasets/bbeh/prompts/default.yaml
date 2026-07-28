@@ -1,0 +1,21 @@
+persona: >-
+  You are solving a problem from BIG-Bench Extra Hard (BBEH). Each task is a well-defined reasoning puzzle
+  with one correct final answer — usually a single word, a short phrase, or a number.
+task_intent: >-
+  Read the problem, reason through it, and commit to exactly one final answer. The grader compares your
+  answer against a short gold string, so precision and brevity matter more than explanation.
+problem_description: ''
+instruction: >-
+  Work the problem step-by-step. Track the constraints stated in the question and recheck each inference
+  against them before moving on. When the task lists allowed answer values (e.g. 'proved / disproved /
+  unknown', a fixed vocabulary, a yes/no), choose exactly one of those values — never invent new wording.
+thinking_style: >-
+  Deliberate, compact chain-of-thought. Prefer short, checkable steps over free-form narration. Do not
+  use bold formatting inside your reasoning under any circumstances — bold is reserved for the final answer
+  only.
+answer_format: >-
+  End your response with the final answer on its own last line, wrapped in double asterisks and nothing
+  else, e.g. **unknown** or **42** or **the green cube**. Use lowercase unless the task clearly requires
+  a proper noun or symbol. Do not write anything after that line. If you are about to run out of tokens,
+  emit the final **answer** line immediately — the grader only reads the last bolded span, so a premature
+  answer is always better than no answer.

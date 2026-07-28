@@ -91,7 +91,7 @@ The runtime block inside `_r_l1_wounds()` partitions into NEW (this round) vs AC
 
 `escalate_l2` (`application/optimization/escalation/firing.py`) checks `esc.l2.stall_count >= opt.l2_patience`. When stalled, L3 fires (subject to its own `l3_patience`).
 
-L3's prompt (`datasets/_optimizer/pipeline.json::resolved_prompts['l3_plan/1']`) reads:
+L3's prompt (`datasets/_optimizer/pipeline.yaml::resolved_prompts['l3_plan/1']`) reads:
 
 - `{{l1_wounds}}` — accumulated `RuntimeFailure` trail (+ validation block) rendered by `_r_l1_wounds()`.
 - `{{guard_breaches}}` — Wound 4 evidence (L2 + L3 post-parse breaches) rendered by `_r_guard_breaches()`.
@@ -129,7 +129,7 @@ class LLMOutputValidator:
 
 An outcome only exists for a failure — so no `passed` flag — and the self-healers count
 **events**, not graded scores, so there is no `score` field (the old "score flows into
-`campaign.json::scoring`" symmetry was aspirational and never wired; it's gone). No owner field
+`campaign.yaml::scoring`" symmetry was aspirational and never wired; it's gone). No owner field
 either: a guard-breach outcome always routes to L3 structurally (see above), so there is no
 per-outcome choice to store.
 

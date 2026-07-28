@@ -10,7 +10,7 @@ calling them out-of-order leaves the session under-wired.
 │    ├─ resolve identity     (default_identity() at Stage-0;          │
 │    │                        Stage-1 swaps in OIDC verification)     │
 │    ├─ build_stores(identity, projects_root=…)                       │
-│    ├─ connector resolve    (datasets/{name}/pipeline.json)          │
+│    ├─ connector resolve    (datasets/{name}/pipeline.yaml)          │
 │    ├─ BackendClient        (wire + session adapter from connector)  │
 │    ├─ GET /pipeline        (merged with dataset overlay)            │
 │    ├─ register backend     (idempotent)                             │
@@ -58,7 +58,7 @@ calling them out-of-order leaves the session under-wired.
 
 | Step | Reads | Writes |
 |---|---|---|
-| `init_services` | `datasets/{name}/pipeline.json`, `.env` (provider keys), backend `/pipeline` | `Session.{store, backend_client, pipeline_schema, samples, index_terms, tenant, langfuse}` |
+| `init_services` | `datasets/{name}/pipeline.yaml`, `.env` (provider keys), backend `/pipeline` | `Session.{store, backend_client, pipeline_schema, samples, index_terms, tenant, langfuse}` |
 | `populate_session_scoring` | `CampaignConfig.scoring`, `cycle_id` | `Session.{scoring, state.obs, experiment_id, source}` |
 | `bootstrap_cycle` | `Session.{store, backend_id, samples}`, `origin_jsp` | the cycle's `campaigns/{campaign_id}/cycles/{cycle_id}/` directory; returns `(cycle_id, resumed_from_round)` |
 | `init_optimization_loop` | everything above + `origin_accuracy` | `Cycle.{ledger, escalation, opt_sp, tracking, axes}`; emits INIT.exit |
@@ -87,4 +87,4 @@ restart — visible immediately); no standing test, see
   `new` / `resume`).
 - **`init_optimization_loop` fails origin scoring** → the backend
   doesn't accept the origin pipeline_params. Check
-  `datasets/{name}/pipeline.json::nodes.{name}.config`.
+  `datasets/{name}/pipeline.yaml::nodes.{name}.config`.

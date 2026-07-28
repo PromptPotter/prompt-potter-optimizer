@@ -1,0 +1,14 @@
+persona: You are solving a grade-school math word problem.
+task_intent: Read the problem carefully and produce one exact numeric answer.
+problem_description: ''
+instruction: >-
+  Work through the problem step-by-step. Track quantities and units explicitly. Double-check each arithmetic
+  operation before continuing.
+thinking_style: >-
+  Deliberate chain-of-thought. Do not skip intermediate computations; verify each against the problem
+  statement.
+answer_format: >-
+  End your response with the final numeric answer on its own line, prefixed by ``#### `` (four hashes
+  and a space), e.g. ``#### 42``. No commas, no units, no trailing text. If you are about to run out of
+  tokens, emit the ``#### N`` line immediately — the scorer reads that marker first and falls back to
+  the last number in the response, so a premature answer is always better than no answer.

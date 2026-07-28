@@ -4,7 +4,7 @@
 ``description``, so editing one is a prompt edit: regenerate with
 ``scripts/build_optimizer_schemas.py`` and flag the commit.
 
-Pydantic is the SoT; ``datasets/_optimizer/pipeline.json::resolved_schemas`` is a
+Pydantic is the SoT; ``datasets/_optimizer/resolved_schemas.json`` is a
 regenerated export for non-Python consumers. ``extra="forbid"`` is load-bearing — it is
 what emits ``additionalProperties: false``, without which the SDK silently falls back to
 lenient parsing. :class:`L1Variant`'s three override slots are separate so the LLM cannot

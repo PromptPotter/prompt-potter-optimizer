@@ -9,38 +9,37 @@ Each subdirectory is a **first-class dataset definition**: the campaign config, 
 
 ```
 datasets/{name}/
-├── campaign.json          # CampaignConfig: optimizer LLM, scoring, max_rounds, etc.
-├── pipeline.json          # Backend tunable overlay (nodes.{name}.config)
+├── campaign.yaml          # CampaignConfig: optimizer LLM, scoring, max_rounds, etc.
+├── pipeline.yaml          # Backend tunable overlay (nodes.{name}.config)
 ├── task_description.md    # L1's framing input — what the task IS
 ├── dataset.md             # Human-facing description: source, split, sample shape
-├── prompts/{node}.json    # Per-node PromptTemplate overrides (optional)
+├── prompts/{node}.yaml    # Per-node PromptTemplate overrides (optional)
 └── cache.json             # The dataset ITEM BANK (write-managed; don't hand-edit)
 ```
 
 Optional:
 
-- `recon_variants.json` — pre-computed L1 sweep variants for recon runs.
 - `sweep/` — sweep-mode sibling cycle outputs.
 
 ## Sole route for backend tunable changes
 
-**Backend overlay (`nodes.{name}.config` in `pipeline.json`) is the only way to switch model, provider, temperature, or anything in a node's `optimizer.param_keys`.** Never edit the backend repo (including the co-owned TermNorm backend) to achieve a tunable switch. Pipeline-agnostic is a §0 commitment.
+**Backend overlay (`nodes.{name}.config` in `pipeline.yaml`) is the only way to switch model, provider, temperature, or anything in a node's `optimizer.param_keys`.** Never edit the backend repo (including the co-owned TermNorm backend) to achieve a tunable switch. Pipeline-agnostic is a §0 commitment.
 
 `load_dataset_node_overlay` → `configure_and_apply_pipeline()` (`promptpotter/application/config.py`) merges the overlay onto each wire payload. **The dataset owns its task model** in `nodes.{node}.config.model` — every LLM node must declare one, or `configure_and_apply_pipeline` raises a loud setup error (no silent fall-through to the backend's own default).
 
 ## Registered datasets
 
-The roster is the directory listing; each dataset's connector is read off its own `pipeline.json::nodes` — don't mirror either here. The special cases worth knowing:
+The roster is the directory listing; each dataset's connector is read off its own `pipeline.yaml::nodes` — don't mirror either here. The special cases worth knowing:
 
 - **`lca-termnorm`** (`termnorm`) — the multi-node retrieval pipeline. Every other benchmark declares a single `llm_only` **node**: all of them are `backend_type: "termnorm"` and route over HTTP to the server exactly as `lca-termnorm` does. `llm_only` is a node name only — the connector that once shared the name was deleted (zero adopters), so there is nothing left to confuse it with.
 - **`aime_2025`** — its overlay routes to OpenRouter+Mistral, off the Groq default.
 - **`email-tagging`** — the built-in try-and-learn demo, surfaced while `User.demo_mode_enabled`.
 - **`justlogic-d234`** — the L4 inner benchmark (an iid mix of depths 2-4; `justlogic` (d6-7) and `justlogic-d23` are dead cuts kept only so their banked measurements stay addressable); **`promptpotter-self`** (`promptpotter` connector) — the one L4 dataset ([§ L4 below](#l4--promptpotter-self)).
-- **`_optimizer/` + `_optimizer_meta/`** — not datasets: the optimizer's own prompt homes. Which prompts live where → [`../docs/glossary.md`](../docs/glossary.md) **Prompt homes**. Both are **operator-owned files** — nothing writes them. `meta_champion.py` ranks meta-prompt states; graduating a winner into `_optimizer/pipeline.json` is a deliberate hand-edit.
+- **`_optimizer/` + `_optimizer_meta/`** — not datasets: the optimizer's own prompt homes. Which prompts live where → [`../docs/glossary.md`](../docs/glossary.md) **Prompt homes**. Both are **operator-owned files** — nothing writes them. `meta_champion.py` ranks meta-prompt states; graduating a winner into `_optimizer/pipeline.yaml` is a deliberate hand-edit.
 
 ## L4 — `promptpotter-self`
 
-`datasets/promptpotter-self/` is the **recursive case**: the outer cycle's mutation surface is the inner cycle's meta-prompt template fields (`l1_generate` / `l1_critique` / `l2_context` / `l3_plan`), exposed via `pipeline.json::nodes.{node}.optimizer.param_keys`.
+`datasets/promptpotter-self/` is the **recursive case**: the outer cycle's mutation surface is the inner cycle's meta-prompt template fields (`l1_generate` / `l1_critique` / `l2_context` / `l3_plan`), exposed via `pipeline.yaml::nodes.{node}.optimizer.param_keys`.
 
 L4 is **not** a 4th `LayerStrategy` — it is the same PromptPotter applied to itself via the `promptpotter` connector, a recursion, not a new layer driver (full statement: [`../promptpotter/application/optimization/CLAUDE.md`](../promptpotter/application/optimization/CLAUDE.md)).
 

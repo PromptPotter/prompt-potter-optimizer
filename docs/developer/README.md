@@ -162,7 +162,7 @@ Order for a contributor who wants to follow L1/L2/L3 end-to-end:
 | [L2 internals](l2-internals.md) | L2 firing, output, OSP mutations, layout edits |
 | [Self-healing internals](self-healing-internals.md) | Failure classification, escalation wiring |
 | [Node standard](node-standard.md) | Node JSON declaration format |
-| [Pipeline JSON contract](pipeline-json-contract.md) | Strict field-level `pipeline.json` shape |
+| [Pipeline JSON contract](pipeline-contract.md) | Strict field-level `pipeline.yaml` shape |
 | [Stable API v1](stable-api.md) | Fork-readiness surface |
 | [Bootstrap sequence](bootstrap-sequence.md) | The four-step chain `init_services` → `populate_session_scoring` → `bootstrap_cycle` → `init_optimization_loop` with pre/postconditions and an ASCII diagram |
 | [Concept map](concept-map.md) | "Where does concept X live" table |

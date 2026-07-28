@@ -8,7 +8,7 @@ that drive the inner PromptPotter cycle. Connector boundary:
 [`docs/specs/l4-outer-loop.md`](../../docs/specs/l4-outer-loop.md).
 Concept: [`docs/concepts/optimizer-of-the-optimizer.md`](../../docs/concepts/optimizer-of-the-optimizer.md).
 
-Each outer "sample" is one entry in `inner_tasks.json`: it mints and runs a full
+Each outer "sample" is one entry in `inner_tasks.yaml`: it mints and runs a full
 inner PromptPotter campaign on **`justlogic`** (high-depth logic reasoning — chosen
 because the inner model is far from what prompting can get out of it there, so the
 inner loop has room to climb and outer candidates score differently. No target
@@ -19,7 +19,7 @@ measurements (`domain/l4/proxies.py::OuterSampleProxies`) — among them
 origin, in logits on one difficulty-adjusted ruler), `first_round_delta`,
 `delta_per_dollar`, and the `cleanliness` / `diversity_health` health terms.
 
-The outer scoring formula in `campaign.json::scoring` composes a weighted subset
+The outer scoring formula in `campaign.yaml::scoring` composes a weighted subset
 (currently `after_N_rounds_delta` alone as the lift core — `first_round_delta` is held
 out as mostly noise at two candidates — gated by `cleanliness × diversity` and scaled
 by `delta_per_dollar`). Operators iterate on the formula as evidence
@@ -36,16 +36,16 @@ place — [`docs/specs/l4-outer-loop.md`](../../docs/specs/l4-outer-loop.md)
 
 Knob values live in the files, not here — read them there.
 
-- `pipeline.json` — meta-prompt node schema (`l1_generate` / `l1_critique` /
+- `pipeline.yaml` — meta-prompt node schema (`l1_generate` / `l1_critique` /
   `l2_context` / `l3_plan`) + the outer optimizer's model/provider.
 - `campaign.json` — outer campaign config: the composite scoring formula,
   `optimizer_set: "meta"`, the USD budget (`token_budget` is `null` on purpose —
   see Cost shape).
-- `inner_tasks.json` — the outer "samples": the seed-pinned `justlogic` bank +
+- `inner_tasks.yaml` — the outer "samples": the seed-pinned `justlogic` bank +
   the `inner_benchmark_config` ladder (a REQUIRED file; all four ladder keys
   must be present or the inner cycle is unscoreable).
-- `task_description.md` / `task_context.json` — outer L1 framing.
-- The outer meta-prompt *rewrites* live in `datasets/_optimizer_meta/prompts.json`
+- `task_description.md` / `task_context.yaml` — outer L1 framing.
+- The outer meta-prompt *rewrites* live in `datasets/_optimizer_meta/prompts.yaml`
   (selected by `optimizer_set: "meta"`), not in a local `prompts/` dir.
 
 ## Run
@@ -68,7 +68,7 @@ inner campaigns/round = (1 origin + n_variants) × n_inner_tasks
 inner rounds/campaign ≤ max_inner_rounds   (the lives brake may stop sooner)
 ```
 
-(plug in the current values from `campaign.json` + `inner_tasks.json`). The
+(plug in the current values from `campaign.json` + `inner_tasks.yaml`). The
 origin is measured once and cached across outer rounds, so steady state after
 round 0 is `n_variants × n_inner_tasks` fresh inner campaigns/round, and PoBB
 elimination prunes trailing candidates before all tasks complete — actual <

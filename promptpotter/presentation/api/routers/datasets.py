@@ -8,7 +8,10 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, File, Form, Header, Query, Request, UploadFile
 from pydantic import Field
 
-from promptpotter.application.datasets.authored import load_dataset_campaign_config
+from promptpotter.application.datasets.authored import (
+    dataset_campaign_path,
+    load_dataset_campaign_config,
+)
 from promptpotter.application.datasets.csv_ingest import (
     MAX_SAMPLES,
     IngestError,
@@ -37,10 +40,11 @@ from promptpotter.infrastructure.store.archive_views import (
 )
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
+    dataset_pipeline_path,
     list_readable_datasets,
     readable_dataset_dir,
 )
-from promptpotter.infrastructure.store.io import read_json
+from promptpotter.infrastructure.store.io import read_json, read_yaml
 from promptpotter.infrastructure.store.layout import campaign_root_dir_for
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
 from promptpotter.presentation.api.deps import (
@@ -580,7 +584,7 @@ def get_dataset_preview(
     # Held-out test fold from campaign config — display-only; never materialized. Read off
     # the typed knob (`CampaignConfig.dataset_split`), not a raw-dict re-parse: one field,
     # one reader, one shape.
-    campaign_path = dataset_dir / "campaign.json"
+    campaign_path = dataset_campaign_path(dataset_dir)
     declared = (
         load_dataset_campaign_config(campaign_path).dataset_split
         if campaign_path.is_file()
@@ -734,10 +738,10 @@ def get_dataset_pipeline(name: str, store: StoreDep) -> DatasetPipelineResponse:
     no unauthenticated path to a benchmark's pipeline/overlay config.
     """
     dataset_dir = _resolve_or_404(store, name)
-    pipeline_path = dataset_dir / "pipeline.json"
+    pipeline_path = dataset_pipeline_path(dataset_dir)
     if not pipeline_path.is_file():
-        raise NotFoundError(f"Dataset '{name}' has no pipeline.json")
-    raw = read_json(pipeline_path)
+        raise NotFoundError(f"Dataset '{name}' has no pipeline.yaml")
+    raw = read_yaml(pipeline_path)
     # `parse_pipeline_response` strips lone surrogates at parse time so the
     # rendered model is already wire-safe (some overlays carry escape
     # sequences pointing at lone low surrogates that crash UTF-8 encode).
@@ -748,7 +752,7 @@ def get_dataset_pipeline(name: str, store: StoreDep) -> DatasetPipelineResponse:
     # showing the recommended per-node locks (e.g. retrieval nodes origin-locked); the
     # draft's own overlay edits layer on top client-side. model/provider are always
     # optimizer-locked (operator-owned axes), so no per-campaign policy is read here.
-    campaign_path = dataset_dir / "campaign.json"
+    campaign_path = dataset_campaign_path(dataset_dir)
     if campaign_path.is_file():
         cfg = load_dataset_campaign_config(campaign_path)
         schema = schema.narrow(cfg.optimizer_narrowing)

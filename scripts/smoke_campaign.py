@@ -73,7 +73,7 @@ def _infer_scoring(dataset: str) -> str:
     """Prefer the dataset's own ``campaign.json`` formula; fall back to ``exact_match``."""
     import json
 
-    cfg_path = _REPO_ROOT / "datasets" / dataset / "campaign.json"
+    cfg_path = _REPO_ROOT / "datasets" / dataset / "campaign.yaml"
     if cfg_path.exists():
         try:
             cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
@@ -120,7 +120,7 @@ async def _run(args: argparse.Namespace) -> int:
         print(
             f"[smoke] ERROR: pipeline schema for {args.dataset!r} declares no "
             f"available_models. Add an `available_models: [...]` list to "
-            f"datasets/{args.dataset}/pipeline.json so the L1 validation rail "
+            f"datasets/{args.dataset}/pipeline.yaml so the L1 validation rail "
             f"can reject candidates that propose unsupported models.",
             file=sys.stderr,
         )

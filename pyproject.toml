@@ -33,6 +33,7 @@ dependencies = [
     "json-repair>=0.30,<1.0",  # why kept: structured repair of provider-returned JSON (invalid \X escapes, etc.) at the LLM boundary
     "cryptography>=46.0.7",    # why kept: RS256 / ES256 JWS verification for OIDC ID tokens (Stage-1 identity foundation, ADR-0002). Floor past PYSEC-2026-35/36 + CVE-2026-26007.
     "openpyxl>=3.1.0",         # why kept: .xlsx upload ingest (application/datasets/csv_ingest.py::_read_xlsx) + ground-truth Excel build (datasets/dataset_builder.py). Default-installed; xlsx parsing is gated off by settings.HARDENED_MODE, not by absence.
+    "pyyaml>=6.0",             # why kept: parse/emit the operator-authored config tier (store/io.py::read_yaml/write_yaml). Already present in every install transitively via uvicorn[standard]; declared because we import it.
 ]
 
 [project.optional-dependencies]
@@ -73,6 +74,7 @@ dev = [
     "ruff>=0.3.0",            # why kept: lint + format
     "mypy>=1.10.0",           # why kept: static type-check (CI gate)
     "deptry>=0.20.0",         # why kept: dependency audit (CI gate)
+    "types-PyYAML>=6.0",      # why kept: stubs so mypy checks the store/io.py YAML emitter instead of skipping it
 ]
 
 [project.urls]
@@ -220,6 +222,7 @@ DEP002 = [
     "ruff",
     "mypy",
     "deptry",
+    "types-PyYAML",      # stub-only package: consumed by mypy, never imported
 ]
 # Optional features — imported lazily with install-message guards.
 # Declared in extras ([excel], [benchmarks], [observability], [anthropic], [jupyter]).

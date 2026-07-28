@@ -305,7 +305,7 @@ CONNECTOR = Connector(
         ("improvement_threshold", 0.01),
         ("degradation_threshold", 0.4),
     ),
-    # A fresh drop's committed pipeline.json must OWN its task model — the dataset
+    # A fresh drop's committed pipeline.yaml must OWN its task model — the dataset
     # is the authority for what the backend runs, never the backend's own hidden
     # GET /pipeline default (which would silently pick the heavy groq/120b). This
     # seed is copied verbatim into the new dataset's file by ``merge_pipeline_overlay``,

@@ -572,7 +572,7 @@ export interface SpawnedBy {
    * string the round file and console use. */
   candidate_label: string | null;
   /** The panel cell this run measured — the outer query, e.g.
-   * `justlogic-d23/seed-0` (`inner_tasks.json::tasks[].id`). The candidate
+   * `justlogic-d23/seed-0` (`inner_tasks.yaml::tasks[].id`). The candidate
    * fields do NOT identify a run: every task runs for every candidate, so one
    * candidate's spawns are as many as the panel has cells and are told apart
    * only by this. Null on a run minted before the stamp existed. */
@@ -657,7 +657,7 @@ export interface CampaignSummary {
   /** Backend this campaign optimizes against */
   backend_id: string;
   /** Connector KIND of the campaign's dataset ('termnorm' / 'promptpotter' / …),
-   * read off `{dataset}/pipeline.json::backend_type`. The webapp's ONE test
+   * read off `{dataset}/pipeline.yaml::backend_type`. The webapp's ONE test
    * for a self-optimizing (L4) campaign — it renders the 'inner loops'
    * disclosure and the pp-self panel variants on it. Empty when the dataset
    * config is gone (a campaign outlives its dataset dir); callers treat empty

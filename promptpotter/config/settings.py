@@ -141,7 +141,7 @@ POBB_DEFAULT_EPSILON: float = 0.15
 # the samples are paid for once per config. Candidate breadth is paid per
 # candidate, per round, and widening it would also widen every θ-LCB comparison
 # basis for no shared-cache payback. 40 is the value the L4 panel has run on
-# (``datasets/promptpotter-self/inner_tasks.json``); a bank smaller than this
+# (``datasets/promptpotter-self/inner_tasks.yaml``); a bank smaller than this
 # scores the whole bank, which is the right answer there, not an error.
 DEFAULT_ORIGIN_BUDGET: int = 40
 
@@ -173,7 +173,7 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
 
     # LLM provider keys. The optimizer's provider + model are install-global,
-    # configured per node in ``datasets/_optimizer/pipeline.json`` and read at
+    # configured per node in ``datasets/_optimizer/pipeline.yaml`` and read at
     # ``llm_call`` — there is no env-var provider/model default. (Target/scoring
     # model is per-dataset, in the pipeline overlay.)
     OPENAI_API_KEY: str = ""

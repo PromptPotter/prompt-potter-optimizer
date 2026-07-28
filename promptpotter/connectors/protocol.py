@@ -80,7 +80,7 @@ class BackendUnreachableError(PotterError):
 @dataclass(frozen=True)
 class Connector:
     name: str
-    """Lowercase id matching ``pipeline.json::backend_type`` and
+    """Lowercase id matching ``pipeline.yaml::backend_type`` and
     ``pipeline_schema.name.lower()``."""
 
     wire_adapter: WireAdapter
@@ -95,7 +95,7 @@ class Connector:
     experiment_file: str = ""
     """Filename of an on-disk experiment doc in the dataset's config dir, read +
     passed to :attr:`extract_experiment` when the dataset ships no CSV/loader
-    samples. The in-process ``promptpotter`` connector sets ``inner_tasks.json`` —
+    samples. The in-process ``promptpotter`` connector sets ``inner_tasks.yaml`` —
     its outer "samples" ARE the inner tasks declared there, not a sample table.
     Empty (default) = samples come from the loader registry / tenant upload only."""
 
@@ -145,7 +145,7 @@ class Connector:
     dir so a connector can fold dataset-scoped inner behavior into the
     fingerprint. The canonical user is the in-process ``promptpotter``
     connector: its backend IS the inner optimizer (meta-prompt origin +
-    layouts + engine + the dataset's ``inner_tasks.json`` inner-run config), so
+    layouts + engine + the dataset's ``inner_tasks.yaml`` inner-run config), so
     without this an origin edit silently reuses stale measurements recorded
     under the old behavior. The connector's ``wire_adapter`` must strip these
     reserved keys from the outbound payload. ``None`` = the backend's revision
@@ -154,7 +154,7 @@ class Connector:
 
     default_pipeline: tuple[str, ...] = ()
     """First-tenant default pipeline step list — the launcher's chat-first
-    ingest seeds ``pipeline.json::pipelines.default`` from this when a draft
+    ingest seeds ``pipeline.yaml::pipelines.default`` from this when a draft
     has no explicit override. Empty tuple means "no override; use the
     backend's ``GET /pipeline`` default." TermNorm sets this to
     ``("llm_only",)`` so a fresh CSV upload skips the heavy nodes
@@ -188,8 +188,8 @@ class Connector:
     an entry; unlisted nodes are untyped (no dependency)."""
 
     default_node_config: Mapping[str, Any] = field(default_factory=dict)
-    """Per-node ``pipeline.json::nodes.{name}`` overlay the chat-first ingest
-    seeds into a fresh dataset's committed ``pipeline.json``. Keyed by node
+    """Per-node ``pipeline.yaml::nodes.{name}`` overlay the chat-first ingest
+    seeds into a fresh dataset's committed ``pipeline.yaml``. Keyed by node
     name; each value is a node overlay (``config`` floor + ``optimizer``
     constraints) merged onto the backend's live ``GET /pipeline`` schema (the
     overlay's ``config``/``optimizer`` sub-blocks shallow-merge, so a partial

@@ -74,7 +74,7 @@ operator to run `start-server-py-LLMs.bat` in their own terminal; wait for `/sta
   (`application/datasets/csv_ingest.py`) handles CSV/TSV/JSON/JSONL/XLSX.
 - **New bundled benchmark (rare):** register a loader returning `list[Sample]`
   (`domain/sample.py`) in `DATASET_LOADERS`, and draft
-  `datasets/<name>/{pipeline.json, campaign.json, dataset.md, prompts/<node>.json}` against
+  `datasets/<name>/{pipeline.yaml, campaign.json, dataset.md, prompts/<node>.yaml}` against
   `datasets/bbeh/`. Follow `docs/operations/adding-a-dataset.md` — canonical split first.
 
 ## First-run smoke

@@ -69,8 +69,8 @@ Each round is **generate → score → critique**: L1 proposes candidates, they'
 
 ## Common questions
 
-- **What does L1 actually mutate?** The prompt template's fields (persona, task instruction, …) plus whatever your `pipeline.json` declares as tunable. See [`state-record.md`](docs/concepts/state-record.md).
-- **Where do I get a starting prompt?** Bring one with your dataset (`datasets/{name}/prompts/{node}.json`). Walkthrough: [manual ch. 03](docs/manual/03-first-campaign.md).
+- **What does L1 actually mutate?** The prompt template's fields (persona, task instruction, …) plus whatever your `pipeline.yaml` declares as tunable. See [`state-record.md`](docs/concepts/state-record.md).
+- **Where do I get a starting prompt?** Bring one with your dataset (`datasets/{name}/prompts/{node}.yaml`). Walkthrough: [manual ch. 03](docs/manual/03-first-campaign.md).
 - **How do I watch a run?** Open `dashboard.json` in an auto-reload editor + watch the CLI terminal. Full guide: [Watching a run](#watching-a-run).
 - **My scoring formula was wrong — did I lose results?** No. Traces are facts; scores are policy. The optimizer rescores on load and replays decisions; on divergence, fork. See [`scoring-and-memory.md`](docs/concepts/scoring-and-memory.md).
 - **What if it stalls?** Stall and failure are different triggers. Failures route back to the proposing layer ([self-healing](docs/developer/self-healing-internals.md)); stalls escalate L1 → L2 → L3 ([the-loop](docs/concepts/the-loop.md)). Stuck for other reasons: [troubleshooting](docs/manual/05-troubleshooting.md).

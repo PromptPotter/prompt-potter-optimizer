@@ -39,9 +39,24 @@ class DatasetRef:
     tier: str  # "yours" | "install"
 
 
-def _has_config(dataset_dir: Path) -> bool:
-    """A directory is a dataset iff it carries a cache or a pipeline overlay."""
-    return (dataset_dir / "cache.json").is_file() or (dataset_dir / "pipeline.json").is_file()
+def dataset_pipeline_path(dataset_dir: Path) -> Path:
+    """The dataset's node overlay. **The one place this filename is spelled.**
+
+    Every reader takes the resolved dir and asks here, so a rename cannot desync a
+    reader from an existence probe — which is the shape that lets a dataset silently
+    stop being a dataset instead of failing loudly.
+    """
+    return dataset_dir / "pipeline.yaml"
+
+
+def is_dataset_dir(dataset_dir: Path) -> bool:
+    """A directory is a dataset iff it carries a cache or a pipeline overlay.
+
+    Public because three call sites used to re-derive it with their own literal —
+    the readiness probe in the origins router among them — so "is this a dataset"
+    could answer differently depending on who asked.
+    """
+    return (dataset_dir / "cache.json").is_file() or dataset_pipeline_path(dataset_dir).is_file()
 
 
 def readable_dataset_dir(store: Stores, name: str) -> Path:
@@ -56,11 +71,11 @@ def readable_dataset_dir(store: Stores, name: str) -> Path:
         tenant_dir = store.tenant_datasets.dataset_dir(name)  # validates the slug
     except ValueError as exc:
         raise DatasetAccessError(name) from exc
-    if _has_config(tenant_dir):
+    if is_dataset_dir(tenant_dir):
         return tenant_dir
 
     install_dir = store.benchmarks_root / name  # name validated above
-    if _has_config(install_dir):
+    if is_dataset_dir(install_dir):
         return install_dir
     raise DatasetAccessError(name)
 
@@ -100,7 +115,7 @@ def list_readable_datasets(store: Stores) -> list[DatasetRef]:
         for entry in sorted(store.benchmarks_root.iterdir()):
             if entry.name in own or _is_internal(entry.name):
                 continue  # tenant copy already won / optimizer's own config
-            if not entry.is_dir() or not (entry / "pipeline.json").is_file():
+            if not entry.is_dir() or not dataset_pipeline_path(entry).is_file():
                 continue
             try:
                 validate_dataset_name(entry.name)
@@ -139,6 +154,8 @@ def _read_n_samples(dataset_dir: Path) -> int:
 __all__ = [
     "DatasetAccessError",
     "DatasetRef",
+    "dataset_pipeline_path",
+    "is_dataset_dir",
     "list_readable_datasets",
     "readable_dataset_dir",
 ]

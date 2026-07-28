@@ -34,10 +34,10 @@ BBEH_TASK_DESCRIPTION = (
     "carefully, reason step by step as needed, and return only the final answer."
 )
 
-# datasets/bbeh/{pipeline,campaign}.json are the SoT — pipeline.json drives the
+# datasets/bbeh/{pipeline,campaign}.json are the SoT — pipeline.yaml drives the
 # target-layer schema (read by init_notebook_session via dataset_name="bbeh"),
 # campaign.json carries every loop-control knob and the optimizer LLM.
-_BBEH_CAMPAIGN_JSON = Path(__file__).resolve().parents[3] / "datasets" / "bbeh" / "campaign.json"
+_BBEH_CAMPAIGN_JSON = Path(__file__).resolve().parents[3] / "datasets" / "bbeh" / "campaign.yaml"
 
 
 def _normalize(examples: list[dict]) -> list[Sample]:
@@ -56,7 +56,7 @@ def build_campaign_config(
 
     Overrides are intended as ad-hoc notebook conveniences; campaign.json
     stays the project default and the SoT for CLI runs. The optimizer LLM is
-    install-global (``datasets/_optimizer/pipeline.json``) — edit that file to
+    install-global (``datasets/_optimizer/pipeline.yaml``) — edit that file to
     change the optimizer model/provider, not the campaign config.
     """
     raw = json.loads(_BBEH_CAMPAIGN_JSON.read_text(encoding="utf-8"))

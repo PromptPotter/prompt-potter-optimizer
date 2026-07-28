@@ -264,7 +264,7 @@ async def _checkin_task(
 ) -> None:
     """Resolve the run's ``task_context`` and stash it on session state.
 
-    ``{dataset_config_dir}/task_context.json`` is the canonical framing — written
+    ``{dataset_config_dir}/task_context.yaml`` is the canonical framing — written
     at commit from the check-in's decomposition, or decomposed once on first sight
     for a repo benchmark. ``--task-file``/``--task-text`` decompose an ad-hoc
     override instead. Either way the result rides session state so ``resume`` reads it
@@ -313,7 +313,10 @@ async def _mint_fresh_session(
     """Find-or-create campaign + mint session + root cycle. No scoring (origin runs as phase 0 of the loop).
     Returns ``(session, campaign_config, dataset_name, session_id)``."""
     from promptpotter.application.config import load_campaign_config as _load_cfg
-    from promptpotter.application.datasets.authored import read_campaign_config_file
+    from promptpotter.application.datasets.authored import (
+        dataset_campaign_path,
+        read_campaign_config_file,
+    )
 
     # Shared unwrap only — `new` validates AFTER merging with the connector
     # profile ({**profile, **file_config}), a different composition order than
@@ -345,7 +348,7 @@ async def _mint_fresh_session(
     # persists with scoring=null + default knobs. file_config only feeds
     # campaign_config below, so reading it post-init is safe.
     if not args.config and session.dataset_config_dir is not None:
-        default_config_path = session.dataset_config_dir / "campaign.json"
+        default_config_path = dataset_campaign_path(session.dataset_config_dir)
         if default_config_path.exists():
             file_config = read_campaign_config_file(default_config_path)
 

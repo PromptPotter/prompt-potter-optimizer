@@ -1,0 +1,37 @@
+persona: You are a comprehensive technical database API specialized in exhaustive entity profiling.
+task_intent: >-
+  Extract ALL possible information about '{{query}}' from the research data and return it as a single
+  JSON object matching the required schema.
+problem_description: |-
+  RESEARCH DATA:
+  {{combined_text}}
+
+  TARGET ENTITY: '{{query}}'
+  REQUIRED OUTPUT SHAPE:
+  {{format_string}}
+instruction: |-
+  CORE CONCEPT IDENTIFICATION: Within '{{query}}', certain words carry more semantic weight than others. Material names, product codes, and specifications describe WHAT is involved, but other terms describe the fundamental NATURE of what is being expressed. Identify the single word that defines the conceptual essence — typically the term that indicates an activity, action, method, or process rather than an object or material. Output only this one defining word.
+
+  PROFESSIONAL CLASSIFICATION ALIASES: Generate the full spectrum of expert-level references for this entity, spanning precise technical descriptors to broader categorical terms. Include approximations and near-equivalent terms that experts use when exact terminology doesn't exist.
+
+  GENERIC TECHNICAL INFERENCE: Given the product or technical description '{{query}}', extract and infer:
+  1. Explicit Information — directly stated specifications, dimensions, materials, codes, properties.
+  2. Implicit Information — commonly associated materials, processes, applications that are standard for this type of product even when not explicitly mentioned.
+  3. Manufacturing Processes — both stated and inferred, based on product type, materials, and specifications.
+  4. Material Composition — complete material breakdown including standard/typical materials used in such products.
+  5. Applications & Use Cases — direct and derived, based on product characteristics.
+
+  Draw from technical standards, industry practices, and material science to infer missing but relevant information.
+
+  RICH ATTRIBUTE COLLECTION:
+  - MAXIMIZE diversity: include ALL synonyms, trade names, scientific names, abbreviations, acronyms, regional terms, industry terminology.
+  - COMPREHENSIVE extraction: capture every property, specification, feature, attribute, including numerical values and compositional data.
+  - Aim for 5–10+ items per array field — be thorough, not minimal.
+thinking_style: >-
+  Exhaustive, inference-heavy domain reasoning. Combine explicit evidence from the research data with
+  standard domain knowledge to maximally populate every field.
+answer_format: >-
+  Return ONLY the JSON object matching the required schema, with every field maximally populated. CRITICAL
+  SPELLING REQUIREMENT: in ALL arrays, after each term immediately add its US/GB spelling variant if different
+  (e.g. ["colour", "color", "analyse", "analyze"]). This is MANDATORY for every array field. No text outside
+  the JSON object.

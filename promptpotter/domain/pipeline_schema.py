@@ -208,7 +208,7 @@ class PipelineViewEdge(StrictModel):
 
 
 class PipelineView(StrictModel):
-    """Webapp-facing graph projection — ``datasets/_optimizer/pipeline.json::view`` or derived."""
+    """Webapp-facing graph projection — ``datasets/_optimizer/pipeline.yaml::view`` or derived."""
 
     model_config = ConfigDict(frozen=True, populate_by_name=True)
 
@@ -301,7 +301,7 @@ class NodeSearchNarrowing(StrictModel):
     """A campaign's per-node narrowing of the dataset-declared optimizer search
     space — the per-campaign search-space lever beside ``exclude_nodes`` (whole
     node); model/provider are always locked. The dataset's
-    ``pipeline.json`` declares the MAXIMUM tunable surface; a campaign may only
+    ``pipeline.yaml`` declares the MAXIMUM tunable surface; a campaign may only
     SUBSET it, frozen into the ``Campaign`` snapshot at mint and applied by
     :meth:`PipelineSchema.narrow`.
 

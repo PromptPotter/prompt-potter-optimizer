@@ -50,7 +50,7 @@ class CampaignSummary(StrictModel):
         default="",
         description=(
             "Connector KIND of the campaign's dataset ('termnorm' / 'promptpotter' / …), read off "
-            "`{dataset}/pipeline.json::backend_type`. The webapp's ONE test for a self-optimizing "
+            "`{dataset}/pipeline.yaml::backend_type`. The webapp's ONE test for a self-optimizing "
             "(L4) campaign — it renders the 'inner loops' disclosure and the pp-self panel "
             "variants on it. Empty when the dataset config is gone (a campaign outlives its "
             "dataset dir); callers treat empty as 'not self-optimizing'."

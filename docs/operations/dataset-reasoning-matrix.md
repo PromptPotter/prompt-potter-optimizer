@@ -1,6 +1,6 @@
-# Dataset Reasoning Matrix — Per-Dataset `pipeline.json` Defaults
+# Dataset Reasoning Matrix — Per-Dataset `pipeline.yaml` Defaults
 
-Single canonical view of the model + reasoning_effort + max_tokens defaults shipped with each dataset's `pipeline.json`. Operators tune per-cycle via `campaign.json` overrides; this table is the **starting point**, not the only valid setting.
+Single canonical view of the model + reasoning_effort + max_tokens defaults shipped with each dataset's `pipeline.yaml`. Operators tune per-cycle via `campaign.json` overrides; this table is the **starting point**, not the only valid setting.
 
 | Dataset | model (default) | `reasoning_effort` | `max_tokens` | Notes |
 |---|---|---|---|---|
@@ -12,7 +12,7 @@ Single canonical view of the model + reasoning_effort + max_tokens defaults ship
 | `lca-termnorm` | `openai/gpt-oss-120b` | n/a | absent (`null`) | Multi-node TermNorm pipeline; not a single-call reasoning dataset. Research nodes carry their own per-node `reasoning_effort` + structured-output mode — see "Why TermNorm research nodes cap `reasoning_effort: low`" below. |
 | `lca-bom-termnorm` | `entity_profiling` → `openai/gpt-oss-20b` | `low` (entity_profiling) | absent (`null`) | Tenant material-matching pipeline (`web_search → entity_profiling → token_matching`, no `llm_ranking`). `entity_profiling` emits **native** `json_schema` and pins `reasoning_effort: low` (the cap is load-bearing — see section below). Multi-node, so the single-call columns describe the profiling node only. Tenant config on disk, gitignored. |
 
-`max_tokens` is **never** set as a numeric default in any dataset's `pipeline.json` node config — provider ceiling applies. Enforced by `tests/test_dataset_pipeline_defaults.py`.
+`max_tokens` is **never** set as a numeric default in any dataset's `pipeline.yaml` node config — provider ceiling applies. Enforced by `tests/test_dataset_pipeline_defaults.py`.
 
 ## Held — next-priority after JustLogic (2026-05-19, Round 8)
 
@@ -32,7 +32,7 @@ Rejected from this round: **AR-LSAT** (72% ceiling — solved at low) and **MuSi
 
 There is no single canonical model — each dataset pins its own (table above). The floor default for a **new** dataset is `openai/gpt-oss-20b:nitro @ low` via OpenRouter (cheapest, fastest, leaves L1 headroom); scale up to `120b` only where the dataset's reasoning genuinely needs it (e.g. `gsm8k`, `hotpotqa`). When a Groq-routed run exhausts its daily 120b volume, drop to `20b` to keep iterating; flip back to `120b` for benchmarking / publication runs.
 
-The current value committed in `datasets/bbeh/pipeline.json` may be either — treat the field as a **live operator knob**, not a fixed default.
+The current value committed in `datasets/bbeh/pipeline.yaml` may be either — treat the field as a **live operator knob**, not a fixed default.
 
 ## Why BBEH ships `reasoning_effort: low` (not `medium`/`high`)
 

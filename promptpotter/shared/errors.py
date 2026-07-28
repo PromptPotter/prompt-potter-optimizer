@@ -195,7 +195,7 @@ class RequestTooLargeError(RuntimeError):
             f"count (parallel calls), NOT a single-request lever — lowering it does "
             f"not shrink this request. Biggest lever first:\n"
             f"  - point the optimizer node `provider` in "
-            f"`datasets/_optimizer/pipeline.json` at a tier whose per-minute cap "
+            f"`datasets/_optimizer/pipeline.yaml` at a tier whose per-minute cap "
             f"exceeds {requested} tokens (e.g. OpenRouter, or a paid Groq tier) — "
             f"the free Groq on_demand tier caps at {limit}\n"
             f"  - or shorten the optimizer meta-prompt (task_description.md)."

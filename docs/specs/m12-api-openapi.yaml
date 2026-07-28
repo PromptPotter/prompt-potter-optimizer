@@ -673,7 +673,7 @@ paths:
       x-status: declared-not-wired  # no handler; POST 404s `command_kind_unknown`
       summary: Overlay a single backend pipeline param on the active cycle.
       description: |
-        Writes to `datasets/{name}/pipeline.json::nodes.{node}.config` — the
+        Writes to `datasets/{name}/pipeline.yaml::nodes.{node}.config` — the
         per-call overlay, NOT the backend's static config. Bound by the
         "never edit backend static config" rule (§Backend overlay).
       tags: [pipeline-params]
@@ -1027,7 +1027,7 @@ paths:
            campaign stays `checkin` so the operator resolves + retries).
         3. Reserves the machine slot, then commits the origin: a fresh upload
            writes `projects/{tenant}/datasets/{slug}/` (the four Dataset files
-           + sibling `campaign.json`) from the materialized bank; a draft derived
+           + sibling `campaign.yaml`) from the materialized bank; a draft derived
            from an existing dataset persists only its candidate library.
         4. Resolves the cycle plan, flips `checkin` → `active`, clears
            `.runtime/checkin.flag`, and detaches the runner.
@@ -1570,7 +1570,7 @@ paths:
         renamed out of the way. Server, in crash-safe order:
         1. Renames `projects/{tenant}/datasets/{slug}/` to the smallest free
            `{slug}-v{n}/` (byte-identical data; self-reference fixed).
-        2. Repoints every dependent campaign — `campaign.json::dataset_name`
+        2. Repoints every dependent campaign — `campaign.yaml::dataset_name`
            and each cycle `index.json::header.dataset_name` — onto `{slug}-vN`,
            and re-stamps that data's measurement-archive entries. After this,
            every prior campaign resolves the exact bytes it always ran on.
@@ -2645,7 +2645,7 @@ components:
           description: |
             `nodes.*.config` value overlay for this fork only, merged ON TOP of the
             dataset overlay (seed > dataset > backend default). The dataset
-            `pipeline.json` stays immutable — the steer never mutates the origin.
+            `pipeline.yaml` stays immutable — the steer never mutates the origin.
             Param *locks* ride `optimizer_narrowing`, not this block.
         optimizer_narrowing:
           type: object
@@ -3097,7 +3097,7 @@ components:
       additionalProperties: false
       description: |
         The campaign-config knobs a draft carries, as one object — materialized
-        into the committed `campaign.json::optimization` block. Operator-facing
+        into the committed `campaign.yaml::optimization` block. Operator-facing
         (UI) vocabulary. Sent whole on `DraftCampaign`; on the edit patch any
         subset is shallow-merged onto the current value (a new knob is one property
         here, not a fresh field threaded through every surface).
@@ -3221,7 +3221,7 @@ components:
           description: |
             The campaign-config knobs (round ceiling, model lock, mechanism
             toggles) as one object. Seeded with stock defaults; operator-editable
-            in the new-campaign form. Materialized into `campaign.json::optimization`
+            in the new-campaign form. Materialized into `campaign.yaml::optimization`
             at commit.
         raw_task_description:
           type: string

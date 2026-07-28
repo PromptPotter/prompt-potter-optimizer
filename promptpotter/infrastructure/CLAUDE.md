@@ -95,7 +95,13 @@ leaf stores: `backends` (`BackendStore`), `tenant_datasets`, `sessions`,
 `campaigns` (`store/campaign_store/`), `checkin` (`CheckinDraftStore`),
 `sweeps`, `archive` (`MeasurementArchive`), `optimizer_calls`
 (`OptimizerCallCache`), `diagnostic_runs`, `users`. Shared I/O in
-`store/io.py`; path helpers in `store/layout.py`; the per-tenant
+`store/io.py` — **format follows authorship**: `write_json`/`read_json*` for what
+code writes and only code reads (manifests, `dashboard.json`, `cache.json`,
+measurements), `write_yaml`/`read_yaml*` for the operator-authored config tier
+under `datasets/`, whose block-scalar emitter lives beside them. There is
+deliberately no `read_yaml_tolerant` — a corrupt config that degrades to "not
+there" attributes a measurement to the wrong fingerprint. Path helpers in
+`store/layout.py`; the per-tenant
 active-session pointer in `store/session_pointer.py`; derived reads are free
 functions in view modules (`store/archive_views.py` is the template — it is
 also the archive's single-writer facade). **`store/__init__.py` re-exports

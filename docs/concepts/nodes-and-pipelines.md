@@ -15,5 +15,5 @@ Three reasons nodes-not-monoliths (mirrors prompt decomposition): measurable axe
 ## Pointers
 
 - JSON declaration format + how to wire a new node: [`../developer/node-standard.md`](../developer/node-standard.md)
-- Pipeline JSON contract: [`../developer/pipeline-json-contract.md`](../developer/pipeline-json-contract.md)
+- Pipeline JSON contract: [`../developer/pipeline-contract.md`](../developer/pipeline-contract.md)
 - Backend integration recipe: [`../operations/backend-integration.md`](../operations/backend-integration.md)

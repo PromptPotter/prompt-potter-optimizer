@@ -165,7 +165,7 @@ runner). Codepath: `event_stream.py::CycleLedgerTail` → `events.py::stream_cyc
 The user ↔ assistant round-trip does not exist (chat input is disabled outside ingest). It
 adds a chat endpoint that wraps an LLM and answers from campaign context — a new optimizer
 node mirroring the `checkin` node, so its **provider/model lives per-node in
-`datasets/_optimizer/pipeline.json`** (resolved inside `run_optimizer_node`/`llm_call`), NOT
+`datasets/_optimizer/pipeline.yaml`** (resolved inside `run_optimizer_node`/`llm_call`), NOT
 in `campaign.json` (which carries no `optimizer_llm.provider`). The assistant uses **no new
 tools** (it answers from context + the live stream); genuine web-search / MCP assistant
 tools are deferred (§7).

@@ -211,7 +211,7 @@ from promptpotter.diagnostics import compute_ledger
 # 315->317 / ``init_files`` 59->60 / ``reexport_shims`` 42->43. A 1105-line orchestration file
 # split along its real seam — ``inner/tasks.py`` (the panel an outer dataset DECLARES) vs
 # ``inner/cycle.py`` (how one cell is RUN). What the ledger cannot see is the subtraction that
-# paid for it: ``inner_tasks.json`` was the ONLY config in the package with no schema, hand-parsed
+# paid for it: ``inner_tasks.yaml`` was the ONLY config in the package with no schema, hand-parsed
 # through a ``.get()`` ladder guarded by a hand-written ``_REQUIRED_BENCH_KEYS`` tuple — the
 # membership-test-over-NAMES bug class ``promptpotter/CLAUDE.md`` names. With nothing able to
 # reject a key, it had grown two nobody read: an 8,050-char ``description`` (a comment field
@@ -283,6 +283,12 @@ from promptpotter.diagnostics import compute_ledger
 # dataset smaller than ``elimination_n_min`` it contradicted the clamp that exists to keep a tiny
 # set electable, crowning a winner and refusing to call the round improved) and the seven
 # margin-only ``EliminationContext`` fields.
+# 2026-07-28 config tier moves to YAML: ``any_params`` 63->64 — ``write_yaml(path, data: Any)``,
+# the exact shape ``write_json`` already has. A serializer's payload is genuinely unconstrained;
+# typing it would only restate ``json``/``yaml``'s own contract one layer up. The pass it pays for
+# subtracts more than it adds: four dead ``recon_variants.json`` files, the "half-generated
+# manifest" concept, and (at Arc 4) a ``read_json_tolerant`` call that was silently attributing
+# measurements to the wrong fingerprint whenever a dataset overlay was corrupt.
 LEDGER_BASELINE = {
     # 312 -> 313: `shared/instrument.py`. Raised DELIBERATELY, and it is the honest number to
     # argue about: the pass it pays for removed three ambient ContextVars and three public
@@ -367,7 +373,7 @@ LEDGER_BASELINE = {
     # champion.py`` + ``application/meta_champion/champion.py``. Operator call, made against
     # a correction: the ChampionConsole panel CANNOT land a winner (its row ops are
     # ``disabled`` placeholders whose tooltips say "run: champion apply"), so the verb was
-    # the only write path into ``datasets/_optimizer/pipeline.json``. Deleting it makes
+    # the only write path into ``datasets/_optimizer/pipeline.yaml``. Deleting it makes
     # graduation a deliberate hand-edit — a once-per-winner action that did not earn ~560
     # lines of promote/coronate/apply/replay machinery, none of which had ever run: no
     # ``champion.json``, no ``meta_champion/registry.json`` exists on disk anywhere.
@@ -490,7 +496,7 @@ LEDGER_BASELINE = {
     # (origin eval breadth; None = sp_budget_ttest). Lets the origin be scored on MORE bank
     # samples than each candidate: origin theta is the term every delta subtracts and its rows
     # are shared cache, so breadth there is cheap precision, while candidate breadth is paid
-    # per-candidate. First user: the L4 inner instrument (inner_tasks.json::n_samples_origin,
+    # per-candidate. First user: the L4 inner instrument (inner_tasks.yaml::n_samples_origin,
     # origin 40 vs candidates 28). A feature, justified, so the baseline rises.
     "config_leaf_fields": 38,
     "settings_env": 16,
@@ -501,7 +507,7 @@ LEDGER_BASELINE = {
     #
     # 15 -> 16 (2026-07-26): ``DEFAULT_ORIGIN_BUDGET`` — the origin (C0) eval breadth every
     # loop falls back to. It is a net-new constant but NOT a net-new concept: the number 40
-    # already existed, hardcoded in ``datasets/promptpotter-self/inner_tasks.json``, while the
+    # already existed, hardcoded in ``datasets/promptpotter-self/inner_tasks.yaml``, while the
     # engine's own default was "whatever ``sp_budget_ttest`` happens to be". Naming it is what
     # lets ``CampaignConfig.sp_budget_origin`` and ``InnerBenchmarkConfig.n_samples_origin``
     # cite ONE value, which is the whole point — an outer recursion and its inner instrument
@@ -541,7 +547,7 @@ LEDGER_BASELINE = {
     # the SDK's own ``ChatCompletion`` is the real type for all three. Written, not baselined:
     # ``openai`` sits behind ``follow_imports="skip"`` so mypy still resolves it to ``Any``, but
     # the reader no longer has to. Three sites named, one net removed.
-    "any_params": 63,
+    "any_params": 64,
     # NEW dimension (2026-07-17), landing at 4 — a Pydantic model that does NOT end up
     # ``extra="forbid"``, so an unknown key is dropped instead of raised. 106 before the
     # ``StrictModel`` migration, 4 after. It is a conceptual surface because the alternative
@@ -555,12 +561,12 @@ LEDGER_BASELINE = {
     #     ``model_validate()`` reading that same file are only compatible while extras are
     #     ignored. Verified, not assumed: forbid breaks all 78 real round files on disk.
     #   * ``NodePromptInfo`` — the BACKEND owns that sub-object's vocabulary (``family``,
-    #     ``description`` ride real ``pipeline.json`` files) and PP reads a subset by contract.
+    #     ``description`` ride real ``pipeline.yaml`` files) and PP reads a subset by contract.
     #     A backend PP does not own must be free to describe itself without crashing PP.
     #   * ``Sample`` — a dataset row carries whatever columns the operator's file had.
     # ``ObservationMapping`` is deliberately NOT on this list though it also parses
-    # ``pipeline.json``: PP owns that vocabulary, so an unknown key there is a typo, which is
-    # the whole reason this arc exists. All 10 committed ``pipeline.json`` files pass forbid.
+    # ``pipeline.yaml``: PP owns that vocabulary, so an unknown key there is a typo, which is
+    # the whole reason this arc exists. All 10 committed ``pipeline.yaml`` files pass forbid.
     "models_lax": 4,
     "prompt_string_fields": 6,
     "injections": 25,

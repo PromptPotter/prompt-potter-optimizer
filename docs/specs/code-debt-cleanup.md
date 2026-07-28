@@ -23,6 +23,17 @@ shape was the old bloat source; readiness buckets replaced it.
 
 ## Ready — no blocker, pick up cold
 
+- **`new bbeh --sweep-batch` cannot load a single payload.** All 12
+  `datasets/bbeh/sweep/*.yaml` carry a `brief` key; `OperatorSweepFile` declares only
+  `reason` + `l1_layout` and is `extra="forbid"`, so every one raises. `brief` left the
+  model in `d8fe4e3c` ("drop l2_directive — task_context becomes broadcast channel") and
+  the payloads were never updated, so the verb has been dead since. Predates the
+  JSON→YAML migration (the identical parse fails on the pre-migration JSON) — surfaced by
+  loading every shipped dataset through its real reader. Action is a product call, not a
+  mechanical one: either `brief` is a lever worth restoring to the model, or it is archival
+  prose that should leave the 12 files. Don't delete operator-authored text to make a
+  parser happy without deciding which.
+
 **Ray / lineage follow-ups** (named during the 2026-07-26 time-ray landing; none blocks the feature):
 
 - **`lib/hooks/usePoll.ts` — head-of-line blocking.** One in-flight tick skips the whole next tick, and the lineage tick `Promise.all`s every subscribed key — one slow campaign's fetch delays every other key. Action: per-key in-flight accounting (a `usePoll` design change, not a caller patch).
@@ -64,11 +75,11 @@ shape was the old bloat source; readiness buckets replaced it.
 
 **Security posture / migration:**
 - **`fe5c6d1e` forbid-by-default migrated CampaignConfig but NOT backend records** — `domain/backend.py::BackendConnection` is `StrictModel` (forbid) and `5a69ca67` dropped its `last_synced_at` field, but stored `archive/backends/*/backend.json` still carried it, so `BackendStore.get`/`list_all` (`BackendConnection(**data)`) raised `extra_forbidden` at `init_services` — **every `new`/`resume` died at load** until the record was migrated. Fixed LOCALLY 2026-07-17 (stripped the dead null field from 8 records). Systemic gap: `deploy-linux/update.sh` re-stamps only CampaignConfig (`restamp_campaign_configs.py`) — backend records get no migration, so the live box breaks the same way on next deploy of `fe5c6d1e`. Action: extend the deploy re-stamp to reconcile `backend.json` against the model (strip unknown keys), OR persist it delta-from-defaults like `freeze_campaign_config`. Same class as the documented CampaignConfig drift (root `CLAUDE.md` § Known issues) — the forbid-default flip needs a migration story for **every** on-disk StrictModel, not just CampaignConfig. Blocker: none — a re-stamp extension, ships before/with the next deploy.
-- **Backend-registration dedup** — `webapp/lib/hooks/useConnector.ts` client-side `distinct`/`seenEndpoints` collapse is a back-compat shim for per-dataset `BackendConnection` rows minted before the `wiring.py` one-row-per-`(base_url, backend_type)` fix. NOT a row-delete: it's a 3-step migration — (1) rewrite each campaign's `campaign.json::backend_id` to the canonical `local` (8 stale ids across 82 campaigns, all → the same `127.0.0.1:8000` endpoint); (2) collapse the duplicate rows (needs a new `BackendStore.remove`); (3) make every re-wire path reuse the canonical id. Then delete the loop. Also: `wiring.py` `not backend_id` reuse block should guard on `existing.base_url == backend_url` (mint a distinct id on mismatch). Blocker: write + operator-run the idempotent migration on their data first — the loop is load-bearing until then.
+- **Backend-registration dedup** — `webapp/lib/hooks/useConnector.ts` client-side `distinct`/`seenEndpoints` collapse is a back-compat shim for per-dataset `BackendConnection` rows minted before the `wiring.py` one-row-per-`(base_url, backend_type)` fix. NOT a row-delete: it's a 3-step migration — (1) rewrite each campaign's `campaign.yaml::backend_id` to the canonical `local` (8 stale ids across 82 campaigns, all → the same `127.0.0.1:8000` endpoint); (2) collapse the duplicate rows (needs a new `BackendStore.remove`); (3) make every re-wire path reuse the canonical id. Then delete the loop. Also: `wiring.py` `not backend_id` reuse block should guard on `existing.base_url == backend_url` (mint a distinct id on mismatch). Blocker: write + operator-run the idempotent migration on their data first — the loop is load-bearing until then.
 
 **Cross-repo (TermNorm sibling at `OfficeAddinApps/TermNorm-excel/backend-api`):**
 - **TermNorm wire `model`** — backend `spend.backend.model` reports a provider slug (`"openrouter"`), not the upstream model, so backend $ can't be derived from `lookup_rate(model)×tokens`. Add `model` to the per-request response + a `/version` endpoint; this repo then bumps `termnorm.py::_EXPECTED_REVISION`. (The connector revision-pin already exists; the old `auth.py` back-fill is already gone.)
-  **Downgraded 2026-07-10:** PromptPotter no longer reads that slug at all. `_compute_step_tokens` now stamps every step-token entry with the node's model — the backend's per-node `model` when it reports one, else the model the dataset overlay pinned (`pipeline.json::nodes.{n}.config.model`, which is mandatory for an LLM node). So per-node cost is derivable today, including for chars/4-estimated nodes, and the old `node_model or llm_provider` coalescing is gone. What remains genuinely owed on the TermNorm side is the **`/version` endpoint**; the per-request `model` is now a nicety (it wins over the overlay when present), not a blocker.
+  **Downgraded 2026-07-10:** PromptPotter no longer reads that slug at all. `_compute_step_tokens` now stamps every step-token entry with the node's model — the backend's per-node `model` when it reports one, else the model the dataset overlay pinned (`pipeline.yaml::nodes.{n}.config.model`, which is mandatory for an LLM node). So per-node cost is derivable today, including for chars/4-estimated nodes, and the old `node_model or llm_provider` coalescing is gone. What remains genuinely owed on the TermNorm side is the **`/version` endpoint**; the per-request `model` is now a nicety (it wins over the overlay when present), not a blocker.
 - **Backend fix isn't observable without clearing a cache** — PP's measurement cache + TermNorm's `match_database` both key on query/searchpoint, never on backend code/revision, so a co-owned backend fix replays stale results. Fold the connector revision-pin into the measurement-cache key (or add a `--fresh` flag); confirm the TermNorm `/matches` short-circuit only fires on `verified` aliases. Workaround: clear `archive/{measurements,dataset_runs}/`.
 
 **Coupon + BYO build (Lane A2 — blocked on the build itself; ADR-0003 § Host coupon):**
@@ -78,7 +89,7 @@ shape was the old bloat source; readiness buckets replaced it.
 
 ## Standing — long-lived design holds
 
-- **Optimizer model repair-rate on heavy L2/L3 structured output — unmeasured.** The old entry named `openrouter/gpt-oss-120b`; every optimizer node now runs `deepseek/deepseek-v4-flash:nitro` (`209eaa42`), swapped for exactly this reason (speed + schema obedience together). What is still owed is the measurement: a live cycle reaching L3 to read the repair-retry rate under the *current* model. Verified 2026-07-16 — the swap is real (`datasets/_optimizer/pipeline.json`), so don't re-file this against the 120b.
+- **Optimizer model repair-rate on heavy L2/L3 structured output — unmeasured.** The old entry named `openrouter/gpt-oss-120b`; every optimizer node now runs `deepseek/deepseek-v4-flash:nitro` (`209eaa42`), swapped for exactly this reason (speed + schema obedience together). What is still owed is the measurement: a live cycle reaching L3 to read the repair-retry rate under the *current* model. Verified 2026-07-16 — the swap is real (`datasets/_optimizer/pipeline.yaml`), so don't re-file this against the 120b.
 
 ## Considered, not debt — don't re-open
 

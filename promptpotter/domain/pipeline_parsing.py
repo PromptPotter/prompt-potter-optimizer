@@ -334,7 +334,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
         if "prompt_info" in rm:
             step_kwargs["prompt_info"] = rm["prompt_info"]
 
-        # Inline prompt_info (for static pipeline.json without resolved_prompts)
+        # Inline prompt_info (for static pipeline.yaml without resolved_prompts)
         if "prompt_info" not in step_kwargs and "prompt_info" in node:
             step_kwargs["prompt_info"] = NodePromptInfo(**node["prompt_info"])
 

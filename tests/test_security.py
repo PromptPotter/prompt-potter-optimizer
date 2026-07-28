@@ -258,7 +258,7 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
     # `_resolve_inner_task` has no default ladder — the benchmark, its sample count,
     # round cap and target score are declared, or the spawn raises.
     write_json(
-        tmp_path / "inner_tasks.json",
+        tmp_path / "inner_tasks.yaml",
         {
             "inner_benchmark": "justlogic",
             "inner_benchmark_config": {

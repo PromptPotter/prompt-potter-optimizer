@@ -39,7 +39,7 @@ knowledge-independent by design, no factual recall.
 
 ## Constraints
 
-- Target model / provider / reasoning effort are operator-locked (see `pipeline.json`) — the
+- Target model / provider / reasoning effort are operator-locked (see `pipeline.yaml`) — the
   point is what a PROMPT buys at fixed capability, not buying reasoning compute.
 - Freely mutable: `temperature`, `max_tokens`, and any prompt field (`persona`, `task_intent`,
   `problem_description`, `instruction`, `thinking_style`, `answer_format`), plus the

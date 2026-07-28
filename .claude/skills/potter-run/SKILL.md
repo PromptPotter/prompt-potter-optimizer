@@ -143,13 +143,13 @@ Finished cycle: `campaigns/<id>/log.md` (campaign digest, heatmap, final winner)
 ## Configs are the source of truth
 
 The skill carries no parallel default-ladder. `dataset.md` (entry point, init flags) ·
-`campaign.json` (max_rounds, n_variants, sp_budget_ttest, patiences) · `pipeline.json` (pipeline,
+`campaign.json` (max_rounds, n_variants, sp_budget_ttest, patiences) · `pipeline.yaml` (pipeline,
 model, caps). BBEH only: `notebooks/bbeh_potter.ipynb::build_campaign_config()` shadows
 `campaign.json` and wins. Per-dataset model + `reasoning_effort` + `max_tokens` defaults live in
 [`docs/operations/dataset-reasoning-matrix.md`](../../../docs/operations/dataset-reasoning-matrix.md).
-The `pipeline.json` `model` field is a live operator knob (Groq daily-volume swaps 120b → 20b), not
+The `pipeline.yaml` `model` field is a live operator knob (Groq daily-volume swaps 120b → 20b), not
 a fixed default. `max_tokens` is never set numerically in node configs — provider ceiling applies;
-override per-cycle via `campaign.json::pipeline_overrides`.
+override per-cycle via `campaign.yaml::pipeline_overrides`.
 
 Read them. Don't propose parameter tweaks unbidden, don't classify data volume, don't offer
 leaderboard picks.

@@ -34,8 +34,8 @@ def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
 
     The backend this connector runs IS the inner optimizer, so a measurement's
     identity must change whenever the inner origin does: the shared meta-prompt
-    text (``datasets/_optimizer/pipeline.json``), the per-node information-flow
-    layouts, the engine version, AND the dataset's WHOLE ``inner_tasks.json`` spec —
+    text (``datasets/_optimizer/pipeline.yaml``), the per-node information-flow
+    layouts, the engine version, AND the dataset's WHOLE ``inner_tasks.yaml`` spec —
     the inner benchmark NAME + task list (which bank, which seeds) plus
     ``inner_benchmark_config`` (sample count, round / variant geometry, the
     ``inner_optimizer_temperature`` clamp). Otherwise an outer origin scored under an old origin/config is
@@ -43,14 +43,18 @@ def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
     comparison that fabricates (or masks) outer signal.
     """
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
-        OPTIMIZER_PIPELINE_PATH,
+        optimizer_manifest,
     )
     from promptpotter.config.settings import APP_VERSION
     from promptpotter.domain.l1_layout import NODE_LAYOUTS
     from promptpotter.domain.pipeline_schema import stable_hash
-    from promptpotter.infrastructure.store.io import read_json_optional
+    from promptpotter.infrastructure.store.io import read_yaml_optional
 
-    origin_text = OPTIMIZER_PIPELINE_PATH.read_text(encoding="utf-8")
+    # The PARSED manifest, never its bytes. Its two siblings in this fingerprint
+    # (`layouts`, `inner_spec`) already hash parsed values, and the file is now
+    # comment-bearing YAML — byte-hashing would void every banked outer measurement
+    # the moment someone documented a node, a change with no behavioural content.
+    origin_manifest = optimizer_manifest()
     layouts = {name: spec.model_dump(mode="json") for name, spec in sorted(NODE_LAYOUTS.items())}
     # The inner-run config is part of the inner origin's effective behavior, so it
     # joins the fingerprint — changing `inner_optimizer_temperature` (or any geometry
@@ -62,13 +66,13 @@ def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
     # what is measured; hashing only the knobs let a d23-banked origin be served against a d234
     # candidate — a stale-vs-fresh comparison that fabricates outer signal (the exact bug this
     # fingerprint exists to prevent).
-    inner_tasks = read_json_optional(dataset_dir / "inner_tasks.json") or {}
+    inner_tasks = read_yaml_optional(dataset_dir / "inner_tasks.yaml") or {}
     inner_spec = {
         "benchmark": inner_tasks.get("inner_benchmark"),
         "config": inner_tasks.get("inner_benchmark_config") or {},
         "tasks": inner_tasks.get("tasks") or [],
     }
-    fingerprint = stable_hash([origin_text, layouts, APP_VERSION, inner_spec])[:12]
+    fingerprint = stable_hash([origin_manifest, layouts, APP_VERSION, inner_spec])[:12]
     return {"l1_generate": {INNER_ORIGIN_KEY: fingerprint}}
 
 
@@ -97,7 +101,7 @@ def promptpotter_wire_adapter(
     ```
 
     Each per-node dict overrides template fields on the inner cycle's
-    ``datasets/_optimizer/pipeline.json`` for that run. A ``model`` key (present only
+    ``datasets/_optimizer/pipeline.yaml`` for that run. A ``model`` key (present only
     when the operator directly set the inner-optimizer model on the carrier node — a
     cap-gated babysit override, never the optimizer's own search) rides the same
     channel untouched and is consumed at the inner optimizer's ``llm_call`` config
@@ -181,7 +185,7 @@ def _extract_experiment(
     outer optimizer stops reading every sample as a label-miss ("node fails 100%
     — reduce parsing errors"), which is false evidence for a proxy-scored sample.
 
-    There is no target score to match against either: ``inner_tasks.json`` declares
+    There is no target score to match against either: ``inner_tasks.yaml`` declares
     what an inner cycle may SPEND, never what it is expected to REACH.
     """
     tasks = experiment_data.get("tasks", [])
@@ -223,7 +227,7 @@ CONNECTOR = Connector(
     in_process_run=_in_process_run,
     # The outer "samples" are the inner tasks — read from this file in the dataset
     # config dir and fed through ``extract_experiment`` at bootstrap (no CSV table).
-    experiment_file="inner_tasks.json",
+    experiment_file="inner_tasks.yaml",
     identity_config=_identity_config,
 )
 

@@ -1,5 +1,12 @@
-"""Regenerate ``datasets/_optimizer/pipeline.json::resolved_schemas`` from
+"""Regenerate ``datasets/_optimizer/resolved_schemas.json`` from
 ``promptpotter.application.optimization.dispatch.schemas``. Idempotent.
+
+**A pure writer** — it reads nothing from ``datasets/_optimizer/`` and owns this file
+outright. It used to read the whole ``pipeline.json``, graft ``resolved_schemas`` into
+it, and rewrite the lot, which put generated output and hand-written meta-prompt prose
+in one file under one ``git diff --exit-code`` gate. That is unworkable now the authored
+half is YAML: re-emitting it would reformat the operator's blocks and comments on every
+run, and CI would read that as schema drift.
 """
 
 from __future__ import annotations
@@ -15,8 +22,7 @@ from promptpotter.application.optimization.dispatch.schemas import (
 
 def main() -> int:
     repo_root = Path(__file__).resolve().parent.parent
-    manifest_path = repo_root / "datasets" / "_optimizer" / "pipeline.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    out_path = repo_root / "datasets" / "_optimizer" / "resolved_schemas.json"
 
     resolved: dict[str, dict[str, Any]] = {}
     for node, model_cls in OPTIMIZER_RESPONSE_MODELS.items():
@@ -35,14 +41,11 @@ def main() -> int:
             },
         }
 
-    manifest["resolved_schemas"] = resolved
-    # `ensure_ascii=False`: the manifest is UTF-8 and its descriptions are hand-written
-    # prose. Escaping them to \uXXXX makes the generator unable to reproduce its own
-    # committed output, so the contract check fails on punctuation instead of on schema drift.
-    manifest_path.write_text(
-        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
-    print(f"wrote {len(resolved)} schemas to {manifest_path.relative_to(repo_root)}")
+    # `ensure_ascii=False`: the schemas carry hand-written prose in their `description`
+    # strings. Escaping them to \uXXXX makes the generator unable to reproduce its own
+    # committed output, so the contract check fails on punctuation instead of schema drift.
+    out_path.write_text(json.dumps(resolved, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(f"wrote {len(resolved)} schemas to {out_path.relative_to(repo_root)}")
     return 0
 
 

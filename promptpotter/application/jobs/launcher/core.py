@@ -31,7 +31,10 @@ from promptpotter.application.config import (
     configure_and_apply_pipeline,
     load_campaign_config,
 )
-from promptpotter.application.datasets.authored import read_campaign_config_file
+from promptpotter.application.datasets.authored import (
+    dataset_campaign_path,
+    read_campaign_config_file,
+)
 from promptpotter.application.datasets.csv_ingest import Table, materialize_samples
 from promptpotter.application.datasets.dataset_replace import recover_pending_replacements
 from promptpotter.application.datasets.draft_campaign import DraftCampaign
@@ -60,9 +63,10 @@ from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
+    dataset_pipeline_path,
     readable_dataset_dir,
 )
-from promptpotter.infrastructure.store.io import read_json_optional
+from promptpotter.infrastructure.store.io import read_yaml_optional
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import MachineBusyError, PayloadInvalidError
@@ -207,11 +211,11 @@ def build_cycle_config(
     (``pipeline_overlay``), split them (``split_overlay``) into ``pipeline_overrides``
     (narrow the search space) + ``optimizer_narrowing`` (origin-floor values) on the
     snapshot, leaving the shared dataset immutable. A fresh upload commits its edits
-    into its own ``pipeline.json``, so it passes no overlay. The ONE definition shared
+    into its own ``pipeline.yaml``, so it passes no overlay. The ONE definition shared
     by ``mint_campaign_command``, ``start_run_command``, and check-in
     ``prepare_checkin_run`` — so the committed config can't drift between launch paths.
     """
-    file_config = read_campaign_config_file(dataset_root / "campaign.json")
+    file_config = read_campaign_config_file(dataset_campaign_path(dataset_root))
     profile = session.store.backends.load_connector_profile(session.backend_id) or {}
     campaign_config = load_campaign_config({**profile, **file_config})
     if pipeline_overlay:
@@ -250,7 +254,7 @@ async def mint_campaign_command(
     per-campaign config snapshot — narrowing the dataset's declared search space
     + overriding origin-floor values for THIS campaign only, leaving the shared
     dataset immutable. A fresh upload commits its edits into its own
-    ``pipeline.json`` instead, so this stays ``None`` for that path.
+    ``pipeline.yaml`` instead, so this stays ``None`` for that path.
     """
     # Heal any dataset Replace interrupted mid-migration before resolving a pin —
     # a crashed version-and-repoint can leave a campaign pointing at a name whose
@@ -329,7 +333,7 @@ async def mint_campaign_command(
         campaign_id, cycle_id = minted.campaign_id, minted.cycle_id
         job_registry.update_target(job.job_id, campaign_id=campaign_id, cycle_id=cycle_id)
 
-        # Run-start framing: read the committed ``task_context.json`` (written at
+        # Run-start framing: read the committed ``task_context.yaml`` (written at
         # commit from the check-in's decomposition) — or decompose a benchmark's
         # ``task_description.md`` once on first sight. No second LLM call once the
         # file exists; the web mint path previously ran with EMPTY framing.
@@ -664,21 +668,21 @@ async def _run_in_background(
 
 
 def _read_backend_type_from_dataset(dataset_root: Path, dataset_name: str) -> str:
-    """Resolve ``backend_type`` from ``{dataset_root}/pipeline.json`` for the preflight.
+    """Resolve ``backend_type`` from ``{dataset_root}/pipeline.yaml`` for the preflight.
 
     Raises :class:`LaunchError` when the field is missing — the launch can't
     proceed without it, and the dispatcher catches LaunchError into a 422.
     """
-    raw_path = dataset_root / "pipeline.json"
+    raw_path = dataset_pipeline_path(dataset_root)
     try:
-        raw = read_json_optional(raw_path)
+        raw = read_yaml_optional(raw_path)
     except json.JSONDecodeError as exc:
-        raise LaunchError(f"dataset {dataset_name!r} pipeline.json is malformed: {exc}") from exc
+        raise LaunchError(f"dataset {dataset_name!r} pipeline.yaml is malformed: {exc}") from exc
     if raw is None:
-        raise LaunchError(f"dataset {dataset_name!r} has no pipeline.json — cannot resolve backend")
+        raise LaunchError(f"dataset {dataset_name!r} has no pipeline.yaml — cannot resolve backend")
     bt = raw.get("backend_type")
     if not isinstance(bt, str) or not bt:
-        raise LaunchError(f"dataset {dataset_name!r} pipeline.json is missing 'backend_type'")
+        raise LaunchError(f"dataset {dataset_name!r} pipeline.yaml is missing 'backend_type'")
     return bt.lower()
 
 

@@ -24,7 +24,10 @@ from fastapi import APIRouter
 from pydantic import Field
 
 from promptpotter.application.config import resolve_pipeline_config_params
-from promptpotter.application.datasets.authored import load_dataset_campaign_config
+from promptpotter.application.datasets.authored import (
+    dataset_campaign_path,
+    load_dataset_campaign_config,
+)
 from promptpotter.application.datasets.csv_ingest import IngestError
 from promptpotter.application.datasets.ingest import draft_from_dataset
 from promptpotter.application.datasets.loaders import resolve_dataset_items
@@ -39,10 +42,12 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.campaign_store.store import origin_accuracy_of
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
+    dataset_pipeline_path,
+    is_dataset_dir,
     list_readable_datasets,
     readable_dataset_dir,
 )
-from promptpotter.infrastructure.store.io import read_json
+from promptpotter.infrastructure.store.io import read_yaml
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
@@ -130,9 +135,9 @@ def _dataset_origin_id(store: Stores, dataset_dir: Path, dataset_name: str) -> s
     overwritten by ``to_job_search_point`` with the schema's active_steps, so only the
     per-node config (model included) drives the config-aware hash."""
     try:
-        raw = read_json(dataset_dir / "pipeline.json")
+        raw = read_yaml(dataset_pipeline_path(dataset_dir))
         schema = parse_pipeline_response(raw)
-        cfg = load_dataset_campaign_config(dataset_dir / "campaign.json")
+        cfg = load_dataset_campaign_config(dataset_campaign_path(dataset_dir))
         active = schema.active_steps_excluding(cfg.exclude_nodes)
         if not active:
             return None
@@ -164,12 +169,12 @@ def _prepared_origins(store: Stores, campaign_ids: set[str]) -> list[OriginEntry
         if ref.tier != "yours" or ref.n_samples <= 0:
             continue
         d = store.tenant_datasets.dataset_dir(ref.name)
-        # Ready = ships a prompts/ dir (any node-named or default.json prompt — the
+        # Ready = ships a prompts/ dir (any node-named or default.yaml prompt — the
         # origin OSP resolves the per-node file like the mint does, see
-        # `resolve_origin_opt_search_point`) + a pipeline.json. Hardcoding
+        # `resolve_origin_opt_search_point`) + a pipeline.yaml. Hardcoding
         # `default.json` here wrongly dropped datasets whose prompt is node-named
         # (e.g. termnorm's `entity_profiling.json`).
-        if not has_dataset_prompts(d) or not (d / "pipeline.json").is_file():
+        if not has_dataset_prompts(d) or not is_dataset_dir(d):
             continue
         origin_id = _dataset_origin_id(store, d, ref.name)
         if origin_id is None or origin_id in campaign_ids:

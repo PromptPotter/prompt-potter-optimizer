@@ -8,7 +8,7 @@ Concept-level: [`../concepts/nodes-and-pipelines.md`](../concepts/nodes-and-pipe
 
 ## Pipeline declaration format
 
-Both backends and the optimizer loop declare pipelines as JSON. Optimizer's at `datasets/_optimizer/pipeline.json`; backend's served by `GET /pipeline`.
+Both backends and the optimizer loop declare pipelines as JSON. Optimizer's at `datasets/_optimizer/pipeline.yaml`; backend's served by `GET /pipeline`.
 
 ```json
 {
@@ -77,5 +77,5 @@ Capabilities are opt-in. A deterministic node declares none; an LLM node in the 
 | [![candidate-elimination](https://img.shields.io/badge/candidate--elimination-black?style=for-the-badge)](../methods/candidate-elimination.md) | Full elimination ladder — validation skip through PoBB cutoff |
 | [![developer/README](https://img.shields.io/badge/developer%2FREADME-red?style=for-the-badge)](README.md) | Architecture brief — prompt structure, dispatch, scoring node, cross-run memory |
 | [![observability](https://img.shields.io/badge/observability-black?style=for-the-badge)](../operations/observability.md) | Node tracing and Langfuse integration |
-| `datasets/_optimizer/pipeline.json` | Live optimizer node declarations |
+| `datasets/_optimizer/pipeline.yaml` | Live optimizer node declarations |
 | `GET /pipeline` | Backend self-description — source of pipeline schema at runtime |

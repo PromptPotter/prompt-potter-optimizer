@@ -39,7 +39,7 @@ If asked "what hyperparameters are we using?", cite the notebook and flag that `
 
 ## Pipeline
 
-Single-node `llm_only` (`datasets/bbeh/pipeline.json`): `openai/gpt-oss-120b` via Groq (canonical) — operator may flip `model` to `openai/gpt-oss-20b` when 120b daily volume is exhausted (see [Groq daily-volume swap](../../../../docs/operations/dataset-reasoning-matrix.md#groq-daily-volume-model-swap)). No dataset-side `max_tokens` cap; `reasoning_effort=low` to stay clear of Groq's per-model output ceiling. Full per-dataset table: [`dataset-reasoning-matrix.md`](../../../../docs/operations/dataset-reasoning-matrix.md).
+Single-node `llm_only` (`datasets/bbeh/pipeline.yaml`): `openai/gpt-oss-120b` via Groq (canonical) — operator may flip `model` to `openai/gpt-oss-20b` when 120b daily volume is exhausted (see [Groq daily-volume swap](../../../../docs/operations/dataset-reasoning-matrix.md#groq-daily-volume-model-swap)). No dataset-side `max_tokens` cap; `reasoning_effort=low` to stay clear of Groq's per-model output ceiling. Full per-dataset table: [`dataset-reasoning-matrix.md`](../../../../docs/operations/dataset-reasoning-matrix.md).
 
 ## Prerequisites
 

@@ -38,6 +38,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.runner.inner.tasks import (
     InnerTaskSpec,
     inner_instrument_config,
+    inner_tasks_path,
     resolve_inner_task,
 )
 from promptpotter.domain.l4.proxies import (
@@ -60,7 +61,7 @@ logger = logging.getLogger(__name__)
 # The terminal-ranker key the outer `promptpotter-self` pipeline reads as its
 # prediction (a non-empty list keeps the origin round-0 health gate from halting
 # on all-NO_RESULT) + the composed-fitness proxy scalars the outer scoring formula
-# reads. `datasets/promptpotter-self/pipeline.json::nodes.l1_critique.optimizer
+# reads. `datasets/promptpotter-self/pipeline.yaml::nodes.l1_critique.optimizer
 # .observation_mappings` declares these as observation keys, so they reach
 # `pipeline_data` and the formula namespace (`scoring/formula/compiler.py`).
 INNER_RESULT_KEY = "final_ranking"
@@ -110,7 +111,7 @@ class InnerSpawnContext:
     ``<workspace>/.inner/<l5_id>``), so the re-entrancy invariant holds without the
     path-length trap. Still out of the ``projects/`` tree, so inner campaigns never
     show in the outer campaign listing. ``dataset_config_dir`` is the spawning
-    campaign's config dir, read for ``inner_tasks.json``; ``identity`` roots the
+    campaign's config dir, read for ``inner_tasks.yaml``; ``identity`` roots the
     sandbox stores under the same tenant.
 
     ``shared_root`` is the REAL workspace root, carried through so the inner store keeps
@@ -178,7 +179,7 @@ def _spawn_provenance(ctx: InnerSpawnContext, round_num: int | None, query: str)
     or candidate produced it, and the sidebar can only number runs by launch order.
 
     A work-item is (candidate × ``task``), not a candidate: the panel runs EVERY task
-    per candidate, so one candidate's spawns are as many as ``inner_tasks.json`` has
+    per candidate, so one candidate's spawns are as many as ``inner_tasks.yaml`` has
     cells (seven for ``promptpotter-self``). ``task`` is the outer QUERY — the panel
     cell's id, e.g. ``justlogic-d23/seed-0`` — and it is the only thing telling those
     siblings apart; the candidate fields are identical across all of them.
@@ -208,20 +209,22 @@ def _verify_outer_observation_contract(session: Session, dataset_dir: Path) -> N
     """An outer dataset must DECLARE every key its inner samples emit — checked once, at the
     seam that arms the recursion, against the schema the campaign actually loaded.
 
-    A dataset that owns an ``inner_tasks.json`` IS an outer dataset (the file is what
-    :func:`resolve_inner_task` reads), so no name test is needed to recognise one. An
+    A dataset that owns the connector's declared ``experiment_file`` IS an outer dataset
+    (that file is what :func:`resolve_inner_task` reads), so no name test is needed to
+    recognise one — and asking the connector, rather than spelling the name a second time,
+    is what keeps this probe from silently disagreeing with the loader. An
     emitted-but-undeclared key is dropped on the floor by ``sample_measurement`` and never
     reaches ``pipeline_data`` — so the scoring formula either dies on a name it cannot see
     (loud, but a run in) or, worse, the observation quietly never lands in the archive and
     the what-if panel scores a term nobody measured. Fail at arm time instead."""
     schema = session.pipeline_schema
-    if schema is None or not (dataset_dir / "inner_tasks.json").is_file():
+    if schema is None or not inner_tasks_path(dataset_dir).is_file():
         return
     declared = {key for node in schema.nodes for key in node.output_keys}
     missing = [k for k in (INNER_RESULT_KEY, *OUTER_PROXY_KEYS) if k not in declared]
     if missing:
         raise ValueError(
-            f"{dataset_dir.name} runs inner campaigns but its pipeline.json declares no "
+            f"{dataset_dir.name} runs inner campaigns but its pipeline.yaml declares no "
             f"observation_mappings for {missing} — every key an inner sample emits must be "
             "declared, or it never reaches pipeline_data and the outer formula scores a "
             "measurement that was silently dropped."
@@ -384,7 +387,10 @@ async def _run_inner_campaign(
     # from here). Deferring to call time keeps this module import-light.
     from promptpotter.application.bootstrap.wiring import init_services
     from promptpotter.application.config import load_campaign_config
-    from promptpotter.application.datasets.authored import read_campaign_config_file
+    from promptpotter.application.datasets.authored import (
+        dataset_campaign_path,
+        read_campaign_config_file,
+    )
     from promptpotter.application.jobs.mint import prepare_fresh_cycle
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         set_optimizer_prompt_overrides,
@@ -423,7 +429,7 @@ async def _run_inner_campaign(
     # every hermetic property together (recursion depth, the evidence epoch, the optimizer
     # decoding clamp) in THIS task's context copy, so none of it reaches the outer cycle and
     # none of it can be forgotten piecemeal by a future code path. `inner_optimizer_temperature`
-    # unset (inner_tasks.json) leaves the optimizer's file decoding alone; the seed is the
+    # unset (inner_tasks.yaml) leaves the optimizer's file decoding alone; the seed is the
     # cell's, matching the target model's (`pipeline_overrides` below), so every candidate for a
     # cell shares one random stream (CRN). See `shared/instrument.py` for why each one is load-
     # bearing — in particular why the archive stays shared as a CACHE while being hidden as
@@ -457,7 +463,7 @@ async def _run_inner_campaign(
 
     file_config: dict[str, Any] = {}
     if session.dataset_config_dir is not None:
-        cfg_path = session.dataset_config_dir / "campaign.json"
+        cfg_path = dataset_campaign_path(session.dataset_config_dir)
         if cfg_path.exists():
             file_config = read_campaign_config_file(cfg_path)
     profile = session.store.backends.load_connector_profile(session.backend_id) or {}
@@ -537,7 +543,7 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
     """Run one inner campaign for an outer query; return the scorer-shaped result.
 
     The ``promptpotter`` connector's ``in_process_run`` arm. Resolves the inner
-    task from ``inner_tasks.json``, runs the campaign in a fresh ``asyncio.Task``
+    task from ``inner_tasks.yaml``, runs the campaign in a fresh ``asyncio.Task``
     (ContextVar isolation), and projects the three proxy metrics onto the
     ``{"data": {…}}`` shape ``measure_sample`` parses from an HTTP body — so the
     outer scorer reads an inner result identically to a remote one.
@@ -563,7 +569,7 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
             f"promptpotter connector: inner recursion is already {depth} level(s) deep "
             f"(MAX_INSTRUMENT_DEPTH={MAX_INSTRUMENT_DEPTH}); refusing to spawn another inner "
             "campaign. An inner dataset whose own backend_type is 'promptpotter' recurses "
-            "without bound — check the inner_benchmark named in inner_tasks.json."
+            "without bound — check the inner_benchmark named in inner_tasks.yaml."
         )
     spec = resolve_inner_task(ctx, query)
     overrides = payload.get("meta_prompt_overrides") or {}

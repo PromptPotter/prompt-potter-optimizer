@@ -7,7 +7,7 @@ converge **faster and further** on the proxy benchmark.
 ## What the inner cycle is solving (so you mutate toward the right behaviour)
 
 The inner benchmark is **justlogic deductive reasoning** (NOT
-arithmetic; the specific depth mix is the dataset's, in `inner_tasks.json` — not
+arithmetic; the specific depth mix is the dataset's, in `inner_tasks.yaml` — not
 restated here, where a stale number would only anchor you). Each inner sample is
 a set of premises plus a candidate conclusion;
 the inner model must answer **TRUE / FALSE / Uncertain** — TRUE/FALSE when the
@@ -29,7 +29,7 @@ finding the discipline; do not hard-code task answers into it.
 
 ## Fitness
 
-Composite formula in ``campaign.json::scoring`` — lift × quality × efficiency:
+Composite formula in ``campaign.yaml::scoring`` — lift × quality × efficiency:
 
 - ``after_N_rounds_delta`` — the lift core: the inner search's MEAN ability across
   its rounds, minus where it started, in logits on one difficulty-adjusted ruler
@@ -46,7 +46,7 @@ two candidates' evidence is mostly noise at this sample budget.)
 
 - Per-node six-field PromptTemplate scheme: ``persona``, ``task_intent``,
   ``problem_description``, ``instruction``, ``thinking_style``, ``answer_format``
-- Exposed at ``pipeline.json::nodes.{node}.optimizer.param_keys``
+- Exposed at ``pipeline.yaml::nodes.{node}.optimizer.param_keys``
 - Four nodes: ``l1_generate``, ``l1_critique``, ``l2_context``, ``l3_plan``.
   Outer L1 may mutate any subset per round
 - Out of scope (belongs to inner cycle): inner ``pipeline_params``,
@@ -68,7 +68,7 @@ two candidates' evidence is mostly noise at this sample budget.)
 
 ## Proxy realism
 
-The committed inner config (``inner_tasks.json`` — the source of truth for the
+The committed inner config (``inner_tasks.yaml`` — the source of truth for the
 inner geometry; don't restate its numbers here) keeps each outer "sample" at
 order-of-minutes. Trade-off is signal quality — bump sample count + rounds before
 publication runs. Cost shape + the finish-line plan:

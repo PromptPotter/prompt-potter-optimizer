@@ -1,11 +1,12 @@
 """Optimizer-pipeline manifest loading — schemas + meta-prompt templates.
 
-Single source of truth for optimizer nodes, schemas, and prompts is
-``datasets/_optimizer/pipeline.json``. It follows the same shape as a
+Single source of truth for optimizer nodes and prompts is
+``datasets/_optimizer/pipeline.yaml``. It follows the same shape as a
 backend's ``GET /pipeline`` response: ``nodes`` reference
 ``schema_family``/``schema_version`` + ``prompt_family``/``prompt_version``,
-and the bodies live in the top-level ``resolved_schemas`` /
-``resolved_prompts`` registries. The optimizer is itself a pipeline.
+prompt bodies live in its ``resolved_prompts`` registry, and the schema
+bodies in the generated sibling ``resolved_schemas.json``. The optimizer is
+itself a pipeline.
 Run-scoped prompt mutation rides the per-node override channel
 (:func:`set_optimizer_prompt_overrides`), never a second prompt source.
 """
@@ -28,6 +29,7 @@ from promptpotter.domain.l1_layout import (
 )
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.infrastructure.store.io import read_json, read_yaml
 from promptpotter.infrastructure.store.layout import REPO_ROOT
 from promptpotter.shared.instrument import instrument_mode
 
@@ -35,6 +37,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "OPTIMIZER_PIPELINE_PATH",
+    "OPTIMIZER_SCHEMAS_PATH",
     "ResolvedNodeOverride",
     "base_optimizer_template",
     "combined_optimizer_prompt_hash",
@@ -44,12 +47,19 @@ __all__ = [
     "list_optimizer_prompts",
     "load_optimizer_prompt",
     "load_optimizer_set_overrides",
+    "optimizer_manifest",
+    "optimizer_resolved_schemas",
     "resolve_node_layout",
     "resolve_node_override",
     "set_optimizer_prompt_overrides",
 ]
 
-OPTIMIZER_PIPELINE_PATH = REPO_ROOT / "datasets" / "_optimizer" / "pipeline.json"
+# The optimizer's own pipeline, split by authorship: the manifest is operator-authored
+# (nodes, prompts, the graph view) and the schema registry is generated from the Pydantic
+# models by ``scripts/build_optimizer_schemas.py``. One file could not be both — the
+# generator's rewrite would reformat the operator's prose on every CI run.
+OPTIMIZER_PIPELINE_PATH = REPO_ROOT / "datasets" / "_optimizer" / "pipeline.yaml"
+OPTIMIZER_SCHEMAS_PATH = REPO_ROOT / "datasets" / "_optimizer" / "resolved_schemas.json"
 
 # Per-cycle override of the optimizer meta-prompts, keyed by optimizer node
 # (`l1_generate` / `l1_critique` / `l2_context` / `l3_plan`) → a partial
@@ -101,7 +111,7 @@ def load_optimizer_set_overrides(opt_set: str) -> dict[str, dict[str, Any]]:
 
     The L4 outer cycle selects a specialized meta-prompt set via
     ``OptimizationConfig.optimizer_set`` (e.g. ``"meta"`` →
-    ``datasets/_optimizer_meta/prompts.json``). The file is a flat
+    ``datasets/_optimizer_meta/prompts.yaml``). The file is a flat
     ``{node: {field: text}}`` map of only the fields that set rewrites; it rides
     the SAME per-node override channel as the inner-cycle mutations
     (:func:`set_optimizer_prompt_overrides` → :func:`resolve_node_override`), so
@@ -118,17 +128,30 @@ def load_optimizer_set_overrides(opt_set: str) -> dict[str, dict[str, Any]]:
     attributed to a prompt set it never used."""
     if not opt_set:
         return {}
-    path = REPO_ROOT / "datasets" / f"_optimizer_{opt_set}" / "prompts.json"
+    path = REPO_ROOT / "datasets" / f"_optimizer_{opt_set}" / "prompts.yaml"
     if not path.exists():
         raise FileNotFoundError(f"optimizer_set {opt_set!r}: no prompt set at {path}")
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = read_yaml(path)
     return {k: v for k, v in data.items() if isinstance(v, dict)}
 
 
 @functools.lru_cache(maxsize=1)
-def _load_optimizer_manifest() -> dict[str, Any]:
-    manifest: dict[str, Any] = json.loads(OPTIMIZER_PIPELINE_PATH.read_text(encoding="utf-8"))
+def optimizer_manifest() -> dict[str, Any]:
+    """The operator-authored optimizer manifest, parsed (cached).
+
+    Public because it is what callers should hash and render — the raw bytes are not
+    a meaningful identity now the file carries comments and block scalars, and a second
+    read of the same file is a second opinion nobody needs.
+    """
+    manifest: dict[str, Any] = read_yaml(OPTIMIZER_PIPELINE_PATH)
     return manifest
+
+
+@functools.lru_cache(maxsize=1)
+def optimizer_resolved_schemas() -> dict[str, Any]:
+    """The generated schema registry keyed ``{family}/{version}``."""
+    schemas: dict[str, Any] = read_json(OPTIMIZER_SCHEMAS_PATH)
+    return schemas
 
 
 def _resolved_key(family: str, version: Any) -> str:
@@ -137,20 +160,21 @@ def _resolved_key(family: str, version: Any) -> str:
 
 @functools.lru_cache(maxsize=1)
 def get_optimizer_schema() -> PipelineSchema:
-    """Load datasets/_optimizer/pipeline.json as PipelineSchema (cached).
+    """Load the optimizer's own pipeline as a PipelineSchema (cached).
 
     Follows the same pipeline-schema convention as a backend: each node's
     structured output schema is referenced via ``config.schema_family`` /
-    ``config.schema_version`` and resolved against the top-level
-    ``resolved_schemas`` registry — same shape ``parse_pipeline_response``
-    uses for backend pipelines, so the optimizer is itself a pipeline that
-    can later be optimized.
+    ``config.schema_version`` and resolved against the ``resolved_schemas``
+    registry — same shape ``parse_pipeline_response`` uses for backend
+    pipelines, so the optimizer is itself a pipeline that can later be
+    optimized. The registry is a sibling file because it is generated, not
+    authored; joining them here is the only place the two halves meet.
     """
     from promptpotter.domain.pipeline_parsing import parse_resolved_schema
     from promptpotter.domain.pipeline_schema import PipelineNode
 
-    data = _load_optimizer_manifest()
-    resolved_schemas = data.get("resolved_schemas", {})
+    data = optimizer_manifest()
+    resolved_schemas = optimizer_resolved_schemas()
 
     nodes: list[PipelineNode] = []
     for name, node_data in data.get("nodes", {}).items():
@@ -174,7 +198,7 @@ def get_optimizer_schema() -> PipelineSchema:
 
 
 def optimizer_node_config(node: str) -> dict[str, Any]:
-    """The resolved config dict for an optimizer node (``datasets/_optimizer/pipeline.json``).
+    """The resolved config dict for an optimizer node (``datasets/_optimizer/pipeline.yaml``).
 
     The single read accessor for optimizer-node tunables — provider, model,
     temperature, reasoning_effort — now that they live only in the optimizer
@@ -199,7 +223,7 @@ def _resolved_prompt_for_node(name: str) -> dict[str, Any] | None:
     the manifest's ``resolved_prompts`` registry — same family/version
     indirection backend pipelines use.
     """
-    data = _load_optimizer_manifest()
+    data = optimizer_manifest()
     node_cfg = data.get("nodes", {}).get(name, {}).get("config", {})
     family = node_cfg.get("prompt_family")
     if not family:
@@ -345,7 +369,7 @@ def resolve_node_layout(node: str) -> L1Layout:
 
 def list_optimizer_prompts() -> list[str]:
     """Names of nodes that declare a ``prompt_family`` in the manifest."""
-    data = _load_optimizer_manifest()
+    data = optimizer_manifest()
     return sorted(
         name
         for name, node in data.get("nodes", {}).items()

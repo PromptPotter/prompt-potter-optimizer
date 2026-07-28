@@ -144,16 +144,16 @@ class DraftCampaign:
     # origin OSP's prompt fields: seeded by the check-in node's decomposition half
     # (``CheckinOutput`` carries it), or from an authored dataset's prompt on the
     # ``draft_from_dataset`` path; operator-editable before commit, and written
-    # verbatim to ``prompts/default.json`` at mint. Empty until the check-in fills it.
+    # verbatim to ``prompts/default.yaml`` at mint. Empty until the check-in fills it.
     origin_prompt_fields: dict[str, Any] = field(default_factory=dict)
     # The check-in's decomposition half also authors the decomposed task context —
     # the 7-field domain framing (:class:`CheckinTaskContext`) that every optimizer
     # layer (L1/L1_CRITIQUE/L2/L3) reads via the ``task_context`` injection. It
-    # rides the draft to commit, lands in ``{slug}/task_context.json``, and the
+    # rides the draft to commit, lands in ``{slug}/task_context.yaml``, and the
     # run reads it instead of re-decomposing at run-start (the second LLM call
     # that used to recompute exactly this). Empty until the check-in fills it.
     decomposed_task_context: dict[str, Any] = field(default_factory=dict)
-    # The chosen active pipeline (``pipeline.json::pipelines.default``) — e.g. the
+    # The chosen active pipeline (``pipeline.yaml::pipelines.default``) — e.g. the
     # full ``cache_lookup → … → token_matching`` vs a bare ``llm_only``. Empty =
     # fall back to the connector's ``default_pipeline``. Carried so reusing an
     # existing dataset PRESERVES its pipeline through display + commit instead of
@@ -391,12 +391,12 @@ class DraftCampaign:
 
 
 def merge_pipeline_overlay(draft: DraftCampaign, connector: Connector) -> dict[str, Any]:
-    """The draft's effective ``pipeline.json::nodes`` block: connector node-config
+    """The draft's effective ``pipeline.yaml::nodes`` block: connector node-config
     seed (e.g. TermNorm's reasoning clamp + owned model) underneath, operator draft
     edits on top.
 
     The one place the draft's resolved node config is computed — shared by the
-    committed pipeline.json builder (``draft_build``), the wire-side optimizer-locks
+    committed pipeline.yaml builder (``draft_build``), the wire-side optimizer-locks
     block, and the origin readiness model gate — so the three never drift. Pure; the
     ``connector`` is passed in (this module stays connector-registry-free, like
     :meth:`DraftCampaign.to_wire`).

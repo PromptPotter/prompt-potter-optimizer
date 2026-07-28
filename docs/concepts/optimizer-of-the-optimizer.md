@@ -31,7 +31,7 @@ Self-optimization tests two beliefs:
 
 Each outer "sample" runs an inner PromptPotter cycle on a cheap proxy benchmark. The
 connector reports a **vector** of bounded, subset-invariant signals per inner cycle
-(`domain/l4/proxies.py::compute_outer_proxies`), and `campaign.json::scoring` composes them so a
+(`domain/l4/proxies.py::compute_outer_proxies`), and `campaign.yaml::scoring` composes them so a
 signal-rich campaign is never distilled to one number — **lift core × quality modulator ×
 efficiency**:
 
@@ -51,7 +51,7 @@ efficiency**:
   **incurred** cost, not the bill — see *The bill is not the cost*, below.
 
 **No declared headroom.** The system holds **no target score, and no expectation of how much
-room a benchmark has.** It used to: `target_score` sat in `inner_tasks.json`, and a
+room a benchmark has.** It used to: `target_score` sat in `inner_tasks.yaml`, and a
 `rounds_to_N` proxy counted rounds to reach it. Both are deleted. The concept was wrong twice
 over. Mechanically it was dead weight — `rounds_to_N` carried no candidate gradient (it was the
 constant `len(levels)+1` whenever the target sat beyond round-budget reach), so it cancelled in
@@ -127,8 +127,8 @@ Each outer sample is at minimum a partial inner cycle. Cost compounds:
 outer_cost ≈ outer_n_samples × outer_n_candidates × inner_n_samples × inner_n_rounds × per_call_cost
 ```
 
-Every factor is a live config value — read them off `datasets/promptpotter-self/campaign.json`
-(`n_variants`, `spend_budget_usd`) and `inner_tasks.json::inner_benchmark_config`
+Every factor is a live config value — read them off `datasets/promptpotter-self/campaign.yaml`
+(`n_variants`, `spend_budget_usd`) and `inner_tasks.yaml::inner_benchmark_config`
 (`n_samples_per_inner_round`, `max_inner_rounds`, which must stay ≥ 2), never off this page.
 Size a run before launching: one outer round is `(1 origin + n_variants) × n_inner_tasks` fresh
 inner campaigns, and `spend_budget_usd` is the hard ceiling that halts it. A cap too small to
@@ -202,7 +202,7 @@ below the panel size, or nothing can ever be eliminated and every variant pays f
 today: read `best_round` and the rounds actually run across the inner cycles under
 `.promptpotter/.inner/` to price the round cap, and read each seed's origin accuracy off its
 inner `round_0000.json` to choose which cells to keep. The live geometry is in
-`inner_tasks.json::inner_benchmark_config` and `campaign.json` — those files are the source of
+`inner_tasks.yaml::inner_benchmark_config` and `campaign.yaml` — those files are the source of
 truth, and this page deliberately quotes none of their values.
 
 ## What stays the same on the outer cycle
@@ -219,7 +219,7 @@ change the outer cycle.
 ## Status
 
 **The recursion is SHIPPED & live-validated (2026-06-30).** `new promptpotter-self`
-runs real inner campaigns: each outer "sample" (an inner task in `inner_tasks.json`)
+runs real inner campaigns: each outer "sample" (an inner task in `inner_tasks.yaml`)
 mints + runs a full inner PromptPotter cycle **in its own asyncio task** under a
 **flat `<workspace>/.inner/<spawn_cycle_id>/` sandbox** (NOT physically nested —
 that overflows Windows `MAX_PATH`; flat keeps it re-entrant at any depth), and the

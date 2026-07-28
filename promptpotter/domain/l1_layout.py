@@ -124,7 +124,7 @@ class NodeLayoutSpec(StrictModel):
 
 # The per-node layout registry — L4's information-flow surface. Each optimizer node
 # owns its injection set here (was: `l1_generate` in `default_l1_layout()` Python +
-# every other node hardcoded as `{{tokens}}` in `datasets/_optimizer/pipeline.json`).
+# every other node hardcoded as `{{tokens}}` in `datasets/_optimizer/pipeline.yaml`).
 # The dispatch hub fills every node from `NODE_LAYOUTS[node]` (floor ± editor edits),
 # so the set of signals reaching each meta-prompt is one searched axis, not two
 # hand-tuned sources. `checkin` is excluded — it runs around the loop, not through

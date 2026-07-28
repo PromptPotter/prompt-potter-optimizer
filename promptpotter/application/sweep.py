@@ -26,6 +26,7 @@ from promptpotter.application.views.view_models import SweepPayloadRow, SweepSum
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.results import PayloadOutcome, SweepBatchResult
 from promptpotter.domain.run_records import ForkSpec, ForkTrigger, OperatorSweepFile
+from promptpotter.infrastructure.store.io import read_yaml
 from promptpotter.infrastructure.store.layout import root_cycle_id
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.infrastructure.store.stores import Stores, build_stores
@@ -52,11 +53,9 @@ def resolve_sweep_dir(dataset_dir: Path | None) -> Path | None:
 
 
 def load_sweep_payloads(sweep_dir: Path) -> list[tuple[Path, OperatorSweepFile]]:
-    """Parse every ``*.json`` under ``sweep_dir``; ``extra='forbid'`` halts on typos."""
-    files = sorted(sweep_dir.glob("*.json"))
-    return [
-        (p, OperatorSweepFile.model_validate_json(p.read_text(encoding="utf-8"))) for p in files
-    ]
+    """Parse every ``*.yaml`` under ``sweep_dir``; ``extra='forbid'`` halts on typos."""
+    files = sorted(sweep_dir.glob("*.yaml"))
+    return [(p, OperatorSweepFile.model_validate(read_yaml(p))) for p in files]
 
 
 def existing_fork_source_files(

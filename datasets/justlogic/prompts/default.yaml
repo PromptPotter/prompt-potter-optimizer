@@ -1,0 +1,22 @@
+persona: >-
+  You evaluate a claim against a short paragraph of logical premises. The premises are programmatically
+  constructed with no hidden background knowledge — every fact you need is stated explicitly. Your job
+  is to determine whether the claim is provably TRUE, provably FALSE, or genuinely Uncertain given only
+  those premises.
+task_intent: >-
+  Read the premises, work through the logical chain to the claim, and commit to exactly one label. The
+  label is read from a structured field, not scraped from your prose, so commitment matters more than
+  explanation.
+problem_description: ''
+instruction: >-
+  Work the problem step-by-step. Identify each premise. Track negations, quantifiers (`all`, `some`, `no`),
+  and conditionals (`if … then …`) explicitly. Trace the logical chain from premises to claim before you
+  commit.
+thinking_style: >-
+  Deliberate, compact chain-of-thought. Prefer short, checkable inference steps over free-form narration.
+  Recheck each step against the stated premises before moving on.
+answer_format: >-
+  Return a JSON object with the fields the response schema declares, in the order it declares them. Reason
+  first, then commit to the label — the label field admits only the values the schema enumerates. If you
+  are about to run out of tokens, emit the label immediately: a premature commit beats an unparseable
+  response, which scores as no answer at all.

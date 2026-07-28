@@ -22,11 +22,11 @@ from fastapi import APIRouter, Query
 from pydantic import Field
 
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
-    OPTIMIZER_PIPELINE_PATH,
+    optimizer_manifest,
+    optimizer_resolved_schemas,
 )
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.io import read_json
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
 from promptpotter.infrastructure.store.stores import descend_store
 from promptpotter.presentation.api.deps import (
@@ -94,7 +94,7 @@ class SpawnedBy(StrictModel):
     )
     task: str | None = Field(
         default=None,
-        description="The panel cell this run measured — the outer query, e.g. `justlogic-d23/seed-0` (`inner_tasks.json::tasks[].id`). The candidate fields do NOT identify a run: every task runs for every candidate, so one candidate's spawns are as many as the panel has cells and are told apart only by this. Null on a run minted before the stamp existed.",
+        description="The panel cell this run measured — the outer query, e.g. `justlogic-d23/seed-0` (`inner_tasks.yaml::tasks[].id`). The candidate fields do NOT identify a run: every task runs for every candidate, so one candidate's spawns are as many as the panel has cells and are told apart only by this. Null on a run minted before the stamp existed.",
     )
 
 
@@ -230,7 +230,8 @@ async def get_machine_status(identity: IdentityDep, jobs: JobRegistryDep) -> Mac
 
 @active_router.get("/optimizer-pipeline", tags=["Optimizer"])
 def get_optimizer_pipeline() -> dict[str, Any]:
-    """Bundled ``datasets/_optimizer/pipeline.json`` — nodes + pipelines + ``view``
+    """Bundled ``datasets/_optimizer/pipeline.yaml`` + its generated
+    ``resolved_schemas.json`` sibling — nodes + pipelines + ``view``
     topology, plus the per-node typed config surface (``node_config_schema`` /
     ``node_output_schema``) so the canvas node-detail renders the optimizer's own
     knobs (model / provider / reasoning_effort / temperature / …) through the same
@@ -239,7 +240,10 @@ def get_optimizer_pipeline() -> dict[str, Any]:
     hand-edit, never a fork and never a write path from here (the ``champion`` verb that
     used to graduate a winner into it was deleted 2026-07-17); model/provider are always
     optimizer-locked."""
-    pipeline: dict[str, Any] = read_json(OPTIMIZER_PIPELINE_PATH)
+    # The manifest is already parsed + cached one layer down; re-reading the file here
+    # was a second opinion on the same bytes. Copied because the response is mutated below.
+    pipeline: dict[str, Any] = dict(optimizer_manifest())
+    pipeline["resolved_schemas"] = optimizer_resolved_schemas()
     schema = parse_pipeline_response(pipeline)
     pipeline["node_config_schema"] = {
         node: [p.model_dump() for p in params]

@@ -1,0 +1,14 @@
+persona: You are answering a multi-hop question against a set of Wikipedia passages.
+task_intent: >-
+  Produce the shortest correct answer — a named entity, date, number, or short phrase — drawn from the
+  provided context.
+problem_description: ''
+instruction: >-
+  Identify which passages are actually relevant (several are distractors) and chain facts across them
+  when the question requires it. Do not answer from a single passage if a bridge entity is needed.
+thinking_style: >-
+  Concise multi-hop reasoning. Think through the bridge entity or chain of facts, then commit to the shortest
+  span that answers the question.
+answer_format: >-
+  Return ONLY the final answer span on the last line — a single entity, date, or short phrase. No leading
+  label, no reasoning, no punctuation beyond what is part of the answer itself.

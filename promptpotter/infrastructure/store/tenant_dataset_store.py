@@ -2,8 +2,8 @@
 
 User-uploaded Origins live at ``{tenant_root}/datasets/{slug}/``. Commit writes
 ``{slug}/`` fresh (:meth:`write_committed_dataset`) from the materialized samples
-+ the Origin files (`cache.json`, `pipeline.json`, `task_description.md`,
-`prompts/default.json`, `task_context.json`) and the sibling `campaign.json`. The
++ the Origin files (`cache.json`, `pipeline.yaml`, `task_description.md`,
+`prompts/default.yaml`, `task_context.yaml`) and the sibling `campaign.yaml`. The
 pre-commit working state (the parsed sample bank + the draft) lives under the
 owning check-in campaign (``campaigns/{id}/checkin/``, :class:`CheckinDraftStore`),
 not here — this store only owns committed datasets.
@@ -22,8 +22,10 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.domain.pipeline_schema import CANDIDATE_LIBRARY_FILE
 from promptpotter.infrastructure.store.io import (
     read_json_optional,
+    read_yaml_optional,
     write_json,
     write_text,
+    write_yaml,
 )
 from promptpotter.infrastructure.store.layout import validate_dataset_name
 from promptpotter.shared.clock import utcnow_iso
@@ -146,14 +148,14 @@ class TenantDatasetStore:
     def _rewrite_campaign_self_ref(self, dataset_dir: Path, new_name: str) -> None:
         """Point the moved dataset's own ``campaign.json`` at its new name, so a later
         ``draft_from_dataset`` off the versioned copy doesn't resurrect the old slug."""
-        path = dataset_dir / "campaign.json"
-        data = read_json_optional(path)
+        path = dataset_dir / "campaign.yaml"
+        data = read_yaml_optional(path)
         if not isinstance(data, dict):
             return
         cc = data.get("campaign_config")
         if isinstance(cc, dict) and cc.get("dataset_name"):
             cc["dataset_name"] = new_name
-            write_json(path, data)
+            write_yaml(path, data)
 
     def write_committed_dataset(
         self,
@@ -175,7 +177,7 @@ class TenantDatasetStore:
         already-materialized ``Sample`` rows (the column mapping is confirmed by
         now), so the pre-commit working dir (the campaign's ``checkin/`` dir) is the
         caller's to clean up or keep as an audit breadcrumb — this writer never moves
-        it. ``task_context.json`` is the
+        it. ``task_context.yaml`` is the
         run-start framing the check-in already decomposed (read at run-start instead
         of a second LLM decomposition). The candidate library is NOT written here:
         it rides the one origin-write seam (:meth:`write_candidate_library`).
@@ -201,11 +203,11 @@ class TenantDatasetStore:
                 "items": serialized,
             },
         )
-        write_json(dst / "pipeline.json", pipeline_json)
-        write_json(dst / "campaign.json", campaign_json)
+        write_yaml(dst / "pipeline.yaml", pipeline_json)
+        write_yaml(dst / "campaign.yaml", campaign_json)
         write_text(dst / "task_description.md", task_description)
-        write_json(dst / "task_context.json", task_context)
-        write_json(dst / "prompts" / "default.json", prompt_default)
+        write_yaml(dst / "task_context.yaml", task_context)
+        write_yaml(dst / "prompts" / "default.yaml", prompt_default)
         return dst
 
     def write_candidate_library(self, slug: str, library: Sequence[str]) -> Path:

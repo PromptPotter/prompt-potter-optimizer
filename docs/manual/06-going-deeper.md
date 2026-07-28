@@ -48,7 +48,7 @@ You've run a campaign. Pointers below for the next layer.
 ## Iterating on prompts manually
 
 Hand-tuning `l1_generate` (or another optimizer meta-prompt) means editing
-`datasets/_optimizer/pipeline.json` directly — it is an operator-owned file that nothing
+`datasets/_optimizer/pipeline.yaml` directly — it is an operator-owned file that nothing
 writes. To measure whether an edit helped, run the optimizer **on itself**:
 `python -m promptpotter new promptpotter-self` (L4) scores meta-prompt variants against a
 cached origin on shared cells and reports a paired verdict.
