@@ -40,7 +40,7 @@ from promptpotter.domain.opt_search_point import (
     OptSearchPoint,
     PromptTemplate,
     candidate_delta,
-    idea_fingerprint,
+    candidate_idea,
     node_config_items,
     same_idea,
 )
@@ -750,11 +750,9 @@ def lost_ideas(prior_rounds: Sequence[Any]) -> list[tuple[int, frozenset[str]]]:
                 continue
             if cand.accuracy > cand.matched_origin_accuracy:
                 continue
-            pf, pp = candidate_delta(
+            if fp := candidate_idea(
                 cand.prompt_fields, parent, cand.pipeline_params_override, parent_pp
-            )
-            values = [str(v) for v in pf.values() if v] + [str(v) for v in pp.values()]
-            if fp := idea_fingerprint(values):
+            ):
                 out.append((rr.round, fp))
     return out
 
@@ -773,8 +771,9 @@ def detect_invariants(
 
     **``repeat_variant`` is the cross-ROUND arm** (the other two are round-local). A candidate
     is rejected when it re-proposes an idea a prior round already measured and lost — matched
-    on content-word vocabulary (:func:`same_idea`), so it still fires when the idea has been
-    rewritten into a different field, which is the only form a re-proposal actually takes.
+    on the content words it ADDED to its parent (:func:`candidate_idea`), so it still fires when
+    the idea has been rewritten into a different field — the only form a re-proposal actually
+    takes — without convicting a candidate for re-emitting the field body its edit had to carry.
 
     Rejecting is destructive — the variant simply never exists, and a wrong rejection leaves no
     trace — so four things bound it. (1) The evidence is filtered to measured losses only
@@ -848,9 +847,15 @@ def detect_invariants(
             continue
         seen[sig] = i
         n_live += 1
-        # The idea is fingerprinted from the mutated VALUES only — never the field names, which
-        # would turn the test into "touched the same field" (see `idea_fingerprint`).
-        fp = idea_fingerprint([str(v) for v in pf.values() if v] + [str(v) for v in pp.values()])
+        # The idea is the words the candidate ADDED to its parent — never the field names, and
+        # never the changed field's whole value: both collapse the test into "touched the same
+        # field" (see `candidate_idea`).
+        fp = candidate_idea(
+            {f: getattr(child, f) for f in PROMPT_STRING_FIELDS},
+            {f: getattr(parent_osp, f) for f in PROMPT_STRING_FIELDS},
+            cp.pipeline_params_override,
+            parent_pp,
+        )
         echo = next(
             (rnd for rnd, prev in tried if same_idea(fp, prev, threshold=IDEA_MATCH_REJECT)),
             None,

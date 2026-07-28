@@ -37,8 +37,8 @@ from promptpotter.domain.escalation_signals import ExplorationBudget
 from promptpotter.domain.opt_search_point import (
     IDEA_MATCH_MARK,
     candidate_delta,
+    candidate_idea,
     flatten_sp_summary,
-    idea_fingerprint,
     same_idea,
 )
 from promptpotter.domain.results import CritiqueReadout, ScoredCandidate
@@ -607,10 +607,10 @@ def _candidate_mutation(
     parent's own schema prose echoed back) as a new mutation.
 
     Returns the values UNCLIPPED and unformatted: the render clips to
-    ``MEMORY_VALUE_CAP`` for the eye, while :func:`idea_fingerprint` needs the whole value
-    to see the idea. One producer, two consumers with different appetites — clipping here
-    would silently starve the second (it did: the fingerprint over 60-char stems was mostly
-    field-name tokens).
+    ``MEMORY_VALUE_CAP`` for the eye. Clipping here would starve any reader that needs the
+    whole value (it did once: a fingerprint taken over 60-char stems was mostly field-name
+    tokens). The row's idea comes from :func:`candidate_idea`, which reads the candidate
+    against its parent rather than off this display list.
     """
     pf, pp = candidate_delta(cand.prompt_fields, parent, cand.pipeline_params_override, parent_pp)
     pp_nested: dict[str, Any] = {}
@@ -671,7 +671,7 @@ def _r_mutation_memory(b: InjectionBundle) -> str:
 
     Rows whose mutation carries an idea ALREADY tried in an earlier retained round are marked
     ``↺ same idea as r{N} (Mx)`` — matched on idea vocabulary, never field+stem, because the
-    generator rewrites an idea into a different field each round (see :func:`idea_fingerprint`).
+    generator rewrites an idea into a different field each round (see :func:`candidate_idea`).
     The marker is the panel's whole point made legible in one clause: the record does not just
     LIST prior attempts, it says which of them are the same attempt.
 
@@ -707,7 +707,12 @@ def _r_mutation_memory(b: InjectionBundle) -> str:
                 else _candidate_fate(cand)
             )
             attempts.append(
-                (f"{scored} · {'; '.join(mutation)}", idea_fingerprint([v for _, v in changed]))
+                (
+                    f"{scored} · {'; '.join(mutation)}",
+                    candidate_idea(
+                        cand.prompt_fields, parent, cand.pipeline_params_override, parent_pp
+                    ),
+                )
             )
         if attempts:
             by_round.append((rr.round, attempts))

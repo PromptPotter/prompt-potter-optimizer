@@ -594,6 +594,48 @@ def same_idea(a: frozenset[str], b: frozenset[str], *, threshold: float) -> bool
     return len(a & b) / min(len(a), len(b)) >= threshold
 
 
+def candidate_idea(
+    child_fields: dict[str, Any],
+    parent_fields: dict[str, Any],
+    pp_override: dict[str, Any] | None,
+    parent_pp: dict[str, Any] | None,
+) -> frozenset[str]:
+    """The content words a candidate ADDED to its parent — the ONE idea definition.
+
+    Fingerprinting a changed field's WHOLE value measures which field was rewritten, not
+    which idea was proposed: an edit re-emits the field's unchanged body, so two unrelated
+    rewrites of one long field share that body and overlap far above
+    :data:`IDEA_MATCH_REJECT`. Measured on ``justlogic-d234__f8dd54`` — two candidates whose
+    words were ~50% new scored 0.800 and 0.867 against a prior loser and were rejected as
+    re-proposals. Both were REMOVAL edits, the only kind that can stop a prompt growing every
+    round; with them gone the rendered prompt grew 44% across 7 rounds until a third of
+    ``l1_generate`` calls overran ``max_tokens`` and paid a repair round-trip.
+
+    Subtracting the parent also sharpens the case this exists FOR — an idea rewritten into a
+    different field keeps its own words, so it still matches, while the boilerplate that never
+    carried the idea stops voting.
+
+    The parent is subtracted WHOLE — every prompt field, not just the ones this candidate
+    changed. A wholesale field rewrite re-types the task's own vocabulary, and that vocabulary
+    lives across the parent's other fields too: subtracting only the changed field left
+    ``provably``/``uncertain``/``json``/``schema`` in both fingerprints and still convicted two
+    unrelated ``instruction`` rewrites at 0.714 and 0.743. A word already somewhere in the
+    parent's prompt cannot be what this candidate contributed.
+    """
+    pf, pp = candidate_delta(child_fields, parent_fields, pp_override, parent_pp)
+    parent = parent_pp or {}
+    written = idea_fingerprint([str(v) for v in pf.values() if v] + [str(v) for v in pp.values()])
+    carried = idea_fingerprint(
+        [str(v) for v in parent_fields.values() if v]
+        + [
+            str(prior)
+            for (n, p), v in pp.items()
+            if (prior := parent_param_value(parent.get(n) or {}, p, v)) is not None
+        ]
+    )
+    return written - carried
+
+
 def _fmt_pp_val(v: object) -> str:
     if isinstance(v, float):
         return f"{v:g}"

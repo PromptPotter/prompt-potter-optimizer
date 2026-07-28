@@ -31,15 +31,16 @@ finding the discipline; do not hard-code task answers into it.
 
 Composite formula in ``campaign.json::scoring`` — lift × quality × efficiency:
 
-- ``after_N_rounds_delta`` — the lift core: how far the inner search climbed above
-  where it started, measured on one difficulty-adjusted ability ruler
+- ``after_N_rounds_delta`` — the lift core: the inner search's MEAN ability across
+  its rounds, minus where it started, in logits on one difficulty-adjusted ruler
 - ``cleanliness × diversity_health`` — bounded quality modulator
 - ``delta_per_dollar`` — efficiency modulator
 
-Better = deeper best-discovered lift, cleanly and cheaply won.
-(``first_round_delta`` measures the same climb after round 1 alone — early speed
-rather than best depth. It is emitted but held out of the formula, being largely
-collinear with the lift core.)
+Better = a whole trajectory held high, cleanly and cheaply won — not one lucky
+round. Because the core averages, sustaining a gain beats spiking to it and
+falling back, and a late collapse costs you the rounds it ruins.
+(``first_round_delta`` measures round 1 alone. Emitted, held out of the formula:
+two candidates' evidence is mostly noise at this sample budget.)
 
 ## Mutation surface
 

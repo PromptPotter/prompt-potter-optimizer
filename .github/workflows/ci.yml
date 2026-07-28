@@ -13,10 +13,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # uv provisions Python 3.13 and installs the EXACT pinned graph from
-      # uv.lock (--frozen fails if the lock drifted from pyproject). This is
-      # what makes CI reproducible: a dependency only moves when uv.lock is
-      # deliberately regenerated in a PR, never silently at install time.
+      # `--frozen` is what makes CI reproducible: a dependency moves only when
+      # uv.lock is deliberately regenerated, never silently at install time.
       - name: Install uv
         uses: astral-sh/setup-uv@v8.2.0
         with:
@@ -37,38 +35,21 @@ jobs:
       - name: Type check
         run: uv run mypy promptpotter/
 
-      # Layering guard: application/ MUST NOT import presentation/ (the one
-      # inversion that matters — presentation→application is the normal
-      # direction). The view-emit machinery lives in application/views now;
-      # ANSI/terminal rendering stays in presentation and imports upward.
-      # Allowlist = the remaining CLI-seam debt (load_session/SessionCtx in
-      # presentation/cli, and the LiveDisplay subscriber type) — a separate
-      # follow-up arc; the allowlist is the debt ledger, shrink it to zero.
+      # Fix by moving the shared piece into application/ — presentation imports
+      # upward. The allowlist is CLI-seam debt; shrink it to zero.
       - name: Layering guard — application must not import presentation
         run: |
-          violations=$(grep -rn "from promptpotter.presentation\|import promptpotter.presentation" promptpotter/application/ --include=*.py \
-            | grep -v "presentation.views.live.display import LiveDisplay" \
-            | grep -v "presentation.cli.session import SessionCtx" \
-            | grep -v "presentation.cli.session import load_session" \
-            || true)
-          if [ -n "$violations" ]; then
-            echo "❌ application/ imports presentation/ — wrong direction. Move the shared piece into application/ (presentation imports upward)."
-            echo "$violations"
-            exit 1
-          fi
+          ! grep -rn "from promptpotter.presentation\|import promptpotter.presentation" promptpotter/application/ --include=*.py \
+            | grep -vE "presentation\.(views\.live\.display import LiveDisplay|cli\.session import (SessionCtx|load_session))"
 
-      # Regenerate the TS type surface from the Pydantic models and fail on any
-      # diff. Without this, a drifted model silently ships a stale
-      # webapp/lib/api/types.generated.ts that the webapp typechecks against —
-      # the generator's "CI re-runs this" contract was previously unenforced.
+      # Both surfaces are generated from Pydantic models. Ungated, a drifted
+      # model ships a stale schema the webapp typechecks against and the LLM is
+      # asked to fill.
       - name: Types contract (Pydantic → TS)
         run: |
           uv run python scripts/build_ts_types.py
           git diff --exit-code webapp/lib/api/types.generated.ts
 
-      # Same contract, other generated surface: the optimizer's committed
-      # `resolved_schemas` are derived from OPTIMIZER_RESPONSE_MODELS. Ungated, a
-      # changed response model ships a stale schema the LLM is then asked to fill.
       - name: Schema contract (Pydantic → optimizer resolved_schemas)
         run: |
           uv run python scripts/build_optimizer_schemas.py
@@ -99,45 +80,26 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      # Explicit type check — `next build` does not hard-fail on every type
-      # error, so this is what makes tsconfig.json's strict mode enforced.
+      # `next build` does not hard-fail on every type error, so this is what
+      # makes tsconfig.json's strict mode enforced.
       - name: Type check
         run: npx tsc --noEmit
 
-      # Vitest covers reader-side derivations (lib/derivations/...) against
-      # frozen cycle fixtures at tests/fixtures/cycles/. Scope + recipe at
+      # Reader-side derivations against frozen cycle fixtures — see
       # docs/developer/cycle-fixtures.md.
       - name: Tests
         run: npm run test
 
-      # Candidate-list construction in components is banned. The spine is
-      # `roundCandidates(dash)` (sole consumer of `liveL1Candidates`) +
-      # the `useRoundCandidates` hook. Two surfaces re-deriving the same
-      # candidate list independently is what produced the lineage/fitness
-      # alignment bug; one centralized spine makes that drift impossible —
-      # and is what lets the bars and the dendrogram beneath them share one
-      # x-axis. Single-field reads (`dash.origin`, `roundOf(dash)`) remain
-      # allowed — they don't replicate the spine. Migration of the
-      # remaining `liveL1Candidates` sites (FreqChart per-sample bucket,
-      # HardSamplesHeatmap per-candidate marks, CandidatesCard evaluator
-      # union) is a follow-up; each site needs its own derivation, not a
-      # shared one.
+      # Two surfaces re-deriving the candidate list is what produced the
+      # lineage/fitness alignment bug. New consumers go through
+      # useRoundCandidates() / lib/derivations/round-candidates.ts; the three
+      # named components are migration debt, each owing its own derivation.
       - name: Anti-rot — no liveL1Candidates outside the spine
         run: |
-          violations=$(grep -RnlE 'liveL1Candidates' components/ lib/ app/ \
-            | grep -vE '__tests__/' \
-            | grep -vE 'FreqChart\.tsx|HardSamplesHeatmap\.tsx|CandidatesCard\.tsx' \
-            | grep -vE 'lib/poll\.tsx|lib/derivations/round-candidates\.ts' \
-            || true)
-          if [ -n "$violations" ]; then
-            echo "❌ liveL1Candidates is the candidate-spine constructor — only roundCandidates() and the three named follow-up sites may call it."
-            echo "   New consumers must go through useRoundCandidates() or roundCandidates() in lib/derivations/round-candidates.ts."
-            echo "$violations"
-            exit 1
-          fi
+          ! grep -RnlE 'liveL1Candidates' components/ lib/ app/ \
+            | grep -vE '__tests__/|FreqChart\.tsx|HardSamplesHeatmap\.tsx|CandidatesCard\.tsx|lib/poll\.tsx|lib/derivations/round-candidates\.ts'
 
+      # DEPLOY_BUILD=1 validates the shipped artifact: React Compiler pass +
+      # source maps. Bare `npm run build` is the local preview path and skips both.
       - name: Build
-        # Validate the exact shipped artifact: React Compiler pass + source
-        # maps on (DEPLOY_BUILD=1). Bare `npm run build` is the fast local
-        # preview path and would skip both.
         run: npm run build:deploy

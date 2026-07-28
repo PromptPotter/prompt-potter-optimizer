@@ -107,10 +107,11 @@ datasets/*/cache.json
 # demo samples are hand-authored, not regenerable — commit them
 !datasets/email-tagging/cache.json
 
-# Research benchmark cuts — an operator's own instrument, not product. The loader in
-# DATASET_LOADERS is what ships; the cut someone chooses to measure with is theirs to make.
+# Research benchmark cuts. The loader in DATASET_LOADERS is what ships, and the drawn cut
+# stays out — but the CONFIG travels: it declares the instrument a measurement came from,
+# and an untracked knob silently reverts on the next clone or deploy.
 datasets/justlogic-d23/
-datasets/justlogic-d234/
+datasets/justlogic-d234/cache.json
 
 # Recon-script raw data downloads (NaturalPlan GitHub JSON, etc.) — regenerable
 .cache/

@@ -16,6 +16,7 @@ from promptpotter.application.scoring.metrics import elimination_p_best
 from promptpotter.config.settings import POBB_DEFAULT_EPSILON
 from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
 from promptpotter.domain.rendering import classify_result
+from promptpotter.domain.scoring import is_answer_collapsed
 from promptpotter.domain.validators import StopRule
 from promptpotter.shared.errors import is_error_result
 
@@ -263,10 +264,35 @@ class PoBBCheck:
     def check(
         self, results: list[QueryMeasurement], candidate_idx: int, n_total_candidates: int
     ) -> EscalationSignal | None:
-        if not self.priors_by_sample:
-            return None
         n = len(results)
         if n < self.n_min:
+            return None
+        # A constant answerer is cut HERE, not at the election. ``is_answer_collapsed`` is the
+        # absence of a measurement, not a low score, and the two are not interchangeable: an arm
+        # answering one label to everything scores whatever share of the subset carries that
+        # label — on a three-way task that can sit near 0.33, comfortably above the ε floor — so
+        # the posterior never fires and the arm measures its full budget before ``l1_score``
+        # drops it from ``electable`` anyway. Measured live 2026-07-28: an arm answering
+        # "Uncertain" 12/12 against 6 TRUE / 6 FALSE spent twelve samples to establish something
+        # the fourth had already shown. Asking the question at ``n_min`` (the same evidence floor
+        # the posterior waits for — no second constant, and by then a genuine reasoner emitting
+        # one label while truths vary is unlikely) turns it into what a human does: see a
+        # candidate that has stopped answering the question, and move on.
+        #
+        # The collapse is still CHARGED, not hidden — the arm keeps its rows, so
+        # ``_round_problem_rate`` bills it to `cleanliness` exactly as before.
+        if is_answer_collapsed(results):
+            return _eliminate(
+                self.name,
+                {
+                    "queries_scored": n,
+                    "total_samples": self.n_samples,
+                    "answer_collapsed": True,
+                },
+                candidate_idx,
+                n_total_candidates,
+            )
+        if not self.priors_by_sample:
             return None
 
         # Exclude error/deprecated samples from the θ fit — a backend hiccup is not
@@ -329,6 +355,20 @@ class PoBBCheck:
                 n_total_candidates,
             )
 
+        # ε is the ONLY futility gate now, and it tests a slightly lower bar than adoption does.
+        # ``elimination_p_best`` compares strictly better-than-prior (no margin), while crowning
+        # needs the winner to clear the matched parent by ``improvement_threshold``. The prior
+        # set includes the incumbent (``l1/score/loop.py`` registers it as ``R{n}_winner``), so
+        # ε does ask "can this beat the parent" — it just cannot ask "by enough to be adopted",
+        # which leaves a thin band of arms that keep buying panel they can never be crowned on.
+        #
+        # A paired-margin futility gate that tested exactly that bar existed and was live-
+        # validated (2026-07-04: tie cut q17/20, losers q10/q13); it was dropped in ``2ee23d40``
+        # alongside the crowning rework. Raising ε absorbs most of its job. If kills still land
+        # late, try the BAR before the mechanism — a margin argument inside ``elimination_p_best``
+        # is a parameter, not a subsystem. **If the optimizer cannot be made to work and late
+        # kills are implicated, bringing that gate back is the considered fallback**; the full
+        # implementation is recoverable from ``2ee23d40``.
         if not self.epsilon_elimination or p_best_current >= self.epsilon:
             return None
 
