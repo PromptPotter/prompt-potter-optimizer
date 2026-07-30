@@ -1,0 +1,5481 @@
+{
+  "components": {
+    "schemas": {
+      "AcceptTermsBody": {
+        "additionalProperties": false,
+        "description": "The version the client is accepting — must equal the live TERMS_VERSION.",
+        "properties": {
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "AcceptTermsBody",
+        "type": "object"
+      },
+      "ActiveSessionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "campaign_id": {
+            "description": "Active campaign id (pinned by the webapp)",
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "cycle_id": {
+            "description": "Active cycle id within the campaign",
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "session_id": {
+            "description": "Active session id",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "tenant_id": {
+            "description": "Tenant the active session belongs to",
+            "title": "Tenant Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenant_id",
+          "session_id",
+          "campaign_id",
+          "cycle_id"
+        ],
+        "title": "ActiveSessionResponse",
+        "type": "object"
+      },
+      "ActivityBucket": {
+        "additionalProperties": false,
+        "description": "One bucket of the Activity pane's three stacked bar charts.\n\n``series`` maps each colour-axis label (model name or provider slug)\nto its per-metric value in this bucket; the frontend uses it to draw\nstacked bars. ``spend_usd`` / ``tokens`` / ``requests`` are the\nbucket totals (= sum of series values), kept for empty-state checks.",
+        "properties": {
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          },
+          "series_requests": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Series Requests",
+            "type": "object"
+          },
+          "series_spend": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Series Spend",
+            "type": "object"
+          },
+          "series_tokens": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Series Tokens",
+            "type": "object"
+          },
+          "spend_usd": {
+            "title": "Spend Usd",
+            "type": "number"
+          },
+          "tokens": {
+            "title": "Tokens",
+            "type": "integer"
+          },
+          "ts": {
+            "title": "Ts",
+            "type": "number"
+          }
+        },
+        "required": [
+          "ts",
+          "spend_usd",
+          "tokens",
+          "requests"
+        ],
+        "title": "ActivityBucket",
+        "type": "object"
+      },
+      "ActivityResponse": {
+        "additionalProperties": false,
+        "description": "Time-bucketed spend / requests / tokens over the requested window.",
+        "properties": {
+          "buckets": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityBucket"
+            },
+            "title": "Buckets",
+            "type": "array"
+          },
+          "group_by": {
+            "title": "Group By",
+            "type": "string"
+          },
+          "series_labels": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Series Labels",
+            "type": "array"
+          },
+          "since": {
+            "title": "Since",
+            "type": "number"
+          },
+          "total_requests": {
+            "title": "Total Requests",
+            "type": "integer"
+          },
+          "total_spend_usd": {
+            "title": "Total Spend Usd",
+            "type": "number"
+          },
+          "total_tokens": {
+            "title": "Total Tokens",
+            "type": "integer"
+          },
+          "until": {
+            "title": "Until",
+            "type": "number"
+          },
+          "window": {
+            "title": "Window",
+            "type": "string"
+          }
+        },
+        "required": [
+          "window",
+          "group_by",
+          "since",
+          "until",
+          "buckets",
+          "series_labels",
+          "total_spend_usd",
+          "total_tokens",
+          "total_requests"
+        ],
+        "title": "ActivityResponse",
+        "type": "object"
+      },
+      "BackendHealthResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "backend_id": {
+            "description": "Backend identifier",
+            "title": "Backend Id",
+            "type": "string"
+          },
+          "base_url": {
+            "description": "Backend API base URL probed",
+            "title": "Base Url",
+            "type": "string"
+          },
+          "checked_at": {
+            "description": "ISO 8601 probe timestamp",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error detail when not 'live'",
+            "title": "Detail"
+          },
+          "status": {
+            "description": "Reachability: 'live', 'unreachable', or 'error'",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "backend_id",
+          "base_url",
+          "status",
+          "checked_at"
+        ],
+        "title": "BackendHealthResponse",
+        "type": "object"
+      },
+      "BackendResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "backend_type": {
+            "description": "Backend type (e.g. 'default')",
+            "title": "Backend Type",
+            "type": "string"
+          },
+          "base_url": {
+            "description": "Backend API base URL",
+            "title": "Base Url",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "ISO 8601 creation timestamp",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "description": "Backend identifier",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "Human-readable backend name",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "backend_type",
+          "base_url",
+          "created_at"
+        ],
+        "title": "BackendResponse",
+        "type": "object"
+      },
+      "Body_ingest_dataset_api_v1_datasets_ingest_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "description": "Tabular upload (CSV/TSV/JSON/JSONL/XLSX); any columns.",
+            "title": "File",
+            "type": "string"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional slug override.",
+            "title": "Slug"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_ingest_dataset_api_v1_datasets_ingest_post",
+        "type": "object"
+      },
+      "Body_upload_candidate_library_api_v1_datasets_draft_candidate_library_post": {
+        "properties": {
+          "draft_id": {
+            "description": "Draft to attach the library to.",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Draft Id",
+            "type": "string"
+          },
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "description": "Target library — one entry per line, or a single-column CSV/Excel.",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "draft_id"
+        ],
+        "title": "Body_upload_candidate_library_api_v1_datasets_draft_candidate_library_post",
+        "type": "object"
+      },
+      "CampaignDetailResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "backend_id": {
+            "default": "",
+            "description": "Backend this campaign optimizes against",
+            "title": "Backend Id",
+            "type": "string"
+          },
+          "backend_type": {
+            "default": "",
+            "description": "Connector KIND of the campaign's dataset ('termnorm' / 'promptpotter' / …), read off `{dataset}/pipeline.yaml::backend_type`. The webapp's ONE test for a self-optimizing (L4) campaign — it renders the 'inner loops' disclosure and the pp-self panel variants on it. Empty when the dataset config is gone (a campaign outlives its dataset dir); callers treat empty as 'not self-optimizing'.",
+            "title": "Backend Type",
+            "type": "string"
+          },
+          "campaign_id": {
+            "description": "Campaign id ({dataset}__{rand6}) — one RUN of an origin",
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "config": {
+            "additionalProperties": true,
+            "description": "Frozen CampaignConfig snapshot for this campaign",
+            "title": "Config",
+            "type": "object"
+          },
+          "created_at": {
+            "description": "ISO 8601 creation timestamp",
+            "title": "Created At",
+            "type": "string"
+          },
+          "dataset_name": {
+            "description": "Dataset this campaign optimizes",
+            "title": "Dataset Name",
+            "type": "string"
+          },
+          "label": {
+            "default": "",
+            "description": "Operator-supplied campaign label",
+            "title": "Label",
+            "type": "string"
+          },
+          "lifecycle_changed_at": {
+            "default": "",
+            "description": "ISO 8601 timestamp of last lifecycle transition",
+            "title": "Lifecycle Changed At",
+            "type": "string"
+          },
+          "lifecycle_reason": {
+            "default": "",
+            "description": "Optional operator-supplied reason for the last lifecycle transition",
+            "title": "Lifecycle Reason",
+            "type": "string"
+          },
+          "lifecycle_status": {
+            "default": "active",
+            "description": "Operator visibility intent: 'active' (default sidebar), 'archived' (hidden), 'deleted' (soft-marked, data retained)",
+            "title": "Lifecycle Status",
+            "type": "string"
+          },
+          "owner_user_id": {
+            "default": "default",
+            "description": "UserId of the operator who minted the campaign",
+            "title": "Owner User Id",
+            "type": "string"
+          },
+          "root_content_hash": {
+            "default": "",
+            "description": "Content hash of the origin search point — the campaign identity",
+            "title": "Root Content Hash",
+            "type": "string"
+          },
+          "root_cycle_id": {
+            "description": "The campaign's root cycle id — `cycle_<root_content_hash>`, so it IS the campaign's ORIGIN identity. Campaigns on one declaration share it and differ only in the random `campaign_id` suffix, which is what makes them separate RUNS of that origin; the sidebar groups the forest by this key.",
+            "title": "Root Cycle Id",
+            "type": "string"
+          },
+          "status": {
+            "description": "Status of the campaign's run (its root cycle)",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "dataset_name",
+          "status",
+          "created_at",
+          "root_cycle_id",
+          "config"
+        ],
+        "title": "CampaignDetailResponse",
+        "type": "object"
+      },
+      "CampaignListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "campaigns": {
+            "description": "List of campaign summaries",
+            "items": {
+              "$ref": "#/components/schemas/CampaignSummary"
+            },
+            "title": "Campaigns",
+            "type": "array"
+          },
+          "total": {
+            "description": "Total number of campaigns",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "campaigns",
+          "total"
+        ],
+        "title": "CampaignListResponse",
+        "type": "object"
+      },
+      "CampaignStorageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "campaign_id": {
+            "description": "The campaign measured",
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "connector_bytes": {
+            "description": "Backend-produced: node-I/O cache + per-sample arrays",
+            "title": "Connector Bytes",
+            "type": "integer"
+          },
+          "dataset_bytes": {
+            "description": "langfuse ground-truth mirror (the input-data copy)",
+            "title": "Dataset Bytes",
+            "type": "integer"
+          },
+          "history_bytes": {
+            "description": "Loop event spine: ledger.jsonl",
+            "title": "History Bytes",
+            "type": "integer"
+          },
+          "on_disk_bytes": {
+            "description": "Whole campaign-dir footprint — sum of the six leaves",
+            "title": "On Disk Bytes",
+            "type": "integer"
+          },
+          "reports_bytes": {
+            "description": "Readable output: manifest + reports + hard_samples",
+            "title": "Reports Bytes",
+            "type": "integer"
+          },
+          "state_bytes": {
+            "description": "Loop resume point: round searchpoint state + overrides",
+            "title": "State Bytes",
+            "type": "integer"
+          },
+          "trace_bytes": {
+            "description": "Loop telemetry: streams, prompts, langfuse loop trace",
+            "title": "Trace Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "on_disk_bytes",
+          "dataset_bytes",
+          "connector_bytes",
+          "state_bytes",
+          "trace_bytes",
+          "history_bytes",
+          "reports_bytes"
+        ],
+        "title": "CampaignStorageResponse",
+        "type": "object"
+      },
+      "CampaignSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "backend_id": {
+            "default": "",
+            "description": "Backend this campaign optimizes against",
+            "title": "Backend Id",
+            "type": "string"
+          },
+          "backend_type": {
+            "default": "",
+            "description": "Connector KIND of the campaign's dataset ('termnorm' / 'promptpotter' / …), read off `{dataset}/pipeline.yaml::backend_type`. The webapp's ONE test for a self-optimizing (L4) campaign — it renders the 'inner loops' disclosure and the pp-self panel variants on it. Empty when the dataset config is gone (a campaign outlives its dataset dir); callers treat empty as 'not self-optimizing'.",
+            "title": "Backend Type",
+            "type": "string"
+          },
+          "campaign_id": {
+            "description": "Campaign id ({dataset}__{rand6}) — one RUN of an origin",
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "ISO 8601 creation timestamp",
+            "title": "Created At",
+            "type": "string"
+          },
+          "dataset_name": {
+            "description": "Dataset this campaign optimizes",
+            "title": "Dataset Name",
+            "type": "string"
+          },
+          "label": {
+            "default": "",
+            "description": "Operator-supplied campaign label",
+            "title": "Label",
+            "type": "string"
+          },
+          "lifecycle_changed_at": {
+            "default": "",
+            "description": "ISO 8601 timestamp of last lifecycle transition",
+            "title": "Lifecycle Changed At",
+            "type": "string"
+          },
+          "lifecycle_reason": {
+            "default": "",
+            "description": "Optional operator-supplied reason for the last lifecycle transition",
+            "title": "Lifecycle Reason",
+            "type": "string"
+          },
+          "lifecycle_status": {
+            "default": "active",
+            "description": "Operator visibility intent: 'active' (default sidebar), 'archived' (hidden), 'deleted' (soft-marked, data retained)",
+            "title": "Lifecycle Status",
+            "type": "string"
+          },
+          "owner_user_id": {
+            "default": "default",
+            "description": "UserId of the operator who minted the campaign",
+            "title": "Owner User Id",
+            "type": "string"
+          },
+          "root_cycle_id": {
+            "description": "The campaign's root cycle id — `cycle_<root_content_hash>`, so it IS the campaign's ORIGIN identity. Campaigns on one declaration share it and differ only in the random `campaign_id` suffix, which is what makes them separate RUNS of that origin; the sidebar groups the forest by this key.",
+            "title": "Root Cycle Id",
+            "type": "string"
+          },
+          "status": {
+            "description": "Status of the campaign's run (its root cycle)",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "dataset_name",
+          "status",
+          "created_at",
+          "root_cycle_id"
+        ],
+        "title": "CampaignSummary",
+        "type": "object"
+      },
+      "ChampionCandidate": {
+        "additionalProperties": false,
+        "description": "One unique meta-prompt state, aggregated across every occurrence in the corpus.",
+        "properties": {
+          "anchor_effect": {
+            "title": "Anchor Effect",
+            "type": "number"
+          },
+          "ci_hi": {
+            "title": "Ci Hi",
+            "type": "number"
+          },
+          "ci_lo": {
+            "title": "Ci Lo",
+            "type": "number"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "n_cells": {
+            "title": "N Cells",
+            "type": "integer"
+          },
+          "n_measurements": {
+            "title": "N Measurements",
+            "type": "integer"
+          },
+          "per_cell_effects": {
+            "items": {
+              "$ref": "#/components/schemas/ChampionCellEffect"
+            },
+            "title": "Per Cell Effects",
+            "type": "array"
+          },
+          "prompt_state": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Prompt State",
+            "type": "object"
+          },
+          "provenance": {
+            "items": {
+              "$ref": "#/components/schemas/ChampionProvenance"
+            },
+            "title": "Provenance",
+            "type": "array"
+          },
+          "state_hash": {
+            "title": "State Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state_hash",
+          "label",
+          "prompt_state",
+          "provenance",
+          "per_cell_effects",
+          "anchor_effect",
+          "ci_lo",
+          "ci_hi",
+          "n_cells",
+          "n_measurements"
+        ],
+        "title": "ChampionCandidate",
+        "type": "object"
+      },
+      "ChampionCellEffect": {
+        "additionalProperties": false,
+        "description": "One environment cell's paired (candidate − origin) effect for a state.",
+        "properties": {
+          "cell": {
+            "title": "Cell",
+            "type": "string"
+          },
+          "mean_d": {
+            "title": "Mean D",
+            "type": "number"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cell",
+          "mean_d",
+          "n"
+        ],
+        "title": "ChampionCellEffect",
+        "type": "object"
+      },
+      "ChampionProvenance": {
+        "additionalProperties": false,
+        "description": "Where one occurrence of a candidate state was measured on disk.",
+        "properties": {
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "candidate_id": {
+            "title": "Candidate Id",
+            "type": "string"
+          },
+          "cycle_id": {
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "round": {
+            "title": "Round",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "cycle_id",
+          "round",
+          "candidate_id"
+        ],
+        "title": "ChampionProvenance",
+        "type": "object"
+      },
+      "ChampionRegistry": {
+        "additionalProperties": false,
+        "description": "The ranked champion table — recomputed from disk on every read, never persisted.",
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/ChampionCandidate"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "generated_at": {
+            "title": "Generated At",
+            "type": "string"
+          },
+          "n_cycles_scanned": {
+            "title": "N Cycles Scanned",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "generated_at",
+          "n_cycles_scanned",
+          "candidates"
+        ],
+        "title": "ChampionRegistry",
+        "type": "object"
+      },
+      "CommandAcceptedBody": {
+        "additionalProperties": false,
+        "description": "The 202 response shape declared in ``m12-api-openapi.yaml``.",
+        "properties": {
+          "command_id": {
+            "description": "Stable id of the appended `CommandRecord`.",
+            "title": "Command Id",
+            "type": "string"
+          },
+          "correlation_id": {
+            "description": "Echo of the request's `Idempotency-Key`.",
+            "title": "Correlation Id",
+            "type": "string"
+          },
+          "ledger_sequence": {
+            "description": "Offset at which the `CommandRecord` was appended.",
+            "minimum": 0.0,
+            "title": "Ledger Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "command_id",
+          "correlation_id",
+          "ledger_sequence"
+        ],
+        "title": "CommandAcceptedBody",
+        "type": "object"
+      },
+      "CommandEnvelope": {
+        "additionalProperties": false,
+        "description": "Inbound envelope per ``m12-api-openapi.yaml#/components/schemas/CommandEnvelope``.",
+        "properties": {
+          "kind": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9-]*$",
+            "title": "Kind",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "CommandEnvelope",
+        "type": "object"
+      },
+      "ConfigCoupling": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "description": "True when this campaign's config is in the violating combination",
+            "title": "Active",
+            "type": "boolean"
+          },
+          "consequence": {
+            "description": "What goes wrong when the combination is violated",
+            "title": "Consequence",
+            "type": "string"
+          },
+          "estimand": {
+            "description": "The shared estimand the knobs co-determine",
+            "title": "Estimand",
+            "type": "string"
+          },
+          "knobs": {
+            "description": "Dotted knob paths the coupling relates",
+            "items": {
+              "type": "string"
+            },
+            "title": "Knobs",
+            "type": "array"
+          },
+          "labels": {
+            "description": "Short display names for those knobs",
+            "items": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "array"
+          },
+          "name": {
+            "description": "Coupling id",
+            "title": "Name",
+            "type": "string"
+          },
+          "relation": {
+            "description": "The relationship rule, plain language",
+            "title": "Relation",
+            "type": "string"
+          },
+          "severity": {
+            "description": "collision (soundness) | inert (wasted knob) | info (relationship)",
+            "title": "Severity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "knobs",
+          "labels",
+          "estimand",
+          "relation",
+          "consequence",
+          "severity",
+          "active"
+        ],
+        "title": "ConfigCoupling",
+        "type": "object"
+      },
+      "ConfigEstimandGroup": {
+        "additionalProperties": false,
+        "properties": {
+          "doc": {
+            "description": "Plain-language one-liner of what this estimand is",
+            "title": "Doc",
+            "type": "string"
+          },
+          "key": {
+            "description": "Estimand key (selection, difficulty, ability, …)",
+            "title": "Key",
+            "type": "string"
+          },
+          "knobs": {
+            "description": "Knobs that move this estimand, in declared order",
+            "items": {
+              "$ref": "#/components/schemas/ConfigKnob"
+            },
+            "title": "Knobs",
+            "type": "array"
+          },
+          "label": {
+            "description": "Human-readable estimand name",
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "doc",
+          "knobs"
+        ],
+        "title": "ConfigEstimandGroup",
+        "type": "object"
+      },
+      "ConfigKnob": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "description": "Short display name (prefix-stripped)",
+            "title": "Label",
+            "type": "string"
+          },
+          "path": {
+            "description": "Dotted CampaignConfig path (or const.<NAME> for a hardcoded floor)",
+            "title": "Path",
+            "type": "string"
+          },
+          "source": {
+            "description": "Where the value came from: default | campaign (operator-set) | required | constant",
+            "title": "Source",
+            "type": "string"
+          },
+          "value": {
+            "description": "Effective value in this campaign's frozen config",
+            "title": "Value"
+          }
+        },
+        "required": [
+          "path",
+          "label",
+          "value",
+          "source"
+        ],
+        "title": "ConfigKnob",
+        "type": "object"
+      },
+      "ConfigMapResponse": {
+        "additionalProperties": false,
+        "description": "The config-map for one campaign: every knob grouped by the statistical\nestimand it moves (with effective value + source layer), plus every declared\ncoupling flagged active/inactive against this campaign's frozen config.\n\nServer-authored from the single ``application.knobs`` registry — the same source\nthe pre-run preflight warning reads, so the webapp panel never disagrees with the\nengine on which knobs collide.",
+        "properties": {
+          "couplings": {
+            "description": "Declared couplings, active ones flagged",
+            "items": {
+              "$ref": "#/components/schemas/ConfigCoupling"
+            },
+            "title": "Couplings",
+            "type": "array"
+          },
+          "groups": {
+            "description": "Estimand groups, in declared order",
+            "items": {
+              "$ref": "#/components/schemas/ConfigEstimandGroup"
+            },
+            "title": "Groups",
+            "type": "array"
+          }
+        },
+        "required": [
+          "groups",
+          "couplings"
+        ],
+        "title": "ConfigMapResponse",
+        "type": "object"
+      },
+      "ConnectedAccount": {
+        "additionalProperties": false,
+        "description": "One OIDC provider currently bound to the active session.\n\nStage-1 beta is single-account-per-user — the list is always length 1.\nThe Clerk-style \"connected accounts\" surface in the webapp displays this\nlist; multi-account linking ships post-M13.",
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "email"
+        ],
+        "title": "ConnectedAccount",
+        "type": "object"
+      },
+      "CycleHop": {
+        "additionalProperties": false,
+        "description": "One ``(campaign, cycle)`` step of a :data:`CyclePath`.\n\nThe campaign component is carried to name the leaf and for symmetry with the\nwebapp; it plays no part in descent — a sandbox is keyed on the cycle id alone.\n\nA model rather than a tuple so it serializes as ``{campaign_id, cycle_id}``: a\nserved path is read by a client that already speaks this shape, and a positional\npair on the wire is one more thing for a reader to decode wrongly.",
+        "properties": {
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "cycle_id": {
+            "title": "Cycle Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "cycle_id"
+        ],
+        "title": "CycleHop",
+        "type": "object"
+      },
+      "CycleListEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "backend_id": {
+            "default": "",
+            "title": "Backend Id",
+            "type": "string"
+          },
+          "best_accuracy": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Best Accuracy"
+          },
+          "campaign_id": {
+            "description": "Campaign the cycle belongs to",
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "created_at": {
+            "default": "",
+            "title": "Created At",
+            "type": "string"
+          },
+          "cycle_id": {
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "dataset_name": {
+            "default": "",
+            "title": "Dataset Name",
+            "type": "string"
+          },
+          "human_intervened": {
+            "default": false,
+            "description": "True once an operator manually intervened (e.g. skip-searchpoint); the cycle is babysat and no longer purely reproducible. Drives the 'babysat' badge; orthogonal to run_phase.",
+            "title": "Human Intervened",
+            "type": "boolean"
+          },
+          "is_root": {
+            "title": "Is Root",
+            "type": "boolean"
+          },
+          "n_rounds": {
+            "default": 0,
+            "title": "N Rounds",
+            "type": "integer"
+          },
+          "origin_accuracy": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Round 0's accuracy — the origin's measurement, derived from rounds[] (no stored copy). Null until round 0 lands.",
+            "title": "Origin Accuracy"
+          },
+          "parent_cycle_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Immediate parent for siblings (forks/sweeps/diag); null for roots. Sidebar uses this to nest siblings.",
+            "title": "Parent Cycle Id"
+          },
+          "parent_session_id": {
+            "default": "",
+            "title": "Parent Session Id",
+            "type": "string"
+          },
+          "run_phase": {
+            "default": "detached",
+            "description": "The single run-state value (RunPhase) — checkin (origin still being authored, pre-loop) / running / paused / detached / terminal. Computed once by derive_run_phase from lifecycle + control flags + freshness; every picker dot and badge reads this, none re-derive it. 'checkin' wins first (the campaign hasn't run); 'terminal' pairs with `status` for the reason label.",
+            "enum": [
+              "checkin",
+              "running",
+              "paused",
+              "detached",
+              "terminal"
+            ],
+            "title": "Run Phase",
+            "type": "string"
+          },
+          "sibling_kind": {
+            "enum": [
+              "root",
+              "fork",
+              "diag",
+              "sweep"
+            ],
+            "title": "Sibling Kind",
+            "type": "string"
+          },
+          "spawned_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpawnedBy"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which outer work-item asked for this cycle, when it is an L4 inner measurement; null for an ordinary campaign. Lets the sidebar name an inner run by the candidate that produced it instead of by launch order. Null on inner cycles minted before the stamp existed — they fall back to their origin hash."
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "unit_kind": {
+            "enum": [
+              "session",
+              "divergent_resume",
+              "user_fork",
+              "auto_rebase"
+            ],
+            "title": "Unit Kind",
+            "type": "string"
+          },
+          "updated_at": {
+            "default": "",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "cycle_id",
+          "sibling_kind",
+          "unit_kind",
+          "is_root",
+          "status"
+        ],
+        "title": "CycleListEntry",
+        "type": "object"
+      },
+      "CyclesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "active_campaign_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Active campaign per active_session.json; null when no session is active.",
+            "title": "Active Campaign Id"
+          },
+          "active_cycle_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Active cycle per active_session.json; null when no session is active.",
+            "title": "Active Cycle Id"
+          },
+          "cycles": {
+            "items": {
+              "$ref": "#/components/schemas/CycleListEntry"
+            },
+            "title": "Cycles",
+            "type": "array"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenant_id",
+          "active_campaign_id",
+          "active_cycle_id",
+          "cycles"
+        ],
+        "title": "CyclesResponse",
+        "type": "object"
+      },
+      "DatasetIndexEntry": {
+        "additionalProperties": false,
+        "description": "One row in the dataset registry — backs the Dashboard ``New campaign`` view.\n\nWire shape pinned in ``docs/specs/m12-api-openapi.yaml::DatasetIndexEntry``.",
+        "properties": {
+          "n_samples": {
+            "default": 0,
+            "description": "Sample bank size from ``cache.json``; ``0`` when the cache hasn't been materialized yet.",
+            "title": "N Samples",
+            "type": "integer"
+          },
+          "name": {
+            "description": "Slug used as the path segment under `datasets/`.",
+            "title": "Name",
+            "type": "string"
+          },
+          "tier": {
+            "description": "``yours`` = user-owned Origin under ``projects/{tenant}/datasets/{slug}/``. ``install`` = content that ships with the product at ``datasets/{slug}/`` (benchmarks, demos, ``promptpotter-self``) — tracked in git, so readable by anyone using the install. A ``yours`` slug shadows an ``install`` one.",
+            "enum": [
+              "yours",
+              "install"
+            ],
+            "title": "Tier",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Display title (from `dataset.md`).",
+            "title": "Title"
+          }
+        },
+        "required": [
+          "name",
+          "tier"
+        ],
+        "title": "DatasetIndexEntry",
+        "type": "object"
+      },
+      "DatasetIndexResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "datasets": {
+            "items": {
+              "$ref": "#/components/schemas/DatasetIndexEntry"
+            },
+            "title": "Datasets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "datasets"
+        ],
+        "title": "DatasetIndexResponse",
+        "type": "object"
+      },
+      "DatasetItem": {
+        "additionalProperties": false,
+        "properties": {
+          "delta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Rasch difficulty delta_s (higher = harder). None when unmeasured.",
+            "title": "Delta"
+          },
+          "delta_se": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "SE of delta_s (large = barely measured). None when unmeasured.",
+            "title": "Delta Se"
+          },
+          "ground_truth": {
+            "title": "Ground Truth",
+            "type": "string"
+          },
+          "n_obs": {
+            "description": "Times this sample has been tried",
+            "title": "N Obs",
+            "type": "integer"
+          },
+          "p_hat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Marginal hit prob the seed-centred decision-IG reads — see ``adaptive_queue_mechanism.marginal_hit_probability``. Near 0.5 = contested at seed; near 0/1 = predictable. None when unmeasured.",
+            "title": "P Hat"
+          },
+          "pick_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Queue-mechanism's blended objective on this sample for a brand-new candidate (prior N(0, sigma_theta**2)) vs the best fitted candidate. The live adaptive queue mechanism re-evaluates per step. None when unmeasured.",
+            "title": "Pick Score"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "sample_id": {
+            "title": "Sample Id",
+            "type": "integer"
+          },
+          "task": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task"
+          }
+        },
+        "required": [
+          "sample_id",
+          "query",
+          "ground_truth",
+          "n_obs"
+        ],
+        "title": "DatasetItem",
+        "type": "object"
+      },
+      "DatasetPipelineResponse": {
+        "additionalProperties": false,
+        "description": "Target pipeline view for a dataset overlay. `view` drives the webapp chat-pane hero;\n`pipeline` is the full parsed schema for consumers needing per-node config; `connector` is\nthe original-cased name for chip labelling.",
+        "properties": {
+          "backend_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backend Type"
+          },
+          "connector": {
+            "title": "Connector",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "node_config_schema": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/NodeConfigParam"
+              },
+              "type": "array"
+            },
+            "title": "Node Config Schema",
+            "type": "object"
+          },
+          "node_output_schema": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/NodeOutputSchema"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Node Output Schema",
+            "type": "object"
+          },
+          "pipeline": {
+            "additionalProperties": true,
+            "title": "Pipeline",
+            "type": "object"
+          },
+          "view": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "View"
+          }
+        },
+        "required": [
+          "name",
+          "connector",
+          "backend_type",
+          "pipeline",
+          "view",
+          "node_config_schema",
+          "node_output_schema"
+        ],
+        "title": "DatasetPipelineResponse",
+        "type": "object"
+      },
+      "DatasetPreviewResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DatasetItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "row_count": {
+            "title": "Row Count",
+            "type": "integer"
+          },
+          "split_test": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Declared held-out test fold size (not materialized). The training-bank size is `row_count` above — the bank IS the preview, so a second field restated it.",
+            "title": "Split Test"
+          }
+        },
+        "required": [
+          "name",
+          "row_count",
+          "items"
+        ],
+        "title": "DatasetPreviewResponse",
+        "type": "object"
+      },
+      "DatasetStorageEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "connector_bytes": {
+            "title": "Connector Bytes",
+            "type": "integer"
+          },
+          "dataset_bytes": {
+            "title": "Dataset Bytes",
+            "type": "integer"
+          },
+          "dataset_name": {
+            "title": "Dataset Name",
+            "type": "string"
+          },
+          "history_bytes": {
+            "title": "History Bytes",
+            "type": "integer"
+          },
+          "reports_bytes": {
+            "title": "Reports Bytes",
+            "type": "integer"
+          },
+          "state_bytes": {
+            "title": "State Bytes",
+            "type": "integer"
+          },
+          "total_bytes": {
+            "description": "On disk — the sum of the six leaves",
+            "title": "Total Bytes",
+            "type": "integer"
+          },
+          "trace_bytes": {
+            "title": "Trace Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "dataset_name",
+          "total_bytes",
+          "dataset_bytes",
+          "connector_bytes",
+          "state_bytes",
+          "trace_bytes",
+          "history_bytes",
+          "reports_bytes"
+        ],
+        "title": "DatasetStorageEntry",
+        "type": "object"
+      },
+      "DatasetStorageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "datasets": {
+            "description": "Fattest-first per-dataset leaf splits",
+            "items": {
+              "$ref": "#/components/schemas/DatasetStorageEntry"
+            },
+            "title": "Datasets",
+            "type": "array"
+          },
+          "total_bytes": {
+            "description": "Grand total across the caller's datasets",
+            "title": "Total Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total_bytes",
+          "datasets"
+        ],
+        "title": "DatasetStorageResponse",
+        "type": "object"
+      },
+      "DiagnosticRunListResponse": {
+        "additionalProperties": false,
+        "description": "One page of diagnostic-run records, newest first.",
+        "properties": {
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/DiagnosticRunRecord"
+            },
+            "title": "Runs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "n",
+          "runs"
+        ],
+        "title": "DiagnosticRunListResponse",
+        "type": "object"
+      },
+      "DiagnosticRunRecord": {
+        "additionalProperties": false,
+        "description": "One on-demand workspace-scope diagnostic run — the ``verify`` and ``noise-floor``\nCLI verbs' shared sidecar shape.\n\nPer-sample data lands in `measurements/`; this record carries the workspace-scope\nverdict. ``verify`` populates the base fields (did the source-campaign composite\nhold on more samples); ``noise-floor`` additionally populates the ``noise_floor_*``\nfields (the run-to-run spread of ``--k`` ``force_fresh`` re-scores of the SAME\nconfig) and leaves ``samples_added``/``source_campaign_*`` at the origin round's\nrecorded values (there is nothing new to \"add\" — every re-score targets the same\nalready-measured set).",
+        "properties": {
+          "config_hash": {
+            "title": "Config Hash",
+            "type": "string"
+          },
+          "dataset": {
+            "title": "Dataset",
+            "type": "string"
+          },
+          "noise_floor_ci_hi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Noise Floor Ci Hi"
+          },
+          "noise_floor_ci_lo": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Noise Floor Ci Lo"
+          },
+          "noise_floor_k": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Noise Floor K"
+          },
+          "noise_floor_mean": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Noise Floor Mean"
+          },
+          "noise_floor_raw": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Noise Floor Raw"
+          },
+          "samples_added": {
+            "title": "Samples Added",
+            "type": "integer"
+          },
+          "samples_requested": {
+            "title": "Samples Requested",
+            "type": "integer"
+          },
+          "source_campaign": {
+            "title": "Source Campaign",
+            "type": "string"
+          },
+          "source_campaign_accuracy": {
+            "title": "Source Campaign Accuracy",
+            "type": "number"
+          },
+          "source_campaign_composite": {
+            "title": "Source Campaign Composite",
+            "type": "number"
+          },
+          "source_campaign_n": {
+            "title": "Source Campaign N",
+            "type": "integer"
+          },
+          "source_candidate_id": {
+            "title": "Source Candidate Id",
+            "type": "string"
+          },
+          "source_cycle": {
+            "title": "Source Cycle",
+            "type": "string"
+          },
+          "source_label": {
+            "title": "Source Label",
+            "type": "string"
+          },
+          "ts": {
+            "title": "Ts",
+            "type": "string"
+          },
+          "workspace_accuracy": {
+            "title": "Workspace Accuracy",
+            "type": "number"
+          },
+          "workspace_composite": {
+            "title": "Workspace Composite",
+            "type": "number"
+          },
+          "workspace_n": {
+            "title": "Workspace N",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ts",
+          "dataset",
+          "source_campaign",
+          "source_cycle",
+          "source_label",
+          "source_candidate_id",
+          "config_hash",
+          "samples_requested",
+          "samples_added",
+          "workspace_n",
+          "workspace_accuracy",
+          "workspace_composite",
+          "source_campaign_accuracy",
+          "source_campaign_composite",
+          "source_campaign_n"
+        ],
+        "title": "DiagnosticRunRecord",
+        "type": "object"
+      },
+      "FileContentResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UTF-8 text content; None when binary or oversized",
+            "title": "Content"
+          },
+          "content_type": {
+            "enum": [
+              "json",
+              "markdown",
+              "log",
+              "text",
+              "binary"
+            ],
+            "title": "Content Type",
+            "type": "string"
+          },
+          "cycle_id": {
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "mtime": {
+            "title": "Mtime",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "cycle",
+              "campaign"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "cycle_id",
+          "scope",
+          "path",
+          "size",
+          "mtime",
+          "content_type"
+        ],
+        "title": "FileContentResponse",
+        "type": "object"
+      },
+      "FileEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "mtime": {
+            "description": "ISO 8601 UTC modification time",
+            "title": "Mtime",
+            "type": "string"
+          },
+          "path": {
+            "description": "Path relative to the scope root, forward slashes",
+            "title": "Path",
+            "type": "string"
+          },
+          "scope": {
+            "description": "Which root the path is under",
+            "enum": [
+              "cycle",
+              "campaign"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "size": {
+            "description": "File size in bytes",
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "scope",
+          "size",
+          "mtime"
+        ],
+        "title": "FileEntry",
+        "type": "object"
+      },
+      "FilesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "cycle_id": {
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/FileEntry"
+            },
+            "title": "Entries",
+            "type": "array"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "cycle_id",
+          "entries"
+        ],
+        "title": "FilesResponse",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "LineageDivergence": {
+        "additionalProperties": false,
+        "description": "Where an alternative criterion would have elected someone else. Rides the node it\ndescribes (``LineageNode.divergence``) — there is no parallel list to re-join.",
+        "properties": {
+          "alternative_candidate_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The candidate the masked criterion would have elected instead (measured, so nameable); null when the round would simply have held on origin.",
+            "title": "Alternative Candidate Id"
+          }
+        },
+        "title": "LineageDivergence",
+        "type": "object"
+      },
+      "LineageNode": {
+        "additionalProperties": false,
+        "description": "One node of the served tree. The same shape at every depth — that is the point.",
+        "properties": {
+          "accuracy": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accuracy"
+          },
+          "best_accuracy": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Best Accuracy"
+          },
+          "children": {
+            "items": {
+              "$ref": "#/components/schemas/LineageNode"
+            },
+            "title": "Children",
+            "type": "array"
+          },
+          "composite_ci_hi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Composite Ci Hi"
+          },
+          "composite_ci_lo": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Composite Ci Lo"
+          },
+          "composite_fitness": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Composite Fitness"
+          },
+          "course_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "root",
+                  "fork",
+                  "diag",
+                  "sweep",
+                  "inner"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Courses, and the candidates a fork contributed here — on those it is the ⑂ stamp marking an attempt the operator cut.",
+            "title": "Course Kind"
+          },
+          "course_label": {
+            "description": "This candidate's label in the course that MINTED it. Equal to `label` for a candidate this course minted itself; a fork-contributed attempt keeps the fork's private `C{round}.{n}` here while `label` carries its renumbered position on this course's timeline. JOIN ON THIS, never on `candidate_id`, when matching a node against a per-cycle projection: `dashboard.json` is per-cycle and speaks the minting course's private counter, while `candidate_id` is re-minted per run (see `_close_facts`), so an id join silently misses.",
+            "title": "Course Label",
+            "type": "string"
+          },
+          "cumulative_theta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Ability of the adopted lineage on the cycle's fixed δ ruler — the subset-invariant, cross-round-comparable series the trend plots. Carried by the round's WINNER only: it is a property of the advancing spine, and a losing sibling never joined it. Its accuracy-space predecessor was a mean over rows measured by different configurations and is gone; `accuracy` is what this node MEASURED.",
+            "title": "Cumulative Theta"
+          },
+          "dataset_name": {
+            "default": "",
+            "title": "Dataset Name",
+            "type": "string"
+          },
+          "divergence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LineageDivergence"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set when the request's lens would have FORKED the record at this node. Only ever set on a closed round's node."
+          },
+          "divergent": {
+            "default": false,
+            "description": "This node is inside the counterfactual subtree below a divergence — the client dims it.",
+            "title": "Divergent",
+            "type": "boolean"
+          },
+          "evaluators": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "The candidate's stored evaluator namespace — the measurement a `score:` lens re-scores against.",
+            "title": "Evaluators",
+            "type": "object"
+          },
+          "expected_samples": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Samples"
+          },
+          "hearts": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hearts"
+          },
+          "id": {
+            "description": "Course: the cycle_id. Candidate: the searchpoint id minted at L1/origin.",
+            "title": "Id",
+            "type": "string"
+          },
+          "is_winner": {
+            "default": false,
+            "description": "Elected this round. False throughout a round that never CLOSED — election is stamped at close, so such a round has no winner to report.",
+            "title": "Is Winner",
+            "type": "boolean"
+          },
+          "kind": {
+            "description": "course | candidate — they strictly alternate",
+            "enum": [
+              "course",
+              "candidate"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "description": "`C{round}.{n}` on the campaign's ONE timeline: this course's own candidates keep their minted label; an attempt a fork contributed takes the next free index of its round, by mint time.",
+            "title": "Label",
+            "type": "string"
+          },
+          "lens_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "This candidate's fitness under the request's `score:` lens, re-scored server-side from its stored evaluator namespace. Null without a lens, or when the namespace can't satisfy the formula.",
+            "title": "Lens Value"
+          },
+          "lives_cap": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lives Cap"
+          },
+          "origin_accuracy": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "This course's round-0 score. A course that has only run its origin has this and no `best_accuracy`, so reading only `best` blanks its bar.",
+            "title": "Origin Accuracy"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The candidate this node descends from; null only at the true root. A course carries the same edge its own C0 carries.",
+            "title": "Parent Id"
+          },
+          "path": {
+            "description": "THE address, root → leaf: the course this node belongs to. A candidate a fork contributed carries the FORK's path, so selecting it re-roots onto that fork.",
+            "items": {
+              "$ref": "#/components/schemas/CycleHop"
+            },
+            "title": "Path",
+            "type": "array"
+          },
+          "round": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Column hint. Candidates only.",
+            "title": "Round"
+          },
+          "run_phase": {
+            "default": "",
+            "description": "Courses only: checkin | running | paused | detached | terminal — the ONE server-owned run-state (`derive_run_phase`), the same value `/cycles` serves.",
+            "title": "Run Phase",
+            "type": "string"
+          },
+          "sample_set_accuracy": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Scorer-faithful accuracy over the request's `samples=` subset. Null without a `samples=` mask, or when this candidate never ran any selected sample.",
+            "title": "Sample Set Accuracy"
+          },
+          "sample_set_n": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How many of the `samples=` subset this candidate ran.",
+            "title": "Sample Set N"
+          },
+          "scored_samples": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scored Samples"
+          },
+          "state": {
+            "default": "",
+            "description": "Candidate: minted | measured — never 'winner' (that rides `is_winner`). Course: the cycle status.",
+            "title": "State",
+            "type": "string"
+          },
+          "steered_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Operator who cut this fork.",
+            "title": "Steered By"
+          },
+          "task": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "An inner run's benchmark task. Load-bearing: every task runs for every candidate, so the candidate edge alone does not identify an inner run.",
+            "title": "Task"
+          },
+          "theta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Difficulty-adjusted Rasch ability the election ranked on — what explains a lower-accuracy winner. Null outside the round's election fit.",
+            "title": "Theta"
+          },
+          "theta_se": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Theta Se"
+          },
+          "trigger": {
+            "default": "",
+            "description": "Fork trigger; empty for roots and inner runs.",
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "label",
+          "course_label"
+        ],
+        "title": "LineageNode",
+        "type": "object"
+      },
+      "MachineHolder": {
+        "additionalProperties": false,
+        "properties": {
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "cycle_id": {
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO start time of the holding run; null if still pending",
+            "title": "Started At"
+          },
+          "user": {
+            "description": "user_id of the operator whose run owns the slot",
+            "title": "User",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user",
+          "campaign_id",
+          "cycle_id"
+        ],
+        "title": "MachineHolder",
+        "type": "object"
+      },
+      "MachineStatusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "busy": {
+            "description": "True iff a *different* user holds a running job (the server runs one campaign at a time).",
+            "title": "Busy",
+            "type": "boolean"
+          },
+          "holder": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MachineHolder"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who holds the slot; null when free for this caller."
+          }
+        },
+        "required": [
+          "busy"
+        ],
+        "title": "MachineStatusResponse",
+        "type": "object"
+      },
+      "MeResponse": {
+        "additionalProperties": false,
+        "description": "Current identity envelope. Returned by ``GET /auth/me`` only.",
+        "properties": {
+          "available_providers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Available Providers",
+            "type": "array"
+          },
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "connected_accounts": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectedAccount"
+            },
+            "title": "Connected Accounts",
+            "type": "array"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "issuer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issuer"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "terms_accepted_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terms Accepted Version"
+          },
+          "terms_version": {
+            "title": "Terms Version",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "tenant_id",
+          "issuer",
+          "email",
+          "name",
+          "provider",
+          "connected_accounts",
+          "available_providers",
+          "capabilities",
+          "terms_version",
+          "terms_accepted_version"
+        ],
+        "title": "MeResponse",
+        "type": "object"
+      },
+      "MeasurementDot": {
+        "additionalProperties": false,
+        "properties": {
+          "hit": {
+            "title": "Hit",
+            "type": "boolean"
+          },
+          "label": {
+            "description": "Short human label, e.g. 'R3 cand 2'.",
+            "title": "Label",
+            "type": "string"
+          },
+          "ord": {
+            "description": "Opaque ordinal for lex sort + uniqueness (encodes ts/run/idx or round/cand).",
+            "title": "Ord",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ord",
+          "hit",
+          "label"
+        ],
+        "title": "MeasurementDot",
+        "type": "object"
+      },
+      "MeasurementSeriesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SampleSeries"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "cycle",
+              "campaign",
+              "dataset"
+            ],
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "scope",
+          "items"
+        ],
+        "title": "MeasurementSeriesResponse",
+        "type": "object"
+      },
+      "MechanismGroup": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "description": "What this group of mechanisms governs",
+            "title": "Description",
+            "type": "string"
+          },
+          "key": {
+            "description": "Group key under optimization.mechanisms (e.g. 'elimination')",
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "description": "Human-readable group name",
+            "title": "Label",
+            "type": "string"
+          },
+          "toggles": {
+            "description": "Toggles in this group, in declared order",
+            "items": {
+              "$ref": "#/components/schemas/MechanismToggle"
+            },
+            "title": "Toggles",
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "description",
+          "toggles"
+        ],
+        "title": "MechanismGroup",
+        "type": "object"
+      },
+      "MechanismSchemaResponse": {
+        "additionalProperties": false,
+        "description": "Self-describing descriptor for the campaign-config mechanism toggles.\n\nDerived live from ``MechanismConfig``'s JSON schema, so a new toggle (a bool\nadded to a group model) surfaces here — and in the webapp — with no edit.\nPair the active value off the campaign's frozen ``config`` snapshot\n(``optimization.mechanisms.{group}.{key}``).",
+        "properties": {
+          "groups": {
+            "description": "Mechanism groups, in declared order",
+            "items": {
+              "$ref": "#/components/schemas/MechanismGroup"
+            },
+            "title": "Groups",
+            "type": "array"
+          }
+        },
+        "required": [
+          "groups"
+        ],
+        "title": "MechanismSchemaResponse",
+        "type": "object"
+      },
+      "MechanismToggle": {
+        "additionalProperties": false,
+        "properties": {
+          "default": {
+            "description": "Default value (preserves stock loop behavior)",
+            "title": "Default",
+            "type": "boolean"
+          },
+          "description": {
+            "description": "What the mechanism does, on vs off",
+            "title": "Description",
+            "type": "string"
+          },
+          "key": {
+            "description": "Field key under its group (e.g. 'epsilon_elimination')",
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "description": "Human-readable toggle name",
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "description",
+          "default"
+        ],
+        "title": "MechanismToggle",
+        "type": "object"
+      },
+      "NodeConfigParam": {
+        "additionalProperties": false,
+        "description": "One param a node carries — the COMPLETE per-node list, which is what lets\n`optimizer_tunable` sum to the node's whole search space.\n\n`kind` names the surface that OWNS the param: `model`/`enum` → a select,\n`number`/`bool`/`string` → a typed input, `prompt` → the prompt editor's (a\n`PromptTemplate` decomposition field), `nested` → structured, no scalar widget\n(`NESTED_PARAM_TYPES`). Only the first five are config-editor rows; the last two\nare listed but not rendered. They are listed because dropping them made\n`every(!optimizer_tunable)` answer \"optimizer-locked\" for a node whose every\naxis is prose — do not re-filter this list at the source.\n\n`optimizer_locked` = never an optimizer axis (`PARAM_FORBIDDEN_KEYS`), though a\ncap-holding operator may still set it on a steered fork. `optimizer_tunable` =\nthe optimizer may currently MOVE it (sits in `param_keys`). A config-only key is\nneither; a node with no tunable param is optimizer-fixed (origin-locked).",
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "optimizer_locked": {
+            "default": false,
+            "title": "Optimizer Locked",
+            "type": "boolean"
+          },
+          "optimizer_tunable": {
+            "default": false,
+            "title": "Optimizer Tunable",
+            "type": "boolean"
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Options",
+            "type": "array"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "key",
+          "kind"
+        ],
+        "title": "NodeConfigParam",
+        "type": "object"
+      },
+      "NodeOutputSchema": {
+        "additionalProperties": false,
+        "description": "Resolved output schema for a TARGET pipeline node — the structured output the\nbackend node produces, parsed from ``GET /pipeline``.\n\nThis is the ``output_schema`` the word belongs to. NOT the optimizer's own\nresponse schema (``validators/l1_strict.py::build_l1_response_schema``), which\ndescribes what ``l1_generate`` returns. The L4 levers named ``output_schema_*``\nact on the optimizer side; the target-side axis is spec-only today.",
+        "properties": {
+          "field_descriptions": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Field Descriptions",
+            "type": "object"
+          },
+          "fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "json_schema": {
+            "additionalProperties": true,
+            "title": "Json Schema",
+            "type": "object"
+          }
+        },
+        "title": "NodeOutputSchema",
+        "type": "object"
+      },
+      "OriginEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "default": "",
+            "description": "ISO 8601 — earliest campaign on this origin",
+            "title": "Created At",
+            "type": "string"
+          },
+          "dataset_name": {
+            "description": "Dataset this origin starts from",
+            "title": "Dataset Name",
+            "type": "string"
+          },
+          "label": {
+            "default": "",
+            "description": "Operator-supplied label, if any",
+            "title": "Label",
+            "type": "string"
+          },
+          "n_campaigns": {
+            "default": 0,
+            "description": "Active campaigns minted from this origin (0 = prepared, not yet run)",
+            "title": "N Campaigns",
+            "type": "integer"
+          },
+          "n_samples": {
+            "default": 0,
+            "description": "Dataset sample count (0 if unmaterialized)",
+            "title": "N Samples",
+            "type": "integer"
+          },
+          "origin_accuracy": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The origin's C0 score, from the canonical campaign's index.json",
+            "title": "Origin Accuracy"
+          },
+          "origin_id": {
+            "description": "Origin content identity — a campaign's root_content_hash (or the dataset's prospective origin hash for a prepared origin)",
+            "title": "Origin Id",
+            "type": "string"
+          },
+          "prepared": {
+            "default": false,
+            "description": "True = a ready dataset config with no campaign yet",
+            "title": "Prepared",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "origin_id",
+          "dataset_name"
+        ],
+        "title": "OriginEntry",
+        "type": "object"
+      },
+      "OriginListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "origins": {
+            "description": "Runnable origins, newest first",
+            "items": {
+              "$ref": "#/components/schemas/OriginEntry"
+            },
+            "title": "Origins",
+            "type": "array"
+          },
+          "total": {
+            "description": "Number of origins",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "origins",
+          "total"
+        ],
+        "title": "OriginListResponse",
+        "type": "object"
+      },
+      "QuotaStatus": {
+        "additionalProperties": false,
+        "description": "Live snapshot of the abuse-limit knobs vs. today's usage.\n\nDrives the Security pane's quota card. ``*_max`` mirrors `user.json`\nso the operator can hand-edit limits; ``*_used`` is the live count\nthat ``check_launch_quotas`` would gate against on the next launch.",
+        "properties": {
+          "campaigns_today": {
+            "title": "Campaigns Today",
+            "type": "integer"
+          },
+          "concurrent_running": {
+            "title": "Concurrent Running",
+            "type": "integer"
+          },
+          "max_campaigns_per_day": {
+            "title": "Max Campaigns Per Day",
+            "type": "integer"
+          },
+          "max_concurrent_cycles": {
+            "title": "Max Concurrent Cycles",
+            "type": "integer"
+          },
+          "spend_budget_usd_daily": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spend Budget Usd Daily"
+          },
+          "spend_used_today_usd": {
+            "title": "Spend Used Today Usd",
+            "type": "number"
+          }
+        },
+        "required": [
+          "spend_used_today_usd",
+          "spend_budget_usd_daily",
+          "concurrent_running",
+          "max_concurrent_cycles",
+          "campaigns_today",
+          "max_campaigns_per_day"
+        ],
+        "title": "QuotaStatus",
+        "type": "object"
+      },
+      "RayItem": {
+        "additionalProperties": false,
+        "description": "One event on the ray: a projection envelope plus its address.\n\n``kind``/``payload`` are byte-identical to ``ProjectionEnvelope``'s, so the webapp's\n``projectionToActivity`` maps a ``RayItem`` unchanged. ``path`` is the address — a bare\n``cycle_id`` is ambiguous inside an L4 family (inner ids repeat across sandboxes).",
+        "properties": {
+          "kind": {
+            "description": "The ledger record_type — ProjectionEnvelope.kind.",
+            "enum": [
+              "candidate_minted",
+              "decision",
+              "command",
+              "command_ack",
+              "cycle_seed",
+              "error",
+              "llm_call_progress",
+              "llm_call",
+              "llm_call_start",
+              "phase",
+              "round_warning",
+              "snapshot",
+              "token_usage",
+              "stream_snapshot"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "offset": {
+            "description": "Physical 0-based line index in this cycle's own ledger — the same space as ProjectionEnvelope.sequence, so a live SSE frame de-duplicates against a ray item on (path, offset). SPARSE: server curation drops kinds, so consecutive items may skip offsets; a gap between ray offsets is not a missing record.",
+            "minimum": 0.0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "path": {
+            "description": "The cycle this record belongs to, root → leaf — THE address.",
+            "items": {
+              "$ref": "#/components/schemas/CycleHop"
+            },
+            "title": "Path",
+            "type": "array"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "description": "The record's model_dump — ProjectionEnvelope.payload.",
+            "title": "Payload",
+            "type": "object"
+          },
+          "ts": {
+            "description": "Effective timestamp: the record's own, raised to its file predecessor's when the two invert (records are stamped at construction but appended later).",
+            "title": "Ts",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "offset",
+          "ts",
+          "kind"
+        ],
+        "title": "RayItem",
+        "type": "object"
+      },
+      "RayResponse": {
+        "additionalProperties": false,
+        "description": "One ordered window of a family's chronology, oldest-first.",
+        "properties": {
+          "cursor_prev": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for the window immediately older than this one; null when this window already reaches the family's beginning.",
+            "title": "Cursor Prev"
+          },
+          "items": {
+            "description": "The window, oldest-first. Includes llm_call_progress heartbeats — the client proves liveness across a silent stretch with them before dropping them from the rendered steps.",
+            "items": {
+              "$ref": "#/components/schemas/RayItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "title": "RayResponse",
+        "type": "object"
+      },
+      "SampleSeries": {
+        "additionalProperties": false,
+        "properties": {
+          "measurements": {
+            "items": {
+              "$ref": "#/components/schemas/MeasurementDot"
+            },
+            "title": "Measurements",
+            "type": "array"
+          },
+          "sample_id": {
+            "title": "Sample Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sample_id",
+          "measurements"
+        ],
+        "title": "SampleSeries",
+        "type": "object"
+      },
+      "SpawnedBy": {
+        "additionalProperties": false,
+        "description": "The outer work-item an L4 inner cycle was spawned to measure.\n\nStamped at inner-cycle mint (``runner/inner/cycle.py``) — an inner campaign's own\nids carry no outer provenance (random ``campaign_id``, ``cycle_id`` hashed from its\nOWN origin), so without this the fan-out can only be numbered by launch order.",
+        "properties": {
+          "candidate_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The outer candidate's `OptSearchPoint.lineage.id` — stable across rounds; null for the origin.",
+            "title": "Candidate Id"
+          },
+          "candidate_idx": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Position in the outer round's population; null for the origin.",
+            "title": "Candidate Idx"
+          },
+          "candidate_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Canonical label (`C0` for the origin, else `C{round}.{idx+1}`) — the same string the round file and console use.",
+            "title": "Candidate Label"
+          },
+          "outer_cycle_id": {
+            "description": "The outer cycle that owns this inner sandbox",
+            "title": "Outer Cycle Id",
+            "type": "string"
+          },
+          "round": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Outer round; 0 is the origin (C0). Null when the spawn came from outside any round (the noise-floor diagnostic).",
+            "title": "Round"
+          },
+          "task": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The panel cell this run measured — the outer query, e.g. `justlogic-d23/seed-0` (`inner_tasks.yaml::tasks[].id`). The candidate fields do NOT identify a run: every task runs for every candidate, so one candidate's spawns are as many as the panel has cells and are told apart only by this. Null on a run minted before the stamp existed.",
+            "title": "Task"
+          }
+        },
+        "required": [
+          "outer_cycle_id"
+        ],
+        "title": "SpawnedBy",
+        "type": "object"
+      },
+      "TermsConsent": {
+        "additionalProperties": false,
+        "description": "Consent state echoed back after an accept (same fields the gate reads on\n``/me``). The accepted timestamp stays server-side in ``user.json``.",
+        "properties": {
+          "terms_accepted_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terms Accepted Version"
+          },
+          "terms_version": {
+            "title": "Terms Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "terms_version",
+          "terms_accepted_version"
+        ],
+        "title": "TermsConsent",
+        "type": "object"
+      },
+      "UserSettings": {
+        "additionalProperties": false,
+        "description": "Per-user preferences surfaced in Account → Preferences.",
+        "properties": {
+          "demo_mode_enabled": {
+            "title": "Demo Mode Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "demo_mode_enabled"
+        ],
+        "title": "UserSettings",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "WorkspaceStorageEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "connector_bytes": {
+            "title": "Connector Bytes",
+            "type": "integer"
+          },
+          "dataset_bytes": {
+            "title": "Dataset Bytes",
+            "type": "integer"
+          },
+          "dataset_name": {
+            "title": "Dataset Name",
+            "type": "string"
+          },
+          "history_bytes": {
+            "title": "History Bytes",
+            "type": "integer"
+          },
+          "lifecycle_status": {
+            "title": "Lifecycle Status",
+            "type": "string"
+          },
+          "on_disk_bytes": {
+            "description": "Whole campaign-dir footprint",
+            "title": "On Disk Bytes",
+            "type": "integer"
+          },
+          "reports_bytes": {
+            "title": "Reports Bytes",
+            "type": "integer"
+          },
+          "state_bytes": {
+            "title": "State Bytes",
+            "type": "integer"
+          },
+          "trace_bytes": {
+            "title": "Trace Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "dataset_name",
+          "lifecycle_status",
+          "on_disk_bytes",
+          "dataset_bytes",
+          "connector_bytes",
+          "state_bytes",
+          "trace_bytes",
+          "history_bytes",
+          "reports_bytes"
+        ],
+        "title": "WorkspaceStorageEntry",
+        "type": "object"
+      },
+      "WorkspaceStorageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "campaigns": {
+            "description": "Fattest-first per-campaign totals (active + archived)",
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceStorageEntry"
+            },
+            "title": "Campaigns",
+            "type": "array"
+          },
+          "other_bytes": {
+            "description": "Everything else under the tenant: sessions, workspace ledger, dataset/backend stores",
+            "title": "Other Bytes",
+            "type": "integer"
+          },
+          "shared_cache_bytes": {
+            "description": "Cross-campaign reuse caches (measurements/ + optimizer_calls/) — survive delete",
+            "title": "Shared Cache Bytes",
+            "type": "integer"
+          },
+          "total_bytes": {
+            "description": "The tenant's real on-disk total — campaigns + caches + other",
+            "title": "Total Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total_bytes",
+          "shared_cache_bytes",
+          "other_bytes",
+          "campaigns"
+        ],
+        "title": "WorkspaceStorageResponse",
+        "type": "object"
+      },
+      "_BuildLibraryBody": {
+        "additionalProperties": false,
+        "description": "Body for building a candidate library from one of the draft's own columns.",
+        "properties": {
+          "column": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Column",
+            "type": "string"
+          },
+          "draft_id": {
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Draft Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "draft_id",
+          "column"
+        ],
+        "title": "_BuildLibraryBody",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "GENERATED — do not edit. Regenerate with `python scripts/build_openapi.py`.\n\nEvery operation the running app serves, derived from the FastAPI routers. The\nhand-written command contract is `m12-api-openapi.yaml`; it is schema-first and\nmay declare operations that are not wired yet, so the two documents are expected\nto differ. This one describes reality.\n",
+    "title": "PromptPotter Optimizer",
+    "version": "generated"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/auth/accept-terms": {
+      "post": {
+        "description": "Record the current user's acceptance of the Terms — the provable consent\nartifact the legal clauses depend on. A per-user identity mutation (like\nuser-settings), not a campaign command, so it rides the auth router rather\nthan the ``/commands`` highway. The accepted version must equal the live\n``TERMS_VERSION``; a stale version is rejected so the gate re-prompts against\ncurrent text. The timestamp is server-stamped — never trust the client clock\nfor a record that has to hold up.",
+        "operationId": "accept_terms_api_v1_auth_accept_terms_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptTermsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TermsConsent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Accept Terms",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/v1/auth/activity": {
+      "get": {
+        "description": "Time-bucketed spend / requests / tokens over the requested window.\n\nWalks every per-cycle ``.runtime/ledger.jsonl`` under the user's\n`campaigns/*/cycles/*/` and projects ``TokenUsageRecord`` rows whose\n`timestamp` lands in the window onto ``_N_BUCKETS`` evenly-spaced\nbins. ``cost_usd`` may be null on disk (Groq doesn't return wire\ncost); we fall back to ``shared.spend.lookup_rate`` × tokens so\nhistorical spend isn't silently zero.\n\n``group_by`` selects the colour axis: ``model`` = exact model string,\n``api_key`` = derived provider slug (``openai`` / ``groq`` /\n``anthropic`` / ``openrouter``).",
+        "operationId": "activity_api_v1_auth_activity_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "window",
+            "required": false,
+            "schema": {
+              "default": "1d",
+              "pattern": "^(15m|30m|1h|3h|1d|2d|1w|1mo|1y)$",
+              "title": "Window",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "group_by",
+            "required": false,
+            "schema": {
+              "default": "model",
+              "pattern": "^(model|api_key)$",
+              "title": "Group By",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Activity",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/v1/auth/callback/{provider}": {
+      "get": {
+        "operationId": "callback_api_v1_auth_callback__provider__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "maxLength": 16,
+              "pattern": "^[a-z]+$",
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Callback",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/v1/auth/login/{provider}": {
+      "get": {
+        "operationId": "login_api_v1_auth_login__provider__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "maxLength": 16,
+              "pattern": "^[a-z]+$",
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Login",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "operationId": "logout_api_v1_auth_logout_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Logout",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "description": "Identity envelope + the data the account modal + consent gate need.\n\n`connected_accounts` is a single-entry list at Stage 1 (one provider\nper session). `available_providers` is configured-minus-connected so\nthe \"+ Connect account\" affordance only surfaces real targets.\n`terms_*` drive the post-auth consent gate (read from `user.json`).",
+        "operationId": "me_api_v1_auth_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Me",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/v1/auth/quota-status": {
+      "get": {
+        "description": "Live quota snapshot for the Security pane.\n\nToday's spend sums ``TokenUsageRecord`` cost from the canonical ledger since\nUTC midnight via ``sum_user_spend`` — uncapped, so an over-budget day shows\nthe true overage rather than clamping the display to the cap; concurrent +\ndaily counts ride the `JobRegistry`.",
+        "operationId": "quota_status_api_v1_auth_quota_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotaStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Quota Status",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/v1/auth/user-settings": {
+      "get": {
+        "description": "Read the current user's preferences (Account → Preferences).",
+        "operationId": "get_user_settings_api_v1_auth_user_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserSettings"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get User Settings",
+        "tags": [
+          "Auth"
+        ]
+      },
+      "patch": {
+        "description": "Persist a preference change. A user-account mutation (not a campaign\ncommand), so it rides the auth router alongside session writes rather than\nthe ``/commands`` highway.",
+        "operationId": "patch_user_settings_api_v1_auth_user_settings_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserSettings"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch User Settings",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/v1/backends": {
+      "get": {
+        "description": "List all registered backends.",
+        "operationId": "list_backends_api_v1_backends_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BackendResponse"
+                  },
+                  "title": "Response List Backends Api V1 Backends Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Backends",
+        "tags": [
+          "Backends"
+        ]
+      }
+    },
+    "/api/v1/backends/{backend_id}/health": {
+      "get": {
+        "description": "Probe the connector's own ``GET /status`` for live reachability.\n\nThin wrapper over ``BackendClient.check_status()`` — the read half of the\nconnector-state probe the webapp polls (slow cadence) to show the backend's\ntrue up/down on the connector node. ``check_status`` already maps a TCP-level\nfailure to ``{\"status\": \"unreachable\"}``, so this never raises on a down\nbackend; only a genuinely missing ``backend_id`` 404s (via ``get_backend_or_404``).",
+        "operationId": "get_backend_health_api_v1_backends__backend_id__health_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "backend_id",
+            "required": true,
+            "schema": {
+              "title": "Backend Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackendHealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Backend Health",
+        "tags": [
+          "Backends"
+        ]
+      }
+    },
+    "/api/v1/campaigns": {
+      "get": {
+        "description": "Every campaign in one store owned by the caller, newest first.\n\nFilters: optional ``?dataset=`` for one dataset, ``?lifecycle=`` for the\nvisibility intent (defaults to ``active``; ``archived`` and ``deleted`` drop\nout of the default surface). The default ``active`` view ALSO surfaces\nin-progress ``checkin`` campaigns (origin authoring is resumable progress, so\nit belongs in the sidebar beside running work) — the only surface that unions\nthem, so origin/campaign-backed lists that ask the store for ``active``\ndirectly stay free of the empty-hash check-ins. Cross-user campaigns are\ninvisible — the ``owner_user_id`` gate filters on ``store.identity.user_id``.\n\n``descend`` names the chain of cycles to descend INTO (see ``GET /cycles``);\nabsent/empty is the tenant's own tree. It is the twin of the cycle list: a\nforest is campaigns × cycles, and the sidebar groups runs by\n``root_cycle_id`` (their origin), so BOTH lists must be available at every\ndepth for one tree builder to serve L4, L5, and the top level alike.",
+        "operationId": "list_campaigns_api_v1_campaigns_get",
+        "parameters": [
+          {
+            "description": "Filter to one dataset",
+            "in": "query",
+            "name": "dataset",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to one dataset",
+              "title": "Dataset"
+            }
+          },
+          {
+            "description": "Operator visibility filter — 'active' (default, includes in-progress 'checkin' campaigns), 'archived', 'deleted', 'checkin', or 'all'",
+            "in": "query",
+            "name": "lifecycle",
+            "required": false,
+            "schema": {
+              "default": "active",
+              "description": "Operator visibility filter — 'active' (default, includes in-progress 'checkin' campaigns), 'archived', 'deleted', 'checkin', or 'all'",
+              "title": "Lifecycle",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "descend",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Descend"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Campaigns",
+        "tags": [
+          "Campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/mechanisms-schema": {
+      "get": {
+        "description": "The mechanism-toggle descriptor — groups, labels, descriptions, defaults.\n\nRead-only and campaign-independent: the webapp zips this with a campaign's\nfrozen ``config`` to render the active toggle states.",
+        "operationId": "get_mechanisms_schema_api_v1_campaigns_mechanisms_schema_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MechanismSchemaResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Mechanisms Schema",
+        "tags": [
+          "Campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}": {
+      "get": {
+        "description": "Campaign manifest detail. 404 on cross-user reads.",
+        "operationId": "get_campaign_api_v1_campaigns__campaign_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "title": "Campaign Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Campaign",
+        "tags": [
+          "Campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}/checkin": {
+      "get": {
+        "description": "Re-open a durable check-in campaign — its draft wire + last resolver turn.\n\nThe sidebar opens a ``checkin``-lifecycle campaign through here instead of the\ndashboard (no ``dashboard.json`` exists pre-loop): the webapp rebuilds the\ningest \"ready\" panel from ``draft`` and shows the prior ``resolution`` recap.\nTenant-scoped (the check-in store is rooted at the tenant dir) — a cross-tenant\nid 404s. 404 when this campaign has no check-in working state (already Started\nor never a check-in). Wire contract pinned in\n``docs/specs/m12-api-openapi.yaml::GET /campaigns/{id}/checkin``.",
+        "operationId": "get_campaign_checkin_api_v1_campaigns__campaign_id__checkin_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "title": "Campaign Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Campaign Checkin Api V1 Campaigns  Campaign Id  Checkin Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Campaign Checkin",
+        "tags": [
+          "Campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}/config-map": {
+      "get": {
+        "description": "The knob coupling/provenance map for one campaign — what moves which\nstatistical estimand, what overwrites what, and which knobs currently collide.\n\nRead-only: resolves the frozen ``CampaignConfig`` snapshot against the declared\n``knobs`` registry. 404 on cross-user reads.",
+        "operationId": "get_campaign_config_map_api_v1_campaigns__campaign_id__config_map_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "title": "Campaign Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigMapResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Campaign Config Map",
+        "tags": [
+          "Campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/dashboard": {
+      "get": {
+        "description": "Live telemetry for the viewed cycle — its own ``dashboard.json``.\n\n``dashboard.json`` is per-cycle: every cycle (root, fork, sweep, diag, or an\nL4 inner descendant) owns its own live file, stamped with its own\n``cycle_id``. The path ids address the top-level (root) cycle; the optional\n``descend`` query walks into the ``.inner/<previous cycle id>`` sandbox one\n``campaign::cycle`` hop at a time, so ONE route serves a top-level cycle, an\ninner cycle, or an L5+ descendant (:func:`resolve_cycle_path`). Absent/empty\n``descend`` is a plain per-cycle read — no session-root collapse.\n\nHonors ``If-Modified-Since`` and returns ``304 Not Modified`` when the\non-disk mtime hasn't advanced — keeps the 2 s webapp poll cheap during\nquiescent stretches. A cycle that exists but has not yet flushed its first\n``dashboard.json`` answers ``warming_up`` at 200 so the webapp renders\n\"initialising\" rather than appearing offline; a cycle that does not exist\nanswers 404, because those are different facts.",
+        "operationId": "get_cycle_dashboard_api_v1_campaigns__campaign_id__cycles__cycle_id__dashboard_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "title": "Campaign Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "cycle_id",
+            "required": true,
+            "schema": {
+              "title": "Cycle Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "descend",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Descend"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Cycle Dashboard",
+        "tags": [
+          "Campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/events:subscribe": {
+      "get": {
+        "description": "Subscribe to a cycle's live ledger via SSE.\n\nReturns ``404`` only when the cycle directory does not exist (unknown\ncampaign/cycle). For any real cycle — running, paused, or finished — frames\narrive in this order:\n\n1. One ``stream_snapshot`` frame — payload is the cycle's current\n   ``dashboard.json`` body + ``snapshot_at_offset`` indicating the ledger\n   high-water mark reflected in the snapshot.\n2. Live tail — every record appended to ``.runtime/ledger.jsonl`` after the\n   snapshot is fanned out as a ``ProjectionEnvelope`` with ``kind`` = the\n   record's ``record_type`` and ``sequence`` = the record's ledger offset.\n3. Heartbeat comment line every 15 s.\n\nThe path ids address the top-level (root) cycle; the optional ``descend``\nquery walks into the ``.inner/<previous cycle id>`` sandbox one\n``campaign::cycle`` hop at a time, so ONE stream serves a top-level cycle or\nan L4 inner descendant (:func:`resolve_cycle_path`) — the chat feed follows\nthe same viewed leaf the dashboard does. Absent/empty ``descend`` is a plain\nper-cycle subscribe, byte-identical to a top-level read.\n\nSee ``docs/developer/event-stream.md`` for the certified Profile A contract.",
+        "operationId": "stream_cycle_events_api_v1_campaigns__campaign_id__cycles__cycle_id__events_subscribe_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "title": "Campaign Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "cycle_id",
+            "required": true,
+            "schema": {
+              "title": "Cycle Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "descend",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Descend"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream Cycle Events",
+        "tags": [
+          "Campaigns",
+          "Stream"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/file": {
+      "get": {
+        "description": "Read the contents of one file under the cycle or campaign scope.\n\n``descend`` walks into the ``.inner/<previous cycle id>`` sandbox one hop per\n``~``-joined ``campaign::cycle`` segment (same seam as the dashboard route), so\nan L4 inner descendant's ``rounds/round_NNNN.json`` reads from the inner cycle\ndir — not the outer root. Absent/empty ``descend`` is a plain per-cycle read.",
+        "operationId": "get_cycle_file_api_v1_campaigns__campaign_id__cycles__cycle_id__file_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "title": "Campaign Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "cycle_id",
+            "required": true,
+            "schema": {
+              "title": "Cycle Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "cycle | campaign",
+            "in": "query",
+            "name": "scope",
+            "required": true,
+            "schema": {
+              "description": "cycle | campaign",
+              "enum": [
+                "cycle",
+                "campaign"
+              ],
+              "title": "Scope",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Relative path under the chosen scope root",
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "description": "Relative path under the chosen scope root",
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "descend",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Descend"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileContentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Cycle File",
+        "tags": [
+          "Campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/files": {
+      "get": {
+        "description": "Recursive file tree for the cycle dir + campaign-level artifacts.\n\n``descend`` walks into the ``.inner/`` sandbox (same seam as the dashboard +\nfile-content routes), so the Files tree of an L4 inner descendant lists the\ninner cycle's tree. Absent/empty ``descend`` is a plain per-cycle read.",
+        "operationId": "list_cycle_files_api_v1_campaigns__campaign_id__cycles__cycle_id__files_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "title": "Campaign Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "cycle_id",
+            "required": true,
+            "schema": {
+              "title": "Cycle Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "descend",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Descend"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FilesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Cycle Files",
+        "tags": [
+          "Campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/ray": {
+      "get": {
+        "description": "The absolute linear sequence of what happened, rooted at this cycle.\n\nOne merged order across the course, its forks, and its inner runs — the only surface\nthat answers \"what happened, in order, and is it still happening\". It is also the\nreplay endpoint: the SSE tail always seeks to EOF, so history has no other home.\n\nWindowed newest-first, delivered oldest-first. ``before`` is an opaque cursor from a\nprior response's ``cursor_prev``; absent = the head window. Consecutive windows page\nback without overlap or hole; revalidate any window with ``If-None-Match``.",
+        "operationId": "get_family_ray_api_v1_campaigns__campaign_id__cycles__cycle_id__ray_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "title": "Campaign Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "cycle_id",
+            "required": true,
+            "schema": {
+              "title": "Cycle Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "descend",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Descend"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RayResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Family Ray",
+        "tags": [
+          "Campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/tree": {
+      "get": {
+        "description": "The lineage tree rooted at this cycle — the single served genealogy.\n\nNodes alternate ``course -> candidate -> (course | sample)`` forever, so an L4 inner\nrun is the same shape one level down rather than a special case, and L5+ needs no new\ntier. There is no ``depth`` parameter: one tree per campaign serves every consumer,\nand the recursion bound is ``lineage_views._MAX_COURSE_DEPTH``.\n\nAn optional **lens** decorates the nodes with a counterfactual. ``lens=score:<formula>``\n= an alternative scoring formula (each candidate's ``lens_value``, plus a ``divergence``\nmarker where that criterion would have elected someone else); ``lens=abort:<variant>``,\nvariant ∈ {``epsilon_off``, ``lock_in_off``, ``all_off``} = switch off a PoBB abort\ncontributor. ``samples`` = a comma-separated sample-id list (the **sample-set mask**):\nre-score over only those samples. No lens + no samples ⇒ the tree is the raw read.\n\nA shell, deliberately: resolve the path, build the view, serve it. The assembly rules\nlive in ``store/lineage_views.py``.",
+        "operationId": "get_lineage_tree_api_v1_campaigns__campaign_id__cycles__cycle_id__tree_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "title": "Campaign Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "cycle_id",
+            "required": true,
+            "schema": {
+              "title": "Cycle Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "descend",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Descend"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lens",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lens"
+            }
+          },
+          {
+            "in": "query",
+            "name": "samples",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Samples"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LineageNode"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Lineage Tree",
+        "tags": [
+          "Campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}/storage": {
+      "get": {
+        "description": "On-disk size of the campaign tree, split into the six MECE leaves. 404 on cross-user.",
+        "operationId": "get_campaign_storage_api_v1_campaigns__campaign_id__storage_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "title": "Campaign Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignStorageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Campaign Storage",
+        "tags": [
+          "Campaigns"
+        ]
+      }
+    },
+    "/api/v1/champion-registry": {
+      "get": {
+        "description": "The L4 champion table — every candidate meta-prompt state on disk, ranked by\nanchor-to-origin effect. Reduced fresh from the tenant's pp-self cycles on each\nfetch (on-demand, not the 2 s poll); zero LLM. Tenant-scoped; empty for a tenant\nwith no pp-self cycles.",
+        "operationId": "get_champion_registry_api_v1_champion_registry_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChampionRegistry"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Champion Registry",
+        "tags": [
+          "Campaigns"
+        ]
+      }
+    },
+    "/api/v1/commands/edit-draft-campaign": {
+      "post": {
+        "description": "Sparse-patch a `DraftCampaign`. Returns the post-mutation full shape.\n\nPer ``docs/specs/m12-api-openapi.yaml::editDraftCampaign``. The mutation rides\n`CommandDispatcher` (architecture.md §0: sole writer of `CommandRecord`); only\nthe response shape differs from the generic 202 verbs, never the ingress.",
+        "operationId": "edit_draft_campaign_api_v1_commands_edit_draft_campaign_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommandEnvelope"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Edit Draft Campaign Api V1 Commands Edit Draft Campaign Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Edit Draft Campaign",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/replace-dataset": {
+      "post": {
+        "description": "Version-and-repoint a colliding dataset so its name frees for new data.\n\nPer ``docs/specs/m12-api-openapi.yaml::replaceDataset``. Data-safe: never overwrites — the\nold data + every prior campaign's results are preserved under ``{slug}-vN``.\nSynchronous (the migration is a bounded set of renames + JSON rewrites); the\nfreed name is re-ingested in a separate ``/datasets/ingest`` call.",
+        "operationId": "replace_dataset_api_v1_commands_replace_dataset_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommandEnvelope"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Replace Dataset Api V1 Commands Replace Dataset Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Replace Dataset",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/resolve-origin": {
+      "post": {
+        "description": "Run one origin-resolver turn against a draft. Returns ``{resolution, draft}``.\n\nPer ``docs/specs/m12-api-openapi.yaml::resolveOrigin``. Synchronous, like\n``edit-draft-campaign`` — the resolver's findings apply in-line and the\ndeterministic checklist re-gates before the response.",
+        "operationId": "resolve_origin_api_v1_commands_resolve_origin_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommandEnvelope"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Resolve Origin Api V1 Commands Resolve Origin Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Origin",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/start-checkin": {
+      "post": {
+        "description": "Flip a CHECKIN campaign to ``active`` + spawn the runner. Synchronous;\nreturns ``{campaign_id, cycle_id, job_id}``.\n\nPer ``docs/specs/m12-api-openapi.yaml::startCheckin``. The campaign already\nexists durably (minted on the first ingest action); this gate-checks the\norigin (incomplete → 422, stays ``checkin``), materializes the dataset, mints\nthe run cycle, and detaches the loop.",
+        "operationId": "start_checkin_api_v1_commands_start_checkin_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommandEnvelope"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Start Checkin Api V1 Commands Start Checkin Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Checkin",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/{kind}": {
+      "post": {
+        "description": "Closed-set command surface — every wired kind validates against the\ndeclared schema in ``m12-api-openapi.yaml`` and dispatches through\n``CommandDispatcher``.",
+        "operationId": "post_command_api_v1_commands__kind__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "pattern": "^[a-z][a-z0-9-]*$",
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Expected-Version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Expected-Version"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommandEnvelope"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Command",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/cycles": {
+      "get": {
+        "description": "Every cycle in one store + that store's active pointer — one round-trip per forest.\n\n``descend`` names the chain of cycles to descend INTO (``~``-joined\n``campaign::cycle``, mirroring the webapp's ``CyclePath``); absent/empty is the\ntenant's own tree. Each hop enters that cycle's ``.inner/`` sandbox, so ONE\nroute serves the top-level forest, an L4 cycle's inner fan-out, or an L5+\ndescendant — a sandbox is structurally a normal projects tree, so the read is\nbyte-identical at every depth (:func:`descend_store`).\n\nThe pointer is the store's own: at the top level the active session, inside a\nsandbox the inner loop running right now. It is reported RAW — liveness is\n``CycleListEntry.run_phase``'s job, and a consumer asking \"is the pointed cycle\nlive?\" reads that off ``cycles[]`` rather than having this route re-derive it.",
+        "operationId": "get_cycles_api_v1_cycles_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "descend",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Descend"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CyclesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Cycles",
+        "tags": [
+          "Cycles"
+        ]
+      }
+    },
+    "/api/v1/datasets": {
+      "get": {
+        "description": "Every dataset this identity may read — its own tenant Origins, then install content.\n\nThe rule lives once in ``store/dataset_access.py`` and is shared with the\nper-dataset read endpoints, so the picker can never list a dataset that\n``GET /datasets/{name}/...`` would then deny.",
+        "operationId": "list_datasets_api_v1_datasets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetIndexResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Datasets",
+        "tags": [
+          "Datasets"
+        ]
+      }
+    },
+    "/api/v1/datasets/draft/candidate-library": {
+      "post": {
+        "description": "Attach a candidate library to a draft — the operator's \"drop in place\" for an\nunfulfilled ``candidate_source`` dependency. Returns the updated draft wire (its\n``dependencies`` block now reports the dependency ``fulfilled``).\n\nA multipart ingress for an `edit-draft-campaign`: the upload is parsed into the\npatch value, then dispatched, so the edit lands on the check-in ledger like every\nother origin mutation. Nothing runs until Start. Wire contract pinned in\n``docs/specs/m12-api-openapi.yaml::POST /datasets/draft/candidate-library``.\n``draft_id`` is the check-in campaign id.",
+        "operationId": "upload_candidate_library_api_v1_datasets_draft_candidate_library_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_candidate_library_api_v1_datasets_draft_candidate_library_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Upload Candidate Library Api V1 Datasets Draft Candidate Library Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Candidate Library",
+        "tags": [
+          "Datasets"
+        ]
+      }
+    },
+    "/api/v1/datasets/draft/candidate-library/from-column": {
+      "post": {
+        "description": "Build a draft's candidate library from the distinct values of one of its own\ncolumns — the unified \"build from dataset\" path (no external file).\n\nWhen the targets already live in the data (the ground-truth/target column, the\nunion of the dataset's category sheets), the library is derived rather than\nuploaded. The derived terms become an `edit-draft-campaign` patch, so this lands\non the check-in ledger exactly like the upload does. Returns the updated draft\nwire (its `candidate_library` dependency now `fulfilled`). Wire contract pinned in\n`docs/specs/m12-api-openapi.yaml::POST /datasets/draft/candidate-library/from-column`.\n`draft_id` is the check-in campaign id.",
+        "operationId": "build_candidate_library_from_column_api_v1_datasets_draft_candidate_library_from_column_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/_BuildLibraryBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Build Candidate Library From Column Api V1 Datasets Draft Candidate Library From Column Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Build Candidate Library From Column",
+        "tags": [
+          "Datasets"
+        ]
+      }
+    },
+    "/api/v1/datasets/ingest": {
+      "post": {
+        "description": "Parse an uploaded tabular file (CSV/TSV/JSON/XLSX); mint a durable check-in\ncampaign and return its :class:`DraftCampaign` (``draft_id`` == ``campaign_id``).\n\nWire contract pinned in ``docs/specs/m12-api-openapi.yaml::POST /datasets/ingest``.\nThe check-in campaign appears in the sidebar immediately and survives a restart;\nnothing runs until the operator starts it via ``/commands/start-checkin``.",
+        "operationId": "ingest_dataset_api_v1_datasets_ingest_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_ingest_dataset_api_v1_datasets_ingest_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Ingest Dataset Api V1 Datasets Ingest Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ingest Dataset",
+        "tags": [
+          "Datasets"
+        ]
+      }
+    },
+    "/api/v1/datasets/{name}/draft": {
+      "post": {
+        "description": "Open an authored dataset's files as a durable check-in campaign.\n\nThe direct path behind \"open this dataset in the ingest panel\" — a demo /\nbenchmark / owned Origin becomes a prefilled check-in (``draft_id`` ==\n``campaign_id``) without a browser-side CSV round-trip. Identity-gated through\nthe same resolver as the other dataset reads; nothing runs until the operator\nstarts it via ``/commands/start-checkin``.",
+        "operationId": "draft_from_existing_dataset_api_v1_datasets__name__draft_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Draft From Existing Dataset Api V1 Datasets  Name  Draft Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Draft From Existing Dataset",
+        "tags": [
+          "Datasets"
+        ]
+      }
+    },
+    "/api/v1/datasets/{name}/measurement-series": {
+      "get": {
+        "description": "Chronological per-sample series for the Meas heat-map column. Aligned to `/preview` order\n+ limit so clients can zip by sample_id. `ord` is opaque (only used for row alignment).",
+        "operationId": "get_dataset_measurement_series_api_v1_datasets__name__measurement_series_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Must match `/preview`'s value so the two responses align by index.",
+            "in": "query",
+            "name": "max_unmeasured",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 1000,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Must match `/preview`'s value so the two responses align by index.",
+              "title": "Max Unmeasured"
+            }
+          },
+          {
+            "description": "Same scopes as `/preview` (dataset/campaign/cycle).",
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "default": "dataset",
+              "description": "Same scopes as `/preview` (dataset/campaign/cycle).",
+              "enum": [
+                "cycle",
+                "campaign",
+                "dataset"
+              ],
+              "title": "Scope",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Required when scope is campaign or cycle.",
+            "in": "query",
+            "name": "campaign_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Required when scope is campaign or cycle.",
+              "title": "Campaign Id"
+            }
+          },
+          {
+            "description": "Required when scope=cycle; ignored otherwise.",
+            "in": "query",
+            "name": "cycle_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Required when scope=cycle; ignored otherwise.",
+              "title": "Cycle Id"
+            }
+          },
+          {
+            "description": "L4 inner-cycle descent tail — same seam as `/preview`'s `descend`.",
+            "in": "query",
+            "name": "descend",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "L4 inner-cycle descent tail — same seam as `/preview`'s `descend`.",
+              "title": "Descend"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeasurementSeriesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Dataset Measurement Series",
+        "tags": [
+          "Datasets"
+        ]
+      }
+    },
+    "/api/v1/datasets/{name}/pipeline": {
+      "get": {
+        "description": "Return the dataset overlay's parsed pipeline schema, graph view, and per-node\nconfig + output schema.\n\nIdentity-gated through the same resolver as the other dataset reads — there is\nno unauthenticated path to a benchmark's pipeline/overlay config.",
+        "operationId": "get_dataset_pipeline_api_v1_datasets__name__pipeline_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetPipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Dataset Pipeline",
+        "tags": [
+          "Datasets"
+        ]
+      }
+    },
+    "/api/v1/datasets/{name}/preview": {
+      "get": {
+        "description": "Hard-sample leaderboard — hardest-first by δ_s, unmeasured trail by sample_id.\n\nCounts of measured/unmeasured come from the companion `/measurement-series` (a sample's\nseries carrying ≥1 dot = measured). Rasch δ persists across rounds + inherits from parent\nfits, so it overcounts on its own.",
+        "operationId": "get_dataset_preview_api_v1_datasets__name__preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Cap on unmeasured rows kept in Rasch-sorted output; None = no trim.",
+            "in": "query",
+            "name": "max_unmeasured",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 1000,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cap on unmeasured rows kept in Rasch-sorted output; None = no trim.",
+              "title": "Max Unmeasured"
+            }
+          },
+          {
+            "description": "dataset=cross-campaign; campaign=pooled (needs campaign_id); cycle=one cycle (needs both ids).",
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "default": "dataset",
+              "description": "dataset=cross-campaign; campaign=pooled (needs campaign_id); cycle=one cycle (needs both ids).",
+              "enum": [
+                "cycle",
+                "campaign",
+                "dataset"
+              ],
+              "title": "Scope",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Required when scope is campaign or cycle.",
+            "in": "query",
+            "name": "campaign_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Required when scope is campaign or cycle.",
+              "title": "Campaign Id"
+            }
+          },
+          {
+            "description": "Required when scope=cycle; ignored otherwise.",
+            "in": "query",
+            "name": "cycle_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Required when scope=cycle; ignored otherwise.",
+              "title": "Cycle Id"
+            }
+          },
+          {
+            "description": "L4 inner-cycle descent tail (`~`-joined `campaign::cycle` hops below the root, mirrors `?descend=` on the dashboard route). Present → read every scope from the inner `.inner/` sandbox; needs campaign_id + cycle_id (the root hop) to walk from.",
+            "in": "query",
+            "name": "descend",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "L4 inner-cycle descent tail (`~`-joined `campaign::cycle` hops below the root, mirrors `?descend=` on the dashboard route). Present → read every scope from the inner `.inner/` sandbox; needs campaign_id + cycle_id (the root hop) to walk from.",
+              "title": "Descend"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Dataset Preview",
+        "tags": [
+          "Datasets"
+        ]
+      }
+    },
+    "/api/v1/diagnostic-runs": {
+      "get": {
+        "description": "Return every diagnostic-run record on disk, optionally filtered by dataset.",
+        "operationId": "list_diagnostic_runs_api_v1_diagnostic_runs_get",
+        "parameters": [
+          {
+            "description": "Filter to one dataset.",
+            "in": "query",
+            "name": "dataset",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to one dataset.",
+              "title": "Dataset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiagnosticRunListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Diagnostic Runs",
+        "tags": [
+          "Verify"
+        ]
+      }
+    },
+    "/api/v1/health": {
+      "get": {
+        "operationId": "health_check_api_v1_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Health Check Api V1 Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health Check",
+        "tags": [
+          "Health"
+        ]
+      }
+    },
+    "/api/v1/machine-status": {
+      "get": {
+        "description": "Whether another user is currently running a campaign on this machine.\n\nThe server is single-process and runs campaigns in sequence, so a launch\nis rejected (409 ``machine_busy``) while anyone else's run is live. This\nread is the poll that lets the webapp surface that state as a critical-alert\nbanner *before* the operator tries — the always-on twin of the 409. Reads\nthe same :meth:`JobRegistry.machine_holder` the launch gate uses, so banner\nand gate never disagree. Cross-user holder info is intentionally exposed\n(the seed of an admin presence view).",
+        "operationId": "get_machine_status_api_v1_machine_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Machine Status",
+        "tags": [
+          "Sessions"
+        ]
+      }
+    },
+    "/api/v1/optimizer-pipeline": {
+      "get": {
+        "description": "Bundled ``promptpotter/assets/optimizer/pipeline.yaml`` + its generated\n``resolved_schemas.json`` sibling — nodes + pipelines + ``view``\ntopology, plus the per-node typed config surface (``node_config_schema`` /\n``node_output_schema``) so the canvas node-detail renders the optimizer's own\nknobs (model / provider / reasoning_effort / temperature / …) through the same\ncanonical config element the steer panel uses, not a hand-rolled chip + JSON\ndump. Read-only: the install-global ``_optimizer`` pipeline is operator-owned — a\nhand-edit, never a fork and never a write path from here (the ``champion`` verb that\nused to graduate a winner into it was deleted 2026-07-17); model/provider are always\noptimizer-locked.",
+        "operationId": "get_optimizer_pipeline_api_v1_optimizer_pipeline_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Optimizer Pipeline Api V1 Optimizer Pipeline Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Optimizer Pipeline",
+        "tags": [
+          "Optimizer"
+        ]
+      }
+    },
+    "/api/v1/origins": {
+      "get": {
+        "description": "Every runnable origin in the caller's tenant — campaign-backed + prepared, newest first.\n\nTenant-scoped (like the dashboard's ``/cycles``), NOT owner-filtered: a\nCLI-minted campaign and a browser OIDC session can share a tenant yet differ\nin ``user_id``, so owner-filtering would hide the operator's own origins.\n``Stores.identity`` still blocks cross-tenant reads. Prepared origins (ready\ndatasets with no campaign yet) sort to the top so freshly-prepared work is\nseen first.",
+        "operationId": "list_origins_api_v1_origins_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OriginListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Origins",
+        "tags": [
+          "Origins"
+        ]
+      }
+    },
+    "/api/v1/origins/{origin_id}/draft": {
+      "post": {
+        "description": "Open a chosen prior origin as a prefilled check-in campaign — the picker's\n\"Reuse an origin\" path for a campaign-backed origin.\n\nResolves the origin's EXACT prompt fields: a campaign that was itself minted\nfrom an origin carries those fields on its root-cycle seed, so reuse them\nverbatim; a normally-minted campaign has no seed and ``draft_from_dataset``\nalready loaded the dataset's authored prompt. The draft is marked\n``reused_origin_id`` so starting it (``/commands/start-checkin``) seeds C0\nvia ``origin_override`` and stamps the ``campaign_origin`` lineage. Nothing\nruns until the operator starts the check-in.",
+        "operationId": "draft_from_origin_api_v1_origins__origin_id__draft_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "origin_id",
+            "required": true,
+            "schema": {
+              "title": "Origin Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Draft From Origin Api V1 Origins  Origin Id  Draft Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Draft From Origin",
+        "tags": [
+          "Origins"
+        ]
+      }
+    },
+    "/api/v1/sessions/active": {
+      "get": {
+        "description": "Return the caller-tenant's active-session pointer; 404 when none exists.\n\nPointers are per-tenant on disk; the API never reads another tenant's\nstate. Unauthed callers are rejected by ``resolve_identity`` before\n``StoreDep`` resolves.",
+        "operationId": "get_active_session_api_v1_sessions_active_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveSessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Active Session",
+        "tags": [
+          "Sessions"
+        ]
+      }
+    },
+    "/api/v1/workspace/storage": {
+      "get": {
+        "description": "Per-campaign on-disk slices across the caller's whole workspace, fattest first,\nplus the shared caches and a residual ``other`` slice so the grand total equals the\ntenant's real footprint — answers \"where did the bucket sizes go?\", nothing excluded.\nIncludes archived campaigns (they live in the ``archive/`` recycle bin).",
+        "operationId": "get_workspace_storage_api_v1_workspace_storage_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceStorageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Workspace Storage",
+        "tags": [
+          "Campaigns"
+        ]
+      }
+    },
+    "/api/v1/workspace/storage-by-dataset": {
+      "get": {
+        "description": "Per-dataset on-disk leaf breakdown (the Files-view 'cake') — every campaign of a\ndataset pooled, then split into the six MECE leaves. Includes archived campaigns; the\nshared measurement store is excluded (it's not per-dataset-owned).",
+        "operationId": "get_storage_by_dataset_api_v1_workspace_storage_by_dataset_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetStorageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Storage By Dataset",
+        "tags": [
+          "Campaigns"
+        ]
+      }
+    }
+  }
+}

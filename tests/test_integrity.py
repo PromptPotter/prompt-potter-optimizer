@@ -1611,3 +1611,109 @@ def test_no_raw_nul_bytes_in_tracked_text_files() -> None:
         "Replace the byte with a visible separator, or add the suffix to _BINARY_SUFFIXES "
         "if the file is genuinely binary."
     )
+
+
+def test_declared_command_kinds_match_the_wired_set() -> None:
+    """A command kind that LOOKS live in the spec but is not wired, or the reverse.
+
+    ``m12-api-openapi.yaml`` is schema-first by design: a kind is declared before its
+    handler exists, and those carry ``x-status: declared-not-wired``. That makes the
+    ABSENCE of the marker a positive claim — "this one is live" — and nothing checked
+    it. The claim is read by humans and by us: `chat-foundation.md` once advertised
+    `endorse-candidate` as a shipped UI affordance on the strength of this file alone.
+
+    Silent in both directions, which is why it is here rather than left to fail loud.
+    A stale "live" declaration surfaces only when someone POSTs it and gets a 404
+    `command_kind_unknown` — after the button was built. A wired-but-undeclared kind
+    is worse and quieter: an inbound mutation reaching the dispatcher with no entry in
+    the document that is supposed to be the closed inbound set, so it never went
+    through the declare-and-review step ADR-0001 requires.
+
+    It cannot be an import-time assert beside the registry (the pattern `tests/CLAUDE.md`
+    prefers): the fact lives in a 175 KB YAML doc, and no production module should read
+    the repo's own doc bytes at import to answer it. Same reasoning as the NUL scan above.
+    """
+    from promptpotter.presentation.api.routers.commands import _WIRED_KINDS, commands_router
+
+    # Kinds served by their own typed route rather than the generic ``POST /commands/
+    # {kind}`` dispatcher, so they are absent from ``_WIRED_KINDS``. Read off the router
+    # itself: a hand-written set here would leave a NEW typed route in neither half of the
+    # comparison, and pass — which is exactly the quiet direction the docstring names.
+    typed_routes = {
+        route.path.rsplit("/", 1)[1]
+        for route in commands_router.routes
+        if "{" not in getattr(route, "path", "{")
+    }
+    wired = set(_WIRED_KINDS) | typed_routes
+
+    spec_path = Path(__file__).resolve().parents[1] / "docs" / "specs" / "m12-api-openapi.yaml"
+    spec = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
+
+    declared_live: set[str] = set()
+    declared_not_wired: set[str] = set()
+    for path, operations in spec["paths"].items():
+        if not path.startswith("/commands/"):
+            continue
+        kind = path.rsplit("/", 1)[1]
+        for operation in operations.values():
+            if not isinstance(operation, dict):
+                continue
+            target = (
+                declared_not_wired
+                if operation.get("x-status") == "declared-not-wired"
+                else declared_live
+            )
+            target.add(kind)
+
+    assert not (declared_live - wired), (
+        f"declared live in m12-api-openapi.yaml but NOT wired: {sorted(declared_live - wired)}. "
+        "A POST to one 404s `command_kind_unknown`. Either wire it, or mark the operation "
+        "`x-status: declared-not-wired`."
+    )
+    assert not (wired - declared_live), (
+        f"wired but not declared live: {sorted(wired - declared_live)}. Every inbound command "
+        "is declared in m12-api-openapi.yaml BEFORE its handler lands (ADR-0001). Add the "
+        "operation, or drop the `x-status: declared-not-wired` marker it still carries."
+    )
+    assert not (declared_not_wired & wired), (
+        f"marked `declared-not-wired` but actually wired: {sorted(declared_not_wired & wired)}. "
+        "The marker is now a lie in the safe direction — drop it."
+    )
+
+
+def test_declared_reads_are_served_paths() -> None:
+    """The other half of the contract: a GET the spec promises must exist on the app.
+
+    The command half above is checked against a Python set; the reads had nothing, and
+    they drift in a way no reader notices. Four of them spelled their path parameters
+    ``{campaignId}``/``{cycleId}`` while FastAPI served ``{campaign_id}``/``{cycle_id}``
+    — a document describing an API nobody could call at those URLs, valid YAML, no test
+    unhappy. Fixed by hand once; this is what keeps it fixed.
+
+    ``openapi.generated.json`` is the app's own answer (``scripts/build_openapi.py``,
+    regenerated and diffed in CI), so this compares the promise against the routing
+    table rather than against a second document. The ``/api/v1`` prefix is the mount
+    point: the spec declares paths relative to it, the app serves them under it.
+
+    Deliberately paths only. Schemas and parameters are NOT compared — the two documents
+    describe the API at different altitudes, and ``build_openapi.py`` says why a
+    disagreement there is information rather than drift. A promised path that does not
+    exist is not a disagreement; it is a dead link.
+    """
+    spec_path = Path(__file__).resolve().parents[1] / "docs" / "specs" / "m12-api-openapi.yaml"
+    generated = Path(__file__).resolve().parents[1] / "docs" / "specs" / "openapi.generated.json"
+    spec = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
+    served = set(json.loads(generated.read_text(encoding="utf-8"))["paths"])
+
+    dead = sorted(
+        f"GET {path}"
+        for path, operations in spec["paths"].items()
+        if isinstance(operations.get("get"), dict)
+        and operations["get"].get("x-status") != "declared-not-wired"
+        and f"/api/v1{path}" not in served
+    )
+    assert not dead, (
+        f"declared in m12-api-openapi.yaml but served at no such path: {dead}. Either the "
+        "path parameter is spelled differently from the handler's argument (the camelCase "
+        "case), the route moved, or the operation needs `x-status: declared-not-wired`."
+    )

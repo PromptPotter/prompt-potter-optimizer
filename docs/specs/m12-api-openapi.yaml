@@ -3,8 +3,23 @@
 # This file is the source of truth for the inbound HTTP command surface.
 # Every `POST /commands/{kind}` operation MUST be declared here BEFORE a
 # handler lands in `promptpotter/presentation/api/routers/commands.py`.
-# Drift detection: review + Spectral lint (no `test_contracts.py` — the
-# structural/contract suite was cut to the silent-harm core, see tests/CLAUDE.md).
+#
+# THIS FILE IS NOT THE SERVED SURFACE, and never was. It owns the command
+# contract plus six reads; the app serves ~35 more endpoints (all of /auth,
+# /backends, /champion-registry, /optimizer-pipeline, /workspace/storage*, the
+# SSE stream, the file reads). Those are described by the generated companion
+# `openapi.generated.json` — reality, emitted from the FastAPI app by
+# `scripts/build_openapi.py` and gated in CI. Read that one to learn what the
+# app runs; read this one to learn what it promises. A difference between them
+# is information (something declared-not-wired), not automatically drift.
+#
+# Drift detection, both enforced now rather than reviewed by eye:
+#   - `tests/test_integrity.py::test_declared_command_kinds_match_the_wired_set`
+#     pins the declared/wired partition below against `commands.py::_WIRED_KINDS`,
+#     so an operation cannot silently look live while a POST to it 404s.
+#   - CI regenerates `openapi.generated.json` and fails on any diff.
+# (There is no `test_contracts.py` — the structural/contract suite was cut to the
+# silent-harm core, see tests/CLAUDE.md.)
 #
 # DECLARED != WIRED. Because this file is schema-first, a declared operation may
 # have no handler yet. Those carry `x-status: declared-not-wired`; a POST to one
@@ -1152,7 +1167,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
 
-  /campaigns/{campaignId}/checkin:
+  /campaigns/{campaign_id}/checkin:
     get:
       operationId: getCampaignCheckin
       summary: Re-open a CHECKIN campaign — its draft wire + last resolver turn.
@@ -1164,7 +1179,7 @@ paths:
         no check-in working state (already Started or never a check-in).
       tags: [campaigns]
       parameters:
-        - name: campaignId
+        - name: campaign_id
           in: path
           required: true
           description: The check-in campaign id (the draft's `draft_id`).
@@ -1204,7 +1219,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
 
-  /campaigns/{campaignId}/cycles/{cycleId}/dashboard:
+  /campaigns/{campaign_id}/cycles/{cycle_id}/dashboard:
     get:
       operationId: getCycleDashboard
       summary: Live telemetry for a viewed cycle — `dashboard.json` (root or any inner descendant).
@@ -1226,12 +1241,12 @@ paths:
         `candidate_scores[]` carries historically.
       tags: [cycles]
       parameters:
-        - name: campaignId
+        - name: campaign_id
           in: path
           required: true
           description: The top-level (root) campaign id.
           schema: { type: string, minLength: 8, maxLength: 128 }
-        - name: cycleId
+        - name: cycle_id
           in: path
           required: true
           description: The top-level (root) cycle id — the key of any `.inner/` sandbox below it.
@@ -1266,7 +1281,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
 
-  /campaigns/{campaignId}/cycles/{cycleId}/tree:
+  /campaigns/{campaign_id}/cycles/{cycle_id}/tree:
     get:
       operationId: getLineageTree
       summary: The lineage tree rooted at one cycle — the single served genealogy.
@@ -1305,12 +1320,12 @@ paths:
         validator — the client holds the ETag itself and sends `If-None-Match`.
       tags: [cycles]
       parameters:
-        - name: campaignId
+        - name: campaign_id
           in: path
           required: true
           description: The top-level (root) campaign id.
           schema: { type: string, minLength: 8, maxLength: 128 }
-        - name: cycleId
+        - name: cycle_id
           in: path
           required: true
           description: The top-level (root) cycle id — the key of any `.inner/` sandbox below it.
@@ -1372,7 +1387,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
 
-  /campaigns/{campaignId}/cycles/{cycleId}/ray:
+  /campaigns/{campaign_id}/cycles/{cycle_id}/ray:
     get:
       operationId: getFamilyRay
       summary: The time-ray — one chronology across a course and everything below it.
@@ -1433,12 +1448,12 @@ paths:
         Any window revalidates with `If-None-Match` against the family's mtimes.
       tags: [cycles]
       parameters:
-        - name: campaignId
+        - name: campaign_id
           in: path
           required: true
           description: The top-level (root) campaign id.
           schema: { type: string, minLength: 8, maxLength: 128 }
-        - name: cycleId
+        - name: cycle_id
           in: path
           required: true
           description: The top-level (root) cycle id.
@@ -3454,7 +3469,7 @@ components:
         A pre-shaped command the copilot offers the operator as a button. The
         resolver proposes a FIELD; code derives the command — which is why the
         resolver never has to name one. Surfaced on `OriginResolution.raised`
-        and on the `GET /campaigns/{campaignId}/checkin` response.
+        and on the `GET /campaigns/{campaign_id}/checkin` response.
 
         Every command here is awaiting a click: a high-confidence finding is
         auto-confirmed (CONFIRMED) inside the resolver turn and never raised, so
