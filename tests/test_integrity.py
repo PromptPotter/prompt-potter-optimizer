@@ -1717,3 +1717,83 @@ def test_declared_reads_are_served_paths() -> None:
         "path parameter is spelled differently from the handler's argument (the camelCase "
         "case), the route moved, or the operation needs `x-status: declared-not-wired`."
     )
+
+
+def _fake_connector(name: str, **overrides: Any):
+    """A minimally valid Connector, so a test can bend exactly one field."""
+    from promptpotter.connectors.protocol import Connector
+
+    return Connector(
+        name=name,
+        wire_adapter=lambda query, params: {"q": query},
+        session_factory=lambda: object(),
+        extract_experiment=lambda raw: ([], []),
+        **overrides,
+    )
+
+
+class _FakeEntryPoint:
+    """Stands in for an installed distribution's entry point (`.name`/`.value`/`.dist`)."""
+
+    def __init__(self, dist: str, obj: Any, *, boom: Exception | None = None) -> None:
+        self.name = "label"
+        self.value = f"{dist.replace('-', '_')}:CONNECTOR"
+        self.dist = type("D", (), {"name": dist})()
+        self._obj = obj
+        self._boom = boom
+
+    def load(self) -> Any:
+        if self._boom is not None:
+            raise self._boom
+        return self._obj
+
+
+def test_third_party_connectors_load_and_are_held_to_the_same_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The `promptpotter.connectors` entry point is published (stable-api.md §1).
+
+    Four rules, and every one of them fails SILENTLY if it is dropped from ``_load``:
+    a plugin that never loads looks like a plugin nobody installed; a plugin that
+    shadows ``termnorm``/``promptpotter`` replaces an object the loop reaches by name
+    (``runner/inner/tasks.py`` reads ``CONNECTORS["promptpotter"]``); a plugin that
+    skips ``_validate`` registers half-wired and fails a campaign instead of an import;
+    and a plugin whose module raises, if it were merely skipped, comes back later as an
+    unexplained ``connector 'x' not registered``.
+
+    The group name itself is asserted because renaming it un-registers every plugin in
+    the world at once — it is a published string, not an implementation detail.
+    """
+    import promptpotter.connectors as reg
+
+    assert reg.ENTRY_POINT_GROUP == "promptpotter.connectors"
+
+    def _with(eps: list[Any]):
+        monkeypatch.setattr(reg, "entry_points", lambda group: eps if group else [])
+        return reg._load()
+
+    # 1. A valid plugin joins the registry, keeps the built-ins, and records its origin.
+    registry, origins = _with([_FakeEntryPoint("acme-backend", _fake_connector("acme"))])
+    assert set(registry) == {"termnorm", "promptpotter", "acme"}
+    assert registry["promptpotter"] is reg._BUILTIN["promptpotter"]
+    # Format pinned, not merely probed for a substring: `stable-api.md` §1 publishes it as
+    # the way to trace a name that greps to nothing, and it is the entry point's VALUE that
+    # says which object was imported — its label ("label" here) is free and identifies nothing.
+    assert origins["acme"] == "acme-backend: acme_backend:CONNECTOR"
+    assert origins["termnorm"] == "built-in"
+
+    # 2. Shadowing a built-in is refused — this is the one that would swap the L4 object.
+    for shipped in reg._BUILTIN:
+        with pytest.raises(RuntimeError, match="may not replace a built-in"):
+            _with([_FakeEntryPoint("evil", _fake_connector(shipped))])
+
+    # 3. The SAME validator that guards our two runs over theirs. `in_process` without
+    #    `in_process_run` is the invariant BackendClient.run_query depends on.
+    with pytest.raises(RuntimeError, match="requires in_process_run set"):
+        _with([_FakeEntryPoint("acme", _fake_connector("acme", execution="in_process"))])
+
+    # 4. A broken or wrongly-typed entry point is fatal at import, not skipped.
+    with pytest.raises(RuntimeError, match="failed to import"):
+        _with([_FakeEntryPoint("acme", None, boom=ImportError("plugin is broken"))])
+    with pytest.raises(RuntimeError, match=r"not a promptpotter\.connectors\.Connector"):
+        _with([_FakeEntryPoint("acme", {"not": "a connector"})])

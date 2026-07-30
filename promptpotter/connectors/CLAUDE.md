@@ -81,8 +81,13 @@ the same shape the scorer parses from an HTTP `/matches` body. The registry guar
 
 ## Conventions
 
-- Declare the connector as a data row in the `CONNECTORS` dict in
-  `__init__.py` — no `register()` call, no import-side effects.
+- Declare a built-in as a data row in the `_BUILTIN` dict in `__init__.py` — no
+  `register()` call. `CONNECTORS` is not that dict: it is what `_load()` returns
+  after merging `_BUILTIN` with the `promptpotter.connectors` entry points and
+  running `_validate` over both. Appending to it post-import registers a connector
+  that was never validated, which is the one thing the module exists to prevent.
+  A connector shipped from **another** package declares the entry point instead
+  and touches nothing here ([`stable-api.md`](../../docs/developer/stable-api.md) §1).
 - Wire adapters are pure functions: `(query, pipeline_params) -> dict`.
   No I/O, no logging beyond debug-level drops.
 - `extract_experiment` returns `(queries, index_terms)` — the index_terms

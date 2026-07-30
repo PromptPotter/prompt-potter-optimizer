@@ -1,6 +1,6 @@
 # Stable API surface — what forks can rely on
 
-> **Stable API v1** · Last reviewed: 2026-06-11
+> **Stable API v1** · Last reviewed: 2026-07-30
 
 What downstream forks build on without breaking on the next refactor. Anything not listed is **internal** — free to rename, restructure, or delete in any PR. Forks on internal symbols are on their own. Breaking changes here bump the major; pre-release the version is informational only. Non-promises spelled out in §8.
 
@@ -16,14 +16,33 @@ class Connector:
     session_factory: Callable[[], SessionProtocol]                  # fresh session per BackendClient
     extract_experiment: Callable[[dict], tuple[list[dict], list[str]]]  # → (queries, index_terms)
     execution: ConnectorExecution = "remote_http"                   # "remote_http" | "in_process" (L4 inner cycle)
+    in_process_run: InProcessRun | None = None                      # async (query, payload) -> {"data": …}; required iff in_process
     expected_revision: str | None = None                            # backend rev this PP rev expects (paired w/ version_check)
     version_check: VersionCheck | None = None                       # async (http, base_url) -> str | None; bootstrap WARNs on drift
     preflight: PreflightFn | None = None                            # async (backend_url) -> None reachability probe; None opts out
+    auth_token: AuthTokenFn | None = None                           # () -> str | None bearer for THIS backend; unset when in_process
 ```
 
 `SessionProtocol` (`promptpotter/domain/connector.py`): `async set_terms(http, base_url, terms)` (backend handshake; noop ok) · `async recover(http, base_url)` (re-establish after transport error).
 
-Each connector self-registers at import via `promptpotter/connectors/__init__.py::CONNECTORS`. Adding a connector is one new file under `promptpotter/connectors/` — no edits to `application/config.py` or `infrastructure/backend.py`. Reference impls: [`connectors/termnorm.py`](../../promptpotter/connectors/termnorm.py), [`connectors/promptpotter.py`](../../promptpotter/connectors/promptpotter.py).
+**Registering one, from your own package — no fork.** `promptpotter.connectors` is a published entry-point group:
+
+```toml
+[project.entry-points."promptpotter.connectors"]
+anything = "my_package.connector:CONNECTOR"
+```
+
+The object named must be a `Connector`; **its `name` field is the registry key**, so the entry-point label is free and a package cannot claim a key its connector does not declare. No edits to `application/config.py` or `infrastructure/backend.py`. Reference impls: [`connectors/termnorm.py`](../../promptpotter/connectors/termnorm.py), [`connectors/promptpotter.py`](../../promptpotter/connectors/promptpotter.py).
+
+Three rules a plugin is held to, all enforced at import in `connectors/__init__.py`:
+
+- **Same validation as a built-in.** One `_validate` runs over ours and yours alike — key/`name` agreement, the three hooks callable, `execution` a declared mode, `in_process` paired with `in_process_run` and carrying no `auth_token`.
+- **No shadowing.** A plugin may not register `termnorm` or `promptpotter`; those keys are read by name inside the loop.
+- **A plugin that cannot load is fatal, not skipped** — the error names the distribution. A skipped one would return later as an unexplained `connector 'x' not registered`.
+
+`CONNECTOR_ORIGINS` maps every registered name to `"built-in"` or `"<distribution>: <module>:<attr>"` (the entry point's *value*, not its label — the label is free, the value is what was imported), so a name that greps to nothing in this tree can still be traced to its package.
+
+Adding one *to this repo* is still one new file under `promptpotter/connectors/` plus a `_BUILTIN` entry. Built-ins are deliberately **not** declared as entry points: reading them from install metadata would make a source-tree run with no metadata find zero backends.
 
 **Contracts beyond `protocol.py`:** wire adapters MUST be pure `(query, pipeline_params) → dict` — no I/O, no logging above debug · `extract_experiment` MUST return `(queries, index_terms)` (the latter may be empty).
 

@@ -23,6 +23,19 @@ from pydantic import BaseModel
 _PACKAGE_ROOT = Path(__file__).resolve().parent
 assert _PACKAGE_ROOT.name == "promptpotter", f"ledger root is not the package: {_PACKAGE_ROOT}"
 
+# ``assets/`` is install DATA the package reads, never code it imports — the optimizer
+# manifest, the exported dashboard, the benchmark dataset definitions. Counting it as
+# conceptual surface is wrong on its own terms, and it is not hypothetical: two of the
+# three asset trees are STAGED there by ``scripts/build_release.py`` before a wheel is
+# built, so a developer who has cut a release once carries ``datasets/CLAUDE.md`` inside
+# the package and the ratchet goes red on a file nobody wrote.
+_ASSETS_ROOT = _PACKAGE_ROOT / "assets"
+
+
+def _package_files(pattern: str) -> list[Path]:
+    """Files matching *pattern* under the package, excluding :data:`_ASSETS_ROOT`."""
+    return [p for p in _PACKAGE_ROOT.rglob(pattern) if _ASSETS_ROOT not in p.parents]
+
 
 def _unwrap_optional(annotation: object) -> object:
     """Strip ``X | None`` / ``Optional[X]`` down to ``X``; pass anything else through."""
@@ -176,7 +189,7 @@ def compute_ledger() -> dict[str, int]:
     from promptpotter.config.settings import PROMPT_STRING_FIELDS, Settings
     from promptpotter.domain.opt_search_point import OptSearchPoint
 
-    py_files = list(_PACKAGE_ROOT.rglob("*.py"))
+    py_files = _package_files("*.py")
     init_files = [p for p in py_files if p.name == "__init__.py"]
 
     return {
@@ -192,7 +205,7 @@ def compute_ledger() -> dict[str, int]:
         "prompt_string_fields": len(PROMPT_STRING_FIELDS),
         "injections": len(INJECTIONS),
         "escalation_rules": len(DEFAULT_ESCALATION_RULES),
-        "claude_md": len(list(_PACKAGE_ROOT.rglob("CLAUDE.md"))),
+        "claude_md": len(_package_files("CLAUDE.md")),
     }
 
 
