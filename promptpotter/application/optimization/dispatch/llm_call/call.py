@@ -170,7 +170,7 @@ async def llm_call(
     """LLM call with config-driven defaults; precedence: _LLM_DEFAULTS < config < overrides.
 
     ``provider`` and ``model`` resolve from the optimizer node's config (sourced
-    from ``datasets/_optimizer/pipeline.yaml`` via ``node``) like every other
+    from ``promptpotter/assets/optimizer/pipeline.yaml`` via ``node``) like every other
     tunable — the client is built here from ``merged["provider"]``, not passed in.
 
     *response_model* defaults to ``OPTIMIZER_RESPONSE_MODELS[node]`` when a
@@ -480,7 +480,7 @@ async def run_optimizer_node(
     """Load prompt template, compile, call LLM → (parsed_result, prompt_text, repair_attempts).
 
     Provider, model, and the default temperature come from the node's config in
-    ``datasets/_optimizer/pipeline.yaml`` (resolved inside :func:`llm_call`).
+    ``promptpotter/assets/optimizer/pipeline.yaml`` (resolved inside :func:`llm_call`).
     Pass *temperature* only to override that default — the L1 generator does, with
     its escalation-driven creativity; every other node defers to the file.
 

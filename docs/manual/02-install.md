@@ -25,7 +25,9 @@ Create a file called `.env` in the repo root, containing exactly:
 OPENROUTER_API_KEY=your_key_here
 ```
 
-The optimizer model defaults to `openai/gpt-oss-120b` on OpenRouter. It's install-global, configured once in `datasets/_optimizer/pipeline.yaml` (per optimizer node's `config.model` / `config.provider`) — the same optimizer runs every campaign. To use a different model or provider, edit that file; set the corresponding `*_API_KEY` for Groq/Anthropic/OpenAI. There is no per-campaign or env-var override.
+The optimizer model defaults to `deepseek/deepseek-v4-flash:nitro` on OpenRouter. It's install-global, configured once in `promptpotter/assets/optimizer/pipeline.yaml` (per optimizer node's `config.model` / `config.provider`) — the same optimizer runs every campaign. To use a different model or provider, edit that file; set the corresponding `*_API_KEY` for Groq/Anthropic/OpenAI. There is no per-campaign or env-var override.
+
+Installed from a wheel rather than a clone, that file sits under `site-packages` and an edit there dies at the next upgrade. Put your copy at `$PROMPTPOTTER_HOME/optimizer/pipeline.yaml` instead: present, it replaces the shipped manifest whole. It is the only shipped asset you may shadow — its two neighbours are generated (`resolved_schemas.json`) or are the L4 instrument (`sets/*.yaml`).
 
 Connecting to a remote / auth-gated backend? See [`operations/backend-integration.md § Connection security`](../operations/backend-integration.md#connection-security).
 
@@ -49,7 +51,7 @@ Next: [Your first campaign](03-first-campaign.md).
 
 ## Environment variables
 
-The `.env` file (see `.env.example`) carries API keys. The optimizer's provider + model are install-global in `datasets/_optimizer/pipeline.yaml` (per optimizer node) — no per-campaign or env-var default. (Target/scoring model is per-dataset in the pipeline overlay.)
+The `.env` file (see `.env.example`) carries API keys. The optimizer's provider + model are install-global in `promptpotter/assets/optimizer/pipeline.yaml` (per optimizer node) — no per-campaign or env-var default. (Target/scoring model is per-dataset in the pipeline overlay.)
 
 | Variable | When required | Purpose |
 |----------|---------------|---------|

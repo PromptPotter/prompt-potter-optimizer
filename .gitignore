@@ -110,7 +110,13 @@ datasets/*/cache.json
 # Research benchmark cuts. The loader in DATASET_LOADERS is what ships, and the drawn cut
 # stays out — but the CONFIG travels: it declares the instrument a measurement came from,
 # and an untracked knob silently reverts on the next clone or deploy.
-datasets/justlogic-d23/
+#
+# `datasets/justlogic-d23/` read `datasets/justlogic-d23/` until 2026-07-30 — the whole
+# directory, config included, against the sentence directly above and against how its own
+# sibling is written one line down. It cost exactly what that sentence predicts: the cut
+# existed on one disk and on no clone, `list_datasets()` named a dataset no fresh checkout
+# could resolve, and the L4 panel is keyed on its cells (`justlogic-d23/seed-0`).
+datasets/justlogic-d23/cache.json
 datasets/justlogic-d234/cache.json
 
 # Recon-script raw data downloads (NaturalPlan GitHub JSON, etc.) — regenerable
@@ -121,3 +127,9 @@ campaign_config.json
 
 # teach-impeccable skill scratch (unrelated to PromptPotter)
 .impeccable.md
+
+# Release staging — scripts/build_release.py copies webapp/out and the tracked
+# datasets/ definitions in here so setuptools can ship them. Both are derived, so
+# they are built on demand, never committed.
+promptpotter/assets/webapp/
+promptpotter/assets/benchmarks/

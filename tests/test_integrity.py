@@ -1444,7 +1444,7 @@ def test_yaml_emitter_keeps_prose_in_block_scalars() -> None:
 
 # Every boolean-valued path in the operator-authored config tier, keyed by
 # ``{dataset}/{stem}::{dotted.path}`` so the entry survives the file's extension.
-# ``_optimizer/resolved_schemas.json`` is out of scope by construction — it is
+# ``assets/optimizer/resolved_schemas.json`` is out of scope by construction — it is
 # generated, so it cannot grow a boolean by the hand-edit slip this census catches.
 _CONFIG_TIER_BOOLEANS = frozenset(
     {

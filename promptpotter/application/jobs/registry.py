@@ -24,8 +24,8 @@ from json import JSONDecodeError
 from pathlib import Path
 from typing import Literal
 
+from promptpotter.config.paths import user_data_root
 from promptpotter.infrastructure.store.io import read_json, write_json
-from promptpotter.infrastructure.store.layout import DEFAULT_PROJECTS_ROOT
 from promptpotter.shared.clock import utcnow_iso
 
 logger = logging.getLogger(__name__)
@@ -63,8 +63,8 @@ class ReserveResult:
 
 
 def default_jobs_dir() -> Path:
-    """Jobs dir sibling of the default `projects/` root."""
-    return DEFAULT_PROJECTS_ROOT.parent / "jobs"
+    """Jobs dir beside `projects/` in the user-data tree."""
+    return user_data_root() / "jobs"
 
 
 class JobRegistry:

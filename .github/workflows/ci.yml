@@ -53,7 +53,7 @@ jobs:
       - name: Schema contract (Pydantic → optimizer resolved_schemas)
         run: |
           uv run python scripts/build_optimizer_schemas.py
-          git diff --exit-code datasets/_optimizer/resolved_schemas.json
+          git diff --exit-code promptpotter/assets/optimizer/resolved_schemas.json
 
       - name: Tests
         run: uv run pytest tests/ -q --tb=short --cov=promptpotter --cov-report=term-missing

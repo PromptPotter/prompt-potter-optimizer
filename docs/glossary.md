@@ -407,9 +407,9 @@ The persisted world is a four-entity containment hierarchy
   LLM template). Field-standard from PromptWizard / DSPy / OPRO.
 - **Prompt homes** — three, don't confuse them. The **target** prompt the optimizer
   evolves: `datasets/{name}/prompts/{node}.yaml`. The **optimizer's** meta-prompts
-  (install-global): `datasets/_optimizer/pipeline.yaml::resolved_prompts` — keyed
+  (install-global): `promptpotter/assets/optimizer/pipeline.yaml::resolved_prompts` — keyed
   `{node}/{n}`, so check-in's second mode lives at `resolved_prompts.checkin/2`. The
-  **outer** L4 meta-prompts: `datasets/_optimizer_meta/prompts.yaml` (prompt fields only,
+  **outer** L4 meta-prompts: `promptpotter/assets/optimizer/sets/meta.yaml` (prompt fields only,
   deliberately no `pipeline.yaml`; selected per-cycle by `OptimizationConfig.optimizer_set`).
   A per-node **overlay** (`pipeline.yaml::nodes.{name}.config.prompt`) is a fourth, and is
   a tunable, not a home.

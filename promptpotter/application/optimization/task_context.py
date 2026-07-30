@@ -61,7 +61,7 @@ async def decompose_prompt_fields(
     """LLM check-in: raw context → Layer 1 prompt fields + task_context sub-dict.
 
     Provider + model come from the ``checkin`` optimizer node config
-    (``datasets/_optimizer/pipeline.yaml``), resolved inside :func:`llm_call`."""
+    (``promptpotter/assets/optimizer/pipeline.yaml``), resolved inside :func:`llm_call`."""
     if isinstance(context_input, dict):
         user_content = (
             "The user has provided partial Layer 1 fields for a prompt. "

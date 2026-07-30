@@ -21,10 +21,10 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from promptpotter.application.jobs.reaper import periodic_sweep, reap_cycle_by_id
 from promptpotter.application.jobs.registry import Job, JobRegistry, default_jobs_dir
 from promptpotter.config.logging import setup_logging, silence_proactor_disconnect_noise
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, webapp_static_root
 from promptpotter.config.settings import APP_VERSION, settings
 from promptpotter.infrastructure.identity.bundle import build_identity_bundle
 from promptpotter.infrastructure.identity.paths import default_identity_paths
-from promptpotter.infrastructure.store.layout import DEFAULT_PROJECTS_ROOT, REPO_ROOT
 from promptpotter.presentation.api.middleware.oidc import install_oidc_middleware
 from promptpotter.presentation.api.routers.active import active_router
 from promptpotter.presentation.api.routers.auth import auth_router
@@ -275,7 +275,7 @@ app.include_router(auth_router, prefix="/api/v1")
 # is a catch-all and MUST stay the last route registered — every API router
 # plus FastAPI's auto /docs + /openapi.json are matched first by Starlette's
 # in-order resolution. `html=True` serves out/index.html at `/`.
-WEBAPP_DIR = REPO_ROOT / "webapp" / "out"
+WEBAPP_DIR = webapp_static_root()
 if WEBAPP_DIR.exists():
     app.mount("/", StaticFiles(directory=WEBAPP_DIR, html=True), name="webapp")
 

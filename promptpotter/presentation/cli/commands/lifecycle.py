@@ -24,7 +24,7 @@ import argparse
 import logging
 import uuid
 
-from promptpotter.infrastructure.store.layout import DEFAULT_PROJECTS_ROOT
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.api.middleware.command_dispatcher import (

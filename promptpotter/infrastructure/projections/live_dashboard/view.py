@@ -166,7 +166,7 @@ class LiveDashboardView(DerivedView):
         cls,
         cycle_id: str | None,
         *,
-        project_root: str,
+        tenant_root: str,
         session_id: str,
         campaign_id: str,
         l1_patience: int,
@@ -187,14 +187,14 @@ class LiveDashboardView(DerivedView):
         the cut while counting its own (copied) round files; ``None`` seeds from
         the cycle's own dir (root / resume).
         """
-        if not (project_root and session_id and campaign_id and cycle_id):
+        if not (tenant_root and session_id and campaign_id and cycle_id):
             return None
 
-        tenant_root = Path(project_root)
-        session_dir = session_dir_for(tenant_root, session_id)
-        cycle_dir = CycleDir(cycle_dir_for(tenant_root, campaign_id, cycle_id))
+        root = Path(tenant_root)
+        session_dir = session_dir_for(root, session_id)
+        cycle_dir = CycleDir(cycle_dir_for(root, campaign_id, cycle_id))
         seed_dir = (
-            cycle_dir_for(tenant_root, campaign_id, seed_from_cycle_id)
+            cycle_dir_for(root, campaign_id, seed_from_cycle_id)
             if seed_from_cycle_id
             else Path(cycle_dir)
         )

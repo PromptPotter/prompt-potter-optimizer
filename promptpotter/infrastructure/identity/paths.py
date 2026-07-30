@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from promptpotter.infrastructure.store.layout import DEFAULT_PROJECTS_ROOT
+from promptpotter.config.paths import user_data_root
 
 
 @dataclass(frozen=True)
@@ -49,7 +49,7 @@ class IdentityPaths:
 
 
 def default_identity_paths() -> IdentityPaths:
-    return IdentityPaths(root=DEFAULT_PROJECTS_ROOT.parent / "identity")
+    return IdentityPaths(root=user_data_root() / "identity")
 
 
 __all__ = ["IdentityPaths", "default_identity_paths"]

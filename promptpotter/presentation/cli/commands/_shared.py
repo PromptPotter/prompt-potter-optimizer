@@ -24,7 +24,7 @@ from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
 )
-from promptpotter.infrastructure.store.layout import REPO_ROOT, campaign_cycles_dir
+from promptpotter.infrastructure.store.layout import campaign_cycles_dir
 from promptpotter.shared.identity import IdentityContext, default_identity
 
 if TYPE_CHECKING:
@@ -123,11 +123,9 @@ async def init_services_cli(
     from promptpotter.config.logging import setup_logging
 
     setup_logging(style="full" if _VERBOSE else "cli")
-    project_root = REPO_ROOT
     return await init_services(
         backend_url=backend_url,
         backend_id=backend_id,
-        project_root=project_root,
         dataset_name=dataset_name,
         on_status=lambda msg: logger.info(msg) if _VERBOSE else None,
         identity=identity if identity is not None else default_identity(),

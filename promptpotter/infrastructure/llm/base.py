@@ -25,7 +25,7 @@ class LLMClientBase(ABC):
         """Send a chat completion request.
 
         - ``model``: mandatory + concrete. ``llm_call`` reads it from the
-          optimizer node config (``datasets/_optimizer/pipeline.yaml``) before
+          optimizer node config (``promptpotter/assets/optimizer/pipeline.yaml``) before
           the call; no model fallback lives below this seam.
         - ``max_tokens``: ``None`` = no cap (provider default).
         - ``response_model``: typed JSON output via provider ``response_format`` +

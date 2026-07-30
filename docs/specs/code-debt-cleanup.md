@@ -89,7 +89,7 @@ shape was the old bloat source; readiness buckets replaced it.
 
 ## Standing — long-lived design holds
 
-- **Optimizer model repair-rate on heavy L2/L3 structured output — unmeasured.** The old entry named `openrouter/gpt-oss-120b`; every optimizer node now runs `deepseek/deepseek-v4-flash:nitro` (`209eaa42`), swapped for exactly this reason (speed + schema obedience together). What is still owed is the measurement: a live cycle reaching L3 to read the repair-retry rate under the *current* model. Verified 2026-07-16 — the swap is real (`datasets/_optimizer/pipeline.yaml`), so don't re-file this against the 120b.
+- **Optimizer model repair-rate on heavy L2/L3 structured output — unmeasured.** The old entry named `openrouter/gpt-oss-120b`; every optimizer node now runs `deepseek/deepseek-v4-flash:nitro` (`209eaa42`), swapped for exactly this reason (speed + schema obedience together). What is still owed is the measurement: a live cycle reaching L3 to read the repair-retry rate under the *current* model. Verified 2026-07-16 — the swap is real (`promptpotter/assets/optimizer/pipeline.yaml`), so don't re-file this against the 120b.
 
 ## Considered, not debt — don't re-open
 

@@ -12,13 +12,13 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.identity import TenantId
 from promptpotter.infrastructure.store.io import (
     read_json_tolerant,
     validate_path_component,
     write_json,
 )
-from promptpotter.infrastructure.store.layout import DEFAULT_PROJECTS_ROOT
 
 
 def _tenant_root(tenant_id: TenantId, projects_root: Path | None = None) -> Path:

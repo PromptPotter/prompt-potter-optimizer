@@ -378,7 +378,7 @@ async def _run_inner_campaign(
     Runs in a FRESH task (the caller spawns it) so the per-task ContextVars are
     isolated from the outer cycle. Sets the per-run optimizer-prompt override
     ContextVar here (inner task only) so the outer L1's meta-prompt mutations
-    shape the inner ``_optimizer/`` prompts without leaking to the outer.
+    shape the inner ``assets/optimizer/`` prompts without leaking to the outer.
 
     ``cycle_dir_box`` is a mutable holder the caller reads from its outer-task
     heartbeat: once the inner cycle is minted its dir is published here, so the

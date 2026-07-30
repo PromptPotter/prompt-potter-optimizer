@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import html
 import json
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bootstrap.session import Session
@@ -142,13 +141,10 @@ async def init_notebook_session(
 ) -> Session:
     """Init store, client, pipeline schema, scoring data — with notebook-friendly logging."""
     setup_logging()
-    project_root = Path(__file__).resolve().parent.parent.parent.parent
-
     session = await _init_services(
         dataset_name=dataset_name,
         backend_url=backend_url,
         backend_id=backend_id,
-        project_root=project_root,
         on_status=print,
     )
     print(f"Dataset    : {dataset_name} ({len(session.samples)} queries)")

@@ -23,7 +23,8 @@ Signals: `promptpotter-self` / `justlogic-d234`, the L4 finish line, a dirty tre
 broke", "bug-hunting", an operator already mid-investigation.
 - Read past the headline into the round's LLM I/O. A green accuracy over an empty panel is a finding.
 - Authority: halt a run, fix at its ROOT, relaunch — without asking. Name the structural cause
-  before touching code; default the fix to the `_optimizer*/` meta-prompts (`<root-fix>`, `<dispatch-first>`).
+  before touching code; default the fix to the `promptpotter/assets/optimizer/` meta-prompts
+  (`pipeline.yaml::resolved_prompts` inner, `sets/*.yaml` outer) (`<root-fix>`, `<dispatch-first>`).
 - **Never commit.** Fixes accumulate uncommitted; name every path touched so the operator can
   `git add` by path (a second session commits to `main` concurrently).
 

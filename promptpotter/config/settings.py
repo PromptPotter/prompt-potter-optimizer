@@ -9,18 +9,24 @@ lists, persistence versioning, and service-level defaults.
 import math
 import tomllib
 from importlib.metadata import version
-from pathlib import Path
 
 from pydantic_settings import BaseSettings
+
+from promptpotter.config.paths import source_checkout_root
 
 
 def _app_version() -> str:
     """One version owner: ``pyproject.toml``. The dev tree reads the file directly
     (editable-install dist metadata goes stale on a bump until reinstall); an
-    installed wheel has no pyproject.toml on disk and reads its own metadata."""
-    pyproject = Path(__file__).parents[2] / "pyproject.toml"
-    if pyproject.is_file():
-        with pyproject.open("rb") as f:
+    installed wheel has no pyproject.toml on disk and reads its own metadata.
+
+    "Is there a checkout beside the package?" is precisely what
+    :func:`~promptpotter.config.paths.source_checkout_root` answers, so this asks it
+    rather than walking to ``parents[2]`` itself — that walk was one of five
+    independent copies of the same question, each correct at its own depth only."""
+    checkout = source_checkout_root()
+    if checkout is not None:
+        with (checkout / "pyproject.toml").open("rb") as f:
             return str(tomllib.load(f)["project"]["version"])
     return version("promptpotter-optimizer")
 
@@ -173,7 +179,7 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
 
     # LLM provider keys. The optimizer's provider + model are install-global,
-    # configured per node in ``datasets/_optimizer/pipeline.yaml`` and read at
+    # configured per node in ``promptpotter/assets/optimizer/pipeline.yaml`` and read at
     # ``llm_call`` — there is no env-var provider/model default. (Target/scoring
     # model is per-dataset, in the pipeline overlay.)
     OPENAI_API_KEY: str = ""

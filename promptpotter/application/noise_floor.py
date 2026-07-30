@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.rendering import display_fitness
 from promptpotter.domain.results import DiagnosticRunRecord, candidate_label
-from promptpotter.infrastructure.store.layout import REPO_ROOT
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.statistics import mean_ci
 
@@ -90,7 +89,6 @@ async def measure_noise_floor(
     session = await init_services(
         backend_id=campaign.backend_id or campaign.dataset_name,
         dataset_name=campaign.dataset_name,
-        project_root=REPO_ROOT,
         identity=identity,
         store=stores,
     )

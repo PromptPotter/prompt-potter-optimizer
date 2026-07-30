@@ -20,7 +20,6 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.rendering import display_fitness
 from promptpotter.domain.results import DiagnosticRunRecord
 from promptpotter.infrastructure.store import archive_views
-from promptpotter.infrastructure.store.layout import REPO_ROOT
 from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
@@ -141,7 +140,6 @@ async def verify_candidate(
     session = await init_services(
         backend_id=campaign.backend_id or campaign.dataset_name,
         dataset_name=campaign.dataset_name,
-        project_root=REPO_ROOT,
         identity=identity,
         store=stores,
     )

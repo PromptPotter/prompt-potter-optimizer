@@ -74,7 +74,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Transition types — one L2/L3 fire's output + the static per-layer spec this
 # module fills. Provider/model/temperature are sourced from the layer's
-# optimizer node config (``datasets/_optimizer/pipeline.yaml``) inside
+# optimizer node config (``promptpotter/assets/optimizer/pipeline.yaml``) inside
 # ``llm_call``, not held here.
 # ---------------------------------------------------------------------------
 

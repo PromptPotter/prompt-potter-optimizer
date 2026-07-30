@@ -56,8 +56,8 @@ def build_campaign_config(
 
     Overrides are intended as ad-hoc notebook conveniences; campaign.json
     stays the project default and the SoT for CLI runs. The optimizer LLM is
-    install-global (``datasets/_optimizer/pipeline.yaml``) — edit that file to
-    change the optimizer model/provider, not the campaign config.
+    install-global (``promptpotter/assets/optimizer/pipeline.yaml``) — edit that
+    file to change the optimizer model/provider, not the campaign config.
     """
     raw = json.loads(_BBEH_CAMPAIGN_JSON.read_text(encoding="utf-8"))
     cfg = raw.get("campaign_config", raw)

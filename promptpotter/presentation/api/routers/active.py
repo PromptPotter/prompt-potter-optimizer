@@ -230,7 +230,7 @@ async def get_machine_status(identity: IdentityDep, jobs: JobRegistryDep) -> Mac
 
 @active_router.get("/optimizer-pipeline", tags=["Optimizer"])
 def get_optimizer_pipeline() -> dict[str, Any]:
-    """Bundled ``datasets/_optimizer/pipeline.yaml`` + its generated
+    """Bundled ``promptpotter/assets/optimizer/pipeline.yaml`` + its generated
     ``resolved_schemas.json`` sibling — nodes + pipelines + ``view``
     topology, plus the per-node typed config surface (``node_config_schema`` /
     ``node_output_schema``) so the canvas node-detail renders the optimizer's own

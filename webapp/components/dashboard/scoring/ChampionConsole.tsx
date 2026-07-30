@@ -4,7 +4,7 @@
 // anchor-to-origin paired effect. Reads the server-reduced registry; no recompute.
 // Renders only for the outer pp-self loop (DashboardTab's isOuterSelfOpt gate).
 // Ranking is the whole surface: nothing here crowns a winner or graduates one into
-// datasets/_optimizer — that is a deliberate hand-edit.
+// promptpotter/assets/optimizer — that is a deliberate hand-edit.
 
 import type { ChampionCandidate, ChampionRegistry } from "@/lib/api";
 import { CardFrame } from "@/components/ui";

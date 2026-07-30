@@ -252,7 +252,7 @@ class ObservabilityBridge:
     @classmethod
     def start_campaign(
         cls,
-        project_root: str | Path | None,
+        tenant_root: str | Path | None,
         backend_id: str | None,
         *,
         config_snapshot: dict[str, Any],
@@ -265,12 +265,12 @@ class ObservabilityBridge:
     ) -> ObservabilityBridge | None:
         """Build a bridge, emit ``CampaignStart``, register the dataset."""
 
-        if not (project_root and backend_id):
+        if not (tenant_root and backend_id):
             return None
 
         bridge: ObservabilityBridge | None = None
         with graceful("Failed to create ObservabilityBridge"):
-            bridge = cls.from_settings(project_root, campaign_id, langfuse=langfuse)
+            bridge = cls.from_settings(tenant_root, campaign_id, langfuse=langfuse)
         if bridge is None:
             return None
 

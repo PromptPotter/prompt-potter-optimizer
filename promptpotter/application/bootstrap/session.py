@@ -77,7 +77,7 @@ class Session:
     # The single resolution seam — every dataset-file loader reads this rather than
     # recomputing a repo path from the bare name.
     dataset_config_dir: Path | None = None
-    project_root: str = ""
+    tenant_root: str = ""
     pipeline_params: dict[str, Any] = field(default_factory=dict)
     langfuse: LangfuseLogger | None = None
 

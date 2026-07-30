@@ -34,7 +34,7 @@ def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
 
     The backend this connector runs IS the inner optimizer, so a measurement's
     identity must change whenever the inner origin does: the shared meta-prompt
-    text (``datasets/_optimizer/pipeline.yaml``), the per-node information-flow
+    text (``promptpotter/assets/optimizer/pipeline.yaml``), the per-node information-flow
     layouts, the engine version, AND the dataset's WHOLE ``inner_tasks.yaml`` spec —
     the inner benchmark NAME + task list (which bank, which seeds) plus
     ``inner_benchmark_config`` (sample count, round / variant geometry, the
@@ -101,7 +101,7 @@ def promptpotter_wire_adapter(
     ```
 
     Each per-node dict overrides template fields on the inner cycle's
-    ``datasets/_optimizer/pipeline.yaml`` for that run. A ``model`` key (present only
+    ``promptpotter/assets/optimizer/pipeline.yaml`` for that run. A ``model`` key (present only
     when the operator directly set the inner-optimizer model on the carrier node — a
     cap-gated babysit override, never the optimizer's own search) rides the same
     channel untouched and is consumed at the inner optimizer's ``llm_call`` config

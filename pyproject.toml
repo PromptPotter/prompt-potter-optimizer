@@ -86,8 +86,28 @@ promptpotter = "promptpotter.presentation.cli.campaign_runner:main"
 [tool.setuptools.packages.find]
 include = ["promptpotter*"]
 
+# Everything the package READS at runtime but does not import. The list is
+# deliberate and exhaustive: setuptools ships no non-.py file unless it is named
+# here, so an asset that is merely committed to git is NOT installed. Two of these
+# were already correctly placed inside the package and still absent from the wheel
+# — which is how `pip install promptpotter-optimizer` produced a CLI that starts
+# and then cannot make a single optimizer call.
 [tool.setuptools.package-data]
-promptpotter = ["py.typed", "shared/data/rates.json"]
+promptpotter = [
+    "py.typed",
+    "shared/data/rates.json",
+    "config/prompt_variants.json",  # config/prompt_blocks.py::BUNDLED_PATH
+    "connectors/resources/*.json",  # n8n workflow templates
+    "assets/optimizer/*.yaml",      # the optimizer's own pipeline manifest
+    "assets/optimizer/*.json",      # + its generated schema registry
+    "assets/optimizer/sets/*.yaml", # specialized meta-prompt sets (L4)
+    # The last two are BUILD ARTIFACTS — a Next.js export and a git-filtered dataset
+    # tree — so they cannot sit in the source tree the way assets/optimizer/ does.
+    # `scripts/build_release.py` stages both before `uv build`; that script is what
+    # makes these two globs true, and without it they match nothing silently.
+    "assets/webapp/**/*",           # exported dashboard
+    "assets/benchmarks/**/*",       # benchmark dataset definitions (no HF caches)
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

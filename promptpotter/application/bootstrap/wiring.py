@@ -271,7 +271,6 @@ async def init_services(
     dataset_name: str,
     backend_url: str = DEFAULT_BACKEND_URL,
     backend_id: str = "",
-    project_root: Path | None = None,
     on_status: Callable[[str], None] | None = None,
     identity: IdentityContext | None = None,
     store: Stores | None = None,
@@ -287,13 +286,13 @@ async def init_services(
     Active-session pointers are per-tenant on disk, so two operators on the
     same machine cannot collide.
 
-    ``store`` injects a pre-built :class:`Stores` instead of rooting one under
-    ``project_root/.promptpotter``: the L4 inner-cycle runner passes a sandboxed
-    store rooted at the flat ``<workspace>/.inner/<spawn_cycle_id>/`` registry — named
-    by the spawning cycle, never nested under it — so an inner campaign's state never
-    touches the outer's active pointer. ``project_root`` still resolves
-    repo-benchmark dataset dirs (``datasets/{name}/``), so the sandbox reads the
-    inner dataset from the repo while writing campaign state into the sandbox."""
+    ``store`` injects a pre-built :class:`Stores` instead of letting
+    :func:`build_stores` resolve the user-data root: the L4 inner-cycle runner passes a
+    sandboxed store rooted at the flat ``<workspace>/.inner/<spawn_cycle_id>/`` registry
+    — named by the spawning cycle, never nested under it — so an inner campaign's state
+    never touches the outer's active pointer. It is the ONE way to relocate the tree;
+    a ``project_root`` parameter sat beside it doing a weaker version of the same job,
+    lost its last caller when the roots moved into ``config/paths.py``, and is gone."""
 
     def status(msg: str) -> None:
         if on_status:
@@ -301,15 +300,8 @@ async def init_services(
 
     resolved_identity = identity if identity is not None else default_identity()
 
-    if project_root is None:
-        project_root = (
-            Path(__file__).resolve().parent.parent.parent.parent
-        )  # wiring → bootstrap → application → promptpotter → repo_root
-
     if store is None:
-        store = build_stores(
-            resolved_identity, projects_root=project_root / ".promptpotter" / "projects"
-        )
+        store = build_stores(resolved_identity)
 
     # An instrument cycle is a measurement, not a campaign — it must not mutate
     # tenant-global storage; the outer campaign that spawned it already did this.
@@ -364,7 +356,7 @@ async def init_services(
         dataset_name=dataset_name,
         dataset_config_dir=dataset_config_dir,
         identity=resolved_identity,
-        project_root=str(store.base_dir),
+        tenant_root=str(store.base_dir),
         # ``enable_tracing=False`` (L4 inner campaigns) force-disables the cloud
         # Langfuse logger so ``bridge.from_settings`` skips ``LangfuseSink`` — no
         # cloud spans, no ``_trace_metadata`` accumulation, no quota burn. The

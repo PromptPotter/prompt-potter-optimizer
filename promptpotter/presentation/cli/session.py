@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.config.paths import benchmark_datasets_root
 from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 
@@ -90,9 +90,10 @@ class SessionCtx:
 
 def no_dataset_hint() -> str:
     """Formatted list of discovered datasets + exact fresh-init commands."""
-    datasets = sorted(p.parent.name for p in Path("datasets").glob("*/campaign.yaml"))
+    root = benchmark_datasets_root()
+    datasets = sorted(p.parent.name for p in root.glob("*/campaign.yaml"))
     lines = [f"  python -m promptpotter new {name}" for name in datasets]
-    body = "\n".join(lines) if lines else "  (no datasets found under ./datasets/)"
+    body = "\n".join(lines) if lines else f"  (no datasets found under {root})"
     return "Available datasets:\n\n" + body
 
 

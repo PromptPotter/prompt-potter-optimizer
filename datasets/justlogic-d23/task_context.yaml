@@ -1,0 +1,84 @@
+domain: JustLogic — 3-Class Deductive Reasoning at Depth 2-3
+pipeline_purpose: >-
+  Evaluate a claim against a set of logical premises and output a deterministic label indicating whether
+  the claim is provably true, provably false, or uncertain given those premises.
+data_characteristics: >-
+  Input: a paragraph of English-prose premises plus one claim; output: exactly one of TRUE, FALSE, Uncertain.
+  Labels are near-balanced by construction, so any class bias is a reasoning failure, never label skew.
+  Synthetic and knowledge-independent — no recall.
+optimization_goals: >-
+  Raise exact-match accuracy by helping the model CLOSE the derivation: read every premise, track negations,
+  keep quantifiers straight. Anti-hedging / be-decisive text is MEASURED to backfire here — it eats the
+  budget the derivation needs. Buy derivation, not decisiveness.
+key_challenges: >-
+  Premise-skipping (answering from one or two premises) and negation-flip (a negation lost inside a nested
+  conditional inverts the conclusion). Retreat to Uncertain is a SYMPTOM of an unfinished chain, not a
+  habit to scold out of it.
+upstream_context: >-
+  The premises and the claim are handed to the model directly as input text. There is no retrieval, enrichment,
+  or upstream node to tune.
+downstream_context: >-
+  A grader extracts the final label from the model's response and scores it by exact match against the
+  gold label.
+raw_description: |
+  # JustLogic — 3-Class Deductive Reasoning at Depth 2-3
+
+  Evaluate a claim against a paragraph of premises and decide whether the claim is
+  provably true, provably false, or genuinely uncertain. Synthetic deductive
+  reasoning (Chen 2025) — knowledge-independent by design, no factual recall.
+
+  ## Domain
+
+  - Input: a paragraph of logical premises (English prose) + a single claim
+  - Output: one of three labels — `TRUE`, `FALSE`, or `Uncertain`
+  - Wired stratum: **depths 2 and 3** of the authors' depth-1-through-7 schema
+
+  ## Why this stratum
+
+  The target model has a capability wall, and the wired depths straddle it. At the
+  shallower depth it completes the derivation and uses all three labels. At the
+  deeper one it is at the edge of what it can close, and starts falling back on
+  `Uncertain`. That frontier is deliberately inside the bank: a mutation that helps
+  the model finish a chain it currently cannot finish shows up as real, measurable
+  movement, and a mutation that starves the derivation shows up as regression.
+
+  ## Success criteria
+
+  - Exact Match: the predicted label equals the gold label (case-insensitive),
+    read from the final answer span
+  - The model must commit to one of the three labels in the expected format —
+    prose with no extractable label scores zero regardless of the reasoning
+
+  ## Key failure modes
+
+  - **Premise-skipping**: the model latches onto one or two premises, ignores the
+    rest, and answers confidently on insufficient evidence
+  - **Negation-flip**: a negation inside a nested conditional ("if not X, then …")
+    is lost, and the conclusion inverts
+  - **Quantifier confusion**: "all" / "some" / "no" get conflated across a chain
+  - **Retreat to `Uncertain` on an unfinished chain**: the model answers
+    `Uncertain` not because the premises leave the claim open but because it did
+    not finish deriving. **This is a capability symptom and it does not respond to
+    being told off.** Anti-hedging instructions, derivation procedures, personas
+    and negation-hunting prompts have all been measured on this pipeline and every
+    one of them INCREASED the retreat: the extra text consumes the very budget the
+    derivation needed. Help the model close the chain; do not lecture it about the
+    conclusion.
+  - **Format-level**: no extractable label — the grader reads nothing
+
+  ## Notes
+
+  - Synthetic generation = no contamination concern. Premises and conclusions are
+    programmatically constructed (paper §3); the model cannot have memorised them.
+  - Deterministic 3-class grading means the score is a true reasoning measurement,
+    not template recognition or label memorisation.
+
+  ## Constraints
+
+  - The target model, its provider, and its reasoning effort are operator-locked
+    (see `pipeline.json`). They are not mutable axes: the point of this benchmark
+    is what a PROMPT can buy at a fixed capability, so buying reasoning compute is
+    out of scope by construction.
+  - Freely mutable: `temperature`, `max_tokens`, and any prompt field (`persona`,
+    `task_intent`, `problem_description`, `instruction`, `thinking_style`,
+    `answer_format`), plus the structured-output field descriptions.

@@ -81,7 +81,8 @@ from promptpotter.diagnostics import compute_ledger
 # the actual L4 recursion). A feature, justified, so the baseline rises.
 # then ``config_leaf_fields`` 34->35: a deliberate new operator knob --
 # ``OptimizationConfig.optimizer_set`` (selects the optimizer meta-prompt set per
-# cycle: default ``_optimizer/`` vs the L4 outer ``_optimizer_meta/`` whose L1
+# cycle: the default ``assets/optimizer/pipeline.yaml`` vs the L4 outer
+# ``assets/optimizer/sets/meta.yaml`` whose L1
 # emits per-node inner-meta-prompt edits; l4-outer-loop slice 3b, the gating
 # slice). A feature, justified, so the baseline rises.
 # then ``config_leaf_fields`` 35->36: a deliberate new operator knob --
@@ -289,6 +290,19 @@ from promptpotter.diagnostics import compute_ledger
 # subtracts more than it adds: four dead ``recon_variants.json`` files, the "half-generated
 # manifest" concept, and (at Arc 4) a ``read_json_tolerant`` call that was silently attributing
 # measurements to the wrong fingerprint whenever a dataset overlay was corrupt.
+# 2026-07-30 the package stops assuming it is a checkout: ``modules`` 294->295 —
+# ``config/paths.py``, the one owner of the three roots the code had been fusing into one.
+# ``REPO_ROOT`` (``layout.py``, ``parents[3]``) resolved to ``site-packages/`` in a wheel, so an
+# installed app read its own optimizer prompts out of the HuggingFace ``datasets`` package (a
+# declared extra of ours, and therefore a path that EXISTS — the wrong tree, not a clean miss)
+# and wrote every campaign into a directory ``pip`` deletes on upgrade. What the ledger cannot
+# see is what the module subtracts: five independent parent walks recomputing that same wrong
+# answer at their own depths (``layout.py``, ``wiring.py``, ``settings.py``, ``notebook_run.py``,
+# plus ``session.py``'s CWD-relative ``Path("datasets")``), the ``REPO_ROOT`` name itself, and
+# ``init_services``' ``project_root`` fallback. It cannot fold into ``layout.py``, whose own
+# docstring promises "pure — no I/O, no parent walk" and whose first statement broke both;
+# nor into ``settings.py``, which must now ASK it where the checkout is. A ship-blocker, so
+# the baseline rises.
 LEDGER_BASELINE = {
     # 312 -> 313: `shared/instrument.py`. Raised DELIBERATELY, and it is the honest number to
     # argue about: the pass it pays for removed three ambient ContextVars and three public
@@ -373,7 +387,7 @@ LEDGER_BASELINE = {
     # champion.py`` + ``application/meta_champion/champion.py``. Operator call, made against
     # a correction: the ChampionConsole panel CANNOT land a winner (its row ops are
     # ``disabled`` placeholders whose tooltips say "run: champion apply"), so the verb was
-    # the only write path into ``datasets/_optimizer/pipeline.yaml``. Deleting it makes
+    # the only write path into ``promptpotter/assets/optimizer/pipeline.yaml``. Deleting it makes
     # graduation a deliberate hand-edit — a once-per-winner action that did not earn ~560
     # lines of promote/coronate/apply/replay machinery, none of which had ever run: no
     # ``champion.json``, no ``meta_champion/registry.json`` exists on disk anywhere.
@@ -461,7 +475,7 @@ LEDGER_BASELINE = {
     # a second family walk. ``lineage_views.iter_family_courses`` was promoted out of the
     # tree's private recursion so both readers ask one function which cycles a campaign
     # contains — a copy of ``_child_courses`` would have been two answers to that.
-    "modules": 294,
+    "modules": 295,
     # 52 -> 51 (2026-07-17): ``cli/commands/sweep`` went with the sweep verb.
     # 51 -> 50 (2026-07-26): ``application/resource_matrix/__init__.py`` went with the
     # retired arc above.

@@ -77,7 +77,7 @@ Connector-described pipeline (the shape `GET /pipeline` exposes, plus an operato
 
 Campaign knobs + scoring + optimizer LLM. Validated by `application/config.py::CampaignConfig` with `extra="forbid"` — unknown keys raise at boot. See `CampaignConfig` for the full field list.
 
-**Top-level keys.** `dataset_name`, `scoring`, `sp_budget_ttest`, `exclude_nodes` (drop pipeline nodes by name), `pipeline_overrides` (per-node config overlay), `optimization`. (The optimizer LLM is install-global — `datasets/_optimizer/pipeline.yaml` — not a campaign key.)
+**Top-level keys.** `dataset_name`, `scoring`, `sp_budget_ttest`, `exclude_nodes` (drop pipeline nodes by name), `pipeline_overrides` (per-node config overlay), `optimization`. (The optimizer LLM is install-global — `promptpotter/assets/optimizer/pipeline.yaml` — not a campaign key.)
 
 **`optimization` knobs:** the stable contract is the mechanism, not a
 frozen key/default table (same rule as §4). Every knob is a
@@ -88,7 +88,7 @@ taxonomy. Only `improvement_threshold` and `degradation_threshold` are
 required; everything else defaults. Read defaults off the fields, never
 off a doc.
 
-**Optimizer LLM:** install-global, **not** in `campaign.yaml`. Provider, model, temperature, `reasoning_effort`, and `max_tokens` are per-node config in `datasets/_optimizer/pipeline.yaml` (`nodes.{l1_generate|l1_critique|l2_context|l3_plan|checkin}.config`), resolved inside `llm_call` like any other node tunable. One file configures the optimizer for every campaign.
+**Optimizer LLM:** install-global, **not** in `campaign.yaml`. Provider, model, temperature, `reasoning_effort`, and `max_tokens` are per-node config in `promptpotter/assets/optimizer/pipeline.yaml` (`nodes.{l1_generate|l1_critique|l2_context|l3_plan|checkin}.config`), resolved inside `llm_call` like any other node tunable. One file configures the optimizer for every campaign.
 
 Constants moved out of `campaign.yaml` (they live next to their consumer): L1 candidate-generation temperature (the `creativity` arg in `l1/generate.py`, driven by `l1_overrides.creativity`, defaulting to the `l1_generate` node temperature), L2/L3 transition temperatures (the `l2_context`/`l3_plan` node temperatures), PoBB lock-in (`l1/execute.py::POBB_LOCK_IN`), runaway-loop ceiling (`runner/loop.py::HARD_CAP`), stale-data recovery ladder (`scoring/sample_measurement.py`).
 
@@ -110,6 +110,36 @@ The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no 
 **The stable contract is the mechanism, not the slot list** — the set evolves (22 today; e.g. the four old per-wound slots merged into `l1_wounds` + `guard_breaches`), so this page doesn't freeze a table that drifts. The live set is the registry itself; the doc-level reference with per-slot detail is [`dispatch-hub.md`](dispatch-hub.md) § Reference.
 
 **Per-template extras** (caller-supplied via `compile_prompt(**hub_dict, **extras)`): `l1_generate` → `{n_variants}` · `l1_critique`/`l2_context`/`l3_plan` → `{}` · `checkin` → `{consultation_instruction}`.
+
+## 4b. Roots — where the package reads and writes
+
+Three roots, owned by `promptpotter/config/paths.py`. A fork may rely on the resolution
+rules; the constants themselves are internal.
+
+| Root | Resolves to | Contents |
+|---|---|---|
+| **Install content** | `promptpotter/assets/` inside the package | The optimizer's own `pipeline.yaml` + `resolved_schemas.json` + `sets/{name}.yaml`, and the exported dashboard. Ships in the wheel; ours, not the operator's. |
+| **User data** | `$PROMPTPOTTER_HOME` → the checkout's `.promptpotter/` when running from a source tree → the OS app-data dir | Campaigns, sessions, measurements, jobs, identity. |
+| **Benchmarks** | the checkout's `datasets/` → `promptpotter/assets/benchmarks/` | Sample datasets. The **definitions** ship; the per-dataset HuggingFace `cache.json` does not, and is re-fetched on first use. A tenant dataset of the same name shadows an installed one. |
+
+**`PROMPTPOTTER_HOME` is stable.** Set it to relocate the whole user-data tree; it is
+read once at import, so it is an environment decision, not a runtime one.
+
+**`$PROMPTPOTTER_HOME/optimizer/pipeline.yaml` is stable, and it is the one install asset
+an operator may shadow.** Present, it replaces the packaged optimizer manifest (provider /
+model / temperature per optimizer node); absent, the packaged one is read. Its two
+neighbours are deliberately not overridable — `resolved_schemas.json` is generated from the
+Pydantic models, `sets/*.yaml` is the L4 instrument — so the seam is one file, not the
+directory.
+
+Both derived asset trees (`assets/webapp/`, `assets/benchmarks/`) are staged by
+`scripts/build_release.py`, which is the supported way to build a wheel. A bare `uv build`
+produces one that quietly serves no dashboard and resolves no dataset.
+
+Running from a checkout (development, and `deploy-linux/`) resolves exactly the paths it
+always has. There is no `REPO_ROOT`: the parent walk that once stood for all three roots
+resolved to `site-packages/` when installed, which is both where `pip` deletes on upgrade
+and where the HuggingFace `datasets` library lives.
 
 ## 5. CLI flags — `new` and `resume`
 
@@ -176,6 +206,6 @@ Sibling cycles (forks, diag, sweeps) live flat under `cycles/` alongside the roo
 - **Private types** (`_Injection`, `_TEMPLATE_EXTRAS`, etc., plus any `_`-prefixed name). Package `__init__` files are namespace markers that re-export nothing — §1–§7 is the whole public surface, not whatever a package surfaces.
 - **Runtime dataclass shapes** not in §1–§7 (`CycleSlice`, `RoundDigest`, `InjectionBundle`, `LiveStateCore`, etc.).
 - **In-memory caches** and their invalidation strategies (optimizer LRU caches, the dispatch hub's pipeline-param-catalogue cache, etc.).
-- **Prompt templates** at `datasets/_optimizer/pipeline.yaml::resolved_prompts` — data, intentionally tunable. Forks may edit; we may also edit on any release.
+- **Prompt templates** at `promptpotter/assets/optimizer/pipeline.yaml::resolved_prompts` — data, intentionally tunable. Forks may edit; we may also edit on any release.
 - **Test helpers** (`tests/_helpers.py`).
 - **The `webapp/` layout.** The webapp + control plane ship and serve users; internal component layout stays free to move.

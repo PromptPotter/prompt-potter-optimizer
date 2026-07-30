@@ -12,7 +12,7 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 
 **What to try:**
 - Wait a few minutes and resume: `python -m promptpotter resume`. No re-mint needed.
-- Switch the optimizer to a smaller model in `datasets/_optimizer/pipeline.yaml` (each optimizer node's `config.model`), e.g. `"meta-llama/llama-4-scout-17b-16e-instruct"` — install-global, applies to every campaign.
+- Switch the optimizer to a smaller model in `promptpotter/assets/optimizer/pipeline.yaml` (each optimizer node's `config.model`), e.g. `"meta-llama/llama-4-scout-17b-16e-instruct"` — install-global, applies to every campaign.
 - Upgrade to a paid tier.
 
 ---
@@ -27,7 +27,7 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 - Swap the `model` field in the relevant `datasets/<name>/pipeline.yaml` to `openai/gpt-oss-20b` and keep iterating. Flip back to `120b` for benchmarks.
 - Each dataset's `reasoning_effort` default is tuned to keep both models clear of Groq's per-model output ceiling — `bbeh` ships `reasoning_effort: low` so `20b` doesn't burn its reasoning budget.
 - `max_tokens` is **never** set as a numeric default in any dataset's `pipeline.yaml` — provider ceiling applies. Raise it per-cycle via `campaign.yaml::pipeline_overrides`.
-- Target-layer model lives in `datasets/<name>/pipeline.yaml::llm_only.config` (set `provider` explicitly — e.g. `openrouter`); the optimizer-layer model is install-global in `datasets/_optimizer/pipeline.yaml` (per optimizer node). They're independent.
+- Target-layer model lives in `datasets/<name>/pipeline.yaml::llm_only.config` (set `provider` explicitly — e.g. `openrouter`); the optimizer-layer model is install-global in `promptpotter/assets/optimizer/pipeline.yaml` (per optimizer node). They're independent.
 - Full per-dataset matrix: [`docs/operations/dataset-reasoning-matrix.md`](../operations/dataset-reasoning-matrix.md).
 
 ---

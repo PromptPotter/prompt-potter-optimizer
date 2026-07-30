@@ -23,12 +23,11 @@ from typing import Literal
 
 from promptpotter.infrastructure.store.io import validate_path_component
 
-# The install root (parent of ``datasets/`` + ``.promptpotter/``). The ONE
-# anchor — every other module imports this instead of recomputing its own
-# depth-specific ``Path(__file__).parents[N]`` (which silently breaks on a move).
-REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_PROJECTS_ROOT = REPO_ROOT / ".promptpotter" / "projects"
-DEFAULT_DATASETS_ROOT = REPO_ROOT / "datasets"
+# The roots (``REPO_ROOT`` + its two derivatives) moved to
+# ``promptpotter/config/paths.py``. They were a ``parents[3]`` walk, which is I/O
+# about the install and a parent walk — the two things this module's own docstring
+# says it does not do. Import them from ``config.paths``; the name ``REPO_ROOT`` is
+# gone deliberately, because there is not one root.
 
 
 _SIBLING_SEP_RE = re.compile(r"_(fork|diag|sweep)_")
@@ -276,9 +275,6 @@ def classify(rel: Path) -> FileKind:
 
 
 __all__ = [
-    "DEFAULT_DATASETS_ROOT",
-    "DEFAULT_PROJECTS_ROOT",
-    "REPO_ROOT",
     "CycleLayout",
     "FileKind",
     "archive_root_dir_for",

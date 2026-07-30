@@ -14,8 +14,8 @@ import shutil
 import sys
 from pathlib import Path
 
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.identity import TenantId
-from promptpotter.infrastructure.store.layout import DEFAULT_PROJECTS_ROOT
 from promptpotter.infrastructure.store.session_pointer import (
     active_pointer_exists,
     clear_active_pointer,

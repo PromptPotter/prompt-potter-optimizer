@@ -1,7 +1,7 @@
 """Provider registry — name → factory.
 
 Provider must be supplied explicitly (the optimizer node's ``config.provider`` in
-``datasets/_optimizer/pipeline.yaml``, read by ``llm_call``); no auto-detection
+``promptpotter/assets/optimizer/pipeline.yaml``, read by ``llm_call``); no auto-detection
 or env-var fallback."""
 
 from __future__ import annotations

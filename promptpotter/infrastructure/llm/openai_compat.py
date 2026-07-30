@@ -388,7 +388,7 @@ class OpenAICompatibleClient(LLMClientBase):
             raise ValueError(
                 f"Model '{model_name}' not found on {self._provider_name}. "
                 f"Update the optimizer node `model` in "
-                f"datasets/_optimizer/pipeline.yaml (or the dataset's pipeline "
+                f"promptpotter/assets/optimizer/pipeline.yaml (or the dataset's pipeline "
                 f"overlay for a backend node)."
             ) from exc
         return try_groq_json_validate_repair(

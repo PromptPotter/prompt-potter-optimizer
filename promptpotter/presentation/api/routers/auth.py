@@ -35,6 +35,7 @@ from promptpotter.application.jobs.spend import (
     start_of_utc_day,
     sum_user_spend,
 )
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import TERMS_VERSION
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.allowlist import check_allowlist
@@ -49,7 +50,6 @@ from promptpotter.infrastructure.identity.google import (
 from promptpotter.infrastructure.identity.migration import maybe_claim_default
 from promptpotter.infrastructure.identity.user import derive_user_id
 from promptpotter.infrastructure.identity.verifier import IDTokenInvalidError
-from promptpotter.infrastructure.store.layout import DEFAULT_PROJECTS_ROOT
 from promptpotter.infrastructure.store.user_store import ConsentRecord
 from promptpotter.presentation.api.deps import IdentityDep, StoreDep
 from promptpotter.presentation.api.middleware.oidc import SESSION_COOKIE_NAME

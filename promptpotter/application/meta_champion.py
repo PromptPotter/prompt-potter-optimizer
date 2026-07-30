@@ -219,7 +219,7 @@ def _finalize(state_hash: str, acc: _Accum) -> ChampionCandidate:
     comes from n = *cells* (a ~7-point panel), not n = total *measurements*, and a cell
     measured five times cannot outweigh five cells measured once. Both matter because this
     ranking is the ONLY thing standing between the corpus and a human hand-graduating a
-    meta-prompt into ``datasets/_optimizer/``, so an overstated CI misleads a person
+    meta-prompt into ``promptpotter/assets/optimizer/``, so an overstated CI misleads a person
     making an irreversible edit.
     """
     per_cell: list[ChampionCellEffect] = []

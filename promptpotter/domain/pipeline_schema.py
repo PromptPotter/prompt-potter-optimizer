@@ -208,7 +208,7 @@ class PipelineViewEdge(StrictModel):
 
 
 class PipelineView(StrictModel):
-    """Webapp-facing graph projection — ``datasets/_optimizer/pipeline.yaml::view`` or derived."""
+    """Webapp-facing graph projection — ``promptpotter/assets/optimizer/pipeline.yaml::view`` or derived."""
 
     model_config = ConfigDict(frozen=True, populate_by_name=True)
 

@@ -61,7 +61,7 @@ Two architectural commitments shape every bucket on this page:
   content-hashed). `OptSearchPoint` is the optimizer's own working
   state (lineage, memory, escalation history) that projects into a
   `JobSearchPoint` for scoring. PromptPotter itself runs on a
-  `datasets/_optimizer/pipeline.yaml` — same shape as a target backend's
+  `promptpotter/assets/optimizer/pipeline.yaml` — same shape as a target backend's
   `pipeline.yaml` — so accumulated `OptSearchPoint` data is the
   dataset for **optimizing the optimizer**.
 
@@ -155,12 +155,17 @@ world is a strict containment hierarchy:
   Workspace ⊃ Dataset containment, identity-scoped, tenant-private;
   (b) **install-global benchmarks** at repo-root `datasets/{name}/`
   (today's `aime_2025`, `bbeh`, `email-tagging`, `gsm8k`, `hotpotqa`,
-  `justlogic`, `lca-termnorm`, `promptpotter-self`, `_optimizer`,
-  `_optimizer_meta`) — install-scoped,
+  `justlogic`, `lca-termnorm`, `promptpotter-self`) — install-scoped,
   read-only, admin-visible only via the `GET /datasets` list endpoint
   identity filter. The two tiers serve different purposes (operator
   benchmarking vs tenant work); both share the `pipeline.yaml` /
-  `campaign.yaml` / `task_description.md` shape. **One resolution
+  `campaign.yaml` / `task_description.md` shape.
+  This tier holds **datasets only**. The optimizer's own pipeline used to sit
+  here as `_optimizer` / `_optimizer_meta`, which is why the listing carried an
+  `_`-prefix filter; it is install content, not a target, and now lives under the
+  package (`config/paths.py::optimizer_assets_root`) where it also ships in the
+  wheel. A checkout resolves benchmarks from `datasets/`; a wheel has none, and
+  the tenant tier is the only tier an installed operator uses. **One resolution
   seam:** `readable_dataset_dir` picks the dir (tenant slug first,
   repo benchmark second) once at bootstrap and stamps it on
   `Session.dataset_config_dir`; every downstream dataset-file loader
@@ -736,7 +741,7 @@ the PR description.
 - **`observed_node()` context manager** — the trace-emission seam
   every optimizer LLM call wraps. Cutting it removes Langfuse-shape
   compatibility (the Tracing bucket's foundation collapses).
-- **`datasets/_optimizer/pipeline.yaml`** — the self-optimization claim in §0
+- **`promptpotter/assets/optimizer/pipeline.yaml`** — the self-optimization claim in §0
   depends on this file having the same shape as a backend
   `pipeline.yaml`. Drift (special-case fields, parallel registries)
   invalidates the claim.

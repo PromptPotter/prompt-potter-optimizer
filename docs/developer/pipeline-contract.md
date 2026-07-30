@@ -3,7 +3,7 @@
 The wire shape PromptPotter parses from `GET /pipeline` (or from a
 local file under `datasets/{name}/pipeline.yaml`). Every connector
 publishes this shape; the **same parser** consumes
-`datasets/_optimizer/pipeline.yaml`
+`promptpotter/assets/optimizer/pipeline.yaml`
 unchanged. If you're writing a new connector or extending the
 optimizer manifest, this is the contract you implement against.
 
@@ -101,7 +101,7 @@ is the single ingress for every pipeline.yaml. **Two non-negotiables:**
    ignores it absent. The "TermNorm doesn't supply X so PromptPotter
    assumes Y" pattern is what makes a second connector painful.
 2. **Same parser, same shape, every time.** A backend's pipeline.yaml
-   and PromptPotter's own `datasets/_optimizer/pipeline.yaml` MUST round-trip
+   and PromptPotter's own `promptpotter/assets/optimizer/pipeline.yaml` MUST round-trip
    through `parse_pipeline_response()` identically. The parity test
    pins this — if you add a special-case field to one, the test
    fails until both files agree.
@@ -143,10 +143,10 @@ A minimal one — the GSM8K single-LLM-node pipeline — at
 }
 ```
 
-## `datasets/_optimizer/pipeline.yaml` parity
+## `promptpotter/assets/optimizer/pipeline.yaml` parity
 
 PromptPotter's own meta-prompt pipeline at
-`datasets/_optimizer/pipeline.yaml` uses
+`promptpotter/assets/optimizer/pipeline.yaml` uses
 the **same shape** as a backend's `pipeline.yaml`:
 
 - Same `nodes` dict, keyed by node name (`l1_generate`, `l1_critique`,
@@ -166,7 +166,7 @@ M12 L4 self-optimization closure (see
 [`docs/specs/roadmap.md`](../specs/roadmap.md)
 + [`docs/specs/roadmap.md`](../specs/roadmap.md)).
 
-The parity fails loud — if `datasets/_optimizer/pipeline.yaml` ever drifts from a
+The parity fails loud — if `promptpotter/assets/optimizer/pipeline.yaml` ever drifts from a
 backend pipeline's shape (parallel registries, ad-hoc keys, special-case
 fields), the shared parser rejects it at load. No standing test (the
 structural/contract suite was cut, see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).

@@ -45,7 +45,7 @@ Knob values live in the files, not here — read them there.
   the `inner_benchmark_config` ladder (a REQUIRED file; all four ladder keys
   must be present or the inner cycle is unscoreable).
 - `task_description.md` / `task_context.yaml` — outer L1 framing.
-- The outer meta-prompt *rewrites* live in `datasets/_optimizer_meta/prompts.yaml`
+- The outer meta-prompt *rewrites* live in `promptpotter/assets/optimizer/sets/meta.yaml`
   (selected by `optimizer_set: "meta"`), not in a local `prompts/` dir.
 
 ## Run

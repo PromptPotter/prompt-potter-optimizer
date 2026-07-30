@@ -1,7 +1,7 @@
 """Optimizer-pipeline manifest loading — schemas + meta-prompt templates.
 
 Single source of truth for optimizer nodes and prompts is
-``datasets/_optimizer/pipeline.yaml``. It follows the same shape as a
+``promptpotter/assets/optimizer/pipeline.yaml``. It follows the same shape as a
 backend's ``GET /pipeline`` response: ``nodes`` reference
 ``schema_family``/``schema_version`` + ``prompt_family``/``prompt_version``,
 prompt bodies live in its ``resolved_prompts`` registry, and the schema
@@ -21,6 +21,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from promptpotter.config.paths import optimizer_assets_root, optimizer_pipeline_path
 from promptpotter.domain.l1_layout import (
     L1_LAYOUT_SLOTS,
     NODE_LAYOUTS,
@@ -30,7 +31,6 @@ from promptpotter.domain.l1_layout import (
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.infrastructure.store.io import read_json, read_yaml
-from promptpotter.infrastructure.store.layout import REPO_ROOT
 from promptpotter.shared.instrument import instrument_mode
 
 logger = logging.getLogger(__name__)
@@ -58,8 +58,18 @@ __all__ = [
 # (nodes, prompts, the graph view) and the schema registry is generated from the Pydantic
 # models by ``scripts/build_optimizer_schemas.py``. One file could not be both — the
 # generator's rewrite would reformat the operator's prose on every CI run.
-OPTIMIZER_PIPELINE_PATH = REPO_ROOT / "datasets" / "_optimizer" / "pipeline.yaml"
-OPTIMIZER_SCHEMAS_PATH = REPO_ROOT / "datasets" / "_optimizer" / "resolved_schemas.json"
+#
+# INSTALL CONTENT, not a dataset. These are install-global by contract (one file
+# configures the optimizer for every campaign), so they live under the package and ship
+# in the wheel. They used to sit among the benchmark datasets, reached through a parent
+# walk that resolved to ``site-packages/datasets/`` once installed — where the HuggingFace
+# ``datasets`` library lives, so an installed loop looked for the optimizer's own prompts
+# inside a third-party package's directory.
+#
+# The manifest resolves through ``optimizer_pipeline_path()`` and the registry does not:
+# the operator may shadow the file they author, never the file we generate.
+OPTIMIZER_PIPELINE_PATH = optimizer_pipeline_path()
+OPTIMIZER_SCHEMAS_PATH = optimizer_assets_root() / "resolved_schemas.json"
 
 # Per-cycle override of the optimizer meta-prompts, keyed by optimizer node
 # (`l1_generate` / `l1_critique` / `l2_context` / `l3_plan`) → a partial
@@ -111,13 +121,13 @@ def load_optimizer_set_overrides(opt_set: str) -> dict[str, dict[str, Any]]:
 
     The L4 outer cycle selects a specialized meta-prompt set via
     ``OptimizationConfig.optimizer_set`` (e.g. ``"meta"`` →
-    ``datasets/_optimizer_meta/prompts.yaml``). The file is a flat
+    ``assets/optimizer/sets/meta.yaml``). The file is a flat
     ``{node: {field: text}}`` map of only the fields that set rewrites; it rides
     the SAME per-node override channel as the inner-cycle mutations
     (:func:`set_optimizer_prompt_overrides` → :func:`resolve_node_override`), so
     every injection slot the set does not name (the ``pipeline_param_catalogue``
-    in ``problem_description``, the evidence panels, …) stays intact from
-    ``datasets/_optimizer/``. Empty ``opt_set`` or a missing file → ``{}``.
+    in ``problem_description``, the evidence panels, …) stays intact from the
+    default manifest. Empty ``opt_set`` or a missing file → ``{}``.
 
     Non-dict top-level entries (e.g. a ``_doc`` note) are dropped — only real
     per-node field maps are returned.
@@ -128,7 +138,7 @@ def load_optimizer_set_overrides(opt_set: str) -> dict[str, dict[str, Any]]:
     attributed to a prompt set it never used."""
     if not opt_set:
         return {}
-    path = REPO_ROOT / "datasets" / f"_optimizer_{opt_set}" / "prompts.yaml"
+    path = optimizer_assets_root() / "sets" / f"{opt_set}.yaml"
     if not path.exists():
         raise FileNotFoundError(f"optimizer_set {opt_set!r}: no prompt set at {path}")
     data = read_yaml(path)
@@ -198,7 +208,7 @@ def get_optimizer_schema() -> PipelineSchema:
 
 
 def optimizer_node_config(node: str) -> dict[str, Any]:
-    """The resolved config dict for an optimizer node (``datasets/_optimizer/pipeline.yaml``).
+    """The resolved config dict for an optimizer node (``promptpotter/assets/optimizer/pipeline.yaml``).
 
     The single read accessor for optimizer-node tunables — provider, model,
     temperature, reasoning_effort — now that they live only in the optimizer

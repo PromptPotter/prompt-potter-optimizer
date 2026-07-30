@@ -147,7 +147,7 @@ def _prepare_cycle_for_resume(
                 )
             raise _PivotToFreshError(dataset_name)
 
-    # Optimizer-prompt drift — campaign identity folds in datasets/_optimizer/; editing them is data-affecting (``new`` is the fix).
+    # Optimizer-prompt drift — campaign identity folds in promptpotter/assets/optimizer/; editing them is data-affecting (``new`` is the fix).
     # A steer-fork mints a fresh sibling under the current prompts, so this halt (like the config one above) does not apply.
     current_optimizer_hash = combined_optimizer_prompt_hash()
     if not steer_fork and campaign.optimizer_prompt_hash != current_optimizer_hash:
@@ -158,12 +158,12 @@ def _prepare_cycle_for_resume(
             f"  stored optimizer hash:  {campaign.optimizer_prompt_hash}\n"
             f"  current optimizer hash: {current_optimizer_hash}\n"
             f"\n"
-            f"The optimizer meta-prompts (datasets/_optimizer/) are part of a "
+            f"The optimizer meta-prompts (promptpotter/assets/optimizer/) are part of a "
             f"campaign's identity — resuming would mix old-prompt rounds with "
             f"new-prompt rounds.\n"
             f"  - `python -m promptpotter new {dataset_name}` mints a distinct "
             f"campaign for the new optimizer prompts (recommended).\n"
-            f"  - Revert datasets/_optimizer/ to resume this campaign in place."
+            f"  - Revert promptpotter/assets/optimizer/ to resume this campaign in place."
         )
 
     if resume_from_round is not None:

@@ -1,0 +1,77 @@
+name: JustLogic-d23
+version: v0.1
+description: >-
+  JustLogic deductive-reasoning benchmark (Chen 2025), depths 6-7 only. 3-class TRUE/FALSE/Uncertain claim
+  evaluation against premises. Routes through TermNorm /matches with the llm_only pipeline.
+backend_name: TermNorm
+backend_type: termnorm
+available_models:
+  - openai/gpt-oss-20b:nitro
+  - openai/gpt-oss-20b
+nodes:
+  llm_only:
+    type: generation
+    runtime: backend
+    node_role: ranker
+    description: >-
+      Direct LLM generation on the TermNorm backend at JustLogic depths 2-3 — the live inner instrument.
+      reasoning_effort=low, ':nitro' for throughput. Depths 6-7 (the old `justlogic`) were measured DEAD
+      on 2026-07-13: past the model's capability wall it stops deriving and answers 'Uncertain' to 80-96%
+      of samples, so accuracy ties what a constant would score. The wall sits between depth 2 and 3. d2
+      is healthy; d3 is the frontier itself — collapsed, but only just — so a genuine improvement there
+      is DETECTABLE, which is the whole point of the cut. Ten prompt variants across two levers failed
+      to move the hedge at d6-7: it is a capability symptom, not a wording problem, and a prompt cannot
+      buy capability.
+    config:
+      provider: openrouter
+      model: openai/gpt-oss-20b:nitro
+      temperature: 0.0
+      reasoning_effort: low
+      output_schema:
+        type: object
+        properties:
+          reasoning:
+            type: string
+            description: >-
+              Work the logical chain step by step. Identify each premise; track negations, quantifiers
+              (all/some/no) and conditionals explicitly; trace premises to the claim. Recheck each step
+              against the stated premises before moving on.
+          answer:
+            type: string
+            enum:
+              - 'TRUE'
+              - 'FALSE'
+              - Uncertain
+            description: >-
+              TRUE when the premises strictly entail the claim; FALSE when they strictly entail its negation;
+              Uncertain ONLY when the premises genuinely do not determine the claim either way — never
+              as a hedge against difficulty.
+        required:
+          - reasoning
+          - answer
+        additionalProperties: false
+      answer_field: answer
+    optimizer:
+      param_keys:
+        - temperature
+        - max_tokens
+        - model
+        - reasoning_effort
+        - persona
+        - task_intent
+        - problem_description
+        - instruction
+        - thinking_style
+        - answer_format
+      param_allowed_values:
+        reasoning_effort:
+          - low
+      observation_name: llm_only
+      observation_mappings:
+        - pipeline_key: final_ranking
+          output_field: generated_text
+          is_llm: true
+      langfuse_type: generation
+pipelines:
+  default:
+    - llm_only

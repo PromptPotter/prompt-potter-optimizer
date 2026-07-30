@@ -35,7 +35,7 @@ The roster is the directory listing; each dataset's connector is read off its ow
 - **`aime_2025`** — its overlay routes to OpenRouter+Mistral, off the Groq default.
 - **`email-tagging`** — the built-in try-and-learn demo, surfaced while `User.demo_mode_enabled`.
 - **`justlogic-d234`** — the L4 inner benchmark (an iid mix of depths 2-4; `justlogic` (d6-7) and `justlogic-d23` are dead cuts kept only so their banked measurements stay addressable); **`promptpotter-self`** (`promptpotter` connector) — the one L4 dataset ([§ L4 below](#l4--promptpotter-self)).
-- **`_optimizer/` + `_optimizer_meta/`** — not datasets: the optimizer's own prompt homes. Which prompts live where → [`../docs/glossary.md`](../docs/glossary.md) **Prompt homes**. Both are **operator-owned files** — nothing writes them. `meta_champion.py` ranks meta-prompt states; graduating a winner into `_optimizer/pipeline.yaml` is a deliberate hand-edit.
+- **The optimizer's own prompt homes are not in this directory.** They sat here as `_optimizer/` + `_optimizer_meta/` until 2026-07-30 — which is why the listing once needed an `_`-prefix filter — and moved under the package as install content: `promptpotter/assets/optimizer/pipeline.yaml` + `sets/*.yaml`, shipped in the wheel. Which prompts live where → [`../docs/glossary.md`](../docs/glossary.md) **Prompt homes**. Still **operator-owned files** — nothing writes them. `meta_champion.py` ranks meta-prompt states; graduating a winner into `assets/optimizer/pipeline.yaml` is a deliberate hand-edit, and an installed operator shadows that one file via `config/paths.py::optimizer_pipeline_path`.
 
 ## L4 — `promptpotter-self`
 

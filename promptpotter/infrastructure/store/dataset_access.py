@@ -80,27 +80,18 @@ def readable_dataset_dir(store: Stores, name: str) -> Path:
     raise DatasetAccessError(name)
 
 
-def _is_internal(name: str) -> bool:
-    """Install dirs prefixed ``_`` are the optimizer's OWN config, not task datasets.
-
-    ``_optimizer`` / ``_optimizer_meta`` hold the meta-prompt pipelines the loop runs
-    *with*; no one mints a campaign against them. The leading underscore is the
-    convention that says so, and the wire contract agrees — the ``slug`` pattern in
-    ``m12-api-openapi.yaml::DatasetIndexEntry`` is ``^[a-z][a-z0-9_-]*$``, which no
-    ``_``-prefixed name can match, so listing one is out-of-contract.
-    :func:`readable_dataset_dir` still resolves them by exact name, which is how the
-    loop reads them.
-    """
-    return name.startswith("_")
-
-
 def list_readable_datasets(store: Stores) -> list[DatasetRef]:
     """Every dataset this identity may pick — tenant content, then install content.
 
     A tenant slug shadows an install slug of the same name, matching the resolver's
-    tenant-first precedence. Narrower than :func:`readable_dataset_dir` by exactly
-    the internal dirs (:func:`_is_internal`) — narrower is safe, since the invariant
-    is that the picker never surfaces a dataset the read endpoints would deny.
+    tenant-first precedence.
+
+    There used to be an ``_``-prefix filter here (``_is_internal``), because the
+    optimizer's own pipeline sat among the benchmark datasets as ``_optimizer`` /
+    ``_optimizer_meta`` and had to be hidden from a picker that would otherwise offer
+    "mint a campaign against the optimizer". That config is install content and now
+    lives under the package (``config/paths.py::optimizer_assets_root``), so the
+    convention it needed is gone with it: whatever sits in this tree is a dataset.
     """
     refs: list[DatasetRef] = []
     own: set[str] = set()
@@ -113,8 +104,8 @@ def list_readable_datasets(store: Stores) -> list[DatasetRef]:
 
     if store.benchmarks_root.is_dir():
         for entry in sorted(store.benchmarks_root.iterdir()):
-            if entry.name in own or _is_internal(entry.name):
-                continue  # tenant copy already won / optimizer's own config
+            if entry.name in own:
+                continue  # tenant copy already won
             if not entry.is_dir() or not dataset_pipeline_path(entry).is_file():
                 continue
             try:

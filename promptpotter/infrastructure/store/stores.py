@@ -20,6 +20,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from promptpotter.config.paths import (
+    DEFAULT_DATASETS_ROOT,
+    DEFAULT_PROJECTS_ROOT,
+)
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.identity import TenantId
 from promptpotter.infrastructure.store.backend_store import BackendStore
@@ -30,10 +34,6 @@ from promptpotter.infrastructure.store.io import (
     read_json_optional,
     validate_path_component,
     write_json,
-)
-from promptpotter.infrastructure.store.layout import (
-    DEFAULT_DATASETS_ROOT,
-    DEFAULT_PROJECTS_ROOT,
 )
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
 from promptpotter.infrastructure.store.session_store import SessionStore

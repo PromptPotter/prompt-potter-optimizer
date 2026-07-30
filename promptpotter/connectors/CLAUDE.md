@@ -73,7 +73,7 @@ the same shape the scorer parses from an HTTP `/matches` body. The registry guar
   spawning cycle publishes its context via `publish_inner_spawn_context` (runner
   seam, every cycle) so this context-free hook can find where to sandbox + which
   inner benchmark to run; the outer L1's meta-prompt mutations apply to the inner
-  `_optimizer/` prompts through a per-run override ContextVar
+  `assets/optimizer/pipeline.yaml` prompts through a per-run override ContextVar
   (`set_optimizer_prompt_overrides`, set inside the inner task). One process, no
   networking. The localhost-endpoint option is retained only as the future
   hosted/multi-tenant worker mode: a new `execution` value, dispatched on

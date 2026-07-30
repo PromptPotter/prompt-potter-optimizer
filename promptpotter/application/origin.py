@@ -134,7 +134,7 @@ def build_campaign_emitter(
     opt = campaign_config.optimization
     return LiveDashboardView.for_session(
         session.state.cycle_id,
-        project_root=session.project_root,
+        tenant_root=session.tenant_root,
         session_id=session.session_id,
         campaign_id=session.campaign_id,
         l1_patience=opt.l1_patience,

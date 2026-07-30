@@ -282,8 +282,8 @@ class OptimizationConfig(StrictModel):
         "",
         description=(
             "Which optimizer meta-prompt set this cycle uses. Empty (default) → the "
-            "standard `datasets/_optimizer/` task-tuning loop. `meta` → the L4 outer "
-            "set `datasets/_optimizer_meta/prompts.yaml`, whose L1 emits per-node "
+            "standard `promptpotter/assets/optimizer/` task-tuning loop. `meta` → the L4 outer "
+            "set `promptpotter/assets/optimizer/sets/meta.yaml`, whose L1 emits per-node "
             "edits to the INNER optimizer's meta-prompts (`pipeline_params_override`) "
             "instead of tuning its own template. Applied per-cycle at the runner seam "
             "through the same per-node override channel the inner runner uses, so an "
@@ -694,7 +694,7 @@ def _check_optimizer_below_target(target_models: tuple[str, ...]) -> PreflightWa
     accidental inversion — the bug class behind the email-tagging 20b optimizer
     pin. Both sides must parse a ``<N>b`` size or the check is skipped (no guess).
     The optimizer model is read from the install-global optimizer node config
-    (``datasets/_optimizer/pipeline.yaml``), not a per-campaign copy."""
+    (``promptpotter/assets/optimizer/pipeline.yaml``), not a per-campaign copy."""
     from promptpotter.application.optimization.dispatch.llm_call.prompts import optimizer_model
 
     opt_model = optimizer_model()
@@ -713,7 +713,7 @@ def _check_optimizer_below_target(target_models: tuple[str, ...]) -> PreflightWa
             "The optimizer is the strong model that improves the pipeline; running "
             "it on a model smaller than the target it optimizes is usually an "
             "accidental inversion. Raise the optimizer node `model` in "
-            "`datasets/_optimizer/pipeline.yaml` to a larger tier."
+            "`promptpotter/assets/optimizer/pipeline.yaml` to a larger tier."
         ),
     )
 
