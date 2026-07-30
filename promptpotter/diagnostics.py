@@ -33,7 +33,22 @@ _ASSETS_ROOT = _PACKAGE_ROOT / "assets"
 
 
 def _package_files(pattern: str) -> list[Path]:
-    """Files matching *pattern* under the package, excluding :data:`_ASSETS_ROOT`."""
+    """Files matching *pattern* under the package, excluding :data:`_ASSETS_ROOT`.
+
+    The exclusion is sound only while ``assets/`` holds no code, so that is asserted
+    rather than assumed: a ``.py`` landing there would be invisible to ``modules``,
+    ``any_params`` and ``models_lax`` at once — a ratchet with a hole in it is worse than
+    no ratchet. Two ways it could happen, and the message has to cover both: someone
+    places a module under ``assets/``, or a benchmark dataset picks up a helper script and
+    ``scripts/build_release.py`` stages it in.
+    """
+    stowaways = sorted(_ASSETS_ROOT.rglob("*.py")) if _ASSETS_ROOT.is_dir() else []
+    assert not stowaways, (
+        f"Python files under {_ASSETS_ROOT.name}/ are excluded from every ledger count, so "
+        f"these are uncounted surface: {[str(p.relative_to(_PACKAGE_ROOT)) for p in stowaways]}. "
+        "assets/ is install DATA — move code into the package proper, or out of the dataset "
+        "that staged it."
+    )
     return [p for p in _PACKAGE_ROOT.rglob(pattern) if _ASSETS_ROOT not in p.parents]
 
 

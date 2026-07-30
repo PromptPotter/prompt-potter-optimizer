@@ -40,7 +40,13 @@ Three rules a plugin is held to, all enforced at import in `connectors/__init__.
 - **No shadowing.** A plugin may not register `termnorm` or `promptpotter`; those keys are read by name inside the loop.
 - **A plugin that cannot load is fatal, not skipped** — the error names the distribution. A skipped one would return later as an unexplained `connector 'x' not registered`.
 
-`CONNECTOR_ORIGINS` maps every registered name to `"built-in"` or `"<distribution>: <module>:<attr>"` (the entry point's *value*, not its label — the label is free, the value is what was imported), so a name that greps to nothing in this tree can still be traced to its package.
+`CONNECTOR_ORIGINS` maps every registered name to `"built-in"` or `"<distribution>: <module>:<attr>"` (the entry point's *value*, not its label — the label is free, the value is what was imported), so a name that greps to nothing in this tree can still be traced to its package. Audit what is loaded with:
+
+```bash
+python -c "from promptpotter.connectors import CONNECTOR_ORIGINS as o; print(*o.items(), sep='\n')"
+```
+
+⚠️ **A connector is trusted code, not sandboxed.** Loading one imports its module into the PromptPotter process, where it sees the provider API keys, the tenant tree and the identity store — the same access any module we ship has. The capability scoping in [ADR-0005](../adr/0005-delegated-principals-and-capability-scoping.md) governs **API principals, not in-process code**, and nothing here changes that. Entry points do not lower the bar (anything able to install a distribution into your environment can already execute code in it), but they make the decision explicit: **installing a connector package is trusting its publisher completely.**
 
 Adding one *to this repo* is still one new file under `promptpotter/connectors/` plus a `_BUILTIN` entry. Built-ins are deliberately **not** declared as entry points: reading them from install metadata would make a source-tree run with no metadata find zero backends.
 

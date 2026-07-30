@@ -31,6 +31,15 @@ in the validator, not in the channel it arrived through.
 party's call. And a plugin that fails to import raises here rather than being skipped:
 skipping would trade a loud error naming the package for ``connector 'x' not
 registered`` at mint time, with nothing pointing at the cause.
+
+**A connector is trusted code, not sandboxed — and that is stated, not implied.** Loading
+one imports its module into this process, where it sees the provider API keys, the tenant
+tree and the identity store, exactly as a module we ship does. Entry points do not weaken
+that boundary (anything that can install a distribution into this environment can already
+run code here), but they do make the trust *explicit*: installing a connector package is
+trusting its publisher completely, and this repo's capability scoping (ADR-0005) governs
+API principals, not in-process code. :data:`CONNECTOR_ORIGINS` is the audit surface — it
+names the distribution behind every registered key, including the ones that are ours.
 """
 
 from __future__ import annotations

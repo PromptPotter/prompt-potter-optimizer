@@ -92,6 +92,17 @@ include = ["promptpotter*"]
 # were already correctly placed inside the package and still absent from the wheel
 # — which is how `pip install promptpotter-optimizer` produced a CLI that starts
 # and then cannot make a single optimizer call.
+#
+# Re-verified 2026-07-30, and verifying it has a trap worth knowing: `*.egg-info/
+# SOURCES.txt` caches the file manifest and SURVIVES `rm -rf build dist`, so a rebuild
+# with this block deleted still ships all 139 files and the list looks inert. Clean room
+# is `rm -rf build dist *.egg-info`; with that, deleting this block drops the wheel to a
+# single non-.py file. Do not conclude anything about packaging without it.
+#
+# The last two entries are wildcards over trees that `scripts/build_release.py` stages,
+# so whatever lands there is published verbatim — a `.env` in `datasets/`, or a secret
+# inlined into the Next.js bundle, would ship. That script scans the built artifact for
+# credential-shaped names and contents and refuses to hand you a wheel carrying one.
 [tool.setuptools.package-data]
 promptpotter = [
     "py.typed",

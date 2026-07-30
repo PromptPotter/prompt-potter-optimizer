@@ -1,9 +1,12 @@
 """Dataset access gateway — the single seam that resolves a dataset directory.
 
-Tenant content is isolated by path; install content ships in git, so it carries **no
-capability check** — gating a read on bytes that arrive with the checkout protects
-nothing and blanks every panel bound to that campaign. A private cut is tenant content,
-never a repo dir. Resolution is tenant-first, so a tenant may shadow an install slug, and
+Tenant content is isolated by path; install content carries **no capability check** —
+gating a read on bytes that ship with the software protects nothing and blanks every
+panel bound to that campaign. That rationale turns on DISTRIBUTION, not on git: since
+2026-07-30 the benchmark definitions ship inside the wheel as well as in the checkout
+(``config/paths.py::benchmark_datasets_root``), and the argument is unchanged either way
+— anyone holding the artifact already holds the bytes. A private cut is tenant content,
+never an install dir. Resolution is tenant-first, so a tenant may shadow an install slug, and
 the *list* and the *resolver* share one rule so the picker cannot surface what the read
 endpoints would deny. Presentation MUST NOT read :attr:`Stores.benchmarks_root` directly
 — every access comes through here, and no standing test enforces it.

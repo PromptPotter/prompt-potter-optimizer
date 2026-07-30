@@ -152,7 +152,24 @@ def optimizer_manifest() -> dict[str, Any]:
     Public because it is what callers should hash and render — the raw bytes are not
     a meaningful identity now the file carries comments and block scalars, and a second
     read of the same file is a second opinion nobody needs.
+
+    Says so once per process when the shipped manifest is NOT the one being read. An
+    override is deliberate and rare, and it decides the provider, model and temperature
+    of every optimizer node — so "why is the optimizer behaving unlike the docs" must be
+    answerable without knowing that file exists. A stale override already fails loudly at
+    the node that went missing; this is for the case where it merely behaves differently.
+    The warning lives here rather than beside the constant because module import happens
+    before ``setup_logging()`` on every entry point, and a record emitted then reaches
+    ``logging.lastResort``: raw stderr, no formatter, and outside the secret-redaction
+    filter. The cache is the once-guard; there is no second one.
     """
+    if optimizer_assets_root() / "pipeline.yaml" != OPTIMIZER_PIPELINE_PATH:
+        logger.warning(
+            "optimizer manifest OVERRIDDEN: reading %s instead of the manifest shipped with "
+            "the package. Provider, model and temperature for every optimizer node come from "
+            "that file.",
+            OPTIMIZER_PIPELINE_PATH,
+        )
     manifest: dict[str, Any] = read_yaml(OPTIMIZER_PIPELINE_PATH)
     return manifest
 
