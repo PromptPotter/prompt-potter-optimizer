@@ -30,7 +30,7 @@ back-compat shims. The word `legacy` is **never** sanctioned.
 ## Other surfaces
 
 - `l4/` — **the L4 law, and its only home.** `proxies.py`: what ONE finished inner cycle says
-  about the meta-prompt that ran it — the floor / exclude / measure trichotomy, plus
+  about the optimizer prompt that ran it — the floor / exclude / measure trichotomy, plus
   `OuterSampleProxies` (the type IS the law; nothing restates it). `verdict.py`: what a ROUND of
   them says about a variant. It lives in `domain/` because it is pure over `CycleResult` — that
   is what stops it growing a file read or a session dep, which is exactly how it drifted before.

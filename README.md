@@ -25,7 +25,7 @@ Every measurement costs money, so the whole design is **most fitness per dollar*
 - **Climbs the hill, escapes dead ends** — each round steps uphill on your metric; when a branch is spent the search rewinds to a better ancestor and climbs a different ridge instead of stalling. Most evolutionary search is one-armed: it only ever expands the latest winner.
 - **Hard-sample leaderboard** — score preferentially on the samples that actually separate variants; the ones everyone aces or fails are noise.
 - **Guards against self-validation** — the loop can't grade itself into a false win: scores are ability-based and subset-invariant (Rasch θ), constant-answer and other degenerate candidates are caught before they count, and the layer that *validates* a fix is never the one that proposed it.
-- **Optimizes itself** — point the optimizer at its own meta-prompts. [L4](docs/concepts/optimizer-of-the-optimizer.md)
+- **Optimizes itself** — point the optimizer at its own optimizer prompts. [L4](docs/concepts/optimizer-of-the-optimizer.md)
 - **Pick your block library mode** — proven personas, thinking styles and answer formats (from PromptWizard and the *Self-Discover* modules it draws on, plus what our own runs turned up). Let the optimizer suggest from the library, restrict it to the library, or switch it off.
 
 ## Peer systems

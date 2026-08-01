@@ -3,7 +3,7 @@
 // pipeline hero / hard-samples panes follow the leaf (like the dashboard
 // already does), so an L4 inner loop shows the inner run's dataset —
 // justlogic's `llm_only` + termnorm backend + real per-sample heat-map —
-// instead of the outer pp-self meta pipeline; and the ETA chip's burn-rate
+// instead of the outer pp-self outer pipeline; and the ETA chip's burn-rate
 // reads the INNER cycle's start time, not the older outer root's (else leaf
 // spend ÷ outer age understates the burn and overstates the ETA).
 //
@@ -19,7 +19,7 @@
 //
 // Same stamp discipline as `useRoundFile` (via the shared `usePathKeyedFetch`):
 // the loaded value is returned only once its stamp matches, so a drill-in never
-// flashes the outer meta-pipeline's dataset name into the connector.
+// flashes the outer outer pipeline's dataset name into the connector.
 
 import { fetchCycleFileByPath } from "../api";
 import { encodeCyclePath, type CyclePath } from "../ids";

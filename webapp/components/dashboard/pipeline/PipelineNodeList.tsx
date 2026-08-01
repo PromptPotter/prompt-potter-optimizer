@@ -35,7 +35,7 @@ export function PipelineNodeList() {
         // This sums a per-param flag into a per-NODE fact, so it is only true while
         // the served list stays COMPLETE (`NodeConfigParam`). It used to be the
         // widget list: prose and nested params were dropped at the server, so
-        // pp-self's four meta-prompt nodes — whose whole search space is prose —
+        // pp-self's four optimizer prompt nodes — whose whole search space is prose —
         // summed to `[].every` and wore a padlock while the optimizer rewrote them.
         const params = schema?.[n.id];
         const locked = params != null && params.every((p) => !p.optimizer_tunable);

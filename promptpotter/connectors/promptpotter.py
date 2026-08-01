@@ -1,6 +1,6 @@
 """PromptPotter-as-connector — the optimizer-of-the-optimizer.
 
-An outer cycle optimizes an inner cycle's meta-prompts, and each inner cycle is a real
+An outer cycle optimizes an inner cycle's optimizer prompts, and each inner cycle is a real
 campaign run on a cheap proxy benchmark. The connector stays a THIN adapter: it declares
 ``execution="in_process"`` — the capability the loop dispatches on — and delegates to
 ``application/runner/inner/cycle.py``, because the recursion is heavy orchestration and
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 # Reserved per-node config key carrying the inner-origin fingerprint. Part of
 # measurement identity (rides node_configs / the origin cycle id), NEVER a wire
-# tunable — the adapter strips it before building ``meta_prompt_overrides``.
+# tunable — the adapter strips it before building ``optimizer_prompt_overrides``.
 INNER_ORIGIN_KEY = "inner_origin"
 
 
@@ -33,7 +33,7 @@ def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
     """The inner optimizer's effective-revision fingerprint, as identity config.
 
     The backend this connector runs IS the inner optimizer, so a measurement's
-    identity must change whenever the inner origin does: the shared meta-prompt
+    identity must change whenever the inner origin does: the shared optimizer prompt
     text (``promptpotter/assets/optimizer/pipeline.yaml``), the per-node information-flow
     layouts, the engine version, AND the dataset's WHOLE ``inner_tasks.yaml`` spec —
     the inner benchmark NAME + task list (which bank, which seeds) plus
@@ -89,7 +89,7 @@ def promptpotter_wire_adapter(
 
     ``query`` is the inner-benchmark task identifier (e.g.
     ``"justlogic-d67/seed-0"``). ``pipeline_params`` carries the outer L1's
-    mutation surface — a nested dict keyed by inner-meta-prompt node:
+    mutation surface — a nested dict keyed by inner-optimizer prompt node:
 
     ```
     {
@@ -111,16 +111,16 @@ def promptpotter_wire_adapter(
     """
     payload: dict[str, Any] = {"query": query}
 
-    meta_prompt_overrides: dict[str, dict[str, Any]] = {}
+    optimizer_prompt_overrides: dict[str, dict[str, Any]] = {}
     for k, v in node_config_items(pipeline_params):
         # The inner-origin fingerprint is identity config, not an override —
         # the inner loop must never see it as a template field.
         stripped = {fk: fv for fk, fv in v.items() if fk != INNER_ORIGIN_KEY}
         if stripped:
-            meta_prompt_overrides[k] = stripped
+            optimizer_prompt_overrides[k] = stripped
 
-    if meta_prompt_overrides:
-        payload["meta_prompt_overrides"] = meta_prompt_overrides
+    if optimizer_prompt_overrides:
+        payload["optimizer_prompt_overrides"] = optimizer_prompt_overrides
 
     return payload
 

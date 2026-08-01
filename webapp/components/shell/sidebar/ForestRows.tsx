@@ -70,7 +70,7 @@ export function ForestRows({ origins, ctx }: { origins: OriginGroup[]; ctx: Tree
 }
 
 // A declaration and the runs that measure it. Renders as a tier only when it groups MORE
-// than one run (at L4: mode collapse — two candidates whose meta-prompts came out
+// than one run (at L4: mode collapse — two candidates whose optimizer prompts came out
 // identical); a lone run wears its own row.
 //
 // Its address carries NO path — a declaration is not an address inside any one campaign, it

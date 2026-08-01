@@ -9,7 +9,7 @@
 //             the loop starts from. Campaigns on one declaration SHARE it.
 //   Run     ≡ one campaign (`{dataset}__{rand6}`). Two runs under one origin are
 //             two measurements of the same spec — at L4 that means two candidates
-//             produced an identical meta-prompt (mode collapse), which is why the
+//             produced an identical optimizer prompt (mode collapse), which is why the
 //             origin tier is worth seeing rather than a flat run list.
 //   Cycle   ≡ a run's root cycle plus the forks/diags/sweeps descending from it.
 //   A cycle can open its own inner forest (`.inner/<cycle_id>`) — the recursion

@@ -36,6 +36,6 @@ on its own line — prose with no extractable label scores zero.
 - **The `:nitro` suffix is a deliberate speed trade.** Nitro routes each call to the fastest
   upstream, so a `seed` buys nothing across stacks and is not set — inner-run noise is drawn
   fresh per arm instead of cancelling as common random numbers in the paired (variant − origin)
-  outer diff, raising the bar every meta-prompt verdict must clear. Panel size is the lever that
+  outer diff, raising the bar every optimizer prompt verdict must clear. Panel size is the lever that
   buys minimum-detectable-effect back. A true pin needs OpenRouter provider pass-through or a
   single-stack provider — both operator calls, not loop decisions.

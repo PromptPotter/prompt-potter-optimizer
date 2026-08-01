@@ -120,7 +120,7 @@ Both effectively saturated at `gpt-oss-120b` (2026-04-12). Cited in literature t
 
 ### Sample sizing for tuning vs. final numbers
 
-Meta-prompt evaluation and ablation tuning use **50–100 sample** runs to keep the bootstrap cost bounded — a single 100-sample × 5-variant × 10-round campaign is already ~5,000 backend evaluations, and tuning sweeps multiply that by the number of meta-prompt variants under test. Final headline numbers in published tables use **200+ sample** runs for tighter CIs. The split is intentional: tuning is high-iteration, low-fidelity; final reporting is low-iteration, high-fidelity. Don't mix the two — small-sample tuning numbers should never appear in the main results table.
+Optimizer prompt evaluation and ablation tuning use **50–100 sample** runs to keep the bootstrap cost bounded — a single 100-sample × 5-variant × 10-round campaign is already ~5,000 backend evaluations, and tuning sweeps multiply that by the number of optimizer prompt variants under test. Final headline numbers in published tables use **200+ sample** runs for tighter CIs. The split is intentional: tuning is high-iteration, low-fidelity; final reporting is low-iteration, high-fidelity. Don't mix the two — small-sample tuning numbers should never appear in the main results table.
 
 ### Controlled variables
 
@@ -159,7 +159,7 @@ The bbeh-comparison harness is deliberately scoped to **prompt-optimization peer
 | DSPy Bootstrap | DSPy's bootstrap few-shot optimizer | [DSPy library](https://github.com/stanfordnlp/dspy) |
 | MIPROv2 | DSPy's MIPRO v2 instruction + demo optimizer (cited) | [Opsahl-Ong et al., 2024](https://arxiv.org/abs/2406.11695) |
 | GEPA | Reflective prompt evolution with trajectory feedback (cited) | [GEPA, 2025](https://github.com/stanfordnlp/dspy) |
-| Promptomatix | Meta-prompt + DSPy compiler, cost-aware (cited) | Salesforce, 2025 |
+| Promptomatix | Optimizer prompt + DSPy compiler, cost-aware (cited) | Salesforce, 2025 |
 | adv-CoT | Adversarial generator-discriminator for reasoning (cited) | adv-CoT, 2025 |
 | PromptWizard | Critique-guided prompt optimization (cited) | [Microsoft, 2024](https://arxiv.org/abs/2405.18369) |
 

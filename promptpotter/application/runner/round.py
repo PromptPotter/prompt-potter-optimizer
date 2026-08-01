@@ -72,7 +72,7 @@ async def emit_origin_round(
         with graceful("Origin critique failed; round 1 proceeds without seeded feedback"):
             async with observed_node(
                 "l1_critique_r0",
-                "llm/meta",
+                "llm/optimizer",
                 obs=session.state.obs,
                 campaign_id=session.state.tracing_campaign_id,
                 round_num=0,
@@ -283,7 +283,7 @@ async def post_round(
     )
     # A zero-candidate round (l1_generate returned nothing parseable) is the same class of
     # structural l1_generate fault as a mandatory-placeholder breach: re-running the identical
-    # meta-prompt reproduces it, so route L2 to heal now instead of burning l1_patience dead
+    # optimizer prompt reproduces it, so route L2 to heal now instead of burning l1_patience dead
     # rounds. `l1_mandatory_breach` reads candidate_scores, which is empty in exactly this round,
     # so it can't catch this — the round owns the signal on `l1_parse_failure`.
     l1_zero_candidates = round_result.l1_parse_failure is not None

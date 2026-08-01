@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 # The `{{token}}` shape `compile_prompt` substitutes — the ONE definition every
 # reader of a template's token set shares (dispatch-hub fill/validate, the
-# meta-prompt port guard in `validators/l1_strict.py`).
+# optimizer prompt port guard in `validators/l1_strict.py`).
 TEMPLATE_TOKEN_RE = re.compile(r"\{\{(\w+)\}\}")
 
 
@@ -191,16 +191,16 @@ class L2L3Memory(StrictModel):
         default_factory=default_l1_layout,
         description=(
             "L2-authored ordered list of injection slots that "
-            "``DispatchHub.fill`` walks to compose the L1 meta-prompt. "
+            "``DispatchHub.fill`` walks to compose the L1 optimizer prompt. "
             "L2's primary lever for changing what evidence L1 sees."
         ),
     )
     l1_overrides: dict[str, Any] = Field(
         default_factory=dict,
         description=(
-            "Per-individual L1 meta-prompt overrides keyed by the surface "
+            "Per-individual L1 optimizer prompt overrides keyed by the surface "
             "field name (``persona``, ``instruction``, …). L2 writes here "
-            "to nudge L1 without rewriting the shared meta-prompt."
+            "to nudge L1 without rewriting the shared optimizer prompt."
         ),
     )
     task_context: TaskDecomposition = Field(

@@ -1,20 +1,20 @@
-# Dataset Selection Rationale — Meta-Campaign Signal Density
+# Dataset Selection Rationale — Self-Optimizing Campaign Signal Density
 
 > **How to add a dataset:** [`adding-a-dataset.md`](adding-a-dataset.md) — research the canonical train/test split *before* writing the loader. This doc is *which* datasets and *why*; the add-doc is *the process for wiring one*.
 
-Parallel to [`dataset-reasoning-matrix.md`](dataset-reasoning-matrix.md) (per-dataset model defaults). This doc captures *which* datasets we trial during L1 meta-prompt evolution and *why* — same operator-driven format, evidence + verdicts + dates.
+Parallel to [`dataset-reasoning-matrix.md`](dataset-reasoning-matrix.md) (per-dataset model defaults). This doc captures *which* datasets we trial during L1 optimizer prompt evolution and *why* — same operator-driven format, evidence + verdicts + dates.
 
-## Frame — BBEH is the headline; meta-campaign needs signal
+## Frame — BBEH is the headline; self-optimizing campaign needs signal
 
 **BBEH stays the headline benchmark** for publication framing. Nothing about the candidate list below changes that.
 
-**But** at the optimizer's current maturity, BBEH is the wrong *iteration* target for L1 meta-prompt evolution. `gpt-oss-20b @ low` scores in the floor band on BBEH (~14% public, see [BBEH score anomaly](../../README.md) and `project_bbeh_score_anomaly.md`) — every cycle ties at noise, PoBB can't separate candidates, and the L1 meta-campaign can't tell good edits from bad ones.
+**But** at the optimizer's current maturity, BBEH is the wrong *iteration* target for L1 optimizer prompt evolution. `gpt-oss-20b @ low` scores in the floor band on BBEH (~14% public, see [BBEH score anomaly](../../README.md) and `project_bbeh_score_anomaly.md`) — every cycle ties at noise, PoBB can't separate candidates, and the L1 self-optimizing campaign can't tell good edits from bad ones.
 
-Framing the operator gave (2026-05-18): *we are too far from the local valley on BBEH; we have to work our way to it with more tractable signal first — improve L1 meta-prompts (and other optimizer pieces) on datasets where lift is measurable, then return to BBEH as headline with better hyperparameters and a more mature optimizer.*
+Framing the operator gave (2026-05-18): *we are too far from the local valley on BBEH; we have to work our way to it with more tractable signal first — improve L1 optimizer prompts (and other optimizer pieces) on datasets where lift is measurable, then return to BBEH as headline with better hyperparameters and a more mature optimizer.*
 
-## Selection criteria — L1-meta-campaign focus datasets
+## Selection criteria — L1-self-optimizing campaign focus datasets
 
-A focus dataset for L1 meta-prompt evolution must satisfy:
+A focus dataset for L1 optimizer prompt evolution must satisfy:
 
 1. **Origin in band.** `gpt-oss-20b @ low` scores **15–40%** at origin. Below 15% → floor effect (BBEH problem). Above 40% → ceiling effect (no headroom for L1 lift to register against PoBB noise). *Band widened from 15-35% after the 7-dataset recon trail 2026-05-19 — see "Selection trail Round 6" for the systemic finding on projection slop.*
 1b. **Origin clears its CONSTANT-ANSWER floor.** The score a stub emitting the single commonest label would earn. This is the floor that matters, and it is per-dataset, not 15%: on a 3-class set whose majority label holds 40% of the bank, a collapsed pipeline scores 40% and reads as a healthy in-band origin with headroom. An origin that merely ties its constant is not a measurement — nothing can be optimised out of it, because the pipeline is not reading the input. **Read it off the `answer_distribution` panel**, which renders the score a constant single-label answer would earn on every round — that is the live surface for this criterion. (An earlier enforcement — `classify_band` + `constant_answer_floor` in `application/resource_matrix/matrix.py` — was retired 2026-07-26 having never once run: reaching it required `matrix measure`, and no matrix was ever measured. It is now enforced where the measurement is actually taken: `domain/scoring.py::is_answer_collapsed` withholds θ from a collapsed candidate and PoBB eliminates it, so a dataset whose pipeline ties its constant can no longer contribute a fitted ability at all.) Criterion (1) alone cannot see this and let a degenerate JustLogic cell into the L4 panel for the whole of its first campaign — see the JustLogic row below.
@@ -32,14 +32,14 @@ A focus dataset for L1 meta-prompt evolution must satisfy:
 | Role | Dataset(s) | Why |
 |---|---|---|
 | **Headline benchmark** (publication) | BBEH | Hardest reasoning benchmark, established competitor comparison, public leaderboards. |
-| **Meta-campaign focus** (L1/L2/L3 iteration) | **`justlogic-d234`** (iid mix of depths 2-4) | Live L4 inner instrument (`datasets/justlogic-d234/`). The earlier d6-7 wiring below + its recon numbers are **VOID** (data-deprecation-era). BBEH-mini @ `low` held as secondary in-band candidate. **Next-priority queue (Round 8, 2026-05-19)**: **PlanBench task_1** (36%, PDDL planning — brand-new family) and **NaturalPlan** (36% macro; `meeting_planning`-only at 43% is the clean cut) — both diversify into planning, no overlap with current portfolio. |
+| **Self-optimizing campaign focus** (L1/L2/L3 iteration) | **`justlogic-d234`** (iid mix of depths 2-4) | Live L4 inner instrument (`datasets/justlogic-d234/`). The earlier d6-7 wiring below + its recon numbers are **VOID** (data-deprecation-era). BBEH-mini @ `low` held as secondary in-band candidate. **Next-priority queue (Round 8, 2026-05-19)**: **PlanBench task_1** (36%, PDDL planning — brand-new family) and **NaturalPlan** (36% macro; `meeting_planning`-only at 43% is the clean cut) — both diversify into planning, no overlap with current portfolio. |
 | **Connector validation** | TermNorm (lca-termnorm) | Per-connector regression, not optimizer iteration. |
 
 When the optimizer matures enough that L1 prompts produce measurable lift on BBEH, the focus role collapses back into the headline role. Until then, they are separate jobs.
 
 ## Why `gpt-oss-20b @ reasoning_effort: low` (operator commitment 2026-05-19)
 
-Operator-pinned model for the meta-campaign focus. Justification:
+Operator-pinned model for the self-optimizing campaign focus. Justification:
 - **Leading open-source** at the 20B-active scale.
 - **Fast on Groq** routing (845 tok/s on `:nitro`-eligible providers; ~5s median per call observed).
 - **Very cheap** — $0.03 in / $0.14 out per Mtok. A full-cycle eval on the 420-sample MMLU-ProX-sw train pool with 5 candidates × 6 rounds ≈ 12.6k calls fits well inside Groq's daily volume.
@@ -68,7 +68,7 @@ Two new in-band candidates from the colleague-triage recon (NaturalPlan + MuSiQu
 
 **Why these two specifically**:
 
-- **AR-LSAT was the third candidate** (`hails/agieval-lsat-ar`, 230 test rows, 5-option MC). Recon: **72% (18/25) CEILING at 1.8s/sample**. `gpt-oss-20b @ low` solves AGIEval LSAT analytical-reasoning puzzles directly — no headroom for L1 lift. Surprising vs literature projection (smaller models 30-50%); the AGIEval cut may be easier than full LSAT-AR, OR the model is genuinely strong on this format. **Rejected for meta-campaign focus**; could become a "verify-improvements-don't-regress" probe at wire-time. See `recon_arlsat` in the recon script for the bulletproof MC parsing — reusable for any future LSAT-style MC dataset.
+- **AR-LSAT was the third candidate** (`hails/agieval-lsat-ar`, 230 test rows, 5-option MC). Recon: **72% (18/25) CEILING at 1.8s/sample**. `gpt-oss-20b @ low` solves AGIEval LSAT analytical-reasoning puzzles directly — no headroom for L1 lift. Surprising vs literature projection (smaller models 30-50%); the AGIEval cut may be easier than full LSAT-AR, OR the model is genuinely strong on this format. **Rejected for self-optimizing campaign focus**; could become a "verify-improvements-don't-regress" probe at wire-time. See `recon_arlsat` in the recon script for the bulletproof MC parsing — reusable for any future LSAT-style MC dataset.
 - **MuSiQue macro ceiling** but per-hop reveals structure: 2hop = 89%, 3hop = 38%, 4hop = 57% (with several "misses" being partial-string mismatches very close to gold). **3hop-only at 38% is the clean in-band cut** — held as secondary if MuSiQue family becomes the L1 surface, but lower priority than PlanBench + NaturalPlan because multi-hop QA overlaps with BBEH's reading-comprehension subtasks (lower marginal-diversity value).
 
 **Held subtask cuts** (lower-priority than the macro candidates above; revisit only if PlanBench + NaturalPlan don't pan out):
@@ -89,7 +89,7 @@ Two new in-band candidates from the colleague-triage recon (NaturalPlan + MuSiQu
 
 ## Trialed and rejected — 2026-05-19 recon trail
 
-7 datasets trialed, 7 rejected before MMLU-ProX-sw landed. **Default recon conditions: `openai/gpt-oss-20b @ reasoning_effort: low`, `temperature: 0.0`** (matches every dataset's wired `pipeline.yaml` — the operator's pinned meta-campaign setting). Provider was Groq for the first wave (until rate-limits), then OpenRouter `:nitro` routing for the rest. The `effort` column below flags any deviation from the `low` default.
+7 datasets trialed, 7 rejected before MMLU-ProX-sw landed. **Default recon conditions: `openai/gpt-oss-20b @ reasoning_effort: low`, `temperature: 0.0`** (matches every dataset's wired `pipeline.yaml` — the operator's pinned self-optimizing campaign setting). Provider was Groq for the first wave (until rate-limits), then OpenRouter `:nitro` routing for the rest. The `effort` column below flags any deviation from the `low` default.
 
 | Dataset | Slice trialed | Effort | Measured origin | Why rejected |
 |---|---|---|---|---|
@@ -107,7 +107,7 @@ Two new in-band candidates from the colleague-triage recon (NaturalPlan + MuSiQu
 | **MMLU-ProX Swahili** | `li-lab/MMLU-ProX` config `sw`, 14-cat stratified 25 samples | low | **36% (9/25)** | Initially wired 2026-05-19 as in-band winner, then rejected same day — operator clarified the target is English reasoning, not language-transfer. Swahili comprehension would dominate as the signal axis (L1 would optimize for translation tricks). Loader + `datasets/mmluprox_sw/` kept on disk pending cleanup. |
 | **FOLIO** | `tasksource/folio` (open mirror of gated `yale-nlp/FOLIO`), full train 25 samples | low | **80% (20/25)** | Above-ceiling on `openai/gpt-oss-20b:nitro` via OpenRouter at the wired `low` default. Reject 2026-05-19. 3-class label match (`true`/`false`/`uncertain`); model coasts on the FOL premises being short enough for direct evaluation. Reproduced cleanly across Groq and OpenRouter, so the number is provider-independent. |
 | **BBEH @ 20b/high/8k** | `BBEH/bbeh` mini, 12 samples on OpenRouter:nitro | **high** (one-time experiment) | **~25% naïve / ~75% on non-empty subset** | At `reasoning_effort: high` the hidden reasoning trace consumes the full output budget before visible content emerges (~8/12 samples returned `pred=''`); `max_tokens: 8192` override is ignored — the model enforces a per-model ~2048-visible-token ceiling. **`high` was an experiment; rejected as the wired effort. `low` and `medium` measurements landed in band — promoted to "In-band candidates" above.** |
-| **AR-LSAT (AGIEval)** | `hails/agieval-lsat-ar`, full 230-row `test` first 25 | low | **72% (18/25)** — CEILING | 5-option LSAT analytical-reasoning MC (schedule/assignment puzzles with hard constraints). Literature projected smaller models 30-50%; `gpt-oss-20b @ low` solves it directly at 1.8s/sample. No headroom for L1 lift. **First-pass recon had a field-shape bug** (assumed `gold`/`choices` were stringified, HF stores them as native Python lists → empty options sent to model, every sample MISS) — patched, then 72% on real prompts. Could become a "regression probe" at wire-time but unsuitable as meta-campaign focus. |
+| **AR-LSAT (AGIEval)** | `hails/agieval-lsat-ar`, full 230-row `test` first 25 | low | **72% (18/25)** — CEILING | 5-option LSAT analytical-reasoning MC (schedule/assignment puzzles with hard constraints). Literature projected smaller models 30-50%; `gpt-oss-20b @ low` solves it directly at 1.8s/sample. No headroom for L1 lift. **First-pass recon had a field-shape bug** (assumed `gold`/`choices` were stringified, HF stores them as native Python lists → empty options sent to model, every sample MISS) — patched, then 72% on real prompts. Could become a "regression probe" at wire-time but unsuitable as self-optimizing campaign focus. |
 | **MuSiQue** (macro) | `dgslibisey/MuSiQue` (open mirror; AI2 original gated), hop-stratified 2/3/4, 25 samples | low | **60% (15/25)** — CEILING macro, **38% (3/8) on 3hop-only** | Reading-comprehension multi-hop QA. Paragraphs supplied in user prompt (NOT closed-book) to sidestep PopQA-style tail-entity-recall. Per-hop: 2hop=89% (ceiling), 3hop=38% (in band), 4hop=57% (borderline; several misses are partial-string mismatches very close to gold). Macro rejected. **3hop-only cut held** as a secondary candidate — overlaps with BBEH's RC subtasks so lower marginal-diversity value than PlanBench / NaturalPlan. |
 | **NaturalPlan** | `google-deepmind/natural-plan` raw GitHub (NOT HF — colleague misremembered) | 3-subtask stratified, 25 samples | low | **36% (9/25)** in-band macro — **HELD next-priority** | Per-subtask scorer dispatch was required (each gold has a different shape): `trip_planning` 0/9 (real floor at low), `calendar_scheduling` 6/9 (ceiling — bare 4-token boilerplate gold caused initial scorer-artifact 0% before the day+time-slot scorer was added), `meeting_planning` 3/7 = 43% (clean in-band). 0.5s/sample. **Wire path: `meeting_planning`-only** for the cleanest cut. See "Next-priority after JustLogic" section above. |
 | **PlanBench task_1** | `tasksource/planbench`, config `task_1_plan_generation`, multi-domain stratified, 25 samples | low | **36% (9/25)** in-band — **HELD next-priority** | PDDL-style plan generation across blocksworld + logistics + obfuscated variants. Scorer = 50% action-call overlap with gold plan (coarse but fair for 3-7 action plans). 1.5s/sample. Brand-new family (planning, no overlap with current portfolio). Wire-time needs PDDL plan-validator scorer for rigor. See "Next-priority after JustLogic" section above. |
@@ -160,7 +160,7 @@ Captured here so they don't get re-investigated next time:
 - **IFEval** — predecessor to IFBench; superseded by IFBench's expanded constraint set and 2025-12 release.
 - **Tau-Bench** — needs tool-call infrastructure; outside the current connector boundary.
 - **AA-LCR** — LLM-judge per sample at cycle scale = budget-incompatible. Same disqualifier as GDPval-AA.
-- **GDPval-AA** — pairwise Elo scoring (breaks PoBB), artifact outputs (docs/slides/diagrams — beyond `llm_only` node), agentic published scores (tool use, not raw completion). Right tool for benchmarking agents, wrong tool for L1 meta-prompt evolution.
+- **GDPval-AA** — pairwise Elo scoring (breaks PoBB), artifact outputs (docs/slides/diagrams — beyond `llm_only` node), agentic published scores (tool use, not raw completion). Right tool for benchmarking agents, wrong tool for L1 optimizer prompt evolution.
 
 ## Deferred research
 

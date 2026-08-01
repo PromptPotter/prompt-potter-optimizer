@@ -1526,7 +1526,7 @@ paths:
 
         `descend` names the chain of cycles to descend INTO; absent/empty is the
         caller's own tenant tree. When the optimizer optimizes its own
-        meta-prompts (L4), each candidate runs as a real inner campaign under a
+        optimizer prompts (L4), each candidate runs as a real inner campaign under a
         flat, off-registry sandbox `<workspace>/.inner/<key>`, which is
         structurally a normal projects tree — so descending one hop returns that
         cycle's inner fan-out through this same route, and an L5+ descendant
@@ -2070,7 +2070,7 @@ components:
           additionalProperties: true
           description: |
             The evolved prompt — `OptSearchPoint.prompt_field_dict()` shape (the
-            six PromptTemplate string fields; pp-self meta pipelines instead carry
+            six PromptTemplate string fields; pp-self outer pipelines instead carry
             per-node prompt fields inside `resolved_pipeline_params`).
         resolved_pipeline_params:
           type: object

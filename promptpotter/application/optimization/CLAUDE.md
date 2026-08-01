@@ -45,7 +45,7 @@ Channel: `task_context` (the operator's frozen framing) and `plan` (L3-set strat
 **Reviewing an L1 round trace.** Load
 [`../../../docs/developer/l1-candidate-analysis-checklist.md`](../../../docs/developer/l1-candidate-analysis-checklist.md)
 before reporting findings on any operator-pasted round dump or
-meta-campaign cycle review. The checklist enumerates the eight checks
+self-optimizing campaign cycle review. The checklist enumerates the eight checks
 that historically slipped past — evidence-availability in the rendered
 input, re-proposal of known-failing configs, PEAKED-axis violations,
 ±50% envelope, param-axis overuse, intra-round paraphrase, citation
@@ -71,7 +71,7 @@ Channel: written to `OptSearchPoint.memory.l1_layout` / `.l1_overrides`. L2 does
 
 **A probe round is a special round that spends its whole budget interrogating ONE thing** — one axis, one variable, one warning, one recurring mistake — instead of spreading a broad mutation set across the failure surface. The distinguishing move is **more candidates on a narrower question**: where a normal round proposes ~2 variants across whatever the critique surfaced, a probe fans out a wider candidate set against the single hypothesis, so the round returns a real answer about that one thing rather than one noisy sample of it.
 
-**L2 cannot request one today — there is no `action` field on `L2ContextOutput`.** This is deliberate, and the history is why. The mechanism shipped in `61aeea3e` (Mar 19) meaning *re-run the warned queries*, resting on a per-query warning inventory (`query_failure_tracker`) that made "the warned set" a real, populated thing. `eea00769` (May 5, "restore probe-round contract") added `axis_targeted` / `ProbeOutcome.axis_tested` — the *probe one axis* idea — to the L2 contract and the diagnostics, but never changed sample selection to match. A later debt sweep then deleted the warning inventory. What was left: the meta-prompt asked L2 which **axis** to probe, the loop selected samples by **warning**, and `warned_queries` was a bare set that only fills on backend degradation.
+**L2 cannot request one today — there is no `action` field on `L2ContextOutput`.** This is deliberate, and the history is why. The mechanism shipped in `61aeea3e` (Mar 19) meaning *re-run the warned queries*, resting on a per-query warning inventory (`query_failure_tracker`) that made "the warned set" a real, populated thing. `eea00769` (May 5, "restore probe-round contract") added `axis_targeted` / `ProbeOutcome.axis_tested` — the *probe one axis* idea — to the L2 contract and the diagnostics, but never changed sample selection to match. A later debt sweep then deleted the warning inventory. What was left: the optimizer prompt asked L2 which **axis** to probe, the loop selected samples by **warning**, and `warned_queries` was a bare set that only fills on backend degradation.
 
 On a healthy run that set is empty, so `runner/loop.py` filtered the round's scoring data to `[]` with no emptiness guard and every candidate scored 0/0 — persisted as `accuracy: 0.0`, indistinguishable downstream from a genuinely terrible candidate. Measured live on `justlogic-d234` (2026-07-26): `warned_samples: 0` on 6/6 L2 fires, L2 chose `probe_round` on 3 of them, and all 3 rounds produced zero candidate measurements while still paying ~4 optimizer calls each and consuming a round against `max_rounds`. `l1_yield` reported 1.00 throughout, and `l2_targets_l1_surface` counted `probe_round` as a touched surface — so L2 scored 100% conformance precisely by picking the action that measured nothing.
 
@@ -137,9 +137,9 @@ Avoid hardcoded round thresholds inside the loops. `params_unlocked` derives fro
 
 ## L4 — recursion, not a new layer
 
-L4 is **not** a 4th `LayerStrategy` driver inside this package. There is no `l4_*.py` and there will not be one. L4 is the same PromptPotter applied to itself via the `promptpotter` connector: an outer cycle whose backend is an inner cycle, mutating the inner's meta-prompt template fields (`l1_generate` / `l1_critique` / `l2_context` / `l3_plan`) as `pipeline_params`.
+L4 is **not** a 4th `LayerStrategy` driver inside this package. There is no `l4_*.py` and there will not be one. L4 is the same PromptPotter applied to itself via the `promptpotter` connector: an outer cycle whose backend is an inner cycle, mutating the inner's optimizer prompt template fields (`l1_generate` / `l1_critique` / `l2_context` / `l3_plan`) as `pipeline_params`.
 
-Conceptually L2 / L3 / L4 are the same family — each mutates a slower-changing surface of the level below (L2 → L1's attention: `l1_layout` / `l1_overrides`; L3 → `plan`; L4 → meta-prompt templates). Structurally L2 and L3 live here as escalation strategies; L4 lives at the connector seam (`../../connectors/promptpotter.py`) and at the dataset (`datasets/promptpotter-self/`). Spec: [`../../../docs/specs/roadmap.md`](../../../docs/specs/roadmap.md) § Connectors + L4 inner-cycle execution. Concept: [`../../../docs/concepts/optimizer-of-the-optimizer.md`](../../../docs/concepts/optimizer-of-the-optimizer.md).
+Conceptually L2 / L3 / L4 are the same family — each mutates a slower-changing surface of the level below (L2 → L1's attention: `l1_layout` / `l1_overrides`; L3 → `plan`; L4 → optimizer prompt templates). Structurally L2 and L3 live here as escalation strategies; L4 lives at the connector seam (`../../connectors/promptpotter.py`) and at the dataset (`datasets/promptpotter-self/`). Spec: [`../../../docs/specs/roadmap.md`](../../../docs/specs/roadmap.md) § Connectors + L4 inner-cycle execution. Concept: [`../../../docs/concepts/optimizer-of-the-optimizer.md`](../../../docs/concepts/optimizer-of-the-optimizer.md).
 
 ## checkin — the fifth optimizer node (decomposition + origin resolution)
 

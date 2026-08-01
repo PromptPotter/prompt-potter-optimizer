@@ -33,7 +33,7 @@ class EscalationInputs:
     # l1_generate produced ZERO parseable candidates this round (empty/truncated provider output
     # or a schema-validation failure — `RoundResult.l1_parse_failure` set). Same class of fault as
     # a mandatory-placeholder breach: l1_generate's output is structurally unusable, and re-running
-    # the identical meta-prompt next round reproduces it. Heal L2 now instead of grinding l1_patience
+    # the identical optimizer prompt next round reproduces it. Heal L2 now instead of grinding l1_patience
     # dead rounds. Shares the `l1_generate_unusable` rule; the loud `l1_zero_candidates` round
     # warning already carries the malformed-vs-tooling detail L2 reads.
     l1_zero_candidates: bool = False

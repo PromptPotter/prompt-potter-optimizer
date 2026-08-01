@@ -90,7 +90,7 @@ export function BackendNodeDetail({ draft, onClose, onPromptApply }: Props) {
   const selectedId = selected?.scope === "target" ? selected.id : null;
   const node = cv.view?.nodes.find((n) => n.id === selectedId && n.kind !== "io") ?? null;
 
-  // The selected node id scopes prompt resolution: a meta-prompt node (pp-self's
+  // The selected node id scopes prompt resolution: an optimizer prompt node (pp-self's
   // l1_generate / l1_critique / …) carries its evolved prompt per-node inside the
   // resolved params, not in the flat `prompt_fields`, so pass it through so the
   // observe read model can surface THIS node's evolved fields.

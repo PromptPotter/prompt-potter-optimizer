@@ -33,7 +33,7 @@ def ensure_api_key() -> None:
 
     print(
         "\nNo API key found. PromptPotter routes the optimizer LLM through "
-        "OpenRouter by default (the optimizer meta-prompt is too large for "
+        "OpenRouter by default (the optimizer prompt is too large for "
         "Groq's free tier). Get a key at https://openrouter.ai/keys.",
         file=sys.stderr,
     )

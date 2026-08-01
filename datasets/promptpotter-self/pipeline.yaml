@@ -2,7 +2,7 @@ name: PromptPotter-self
 version: v0.1
 description: >-
   Optimizer-of-the-optimizer — outer PromptPotter cycle mutates inner PromptPotter's L1/L1_CRITIQUE/L2/L3
-  meta-prompts. Each outer 'sample' runs an inner cycle on a cheap proxy benchmark (configured per inner_tasks.json).
+  optimizer prompts. Each outer 'sample' runs an inner cycle on a cheap proxy benchmark (configured per inner_tasks.json).
   See docs/specs/l4-outer-loop.md.
 backend_name: PromptPotter
 backend_type: promptpotter
@@ -19,15 +19,15 @@ available_models:
 # `problem_description` and `answer_format` are absent from every `param_keys` for the
 # reason a lever is never advertised and then forbidden: they carry the injection slots and
 # the output contract, so an edit there severs a channel rather than steering one. That was
-# prose in `assets/optimizer/sets/meta.yaml` asking the generator not to; it is now a
+# prose in `assets/optimizer/sets/self_optimizing.yaml` asking the generator not to; it is now a
 # surface it cannot reach.
 nodes:
   l1_generate:
-    type: meta_prompt
+    type: optimizer_prompt
     runtime: in_process
     node_role: candidate_source
     description: >-
-      Inner cycle's L1-generate meta-prompt — produces inner candidate variants from inner panels (critique,
+      Inner cycle's L1-generate optimizer prompt — produces inner candidate variants from inner panels (critique,
       escalation_panel, axis_memory, origin_strengths).
     config: {}
     optimizer:
@@ -44,11 +44,11 @@ nodes:
       observation_mappings: []
       langfuse_type: generation
   l1_critique:
-    type: meta_prompt
+    type: optimizer_prompt
     runtime: in_process
     node_role: ranker
     description: >-
-      Inner cycle's L1-critique meta-prompt — narrates score deltas and proposes negative_critique + suggested_axes.
+      Inner cycle's L1-critique optimizer prompt — narrates score deltas and proposes negative_critique + suggested_axes.
     config: {}
     optimizer:
       param_keys:
@@ -66,10 +66,10 @@ nodes:
         - pipeline_key: final_delta
       langfuse_type: generation
   l2_context:
-    type: meta_prompt
+    type: optimizer_prompt
     runtime: in_process
     node_role: enricher
-    description: Inner cycle's L2 meta-prompt — refines task_context on inner-L1 stall.
+    description: Inner cycle's L2 optimizer prompt — refines task_context on inner-L1 stall.
     config: {}
     optimizer:
       param_keys:
@@ -85,10 +85,10 @@ nodes:
       observation_mappings: []
       langfuse_type: generation
   l3_plan:
-    type: meta_prompt
+    type: optimizer_prompt
     runtime: in_process
     node_role: enricher
-    description: Inner cycle's L3 meta-prompt — replans strategy on inner-L2 stall.
+    description: Inner cycle's L3 optimizer prompt — replans strategy on inner-L2 stall.
     config: {}
     optimizer:
       param_keys:

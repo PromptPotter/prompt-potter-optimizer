@@ -27,6 +27,7 @@ CalibrationModel = Literal["1PL", "2PL"]
 __all__ = [
     "L1_PARSE_FAILURE_MALFORMED",
     "L1_PARSE_FAILURE_TOOLING",
+    "L1_PARSE_FAILURE_WRONG_TYPE",
     "CalibrationModel",
     "CandidateProposal",
     "CritiqueReadout",
@@ -323,14 +324,18 @@ class RoundParent(StrictModel):
     results: list[dict[str, Any]] = Field(default_factory=list)
 
 
-# The two reasons `RoundResult.l1_parse_failure` can carry. Opposite kinds of evidence,
+# The reasons `RoundResult.l1_parse_failure` can carry. Two are opposite kinds of evidence,
 # so no reader may treat the field as a bool:
-#   MALFORMED — the meta-prompt drove the optimizer LLM to emit schema-noncompliant output.
-#               That IS the meta-prompt's fault; charge it (L4 scores the round dirty).
-#   TOOLING   — the optimizer LLM returned empty/truncated content. Missing data, not a
-#               verdict. Charging it scores provider flakiness as a bad mutation; the round
-#               must be EXCLUDED, exactly as a crashed inner cycle is excluded as a sample.
-L1_PARSE_FAILURE_MALFORMED = "meta_prompt_parse_failure"
+#   MALFORMED  — the optimizer prompt drove the optimizer LLM to emit schema-noncompliant output.
+#                That IS the optimizer prompt's fault; charge it (L4 scores the round dirty).
+#   WRONG_TYPE — a MALFORMED variety worth naming: the response decoded cleanly but as some
+#                other model, so the failure is the schema the optimizer prompt asked for, not
+#                the transport. Charged like MALFORMED (`proxies.py` excludes only TOOLING).
+#   TOOLING    — the optimizer LLM returned empty/truncated content. Missing data, not a
+#                verdict. Charging it scores provider flakiness as a bad mutation; the round
+#                must be EXCLUDED, exactly as a crashed inner cycle is excluded as a sample.
+L1_PARSE_FAILURE_MALFORMED = "optimizer_prompt_parse_failure"
+L1_PARSE_FAILURE_WRONG_TYPE = "optimizer_prompt_unexpected_type"
 L1_PARSE_FAILURE_TOOLING = "l1_provider_empty_response"
 
 
@@ -410,7 +415,7 @@ class RoundResult(StrictModel):
     matched_origin_composite: float = 0.0
     # Subset-invariant peer of this round's own `accuracy`: ability of the cumulative frontier
     # on the cycle's fixed δ ruler. None when the ruler is cold. Feeds the L4 outer proxy so a
-    # drifting per-round subset can't inflate the meta-fitness signal.
+    # drifting per-round subset can't inflate the outer fitness signal.
     #
     # There is deliberately no `cumulative_accuracy` beside it. θ is an ability fitted against
     # an explicit per-sample δ, so pooling rows of mixed provenance is a modelled operation;
@@ -611,7 +616,7 @@ class CycleResult(StrictModel):
     # and `round_adopted_levels` the ability of the incumbent each round ADOPTED — both in ONE
     # space (θ on the cycle's fixed δ ruler when warm, else the cycle is excluded), so no proxy
     # delta ever subtracts across scales. Levels are NOT floored at origin — a regressing
-    # meta-prompt yields a level below origin so the outer keeps a gradient to avoid it.
+    # optimizer prompt yields a level below origin so the outer keeps a gradient to avoid it.
     #
     # These read the CROWNED frontier. They once read the round's proposals instead, on the
     # argument that a conservative election rarely crowns at a small inner budget and so gave

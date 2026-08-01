@@ -404,7 +404,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_rank_l4 = sub.add_parser(
         "rank-optimizer-prompts",
-        help="Rank every L4 meta-prompt state on disk by its paired candidate-minus-origin "
+        help="Rank every L4 optimizer prompt state on disk by its paired candidate-minus-origin "
         "effect, pooling every cell past runs already paid for. Read-only, zero spend, "
         "no LLM calls; naming a winner, never adopting one.",
     )

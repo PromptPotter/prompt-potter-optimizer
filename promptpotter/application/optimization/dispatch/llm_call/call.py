@@ -1,6 +1,6 @@
 """The optimizer LLM call itself — ``llm_call`` + ``run_optimizer_node``.
 
-``llm_call`` is the chokepoint: every meta-prompt call goes through it for
+``llm_call`` is the chokepoint: every optimizer prompt call goes through it for
 429-retry, the wall-clock deadline, the in-flight heartbeat, token-usage
 emit, the audit-trail ledger record, and the cross-cycle response cache.
 ``run_optimizer_node`` is the template → compile → call → parse wrapper the
@@ -38,7 +38,10 @@ from promptpotter.domain.run_records import (
     LLMCallStartRecord,
 )
 from promptpotter.infrastructure.llm.base import LLMClientBase
-from promptpotter.infrastructure.llm.json_parse import MetaPromptParseError, extract_parsed_json
+from promptpotter.infrastructure.llm.json_parse import (
+    OptimizerPromptParseError,
+    extract_parsed_json,
+)
 from promptpotter.infrastructure.llm.models import LLMResponse, emit_token_usage
 from promptpotter.infrastructure.llm.rate_limit import (
     MAX_429_ATTEMPTS,
@@ -356,7 +359,7 @@ async def llm_call(
                         decision.seconds,
                     )
                     await wait_with_countdown(decision.seconds, f"{label} {decision.scope}")
-        except MetaPromptParseError as parse_err:
+        except OptimizerPromptParseError as parse_err:
             # A call that failed to parse was billed exactly like one that parsed. Meter it
             # here — the raise happens upstream of the success path's usage block, so this is
             # the ONLY metering point on the parse-failure path. Without it the two round-trips

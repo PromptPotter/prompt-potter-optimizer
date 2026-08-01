@@ -1,4 +1,4 @@
-"""``cmd_rank_optimizer_prompts`` — rank every meta-prompt state on disk by paired candidate-minus-origin effect.
+"""``cmd_rank_optimizer_prompts`` — rank every optimizer prompt state on disk by paired candidate-minus-origin effect.
 
 Read-only and **zero spend**: :func:`rank_optimizer_prompts` re-derives the ranking from round files
 already written, so it pools every cell every past L4 run paid for and answers "which edit
@@ -29,7 +29,7 @@ logger = logging.getLogger("promptpotter.presentation.cli")
 
 
 async def cmd_rank_optimizer_prompts(args: argparse.Namespace) -> CommandResult:
-    """Rank the meta-prompt corpus; print the top ``--top`` states with their CIs."""
+    """Rank the optimizer prompt corpus; print the top ``--top`` states with their CIs."""
     from promptpotter.config.logging import setup_logging
 
     setup_logging(style="full" if get_verbose() else "cli")

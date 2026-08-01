@@ -49,7 +49,7 @@ owner-grouped signals** (`l1_wounds` = validation + runtime; `guard_breaches` = 
 The wounds heal **candidate** failures. The prompt-budget unit is a
 **different mechanism** — not a tier or escape-hatch of the wound model —
 that guards one unrelated concern: the size of a composed optimizer
-meta-prompt. It earns its own section because it isn't a wound, not
+optimizer prompt. It earns its own section because it isn't a wound, not
 because the taxonomy needed an exception. Two healing modes survive
 (the aggregate shed allocator + the `prompt_budget_status` L2-self-heal
 injection + the `PROMPT_BUDGET` halt were deleted — `git log` has them):

@@ -24,12 +24,12 @@ logger = logging.getLogger(__name__)
 # prompt fault (or the reverse) because two modules drew the line differently.
 MIN_CONTENT_CHARS = 20
 
-# Retry strategies (``MetaPromptParseError.retry_kind``). See ``OpenAICompatibleClient.chat``.
+# Retry strategies (``OptimizerPromptParseError.retry_kind``). See ``OpenAICompatibleClient.chat``.
 RETRY_CLEAN_REASK = "clean_reask"
 RETRY_SCHEMA_REPAIR = "schema_repair"
 
 
-class MetaPromptParseError(RuntimeError):
+class OptimizerPromptParseError(RuntimeError):
     """LLM returned content that failed Pydantic validation after one repair-hint retry.
 
     Carries raw + last ValidationError → L1 records Wound 1, L2 heals next round.
@@ -71,7 +71,7 @@ class MetaPromptParseError(RuntimeError):
         retry_kind: str = "",
     ):
         super().__init__(
-            f"Meta-prompt response failed Pydantic validation after {attempts} attempt(s): "
+            f"Optimizer prompt response failed Pydantic validation after {attempts} attempt(s): "
             f"{error.error_count()} errors"
         )
         self.raw = raw
@@ -123,7 +123,7 @@ class MetaPromptParseError(RuntimeError):
 
     @property
     def is_empty(self) -> bool:
-        """Provider degraded (returned nothing) — vs output the META-PROMPT owns.
+        """Provider degraded (returned nothing) — vs output the OPTIMIZER PROMPT owns.
 
         Steers L2's heal direction, and downstream decides whether an L4 outer round
         counts at all (``domain/l4/proxies.py`` excludes a ``L1_PARSE_FAILURE_TOOLING``
@@ -131,7 +131,7 @@ class MetaPromptParseError(RuntimeError):
         evidence. Three tests, most decisive first:
 
         1. ``finish_reason == "length"`` on the failing attempt is NOT provider
-           degradation, however empty the content. Truncation means the meta-prompt asked
+           degradation, however empty the content. Truncation means the optimizer prompt asked
            for more than the token budget could carry — its own fault.
         2. **The failure reproduced under a clean re-ask.** This is measured, not inferred:
            the same request was sent twice and failed the same way both times, so it is a
@@ -149,7 +149,7 @@ class MetaPromptParseError(RuntimeError):
     def warning_detail(self) -> dict[str, Any]:
         """The provider's own account of WHY, for a round warning's disk-bound
         ``detail``. ``finish_reason: length`` + a large ``reasoning_tokens`` means
-        the meta-prompt is too big for the token budget (fix the prompt); ``stop``
+        the optimizer prompt is too big for the token budget (fix the prompt); ``stop``
         with ~2 completion tokens means the provider degraded (retry/route
         elsewhere). Same symptom, opposite fix — so both land on disk rather than
         only in the log."""
@@ -310,7 +310,7 @@ __all__ = [
     "MIN_CONTENT_CHARS",
     "RETRY_CLEAN_REASK",
     "RETRY_SCHEMA_REPAIR",
-    "MetaPromptParseError",
+    "OptimizerPromptParseError",
     "extract_parsed_json",
     "parse_response_content",
     "try_groq_json_validate_repair",

@@ -45,7 +45,7 @@ TRANSCRIPT_PREDICTED_CAP = 200
 INNER_NARRATIVE_CAP = 1150
 # How many of those cells keep the WHOLE story. The panel measured 7,090 chars on a live
 # round — 61% of every panel byte, and 86% byte-identical round to round, because a cell
-# that is doing fine narrates the same thing every time. A meta-prompt edit is aimed at the
+# that is doing fine narrates the same thing every time. An optimizer prompt edit is aimed at the
 # cells that are NOT, so those lead and keep their detail; the rest are a line each, which
 # is what "this one is fine" costs to say.
 INNER_NARRATIVE_FULL_CELLS = 3

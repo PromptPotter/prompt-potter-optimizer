@@ -82,7 +82,7 @@
           }
         },
         "additionalProperties": false,
-        "description": "Top-level shape returned by the ``l1_generate`` meta-prompt.",
+        "description": "Top-level shape returned by the ``l1_generate`` optimizer prompt.",
         "properties": {
           "variants": {
             "items": {

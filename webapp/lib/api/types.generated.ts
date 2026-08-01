@@ -102,9 +102,9 @@ export interface DiagnosticRunRecord {
 /** L1-output parse-time invariant violation; drives synthetic-0 in ``score_search_point``. */
 export interface ValidationFailure {
   /** The parameter path that failed, ``{node_name}.{param}`` (e.g.
-   * ``llm_only.model``), or a meta-axis on the generator output itself:
-   * ``l1_generate.output`` (parse/shape failures) or ``variant`` (no-op /
-   * duplicate mutations). */
+   * ``llm_only.model``), or an axis on the generator's own output rather than
+   * a pipeline param: ``l1_generate.output`` (parse/shape failures) or
+   * ``variant`` (no-op / duplicate mutations). */
   axis: string;
   /** The offending value as rendered for the prompt; truncated to ≤300 chars for
    * raw LLM output. Always a string — original type is encoded into the
@@ -118,8 +118,8 @@ export interface ValidationFailure {
    * ``not_in_available_models`` / ``not_in_param_allowed_values`` (value
    * outside schema enum), ``reproposes_known_failing_config`` (matches a
    * prior ``RuntimeFailure.observed_config`` row),
-   * ``l1_provider_empty_response`` / ``meta_prompt_parse_failure`` /
-   * ``meta_prompt_unexpected_type`` (generator-side failure),
+   * ``l1_provider_empty_response`` / ``optimizer_prompt_parse_failure`` /
+   * ``optimizer_prompt_unexpected_type`` (generator-side failure),
    * ``no_op_variant`` / ``duplicate_variant`` (invariant-detect),
    * ``hallucinated_node`` (named a node absent from the schema — NON-fatal:
    * the phantom edit is stripped, the candidate still scores; routed as
@@ -255,12 +255,12 @@ export interface L2L3Memory {
    * Rendered by dispatch-hub injections; absorbed by L2 next round. */
   wounds: WoundChannels;
   /** L2-authored ordered list of injection slots that ``DispatchHub.fill`` walks to
-   * compose the L1 meta-prompt. L2's primary lever for changing what evidence
-   * L1 sees. */
+   * compose the L1 optimizer prompt. L2's primary lever for changing what
+   * evidence L1 sees. */
   l1_layout: L1Layout;
-  /** Per-individual L1 meta-prompt overrides keyed by the surface field name
+  /** Per-individual L1 optimizer prompt overrides keyed by the surface field name
    * (``persona``, ``instruction``, …). L2 writes here to nudge L1 without
-   * rewriting the shared meta-prompt. */
+   * rewriting the shared optimizer prompt. */
   l1_overrides: Record<string, unknown>;
   /** Persistent task-framing dict refined by ``l2_context`` and spliced around
    * ``problem_description`` at render time. Accumulative: each L2 fire merges
@@ -694,7 +694,7 @@ export interface EffectProvenance {
   candidate_id: string;
 }
 
-/** One unique meta-prompt state, aggregated across every occurrence in the corpus. */
+/** One unique optimizer prompt state, aggregated across every occurrence in the corpus. */
 export interface RankedOptimizerPrompt {
   state_hash: string;
   label: string;

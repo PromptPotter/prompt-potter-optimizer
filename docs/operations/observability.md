@@ -8,9 +8,9 @@ Phase events (`init`, `l1_generate`, `l1_evaluate`, `refine_strategy`, `modify_p
 
 | Source | Event | Payload |
 |--------|-------|---------|
-| L1 Generate | LLM call | rendered meta-prompt, candidate outputs, token counts |
-| L1 Critique | LLM call | critique meta-prompt, structured output |
-| L2 Refine | LLM call | refinement meta-prompt (incl. the L1 field catalogue), parsed transition |
+| L1 Generate | LLM call | rendered optimizer prompt, candidate outputs, token counts |
+| L1 Critique | LLM call | critique optimizer prompt, structured output |
+| L2 Refine | LLM call | refinement optimizer prompt (incl. the L1 field catalogue), parsed transition |
 | L3 Plan | LLM call | plan template (axes_digest + L2 history + pipeline + runtime failures), new plan |
 | Backend match | Span | query, params, result, `diagnostics.warnings` |
 | Escalation rule firing | `escalation/rule_fired` | `{layer, rule_name, rule_priority, next_action, reason, signal_inputs}` |

@@ -1,6 +1,6 @@
 "use client";
 // The ranked table of edits to the optimizer's OWN prompts — the
-// developer answer to "which meta-prompt is overall best?". Ranks by the
+// developer answer to "which optimizer prompt is overall best?". Ranks by the
 // anchor-to-origin paired effect. Reads the server-reduced registry; no recompute.
 // Renders only for the outer pp-self loop (DashboardTab's isOuterSelfOpt gate).
 // Ranking is the whole surface: nothing here crowns a winner or graduates one into
@@ -65,13 +65,13 @@ export function OptimizerPromptRankingPanel({ registry }: { registry: OptimizerP
       }
     >
       <p className="l4-lede">
-        Every candidate meta-prompt state on disk, ranked by anchor-to-origin effect (paired
+        Every candidate optimizer prompt state on disk, ranked by anchor-to-origin effect (paired
         candidate−origin over shared cells). Absolute scores across runs are not comparable
         — only these paired effects are.
       </p>
       {rows.length === 0 ? (
         <p className="l4-empty">
-          No candidate meta-prompt states yet — run <code>promptpotter new promptpotter-self</code>{" "}
+          No candidate optimizer prompt states yet — run <code>promptpotter new promptpotter-self</code>{" "}
           to produce some.
         </p>
       ) : (

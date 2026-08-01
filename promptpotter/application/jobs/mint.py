@@ -134,7 +134,7 @@ def _warn_on_duplicate_origin(
     logger.warning(
         "This origin has already been run as cycle %s in campaign(s) %s — a fresh `new` "
         "re-measures the identical seed. `resume` continues one of those instead; `new` is "
-        "for an origin you have CHANGED (meta-prompt, config, or dataset).",
+        "for an origin you have CHANGED (optimizer prompt, config, or dataset).",
         cycle_id,
         ", ".join(prior),
     )

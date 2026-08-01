@@ -47,10 +47,10 @@ You've run a campaign. Pointers below for the next layer.
 
 ## Iterating on prompts manually
 
-Hand-tuning `l1_generate` (or another optimizer meta-prompt) means editing
+Hand-tuning `l1_generate` (or another optimizer prompt) means editing
 `promptpotter/assets/optimizer/pipeline.yaml` directly — it is an operator-owned file that nothing
 writes. To measure whether an edit helped, run the optimizer **on itself**:
-`python -m promptpotter new promptpotter-self` (L4) scores meta-prompt variants against a
+`python -m promptpotter new promptpotter-self` (L4) scores optimizer prompt variants against a
 cached origin on shared cells and reports a paired verdict.
 
 A hand-driven strategist skill used to own this; L4's recursion replaced it, because a

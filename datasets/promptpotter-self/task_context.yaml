@@ -1,9 +1,10 @@
-domain: Prompt engineering and meta‑optimization for LLM pipelines
+domain: Prompt engineering and self-optimization for LLM pipelines
 pipeline_purpose: >-
-  Automatically evolve PromptPotter's meta‑prompt templates to accelerate inner‑cycle convergence on the
-  JustLogic depth‑6/7 benchmark (deductive TRUE/FALSE/Uncertain reasoning).
+  Automatically evolve PromptPotter's optimizer prompt templates to accelerate inner-cycle convergence on
+  the JustLogic deductive-reasoning benchmark (TRUE/FALSE/Uncertain; the depth cut is the dataset's, in
+  inner_tasks.yaml).
 data_characteristics: >-
-  Each sample is a whole inner run; the mutation surface is 24 free-prose and categorical meta-prompt
+  Each sample is a whole inner run; the mutation surface is 24 free-prose and categorical optimizer prompt
   fields, and fitness is noisy numeric deltas from a small inner panel, so edits move the score but improvement
   is real and infrequent.
 optimization_goals: >-
@@ -16,22 +17,24 @@ key_challenges: >-
   inner failure the critique and transcripts show; noisy fitness from a small inner panel makes that drift
   easy.
 upstream_context: >-
-  Outer optimization loop generates mutation proposals for meta‑prompt fields; inner cycle executes with
-  current meta‑prompts to produce outputs and compute scores.
+  Outer optimization loop generates mutation proposals for optimizer prompt fields; inner cycle executes with
+  current optimizer prompts to produce outputs and compute scores.
 downstream_context: >-
-  Composite fitness scores are aggregated to select the best meta‑prompt configurations for the next outer
+  Composite fitness scores are aggregated to select the best optimizer prompt configurations for the next outer
   iteration.
 raw_description: |
-  # Task: evolve PromptPotter's own meta-prompts
+  # Task: evolve PromptPotter's own optimizer prompts
 
   Goal: the outer cycle mutates the **inner** cycle's L1 / L1_CRITIQUE / L2 / L3
-  meta-prompt template fields (6 per node × 4 nodes = 24 fields) so inner cycles
+  optimizer prompt template fields (6 per node × 4 nodes = 24 fields) so inner cycles
   converge **faster and further** on the proxy benchmark.
 
   ## What the inner cycle is solving (so you mutate toward the right behaviour)
 
-  The inner benchmark is **justlogic deductive reasoning** (the depth cut is `inner_tasks.json`'s) (NOT
-  arithmetic). Each inner sample is a set of premises plus a candidate conclusion;
+  The inner benchmark is **justlogic deductive reasoning** (NOT
+  arithmetic; the specific depth mix is the dataset's, in `inner_tasks.yaml` — not
+  restated here, where a stale number would only anchor you). Each inner sample is
+  a set of premises plus a candidate conclusion;
   the inner model must answer **TRUE / FALSE / Uncertain** — TRUE/FALSE when the
   premises strictly determine the conclusion, `Uncertain` only when they are
   genuinely indeterminate. The task is hard for the inner model *as currently
@@ -46,7 +49,7 @@ raw_description: |
   candidate must name the observed inner deficiency it attacks. Note the label
   space is three-way and ground-truth labels include genuine `Uncertain` cases —
   an edit that suppresses one answer class trades one error class for another.
-  Mutate the inner meta-prompt fields to make the inner *optimizer* better at
+  Mutate the inner optimizer prompt fields to make the inner *optimizer* better at
   finding the discipline; do not hard-code task answers into it.
 
   ## Fitness
@@ -66,7 +69,7 @@ raw_description: |
 
   - Per-node six-field PromptTemplate scheme: ``persona``, ``task_intent``,
     ``problem_description``, ``instruction``, ``thinking_style``, ``answer_format``
-  - Exposed at ``pipeline.json::nodes.{node}.optimizer.param_keys``
+  - Exposed at ``pipeline.yaml::nodes.{node}.optimizer.param_keys``
   - Four nodes: ``l1_generate``, ``l1_critique``, ``l2_context``, ``l3_plan``.
     Outer L1 may mutate any subset per round
   - Out of scope (belongs to inner cycle): inner ``pipeline_params``,
@@ -88,7 +91,7 @@ raw_description: |
 
   ## Proxy realism
 
-  The committed inner config (``inner_tasks.json`` — the source of truth for the
+  The committed inner config (``inner_tasks.yaml`` — the source of truth for the
   inner geometry; don't restate its numbers here) keeps each outer "sample" at
   order-of-minutes. Trade-off is signal quality — bump sample count + rounds before
   publication runs. Cost shape + the finish-line plan:

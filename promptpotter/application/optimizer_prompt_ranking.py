@@ -1,4 +1,4 @@
-"""Rank every L4 meta-prompt state on disk by how much it beat the origin.
+"""Rank every L4 optimizer prompt state on disk by how much it beat the origin.
 
 Zero LLM calls, every number re-derived from the on-disk round files, recomputed per read
 — nothing is persisted, nothing is crowned, and naming a leader is where this stops
@@ -29,7 +29,7 @@ from promptpotter.shared.statistics import paired_diff_posterior, t_critical
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
 
-# The connector whose cycles carry meta-prompt candidates — i.e. the L4 recursion.
+# The connector whose cycles carry optimizer prompt candidates — i.e. the L4 recursion.
 _PP_SELF_BACKEND_TYPE = "promptpotter"
 _ORIGIN_HASH = "origin"
 
@@ -52,11 +52,11 @@ class EffectProvenance(StrictModel):
 
 
 class RankedOptimizerPrompt(StrictModel):
-    """One unique meta-prompt state, aggregated across every occurrence in the corpus."""
+    """One unique optimizer prompt state, aggregated across every occurrence in the corpus."""
 
     state_hash: str
     label: str
-    prompt_state: dict[str, dict[str, str]]  # {node: {field: text}} — the meta-prompt edit
+    prompt_state: dict[str, dict[str, str]]  # {node: {field: text}} — the optimizer prompt edit
     provenance: list[EffectProvenance]
     per_cell_effects: list[CellEffect]
     anchor_effect: float  # mean of the PER-CELL paired diffs — one point per cell, not per
@@ -76,7 +76,7 @@ class OptimizerPromptRanking(StrictModel):
 
 
 def _state_hash(prompt_state: dict[str, dict[str, str]]) -> str:
-    """Stable short hash of a meta-prompt state; empty state ⇒ the origin sentinel."""
+    """Stable short hash of an optimizer prompt state; empty state ⇒ the origin sentinel."""
     if not prompt_state:
         return _ORIGIN_HASH
     canonical = json.dumps(prompt_state, sort_keys=True, ensure_ascii=False)
@@ -212,14 +212,14 @@ def _coerce_state(raw: Any) -> dict[str, dict[str, str]]:
 
 
 def _finalize(state_hash: str, acc: _Accum) -> RankedOptimizerPrompt:
-    """Aggregate one meta-prompt state's measurements into its ranked row.
+    """Aggregate one optimizer prompt state's measurements into its ranked row.
 
     **Aggregation is PER CELL, then across cells** — the same two-stage shape
     ``domain/l4/verdict.py::compute_outer_verdict`` uses, and for the same reasons: the SE
     comes from n = *cells* (a ~7-point panel), not n = total *measurements*, and a cell
     measured five times cannot outweigh five cells measured once. Both matter because this
     ranking is the ONLY thing standing between the corpus and a human hand-graduating a
-    meta-prompt into ``promptpotter/assets/optimizer/``, so an overstated CI misleads a person
+    optimizer prompt into ``promptpotter/assets/optimizer/``, so an overstated CI misleads a person
     making an irreversible edit.
     """
     per_cell: list[CellEffect] = []

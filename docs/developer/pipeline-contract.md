@@ -47,7 +47,7 @@ publish it*, not *PP reads it*.
 
 | Field | Required | Type | Notes |
 |---|---|---|---|
-| `type` | required | `str` | Wire type — `generation`, `cache`, `retriever`, `tool`, `meta_prompt` for connector-served nodes; `llm/meta`, `measurement`, `agent` for `_optimizer` internal nodes. Mapped to `PipelineNode.wire_type`. |
+| `type` | required | `str` | Wire type — `generation`, `cache`, `retriever`, `tool`, `optimizer_prompt` for connector-served nodes; `llm/optimizer`, `measurement`, `agent` for the optimizer's own internal nodes (`assets/optimizer/pipeline.yaml`). Mapped to `PipelineNode.wire_type`. |
 | `node_role` | optional | `str` | One of `""`, `candidate_source`, `ranker`, `enricher`, `cache`. Mapped to `PipelineNode.node_type` (the typed `NodeType` enum). Absent on every `_optimizer` node; parsed as `""`. |
 | `description` | required | `str` | One-line node description. Self-description (see below) — not parsed. |
 | `runtime` | connector-served | `str` | Where the node runs **inside the backend's own topology**: `backend`, `frontend` (e.g. TermNorm's Excel add-in runs `cache_lookup` / `fuzzy_matching` client-side), `in_process`. Orthogonal to `Connector.execution`, which says how *PromptPotter* reaches the backend — one `remote_http` connector legitimately mixes all three (`lca-termnorm` does). Self-description — not parsed. Absent on `_optimizer` nodes. |
@@ -145,7 +145,7 @@ A minimal one — the GSM8K single-LLM-node pipeline — at
 
 ## `promptpotter/assets/optimizer/pipeline.yaml` parity
 
-PromptPotter's own meta-prompt pipeline at
+PromptPotter's own optimizer prompt pipeline at
 `promptpotter/assets/optimizer/pipeline.yaml` uses
 the **same shape** as a backend's `pipeline.yaml`:
 

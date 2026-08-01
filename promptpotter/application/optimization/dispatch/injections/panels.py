@@ -397,7 +397,7 @@ def _proxy_lift(r: dict[str, Any]) -> float | None:
     """One inner cell's outer-lift proxy, or ``None`` off the recursion.
 
     The L4 discriminator: only the `promptpotter` connector stamps this proxy, and a
-    zero-lift seed (a flat inner run — the ones a meta-prompt edit most needs to see)
+    zero-lift seed (a flat inner run — the ones an optimizer prompt edit most needs to see)
     can round-trip as an int 0, so accept any real number, exclude bool.
     """
     d = (r.get("pipeline_data") or {}).get("final_delta")
@@ -427,7 +427,7 @@ def _r_inner_narratives(b: InjectionBundle) -> str:
     **Each cell's delta is shown BESIDE the origin's own delta on that same seed**, because
     alone it is mostly the seed. The same seed measured 0.013 and 0.458 across one run's draws,
     and the panel presented whichever it drew as that cell's character — so the generator read a
-    seed that had simply drawn low as a meta-prompt failure and anchored four of six candidates
+    seed that had simply drawn low as an optimizer prompt failure and anchored four of six candidates
     on it. The origin ran every seed too (``origin_per_sample``, the frozen round-0 snapshot),
     and that pair is the comparison the outer verdict is itself computed on: printing both makes
     "this seed is hard" and "your edits did nothing here" different sentences instead of one
@@ -435,13 +435,13 @@ def _r_inner_narratives(b: InjectionBundle) -> str:
     single most useful thing this panel can say to a round whose candidates all lost.
 
     The ORDER stays the raw delta (ascending), not the pair: a cell where the inner loop found
-    little to climb is the one a meta-prompt edit has to reach, whether or not this round's
+    little to climb is the one an optimizer prompt edit has to reach, whether or not this round's
     candidates moved it.
 
     **Only the weakest cells carry their whole story.** Measured on a live round the panel was
     7,090 chars — 61% of every panel byte the generator saw — and 86% byte-identical between
     consecutive rounds, because the strong cells' stories say the same thing every time. The
-    weak ones are what a meta-prompt edit has to fix; the rest are a line each, which is enough
+    weak ones are what an optimizer prompt edit has to fix; the rest are a line each, which is enough
     to see that they are fine.
     """
     origin_lift = {
@@ -461,7 +461,7 @@ def _r_inner_narratives(b: InjectionBundle) -> str:
     header = (
         f"INNER RUN NARRATIVES ({len(scored)} inner campaigns this round, weakest first — each is "
         "one outer sample. D is that inner run's lift; `origin` is what the SAME seed scored "
-        "under the unedited meta-prompts, so a low D beside a low origin is a hard seed, not "
+        "under the unedited optimizer prompts, so a low D beside a low origin is a hard seed, not "
         "your edit. Equal values mean the incumbent on that seed still IS the origin. The "
         "weakest carry their full story; ground every candidate in a specific observation):"
     )
@@ -489,7 +489,7 @@ def _misses(b: InjectionBundle) -> list[dict[str, Any]]:
     pipeline answered nothing wrongly and no mutation can win it back. Rendered as a miss it
     reads as a winnable failure carrying a difficulty, and the generator invents a task-level
     deficiency to attack it with — measured: an infra-dead round put 4 of 6 outer candidates
-    onto an output-format edit the meta-prompt explicitly forbids and prices at -2.2%."""
+    onto an output-format edit the optimizer prompt explicitly forbids and prices at -2.2%."""
     return [
         r for r in b.trajectory_results if not is_hit(r.get("fitness")) and not is_error_result(r)
     ]

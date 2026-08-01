@@ -281,13 +281,13 @@ class OptimizationConfig(StrictModel):
     optimizer_set: Annotated[str, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
         "",
         description=(
-            "Which optimizer meta-prompt set this cycle uses. Empty (default) → the "
-            "standard `promptpotter/assets/optimizer/` task-tuning loop. `meta` → the L4 outer "
-            "set `promptpotter/assets/optimizer/sets/meta.yaml`, whose L1 emits per-node "
-            "edits to the INNER optimizer's meta-prompts (`pipeline_params_override`) "
+            "Which optimizer prompt set this cycle uses. Empty (default) → the "
+            "standard `promptpotter/assets/optimizer/` task-tuning loop. `self_optimizing` → the "
+            "L4 outer set `promptpotter/assets/optimizer/sets/self_optimizing.yaml`, whose L1 emits per-node "
+            "edits to the INNER optimizer's own prompts (`pipeline_params_override`) "
             "instead of tuning its own template. Applied per-cycle at the runner seam "
             "through the same per-node override channel the inner runner uses, so an "
-            "outer (meta) cycle and the inner (default) cycles it spawns stay isolated "
+            "outer cycle and the inner (default) cycles it spawns stay isolated "
             "by task. See docs/specs/l4-outer-loop.md § 3."
         ),
     )
@@ -1071,7 +1071,7 @@ def _validate_model_ownership(
     overlay. A missing model is a setup bug, surfaced loudly here: the prior
     silent fall-through let the backend's hidden GET /pipeline default decide
     (TermNorm ships groq/120b), so a fresh drop ran the wrong model unnoticed.
-    In-process meta-prompt nodes (L4) are not `is_llm` and are exempt — their
+    In-process optimizer prompt nodes (L4) are not `is_llm` and are exempt — their
     model is the install-global optimizer config.
     """
     if filtered is None:

@@ -6,7 +6,7 @@ Five steps. Takes a couple of minutes.
 
 Sign up at [openrouter.ai/keys](https://openrouter.ai/keys) and create an API key.
 
-OpenRouter is the default optimizer LLM provider — the optimizer meta-prompt is too large for Groq's free tier. If you prefer Groq, OpenAI, or Anthropic, see [§ Environment variables](#environment-variables) below for the alternative variables.
+OpenRouter is the default optimizer LLM provider — the optimizer prompt is too large for Groq's free tier. If you prefer Groq, OpenAI, or Anthropic, see [§ Environment variables](#environment-variables) below for the alternative variables.
 
 ## 2. Clone the repo
 

@@ -18,7 +18,7 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 |---|---|---|
 | [`manual/`](manual/) | Operator onboarding: install → first campaign → reading output → troubleshooting → going deeper. Numbered chapters. | [`manual/README.md`](manual/README.md) |
 | [`concepts/`](concepts/) | How the loop works conceptually — the three-layer loop, scoring + memory, candidate-elimination, **optimizer-of-the-optimizer (L4 recursion)**, campaign tree, paired-sample PoBB. Read before the developer docs. | [`concepts/README.md`](concepts/README.md) |
-| [`developer/`](developer/) | Implementation specs — Python names, data contracts, node wiring, `pipeline.yaml` contract, dispatch hub + L1 layout, L1-candidate-analysis checklist (incl. the meta-campaign lookup), self-healing internals, **`conventions.md` (full style + code-shape rules)**, `stable-api.md` (v1 fork-readiness surface). | [`developer/README.md`](developer/README.md) |
+| [`developer/`](developer/) | Implementation specs — Python names, data contracts, node wiring, `pipeline.yaml` contract, dispatch hub + L1 layout, L1-candidate-analysis checklist (incl. the self-optimizing campaign lookup), self-healing internals, **`conventions.md` (full style + code-shape rules)**, `stable-api.md` (v1 fork-readiness surface). | [`developer/README.md`](developer/README.md) |
 | [`operations/`](operations/) | Running it — CLI reference, env, persistence + recovery, observability, backend integration, **`access-model.md`** (the security map an audit opens — tiers, boundaries, enforcement, deploy checklist), **`secure-hosting.md`** (allowlist admin via the on-box bot), **`adding-a-dataset.md`**, **`dataset-selection-rationale.md`**, **`dataset-reasoning-matrix.md`** (per-dataset model + `reasoning_effort` + `max_tokens` defaults). | [`operations/README.md`](operations/README.md) |
 | [`methods/`](methods/) | The two spend-control procedures: PoBB elimination + hard-sample leaderboard. | [`methods/README.md`](methods/README.md) |
 | [`research/`](research/) | Benchmarks (BBEH comparison + the PEvol-Bench definition), metrics, related-work table (incl. MCTS comparison). | [`research/README.md`](research/README.md) |
@@ -44,7 +44,7 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 | How is L1's evidence surface built? | [`developer/dispatch-hub.md`](developer/dispatch-hub.md) § L1 layout |
 | **What is L4 / how does PromptPotter optimize itself?** | [`concepts/optimizer-of-the-optimizer.md`](concepts/optimizer-of-the-optimizer.md) + [`specs/roadmap.md`](specs/roadmap.md) |
 | What datasets do we use? Why didn't we use Y? | [`operations/dataset-selection-rationale.md`](operations/dataset-selection-rationale.md) |
-| What model + `reasoning_effort` for this dataset? | [`operations/dataset-reasoning-matrix.md`](operations/dataset-reasoning-matrix.md) (canonical — NOT meta-campaign NOTES.md) |
+| What model + `reasoning_effort` for this dataset? | [`operations/dataset-reasoning-matrix.md`](operations/dataset-reasoning-matrix.md) (canonical — NOT self-optimizing campaign NOTES.md) |
 | What's the canonical split for this benchmark? | [`operations/adding-a-dataset.md`](operations/adding-a-dataset.md) |
 | How do I run the auth-on dashboard locally? | [`developer/local-oidc.md`](developer/local-oidc.md) (Dex harness at `dev/oidc-local/`) — only needed for the real OIDC login round-trip |
 | How do I drive the authed/live UI surface (no OIDC, no spend)? | Relaunch with `PROMPTPOTTER_AUTH=off` → reads your real on-disk campaigns. Recipe + the per-control behavior bar: [`../webapp/CLAUDE.md`](../webapp/CLAUDE.md) § Testing posture + [`specs/frontend-surface-contract.md`](specs/frontend-surface-contract.md) |
@@ -54,7 +54,7 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 
 ## L4 — the recursion case (project's closing focus)
 
-L4 (PromptPotter optimizing its own meta-prompts) **recursion is SHIPPED & live-validated**; the project is now finishing it into a **distributable `promptpotter-self`**. An AI agent driving L4 reads **(2) first** — it is the living finish-line plan + the SoT.
+L4 (PromptPotter optimizing its own optimizer prompts) **recursion is SHIPPED & live-validated**; the project is now finishing it into a **distributable `promptpotter-self`**. An AI agent driving L4 reads **(2) first** — it is the living finish-line plan + the SoT.
 
 1. [`concepts/optimizer-of-the-optimizer.md`](concepts/optimizer-of-the-optimizer.md) — why, the composed outer fitness (lift × quality × efficiency + the candidate-gradient law), cost realism (status note points back to the plan).
 2. **[`specs/l4-outer-loop.md`](specs/l4-outer-loop.md) — the living finish-line plan: § Finish line (distributable goal), § Live-run learnings (MAX_PATH flat `.inner/` registry, gsm8k→`justlogic-d234` headroom, slice-3-is-gating), and the slice order.** Read first.

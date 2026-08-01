@@ -302,7 +302,7 @@ def _check_not_only_param_variants(
 def _check_changes_description_english(
     round_dict: dict[str, Any], ctx: ValidatorContext
 ) -> CheckResult:
-    """``changes_description`` must stay in the language its meta-prompt is written in.
+    """``changes_description`` must stay in the language its optimizer prompt is written in.
 
     It is the loop's ONLY record of what a candidate intended — every downstream reader
     (``review.md``, the ALREADY TRIED panel, an operator triaging a round) is a reader of
@@ -351,7 +351,7 @@ def run_all_checks(round_dict: dict[str, Any], ctx: ValidatorContext) -> list[Ch
     **Empty list when L1 emitted NO variants** — there is nothing to score, and an absent
     yield must not count as a conformance PASS. Every check short-circuits to
     ``passed=True`` ("no variants emitted") on an empty variant list, so running them anyway
-    scored 4/4 and turned the worst L1 outcome — a meta-prompt that makes its own children
+    scored 4/4 and turned the worst L1 outcome — an optimizer prompt that makes its own children
     unreadable (``RoundResult.l1_parse_failure``) — into a perfect ``behavior_pass_rate`` of
     1.0 and a ``healthy`` round-1 verdict, which is the gate that authorises another round of
     real spend. "Nothing to check" is not "nothing wrong".

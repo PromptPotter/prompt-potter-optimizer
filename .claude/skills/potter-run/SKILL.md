@@ -23,7 +23,7 @@ Signals: `promptpotter-self` / `justlogic-d234`, the L4 finish line, a dirty tre
 broke", "bug-hunting", an operator already mid-investigation.
 - Read past the headline into the round's LLM I/O. A green accuracy over an empty panel is a finding.
 - Authority: halt a run, fix at its ROOT, relaunch — without asking. Name the structural cause
-  before touching code; default the fix to the `promptpotter/assets/optimizer/` meta-prompts
+  before touching code; default the fix to the `promptpotter/assets/optimizer/` optimizer prompts
   (`pipeline.yaml::resolved_prompts` inner, `sets/*.yaml` outer) (`<root-fix>`, `<dispatch-first>`).
 - **Never commit.** Fixes accumulate uncommitted; name every path touched so the operator can
   `git add` by path (a second session commits to `main` concurrently).
@@ -82,9 +82,9 @@ cache-hits prior results.
 **`promptpotter-self` runs ONCE, in the foreground, to completion.** A kill orphans the open
 inner run → the reaper stamps it `producer_vanished` (excluded from scoring, and NOT cached), so
 the next launch re-burns that seed. And the outer `cycle_id` is deterministic (hash of
-meta-prompts + benchmark), so re-`new` with unchanged meta-prompts collides on one `cycle_id` and
+optimizer prompts + benchmark), so re-`new` with unchanged optimizer prompts collides on one `cycle_id` and
 renders the same measurement under N campaign headers. Iterate with `resume`; `new` again only
-after a meta-prompt or config change.
+after an optimizer prompt or config change.
 
 ## Supervise
 
@@ -110,7 +110,7 @@ backend fault, not a prompt problem. Fix the backend and `resume`; don't burn ro
 measurement" is not a reason to continue.** The test is not *is this cell scoreable* — it is
 *will this recur*. Round 0 is the cheapest place the defect will ever appear: a structural
 fault in cell 1 of N repeats in every remaining cell, in every variant of every later round,
-at full price, and the run ends up measuring the defect instead of the meta-prompt. Anything
+at full price, and the run ends up measuring the defect instead of the optimizer prompt. Anything
 systematic qualifies — a share of candidates producing no measurement (`repeat_variant`,
 answer-collapse), optimizer calls blowing `max_tokens` and paying a repair round-trip, a panel
 that drifts, a prompt that grows every round. Halt, fix at the root, relaunch. Wave one through

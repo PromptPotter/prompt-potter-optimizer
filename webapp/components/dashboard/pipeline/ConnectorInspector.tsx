@@ -110,7 +110,7 @@ export function ConnectorInspector({ view }: Props) {
           {interior.length === 0 && (
             <li className="empty">
               {selfOpt
-                ? "meta-prompt nodes — inspect them in the inner run"
+                ? "optimizer prompt nodes — inspect them in the inner run"
                 : "no nodes loaded"}
             </li>
           )}

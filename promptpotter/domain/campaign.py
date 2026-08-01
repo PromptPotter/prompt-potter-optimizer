@@ -1,6 +1,6 @@
 """``Campaign`` — first-class optimization-effort entity (``campaign.json``).
 
-One declared effort: dataset + origin + context + optimizer meta-prompts. Holds
+One declared effort: dataset + origin + context + optimizer prompts. Holds
 one session root (``cycle_<target_hash>``) plus fork/diag/sweep descendants, flat
 under ``cycles/``. Single owner of the frozen ``CampaignConfig`` snapshot.
 

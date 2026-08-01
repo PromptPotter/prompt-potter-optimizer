@@ -2,7 +2,7 @@
 
 ## What this is
 
-A self-referential dataset: outer PromptPotter optimizes the **meta-prompts**
+A self-referential dataset: outer PromptPotter optimizes the **optimizer prompts**
 that drive the inner PromptPotter cycle. Connector boundary:
 `promptpotter/connectors/promptpotter.py`. Spec:
 [`docs/specs/l4-outer-loop.md`](../../docs/specs/l4-outer-loop.md).
@@ -20,7 +20,7 @@ the inner search ENDED on minus its origin, in logits on one difficulty-adjusted
 The outer scoring formula in `campaign.yaml::scoring` re-anchors that one term into
 [0,1] and nothing else. It used to compose four factors over eight emitted proxies;
 a 39-cell panel then measured each, and only this one discriminated between
-meta-prompts — the quality terms carried more SEED variance than arm variance while
+optimizer prompts — the quality terms carried more SEED variance than arm variance while
 holding authority over the ordering. The rationale lives on `OuterSampleProxies`.
 
 ## Status
@@ -33,17 +33,17 @@ place — [`docs/specs/l4-outer-loop.md`](../../docs/specs/l4-outer-loop.md)
 
 Knob values live in the files, not here — read them there.
 
-- `pipeline.yaml` — meta-prompt node schema (`l1_generate` / `l1_critique` /
+- `pipeline.yaml` — optimizer prompt node schema (`l1_generate` / `l1_critique` /
   `l2_context` / `l3_plan`) + the outer optimizer's model/provider.
 - `campaign.yaml` — outer campaign config: the composite scoring formula,
-  `optimizer_set: "meta"`, the USD budget (`token_budget` is `null` on purpose —
+  `optimizer_set: "self_optimizing"`, the USD budget (`token_budget` is `null` on purpose —
   see Cost shape).
 - `inner_tasks.yaml` — the outer "samples": the seed-pinned `justlogic` bank +
   the `inner_benchmark_config` ladder (a REQUIRED file; all four ladder keys
   must be present or the inner cycle is unscoreable).
 - `task_description.md` / `task_context.yaml` — outer L1 framing.
-- The outer meta-prompt *rewrites* live in `promptpotter/assets/optimizer/sets/meta.yaml`
-  (selected by `optimizer_set: "meta"`), not in a local `prompts/` dir.
+- The outer optimizer prompt *rewrites* live in `promptpotter/assets/optimizer/sets/self_optimizing.yaml`
+  (selected by `optimizer_set: "self_optimizing"`), not in a local `prompts/` dir.
 
 ## Run
 

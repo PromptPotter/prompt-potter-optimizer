@@ -1,4 +1,4 @@
-"""L1 generation — LLM meta-prompt call producing N candidate variants."""
+"""L1 generation — LLM optimizer prompt call producing N candidate variants."""
 
 from __future__ import annotations
 
@@ -28,10 +28,11 @@ from promptpotter.domain.opt_search_point import EvidenceGrounding
 from promptpotter.domain.results import (
     L1_PARSE_FAILURE_MALFORMED,
     L1_PARSE_FAILURE_TOOLING,
+    L1_PARSE_FAILURE_WRONG_TYPE,
     CandidateProposal,
     candidate_label,
 )
-from promptpotter.infrastructure.llm.json_parse import MetaPromptParseError
+from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
 from promptpotter.infrastructure.llm.models import emit_round_warning
 from promptpotter.infrastructure.tracing.events import CandidateCreated
 from promptpotter.shared import truncate
@@ -89,10 +90,10 @@ async def l1_generate(
     obs: ObservabilityBridge | None = None,
     round_num: int = 0,
 ) -> tuple[list[CandidateProposal], str | None]:
-    """Generate candidate variants via LLM meta-prompt; context read from cycle.
+    """Generate candidate variants via LLM optimizer prompt; context read from cycle.
 
     Returns ``(candidates, parse_failure)``. ``parse_failure`` names the reason when the
-    meta-prompt produced unparseable output — the round then carries zero candidates and
+    optimizer prompt produced unparseable output — the round then carries zero candidates and
     the reason travels with it (charged to the round, never to a candidate), rather than
     vanishing into a bare ``[]``.
     """
@@ -136,7 +137,7 @@ async def l1_generate(
     # the SAME `effective_l1_field_names` — a disagreement would fail every parse, every round.
     response_model = build_l1_response_model(effective_l1_field_names())
     try:
-        generated, meta_prompt, _ = await run_optimizer_node(
+        generated, optimizer_prompt, _ = await run_optimizer_node(
             template_name="l1_generate",
             prompt_vars=prompt_vars,
             temperature=creativity,
@@ -149,25 +150,25 @@ async def l1_generate(
             ),
             template=template,
         )
-    except MetaPromptParseError as parse_err:
+    except OptimizerPromptParseError as parse_err:
         # Schema-noncompliant after one repair retry. Split provider-degraded (empty) vs
         # structurally wrong — both wound the same channel but `reason` steers L2's heal
         # direction, and TOOLING additionally drops the round from L4 outer scoring
         # (`domain/l4/proxies.py::_is_evidential`), so the split decides whether this round
         # is evidence at all. `is_empty` reads the FIRST attempt and refuses to call a
-        # truncation "provider degraded" — a meta-prompt that outgrew max_tokens owns its
+        # truncation "provider degraded" — an optimizer prompt that outgrew max_tokens owns its
         # failure. Truncation is called by name below: it is the one cause with an obvious
-        # operator fix (shrink the meta-prompt or raise the node's max_tokens).
+        # operator fix (shrink the optimizer prompt or raise the node's max_tokens).
         is_empty = parse_err.is_empty
         truncated = parse_err.first_finish_reason == "length"
         reason = L1_PARSE_FAILURE_TOOLING if is_empty else L1_PARSE_FAILURE_MALFORMED
         cause = (
-            "response truncated at max_tokens — the meta-prompt asks for more than the "
+            "response truncated at max_tokens — the optimizer prompt asks for more than the "
             "budget carries"
             if truncated
             else "provider returned empty/truncated content"
             if is_empty
-            else "meta-prompt parse failure after retry"
+            else "optimizer prompt parse failure after retry"
         )
         logger.error(
             "L1 R%d: %s — zero candidates this round (failing attempt=%d chars) [%s]",
@@ -191,7 +192,7 @@ async def l1_generate(
                 "Optimizer produced 0 candidates this round — "
                 + (
                     "the optimizer LLM's response was cut off at max_tokens; shrink the "
-                    "meta-prompt or raise the node's max_tokens"
+                    "optimizer prompt or raise the node's max_tokens"
                     if truncated
                     else "the optimizer LLM returned empty/truncated output"
                     if is_empty
@@ -211,9 +212,9 @@ async def l1_generate(
         key=lambda x: -x[1],
     )
     logger.info(
-        "L1 R%d meta-prompt: %d chars | %s",
+        "L1 R%d optimizer prompt: %d chars | %s",
         round_num,
-        len(meta_prompt),
+        len(optimizer_prompt),
         " | ".join(f"{n}={s}" for n, s in slot_sizes),
     )
 
@@ -232,7 +233,7 @@ async def l1_generate(
                 axis="l1_generate.output",
                 value=truncate(str(generated), 300),
                 allowed=[],
-                reason="meta_prompt_unexpected_type",
+                reason=L1_PARSE_FAILURE_WRONG_TYPE,
             )
         )
         emit_round_warning(
@@ -243,9 +244,9 @@ async def l1_generate(
                 f"response decoded as {type(generated).__name__} instead of the expected "
                 f"schema (model {model})."
             ),
-            detail={"reason": "meta_prompt_unexpected_type", "model": model},
+            detail={"reason": L1_PARSE_FAILURE_WRONG_TYPE, "model": model},
         )
-        return [], "meta_prompt_unexpected_type"
+        return [], L1_PARSE_FAILURE_WRONG_TYPE
 
     variants_list = generated.variants
 

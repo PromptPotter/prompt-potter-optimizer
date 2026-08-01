@@ -157,7 +157,7 @@ function AppShellInner() {
   );
   // The DISPLAY panes (connector, pipeline hero, hard-samples) follow the VIEWED
   // LEAF hop — the same hop the dashboard stream re-roots to — so drilling into an
-  // L4 inner loop shows the inner run's connector + samples, not the outer meta
+  // L4 inner loop shows the inner run's connector + samples, not the outer loop
   // pipeline. The CHAT THREAD (live feed, control verbs, session, Files, checkin)
   // stays on the root hop below. At depth 1 leaf == root, so every leaf value
   // equals its root counterpart and the top-level view is unchanged. `leafCreatedAt`

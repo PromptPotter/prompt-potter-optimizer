@@ -124,7 +124,7 @@ async def generate_or_load_candidates(
 
     async with observed_node(
         f"l1_generate_r{round_num}",
-        "llm/meta",
+        "llm/optimizer",
         obs=obs,
         campaign_id=session.state.tracing_campaign_id,
         round_num=round_num,

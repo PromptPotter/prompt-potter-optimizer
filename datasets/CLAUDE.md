@@ -36,11 +36,11 @@ The roster is the directory listing; each dataset's connector is read off its ow
 - **`aime_2025`** — its overlay routes to OpenRouter+Mistral, off the Groq default.
 - **`email-tagging`** — the built-in try-and-learn demo, surfaced while `User.demo_mode_enabled`.
 - **`justlogic-d234`** — the L4 inner benchmark (an iid mix of depths 2-4; `justlogic` (d6-7) and `justlogic-d23` are dead cuts kept only so their banked measurements stay addressable); **`promptpotter-self`** (`promptpotter` connector) — the one L4 dataset ([§ L4 below](#l4--promptpotter-self)).
-- **The optimizer's own prompt homes are not in this directory.** They sat here as `_optimizer/` + `_optimizer_meta/` until 2026-07-30 — which is why the listing once needed an `_`-prefix filter — and moved under the package as install content: `promptpotter/assets/optimizer/pipeline.yaml` + `sets/*.yaml`, shipped in the wheel. Which prompts live where → [`../docs/glossary.md`](../docs/glossary.md) **Prompt homes**. Still **operator-owned files** — nothing writes them. `meta_champion.py` ranks meta-prompt states; graduating a winner into `assets/optimizer/pipeline.yaml` is a deliberate hand-edit, and an installed operator shadows that one file via `config/paths.py::optimizer_pipeline_path`.
+- **The optimizer's own prompt homes are not in this directory.** They sat here as `_optimizer/` + `_optimizer_meta/` until 2026-07-30 — which is why the listing once needed an `_`-prefix filter — and moved under the package as install content: `promptpotter/assets/optimizer/pipeline.yaml` + `sets/*.yaml`, shipped in the wheel. Which prompts live where → [`../docs/glossary.md`](../docs/glossary.md) **Prompt homes**. Still **operator-owned files** — nothing writes them. `optimizer_prompt_ranking.py` ranks optimizer-prompt states; graduating a winner into `assets/optimizer/pipeline.yaml` is a deliberate hand-edit, and an installed operator shadows that one file via `config/paths.py::optimizer_pipeline_path`.
 
 ## L4 — `promptpotter-self`
 
-`datasets/promptpotter-self/` is the **recursive case**: the outer cycle's mutation surface is the inner cycle's meta-prompt template fields (`l1_generate` / `l1_critique` / `l2_context` / `l3_plan`), exposed via `pipeline.yaml::nodes.{node}.optimizer.param_keys`.
+`datasets/promptpotter-self/` is the **recursive case**: the outer cycle's mutation surface is the inner cycle's optimizer prompt template fields (`l1_generate` / `l1_critique` / `l2_context` / `l3_plan`), exposed via `pipeline.yaml::nodes.{node}.optimizer.param_keys`.
 
 L4 is **not** a 4th `LayerStrategy` — it is the same PromptPotter applied to itself via the `promptpotter` connector, a recursion, not a new layer driver (full statement: [`../promptpotter/application/optimization/CLAUDE.md`](../promptpotter/application/optimization/CLAUDE.md)).
 
@@ -52,7 +52,7 @@ Source of truth for wire / reject rationale, projection-bias findings, per-datas
 
 - **Adding a dataset + canonical splits** → [`../docs/operations/adding-a-dataset.md`](../docs/operations/adding-a-dataset.md). Research the canonical split; never invent one.
 - **Why X is / isn't wired, trialed-and-rejected list** → [`../docs/operations/dataset-selection-rationale.md`](../docs/operations/dataset-selection-rationale.md). Check first when asked "why didn't we use Y?" or "have we trialed Z?".
-- **Per-dataset model + `reasoning_effort` + `max_tokens`, BBEH output-ceiling traps, Groq daily-volume swap protocol** → [`../docs/operations/dataset-reasoning-matrix.md`](../docs/operations/dataset-reasoning-matrix.md). This — not meta-campaign NOTES.md — is the canonical source for model recommendations.
+- **Per-dataset model + `reasoning_effort` + `max_tokens`, BBEH output-ceiling traps, Groq daily-volume swap protocol** → [`../docs/operations/dataset-reasoning-matrix.md`](../docs/operations/dataset-reasoning-matrix.md). This — not self-optimizing campaign NOTES.md — is the canonical source for model recommendations.
 
 ## Conventions
 

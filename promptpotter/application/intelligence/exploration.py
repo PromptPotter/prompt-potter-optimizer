@@ -156,11 +156,11 @@ def adopted_level_trajectory(
     wherever the origin sits. Projecting each θ back through :func:`ruler_expected_accuracy`
     *before* differencing throws that property away, because the sigmoid is flat near the ruler's
     ceiling: the same ability gain then reads smaller for a strong origin than for a weak one, and
-    the outer loop would rank meta-prompts partly by which seed drew an easy origin.
+    the outer loop would rank optimizer prompts partly by which seed drew an easy origin.
 
     A round whose frontier could not be fit (every row errored) carries the PRIOR level — the
     incumbent persists; nothing says it moved — falling back to the origin at round 1. Levels are
-    **not** floored at the origin, so a genuinely regressing meta-prompt still reads negative,
+    **not** floored at the origin, so a genuinely regressing optimizer prompt still reads negative,
     which is the gradient the outer optimizer needs to avoid bad mutations.
 
     ``delta_scale`` is read only as the WARM-RULER GATE, not by the arithmetic — where the ruler

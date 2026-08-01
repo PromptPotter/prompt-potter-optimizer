@@ -302,7 +302,7 @@ def _load_dataset_rows(
     Sample-id key varies on disk (``id`` canonical, BBEH HF emits ``sample_id``) —
     normalise at the read boundary. The name is already access-checked by
     :func:`readable_dataset_dir`, so MISSING rows are not an unknown dataset — they are a
-    resolvable one with no materialised sample bank (a pipeline-only / L4 meta-dataset
+    resolvable one with no materialised sample bank (a pipeline-only / L4 self-optimizing dataset
     such as ``promptpotter-self``, which reports ``n_samples: 0`` in the list). Return an
     empty bank so ``/preview`` + ``/measurement-series`` answer an honest empty 200 rather
     than a 404 that reads as "unknown slug" and spams the webapp console every load.

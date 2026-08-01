@@ -199,7 +199,7 @@ class RequestTooLargeError(RuntimeError):
             f"`promptpotter/assets/optimizer/pipeline.yaml` at a tier whose per-minute cap "
             f"exceeds {requested} tokens (e.g. OpenRouter, or a paid Groq tier) — "
             f"the free Groq on_demand tier caps at {limit}\n"
-            f"  - or shorten the optimizer meta-prompt (task_description.md)."
+            f"  - or shorten the optimizer prompt (task_description.md)."
         )
 
 

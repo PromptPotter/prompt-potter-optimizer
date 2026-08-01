@@ -582,7 +582,7 @@ export function fetchConfigMap(
 }
 
 // --- Optimizer-prompt ranking (outer-loop dashboard box) --------------------------
-// The ranked table of candidate meta-prompt states, reduced fresh from the
+// The ranked table of candidate optimizer prompt states, reduced fresh from the
 // tenant's on-disk pp-self cycles. Empty (n_cycles_scanned=0) for every tenant
 // with no pp-self campaigns — i.e. every whitelabeled end-user; the dashboard
 // renders the box only when viewing the outer pp-self loop, so the read is

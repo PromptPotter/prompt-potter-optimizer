@@ -69,7 +69,7 @@ _MODEL_PROFILES: dict[str, ModelProfile] = {
     "openai/gpt-oss-120b": ModelProfile(
         is_reasoning=True,
         min_max_tokens=8000,
-        notes="Over-reasons on long meta-prompts and returns empty content; keep effort low.",
+        notes="Over-reasons on long optimizer prompts and returns empty content; keep effort low.",
     ),
 }
 

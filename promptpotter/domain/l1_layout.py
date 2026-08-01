@@ -3,9 +3,9 @@ lists of placeholder names the dispatch hub resolves when filling a node's Promp
 
 Every optimizer node owns a ``NodeLayoutSpec`` in ``NODE_LAYOUTS`` (editor / possible /
 mandatory / floor). ``l1_generate`` is edited by L2 in-campaign (its live layout rides
-``OptSearchPoint.memory.l1_layout``); the other meta-prompt nodes are edited only by L4
+``OptSearchPoint.memory.l1_layout``); the other optimizer prompt nodes are edited only by L4
 across the recursion (their floor is their layout until an outer loop mutates it). This
-is the single source for which signals reach each meta-prompt — the dispatch hub fills
+is the single source for which signals reach each optimizer prompt — the dispatch hub fills
 every node from here (no second `{{token}}` source in the templates).
 
 Validation (`validate_l1_layout`, against a node's spec):
@@ -96,7 +96,7 @@ class NodeLayoutSpec(StrictModel):
 
     * ``editor`` — who may mutate this node's layout: ``l2_l4`` (L2 in-campaign +
       L4 across the recursion — only ``l1_generate``), ``l4`` (L4 only — the other
-      meta-prompt nodes, since nothing sits above them in a normal campaign), or
+      optimizer prompt nodes, since nothing sits above them in a normal campaign), or
       ``static`` (never edited).
     * ``possible`` — the full add/excise vocabulary (⊇ ``mandatory`` and ⊇ ``floor``).
     * ``mandatory`` — the GUARD RAIL: placeholders an edit may never excise; the
@@ -126,7 +126,7 @@ class NodeLayoutSpec(StrictModel):
 # owns its injection set here (was: `l1_generate` in `default_l1_layout()` Python +
 # every other node hardcoded as `{{tokens}}` in `promptpotter/assets/optimizer/pipeline.yaml`).
 # The dispatch hub fills every node from `NODE_LAYOUTS[node]` (floor ± editor edits),
-# so the set of signals reaching each meta-prompt is one searched axis, not two
+# so the set of signals reaching each optimizer prompt is one searched axis, not two
 # hand-tuned sources. `checkin` is excluded — it runs around the loop, not through
 # the injection path (§5 non-goal). Floor order == the prompt's prior `{{token}}`
 # order so the collapse stays rendering-identical.

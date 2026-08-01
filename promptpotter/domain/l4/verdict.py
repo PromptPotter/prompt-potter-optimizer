@@ -1,6 +1,6 @@
-"""The round's blocked-paired verdict on a meta-prompt variant.
+"""The round's blocked-paired verdict on an optimizer prompt variant.
 
-An L4 outer round scores each meta-prompt variant across the panel's cells (one inner cycle per
+An L4 outer round scores each optimizer prompt variant across the panel's cells (one inner cycle per
 (variant, cell)); each cell yields an :class:`~promptpotter.domain.l4.proxies.OuterSampleProxies`.
 The round then pairs them: the **cached round-0 origin** is the within-panel control — no config
 is ever re-measured mid-run. :func:`compute_outer_verdict` computes, for the round's target

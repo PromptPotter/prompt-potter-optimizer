@@ -55,7 +55,7 @@ from promptpotter.domain.run_records import (
     RebaseRequest,
 )
 from promptpotter.domain.validators import ValidatorOutcome
-from promptpotter.infrastructure.llm.json_parse import MetaPromptParseError
+from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
 from promptpotter.infrastructure.llm.models import emit_round_warning
 from promptpotter.infrastructure.tracing.bridge import observed_node
 from promptpotter.infrastructure.tracing.events import LayerApplied
@@ -359,7 +359,7 @@ async def _run_transition(
     )
     async with observed_node(
         f"{transition.template_name}_r{round_num}",
-        "llm/meta",
+        "llm/optimizer",
         obs=obs,
         campaign_id=tracing_campaign_id,
         round_num=round_num,
@@ -381,15 +381,15 @@ async def _run_transition(
                 ),
             )
             result = transition.parse(raw, cycle.opt_sp, prompt)
-        except MetaPromptParseError as parse_err:
+        except OptimizerPromptParseError as parse_err:
             # A refinement that never parsed costs a REFINEMENT, not a MEASUREMENT. Left
             # unhandled this kills the whole cycle — and under L4 that voids an entire outer
-            # sample, so one flaky provider response is scored as "this meta-prompt is bad".
+            # sample, so one flaky provider response is scored as "this optimizer prompt is bad".
             # `l1_generate` has always survived the same failure (`l1/generate.py`); L2/L3
             # simply never got the same treatment. Prior `task_context`/`plan` stays adopted
             # (identical to a soft-reject), the round is a stall, and the loop continues.
             logger.error(
-                "%s: meta-prompt parse failure — refinement discarded, prior framing kept. [%s]",
+                "%s: optimizer prompt parse failure — refinement discarded, prior framing kept. [%s]",
                 transition.template_name,
                 parse_err.diagnosis(),
             )

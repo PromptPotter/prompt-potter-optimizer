@@ -12,7 +12,7 @@ from promptpotter.infrastructure.llm.json_parse import (
     MIN_CONTENT_CHARS,
     RETRY_CLEAN_REASK,
     RETRY_SCHEMA_REPAIR,
-    MetaPromptParseError,
+    OptimizerPromptParseError,
     parse_response_content,
     try_groq_json_validate_repair,
 )
@@ -57,7 +57,7 @@ def _finish_reason(response: ChatCompletion) -> str | None:
 def _failure_diagnostics(
     response: ChatCompletion, first_prompt: int, first_completion: int
 ) -> dict[str, Any]:
-    """The SECOND attempt's account + the billed totals, for ``MetaPromptParseError``.
+    """The SECOND attempt's account + the billed totals, for ``OptimizerPromptParseError``.
 
     ``prompt_tokens`` / ``completion_tokens`` are deliberately sums across both
     round-trips: they are the billing contract (``dispatch/llm_call/call.py`` meters spend
@@ -185,8 +185,8 @@ class OpenAICompatibleClient(LLMClientBase):
             # The FAILING attempt's own account. Captured here because `response` is about
             # to be rebound to the retry's, and the retry cannot answer why this one was
             # rejected — `finish_reason="length"` here is the difference between "the
-            # meta-prompt outgrew max_tokens" and "the provider degraded", which classify
-            # to opposite owners and opposite fixes (`MetaPromptParseError.is_empty`).
+            # optimizer prompt outgrew max_tokens" and "the provider degraded", which classify
+            # to opposite owners and opposite fixes (`OptimizerPromptParseError.is_empty`).
             first_prompt, first_completion, first_reasoning = _attempt_usage(response)
             first_finish_reason = _finish_reason(response)
             schema_name = response_model.__name__ if response_model else "<schema>"
@@ -273,7 +273,7 @@ class OpenAICompatibleClient(LLMClientBase):
                 return result
             response, content, validation_err, parsed = result
             if validation_err is not None:
-                err = MetaPromptParseError(
+                err = OptimizerPromptParseError(
                     raw=content,
                     error=validation_err,
                     attempts=2,

@@ -246,7 +246,7 @@ class PipelineNode(StrictModel):
     def is_llm(self) -> bool:
         """Whether this node makes an LLM call PER ITS OBSERVATION MAPPINGS. Narrow
         on purpose: this is the "the dataset must declare a per-node ``model``" signal
-        (`config.py::_require_owned_models`). An in-process meta-prompt node (L4) runs
+        (`config.py::_require_owned_models`). An in-process optimizer prompt node (L4) runs
         an LLM but carries no owned model — its model is the install-global optimizer
         config — so it is deliberately NOT ``is_llm`` and stays exempt from that check."""
         return any(m.is_llm for m in self.observation_mappings)
@@ -256,7 +256,7 @@ class PipelineNode(StrictModel):
         """Whether this node runs an LLM call at all — the BROAD signal, the union of
         the ``is_llm`` mapping, a ``generation`` wire/langfuse type (the backend's
         explicit LLM marker), and the ``llm_only`` sentinel. This is the "could this
-        node carry the model axis" predicate: pp-self's ``meta_prompt`` nodes are
+        node carry the model axis" predicate: pp-self's ``optimizer_prompt`` nodes are
         ``generation`` LLM calls with no per-node model, so ``is_llm`` is False for
         them but ``runs_llm`` is True. Model-axis carrier selection reads THIS, not the
         narrower ``is_llm`` — otherwise a self-optimization pipeline resolves no carrier
@@ -385,7 +385,7 @@ class PipelineSchema(StrictModel):
         that owns it (see :class:`NodeConfigParam`); the config editor renders the five
         widget kinds and skips ``prompt``/``nested``, which is where the filtering
         belongs — a param this method drops is invisible to every caller, and dropping
-        the prose fields is what made pp-self's four meta-prompt nodes — whose entire
+        the prose fields is what made pp-self's four optimizer prompt nodes — whose entire
         search space IS prose — report themselves optimizer-locked.
 
         The lone exclusion is :data:`SCHEMA_OWNED_FIELDS` (``output_schema`` /
@@ -397,7 +397,7 @@ class PipelineSchema(StrictModel):
         them on a fork, which taints the branch babysat (ADR-0005 §4).
 
         When NO node declares ``model`` natively (an install-global-model pipeline —
-        pp-self's meta-prompt nodes run the shared optimizer model, own none) the model
+        pp-self's optimizer prompt nodes run the shared optimizer model, own none) the model
         row is SYNTHESIZED onto the carrier from ``available_models`` so the operator's
         fork-model-steer has somewhere to land (without it the steer panel showed
         "no configurable params").

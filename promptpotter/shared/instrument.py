@@ -1,6 +1,6 @@
 """Instrument mode — this task's cycle is a MEASUREMENT, not a campaign.
 
-L4 runs a whole campaign as ``f(meta_prompt, seed) -> proxies``, and a campaign is a
+L4 runs a whole campaign as ``f(optimizer_prompt, seed) -> proxies``, and a campaign is a
 stateful process, so ``f`` leaks unless features are *subtracted*: recursion depth, the
 optimizer decoding clamp, the evidence epoch. This is the ONE declared mode that binds
 them — never re-split it into properties a spawn site sets by hand, because forgetting

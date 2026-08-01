@@ -234,7 +234,7 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
         ``CancelledError`` with a plain return — and it made this entire guard vanish.
         ``asyncio.timeout`` raises TimeoutError only when a CancelledError travels back up,
         so a swallowing callee let the await complete, no deadline fired, and an over-budget
-        campaign was scored as a genuine measurement of the meta-prompt that ran it. A stub
+        campaign was scored as a genuine measurement of the optimizer prompt that ran it. A stub
         that politely re-raises cannot catch that, which is why this one does not.
         """
         started.set()

@@ -177,7 +177,7 @@ world is a strict containment hierarchy:
   So an ingested tenant dataset is first-class to the whole loop, not
   just to the mint that created it.
 - **Campaign** — one declared optimization effort: a dataset, a
-  pipeline origin, context text, **and the optimizer meta-prompts it
+  pipeline origin, context text, **and the optimizer prompts it
   runs under**. A **first-class entity** and a **cycle tree** — root
   + its fork/diag/sweep descendants. `campaign_id = {dataset}__{rand6_hex}`,
   minted fresh per `new` invocation by `mint_campaign_id` — each `new`

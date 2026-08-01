@@ -30,7 +30,7 @@ class L1Stats:
     behavior_pass_rate: float | None
     stagnation_max: int
     l2_fires: int
-    # `l2_context` meta-prompt conformance — None when L2 never fired, so the reader
+    # `l2_context` optimizer prompt conformance — None when L2 never fired, so the reader
     # doesn't have to cross-check `l2_fires` to know a 1.0 was vacuous.
     l2_behavior_pass_rate: float | None
     round_1_verdict: str  # "healthy" | "degraded" | "broken" | "unknown"
@@ -82,7 +82,7 @@ def _compute_round_1_verdict(
     Two guards close the paths where ``failed_total == 0`` would report a false ``healthy``:
 
     1. **L1 yielded nothing.** Zero variants is the WORST L1 outcome, not the cleanest — the
-       meta-prompt made its own children unreadable. Each check short-circuits to
+       optimizer prompt made its own children unreadable. Each check short-circuits to
        ``passed=True`` on an empty variant list, so ``run_all_checks`` returns ``[]`` there,
        landing in guard 2.
     2. **The checks never ran** (empty list — L1 yielded nothing, or the round's audit dict was

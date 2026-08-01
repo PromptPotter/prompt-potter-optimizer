@@ -115,9 +115,9 @@ class ValidationFailure(StrictModel):
     axis: str = Field(
         description=(
             "The parameter path that failed, ``{node_name}.{param}`` "
-            "(e.g. ``llm_only.model``), or a meta-axis on the generator "
-            "output itself: ``l1_generate.output`` (parse/shape failures) "
-            "or ``variant`` (no-op / duplicate mutations)."
+            "(e.g. ``llm_only.model``), or an axis on the generator's own "
+            "output rather than a pipeline param: ``l1_generate.output`` "
+            "(parse/shape failures) or ``variant`` (no-op / duplicate mutations)."
         ),
     )
     value: str = Field(
@@ -143,8 +143,8 @@ class ValidationFailure(StrictModel):
             "(value outside schema enum), "
             "``reproposes_known_failing_config`` (matches a prior "
             "``RuntimeFailure.observed_config`` row), "
-            "``l1_provider_empty_response`` / ``meta_prompt_parse_failure`` "
-            "/ ``meta_prompt_unexpected_type`` (generator-side failure), "
+            "``l1_provider_empty_response`` / ``optimizer_prompt_parse_failure`` "
+            "/ ``optimizer_prompt_unexpected_type`` (generator-side failure), "
             "``no_op_variant`` / ``duplicate_variant`` (invariant-detect), "
             "``hallucinated_node`` (named a node absent from the schema — "
             "NON-fatal: the phantom edit is stripped, the candidate still scores; "

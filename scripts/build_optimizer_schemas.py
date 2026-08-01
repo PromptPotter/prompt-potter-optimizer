@@ -3,7 +3,7 @@
 
 **A pure writer** — it reads nothing from the optimizer assets and owns this file
 outright. It used to read the whole ``pipeline.json``, graft ``resolved_schemas`` into
-it, and rewrite the lot, which put generated output and hand-written meta-prompt prose
+it, and rewrite the lot, which put generated output and hand-written optimizer prompt prose
 in one file under one ``git diff --exit-code`` gate. That is unworkable now the authored
 half is YAML: re-emitting it would reformat the operator's blocks and comments on every
 run, and CI would read that as schema drift.

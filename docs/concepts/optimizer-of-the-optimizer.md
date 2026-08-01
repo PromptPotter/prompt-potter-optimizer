@@ -2,7 +2,7 @@
 
 > **Audience:** Developer reference. Operators see [`../manual/`](../manual/) for usage docs.
 
-PromptPotter can optimize **its own meta-prompts**. The four optimizer LLM
+PromptPotter can optimize **its own optimizer prompts**. The four optimizer LLM
 calls — `l1_generate`, `l1_critique`, `l2_context`, `l3_plan` — are
 themselves prompts driven by the eight-field `PromptTemplate` scheme. Expose
 those template fields as a connector's `pipeline_params`, point an outer
@@ -16,9 +16,9 @@ This is the headline self-referential capability of M12. Connector:
 
 ## Why it's interesting
 
-Most prompt-optimization work treats the *meta-prompt* as fixed — the L1
+Most prompt-optimization work treats the *optimizer prompt* as fixed — the L1
 and critique templates are written by humans and frozen. But the
-meta-prompts are prompts; they're as optimizable as any task prompt.
+optimizer prompts are prompts; they're as optimizable as any task prompt.
 Self-optimization tests two beliefs:
 
 1. The mutation-and-elimination loop is general enough to improve any
@@ -48,8 +48,8 @@ mean logit lift — a number to read, not merely to order by.
 the composition did not survive contact:
 
 - `cleanliness` put **twice** as much of its variance into the SEED as into the arm (30.9% vs
-  15.4%). It was grading which data a cell drew, not which meta-prompt ran it. This spec had
-  flagged exactly that as open and left it charging pending "a run with a real meta-prompt
+  15.4%). It was grading which data a cell drew, not which optimizer prompt ran it. This spec had
+  flagged exactly that as open and left it charging pending "a run with a real optimizer prompt
   contrast"; that run happened.
 - `diversity_health` never left the top fifth of its range — no candidate gradient at all.
 - `delta_per_dollar` correlated **0.958** with the lift core and flipped no ordering: it was the
@@ -76,7 +76,7 @@ Declaring a target bakes a pessimistic guess about the ceiling into config and t
 against the guess. The lift term is the raw climb on the ability ruler and divides by nothing at
 all — so nothing was lost by deleting the target, and one whole class of assumption went with it.
 
-**Governing law — every term must carry a candidate gradient** (vary across the meta-prompt
+**Governing law — every term must carry a candidate gradient** (vary across the optimizer prompt
 candidates being compared). That law is what removed the four factors above, and it is why there
 is one term rather than a tidy-looking basket.
 
@@ -108,8 +108,8 @@ consequence. Re-run an inner cycle we have run before and it **replays**: the sa
 same trajectory, the same conclusion — and no money spent.
 
 That saving is not distributed evenly across the arms, and this is the whole problem. The arm that
-replays is the **origin** arm: it is the meta-prompt we have been running all along, on the seeds
-we have been running it on. A variant meta-prompt, by construction, writes different prompts, so
+replays is the **origin** arm: it is the optimizer prompt we have been running all along, on the seeds
+we have been running it on. A variant optimizer prompt, by construction, writes different prompts, so
 every one of its content hashes is new and it pays full freight. So a cost term denominated in the
 *bill* does not measure the candidate at all — it measures how often we have run the candidate
 before, and it hands the incumbent an advantage on precisely the cells we know best.
@@ -167,20 +167,20 @@ difference between a cheaper run and a run that can no longer tell you anything.
 
 **Cutting the inner round cap is close to free.** The instinct is that truncating the inner
 search must bias the result — but it does not, because the truncation is *common*. The outer
-verdict never asks "how good is this meta-prompt in absolute terms". It asks "how does this
-meta-prompt compare to the origin, **on the same cell**", and the origin is re-measured under
+verdict never asks "how good is this optimizer prompt in absolute terms". It asks "how does this
+optimizer prompt compare to the origin, **on the same cell**", and the origin is re-measured under
 whatever geometry is currently declared (changing `inner_benchmark_config` re-keys the
 measurement identity, so a banked origin from the old geometry is invalidated rather than reused).
 Both arms are cut off at the same round, so the comparison stays exactly fair.
 
-What you give up is *ceiling*, and this is a real loss, not a free one. **A meta-prompt whose
+What you give up is *ceiling*, and this is a real loss, not a free one. **An optimizer prompt whose
 virtue is that it keeps compounding past the cap can no longer show you that virtue — and
-compounding is arguably the most valuable thing a meta-prompt can do.** Capping the inner search
+compounding is arguably the most valuable thing an optimizer prompt can do.** Capping the inner search
 is a trade we have made deliberately, to get the outer round down to a length that can be
 iterated on at all; it is not a claim that the truncated rounds were worthless. It should be
 revisited the moment the round is cheap enough to afford them, and it must be stated whenever a
-result is reported, because a panel run under a cap cannot distinguish "this meta-prompt stops
-improving at round N" from "this meta-prompt was stopped at round N".
+result is reported, because a panel run under a cap cannot distinguish "this optimizer prompt stops
+improving at round N" from "this optimizer prompt was stopped at round N".
 
 So the cap should sit just past the round where improvement actually stops — a question you
 answer by **measuring where `best_round` lands across the inner cycles already on disk**, not by
@@ -203,12 +203,12 @@ you pay full price for it and learn nothing.
 and they are not interchangeable: each seed draws a different sample of the underlying task, so
 each has its own difficulty — its *origin strength*, how well the inner model does before any
 optimization. A panel is only informative if it spans that range. A strong-origin seed is a hard
-cell, not a broken one: it is where a meta-prompt has least room to work, and therefore where
+cell, not a broken one: it is where an optimizer prompt has least room to work, and therefore where
 weak ones are exposed. So when you shrink the panel, do not take the first N seeds — measure each
 seed's origin (it is deterministic per seed, because the inner run is seeded), sort them, and
 **drop the redundant twins**: two seeds with the same origin strength are, for panel purposes,
 close to the same cell measured twice. Dropping a duplicate costs you almost nothing. Dropping
-the only strong-origin cell costs you the ability to see a meta-prompt fail.
+the only strong-origin cell costs you the ability to see an optimizer prompt fail.
 
 **One coupled knob, easy to forget.** `elimination_n_min` is the number of cells a candidate must
 run before PoBB is allowed to eliminate it — the floor that stops a variant being cut on one
@@ -254,7 +254,7 @@ trying to measure. Implementation: `promptpotter/application/runner/inner/`.
 
 **The project is now in its closing phase: ship a *distributable* `promptpotter-self`.**
 The remaining work and the live-run learnings (gsm8k retired as the inner benchmark —
-no headroom; `justlogic-d234` (iid mix of depths 2-4) chosen; the specialized `_optimizer_meta/` outer
+no headroom; `justlogic-d234` (iid mix of depths 2-4) chosen; the specialized outer prompt set's
 prompt set is the gating slice; inner-spend rollup; bounded cheap default config) are
 the **living finish-line plan** in [`../specs/l4-outer-loop.md`](../specs/l4-outer-loop.md)
 § Finish line — the single SoT an AI agent driving L4 reads first.

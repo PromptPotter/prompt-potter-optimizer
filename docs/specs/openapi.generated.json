@@ -2637,7 +2637,7 @@
       },
       "RankedOptimizerPrompt": {
         "additionalProperties": false,
-        "description": "One unique meta-prompt state, aggregated across every occurrence in the corpus.",
+        "description": "One unique optimizer prompt state, aggregated across every occurrence in the corpus.",
         "properties": {
           "anchor_effect": {
             "title": "Anchor Effect",
@@ -5347,7 +5347,7 @@
     },
     "/api/v1/optimizer-prompt-ranking": {
       "get": {
-        "description": "The L4 prompt ranking — every candidate meta-prompt state on disk, ranked by\nanchor-to-origin effect. Reduced fresh from the tenant's pp-self cycles on each\nfetch (on-demand, not the 2 s poll); zero LLM. Tenant-scoped; empty for a tenant\nwith no pp-self cycles.",
+        "description": "The L4 prompt ranking — every candidate optimizer prompt state on disk, ranked by\nanchor-to-origin effect. Reduced fresh from the tenant's pp-self cycles on each\nfetch (on-demand, not the 2 s poll); zero LLM. Tenant-scoped; empty for a tenant\nwith no pp-self cycles.",
         "operationId": "get_optimizer_prompt_ranking_api_v1_optimizer_prompt_ranking_get",
         "responses": {
           "200": {

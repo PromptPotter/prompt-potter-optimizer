@@ -144,7 +144,7 @@ class Connector:
     the backend's effective revision does. Receives the resolved dataset config
     dir so a connector can fold dataset-scoped inner behavior into the
     fingerprint. The canonical user is the in-process ``promptpotter``
-    connector: its backend IS the inner optimizer (meta-prompt origin +
+    connector: its backend IS the inner optimizer (optimizer prompt origin +
     layouts + engine + the dataset's ``inner_tasks.yaml`` inner-run config), so
     without this an origin edit silently reuses stale measurements recorded
     under the old behavior. The connector's ``wire_adapter`` must strip these

@@ -221,7 +221,7 @@ def test_an_unmeasured_term_is_never_scored_as_zero() -> None:
 
     # An errored row is the ABSENCE of a verdict — excluded from the mean, never a silent
     # 0.0 dragging a real score down (an L4 inner campaign dying of a timeout must not
-    # halve its meta-prompt's accuracy)...
+    # halve its optimizer prompt's accuracy)...
     scored = _result_min("q", "a") | {"hit": True, "fitness": 1.0}
     errored = _result_min("ERROR", "a") | {"error": "boom", "error_category": "UNKNOWN"}
     del errored["fitness"], errored["hit"]  # real error rows carry neither
@@ -810,7 +810,7 @@ def test_fit_theta_given_delta_is_subset_invariant_unlike_accuracy() -> None:
 
 
 def test_ruler_expected_accuracy_refuses_subset_inflation() -> None:
-    # RP-2 (L4 proxy honesty). The outer meta-fitness reads inner improvement as
+    # RP-2 (L4 proxy honesty). The outer outer fitness reads inner improvement as
     # θ-implied accuracy on the cycle's FIXED ruler, not the winner's raw hit-rate, so a
     # lucky thin resubset (`per_round_resubset`) cannot inflate the signal an outer cycle
     # optimizes against. The silent harm without this: a 5/6 easy-slice reads 0.83 and
@@ -832,7 +832,7 @@ def test_ruler_expected_accuracy_refuses_subset_inflation() -> None:
 def test_adopted_level_trajectory_is_honest_single_scale() -> None:
     # The L4 outer proxy's inner-search signal. Every branch here is a SILENT wrong-number
     # class: a completed inner run reports a plausible number and the outer optimizes on it,
-    # so a mis-built level is invisible — the run looks fine and the meta-fitness is wrong.
+    # so a mis-built level is invisible — the run looks fine and the outer fitness is wrong.
     ruler = {1: -1.0, 2: 0.0, 3: 1.0}
     origin_theta = 0.0
 
@@ -840,7 +840,7 @@ def test_adopted_level_trajectory_is_honest_single_scale() -> None:
     # fitting Rasch at all — so an identical Δθ must read as an identical gain wherever the origin
     # sits. Projecting each θ back through the ruler's sigmoid before differencing compressed the
     # gain near the ceiling, so the strong-origin arm scored less for the same ability climb.
-    # SILENT: the outer ranks meta-prompts partly by which seed happened to draw an easy origin.
+    # SILENT: the outer ranks optimizer prompts partly by which seed happened to draw an easy origin.
     low_o, low = adopted_level_trajectory(-1.0, [-0.5], ruler)
     high_o, high = adopted_level_trajectory(1.5, [2.0], ruler)
     assert low_o is not None and high_o is not None
@@ -861,7 +861,7 @@ def test_adopted_level_trajectory_is_honest_single_scale() -> None:
     assert levels == [pytest.approx(0.2702)]
 
     # A peak followed by a collapse must read LOWER than a sustained peak. Under a running max
-    # the two are byte-identical, so a meta-prompt that destroys the inner loop after one good
+    # the two are byte-identical, so an optimizer prompt that destroys the inner loop after one good
     # round scored as its best round forever.
     _, spike = adopted_level_trajectory(origin_theta, [1.2, -2.0], ruler)
     _, held = adopted_level_trajectory(origin_theta, [1.2, 1.2], ruler)
@@ -921,7 +921,7 @@ def test_compute_proxies_is_one_exact_delta_over_the_adopted_incumbent() -> None
 def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
     # SILENT wrong-score. Every aggregate here is TOTAL on an empty input (`_mean([])` is 0.0),
     # so a cycle that never ran an L1 round scores `cleanliness = diversity_health = 1.0` — an
-    # unexercised meta-prompt reported as flawless, and a *high* outer fitness. Nothing errors.
+    # unexercised optimizer prompt reported as flawless, and a *high* outer fitness. Nothing errors.
     # The exclusion predicate must ask "produced evidence?", not "failed?" — the two answers
     # differ on every row below.
     from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError, compute_outer_proxies
@@ -933,10 +933,10 @@ def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
 
     # ONLY A SUCCESS OUTCOME IS A MEASUREMENT. The dangerous rows are the ones with rounds on
     # the board: a rail-truncated cycle looks exactly like a completed one, so every aggregate
-    # below computes happily and reports a TRUNCATED trajectory as the meta-prompt's verdict —
+    # below computes happily and reports a TRUNCATED trajectory as the optimizer prompt's verdict —
     # "it stopped improving" is indistinguishable from "we cut it off". That let provider mood
     # (a slow backend, a spend cap tripping on jittery reasoning-token counts, an operator's
-    # Ctrl+C) masquerade as meta-prompt quality. Measured before the fix: 3 of 36 inner cycles
+    # Ctrl+C) masquerade as optimizer prompt quality. Measured before the fix: 3 of 36 inner cycles
     # on disk tripped `token_budget`, two truncating at rounds 4-5 of a 7-round budget, and
     # every one was scored. Read the verdict off the typed StopOutcome table, never a
     # hand-written reason set.
@@ -959,7 +959,7 @@ def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
             compute_outer_proxies(truncated)
 
     # ...and it is EXCLUDED, never floored: the floor is `after_N_rounds_delta = -1`, which zeroes
-    # cell (the lift core is multiplicative) — punishing the meta-prompt for a slow provider,
+    # cell (the lift core is multiplicative) — punishing the optimizer prompt for a slow provider,
     # which is the dead-cell bug in a new costume. An all-tooling-rounds cycle that would
     # otherwise floor (see the test above) is excluded once a rail truncated it.
     railed_and_empty = cycle_result(
@@ -1063,7 +1063,7 @@ def test_pp_self_scoring_is_monotone_and_never_clips_on_real_data() -> None:
     # than merely orderable: equal movements in the delta buy equal movements in the fitness.
     assert (s(0.9) - s(0.5)) == pytest.approx(s(0.5) - s(0.1))
     # The FLOOR lands exactly at 0.0, which is its contract: `_floor_proxies` assigns -1.0 to a
-    # meta-prompt that broke its own measurement, and that is the one route to a zeroed cell.
+    # optimizer prompt that broke its own measurement, and that is the one route to a zeroed cell.
     assert s(-1.0) == 0.0
     # No MEASURED cell clips. The banked 39-cell panel spans [-0.189, +1.405]; both ends must sit
     # strictly inside (0, 1) or the term stops carrying a gradient exactly where it matters.
@@ -1717,7 +1717,7 @@ def test_parse_population_flags_dropped_mandatory_placeholder():
     assert opt_sp_list[1].memory.wounds.validation_failures == []
 
 
-def test_parse_population_flags_dropped_meta_prompt_port():
+def test_parse_population_flags_dropped_optimizer_prompt_port():
     """An L4 candidate whose merged `l1_generate` prose drops an INLINE port
     (`{{citable_fields}}` in `answer_format`, `{{n_variants}}` in `task_intent`+`instruction`)
     is invalid (synthetic-0) — a severed channel once ran 4 inner campaigns as normal

@@ -1,7 +1,7 @@
-# Task: evolve PromptPotter's own meta-prompts
+# Task: evolve PromptPotter's own optimizer prompts
 
 Goal: the outer cycle mutates the **inner** cycle's L1 / L1_CRITIQUE / L2 / L3
-meta-prompt template fields (6 per node × 4 nodes = 24 fields) so inner cycles
+optimizer prompt template fields (6 per node × 4 nodes = 24 fields) so inner cycles
 converge **faster and further** on the proxy benchmark.
 
 ## What the inner cycle is solving (so you mutate toward the right behaviour)
@@ -24,7 +24,7 @@ generated, what its critique diagnosed, where its rounds stalled); each outer
 candidate must name the observed inner deficiency it attacks. Note the label
 space is three-way and ground-truth labels include genuine `Uncertain` cases —
 an edit that suppresses one answer class trades one error class for another.
-Mutate the inner meta-prompt fields to make the inner *optimizer* better at
+Mutate the inner optimizer prompt fields to make the inner *optimizer* better at
 finding the discipline; do not hard-code task answers into it.
 
 ## Fitness

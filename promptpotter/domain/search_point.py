@@ -151,7 +151,7 @@ class TaskDecomposition:
     the ``task_context`` injection into every optimizer prompt (L1, L1
     critique, L2, L3), so the per-field semantics are load-bearing.
 
-    Field semantics (also reflected in the L2 meta-prompt):
+    Field semantics (also reflected in the L2 optimizer prompt):
 
     - ``domain`` — one-line task family ("competition mathematics",
       "biomedical entity normalization"). Steers L1's persona /

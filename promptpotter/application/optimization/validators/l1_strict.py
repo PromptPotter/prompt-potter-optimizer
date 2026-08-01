@@ -244,9 +244,9 @@ def build_l1_response_schema(
     ``task_context_override`` the two strings spliced around ``problem_description`` —
     and ``to_job_search_point`` puts that render on the wire only through
     ``prompt_node_names()[0]``. With no such node (L4: the mutation surface is the inner
-    meta-prompts, carried as ``pipeline_params``) the render lands nowhere, so a variant
+    optimizer prompts, carried as ``pipeline_params``) the render lands nowhere, so a variant
     spending itself on either slot mutates nothing. Same lock as model/provider — the LLM
-    cannot emit a key the schema never declares — which is why the meta prompt no longer
+    cannot emit a key the schema never declares — which is why the optimizer prompt no longer
     has to ASK for them to be left empty.
 
     Returns the BARE JSON Schema. ``chat()``'s ``response_schema`` *is* the wire
@@ -284,7 +284,7 @@ def build_l1_response_schema(
             continue
         # Scalars first, then the nested params, each alphabetical. Field ORDER is what
         # this schema teaches (`docs/concepts/structured-output.md`), so the two groups
-        # are emitted in a fixed sequence rather than one interleaved sort — the meta-
+        # are emitted in a fixed sequence rather than one interleaved sort — the optimizer
         # levers read after the surface they act on.
         nested = {p for p in keys if node.param_types.get(p) in NESTED_PARAM_TYPES}
         param_props: dict[str, dict[str, Any]] = {}
@@ -615,10 +615,10 @@ L1_CONFIG_NOT_IN_RUNTIME_FAILURES: LLMOutputValidator = LLMOutputValidator(
 )
 
 
-def _meta_template_failures(pipeline_params: dict[str, Any]) -> list[ValidationFailure]:
-    """INLINE injection ports dropped from an inner meta-prompt's prose (the L4 surface).
+def _optimizer_template_failures(pipeline_params: dict[str, Any]) -> list[ValidationFailure]:
+    """INLINE injection ports dropped from an inner optimizer prompt's prose (the L4 surface).
 
-    A ``{{token}}`` embedded mid-sentence in a meta-prompt field (``{{n_variants}}`` in
+    A ``{{token}}`` embedded mid-sentence in an optimizer prompt field (``{{n_variants}}`` in
     ``l1_generate.task_intent``/``instruction``, ``{{citable_fields}}`` in
     ``l1_generate.answer_format``) is a channel port, not prose — an L4 rewrite that deletes
     it severs the channel while the schema keeps accepting proposals, and no measurement can
@@ -676,8 +676,8 @@ def _check_l1_prompt_placeholders_intact(
       web_search evidence into entity_profiling), the backend injects nothing there and the
       evidence-free program would otherwise score as a valid winner. Mint guards this at setup
       (``configure_and_apply_pipeline``); this is its in-loop twin, same ``missing_template_vars``.
-    - **Inner meta-prompts** (L4): ``source_output`` is the candidate's MERGED
-      ``pipeline_params``; :func:`_meta_template_failures` guards the prose-embedded ports the
+    - **Inner optimizer prompts** (L4): ``source_output`` is the candidate's MERGED
+      ``pipeline_params``; :func:`_optimizer_template_failures` guards the prose-embedded ports the
       same way. Same reason, same fatal synthetic-0 path, same patience-0 L2 fire.
     """
     if opt_sp is None or pipeline_schema is None:
@@ -699,7 +699,7 @@ def _check_l1_prompt_placeholders_intact(
                     )
                 )
     if isinstance(source_output, dict):
-        failures.extend(_meta_template_failures(source_output))
+        failures.extend(_optimizer_template_failures(source_output))
     if not failures:
         return None
     return ValidatorOutcome(
@@ -729,7 +729,7 @@ class L1YieldStats:
     # round already measured and lost. Defaulted so the many construction sites that predate
     # the gate stay valid — the count is only ever non-zero where prior rounds are passed.
     l1_n_repeat: int = 0
-    # Set when the meta-prompt made L1's own output unparseable — the round then holds zero
+    # Set when the optimizer prompt made L1's own output unparseable — the round then holds zero
     # candidates. `detect_invariants` never sets it (it only sees proposals that exist); it is
     # stamped from `l1_generate`'s return in `generate_or_load_candidates`.
     l1_parse_failure: str | None = None

@@ -111,7 +111,7 @@ promptpotter = [
     "connectors/resources/*.json",  # n8n workflow templates
     "assets/optimizer/*.yaml",      # the optimizer's own pipeline manifest
     "assets/optimizer/*.json",      # + its generated schema registry
-    "assets/optimizer/sets/*.yaml", # specialized meta-prompt sets (L4)
+    "assets/optimizer/sets/*.yaml", # specialized optimizer prompt sets (L4)
     # The last two are BUILD ARTIFACTS — a Next.js export and a git-filtered dataset
     # tree — so they cannot sit in the source tree the way assets/optimizer/ does.
     # `scripts/build_release.py` stages both before `uv build`; that script is what

@@ -42,8 +42,8 @@ export interface ObserveConfig {
 // Project the six PromptTemplate string fields out of ONE node's resolved params.
 // Used when the flat `prompt_fields` carries no prompt content but the selected
 // node IS prompt-bearing and its evolved fields live per-node inside
-// `resolved_pipeline_params[nodeId]` — the pp-self meta-prompt shape, where each
-// meta node (l1_generate / l1_critique / …) owns its own persona/instruction/…
+// `resolved_pipeline_params[nodeId]` — the pp-self optimizer prompt shape, where each
+// optimizer node (l1_generate / l1_critique / …) owns its own persona/instruction/…
 // rather than sharing one flat prompt. Only fields actually present are returned
 // (the round file carries only the optimizer's mutated delta, not the static
 // `prompts/{node}.json` origin).
@@ -64,7 +64,7 @@ function nodePromptFields(
 
 // A candidate row carrying the two observe fields — the same `LiveInputCandidate`
 // shape backs both the round-file `candidate_scores[]` and the live in-flight input.
-// `nodeId` (the selected node) lets a prompt-bearing meta node surface its OWN
+// `nodeId` (the selected node) lets a prompt-bearing optimizer node surface its OWN
 // evolved prompt when the flat `prompt_fields` is empty; single-prompt pipelines
 // (`llm_only`, every normal dataset) keep their flat prompt and ignore it.
 function rowConfig(

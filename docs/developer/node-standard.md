@@ -16,7 +16,7 @@ Both backends and the optimizer loop declare pipelines as JSON. Optimizer's at `
   "version": "v1.0",
   "nodes": {
     "node_name": {
-      "type": "llm | llm/structured | llm/meta | agent | deterministic | measurement | web_search",
+      "type": "llm | llm/structured | llm/optimizer | agent | deterministic | measurement | web_search",
       "node_role": "cache | candidate_source | enricher | ranker",
       "config": {
         "prompt_family": "node_name",

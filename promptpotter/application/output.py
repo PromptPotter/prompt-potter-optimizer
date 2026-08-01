@@ -112,7 +112,7 @@ def render_review_md(
 
 def _schema_repair_count(audit: dict[str, Any] | None) -> int:
     """Sum ``schema_repair_attempts`` across optimizer nodes; non-zero ⇒ a second round-trip was paid.
-    Cycle-wide rate is the cleanest single-number quality signal for an L1 meta-prompt."""
+    Cycle-wide rate is the cleanest single-number quality signal for an L1 optimizer prompt."""
     if not audit:
         return 0
     nodes = audit.get("nodes") or {}

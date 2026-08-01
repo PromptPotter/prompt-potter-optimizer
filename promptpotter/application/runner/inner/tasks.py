@@ -35,7 +35,7 @@ class InnerBenchmarkConfig(StrictModel):
     real ceiling instead (``domain/l4/proxies.py``).
 
     The round cap and sample count set what the inner cycle is even ALLOWED to discover, so there
-    is no default ladder: defaulting them in code silently rescales every meta-prompt candidate's
+    is no default ladder: defaulting them in code silently rescales every optimizer prompt candidate's
     fitness against a benchmark nobody declared. Every required field is required.
     """
 
@@ -63,7 +63,7 @@ class InnerBenchmarkConfig(StrictModel):
     # not the inner dataset's standalone default.
     inner_lives: LivesConfig | None = None
     # Determinism clamp on the inner OPTIMIZER's sampling temperature. Each inner campaign is a
-    # fitness measurement of one meta-prompt; at the file default, identical meta-prompts generate
+    # fitness measurement of one optimizer prompt; at the file default, identical optimizer prompts generate
     # different candidates and the run-to-run swing swamps the outer proxy. None ⇒ feature off.
     inner_optimizer_temperature: float | None = Field(default=None, ge=0.0, le=2.0)
 

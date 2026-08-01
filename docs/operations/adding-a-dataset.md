@@ -27,7 +27,7 @@ The new `datasets/{name}/dataset.md` must have a **Data** section that quotes th
 
 ## 3. Operator confirms the cut — before any wire
 
-The cut + protocol decision is operator-directed once the canonical protocol is on the table. **Never invent a split.** **Never consume a canonical test set as an optimization pool** without the operator explicitly accepting that the resulting number is not leaderboard-comparable. If we deviate from the canonical protocol (e.g. consume the test set for diagnostic / meta-campaign use), say so explicitly in `dataset.md` with the reason.
+The cut + protocol decision is operator-directed once the canonical protocol is on the table. **Never invent a split.** **Never consume a canonical test set as an optimization pool** without the operator explicitly accepting that the resulting number is not leaderboard-comparable. If we deviate from the canonical protocol (e.g. consume the test set for diagnostic / self-optimizing campaign use), say so explicitly in `dataset.md` with the reason.
 
 ## 4. Then wire
 

@@ -20,7 +20,7 @@ here may assume depth 1:
 
 Instrument mode — what makes this a measurement rather than a campaign — is declared in
 ``shared/instrument.py`` alone; read it before changing any of what it binds. The outer's
-meta-prompt overrides are the SPECIMEN under test, not part of the instrument, and are
+optimizer prompt overrides are the SPECIMEN under test, not part of the instrument, and are
 applied inside the inner task so they cannot leak outward. Inner spend rolls up as the
 outer sample's backend cost, read from live state at finalize rather than the debounced
 ``dashboard.json``, which would race.
@@ -79,9 +79,9 @@ INNER_RESULT_KEY = "final_ranking"
 # proxies are defined over exactly them.
 #
 # It deliberately carries no spend or token cap. Those trip on MEASURED token counts, which jitter
-# run to run (reasoning tokens are not reproducible) — so the same meta-prompt halted at a
+# run to run (reasoning tokens are not reproducible) — so the same optimizer prompt halted at a
 # different round on different runs, and the resulting truncated trajectory is indistinguishable
-# from "this meta-prompt found nothing". That made provider mood a fitness signal, and it was a
+# from "this optimizer prompt found nothing". That made provider mood a fitness signal, and it was a
 # second budget doing the same kind of work as the round budget, only nondeterministically.
 # Measured on the inner cycles then on disk: 3 of 36 tripped `token_budget`, two of them
 # truncating at rounds 4-5 of a 7-round budget, and every one was scored as a verdict.
@@ -267,12 +267,12 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
     the round acted on (the PRIOR round's ``priority_fix`` — that's the causal pairing),
     and the strongest candidate's edit + matched-origin delta; plus one verbatim
     failure highlight for the campaign. Exactly the evidence an outer critique needs
-    to say WHY a meta-prompt mutation helped or hurt."""
+    to say WHY an optimizer prompt mutation helped or hurt."""
     # A floored cycle has no trajectory to narrate — say why it was floored instead.
     if (floor := floor_reason(result)) is not None:
         return (
             f"INNER {spec.inner_dataset} seed-{spec.seed}: {floor} — scored at the floor "
-            f"(meta-prompt-owned); stop={result.stop_reason}."
+            f"(optimizer-prompt-owned); stop={result.stop_reason}."
         )
     # Narrated only for a cycle that carried evidence, so both are present (`compute_outer_proxies`
     # raised otherwise). No `or 0.0`: an origin that was never scored has no level to narrate.
@@ -349,7 +349,7 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
             f"{tag} x{n}"
             # `repeat` rides the inner narrative because it is the anomaly the OUTER generator
             # most needs: it says the inner loop stopped forming new hypotheses, which is a
-            # meta-prompt defect, not a task difficulty.
+            # optimizer prompt defect, not a task difficulty.
             for tag, n in (
                 ("no-op", rnd.l1_n_no_op),
                 ("dup", rnd.l1_n_duplicate),
@@ -379,7 +379,7 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
 async def _run_inner_campaign(
     ctx: InnerSpawnContext,
     spec: InnerTaskSpec,
-    meta_prompt_overrides: dict[str, dict[str, Any]],
+    optimizer_prompt_overrides: dict[str, dict[str, Any]],
     cycle_dir_box: dict[str, Path],
     spawned_by: dict[str, Any],
 ) -> CycleResult:
@@ -391,7 +391,7 @@ async def _run_inner_campaign(
 
     Runs in a FRESH task (the caller spawns it) so the per-task ContextVars are
     isolated from the outer cycle. Sets the per-run optimizer-prompt override
-    ContextVar here (inner task only) so the outer L1's meta-prompt mutations
+    ContextVar here (inner task only) so the outer L1's optimizer prompt mutations
     shape the inner ``assets/optimizer/`` prompts without leaking to the outer.
 
     ``cycle_dir_box`` is a mutable holder the caller reads from its outer-task
@@ -422,11 +422,11 @@ async def _run_inner_campaign(
     from promptpotter.infrastructure.store.stores import build_stores
     from promptpotter.shared.instrument import enter_instrument_mode
 
-    # Apply the outer L1's meta-prompt mutations to the inner optimizer prompts — set in THIS
+    # Apply the outer L1's optimizer prompt mutations to the inner optimizer prompts — set in THIS
     # task's context copy, so they can't reach the outer's optimizer. This is the SPECIMEN under
     # test, not part of the instrument: the same channel also carries a normal outer cycle's own
-    # meta-prompt SET (`optimizer_set`, bound at the runner seam), so it is not mode-gated.
-    set_optimizer_prompt_overrides(meta_prompt_overrides or None)
+    # optimizer prompt SET (`optimizer_set`, bound at the runner seam), so it is not mode-gated.
+    set_optimizer_prompt_overrides(optimizer_prompt_overrides or None)
 
     # Sandbox: the inner tenant tree roots at the spawning cycle's flat, shallow
     # `<workspace>/.inner/<key>` home (re-entrant + Windows MAX_PATH-safe; see
@@ -579,11 +579,11 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
     ``{"data": {…}}`` shape ``measure_sample`` parses from an HTTP body — so the
     outer scorer reads an inner result identically to a remote one.
 
-    An inner cycle that produced **no evidence** about the meta-prompt for a NO-FAULT
+    An inner cycle that produced **no evidence** about the optimizer prompt for a NO-FAULT
     reason — it crashed as tooling, or never reached an L1 round — raises
     ``InnerCycleUnscoreableError`` from ``compute_outer_proxies`` (see ``no_evidence_reason``,
     the one exclusion decision), so ``measure_sample`` excludes it as one error row
-    (missing data, not a real proxy). A meta-prompt-OWNED evidence kill — every L1 round
+    (missing data, not a real proxy). An optimizer prompt-OWNED evidence kill — every L1 round
     lost to an empty optimizer response — scores the FLOOR instead (``floor_reason``), and
     a completed inner run that merely failed to improve returns normally with poor proxies
     (measured, so a bad mutation is penalised). One excluded sample cannot kill the outer
@@ -603,7 +603,7 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
             "without bound — check the inner_benchmark named in inner_tasks.yaml."
         )
     spec = resolve_inner_task(ctx, query)
-    overrides = payload.get("meta_prompt_overrides") or {}
+    overrides = payload.get("optimizer_prompt_overrides") or {}
 
     start = time.monotonic()
     # Lazy imports (match this file's lazy-import discipline; sidesteps the
@@ -755,7 +755,7 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
         # sample's outcome depends on config only UP TO that node", and prefix-
         # matched rows replay when they terminated inside the trusted prefix
         # (MeasurementArchive.load_reusable_results). An inner campaign consumes
-        # the ENTIRE meta-config at once, so the only honest stamp is the LAST
+        # the ENTIRE outer config at once, so the only honest stamp is the LAST
         # node of the outer chain — anything earlier lets a candidate editing a
         # later node (l2_context/l3_plan) silently replay the origin's rows.
         # step_timings/step_tokens stay keyed by l1_critique (the ranker node

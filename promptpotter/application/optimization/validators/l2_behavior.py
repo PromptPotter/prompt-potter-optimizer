@@ -1,8 +1,8 @@
 """L2 behaviour checks — programmatic conformance for one ``l2_context`` fire.
 
 Conformance here is **dataset-independent** — it scores how well the optimizer LLM
-honoured the meta-prompt's contract, not whether task accuracy moved, and that decoupling
-is what makes the metric a usable anchor for iterating the meta-prompt across datasets.
+honoured the optimizer prompt's contract, not whether task accuracy moved, and that decoupling
+is what makes the metric a usable anchor for iterating the optimizer prompt across datasets.
 Adding a check is one function plus one ``L2_CHECK_REGISTRY`` entry; the registry is the
 SoT, so every surface enumerating the checks reads the same set. Rules the L2 schema
 already enforces structurally (no ``pipeline_params``, frozen ``task_context``) need no

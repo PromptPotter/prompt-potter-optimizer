@@ -1,4 +1,4 @@
-"""Optimizer LLM chokepoint — every meta-prompt call goes through here.
+"""Optimizer LLM chokepoint — every optimizer prompt call goes through here.
 
 * :mod:`call` — :func:`llm_call` (429-retry + heartbeat + token emit +
   recorder + cross-cycle cache) and :func:`run_optimizer_node`

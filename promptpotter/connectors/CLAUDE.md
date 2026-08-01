@@ -13,7 +13,7 @@ nodes.{name}.config`, never in the backend's repo.
 | Name | File | Wire shape | Session | Use |
 |---|---|---|---|---|
 | `termnorm` | `termnorm.py` | `{query, steps, node_config}` posted to `/matches` | `POST /sessions` handshake with terms array | TermNorm production backend |
-| `promptpotter` | `promptpotter.py` | `{query, meta_prompt_overrides}` → in-process inner cycle (`in_process_run` → `runner/inner/cycle.py`) | Noop (no remote service) | Optimizer-of-the-optimizer (L4) |
+| `promptpotter` | `promptpotter.py` | `{query, optimizer_prompt_overrides}` → in-process inner cycle (`in_process_run` → `runner/inner/cycle.py`) | Noop (no remote service) | Optimizer-of-the-optimizer (L4) |
 
 > **`llm_only` is a NODE name, never a connector.** The six single-node benchmarks
 > declare an `llm_only` node inside a `termnorm` pipeline and route over HTTP to the
@@ -30,7 +30,7 @@ modification. Three observations the next connector should heed:
 
 1. **Wire payload shape is connector-specific.** `termnorm` flattens
    `pipeline_params` into a `node_config` block; `promptpotter` keeps the
-   nested-by-node shape under `meta_prompt_overrides`. The protocol
+   nested-by-node shape under `optimizer_prompt_overrides`. The protocol
    carries the dict through; each connector decides its own outer key.
 2. **Session contract works for in-process backends with a noop.**
    `PromptPotterSession` no-ops `set_terms`/`recover` so non-HTTP
@@ -72,7 +72,7 @@ the same shape the scorer parses from an HTTP `/matches` body. The registry guar
   the **re-entrant** invariant holds (task spawns at every level → L5+ nests). The
   spawning cycle publishes its context via `publish_inner_spawn_context` (runner
   seam, every cycle) so this context-free hook can find where to sandbox + which
-  inner benchmark to run; the outer L1's meta-prompt mutations apply to the inner
+  inner benchmark to run; the outer L1's optimizer prompt mutations apply to the inner
   `assets/optimizer/pipeline.yaml` prompts through a per-run override ContextVar
   (`set_optimizer_prompt_overrides`, set inside the inner task). One process, no
   networking. The localhost-endpoint option is retained only as the future

@@ -2,7 +2,7 @@
 
 The three questions this module answers, in order, for every inner cycle:
 
-1. Is it meta-prompt-owned no-evidence? → score it at the FLOOR (:func:`floor_reason`).
+1. Is it optimizer prompt-owned no-evidence? → score it at the FLOOR (:func:`floor_reason`).
 2. Is it no-fault no-evidence? → EXCLUDE it (:func:`no_evidence_reason`).
 3. Otherwise → MEASURE it (:func:`compute_outer_proxies`).
 
@@ -24,22 +24,22 @@ logger = logging.getLogger(__name__)
 
 
 class InnerCycleUnscoreableError(RuntimeError):
-    """This inner cycle carries no evidence about the meta-prompt that ran it.
+    """This inner cycle carries no evidence about the optimizer prompt that ran it.
 
     Raised by the resolver when the panel's declaration is missing, and by the law when a
-    cycle's trajectory was cut short by something the meta-prompt does not own. The caller
+    cycle's trajectory was cut short by something the optimizer prompt does not own. The caller
     drops the panel cell — loudly. It is never scored on zeros.
     """
 
 
 class OuterSampleProxies(StrictModel):
     """One outer sample's observation vector — what a finished inner cycle says about the
-    meta-prompt that ran it. **This type is the governing law**; nothing restates it.
+    optimizer prompt that ran it. **This type is the governing law**; nothing restates it.
 
     **It is one number, and that is the design.** The vector carried eight fields and the outer
     formula composed four of them; measured over a full 39-cell panel, only this one discriminated
-    between meta-prompts. ``cleanliness`` put twice as much of its variance into the SEED as into
-    the arm (30.9% vs 15.4%) — it was grading which data a cell drew, not which meta-prompt ran
+    between optimizer prompts. ``cleanliness`` put twice as much of its variance into the SEED as into
+    the arm (30.9% vs 15.4%) — it was grading which data a cell drew, not which optimizer prompt ran
     it, settling the question `l4-outer-loop.md` left open. ``diversity_health`` never left the
     top fifth of its range, so it carried no candidate gradient at all, which the spec's own
     governing law already disqualifies. ``delta_per_dollar`` correlated 0.958 with the lift core
@@ -102,7 +102,7 @@ OUTER_PROXY_KEYS: tuple[str, ...] = tuple(OuterSampleProxies.model_fields)
 
 
 def _is_evidential(rnd: RoundResult) -> bool:
-    """False when the round says nothing about the meta-prompt under test.
+    """False when the round says nothing about the optimizer prompt under test.
 
     A ``L1_PARSE_FAILURE_TOOLING`` round lost its candidates to an empty optimizer response.
     That is missing data — the same class as a crashed inner cycle. Scoring it dirty makes
@@ -111,27 +111,27 @@ def _is_evidential(rnd: RoundResult) -> bool:
 
 
 def no_evidence_reason(result: CycleResult) -> str | None:
-    """Why this inner cycle says nothing about the meta-prompt under test — ``None`` if it does.
+    """Why this inner cycle says nothing about the optimizer prompt under test — ``None`` if it does.
 
     THE exclusion decision, asked once. The question is **"did this run produce evidence?"**,
     never "did it fail?". Those differ: a cycle can end without ever running an L1 round (target
     hit at origin, a budget rail, the origin gate, an operator Ctrl+C), and every aggregate then
-    reads an *unexercised* meta-prompt as flawless.
+    reads an *unexercised* optimizer prompt as flawless.
 
     **Only a SUCCESS outcome is a measurement.** :class:`StopOutcome` draws exactly this line —
     SUCCESS means the cycle ended on its own terms (round cap, lives, target, L3 convergence),
     while HALTED/FAILED/PAUSED mean something *outside the search* stopped it. Such a trajectory
-    is truncated, and a truncated trajectory is indistinguishable from "this meta-prompt found
-    nothing" — so scoring one lets provider mood or a Ctrl+C masquerade as meta-prompt quality.
+    is truncated, and a truncated trajectory is indistinguishable from "this optimizer prompt found
+    nothing" — so scoring one lets provider mood or a Ctrl+C masquerade as optimizer prompt quality.
     Read off the typed table, never a hand-written reason set.
 
     Deliberately NOT routed to the floor: the floor zeroes the cell, which would punish the
-    meta-prompt for a slow provider."""
+    optimizer prompt for a slow provider."""
     outcome = stop_reason_outcome(result.stop_reason)
     if outcome is not StopOutcome.SUCCESS:
         return (
             f"it did not end on its own terms — {outcome} (stop_reason={result.stop_reason}); "
-            "its trajectory was cut short by something the meta-prompt does not own"
+            "its trajectory was cut short by something the optimizer prompt does not own"
         )
     if not result.rounds:
         return f"it ran no L1 rounds (stop_reason={result.stop_reason})"
@@ -143,12 +143,12 @@ def no_evidence_reason(result: CycleResult) -> str | None:
 
 
 def floor_reason(result: CycleResult) -> str | None:
-    """The one meta-prompt-OWNED no-evidence shape — scored at the FLOOR, never excluded.
+    """The one optimizer prompt-OWNED no-evidence shape — scored at the FLOOR, never excluded.
 
     One empty optimizer response is provider noise (``_is_evidential`` drops that round), but a
-    cycle whose EVERY L1 round lost its candidates to empty content is the verbose-meta-prompt
+    cycle whose EVERY L1 round lost its candidates to empty content is the verbose-optimizer prompt
     failure mode, reproducible under the inner determinism clamp — so it IS evidence about the
-    meta-prompt. Excluding it let a candidate that breaks its own measurement escape penalty, and
+    optimizer prompt. Excluding it let a candidate that breaks its own measurement escape penalty, and
     left an un-crownable, un-eliminable zombie arm burning budget every remaining round.
 
     Only a cycle that ended on its OWN terms can be floored — anything else was cut short by a
@@ -164,15 +164,15 @@ def floor_reason(result: CycleResult) -> str | None:
 
 
 def _floor_proxies() -> OuterSampleProxies:
-    """The worst measurable verdict — ASSIGNED (not measured) to a meta-prompt-owned failure.
+    """The worst measurable verdict — ASSIGNED (not measured) to an optimizer prompt-owned failure.
 
     ``final_delta = -1`` sits exactly at the bottom of the scoring formula's re-anchoring window,
     so the composed fitness is exactly 0.0 — and this is the ONLY route to a zeroed cell. A
     measured cycle reaches -1 logit only by collapsing the inner ability outright, so a zero means
-    "the meta-prompt broke its own measurement", never "this seed drew a strong origin".
+    "the optimizer prompt broke its own measurement", never "this seed drew a strong origin".
 
     This is the ONLY route to a zeroed cell: a *measured* cycle reaches −1 only by collapsing the
-    inner ability to nothing, so a zero means "the meta-prompt broke its own measurement", never
+    inner ability to nothing, so a zero means "the optimizer prompt broke its own measurement", never
     "this seed drew a strong origin"."""
     return OuterSampleProxies(final_delta=-1.0)
 
@@ -184,17 +184,17 @@ def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
     ONE reading of ONE series: the ability of the incumbent each round adopted, in LOGITS on the
     cycle's locked ruler (``origin_level`` / ``round_adopted_levels``, built upstream in
     ``adopted_level_trajectory``). ``final_delta`` is where the search ENDED minus its origin —
-    what the meta-prompt actually delivered. One estimator, one interval scale, so the delta is
+    what the optimizer prompt actually delivered. One estimator, one interval scale, so the delta is
     not compressed by where its origin happened to sit.
 
     Why the other seven readings are gone is the type's own docstring; the short version is that
-    a 39-cell panel measured each of them and none discriminated between meta-prompts.
+    a 39-cell panel measured each of them and none discriminated between optimizer prompts.
 
-    The delta may be negative on a regressing meta-prompt — levels are not floored at origin —
+    The delta may be negative on a regressing optimizer prompt — levels are not floored at origin —
     and the scoring formula re-anchors it into [0,1].
 
     Raises :class:`InnerCycleUnscoreableError` when the cycle carries no evidence for a no-fault
-    reason; a meta-prompt-owned evidence kill returns the floor instead. Asking those two first is
+    reason; an optimizer prompt-owned evidence kill returns the floor instead. Asking those two first is
     what makes "absent" unrepresentable here."""
     if (floor := floor_reason(result)) is not None:
         logger.warning("inner cycle scored at the floor: %s", floor)
@@ -202,7 +202,7 @@ def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
     if (reason := no_evidence_reason(result)) is not None:
         # Loud, never silent: this drops a panel cell, and a dropped cell that reads as "covered"
         # is worse than no cell at all.
-        logger.warning("inner cycle EXCLUDED (no evidence about the meta-prompt): %s", reason)
+        logger.warning("inner cycle EXCLUDED (no evidence about the optimizer prompt): %s", reason)
         raise InnerCycleUnscoreableError(reason)
 
     assert result.origin_level is not None  # guaranteed by no_evidence_reason

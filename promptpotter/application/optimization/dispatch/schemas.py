@@ -169,7 +169,7 @@ class L1Variant(StrictModel):
 
 
 class L1GenerateOutput(StrictModel):
-    """Top-level shape returned by the ``l1_generate`` meta-prompt."""
+    """Top-level shape returned by the ``l1_generate`` optimizer prompt."""
 
     variants: list[L1Variant]
 

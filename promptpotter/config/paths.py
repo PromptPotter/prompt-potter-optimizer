@@ -113,7 +113,7 @@ def user_data_root() -> Path:
 
 
 def optimizer_assets_root() -> Path:
-    """Install content: the optimizer's own pipeline + meta-prompt sets.
+    """Install content: the optimizer's own pipeline + optimizer prompt sets.
 
     These are install-global by contract (``docs/developer/stable-api.md`` §3 —
     "one file configures the optimizer for every campaign"), so they belong to the

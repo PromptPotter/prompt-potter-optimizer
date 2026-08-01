@@ -164,7 +164,7 @@ The persisted world is a four-entity containment hierarchy
   that it is the prior winner** — so "origin" is reserved for offset 0 and
   the fork point, and every other round says *parent*.
 - **Campaign** — one declared optimization effort: a dataset, a
-  pipeline origin, context text, and the optimizer meta-prompts it runs
+  pipeline origin, context text, and the optimizer prompts it runs
   under. A first-class entity holding one session root + its fork/diag/
   sweep descendants. Directory `campaigns/{campaign_id}/` +
   `campaign.json` manifest. `campaign_id = {dataset}__{rand6_hex}` —
@@ -403,17 +403,21 @@ The persisted world is a four-entity containment hierarchy
   the node's live layout (`citable_fields`, `dispatch/injections/
   registry.py`), so a panel L1 was not shown cannot be cited. Validated by
   `application/optimization/validators/l1_behavior.py`.
-- **Meta-prompt** — synonym for "optimizer prompt" (L1/L2/L3/Critique
-  LLM template). Field-standard from PromptWizard / DSPy / OPRO.
+- **Optimizer prompt** — a prompt the optimizer itself runs on: the
+  `PromptTemplate` behind `l1_generate` / `l1_critique` / `l2_context` /
+  `l3_plan` / `checkin`. Its opposite number is the **target prompt** — the
+  prompt being optimized. Formerly called a "meta-prompt"; that word named both
+  halves of the loop and is retired (root `CLAUDE.md` § Conventions). The
+  literature calls the technique meta-prompting (PromptWizard / DSPy / OPRO).
 - **Prompt homes** — three, don't confuse them. The **target** prompt the optimizer
-  evolves: `datasets/{name}/prompts/{node}.yaml`. The **optimizer's** meta-prompts
+  evolves: `datasets/{name}/prompts/{node}.yaml`. The **optimizer's** optimizer prompts
   (install-global): `promptpotter/assets/optimizer/pipeline.yaml::resolved_prompts` — keyed
   `{node}/{n}`, so check-in's second mode lives at `resolved_prompts.checkin/2`. The
-  **outer** L4 meta-prompts: `promptpotter/assets/optimizer/sets/meta.yaml` (prompt fields only,
+  **outer** L4 optimizer prompts: `promptpotter/assets/optimizer/sets/self_optimizing.yaml` (prompt fields only,
   deliberately no `pipeline.yaml`; selected per-cycle by `OptimizationConfig.optimizer_set`).
   A per-node **overlay** (`pipeline.yaml::nodes.{name}.config.prompt`) is a fourth, and is
   a tunable, not a home.
-- **L4** — PromptPotter optimizing its own meta-prompts: an outer cycle whose backend
+- **L4** — PromptPotter optimizing its own optimizer prompts: an outer cycle whose backend
   is an inner cycle. **Recursion, not a fourth layer** — the ladder is closed at
   L1/L2/L3 and there is no `l4_*.py`. Lives at the connector seam
   (`connectors/promptpotter.py`) + `runner/inner/cycle.py::run_inner_cycle`, driven

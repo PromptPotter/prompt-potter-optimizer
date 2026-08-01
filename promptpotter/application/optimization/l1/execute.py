@@ -195,7 +195,7 @@ async def execute_round(
         with graceful("L1 critique failed; continuing without round-over-round feedback"):
             async with observed_node(
                 f"l1_critique_r{round_num}",
-                "llm/meta",
+                "llm/optimizer",
                 obs=obs,
                 campaign_id=session.state.tracing_campaign_id,
                 round_num=round_num,

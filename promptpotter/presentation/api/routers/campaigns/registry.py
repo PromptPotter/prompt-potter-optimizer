@@ -396,7 +396,7 @@ def get_campaign_config_map(store: StoreDep, campaign_id: str) -> ConfigMapRespo
 # for them, and there is nothing to hide.
 @campaigns_router.get("/optimizer-prompt-ranking", response_model=OptimizerPromptRanking)
 def get_optimizer_prompt_ranking(store: StoreDep) -> OptimizerPromptRanking:
-    """The L4 prompt ranking — every candidate meta-prompt state on disk, ranked by
+    """The L4 prompt ranking — every candidate optimizer prompt state on disk, ranked by
     anchor-to-origin effect. Reduced fresh from the tenant's pp-self cycles on each
     fetch (on-demand, not the 2 s poll); zero LLM. Tenant-scoped; empty for a tenant
     with no pp-self cycles."""

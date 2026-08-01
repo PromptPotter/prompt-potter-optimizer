@@ -236,7 +236,7 @@ def _wheel_problem(wheel: Path, *, expect_webapp: bool) -> tuple[str | None, int
         "assets/benchmarks": "promptpotter/assets/benchmarks/",
         "assets/optimizer/*.yaml": "promptpotter/assets/optimizer/pipeline.yaml",
         "assets/optimizer/*.json": "promptpotter/assets/optimizer/resolved_schemas.json",
-        "assets/optimizer/sets/*.yaml": "promptpotter/assets/optimizer/sets/meta.yaml",
+        "assets/optimizer/sets/*.yaml": "promptpotter/assets/optimizer/sets/self_optimizing.yaml",
     }
     if expect_webapp:
         required["assets/webapp"] = "promptpotter/assets/webapp/index.html"

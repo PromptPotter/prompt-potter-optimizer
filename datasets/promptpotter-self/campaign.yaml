@@ -12,7 +12,7 @@ campaign_config:
   # ONE measurand: what the inner search DELIVERED — a theta-logit delta over the ADOPTED
   # incumbent, so exploring costs nothing. The four-factor composite this replaces is described
   # in `domain/l4/proxies.py`; measured over a 39-cell panel, only this term discriminated
-  # between meta-prompts, and the quality factors carried more seed variance than arm variance
+  # between optimizer prompts, and the quality factors carried more seed variance than arm variance
   # while holding authority over the ordering.
   #
   # The re-anchor is LINEAR and only exists because `compile_scorer` refuses an empty formula and
@@ -29,7 +29,7 @@ campaign_config:
   exclude_nodes: []
   pipeline_overrides: {}
   optimization:
-    optimizer_set: meta
+    optimizer_set: self_optimizing
     prompt_block_catalogue: 'off'
     replicate_survivors: 0
     l1_patience: 2

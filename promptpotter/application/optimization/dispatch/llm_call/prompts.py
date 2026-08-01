@@ -1,4 +1,4 @@
-"""Optimizer-pipeline manifest loading — schemas + meta-prompt templates.
+"""Optimizer-pipeline manifest loading — schemas + optimizer prompt templates.
 
 Single source of truth for optimizer nodes and prompts is
 ``promptpotter/assets/optimizer/pipeline.yaml``. It follows the same shape as a
@@ -43,7 +43,7 @@ __all__ = [
     "base_optimizer_template",
     "combined_optimizer_prompt_hash",
     "compute_optimizer_prompt_hashes",
-    "effective_meta_prompts",
+    "effective_optimizer_prompts",
     "get_optimizer_config_overrides",
     "get_optimizer_schema",
     "list_optimizer_prompts",
@@ -73,17 +73,17 @@ __all__ = [
 OPTIMIZER_PIPELINE_PATH = optimizer_pipeline_path()
 OPTIMIZER_SCHEMAS_PATH = optimizer_assets_root() / "resolved_schemas.json"
 
-# Per-cycle override of the optimizer meta-prompts, keyed by optimizer node
+# Per-cycle override of the optimizer prompts, keyed by optimizer node
 # (`l1_generate` / `l1_critique` / `l2_context` / `l3_plan`) → a partial
 # `PromptTemplate`-field dict (plus the structural `layout` / `output_schema_field_names` /
 # `model` levers), resolved by `resolve_node_override`. ONE channel, two callers — both
 # task-isolated:
-#   1. the OUTER L4 cycle binds its specialized meta-prompt SET here
+#   1. the OUTER L4 cycle binds its specialized optimizer prompt SET here
 #      (`load_optimizer_set_overrides`, from `OptimizationConfig.optimizer_set`,
 #      set at the runner seam) so it reasons about editing an inner optimizer; and
 #   2. the L4 inner-cycle runner binds the OUTER's per-node MUTATIONS here (inside
 #      the inner asyncio task) so those mutations shape the inner cycle's prompts.
-# Because each inner cycle runs in its own task, an outer (meta) binding and the
+# Because each inner cycle runs in its own task, an outer binding and the
 # inner (mutation) binding never collide — the inner task overwrites its copy. A
 # ContextVar — not a global — so every level at any recursion depth carries its
 # own. Default `None` = no override (every normal, non-L4 cycle).
@@ -97,7 +97,7 @@ def set_optimizer_prompt_overrides(overrides: dict[str, dict[str, Any]] | None) 
 
     Keyed by optimizer node; each value is a partial `PromptTemplate`-field map
     merged onto the loaded prompt by :func:`load_optimizer_prompt`. Two callers,
-    both task-isolated: the runner seam binds the outer L4 cycle's meta-prompt set
+    both task-isolated: the runner seam binds the outer L4 cycle's optimizer prompt set
     (:func:`load_optimizer_set_overrides`); the inner runner
     (`runner/inner/cycle.py`) binds the outer's per-node mutations."""
     _OPTIMIZER_PROMPT_OVERRIDES.set(overrides or None)
@@ -109,10 +109,10 @@ def get_optimizer_config_overrides() -> dict[str, Any] | None:
     A flat ``{param: value}`` map (``temperature`` + ``seed``) clamped onto EVERY optimizer
     node call by :func:`..call.llm_call`, applied LAST so it beats both the node's file
     config and any per-call override (``l1_generate``'s creativity temp, the dominant noise
-    source). Distinct from the prompt-field override above: that swaps meta-prompt TEXT,
+    source). Distinct from the prompt-field override above: that swaps optimizer prompt TEXT,
     this pins the sampling knobs. Set only by declaring a cycle a measurement instrument
     (:func:`~promptpotter.shared.instrument.enter_instrument_mode`), which is what makes an
-    inner campaign a near-deterministic function of its meta-prompt — the outer optimizer's
+    inner campaign a near-deterministic function of its optimizer prompt — the outer optimizer's
     own task binds no mode and keeps the file default."""
     mode = instrument_mode()
     return mode.optimizer_clamp if mode is not None else None
@@ -121,9 +121,9 @@ def get_optimizer_config_overrides() -> dict[str, Any] | None:
 def load_optimizer_set_overrides(opt_set: str) -> dict[str, dict[str, Any]]:
     """Load a named optimizer prompt-set's per-node field overrides.
 
-    The L4 outer cycle selects a specialized meta-prompt set via
-    ``OptimizationConfig.optimizer_set`` (e.g. ``"meta"`` →
-    ``assets/optimizer/sets/meta.yaml``). The file is a flat
+    The L4 outer cycle selects a specialized optimizer prompt set via
+    ``OptimizationConfig.optimizer_set`` (e.g. ``"self_optimizing"`` →
+    ``assets/optimizer/sets/self_optimizing.yaml``). The file is a flat
     ``{node: {field: text}}`` map of only the fields that set rewrites; it rides
     the SAME per-node override channel as the inner-cycle mutations
     (:func:`set_optimizer_prompt_overrides` → :func:`resolve_node_override`), so
@@ -276,11 +276,11 @@ def base_optimizer_template(name: str) -> PromptTemplate:
     return PromptTemplate(**body)
 
 
-def effective_meta_prompts(
+def effective_optimizer_prompts(
     schema: PipelineSchema | None,
     pipeline_params: dict[str, Any] | None,
 ) -> dict[str, dict[str, str]]:
-    """Every inner meta-prompt field an outer cycle may rewrite, with its CURRENT text.
+    """Every inner optimizer prompt field an outer cycle may rewrite, with its CURRENT text.
 
     On the recursion the artifact under edit is not the ``OptSearchPoint`` — it is the
     inner optimizer's own templates, carried per node as ``pipeline_params``. So the
@@ -356,7 +356,7 @@ def _node_override(node: str) -> dict[str, Any]:
 
 def _single_model_override() -> tuple[str | None, str | None]:
     """The one inner-optimizer ``(model, provider)`` the outer carrier node set — fanned onto
-    every node. Empty on every normal cycle and for an outer meta-prompt SET (prose only)."""
+    every node. Empty on every normal cycle and for an outer optimizer prompt SET (prose only)."""
     for nd in (_OPTIMIZER_PROMPT_OVERRIDES.get() or {}).values():
         if isinstance(nd, dict) and isinstance(nd.get("model"), str) and nd["model"]:
             prov = nd.get("provider")
@@ -466,7 +466,7 @@ def compute_optimizer_prompt_hashes() -> dict[str, str]:
 
 
 def combined_optimizer_prompt_hash() -> str:
-    """One 12-hex hash over the whole optimizer meta-prompt set.
+    """One 12-hex hash over the whole optimizer prompt set.
 
     Folds the per-prompt hashes from :func:`compute_optimizer_prompt_hashes`
     into a single deterministic digest. Recorded on ``campaign.json`` as

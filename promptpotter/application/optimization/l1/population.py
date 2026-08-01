@@ -109,7 +109,7 @@ def parse_population(
                     failures.extend(rf_outcome.evidence["failures"])
             # Mandatory placeholders intact — the evolved TARGET prompt (runs even when the
             # mutation is prompt-fields-only, the exact case that drops {{combined_text}})
-            # AND, on an L4 campaign, the MERGED inner meta-prompts (a child of a broken
+            # AND, on an L4 campaign, the MERGED inner optimizer prompts (a child of a broken
             # incumbent inherits a severed port without re-proposing it).
             ph_outcome = L1_PROMPT_PLACEHOLDERS_INTACT.run(
                 merged_pp or {},

@@ -234,7 +234,7 @@ async def l1_score(
         # feeds it to the L4 trajectory, where one such arm dragged its round 0.8 logits below
         # origin. It keeps its matched-origin stamp above (the record stays honest); it just stops
         # being a thing the election, the ruler, or the outer proxy can read. The round-level fact
-        # — that this meta-prompt made its children stop answering — is charged separately, to
+        # — that this optimizer prompt made its children stop answering — is charged separately, to
         # the L4 floor + PoBB elimination (`domain/l4/proxies.py::floor_reason`).
         if is_answer_collapsed(cand_results):
             continue

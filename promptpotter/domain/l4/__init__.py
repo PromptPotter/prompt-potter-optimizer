@@ -1,6 +1,6 @@
-"""The L4 law — everything the outer loop knows about a meta-prompt, in one place.
+"""The L4 law — everything the outer loop knows about an optimizer prompt, in one place.
 
-- :mod:`proxies` — what ONE finished inner cycle says about the meta-prompt that ran it
+- :mod:`proxies` — what ONE finished inner cycle says about the optimizer prompt that ran it
   (the floor / exclude / measure trichotomy, and the proxy vector itself).
 - :mod:`verdict` — what a ROUND of them says about a variant (the blocked-paired decision).
 
