@@ -309,20 +309,29 @@ def cleanup_stub_fork_if_empty(
     *,
     campaign_store: CampaignStore,
     campaign_id: str,
-    session_id: str,
     cycle_id: str,
     parent_cycle_id: str,
 ) -> tuple[bool, str]:
     """Delete a freshly-minted fork's dir if it never advanced past round 0;
     retarget the active pointer back to *parent_cycle_id* when the fork was
-    active. Returns ``(deleted, reason)``.
+    active. Returns ``(deleted, reason)``. THE stub-deletion path — the runner's
+    own post-run cleanup and the control plane's ``delete-cycle`` both come here,
+    so the pointer discipline has one home.
 
     ``CampaignStore.try_delete_stub_cycle`` enforces the file-system guards
     (n_rounds=0, no descendants, not root); this helper layers
     active-pointer policy on top.
+
+    The session id comes off the POINTER, not from the caller. A retarget only
+    changes which cycle the pointer names, so the id it needs is the one already
+    written there — and it is readable exactly when it is needed, since the branch
+    only runs if the pointer names this cycle. Taking it as an argument meant a
+    caller that had none (a sibling index carries ``parent_session_id: ""`` whenever
+    its parent did) passed the empty string into ``validate_path_component`` and
+    the cleanup raised instead of cleaning up.
     """
     workspace = campaign_store.workspace
-    _, _, active_cid = read_active_pointer(workspace)
+    session_id, _, active_cid = read_active_pointer(workspace)
     was_active = active_cid == cycle_id
     if was_active:
         save_active_pointer(workspace, session_id, campaign_id, parent_cycle_id)

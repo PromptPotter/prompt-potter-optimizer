@@ -25,7 +25,7 @@ node enabled.
 
 `gsm8k_match(predicted, ground_truth)` — extracts `#### N` or last number and
 compares as float. Registered in
-`promptpotter/shared/scoring.py::SCORING_FUNCTIONS`.
+`promptpotter/application/scoring/formula/matchers.py::SCORING_FUNCTIONS`.
 
 ## Pipeline Notes
 

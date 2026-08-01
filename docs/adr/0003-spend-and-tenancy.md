@@ -156,7 +156,7 @@ The seam is where `IdentityContext` enters the process. Three entry points, two 
 
 #### 4. Spend feature
 
-- **Per-cycle aggregator.** One `Spend` dataclass per cycle, owned by `LiveStateView` (already exists — see `infrastructure/projections/live_state/`).
+- **Per-cycle aggregator.** One `Spend` dataclass per cycle, owned by `LiveStateCore` (already exists — see `infrastructure/projections/live_state.py`).
 - **Resolution.** `shared/spend.py` shipped as-is — three layers, stdlib only.
 - **Dashboard projection.** `dashboard.json::spend = {backend, loop, total_used_usd}` — two `{used_usd, input_tokens, output_tokens, rate_known, model}` buckets, sole writer `LiveDashboardView._handle_token_usage` (see § Highway architecture). Bar, publication, and `log.md` all read `total_used_usd`; the budget lives on `run_limits.spend_budget_usd`, not in the spend block.
 - **Budget config + halt.** `OptimizationConfig.spend_budget_usd: float | None`. `StopReason.SPEND_BUDGET` (root `CLAUDE.md`: no back-compat). `_probe_cycle_spend` halts the **current cycle only** at round boundary; the **per-user, cross-cycle** host-wallet gate is the **coupon** (see § Host coupon below), not a daily cap.

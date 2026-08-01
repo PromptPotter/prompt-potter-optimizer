@@ -209,7 +209,6 @@ async def run_sweep_batch(
                 cleanup_stub_fork_if_empty(
                     campaign_store=store.campaigns,
                     campaign_id=campaign_id,
-                    session_id=root_ctx.session_id,
                     cycle_id=new_cycle_id,
                     parent_cycle_id=parent_cycle_id,
                 )

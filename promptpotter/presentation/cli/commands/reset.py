@@ -20,7 +20,7 @@ from promptpotter.infrastructure.store.session_pointer import (
     active_pointer_exists,
     clear_active_pointer,
 )
-from promptpotter.presentation.cli.commands._shared import CommandResult
+from promptpotter.presentation.cli.commands._shared import CommandResult, identity_from_args
 
 logger = logging.getLogger("promptpotter.presentation.cli.reset")
 
@@ -71,13 +71,21 @@ def _human_size(path: Path) -> str:
 
 
 def _resolve_tenant_dirs(args: argparse.Namespace, projects_root: Path) -> list[Path]:
-    """Pick the tenant dirs to operate on, honoring ``--tenant`` / ``--all-tenants``."""
+    """Pick the tenant dirs to operate on, honoring ``--tenant`` / ``--all-tenants``.
+
+    The single tenant comes from ``identity_from_args`` — the seam every other verb
+    uses — and not from ``args.tenant or "default"``. That hardcoded default made
+    this the one verb that resolved its own identity, and it resolved it wrongly:
+    the first web sign-in RENAMES ``projects/default/`` to ``projects/{user_id}/``
+    (``identity/migration.py::maybe_claim_default``), so on any registered install a
+    bare ``reset`` addressed a directory that no longer exists and reported
+    "tenant dir does not exist — nothing to reset" while the real workspace sat
+    untouched. A destructive verb that silently does nothing and calls it success."""
     if getattr(args, "all_tenants", False):
         if not projects_root.is_dir():
             return []
         return sorted(p for p in projects_root.iterdir() if p.is_dir())
-    tenant_id = getattr(args, "tenant", None) or "default"
-    return [projects_root / tenant_id]
+    return [projects_root / identity_from_args(args).tenant_id]
 
 
 def _render_summary(tenants: list[tuple[Path, list[Path], list[Path], list[Path]]]) -> str:

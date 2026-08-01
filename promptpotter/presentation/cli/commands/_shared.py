@@ -25,7 +25,7 @@ from promptpotter.config.settings import (
     DEFAULT_BACKEND_URL,
 )
 from promptpotter.infrastructure.store.layout import campaign_cycles_dir
-from promptpotter.shared.identity import IdentityContext, default_identity
+from promptpotter.shared.identity import IdentityContext
 
 if TYPE_CHECKING:
     import argparse
@@ -110,14 +110,21 @@ def campaign_result_human(campaign_dir: Any, *, dataset_name: str, cycle_id: str
 
 async def init_services_cli(
     dataset_name: str,
+    *,
+    identity: IdentityContext,
     backend_url: str = DEFAULT_BACKEND_URL,
     backend_id: str = DEFAULT_BACKEND_ID,
-    identity: IdentityContext | None = None,
 ) -> Session:
     """Initialize services for a CLI command (logging style + service init).
 
-    *identity* defaults to the Stage-0 :func:`default_identity`; CLI callers
-    derive it from ``args.tenant`` via :func:`identity_from_args`.
+    *identity* is REQUIRED, and every caller already passes
+    :func:`identity_from_args`. It used to default to :func:`default_identity` —
+    the same conditional ``init_services`` performs one call down, so the outer
+    copy could only ever be redundant, and it disagreed: the CLI's rule is
+    ``registered_or_default_identity`` (explicit ``--tenant`` > the registered
+    operator > anonymous), while ``default_identity()`` is flatly ``default``.
+    Reached, it would have written a terminal run into the anonymous workspace
+    instead of the operator's.
     """
     from promptpotter.application.bootstrap.wiring import init_services
     from promptpotter.config.logging import setup_logging
@@ -128,7 +135,7 @@ async def init_services_cli(
         backend_id=backend_id,
         dataset_name=dataset_name,
         on_status=lambda msg: logger.info(msg) if _VERBOSE else None,
-        identity=identity if identity is not None else default_identity(),
+        identity=identity,
     )
 
 

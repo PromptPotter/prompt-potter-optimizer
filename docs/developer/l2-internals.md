@@ -72,7 +72,9 @@ That is the whole of `_apply_l2`. The OSP is mutable Pydantic; writes happen in 
 
 ## Wound 4 — L2 self-healing via L3
 
-`run_l2_output_validators` (`validators/l2_output.py`) runs `L2_TASK_CONTEXT_STALE_REPEAT` against the proposed/applied task_context pair. Layout HARD failures from `validate_l1_layout` are appended to the same `l2_guard_breaches` list. When the list holds any non-soft-reject breach after `_apply_l2`, the escalation driver force-triggers L3 to heal — but a list that is *all* soft-reject (`_L2_SOFT_REJECT_VALIDATOR_IDS`: stale-repeat / dangling-trigger — self-correcting, already discarded) skips the force-trigger. L2's own thrashing is observable to L3 via the `l2_guard_breaches` injection on its next fire.
+`l2_guard_breaches` holds HARD `validate_l1_layout` failures — mandatory placeholder missing, unknown name, duplicate within a slot — and **any** breach after `_apply_l2` force-triggers L3 to heal. L2's own thrashing is observable to L3 via the `l2_guard_breaches` injection on its next fire.
+
+There is no soft-reject tier and no task_context validator. This section described `run_l2_output_validators` / `validators/l2_output.py` / `L2_TASK_CONTEXT_STALE_REPEAT` / `_L2_SOFT_REJECT_VALIDATOR_IDS` for a long time; none of those has ever existed in the tree as written, and the last of the shape they belonged to left with the framing-rewrite surface — a stale task_context repeat is unrepresentable now that the framing is frozen, so there is no inert breach left to except (`escalation/firing.py`, above its unconditional `if breaches:`).
 
 ## File-line anchors
 
@@ -82,6 +84,5 @@ That is the whole of `_apply_l2`. The OSP is mutable Pydantic; writes happen in 
 - L2 prompt template: `promptpotter/assets/optimizer/pipeline.yaml::resolved_prompts['l2_context/1']`
 - OSP mutation surface: `promptpotter/domain/opt_search_point.py` — `task_context`, `l1_layout`, `l1_overrides`, `l2_guard_breaches`
 - Layout validators: `promptpotter/domain/l1_layout.py::validate_l1_layout`
-- Task-context stale-repeat: `promptpotter/application/optimization/validators/l2_output.py::L2_TASK_CONTEXT_STALE_REPEAT`
 
 Cross-references: [`dispatch-hub.md`](dispatch-hub.md) (the layout L2 mutates + the dispatch hub both layers share); [`self-healing-internals.md`](self-healing-internals.md) (L2 is the nurse for Wounds 1 + 2; produces Wound 4).

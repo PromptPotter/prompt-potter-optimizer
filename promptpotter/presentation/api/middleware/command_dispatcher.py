@@ -363,16 +363,47 @@ class CommandDispatcher:
         idempotency_key: str,
     ) -> CommandOutcome:
         """delete-cycle writes its audit trail on the campaign's root cycle
-        ledger — the target cycle's own ledger goes away as part of the apply."""
-        _, active_campaign, active_cycle = read_active_pointer(self._store.base_dir)
-        if active_campaign == campaign_id and active_cycle == cycle_id:
-            raise ConflictError(f"refusing to delete {cycle_id}: active cycle — switch first")
+        ledger — the target cycle's own ledger goes away as part of the apply.
+
+        The guard here is LIVENESS, and it used to be the other question entirely: it
+        refused whenever the target was the ACTIVE cycle ("switch first" — a gesture in
+        neither the command vocabulary nor the webapp) and checked nothing about whether
+        a producer was writing into the dir it was about to remove. That is the inverted
+        pair. ``try_delete_stub_cycle`` only ever removes a cycle with ``n_rounds == 0``,
+        which is *precisely* the just-minted window before round 1 commits — so the one
+        deletion this verb can perform is the one most likely to be live, and it was the
+        unchecked case. Being the cycle you happen to be looking at, meanwhile, is not a
+        hazard: the pointer is retargeted to the parent, exactly as the runner's own stub
+        cleanup does, and that helper is now the single path for both.
+
+        Liveness lives at this entry rather than inside the store method because the two
+        callers differ in what they know. This one is a third party asking about someone
+        else's run. The runner's is the OWNER, calling immediately after its own process
+        stopped — inside ``RUN_FRESH_S`` of the index write that makes a just-minted stub
+        read ``running``, so a refusal down there would block the cleanup it exists for.
+        """
+        if cycle_id in self._store.campaigns.live_cycle_ids(campaign_id):
+            raise ConflictError(
+                f"refusing to delete {cycle_id}: it has a live producer — pause or stop it first"
+            )
+
+        index = self._store.campaigns.load(campaign_id, cycle_id) or {}
+        parent_cycle_id = str(index.get("parent_cycle_id") or campaign.root_cycle_id)
 
         root_dir = self._store.campaigns.cycle_dir(campaign_id, campaign.root_cycle_id)
         root_ledger = CycleEventLog.open(CycleDir(root_dir))
 
+        from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
+            cleanup_stub_fork_if_empty,
+        )
+
         def _apply() -> None:
-            deleted, reason = self._store.campaigns.try_delete_stub_cycle(campaign_id, cycle_id)
+            deleted, reason = cleanup_stub_fork_if_empty(
+                campaign_store=self._store.campaigns,
+                campaign_id=campaign_id,
+                cycle_id=cycle_id,
+                parent_cycle_id=parent_cycle_id,
+            )
             if not deleted:
                 raise _DeleteCycleRejectedError(reason)
 

@@ -609,7 +609,6 @@ async def _run_single_cycle(
         cleanup_stub_fork_if_empty(
             campaign_store=session.store.campaigns,
             campaign_id=session.campaign_id,
-            session_id=session.session_id or "",
             cycle_id=session.state.cycle_id,
             parent_cycle_id=pre_loop_cycle_id,
         )
@@ -710,9 +709,9 @@ async def run_optimization(
     # runner can't know a child will recurse) + re-entrant (each level publishes
     # its own); a no-op until the cycle_id is set.
     publish_inner_spawn_context(session)
-    # Select this cycle's optimizer meta-prompt set (L4: outer = `meta`, inner =
+    # Select this cycle's optimizer prompt set (L4: outer = `meta`, inner =
     # default). Bound through the same per-node override channel the inner runner
-    # uses — task-isolated, so an outer (meta) binding and the inner (mutation)
+    # uses — task-isolated, so an outer binding and the inner (mutation)
     # bindings of the cycles it spawns never collide. Empty set → no-op (every
     # normal cycle), and must NOT clear an inner runner's already-bound mutations.
     if campaign_config.optimization.optimizer_set:

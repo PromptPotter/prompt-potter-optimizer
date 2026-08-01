@@ -448,6 +448,15 @@ class CampaignStore:
                 live.append(cdir.name)
         return live
 
+    def live_cycle_ids(self, campaign_id: str) -> list[str]:
+        """Cycles of *campaign_id* whose producer is alive right now.
+
+        Public because two verbs need it and there must not be two answers: campaign
+        archive/delete asks below, and the control plane asks before deleting a stub
+        cycle. Both route to the one ``derive_run_phase``.
+        """
+        return self._live_cycle_ids(campaign_id)
+
     def _guard_and_release(self, campaign_id: str, verb: str) -> None:
         """Refuse *verb* while a producer is attached; otherwise release the pointer.
 

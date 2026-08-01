@@ -325,6 +325,52 @@ def test_delete_removes_the_campaign_the_operator_is_looking_at(built_stores: St
     assert read_active_pointer(tenant_root) == ("", "", "")
 
 
+async def test_delete_cycle_guards_liveness_and_not_the_pointer(built_stores: Stores) -> None:
+    """The inverted pair. ``delete-cycle`` refused the ACTIVE cycle and checked nothing
+    about a live producer — while ``try_delete_stub_cycle`` only ever removes a cycle with
+    ``n_rounds == 0``, which IS the just-minted window before round 1 commits. So the one
+    deletion the verb can perform is the one most likely to be live, and that was the
+    unchecked case; the case it did refuse was harmless."""
+    from promptpotter.presentation.api.middleware.command_dispatcher import CommandDispatcher
+
+    tenant_root, _ = _lifecycle_fixture(built_stores, running=True)
+    stub = "cycle-0_fork_deadbeef"
+    built_stores.campaigns.create(_CAMPAIGN, stub, {"parent_cycle_id": _CYCLE, "n_rounds": 0})
+    stub_dir = built_stores.campaigns.cycle_dir(_CAMPAIGN, stub)
+    write_json(stub_dir / "dashboard.json", {"run_phase": "running"})
+    write_json(
+        tenant_root / ".workspace" / "active_session.json",
+        {"session_id": "s1", "campaign_id": _CAMPAIGN, "cycle_id": stub},
+    )
+    disp = CommandDispatcher(built_stores)
+
+    # Live producer on the target → refused, and the tree is still there.
+    with pytest.raises(ConflictError):
+        await disp.dispatch_cycle_command(
+            kind="delete-cycle",
+            campaign_id=_CAMPAIGN,
+            cycle_id=stub,
+            payload_extras={},
+            idempotency_key="k1",
+            expected_version=None,
+        )
+    assert stub_dir.is_dir()
+
+    # Producer gone: being the ACTIVE cycle is not a reason to refuse — the pointer
+    # falls back to the parent instead.
+    _age(stub_dir, 10_000)
+    await disp.dispatch_cycle_command(
+        kind="delete-cycle",
+        campaign_id=_CAMPAIGN,
+        cycle_id=stub,
+        payload_extras={},
+        idempotency_key="k2",
+        expected_version=None,
+    )
+    assert not stub_dir.exists()
+    assert read_active_pointer(tenant_root)[2] == _CYCLE
+
+
 async def test_the_delete_verb_reaches_the_store_that_allows_it(built_stores: Stores) -> None:
     """Same fact one level up, and the reason the fix above did not reach the operator.
 

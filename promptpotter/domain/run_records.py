@@ -314,7 +314,6 @@ class ErrorRecord(StrictModel):
 # one source so the record schema and the emit signature can't drift.
 RoundWarningKind = Literal[
     "l1_zero_candidates",
-    "l2_validator_soft_reject",
     "injection_budget_overrun",
     "layer_parse_failure",
 ]
@@ -326,8 +325,11 @@ class RoundWarningRecord(StrictModel):
     Distinct from :class:`ErrorRecord` (a fatal run halt) and from
     ``RoundDiagnostics`` (post-scoring analytics): these are mid-round
     self-heal events — the optimizer LLM returning empty/truncated output and
-    the round recording zero candidates, an L2 framing-output validator
-    soft-reject, an over-budget injection truncation. The rails recover and the
+    the round recording zero candidates, an over-budget injection truncation.
+    A fourth kind, ``l2_validator_soft_reject``, sat in the closed set with no
+    emitter: it named the L2 task_context stale-repeat validator, which left with
+    the framing-rewrite surface it existed for (a stale repeat is unrepresentable
+    now that the framing is frozen). The rails recover and the
     run continues, so stdout alone would leave the operator never knowing.
 
     Rides the canonical ledger via :func:`emit_round_warning` over the

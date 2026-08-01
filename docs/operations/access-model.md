@@ -168,7 +168,7 @@ not backend-supplied.
   (no JWT past the middleware — ADR-0002).
 - **Admin (allowlist) edits never have an inbound door** — delivered out-of-band by the on-box,
   outbound-only Telegram bot (`presentation/admin_bot.py`, ADR-0004). This is the zero-trust rule.
-- **Response headers** (`main.py::response_headers`, one middleware): `nosniff`, `X-Frame-Options:
+- **Response headers** (`main.py::SecurityHeadersMiddleware`, one middleware): `nosniff`, `X-Frame-Options:
   DENY`, `Referrer-Policy`, HSTS on https; CSP strict (`default-src 'none'`) on JSON API paths,
   frame-only on the webapp document; `Cache-Control: no-store` on `/api/v1/*`.
 - **PP↔TermNorm** is authenticated with a shared bearer token (`Authorization: Bearer`,
@@ -195,7 +195,7 @@ not backend-supplied.
 | Sole inbound writer | `middleware/command_dispatcher.py` |
 | AuthN resolver + 401 | `deps.py::resolve_identity`, `middleware/oidc.py` |
 | Out-of-band admin channel | `presentation/admin_bot.py` + [ADR-0004](../adr/0004-operator-admin-channels.md) |
-| Response security headers | `main.py::response_headers` |
+| Response security headers | `main.py::SecurityHeadersMiddleware` |
 | Loop OS wall (systemd) | `deploy-linux/install-service.sh` |
 | PP→TermNorm credential | `connectors/termnorm.py`, `infrastructure/backend.py` |
 

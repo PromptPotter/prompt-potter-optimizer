@@ -153,9 +153,11 @@ and worth flagging.
 | Schema compliance (allowed-models, param_allowed_values, type) | `L1_SCHEMA_COMPLIANCE` |
 | Forbidden axes (`model`, `provider`) | `validate_overrides()` (always locked) |
 | Re-propose known-failing config | `L1_CONFIG_NOT_IN_RUNTIME_FAILURES` (this PR) |
-| L2 task_context no-op merge / paraphrase repeat | `L2_TASK_CONTEXT_STALE_REPEAT` (evidence `mode`: `verbatim` \| `paraphrase`) |
-| L2 duplicate insert (≥3 lines) | `L2_DUPLICATE_INSERT` |
 | L3 plan length floor / verbatim repeat | `L3_PLAN_LENGTH_FLOOR`, `L3_PLAN_VERBATIM_REPEAT` |
+
+(Two rows naming L2 task_context validators used to sit here under that *today*.
+They were never written, and the surface they policed is gone — L2 cannot write
+`task_context` at all. L2's framing output is checked by `l2_behavior.py`.)
 
 Everything else above is your analysis responsibility.
 

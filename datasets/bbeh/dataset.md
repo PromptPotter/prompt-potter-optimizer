@@ -33,7 +33,7 @@ Requires a TermNorm instance with the `llm_only` node enabled.
 
 `exact_match(predicted, ground_truth)` — case-insensitive, whitespace-stripped
 string equality. Registered in
-`promptpotter/shared/scoring.py::SCORING_FUNCTIONS`.
+`promptpotter/application/scoring/formula/matchers.py::SCORING_FUNCTIONS`.
 
 ## Pipeline Notes
 

@@ -177,8 +177,8 @@ and where the HuggingFace `datasets` library lives.
 | `new` | `--dataset-name <name>` | Alternative to the positional `<name>`. |
 | `new` | `--sweep-batch` | Sweep mode: round 1 scored, round 2 generation-only. Mints siblings under `sweeps/`. |
 | `new` | `--diag` | Diag mode: round 1 scored, force L2 on round-1 evidence, round 2 generation-only. |
-| `new` / `resume` | `--halt-at-accuracy <float>` | Halt with `TARGET_HIT` once `best_accuracy ≥ X`. |
-| `new` / `resume` | `--max-spend-usd <float>` | Halt with `MAX_SPEND` once cycle spend ≥ X. |
+| `new` / `resume` | `--halt-at <float>` | Halt with `TARGET_HIT` once `best_accuracy ≥ X`. |
+| `new` / `resume` | `--spend-budget <float>` | Halt with `SPEND_BUDGET` once cycle spend ≥ X. |
 | `resume` | `--from <N>` | Resume rewind: archive rounds > N and resume from round N+1. |
 | `resume` | `--no-check` | Skip the rescore-and-replay divergence check at boot. |
 | `resume` | `--fork-on-divergence` | On divergence, mint a sibling cycle rooted at the divergence point. |
@@ -188,7 +188,7 @@ and where the HuggingFace `datasets` library lives.
 
 **Mutual exclusions:** `--sweep-batch` and `--diag` mutually exclusive on `new`.
 
-The maintenance and diagnostic verbs have their own flag sets — see `presentation/cli/parsers.py`. Not part of v1 (M11 still touches them). There is no `sweep` verb: a sweep is `new --sweep-batch`, and `--sweep-batch` with no `sweep/*.json` payloads is a setup error, not a fall-through to a single unpaired cycle.
+The maintenance and diagnostic verbs have their own flag sets — see `presentation/cli/parsers.py`. Not part of v1 (M11 still touches them). There is no `sweep` verb: a sweep is `new --sweep-batch`, and `--sweep-batch` with no `sweep/*.yaml` payloads is a setup error, not a fall-through to a single unpaired cycle.
 
 ## 6. Ledger event types
 
@@ -215,8 +215,8 @@ Operator-visible files inside `campaigns/{campaign_id}/cycles/{cycle_id}/`. Weba
 | `review.md` | `application/output.py::write_review_md` | Per-round behavior-check + L1Stats narrative. |
 | `rounds/round_NNNN.json` | `CampaignStore.save_round_file` | Full per-round detail: candidate scores, evaluators, prompt_fields, pipeline_params, OSP snapshot, decisions. |
 | `dashboard.json` (per cycle) | `LiveDashboardView._persist` | Live operator view; rewritten on every record. Refresh: 2 s. |
-| `langfuse/*.json` | `infrastructure/tracing/langfuse_push.py` | Per-cycle Langfuse export snapshots. |
-| `prompts/{node}.yaml` | `infrastructure/tracing/langfuse_push.py` (and CLI `init`) | Resolved prompt templates for this cycle's runs. |
+| `langfuse/*.json` | `infrastructure/tracing/langfuse_sink.py` | Per-cycle Langfuse export snapshots. |
+| `prompts/{node}.yaml` | `infrastructure/tracing/file_sink.py` | Resolved prompt templates for this cycle's runs. |
 | `.runtime/ledger.jsonl` | `CycleEventLog.append` | The sole-ingress event log. Internal-but-stable shape (see §6). |
 | `.runtime/cache/rounds/round_NNNN.json` | `AuditTrailView.flush` | Per-round audit cache (writer-buffered until round close). |
 | `.runtime/cache/candidates/round_NNNN.json` | `CampaignStore.save_round_candidates` | Mid-round candidates checkpoint (deleted after L1 score on escalation). |
@@ -232,5 +232,5 @@ Sibling cycles (forks, diag, sweeps) live flat under `cycles/` alongside the roo
 - **Runtime dataclass shapes** not in §1–§7 (`CycleSlice`, `RoundDigest`, `InjectionBundle`, `LiveStateCore`, etc.).
 - **In-memory caches** and their invalidation strategies (optimizer LRU caches, the dispatch hub's pipeline-param-catalogue cache, etc.).
 - **Prompt templates** at `promptpotter/assets/optimizer/pipeline.yaml::resolved_prompts` — data, intentionally tunable. Forks may edit; we may also edit on any release.
-- **Test helpers** (`tests/_helpers.py`).
+- **Test helpers** (`tests/factories.py`, `tests/conftest.py`).
 - **The `webapp/` layout.** The webapp + control plane ship and serve users; internal component layout stays free to move.

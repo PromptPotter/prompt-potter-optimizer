@@ -255,8 +255,9 @@ round election. Full account + the measured cost:
 * `docs/concepts/the-loop.md` — where PoBB fits in the round lifecycle.
 * `docs/concepts/scoring-and-memory.md` — the MeasurementArchive that
   catches every backfilled `(leader_sp, sample)` measurement.
-* `docs/operations/rewind-and-fork.md` — how decision replay drives
-  divergence + fork behavior.
+* `docs/operations/persistence-and-state.md` — how decision replay drives
+  divergence + fork behavior (the `rewind-and-fork.md` this used to name has
+  never existed; it is the only broken doc link in the tree).
 * `git log` — the artifact contract carrying
   the heatmap's `sample_order` (δ_s desc) and the descriptive
   `pick_score.per_sample` contestedness snapshot.

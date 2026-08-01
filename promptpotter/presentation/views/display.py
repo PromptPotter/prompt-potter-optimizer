@@ -325,7 +325,7 @@ def _step_tag(step_name: str | None) -> str:
 
 # ===========================================================================
 # Live-display formatting helpers shared across views.
-# Markdown/box helpers consumed by ``live.py``, ``reports.py``, and the
+# Markdown/box helpers consumed by ``views/live/``, ``application/output.py`` and the
 # notebook ↔ Claude exchange channel; plus the ``fmt_*`` numeric formatters
 # (``fmt_ci`` / ``fmt_pvalue``) — single import surface.
 # ===========================================================================

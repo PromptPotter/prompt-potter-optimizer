@@ -27,7 +27,7 @@ node enabled.
 (primary, standard math benchmark convention) or last number in text
 (fallback), then compares as integer. Matches MathArena evaluation
 methodology. Registered in
-`promptpotter/shared/scoring.py::SCORING_FUNCTIONS`.
+`promptpotter/application/scoring/formula/matchers.py::SCORING_FUNCTIONS`.
 
 ## Pipeline Notes
 
