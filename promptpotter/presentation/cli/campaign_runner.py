@@ -98,6 +98,21 @@ def main() -> None:
             return
         args = parser.parse_args([*sys.argv[1:], "resume"])
 
+    # Reconcile liveness before dispatch. The reaper had exactly two call sites, both bound
+    # to the API server's lifespan — so on a CLI-only install nothing ever ran it, and a
+    # cycle whose process died hard (SIGKILL, laptop lid, power) kept `status: active`
+    # forever: the dock, the pickers and `resume` all read a corpse as a live unit. The
+    # operator's own next command is the honest moment to notice, and it costs one glob.
+    #
+    # This is the whole answer, not half of it: no `atexit`/signal handler in this process
+    # can stamp a cycle its own SIGKILL just ended, and a second mechanism that only covers
+    # the graceful case would answer the same question twice. Ctrl+C already saves through
+    # the loop's own checkpoint.
+    from promptpotter.application.jobs.reaper import sweep_dead_cycles
+    from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+
+    sweep_dead_cycles(DEFAULT_PROJECTS_ROOT)
+
     if args.command in ("new", "resume"):
         from promptpotter.config.env_bootstrap import ensure_api_key
 

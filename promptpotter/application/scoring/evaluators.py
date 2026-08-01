@@ -47,6 +47,7 @@ __all__ = [
     "materialize_round_values",
     "materialize_row_derivable",
     "materialize_sample_values",
+    "resolve_round_formula",
 ]
 
 
@@ -552,3 +553,24 @@ def default_per_round_formula_short(schema: PipelineSchema) -> str:
     """Short form of the default formula — derived from the full formula via the
     shared short-code table (no hand-synced literal); fits the 70-char frame."""
     return to_short_formula(default_per_round_formula(schema))
+
+
+def resolve_round_formula(
+    explicit: str | None,
+    schema: PipelineSchema | None,
+) -> tuple[str | None, str | None]:
+    """``(full, short)`` composite-fitness formula for a cycle — campaign override first,
+    else the schema default, else nothing to report.
+
+    The ONE resolution. Three surfaces answer "what formula is this cycle scored under" —
+    the live dashboard at INIT.enter, the same at INIT.exit, and the finished cycle's
+    `index.json::final`, which `log.md` reads. The third had no writer at all, so every
+    `log.md` ever rendered said `(formula unavailable)` about a cycle whose formula the
+    other two were already displaying. A short form exists only for the default: an
+    operator-authored formula is shown verbatim or not at all.
+    """
+    if explicit:
+        return explicit, None
+    if schema is None:
+        return None, None
+    return default_per_round_formula(schema), default_per_round_formula_short(schema)

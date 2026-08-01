@@ -29,8 +29,8 @@ l1_generate:
     CURRENT INNER META-PROMPTS below is the text you are rewriting. Your override REPLACES that field
     whole, so carry every contract in the current text forward unless your hypothesis is that the
     contract is the problem — and when you drop one, say in `changes_description` WHAT you removed and
-    WHY. A `{{token}}` is an injection slot the inner loop fills; drop one and the channel is severed,
-    which rolls the candidate back. The replacement must instruct the inner node's OPTIMIZER job (how
+    WHY. Text in doubled curly braces is an injection slot the inner loop fills; drop one and
+    the channel is severed, which rolls the candidate back. The replacement must instruct the inner node's OPTIMIZER job (how
     to generate, critique, or frame PROMPT CANDIDATES) — text that answers or formats the inner
     BENCHMARK TASK belongs in the prompts the inner loop evolves, never in a meta-prompt field; such a
     candidate is wasted (measured: -2.2%).
@@ -50,17 +50,17 @@ l1_generate:
 
     SECOND LEVER - information flow (l1_critique/l2_context/l3_plan only): a `layout` edit reshapes WHICH
     evidence panels feed that inner node. Under pipeline_params_override[node] emit `layout: {problem_description:
-    [signal, ...]}` using ONLY the exact panel names in LAYOUT VOCABULARY below. Excise a fat low-value
-    panel to tighten context, or add a missing one; dropping a mandatory panel silently rolls back. One
-    candidate edits prose OR layout for a node, not both.
+    [signal, ...]}`; the schema's own enum for that node lists every legal panel name, so pick from it
+    rather than inventing one. Excise a panel that is crowding out the evidence the failures need, or add
+    one that is missing. A few per node are load-bearing and an edit dropping them rolls back silently —
+    so name in `changes_description` what you removed, and expect a layout to survive only if it keeps
+    what the node cannot work without. One candidate edits prose OR layout for a node, not both.
   answer_format: |-
     Return JSON: {"variants": [...]}. Each variant, IN THIS ORDER:
       - "evidence_grounding": {field, citation} — field is EXACTLY one of {{citable_fields}} (any other value, e.g. 'failure', is invalid); citation quotes the panel entry.
       - "pipeline_params_override": {inner_node: {field: "complete replacement text"}} — inner_node one of l1_generate/l1_critique/l2_context/l3_plan; field one of persona/task_intent/instruction/thinking_style. MUST be non-empty: a variant that overrides nothing mutates nothing and is rejected.
       - Instead of a prose field, a variant may edit information flow: "pipeline_params_override": {inner_node: {"layout": {"problem_description": ["signal", ...]}}} — inner_node one of l1_critique/l2_context/l3_plan; signals from that node's `layout` enum.
       - "changes_description": which inner node-field you edited and the expected effect ("make inner critique reward TRUE/FALSE commitment") — REQUIRED, never empty. It REPORTS the override above; it never substitutes for one.
-
-    LAYOUT VOCABULARY — a layout lists PromptPotter's own EVIDENCE-PANEL signals (NOT task content; do NOT invent names like 'premise_summary'). Use ONLY these exact names per node: l1_critique: [archive_top_runs, axis_memory, diagnostics, evidence_health, l1_wounds, origin_strengths, rare_hit_samples, sample_transcripts] (mandatory, never drop: diagnostics) | l2_context: [archive_top_runs, axis_memory, critique, diagnostics, evidence_health, guard_breaches, l1_overrides, l1_signal_catalogue, l3_to_l2_note, plan, rare_hit_samples, rebase_capability, rendered_prompt, task_context, terminate_capability] (mandatory, never drop: critique, diagnostics, l1_signal_catalogue, rebase_capability, task_context, terminate_capability) | l3_plan: [archive_top_runs, axis_memory, critique, diagnostics, evidence_health, guard_breaches, l1_wounds, plan, rebase_capability, task_context, terminate_capability] (mandatory, never drop: diagnostics, plan, rebase_capability, task_context, terminate_capability). A layout edit reshapes which of these panels feed that inner node's problem_description; dropping a fat low-value one (e.g. l2_context rendered_prompt) is the cheapest inner win.
 l1_critique:
   persona: >-
     You analyze INNER PromptPotter optimizer runs. A sample's value is how much that inner loop improved

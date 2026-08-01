@@ -37,6 +37,7 @@ from promptpotter.application.run_phase_control import declare_run_phase
 from promptpotter.application.runner.inner.cycle import publish_inner_spawn_context
 from promptpotter.application.runner.loop import run_round_loop
 from promptpotter.application.runner.termination import BudgetGate
+from promptpotter.application.scoring.evaluators import resolve_round_formula
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.domain.opt_search_point import overlay_sets_model_outside_allowed
 from promptpotter.domain.phases import STOP_REASON_INFO, RunPhase, StopOutcome, StopReason
@@ -850,6 +851,14 @@ def _finalize_run(
             # `rounds[0].matched_origin_composite` — round 1's winner's matched floor,
             # a different sample basis under the origin's name.
             "origin_composite_fitness": cycle_result.origin_composite_fitness,
+            # The formula EVERY number above was computed under. `log.md` has always read
+            # this key (`output.py::LogMdView.formula`) and nothing had ever written it, so
+            # every artifact this project has produced said "(formula unavailable)" about a
+            # cycle whose formula the live dashboard was displaying at the same moment.
+            # Same `resolve_round_formula` the dashboard calls — one resolution, three readers.
+            "scorer_round_formula": resolve_round_formula(
+                session.scoring.scorer_round_formula, session.pipeline_schema
+            )[0],
             "mode": "sweep" if sweep else "full",
             # The winner artifact, serialized for the disk readers: log.md's FinalWinnerView
             # (writers.py) fetches these from `final`. Basis: the COMPOSITE-fitness high-water

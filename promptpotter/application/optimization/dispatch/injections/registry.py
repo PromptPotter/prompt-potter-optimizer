@@ -17,6 +17,7 @@ size, so healthy rounds are untouched. ``None`` only for the small, internally-c
 from __future__ import annotations
 
 import inspect
+from collections.abc import Mapping
 
 from promptpotter.application.optimization.dispatch.bundle import (
     _Injection,
@@ -42,7 +43,12 @@ INJECTIONS: dict[str, _Injection] = injection_registry()
 STALL_EXPLORATION = "stall_exploration"
 
 
-def citable_fields(layout: L1Layout, *, exploration_budget: str | None = None) -> tuple[str, ...]:
+def citable_fields(
+    layout: L1Layout,
+    *,
+    exploration_budget: str | None = None,
+    rendered: Mapping[str, str] | None = None,
+) -> tuple[str, ...]:
     """What an ``l1_generate`` variant may cite THIS round: the evidence-bearing panels the
     layout actually renders into its prompt, plus the stall escape hatch when licensed.
 
@@ -50,9 +56,26 @@ def citable_fields(layout: L1Layout, *, exploration_budget: str | None = None) -
     contract invites fabricated citations — so citability is the layout, filtered by
     ``_Injection.citable``, and the same call feeds the prompt's menu, the wire schema's
     enum, and the behaviour check. ``exploration_budget=None`` (the wiring layer couldn't
-    determine it) offers the hatch — fail open, as the check has always done."""
-    names = [n for n in layout.all_placeholders() if INJECTIONS[n].citable]
-    if exploration_budget != ExplorationBudget.TIGHT:
+    determine it) offers the hatch — fail open, as the check has always done.
+
+    *rendered* (``DispatchHub.fill``'s third return) narrows "in the layout" to "shown":
+    a panel with nothing to say renders empty and never reaches the slot, and offering its
+    name is the same phantom the layout derivation exists to prevent, one level down —
+    measured at 5 of 10 offered names blank on a live round. The behaviour check replaying
+    off a round file has no render to consult and omits it, which fails OPEN in the same
+    direction the rest of that path already does.
+
+    **The result is never empty.** It becomes the ``evidence_grounding.field`` enum, and an
+    empty enum is an unsatisfiable schema. The layout invariant below guarantees a citable
+    mandatory panel EXISTS; it cannot guarantee one SAID anything, and a first round has no
+    critique yet. When nothing rendered, "no panel points anywhere" is measured rather than
+    inferred from a stall count — which is the hatch's own definition, so it is offered."""
+    names = [
+        n
+        for n in layout.all_placeholders()
+        if INJECTIONS[n].citable and (rendered is None or rendered.get(n))
+    ]
+    if not names or exploration_budget != ExplorationBudget.TIGHT:
         names.append(STALL_EXPLORATION)
     return tuple(sorted(names))
 

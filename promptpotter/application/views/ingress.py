@@ -16,10 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from promptpotter.application.optimization.dispatch.llm_call.prompts import optimizer_model
-from promptpotter.application.scoring.evaluators import (
-    default_per_round_formula,
-    default_per_round_formula_short,
-)
+from promptpotter.application.scoring.evaluators import resolve_round_formula
 from promptpotter.application.views.view_models import (
     AnyView,
     CandidatesGeneratedView,
@@ -81,14 +78,7 @@ def _init_enter(d: dict[str, Any], ctx: ViewContext) -> InitEnterView:
     # Resolve the per-round composite formula at INIT.enter so the live
     # dashboard can stamp it before origin scoring fires (matches _init_exit
     # priority: explicit campaign override > schema default > None).
-    explicit = session.scoring.scorer_round_formula
-    if explicit:
-        full, short = explicit, None
-    elif schema is None:
-        full, short = None, None
-    else:
-        full = default_per_round_formula(schema)
-        short = default_per_round_formula_short(schema)
+    full, short = resolve_round_formula(session.scoring.scorer_round_formula, schema)
     ctx.composite_fitness_formula = full
     ctx.composite_fitness_formula_short = short
 
@@ -113,14 +103,7 @@ def _init_exit(d: dict[str, Any], ctx: ViewContext) -> InitExitView:
     ctx.origin_accuracy = cycle.tracking.current_accuracy
     ctx.origin_composite_fitness = cycle.tracking.current_composite_fitness
     schema = session.pipeline_schema
-    explicit = session.scoring.scorer_round_formula
-    if explicit:
-        full, short = explicit, None
-    elif schema is None:
-        full, short = None, None
-    else:
-        full = default_per_round_formula(schema)
-        short = default_per_round_formula_short(schema)
+    full, short = resolve_round_formula(session.scoring.scorer_round_formula, schema)
     ctx.composite_fitness_formula = full
     ctx.composite_fitness_formula_short = short
 

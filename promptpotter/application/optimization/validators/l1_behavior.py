@@ -216,17 +216,25 @@ def _check_evidence_grounding_present(
     - ``evidence_grounding`` is missing / not a dict, or
     - ``field`` names a panel this round's prompt did not render (including
       ``stall_exploration`` under a ``tight`` budget), or
-    - ``citation`` is empty / whitespace.
+    - ``citation`` is empty / whitespace, or
+    - ``citation`` quotes text that is **nowhere in the prompt L1 was shown**.
 
     The citable set is re-derived from the round-start layout — the same
     :func:`citable_fields` call that built the prompt's menu. Membership in a
     hand-maintained list was checkable while the panel was absent from the prompt, which
-    is the shape of a fabricated citation the check exists to catch."""
+    is the shape of a fabricated citation the check exists to catch.
+
+    That derivation checks the NAME; the containment test checks the TEXT, and until it
+    existed a variant could name a rendered panel and quote something invented — 3 of one
+    live round's 6 citations were fabricated or misattributed and all six passed. The
+    prompt is on disk in this same round file (``nodes.l1_generate.input.template_fields``,
+    filled), so the evidence needs no new context."""
     variants = extract_l1_variants(round_dict)
     if not variants:
         return CheckResult("evidence_grounding_present", True, "no variants emitted")
 
     citable = _round_citable_fields(ctx)
+    shown = _rendered_l1_prompt(round_dict)
     offenders: list[tuple[str, str]] = []
     for i, v in enumerate(variants):
         label = f"C{i + 1}"
@@ -241,6 +249,9 @@ def _check_evidence_grounding_present(
             continue
         if not citation:
             offenders.append((label, "empty_citation"))
+            continue
+        if not _citation_in_prompt(citation, shown):
+            offenders.append((label, "citation_not_in_prompt"))
             continue
         peaked_hit = _cited_peaked_axis(v, citation, field_name, ctx)
         if peaked_hit and not _has_peaked_rebut(v, citation, ctx):
@@ -367,6 +378,48 @@ def _round_citable_fields(ctx: ValidatorContext) -> tuple[str, ...]:
     if layout is None:
         return tuple(sorted([n for n, i in INJECTIONS.items() if i.citable] + [STALL_EXPLORATION]))
     return citable_fields(layout, exploration_budget=ctx.exploration_budget)
+
+
+_NORMALIZE_RE = re.compile(r"[^a-z0-9]+")
+
+# A quoted run shorter than this cannot adjudicate fabrication either way: it matches
+# something in a 16k-char prompt by coincidence, and flagging its absence would be noise.
+# The check abstains rather than guessing — a false accusation here downgrades a round's
+# verdict, and the round-1 verdict is what authorises another round of real spend.
+_CITATION_MIN_RUN = 12
+
+
+def _normalize_quote(text: str) -> str:
+    """Lowercase alphanumerics joined by single spaces — the form a quote survives in.
+
+    A citation re-types a panel line, so it drifts on the things that carry no meaning:
+    line wrapping, smart quotes, an em-dash the model rendered as a hyphen. Normalizing
+    both sides means only the WORDS have to match.
+    """
+    return _NORMALIZE_RE.sub(" ", text.lower()).strip()
+
+
+def _rendered_l1_prompt(round_dict: dict[str, Any]) -> str:
+    """The filled ``l1_generate`` prompt this round actually sent, normalized."""
+    node = ((round_dict.get("nodes") or {}).get("l1_generate")) or {}
+    fields = ((node.get("input") or {}).get("template_fields")) or {}
+    return _normalize_quote(" ".join(str(v) for v in fields.values() if isinstance(v, str)))
+
+
+def _citation_in_prompt(citation: str, shown: str) -> bool:
+    """Did this quote come out of the prompt? Abstains when it cannot tell.
+
+    An honest citation may ELIDE (``"…"``), so the test is the longest ellipsis-free run
+    rather than the whole string — a fabricated citation has no matching run at any length.
+    Abstains (True) when the prompt is unavailable, so an older round file or a
+    generation-only peek never fails every variant it holds.
+    """
+    if not shown:
+        return True
+    longest = max((_normalize_quote(part) for part in re.split(r"[.]{3}|…", citation)), key=len)
+    if len(longest) < _CITATION_MIN_RUN:
+        return True
+    return longest in shown
 
 
 def _uncitable_reason(field_name: str, ctx: ValidatorContext) -> str:

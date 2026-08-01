@@ -53,8 +53,8 @@ def _r_l3_to_l2_note(b: InjectionBundle) -> str:
 
 _META_PROMPT_HEADER = (
     "CURRENT INNER META-PROMPTS — the text an override REPLACES, field by field.\n"
-    "A `{{token}}` is an injection slot the inner loop fills; a replacement that drops "
-    "one severs that channel and is rejected."
+    "Text in doubled curly braces is an injection slot the inner loop fills; a replacement "
+    "that drops one severs that channel and is rejected."
 )
 
 

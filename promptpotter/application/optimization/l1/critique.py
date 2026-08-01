@@ -44,7 +44,7 @@ async def run_l1_critique(
         load_optimizer_prompt,
     )
 
-    template, prompt_vars = DispatchHub.fill(
+    template, prompt_vars, _ = DispatchHub.fill(
         load_optimizer_prompt("l1_critique"), resolve_node_layout("l1_critique"), bundle
     )
 

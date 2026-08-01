@@ -425,12 +425,12 @@ async def _maybe_dispatch_sweep_batch(
     if sweep_dir is None:
         raise PayloadInvalidError(
             f"--sweep-batch needs a sweep/ directory of payloads, and {dataset_config_dir} "
-            "has none. Author one JSON OperatorSweepFile per arm there, or drop the flag."
+            "has none. Author one YAML OperatorSweepFile per arm there, or drop the flag."
         )
     sweep_payloads = load_sweep_payloads(sweep_dir)
     if not sweep_payloads:
         raise PayloadInvalidError(
-            f"--sweep-batch found {sweep_dir} but no *.json payloads in it. Author one "
+            f"--sweep-batch found {sweep_dir} but no *.yaml payloads in it. Author one "
             "OperatorSweepFile per arm, or drop the flag."
         )
     ctx.save_phase("optimizing")

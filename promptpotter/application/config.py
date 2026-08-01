@@ -925,10 +925,13 @@ def missing_template_vars(rendered: str, declared: list[str]) -> list[str]:
     A prompt-bearing node declares the `{{name}}` placeholders the backend fills
     (query / research evidence / output-schema). If the rendered prompt omits one,
     that injection silently no-ops and the model never sees it. The six-field
-    decomposition names (`PROMPT_STRING_FIELDS`) are excluded — some nodes declare
-    THOSE as template_variables, but `render()` assembles them; they are never
-    `{{substituted}}`. The SINGLE definition of "required placeholder", shared by
-    the mint-time setup check and the in-loop L1 candidate guard.
+    decomposition names (`PROMPT_STRING_FIELDS`) are excluded because `render()`
+    ASSEMBLES them — they are never `{{substituted}}`, whoever declares them. No
+    shipped pipeline does today (pp-self, the one that did, declares no `prompt_info`
+    at all now); the clause stays because it is a true statement about those names
+    rather than a patch for one dataset, and a live backend we cannot read from here
+    is the wrong place to learn otherwise. The SINGLE definition of "required
+    placeholder", shared by the mint-time setup check and the in-loop L1 candidate guard.
     """
     return [
         v for v in declared if v not in PROMPT_STRING_FIELDS and "{{" + v + "}}" not in rendered

@@ -106,13 +106,15 @@ async def l1_generate(
 
     bundle = build_bundle(cycle)
     # L2-authored layout rides the OSP; `fill` resolves each slot's injections into `injection_vars`.
-    template, injection_vars = DispatchHub.fill(
+    template, injection_vars, rendered = DispatchHub.fill(
         load_optimizer_prompt("l1_generate"), opt_sp.memory.l1_layout, bundle
     )
     # What L1 may cite IS what L1 was shown — one derivation, feeding the prompt's menu and
     # the wire schema's enum, so the two can't disagree about which panels exist this round.
     citable = citable_fields(
-        opt_sp.memory.l1_layout, exploration_budget=bundle.cycle_slice.exploration_budget
+        opt_sp.memory.l1_layout,
+        exploration_budget=bundle.cycle_slice.exploration_budget,
+        rendered=rendered,
     )
     prompt_vars: dict[str, str] = {
         "n_variants": str(n_variants),

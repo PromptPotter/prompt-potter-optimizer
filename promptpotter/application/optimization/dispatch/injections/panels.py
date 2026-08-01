@@ -14,6 +14,8 @@ from typing import Any, cast
 from promptpotter.application.intelligence.exploration import ruler_entry
 from promptpotter.application.optimization.dispatch.bundle import (
     INNER_NARRATIVE_CAP,
+    INNER_NARRATIVE_FULL_CELLS,
+    INNER_NARRATIVE_SUMMARY_CAP,
     MEMORY_FIELD_CAP,
     MEMORY_ROUND_CAP,
     MEMORY_VALUE_CAP,
@@ -391,11 +393,22 @@ def _r_sample_transcripts(b: InjectionBundle) -> str:
     return "\n\n".join(sections)
 
 
+def _proxy_lift(r: dict[str, Any]) -> float | None:
+    """One inner cell's outer-lift proxy, or ``None`` off the recursion.
+
+    The L4 discriminator: only the `promptpotter` connector stamps this proxy, and a
+    zero-lift seed (a flat inner run — the ones a meta-prompt edit most needs to see)
+    can round-trip as an int 0, so accept any real number, exclude bool.
+    """
+    d = (r.get("pipeline_data") or {}).get("final_delta")
+    return float(d) if isinstance(d, int | float) and not isinstance(d, bool) else None
+
+
 @signal(
     "inner_narratives",
     kind=InjectionKind.MEASUREMENT,
-    # Sized for the full outer-seed panel (8 today x <=1150c + fences); the narrative is authored
-    # to <=1150c upstream, so a per-section overrun is a safety rail, not an expected drop.
+    # Sized for the full outer-seed panel; only the weakest few carry their whole narrative
+    # now, so a per-section overrun is a safety rail rather than an expected drop.
     char_cap=13000,
     citable=True,
 )
@@ -407,23 +420,36 @@ def _r_inner_narratives(b: InjectionBundle) -> str:
     plus one scalar per-seed delta — so it re-proposes mutations the inner loop already measured
     and lost, the exact "doesn't use the information" failure.
 
-    Fires ONLY on the recursion. The discriminator is ``final_delta`` — the outer-lift
-    proxy the ``promptpotter`` connector stamps on every inner-cycle row (``compute_outer_proxies``)
-    and nothing else writes. It is NOT ``reasoning_trace``: an ordinary backend returns one of
-    those on most samples (it is what ``sample_transcripts`` renders), so gating on the trace
-    alone flooded every non-L4 generator with its own task transcripts. Ordered weakest-lift-first
-    (delta ascending): the seeds whose inner loop improved LEAST are the ones a meta-prompt edit
-    must fix, so they lead and a byte overrun drops the strong performers at the tail.
+    Fires ONLY on the recursion, on ``final_delta``. NOT on ``reasoning_trace``: an ordinary
+    backend returns one of those on most samples (it is what ``sample_transcripts`` renders),
+    so gating on the trace alone flooded every non-L4 generator with its own task transcripts.
+
+    **Each cell's delta is shown BESIDE the origin's own delta on that same seed**, because
+    alone it is mostly the seed. The same seed measured 0.013 and 0.458 across one run's draws,
+    and the panel presented whichever it drew as that cell's character — so the generator read a
+    seed that had simply drawn low as a meta-prompt failure and anchored four of six candidates
+    on it. The origin ran every seed too (``origin_per_sample``, the frozen round-0 snapshot),
+    and that pair is the comparison the outer verdict is itself computed on: printing both makes
+    "this seed is hard" and "your edits did nothing here" different sentences instead of one
+    number. They are equal exactly when the incumbent on that seed IS the origin, which is the
+    single most useful thing this panel can say to a round whose candidates all lost.
+
+    The ORDER stays the raw delta (ascending), not the pair: a cell where the inner loop found
+    little to climb is the one a meta-prompt edit has to reach, whether or not this round's
+    candidates moved it.
+
+    **Only the weakest cells carry their whole story.** Measured on a live round the panel was
+    7,090 chars — 61% of every panel byte the generator saw — and 86% byte-identical between
+    consecutive rounds, because the strong cells' stories say the same thing every time. The
+    weak ones are what a meta-prompt edit has to fix; the rest are a line each, which is enough
+    to see that they are fine.
     """
-
-    def _proxy_lift(r: dict[str, Any]) -> float | None:
-        # The L4 discriminator: only the `promptpotter` connector stamps this proxy, and a
-        # zero-lift seed (a flat inner run — the ones a meta-prompt edit most needs to see)
-        # can round-trip as an int 0, so accept any real number, exclude bool.
-        d = (r.get("pipeline_data") or {}).get("final_delta")
-        return float(d) if isinstance(d, int | float) and not isinstance(d, bool) else None
-
-    scored = [
+    origin_lift = {
+        sid: lift
+        for r in b.origin_per_sample
+        if (sid := r.get("sample_id")) is not None and (lift := _proxy_lift(r)) is not None
+    }
+    scored: list[tuple[float, dict[str, Any]]] = [
         (lift, r)
         for r in b.trajectory_results
         if (lift := _proxy_lift(r)) is not None
@@ -431,17 +457,27 @@ def _r_inner_narratives(b: InjectionBundle) -> str:
     ]
     if not scored:
         return ""
-    scored.sort(key=lambda dr: dr[0])
+    scored.sort(key=lambda t: t[0])
     header = (
-        f"INNER RUN NARRATIVES ({len(scored)} inner campaigns this round, weakest lift first — "
-        "each is one outer sample; ground every candidate in a specific observation below):"
+        f"INNER RUN NARRATIVES ({len(scored)} inner campaigns this round, weakest first — each is "
+        "one outer sample. D is that inner run's lift; `origin` is what the SAME seed scored "
+        "under the unedited meta-prompts, so a low D beside a low origin is a hard seed, not "
+        "your edit. Equal values mean the incumbent on that seed still IS the origin. The "
+        "weakest carry their full story; ground every candidate in a specific observation):"
     )
     sections = [header]
-    for delta, r in scored:
+    for i, (delta, r) in enumerate(scored):
         pd = r.get("pipeline_data") or {}
         label = str(r.get("query") or r.get("sample_id") or "inner")[:80]
-        narrative = _head_at_line(str(pd.get("reasoning_trace") or ""), INNER_NARRATIVE_CAP)
-        sections.append(fence_untrusted(f"[{label}] D{delta:+.3f}\n{narrative}"))
+        base = origin_lift.get(r.get("sample_id"))
+        mark = f"D{delta:+.3f}" + (f" origin{base:+.3f}" if base is not None else "")
+        trace = str(pd.get("reasoning_trace") or "")
+        body = (
+            _head_at_line(trace, INNER_NARRATIVE_CAP)
+            if i < INNER_NARRATIVE_FULL_CELLS
+            else _head_at_line(trace, INNER_NARRATIVE_SUMMARY_CAP)
+        )
+        sections.append(fence_untrusted(f"[{label}] {mark}\n{body}"))
     return "\n\n".join(sections)
 
 

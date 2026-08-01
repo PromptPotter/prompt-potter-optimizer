@@ -364,7 +364,7 @@ async def _run_transition(
         campaign_id=tracing_campaign_id,
         round_num=round_num,
     ):
-        template, prompt_vars = DispatchHub.fill(
+        template, prompt_vars, _ = DispatchHub.fill(
             load_optimizer_prompt(transition.template_name),
             resolve_node_layout(transition.template_name),
             build_bundle(cycle),

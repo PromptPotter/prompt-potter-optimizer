@@ -48,7 +48,12 @@ from promptpotter.application.views.view_models import (
 from promptpotter.domain.escalation_signals import exploration_budget
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.rendering import format_l1_critique_for_prompt
-from promptpotter.domain.results import DegradationHealth, RoundResult
+from promptpotter.domain.results import (
+    DegradationHealth,
+    RoundResult,
+    ScoredCandidate,
+    candidate_label,
+)
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
 from promptpotter.infrastructure.store.campaign_store.store import origin_accuracy_of
 from promptpotter.infrastructure.store.io import read_json_tolerant, write_json, write_text
@@ -345,7 +350,7 @@ def _render_round(
         parts.append(f"- schema_repair_retries: {schema_repair_retries}")
     parts += _render_l1_inputs(opt_sp, lineage)
     parts += _render_check_checklist(checks)
-    parts += _render_variants_table(audit, scored=not is_peek)
+    parts += _render_variants_table(audit, round_data, scored=not is_peek)
     parts += _render_critique(round_data)
     return parts
 
@@ -379,23 +384,36 @@ def _render_check_checklist(checks: list[CheckResult]) -> list[str]:
     return parts
 
 
-def _render_variants_table(audit: dict[str, Any] | None, *, scored: bool) -> list[str]:
+def _render_variants_table(
+    audit: dict[str, Any] | None,
+    round_data: RoundResult,
+    *,
+    scored: bool,
+) -> list[str]:
+    """Per-variant row. The audit dict carries what L1 PROPOSED; ``round_data`` carries what
+    each proposal MEASURED, joined on :func:`candidate_label` — the sole writer of both sides'
+    key. Every score column used to print ``—`` while ``candidate_scores`` sat populated on
+    the first parameter, so `review.md` recorded an unscored round for every round ever run.
+
+    There is no Δ_parent column: the round file holds each candidate's MATCHED origin, which
+    is the comparison the loop itself elects on, and no parent composite. A column with no
+    source is what the em-dashes were.
+    """
     variants = extract_l1_variants(audit)
     if not variants:
         return []
     parts: list[str] = ["**Variants**", ""]
     if scored:
-        parts.append(
-            "| variant | composite_fitness | acc | Δ_parent | Δ_origin | beat | evidence | changes |"
-        )
-        parts.append("|---|---|---|---|---|---|---|---|")
-        # Without per-variant scores in the audit dict the table degrades to
-        # changes_description only — full per-variant scoring lives on the
-        # round_data dict's candidate_scores array, surfaced when available.
+        by_label = {c.label: c for c in round_data.candidate_scores}
+        parts.append("| variant | composite_fitness | acc | Δ_origin | beat | evidence | changes |")
+        parts.append("|---|---|---|---|---|---|---|")
         for i, v in enumerate(variants):
             changes = (v.get("changes_description") or "").replace("|", "\\|").strip()[:80]
             evidence = _fmt_evidence_cell(v.get("evidence_grounding"))
-            parts.append(f"| `C{i + 1}` | — | — | — | — | — | {evidence} | {changes} |")
+            label = candidate_label(round_data.round, i)
+            parts.append(
+                f"| `{label}` | {_score_cells(by_label.get(label))} | {evidence} | {changes} |"
+            )
     else:
         parts.append("| cand_id | changes | derived_axes | evidence |")
         parts.append("|---|---|---|---|")
@@ -406,6 +424,23 @@ def _render_variants_table(audit: dict[str, Any] | None, *, scored: bool) -> lis
             parts.append(f"| `C{i + 1}` | {changes} | {axes} | {evidence} |")
     parts.append("")
     return parts
+
+
+def _score_cells(c: ScoredCandidate | None) -> str:
+    """``composite_fitness | acc | Δ_origin | beat`` for one variant.
+
+    ``—`` only where there genuinely is no number: a variant L1 proposed but the round never
+    scored (parse-rejected, deduped), or a candidate with no MATCHED origin — eliminated
+    before the coverage floor, where ``matched_origin_composite`` is deliberately ``None``
+    rather than 0.0 (a 0.0 there reads as "beat the origin by its whole score").
+    """
+    if c is None:
+        return "— | — | — | —"
+    mo = c.matched_origin_composite
+    if mo is None:
+        return f"`{c.composite_fitness:.4f}` | {c.accuracy:.1%} | — | —"
+    delta = c.composite_fitness - mo
+    return f"`{c.composite_fitness:.4f}` | {c.accuracy:.1%} | {delta:+.4f} | {'✓' if delta > 0 else '·'}"
 
 
 def _fmt_evidence_cell(raw: object) -> str:

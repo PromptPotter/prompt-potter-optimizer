@@ -136,7 +136,7 @@ class DispatchHub:
         template: PromptTemplate,
         layout: L1Layout,
         bundle: InjectionBundle,
-    ) -> tuple[PromptTemplate, dict[str, str]]:
+    ) -> tuple[PromptTemplate, dict[str, str], dict[str, str]]:
         """Fill a node's layout + resolve any injection tokens left in non-layout slots.
 
         Two rendering channels, one call — every optimizer node routes through here:
@@ -152,8 +152,14 @@ class DispatchHub:
            ``INJECTIONS`` (caller extras like ``n_variants``; a backend's own ``{{query}}``
            echoed inside ``rendered_prompt``) are left for the caller / backend.
 
-        Returns ``(filled_template, injection_vars)``; the caller merges its own extras
-        onto ``injection_vars`` and passes both to ``run_optimizer_node``.
+        Returns ``(filled_template, injection_vars, rendered)``; the caller merges its own
+        extras onto ``injection_vars`` and passes both to ``run_optimizer_node``. ``rendered``
+        is each layout placeholder's text — **what the node was actually shown**, which is a
+        different set from what its layout NAMES: a panel with nothing to say renders empty
+        and is dropped from the slot. `l1_generate` derives its citation menu from this, so
+        it cannot offer a name whose panel is blank; rendering here rather than re-rendering
+        at the menu keeps one render per panel per round (a second pass would re-emit any
+        `injection_budget_overrun` wound).
         """
         rendered = {name: DispatchHub.render(name, bundle) for name in layout.all_placeholders()}
 
@@ -172,7 +178,7 @@ class DispatchHub:
         injection_vars = {
             name: DispatchHub.render(name, bundle) for name in remaining if name in INJECTIONS
         }
-        return filled, injection_vars
+        return filled, injection_vars, rendered
 
 
 def build_bundle(

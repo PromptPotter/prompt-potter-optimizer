@@ -15,6 +15,7 @@ own.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -32,6 +33,9 @@ if TYPE_CHECKING:
     from promptpotter.application.config import CampaignConfig
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.sample import Sample
+
+
+logger = logging.getLogger(__name__)
 
 
 def _noop_log(*_args: Any, **_kwargs: Any) -> None:
@@ -102,6 +106,42 @@ def resolve_cycle_plan(
     )
 
 
+def _warn_on_duplicate_origin(
+    session: Session,
+    cycle_id: str,
+    *,
+    log: Callable[..., None],
+) -> None:
+    """Say so, BEFORE the spend, when this exact origin has already been run.
+
+    ``cycle_id`` is content-addressed, so a second ``new`` over an unedited origin mints a
+    fresh campaign whose root cycle carries the SAME id and re-runs the identical seed. The
+    store takes it happily — each campaign has its own directory — and the operator learns
+    hours and dollars later, from a picker holding N campaigns with identical stats.
+
+    A warning and not a refusal: ``new`` is the verb an operator reaches for, the duplicate
+    is legal, and a gate that guesses wrong blocks the main path. What they need is the
+    campaign id to ``resume`` instead, which is what this prints.
+    """
+    prior = sorted(
+        {
+            str(entry.get("campaign_id") or "")
+            for entry in session.store.campaigns.enumerate_cycles()
+            if entry.get("cycle_id") == cycle_id and entry.get("campaign_id")
+        }
+    )
+    if not prior:
+        return
+    logger.warning(
+        "This origin has already been run as cycle %s in campaign(s) %s — a fresh `new` "
+        "re-measures the identical seed. `resume` continues one of those instead; `new` is "
+        "for an origin you have CHANGED (meta-prompt, config, or dataset).",
+        cycle_id,
+        ", ".join(prior),
+    )
+    log(f"NOTE: identical origin already run in {', '.join(prior)} — consider `resume`")
+
+
 def prepare_fresh_cycle(
     session: Session,
     campaign_config: CampaignConfig,
@@ -147,6 +187,7 @@ def prepare_fresh_cycle(
     inner_sandbox = session.store.projects_root.parent / ".inner" / plan.cycle_id
     if inner_sandbox.exists():
         rmtree_robust(inner_sandbox)
+    _warn_on_duplicate_origin(session, plan.cycle_id, log=log or _noop_log)
     session_id, campaign_id, cycle_id = auto_mint_session(
         session,
         campaign_config,
