@@ -23,8 +23,14 @@ if TYPE_CHECKING:
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 
 
-def fmt_ci(lower: float, upper: float) -> str:
-    """Format a 95% CI bracket: ``[X.X%-Y.Y%]``."""
+def fmt_ci(lower: float | None, upper: float | None) -> str:
+    """Format a 95% CI bracket: ``[X.X%-Y.Y%]``, or ``—`` where no interval exists.
+
+    The composite CI is absent for a candidate with no scored cell, and an absent
+    interval must read as absent rather than as ``[0.0%-0.0%]`` — a fabricated
+    bracket claiming certainty about a measurement that never happened."""
+    if lower is None or upper is None:
+        return "—"
     return f"[{lower:.1%}-{upper:.1%}]"
 
 
@@ -228,14 +234,17 @@ def _scoreboard(
     w = 78
 
     hdr = (
-        f"{'#':<4s}{'Label':<8s}{'Accuracy':>9s}  {'95% CI':>16s}  {'Composite':>9s}  {'Delta':>7s}"
+        # CI sits beside Composite because that is what it brackets. It used to sit
+        # beside Accuracy while carrying a Wilson interval on binary hits — two
+        # different quantities, drawn as if one bounded the other.
+        f"{'#':<4s}{'Label':<8s}{'Accuracy':>9s}  {'Composite':>9s}  {'95% CI':>16s}  {'Delta':>7s}"
     )
     lines = [f"  {_box_top('SCOREBOARD', width=w)}", f"  {_box_line(hdr, width=w)}"]
 
     for i, s in enumerate(ranked, 1):
         label = (s.label or "")[:8]
         acc = s.accuracy
-        ci_str = fmt_ci(s.ci_lo, s.ci_hi)
+        ci_str = fmt_ci(s.composite_ci_lo, s.composite_ci_hi)
         # Per-row matched-pair origin: compares this candidate's accuracy against origin on
         # the *same samples this candidate ran* (PoBB-locked rows). ``None`` for rows nothing
         # was matched to (eliminated / under the coverage floor) — those fall back to the

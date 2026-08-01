@@ -465,7 +465,6 @@ class LiveDisplay(DerivedView):
                 "label": round_result.label,
                 "accuracy": round_result.accuracy,
                 "composite_fitness": round_result.composite_fitness,
-                "hits": round_result.hits,
                 "total": round_result.total,
                 "improved": round_result.improved,
                 "prompt_fields": OptSearchPoint.from_prompt_fields(round_result.prompt_fields),

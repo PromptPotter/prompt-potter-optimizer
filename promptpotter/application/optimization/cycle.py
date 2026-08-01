@@ -100,7 +100,6 @@ def _origin_round(
             "prompt_fields": prompt_fields,
             "resolved_pipeline_params": sp.config_params,
             "matched_origin_accuracy": report.accuracy,
-            "matched_origin_hits": report.hits,
             "matched_origin_composite": report.composite_fitness,
         }
     )
@@ -109,12 +108,10 @@ def _origin_round(
         label=row.label,
         accuracy=row.accuracy,
         composite_fitness=row.composite_fitness,
-        hits=row.hits,
         total=row.total,
         improved=False,
         origin_accuracy=row.accuracy,
         matched_origin_accuracy=row.accuracy,
-        matched_origin_hits=row.hits,
         matched_origin_composite=row.composite_fitness,
         prompt_fields=prompt_fields,
         pipeline_params=sp.pipeline_params,

@@ -81,9 +81,9 @@ def render_round_stats(
     round_result: RoundResult,
     pipeline_schema: PipelineSchema | None,
 ) -> str:
-    """hits/total, candidate count, pipeline terminations, degradation%, recall@1/5."""
+    """accuracy over N samples, candidate count, pipeline terminations, degradation%, recall@1/5."""
     lines: list[str] = []
-    hits = round_result.hits
+    accuracy = round_result.accuracy
     total = round_result.total
     deprecated = round_result.deprecated
     if total == 0 and round_result.candidate_scores:
@@ -102,13 +102,16 @@ def render_round_stats(
                 key=lambda s: round_winner_key(s.composite_fitness, s.accuracy),
             ),
         )
-        hits = best.hits
+        accuracy = best.accuracy
         total = best.total
         deprecated = 0
     suffix = f"  ({deprecated} deprecated)" if deprecated else ""
     lines.append(
         _node_line(
-            f"hits: {hits}/{total}{suffix}  |  evaluated: "
+            # Was `hits: 12/20`. The integer pair is the small readability cost of
+            # dropping a scalar that meant nothing on a graded scorer; the percentage
+            # is the same number the round reports everywhere else.
+            f"accuracy: {accuracy:.1%} of {total} samples{suffix}  |  evaluated: "
             f"{round_result.candidates_scored} candidates"
         )
     )

@@ -117,7 +117,6 @@ class RunRecord:
     name: str
     accuracy: float
     composite: float
-    hits: int
     total: int
 
 
@@ -460,7 +459,6 @@ class AxisIndex:
                 name=entry.get("name", ""),
                 accuracy=accuracy,
                 composite=display_fitness(scores.get("composite_fitness"), accuracy),
-                hits=scores.get("hits", 0),
                 total=total,
             )
             prev = best_by_run.get(run_id)

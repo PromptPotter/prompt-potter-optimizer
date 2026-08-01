@@ -85,7 +85,7 @@ def _render_round(
         f"### Round {rd.round} — {rd.label} ({_fmt_pct(rd.accuracy)})",
         "",
         f"- improved: **{'yes' if rd.improved else 'no'}**",
-        f"- hits: {rd.hits}/{rd.total}",
+        f"- samples: {rd.total}",
         f"- composite_fitness: `{rd.composite_fitness:.4f}`",
     ]
     if rd.changes_description:

@@ -433,15 +433,14 @@ def test_matched_origin_stats_restricts_to_candidate_subset():
         for i in range(10, 18)
     ]
     matched = matched_origin_stats(origin_results, candidate_results, schema)
-    # Origin had ZERO hits on samples 10-17. The faked extrapolation
-    # (origin.accuracy * 8 = 0.5 * 8 = 4) would have invented 4 hits.
-    assert matched["hits"] == 0
+    # Origin scored ZERO on samples 10-17. The faked extrapolation
+    # (origin.accuracy * 8 = 0.5 * 8) would have invented lift the origin never earned.
     assert matched["total"] == 8
     assert matched["accuracy"] == 0.0
     # Degenerate case: candidate measured all 20 → matches full-set stats.
     full = matched_origin_stats(origin_results, origin_results, schema)
-    assert full["hits"] == 10
     assert full["total"] == 20
+    assert full["accuracy"] == 0.5
     assert full["accuracy"] == pytest.approx(0.5)
     # DISJOINT subset (per_round_resubset can hand a candidate samples the origin never
     # measured): restricting yields [], which scores no `accuracy` term. This must NOT crash
@@ -452,7 +451,6 @@ def test_matched_origin_stats_restricts_to_candidate_subset():
         {**_eval_result(hit=True, score=1.0), "sample_id": i} for i in range(100, 108)
     ]
     disjoint = matched_origin_stats(origin_results, disjoint_candidate, schema)
-    assert disjoint["hits"] == 10
     assert disjoint["total"] == 20
     assert disjoint["accuracy"] == pytest.approx(0.5)
 

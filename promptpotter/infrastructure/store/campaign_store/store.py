@@ -66,7 +66,6 @@ def round_summary(rr: RoundResult) -> dict[str, Any]:
         "round": rr.round,
         "label": rr.label,
         "accuracy": rr.accuracy,
-        "hits": rr.hits,
         "total": rr.total,
         "improved": rr.improved,
         "status": rr.status,

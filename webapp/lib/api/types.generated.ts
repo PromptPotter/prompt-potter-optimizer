@@ -166,7 +166,6 @@ export interface ScoredCandidate {
   changes_description: string;
   accuracy: number;
   composite_fitness: number;
-  hits: number;
   total: number;
   evaluators: Record<string, number>;
   pipeline_params_override: Record<string, unknown> | null;
@@ -183,14 +182,11 @@ export interface ScoredCandidate {
   elimination_context: unknown;
   degradation_context: unknown;
   matched_origin_accuracy: number | null;
-  matched_origin_hits: number | null;
   matched_origin_composite: number | null;
   theta: number | null;
   theta_se: number | null;
   composite_ci_lo: number | null;
   composite_ci_hi: number | null;
-  ci_lo: number;
-  ci_hi: number;
 }
 
 /** One rank-ordered row of ``RoundResult.scoreboard`` — the round file's display table. */
@@ -200,14 +196,12 @@ export interface ScoreboardRow {
   changes_description: string;
   accuracy: number;
   composite_fitness: number;
-  hits: number;
   total: number;
   escalation_aborted: boolean;
   matched_origin_accuracy: number | null;
-  matched_origin_hits: number | null;
   matched_origin_composite: number | null;
-  ci_lo: number;
-  ci_hi: number;
+  composite_ci_lo: number | null;
+  composite_ci_hi: number | null;
   is_winner: boolean;
 }
 
@@ -296,7 +290,6 @@ export interface RoundResult {
   label: string;
   accuracy: number;
   composite_fitness: number;
-  hits: number;
   total: number;
   improved: boolean;
   p_value: number | null;
@@ -305,7 +298,6 @@ export interface RoundResult {
   deprecated: number;
   escalation_signal: unknown | null;
   matched_origin_accuracy: number;
-  matched_origin_hits: number;
   matched_origin_composite: number;
   cumulative_theta: number | null;
   calibration_model: '1PL' | '2PL' | null;

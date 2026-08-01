@@ -227,7 +227,6 @@ def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
     # actually promoted (whose accuracy is `winner_accuracy`), so the verdict
     # line / SCOREBOARD `*` would disagree with the dashboard.
     winner_label = str(d.get("winner_label") or "?")
-    winner_hits = int(d.get("winner_hits", 0))
     winner_total = int(d.get("winner_total", 0))
 
     w_acc = float(d["winner_accuracy"])
@@ -238,7 +237,6 @@ def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
     # matches the ``improved`` gate, not the full-set comparison that
     # punishes PoBB-locked winners.
     matched_origin_acc = float(d.get("winner_matched_origin_accuracy", origin_acc))
-    matched_origin_hits = int(d.get("winner_matched_origin_hits", 0))
     matched_origin_composite = d.get("winner_matched_origin_composite")
     delta = w_acc - matched_origin_acc
     p_value: float | None = d.get("p_value")  # computed by l1_score; not recomputed here.
@@ -253,7 +251,6 @@ def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
         winner_accuracy=w_acc,
         winner_composite_fitness=d.get("winner_composite_fitness"),
         winner_evaluators=dict(d["winner_evaluators"]),
-        winner_hits=winner_hits,
         winner_total=winner_total,
         improved=improved,
         delta=delta,
@@ -265,7 +262,6 @@ def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
         composite_fitness_formula_short=ctx.composite_fitness_formula_short,
         origin_composite_fitness=ctx.origin_composite_fitness,
         matched_origin_accuracy=matched_origin_acc,
-        matched_origin_hits=matched_origin_hits,
         matched_origin_composite=matched_origin_composite,
     )
 
@@ -357,8 +353,9 @@ def from_phase_event(event: PhaseEvent, ctx: ViewContext) -> AnyView | None:
 def score_entry_from_dict(s: dict[str, Any]) -> ScoreEntry:
     """``ScoredCandidate`` dict (``model_dump``) → narrow ``ScoreEntry`` renderer row.
 
-    ``ci_lo``/``ci_hi`` ride the validated candidate (sole Wilson site); the
-    scoreboard's ``invalid_reason`` is derived from the first validation failure.
+    The interval is ``composite_ci_lo``/``_hi`` — it brackets the composite the row
+    reports, where the old Wilson pair bracketed a binary hit-rate nothing displayed.
+    The scoreboard's ``invalid_reason`` is derived from the first validation failure.
     """
     sc = ScoredCandidate.model_validate(s)
     invalid_reason: str | None = None
@@ -370,10 +367,9 @@ def score_entry_from_dict(s: dict[str, Any]) -> ScoreEntry:
         label=sc.label,
         accuracy=sc.accuracy,
         composite_fitness=sc.composite_fitness,
-        hits=sc.hits,
         total=sc.total,
-        ci_lo=sc.ci_lo,
-        ci_hi=sc.ci_hi,
+        composite_ci_lo=sc.composite_ci_lo,
+        composite_ci_hi=sc.composite_ci_hi,
         escalation_aborted=sc.escalation_aborted,
         invalid_reason=invalid_reason,
         matched_origin_accuracy=sc.matched_origin_accuracy,

@@ -606,7 +606,6 @@ def from_disk_log(
                 label=t.label.strip() or t.round_id,
                 accuracy=t.accuracy,
                 improved=t.improved,
-                hits=t.hits,
                 total=t.total,
                 composite_fitness=t.composite_fitness,
                 changes_description=(lineage.changes_description if lineage else "").strip(),

@@ -162,7 +162,6 @@ class LangfuseSink:
             },
             output={
                 "accuracy": event.accuracy,
-                "hits": event.hits,
                 "total": event.total,
             },
             parent_observation_id=round_observation_id,

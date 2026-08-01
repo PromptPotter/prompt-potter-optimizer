@@ -179,7 +179,6 @@ def build_score_report(
         prompt_fields=opt_sp.prompt_field_dict(),
         accuracy=score_summary["accuracy"],
         composite_fitness=score_summary["composite_fitness"],
-        hits=score_summary["hits"],
         total=score_summary["total"],
         evaluators=evaluators,
         escalation_aborted=aborted,
@@ -222,7 +221,6 @@ def pobb_decision_data(
 INVALID_SCORES: dict[str, Any] = {
     "accuracy": 0.0,
     "composite_fitness": 0.0,
-    "hits": 0,
     "total": 0,
     "errors": 0,
     "invalid": True,

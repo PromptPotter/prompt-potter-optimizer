@@ -56,7 +56,6 @@ async def run_sweep_generation_only(
                     status="generation_only",
                     accuracy=0.0,
                     composite_fitness=0.0,
-                    hits=0,
                     total=0,
                     improved=False,
                     prompt_fields=cycle.opt_sp.prompt_field_dict(),

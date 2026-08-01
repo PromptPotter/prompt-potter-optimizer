@@ -159,7 +159,6 @@ async def l1_score(
             )
             parent_election_results.extend(cast("list[QueryMeasurement]", extra.results))
     # Full-set parent stats — fallback for `matched_origin` when every candidate ran every sample.
-    parent_base = _compute_accuracy(cast("list[QueryMeasurement]", parent.results))
     # No-winner headline = the RETAINED incumbent re-scored on THIS round's touched subset
     # (`rescore_parent`, above) — one configuration, on named samples, actually measured.
     #
@@ -176,8 +175,8 @@ async def l1_score(
     # It also makes the series ONE quantity: a winner round already reports the winner on this
     # round's subset, so every round now reads "whoever holds the lineage, measured on the
     # samples this round drew" instead of alternating between two incomparable things.
-    # `results`/`hits`/`total` source from the SAME re-score so they stay mutually consistent
-    # (the round-health Wilson CI pairs `hits` with `total`; the health failure rates + the
+    # `results`/`total` source from the SAME re-score so they stay mutually consistent
+    # (the health failure rates + the
     # evidence-starved→L2 rate denominate over `results` — the attempted rows — internally).
     # All nine are overwritten when a winner is elected, so this only shapes the no-winner record.
     best_acc = parent.report.accuracy
@@ -191,7 +190,6 @@ async def l1_score(
     best_label = parent.report.label
     best_scores: dict[str, float] = dict(parent.report.evaluators)
     best_matched_origin_acc = parent.report.accuracy
-    best_matched_origin_hits = parent_base["hits"]
     best_matched_origin_composite = parent.report.composite_fitness
     # Elect by confident improvement over MATCHED origin (origin on the candidate's own measured
     # samples), NOT raw accuracy vs origin's full-set rate. Candidates share ONE round order but
@@ -227,7 +225,6 @@ async def l1_score(
         candidate_scores[cs_idx] = candidate_scores[cs_idx].model_copy(
             update={
                 "matched_origin_accuracy": matched["accuracy"],
-                "matched_origin_hits": matched["hits"],
                 "matched_origin_composite": matched["composite_fitness"],
             }
         )
@@ -271,7 +268,6 @@ async def l1_score(
                 update={
                     "composite_fitness": s["composite_fitness"],
                     "accuracy": s["accuracy"],
-                    "hits": s["hits"],
                     "total": s["total"],
                     "composite_ci_lo": ci_lo,
                     "composite_ci_hi": ci_hi,
@@ -330,14 +326,12 @@ async def l1_score(
         best_label = winner_ind.lineage.changes_description or winner_ind.lineage.id[:12]
         best_scores = dict(winner_cs.evaluators)
         best_matched_origin_acc = matched["accuracy"]
-        best_matched_origin_hits = matched["hits"]
         best_matched_origin_composite = matched["composite_fitness"]
 
     base = _compute_accuracy(best_results)
-    # Headline hits/total ride the winner's ScoredCandidate row — the replication
+    # The headline sample count rides the winner's ScoredCandidate row — the replication
     # block above updates it over ALL rows, so the round header and the
     # per-candidate table cannot disagree under ``replicate_survivors > 0``.
-    best_hits = winner_cs.hits if winner_id else base["hits"]
     best_total = winner_cs.total if winner_id else base["total"]
     p_value: float | None = None
     if base["total"] > 0 and winner_id:
@@ -423,14 +417,12 @@ async def l1_score(
         label=best_label,
         accuracy=best_acc,
         composite_fitness=best_comp,
-        hits=best_hits,
         total=best_total,
         improved=improved,
         p_value=p_value,
         improved_reason=improved_reason,
         origin_accuracy=best_origin_accuracy,
         matched_origin_accuracy=best_matched_origin_acc,
-        matched_origin_hits=best_matched_origin_hits,
         matched_origin_composite=best_matched_origin_composite,
         prompt_fields={
             **best_opt_sp.prompt_field_dict(),

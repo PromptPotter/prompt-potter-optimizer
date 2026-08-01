@@ -170,7 +170,6 @@ class DatasetRun:
     content_hash: str
     prompt_fields_id: str
     accuracy: float
-    hits: int
     total: int
 
 
@@ -179,7 +178,6 @@ class RoundEnd:
     campaign_id: str
     round_num: int
     accuracy: float
-    hits: int
     total: int
     improved: bool
     winner_prompt_fields_id: str

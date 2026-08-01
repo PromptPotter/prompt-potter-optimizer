@@ -155,14 +155,12 @@ async def execute_round(
         winner_accuracy=round_result.accuracy,
         winner_composite_fitness=round_result.composite_fitness,
         winner_evaluators=dict(round_result.evaluators),
-        winner_hits=round_result.hits,
         winner_total=round_result.total,
         improved=round_result.improved,
         improved_reason=round_result.improved_reason,
         p_value=round_result.p_value,
         candidate_scores=[c.model_dump() for c in round_result.candidate_scores],
         winner_matched_origin_accuracy=round_result.matched_origin_accuracy,
-        winner_matched_origin_hits=round_result.matched_origin_hits,
         winner_matched_origin_composite=round_result.matched_origin_composite,
     )
 
@@ -226,7 +224,6 @@ async def execute_round(
                     campaign_id=session.state.tracing_campaign_id,
                     round_num=round_num,
                     accuracy=round_result.accuracy,
-                    hits=round_result.hits,
                     total=round_result.total,
                     improved=round_result.improved,
                     winner_prompt_fields_id=winner_opt_sp.lineage.id,

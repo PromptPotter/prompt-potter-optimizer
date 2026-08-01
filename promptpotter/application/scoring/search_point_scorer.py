@@ -258,7 +258,6 @@ def _emit_dataset_run(
                 content_hash=content_hash,
                 prompt_fields_id=search_point.sp_hash(pipeline_schema),
                 accuracy=scores["accuracy"],
-                hits=scores["hits"],
                 total=scores["total"],
             )
         )

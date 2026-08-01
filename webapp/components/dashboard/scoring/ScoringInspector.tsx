@@ -39,7 +39,7 @@ export function ScoringInspector({ selected, onClose }: Props) {
   // resolves its `round_NNNN.json` from the inner cycle's dir, not the outer
   // root's empty `rounds/` (the old "round file not on disk" degradation).
   const { viewedPath } = useWorkspace();
-  // Composite + hits are deep-audit fields. For a *completed* round they live
+  // Composite + accuracy are deep-audit fields. For a *completed* round they live
   // in `round_NNNN.json::scoreboard`; for the *in-flight* round they live in
   // `dashboard.json`'s live l1_score stats. `useRoundSource` picks one source
   // per the no-stitch rule and never fetches the live round's not-yet-written
@@ -47,15 +47,19 @@ export function ScoringInspector({ selected, onClose }: Props) {
   const { isLive, doc } = useRoundSource(viewedPath, selected?.round ?? null, dash);
   const [steerOpen, setSteerOpen] = useState(false);
 
-  const data = useMemo<{ composite?: number; hits?: number; total?: number } | null>(() => {
+  const data = useMemo<{ composite?: number; accuracy?: number; total?: number } | null>(() => {
     if (!selected) return null;
     if (isLive) {
       const c = liveCandidate(dash, selected.round, selected.candidate_id);
       if (!c?.stats) return null;
-      return { composite: c.stats.composite_fitness, hits: c.stats.hits, total: c.stats.total };
+      return {
+        composite: c.stats.composite_fitness,
+        accuracy: c.stats.accuracy ?? undefined,
+        total: c.stats.total ?? undefined,
+      };
     }
     const e = doc?.scoreboard.find((c) => c.candidate_id === selected.candidate_id);
-    return e ? { composite: e.composite_fitness, hits: e.hits, total: e.total } : null;
+    return e ? { composite: e.composite_fitness, accuracy: e.accuracy, total: e.total } : null;
   }, [selected, isLive, dash, doc]);
 
   // The per-sample stream for *just this* searchpoint — the same rows the
@@ -145,10 +149,12 @@ export function ScoringInspector({ selected, onClose }: Props) {
             <span className="inspector-val">{data.composite.toFixed(4)}</span>
           </div>
         )}
-        {data && typeof data.hits === "number" && typeof data.total === "number" && (
+        {data && typeof data.accuracy === "number" && typeof data.total === "number" && (
           <div className="inspector-row">
-            <span className="inspector-key">hits</span>
-            <span className="inspector-val">{data.hits} / {data.total}</span>
+            <span className="inspector-key">accuracy</span>
+            <span className="inspector-val">
+              {(data.accuracy * 100).toFixed(1)}% of {data.total}
+            </span>
           </div>
         )}
         <div className="inspector-row">
@@ -163,7 +169,7 @@ export function ScoringInspector({ selected, onClose }: Props) {
         {data == null && (
           <div className="inspector-note">
             {isLive
-              ? `Scoring in progress for R${selected.round} — composite + hits appear as this candidate's samples land.`
+              ? `Scoring in progress for R${selected.round} — composite + accuracy appear as this candidate's samples land.`
               : `Round file not yet on disk for R${selected.round} — showing only the in-tree summary.`}
           </div>
         )}
@@ -172,13 +178,14 @@ export function ScoringInspector({ selected, onClose }: Props) {
         <div className="inspector-samples">
           <div className="rsv-group-head" aria-hidden>
             <span className="rsv-cand-label">{selected.label} · samples</span>
-            {/* Served counts, not a tally over the rendered rows: the two disagreed
+            {/* Served numbers, not a tally over the rendered rows: the two disagreed
                 whenever this list was capped or still filling. R-36 — the backend
-                computes, the webapp never recomputes. */}
-            {data && typeof data.hits === "number" && typeof data.total === "number" && (
+                computes, the webapp never recomputes. The HIT/MISS pair is gone with
+                the served `hits`; on a graded scorer it read "HIT 0 / MISS n" beside a
+                real accuracy, and on a binary one it said the same thing twice. */}
+            {data && typeof data.accuracy === "number" && typeof data.total === "number" && (
               <span className="rsv-tally">
-                <span className="tag-hit">HIT {data.hits}</span>
-                <span className="tag-miss">MISS {data.total - data.hits}</span>
+                {(data.accuracy * 100).toFixed(0)}% of {data.total}
               </span>
             )}
           </div>

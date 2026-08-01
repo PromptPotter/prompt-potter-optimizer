@@ -174,10 +174,9 @@ class ScoreEntry:
     label: str
     accuracy: float
     composite_fitness: float | None
-    hits: int
     total: int
-    ci_lo: float
-    ci_hi: float
+    composite_ci_lo: float | None
+    composite_ci_hi: float | None
     escalation_aborted: bool = False
     # First-validation-failure reason for synthetic-zeroed variants (e.g. ``no_op_variant``);
     # scoreboard suppresses these rows so ranking reflects mutated candidates only.
@@ -200,7 +199,6 @@ class RoundCompleteView:
     winner_accuracy: float
     winner_composite_fitness: float | None
     winner_evaluators: dict[str, float]
-    winner_hits: int
     winner_total: int
     improved: bool
     delta: float
@@ -214,7 +212,6 @@ class RoundCompleteView:
     # Origin restricted to the winner's measured samples; verdict line + Δ
     # read these so operator-facing "Δ vs origin" matches the ``l1_score`` gate.
     matched_origin_accuracy: float = 0.0
-    matched_origin_hits: int = 0
     matched_origin_composite: float | None = None
 
 
@@ -301,7 +298,6 @@ class RoundDigestView:
     label: str
     accuracy: float
     improved: bool
-    hits: int
     total: int
     composite_fitness: float
     changes_description: str

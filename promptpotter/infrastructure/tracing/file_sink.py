@@ -272,7 +272,6 @@ class FileSink:
             },
             output_data={
                 "accuracy": event.accuracy,
-                "hits": event.hits,
                 "total": event.total,
             },
             tags=["dataset_run"],
@@ -285,7 +284,6 @@ class FileSink:
                 "run_id": event.run_id,
                 "content_hash": event.content_hash,
                 "accuracy": event.accuracy,
-                "hits": event.hits,
                 "total": event.total,
                 "prompt_fields_id": event.prompt_fields_id,
             }
@@ -370,7 +368,6 @@ class FileSink:
                     observation_id,
                     {
                         "accuracy": event.accuracy,
-                        "hits": event.hits,
                         "total": event.total,
                         "improved": event.improved,
                         "next_action": event.next_action,
@@ -386,7 +383,6 @@ class FileSink:
             "campaign_id": event.campaign_id,
             "round": event.round_num,
             "accuracy": event.accuracy,
-            "hits": event.hits,
             "total": event.total,
             "improved": event.improved,
             "next_action": event.next_action,

@@ -152,13 +152,15 @@ class ScoredCandidate(StrictModel):
     """One candidate's L1 score report — the single shape for round-file scores.
 
     ``model_dump()`` *is* the wire format; ``model_validate()`` reads it back.
-    ``ci_lo``/``ci_hi`` are computed from ``hits``/``total`` (sole Wilson site),
-    so they round-trip through serialization without being stored or recomputed
-    by readers.
+
+    There is no ``hits`` and no Wilson interval. ``accuracy`` IS mean fitness, so on a
+    binary scorer ``hits/total`` was exactly that number a second time, and on a graded
+    one it counted an unreachable ceiling. The interval that belongs beside a composite
+    is ``composite_ci_lo``/``_hi``, which brackets the quantity actually reported.
     """
 
-    # `extra="ignore"`: `ci_lo`/`ci_hi` are computed fields — `model_dump()` writes them,
-    # `model_validate()` must not reject them coming back.
+    # `extra="ignore"`: round files written before `hits`/`ci_lo`/`ci_hi` were dropped
+    # still carry them, and a stale key must not make a paid measurement unreadable.
     model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True, extra="ignore")
 
     candidate_id: str
@@ -166,7 +168,6 @@ class ScoredCandidate(StrictModel):
     changes_description: str = ""
     accuracy: float
     composite_fitness: float
-    hits: int
     total: int
     evaluators: dict[str, float] = Field(default_factory=dict)
     pipeline_params_override: dict[str, Any] | None = None
@@ -202,7 +203,6 @@ class ScoredCandidate(StrictModel):
     # that scored nothing, and it reads as "this candidate beat the origin by its whole accuracy"
     # — which is what the inner narrative told the outer optimizer, on every eliminated arm.
     matched_origin_accuracy: float | None = None
-    matched_origin_hits: int | None = None
     matched_origin_composite: float | None = None
     # Difficulty-adjusted Rasch ability (+ Laplace SE) on the round's joint-fit scale — the
     # subset-invariant metric the winner election ranks by (`elect_round_winner`), stamped from
@@ -214,24 +214,9 @@ class ScoredCandidate(StrictModel):
     # Normal-CLT CI on the mean per-cell composite fitness (``metrics.composite_ci`` —
     # ``mean_ci`` over ``_mean_fitness_by_cell``, the same reader the θ / paired decision
     # metrics use) — always present for any candidate with ≥1 scored cell, unlike ``theta_se``
-    # (fit-restricted). No composite point estimate should stand alone; ``ci_lo``/``ci_hi``
-    # below are the Wilson interval on binary ``hits``/``total``, a different quantity.
+    # (fit-restricted). No composite point estimate should stand alone.
     composite_ci_lo: float | None = None
     composite_ci_hi: float | None = None
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def ci_lo(self) -> float:
-        from promptpotter.shared.statistics import wilson_ci
-
-        return wilson_ci(self.hits, self.total)[0]
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def ci_hi(self) -> float:
-        from promptpotter.shared.statistics import wilson_ci
-
-        return wilson_ci(self.hits, self.total)[1]
 
 
 def is_leader_eligible(cs: ScoredCandidate) -> bool:
@@ -271,13 +256,11 @@ _SCOREBOARD_INCLUDE: set[str] = {
     "changes_description",
     "accuracy",
     "composite_fitness",
-    "hits",
     "total",
-    "ci_lo",
-    "ci_hi",
+    "composite_ci_lo",
+    "composite_ci_hi",
     "escalation_aborted",
     "matched_origin_accuracy",
-    "matched_origin_hits",
     "matched_origin_composite",
 }
 
@@ -292,17 +275,15 @@ class ScoreboardRow(StrictModel):
     changes_description: str
     accuracy: float
     composite_fitness: float
-    hits: int
     total: int
     escalation_aborted: bool
     # ``None`` for a row nothing was matched to (eliminated / under the coverage floor) — see
     # ``ScoredCandidate``. The round file carries the absence rather than a 0.0 that reads as a
     # verdict the origin never gave.
     matched_origin_accuracy: float | None
-    matched_origin_hits: int | None
     matched_origin_composite: float | None
-    ci_lo: float
-    ci_hi: float
+    composite_ci_lo: float | None
+    composite_ci_hi: float | None
     is_winner: bool
 
 
@@ -413,7 +394,6 @@ class RoundResult(StrictModel):
     label: str
     accuracy: float
     composite_fitness: float = 0.0
-    hits: int
     total: int
     improved: bool
     # One-sided two-proportion p-value vs origin; drives the IMPROVED gate. None ⇒ no test ran.
@@ -421,13 +401,12 @@ class RoundResult(StrictModel):
     # When `improved=False` despite Δ>0: which of {delta_threshold, significance, min_samples} blocked promotion.
     improved_reason: str | None = None
     degraded_samples: int = 0
-    # Fatal-warning samples discarded from hits/total/accuracy on the winner's run.
+    # Fatal-warning samples discarded from total/accuracy on the winner's run.
     deprecated: int = 0
     escalation_signal: EscalationSignal | None = None
     # Origin restricted to the winner's measured samples — apples-to-apples when PoBB locks
     # at q8/20 while origin has 20. Drives `improved`, p_value, verdict Δ.
     matched_origin_accuracy: float = 0.0
-    matched_origin_hits: int = 0
     matched_origin_composite: float = 0.0
     # Subset-invariant peer of this round's own `accuracy`: ability of the cumulative frontier
     # on the cycle's fixed δ ruler. None when the ruler is cold. Feeds the L4 outer proxy so a

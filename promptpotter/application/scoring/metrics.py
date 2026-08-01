@@ -27,7 +27,7 @@ from promptpotter.application.scoring.formula import (
     extract_item_label,
 )
 from promptpotter.domain.pipeline_schema import NodeType
-from promptpotter.domain.scoring import RoundScorer, is_hit
+from promptpotter.domain.scoring import RoundScorer
 from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
 
 if TYPE_CHECKING:
@@ -67,7 +67,7 @@ def find_rank(items: list[Any], ground_truth: str) -> int | None:
 
 
 def _compute_accuracy(results: list[QueryMeasurement]) -> dict[str, Any]:
-    """Base scalars: hits, total, accuracy, errors, deprecated.
+    """Base scalars: total, accuracy, errors, deprecated.
 
     ``total`` is the EVIDENCE denominator — scoreable rows only (not deprecated,
     not errored): the same population ``compute_accuracy`` averages, the Wilson-CI
@@ -77,7 +77,7 @@ def _compute_accuracy(results: list[QueryMeasurement]) -> dict[str, Any]:
     so neither belongs in the denominator a rate is read against.
 
     Kept as a thin function (not part of the registry) because several
-    consumers read ``hits`` / ``total`` directly.
+    consumers read ``total`` directly.
     """
     from promptpotter.application.optimization.pobb.classification import is_deprecated
 
@@ -86,11 +86,9 @@ def _compute_accuracy(results: list[QueryMeasurement]) -> dict[str, Any]:
     errors = sum(1 for r in valid if is_error_result(r))
     scoreable = [r for r in valid if not is_error_result(r)]
     total = len(scoreable)
-    hits = sum(1 for r in scoreable if is_hit(r.get("fitness")))
     # Single source for the mean-fitness-over-scoreable formula.
     accuracy = compute_accuracy(results=results)
     return {
-        "hits": hits,
         "total": total,
         "accuracy": accuracy,
         "errors": errors,
@@ -348,7 +346,7 @@ def matched_origin_stats(
     *,
     round_scorer: RoundScorer | str | None = None,
 ) -> dict[str, Any]:
-    """Origin's accuracy/hits/composite restricted to the candidate's measured samples.
+    """Origin's accuracy/composite restricted to the candidate's measured samples.
 
     When PoBB leader-locks a candidate at q8/20, returns origin's stats on
     only those 8 samples — the apples-to-apples comparison PoBB's matched-pair
@@ -378,7 +376,7 @@ def matched_origin_stats(
         round_scorer=round_scorer,
         l1_diversity=1.0,
     )
-    return {key: composite[key] for key in ("accuracy", "hits", "total", "composite_fitness")}
+    return {key: composite[key] for key in ("accuracy", "total", "composite_fitness")}
 
 
 # ---------------------------------------------------------------------------

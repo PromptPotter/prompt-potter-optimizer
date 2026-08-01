@@ -51,7 +51,6 @@ class MLflowSink:
 
         metrics = {
             "accuracy": event.accuracy,
-            "hits": float(event.hits),
             "total": float(event.total),
         }
         tags = {
