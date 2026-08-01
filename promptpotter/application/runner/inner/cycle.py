@@ -494,7 +494,8 @@ async def _run_inner_campaign(
             session.campaign_id, session.state.cycle_id
         )
     task_context = await load_or_build_task_context(
-        session.dataset_config_dir,
+        session.store,
+        session.dataset_name,
         campaign_id=session.campaign_id,
         context=checkin_call_context(
             session.store, session.campaign_id, session.state.cycle_id or ""

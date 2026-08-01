@@ -1,10 +1,15 @@
 """Task-description check-in: raw context → Layer-1 prompt fields + task_context.
 
-One LLM decomposition, cached on disk as the dataset's ``task_context.yaml``.
-The web ingest path writes that file at commit (from the check-in it already ran);
+One LLM decomposition, cached on disk as ``task_context.yaml``. The web ingest path
+writes that file at commit (from the check-in it already ran);
 :func:`load_or_build_task_context` is the single run-start seam that reads it — or
-decomposes a repo benchmark's ``task_description.md`` once on first sight. No second
+decomposes a benchmark's ``task_description.md`` once on first sight. No second
 check-in call recomputes what ingest already produced.
+
+**Read and write do not share a tier.** The framing resolves tenant-then-install
+(``store/dataset_access.py::readable_task_context``), but a first-sight decomposition
+is persisted to the TENANT tree, never beside the definition it was derived from —
+that dir is inside ``site-packages`` under a wheel.
 
 The call bills the campaign it seeds. :func:`checkin_call_context` names that cycle,
 and *context* is required at both seams precisely so no caller can reach the LLM
@@ -16,7 +21,6 @@ without one: this decomposition ran unbilled and untraced — the ledger binds
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
 from promptpotter.application.optimization.dispatch.llm_call.call import (
@@ -28,11 +32,11 @@ from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.models import reset_cycle_ledger, set_cycle_ledger
-from promptpotter.infrastructure.store.io import (
-    read_text_optional,
-    read_yaml_optional,
-    write_yaml,
+from promptpotter.infrastructure.store.dataset_access import (
+    readable_dataset_dir,
+    readable_task_context,
 )
+from promptpotter.infrastructure.store.io import read_text_optional
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.tracing.bridge import observed_node
 
@@ -108,33 +112,43 @@ async def decompose_prompt_fields(
 
 
 async def load_or_build_task_context(
-    dataset_config_dir: Path | None,
+    store: Stores,
+    dataset_name: str | None,
     *,
     campaign_id: str,
     context: LLMCallContext,
 ) -> TaskDecomposition:
-    """Run-start task framing — read the committed ``{dir}/task_context.yaml``, or
+    """Run-start task framing — resolve the dataset's ``task_context.yaml``, or
     decompose ``task_description.md`` once on first sight and persist it.
 
     The single seam both the web mint path and CLI ``new`` funnel through: an
     ingested dataset already carries ``task_context.yaml`` (written at commit from
-    the check-in's decomposition), so the run reads it with no LLM call. A repo
-    benchmark / pre-change dataset has only ``task_description.md`` — decompose it
-    once, write the file, and every later run is a free read. Empty framing when
-    neither file exists.
+    the check-in's decomposition), so the run reads it with no LLM call. A benchmark
+    that shipped without one has only ``task_description.md`` — decompose it once and
+    every later run is a free read. Empty framing when neither exists.
+
+    Takes the store and the NAME, not a resolved dir, because the read and the write
+    do not share a tier. The framing resolves through
+    :func:`~promptpotter.infrastructure.store.dataset_access.readable_task_context`
+    (tenant, then install) while the write always lands in the tenant tree: the
+    decomposition is derived from install content but is not install content, and
+    under a wheel that dir is inside ``site-packages``. Handed a dir, this function
+    wrote back into whichever tier it was handed — which is exactly what it must not
+    do for the four benchmarks that ship no ``task_context.yaml``.
     """
-    if dataset_config_dir is None:
+    if dataset_name is None:
         return TaskDecomposition()
-    tc_path = dataset_config_dir / "task_context.yaml"
-    existing = read_yaml_optional(tc_path)
+    existing = readable_task_context(store, dataset_name)
     if existing:
         task_context = TaskDecomposition.from_dict(existing)
         # The budget is enforced HERE — once, before the campaign starts — and nowhere else.
         # The render used to clip instead, which meant an over-budget field was amputated on
         # every prompt for the run's whole life and the operator only ever saw a log line.
-        task_context.check_budget(source=str(tc_path))
+        task_context.check_budget(source=f"{dataset_name}/task_context.yaml")
         return task_context
-    task_description = read_text_optional(dataset_config_dir / "task_description.md")
+    task_description = read_text_optional(
+        readable_dataset_dir(store, dataset_name) / "task_description.md"
+    )
     if not task_description:
         return TaskDecomposition()
     result = await decompose_prompt_fields(
@@ -145,6 +159,6 @@ async def load_or_build_task_context(
     task_context = TaskDecomposition.from_dict(tc_dict)
     # Persist BEFORE gating: the decomposition call is already paid for, so a verbose checkin
     # leaves an editable file behind rather than burning the call and vanishing.
-    write_yaml(tc_path, task_context.to_dict())
-    task_context.check_budget(source=str(tc_path))
+    path = store.tenant_datasets.save_task_context(dataset_name, task_context.to_dict())
+    task_context.check_budget(source=str(path))
     return task_context

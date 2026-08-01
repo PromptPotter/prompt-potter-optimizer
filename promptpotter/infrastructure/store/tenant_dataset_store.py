@@ -9,10 +9,18 @@ owning check-in campaign (``campaigns/{id}/checkin/``, :class:`CheckinDraftStore
 not here — this store only owns committed datasets.
 
 A built-in benchmark's DEFINITION is install content and stays out of this tree
-(`config/paths.py::benchmark_datasets_root`, read-only). Its materialized ROWS are
-not: they are fetched on the operator's machine, regenerable, and 6.8 MB, so they
-land here under ``benchmark-rows/`` — see :meth:`benchmark_rows_path`. This store
-only touches the tenant tree, and it is the only place dataset rows are written.
+(`config/paths.py::benchmark_datasets_root`, read-only). What is DERIVED from that
+definition on the operator's machine is not, and lands here in a flat keyed file
+per kind:
+
+* ``benchmark-rows/{name}.json`` — the fetched rows (regenerable, 6.8 MB); see
+  :meth:`benchmark_rows_path`.
+* ``task-context/{name}.yaml`` — the first-sight LLM decomposition of
+  ``task_description.md``; see :meth:`task_context_path`.
+
+Both used to be written back into the definition dir, which is the only reason that
+tier ever had to be writable. This store only touches the tenant tree, and it is the
+only place either artifact is written.
 """
 
 from __future__ import annotations
@@ -149,6 +157,31 @@ class TenantDatasetStore:
                 "items": serialized,
             },
         )
+        return path
+
+    # -- Derived task context -------------------------------------------------
+
+    def task_context_path(self, name: str) -> Path:
+        """Where a dataset's DERIVED task framing lives for this tenant.
+
+        Sibling of :meth:`benchmark_rows_path`, for the same reason: a decomposition
+        is computed from ``task_description.md`` by an LLM the operator paid for, so
+        it is theirs, and it cannot land beside a definition that is read-only under
+        a wheel. An ingested dataset writes its own ``{slug}/task_context.yaml`` at
+        commit and never reaches here — this is the first-sight decomposition of a
+        dataset that shipped without one.
+        """
+        validate_dataset_name(name)
+        return self._base_dir / "task-context" / f"{name}.yaml"
+
+    def load_task_context(self, name: str) -> dict[str, Any] | None:
+        return read_yaml_optional(self.task_context_path(name))
+
+    def save_task_context(self, name: str, data: dict[str, Any]) -> Path:
+        """Persist a first-sight decomposition. The one writer of derived framing
+        outside a committed dataset's own dir."""
+        path = self.task_context_path(name)
+        write_yaml(path, data)
         return path
 
     def task_description(self, slug: str) -> str | None:

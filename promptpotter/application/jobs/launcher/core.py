@@ -339,7 +339,8 @@ async def mint_campaign_command(
         # file exists; the web mint path previously ran with EMPTY framing.
         _t_framing0 = time.perf_counter()
         task_context = await load_or_build_task_context(
-            session.dataset_config_dir,
+            stores,
+            session.dataset_name,
             campaign_id=campaign_id,
             context=checkin_call_context(stores, campaign_id, cycle_id),
         )
@@ -527,7 +528,8 @@ async def start_run_command(
         configure_and_apply_pipeline(session, campaign_config, log=lambda *_a, **_k: None)
         _t_framing0 = time.perf_counter()
         task_context = await load_or_build_task_context(
-            session.dataset_config_dir,
+            stores,
+            session.dataset_name,
             campaign_id=campaign_id,
             context=checkin_call_context(stores, campaign_id, cycle_id),
         )

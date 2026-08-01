@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from promptpotter.infrastructure.store.io import read_json_tolerant
+from promptpotter.infrastructure.store.io import read_json_tolerant, read_yaml_optional
 from promptpotter.infrastructure.store.layout import validate_dataset_name
 from promptpotter.infrastructure.store.stores import Stores
 
@@ -51,6 +51,14 @@ def dataset_pipeline_path(dataset_dir: Path) -> Path:
     stop being a dataset instead of failing loudly.
     """
     return dataset_dir / "pipeline.yaml"
+
+
+def dataset_task_context_path(dataset_dir: Path) -> Path:
+    """The dataset's run-start framing — spelled once for every READER, same rule as
+    :func:`dataset_pipeline_path`, across all three tiers it can resolve from (see
+    :func:`readable_task_context`). The commit writer keeps its own literal: it lives
+    below this module in the import order and cannot reach up to it."""
+    return dataset_dir / "task_context.yaml"
 
 
 def is_dataset_dir(dataset_dir: Path) -> bool:
@@ -118,6 +126,37 @@ def readable_dataset_rows(store: Stores, name: str) -> dict[str, Any] | None:
         return rows
     shipped = read_json_tolerant(store.benchmarks_root / name / "cache.json")
     return shipped if isinstance(shipped, dict) and shipped.get("items") else None
+
+
+def readable_task_context(store: Stores, name: str) -> dict[str, Any] | None:
+    """The task framing for *name*, or ``None`` — resolved like the rows, and for the
+    same reason.
+
+    ``task_context.yaml`` is DERIVED from the definition's ``task_description.md`` by
+    an LLM call the operator paid for. That makes it theirs, not ours, so it resolves
+    on its own tenant-first ladder rather than being written back beside a definition
+    that is read-only under a wheel:
+
+    1. A committed tenant dataset's own ``task_context.yaml`` — written at commit
+       from the check-in's decomposition, inside a dir the tenant owns outright.
+    2. This tenant's ``task-context/{name}.yaml`` — what
+       :func:`~promptpotter.application.optimization.task_context.load_or_build_task_context`
+       persisted after decomposing on first sight.
+    3. The install dir's shipped ``task_context.yaml``. Six of the ten benchmarks
+       ship one; the other four are what made the missing tier-split visible.
+    """
+    try:
+        tenant_dir = store.tenant_datasets.dataset_dir(name)  # validates the slug
+    except ValueError as exc:
+        raise DatasetAccessError(name) from exc
+    for candidate in (
+        read_yaml_optional(dataset_task_context_path(tenant_dir)),
+        store.tenant_datasets.load_task_context(name),
+        read_yaml_optional(dataset_task_context_path(store.benchmarks_root / name)),
+    ):
+        if isinstance(candidate, dict) and candidate:
+            return candidate
+    return None
 
 
 def list_readable_datasets(store: Stores) -> list[DatasetRef]:
@@ -189,8 +228,10 @@ __all__ = [
     "DatasetAccessError",
     "DatasetRef",
     "dataset_pipeline_path",
+    "dataset_task_context_path",
     "is_dataset_dir",
     "list_readable_datasets",
     "readable_dataset_dir",
     "readable_dataset_rows",
+    "readable_task_context",
 ]

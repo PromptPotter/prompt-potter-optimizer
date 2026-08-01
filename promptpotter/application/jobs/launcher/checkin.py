@@ -218,7 +218,8 @@ async def prepare_checkin_run(
         )
 
     task_context = await load_or_build_task_context(
-        session.dataset_config_dir,
+        stores,
+        session.dataset_name,
         campaign_id=campaign_id,
         context=checkin_call_context(stores, campaign_id, cycle_id),
     )

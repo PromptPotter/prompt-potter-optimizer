@@ -264,11 +264,12 @@ async def _checkin_task(
 ) -> None:
     """Resolve the run's ``task_context`` and stash it on session state.
 
-    ``{dataset_config_dir}/task_context.yaml`` is the canonical framing — written
-    at commit from the check-in's decomposition, or decomposed once on first sight
-    for a repo benchmark. ``--task-file``/``--task-text`` decompose an ad-hoc
-    override instead. Either way the result rides session state so ``resume`` reads it
-    back; no second check-in call recomputes what ingest already decomposed."""
+    The dataset's ``task_context.yaml`` is the canonical framing — written at commit
+    from the check-in's decomposition, shipped with a benchmark, or decomposed once on
+    first sight (resolved tenant-then-install by ``readable_task_context``).
+    ``--task-file``/``--task-text`` decompose an ad-hoc override instead. Either way
+    the result rides session state so ``resume`` reads it back; no second check-in
+    call recomputes what ingest already decomposed."""
     from promptpotter.application.optimization.task_context import (
         checkin_call_context,
         decompose_prompt_fields,
@@ -293,7 +294,7 @@ async def _checkin_task(
         task_context = TaskDecomposition.from_dict(tc_dict)
     else:
         task_context = await load_or_build_task_context(
-            session.dataset_config_dir, campaign_id=campaign_id, context=context
+            session.store, session.dataset_name, campaign_id=campaign_id, context=context
         )
 
     if not task_context:

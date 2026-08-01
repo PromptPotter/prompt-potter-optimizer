@@ -12,6 +12,7 @@ datasets/{name}/
 ├── campaign.yaml          # CampaignConfig: optimizer LLM, scoring, max_rounds, etc.
 ├── pipeline.yaml          # Backend tunable overlay (nodes.{name}.config)
 ├── task_description.md    # L1's framing input — what the task IS
+├── task_context.yaml      # …decomposed into the framing fields (optional; see below)
 ├── dataset.md             # Human-facing description: source, split, sample shape
 ├── prompts/{node}.yaml    # Per-node PromptTemplate overrides (optional)
 └── cache.json             # The dataset ITEM BANK (write-managed; don't hand-edit)
@@ -58,4 +59,5 @@ Source of truth for wire / reject rationale, projection-bias findings, per-datas
 - **Origin = conservative floor** — the overlay starts at each tunable's floor; contract in [`../promptpotter/application/optimization/CLAUDE.md`](../promptpotter/application/optimization/CLAUDE.md).
 - **Don't hand-edit `cache.json`.** It is the **item bank** — `{name, created_at, source_file, row_count, items}`, read into `session.samples` at wiring. A file here is the SHIPPED bank (only `email-tagging` has one); a fetched one is the operator's and is written to `.promptpotter/{tenant}/benchmark-rows/{name}.json` by `resolve_dataset_items` → `TenantDatasetStore.save_benchmark_rows`, since this tier is read-only under a wheel. Both are resolved by `readable_dataset_rows`. It is NOT an origin score cache, though it was described as one here for a long time: measurements live in the tenant-global content-addressed `measurements/` archive (`infrastructure/store/archive_views.py`), which is what replays origin rows across cycles, forks and resumes. The distinction matters when reasoning about origin cost — `sp_budget_origin` breadth is cheap *because* of the archive, not because of this file.
 - **`task_description.md` is L1's framing input** — written for the LLM that will generate candidates, not for human readers (though it should be readable).
+- **`task_context.yaml` is that description DECOMPOSED, and it is optional here.** An ingested dataset gets one at commit from its check-in; a benchmark may ship one (six of ten do). When it is absent, the first run decomposes `task_description.md` once — and writes the result to `.promptpotter/{tenant}/task-context/{name}.yaml`, **not** back into this directory, which is read-only under a wheel. Same definition-vs-derived split as `cache.json` above, and for the same reason. Resolved tenant-then-install by `readable_task_context`; hand-editing either tier's copy is supported (the run reads whichever wins).
 - **`dataset.md` is operator-facing** — describes source, split, sample shape; cite the canonical evaluation protocol.

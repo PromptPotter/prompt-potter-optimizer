@@ -145,7 +145,7 @@ rules; the constants themselves are internal.
 |---|---|---|
 | **Install content** | `promptpotter/assets/` inside the package | The optimizer's own `pipeline.yaml` + `resolved_schemas.json` + `sets/{name}.yaml`, and the exported dashboard. Ships in the wheel; ours, not the operator's. |
 | **User data** | `$PROMPTPOTTER_HOME` → the checkout's `.promptpotter/` when running from a source tree → the OS app-data dir | Campaigns, sessions, measurements, jobs, identity. |
-| **Benchmarks** | the checkout's `datasets/` → `promptpotter/assets/benchmarks/` | Sample dataset **definitions**, read-only on both shapes. They ship; the per-dataset HuggingFace rows do not, and are re-fetched on first use into the user-data root (`benchmark-rows/{name}.json`) — never beside the definition, which under a wheel is inside `site-packages`. A tenant dataset of the same name shadows an installed one. |
+| **Benchmarks** | the checkout's `datasets/` → `promptpotter/assets/benchmarks/` | Sample dataset **definitions**, read-only on both shapes. Anything DERIVED from a definition on the operator's machine lands in the user-data root instead, under a flat keyed file per kind — the HuggingFace rows at `benchmark-rows/{name}.json`, the first-sight LLM decomposition of `task_description.md` at `task-context/{name}.yaml`. Never beside the definition, which under a wheel is inside `site-packages`. A tenant dataset of the same name shadows an installed one. |
 
 **`PROMPTPOTTER_HOME` is stable.** Set it to relocate the whole user-data tree; it is
 read once at import, so it is an environment decision, not a runtime one.
