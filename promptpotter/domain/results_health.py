@@ -144,8 +144,6 @@ def evidence_starved_node(rates: dict[str, float]) -> str | None:
 
 def compute_degradation_health(
     *,
-    hits: int,
-    total: int,
     attempted: int,
     structural_count: int,
     transient_count: int,
@@ -159,11 +157,24 @@ def compute_degradation_health(
     is_origin: bool = False,
 ) -> DegradationHealth | None:
     """Grade a round's degradation health from its winner's per-sample outcomes
-    plus the cycle's track record. Two denominators, two meanings: every failure
-    RATE is over ``attempted`` (all rows the round ran — health grades the round's
-    work, and an errored row is exactly the evidence health exists to count), while
-    the Wilson CI keeps ``hits``/``total`` (the EVIDENCE basis — the same scoreable
-    population the accuracy beside it averages). Returns ``None`` when nothing was
+    plus the cycle's track record. One denominator: every failure RATE is over
+    ``attempted`` (all rows the round ran — health grades the round's WORK, and an
+    errored row is exactly the evidence health exists to count).
+
+    Health does not grade PRECISION, and it used to try. A clause graded an untested
+    round ``degraded`` when its Wilson interval was wider than ``DEGRADED_RATE_FLAG``
+    — reusing a "fraction of samples that failed" threshold as an interval width,
+    two unrelated quantities sharing one number. Measured across the shipped sample
+    budgets, that fires for any round whose accuracy is not pinned near 0 or 1 below
+    n≈100: a round scoring 50% of 20 samples was graded ``degraded`` for existing.
+    Since ``prior_clean_rounds`` counts only HEALTHY priors, such a cycle never
+    cleared ``untested`` — which permanently armed the ``structural_untested`` clause
+    above, so the first transient blip at any later round graded ``critical`` and
+    could trip ``origin_gate_tripped``. "The interval is wide" is a fact about n, and
+    the honest place for it is the CI already drawn beside every candidate
+    (``composite_ci_lo``/``_hi``), not a verdict that the pipeline is unwell.
+
+    Returns ``None`` when nothing was
     attempted — genuinely no verdict, not a fabricated clean one — EXCEPT
     the origin: a round-0 result only exists once scoring was attempted (the
     ``has_program`` gate), so an ``attempted == 0`` origin measured *nothing* where
@@ -181,7 +192,7 @@ def compute_degradation_health(
         config (no clean round precedes this one), OR ≥
         :data:`CONSECUTIVE_DEGRADED_CRITICAL` consecutive degraded rounds.
       * **degraded** — degraded fraction ≥ :data:`DEGRADED_RATE_FLAG` (transient /
-        noise on a proven pipeline), OR an untested origin with a wide CI.
+        noise on a proven pipeline).
       * **healthy** — otherwise.
 
     ``evidence_starved`` grades the round and names the starved node; it *routes* to
@@ -200,8 +211,6 @@ def compute_degradation_health(
                 degraded_rate=0.0,
                 consecutive_degraded_rounds=0,
                 prior_clean_rounds=prior_clean_rounds,
-                ci_lo=0.0,
-                ci_hi=1.0,
                 suggested_action=(
                     "the origin scored zero samples — no origin was measured, so "
                     "candidates would be elected against nothing. The pipeline/connector "
@@ -210,9 +219,6 @@ def compute_degradation_health(
                 ),
             )
         return None
-    from promptpotter.shared.statistics import wilson_ci
-
-    ci_lo, ci_hi = wilson_ci(hits, total)
     structural_rate = structural_count / attempted
     no_result_rate = no_result_count / attempted
     degraded_rate = (structural_count + transient_count) / attempted
@@ -248,8 +254,6 @@ def compute_degradation_health(
         grade, reasons = "critical", ["persistent"]
     elif degraded_rate >= DEGRADED_RATE_FLAG:
         grade, reasons = "degraded", ["degraded"]
-    elif untested and (ci_hi - ci_lo) >= DEGRADED_RATE_FLAG:
-        grade, reasons = "degraded", ["untested"]
     else:
         grade = "healthy"
 
@@ -317,8 +321,6 @@ def compute_degradation_health(
         dominant_node=dominant_node,
         node_failure_rates=dict(rates),
         node_warnings={n: list(v) for n, v in nw.items()},
-        ci_lo=ci_lo,
-        ci_hi=ci_hi,
         suggested_action=suggested_action,
     )
 
@@ -396,8 +398,6 @@ def _collect_node_warnings(results: list[dict[str, Any]]) -> dict[str, list[str]
 
 def compute_round_health(
     *,
-    hits: int,
-    total: int,
     results: list[dict[str, Any]],
     prior_healths: Sequence[DegradationHealth | None],
     is_origin: bool = False,
@@ -408,7 +408,7 @@ def compute_round_health(
     rows (``results``) via the backend's ``step_statuses``, derives the track
     record (clean rounds + consecutive degraded run) from prior rounds' verdicts,
     then grades via :func:`compute_degradation_health` — failure rates over the
-    ATTEMPTED rows (``len(results)``), the Wilson CI over the evidence ``total``."""
+    ATTEMPTED rows (``len(results)``)."""
     from promptpotter.shared.errors import ErrorCategory, error_category
 
     structural = transient = unreachable = no_result = 0
@@ -472,8 +472,6 @@ def compute_round_health(
                 break
 
     return compute_degradation_health(
-        hits=hits,
-        total=total,
         attempted=len(results or []),
         structural_count=structural,
         transient_count=transient,

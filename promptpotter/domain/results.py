@@ -797,8 +797,6 @@ class DegradationHealth(StrictModel):
     # Verbatim upstream reasons per node ("[code] message"), harvested from the
     # connector's StepWarnings — the evidence behind the verdict, connector-agnostic.
     node_warnings: dict[str, list[str]] = Field(default_factory=dict)
-    ci_lo: float
-    ci_hi: float
     suggested_action: str | None = None
 
 

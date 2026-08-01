@@ -34,8 +34,6 @@ export interface DegradationHealth {
   dominant_node: string | null;
   node_failure_rates: Record<string, number>;
   node_warnings: Record<string, string[]>;
-  ci_lo: number;
-  ci_hi: number;
   suggested_action: string | null;
 }
 

@@ -239,8 +239,6 @@ async def close_round(
     Track record = the prior rounds' verdicts, oldest first, starting at the origin's.
     The round being closed is excluded (it is already in ``cycle.rounds``)."""
     round_result.health = compute_round_health(
-        hits=round_result.hits,
-        total=round_result.total,
         results=round_result.results,
         prior_healths=assemble_prior_healths(cycle.rounds, round_num),
         is_origin=round_num == 0,

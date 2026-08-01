@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from typing import Any
+from typing import Any, cast
 
 from promptpotter.application.intelligence.exploration import ruler_entry
 from promptpotter.application.optimization.dispatch.bundle import (
@@ -33,6 +33,7 @@ from promptpotter.application.optimization.dispatch.bundle import (
     fence_untrusted,
     signal,
 )
+from promptpotter.application.scoring.evaluators import compute_accuracy
 from promptpotter.domain.escalation_signals import ExplorationBudget
 from promptpotter.domain.opt_search_point import (
     IDEA_MATCH_MARK,
@@ -43,7 +44,7 @@ from promptpotter.domain.opt_search_point import (
 )
 from promptpotter.domain.results import CritiqueReadout, ScoredCandidate
 from promptpotter.domain.results_health import EVIDENCE_STARVED_RATE
-from promptpotter.domain.scoring import enumerable_truth_labels, is_hit
+from promptpotter.domain.scoring import QueryMeasurement, enumerable_truth_labels, is_hit
 from promptpotter.shared.errors import is_error_result
 
 
@@ -503,14 +504,20 @@ def _r_answer_distribution(b: InjectionBundle) -> str:
 
     top_label, top_n = truth.most_common(1)[0]
     constant = top_n / n
-    scored = sum(1 for r in rows if is_hit(r.get("fitness")))
+    # Mean fitness — the SAME quantity `accuracy` reports, and the only one comparable
+    # to the constant-answer floor beside it. Counting `fitness >= 1.0` instead made
+    # this line read "You score 0.00" on every graded scorer, so the panel told the
+    # generator a constant answer beat it while the run was in fact climbing.
+    scored = compute_accuracy(results=cast("list[QueryMeasurement]", rows))
+    if scored is None:
+        return ""  # nothing scoreable — no score to compare the floor against
 
     lines = [
         f"ANSWER DISTRIBUTION (over the {n} samples scored so far):",
         f"  you answer : {_tally(said, n) if said else '(nothing parsed)'}",
         f"  the truth  : {_tally(truth, n)}",
         f'  Answering "{top_label}" to EVERY sample would score {constant:.2f}. '
-        f"You score {scored / n:.2f}.",
+        f"You score {scored:.2f}.",
     ]
     return fence_untrusted("\n".join(lines))
 
@@ -747,18 +754,24 @@ def _r_mutation_memory(b: InjectionBundle) -> str:
     citable=True,
 )
 def _r_origin_strengths(b: InjectionBundle) -> str:
-    """One-line hit count — actionable signal ("don't strip scaffolding"). Enumerating samples
-    added bytes without adding input: L1 preserves all origin hits, doesn't pick.
+    """One line on what the origin already earns — actionable signal ("don't strip
+    scaffolding"). Enumerating samples added bytes without adding input: L1 preserves the
+    parent's strengths wholesale, it doesn't pick.
+
+    Reports the origin's mean fitness rather than a count of maxed-out samples. The count
+    made the panel SILENT on every graded scorer (no row ever reaches 1.0, so the
+    early-return fired), which is the one outcome a "don't strip this" warning must never
+    have — the generator lost the signal exactly where scaffolding is most elaborate.
     """
     rows = b.origin_per_sample
     if not rows:
         return ""
-    hits = [r for r in rows if is_hit(r.get("fitness"))]
-    if not hits:
+    acc = compute_accuracy(results=cast("list[QueryMeasurement]", rows))
+    if acc is None:
         return ""
     return (
-        f"ORIGIN STRENGTHS: {len(hits)}/{len(rows)} samples solved by origin "
-        "— preserve the parent scaffolding earning these."
+        f"ORIGIN STRENGTHS: origin scores {acc:.0%} across {len(rows)} samples "
+        "— preserve the parent scaffolding earning that."
     )
 
 

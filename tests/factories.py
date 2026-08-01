@@ -78,8 +78,6 @@ def degradation_health(
         degraded_rate=degraded_rate,
         consecutive_degraded_rounds=0,
         prior_clean_rounds=0,
-        ci_lo=0.0,
-        ci_hi=0.0,
     )
 
 

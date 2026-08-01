@@ -20,8 +20,6 @@ function health(
     dominant_node: "web_search",
     node_failure_rates: {},
     node_warnings: {},
-    ci_lo: 0.5,
-    ci_hi: 0.9,
     suggested_action: null,
     ...over,
   };

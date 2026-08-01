@@ -2571,7 +2571,7 @@ def test_compute_round_health_names_the_structural_cause_not_collateral():
         }
 
     results = [_struct_fail() for _ in range(12)] + [_clean_hit() for _ in range(8)]
-    h = compute_round_health(hits=8, total=20, results=results, prior_healths=[])
+    h = compute_round_health(results=results, prior_healths=[])
     assert h is not None
     assert h.grade == "critical"
     assert h.dominant_node == "entity_profiling"
@@ -2618,7 +2618,7 @@ def test_evidence_starved_round_grades_critical_without_auto_halting():
         }
 
     results = [_web_starved() for _ in range(10)] + [_clean_hit() for _ in range(10)]
-    h = compute_round_health(hits=10, total=20, results=results, prior_healths=[])
+    h = compute_round_health(results=results, prior_healths=[])
     assert h is not None
     assert h.grade == "critical"
     assert h.reasons == ["evidence_starved"]
@@ -2650,7 +2650,7 @@ def test_unscoreable_origin_grades_critical_and_trips_the_origin_gate():
 
     # All 20 succeeded but produced no parseable label → unscoreable floor.
     no_result_rows = [_row("NO_RESULT", hit=False) for _ in range(20)]
-    h = compute_round_health(hits=0, total=20, results=no_result_rows, prior_healths=[])
+    h = compute_round_health(results=no_result_rows, prior_healths=[])
     assert h is not None
     assert h.grade == "critical"
     assert h.reasons == ["unscoreable"]
@@ -2663,7 +2663,7 @@ def test_unscoreable_origin_grades_critical_and_trips_the_origin_gate():
     # A hard task that emits REAL labels (just wrong) is a measurement, not a broken
     # floor — it must stay gradable on accuracy, never flagged ``unscoreable``.
     wrong_rows = [_row("FALSE", hit=False) for _ in range(20)]
-    hw = compute_round_health(hits=0, total=20, results=wrong_rows, prior_healths=[])
+    hw = compute_round_health(results=wrong_rows, prior_healths=[])
     assert hw is not None
     assert hw.no_result_count == 0
     assert "unscoreable" not in hw.reasons
@@ -2681,7 +2681,7 @@ def test_unmeasured_origin_grades_critical_but_a_non_origin_round_abstains():
     from promptpotter.domain.phases import StopReason
     from promptpotter.domain.results_health import compute_round_health
 
-    ho = compute_round_health(hits=0, total=0, results=[], prior_healths=[], is_origin=True)
+    ho = compute_round_health(results=[], prior_healths=[], is_origin=True)
     assert ho is not None
     assert ho.grade == "critical"
     assert ho.reasons == ["origin_unmeasured"]
@@ -2689,37 +2689,37 @@ def test_unmeasured_origin_grades_critical_but_a_non_origin_round_abstains():
     assert origin_gate_tripped(ho, "critical_only") == StopReason.ORIGIN_GATE
 
     # A non-origin round that measured nothing abstains — not a fabricated ``healthy``.
-    assert compute_round_health(hits=0, total=0, results=[], prior_healths=[]) is None
+    assert compute_round_health(results=[], prior_healths=[]) is None
 
 
 @pytest.mark.parametrize(
-    ("hits", "total", "structural", "transient", "prior_clean", "consec", "grade", "reasons"),
+    ("attempted", "structural", "transient", "prior_clean", "consec", "grade", "reasons"),
     [
         # lca-bom-termnorm origin: 60% structural failures, untested → critical/structural.
-        (3, 20, 12, 0, 0, 1, "critical", ["structural"]),
+        (20, 12, 0, 0, 1, "critical", ["structural"]),
         # First-sight structural at an untested config, even at low rate → critical.
-        (18, 20, 1, 0, 0, 1, "critical", ["structural_untested"]),
+        (20, 1, 0, 0, 1, "critical", ["structural_untested"]),
         # The SAME isolated structural failure deep in a proven campaign → NOT critical.
-        (18, 20, 1, 0, 5, 1, "healthy", []),
+        (20, 1, 0, 5, 1, "healthy", []),
         # Sustained: 3 consecutive degraded rounds escalates on persistence alone.
-        (15, 20, 0, 5, 5, 3, "critical", ["persistent"]),
+        (20, 0, 5, 5, 3, "critical", ["persistent"]),
         # Transient noise on a proven pipeline above the rate floor → degraded, quiet.
-        (15, 20, 0, 5, 5, 1, "degraded", ["degraded"]),
-        # Untested origin, no degradation but few samples (wide CI) → degraded/under-probed.
-        (10, 20, 0, 0, 0, 0, "degraded", ["untested"]),
+        (20, 0, 5, 5, 1, "degraded", ["degraded"]),
+        # A clean round at an UNTESTED config is healthy. It used to grade ``degraded``
+        # purely because a 20-sample Wilson interval is wide — precision is not health,
+        # and that verdict was what kept ``prior_clean_rounds`` pinned at 0 forever.
+        (20, 0, 0, 0, 0, "healthy", []),
     ],
 )
 def test_degradation_health_is_context_aware(
-    hits, total, structural, transient, prior_clean, consec, grade, reasons
+    attempted, structural, transient, prior_clean, consec, grade, reasons
 ):
     """The verdict grades the SAME degradation differently by track record, and only a
     ``critical`` grade carries an operator-facing suggested action (never auto-stops)."""
     from promptpotter.domain.results_health import compute_degradation_health
 
     h = compute_degradation_health(
-        hits=hits,
-        total=total,
-        attempted=total,
+        attempted=attempted,
         structural_count=structural,
         transient_count=transient,
         prior_clean_rounds=prior_clean,
@@ -2730,7 +2730,6 @@ def test_degradation_health_is_context_aware(
     assert h.grade == grade
     assert h.reasons == reasons
     assert (h.suggested_action is not None) is (grade == "critical")
-    assert h.ci_lo <= hits / total <= h.ci_hi
 
 
 def test_origin_verdict_is_first_in_the_l1_track_record():
@@ -2749,8 +2748,6 @@ def test_origin_verdict_is_first_in_the_l1_track_record():
 
     def _health(grade):
         return compute_degradation_health(
-            hits=15,
-            total=20,
             attempted=20,
             structural_count=(0 if grade == "healthy" else 5),
             transient_count=0,
@@ -2785,7 +2782,7 @@ def test_origin_verdict_is_first_in_the_l1_track_record():
         {"pipeline_data": {"diagnostics": {"step_statuses": {"web_search": "degraded"}}}}
         for _ in range(5)
     ] + [{"pipeline_data": {"diagnostics": {}}} for _ in range(15)]
-    h = compute_round_health(hits=15, total=20, results=transient_rows, prior_healths=fresh)
+    h = compute_round_health(results=transient_rows, prior_healths=fresh)
     assert h is not None and h.grade == "critical" and "persistent" in h.reasons
 
 
@@ -2801,8 +2798,6 @@ def test_ungraded_prior_round_is_transparent_to_the_track_record():
     )
 
     degraded = compute_degradation_health(
-        hits=15,
-        total=20,
         attempted=20,
         structural_count=0,
         transient_count=5,
@@ -2817,9 +2812,7 @@ def test_ungraded_prior_round_is_transparent_to_the_track_record():
         {"pipeline_data": {"diagnostics": {"step_statuses": {"web_search": "degraded"}}}}
         for _ in range(5)
     ] + [{"pipeline_data": {"diagnostics": {}}} for _ in range(15)]
-    h = compute_round_health(
-        hits=15, total=20, results=transient_rows, prior_healths=[degraded, None, degraded]
-    )
+    h = compute_round_health(results=transient_rows, prior_healths=[degraded, None, degraded])
     assert h is not None and h.grade == "critical" and "persistent" in h.reasons
 
 
@@ -2835,7 +2828,7 @@ def test_all_errored_round_is_critical_not_unmeasured() -> None:
         {"error": "connect timeout", "error_category": "CONNECTION", "pipeline_data": None}
         for _ in range(10)
     ]
-    h = compute_round_health(hits=0, total=0, results=rows, prior_healths=[])
+    h = compute_round_health(results=rows, prior_healths=[])
     assert h is not None and h.grade == "critical" and "backend_unreachable" in h.reasons
     assert h.samples == 10 and h.suggested_action is not None
 
@@ -2846,8 +2839,6 @@ def test_degradation_health_none_when_unmeasured():
 
     assert (
         compute_degradation_health(
-            hits=0,
-            total=0,
             attempted=0,
             structural_count=0,
             transient_count=0,

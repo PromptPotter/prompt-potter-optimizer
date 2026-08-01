@@ -119,11 +119,11 @@ def render_round_stats(
     if h is not None and h.grade == "critical":
         lines.append(_node_line(f"{BOLD}{RED}⛔ CRITICAL — {h.suggested_action}{RESET}"))
     elif h is not None and h.grade == "degraded":
-        why = (
-            f"{h.structural_count + h.transient_count}/{h.samples} samples degraded"
-            if (h.structural_count + h.transient_count)
-            else f"under-probed (CI {h.ci_lo:.0%}-{h.ci_hi:.0%})"
-        )
+        # One arm, not two: ``degraded`` now requires ``degraded_rate >= FLAG``, which
+        # cannot hold with zero degraded samples. The old "under-probed (CI …)" arm
+        # belonged to the deleted untested-CI clause — a wide interval is a fact about
+        # n, and it is reported as one beside the candidate, not as a health verdict.
+        why = f"{h.structural_count + h.transient_count}/{h.samples} samples degraded"
         lines.append(_node_line(f"{YELLOW}⚠ DEGRADED — {why}; numbers soft{RESET}"))
 
     if not round_result.results:
