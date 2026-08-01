@@ -3,14 +3,21 @@
 The archive is the database core (per ``docs/architecture.md``): cross-cycle,
 content-addressed measurements indexed by sample + node-config, and **tenant-global
 — never backend-scoped**, so nothing here takes a ``backend_id``. Every archive
-read/write lives behind this module; reaching ``stores.archive`` (or aliasing
-it) outside this file is drift, enforced by
-``test_no_direct_archive_access_outside_facade``.
+WRITE lives behind this module; reaching ``stores.archive`` outside it to write is
+drift. Nothing enforces that mechanically, and this file used to name a test that
+would have — one that was never written, which is worse than no claim at all: a
+fourth write (``maintain_index``) then landed at a caller for a year without anyone
+noticing the facade had been bypassed.
+
+Two READS remain outside, both narrow and both honest about it:
+``datasets/dataset_replace.py::restamp_dataset`` (a dataset-lifecycle operation that
+predates the facade) and ``intelligence/hard_sample_archive.py`` (``archive.base_dir``
+as a memo key, no I/O).
 
 Placement in ``infrastructure/store/`` (not ``application/scoring/``): the archive
-IS a store, so its single-writer facade lives beside the leaf it wraps. The three
-writes below (append / compact / reset) are the whole write surface — any new one
-means a new function here, not a sidecar."""
+IS a store, so its single-writer facade lives beside the leaf it wraps. The four
+writes below (append / compact / reset / maintain-index) are the whole write
+surface — any new one means a new function here, not a sidecar."""
 
 from __future__ import annotations
 
@@ -244,6 +251,22 @@ def reset_measurement_run(stores: Stores, run_id: str) -> None:
     """Discard the run's detail log — a ``force_fresh`` pass REPLACES its rows, and an
     append-only log does not overwrite. See :meth:`MeasurementArchive.reset_run`."""
     stores.archive.reset_run(run_id)
+
+
+def maintain_measurement_index(stores: Stores) -> bool:
+    """Compact the index's superseded rows at run start; ``True`` if it rewrote anything.
+
+    **Silently skipped inside an instrument**, and the gate lives here rather than at the
+    caller for the same reason every other epoch rule does: an instrument cycle is a
+    measurement, not a campaign, so it must not mutate tenant-global storage — the outer
+    campaign that spawned it already did this. Wrapped around the disk touch, so a second
+    caller inherits the rule instead of having to remember it (this one did not: the gate
+    was an ``if`` in ``bootstrap/wiring.py``, which is also how the call ended up being the
+    archive's only write reaching past this facade).
+    """
+    if instrument_mode() is not None:
+        return False
+    return stores.archive.maintain_index()
 
 
 def reindex_measurements(stores: Stores) -> dict[str, int]:

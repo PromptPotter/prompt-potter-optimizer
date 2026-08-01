@@ -55,8 +55,9 @@ operator-admin channel.
   command is appended to its target ledger (per-cycle, campaign root
   cycle, or workspace ledger at `projects/{tenant}/.workspace/events.jsonl`)
   as a `CommandRecord`; inline-applied; paired `CommandAckRecord` written
-  by the same dispatcher (workspace + lifecycle) or by
-  `RunnerCommandSubscriber` (cycle-scoped).
+  by the same dispatcher — every kind, cycle-scoped included. A separate
+  `RunnerCommandSubscriber` for the cycle-scoped acks was specified and
+  never written; nothing else has ever produced one.
 - `POST /datasets/ingest` — multipart CSV upload; mints a durable `checkin` campaign and returns its `DraftCampaign` (`draft_id` IS the `campaign_id`; declared in `docs/specs/m12-api-openapi.yaml`; spec at `docs/specs/roadmap.md § Ingest`). Workspace-scoped, identity-bound; the check-in shows in the sidebar + survives a restart, but nothing runs until the operator starts it via the separate `/commands/start-checkin` verb. Mutation verbs (`edit-draft-campaign`, `resolve-origin`) key on the `campaign_id` and persist to `campaigns/{id}/checkin/` via `CheckinDraftStore`.
 - `POST /datasets/draft/candidate-library` and its `/from-column` sibling — **ingresses, not write paths.** A multipart upload and a column name are two ways to *derive* a `candidate_library`; both hand the derived terms to `commands.py::dispatch_draft_patch` and dispatch as `edit-draft-campaign`, so the edit is a `CommandRecord` on the check-in ledger. A route that mutates a draft outside that function is the bug this collapsed.
 

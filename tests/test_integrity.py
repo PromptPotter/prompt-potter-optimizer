@@ -16,6 +16,7 @@ import dataclasses
 import io
 import json
 import logging
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -1663,6 +1664,51 @@ def test_no_raw_nul_bytes_in_tracked_text_files() -> None:
     )
 
 
+def test_every_test_named_by_the_package_exists() -> None:
+    """A docstring that names an enforcement test which was never written.
+
+    Same silent-harm class as the NUL scan above, and the same reason it must be a
+    scan: the harm is that a later reader *trusts the lock and stops checking*. Four
+    of these were live — ``test_no_direct_archive_access_outside_facade``,
+    ``test_no_raw_httpexception_in_api``, ``test_every_injection_renderer_is_wired``,
+    ``test_no_bare_string_decision_kinds``. Two of them named a rule that IS enforced,
+    just somewhere else (an import-time assert; a typed parameter); one named a rule
+    nothing enforced at all, and a fourth write slipped past that facade for a year.
+    Nothing fails when a claim like this is false — it simply reads as covered.
+
+    Scope is package code + ``CLAUDE.md``, the two places that make binding claims.
+    Prose docs are excluded on purpose: they say "a ``test_structure`` scan" meaning
+    the kind, not the file, and an allowlist to tell those apart would be the same
+    unchecked claim in a new place.
+    """
+    root = Path(__file__).resolve().parents[1]
+    tracked = subprocess.run(
+        ["git", "ls-files"], cwd=root, capture_output=True, check=True, text=True
+    ).stdout.split()
+
+    defined: set[str] = set()
+    for rel in tracked:
+        if rel.startswith("tests/") and rel.endswith(".py"):
+            defined.add(Path(rel).stem)  # a module may be cited as a whole
+            body = (root / rel).read_text(encoding="utf-8")
+            defined |= set(re.findall(r"^\s*(?:async\s+)?def (test_[a-z0-9_]+)", body, re.M))
+
+    claimed: dict[str, set[str]] = {}
+    for rel in tracked:
+        if not ((rel.startswith("promptpotter/") and rel.endswith(".py")) or "CLAUDE.md" in rel):
+            continue
+        text = (root / rel).read_text(encoding="utf-8", errors="replace")
+        for m in re.finditer(r"\btest_[a-z0-9_]+", text):
+            claimed.setdefault(m.group(0).removesuffix("_py"), set()).add(rel)
+
+    missing = {name: sorted(where) for name, where in claimed.items() if name not in defined}
+    assert not missing, (
+        f"named test(s) that do not exist: {missing}. Delete the claim or name the real "
+        "enforcement — an import-time assert and a typed signature are both better locks "
+        "than a test, but neither is the test the docstring promised."
+    )
+
+
 def test_declared_command_kinds_match_the_wired_set() -> None:
     """A command kind that LOOKS live in the spec but is not wired, or the reverse.
 
@@ -2007,15 +2053,24 @@ def test_every_persisted_timestamp_is_canonical_utc() -> None:
     same_instant = ("2026-08-01T10:00:00+00:00", "2026-08-01T10:00:00Z")
     assert min(same_instant) != max(same_instant), "the two spellings do not sort equal"
 
-    source = (
-        Path(__file__).resolve().parents[1]
-        / "promptpotter"
-        / "application"
-        / "bootstrap"
-        / "session.py"
-    ).read_text(encoding="utf-8")
-    assert "datetime.now(" not in source, (
-        "bootstrap/session.py mints a timestamp outside shared/clock.py::utcnow_iso"
+    # Scoped to ONE file, this could not see the two sites that were actually wrong:
+    # `optimizer_prompt_ranking.py` and `files.py` both minted `+00:00`. The rule is
+    # about the SPELLING, so the check is `.isoformat()` on a datetime anywhere in the
+    # package — `strftime` (id suffixes, explicit `Z`) and `.timestamp()` (epoch floats)
+    # are different jobs and stay legal.
+    pkg = Path(__file__).resolve().parents[1] / "promptpotter"
+    offenders = [
+        str(py.relative_to(pkg))
+        for py in pkg.rglob("*.py")
+        if py.name != "clock.py"
+        and re.search(
+            r"\bdatetime\.(now|fromtimestamp|utcnow)\([^)]*\)\.isoformat",
+            py.read_text(encoding="utf-8"),
+        )
+    ]
+    assert not offenders, (
+        f"{offenders} mint a timestamp outside shared/clock.py — use utcnow_iso() for now, "
+        "iso_z(dt) for an instant you already hold. Bare .isoformat() writes '+00:00'."
     )
 
 

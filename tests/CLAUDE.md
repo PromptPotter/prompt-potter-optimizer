@@ -51,7 +51,7 @@ need no test to update): e.g. `RESUME_CHECKPOINT_GATING` exhaustiveness
 (`dispatch/injections/registry.py`), the `L1_MANDATORY`/origin-layout subset
 checks (`domain/l1_layout.py`), the divergence-hint exhaustiveness
 (`cli/commands/_shared.py`). Add new ones the same way — beside the thing they
-validate, never as a `test_structure` scan.
+validate, never as a repo-wide structure scan.
 
 ## Adding a test
 

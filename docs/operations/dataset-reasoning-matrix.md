@@ -12,7 +12,7 @@ Single canonical view of the model + reasoning_effort + max_tokens defaults ship
 | `lca-termnorm` | `openai/gpt-oss-120b` | n/a | absent (`null`) | Multi-node TermNorm pipeline; not a single-call reasoning dataset. Research nodes carry their own per-node `reasoning_effort` + structured-output mode — see "Why TermNorm research nodes cap `reasoning_effort: low`" below. |
 | `lca-bom-termnorm` | `entity_profiling` → `openai/gpt-oss-20b` | `low` (entity_profiling) | absent (`null`) | Tenant material-matching pipeline (`web_search → entity_profiling → token_matching`, no `llm_ranking`). `entity_profiling` emits **native** `json_schema` and pins `reasoning_effort: low` (the cap is load-bearing — see section below). Multi-node, so the single-call columns describe the profiling node only. Tenant config on disk, gitignored. |
 
-`max_tokens` is **never** set as a numeric default in any dataset's `pipeline.yaml` node config — provider ceiling applies. Enforced by `tests/test_dataset_pipeline_defaults.py`.
+`max_tokens` is **never** set as a numeric default in any dataset's `pipeline.yaml` node config — provider ceiling applies. True on every dataset as of 2026-08-01, and held by convention: this line claimed enforcement by a `tests/test_dataset_pipeline_defaults.py` that was never written.
 
 ## Held — next-priority after JustLogic (2026-05-19, Round 8)
 

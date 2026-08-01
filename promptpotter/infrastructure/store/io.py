@@ -52,6 +52,23 @@ def ensure_parent_dir(path: Path) -> None:
     os.makedirs(_long_path(path.parent), exist_ok=True)
 
 
+def unlink_robust(path: Path) -> None:
+    """Delete one FILE — the same read-only chmod dance :func:`rmtree_robust` does.
+
+    Its sibling, and here rather than private to a store because the two are one rule
+    split by arity: a Windows read-only bit stops ``Path.unlink`` exactly as it stops
+    ``shutil.rmtree``, and this half lived inside ``campaign_store`` where the reset
+    verb — the one that deletes whole tenant trees — could not see it and called bare
+    ``unlink`` instead. Missing is success; anything else the caller must see."""
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+    except PermissionError:
+        os.chmod(path, stat.S_IWRITE)
+        path.unlink()
+
+
 def rmtree_robust(path: Path) -> None:
     r"""Delete a tree — long-path safe, read-only tolerant, retried. **The one deleter.**
 
@@ -320,6 +337,7 @@ __all__ = [
     "read_yaml",
     "read_yaml_optional",
     "rmtree_robust",
+    "unlink_robust",
     "validate_path_component",
     "write_json",
     "write_jsonl",

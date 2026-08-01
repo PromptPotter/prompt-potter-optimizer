@@ -35,8 +35,8 @@ class PotterError(Exception):
     ``docs/specs/m12-api-openapi.yaml`` — ``{"error", "message", "details"?}`` —
     and the command-dispatcher's central catch emits a rejected ack then re-raises
     the same instance for that handler. There is no per-class handler and no
-    ``HTTPException`` in the API layer (locked by
-    ``test_no_raw_httpexception_in_api`` / the surface contract).
+    ``HTTPException`` in the API layer — a convention held by review, not a lock.
+    It claimed a lock for a long time, naming an enforcement test nobody had written.
 
     A subclass fixes the HTTP *status family* (``NotFoundError`` → 404); the
     ``code`` is the stable category, defaulted per subclass and overridable per

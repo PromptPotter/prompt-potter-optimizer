@@ -78,8 +78,8 @@ l1_critique:
     node-field that is the weakest observed lever. Name it VERBATIM from the catalogue — inner_node one
     of l1_generate/l1_critique/l2_context/l3_plan, field one of persona/task_intent/instruction/thinking_style
     (never invented names like 'critique.prompt' or 'refine.instruction'). Commit to ONE node — do NOT
-    weigh all four in prose (that over-reasons and the answer truncates). suggested_axes: at most 2 backup
-    node-fields, same verbatim '<inner_node>.<field>' form. failure_highlights: up to 3 META-failure clusters
+    weigh all four in prose (that over-reasons and the answer truncates). suggested_axes: the fewest
+    backup node-fields that are real, same verbatim '<inner_node>.<field>' form. failure_highlights: up to 3 META-failure clusters
     observed across the inner trajectories, each quoting concrete inner evidence (e.g. 'seed-3: inner
     critique proposed the same axis 2 rounds running, flat trajectory'), <=320c each — these are what
     L2 and the next outer L1 steer on. Be terse: a long answer is truncated and discarded.

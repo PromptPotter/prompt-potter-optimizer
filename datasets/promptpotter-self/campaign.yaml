@@ -34,9 +34,15 @@ campaign_config:
     replicate_survivors: 0
     l1_patience: 2
     max_rounds: 2
-    lives:
-      start: 2
-      cap: 4
+    # No `lives` block, and its absence is deliberate rather than an omission. It read
+    # `start: 2` against `max_rounds: 2`, so the bank could not reach zero before the
+    # calendar did: hearts NEVER bound, they only relabelled the stop. `af6252` stopped
+    # `lives_exhausted` on round 2, which is also exactly where `max_rounds` would have
+    # ended it, and nothing in the record says which fact stopped the run. Deleting the
+    # inert knob changes no round, only the reason it reports. Re-add it with real
+    # headroom (`start` well under `max_rounds`) when the outer loop runs long enough for
+    # a measurement-driven brake to mean something — `run_preflight_checks` warns
+    # (`config.lives_no_headroom`) if it goes back in without it.
     n_variants: 3
     # On the fitness scale, so it moves with the re-anchor above: the window widened from 1.5 to
     # 3.0, which halves the fitness distance a given logit lift covers. Carrying the old value

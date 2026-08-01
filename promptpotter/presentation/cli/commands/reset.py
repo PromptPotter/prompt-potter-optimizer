@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import argparse
 import logging
-import shutil
 import sys
 from pathlib import Path
 
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.infrastructure.store.io import rmtree_robust, unlink_robust
 from promptpotter.infrastructure.store.session_pointer import (
     active_pointer_exists,
     clear_active_pointer,
@@ -114,10 +114,15 @@ def _render_summary(tenants: list[tuple[Path, list[Path], list[Path], list[Path]
 
 
 def _remove(path: Path) -> None:
+    """Delete a tenant subtree through the package's two robust deleters.
+
+    It used bare ``shutil.rmtree`` / ``Path.unlink`` — in the one verb that removes
+    whole tenant trees, and therefore the ``.inner/`` sandboxes the long-path deleter
+    was written for. A plain ``rmtree`` cannot remove those at all."""
     if path.is_dir() and not path.is_symlink():
-        shutil.rmtree(path)
+        rmtree_robust(path)
     elif path.exists() or path.is_symlink():
-        path.unlink()
+        unlink_robust(path)
 
 
 def _tenants_with_pointers(tenant_dirs: list[Path]) -> list[WorkspaceDir]:

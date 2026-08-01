@@ -12,9 +12,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
-import os
 import shutil
-import stat
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -36,6 +34,7 @@ from promptpotter.infrastructure.store.io import (
     read_json_optional,
     read_json_tolerant,
     rmtree_robust,
+    unlink_robust,
     validate_path_component,
     write_json,
 )
@@ -141,17 +140,6 @@ def fresh_sibling_index_blob(
     }
 
 
-def _unlink_robust(path: Path) -> None:
-    """``Path.unlink`` with the Windows read-only chmod dance ``rmtree_robust`` uses."""
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        return
-    except PermissionError:
-        os.chmod(path, stat.S_IWRITE)
-        path.unlink()
-
-
 def _prune_empty_dirs(root: Path) -> None:
     """``rmdir`` every now-empty directory under *root*, deepest first (a dir holding a
     keepsake file keeps its ancestors alive)."""
@@ -183,7 +171,7 @@ def _strip_to_keepsake(campaign_dir: Path) -> None:
                 for f in cdir.rglob("*")
                 if f.is_file() and not classify(f.relative_to(campaign_dir)).keepsake
             ]:
-                _unlink_robust(p)
+                unlink_robust(p)
             _prune_empty_dirs(cdir)
     sweeps = campaign_dir / "sweeps"
     if sweeps.exists():
@@ -720,7 +708,7 @@ class CampaignStore:
 
         if displaced:
             for p in displaced:
-                _unlink_robust(p)
+                unlink_robust(p)
             logger.info(
                 "Rewind cycle %s to round %d: deleted %d displaced file(s)",
                 cycle_id,
@@ -1109,7 +1097,7 @@ class CampaignStore:
         """Delete cached candidates (forces fresh generation)."""
         path = self._layout(campaign_id, cycle_id).candidate_file(round_num)
         if path.exists():
-            path.unlink()
+            unlink_robust(path)
             logger.debug(
                 "Deleted cached candidates for round %d (escalation invalidation)", round_num
             )

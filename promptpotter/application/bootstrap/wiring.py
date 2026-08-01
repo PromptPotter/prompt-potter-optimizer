@@ -27,6 +27,7 @@ from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.pipeline_parsing import merge_node_blocks, parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.infrastructure.backend import BackendClient, build_backend_client
+from promptpotter.infrastructure.store.archive_views import maintain_measurement_index
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
     dataset_pipeline_path,
@@ -35,7 +36,6 @@ from promptpotter.infrastructure.store.dataset_access import (
 from promptpotter.infrastructure.store.io import read_yaml_optional
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.shared.identity import IdentityContext, default_identity
-from promptpotter.shared.instrument import instrument_mode
 
 logger = logging.getLogger(__name__)
 
@@ -305,10 +305,7 @@ async def init_services(
     if store is None:
         store = build_stores(resolved_identity, projects_root=DEFAULT_PROJECTS_ROOT)
 
-    # An instrument cycle is a measurement, not a campaign — it must not mutate
-    # tenant-global storage; the outer campaign that spawned it already did this.
-    if instrument_mode() is None:
-        store.archive.maintain_index()
+    maintain_measurement_index(store)
 
     dataset_config_dir = readable_dataset_dir(store, dataset_name)
     backend_type = _read_backend_type(dataset_config_dir, dataset_name)

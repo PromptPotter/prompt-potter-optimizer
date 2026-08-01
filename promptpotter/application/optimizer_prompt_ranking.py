@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -24,6 +23,7 @@ from promptpotter.infrastructure.projections.live_dashboard.round_summary import
 )
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
+from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.statistics import paired_diff_posterior, t_critical
 
 if TYPE_CHECKING:
@@ -160,7 +160,7 @@ def rank_optimizer_prompts(store: Stores) -> OptimizerPromptRanking:
     rows = [_finalize(state_hash, acc) for state_hash, acc in accums.items()]
     rows.sort(key=lambda r: r.anchor_effect, reverse=True)
     return OptimizerPromptRanking(
-        generated_at=datetime.now(UTC).isoformat(timespec="seconds"),
+        generated_at=utcnow_iso(),
         n_cycles_scanned=n_cycles,
         candidates=rows,
     )

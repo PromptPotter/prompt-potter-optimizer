@@ -19,7 +19,6 @@ import secrets
 import threading
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from datetime import date
 from json import JSONDecodeError
 from pathlib import Path
 from typing import Literal
@@ -272,8 +271,15 @@ class JobRegistry:
         return min(others, key=lambda j: j.created_at)
 
     def list_created_today(self, *, user_id: str | None = None) -> list[Job]:
-        """Daily-campaigns quota probe — jobs created since UTC midnight."""
-        today = date.today().isoformat()
+        """Daily-campaigns quota probe — jobs created since UTC midnight.
+
+        The prefix is sliced off ``utcnow_iso`` rather than composed, because
+        ``created_at`` was MINTED by that function: any second spelling of "today" is a
+        chance for the key and the stamp to disagree. One did — ``date.today()`` is the
+        LOCAL date, so on a UTC+2 machine this quota rolled over two hours before the
+        daily-spend quota beside it (``spend.py::start_of_utc_day``) and matched no
+        ``created_at`` at all during the gap."""
+        today = utcnow_iso()[:10]
         return [j for j in self.list_all(user_id=user_id) if j.created_at.startswith(today)]
 
     def _persist(self, job: Job) -> None:

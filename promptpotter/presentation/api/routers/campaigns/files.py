@@ -17,6 +17,7 @@ from promptpotter.infrastructure.store.layout import campaign_root_dir_for, cycl
 from promptpotter.infrastructure.store.stores import resolve_cycle_path
 from promptpotter.presentation.api.deps import StoreDep, decode_descend
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
+from promptpotter.shared.clock import iso_z
 from promptpotter.shared.errors import BadRequestError, ContentTooLargeError, NotFoundError
 
 # Campaign-level file artifacts that live at the campaign dir, not a cycle dir.
@@ -70,7 +71,7 @@ def _walk_files(root: Path) -> Iterator[Path]:
 
 
 def _iso_mtime(p: Path) -> str:
-    return datetime.fromtimestamp(p.stat().st_mtime, UTC).isoformat()
+    return iso_z(datetime.fromtimestamp(p.stat().st_mtime, UTC))
 
 
 def _resolve_safe_file(scope_root: Path, raw_path: str) -> Path:

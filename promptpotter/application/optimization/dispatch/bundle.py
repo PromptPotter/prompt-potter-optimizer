@@ -240,7 +240,9 @@ def signal(
 def injection_registry() -> dict[str, _Injection]:
     """Snapshot of every ``@signal``-registered injection. Call only after importing all
     renderer modules (registry.py does this) — a renderer whose module wasn't imported is
-    absent here and surfaces as an orphan in ``test_every_injection_renderer_is_wired``."""
+    absent here and fails LOUD at import, where ``registry.py`` diffs this snapshot against
+    ``INJECTIONS`` and raises on any orphan. That check is six lines from here; the
+    docstring used to send the reader to a test that does not exist."""
     return dict(_REGISTRY)
 
 

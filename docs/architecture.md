@@ -306,10 +306,17 @@ HTTP-ingressed mutations authored by signed-in operators or
 signed-in clients. Every command is appended to the canonical
 per-cycle `.runtime/ledger.jsonl` as a `CommandRecord` by a sole
 `CommandDispatcher` at the FastAPI seam (kwargs-only `emit_command`,
-ContextVar-scoped identity + cycle); the runner subscribes to
-`CommandRecord` as another ledger driver, applies the mutation, and
-acknowledges via a sibling `CommandAckRecord` written by a sole
-`RunnerCommandSubscriber` (kwargs-only `emit_command_ack`).
+ContextVar-scoped identity + cycle); it applies the mutation inline and
+acknowledges via a sibling `CommandAckRecord` on the same ledger
+(kwargs-only `emit_command_ack`). One writer for both halves — a
+`RunnerCommandSubscriber` was specified for the ack and stood written
+down here, in `presentation/CLAUDE.md`, and ticked ☑ in ADR-0001 for
+months; it was never built, and the dispatcher doing both is simpler
+than the split it was supposed to be.
+
+Runtime FLAGS are the separate mechanism, and the one the runner really
+does read: `pause` / `skip` / `spend_cap` are polled at the next sample
+boundary (`infrastructure/runtime_flags.py`), not subscribed.
 Outbound, no projection writes SSE frames at all — `CycleLedgerTail`
 tails the on-disk ledger directly (cross-process) and fans out
 `ProjectionEnvelope` frames over SSE. Identity scope rides the
@@ -590,9 +597,8 @@ the PR description.
   persistence backbone. No second ingress, ever.
 - **Control-remote highway** — the `CommandRecord` / `CommandAckRecord`
   / `ProjectionEnvelope` triple riding the canonical `.runtime/ledger.jsonl` via
-  sole `CommandDispatcher` (inbound), sole `RunnerCommandSubscriber`
-  (ack), `CycleLedgerTail` reading the ledger directly (outbound SSE,
-  no writer). The closed inbound +
+  sole `CommandDispatcher` (inbound AND ack), `CycleLedgerTail` reading
+  the ledger directly (outbound SSE, no writer). The closed inbound +
   outbound sets live in `docs/specs/m12-api-openapi.yaml` and
   `docs/specs/m12-events-asyncapi.yaml`; the permanent contract is
   `docs/adr/0001-m12-control-plane.md`. Cleanup PRs cannot collapse

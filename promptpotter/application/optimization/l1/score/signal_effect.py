@@ -81,8 +81,8 @@ class SignalEffect:
     owns leader-label decoration (needs prior-rank lookup over already-scored
     candidates) and decision emission gating. Decision payloads are kept as
     ``(inputs_ref, data)`` tuples — the ``ResumeCheckpointKind`` literal stays at
-    the ``record_decision`` callsite (static check in
-    ``test_no_bare_string_decision_kinds``).
+    the ``record_decision`` callsite, where ``record_decision``'s own signature types
+    it, so a bare string is a mypy error rather than something a test has to find.
     """
 
     aborted: bool
