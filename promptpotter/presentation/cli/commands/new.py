@@ -159,10 +159,11 @@ async def _ingest_checkin(args: argparse.Namespace) -> str:
     from promptpotter.application.datasets.origin_readiness import origin_readiness
     from promptpotter.application.datasets.origin_resolve import resolve_origin_turn
     from promptpotter.application.jobs.launcher.checkin import save_checkin_draft
+    from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
     from promptpotter.infrastructure.store.stores import build_stores
 
     file_path = Path(args.dataset)
-    stores = build_stores(identity_from_args(args))
+    stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
 
     try:
         draft = ingest_draft(
@@ -222,10 +223,11 @@ async def _ingest_and_prepare_checkin(
         load_checkin_draft,
         prepare_checkin_run,
     )
+    from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
     from promptpotter.infrastructure.store.stores import build_stores
 
     campaign_id = await _ingest_checkin(args)
-    stores = build_stores(identity_from_args(args))
+    stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
     campaign = stores.campaigns.load_campaign(campaign_id)
     assert campaign is not None  # just minted
     draft = load_checkin_draft(stores, campaign_id)

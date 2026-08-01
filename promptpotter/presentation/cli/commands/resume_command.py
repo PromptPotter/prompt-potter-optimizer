@@ -200,7 +200,6 @@ def _maybe_fork_diag_sibling(args: argparse.Namespace, ctx: SessionCtx, session:
     new_cycle_id = _mint_fork(
         session.store.campaigns,
         ctx.campaign_id,
-        tenant_id,
         ctx.session_id,
         ctx.cycle_id,
         0,
@@ -244,7 +243,6 @@ def _maybe_fork_operator_rewind(
     new_cycle_id = _mint_fork(
         session.store.campaigns,
         ctx.campaign_id,
-        tenant_id,
         ctx.session_id,
         parent_cycle_id,
         rewind_to,
@@ -481,9 +479,12 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
     # rounds) isn't resumable: there's nothing to run until it's Started. Guard
     # cheaply before init_services so the operator gets a clear next step instead of
     # a confusing dataset-not-found deep in the loop.
+    from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
     from promptpotter.infrastructure.store.stores import build_stores
 
-    _campaign = build_stores(identity_from_args(args)).campaigns.load_campaign(ctx.campaign_id)
+    _campaign = build_stores(
+        identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT
+    ).campaigns.load_campaign(ctx.campaign_id)
     if _campaign is not None and _campaign.lifecycle_status == "checkin":
         raise SystemExit(
             f"ERROR: campaign '{ctx.campaign_id}' is still in check-in — its origin "

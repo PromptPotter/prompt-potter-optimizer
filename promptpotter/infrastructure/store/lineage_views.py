@@ -383,7 +383,7 @@ def _course_scalars(
     # those "root" would put two roots in one tree. A fork of an inner run stays a fork —
     # only the sandbox's own roots are the recursion's entry point.
     kind: CourseKind = sibling_kind(hop.cycle_id)
-    # A sandbox store is rooted at `.inner/<cycle_id>`, so its own path is the answer.
+    # A sandbox store is rooted at its own `.inner/<key>`, so its own path is the answer.
     if kind == "root" and (spawned or ".inner" in store.projects_root.parts):
         kind = "inner"
 
@@ -413,7 +413,7 @@ def _child_courses(store: Stores, path: CyclePath, reads: _Reads) -> list[Family
 
     Collapse #1 in code: a fork is a sibling cycle in the SAME store whose
     ``parent_cycle_id`` is ours (so its path replaces our leaf); an inner run is a campaign
-    ROOT inside our ``.inner/<cycle_id>`` sandbox (so its path extends ours by one hop). Two
+    ROOT inside our ``.inner/<key>`` sandbox (so its path extends ours by one hop). Two
     directories, one kind of thing — callers never branch on which.
 
     Only sandbox ROOTS are taken: an inner run's own forks are that course's children, and
@@ -445,7 +445,7 @@ def _child_courses(store: Stores, path: CyclePath, reads: _Reads) -> list[Family
             )
         )
 
-    sandbox = inner_sandbox_store(store, leaf.cycle_id)
+    sandbox = inner_sandbox_store(store, leaf.campaign_id, leaf.cycle_id)
     if sandbox is not None:
         for entry in reads.cycles(sandbox):
             if entry.get("parent_cycle_id"):

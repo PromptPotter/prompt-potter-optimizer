@@ -11,6 +11,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.infrastructure.store.io import (
     read_json,
     read_json_optional,
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 class SweepStore:
-    def __init__(self, base_dir: Path) -> None:
+    def __init__(self, base_dir: WorkspaceDir) -> None:
         self._base_dir = base_dir  # tenant root
 
     def batch_dir(self, campaign_id: str, batch_id: str) -> Path:

@@ -56,9 +56,7 @@ def get_active_session(store: StoreDep) -> ActiveSessionResponse:
     state. Unauthed callers are rejected by ``resolve_identity`` before
     ``StoreDep`` resolves.
     """
-    session_id, campaign_id, cycle_id = read_active_pointer(
-        store.tenant_id, projects_root=store.projects_root
-    )
+    session_id, campaign_id, cycle_id = read_active_pointer(store.base_dir)
     if not session_id:
         raise NotFoundError("No active session")
     return ActiveSessionResponse(
@@ -78,6 +76,10 @@ class SpawnedBy(StrictModel):
     """
 
     outer_cycle_id: str = Field(description="The outer cycle that owns this inner sandbox")
+    outer_campaign_id: str | None = Field(
+        default=None,
+        description="The outer CAMPAIGN that owns this inner sandbox. Required alongside the cycle because a `cycle_id` is content-addressed on its origin and so is shared by every campaign minted from that origin — the pair is the identity, either half alone is not. Null on a run minted before the stamp existed, which is why two pooled sandboxes on disk cannot be attributed after the fact.",
+    )
     round: int | None = Field(
         default=None,
         description="Outer round; 0 is the origin (C0). Null when the spawn came from outside any round (the noise-floor diagnostic).",
@@ -173,9 +175,7 @@ def get_cycles(store: StoreDep, descend: str | None = Query(None)) -> CyclesResp
     live?" reads that off ``cycles[]`` rather than having this route re-derive it.
     """
     leaf = descend_store(store, decode_descend(descend))
-    _, active_cmp, active_cid = read_active_pointer(
-        leaf.tenant_id, projects_root=leaf.projects_root
-    )
+    _, active_cmp, active_cid = read_active_pointer(leaf.base_dir)
     entries = leaf.campaigns.enumerate_cycles()
     return CyclesResponse(
         tenant_id=leaf.tenant_id,

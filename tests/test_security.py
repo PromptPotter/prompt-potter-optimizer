@@ -274,6 +274,7 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
             dataset_config_dir=tmp_path,
             identity=None,  # type: ignore[arg-type]  # the stubbed inner run never reads it
             shared_root=tmp_path,
+            spawn_campaign_id="ppself__aaaaaa",
             spawn_cycle_id="cycle_deadbeef0000",
         )
     )

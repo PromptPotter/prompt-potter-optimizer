@@ -165,7 +165,7 @@ def get_cycle_file(
 ) -> FileContentResponse:
     """Read the contents of one file under the cycle or campaign scope.
 
-    ``descend`` walks into the ``.inner/<previous cycle id>`` sandbox one hop per
+    ``descend`` walks into the previous hop's ``.inner/<key>`` sandbox one hop per
     ``~``-joined ``campaign::cycle`` segment (same seam as the dashboard route), so
     an L4 inner descendant's ``rounds/round_NNNN.json`` reads from the inner cycle
     dir — not the outer root. Absent/empty ``descend`` is a plain per-cycle read.

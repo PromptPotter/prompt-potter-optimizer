@@ -96,7 +96,7 @@ tags:
     description: |
       Read-only cycle reads. `descend` is the one inner-descent mechanism across
       them: a `~`-joined `campaign::cycle` hop chain that re-roots the read into
-      `.inner/<cycle_id>`, so `/cycles` (the forest) and `/dashboard` (one leaf)
+      `.inner/<key>`, so `/cycles` (the forest) and `/dashboard` (one leaf)
       each serve the top level, an L4 inner fan-out, and L5+ through the same
       handler. NOTE: this file began as the closed *command* set, so some read
       GETs predate it and are not yet declared; the remaining pre-existing read
@@ -1122,7 +1122,7 @@ paths:
         this returns its campaigns, and the webapp groups the pair by
         `root_cycle_id` (`buildForest`). Takes the same `descend`: absent/empty
         is the caller's own tenant tree; a hop chain re-roots the list into an
-        L4 `.inner/<cycle_id>` sandbox, so one route lists the top level and
+        L4 `.inner/<key>` sandbox, so one route lists the top level and
         any depth. Response shape is owned by the server model
         (`registry.py::CampaignListResponse`, generated into
         `webapp/lib/api/types.generated.ts::CampaignSummary`) — not duplicated
@@ -1227,7 +1227,7 @@ paths:
         The single dashboard-serving route. `dashboard.json` is per-cycle: every
         cycle owns its own live file, self-stamped with its own `campaign_id` /
         `cycle_id`. The path ids address the top-level (root) cycle; the optional
-        `descend` query walks into the L4 `.inner/<previous cycle id>` sandbox one
+        `descend` query walks into the previous hop's L4 `.inner/<key>` sandbox one
         `campaign::cycle` hop at a time, so ONE route reads a top-level cycle, an
         inner cycle, or an L5+ descendant — the recursion-native address that
         retired the separate inner-dashboard route. Absent/empty `descend` is a
@@ -1256,7 +1256,7 @@ paths:
           required: false
           description: |
             `~`-joined `campaign::cycle` hops BELOW the root, each re-rooting into
-            `.inner/<previous cycle id>`. Absent/empty = the top-level cycle. Every
+            the previous hop's `.inner/<key>`. Absent/empty = the top-level cycle. Every
             component is validated against the id charset before any filesystem touch.
           schema: { type: string }
         - name: If-Modified-Since
@@ -1527,7 +1527,7 @@ paths:
         `descend` names the chain of cycles to descend INTO; absent/empty is the
         caller's own tenant tree. When the optimizer optimizes its own
         meta-prompts (L4), each candidate runs as a real inner campaign under a
-        flat, off-registry sandbox `<workspace>/.inner/<cycle_id>`, which is
+        flat, off-registry sandbox `<workspace>/.inner/<key>`, which is
         structurally a normal projects tree — so descending one hop returns that
         cycle's inner fan-out through this same route, and an L5+ descendant
         through two. There is no depth-specific read.

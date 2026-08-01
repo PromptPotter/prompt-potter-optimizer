@@ -21,7 +21,7 @@ from typing import Any
 
 from promptpotter.config.settings import DEFAULT_CONNECTOR_TYPE
 from promptpotter.domain.campaign import Campaign
-from promptpotter.domain.cycle_paths import CycleDir
+from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
 from promptpotter.domain.phases import RunPhase, StopReason
 from promptpotter.domain.results import RoundResult, best_round_by_measured_accuracy
 from promptpotter.domain.run_records import CycleSeed, CycleSeedRecord
@@ -46,12 +46,13 @@ from promptpotter.infrastructure.store.layout import (
     campaign_root_dir_for,
     classify,
     cycle_dir_under,
+    inner_sandbox_key,
     root_cycle_id,
     sibling_kind,
 )
 from promptpotter.infrastructure.store.session_pointer import (
-    clear_active_pointer_under,
-    read_active_pointer_under,
+    clear_active_pointer,
+    read_active_pointer,
 )
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import BadRequestError, ConflictError, NotFoundError
@@ -208,8 +209,19 @@ class CampaignStore:
     files, and the cycle-seed ledger I/O (``CycleSeedRecord``).
     """
 
-    def __init__(self, base_dir: Path):
+    def __init__(self, base_dir: WorkspaceDir):
         self._base_dir = base_dir
+
+    @property
+    def workspace(self) -> WorkspaceDir:
+        """The tenant root this store is rooted at.
+
+        Exposed because a caller holding a ``CampaignStore`` already holds a resolved
+        tenant root, and used to be handed the same fact twice more — the fork mint
+        took ``(campaign_store, tenant_id, projects_root=None)`` and defaulted the
+        third, so the pointer it retargeted could belong to a different workspace than
+        the cycle it just minted."""
+        return self._base_dir
 
     # ------------------------------------------------------------------
     # Path resolution + cross-cutting reads
@@ -461,9 +473,9 @@ class CampaignStore:
                 f"refusing to {verb} {campaign_id}: cycle {live[0]} has a live producer "
                 "— pause or stop it first"
             )
-        _, active_campaign, _ = read_active_pointer_under(self._base_dir)
+        _, active_campaign, _ = read_active_pointer(self._base_dir)
         if active_campaign == campaign_id:
-            clear_active_pointer_under(self._base_dir)
+            clear_active_pointer(self._base_dir)
 
     def _lifecycle_updates(self, status: str, changed_at: str, reason: str) -> dict[str, str]:
         return {
@@ -520,11 +532,14 @@ class CampaignStore:
         re-run on the same ``(dataset × config)`` reproduces the identical key.
 
         ``inner_sandbox_root`` (the workspace ``.inner/``, i.e.
-        ``Stores.projects_root.parent / ".inner"``) — when given, the off-registry L4
-        inner-proxy sandboxes this campaign's cycles spawned
-        (``.inner/<cycle_id>``, siblings of ``projects/`` and so missed by the
-        campaign-tree rmtree above) are removed for every cycle_id. Without this a
-        deleted L4 campaign orphans dozens of inner campaign trees on disk forever.
+        ``inner_sandboxes_dir(Stores.shared_root)``) — when given, the off-registry L4
+        inner-proxy sandboxes this campaign's cycles spawned (siblings of ``projects/``
+        and so missed by the campaign-tree rmtree above) are removed for every cycle_id.
+        Without this a deleted L4 campaign orphans dozens of inner campaign trees on disk
+        forever. Each is resolved through ``inner_sandbox_key`` on THIS campaign's identity,
+        so the cascade cannot reach a sibling campaign minted from the same origin — keyed
+        on the cycle alone, as it was, deleting one such campaign took the other's inner
+        history with it.
         Passed only on delete — NOT on archive, which is recoverable and must keep the
         sandboxes for a later unarchive + the self-potter-hop.
 
@@ -551,8 +566,9 @@ class CampaignStore:
         else:
             rmtree_robust(campaign_dir)
         if inner_sandbox_root is not None:
+            tenant_id = self._base_dir.name
             for cycle_id in inner_cycle_ids:
-                inner_dir = inner_sandbox_root / cycle_id
+                inner_dir = inner_sandbox_root / inner_sandbox_key(tenant_id, campaign_id, cycle_id)
                 if inner_dir.exists():
                     rmtree_robust(inner_dir)
         return True

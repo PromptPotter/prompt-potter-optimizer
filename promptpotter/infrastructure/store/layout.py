@@ -15,12 +15,15 @@ from a ``CycleLayout``; to move a file on disk, change it here and nowhere else.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Literal
 
+from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.infrastructure.store.io import validate_path_component
 
 # The roots (``REPO_ROOT`` + its two derivatives) moved to
@@ -77,12 +80,28 @@ def sibling_kind(cycle_id: str) -> Literal["root", "fork", "diag", "sweep"]:
     return m.group(1)  # type: ignore[return-value]
 
 
-def campaign_root_dir_for(tenant_root: Path, campaign_id: str) -> Path:
+def tenant_workspace(projects_root: Path, tenant_id: str) -> WorkspaceDir:
+    """``projects_root/{tenant_id}`` — the tenant's workspace root, and the ONE
+    place that relation is written down.
+
+    Every ``tenant_root`` argument below is one of these. It is a
+    :data:`~promptpotter.domain.cycle_paths.WorkspaceDir` rather than a bare ``Path``
+    so the type system can tell it apart from the ``projects_root`` one level up:
+    the two are both ``Path``, differ by exactly one segment, and every function that
+    took the wrong one still compiled. That was not hypothetical — the active-session
+    pointer accepted an optional root and defaulted to the process-global workspace, so
+    an L4 inner cycle retargeted the OPERATOR's pointer at a campaign living under
+    ``.inner/`` and blanked their dashboard mid-run.
+    """
+    return WorkspaceDir(projects_root / validate_path_component(tenant_id))
+
+
+def campaign_root_dir_for(tenant_root: WorkspaceDir, campaign_id: str) -> Path:
     """Campaign dir — ``campaign.json`` + ``log.md`` + ``hard_samples.json`` + ``cycles/``. Per-session telemetry binds one level down."""
     return tenant_root / "campaigns" / validate_path_component(campaign_id)
 
 
-def archive_root_dir_for(tenant_root: Path, campaign_id: str) -> Path:
+def archive_root_dir_for(tenant_root: WorkspaceDir, campaign_id: str) -> Path:
     """Recycle-bin home for an archived campaign — ``archive/{campaign_id}/``. The
     ``archive`` verb MOVES the campaign tree here; ``unarchive`` moves it back to
     ``campaigns/``. Recoverability is its only feature; it sits beside the
@@ -103,20 +122,83 @@ def cycle_dir_under(campaign_root: Path, cycle_id: str) -> Path:
     return campaign_cycles_dir(campaign_root) / validate_path_component(cycle_id)
 
 
-def cycle_dir_for(tenant_root: Path, campaign_id: str, cycle_id: str) -> Path:
+def cycle_dir_for(tenant_root: WorkspaceDir, campaign_id: str, cycle_id: str) -> Path:
     """Per-cycle dir ``campaigns/{campaign_id}/cycles/{cycle_id}``; flat — sibling kind in ``index.json``, not the path."""
     return cycle_dir_under(campaign_root_dir_for(tenant_root, campaign_id), cycle_id)
 
 
-def sweep_batch_dir_for(tenant_root: Path, campaign_id: str, batch_id: str) -> Path:
+def sweep_batch_dir_for(tenant_root: WorkspaceDir, campaign_id: str, batch_id: str) -> Path:
     """``campaigns/{campaign_id}/sweeps/{batch_id}`` — batch ``index.json`` + ``summary.md``; fork *cycles* live flat under ``cycles/``."""
     validate_path_component(batch_id)
     return campaign_root_dir_for(tenant_root, campaign_id) / "sweeps" / batch_id
 
 
-def session_dir_for(tenant_root: Path, session_id: str) -> Path:
+def session_dir_for(tenant_root: WorkspaceDir, session_id: str) -> Path:
     validate_path_component(session_id)
     return tenant_root / "sessions" / session_id
+
+
+# -- L4 inner sandboxes -------------------------------------------------------
+#
+# The natural home for a cycle's inner campaigns is inside that cycle's own directory,
+# where ownership would be structural and deletion would cascade for free. They live in a
+# flat off-registry registry instead for ONE reason: physical nesting blows Windows'
+# 260-char MAX_PATH at depth 1 and is hopeless at L5+. That constraint is also why the key
+# below is a fixed-width hash rather than the owner's three names joined — this tree already
+# runs within ~30 chars of the limit, so the key has to stay the width it always was.
+
+
+def inner_sandboxes_dir(workspace_projects_root: Path) -> Path:
+    """The workspace's sandbox home, ``.inner/`` — a sibling of ``projects/``.
+
+    Pass the REAL workspace projects root (``Stores.shared_root``), which is invariant
+    across recursion depth. A sandboxed store's own ``projects_root`` already IS
+    ``.inner/<key>``, so anchoring on it would nest ``.inner/.inner/…`` at L5 — the exact
+    path-length trap the flat layout exists to avoid. The two coincide at depth 0.
+    """
+    return workspace_projects_root.parent / ".inner"
+
+
+def inner_sandbox_key(tenant_id: str, campaign_id: str, cycle_id: str) -> str:
+    """Directory name of one cycle's inner sandbox: ``inner_<16 hex>``.
+
+    Keyed on the FULL owner identity, because no part of it identifies the owner alone.
+    ``cycle_id`` is a content hash of the origin and is therefore SHARED by every campaign
+    minted from that origin — deliberately, since resume and cache reuse depend on it — and
+    ``campaign_id`` is unique only within a tenant. Keyed on the cycle alone, as it was, two
+    campaigns on one origin shared a single sandbox: a fresh ``new`` swept away the other's
+    live inner tree, ``delete_campaign`` cascaded into it, ``reclaim_orphan_sandboxes``
+    resolved its owner through a cross-tenant glob, and ``?descend=`` served one campaign's
+    inner fan-out under the other's id. Observed, not hypothetical — a second
+    ``new promptpotter-self`` destroyed 39 banked inner campaigns belonging to the only outer
+    run that had ever finished.
+
+    The three names are not lost to the hash: the sandbox records them in ``owner.json``
+    (:func:`sandbox_owner_path`), which is also what lets a reader resolve ownership exactly
+    instead of guessing at it from a path.
+    """
+    for part in (tenant_id, campaign_id, cycle_id):
+        validate_path_component(part)
+    blob = json.dumps([tenant_id, campaign_id, cycle_id], sort_keys=True)
+    return "inner_" + hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+
+def inner_sandbox_dir(
+    workspace_projects_root: Path, tenant_id: str, campaign_id: str, cycle_id: str
+) -> Path:
+    """The one sandbox owned by ``(tenant, campaign, cycle)`` — THE path, built once here."""
+    return inner_sandboxes_dir(workspace_projects_root) / inner_sandbox_key(
+        tenant_id, campaign_id, cycle_id
+    )
+
+
+def sandbox_owner_path(sandbox_dir: Path) -> Path:
+    """``owner.json`` — which ``(tenant, campaign, cycle)`` this sandbox belongs to.
+
+    A material fact, so it lands on disk in human-readable form rather than only in the
+    directory name. It is what makes the orphan reaper's ownership test exact.
+    """
+    return sandbox_dir / "owner.json"
 
 
 def round_basename(round_num: int) -> str:
@@ -294,10 +376,15 @@ __all__ = [
     "classify",
     "cycle_dir_for",
     "cycle_dir_under",
+    "inner_sandbox_dir",
+    "inner_sandbox_key",
+    "inner_sandboxes_dir",
     "root_cycle_id",
     "round_basename",
+    "sandbox_owner_path",
     "session_dir_for",
     "sibling_kind",
     "sweep_batch_dir_for",
+    "tenant_workspace",
     "validate_dataset_name",
 ]

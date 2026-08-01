@@ -12,7 +12,6 @@ import hashlib
 import logging
 import re
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.optimization.resume_and_fork.decisions import (
@@ -20,7 +19,6 @@ from promptpotter.application.optimization.resume_and_fork.decisions import (
     record_decision,
 )
 from promptpotter.domain.cycle_paths import CycleDir
-from promptpotter.domain.identity import TenantId
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import UNATTRIBUTED_OPERATOR, ForkSpec, ForkTrigger
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -52,7 +50,6 @@ class ForkResult(NamedTuple):
 def _fork_sibling_setup(
     campaign_store: CampaignStore,
     campaign_id: str,
-    tenant_id: TenantId,
     session_id: str,
     parent_cycle_id: str,
     new_cycle_id: str,
@@ -61,7 +58,6 @@ def _fork_sibling_setup(
     payload: ForkSpec,
     sweep_batch_id: str | None = None,
     source_file: str | None = None,
-    projects_root: Path | None = None,
 ) -> str:
     """Common plumbing: dir create, FORK_CUT append, pointer + log. Returns ``now_iso``."""
     parent_dir = campaign_store.cycle_dir(campaign_id, parent_cycle_id)
@@ -89,9 +85,7 @@ def _fork_sibling_setup(
             data=record_data,
         )
 
-    save_active_pointer(
-        tenant_id, session_id, campaign_id, new_cycle_id, projects_root=projects_root
-    )
+    save_active_pointer(campaign_store.workspace, session_id, campaign_id, new_cycle_id)
     logger.info(
         "Forked %s → %s at round %d [trigger=%s] (active pointer retargeted)",
         parent_cycle_id,
@@ -139,7 +133,6 @@ _REBASE_TRIGGERS = frozenset(
 def _mint_fork(
     campaign_store: CampaignStore,
     campaign_id: str,
-    tenant_id: TenantId,
     session_id: str,
     parent_cycle_id: str,
     fork_from_round: int,
@@ -148,11 +141,15 @@ def _mint_fork(
     surviving_rounds: list[RoundResult] | None = None,
     sweep_batch_id: str | None = None,
     sweep_source_file: str | None = None,
-    projects_root: Path | None = None,
 ) -> str:
     """Single entry point for fork creation. Dispatches on ``payload.trigger``.
 
-    The new cycle lands in the same campaign (``campaign_id``).
+    The new cycle lands in the same campaign (``campaign_id``), and its active pointer
+    is retargeted in ``campaign_store``'s OWN workspace. That used to be a separate
+    ``(tenant_id, projects_root=None)`` pair, defaulting to the process-global
+    workspace — so the L4 auto-rebase, which passes an inner cycle's store and omitted
+    the root, pointed the operator's real ``active_session.json`` at a campaign under
+    ``.inner/`` and every per-cycle route 404'd until they re-ran ``resume``.
     ``SCORING_DIVERGENCE`` requires ``surviving_rounds``.
     ``L{2,3}_REBASE`` / ``OPERATOR_REWIND`` synthesize ``surviving_rounds``
     from the parent's persisted rounds if the caller omits them.
@@ -190,13 +187,11 @@ def _mint_fork(
         now = _fork_sibling_setup(
             campaign_store,
             campaign_id,
-            tenant_id,
             session_id,
             parent_cycle_id,
             new_cycle_id,
             from_round=fork_from_round,
             payload=payload,
-            projects_root=projects_root,
         )
         campaign_store.save_rebase_fork(
             campaign_id,
@@ -227,13 +222,11 @@ def _mint_fork(
         now = _fork_sibling_setup(
             campaign_store,
             campaign_id,
-            tenant_id,
             session_id,
             parent_cycle_id,
             new_cycle_id,
             from_round=0,
             payload=payload,
-            projects_root=projects_root,
         )
         campaign_store.write_fresh_sibling(
             campaign_id, parent_cycle_id, new_cycle_id, "diag", forked_at=now
@@ -250,13 +243,11 @@ def _mint_fork(
         now = _fork_sibling_setup(
             campaign_store,
             campaign_id,
-            tenant_id,
             session_id,
             parent_cycle_id,
             new_cycle_id,
             from_round=0,
             payload=payload,
-            projects_root=projects_root,
         )
         # Clean-offshoot fork from the lineage/control panel (endorse or steered):
         # fresh sibling index (no parent-round copy, round numbering restarts at 1);
@@ -289,7 +280,6 @@ def _mint_fork(
         now = _fork_sibling_setup(
             campaign_store,
             campaign_id,
-            tenant_id,
             session_id,
             parent_cycle_id,
             new_cycle_id,
@@ -297,7 +287,6 @@ def _mint_fork(
             payload=payload,
             sweep_batch_id=sweep_batch_id,
             source_file=sweep_source_file,
-            projects_root=projects_root,
         )
         campaign_store.write_fresh_sibling(
             campaign_id,
@@ -320,7 +309,6 @@ def cleanup_stub_fork_if_empty(
     *,
     campaign_store: CampaignStore,
     campaign_id: str,
-    tenant_id: TenantId,
     session_id: str,
     cycle_id: str,
     parent_cycle_id: str,
@@ -333,19 +321,20 @@ def cleanup_stub_fork_if_empty(
     (n_rounds=0, no descendants, not root); this helper layers
     active-pointer policy on top.
     """
-    _, _, active_cid = read_active_pointer(tenant_id)
+    workspace = campaign_store.workspace
+    _, _, active_cid = read_active_pointer(workspace)
     was_active = active_cid == cycle_id
     if was_active:
-        save_active_pointer(tenant_id, session_id, campaign_id, parent_cycle_id)
+        save_active_pointer(workspace, session_id, campaign_id, parent_cycle_id)
     try:
         deleted, reason = campaign_store.try_delete_stub_cycle(campaign_id, cycle_id)
     except Exception as exc:
         logger.warning("Stub cleanup raised for %s: %s", cycle_id, exc)
         if was_active:
-            save_active_pointer(tenant_id, session_id, campaign_id, cycle_id)
+            save_active_pointer(workspace, session_id, campaign_id, cycle_id)
         return False, str(exc)
     if not deleted and was_active:
-        save_active_pointer(tenant_id, session_id, campaign_id, cycle_id)
+        save_active_pointer(workspace, session_id, campaign_id, cycle_id)
         logger.info("Stub cleanup skipped for %s (%s); active pointer restored", cycle_id, reason)
     elif deleted:
         logger.info("Stub fork cleaned up: %s (parent=%s)", cycle_id, parent_cycle_id)
@@ -385,10 +374,8 @@ def mint_operator_fork(
     return _mint_fork(
         stores.campaigns,
         campaign_id,
-        stores.tenant_id,
         str(parent_index.get("parent_session_id", "")),
         cycle_id,
         0,
         spec,
-        projects_root=stores.projects_root,
     )

@@ -10,7 +10,9 @@ the default sidebar, restorable by ``unarchive``); ``delete`` is destructive —
 removes the tree outright, or with ``--keep-results`` strips to the keepsake tier
 (manifest + reports + the shallow langfuse loop trace). The cross-campaign
 measurement cache (``measurements/``) is never touched, so siblings still
-cache-hit. The active campaign is refused (switch first). Operator-facing shape:
+cache-hit. A LIVE cycle is refused; the campaign you are merely looking at is the
+ordinary case, and its active pointer is released rather than defended.
+Operator-facing shape:
 ``docs/operations/persistence-and-state.md`` § Beta hosting state.
 
 The three are a thin shell over ``CommandDispatcher.dispatch_lifecycle`` — the
@@ -114,9 +116,7 @@ async def cmd_pause(args: argparse.Namespace) -> CommandResult:
     campaign_id: str = getattr(args, "campaign", None) or ""
     cycle_id: str = getattr(args, "cycle", None) or ""
     if not (campaign_id and cycle_id):
-        _sid, pointer_cid, pointer_cyid = read_active_pointer(
-            identity.tenant_id, projects_root=store.projects_root
-        )
+        _sid, pointer_cid, pointer_cyid = read_active_pointer(store.base_dir)
         campaign_id = campaign_id or pointer_cid
         cycle_id = cycle_id or pointer_cyid
     if not (campaign_id and cycle_id):

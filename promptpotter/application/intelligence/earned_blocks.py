@@ -20,6 +20,7 @@ from promptpotter.config.settings import ANSWER_SPACE_CAP
 from promptpotter.domain.opt_search_point import candidate_delta
 from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
+from promptpotter.shared.instrument import instrument_mode
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
@@ -126,7 +127,20 @@ def mine_earned_blocks(store: Stores) -> dict[str, list[EarnedBlock]]:
     ``{fit_signature: [EarnedBlock, ...]}`` — each fit's blocks ranked by mean credible lift,
     highest first. A caller looks up its own run's fit signature (see
     :func:`_answer_space_signature`) to get only blocks that fit its task shape.
+
+    **Empty under instrument mode.** This is cross-run MEMORY, the category
+    ``shared/instrument.py`` names as contamination for an instrument — but it reads the
+    CAMPAIGN TREE, not the archive, so the evidence epoch that hides memory from every
+    other such read (``store/archive_views.py``) never sees it. Applied here the epoch
+    would hide everything anyway: an inner sandbox's campaign tree holds nothing BUT the
+    sibling cells of the same outer run, so the empty library IS the filtered answer, not
+    a special case. Ungated, cell #1 rendered the static fallback while cell #39 rendered
+    blocks mined from 38 finished siblings — same cell, different prompt, ordered by how
+    often the instrument had been used.
     """
+    if instrument_mode() is not None:
+        return {}
+
     acc: dict[tuple[str, str, str], list[float]] = defaultdict(list)
     for campaign_dir in store.campaigns.iter_campaign_dirs():
         cycles_dir = campaign_cycles_dir(campaign_dir)

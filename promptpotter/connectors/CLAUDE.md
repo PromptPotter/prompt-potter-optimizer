@@ -64,7 +64,7 @@ the same shape the scorer parses from an HTTP `/matches` body. The registry guar
   (the three per-task ContextVars — `_CYCLE_LEDGER`, `_CURRENT_ROUND`,
   `_ABORT_CHECK` — isolate per task, not per call; the child gets a COPY, which is
   how `_ABORT_CHECK` carries the outer's pause into the inner run) under **sandboxed stores in a
-  flat per-cycle registry `<workspace>/.inner/<spawn_cycle_id>/`**
+  flat per-cycle registry `<workspace>/.inner/<key>/`**
   (`init_services(store=…)`; no active-pointer / capacity-1 collision). It is
   named by (owned by) the spawning cycle but kept **flat, not physically nested** —
   physical nesting (`…/.runtime/inner/…/.runtime/inner/…`) blows past Windows'

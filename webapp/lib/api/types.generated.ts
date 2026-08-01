@@ -553,6 +553,13 @@ export interface ActiveSessionResponse {
 export interface SpawnedBy {
   /** The outer cycle that owns this inner sandbox */
   outer_cycle_id: string;
+  /** The outer CAMPAIGN that owns this inner sandbox. Required alongside the cycle
+   * because a `cycle_id` is content-addressed on its origin and so is shared
+   * by every campaign minted from that origin — the pair is the identity,
+   * either half alone is not. Null on a run minted before the stamp existed,
+   * which is why two pooled sandboxes on disk cannot be attributed after the
+   * fact. */
+  outer_campaign_id: string | null;
   /** Outer round; 0 is the origin (C0). Null when the spawn came from outside any
    * round (the noise-floor diagnostic). */
   round: number | null;

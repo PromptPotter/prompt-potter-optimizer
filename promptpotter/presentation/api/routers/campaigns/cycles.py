@@ -10,8 +10,6 @@ read cannot describe a leaf below depth 1.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from fastapi import Query, Request, Response
 from fastapi.responses import JSONResponse
 
@@ -21,7 +19,7 @@ from promptpotter.application.mask.record import MaskRecord
 from promptpotter.application.mask.verdicts import make_abort_verdict, make_scoring_verdict
 from promptpotter.application.scoring.formula import compile_round_scorer
 from promptpotter.application.scoring.metrics import value_with_mask_applied
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.infrastructure.store.io import newest_mtime_ns, read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.lineage_views import (
@@ -54,13 +52,13 @@ _ABORT_SUPPRESS: dict[str, frozenset[str]] = {
 
 
 def serve_dashboard_response(
-    request: Request, base_dir: Path, campaign_id: str, cycle_id: str
+    request: Request, base_dir: WorkspaceDir, campaign_id: str, cycle_id: str
 ) -> Response:
     """304 / warming / atomic ``dashboard.json`` read under any tenant ``base_dir``.
 
     The single dashboard-serving path: the outer per-cycle route passes the
     caller's ``store.base_dir``; the inner-cycle route passes a sandbox store's
-    ``base_dir`` (``.inner/<outer_cycle_id>/<tenant>``). One implementation, two
+    ``base_dir`` (``.inner/<key>/<tenant>``). One implementation, two
     roots — so the 304 / warming-fallback / atomic-read semantics can't drift
     between the outer and inner dashboards.
     """
@@ -116,7 +114,7 @@ def get_cycle_dashboard(
     ``dashboard.json`` is per-cycle: every cycle (root, fork, sweep, diag, or an
     L4 inner descendant) owns its own live file, stamped with its own
     ``cycle_id``. The path ids address the top-level (root) cycle; the optional
-    ``descend`` query walks into the ``.inner/<previous cycle id>`` sandbox one
+    ``descend`` query walks into the previous hop's ``.inner/<key>`` sandbox one
     ``campaign::cycle`` hop at a time, so ONE route serves a top-level cycle, an
     inner cycle, or an L5+ descendant (:func:`resolve_cycle_path`). Absent/empty
     ``descend`` is a plain per-cycle read — no session-root collapse.
@@ -134,7 +132,7 @@ def get_cycle_dashboard(
     return serve_dashboard_response(request, stores.base_dir, leaf.campaign_id, leaf.cycle_id)
 
 
-def _subtree_mtime(base_dir: Path, campaign_id: str, cycle_id: str) -> int | None:
+def _subtree_mtime(base_dir: WorkspaceDir, campaign_id: str, cycle_id: str) -> int | None:
     """Newest mtime across this course's lineage inputs.
 
     The **ledger** is the validator that matters: it bumps the moment a candidate is

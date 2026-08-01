@@ -168,6 +168,46 @@ def test_earned_blocks_gate_on_credible_lift_and_task_fit() -> None:
     assert not any(field == "instruction" for _, field, _ in acc)
 
 
+def test_earned_block_mining_is_blind_inside_an_instrument() -> None:
+    """An instrument must not mine the campaign tree — its siblings ARE the tree.
+
+    The earned-block library is cross-run MEMORY, which ``shared/instrument.py`` names as
+    contamination for an instrument, but it reads campaign dirs rather than the archive, so
+    the evidence epoch that hides memory from every other such read cannot reach it. Inside
+    an L4 sandbox the only campaigns on disk are the sibling cells of the same outer run,
+    which accumulate as it proceeds — so ungated, cell #1 renders the static fallback and
+    cell #39 renders blocks mined from 38 finished siblings. Same cell, different prompt,
+    ordered by how often the instrument has been used. Measured on a banked sandbox before
+    the gate landed.
+
+    The store here is a tripwire, so removing the gate IS the fault injection: the walk it
+    guards is the first thing the miner does.
+    """
+    import contextvars
+
+    from promptpotter.application.intelligence.earned_blocks import mine_earned_blocks
+    from promptpotter.shared.instrument import enter_instrument_mode
+
+    class _Tripwire:
+        def iter_campaign_dirs(self) -> list[Path]:
+            raise AssertionError("mined the campaign tree")
+
+    class _Store:
+        campaigns = _Tripwire()
+
+    store: Any = _Store()
+
+    with pytest.raises(AssertionError, match="mined the campaign tree"):
+        mine_earned_blocks(store)
+
+    def _inside_instrument() -> dict[str, Any]:
+        enter_instrument_mode(evidence_epoch=frozenset(), optimizer_clamp=None)
+        return mine_earned_blocks(store)
+
+    # Own context, exactly as a real spawn binds it — and so the mode cannot leak sideways.
+    assert contextvars.copy_context().run(_inside_instrument) == {}
+
+
 def _archive(archive: MeasurementArchive, run_id: str, data: dict[str, Any]) -> None:
     """Seed one complete run — the whole measurement set is what is new."""
     archive.append_run(run_id, data, data["measurements"])
@@ -1031,9 +1071,17 @@ def test_two_inner_runs_of_one_benchmark_cell_both_reach_the_tree(built_stores) 
         )
     )
 
-    # The sandbox is `<workspace>/.inner/<outer cycle>` — flat, and shared by every candidate
-    # this course measured, which is what puts the two colliding ids in one store.
-    sandbox = built_stores.shared_root.parent / ".inner" / outer_cycle / built_stores.tenant_id
+    # The sandbox is flat and keyed on the owning (tenant, campaign, cycle) — one per outer
+    # cycle, shared by every candidate this course measured, which is what puts the two
+    # colliding inner ids in one store.
+    from promptpotter.infrastructure.store.layout import inner_sandbox_dir
+
+    sandbox = (
+        inner_sandbox_dir(
+            built_stores.shared_root, str(built_stores.tenant_id), outer_campaign, outer_cycle
+        )
+        / built_stores.tenant_id
+    )
     for inner_campaign, spawned, best in [
         ("bench__aaaaaa", {"candidate_label": "C0", "task": "bench/seed-0"}, 0.57),
         (

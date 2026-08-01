@@ -208,7 +208,7 @@ async def _in_process_run(query: str, payload: dict[str, Any]) -> dict[str, Any]
     per-task ContextVars — ``_CYCLE_LEDGER`` / ``_CURRENT_ROUND`` / ``_ABORT_CHECK``
     — don't clobber the outer's; the inherited copy is what lets a pause on the outer
     reach the inner loop) under a store sandbox rooted at
-    ``<workspace>/.inner/<this cycle_id>/`` — a FLAT registry, named by this cycle but
+    ``<workspace>/.inner/<key>/`` — a FLAT registry, owned by this cycle but
     never nested under it, so the tree stays shallow at every depth and L5+ nests
     logically rather than on disk (physical nesting blew Windows' ``MAX_PATH``). The spawning
     cycle's context is published by the runner seam (``publish_inner_spawn_context``)

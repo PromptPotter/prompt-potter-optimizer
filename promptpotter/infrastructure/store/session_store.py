@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.infrastructure.store.io import (
     read_json,
     read_json_optional,
@@ -21,7 +22,7 @@ class SessionStore:
     :class:`promptpotter.infrastructure.identity.OIDCSessionStore`.
     """
 
-    def __init__(self, base_dir: Path):
+    def __init__(self, base_dir: WorkspaceDir):
         self._base_dir = base_dir
 
     # -- Path helpers ---------------------------------------------------------

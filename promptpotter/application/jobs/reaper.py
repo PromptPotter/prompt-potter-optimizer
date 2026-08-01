@@ -18,6 +18,7 @@ import logging
 import time
 from pathlib import Path
 
+from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.phases import RunPhase
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
@@ -26,7 +27,11 @@ from promptpotter.infrastructure.store.io import (
     rmtree_robust,
     validate_path_component,
 )
-from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.store.layout import (
+    CycleLayout,
+    inner_sandboxes_dir,
+    sandbox_owner_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +45,9 @@ logger = logging.getLogger(__name__)
 DEAD_AFTER_S = 900.0
 
 
-def _tenant_root_of(cycle_dir: Path) -> Path:
-    """``projects_root/{tenant}`` for a ``…/{tenant}/campaigns/{cid}/cycles/{cyid}`` dir."""
-    return cycle_dir.parents[3]
+def _tenant_root_of(cycle_dir: Path) -> WorkspaceDir:
+    """The workspace root for a ``…/{tenant}/campaigns/{cid}/cycles/{cyid}`` dir."""
+    return WorkspaceDir(cycle_dir.parents[3])
 
 
 def _store_for(cycle_dir: Path) -> CampaignStore:
@@ -88,21 +93,20 @@ def _is_dead(cycle_dir: Path, *, dead_after_s: float) -> bool:
 
 
 def _sweep_roots(projects_root: Path) -> list[Path]:
-    """The top-level ``projects_root`` plus every L4 inner sandbox
-    (``<workspace>/.inner/<outer_cycle_id>``, a sibling of ``projects_root`` —
-    see ``runner/inner/cycle.py``). Each inner sandbox is itself a
+    """The top-level ``projects_root`` plus every L4 inner sandbox (a sibling of
+    ``projects_root`` — see ``runner/inner/cycle.py``). Each inner sandbox is itself a
     projects-root-shaped tree (``{tenant}/campaigns/{cid}/cycles/{cyid}/``), so
     the SAME glob pattern reaches it one level in — no recursion needed, the
     registry never nests an inner sandbox inside another."""
     roots = [projects_root]
-    inner_dir = projects_root.parent / ".inner"
+    inner_dir = inner_sandboxes_dir(projects_root)
     if inner_dir.is_dir():
         roots.extend(p for p in inner_dir.iterdir() if p.is_dir())
     return roots
 
 
 def reclaim_orphan_sandboxes(projects_root: Path) -> int:
-    """Delete every ``.inner/<cycle_id>`` whose owner cycle is gone; return the count.
+    """Delete every inner sandbox whose owner cycle is gone; return the count.
 
     A sandbox is **scratch owned by exactly one outer cycle** — named by it, written only
     while it runs, reachable afterwards only by walking down from that cycle (the lineage
@@ -118,16 +122,34 @@ def reclaim_orphan_sandboxes(projects_root: Path) -> int:
     that guesses at the difference deletes measurement history to save disk. Absence of
     the owner is a fact, not a policy, which is why it is the one this function acts on.
     """
-    inner_dir = projects_root.parent / ".inner"
+    inner_dir = inner_sandboxes_dir(projects_root)
     if not inner_dir.is_dir():
         return 0
     reclaimed = 0
     for sandbox in inner_dir.iterdir():
         if not sandbox.is_dir():
             continue
-        # The owner is a cycle dir named by the sandbox, in ANY tenant. Its `index.json`
-        # is what every other reader treats as "this cycle exists".
-        if next(projects_root.glob(f"*/campaigns/*/cycles/{sandbox.name}/index.json"), None):
+        # The owner names itself, in the sandbox's own `owner.json`. This used to be a glob
+        # for `*/campaigns/*/cycles/{sandbox.name}/index.json` — across EVERY tenant and
+        # EVERY campaign — because the directory name carried only the cycle_id, which is
+        # content-addressed and therefore shared. So any campaign in any tenant that happened
+        # to have run the same origin answered "the owner exists", and the sandbox was kept.
+        # Now the claim is exact: this tenant, this campaign, this cycle.
+        owner = read_json_optional(sandbox_owner_path(sandbox))
+        if not isinstance(owner, dict):
+            # No owner record and no way to derive one from a hashed name. Not provably an
+            # orphan, so it is KEPT — this function deletes on a fact, never on a guess.
+            continue
+        cycle_index = (
+            projects_root
+            / str(owner.get("tenant_id", ""))
+            / "campaigns"
+            / str(owner.get("campaign_id", ""))
+            / "cycles"
+            / str(owner.get("cycle_id", ""))
+            / "index.json"
+        )
+        if cycle_index.is_file():
             continue
         try:
             rmtree_robust(sandbox)

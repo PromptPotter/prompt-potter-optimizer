@@ -133,9 +133,9 @@ discordance-potential samples — hence the shared, seed-stratified order.
   two trigger points.
 
 The ranking is written to `hard_samples.json` (cycle + campaign scope) at each
-round boundary; the webapp polls it. The suffixed
-`archive/measurements/hard_samples_{backend}_{dataset}.json` is the separate
-archive-scope file.
+round boundary; the webapp polls it. **Dataset scope is never persisted** — it is
+cross-campaign, so no campaign owns it, and `GET /datasets/{name}/heatmap` folds it
+from the archive per request instead.
 
 ---
 

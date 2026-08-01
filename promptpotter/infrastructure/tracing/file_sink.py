@@ -12,6 +12,7 @@ import uuid
 from pathlib import Path
 from typing import Any, ClassVar
 
+from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.infrastructure.store.io import (
     append_jsonl,
     read_json_optional,
@@ -45,7 +46,7 @@ logger = logging.getLogger(__name__)
 
 class FileSink:
     def __init__(self, store_base_dir: str | Path, campaign_id: str = "") -> None:
-        self._tenant_root = Path(store_base_dir)
+        self._tenant_root = WorkspaceDir(Path(store_base_dir))
         self._campaign_id = campaign_id
         self._cycle_id: str | None = None
         self._campaign_traces: dict[str, str] = {}

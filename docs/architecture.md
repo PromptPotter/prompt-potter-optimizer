@@ -370,10 +370,9 @@ MeasurementArchive (the other persistence layer, see "Measurement archive"
 below) is under the same discipline via the **`store/archive_views.py`
 facade** — the free-function read/write surface (`measurements_for_sample`,
 `reusable_results`, `record_measurement_run`, `reindex_measurements`, …)
-every consumer goes through. Two raw call sites remain, both narrow
-dataset-lifecycle operations that predate the facade
-(`datasets/dataset_replace.py::restamp_dataset`,
-`output.py::dataset_snapshot_path`); a third consumer is drift.
+every consumer goes through. One raw call site remains, a narrow
+dataset-lifecycle operation that predates the facade
+(`datasets/dataset_replace.py::restamp_dataset`); a second consumer is drift.
 Together the two pins capture event-sourcing's reasoning-clarity gain
 without paying replay-on-every-read.
 

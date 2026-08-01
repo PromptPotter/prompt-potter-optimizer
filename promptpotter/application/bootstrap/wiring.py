@@ -18,6 +18,7 @@ from promptpotter import connectors
 from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.datasets.csv_ingest import read_candidate_library_file
 from promptpotter.application.datasets.loaders import resolve_dataset_items, samples_from_dicts
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
@@ -288,7 +289,8 @@ async def init_services(
 
     ``store`` injects a pre-built :class:`Stores` instead of letting
     :func:`build_stores` resolve the user-data root: the L4 inner-cycle runner passes a
-    sandboxed store rooted at the flat ``<workspace>/.inner/<spawn_cycle_id>/`` registry
+    sandboxed store rooted at the flat ``<workspace>/.inner/<key>/`` registry, keyed on
+    the owning (tenant, campaign, cycle)
     — named by the spawning cycle, never nested under it — so an inner campaign's state
     never touches the outer's active pointer. It is the ONE way to relocate the tree;
     a ``project_root`` parameter sat beside it doing a weaker version of the same job,
@@ -301,7 +303,7 @@ async def init_services(
     resolved_identity = identity if identity is not None else default_identity()
 
     if store is None:
-        store = build_stores(resolved_identity)
+        store = build_stores(resolved_identity, projects_root=DEFAULT_PROJECTS_ROOT)
 
     # An instrument cycle is a measurement, not a campaign — it must not mutate
     # tenant-global storage; the outer campaign that spawned it already did this.

@@ -20,11 +20,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from promptpotter.config.paths import (
-    DEFAULT_PROJECTS_ROOT,
-    benchmark_datasets_root,
-)
-from promptpotter.domain.cycle_paths import CycleHop, CyclePath
+from promptpotter.config.paths import benchmark_datasets_root
+from promptpotter.domain.cycle_paths import CycleHop, CyclePath, WorkspaceDir
 from promptpotter.domain.identity import TenantId
 from promptpotter.infrastructure.store.backend_store import BackendStore
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
@@ -35,6 +32,7 @@ from promptpotter.infrastructure.store.io import (
     validate_path_component,
     write_json,
 )
+from promptpotter.infrastructure.store.layout import inner_sandbox_dir, tenant_workspace
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
 from promptpotter.infrastructure.store.session_store import SessionStore
 from promptpotter.infrastructure.store.sweep_store import SweepStore
@@ -112,14 +110,18 @@ class Stores:
     field (per identity-foundation no-drift gate #4: ``IdentityContext.tenant_id``
     is the only source of tenant scope).
 
-    ``projects_root`` is the parent-of-all-tenant-dirs (the workspace root).
-    The relation is fixed: ``base_dir = projects_root / identity.tenant_id``.
-    Use ``projects_root`` directly — do not re-walk ``base_dir.parent``.
+    ``projects_root`` is the parent-of-all-tenant-dirs; ``base_dir`` is this tenant's
+    own root under it, a :data:`WorkspaceDir` (``store/layout.py::tenant_workspace``
+    owns the relation — do not re-derive it, and do not re-walk ``base_dir.parent``).
+    The two differ by one segment and are both ``Path`` on disk, which is why the
+    newtype exists: everything keyed on a tenant — the active-session pointer, the
+    workspace ledger, every ``*_dir_for`` builder — takes ``base_dir``, and passing
+    ``projects_root`` there is now a type error rather than a silent tenant escape.
 
     ``shared_root`` is the workspace root holding the two CONTENT-ADDRESSED caches
     (``archive`` + ``optimizer_calls``). It equals ``projects_root`` for every normal
     run and DIVERGES only inside an L4 inner sandbox, where campaign state is rooted at
-    ``.inner/<cycle_id>`` but the caches must stay tenant-global. Keys are content
+    ``.inner/<key>`` but the caches must stay tenant-global. Keys are content
     hashes, so a hit is the same measurement by construction — isolating them would not
     make a run safer, only re-pay for it (and redraw the origin's stochastic score, which
     the outer fitness subtracts). It is a field rather than a re-walk of ``projects_root``
@@ -133,7 +135,7 @@ class Stores:
     never read this path directly from a handler.
     """
 
-    base_dir: Path
+    base_dir: WorkspaceDir
     projects_root: Path
     shared_root: Path
     benchmarks_root: Path
@@ -157,17 +159,24 @@ class Stores:
 def build_stores(
     identity: IdentityContext,
     *,
-    projects_root: Path | str | None = None,
-    benchmarks_root: Path | str | None = None,
-    shared_root: Path | str | None = None,
+    projects_root: Path,
+    benchmarks_root: Path | None = None,
+    shared_root: Path | None = None,
 ) -> Stores:
     """Assemble an :class:`IdentityContext`-rooted :class:`Stores` bundle.
 
-    Defaults: ``projects_root=<repo>/.promptpotter/projects``,
-    ``benchmarks_root=<repo>/datasets`` (survives ``.promptpotter/`` resets).
-    Tests pass ``tmp_path``. The tenant slug rides ``identity.tenant_id`` —
-    use :func:`~promptpotter.shared.identity.default_identity` for Stage-0
-    single-operator callers.
+    ``projects_root`` is REQUIRED, and that is the whole point: it used to default to
+    the process-global ``DEFAULT_PROJECTS_ROOT``, so eleven of twelve callers omitted
+    it and a store built anywhere inside an L4 sandbox silently addressed the operator's
+    real workspace. An entry point that genuinely means the process-global workspace
+    still says so — it just says it out loud, and every caller downstream of one is now
+    forced by mypy to pass the root it already holds. The tenant slug rides
+    ``identity.tenant_id``; use :func:`~promptpotter.shared.identity.default_identity`
+    for Stage-0 single-operator callers.
+
+    ``benchmarks_root`` defaults to the install-global benchmark definitions
+    (``<repo>/datasets`` in a checkout, ``assets/benchmarks/`` under a wheel) — that one
+    is a property of the INSTALL, not of the workspace, so it has no tenant to escape.
 
     ``shared_root`` roots the two content-addressed caches (``archive`` +
     ``optimizer_calls``) somewhere other than ``projects_root``. Its ONE caller is the
@@ -175,11 +184,11 @@ def build_stores(
     isolating the tenant-global measurement cache. Omit it and the caches sit under
     ``projects_root``, as they do for every non-recursive run.
     """
-    root = Path(projects_root) if projects_root else DEFAULT_PROJECTS_ROOT
-    tenant_dir = root / identity.tenant_id
-    shared = Path(shared_root) if shared_root else root
+    root = projects_root
+    tenant_dir = tenant_workspace(root, identity.tenant_id)
+    shared = shared_root if shared_root is not None else root
     shared_tenant = shared / identity.tenant_id
-    bench_root = Path(benchmarks_root) if benchmarks_root else benchmark_datasets_root()
+    bench_root = benchmarks_root if benchmarks_root is not None else benchmark_datasets_root()
     return Stores(
         base_dir=tenant_dir,
         projects_root=root,
@@ -199,34 +208,41 @@ def build_stores(
     )
 
 
-def inner_sandbox_store(store: Stores, outer_cycle_id: str) -> Stores | None:
-    """A :class:`Stores` rooted at *outer_cycle_id*'s inner sandbox, or ``None``.
+def inner_sandbox_store(
+    store: Stores, outer_campaign_id: str, outer_cycle_id: str
+) -> Stores | None:
+    """A :class:`Stores` rooted at the inner sandbox of ``(outer_campaign_id, outer_cycle_id)``.
 
-    L4 (``promptpotter-self``) runs each candidate as a real inner campaign under
-    a flat, off-registry sandbox ``<workspace>/.inner/<outer_cycle_id>`` (keyed on
-    the outer cycle id alone — see ``runner/inner.publish_inner_spawn_context``).
-    That sandbox is structurally a normal projects tree, so pointing
-    :func:`build_stores` at it lets every existing read work verbatim. ``None`` when
-    the cycle spawned no inner campaigns (non-L4, or the loop hasn't recursed
-    yet) — callers degrade to an empty list / 404, never an error.
+    L4 (``promptpotter-self``) runs each candidate as a real inner campaign under a flat,
+    off-registry sandbox. That sandbox is structurally a normal projects tree, so pointing
+    :func:`build_stores` at it lets every existing read work verbatim. ``None`` when the
+    cycle spawned no inner campaigns (non-L4, or the loop hasn't recursed yet) — callers
+    degrade to an empty list / 404, never an error.
 
-    Anchored on ``shared_root`` — the REAL workspace root, invariant across depth —
-    exactly as the writer is, and carried into the sandbox store for the same
-    reason. ``projects_root`` is NOT a valid anchor: inside a sandbox it already IS
-    ``.inner/<parent>``, so an L5 hop would read ``.inner/.inner/<id>`` while the
-    writer wrote ``.inner/<id>``, and the sandbox's ``archive`` + ``optimizer_calls``
-    would root under the sandbox instead of staying tenant-global. The two roots
-    coincide at depth 1, which is why neither had fired.
+    **The campaign is half of the key, not decoration.** ``cycle_id`` is content-addressed
+    on the origin and so is shared by every campaign minted from it; keyed on the cycle
+    alone, two campaigns on one origin served each other's inner fan-out through
+    ``?descend=`` / ``/tree`` / ``events:subscribe``. :func:`descend_store` validated
+    ``hop.campaign_id`` and then dropped it — the caller always knew, the key just refused
+    to take it.
+
+    Anchored on ``shared_root`` — the REAL workspace root, invariant across depth — exactly
+    as the writer is, and carried into the sandbox store for the same reason.
+    ``projects_root`` is NOT a valid anchor: inside a sandbox it already IS the sandbox, so
+    an L5 hop would read ``.inner/.inner/…`` while the writer wrote one level up, and the
+    sandbox's ``archive`` + ``optimizer_calls`` would root under the sandbox instead of
+    staying tenant-global. The two roots coincide at depth 1, which is why neither had fired.
     """
-    validate_path_component(outer_cycle_id)
-    sandbox_root = store.shared_root.parent / ".inner" / outer_cycle_id
+    sandbox_root = inner_sandbox_dir(
+        store.shared_root, str(store.tenant_id), outer_campaign_id, outer_cycle_id
+    )
     if not (sandbox_root / store.tenant_id).is_dir():
         return None
     return build_stores(store.identity, projects_root=sandbox_root, shared_root=store.shared_root)
 
 
 def descend_store(store: Stores, hops: CyclePath) -> Stores:
-    """Fold ``.inner/<cycle_id>`` over *hops* — THE recursive step, and the one
+    """Fold ``.inner/<key>`` over *hops* — THE recursive step, and the one
     place a nested store is reached.
 
     Each hop descends INTO that hop's cycle, so the returned store is the one whose
@@ -242,7 +258,7 @@ def descend_store(store: Stores, hops: CyclePath) -> Stores:
             validate_path_component(hop.cycle_id)
         except ValueError as exc:
             raise BadRequestError(str(exc)) from exc
-        nxt = inner_sandbox_store(cur, hop.cycle_id)
+        nxt = inner_sandbox_store(cur, hop.campaign_id, hop.cycle_id)
         if nxt is None:
             raise NotFoundError(f"No inner sandbox for cycle '{hop.cycle_id}'")
         cur = nxt

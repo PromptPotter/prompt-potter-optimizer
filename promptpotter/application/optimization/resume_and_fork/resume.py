@@ -122,7 +122,6 @@ def resume_with_divergence_check(
                 new_cycle_id = _mint_fork(
                     campaign_store,
                     campaign_id,
-                    session.store.tenant_id,
                     session.session_id,
                     cycle_id,
                     div.round_num,

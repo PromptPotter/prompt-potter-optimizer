@@ -9,6 +9,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.infrastructure.store.io import read_json_optional, write_json
 from promptpotter.infrastructure.store.layout import cycle_dir_for
 from promptpotter.infrastructure.tracing.events import (
@@ -37,7 +38,7 @@ class LangfuseSink:
         campaign_id: str,
         langfuse: LangfuseLogger,
     ) -> None:
-        self._base = Path(store_base_dir)
+        self._base = WorkspaceDir(Path(store_base_dir))
         self._campaign_id = campaign_id
         self._lf = langfuse
 

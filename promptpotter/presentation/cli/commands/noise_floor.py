@@ -13,6 +13,7 @@ import argparse
 import logging
 
 from promptpotter.application.noise_floor import NoiseFloorError, measure_noise_floor
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
@@ -32,7 +33,7 @@ async def cmd_noise_floor(args: argparse.Namespace) -> CommandResult:
 
     setup_logging(style="full" if get_verbose() else "cli")
     identity = identity_from_args(args)
-    stores = build_stores(identity)
+    stores = build_stores(identity, projects_root=DEFAULT_PROJECTS_ROOT)
     campaign_id = resolve_campaign(stores, args.campaign)
     cycle_id = resolve_cycle(stores, campaign_id, args.cycle)
 

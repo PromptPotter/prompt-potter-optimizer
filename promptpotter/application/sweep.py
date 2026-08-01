@@ -23,6 +23,7 @@ from promptpotter.application.optimization.resume_and_fork.fork_siblings import 
 )
 from promptpotter.application.views.render import render_sweep_summary
 from promptpotter.application.views.view_models import SweepPayloadRow, SweepSummaryView
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.results import PayloadOutcome, SweepBatchResult
 from promptpotter.domain.run_records import ForkSpec, ForkTrigger, OperatorSweepFile
@@ -110,7 +111,7 @@ async def run_sweep_batch(
     # the one workspace instead of orphaning under `projects/default/`.
     identity = registered_or_default_identity(getattr(args, "tenant", None))
     tenant_id = identity.tenant_id
-    store = build_stores(identity)
+    store = build_stores(identity, projects_root=DEFAULT_PROJECTS_ROOT)
     parent_cycle_id = root_ctx.cycle_id
     campaign_id = root_ctx.campaign_id
     existing = existing_fork_source_files(store, campaign_id, parent_cycle_id)
@@ -159,7 +160,6 @@ async def run_sweep_batch(
         new_cycle_id = _mint_fork(
             store.campaigns,
             campaign_id,
-            tenant_id,
             root_ctx.session_id,
             parent_cycle_id,
             0,
@@ -209,7 +209,6 @@ async def run_sweep_batch(
                 cleanup_stub_fork_if_empty(
                     campaign_store=store.campaigns,
                     campaign_id=campaign_id,
-                    tenant_id=tenant_id,
                     session_id=root_ctx.session_id,
                     cycle_id=new_cycle_id,
                     parent_cycle_id=parent_cycle_id,
@@ -266,7 +265,7 @@ async def run_sweep_batch(
             path.name,
         )
 
-    save_active_pointer(tenant_id, root_ctx.session_id, campaign_id, parent_cycle_id)
+    save_active_pointer(store.base_dir, root_ctx.session_id, campaign_id, parent_cycle_id)
 
     completed_at = utcnow_iso()
     cycle_by_source = {

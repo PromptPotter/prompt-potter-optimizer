@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import logging
 
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.infrastructure.store import archive_views
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli.commands._shared import CommandResult, identity_from_args
@@ -24,7 +25,7 @@ __all__ = ["cmd_reindex"]
 
 async def cmd_reindex(args: argparse.Namespace) -> CommandResult:
     """Rebuild ``measurements/index.jsonl`` from the detail files; report the counts."""
-    stores = build_stores(identity_from_args(args))
+    stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
     counts = archive_views.reindex_measurements(stores)
     human = (
         f"reindex: {counts['indexed']} run(s) indexed from "

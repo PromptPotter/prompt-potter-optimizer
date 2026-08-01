@@ -14,6 +14,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.infrastructure.store.io import (
     read_json_optional,
     write_json,
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
 
 
 class CheckinDraftStore:
-    def __init__(self, base_dir: Path):
+    def __init__(self, base_dir: WorkspaceDir):
         self._base_dir = base_dir
 
     def _checkin_dir(self, campaign_id: str) -> Path:

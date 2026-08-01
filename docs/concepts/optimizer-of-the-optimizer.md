@@ -240,7 +240,8 @@ change the outer cycle.
 **The recursion is SHIPPED & live-validated (2026-06-30).** `new promptpotter-self`
 runs real inner campaigns: each outer "sample" (an inner task in `inner_tasks.yaml`)
 mints + runs a full inner PromptPotter cycle **in its own asyncio task** under a
-**flat `<workspace>/.inner/<spawn_cycle_id>/` sandbox** (NOT physically nested —
+**flat `<workspace>/.inner/<key>/` sandbox**, keyed on the owning (tenant, campaign,
+cycle) (NOT physically nested —
 that overflows Windows `MAX_PATH`; flat keeps it re-entrant at any depth), and the
 composed fitness vector flows into the outer scoring formula. **The sandbox holds
 campaign STATE only.** The two content-addressed caches (`MeasurementArchive`,

@@ -6,7 +6,7 @@ import argparse
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.config.paths import benchmark_datasets_root
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, benchmark_datasets_root
 from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 
@@ -108,13 +108,13 @@ def load_session(args: argparse.Namespace) -> SessionCtx:
     # developer (claim marker) > anonymous default. Must match, else resume
     # reads one tenant's pointer but looks for the session in another's tree.
     identity = registered_or_default_identity(getattr(args, "tenant", None))
-    if not active_pointer_exists(identity.tenant_id):
+    store = build_stores(identity, projects_root=DEFAULT_PROJECTS_ROOT)
+    if not active_pointer_exists(store.base_dir):
         raise SystemExit(
             "ERROR: No active session.\n\n"
             "To start a campaign, run `new` against a dataset:\n\n" + no_dataset_hint()
         )
-    store = build_stores(identity)
-    pointer_sid, pointer_cid, pointer_cyid = read_active_pointer(identity.tenant_id)
+    pointer_sid, pointer_cid, pointer_cyid = read_active_pointer(store.base_dir)
     session_id = getattr(args, "session", None) or pointer_sid
     if not session_id:
         raise SystemExit("ERROR: No active session_id in pointer.")

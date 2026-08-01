@@ -114,7 +114,7 @@ channels:
             descend:
               type: string
               description: |
-                Optional L4 descent. Walks into the `.inner/<spawn cycle id>`
+                Optional L4 descent. Walks into the previous hop's `.inner/<key>`
                 sandbox one hop per id, so the chat/dashboard can follow the
                 viewed leaf of a `CyclePath` into an inner campaign. Omitted =
                 the top-level cycle addressed by the path ids.

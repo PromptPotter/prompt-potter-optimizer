@@ -82,10 +82,13 @@ def main() -> None:
     # First-run guard: if no active session exists, print a friendly landing
     # instead of letting resume fail with a confusing error.
     if args.command is None:
+        from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+        from promptpotter.infrastructure.store.layout import tenant_workspace
         from promptpotter.infrastructure.store.session_pointer import active_pointer_exists
         from promptpotter.presentation.cli.commands._shared import identity_from_args
 
-        if not active_pointer_exists(identity_from_args(args).tenant_id):
+        identity = identity_from_args(args)
+        if not active_pointer_exists(tenant_workspace(DEFAULT_PROJECTS_ROOT, identity.tenant_id)):
             print(
                 "Welcome to PromptPotter.\n\n"
                 "Pick a verb to get started:\n"

@@ -2870,6 +2870,18 @@
             "description": "Canonical label (`C0` for the origin, else `C{round}.{idx+1}`) — the same string the round file and console use.",
             "title": "Candidate Label"
           },
+          "outer_campaign_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The outer CAMPAIGN that owns this inner sandbox. Required alongside the cycle because a `cycle_id` is content-addressed on its origin and so is shared by every campaign minted from that origin — the pair is the identity, either half alone is not. Null on a run minted before the stamp existed, which is why two pooled sandboxes on disk cannot be attributed after the fact.",
+            "title": "Outer Campaign Id"
+          },
           "outer_cycle_id": {
             "description": "The outer cycle that owns this inner sandbox",
             "title": "Outer Cycle Id",
@@ -3728,7 +3740,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/dashboard": {
       "get": {
-        "description": "Live telemetry for the viewed cycle — its own ``dashboard.json``.\n\n``dashboard.json`` is per-cycle: every cycle (root, fork, sweep, diag, or an\nL4 inner descendant) owns its own live file, stamped with its own\n``cycle_id``. The path ids address the top-level (root) cycle; the optional\n``descend`` query walks into the ``.inner/<previous cycle id>`` sandbox one\n``campaign::cycle`` hop at a time, so ONE route serves a top-level cycle, an\ninner cycle, or an L5+ descendant (:func:`resolve_cycle_path`). Absent/empty\n``descend`` is a plain per-cycle read — no session-root collapse.\n\nHonors ``If-Modified-Since`` and returns ``304 Not Modified`` when the\non-disk mtime hasn't advanced — keeps the 2 s webapp poll cheap during\nquiescent stretches. A cycle that exists but has not yet flushed its first\n``dashboard.json`` answers ``warming_up`` at 200 so the webapp renders\n\"initialising\" rather than appearing offline; a cycle that does not exist\nanswers 404, because those are different facts.",
+        "description": "Live telemetry for the viewed cycle — its own ``dashboard.json``.\n\n``dashboard.json`` is per-cycle: every cycle (root, fork, sweep, diag, or an\nL4 inner descendant) owns its own live file, stamped with its own\n``cycle_id``. The path ids address the top-level (root) cycle; the optional\n``descend`` query walks into the previous hop's ``.inner/<key>`` sandbox one\n``campaign::cycle`` hop at a time, so ONE route serves a top-level cycle, an\ninner cycle, or an L5+ descendant (:func:`resolve_cycle_path`). Absent/empty\n``descend`` is a plain per-cycle read — no session-root collapse.\n\nHonors ``If-Modified-Since`` and returns ``304 Not Modified`` when the\non-disk mtime hasn't advanced — keeps the 2 s webapp poll cheap during\nquiescent stretches. A cycle that exists but has not yet flushed its first\n``dashboard.json`` answers ``warming_up`` at 200 so the webapp renders\n\"initialising\" rather than appearing offline; a cycle that does not exist\nanswers 404, because those are different facts.",
         "operationId": "get_cycle_dashboard_api_v1_campaigns__campaign_id__cycles__cycle_id__dashboard_get",
         "parameters": [
           {
@@ -3794,7 +3806,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/events:subscribe": {
       "get": {
-        "description": "Subscribe to a cycle's live ledger via SSE.\n\nReturns ``404`` only when the cycle directory does not exist (unknown\ncampaign/cycle). For any real cycle — running, paused, or finished — frames\narrive in this order:\n\n1. One ``stream_snapshot`` frame — payload is the cycle's current\n   ``dashboard.json`` body + ``snapshot_at_offset`` indicating the ledger\n   high-water mark reflected in the snapshot.\n2. Live tail — every record appended to ``.runtime/ledger.jsonl`` after the\n   snapshot is fanned out as a ``ProjectionEnvelope`` with ``kind`` = the\n   record's ``record_type`` and ``sequence`` = the record's ledger offset.\n3. Heartbeat comment line every 15 s.\n\nThe path ids address the top-level (root) cycle; the optional ``descend``\nquery walks into the ``.inner/<previous cycle id>`` sandbox one\n``campaign::cycle`` hop at a time, so ONE stream serves a top-level cycle or\nan L4 inner descendant (:func:`resolve_cycle_path`) — the chat feed follows\nthe same viewed leaf the dashboard does. Absent/empty ``descend`` is a plain\nper-cycle subscribe, byte-identical to a top-level read.\n\nSee ``docs/developer/event-stream.md`` for the certified Profile A contract.",
+        "description": "Subscribe to a cycle's live ledger via SSE.\n\nReturns ``404`` only when the cycle directory does not exist (unknown\ncampaign/cycle). For any real cycle — running, paused, or finished — frames\narrive in this order:\n\n1. One ``stream_snapshot`` frame — payload is the cycle's current\n   ``dashboard.json`` body + ``snapshot_at_offset`` indicating the ledger\n   high-water mark reflected in the snapshot.\n2. Live tail — every record appended to ``.runtime/ledger.jsonl`` after the\n   snapshot is fanned out as a ``ProjectionEnvelope`` with ``kind`` = the\n   record's ``record_type`` and ``sequence`` = the record's ledger offset.\n3. Heartbeat comment line every 15 s.\n\nThe path ids address the top-level (root) cycle; the optional ``descend``\nquery walks into the previous hop's ``.inner/<key>`` sandbox one\n``campaign::cycle`` hop at a time, so ONE stream serves a top-level cycle or\nan L4 inner descendant (:func:`resolve_cycle_path`) — the chat feed follows\nthe same viewed leaf the dashboard does. Absent/empty ``descend`` is a plain\nper-cycle subscribe, byte-identical to a top-level read.\n\nSee ``docs/developer/event-stream.md`` for the certified Profile A contract.",
         "operationId": "stream_cycle_events_api_v1_campaigns__campaign_id__cycles__cycle_id__events_subscribe_get",
         "parameters": [
           {
@@ -3856,7 +3868,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/file": {
       "get": {
-        "description": "Read the contents of one file under the cycle or campaign scope.\n\n``descend`` walks into the ``.inner/<previous cycle id>`` sandbox one hop per\n``~``-joined ``campaign::cycle`` segment (same seam as the dashboard route), so\nan L4 inner descendant's ``rounds/round_NNNN.json`` reads from the inner cycle\ndir — not the outer root. Absent/empty ``descend`` is a plain per-cycle read.",
+        "description": "Read the contents of one file under the cycle or campaign scope.\n\n``descend`` walks into the previous hop's ``.inner/<key>`` sandbox one hop per\n``~``-joined ``campaign::cycle`` segment (same seam as the dashboard route), so\nan L4 inner descendant's ``rounds/round_NNNN.json`` reads from the inner cycle\ndir — not the outer root. Absent/empty ``descend`` is a plain per-cycle read.",
         "operationId": "get_cycle_file_api_v1_campaigns__campaign_id__cycles__cycle_id__file_get",
         "parameters": [
           {

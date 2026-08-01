@@ -9,6 +9,7 @@ from typing import Annotated, Any
 from fastapi import Depends, Request
 
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import settings
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
@@ -72,8 +73,13 @@ IdentityDep = Annotated[IdentityContext, Depends(resolve_identity)]
 
 
 def build_stores_from_identity(identity: IdentityDep) -> Stores:
-    """FastAPI factory bridging :data:`IdentityDep` into :func:`build_stores`."""
-    return build_stores(identity)
+    """FastAPI factory bridging :data:`IdentityDep` into :func:`build_stores`.
+
+    The API server serves the one process-global workspace; a request never names
+    another. Inner sandboxes are reached from here by DESCENT (``?descend=``,
+    :func:`~promptpotter.infrastructure.store.stores.descend_store`), never by
+    rebuilding a store at a different root."""
+    return build_stores(identity, projects_root=DEFAULT_PROJECTS_ROOT)
 
 
 StoreDep = Annotated[Stores, Depends(build_stores_from_identity)]

@@ -12,7 +12,8 @@ here may assume depth 1:
   outer's task would clobber all three. Spawning copies the context instead, and the abort
   predicate is the one the inner run READS back (`_bind_run_controls` composes rather than
   overwrites), so a pause on the owner stops the instrument.
-- **A FLAT sandbox home**, ``<workspace>/.inner/<spawn_cycle_id>``, a sibling of
+- **A FLAT sandbox home**, ``<workspace>/.inner/<key>`` keyed on the owning
+  (tenant, campaign, cycle), a sibling of
   ``projects/`` rather than a child of the outer cycle dir. Physical nesting blows past
   Windows' ``MAX_PATH`` at depth 1 and is hopeless by L5; flat stays shallow at every
   depth. The inner tree never touches the outer's listing, pointer or SSE stream.
@@ -49,8 +50,12 @@ from promptpotter.domain.l4.proxies import (
     compute_outer_proxies,
     floor_reason,
 )
-from promptpotter.infrastructure.store.io import read_json_optional
-from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.store.io import read_json_optional, write_json
+from promptpotter.infrastructure.store.layout import (
+    CycleLayout,
+    inner_sandbox_dir,
+    sandbox_owner_path,
+)
 from promptpotter.shared.instrument import MAX_INSTRUMENT_DEPTH, instrument_depth
 
 if TYPE_CHECKING:
@@ -106,16 +111,16 @@ class InnerSpawnContext:
     cycle so the connector (which only gets ``(query, payload)``) can recurse.
 
     ``inner_sandbox_root`` is the SHALLOW, FLAT home for this cycle's inner
-    campaigns: ``<workspace>/.inner/<spawn_cycle_id>``. It is named by (owned by)
-    the spawning cycle but NOT physically nested under its deep campaign dir —
+    campaigns: ``<workspace>/.inner/<key>``, where the key identifies the OWNING
+    ``(tenant, campaign, cycle)`` — see ``store/layout.py::inner_sandbox_key``. It is
+    owned by the spawning cycle but NOT physically nested under its deep campaign dir —
     physical nesting (``…/.runtime/inner/…/.runtime/inner/…``) blows past Windows'
     260-char ``MAX_PATH`` at depth 1, and would be hopeless at L5+. A flat registry
-    stays shallow at EVERY recursion depth (an L5 cycle gets its own
-    ``<workspace>/.inner/<l5_id>``), so the re-entrancy invariant holds without the
-    path-length trap. Still out of the ``projects/`` tree, so inner campaigns never
-    show in the outer campaign listing. ``dataset_config_dir`` is the spawning
-    campaign's config dir, read for ``inner_tasks.yaml``; ``identity`` roots the
-    sandbox stores under the same tenant.
+    stays shallow at EVERY recursion depth (an L5 cycle gets its own key), so the
+    re-entrancy invariant holds without the path-length trap. Still out of the
+    ``projects/`` tree, so inner campaigns never show in the outer campaign listing.
+    ``dataset_config_dir`` is the spawning campaign's config dir, read for
+    ``inner_tasks.yaml``; ``identity`` roots the sandbox stores under the same tenant.
 
     ``shared_root`` is the REAL workspace root, carried through so the inner store keeps
     its ``archive`` + ``optimizer_calls`` tenant-global while its campaign state stays
@@ -125,14 +130,17 @@ class InnerSpawnContext:
     0.375 in seven sandboxes and 0.417 in two). The outer fitness subtracts that origin,
     so the isolation injected a noise term larger than the lift it was measuring.
 
-    ``spawn_cycle_id`` is the OUTER cycle that owns this sandbox — carried explicitly
-    rather than re-parsed off ``inner_sandbox_root.name``, so the provenance an inner
-    campaign stamps names its parent by fact, not by string surgery on a path."""
+    ``spawn_campaign_id`` / ``spawn_cycle_id`` are the OUTER campaign + cycle that own this
+    sandbox — carried explicitly rather than re-parsed off ``inner_sandbox_root.name``, so
+    the provenance an inner campaign stamps names its parent by fact, not by string surgery
+    on a path. Since the key became a hash, re-parsing is not merely fragile but impossible,
+    and these two are also what the sandbox records in its ``owner.json``."""
 
     inner_sandbox_root: Path
     dataset_config_dir: Path
     identity: IdentityContext
     shared_root: Path
+    spawn_campaign_id: str
     spawn_cycle_id: str
 
 
@@ -153,15 +161,15 @@ def publish_inner_spawn_context(session: Session) -> None:
     dataset_dir = session.dataset_config_dir
     if not cycle_id or dataset_dir is None or not session.campaign_id:
         return
-    # Flat, shallow sandbox home: the workspace's ``.inner/<cycle_id>`` (sibling of
-    # ``projects/``), NOT the deep outer cycle dir — keeps the path short at any
-    # recursion depth (Windows MAX_PATH). Anchored on ``shared_root`` (the REAL
-    # workspace root, invariant across depth), not on this store's ``projects_root``:
-    # inside a sandbox the latter already IS ``.inner/<parent>``, so an L5 would nest
-    # at ``.inner/.inner/<id>`` and reintroduce the path-length trap the flat layout exists
-    # to avoid. Identical for a top-level cycle, where the two roots coincide.
+    # Flat, shallow sandbox home keyed on the FULL owner identity — see
+    # ``store/layout.py::inner_sandbox_key`` for why all three parts are needed and why the
+    # key is a hash. Anchored on ``shared_root`` (the REAL workspace root, invariant across
+    # depth), never this store's ``projects_root``, which inside a sandbox already IS the
+    # sandbox.
     shared_root = session.store.shared_root
-    inner_root = shared_root.parent / ".inner" / cycle_id
+    inner_root = inner_sandbox_dir(
+        shared_root, session.store.tenant_id, session.campaign_id, cycle_id
+    )
     _verify_outer_observation_contract(session, Path(dataset_dir))
     _INNER_SPAWN.set(
         InnerSpawnContext(
@@ -169,6 +177,7 @@ def publish_inner_spawn_context(session: Session) -> None:
             dataset_config_dir=Path(dataset_dir),
             identity=session.store.identity,
             shared_root=shared_root,
+            spawn_campaign_id=session.campaign_id,
             spawn_cycle_id=cycle_id,
         )
     )
@@ -198,6 +207,10 @@ def _spawn_provenance(ctx: InnerSpawnContext, round_num: int | None, query: str)
     cand = measured_candidate()
     return {
         "outer_cycle_id": ctx.spawn_cycle_id,
+        # The campaign half. A cycle_id is content-addressed on its origin, so it is SHARED
+        # by every campaign minted from that origin — stamping it alone recorded half an
+        # identity, the same defect the sandbox key itself had.
+        "outer_campaign_id": ctx.spawn_campaign_id,
         "round": round_num,
         "candidate_idx": cand.idx if cand else None,
         "candidate_id": cand.candidate_id if cand else None,
@@ -416,7 +429,7 @@ async def _run_inner_campaign(
     set_optimizer_prompt_overrides(meta_prompt_overrides or None)
 
     # Sandbox: the inner tenant tree roots at the spawning cycle's flat, shallow
-    # `<workspace>/.inner/<cycle_id>` home (re-entrant + Windows MAX_PATH-safe; see
+    # `<workspace>/.inner/<key>` home (re-entrant + Windows MAX_PATH-safe; see
     # InnerSpawnContext). The store reads benchmarks from the repo `datasets/`
     # (build_stores default) and keeps the content-addressed caches (`archive` +
     # `optimizer_calls`) on the REAL tenant tree via `shared_root`, so only campaign
@@ -427,6 +440,19 @@ async def _run_inner_campaign(
         ctx.identity,
         projects_root=ctx.inner_sandbox_root,
         shared_root=ctx.shared_root,
+    )
+    # Who owns this sandbox, written where a human and the orphan reaper can both read it.
+    # The directory name is a hash (MAX_PATH — see `store/layout.py::inner_sandbox_key`), so
+    # this file is the only place the three owner names survive. Written here rather than at
+    # `publish_inner_spawn_context`, which fires for EVERY cycle and would mint an empty
+    # sandbox dir for every non-L4 run.
+    write_json(
+        sandbox_owner_path(ctx.inner_sandbox_root),
+        {
+            "tenant_id": str(ctx.identity.tenant_id),
+            "campaign_id": ctx.spawn_campaign_id,
+            "cycle_id": ctx.spawn_cycle_id,
+        },
     )
 
     # THE declaration: this cycle is a measurement instrument, not a campaign. One call binds

@@ -21,7 +21,7 @@ from pydantic import ConfigDict, Field, ValidationError
 
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.campaign import Campaign
-from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
+from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.opt_search_point import overlay_sets_model_outside_allowed
 from promptpotter.domain.run_records import CommandRecord, CycleSeed
 from promptpotter.domain.strict_model import StrictModel
@@ -33,7 +33,11 @@ from promptpotter.infrastructure.llm.models import (
     set_cycle_ledger,
 )
 from promptpotter.infrastructure.store.io import read_json_tolerant, write_json
-from promptpotter.infrastructure.store.layout import CycleLayout, root_cycle_id
+from promptpotter.infrastructure.store.layout import (
+    CycleLayout,
+    inner_sandboxes_dir,
+    root_cycle_id,
+)
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
@@ -247,19 +251,17 @@ class CommandDispatcher:
         (``projects/{tenant}/.workspace/events.jsonl``), not the campaign's own —
         ``archive`` MOVES that tree into the recycle bin and ``delete`` REMOVES it,
         so the campaign's own ledger can't be the audit home. Owner-gated by
-        ``Stores.identity`` (cross-user reads 404, not 403); archiving or deleting
-        the active-session campaign is refused (409) before anything is recorded."""
-        self._load_owned_campaign(campaign_id)
-        if kind in ("archive-campaign", "delete-campaign"):
-            _, active_campaign, _ = read_active_pointer(
-                self._store.tenant_id, projects_root=self._store.projects_root
-            )
-            if active_campaign == campaign_id:
-                raise ConflictError(
-                    f"refusing to {kind} {campaign_id}: active campaign — switch first"
-                )
+        ``Stores.identity`` (cross-user reads 404, not 403).
 
-        ledger = CycleEventLog.open_workspace(WorkspaceDir(self._store.base_dir))
+        There is no active-campaign pre-check here, and its absence is the fix. One
+        stood at this line refusing any campaign the pointer named — telling the
+        operator to "switch first", a gesture that exists in neither the command
+        vocabulary nor the webapp. The store's own guard was corrected to refuse only a
+        LIVE producer and to RELEASE the pointer otherwise, but this copy sat in front
+        of it, so both webapp buttons and both CLI verbs stayed dead while the
+        store-level test passed."""
+        self._load_owned_campaign(campaign_id)
+        ledger = CycleEventLog.open_workspace(self._store.base_dir)
         return await self._record_and_apply(
             ledger=ledger,
             kind=kind,
@@ -283,7 +285,7 @@ class CommandDispatcher:
         edit; it lands on the WORKSPACE ledger (the campaign-scoped audit home). Owner-gated
         via ``CAP_FOR_KIND`` at ``_record_and_apply`` (``CAMPAIGN_LIFECYCLE_CAP``)."""
         self._load_owned_campaign(campaign_id)
-        ledger = CycleEventLog.open_workspace(WorkspaceDir(self._store.base_dir))
+        ledger = CycleEventLog.open_workspace(self._store.base_dir)
         return await self._record_and_apply(
             ledger=ledger,
             kind=kind,
@@ -362,9 +364,7 @@ class CommandDispatcher:
     ) -> CommandOutcome:
         """delete-cycle writes its audit trail on the campaign's root cycle
         ledger — the target cycle's own ledger goes away as part of the apply."""
-        _, active_campaign, active_cycle = read_active_pointer(
-            self._store.tenant_id, projects_root=self._store.projects_root
-        )
+        _, active_campaign, active_cycle = read_active_pointer(self._store.base_dir)
         if active_campaign == campaign_id and active_cycle == cycle_id:
             raise ConflictError(f"refusing to delete {cycle_id}: active cycle — switch first")
 
@@ -398,7 +398,7 @@ class CommandDispatcher:
         that have no cycle target. ``CommandRecord`` lands on the workspace
         ledger (``projects/{tenant}/.workspace/events.jsonl``) per the §0
         Persistence sibling. No ``Expected-Version``."""
-        ledger = CycleEventLog.open_workspace(WorkspaceDir(self._store.base_dir))
+        ledger = CycleEventLog.open_workspace(self._store.base_dir)
         applier: Applier
         if kind == "register-backend":
             applier = lambda: self._apply_register_backend(payload)  # noqa: E731
@@ -702,7 +702,7 @@ class CommandDispatcher:
                 keep_results=keep_results,
                 changed_at=changed_at,
                 reason=reason,
-                inner_sandbox_root=self._store.projects_root.parent / ".inner",
+                inner_sandbox_root=inner_sandboxes_dir(self._store.shared_root),
             )
 
     def _apply_register_backend(self, payload: dict[str, Any]) -> None:
@@ -860,9 +860,7 @@ class CommandDispatcher:
         leaves-first via two passes. Reasons for skipped entries surface via
         the audit ack detail string."""
         root_id = root_cycle_id(cycle_id)
-        _, active_cmp, active_cid = read_active_pointer(
-            self._store.tenant_id, projects_root=self._store.projects_root
-        )
+        _, active_cmp, active_cid = read_active_pointer(self._store.base_dir)
         deleted_ids: list[str] = []
         for _pass in range(2):
             progress = False

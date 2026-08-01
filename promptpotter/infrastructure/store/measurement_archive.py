@@ -134,8 +134,7 @@ class MeasurementArchive:
     `backend_id`, and repointing a dataset at a different connector (wire TermNorm
     → an in-process one, say) does NOT invalidate rows measured under the old
     one — it silently serves them. Change the connector and you must change the
-    config the hash sees, or re-mint the campaign. (`dataset_snapshot_path` is the
-    one exception: its FILENAME carries the backend, so it takes one.)
+    config the hash sees, or re-mint the campaign.
     """
 
     def __init__(self, base_dir: Path):
@@ -204,11 +203,6 @@ class MeasurementArchive:
             self._rows, self._offset = fold_jsonl_from(path, "content_hash", 0)
         self._stat = sig
         return self._rows
-
-    def dataset_snapshot_path(self, backend_id: str, dataset_name: str) -> Path:
-        """Path of the per-(backend, dataset) hard-samples snapshot — the store owns
-        its own layout, so the writer never reconstructs `measurements/…` inline."""
-        return self._store_dir() / f"hard_samples_{backend_id}_{dataset_name}.json"
 
     # -- complete runs --------------------------------------------------------
 

@@ -609,7 +609,6 @@ async def _run_single_cycle(
         cleanup_stub_fork_if_empty(
             campaign_store=session.store.campaigns,
             campaign_id=session.campaign_id,
-            tenant_id=session.store.tenant_id,
             session_id=session.session_id or "",
             cycle_id=session.state.cycle_id,
             parent_cycle_id=pre_loop_cycle_id,
@@ -652,7 +651,6 @@ def _mint_and_rebase_fork(
     new_cycle_id = _mint_fork(
         campaign_store=session.store.campaigns,
         campaign_id=session.campaign_id,
-        tenant_id=session.store.tenant_id,
         session_id=session.session_id or "",
         parent_cycle_id=parent_cycle_id,
         fork_from_round=rebase_req.fork_from_round,
@@ -708,7 +706,7 @@ async def run_optimization(
     started_at = utcnow_iso()
     # Publish this cycle as the spawn context for any L4 recursion: a child that
     # uses the ``promptpotter`` connector reads it to root its sandbox at
-    # ``<workspace>/.inner/<this cycle_id>/`` + find the inner benchmark. Unconditional (the
+    # ``<workspace>/.inner/<key>/`` + find the inner benchmark. Unconditional (the
     # runner can't know a child will recurse) + re-entrant (each level publishes
     # its own); a no-op until the cycle_id is set.
     publish_inner_spawn_context(session)

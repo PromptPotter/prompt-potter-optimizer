@@ -20,9 +20,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.intelligence.exploration import build_observations
-from promptpotter.application.intelligence.hard_sample_archive import (
-    build_archive_hard_samples_artifact,
-)
 from promptpotter.application.intelligence.hard_sample_sorter import (
     build_hard_samples_artifact,
     build_hard_samples_artifact_from_observations,
@@ -511,14 +508,18 @@ def _filter_artifact_to_live_candidates(
 def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict[str, Any] | None:
     """Build + persist the hard-sample heatmap artifacts at each data scope.
 
-    Three files, named by data scope:
+    Two files, named by data scope:
 
     - ``cycles/{cycle_id}/hard_samples.json`` — **cycle** scope: fit over
       ``cycle.rounds`` only.
     - ``campaigns/{campaign_id}/hard_samples.json`` — **campaign** scope:
       the cycle's rounds folded with the campaign's archive observations.
-    - ``measurements/hard_samples_{backend}_{dataset}.json`` —
-      **dataset** scope: the archive snapshot for this backend + dataset.
+
+    There is no dataset-scope file. Dataset scope is CROSS-campaign, so no single
+    campaign owns it; the one consumer (``GET /datasets/{name}/heatmap``) folds it
+    from the archive per request, which is also the only way it can be correct while
+    a run is in flight. A third write here used to mint
+    ``measurements/hard_samples_{backend}_{dataset}.json`` that nothing ever read.
 
     Returns the artifact selected for inline log.md rendering: the
     campaign-scope one when ``optimization.seed_heatmap_from_archive`` is on,
@@ -560,19 +561,6 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict[str, An
         write_json(CycleLayout(cycle_dir).hard_samples, cycle_artifact)
     with graceful("campaign hard_samples.json write failed"):
         write_json(campaign_dir / "hard_samples.json", campaign_artifact)
-
-    # Dataset-scope snapshot is per-(backend, dataset) — cross-dataset
-    # pooling would corrupt Rasch + PoBB queue mechanism (sample_id collides).
-    dataset_tag = session.dataset_name or "unknown"
-    tenant_path = session.store.archive.dataset_snapshot_path(session.backend_id, dataset_tag)
-    with graceful("dataset hard_samples snapshot write failed"):
-        archive_artifact = build_archive_hard_samples_artifact(
-            session.store,
-            dataset_name=session.dataset_name,
-            top_k_candidates=None,
-            top_k_samples=None,
-        )
-        write_json(tenant_path, archive_artifact)
 
     return campaign_artifact if opt_cfg.seed_heatmap_from_archive else cycle_artifact
 

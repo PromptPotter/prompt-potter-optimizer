@@ -80,7 +80,7 @@ Role split: the operator is the developer/user (UX); the agent owns everything e
    `dangling_trigger`), whether the task_context delta is evidence-anchored, plan text sane and
    within its render cap.
 5. **Spot-check ≥1 inner campaign per outer sample batch** — the same four reads one level down
-   in `.inner/<outer_cycle>/…/campaigns/justlogic-d234__*/`.
+   in `.inner/<key>/…/campaigns/justlogic-d234__*/`.
 
 Red flags that mean STOP-AND-DIAGNOSE, not keep-watching: `raw_chars: 0` / empty candidate list;
 an outer sample returning in ~0.0s (stale-cache reuse — identity bug); off-enum grounding fields;
@@ -139,13 +139,13 @@ Standing invariants (verified — don't re-chase):
   per-round verdict (`domain/l4/verdict.py::compute_outer_verdict`) pairs the round's
   variant against the **cached round-0 origin**.
 - **Candidate-arm inner round-0 is NOT re-measured** — the tenant-global `measurements/`
-  store under the shared `.inner/<cycle>/` sandbox + content-addressed reuse replays the
+  store under the cycle's `.inner/<key>/` sandbox + content-addressed reuse replays the
   origin-arm's rows into candidate arms by construction; a "share the origin across arms"
   fix is unnecessary.
 
 ## Live-run learnings — bake these in, don't re-discover
 
-- **Inner sandbox is a FLAT registry, not physical nesting.** Inner campaigns live at `<workspace>/.inner/<spawn_cycle_id>/` (sibling of `projects/`), NOT nested under the deep outer cycle dir — physical nesting blows Windows' 260-char `MAX_PATH` at depth 1; a flat registry named-by-but-not-under the spawning cycle stays shallow at every depth, so the re-entrancy invariant holds. (`runner/inner/cycle.py::InnerSpawnContext`.)
+- **Inner sandbox is a FLAT registry, not physical nesting.** Inner campaigns live at `<workspace>/.inner/<key>/` (sibling of `projects/`), where the key identifies the owning `(tenant, campaign, cycle)` — NOT nested under the deep outer cycle dir — physical nesting blows Windows' 260-char `MAX_PATH` at depth 1; a flat registry named-by-but-not-under the spawning cycle stays shallow at every depth, so the re-entrancy invariant holds. (`runner/inner/cycle.py::InnerSpawnContext`.)
 - **`in_process` connectors must NOT fetch a remote pipeline schema.** `init_services` skips the backend `GET /pipeline` for `in_process` execution and uses the local `pipeline.yaml` alone — otherwise it merges an unrelated backend's nodes under the dataset overlay.
 - **L4 datasets carry their "samples" on disk, not as a CSV.** The outer "samples" ARE the inner tasks; `Connector.experiment_file` (`"inner_tasks.yaml"`) loads them through `extract_experiment` at bootstrap.
 - **An inner failure must degrade, not propagate.** `run_inner_cycle` catches any inner exception and returns a zero-improvement proxy, so a bad outer candidate scores poorly instead of killing the outer cycle. Keep the fallback — but a *clean* origin-gate halt should return real proxies, not the exception sentinel; verify on the justlogic run.
@@ -185,7 +185,7 @@ no-server connector needs a dataset that actually declares it, not a spec claim.
 `run_inner_cycle` (`application/runner/inner/cycle.py`) mints + runs each inner campaign
 via `run_optimization` in its **own `asyncio.Task`** (fresh per-task ContextVar copies:
 `_CYCLE_LEDGER` / `_CURRENT_ROUND` / `_ABORT_CHECK`) under **sandboxed stores** at the flat
-`<workspace>/.inner/<spawn_cycle_id>/` registry. The re-entrancy invariant that makes L5+
+`<workspace>/.inner/<key>/` registry. The re-entrancy invariant that makes L5+
 come free: the sandbox is named by *this* cycle (never a global path or a baked-in
 outer-vs-inner split) and the fresh-task spawn happens at *every* level — never assume
 depth 1. The real recursion ceiling is **economic and statistical, not architectural**

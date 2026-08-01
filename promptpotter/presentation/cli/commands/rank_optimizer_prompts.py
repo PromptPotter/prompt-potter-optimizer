@@ -17,6 +17,7 @@ import argparse
 import logging
 
 from promptpotter.application.optimizer_prompt_ranking import rank_optimizer_prompts
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
@@ -32,7 +33,9 @@ async def cmd_rank_optimizer_prompts(args: argparse.Namespace) -> CommandResult:
     from promptpotter.config.logging import setup_logging
 
     setup_logging(style="full" if get_verbose() else "cli")
-    registry = rank_optimizer_prompts(build_stores(identity_from_args(args)))
+    registry = rank_optimizer_prompts(
+        build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
+    )
 
     if not registry.candidates:
         return CommandResult(

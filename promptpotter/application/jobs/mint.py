@@ -24,7 +24,6 @@ from promptpotter.application.config import configure_and_apply_pipeline
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.runner.identity import build_origin_cycle_id
 from promptpotter.domain.run_records import CycleSeed
-from promptpotter.infrastructure.store.io import rmtree_robust
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -169,24 +168,13 @@ def prepare_fresh_cycle(
     plan = resolve_cycle_plan(
         session, campaign_config, dataset, origin_override=origin_override, log=log
     )
-    # A fresh mint of a content-addressed cycle_id means "restart THIS exact origin".
-    # Its off-registry inner proxy sandbox (``<workspace>/.inner/<cycle_id>``, written
-    # only by an L4 recursion) is therefore a PRIOR run's leftover — a stale,
-    # tenant-pooled measurement archive that would warm this run's inner δ-ruler from
-    # foreign campaigns and un-attribute its proxy signal. Sweep it so every fresh
-    # outer run starts isolated. Resume/fork reach the sandbox by other paths (they
-    # never call this prologue), so their live trees are untouched; capacity-1 minting
-    # keeps a concurrent same-origin run from racing this. For a non-L4 mint (or an
-    # inner-campaign mint, whose sandbox root sits one level deeper) the path is
-    # absent, so this is a no-op.
-    # ``rmtree_robust``, never a bare ``shutil.rmtree``: these trees nest langfuse
-    # observation dirs past Windows MAX_PATH (measured at 668 chars), where a plain
-    # rmtree fails — and with ``ignore_errors=True``, which this call used to carry, it
-    # failed SILENTLY and left the stale sandbox exactly where the comment above promises
-    # it is gone. A sweep that cannot report its own failure is not a sweep.
-    inner_sandbox = session.store.projects_root.parent / ".inner" / plan.cycle_id
-    if inner_sandbox.exists():
-        rmtree_robust(inner_sandbox)
+    # No inner-sandbox sweep here, and that is the fix rather than an omission. A sweep stood
+    # at this line because the sandbox key was the content-addressed ``cycle_id`` alone, so a
+    # fresh mint on an unchanged origin landed on a PRIOR campaign's sandbox and had to clear
+    # it first. The key now carries the campaign too (``store/layout.py::inner_sandbox_key``)
+    # and a fresh mint always has a fresh ``campaign_id``, so the sandbox it will use cannot
+    # exist yet — there is nothing to sweep, and the rmtree that used to run here could only
+    # ever destroy a DIFFERENT campaign's inner history. It did: 39 banked inner campaigns.
     _warn_on_duplicate_origin(session, plan.cycle_id, log=log or _noop_log)
     session_id, campaign_id, cycle_id = auto_mint_session(
         session,

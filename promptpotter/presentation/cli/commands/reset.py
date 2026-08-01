@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
-from promptpotter.domain.identity import TenantId
+from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.infrastructure.store.session_pointer import (
     active_pointer_exists,
     clear_active_pointer,
@@ -120,13 +120,13 @@ def _remove(path: Path) -> None:
         path.unlink()
 
 
-def _tenants_with_pointers(tenant_dirs: list[Path]) -> list[str]:
-    """Return the slugs of tenants in scope that currently hold an active-session pointer."""
-    return [
-        td.name
-        for td in tenant_dirs
-        if active_pointer_exists(TenantId(td.name), projects_root=td.parent)
-    ]
+def _tenants_with_pointers(tenant_dirs: list[Path]) -> list[WorkspaceDir]:
+    """The in-scope tenant workspaces that currently hold an active-session pointer.
+
+    Returns the ROOTS, not the slugs: the caller has already resolved each one, and
+    re-deriving ``projects_root / slug`` on the way back is how the two halves of that
+    relation drift apart."""
+    return [ws for td in tenant_dirs if active_pointer_exists(ws := WorkspaceDir(td))]
 
 
 async def cmd_reset(args: argparse.Namespace) -> CommandResult:
@@ -149,8 +149,8 @@ async def cmd_reset(args: argparse.Namespace) -> CommandResult:
     summary = _render_summary(classified)
     if tenants_with_pointers:
         summary += "\n\npointers:"
-        for tid in tenants_with_pointers:
-            summary += f"\n    - projects/{tid}/.workspace/active_session.json"
+        for ws in tenants_with_pointers:
+            summary += f"\n    - projects/{ws.name}/.workspace/active_session.json"
 
     if getattr(args, "dry_run", False):
         if not has_anything_to_drop:
@@ -159,8 +159,8 @@ async def cmd_reset(args: argparse.Namespace) -> CommandResult:
                 human="reset --dry-run:\n" + summary + "\n\n(nothing to drop)",
             )
         would_drop = [str(p) for _td, drop, _p, _s in classified for p in drop]
-        for tid in tenants_with_pointers:
-            would_drop.append(f"projects/{tid}/.workspace/active_session.json")
+        for ws in tenants_with_pointers:
+            would_drop.append(f"projects/{ws.name}/.workspace/active_session.json")
         return CommandResult(
             data={
                 "tenants": [str(td) for td in tenant_dirs],
@@ -193,11 +193,10 @@ async def cmd_reset(args: argparse.Namespace) -> CommandResult:
             _remove(p)
             dropped.append(str(p))
             logger.info("reset: removed %s", p)
-    for tid in tenants_with_pointers:
-        clear_active_pointer(TenantId(tid), projects_root=projects_root)
-        rel = f"projects/{tid}/.workspace/active_session.json"
-        dropped.append(rel)
-        logger.info("reset: cleared active-session pointer for %s", tid)
+    for ws in tenants_with_pointers:
+        clear_active_pointer(ws)
+        dropped.append(f"projects/{ws.name}/.workspace/active_session.json")
+        logger.info("reset: cleared active-session pointer for %s", ws.name)
 
     return CommandResult(
         data={"tenants": [str(td) for td in tenant_dirs], "dropped": dropped},

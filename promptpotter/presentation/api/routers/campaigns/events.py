@@ -77,7 +77,7 @@ async def stream_cycle_events(
     3. Heartbeat comment line every 15 s.
 
     The path ids address the top-level (root) cycle; the optional ``descend``
-    query walks into the ``.inner/<previous cycle id>`` sandbox one
+    query walks into the previous hop's ``.inner/<key>`` sandbox one
     ``campaign::cycle`` hop at a time, so ONE stream serves a top-level cycle or
     an L4 inner descendant (:func:`resolve_cycle_path`) — the chat feed follows
     the same viewed leaf the dashboard does. Absent/empty ``descend`` is a plain

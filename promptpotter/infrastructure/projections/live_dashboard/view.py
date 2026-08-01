@@ -22,7 +22,7 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.cycle_paths import CycleDir
+from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
 from promptpotter.domain.phases import CampaignPhase, DashboardState, PhaseEvent, RunPhase
 from promptpotter.domain.results import HeadlineMetric, candidate_label
 from promptpotter.domain.run_records import (
@@ -195,7 +195,7 @@ class LiveDashboardView(DerivedView):
         if not (tenant_root and session_id and campaign_id and cycle_id):
             return None
 
-        root = Path(tenant_root)
+        root = WorkspaceDir(Path(tenant_root))
         session_dir = session_dir_for(root, session_id)
         cycle_dir = CycleDir(cycle_dir_for(root, campaign_id, cycle_id))
         seed_dir = (
