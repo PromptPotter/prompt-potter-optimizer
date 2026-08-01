@@ -80,7 +80,7 @@ This release is a five-week arc, and the order the work landed *is* the story �
 ### BREAKING Changes
 
 - **Start clean — pre-0.8.8 measurements are not comparable.** Scoring decisions now read Rasch ability θ (not subset accuracy) and the on-disk cycle layout changed (session tier removed, `CycleLayout` owns layout, measurements relocated under the MECE taxonomy). By policy there are no compatibility shims: re-measure origins on a fresh workspace.
-- **`CampaignConfig` field renames remain data migrations.** Both on-disk surfaces now persist the **delta from defaults** (a knob nobody set is absent, so renaming it is free); a knob the operator *did* set is still written down. `deploy-linux/update.sh` runs `restamp_campaign_configs.py --apply` on every deploy.
+- **`CampaignConfig` field renames remain data migrations.** Both on-disk surfaces now persist the **delta from defaults** (a knob nobody set is absent, so renaming it is free); a knob the operator *did* set is still written down. `deploy-linux/update.sh` runs `promptpotter restamp --apply` on every deploy.
 - **`CycleResult.n_rounds → n_l1_rounds`** (origin-exclusive count).
 - **Elimination config** — PoBB `pobb_epsilon` + dominance/equivalence are replaced by one `margin_elimination` paired-gate knob.
 - **Paired backend.** 0.8.8 pairs with the TermNorm backend on the web-search `strategy` axis + the structured-output seam (`llm_only` returns `content=""` with a `content_empty:` advisory rather than substituting the reasoning trace). <!-- TODO(release): stamp the exact paired TermNorm version once its minor release is cut. -->

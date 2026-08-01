@@ -2479,8 +2479,8 @@ components:
               disk stopped satisfying the code that reads it — typically a knob
               dropped from `CampaignConfig` (`extra="forbid"`) while a file
               written earlier still names it. It is a 500 because the caller did
-              nothing wrong and cannot fix it; the remedy is
-              `scripts/restamp_campaign_configs.py`, which `deploy-linux/update.sh`
+              nothing wrong and cannot fix it; the remedy is the
+              `promptpotter restamp --apply` verb, which `deploy-linux/update.sh`
               runs on every deploy.
             (`internal_error` carries no `details`: its trace handle is the
             top-level `error_id`, which every error now has.)

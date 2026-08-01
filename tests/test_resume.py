@@ -419,7 +419,7 @@ def test_a_dataset_template_frozen_before_todays_config_still_loads() -> None:
     re-stamp, so the loss is theirs and irreversible.
 
     Pinned, never regenerated: a rename of any knob this template names must fail HERE, in CI,
-    not on a user's disk. Remedy on failure is `scripts/restamp_campaign_configs.py` (which
+    not on a user's disk. Remedy on failure is the `restamp` verb (which
     `deploy-linux/update.sh` now runs on every deploy) — never `extra="allow"`, never a shim.
     """
     from pathlib import Path

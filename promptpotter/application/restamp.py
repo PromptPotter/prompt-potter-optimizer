@@ -23,18 +23,18 @@ a migration shim wearing a script.
 
 Skips are counted and printed; a scan that swallows ``OSError`` reports a vacuous zero.
 
-Usage::
-
-    python scripts/restamp_campaign_configs.py            # dry run — reports, writes nothing
-    python scripts/restamp_campaign_configs.py --apply     # rewrite
+Reached by the ``restamp`` CLI verb. It lived under ``scripts/`` until it did not add up:
+``scripts/`` ships in no wheel (``pyproject.toml`` includes ``promptpotter*`` only), yet
+five surfaces named the file as THE remedy — including an HTTP 500 body an installed
+tenant reads. Its roots were bare CWD-relative strings for the same reason, so even a
+copied-out script addressed the wrong workspace from anywhere but the repo root. As a verb
+it resolves both roots through ``config/paths.py`` and exists wherever it is named.
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import pathlib
-import sys
 import types
 from collections import Counter
 from typing import Any, Union, get_args, get_origin
@@ -47,7 +47,10 @@ from promptpotter.application.config import (
     freeze_campaign_config,
     load_campaign_config,
 )
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, benchmark_datasets_root
 from promptpotter.infrastructure.store.io import write_yaml
+
+__all__ = ["restamp_campaign_configs"]
 
 
 def _nested_model(ann: Any) -> type[BaseModel] | None:
@@ -160,37 +163,40 @@ def _process(
             path.write_text(json.dumps(doc, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--apply", action="store_true", help="Rewrite (default: report only).")
-    ap.add_argument("--root", default=".promptpotter/projects", help="Workspace tenant root.")
-    ap.add_argument("--datasets", default="datasets", help="Repo benchmark datasets dir.")
-    args = ap.parse_args()
+def restamp_campaign_configs(*, apply: bool) -> dict[str, int]:
+    """Scan both on-disk config surfaces; report, and rewrite when *apply*.
 
-    root = pathlib.Path(args.root)
+    Roots come from ``config/paths.py`` — the tenant workspace and the install's benchmark
+    definitions — so the verb addresses the same trees the engine reads, from any CWD and
+    under a wheel. Returns the tallies; the printed detail is the operator's report.
+    """
+    root = DEFAULT_PROJECTS_ROOT
     if not root.is_dir():
-        print(f"No workspace at {root}", file=sys.stderr)
-        return 1
+        # Nothing to re-stamp is not a failure and not an unreadable file — a fresh
+        # install has no workspace yet, and counting that as a skip made the verb report
+        # damage it had not found.
+        print(f"No workspace at {root} — nothing to re-stamp.")
+        return {"rewritten": 0, "failed": 0, "skipped": 0}
 
     snapshots = _Tally()
     for path in sorted(root.glob("*/campaigns/*/campaign.json")) + sorted(
         root.glob("*/archive/*/campaign.json")
     ):
-        _process(path, ("config",), delta=True, apply=args.apply, tally=snapshots)
+        _process(path, ("config",), delta=True, apply=apply, tally=snapshots)
 
     templates = _Tally()
     for path in sorted(root.glob("*/datasets/*/campaign.yaml")) + sorted(
-        pathlib.Path(args.datasets).glob("*/campaign.yaml")
+        benchmark_datasets_root().glob("*/campaign.yaml")
     ):
-        _process(path, ("campaign_config",), delta=False, apply=args.apply, tally=templates)
+        _process(path, ("campaign_config",), delta=False, apply=apply, tally=templates)
 
     snapshots.report(
         "Minted snapshots (campaigns/*/campaign.json::config) — rewritten as a delta",
-        "re-stamped" if args.apply else "would re-stamp",
+        "re-stamped" if apply else "would re-stamp",
     )
     templates.report(
         "Dataset templates (datasets/*/campaign.yaml::campaign_config) — pruned only",
-        "pruned" if args.apply else "would prune",
+        "pruned" if apply else "would prune",
     )
 
     gone = snapshots.gone + templates.gone
@@ -199,12 +205,11 @@ def main() -> int:
         for entry, n in gone.most_common():
             print(f"  {n:4d}x  {entry}")
 
-    failed = snapshots.failed + templates.failed
-    skipped = snapshots.skipped + templates.skipped
-    if not args.apply and (snapshots.rewritten or templates.rewritten):
+    rewritten = snapshots.rewritten + templates.rewritten
+    if not apply and rewritten:
         print("\nDry run. Re-run with --apply to rewrite.")
-    return 1 if (failed or skipped) else 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    return {
+        "rewritten": rewritten,
+        "failed": snapshots.failed + templates.failed,
+        "skipped": snapshots.skipped + templates.skipped,
+    }

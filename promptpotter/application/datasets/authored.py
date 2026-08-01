@@ -122,7 +122,7 @@ def load_dataset_campaign_config(path: Path) -> CampaignConfig:
     ``CampaignConfig`` is ``extra="forbid"``: a knob dropped from the model makes every
     file still naming it unloadable. That is a property of *our* deploy, not of the
     caller's request, so it surfaces as :class:`StoredConfigInvalidError` carrying the
-    path and the offending key — and the remedy (``restamp_campaign_configs.py``) runs
+    path and the offending key — and the remedy (``promptpotter restamp --apply``) runs
     on every deploy. Callers wanting the raw dict to merge still use
     :func:`read_campaign_config_file`.
     """

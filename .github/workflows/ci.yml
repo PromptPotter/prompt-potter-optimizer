@@ -68,6 +68,46 @@ jobs:
       - name: Tests
         run: uv run pytest tests/ -q --tb=short --cov=promptpotter --cov-report=term-missing
 
+  # The wheel is a shape we ship and never run. In a checkout every path function takes
+  # its checkout branch, so `assets/benchmarks/` and `assets/webapp/` — the trees the
+  # wheel actually serves — are read by no dev run and no test, and `pyproject.toml`'s
+  # package-data list (delete it in a clean room and the wheel drops to ONE non-.py file)
+  # is load-bearing with nothing behind it. This job is the only place any of that is
+  # exercised.
+  wheel:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra stats --extra dev --frozen
+
+      # `--no-webapp` deliberately: the dashboard export is the `webapp` job's subject,
+      # and building it again here would double this job's runtime to re-check it.
+      # build_release.py already verifies the ARTIFACT (required trees present, no
+      # credentials, no stray caches) and deletes a wheel that fails.
+      - name: Build the wheel
+        run: uv run python scripts/build_release.py --no-webapp
+
+      # Outside the checkout is the whole point — inside one, `source_checkout_root()`
+      # answers yes and every assertion in the smoke script is vacuous. It refuses to run
+      # from a source tree for that reason.
+      - name: Install it elsewhere and run it
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet dist/*.whl
+          mkdir -p "$RUNNER_TEMP/elsewhere" "$RUNNER_TEMP/home"
+          cd "$RUNNER_TEMP/elsewhere"
+          export PROMPTPOTTER_HOME="$RUNNER_TEMP/home"
+          "$RUNNER_TEMP/venv/bin/promptpotter" --help > /dev/null
+          "$RUNNER_TEMP/venv/bin/python" "$GITHUB_WORKSPACE/scripts/smoke_wheel.py"
+
   webapp:
     runs-on: ubuntu-latest
 

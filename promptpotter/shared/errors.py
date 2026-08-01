@@ -151,8 +151,9 @@ class StoredConfigInvalidError(PotterError):
     Not 400/404/422: the request was well-formed, the file exists, and the caller
     can't fix it. The usual cause is a knob dropped from ``CampaignConfig``
     (``extra="forbid"``) while a file written earlier still names it — so the
-    remedy is ``scripts/restamp_campaign_configs.py``, which
-    ``deploy-linux/update.sh`` runs on every deploy.
+    remedy is ``promptpotter restamp --apply``, which ``deploy-linux/update.sh``
+    runs on every deploy. A VERB rather than a script because this message is read by
+    an installed tenant, and ``scripts/`` ships in no wheel.
 
     Without this class such a failure reaches the catch-all as a bare
     ``internal_error``, and the key that broke it lives only in a traceback in

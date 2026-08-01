@@ -585,7 +585,7 @@ def freeze_campaign_config(config: CampaignConfig) -> dict[str, Any]:
     It is not a rename-proofing device: a field the operator *did* set still lands in the
     snapshot and still breaks under ``extra="forbid"`` if it is later renamed. That case is
     caught in CI by the frozen fixture in ``tests/test_resume.py`` and remedied by re-stamping
-    (``scripts/restamp_campaign_configs.py``) — never by ``extra="allow"``, an alias, or a shim.
+    (``promptpotter restamp --apply``) — never by ``extra="allow"``, an alias, or a shim.
 
     The two ``improvement_threshold`` / ``degradation_threshold`` leaves are declared without a
     default, so they are always emitted and the delta always re-validates.

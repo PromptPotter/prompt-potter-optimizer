@@ -143,6 +143,25 @@ def optimizer_pipeline_path() -> Path:
     return override if override.is_file() else optimizer_assets_root() / "pipeline.yaml"
 
 
+def env_file_path() -> Path:
+    """The ONE ``.env`` this install reads — and the one the first-run prompt writes.
+
+    A checkout keeps ``<repo>/.env``: that is where every existing key already sits, and
+    relocating it would silently un-configure a working box. Everything else lands beside
+    the user data, so the file is a property of the INSTALL rather than of wherever the
+    operator happened to be standing.
+
+    That last part is the fix. Two call sites resolved ``.env`` off ``Path.cwd()``
+    independently — the settings model and the first-run key prompt — which is invisible
+    in development (CWD is always the repo root) and scatters one ``.env`` per working
+    directory under a wheel. The key pasted last week simply is not found from anywhere
+    else, and nothing says so: the run reaches the provider and fails with the provider's
+    own auth error.
+    """
+    checkout = source_checkout_root()
+    return (checkout if checkout is not None else user_data_root()) / ".env"
+
+
 def benchmark_datasets_root() -> Path:
     """The benchmark DEFINITIONS: the checkout's ``datasets/``, else package assets.
 
@@ -184,6 +203,7 @@ __all__ = [
     "DEFAULT_PROJECTS_ROOT",
     "PACKAGE_ROOT",
     "benchmark_datasets_root",
+    "env_file_path",
     "optimizer_assets_root",
     "optimizer_pipeline_path",
     "source_checkout_root",

@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import os
 import sys
-from pathlib import Path
+
+from promptpotter.config.paths import env_file_path
 
 _PROVIDER_KEYS = ("GROQ_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY")
 
@@ -26,7 +27,7 @@ def ensure_api_key() -> None:
     if any(os.environ.get(k) for k in _PROVIDER_KEYS):
         return
 
-    env_path = Path.cwd() / ".env"
+    env_path = env_file_path()
     if env_path.exists():
         return
 

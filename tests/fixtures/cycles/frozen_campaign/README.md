@@ -29,7 +29,7 @@ backward compatibility" licenses breaking *code*, never a user's data.
 
 **When this test fails:** you renamed or removed a `CampaignConfig` / `Campaign` field. Do not
 reach for `extra="allow"`, a field alias, or a migration shim — those are the forbidden shapes.
-Ship the rename together with a re-stamp: `python scripts/restamp_campaign_configs.py --apply`,
+Ship the rename together with a re-stamp: `python -m promptpotter restamp --apply`,
 and update this fixture in the same commit.
 
 Identifiers (`campaign_id`, `root_cycle_id`) are deterministic placeholders, not anonymized real

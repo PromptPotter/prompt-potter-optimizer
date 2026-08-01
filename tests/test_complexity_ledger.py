@@ -21,7 +21,7 @@ name does not say it, and which members are a deliberate FLOOR rather than debt.
 from promptpotter.diagnostics import compute_ledger
 
 LEDGER_BASELINE = {
-    "modules": 296,
+    "modules": 298,
     "init_files": 47,
     # A FLOOR, not debt. The 5 survivors are not shims and emptying them breaks the app:
     #   * ``connectors`` — IS the connector registry (import-time guards).
@@ -45,7 +45,7 @@ LEDGER_BASELINE = {
     # fix — it rejects ``dict[str, Any]`` (honest, for raw JSON) exactly as hard.
     # Marches to a FLOOR, not to zero: ~30 are honest (raw JSON pre-parse, provider SDK
     # payloads behind ``follow_imports="skip"``), and ``**kwargs: Any`` is excluded outright.
-    "any_params": 64,
+    "any_params": 65,
     # A Pydantic model that does NOT end up ``extra="forbid"``, so an unknown key is dropped
     # instead of raised. Also a FLOOR — the 4 each name their reason on the model itself:
     #   * ``RoundResult`` / ``ScoredCandidate`` — ``@computed_field`` round-trip. Pydantic

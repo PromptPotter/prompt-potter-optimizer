@@ -54,7 +54,7 @@ fi
 # remembering: report-only failures (unreadable file, no workspace yet) must not
 # abort an otherwise-good deploy, so its exit code is advisory.
 say "data: re-stamp configs onto the synced schema"
-if ! ( cd "$INSTALL_DIR" && .venv/bin/python scripts/restamp_campaign_configs.py --apply ); then
+if ! ( cd "$INSTALL_DIR" && .venv/bin/python -m promptpotter restamp --apply ); then
   bad "re-stamp reported skips/failures (above) — deploy continues; check them"
 fi
 [[ -d "$INSTALL_DIR/$WEBAPP_DIR" ]] && ( cd "$INSTALL_DIR/$WEBAPP_DIR" && npm install --silent && npm run build:deploy )

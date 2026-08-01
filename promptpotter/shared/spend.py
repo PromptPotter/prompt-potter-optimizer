@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from promptpotter.config.paths import user_data_root
 from promptpotter.shared.clock import utcnow_iso
 
 logger = logging.getLogger(__name__)
@@ -37,7 +38,10 @@ UPSTREAM_URL = (
     "https://raw.githubusercontent.com/BerriAI/litellm/main/"
     "litellm/model_prices_and_context_window_backup.json"
 )
-CACHE_PATH = Path.home() / ".promptpotter" / "rates.json"
+# Beside the rest of the user data, through the one resolver — it hand-rolled
+# ``Path.home()/".promptpotter"``, which ignores ``$PROMPTPOTTER_HOME`` and, on Windows,
+# misses ``%LOCALAPPDATA%`` where every other user file lands.
+CACHE_PATH = user_data_root() / "rates.json"
 BUNDLED_PATH = Path(__file__).parent / "data" / "rates.json"
 _KEEP_FIELDS = ("input_cost_per_token", "output_cost_per_token", "litellm_provider", "mode")
 _FETCH_TIMEOUT_S = 30.0

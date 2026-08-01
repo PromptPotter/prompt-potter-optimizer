@@ -185,7 +185,7 @@ def classify_config_diff(
             logger.warning(
                 "classify_config_diff: unclassified config path %r — treating as "
                 "DATA_AFFECTING. This campaign's snapshot names a knob the engine no "
-                "longer has; re-stamp it (scripts/restamp_campaign_configs.py).",
+                "longer has; re-stamp it (`promptpotter restamp --apply`).",
                 ".".join(path),
             )
             has_data = True

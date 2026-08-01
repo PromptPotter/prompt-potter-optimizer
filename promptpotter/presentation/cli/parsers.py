@@ -391,6 +391,17 @@ def build_parser() -> argparse.ArgumentParser:
         "after a crash mid-append or to reclaim orphaned bytes. Pure disk work, zero spend.",
     )
 
+    p_restamp = sub.add_parser(
+        "restamp",
+        help="Prune knobs the engine no longer has from every on-disk CampaignConfig — "
+        "the minted snapshots and the dataset templates. The sanctioned remedy after a "
+        "field rename; every dropped key is reported with the value its file held. "
+        "Dry-run by default. Pure disk work, zero spend.",
+    )
+    p_restamp.add_argument(
+        "--apply", action="store_true", help="Rewrite the files (default: report only)."
+    )
+
     p_rank_l4 = sub.add_parser(
         "rank-optimizer-prompts",
         help="Rank every L4 meta-prompt state on disk by its paired candidate-minus-origin "

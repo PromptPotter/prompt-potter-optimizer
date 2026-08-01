@@ -12,7 +12,7 @@ from importlib.metadata import version
 
 from pydantic_settings import BaseSettings
 
-from promptpotter.config.paths import source_checkout_root
+from promptpotter.config.paths import env_file_path, source_checkout_root
 
 
 def _app_version() -> str:
@@ -230,7 +230,8 @@ class Settings(BaseSettings):
     # MLflow Python SDK.
     MLFLOW_ENABLED: bool = False
 
-    model_config = {"env_file": ".env", "case_sensitive": True, "extra": "ignore"}
+    # Resolved, never CWD-relative — see ``config/paths.py::env_file_path``.
+    model_config = {"env_file": env_file_path(), "case_sensitive": True, "extra": "ignore"}
 
 
 settings = Settings()
