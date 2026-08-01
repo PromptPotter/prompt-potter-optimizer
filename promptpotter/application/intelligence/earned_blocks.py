@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.config.settings import ANSWER_SPACE_CAP
 from promptpotter.domain.opt_search_point import candidate_delta
 from promptpotter.infrastructure.store.io import read_json_optional
-from promptpotter.infrastructure.store.layout import campaign_cycles_dir
+from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
@@ -133,7 +133,7 @@ def mine_earned_blocks(store: Stores) -> dict[str, list[EarnedBlock]]:
         if not cycles_dir.is_dir():
             continue
         for cycle_dir in sorted(cycles_dir.iterdir()):
-            rounds_dir = cycle_dir / "rounds"
+            rounds_dir = CycleLayout(cycle_dir).rounds
             if not rounds_dir.is_dir():
                 continue
             for round_file in sorted(rounds_dir.glob("round_*.json")):

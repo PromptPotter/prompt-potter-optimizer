@@ -30,7 +30,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 )
 from promptpotter.infrastructure.store.campaign_store.store import origin_accuracy_of
 from promptpotter.infrastructure.store.io import read_json_optional
-from promptpotter.infrastructure.store.layout import cycle_dir_for, sibling_kind
+from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for, sibling_kind
 from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store, resolve_cycle_path
 
 __all__ = [
@@ -259,10 +259,14 @@ class _Reads:
         return self._campaigns[key]
 
 
+def _layout(store: Stores, hop: CycleHop) -> CycleLayout:
+    """This hop's cycle paths. Three readers here wanted three different files out of
+    the same dir and each spelled its own name; ``CycleLayout`` owns all three."""
+    return CycleLayout(cycle_dir_for(store.base_dir, hop.campaign_id, hop.cycle_id))
+
+
 def _read_index(store: Stores, hop: CycleHop) -> dict[str, object]:
-    index = read_json_optional(
-        cycle_dir_for(store.base_dir, hop.campaign_id, hop.cycle_id) / "index.json"
-    )
+    index = read_json_optional(_layout(store, hop).manifest)
     return index if isinstance(index, dict) else {}
 
 
@@ -363,8 +367,8 @@ def _course_scalars(
     store: Stores, hop: CycleHop, index: dict[str, object], reads: _Reads
 ) -> dict[str, object]:
     """The course's own facts: topology from ``index.json``, live ♥ from the dashboard."""
-    cdir = cycle_dir_for(store.base_dir, hop.campaign_id, hop.cycle_id)
-    dash = read_json_optional(cdir / "dashboard.json")
+    layout = _layout(store, hop)
+    dash = read_json_optional(layout.dashboard)
     dash = dash if isinstance(dash, dict) else {}
 
     fork, spawned = _block(index, "fork"), _block(index, "spawned_by")
@@ -387,7 +391,9 @@ def _course_scalars(
         "state": str(index.get("status") or ""),
         # The ONE run-phase derivation, the same call `/cycles` makes — never a second
         # "is it running?" computed from this module's own inputs.
-        "run_phase": str(derive_run_phase(cdir, is_terminal=bool(index.get("finished_at")))),
+        "run_phase": str(
+            derive_run_phase(layout.cycle_dir, is_terminal=bool(index.get("finished_at")))
+        ),
         "trigger": str(fork.get("trigger") or ""),
         "steered_by": _str_or_none(fork.get("issued_by")),
         "task": _str_or_none(spawned.get("task")),
@@ -613,9 +619,7 @@ def _contributions(
 def _build(store: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> LineageNode:
     leaf = path[-1]
     index = _read_index(store, leaf)
-    ledger_path = (
-        cycle_dir_for(store.base_dir, leaf.campaign_id, leaf.cycle_id) / ".runtime" / "ledger.jsonl"
-    )
+    ledger_path = _layout(store, leaf).ledger
     candidates = scan_ledger_candidates(ledger_path)
     children = _child_courses(store, path, reads)
     inner = [c for c in children if c.inner]

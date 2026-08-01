@@ -20,5 +20,5 @@ def built_stores(tmp_path: Path) -> Stores:
     return build_stores(
         default_identity(),
         projects_root=tmp_path / "projects",
-        datasets_root=tmp_path / "datasets",
+        benchmarks_root=tmp_path / "datasets",
     )

@@ -21,17 +21,24 @@ from typing import Any
 from promptpotter.infrastructure.store.io import read_json_tolerant, read_yaml_optional
 from promptpotter.infrastructure.store.layout import validate_dataset_name
 from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.shared.errors import NotFoundError
 
 
-class DatasetAccessError(Exception):
+class DatasetAccessError(NotFoundError):
     """No dataset *name* this identity can resolve — invalid slug, or absent.
 
-    The router maps it to 404. One exception because there is one reason: the
-    dataset is not there.
+    A :class:`NotFoundError`, so the central ``PotterError`` handler maps it to
+    404 with no per-route arm. Two routers used to catch it and rebuild that same
+    404 by hand. One exception because there is one reason: the dataset is not
+    there.
+
+    404 rather than 403 is the existence-leak posture, and it belongs here rather
+    than at a router: a non-admin must not be able to tell a benchmark they may not
+    read from a dataset that does not exist.
     """
 
     def __init__(self, name: str) -> None:
-        super().__init__(name)
+        super().__init__(f"Dataset '{name}' not found")
         self.name = name
 
 

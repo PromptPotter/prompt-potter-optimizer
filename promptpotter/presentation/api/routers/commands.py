@@ -17,7 +17,6 @@ from typing import Annotated, Any, cast, get_args
 from fastapi import APIRouter, Header, Path, Request
 from pydantic import Field
 
-from promptpotter.application.datasets.csv_ingest import IngestError
 from promptpotter.application.datasets.dataset_replace import (
     NothingToReplaceError,
     version_and_repoint,
@@ -502,12 +501,6 @@ async def start_checkin(
             # carries code=origin_incomplete + details.gaps; refresh the breadcrumb.
             save_checkin_draft(store, draft)
             raise
-        except IngestError as exc:
-            # A confirmed column mapping still hit a per-row data failure at
-            # materialization (e.g. a blank input/target cell). Clean 422.
-            raise PayloadInvalidError(
-                exc.message, code="ingest_failed", details={"reason": exc.reason}
-            ) from exc
         except BackendUnreachableError as exc:
             # Preflight ran before any irreversible write → the check-in is preserved;
             # the operator can fix the backend and retry without re-authoring. Augment

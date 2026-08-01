@@ -23,7 +23,7 @@ from promptpotter.infrastructure.projections.live_dashboard.round_summary import
     origin_cells_from_disk,
 )
 from promptpotter.infrastructure.store.io import read_json_tolerant
-from promptpotter.infrastructure.store.layout import campaign_cycles_dir
+from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
 from promptpotter.shared.statistics import paired_diff_posterior, t_critical
 
 if TYPE_CHECKING:
@@ -139,7 +139,7 @@ def reduce_corpus(store: Stores) -> ChampionRegistry:
         if not cycles_dir.is_dir():
             continue
         for cycle_dir in sorted(cycles_dir.iterdir()):
-            rounds_dir = cycle_dir / "rounds"
+            rounds_dir = CycleLayout(cycle_dir).rounds
             if not rounds_dir.is_dir():
                 continue
             origin_cells = origin_cells_from_disk(cycle_dir)

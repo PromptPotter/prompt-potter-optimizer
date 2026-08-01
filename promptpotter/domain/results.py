@@ -316,7 +316,7 @@ class CandidateProposal(StrictModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    osp: OptSearchPoint
+    opt_sp: OptSearchPoint
     pipeline_params_override: dict[str, dict[str, Any]] = Field(default_factory=dict)
     prompt_fields_override: dict[str, str] = Field(default_factory=dict)
 
@@ -334,7 +334,7 @@ class RoundParent(StrictModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
 
-    osp: OptSearchPoint
+    opt_sp: OptSearchPoint
     report: ScoredCandidate
     # Per-sample ``QueryMeasurement`` rows plus open-ended stale-data protocol
     # markers (``retry_of_degraded`` etc.) — kept ``dict`` so the markers survive
@@ -489,7 +489,7 @@ class RoundResult(StrictModel):
     # The cycle's working searchpoint at close. Resume rebuilds `Cycle.opt_sp` from it,
     # and review/stats/sibling-wounds read its lineage — so it is round state, not a
     # rendering detail. None only on a round that never closed.
-    opt_search_point: OptSearchPoint | None = None
+    opt_sp: OptSearchPoint | None = None
     # AxisIndex's peaked set at close. Persisted because `review.py`'s
     # `evidence_grounding_present` check needs it and AxisIndex is not reconstructable
     # from the round file alone.

@@ -25,8 +25,8 @@ from promptpotter.application.mask.record import (
 )
 from promptpotter.application.scoring.evaluators import materialize_row_derivable
 from promptpotter.domain.results import ScoredCandidate, is_leader_eligible
-from promptpotter.infrastructure.store.io import read_json_optional
-from promptpotter.infrastructure.store.layout import cycle_dir_for
+from promptpotter.infrastructure.store.io import read_json_tolerant
+from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.stores import Stores
 
 
@@ -122,7 +122,7 @@ def load_mask_record(
     for e in entries:
         cid = e["cycle_id"]
         cdir = cycle_dir_for(store.base_dir, campaign_id, cid)
-        index = read_json_optional(cdir / "index.json")
+        index = read_json_tolerant(CycleLayout(cdir).manifest)
         if not isinstance(index, dict):
             continue
         fork = index.get("fork")
@@ -136,7 +136,7 @@ def load_mask_record(
             rn = r.get("round") if isinstance(r, dict) else None
             if not isinstance(rn, int):
                 continue
-            rf = read_json_optional(cdir / "rounds" / f"round_{rn:04d}.json")
+            rf = read_json_tolerant(CycleLayout(cdir).round_file(rn))
             if isinstance(rf, dict):
                 by_round[rn] = rf
         files[cid] = by_round

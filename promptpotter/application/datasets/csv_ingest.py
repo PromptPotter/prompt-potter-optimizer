@@ -29,6 +29,7 @@ from typing import Any
 
 from promptpotter.domain.pipeline_schema import CANDIDATE_LIBRARY_FILE
 from promptpotter.domain.sample import Sample
+from promptpotter.shared.errors import PayloadInvalidError
 
 MAX_SAMPLES = 50_000
 """Per-upload row cap. Prevents a 200 MB CSV from exhausting the draft tempdir.
@@ -41,21 +42,26 @@ genuine large-dataset onboarding flow surfaces.
 _JSON_RECORD_KEYS = ("data", "rows", "items", "records", "examples")
 
 
-@dataclass(frozen=True, slots=True)
-class IngestError(Exception):
-    """Structured parse / shape failure ready for a 422 wire response.
+class IngestError(PayloadInvalidError):
+    """Structured parse / shape failure — 422 through the one wire seam.
 
     ``reason`` is a stable code declared in
     ``docs/specs/m12-api-openapi.yaml::ErrorEnvelope`` (``ingest_failed``
     detail): ``bad_csv`` | ``bad_json`` | ``empty`` | ``too_large`` |
     ``missing_column`` | ``unsupported_format`` | ``hardened_blocked``.
+
+    A :class:`PayloadInvalidError`, like ``LaunchError`` beside it, so the central
+    ``PotterError`` handler maps it with no per-route arm. It was a plain
+    ``Exception``, and the five routers that could raise it each rebuilt the same
+    ``code``/``details`` by hand — five copies of one mapping, free to drift.
+    A route that needs MORE context adds to ``details`` and re-raises.
     """
 
-    reason: str
-    message: str
+    code = "ingest_failed"
 
-    def __str__(self) -> str:
-        return self.message
+    def __init__(self, *, reason: str, message: str) -> None:
+        super().__init__(message, details={"reason": reason})
+        self.reason = reason
 
 
 @dataclass(frozen=True, slots=True)

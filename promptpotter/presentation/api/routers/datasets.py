@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, File, Form, Header, Query, Request, UploadFile
@@ -39,7 +38,6 @@ from promptpotter.infrastructure.store.archive_views import (
     measurement_series_for_samples,
 )
 from promptpotter.infrastructure.store.dataset_access import (
-    DatasetAccessError,
     dataset_pipeline_path,
     list_readable_datasets,
     readable_dataset_dir,
@@ -173,11 +171,8 @@ async def ingest_dataset(
             slug=slug,
         )
     except IngestError as exc:
-        raise PayloadInvalidError(
-            exc.message,
-            code="ingest_failed",
-            details={"reason": exc.reason, "max_samples": MAX_SAMPLES},
-        ) from None
+        exc.details["max_samples"] = MAX_SAMPLES
+        raise
     except ValueError as exc:
         raise PayloadInvalidError(str(exc), details={"reason": "bad_slug"}) from None
     except SlugTakenError as exc:
@@ -217,12 +212,7 @@ async def upload_candidate_library(
     """
     idemp = ensure_idempotency_key(idempotency_key)
     blob = await _read_capped(request, file, MAX_UPLOAD_BYTES)
-    try:
-        terms = parse_candidate_library(blob, file.filename or "")
-    except IngestError as exc:
-        raise PayloadInvalidError(
-            exc.message, code="ingest_failed", details={"reason": exc.reason}
-        ) from None
+    terms = parse_candidate_library(blob, file.filename or "")
     if not terms:
         raise PayloadInvalidError(
             "The candidate library has no usable entries (every line was blank).",
@@ -299,27 +289,9 @@ def draft_from_existing_dataset(name: str, store: StoreDep) -> dict[str, Any]:
     the same resolver as the other dataset reads; nothing runs until the operator
     starts it via ``/commands/start-checkin``.
     """
-    dataset_dir = _resolve_or_404(store, name)
-    try:
-        draft = draft_from_dataset(stores=store, dataset_dir=dataset_dir, dataset_name=name)
-    except IngestError as exc:
-        raise PayloadInvalidError(
-            exc.message, code="ingest_failed", details={"reason": exc.reason}
-        ) from None
+    dataset_dir = readable_dataset_dir(store, name)
+    draft = draft_from_dataset(stores=store, dataset_dir=dataset_dir, dataset_name=name)
     return draft_wire_with_locks(draft)
-
-
-def _resolve_or_404(store: Stores, name: str) -> Path:
-    """Resolve *name* through the identity-aware gateway; 404 if not readable.
-
-    The 404 (rather than 403) keeps the existence-leak posture: a non-admin can't
-    tell a benchmark apart from a non-existent dataset. All dataset-directory
-    access in this router goes through here — never a raw ``benchmarks_root`` read.
-    """
-    try:
-        return readable_dataset_dir(store, name)
-    except DatasetAccessError as exc:
-        raise NotFoundError(f"Dataset '{name}' not found") from exc
 
 
 def _load_dataset_rows(
@@ -329,7 +301,7 @@ def _load_dataset_rows(
 
     Sample-id key varies on disk (``id`` canonical, BBEH HF emits ``sample_id``) —
     normalise at the read boundary. The name is already access-checked by
-    :func:`_resolve_or_404`, so MISSING rows are not an unknown dataset — they are a
+    :func:`readable_dataset_dir`, so MISSING rows are not an unknown dataset — they are a
     resolvable one with no materialised sample bank (a pipeline-only / L4 meta-dataset
     such as ``promptpotter-self``, which reports ``n_samples: 0`` in the list). Return an
     empty bank so ``/preview`` + ``/measurement-series`` answer an honest empty 200 rather
@@ -516,7 +488,7 @@ def get_dataset_preview(
     series carrying ≥1 dot = measured). Rasch δ persists across rounds + inherits from parent
     fits, so it overcounts on its own.
     """
-    dataset_dir = _resolve_or_404(store, name)
+    dataset_dir = readable_dataset_dir(store, name)
     raw, sample_lookup = _load_dataset_rows(store, name)
 
     art_store, art_campaign, art_cycle = _artifact_scope_store(
@@ -654,7 +626,7 @@ def get_dataset_measurement_series(
     """Chronological per-sample series for the Meas heat-map column. Aligned to `/preview` order
     + limit so clients can zip by sample_id. `ord` is opaque (only used for row alignment).
     """
-    _resolve_or_404(store, name)  # 404s an unknown slug before we answer with an empty bank
+    readable_dataset_dir(store, name)  # 404s an unknown slug before we answer with an empty bank
     raw, sample_lookup = _load_dataset_rows(store, name)
 
     art_store, art_campaign, art_cycle = _artifact_scope_store(
@@ -740,7 +712,7 @@ def get_dataset_pipeline(name: str, store: StoreDep) -> DatasetPipelineResponse:
     Identity-gated through the same resolver as the other dataset reads — there is
     no unauthenticated path to a benchmark's pipeline/overlay config.
     """
-    dataset_dir = _resolve_or_404(store, name)
+    dataset_dir = readable_dataset_dir(store, name)
     pipeline_path = dataset_pipeline_path(dataset_dir)
     if not pipeline_path.is_file():
         raise NotFoundError(f"Dataset '{name}' has no pipeline.yaml")

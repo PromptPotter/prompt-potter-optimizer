@@ -34,6 +34,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 from promptpotter.infrastructure.store.io import (
     read_json,
     read_json_optional,
+    read_json_tolerant,
     rmtree_robust,
     validate_path_component,
     write_json,
@@ -438,7 +439,7 @@ class CampaignStore:
             return []
         live: list[str] = []
         for cdir in sorted(p for p in cycles_dir.iterdir() if p.is_dir()):
-            data = read_json_optional(cdir / "index.json")
+            data = read_json_optional(CycleLayout(cdir).manifest)
             if not isinstance(data, dict):
                 continue
             if (
@@ -833,10 +834,7 @@ class CampaignStore:
     def _entry_from_index(self, index_path: Path) -> dict[str, Any]:
         """THE decoder of ``index.json`` into the served ``CycleListEntry`` shape."""
         campaign_id, cycle_id = self._ids_from_index_path(index_path)
-        try:
-            data = read_json_optional(index_path)
-        except Exception:
-            data = None
+        data = read_json_tolerant(index_path)
         kind = sibling_kind(cycle_id)
         # The single run-phase derivation — running / paused / stopping /
         # detached / terminal. Lifecycle (terminal) comes from index
@@ -887,7 +885,9 @@ class CampaignStore:
     def try_delete_stub_cycle(self, campaign_id: str, cycle_id: str) -> tuple[bool, str]:
         """Delete a stub cycle dir → ``(deleted, reason)``. Guards: ``n_rounds == 0``, not a family root, no children."""
         cycle_dir = self.cycle_dir(campaign_id, cycle_id)
-        index_path = cycle_dir / "index.json"
+        index_path = self._index_path(campaign_id, cycle_id)
+        # NOT read_json_tolerant: this has to tell "absent" from "corrupt" — one is a
+        # stub to delete, the other is a cycle whose state we cannot vouch for.
         try:
             index = read_json_optional(index_path)
         except (OSError, json.JSONDecodeError) as exc:

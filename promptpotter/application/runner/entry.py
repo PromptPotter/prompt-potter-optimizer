@@ -19,7 +19,7 @@ from promptpotter.application.bootstrap.scoring_context import init_optimization
 from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.config import CampaignConfig, apply_node_overlay
 from promptpotter.application.optimization.cycle import Cycle
-from promptpotter.application.optimization.escalation.firing import apply_fork_payload_to_osp
+from promptpotter.application.optimization.escalation.firing import apply_fork_payload_to_opt_sp
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
     _mint_fork,
     cleanup_stub_fork_if_empty,
@@ -486,7 +486,7 @@ async def _run_single_cycle(
 
         # Operator forks (sweep, rebase) stamp L1-surface deltas; triggers without deltas skip.
         if fork_payload is not None and fork_payload.l1_layout is not None:
-            apply_fork_payload_to_osp(cycle.opt_sp, fork_payload)
+            apply_fork_payload_to_opt_sp(cycle.opt_sp, fork_payload)
 
         # Fork-on-divergence: rebuild observers around the fork's own ledger.
         forked = (

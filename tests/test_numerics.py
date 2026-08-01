@@ -1867,7 +1867,7 @@ def _parent() -> OptSearchPoint:
 
 
 def _child(parent: OptSearchPoint, **changes) -> CandidateProposal:
-    return CandidateProposal(osp=parent.mutate(**changes))
+    return CandidateProposal(opt_sp=parent.mutate(**changes))
 
 
 def test_no_op_clone_attaches_validation_failure():
@@ -1876,9 +1876,9 @@ def test_no_op_clone_attaches_validation_failure():
 
     stats = detect_invariants(proposals, parent, {})
 
-    no_op_reasons = [vf.reason for vf in proposals[0].osp.memory.wounds.validation_failures]
+    no_op_reasons = [vf.reason for vf in proposals[0].opt_sp.memory.wounds.validation_failures]
     assert "no_op_variant" in no_op_reasons
-    assert proposals[1].osp.memory.wounds.validation_failures == []
+    assert proposals[1].opt_sp.memory.wounds.validation_failures == []
     assert stats.l1_n_no_op == 1
     assert stats.l1_n_duplicate == 0
     assert stats.l1_yield == 0.5
@@ -1933,10 +1933,10 @@ def test_a_reproposed_idea_is_rejected_even_when_rewritten_into_another_field():
 
     stats = detect_invariants(proposals, parent, {}, prior)
 
-    reasons = [vf.reason for vf in proposals[0].osp.memory.wounds.validation_failures]
+    reasons = [vf.reason for vf in proposals[0].opt_sp.memory.wounds.validation_failures]
     assert "repeat_variant" in reasons, "a rewritten re-proposal must still be caught"
-    assert "round 1" in proposals[0].osp.memory.wounds.validation_failures[0].value
-    assert proposals[1].osp.memory.wounds.validation_failures == [], "unrelated idea survives"
+    assert "round 1" in proposals[0].opt_sp.memory.wounds.validation_failures[0].value
+    assert proposals[1].opt_sp.memory.wounds.validation_failures == [], "unrelated idea survives"
     assert stats.l1_n_repeat == 1
 
 
@@ -1959,7 +1959,7 @@ def test_a_repeat_never_empties_the_round_and_unmeasured_history_never_convicts(
     ]
     stats = detect_invariants(all_repeats, parent, {}, prior)
     assert stats.l1_n_repeat == 0, "a repeat may cost a candidate, never the whole round"
-    assert all(not p.osp.memory.wounds.validation_failures for p in all_repeats)
+    assert all(not p.opt_sp.memory.wounds.validation_failures for p in all_repeats)
 
     # (2) the same history, but never measured → no conviction even with a live alternative.
     unmeasured = [_lost_round(1, "instruction", _DEAD_IDEA, total=0, acc=0.0)]
@@ -1983,7 +1983,7 @@ def test_an_idea_that_beat_its_origin_is_not_grounds_for_rejection():
     stats = detect_invariants(proposals, parent, {}, [won])
 
     assert stats.l1_n_repeat == 0
-    assert proposals[0].osp.memory.wounds.validation_failures == []
+    assert proposals[0].opt_sp.memory.wounds.validation_failures == []
 
 
 def test_duplicate_signature_attaches_validation_failure():
@@ -1996,10 +1996,10 @@ def test_duplicate_signature_attaches_validation_failure():
 
     stats = detect_invariants(proposals, parent, {})
 
-    assert proposals[0].osp.memory.wounds.validation_failures == []
-    dup_reasons = [vf.reason for vf in proposals[1].osp.memory.wounds.validation_failures]
+    assert proposals[0].opt_sp.memory.wounds.validation_failures == []
+    dup_reasons = [vf.reason for vf in proposals[1].opt_sp.memory.wounds.validation_failures]
     assert "duplicate_variant" in dup_reasons
-    assert proposals[2].osp.memory.wounds.validation_failures == []
+    assert proposals[2].opt_sp.memory.wounds.validation_failures == []
     assert stats.l1_n_duplicate == 1
     assert stats.l1_n_no_op == 0
     assert stats.l1_yield == 2 / 3
@@ -2025,16 +2025,16 @@ def test_param_override_echoing_parent_value_is_a_no_op():
     }
     proposals = [
         CandidateProposal(
-            osp=parent.mutate(), pipeline_params_override={"llm_only": {"temperature": 0.0}}
+            opt_sp=parent.mutate(), pipeline_params_override={"llm_only": {"temperature": 0.0}}
         ),
         CandidateProposal(
-            osp=parent.mutate(),
+            opt_sp=parent.mutate(),
             pipeline_params_override={
                 "llm_only": {"output_schema_descriptions": {"answer": "Commit to one label."}}
             },
         ),
         CandidateProposal(
-            osp=parent.mutate(),
+            opt_sp=parent.mutate(),
             pipeline_params_override={
                 "llm_only": {"output_schema_descriptions": {"answer": "Never hedge."}}
             },
@@ -2044,16 +2044,16 @@ def test_param_override_echoing_parent_value_is_a_no_op():
     stats = detect_invariants(proposals, parent, parent_pp)
 
     assert "no_op_variant" in [
-        vf.reason for vf in proposals[0].osp.memory.wounds.validation_failures
+        vf.reason for vf in proposals[0].opt_sp.memory.wounds.validation_failures
     ]
     assert "no_op_variant" in [
-        vf.reason for vf in proposals[1].osp.memory.wounds.validation_failures
+        vf.reason for vf in proposals[1].opt_sp.memory.wounds.validation_failures
     ]
-    assert proposals[2].osp.memory.wounds.validation_failures == []
+    assert proposals[2].opt_sp.memory.wounds.validation_failures == []
     assert stats.l1_n_no_op == 2
 
 
-def test_parse_population_attaches_forbidden_axis_failure_to_osp():
+def test_parse_population_attaches_forbidden_axis_failure_to_opt_sp():
     from promptpotter.application.optimization.l1.population import parse_population
     from promptpotter.domain.pipeline_schema import NodePromptInfo
 
@@ -2064,13 +2064,13 @@ def test_parse_population_attaches_forbidden_axis_failure_to_osp():
     )
     parent = _parent()
     proposal = CandidateProposal(
-        osp=parent.mutate(persona="Strict"),
+        opt_sp=parent.mutate(persona="Strict"),
         pipeline_params_override={"llm_only": {"model": "anything-at-all"}},
     )
 
-    osp_list, _ = parse_population([proposal], pipeline_params=None, schema=schema)
+    opt_sp_list, _ = parse_population([proposal], pipeline_params=None, schema=schema)
 
-    failures = osp_list[0].memory.wounds.validation_failures
+    failures = opt_sp_list[0].memory.wounds.validation_failures
     assert len(failures) == 1
     assert failures[0].reason == "forbidden_axis"
     assert failures[0].axis == "llm_only.model"
@@ -2094,18 +2094,18 @@ def test_parse_population_flags_dropped_mandatory_placeholder():
         ],
     )
     parent = _parent()
-    dropped = CandidateProposal(osp=parent.mutate(problem_description="Profile the entity."))
+    dropped = CandidateProposal(opt_sp=parent.mutate(problem_description="Profile the entity."))
     intact = CandidateProposal(
-        osp=parent.mutate(problem_description="Profile using {{combined_text}}.")
+        opt_sp=parent.mutate(problem_description="Profile using {{combined_text}}.")
     )
 
-    osp_list, _ = parse_population([dropped, intact], pipeline_params=None, schema=schema)
+    opt_sp_list, _ = parse_population([dropped, intact], pipeline_params=None, schema=schema)
 
-    dropped_failures = osp_list[0].memory.wounds.validation_failures
+    dropped_failures = opt_sp_list[0].memory.wounds.validation_failures
     assert len(dropped_failures) == 1
     assert dropped_failures[0].reason == "dropped_mandatory_placeholder"
     assert dropped_failures[0].axis == "entity_profiling.prompt"
-    assert osp_list[1].memory.wounds.validation_failures == []
+    assert opt_sp_list[1].memory.wounds.validation_failures == []
 
 
 def test_parse_population_flags_dropped_meta_prompt_port():
@@ -2128,18 +2128,18 @@ def test_parse_population_flags_dropped_meta_prompt_port():
     parent = _parent()
     base_answer_format = base_optimizer_template("l1_generate").answer_format
     dropped = CandidateProposal(
-        osp=parent.mutate(),
+        opt_sp=parent.mutate(),
         pipeline_params_override={"l1_generate": {"answer_format": "Return JSON variants."}},
     )
     intact = CandidateProposal(
-        osp=parent.mutate(),
+        opt_sp=parent.mutate(),
         pipeline_params_override={
             "l1_generate": {"answer_format": base_answer_format + " Be terse."}
         },
     )
-    inherits_broken = CandidateProposal(osp=parent.mutate(persona="Strict"))
+    inherits_broken = CandidateProposal(opt_sp=parent.mutate(persona="Strict"))
 
-    osp_list, _ = parse_population(
+    opt_sp_list, _ = parse_population(
         [dropped, intact],
         pipeline_params=None,
         schema=schema,
@@ -2150,11 +2150,11 @@ def test_parse_population_flags_dropped_meta_prompt_port():
         schema=schema,
     )
 
-    dropped_failures = osp_list[0].memory.wounds.validation_failures
+    dropped_failures = opt_sp_list[0].memory.wounds.validation_failures
     assert [vf.reason for vf in dropped_failures] == ["dropped_mandatory_placeholder"]
     assert dropped_failures[0].axis == "l1_generate.prompt"
     assert "citable_fields" in dropped_failures[0].value
-    assert osp_list[1].memory.wounds.validation_failures == []
+    assert opt_sp_list[1].memory.wounds.validation_failures == []
     assert [vf.reason for vf in inherited_list[0].memory.wounds.validation_failures] == [
         "dropped_mandatory_placeholder"
     ]
@@ -2165,7 +2165,7 @@ def test_parse_population_flags_dropped_meta_prompt_port():
 # ===========================================================================
 
 
-def _osp(**kwargs) -> OptSearchPoint:
+def _opt_sp(**kwargs) -> OptSearchPoint:
     from promptpotter.domain.opt_search_point import L2L3Memory
 
     memory_fields = {
@@ -2188,8 +2188,8 @@ def test_l1_config_not_in_runtime_failures_fires_on_reproposal():
     )
     from promptpotter.domain.escalation_signals import RuntimeFailure
 
-    osp = _osp()
-    osp.memory.wounds.runtime_failures = [
+    opt_sp = _opt_sp()
+    opt_sp.memory.wounds.runtime_failures = [
         RuntimeFailure(
             source="degradation_check",
             dominant_warning="llm_only:empty_response",
@@ -2201,7 +2201,7 @@ def test_l1_config_not_in_runtime_failures_fires_on_reproposal():
             first_seen_round=1,
         )
     ]
-    out = L1_CONFIG_NOT_IN_RUNTIME_FAILURES.run({"llm_only": {"max_tokens": 1800}}, opt_sp=osp)
+    out = L1_CONFIG_NOT_IN_RUNTIME_FAILURES.run({"llm_only": {"max_tokens": 1800}}, opt_sp=opt_sp)
     assert out is not None
     failures = out.evidence["failures"]
     assert len(failures) == 1
@@ -2216,8 +2216,8 @@ def test_l1_config_not_in_runtime_failures_quiet_on_novel_config():
     )
     from promptpotter.domain.escalation_signals import RuntimeFailure
 
-    osp = _osp()
-    osp.memory.wounds.runtime_failures = [
+    opt_sp = _opt_sp()
+    opt_sp.memory.wounds.runtime_failures = [
         RuntimeFailure(
             source="degradation_check",
             dominant_warning="llm_only:empty_response",
@@ -2229,7 +2229,7 @@ def test_l1_config_not_in_runtime_failures_quiet_on_novel_config():
             first_seen_round=1,
         )
     ]
-    out = L1_CONFIG_NOT_IN_RUNTIME_FAILURES.run({"llm_only": {"max_tokens": 2400}}, opt_sp=osp)
+    out = L1_CONFIG_NOT_IN_RUNTIME_FAILURES.run({"llm_only": {"max_tokens": 2400}}, opt_sp=opt_sp)
     assert out is None
 
 
@@ -2239,14 +2239,14 @@ def test_l1_config_not_in_runtime_failures_quiet_on_novel_config():
 
 
 def test_plan_length_floor_fires_on_short_plan():
-    out = L3_PLAN_LENGTH_FLOOR.run({"plan": "do better"}, opt_sp=_osp())
+    out = L3_PLAN_LENGTH_FLOOR.run({"plan": "do better"}, opt_sp=_opt_sp())
     assert out is not None
 
 
 def test_plan_verbatim_repeat_fires():
-    osp = _osp(plan="Maintain current strategy and explore persona axis carefully.")
+    opt_sp = _opt_sp(plan="Maintain current strategy and explore persona axis carefully.")
     out = L3_PLAN_VERBATIM_REPEAT.run(
-        {"plan": "Maintain current strategy and explore persona axis carefully."}, opt_sp=osp
+        {"plan": "Maintain current strategy and explore persona axis carefully."}, opt_sp=opt_sp
     )
     assert out is not None
 
@@ -2297,8 +2297,8 @@ def test_fatal_degradation_runtime_failure_escalates_to_operator():
 
 
 def test_run_l3_output_validators_aggregates():
-    osp = _osp(plan="short")
-    outcomes = run_l3_output_validators({"plan": "short"}, osp)
+    opt_sp = _opt_sp(plan="short")
+    outcomes = run_l3_output_validators({"plan": "short"}, opt_sp)
     ids = {o.validator_id for o in outcomes}
     assert "l3_plan_length_floor" in ids
     assert "l3_plan_verbatim_repeat" in ids
@@ -2983,7 +2983,7 @@ def test_l2_behavior_checks_score_conformant_vs_stub_fires():
 
     ctx = ValidatorContext(
         round_num=3,
-        opt_search_point={"task_context": {"key_challenges": "the prior framing"}},
+        opt_sp={"task_context": {"key_challenges": "the prior framing"}},
     )
 
     conformant = run_all_l2_checks(

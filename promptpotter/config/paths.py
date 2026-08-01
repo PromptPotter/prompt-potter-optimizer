@@ -178,11 +178,9 @@ def webapp_static_root() -> Path:
 # Bound once at import, like ``settings.APP_VERSION``. ``$PROMPTPOTTER_HOME`` is
 # read here, so it is an environment decision made before the process starts.
 DEFAULT_PROJECTS_ROOT = user_data_root() / "projects"
-DEFAULT_DATASETS_ROOT = benchmark_datasets_root()
 
 
 __all__ = [
-    "DEFAULT_DATASETS_ROOT",
     "DEFAULT_PROJECTS_ROOT",
     "PACKAGE_ROOT",
     "benchmark_datasets_root",

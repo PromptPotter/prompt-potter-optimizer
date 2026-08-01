@@ -72,7 +72,7 @@ class ValidatorContext:
     """Context shared by all behaviour checks for one round.
 
     ``prior_rounds`` are the round dicts strictly before ``round_num``,
-    in order; ``opt_search_point`` is the OSP snapshot at round-start
+    in order; ``opt_sp`` is the OSP snapshot at round-start
     (carries ``task_context`` + the live prompt fields); ``context_object``
     is the three task-decomposition strings L1's prompt was shown.
     ``exploration_budget`` is the round's escalation-panel exploration
@@ -84,7 +84,7 @@ class ValidatorContext:
 
     round_num: int
     prior_rounds: list[dict[str, Any]] = field(default_factory=list)
-    opt_search_point: dict[str, Any] = field(default_factory=dict)
+    opt_sp: dict[str, Any] = field(default_factory=dict)
     context_object: list[str] = field(default_factory=list)
     exploration_budget: str | None = None
     # Axes the round-start AxisIndex flagged as ``peaked``. Used by
@@ -315,7 +315,7 @@ def _round_citable_fields(ctx: ValidatorContext) -> tuple[str, ...]:
     Falls open to every citable panel when the snapshot carries no layout (an older round
     file, or a wiring layer that couldn't supply one): a missing snapshot must not fail
     every variant in the round."""
-    memory = ctx.opt_search_point.get("memory") or {}
+    memory = ctx.opt_sp.get("memory") or {}
     layout = coerce_l1_layout(memory.get("l1_layout") if isinstance(memory, dict) else None)
     if layout is None:
         return tuple(sorted([n for n, i in INJECTIONS.items() if i.citable] + [STALL_EXPLORATION]))

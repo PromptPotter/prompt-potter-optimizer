@@ -162,11 +162,11 @@ def _compute_behavior_per_round(
             l1_out.append([])
             l2_out.append([])
             continue
-        osp = round_data.opt_search_point
+        opt_sp = round_data.opt_sp
         ctx = ValidatorContext(
             round_num=round_num,
             prior_rounds=list(prior_audits),
-            opt_search_point=osp.model_dump() if osp else {},
+            opt_sp=opt_sp.model_dump() if opt_sp else {},
             context_object=context_object,
             exploration_budget=budget,
             peaked_axes=frozenset(round_data.axis_memory_peaked),
@@ -328,8 +328,8 @@ def _render_round(
     is_peek: bool,
     schema_repair_retries: int = 0,
 ) -> list[str]:
-    osp = round_data.opt_search_point.model_dump() if round_data.opt_search_point else {}
-    lineage = osp.get("lineage") or {}
+    opt_sp = round_data.opt_sp.model_dump() if round_data.opt_sp else {}
+    lineage = opt_sp.get("lineage") or {}
     suffix = " (next-gen peek)" if is_peek else ""
     parts: list[str] = [
         f"### Round {round_data.round}{suffix}",
@@ -343,16 +343,16 @@ def _render_round(
         ]
     if schema_repair_retries:
         parts.append(f"- schema_repair_retries: {schema_repair_retries}")
-    parts += _render_l1_inputs(osp, lineage)
+    parts += _render_l1_inputs(opt_sp, lineage)
     parts += _render_check_checklist(checks)
     parts += _render_variants_table(audit, scored=not is_peek)
     parts += _render_critique(round_data)
     return parts
 
 
-def _render_l1_inputs(osp: dict[str, Any], lineage: dict[str, Any]) -> list[str]:
+def _render_l1_inputs(opt_sp: dict[str, Any], lineage: dict[str, Any]) -> list[str]:
     parts: list[str] = ["", "**L1 inputs**", ""]
-    tc = (osp.get("memory") or {}).get("task_context") or {}
+    tc = (opt_sp.get("memory") or {}).get("task_context") or {}
     if isinstance(tc, dict) and tc:
         keys = ", ".join(sorted(k for k, v in tc.items() if v))
         parts.append(f"- task_context fields: {keys or '_(empty)_'}")
@@ -599,7 +599,7 @@ def from_disk_log(
     round_views: list[RoundDigestView] = []
     for t in rounds:
         traj, _ = _load_p_best_trajectory(streams_dir, t.round)
-        lineage = t.opt_search_point.lineage if t.opt_search_point else None
+        lineage = t.opt_sp.lineage if t.opt_sp else None
         round_views.append(
             RoundDigestView(
                 round=t.round,

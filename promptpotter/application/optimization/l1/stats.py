@@ -156,4 +156,4 @@ def _behavior_pass_rate(behavior_results: list[list[CheckResult]]) -> float | No
 
 def _round_source(rr: RoundResult) -> str:
     """Pull the lineage source ('l1_generate' / 'l2_context' / ...) off a round."""
-    return rr.opt_search_point.lineage.source if rr.opt_search_point else ""
+    return rr.opt_sp.lineage.source if rr.opt_sp else ""

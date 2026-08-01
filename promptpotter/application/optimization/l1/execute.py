@@ -112,7 +112,7 @@ async def execute_round(
         campaign_id=session.state.tracing_campaign_id,
         round_num=round_num,
     ):
-        round_result, winner_osp = await l1_score(
+        round_result, winner_opt_sp = await l1_score(
             cycle,
             candidates,
             scoring_set,
@@ -133,16 +133,16 @@ async def execute_round(
         )
         # The elected winner IS the round's resulting incumbent — and on a HELD round
         # (no candidate cleared the floor) l1_score returns the retained incumbent itself
-        # (origin.osp), so the ids match and absorb_round adopts nothing. absorb reads
+        # (origin.opt_sp), so the ids match and absorb_round adopts nothing. absorb reads
         # this to advance the cycle's identity to the winner on an advancing round.
-        round_result.opt_search_point = winner_osp
+        round_result.opt_sp = winner_opt_sp
         if obs and round_result.candidate_scores:
             with graceful("RoundWinnerChosen emit failed"):
                 obs.emit_write_point(
                     RoundWinnerChosen,
                     campaign_id=session.state.tracing_campaign_id,
                     round_num=round_num,
-                    winner_candidate_id=winner_osp.lineage.id,
+                    winner_candidate_id=winner_opt_sp.lineage.id,
                     winner_accuracy=round_result.accuracy,
                     improved=round_result.improved,
                 )
@@ -229,7 +229,7 @@ async def execute_round(
                     hits=round_result.hits,
                     total=round_result.total,
                     improved=round_result.improved,
-                    winner_prompt_fields_id=winner_osp.lineage.id,
+                    winner_prompt_fields_id=winner_opt_sp.lineage.id,
                     candidate_scores=[c.model_dump() for c in round_result.candidate_scores],
                     model=optimizer_model(),
                     n_variants=config.optimization.n_variants,
@@ -242,10 +242,10 @@ async def execute_round(
                 PromptVersion(
                     campaign_id=session.state.tracing_campaign_id,
                     round_num=round_num,
-                    prompt_fields_id=winner_osp.lineage.id,
-                    rendered_prompt=winner_osp.render(),
-                    layer1_fields={f: getattr(winner_osp, f) for f in PROMPT_STRING_FIELDS},
-                    parent_id=winner_osp.lineage.parent_id,
+                    prompt_fields_id=winner_opt_sp.lineage.id,
+                    rendered_prompt=winner_opt_sp.render(),
+                    layer1_fields={f: getattr(winner_opt_sp, f) for f in PROMPT_STRING_FIELDS},
+                    parent_id=winner_opt_sp.lineage.parent_id,
                 )
             )
 

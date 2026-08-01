@@ -656,7 +656,7 @@ def _check_l1_prompt_placeholders_intact(
 
     - **Target prompt**: the evolved prompt lands on exactly ONE node —
       ``prompt_node_names()[0]``, the node ``OptSearchPoint.to_job_search_point`` injects
-      ``osp.render()`` into; the other prompt-bearing nodes keep their fixed starting prompt.
+      ``opt_sp.render()`` into; the other prompt-bearing nodes keep their fixed starting prompt.
       If a mutation drops a declared ``{{var}}`` (e.g. ``{{combined_text}}`` carrying
       web_search evidence into entity_profiling), the backend injects nothing there and the
       evidence-free program would otherwise score as a valid winner. Mint guards this at setup
@@ -759,7 +759,7 @@ def lost_ideas(prior_rounds: Sequence[Any]) -> list[tuple[int, frozenset[str]]]:
 
 def detect_invariants(
     proposals: list[CandidateProposal],
-    parent_osp: OptSearchPoint,
+    parent_opt_sp: OptSearchPoint,
     parent_pipeline_params: dict[str, Any] | None,
     prior_rounds: Sequence[Any] = (),
 ) -> L1YieldStats:
@@ -791,9 +791,9 @@ def detect_invariants(
     """
     parent_pp = parent_pipeline_params or {}
     for cp in proposals:
-        cp.osp.memory.wounds.validation_failures = [
+        cp.opt_sp.memory.wounds.validation_failures = [
             vf
-            for vf in cp.osp.memory.wounds.validation_failures
+            for vf in cp.opt_sp.memory.wounds.validation_failures
             if vf.reason not in INVARIANT_REASONS
         ]
     seen: dict[tuple[Any, ...], int] = {}
@@ -804,12 +804,12 @@ def detect_invariants(
     # how many proposals SURVIVE the other two gates, which is only known after the loop.
     repeats: list[tuple[CandidateProposal, int]] = []
     n_live = 0
-    parent_tc = parent_osp.memory.task_context.to_dict()
+    parent_tc = parent_opt_sp.memory.task_context.to_dict()
     for i, cp in enumerate(proposals):
-        child = cp.osp
+        child = cp.opt_sp
         pf, pp = candidate_delta(
             {f: getattr(child, f) for f in PROMPT_STRING_FIELDS},
-            {f: getattr(parent_osp, f) for f in PROMPT_STRING_FIELDS},
+            {f: getattr(parent_opt_sp, f) for f in PROMPT_STRING_FIELDS},
             cp.pipeline_params_override,
             parent_pp,
         )
@@ -821,8 +821,8 @@ def detect_invariants(
         pp_delta = tuple(sorted((n, p, json.dumps(v, sort_keys=True)) for (n, p), v in pp.items()))
         sig = (pf_delta, tc_delta, pp_delta)
         if not any(sig):
-            cp.osp.memory.wounds.validation_failures = [
-                *cp.osp.memory.wounds.validation_failures,
+            cp.opt_sp.memory.wounds.validation_failures = [
+                *cp.opt_sp.memory.wounds.validation_failures,
                 ValidationFailure(
                     axis="variant",
                     value="(no mutation)",
@@ -834,8 +834,8 @@ def detect_invariants(
             continue
         if sig in seen:
             twin = seen[sig]
-            cp.osp.memory.wounds.validation_failures = [
-                *cp.osp.memory.wounds.validation_failures,
+            cp.opt_sp.memory.wounds.validation_failures = [
+                *cp.opt_sp.memory.wounds.validation_failures,
                 ValidationFailure(
                     axis="variant",
                     value=f"duplicate of C{twin + 1}",
@@ -852,7 +852,7 @@ def detect_invariants(
         # field" (see `candidate_idea`).
         fp = candidate_idea(
             {f: getattr(child, f) for f in PROMPT_STRING_FIELDS},
-            {f: getattr(parent_osp, f) for f in PROMPT_STRING_FIELDS},
+            {f: getattr(parent_opt_sp, f) for f in PROMPT_STRING_FIELDS},
             cp.pipeline_params_override,
             parent_pp,
         )
@@ -871,8 +871,8 @@ def detect_invariants(
     n_repeat = 0
     if len(repeats) < n_live:
         for cp, echo in repeats:
-            cp.osp.memory.wounds.validation_failures = [
-                *cp.osp.memory.wounds.validation_failures,
+            cp.opt_sp.memory.wounds.validation_failures = [
+                *cp.opt_sp.memory.wounds.validation_failures,
                 ValidationFailure(
                     axis="variant",
                     value=f"re-proposes the idea measured and lost in round {echo}",

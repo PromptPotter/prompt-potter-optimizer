@@ -167,11 +167,11 @@ async def generate_or_load_candidates(
                 CandidateMintedRecord(
                     round=round_num,
                     idx=idx,
-                    candidate_id=cp.osp.lineage.id,
-                    parent_id=cp.osp.lineage.parent_id,
+                    candidate_id=cp.opt_sp.lineage.id,
+                    parent_id=cp.opt_sp.lineage.parent_id,
                     label=candidate_label(round_num, idx),
-                    changes_description=cp.osp.lineage.changes_description,
-                    source=cp.osp.lineage.source,
+                    changes_description=cp.opt_sp.lineage.changes_description,
+                    source=cp.opt_sp.lineage.source,
                 )
             )
 

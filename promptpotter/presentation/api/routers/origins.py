@@ -28,7 +28,6 @@ from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
     load_dataset_campaign_config,
 )
-from promptpotter.application.datasets.csv_ingest import IngestError
 from promptpotter.application.datasets.ingest import draft_from_dataset
 from promptpotter.application.datasets.loaders import resolve_dataset_items
 from promptpotter.application.datasets.prompts import has_dataset_prompts
@@ -41,7 +40,6 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.campaign_store.store import origin_accuracy_of
 from promptpotter.infrastructure.store.dataset_access import (
-    DatasetAccessError,
     dataset_pipeline_path,
     is_dataset_dir,
     list_readable_datasets,
@@ -50,7 +48,7 @@ from promptpotter.infrastructure.store.dataset_access import (
 from promptpotter.infrastructure.store.io import read_yaml
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.presentation.api.deps import StoreDep
-from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
+from promptpotter.shared.errors import NotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -144,14 +142,14 @@ def _dataset_origin_id(store: Stores, dataset_dir: Path, dataset_name: str) -> s
         base_pp = resolve_pipeline_config_params(
             active, cfg.pipeline_overrides, dataset_dir, schema
         )
-        osp = resolve_origin_opt_search_point(
+        opt_sp = resolve_origin_opt_search_point(
             prompt_node_names=schema.prompt_node_names(), dataset_dir=dataset_dir
         )
         items = resolve_dataset_items(store, dataset_name)
         if not items:
             return None
         samples = [Sample(**it) for it in items]
-        return build_origin_cycle_id(osp, schema, samples, base_pp).removeprefix("cycle_")
+        return build_origin_cycle_id(opt_sp, schema, samples, base_pp).removeprefix("cycle_")
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
         logger.exception("origins: prospective origin id failed for %s", dataset_name)
         return None
@@ -244,23 +242,15 @@ def draft_from_origin(origin_id: str, store: StoreDep) -> dict[str, Any]:
     match = _campaign_for_origin(store, origin_id)
     if match is None:
         raise NotFoundError(f"Origin '{origin_id}' not found", code="command_target_not_found")
-    try:
-        dataset_dir = readable_dataset_dir(store, match.dataset_name)
-    except DatasetAccessError as exc:
-        raise NotFoundError(f"Dataset '{match.dataset_name}' not found") from exc
+    dataset_dir = readable_dataset_dir(store, match.dataset_name)
     seed = store.campaigns.read_cycle_seed(match.campaign_id, match.root_cycle_id)
     overrides: dict[str, Any] = {"reused_origin_id": origin_id}
     if seed is not None and seed.origin_prompt_fields:
         overrides["origin_prompt_fields"] = dict(seed.origin_prompt_fields)
-    try:
-        draft = draft_from_dataset(
-            stores=store,
-            dataset_dir=dataset_dir,
-            dataset_name=match.dataset_name,
-            overrides=overrides,
-        )
-    except IngestError as exc:
-        raise PayloadInvalidError(
-            exc.message, code="ingest_failed", details={"reason": exc.reason}
-        ) from None
+    draft = draft_from_dataset(
+        stores=store,
+        dataset_dir=dataset_dir,
+        dataset_name=match.dataset_name,
+        overrides=overrides,
+    )
     return draft_wire_with_locks(draft)

@@ -50,6 +50,7 @@ from promptpotter.domain.l4.proxies import (
     floor_reason,
 )
 from promptpotter.infrastructure.store.io import read_json_optional
+from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.instrument import MAX_INSTRUMENT_DEPTH, instrument_depth
 
 if TYPE_CHECKING:
@@ -607,7 +608,7 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
         cycle_dir = cycle_dir_box.get("dir")
         if cycle_dir is None:
             return "inner campaign starting…"
-        dash = read_json_optional(cycle_dir / "dashboard.json")
+        dash = read_json_optional(CycleLayout(cycle_dir).dashboard)
         if not dash:
             return "inner campaign starting…"
         rnd = dash.get("round")

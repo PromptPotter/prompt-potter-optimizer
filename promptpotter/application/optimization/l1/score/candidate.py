@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class CandidateRunResult:
     """One candidate's full lifecycle output. ``runtime_failure`` is the
-    caller's signal to append to ``osp_c.memory.wounds.runtime_failures``; the function
+    caller's signal to append to ``opt_sp_c.memory.wounds.runtime_failures``; the function
     cannot mutate it directly because the OSP is shared with other paths."""
 
     outcome: CandidateOutcome
@@ -56,7 +56,7 @@ class CandidateRunResult:
 async def score_one_candidate(
     *,
     idx: int,
-    osp_c: OptSearchPoint,
+    opt_sp_c: OptSearchPoint,
     candidate_sp: JobSearchPoint,
     pipeline_params_override: dict[str, Any] | None,
     cycle: Cycle,
@@ -90,7 +90,9 @@ async def score_one_candidate(
     # reach it any other way. Bound before the validation-skip return below: a skipped
     # candidate spawns nothing, but leaving the PRIOR candidate's identity bound would
     # mis-attribute whatever ran next.
-    set_measured_candidate(MeasuredCandidate(idx=idx, candidate_id=osp_c.lineage.id, label=label))
+    set_measured_candidate(
+        MeasuredCandidate(idx=idx, candidate_id=opt_sp_c.lineage.id, label=label)
+    )
 
     # Path 1 — validation-skip synthetic-0. A ``hallucinated_node`` wound is the one
     # NON-fatal validation failure: L1 named a node that doesn't exist, but that phantom
@@ -99,14 +101,14 @@ async def score_one_candidate(
     # ``validation_failure_rate``), not a synthetic-0. Every other failure (forbidden axis,
     # type mismatch, out-of-enum value) is a genuinely invalid program and still nukes it.
     fatal_failures = [
-        vf for vf in osp_c.memory.wounds.validation_failures if vf.reason != "hallucinated_node"
+        vf for vf in opt_sp_c.memory.wounds.validation_failures if vf.reason != "hallucinated_node"
     ]
     if fatal_failures:
         return CandidateRunResult(
             outcome=CandidateOutcome.SKIPPED_VALIDATION,
             results=[],
             report=build_score_report(
-                osp_c,
+                opt_sp_c,
                 pipeline_params_override,
                 INVALID_SCORES,
                 [],
@@ -135,7 +137,7 @@ async def score_one_candidate(
         n_total_candidates=n_total,
         axes=cycle.axes,
         l1_diversity=l1_diversity,
-        opt_sp=osp_c,
+        opt_sp=opt_sp_c,
         on_sample_pre_check=_catch_priors_up,
         force_fresh=force_fresh,
     )
@@ -149,16 +151,16 @@ async def score_one_candidate(
         effective_pipeline_params=effective_pipeline_params,
         round_num=round_num,
         elim_check=elim_check,
-        candidate_id=osp_c.lineage.id,
-        candidate_label=osp_c.lineage.changes_description or "",
+        candidate_id=opt_sp_c.lineage.id,
+        candidate_label=opt_sp_c.lineage.changes_description or "",
         priors_at_test=priors_at_test,
     )
     # Aborted candidates must NOT seed priors — their scores are synthetic 0s.
     if len(results) == len(dataset) and not effect.aborted:
-        elim_check.register_completed(results, candidate_id=osp_c.lineage.id, sp=candidate_sp)
+        elim_check.register_completed(results, candidate_id=opt_sp_c.lineage.id, sp=candidate_sp)
 
     report = build_score_report(
-        osp_c,
+        opt_sp_c,
         pipeline_params_override,
         scores,
         results,

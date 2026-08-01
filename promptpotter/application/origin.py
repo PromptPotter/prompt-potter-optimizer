@@ -92,7 +92,7 @@ async def rescore_parent(
         force_fresh=force_fresh,
     )
     return RoundParent(
-        osp=cycle.opt_sp,
+        opt_sp=cycle.opt_sp,
         results=results,
         # The gateway's OWN answer, not a second computation of it. This used to discard
         # `scores` and re-run `compute_composite_fitness` over the same rows with the same

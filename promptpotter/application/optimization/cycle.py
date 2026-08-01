@@ -73,7 +73,7 @@ def _merge_known_outcomes(
 
 
 def _origin_round(
-    osp: OptSearchPoint,
+    opt_sp: OptSearchPoint,
     sp: JobSearchPoint,
     *,
     report: ScoredCandidate,
@@ -92,7 +92,7 @@ def _origin_round(
     The origin changed nothing, so it describes no change — winner identity is
     ``candidate_id``, which both this row and the round stamp from the same lineage.
     """
-    prompt_fields = {**osp.prompt_field_dict(), "lineage": osp.lineage.model_dump()}
+    prompt_fields = {**opt_sp.prompt_field_dict(), "lineage": opt_sp.lineage.model_dump()}
     deprecated = _compute_accuracy(cast("list[QueryMeasurement]", results))["deprecated"]
     row = report.model_copy(
         update={
@@ -119,7 +119,7 @@ def _origin_round(
         prompt_fields=prompt_fields,
         pipeline_params=sp.pipeline_params,
         results=results,
-        all_candidate_results={osp.lineage.id: results},
+        all_candidate_results={opt_sp.lineage.id: results},
         candidates_scored=1,
         candidate_scores=[row],
         deprecated=deprecated,
@@ -129,7 +129,7 @@ def _origin_round(
         cumulative_theta=theta,
         calibration_model=calibration_model,
         evaluators=dict(row.evaluators),
-        opt_search_point=osp,
+        opt_sp=opt_sp,
     )
 
 
@@ -510,14 +510,14 @@ class Cycle:
             # ``start`` already seeded tracking from round 0.
             return
         last_rr = l1_rounds[-1]
-        if last_rr.opt_search_point is None or last_rr.pipeline_params is None:
+        if last_rr.opt_sp is None or last_rr.pipeline_params is None:
             raise ValueError(
-                f"round {last_rr.round} closed without an opt_search_point / pipeline_params — "
+                f"round {last_rr.round} closed without an opt_sp / pipeline_params — "
                 "the round file cannot seed a resume."
             )
         # Deep copy: the cycle mutates its working OSP (wounds, memory), and the round
         # is a record of what ran, not a scratchpad.
-        self.opt_sp = last_rr.opt_search_point.model_copy(deep=True)
+        self.opt_sp = last_rr.opt_sp.model_copy(deep=True)
         for f in PROMPT_STRING_FIELDS:
             setattr(self.opt_sp, f, last_rr.prompt_fields.get(f, ""))
         # The winner's OWN resolved params — not the origin's. Reading them off the round
@@ -540,10 +540,10 @@ class Cycle:
                 tr.best_round = rr.round
                 # Build best_sp from THIS round's prompts, not self.opt_sp (pinned to the last
                 # prior above) — else a resumed best≠last cycle pairs best params with last text.
-                best_osp = self.opt_sp.model_copy(
+                best_opt_sp = self.opt_sp.model_copy(
                     update={f: rr.prompt_fields.get(f, "") for f in PROMPT_STRING_FIELDS}
                 )
-                tr.best_sp = best_osp.to_job_search_point(
+                tr.best_sp = best_opt_sp.to_job_search_point(
                     base_pipeline_params=rr.pipeline_params, schema=schema
                 )
             # best_theta is a running max over the same cumulative frontier as
@@ -644,14 +644,14 @@ class Cycle:
         # Advance the incumbent to the elected winner. The winner OSP already carries
         # its own lineage (parent = this incumbent), so identity — not just the six
         # prompt strings — moves forward, and next round's candidates descend from the
-        # winner. A HELD round returns the incumbent itself as the "winner" (origin.osp),
+        # winner. A HELD round returns the incumbent itself as the "winner" (origin.opt_sp),
         # so the lineage ids match and nothing is adopted: the incumbent is unchanged and
         # mints no node. The winner's task_context (an L1 child can win on a framing
         # override, its 3rd mutation slot) rides along; wounds + l1_layout carry from the
         # outgoing incumbent — all through the single `adopt` seam.
-        winner_osp = rr.opt_search_point
-        if winner_osp is not None and winner_osp.lineage.id != self.opt_sp.lineage.id:
-            self.adopt(winner_osp, advanced={"task_context": winner_osp.memory.task_context})
+        winner_opt_sp = rr.opt_sp
+        if winner_opt_sp is not None and winner_opt_sp.lineage.id != self.opt_sp.lineage.id:
+            self.adopt(winner_opt_sp, advanced={"task_context": winner_opt_sp.memory.task_context})
         assert tr.current_sp is not None
         _pp = (
             rr.pipeline_params if rr.pipeline_params is not None else tr.current_sp.pipeline_params
@@ -674,5 +674,5 @@ class Cycle:
 
         rr.cumulative_theta = cur_theta
         rr.calibration_model = self.calibration_model
-        rr.opt_search_point = self.opt_sp
+        rr.opt_sp = self.opt_sp
         return rr

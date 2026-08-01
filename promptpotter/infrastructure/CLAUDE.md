@@ -82,7 +82,7 @@ admissibility checks.
 ## Stores — composite over leaves
 
 `store/stores.py`: `Stores` frozen dataclass + `build_stores(identity,
-*, projects_root=…, datasets_root=…, shared_root=…)` builder.
+*, projects_root=…, benchmarks_root=…, shared_root=…)` builder.
 `shared_root` roots the two CONTENT-ADDRESSED caches (`archive`,
 `optimizer_calls`) and equals `projects_root` everywhere except an L4
 inner sandbox, which isolates campaign state but must NOT isolate a
@@ -100,7 +100,22 @@ code writes and only code reads (manifests, `dashboard.json`, `cache.json`,
 measurements), `write_yaml`/`read_yaml*` for the operator-authored config tier
 under `datasets/`, whose block-scalar emitter lives beside them. There is
 deliberately no `read_yaml_tolerant` — a corrupt config that degrades to "not
-there" attributes a measurement to the wrong fingerprint. Path helpers in
+there" attributes a measurement to the wrong fingerprint.
+
+**`read_json_optional` vs `read_json_tolerant` is a decision, not a preference.**
+Tolerant collapses *absent* and *corrupt* into one answer; optional lets corrupt
+raise. Use **tolerant** for a cross-cycle SURVEY — walking siblings, building the
+lineage tree, sizing a storage report — where one unreadable neighbour must not
+fail the whole read. Use **optional** wherever the caller acts differently on the
+two, and say which in a comment: `try_delete_stub_cycle` (absent = a stub to
+delete, corrupt = a cycle we cannot vouch for), the SSE snapshot (corrupt serves
+a `dashboard_unreadable` reason), and the three identity readers, where absent
+and malformed are opposite security answers (`check_allowlist` allows on absent
+and denies on malformed — collapsing them would fail OPEN). Hand-rolling
+`json.loads(path.read_text())` in a `try` is the bug; picking the stricter helper
+on purpose is not.
+
+Path helpers in
 `store/layout.py`; the per-tenant
 active-session pointer in `store/session_pointer.py`; derived reads are free
 functions in view modules (`store/archive_views.py` is the template — it is

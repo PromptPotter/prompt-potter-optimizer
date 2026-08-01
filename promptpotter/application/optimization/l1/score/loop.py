@@ -114,26 +114,26 @@ async def score_population(
     samples_by_id = {int(s.id): s for s in dataset}
     dataset = [samples_by_id[sid] for sid in order]
 
-    for idx, osp_c in enumerate(population):
+    for idx, opt_sp_c in enumerate(population):
         pipeline_params_override = proposals[idx].pipeline_params_override or None
         # Single merge site: build the candidate's frozen searchpoint once and
         # share it with both consumers — the in-flight dashboard seed (resolved
         # config-only) and ``score_one_candidate`` (scoring + round-file report).
-        candidate_sp = osp_c.to_job_search_point(
+        candidate_sp = opt_sp_c.to_job_search_point(
             base_pipeline_params=effective_pipeline_params[idx],
             schema=cycle.session.pipeline_schema,
         )
         callbacks.on_candidate_started(
             idx,
             n,
-            osp_c.lineage.changes_description or "",
+            opt_sp_c.lineage.changes_description or "",
             pipeline_params_override,
-            osp_c.prompt_field_dict(),
+            opt_sp_c.prompt_field_dict(),
             candidate_sp.config_params,
         )
         # Bind PoBBCheck so this candidate's per-sample snapshot rides the telemetry stream tagged.
         elim_check.set_current(
-            osp_c.lineage.id,
+            opt_sp_c.lineage.id,
             on_snapshot=partial(callbacks.on_p_best_update, round_num, idx, n),
         )
         # The shared order at candidate start — webapp table + console read it.
@@ -147,7 +147,7 @@ async def score_population(
 
         cr_result = await score_one_candidate(
             idx=idx,
-            osp_c=osp_c,
+            opt_sp_c=opt_sp_c,
             candidate_sp=candidate_sp,
             pipeline_params_override=pipeline_params_override,
             cycle=cycle,
@@ -163,10 +163,10 @@ async def score_population(
             l1_diversity=l1_diversity,
             force_fresh=False,
         )
-        all_candidate_results[osp_c.lineage.id] = cr_result.results
+        all_candidate_results[opt_sp_c.lineage.id] = cr_result.results
         if cr_result.runtime_failure is not None:
-            osp_c.memory.wounds.runtime_failures = [
-                *osp_c.memory.wounds.runtime_failures,
+            opt_sp_c.memory.wounds.runtime_failures = [
+                *opt_sp_c.memory.wounds.runtime_failures,
                 cr_result.runtime_failure,
             ]
         candidate_scores.append(cr_result.report)
@@ -213,9 +213,9 @@ async def replicate_survivors_pass(
     schema = cycle.session.pipeline_schema
     assert schema is not None, "replication requires pipeline_schema"
     for _ in range(k):
-        for osp_c in survivors:
-            cid = osp_c.lineage.id
-            jsp = osp_c.to_job_search_point(
+        for opt_sp_c in survivors:
+            cid = opt_sp_c.lineage.id
+            jsp = opt_sp_c.to_job_search_point(
                 base_pipeline_params=effective_by_id.get(cid), schema=schema
             )
             rows, _scores, _signal = await score_search_point(
@@ -227,7 +227,7 @@ async def replicate_survivors_pass(
                 n_total_candidates=0,
                 axes=cycle.axes,
                 l1_diversity=0.0,
-                opt_sp=osp_c,
+                opt_sp=opt_sp_c,
                 on_sample_scored=None,
                 on_sample_starting=None,
                 force_fresh=True,

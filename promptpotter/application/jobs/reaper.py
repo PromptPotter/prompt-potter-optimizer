@@ -26,6 +26,7 @@ from promptpotter.infrastructure.store.io import (
     rmtree_robust,
     validate_path_component,
 )
+from promptpotter.infrastructure.store.layout import CycleLayout
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ def _is_dead(cycle_dir: Path, *, dead_after_s: float) -> bool:
     ``mark_producer_vanished`` is still the seam that re-checks pause/checkin
     before writing (slice 3), so a race between this read and a state change
     is never a silent double-reap."""
-    data = read_json_optional(cycle_dir / "index.json")
+    data = read_json_optional(CycleLayout(cycle_dir).manifest)
     if not isinstance(data, dict):
         return False  # unreadable — nothing to judge
     finished_at = data.get("finished_at")

@@ -316,7 +316,7 @@ class CommandDispatcher:
         when present; absent header skips the check (v0 relaxation)."""
         campaign = self._load_owned_campaign(campaign_id)
         cycle_dir = self._store.campaigns.cycle_dir(campaign_id, cycle_id)
-        if not (cycle_dir / "index.json").is_file():
+        if not CycleLayout(cycle_dir).manifest.is_file():
             raise NotFoundError(
                 f"cycle not found: {campaign_id}/{cycle_id}", code="command_target_not_found"
             )
@@ -447,7 +447,7 @@ class CommandDispatcher:
         """
         campaign = self._load_owned_campaign(campaign_id)
         cycle_dir = self._store.campaigns.cycle_dir(campaign_id, campaign.root_cycle_id)
-        if not (cycle_dir / "index.json").is_file():
+        if not CycleLayout(cycle_dir).manifest.is_file():
             raise NotFoundError(
                 f"check-in cycle not found: {campaign_id}/{campaign.root_cycle_id}",
                 code="command_target_not_found",

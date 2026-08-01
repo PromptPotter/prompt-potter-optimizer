@@ -80,7 +80,7 @@ export function roundDoc(over: Partial<RoundResult> = {}): RoundResult {
     diagnostics: null,
     critique: null,
     health: null,
-    opt_search_point: null,
+    opt_sp: null,
     axis_memory_peaked: [],
     status: "",
     round_id: "round_0",

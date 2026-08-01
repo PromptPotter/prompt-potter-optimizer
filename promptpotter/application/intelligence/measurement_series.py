@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.infrastructure.store.io import read_json_tolerant
-from promptpotter.infrastructure.store.layout import cycle_dir_for
+from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
@@ -32,7 +32,7 @@ def cycle_measurement_series(
     Ord = ``{round:04d}/{cand_idx:02d}``; candidates absent from the scoreboard sink to slot 99.
     """
     cycle_dir = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
-    rounds_dir = cycle_dir / "rounds"
+    rounds_dir = CycleLayout(cycle_dir).rounds
     out: dict[int, list[dict[str, Any]]] = {sid: [] for sid in sample_ids}
     if not rounds_dir.is_dir():
         return out

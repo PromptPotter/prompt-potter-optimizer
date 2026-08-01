@@ -72,7 +72,7 @@ def serve_dashboard_response(
     # read (`/tree`, `/ray`, `/events:subscribe`, `/file`) already 404s here.
     if not cycle_path.is_dir():
         raise NotFoundError(f"Cycle '{campaign_id}/{cycle_id}' not found")
-    path = cycle_path / "dashboard.json"
+    path = CycleLayout(cycle_path).dashboard
     present = path.is_file()
 
     # Conditional-GET once, before reading the body: Last-Modified rides the

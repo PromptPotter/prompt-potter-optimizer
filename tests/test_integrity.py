@@ -77,8 +77,8 @@ def test_render_does_not_leak_l3_plan_into_target_prompt() -> None:
     """L3's plan reaches L1/L2/L3 prompts via ``_r_plan`` only — never via
     ``render``. A leak would silently score a plan-contaminated target prompt."""
     sentinel = "REVISED_OPTIMIZATION_FRAMEWORK_PLAN_SENTINEL"
-    osp = OptSearchPoint(persona="Expert", instruction="Solve.", plan=sentinel)
-    assert sentinel not in osp.render()
+    opt_sp = OptSearchPoint(persona="Expert", instruction="Solve.", plan=sentinel)
+    assert sentinel not in opt_sp.render()
 
 
 def test_reasoning_model_below_token_floor_is_blocked_not_run() -> None:

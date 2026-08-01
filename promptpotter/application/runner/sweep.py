@@ -63,7 +63,7 @@ async def run_sweep_generation_only(
                     candidates_scored=0,
                     l1_yield=yield_stats.l1_yield,
                     # Collapse counts derive from `candidate_scores` — see `RoundResult`.
-                    opt_search_point=cycle.opt_sp,
+                    opt_sp=cycle.opt_sp,
                 ),
             )
         hard_samples_artifact = write_hard_samples_artifacts(session, cycle)

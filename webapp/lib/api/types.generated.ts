@@ -326,7 +326,7 @@ export interface RoundResult {
   diagnostics: unknown | null;
   critique: unknown | null;
   health: DegradationHealth | null;
-  opt_search_point: OptSearchPoint | null;
+  opt_sp: OptSearchPoint | null;
   axis_memory_peaked: string[];
   status: string;
   round_id: string;

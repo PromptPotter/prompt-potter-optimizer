@@ -84,7 +84,7 @@ async def measure_noise_floor(
         raise NoiseFloorError(
             f"origin arm in {campaign_id}/{cycle_id} round 0 carries no scored samples."
         )
-    osp = OptSearchPoint.from_prompt_fields(round_file.prompt_fields)
+    opt_sp = OptSearchPoint.from_prompt_fields(round_file.prompt_fields)
 
     session = await init_services(
         backend_id=campaign.backend_id or campaign.dataset_name,
@@ -117,7 +117,7 @@ async def measure_noise_floor(
     schema = session.pipeline_schema
     if schema is None:
         raise NoiseFloorError("pipeline schema unavailable; cannot resolve the origin config.")
-    jsp = osp.to_job_search_point(pipeline_params, schema=schema)
+    jsp = opt_sp.to_job_search_point(pipeline_params, schema=schema)
     scoring_set = [s for s in session.samples if s.id in sample_ids]
     if not scoring_set:
         raise NoiseFloorError(

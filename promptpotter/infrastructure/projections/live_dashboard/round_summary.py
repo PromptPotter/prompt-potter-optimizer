@@ -9,7 +9,6 @@ is fetched on demand by the deep-inspection consumers.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +19,7 @@ from promptpotter.domain.results import (
     RoundSummaryCandidate,
     is_round_winner,
 )
+from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout
 
 # The ``ScoredCandidate`` fields each display model copies verbatim — its own field list
@@ -34,13 +34,7 @@ def origin_cells_from_disk(cycle_dir: Path) -> dict[str, float]:
     the un-edited-meta-prompt control every later round's outer verdict pairs against. The
     sole reader of this file for this purpose; ``application/meta_champion.py``
     reuses it instead of keeping its own copy."""
-    origin_file = CycleLayout(Path(cycle_dir)).round_file(0)
-    if not origin_file.is_file():
-        return {}
-    try:
-        doc = json.loads(origin_file.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
+    doc = read_json_tolerant(CycleLayout(Path(cycle_dir)).round_file(0))
     if not isinstance(doc, dict):
         return {}
     acr = doc.get("all_candidate_results") or {}

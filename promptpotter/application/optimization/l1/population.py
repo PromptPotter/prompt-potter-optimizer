@@ -78,11 +78,11 @@ def parse_population(
     prompt-field value proposed outside the block library — only under ``restrict``
     (see the same-named knob).
     """
-    osp_list: list[OptSearchPoint] = []
+    opt_sp_list: list[OptSearchPoint] = []
     merged: list[dict[str, Any] | None] = []
     for cp in proposals:
         pipeline_params_override = cp.pipeline_params_override
-        osp = cp.osp
+        opt_sp = cp.opt_sp
         merged_pp = merge_pipeline_params(pipeline_params, pipeline_params_override, schema)
         if schema:
             failures: list[ValidationFailure] = []
@@ -103,7 +103,7 @@ def parse_population(
                 # opt_sp.memory.wounds.runtime_failures; runs even when schema-compliance passes.
                 rf_outcome = L1_CONFIG_NOT_IN_RUNTIME_FAILURES.run(
                     pipeline_params_override,
-                    opt_sp=osp,
+                    opt_sp=opt_sp,
                 )
                 if rf_outcome is not None:
                     failures.extend(rf_outcome.evidence["failures"])
@@ -113,29 +113,29 @@ def parse_population(
             # incumbent inherits a severed port without re-proposing it).
             ph_outcome = L1_PROMPT_PLACEHOLDERS_INTACT.run(
                 merged_pp or {},
-                opt_sp=osp,
+                opt_sp=opt_sp,
                 pipeline_schema=schema,
             )
             if ph_outcome is not None:
                 failures.extend(ph_outcome.evidence["failures"])
             if failures:
-                osp.memory.wounds.validation_failures = failures
+                opt_sp.memory.wounds.validation_failures = failures
                 for vf in failures:
                     logger.warning(
                         "candidate %s: validation failure on %s — proposed %r not in allowed %r (reason=%s)",
-                        osp.lineage.id[:8],
+                        opt_sp.lineage.id[:8],
                         vf.axis,
                         vf.value,
                         vf.allowed,
                         vf.reason,
                     )
-        osp_list.append(osp)
+        opt_sp_list.append(opt_sp)
         merged.append(merged_pp)
-    return osp_list, merged
+    return opt_sp_list, merged
 
 
 def build_score_report(
-    osp: OptSearchPoint,
+    opt_sp: OptSearchPoint,
     pipeline_params_override: dict[str, Any] | None,
     score_summary: dict[str, Any],
     query_results: list[Any],
@@ -171,12 +171,12 @@ def build_score_report(
     return ScoredCandidate(
         composite_ci_lo=ci_lo,
         composite_ci_hi=ci_hi,
-        candidate_id=osp.lineage.id,
+        candidate_id=opt_sp.lineage.id,
         label=label,
-        changes_description=osp.lineage.changes_description or "",
+        changes_description=opt_sp.lineage.changes_description or "",
         pipeline_params_override=pipeline_params_override,
         resolved_pipeline_params=resolved_pipeline_params,
-        prompt_fields=osp.prompt_field_dict(),
+        prompt_fields=opt_sp.prompt_field_dict(),
         accuracy=score_summary["accuracy"],
         composite_fitness=score_summary["composite_fitness"],
         hits=score_summary["hits"],
@@ -188,7 +188,7 @@ def build_score_report(
         expected_samples=len(dataset),
         partial_reason=str(score_summary.get("partial_reason", "")),
         invalid=invalid,
-        validation_failures=list(osp.memory.wounds.validation_failures),
+        validation_failures=list(opt_sp.memory.wounds.validation_failures),
         runtime_failures=[new_runtime_failure] if new_runtime_failure else [],
         elimination_context=elimination_context or {},
         degradation_context=degradation_context or {},

@@ -21,8 +21,8 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.config.paths import (
-    DEFAULT_DATASETS_ROOT,
     DEFAULT_PROJECTS_ROOT,
+    benchmark_datasets_root,
 )
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.identity import TenantId
@@ -158,13 +158,13 @@ def build_stores(
     identity: IdentityContext,
     *,
     projects_root: Path | str | None = None,
-    datasets_root: Path | str | None = None,
+    benchmarks_root: Path | str | None = None,
     shared_root: Path | str | None = None,
 ) -> Stores:
     """Assemble an :class:`IdentityContext`-rooted :class:`Stores` bundle.
 
     Defaults: ``projects_root=<repo>/.promptpotter/projects``,
-    ``datasets_root=<repo>/datasets`` (survives ``.promptpotter/`` resets).
+    ``benchmarks_root=<repo>/datasets`` (survives ``.promptpotter/`` resets).
     Tests pass ``tmp_path``. The tenant slug rides ``identity.tenant_id`` —
     use :func:`~promptpotter.shared.identity.default_identity` for Stage-0
     single-operator callers.
@@ -179,12 +179,12 @@ def build_stores(
     tenant_dir = root / identity.tenant_id
     shared = Path(shared_root) if shared_root else root
     shared_tenant = shared / identity.tenant_id
-    ds_root = Path(datasets_root) if datasets_root else DEFAULT_DATASETS_ROOT
+    bench_root = Path(benchmarks_root) if benchmarks_root else benchmark_datasets_root()
     return Stores(
         base_dir=tenant_dir,
         projects_root=root,
         shared_root=shared,
-        benchmarks_root=ds_root,
+        benchmarks_root=bench_root,
         identity=identity,
         backends=BackendStore(tenant_dir),
         tenant_datasets=TenantDatasetStore(tenant_dir),

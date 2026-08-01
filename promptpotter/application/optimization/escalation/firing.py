@@ -92,7 +92,7 @@ class TransitionResult:
     ``_mint_fork`` + observer rebuild + loop re-entry on the new fork.
     """
 
-    opt_search_point: OptSearchPoint
+    opt_sp: OptSearchPoint
     l3_note: str = ""
     axis_targeted: str = ""
     l1_layout: L1Layout | None = None
@@ -165,7 +165,7 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, prompt: str) -> Tran
         )
 
     return TransitionResult(
-        opt_search_point=opt_sp.mutate(source="l2_context", **changes),
+        opt_sp=opt_sp.mutate(source="l2_context", **changes),
         axis_targeted=raw.axis_targeted,
         l1_layout=accepted_layout,
         l2_guard_breaches=failures,
@@ -177,10 +177,10 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, prompt: str) -> Tran
 
 
 def _apply_l2(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
-    osp = cycle.opt_sp
+    opt_sp = cycle.opt_sp
     if result.l1_layout is not None:
-        osp.memory.l1_layout = result.l1_layout
-    osp.memory.wounds.l2_guard_breaches = list(result.l2_guard_breaches)
+        opt_sp.memory.l1_layout = result.l1_layout
+    opt_sp.memory.wounds.l2_guard_breaches = list(result.l2_guard_breaches)
     cycle.escalation.record_l2_fired(
         best_composite_fitness=cycle.tracking.best_composite_fitness,
         best_theta=cycle.tracking.best_theta,
@@ -204,9 +204,9 @@ def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
         "l2_stall_count": cycle.escalation.l2_stall_count,
         "l2_best_composite_fitness_at_entry": cycle.escalation.l2_best_composite_fitness_at_entry,
         "l2_best_theta_at_entry": cycle.escalation.l2_best_theta_at_entry,
-        "param_changes_count": len(result.opt_search_point.memory.l1_overrides),
+        "param_changes_count": len(result.opt_sp.memory.l1_overrides),
         "l1_layout_changed": result.l1_layout is not None,
-        "changes_description": result.opt_search_point.lineage.changes_description or "",
+        "changes_description": result.opt_sp.lineage.changes_description or "",
         "axis_targeted": result.axis_targeted,
         "l2_prompt": result.debug_prompt,
         "l2_response": result.debug_response,
@@ -247,7 +247,7 @@ def _parse_l3(raw: L3PlanOutput, opt_sp: OptSearchPoint, prompt: str) -> Transit
             ", ".join(o.validator_id for o in failures),
         )
     return TransitionResult(
-        opt_search_point=opt_sp.mutate(
+        opt_sp=opt_sp.mutate(
             plan=new_plan, changes_description=f"L3: {truncate(rationale, 80)}", source="l3_plan"
         ),
         l3_note=raw.note,
@@ -285,8 +285,8 @@ def _l3_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
         "l3_stall_count": cycle.escalation.l3_stall_count,
         "l3_best_composite_fitness_at_entry": cycle.escalation.l3_best_composite_fitness_at_entry,
         "l3_best_theta_at_entry": cycle.escalation.l3_best_theta_at_entry,
-        "new_plan_preview": str(result.opt_search_point.plan)[:120],
-        "changes_description": result.opt_search_point.lineage.changes_description or "",
+        "new_plan_preview": str(result.opt_sp.plan)[:120],
+        "changes_description": result.opt_sp.lineage.changes_description or "",
     }
     if result.fork_proposal is not None:
         payload["fork_proposal"] = result.fork_proposal.model_dump()
@@ -311,7 +311,7 @@ L3 = LayerStrategy(
 # ---------------------------------------------------------------------------
 
 
-def apply_fork_payload_to_osp(opt_sp: OptSearchPoint, payload: ForkSpec) -> None:
+def apply_fork_payload_to_opt_sp(opt_sp: OptSearchPoint, payload: ForkSpec) -> None:
     """Stamp a fork payload's L1-surface deltas on the OSP — same shape L2 writes. Assumes
     `payload.l1_layout is not None` (callers without deltas guard at the call site).
     """
@@ -421,7 +421,7 @@ async def _run_transition(
     # lineage, parent = the outgoing incumbent) and the persistent memory carries
     # forward. The frame surfaces L2/L3 own (l1_layout / plan) are then
     # installed by `transition.apply` below, so no `advanced` overlay is passed here.
-    new_opt = result.opt_search_point
+    new_opt = result.opt_sp
     cycle.adopt(new_opt, advanced={})
     cycle.tracking.current_sp = new_opt.to_job_search_point(
         base_pipeline_params=current_pp, schema=pipeline_schema
@@ -433,7 +433,7 @@ async def _run_transition(
                 layer=transition.layer_id,
                 campaign_id=tracing_campaign_id,
                 round_num=round_num,
-                changes_description=result.opt_search_point.lineage.changes_description or "",
+                changes_description=result.opt_sp.lineage.changes_description or "",
             )
     transition.apply(cycle, result, round_num)
     emit_phase(
@@ -668,6 +668,6 @@ async def escalate_l2(
 __all__ = [
     "L2",
     "L3",
-    "apply_fork_payload_to_osp",
+    "apply_fork_payload_to_opt_sp",
     "escalate_l2",
 ]

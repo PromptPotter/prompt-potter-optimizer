@@ -63,14 +63,14 @@ async def l1_score(
     round_num: int = 0,
     yield_stats: L1YieldStats,
 ) -> tuple[RoundResult, OptSearchPoint]:
-    """Score + select winner. Returns `(RoundResult, winner_osp)` — RoundResult is persistence
-    shape, winner_osp rides alongside for the caller's `PromptVersion` tracing emit.
+    """Score + select winner. Returns `(RoundResult, winner_opt_sp)` — RoundResult is persistence
+    shape, winner_opt_sp rides alongside for the caller's `PromptVersion` tracing emit.
     """
     session = cycle.session
     schema = session.pipeline_schema
     assert schema is not None, "l1_score requires pipeline_schema"
 
-    osp_population, effective_pipeline_params = parse_population(
+    opt_sp_population, effective_pipeline_params = parse_population(
         candidates,
         pipeline_params,
         schema,
@@ -81,7 +81,7 @@ async def l1_score(
     # no longer aligns with this full-population list. Keyed lookup is filter-proof.
     params_by_id = {
         ind.lineage.id: pp
-        for ind, pp in zip(osp_population, effective_pipeline_params, strict=True)
+        for ind, pp in zip(opt_sp_population, effective_pipeline_params, strict=True)
     }
     # THE cycle's decision sink — the same list every escalation decision uses, which
     # `persist_round` flushes to the ledger and folds into the round file. A local list here
@@ -95,7 +95,7 @@ async def l1_score(
         escalation_signal,
     ) = await score_population(
         cycle,
-        osp_population,
+        opt_sp_population,
         effective_pipeline_params,
         candidates,
         dataset,
@@ -110,7 +110,7 @@ async def l1_score(
     aborted_ids = {cs.candidate_id for cs in candidate_scores if not is_leader_eligible(cs)}
     scored = [
         ind
-        for ind in osp_population
+        for ind in opt_sp_population
         if ind.lineage.id in all_candidate_results and ind.lineage.id not in aborted_ids
     ]
     # Opt-in successive-halving replication: give survivors extra independent draws BEFORE the
@@ -186,7 +186,7 @@ async def l1_score(
     # round renders "accuracy 58% (origin 18%)" — a phantom lift. No winner ⇒ both are the
     # incumbent's standing (lift 0); a winner keeps the touched matched reference (set below).
     best_origin_accuracy = parent.report.accuracy
-    best_osp: OptSearchPoint = parent.osp
+    best_opt_sp: OptSearchPoint = parent.opt_sp
     best_results: list[QueryMeasurement] = list(cast("list[QueryMeasurement]", parent.results))
     best_label = parent.report.label
     best_scores: dict[str, float] = dict(parent.report.evaluators)
@@ -250,11 +250,11 @@ async def l1_score(
     # its OWN report stamped when it finished scoring (``build_score_report``), which is what
     # lets a mid-round bar carry a whisker at all.
     if rep_k > 0:
-        osp_by_id = {ind.lineage.id: ind for ind in osp_population}
+        opt_sp_by_id = {ind.lineage.id: ind for ind in opt_sp_population}
         for cs_idx, cs in enumerate(candidate_scores):
             rows = all_candidate_results.get(cs.candidate_id)
-            osp = osp_by_id.get(cs.candidate_id)
-            if not rows or osp is None:
+            opt_sp = opt_sp_by_id.get(cs.candidate_id)
+            if not rows or opt_sp is None:
                 continue
             n_cells = len({r.get("sample_id") for r in rows if r.get("sample_id") is not None})
             if len(rows) <= n_cells:
@@ -262,7 +262,7 @@ async def l1_score(
             s = compute_composite_fitness(
                 rows,
                 schema,
-                opt_sp=osp,
+                opt_sp=opt_sp,
                 round_scorer=session.scoring.round_scorer,
                 l1_diversity=yield_stats.l1_yield,
             )
@@ -325,7 +325,7 @@ async def l1_score(
         best_acc = winner_cs.accuracy
         best_comp = winner_cs.composite_fitness
         best_origin_accuracy = parent.report.accuracy
-        best_osp = winner_ind
+        best_opt_sp = winner_ind
         best_results = list(all_candidate_results[winner_id])
         best_label = winner_ind.lineage.changes_description or winner_ind.lineage.id[:12]
         best_scores = dict(winner_cs.evaluators)
@@ -433,8 +433,8 @@ async def l1_score(
         matched_origin_hits=best_matched_origin_hits,
         matched_origin_composite=best_matched_origin_composite,
         prompt_fields={
-            **best_osp.prompt_field_dict(),
-            "lineage": best_osp.lineage.model_dump(),
+            **best_opt_sp.prompt_field_dict(),
+            "lineage": best_opt_sp.lineage.model_dump(),
         },
         pipeline_params=params_by_id.get(winner_id, pipeline_params)
         if winner_id
@@ -456,7 +456,7 @@ async def l1_score(
         # reason. Passing them here would be a second recording that could disagree.
         l1_parse_failure=yield_stats.l1_parse_failure,
     )
-    return round_result, best_osp
+    return round_result, best_opt_sp
 
 
 __all__ = ["l1_score"]

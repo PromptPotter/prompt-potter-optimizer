@@ -50,13 +50,19 @@ class TenantDatasetStore:
 
     # -- Path helpers ---------------------------------------------------------
 
-    def datasets_root(self) -> Path:
+    def committed_datasets_root(self) -> Path:
+        """This tenant's OWN dataset tree — read-write, theirs outright.
+
+        Named apart from ``Stores.benchmarks_root`` on purpose: that one is the
+        install-global DEFINITIONS dir and is read-only. Both were spelled
+        ``datasets_root``, so the one identifier named two directories with
+        opposite write semantics."""
         return self._base_dir / "datasets"
 
     def dataset_dir(self, slug: str) -> Path:
         """Resolve ``{tenant_root}/datasets/{slug}``. Raises ``ValueError`` on bad slug."""
         validate_dataset_name(slug)
-        return self.datasets_root() / slug
+        return self.committed_datasets_root() / slug
 
     # -- Slug registry --------------------------------------------------------
 
@@ -66,7 +72,7 @@ class TenantDatasetStore:
         Keyed on the same file :func:`~promptpotter.infrastructure.store.dataset_access.is_dataset_dir`
         asks for, so this listing and the resolver cannot disagree about what a dataset is.
         """
-        root = self.datasets_root()
+        root = self.committed_datasets_root()
         if not root.is_dir():
             return []
         out: list[str] = []
@@ -118,7 +124,7 @@ class TenantDatasetStore:
     def migrations_dir(self) -> Path:
         """Resumable-migration marker home (``datasets/.migrations/``). Hidden, so
         :meth:`list_slugs` already skips it — a marker is never a dataset."""
-        return self.datasets_root() / ".migrations"
+        return self.committed_datasets_root() / ".migrations"
 
     # -- Committed dataset I/O ------------------------------------------------
 

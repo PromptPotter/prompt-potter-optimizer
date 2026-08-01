@@ -102,7 +102,7 @@ Three layers of confirmation:
 ### Status (what's already on disk)
 
 - **`IdentityContext` seam shipped** — `promptpotter/shared/identity.py` carries the 5-field frozen dataclass; `default_identity(tenant_id="default")` is the Stage-0 factory; `TenantId` / `UserId` / `Issuer` / `SafeName` newtypes live in `promptpotter/domain/identity.py`; `safe_name()` validator gates path-segment use. **`TenantContext` deleted**; `Session.identity: IdentityContext` replaces `Session.tenant`.
-- **`build_stores(identity, *, projects_root=…, datasets_root=…)` shipped** — `infrastructure/store/stores.py`. `Stores.identity` is the sole tenant-scope source; `Stores.tenant_id` is a derived `@property` returning the `TenantId` newtype. `DEFAULT_TENANT_ID` removed.
+- **`build_stores(identity, *, projects_root=…, benchmarks_root=…)` shipped** — `infrastructure/store/stores.py`. `Stores.identity` is the sole tenant-scope source; `Stores.tenant_id` is a derived `@property` returning the `TenantId` newtype. `DEFAULT_TENANT_ID` removed.
 - **FastAPI seam shipped** — `presentation/api/deps.py::resolve_identity` returns the Stage-0 default; `IdentityDep` / `build_stores_from_identity` / `StoreDep` chain it. Stage 1 (M12 OIDC client) replaces only `resolve_identity`.
 - **CLI seam shipped** — `presentation/cli/commands/_shared.py::identity_from_args` reads `args.tenant`; `init_services_cli(identity=…)` + `init_services(identity=…)` accept the `IdentityContext`. All 8 `build_stores` call sites migrated.
 - **Seam enforced by types + review** — no-drift gates #3 (`build_stores` signature), #4 (`Stores.identity` sole tenant source), #6 (SCIM-named field set) ride the typed seam; no standing test (structural/contract suite cut, see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).
@@ -139,7 +139,7 @@ Reifies the Stage-0 deliverables of [`0002-identity-foundation.md`](0002-identit
 #### 2. `IdentityContext` is the construction route for `Stores`
 
 - `TenantContext` deleted; `Session.identity: IdentityContext` (`application/bootstrap/session.py`) replaces `Session.tenant: TenantContext | None`. Behavior change, no shim. **(shipped)**
-- `build_stores(identity, *, projects_root=…, datasets_root=…)` (`infrastructure/store/stores.py`) is the only construction route. The newtype + the context object collapse into one positional argument — no caller passes a raw string. `build_stores` reads `identity.tenant_id` to root the file-based stores under `projects/{tenant_id}/`. **(shipped)**
+- `build_stores(identity, *, projects_root=…, benchmarks_root=…)` (`infrastructure/store/stores.py`) is the only construction route. The newtype + the context object collapse into one positional argument — no caller passes a raw string. `build_stores` reads `identity.tenant_id` to root the file-based stores under `projects/{tenant_id}/`. **(shipped)**
 - Spend events that carry user identity use SCIM-named fields (`User.id`, `User.externalId`); the `org_id` tenant claim feeds `IdentityContext.tenant_id`. See [`0002-identity-foundation.md` § Data model](0002-identity-foundation.md#data-model--scim-20-core--enterpriseuser).
 
 #### 3. Single seam per entry point

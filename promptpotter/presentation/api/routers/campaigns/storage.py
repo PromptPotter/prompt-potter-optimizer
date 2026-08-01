@@ -18,6 +18,7 @@ from pathlib import Path
 from pydantic import Field
 
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import FileKind, classify
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
@@ -33,10 +34,7 @@ _LEAVES = ("dataset", "connector", *_LOOP_LEAVES)
 
 def _round_connector_bytes(path: Path) -> int:
     """Serialized size of the per-sample arrays the backend produced in one round file."""
-    try:
-        doc = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return 0
+    doc = read_json_tolerant(path)
     if not isinstance(doc, dict):
         return 0
     return sum(len(json.dumps(doc[k])) for k in _CONNECTOR_ROUND_KEYS if k in doc)

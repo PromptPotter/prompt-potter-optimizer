@@ -119,7 +119,7 @@ async def verify_candidate(
             f"{label!r} requested index {cand_idx + 1}."
         )
     proposal = proposals[cand_idx]
-    osp = OptSearchPoint.model_validate(proposal["osp"])
+    opt_sp = OptSearchPoint.model_validate(proposal["opt_sp"])
     pp_override = proposal.get("pipeline_params_override") or {}
 
     round_file = stores.campaigns.load_round_file(campaign_id, cycle_id, round_num)
@@ -164,7 +164,7 @@ async def verify_candidate(
     if schema is None:
         raise VerifyError("pipeline schema unavailable; cannot resolve candidate config.")
     effective_pipeline_params = merge_pipeline_params(pipeline_params, pp_override, schema) or {}
-    jsp = osp.to_job_search_point(effective_pipeline_params, schema=schema)
+    jsp = opt_sp.to_job_search_point(effective_pipeline_params, schema=schema)
     node_configs = schema.node_configs(effective_pipeline_params)
     predicate: dict[str, dict[str, Any]] = dict(node_configs)
     config_hash = schema.sp_hash(effective_pipeline_params)

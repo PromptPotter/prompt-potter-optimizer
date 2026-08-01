@@ -64,11 +64,11 @@ def candidate_summaries(proposals: list[CandidateProposal], round_num: int) -> l
     """Per-candidate summary dicts for phase events. `label` set once here — no display-side `idx+1`."""
     summaries = []
     for i, cp in enumerate(proposals):
-        prompt_fields = cp.osp.prompt_fields()
+        prompt_fields = cp.opt_sp.prompt_fields()
         summary: dict[str, Any] = {
             "idx": i,
             "label": candidate_label(round_num, i),
-            "changes_description": cp.osp.lineage.changes_description or "",
+            "changes_description": cp.opt_sp.lineage.changes_description or "",
         }
         if cp.pipeline_params_override:
             summary["pipeline_params_override"] = cp.pipeline_params_override
@@ -76,7 +76,7 @@ def candidate_summaries(proposals: list[CandidateProposal], round_num: int) -> l
             summary["prompt_fields"] = prompt_fields
         # Third L1 mutation slot — lets SP-diff render task_context-only candidates as a mutation,
         # not a bare [clone].
-        summary["task_context"] = cp.osp.memory.task_context.to_dict()
+        summary["task_context"] = cp.opt_sp.memory.task_context.to_dict()
         summaries.append(summary)
     return summaries
 
@@ -269,7 +269,7 @@ async def l1_generate(
             child.memory.task_context = child.memory.task_context.merge(tc_changes)
         population.append(
             CandidateProposal(
-                osp=child,
+                opt_sp=child,
                 pipeline_params_override=pipeline_params_override,
                 prompt_fields_override=prompt_changes,
             )

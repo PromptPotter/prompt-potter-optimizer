@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.domain.escalation_signals import RuntimeFailure, rf_dedup_key
 from promptpotter.domain.phases import StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.infrastructure.store.io import read_json_tolerant
-from promptpotter.infrastructure.store.layout import campaign_cycles_dir
+from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
@@ -59,7 +59,7 @@ def gather_sibling_runtime_failures(
     for sibling in sibling_dirs:
         if exclude_cycle_id and sibling.name == exclude_cycle_id:
             continue
-        idx = read_json_tolerant(sibling / "index.json")
+        idx = read_json_tolerant(CycleLayout(sibling).manifest)
         if not isinstance(idx, dict):
             continue
         if not _ran_to_completion(idx.get("stop_reason")):
@@ -67,11 +67,11 @@ def gather_sibling_runtime_failures(
         n_rounds = int(idx.get("n_rounds") or 0)
         if n_rounds <= 0:
             continue
-        round_data = read_json_tolerant(sibling / "rounds" / f"round_{n_rounds:04d}.json")
+        round_data = read_json_tolerant(CycleLayout(sibling).round_file(n_rounds))
         if not isinstance(round_data, dict):
             continue
-        osp = round_data.get("opt_search_point") or {}
-        memory = osp.get("memory") or {}
+        opt_sp = round_data.get("opt_sp") or {}
+        memory = opt_sp.get("memory") or {}
         wounds = memory.get("wounds") or {}
         for rf_dict in wounds.get("runtime_failures") or []:
             key = rf_dedup_key(rf_dict)

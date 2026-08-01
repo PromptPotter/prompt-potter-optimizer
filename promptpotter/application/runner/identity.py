@@ -54,7 +54,7 @@ def mint_checkin_cycle_id() -> str:
 
 
 def build_origin_cycle_id(
-    osp: OptSearchPoint,
+    opt_sp: OptSearchPoint,
     schema: PipelineSchema | None,
     dataset: list[Sample],
     base_pipeline_params: dict[str, Any] | None = None,
@@ -72,7 +72,7 @@ def build_origin_cycle_id(
         if base_pipeline_params is not None
         else (schema.to_pipeline_params() if schema else {})
     )
-    jsp = osp.to_job_search_point(base_pipeline_params=base_pp, schema=schema)
+    jsp = opt_sp.to_job_search_point(base_pipeline_params=base_pp, schema=schema)
     return cycle_config_identity(jsp, dataset)
 
 
