@@ -447,4 +447,20 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-__all__ = ["build_parser"]
+def parser_verbs(parser: argparse.ArgumentParser) -> frozenset[str]:
+    """The subcommand names registered on ``parser`` — the argparse half of the verb set.
+
+    Exists so ``campaign_runner`` can assert its ``COMMANDS`` table against the parser at
+    import without reaching into argparse itself. The two halves are authored in different
+    files and drift silently in one direction: a verb in ``COMMANDS`` with no parser row is
+    simply unreachable, and argparse reports an unknown verb rather than a missing one.
+    """
+    return frozenset(
+        name
+        for action in parser._actions
+        if isinstance(action, argparse._SubParsersAction)
+        for name in action.choices
+    )
+
+
+__all__ = ["build_parser", "parser_verbs"]

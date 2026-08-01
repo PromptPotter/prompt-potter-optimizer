@@ -17,7 +17,6 @@ Sections (Pass A — scorers, evaluators, IRT):
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -63,8 +62,10 @@ from promptpotter.domain.pipeline_schema import (
 )
 from promptpotter.domain.rendering import display_fitness, extract_display_answer
 from promptpotter.domain.sample import Sample
+from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.shared import extract_gsm8k_number
 from promptpotter.shared.statistics import mean_ci
+from tests.factories import cycle_result, lost_round, round_result
 
 # ===========================================================================
 # 1. Scorer matcher formulas — one parametrized family
@@ -890,98 +891,6 @@ def test_adopted_level_trajectory_is_honest_single_scale() -> None:
     assert adopted_level_trajectory(origin_theta, [1.0], {}) == (None, [])
 
 
-def _fake_inner_round(
-    rnd: int,
-    *,
-    improved: bool = True,
-    degraded_rate: float = 0.0,
-    no_result: int = 0,
-    samples: int = 24,
-    candidates_scored: int = 2,
-    parse_failure: str | None = None,
-    no_op: int = 0,
-    dup: int = 0,
-    collapsed: int = 0,
-    cut: int = 0,
-) -> SimpleNamespace:
-    """A RoundResult stand-in carrying only the fields ``compute_outer_proxies`` reads.
-
-    A parse failure yields ZERO candidates by construction (``l1_generate`` returns ``[]``),
-    so it is modelled on the round, never on a candidate — no ``ScoredCandidate`` can carry
-    a ``meta_prompt_parse_failure``.
-
-    ``collapsed`` makes that many candidates answer ONE label to every sample (the constant
-    answerer ``_answer_collapse_rate`` charges). The truth list repeats deliberately: with as
-    many distinct truths as rows the answer space reads as identity-keyed and no collapse is
-    detectable — which is exactly the guard that keeps an L4 OUTER round, whose ground truths
-    are per-seed tokens, from being called collapsed.
-
-    ``cut`` makes that many candidates *also* stop after 2 rows — an arm PoBB eliminated before
-    it earned a verdict. They are collapsed by construction (a 2-row constant answerer), which
-    is the point: below ``elimination_n_min`` we cannot tell collapse from small-n noise.
-    """
-    if parse_failure:
-        candidates_scored = 0
-    truth = ["TRUE", "FALSE", "TRUE", "FALSE"]
-    return SimpleNamespace(
-        round=rnd,
-        improved=improved,
-        health=SimpleNamespace(
-            samples=samples, degraded_rate=degraded_rate, no_result_count=no_result
-        ),
-        candidates_scored=candidates_scored,
-        candidate_scores=[
-            SimpleNamespace(validation_failures=[], runtime_failures=[])
-            for _ in range(candidates_scored)
-        ],
-        all_candidate_results={
-            f"c{i}": [
-                {"predicted": "Uncertain" if i < collapsed or i < cut else t, "ground_truth": t}
-                for t in (truth[:2] if i < cut else truth)
-            ]
-            for i in range(candidates_scored)
-        },
-        l1_n_no_op=no_op,
-        l1_n_duplicate=dup,
-        l1_n_repeat=0,
-        l1_parse_failure=parse_failure,
-    )
-
-
-def _fake_inner_result(
-    levels: list[float],
-    origin: float | None,
-    rounds: list[SimpleNamespace],
-    *,
-    cost: float = 0.03,
-    stop_reason: StopReason = StopReason.MAX_ROUNDS,
-    unpriced_tokens: int = 0,
-    billed: float | None = None,
-) -> SimpleNamespace:
-    """``rounds`` carries L1 rounds ONLY — round 0 is peeled off upstream (``Cycle.absorb_round``
-    is the sole sink for a finished L1 round), and ``levels`` carries one level per L1 round.
-
-    ``cost`` is the INCURRED cost — what the search would cost cold, and the only divisor the
-    proxies read. ``billed`` (the bill; defaults to the same) is deliberately independent: they
-    diverge exactly when a cycle replays the tenant-global cache.
-
-    ``elimination_n_min`` matches ``_fake_inner_round``'s 4-row full arms, so an uncut candidate
-    earns a verdict and a ``cut`` one does not."""
-    return SimpleNamespace(
-        origin_level=origin,
-        round_adopted_levels=levels,
-        elimination_n_min=4,
-        rounds=rounds,
-        spend=SimpleNamespace(
-            cost_usd=cost if billed is None else billed,
-            unpriced_tokens=0,
-            incurred_usd=cost,
-            incurred_unpriced_tokens=unpriced_tokens,
-        ),
-        stop_reason=stop_reason,
-    )
-
-
 def test_compute_proxies_composed_fitness_discriminates() -> None:
     # SILENT wrong-score: the outer L4 once distilled a signal-rich inner campaign to TWO
     # endpoint deltas — a warning-riddled, mode-collapsing, or expensive campaign scored
@@ -991,7 +900,7 @@ def test_compute_proxies_composed_fitness_discriminates() -> None:
     # invisible if wrong: the run completes, the dashboard looks fine, the ranking is subtly off.
     from promptpotter.domain.l4.proxies import compute_outer_proxies
 
-    clean = _fake_inner_result([0.40, 0.55], 0.30, [_fake_inner_round(1), _fake_inner_round(2)])
+    clean = cycle_result([0.40, 0.55], 0.30, [round_result(1), round_result(2)])
     px = compute_outer_proxies(clean).model_dump()
     # The lift core is the raw climb on the ability ruler — no denominator. Both levels are
     # abilities in (0,1), so the delta is bounded with nothing to divide by. A divisor of ANY
@@ -1012,12 +921,12 @@ def test_compute_proxies_composed_fitness_discriminates() -> None:
     assert px["delta_per_dollar"] == pytest.approx(0.25 / 0.03)
 
     # Same lift, but round 1 is warning-riddled and round 2 mode-collapses → quality drops.
-    dirty = _fake_inner_result(
+    dirty = cycle_result(
         [0.40, 0.55],
         0.30,
         [
-            _fake_inner_round(1, degraded_rate=0.5, no_result=6),
-            _fake_inner_round(2, no_op=1, dup=1),
+            round_result(1, degraded_rate=0.5, no_result=6),
+            round_result(2, no_op=1, dup=1),
         ],
     )
     pd = compute_outer_proxies(dirty).model_dump()
@@ -1030,18 +939,25 @@ def test_compute_proxies_composed_fitness_discriminates() -> None:
     # so the round must carry the failure — otherwise the worst possible outer candidate scores
     # `problem_rate == 0.0`, i.e. cleaner than a merely degraded one, and the L4 outer loop
     # silently steers TOWARD schema-breaking meta-prompts. The run completes; nothing errors.
-    broke = _fake_inner_result(
+    broke = cycle_result(
         [0.40, 0.55],
         0.30,
         [
-            _fake_inner_round(1, parse_failure="meta_prompt_parse_failure"),
-            _fake_inner_round(2),
+            round_result(1, parse_failure="meta_prompt_parse_failure"),
+            round_result(2),
         ],
     )
     pb = compute_outer_proxies(broke).model_dump()
     assert pb["cleanliness"] < px["cleanliness"]  # a broken round is NOT clean
     assert pb["cleanliness"] == pytest.approx(1.0 - 1.0 / 2)  # one of two L1 rounds fully dirty
-    assert pb["cleanliness"] < pd["cleanliness"]  # and dirtier than mere sample degradation
+    # Dirtier than MERE sample degradation — the comparison is against degradation alone, not
+    # against `dirty` above: that one also mode-collapses, and a collapsed variant rides
+    # `candidate_scores` with its ValidationFailure, so it is charged a second time through
+    # `_self_heal_rate`. Two dirt sources outscoring one is the formula working.
+    degraded_only = cycle_result(
+        [0.40, 0.55], 0.30, [round_result(1, degraded_rate=0.5, no_result=6), round_result(2)]
+    )
+    assert pb["cleanliness"] < compute_outer_proxies(degraded_only).model_dump()["cleanliness"]
 
     # The whole point: the composed formula ranks the clean campaign above the dirty one.
     from pathlib import Path
@@ -1070,18 +986,16 @@ def test_exploring_beats_inert_and_a_cut_arm_is_not_dirt() -> None:
     from promptpotter.domain.l4.proxies import compute_outer_proxies
 
     # Explored hard: climbed, and spent two of its four arms per round on probes PoBB cut early.
-    explorer = _fake_inner_result(
+    explorer = cycle_result(
         [0.40, 0.85],
         0.30,
         [
-            _fake_inner_round(1, candidates_scored=4, cut=2),
-            _fake_inner_round(2, candidates_scored=4, cut=2),
+            round_result(1, candidates_scored=4, cut=2),
+            round_result(2, candidates_scored=4, cut=2),
         ],
     )
     # Inert: proposed two safe near-copies per round and went nowhere. Perfectly clean.
-    inert = _fake_inner_result(
-        [0.30, 0.30], 0.30, [_fake_inner_round(1, improved=False), _fake_inner_round(2)]
-    )
+    inert = cycle_result([0.30, 0.30], 0.30, [round_result(1, improved=False), round_result(2)])
 
     ex = compute_outer_proxies(explorer).model_dump()
     it = compute_outer_proxies(inert).model_dump()
@@ -1108,18 +1022,18 @@ def test_compute_proxies_excludes_tooling_failures_from_cleanliness() -> None:
     # mostly a measurement of provider noise. Nothing errors; the ranking is just wrong.
     from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError, compute_outer_proxies
 
-    clean = _fake_inner_result([0.40, 0.55], 0.30, [_fake_inner_round(1), _fake_inner_round(2)])
+    clean = cycle_result([0.40, 0.55], 0.30, [round_result(1), round_result(2)])
     px = compute_outer_proxies(clean).model_dump()
 
     # One tooling round out of two → dropped, not charged. The surviving round is clean, so
     # cleanliness stays 1.0. (Charging it would give 0.5 — the same score as a meta-prompt that
     # genuinely broke its own children.)
-    tooling = _fake_inner_result(
+    tooling = cycle_result(
         [0.40, 0.55],
         0.30,
         [
-            _fake_inner_round(1, parse_failure="l1_provider_empty_response"),
-            _fake_inner_round(2),
+            round_result(1, parse_failure="l1_provider_empty_response"),
+            round_result(2),
         ],
     )
     pt = compute_outer_proxies(tooling).model_dump()
@@ -1127,12 +1041,12 @@ def test_compute_proxies_excludes_tooling_failures_from_cleanliness() -> None:
     assert pt["cleanliness"] == pytest.approx(1.0)
 
     # ...but a malformed round in the same slot IS charged. Same field, opposite handling.
-    malformed = _fake_inner_result(
+    malformed = cycle_result(
         [0.40, 0.55],
         0.30,
         [
-            _fake_inner_round(1, parse_failure="meta_prompt_parse_failure"),
-            _fake_inner_round(2),
+            round_result(1, parse_failure="meta_prompt_parse_failure"),
+            round_result(2),
         ],
     )
     assert compute_outer_proxies(malformed).cleanliness < 1.0
@@ -1142,12 +1056,12 @@ def test_compute_proxies_excludes_tooling_failures_from_cleanliness() -> None:
     # provider blip. It scores the FLOOR (composed fitness exactly 0.0) — excluding it let a
     # candidate that breaks its own measurement escape penalty and, at the panel's coverage
     # floor, park as an un-crownable, un-eliminable zombie arm. `_mean([])` never runs.
-    all_tooling = _fake_inner_result(
+    all_tooling = cycle_result(
         [0.40],
         0.30,
         [
-            _fake_inner_round(1, parse_failure="l1_provider_empty_response"),
-            _fake_inner_round(2, parse_failure="l1_provider_empty_response"),
+            round_result(1, parse_failure="l1_provider_empty_response"),
+            round_result(2, parse_failure="l1_provider_empty_response"),
         ],
     )
     floor = compute_outer_proxies(all_tooling).model_dump()
@@ -1164,10 +1078,10 @@ def test_compute_proxies_excludes_tooling_failures_from_cleanliness() -> None:
     assert score({"pipeline_data": floor}) < score({"pipeline_data": px})
 
     # ...but a FAILED cycle with the same all-empty rounds is tooling-owned → still EXCLUDED.
-    failed_tooling = _fake_inner_result(
+    failed_tooling = cycle_result(
         [0.40],
         0.30,
-        [_fake_inner_round(1, parse_failure="l1_provider_empty_response")],
+        [round_result(1, parse_failure="l1_provider_empty_response")],
         stop_reason=StopReason.CRASHED,
     )
     with pytest.raises(InnerCycleUnscoreableError, match="did not end on its own terms"):
@@ -1186,14 +1100,12 @@ def test_constant_answer_collapse_dirties_a_round_that_scored_perfectly_clean() 
     # alive and accumulated real observations.
     from promptpotter.domain.l4.proxies import compute_outer_proxies
 
-    healthy = _fake_inner_result([0.40, 0.55], 0.30, [_fake_inner_round(1), _fake_inner_round(2)])
+    healthy = cycle_result([0.40, 0.55], 0.30, [round_result(1), round_result(2)])
     assert compute_outer_proxies(healthy).cleanliness == pytest.approx(1.0)
 
     # One of round 1's two candidates collapses. The magnitude is not the contract — only that a
     # collapsed arm can no longer be scored as a clean round.
-    collapsed = _fake_inner_result(
-        [0.40, 0.55], 0.30, [_fake_inner_round(1, collapsed=1), _fake_inner_round(2)]
-    )
+    collapsed = cycle_result([0.40, 0.55], 0.30, [round_result(1, collapsed=1), round_result(2)])
     assert compute_outer_proxies(collapsed).cleanliness < 1.0
 
 
@@ -1206,7 +1118,7 @@ def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
     from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError, compute_outer_proxies
 
     # Zero L1 rounds, on a cycle that DID end on its own terms.
-    empty = _fake_inner_result([], 0.30, [], stop_reason=StopReason.TARGET_HIT)
+    empty = cycle_result([], 0.30, [], stop_reason=StopReason.TARGET_HIT)
     with pytest.raises(InnerCycleUnscoreableError, match="no L1 rounds"):
         compute_outer_proxies(empty)
 
@@ -1228,10 +1140,10 @@ def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
         StopReason.OPTIMIZER_TIMEOUT,
         StopReason.CRASHED,
     ):
-        truncated = _fake_inner_result(
+        truncated = cycle_result(
             [0.40, 0.55],
             0.30,
-            [_fake_inner_round(1), _fake_inner_round(2)],
+            [round_result(1), round_result(2)],
             stop_reason=stop,
         )
         with pytest.raises(InnerCycleUnscoreableError, match="did not end on its own terms"):
@@ -1241,10 +1153,10 @@ def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
     # cell (the lift core is multiplicative) — punishing the meta-prompt for a slow provider,
     # which is the dead-cell bug in a new costume. An all-tooling-rounds cycle that would
     # otherwise floor (see the test above) is excluded once a rail truncated it.
-    railed_and_empty = _fake_inner_result(
+    railed_and_empty = cycle_result(
         [0.40],
         0.30,
-        [_fake_inner_round(1, parse_failure="l1_provider_empty_response")],
+        [round_result(1, parse_failure="l1_provider_empty_response")],
         stop_reason=StopReason.TOKEN_BUDGET,
     )
     with pytest.raises(InnerCycleUnscoreableError, match="did not end on its own terms"):
@@ -1253,7 +1165,7 @@ def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
     # Rounds ran, but the trajectory is empty → nothing to difference against origin. Without
     # the guard `first`/`after_N_rounds_delta` would both read a flat 0.0: "no lift" is a
     # plausible-looking number for "no measurement", which is what makes it dangerous.
-    levelless = _fake_inner_result([], 0.30, [_fake_inner_round(1)])
+    levelless = cycle_result([], 0.30, [round_result(1)])
     with pytest.raises(InnerCycleUnscoreableError, match="no levels"):
         compute_outer_proxies(levelless)
 
@@ -1261,12 +1173,12 @@ def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
     # that floor, so substituting 0.0 (the old `origin_acc` stand-in, itself 0.0 when nothing
     # was scored) reports the whole trajectory as an enormous lift over nothing — and it does so
     # for the CHEAPEST rows, since a crash at round 0 is what leaves the origin unscored.
-    floorless = _fake_inner_result([0.40, 0.55], None, [_fake_inner_round(1), _fake_inner_round(2)])
+    floorless = cycle_result([0.40, 0.55], None, [round_result(1), round_result(2)])
     with pytest.raises(InnerCycleUnscoreableError, match="origin was never scored"):
         compute_outer_proxies(floorless)
 
     # ...and a cycle that DID produce evidence still scores, on the same predicate.
-    ok = _fake_inner_result([0.40, 0.55], 0.30, [_fake_inner_round(1), _fake_inner_round(2)])
+    ok = cycle_result([0.40, 0.55], 0.30, [round_result(1), round_result(2)])
     ok_px = compute_outer_proxies(ok)
     assert ok_px.after_N_rounds_delta == pytest.approx(0.175)
 
@@ -1282,14 +1194,14 @@ def test_unmeasured_cost_never_scores_as_maximal_efficiency() -> None:
 
     from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError, compute_outer_proxies
 
-    rounds = [_fake_inner_round(1), _fake_inner_round(2)]
+    rounds = [round_result(1), round_result(2)]
 
-    broke = _fake_inner_result([0.40, 0.55], 0.30, rounds, cost=0.0)
+    broke = cycle_result([0.40, 0.55], 0.30, rounds, cost=0.0)
     with pytest.raises(InnerCycleUnscoreableError, match="no LLM calls"):
         compute_outer_proxies(broke)
 
     # Partially unpriced: a real, positive cost that nonetheless understates the true total.
-    understated = _fake_inner_result([0.40, 0.55], 0.30, rounds, cost=0.03, unpriced_tokens=4096)
+    understated = cycle_result([0.40, 0.55], 0.30, rounds, cost=0.03, unpriced_tokens=4096)
     with pytest.raises(InnerCycleUnscoreableError, match="understates what the search costs"):
         compute_outer_proxies(understated)
 
@@ -1299,12 +1211,8 @@ def test_unmeasured_cost_never_scores_as_maximal_efficiency() -> None:
         Path("datasets/promptpotter-self/campaign.yaml").read_text(encoding="utf-8")
     )
     score = compile_scorer(cfg["campaign_config"]["scoring"])
-    cheap = compute_outer_proxies(
-        _fake_inner_result([0.40, 0.55], 0.30, rounds, cost=0.01)
-    ).model_dump()
-    dear = compute_outer_proxies(
-        _fake_inner_result([0.40, 0.55], 0.30, rounds, cost=0.30)
-    ).model_dump()
+    cheap = compute_outer_proxies(cycle_result([0.40, 0.55], 0.30, rounds, cost=0.01)).model_dump()
+    dear = compute_outer_proxies(cycle_result([0.40, 0.55], 0.30, rounds, cost=0.30)).model_dump()
     assert cheap["delta_per_dollar"] > dear["delta_per_dollar"]
     assert score({"pipeline_data": cheap}) > score({"pipeline_data": dear})
 
@@ -1323,16 +1231,16 @@ def test_efficiency_divides_by_incurred_cost_not_the_bill() -> None:
     # cache hits priced from the tokens they recorded) and is blind to what was actually billed.
     from promptpotter.domain.l4.proxies import compute_outer_proxies
 
-    rounds = [_fake_inner_round(1), _fake_inner_round(2)]
+    rounds = [round_result(1), round_result(2)]
 
     # Same search, same incurred cost. One replayed off a warm cache and billed nothing; the other
     # paid full freight. Same measurement of the same meta-prompt ⇒ identical proxies. The bill is
     # not an input.
     replayed = compute_outer_proxies(
-        _fake_inner_result([0.40, 0.55], 0.30, rounds, cost=0.03, billed=0.0)
+        cycle_result([0.40, 0.55], 0.30, rounds, cost=0.03, billed=0.0)
     ).model_dump()
     paid = compute_outer_proxies(
-        _fake_inner_result([0.40, 0.55], 0.30, rounds, cost=0.03, billed=0.03)
+        cycle_result([0.40, 0.55], 0.30, rounds, cost=0.03, billed=0.03)
     ).model_dump()
     assert replayed == paid
     assert replayed["delta_per_dollar"] == pytest.approx(0.25 / 0.03)
@@ -1884,24 +1792,6 @@ def test_no_op_clone_attaches_validation_failure():
     assert stats.l1_yield == 0.5
 
 
-def _lost_round(round_num: int, field: str, value: str, *, total: int = 20, acc: float = 0.3):
-    """A prior round holding one candidate that was MEASURED and LOST."""
-    return SimpleNamespace(
-        round=round_num,
-        prompt_fields={},
-        pipeline_params=None,
-        candidate_scores=[
-            SimpleNamespace(
-                total=total,
-                accuracy=acc,
-                matched_origin_accuracy=0.5,
-                prompt_fields={field: value},
-                pipeline_params_override=None,
-            )
-        ],
-    )
-
-
 # The two strings differ in wording and, in the tests below, in the FIELD they are written
 # into — which is the invariant under test. They are close paraphrases on purpose: the gate is
 # a lexical overlap test (`IDEA_MATCH_REJECT`), so a pair that shares little vocabulary would
@@ -1925,7 +1815,7 @@ def test_a_reproposed_idea_is_rejected_even_when_rewritten_into_another_field():
     fires on the failure it was built for.
     """
     parent = _parent()
-    prior = [_lost_round(1, "instruction", _DEAD_IDEA)]
+    prior = [lost_round(1, "instruction", _DEAD_IDEA)]
     proposals = [
         _child(parent, thinking_style=_DEAD_IDEA_REPHRASED),  # same idea, different field
         _child(parent, persona="A terse logician who commits to a label."),  # unrelated
@@ -1950,7 +1840,7 @@ def test_a_repeat_never_empties_the_round_and_unmeasured_history_never_convicts(
     proposal on that is the loop punishing an idea nobody ever ran.
     """
     parent = _parent()
-    prior = [_lost_round(1, "instruction", _DEAD_IDEA)]
+    prior = [lost_round(1, "instruction", _DEAD_IDEA)]
 
     # (1) every proposal is a repeat → none rejected.
     all_repeats = [
@@ -1962,7 +1852,7 @@ def test_a_repeat_never_empties_the_round_and_unmeasured_history_never_convicts(
     assert all(not p.opt_sp.memory.wounds.validation_failures for p in all_repeats)
 
     # (2) the same history, but never measured → no conviction even with a live alternative.
-    unmeasured = [_lost_round(1, "instruction", _DEAD_IDEA, total=0, acc=0.0)]
+    unmeasured = [lost_round(1, "instruction", _DEAD_IDEA, total=0, acc=0.0)]
     proposals = [
         _child(parent, thinking_style=_DEAD_IDEA_REPHRASED),
         _child(parent, persona="A terse logician who commits to a label."),
@@ -1974,7 +1864,7 @@ def test_a_repeat_never_empties_the_round_and_unmeasured_history_never_convicts(
 def test_an_idea_that_beat_its_origin_is_not_grounds_for_rejection():
     """Refining a winner is the search working. Only measured LOSSES close a direction off."""
     parent = _parent()
-    won = _lost_round(1, "instruction", _DEAD_IDEA, acc=0.9)  # 0.9 > matched origin 0.5
+    won = lost_round(1, "instruction", _DEAD_IDEA, acc=0.9)  # 0.9 > matched origin 0.5
     proposals = [
         _child(parent, thinking_style=_DEAD_IDEA_REPHRASED),
         _child(parent, persona="A terse logician who commits to a label."),
@@ -2387,7 +2277,7 @@ def _measurements(scores: list[float], sample_ids: list[int] | None = None) -> l
     ]
 
 
-_DUMMY_SP = SimpleNamespace()
+_DUMMY_SP = JobSearchPoint()
 
 
 def test_pobb_check_gates_elimination_on_posterior():
@@ -2477,7 +2367,7 @@ async def test_paired_pobb_breaks_lucky_prefix_leader_trap():
         sp=_DUMMY_SP,
     )
     for sid in candidate_samples:
-        await check_paired.backfill_for_sample(SimpleNamespace(id=sid))
+        await check_paired.backfill_for_sample(Sample(id=sid, query="q", ground_truth="t"))
 
     assert backfill_calls == [(9,), (12,), (13,), (14,), (8,)]
     leader_paired = check_paired.priors_by_sample["R1_lucky_winner"]

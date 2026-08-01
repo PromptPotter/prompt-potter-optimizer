@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.cycle_paths import CycleDir
-from promptpotter.domain.phases import CampaignPhase, PhaseEvent, RunPhase
+from promptpotter.domain.phases import CampaignPhase, DashboardState, PhaseEvent, RunPhase
 from promptpotter.domain.results import HeadlineMetric, candidate_label
 from promptpotter.domain.run_records import (
     CycleRecord,
@@ -87,13 +87,18 @@ _DASHBOARD_DEBOUNCE_S = 0.25
 
 
 # L1_SCORE absent: driven by sample_started / sample_scored.
-_PHASE_TO_STATE: dict[str, str] = {
-    CampaignPhase.INIT: "init",
-    CampaignPhase.ORIGIN: "origin",
-    CampaignPhase.L1_GENERATE: "l1_generate",
-    CampaignPhase.REFINE_STRATEGY: "l2_refining",
-    CampaignPhase.MODIFY_PLAN: "l3_replanning",
-    CampaignPhase.ESCALATION: "escalation",
+# The VALUES used to be bare strings, and they were the only declaration the
+# `dashboard.json::state` vocabulary had anywhere — the webapp mirrored them by hand against
+# no source. The key stays `str` because `PhaseEvent.phase` is genuinely wider than
+# `CampaignPhase` (a round-boundary event carries "round"); the members below say which
+# subset is mapped.
+_PHASE_TO_STATE: dict[str, DashboardState] = {
+    CampaignPhase.INIT: DashboardState.INIT,
+    CampaignPhase.ORIGIN: DashboardState.ORIGIN,
+    CampaignPhase.L1_GENERATE: DashboardState.L1_GENERATE,
+    CampaignPhase.REFINE_STRATEGY: DashboardState.L2_REFINING,
+    CampaignPhase.MODIFY_PLAN: DashboardState.L3_REPLANNING,
+    CampaignPhase.ESCALATION: DashboardState.ESCALATION,
 }
 
 
@@ -257,13 +262,13 @@ class LiveDashboardView(DerivedView):
         )
         state.stop_reason = f"{type(exc).__name__}: {exc}"
         state.run_phase = RunPhase.TERMINAL
-        state.state = "stopped"
+        state.state = DashboardState.STOPPED
         state.state_since = utcnow_iso()
         write_json(CycleLayout(cycle_path).dashboard, state.model_dump(), default=str)
 
     # -- State transitions ----------------------------------------------------
 
-    def _set_state(self, name: str) -> None:
+    def _set_state(self, name: DashboardState) -> None:
         """Liveness transition — keeps ``state`` and ``state_since`` in lockstep."""
         self.state.state = name
         self.state.state_since = utcnow_iso()
@@ -277,7 +282,7 @@ class LiveDashboardView(DerivedView):
         """
         self.state.stop_reason = reason
         self.state.run_phase = RunPhase.TERMINAL
-        self._set_state("stopped")
+        self._set_state(DashboardState.STOPPED)
         self._flush_pending_persist()
 
     # -- Write coalesce -------------------------------------------------------
@@ -427,7 +432,7 @@ class LiveDashboardView(DerivedView):
             self.state.current_query_payload = (payload.get("query_text") or "")[:120]
             sid = payload.get("sample_id")
             self.state.current_sample_id = int(sid) if sid is not None else None
-            self._set_state("scoring")
+            self._set_state(DashboardState.SCORING)
         elif ev == "sample_scored":
             result = payload.get("result") or {}
             self._update_sample_markers(ci, ct, qi, qt)
@@ -480,7 +485,7 @@ class LiveDashboardView(DerivedView):
         if event.round is not None:
             s.round = event.round
         # L1_SCORE has no _PHASE_TO_STATE entry — sample_started/scored own its transitions.
-        if event.event == "enter" and s.state != "stopped":
+        if event.event == "enter" and s.state != DashboardState.STOPPED:
             mapped = _PHASE_TO_STATE.get(event.phase)
             if mapped is not None:
                 self._set_state(mapped)
@@ -565,7 +570,11 @@ class LiveDashboardView(DerivedView):
         s.current_query_payload = None
         s.current_sample_id = None
         s.last_query_elapsed_s = round(query_time, 2)
-        self._set_state("between_candidates" if last_in_candidate else "between_samples")
+        self._set_state(
+            DashboardState.BETWEEN_CANDIDATES
+            if last_in_candidate
+            else DashboardState.BETWEEN_SAMPLES
+        )
 
     def _handle_token_usage(self, record: TokenUsageRecord) -> None:
         """Sole writer for ``state['spend']``: optimizer → ``loop``, backend → ``backend``.

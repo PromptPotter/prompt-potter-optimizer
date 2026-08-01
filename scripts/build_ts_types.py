@@ -265,6 +265,20 @@ def _emit_computed_field(model: type[BaseModel], name: str, info: ComputedFieldI
     return f"{comment_block}  {name}: {ts_type};"
 
 
+def _emit_enum_union(enum_cls: type[enum.Enum], note: str) -> str:
+    """Emit a domain StrEnum as a NAMED TS union.
+
+    The inline unions Pydantic fields already produce are anonymous, so a webapp map over
+    the vocabulary has nothing to key on and falls back to ``Record<string, …>`` — which
+    accepts any subset silently. A named type lets the mirror say ``Record<RunPhase, …>``
+    and makes a missing member a compile error instead of a blank render. That is not
+    hypothetical: ``gate`` sat in ``RunPhase`` while the dock's in-flight set and label map
+    were both keyed on ``string``, and a held origin gate rendered as an ordinary run.
+    """
+    members = " | ".join(repr(m.value) for m in enum_cls)
+    return f"// {note}\nexport type {enum_cls.__name__} = {members};"
+
+
 def _emit_stop_reason_labels() -> str:
     """Emit ``STOP_REASON_INFO`` (domain/phases.py) as a TS label const — the
     single label source, mirrored to the webapp without hand-maintained drift."""
@@ -342,7 +356,19 @@ _HEADER = """\
 
 
 def main() -> int:
+    from promptpotter.domain.phases import DashboardState, RunPhase
+
     blocks = [_emit_interface(model) for model in EXPORTED_MODELS]
+    blocks.append(
+        _emit_enum_union(RunPhase, "The coarse run-state axis (domain/phases.py::RunPhase).")
+    )
+    blocks.append(
+        _emit_enum_union(
+            DashboardState,
+            "The fine-grained activity axis, `dashboard.json::state` "
+            "(domain/phases.py::DashboardState).",
+        )
+    )
     blocks.append(_emit_stop_reason_labels())
     blocks.append(_emit_evaluator_meta())
     content = _HEADER + "\n\n".join(blocks) + "\n"

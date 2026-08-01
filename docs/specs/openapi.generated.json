@@ -1047,17 +1047,9 @@
             "type": "string"
           },
           "run_phase": {
+            "$ref": "#/components/schemas/RunPhase",
             "default": "detached",
-            "description": "The single run-state value (RunPhase) — checkin (origin still being authored, pre-loop) / running / paused / detached / terminal. Computed once by derive_run_phase from lifecycle + control flags + freshness; every picker dot and badge reads this, none re-derive it. 'checkin' wins first (the campaign hasn't run); 'terminal' pairs with `status` for the reason label.",
-            "enum": [
-              "checkin",
-              "running",
-              "paused",
-              "detached",
-              "terminal"
-            ],
-            "title": "Run Phase",
-            "type": "string"
+            "description": "The single run-state value (RunPhase). Computed once by derive_run_phase from lifecycle + control flags + freshness; every picker dot and badge reads this, none re-derive it. 'checkin' wins first (the campaign hasn't run); 'terminal' pairs with `status` for the reason label."
           },
           "sibling_kind": {
             "enum": [
@@ -2076,10 +2068,15 @@
             "title": "Round"
           },
           "run_phase": {
-            "default": "",
-            "description": "Courses only: checkin | running | paused | detached | terminal — the ONE server-owned run-state (`derive_run_phase`), the same value `/cycles` serves.",
-            "title": "Run Phase",
-            "type": "string"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunPhase"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Courses only — the ONE server-owned run-state (`derive_run_phase`), the same value `/cycles` serves. Null on a candidate, which has no run of its own."
           },
           "sample_set_accuracy": {
             "anyOf": [
@@ -2796,6 +2793,19 @@
         },
         "title": "RayResponse",
         "type": "object"
+      },
+      "RunPhase": {
+        "description": "The single run-state vocabulary every surface reads.\n\nComposes two orthogonal facts — *lifecycle* (is the cycle active or\nfinished) and *control + liveness* (is a process driving it, and what is\nthe operator's intent) — into one value derived in exactly one place\n(``derive_run_phase``).\n\n- ``CHECKIN`` — the campaign is still authoring its origin (pre-loop); a\n  real disk-backed campaign in the ``checkin`` lifecycle, minted on the\n  first ingest action, resumable. Holds no machine slot. Derived from\n  ``.runtime/checkin.flag`` (dropped at skeleton creation, cleared at\n  Start when ``checkin`` flips to ``active``); precedes every other phase.\n- ``RUNNING`` — a process is attached and driving the active cycle.\n- ``PAUSED`` — operator paused (the pause button or Ctrl+C); the worker\n  exits cleanly at the next checkpoint but the cycle stays **active and\n  resumable** (no ``finished_at``). Derived off ``.runtime/pause.flag``;\n  the play action relaunches via ``start-run``/``resume``. The single\n  operator-interrupt phase — there is no separate \"stopping\".\n- ``GATE`` — alive, holding at the round-0 origin gate awaiting an\n  operator decision (rescore / proceed / abort) because the origin\n  verdict was not ``healthy``. Reversible (``origin-gate-decision``).\n- ``DETACHED`` — active lifecycle but no live producer (CLI exited or\n  ``kill -9`` left no terminal record). The *only* phase that uses the\n  freshness heuristic; never written into ``dashboard.json`` (a dead\n  producer can't write) — only emitted by ``derive_run_phase``. This is\n  a *dead* producer, not a quiet-but-alive one (a live cycle heartbeats\n  its ledger → dashboard within ``RUN_FRESH_S``), so the liveness reaper\n  (``application/jobs/reaper.py``) stamps a persistently-detached cycle\n  ``TERMINAL`` (``PRODUCER_VANISHED``); it is not an in-flight unit and\n  drops out of the dock.\n- ``TERMINAL`` — the cycle finished; the reason is the cycle's\n  :class:`StopReason` (labelled via the :data:`STOP_REASON_INFO` table).",
+        "enum": [
+          "checkin",
+          "running",
+          "paused",
+          "gate",
+          "detached",
+          "terminal"
+        ],
+        "title": "RunPhase",
+        "type": "string"
       },
       "SampleSeries": {
         "additionalProperties": false,

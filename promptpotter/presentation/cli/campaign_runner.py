@@ -5,7 +5,8 @@ Two write verbs: ``new [DATASET|FILE]`` mints a fresh campaign — from an autho
 check-in → commits as a tenant dataset → runs, the headless twin of the web
 onboarding); ``resume`` continues the active session. Reads = open the on-disk
 artifact tree (``dashboard.json`` / ``log.md`` / ``cycles/{cycle_id}/index.json``).
-Ctrl+C stops; no mid-run pause.
+Ctrl+C stops; ``pause`` asks a running cycle to stop at its next checkpoint, through
+the same dispatcher the webapp's pause control fires.
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ from promptpotter.presentation.cli.commands.reindex import cmd_reindex
 from promptpotter.presentation.cli.commands.reset import cmd_reset
 from promptpotter.presentation.cli.commands.resume_command import cmd_resume
 from promptpotter.presentation.cli.commands.verify import cmd_verify
-from promptpotter.presentation.cli.parsers import build_parser
+from promptpotter.presentation.cli.parsers import build_parser, parser_verbs
 
 __all__ = ["_DIVERGENCE_HINT", "main", "set_verbose"]
 
@@ -51,6 +52,19 @@ COMMANDS = {
     "unarchive": cmd_unarchive,
     "pause": cmd_pause,
 }
+
+# A verb is one row here plus one `sub.add_parser` in `parsers.py`, and nothing made the two
+# agree. Both halves fail QUIETLY: a parser row with no handler raises `KeyError` from the
+# dispatch below — the operator's verb parsed, then crashed on a bare key — and a handler with
+# no parser row is unreachable, reported by argparse as an unknown verb rather than a missing
+# one. An import-time assert beside the table (`tests/CLAUDE.md`: structural invariants live in
+# production, not tests) costs nothing to maintain and fails before `main()` can dispatch.
+_declared = parser_verbs(build_parser())
+assert _declared == COMMANDS.keys(), (
+    "CLI verb drift between COMMANDS and parsers.py — "
+    f"parser-only: {sorted(_declared - COMMANDS.keys())}, "
+    f"handler-only: {sorted(COMMANDS.keys() - _declared)}"
+)
 
 
 def main() -> None:

@@ -430,7 +430,7 @@ export interface LiveDashboardState {
   cycle_id: string;
   session_id: string;
   langfuse_trace_url: string | null;
-  state: string;
+  state: 'init' | 'origin' | 'scoring' | 'between_samples' | 'between_candidates' | 'l1_generate' | 'l2_refining' | 'l3_replanning' | 'escalation' | 'stopped';
   state_since: string;
   run_phase: 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
   stop_reason: string | null;
@@ -593,13 +593,11 @@ export interface CycleListEntry {
   unit_kind: 'session' | 'divergent_resume' | 'user_fork' | 'auto_rebase';
   is_root: boolean;
   status: string;
-  /** The single run-state value (RunPhase) — checkin (origin still being authored,
-   * pre-loop) / running / paused / detached / terminal. Computed once by
-   * derive_run_phase from lifecycle + control flags + freshness; every picker
-   * dot and badge reads this, none re-derive it. 'checkin' wins first (the
-   * campaign hasn't run); 'terminal' pairs with `status` for the reason
-   * label. */
-  run_phase: 'checkin' | 'running' | 'paused' | 'detached' | 'terminal';
+  /** The single run-state value (RunPhase). Computed once by derive_run_phase from
+   * lifecycle + control flags + freshness; every picker dot and badge reads
+   * this, none re-derive it. 'checkin' wins first (the campaign hasn't run);
+   * 'terminal' pairs with `status` for the reason label. */
+  run_phase: 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
   best_accuracy: number | null;
   /** Round 0's accuracy — the origin's measurement, derived from rounds[] (no
    * stored copy). Null until round 0 lands. */
@@ -832,10 +830,9 @@ export interface LineageNode {
   /** Courses, and the candidates a fork contributed here — on those it is the ⑂
    * stamp marking an attempt the operator cut. */
   course_kind: 'root' | 'fork' | 'diag' | 'sweep' | 'inner' | null;
-  /** Courses only: checkin | running | paused | detached | terminal — the ONE
-   * server-owned run-state (`derive_run_phase`), the same value `/cycles`
-   * serves. */
-  run_phase: string;
+  /** Courses only — the ONE server-owned run-state (`derive_run_phase`), the same
+   * value `/cycles` serves. Null on a candidate, which has no run of its own. */
+  run_phase: 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal' | null;
   dataset_name: string;
   /** Fork trigger; empty for roots and inner runs. */
   trigger: string;
@@ -887,6 +884,12 @@ export interface DiagnosticRunListResponse {
   n: number;
   runs: DiagnosticRunRecord[];
 }
+
+// The coarse run-state axis (domain/phases.py::RunPhase).
+export type RunPhase = 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
+
+// The fine-grained activity axis, `dashboard.json::state` (domain/phases.py::DashboardState).
+export type DashboardState = 'init' | 'origin' | 'scoring' | 'between_samples' | 'between_candidates' | 'l1_generate' | 'l2_refining' | 'l3_replanning' | 'escalation' | 'stopped';
 
 // Operator-facing label per terminal reason (StopReason). Mirror of
 // domain/phases.py::STOP_REASON_INFO — the single label source.

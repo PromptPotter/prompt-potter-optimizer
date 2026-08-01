@@ -21,6 +21,7 @@ from pydantic import ConfigDict, Field
 
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
+from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.run_records import LedgerCandidate
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
@@ -176,10 +177,10 @@ class LineageNode(StrictModel):
         description="Courses, and the candidates a fork contributed here — on those it is "
         "the ⑂ stamp marking an attempt the operator cut.",
     )
-    run_phase: str = Field(
-        default="",
-        description="Courses only: checkin | running | paused | detached | terminal — the "
-        "ONE server-owned run-state (`derive_run_phase`), the same value `/cycles` serves.",
+    run_phase: RunPhase | None = Field(
+        default=None,
+        description="Courses only — the ONE server-owned run-state (`derive_run_phase`), the "
+        "same value `/cycles` serves. Null on a candidate, which has no run of its own.",
     )
     dataset_name: str = ""
     trigger: str = Field(default="", description="Fork trigger; empty for roots and inner runs.")

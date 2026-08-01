@@ -66,8 +66,23 @@ No pytest-mock plugin. `monkeypatch` for async, stdlib `unittest.mock` when
 needed. More than 2–3 monkeypatches in one test means it's testing wiring that
 should be an import-time assert, not a test.
 
-## Fixtures (`conftest.py`)
+**Never fake a strict model.** A `SimpleNamespace` stand-in for a Pydantic model is the
+one construct that can carry this file's own silent-harm class past every gate: rename a
+field and ruff, mypy and pytest all stay green while the real read path breaks. It can
+also assert a shape the model cannot produce — the `RoundResult` fake `factories.py`
+replaced stamped `l1_n_no_op` directly, though it is a `@computed_field` derived from
+`candidate_scores`, which `test_integrity.py` pins in the other direction. Build the real
+model via `factories.py`. A namespace is fine only for a wiring seam that is not a
+validated document (a `Stores`-shaped stub, a session object).
+
+## Fixtures (`conftest.py`) + builders (`factories.py`)
 
 | Fixture | Purpose |
 |---------|---------|
 | `built_stores` | A real `Stores` rooted in `tmp_path` (default identity). The one surviving fixture — used by the resume data-integrity tests. |
+
+`factories.py` is not a seventh test file (no `test_` prefix, collects nothing). It holds
+builders that return REAL domain models — `round_result`, `cycle_result`,
+`scored_candidate`, `degradation_health`, `lost_round` — each taking only the fields a
+test bends. Add a parameter when a test needs to bend one, never a whole new builder for
+a shape an existing one can express.

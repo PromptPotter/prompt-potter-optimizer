@@ -18,7 +18,7 @@ from typing import Any
 
 from pydantic import ConfigDict, Field
 
-from promptpotter.domain.phases import RunPhase
+from promptpotter.domain.phases import DashboardState, RunPhase
 from promptpotter.domain.results import HeadlineMetric, RoundSummary
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
@@ -221,8 +221,8 @@ class LiveDashboardState(StrictModel):
     # so it ships pre-built; this is the live-run path to the full nested trace.
     langfuse_trace_url: str | None = None
 
-    # Operator-visible state name + transition timestamp.
-    state: str = "init"
+    # Operator-visible activity name + transition timestamp.
+    state: DashboardState = DashboardState.INIT
     state_since: str
 
     # The single run-state vocabulary (RunPhase). Declared by the runner via

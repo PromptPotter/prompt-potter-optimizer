@@ -44,7 +44,7 @@ function node(
     divergence: null,
     divergent: false,
     course_kind: null,
-    run_phase: "",
+    run_phase: null,
     dataset_name: "",
     trigger: "",
     steered_by: null,

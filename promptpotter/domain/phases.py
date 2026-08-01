@@ -13,6 +13,7 @@ from promptpotter.shared.clock import utcnow_iso
 
 __all__ = [
     "CampaignPhase",
+    "DashboardState",
     "PhaseEvent",
     "RunPhase",
     "StopLoop",
@@ -122,6 +123,37 @@ class RunPhase(enum.StrEnum):
     GATE = "gate"
     DETACHED = "detached"
     TERMINAL = "terminal"
+
+
+class DashboardState(enum.StrEnum):
+    """The fine-grained ACTIVITY vocabulary — ``dashboard.json::state``.
+
+    Orthogonal to :class:`RunPhase`, which is the coarse lifecycle+control axis. This one
+    answers "what is it doing right now", and every surface that narrates a live run reads
+    it: the pause affordance ("Finishing {…} — will pause"), the terminal readout, the
+    activity line.
+
+    It lives here rather than in the projection that writes it because it is a vocabulary
+    two sides must agree on, and it spent its whole life undeclared — bare string literals
+    at four ``_set_state`` call sites plus the values of ``_PHASE_TO_STATE``, mirrored by
+    hand in the webapp against no source. ``INIT`` and ``STOPPED`` were emitted the whole
+    time and had no label there; nothing errored, the affordance just rendered blank.
+
+    ``INIT`` / ``STOPPED`` bracket the run; the rest are one-to-one with the
+    :class:`CampaignPhase` the runner declares, except the two scoring states, which the
+    per-sample loop drives (``L1_SCORE`` has no phase mapping for exactly that reason).
+    """
+
+    INIT = "init"
+    ORIGIN = "origin"
+    SCORING = "scoring"
+    BETWEEN_SAMPLES = "between_samples"
+    BETWEEN_CANDIDATES = "between_candidates"
+    L1_GENERATE = "l1_generate"
+    L2_REFINING = "l2_refining"
+    L3_REPLANNING = "l3_replanning"
+    ESCALATION = "escalation"
+    STOPPED = "stopped"
 
 
 class StopOutcome(enum.StrEnum):
