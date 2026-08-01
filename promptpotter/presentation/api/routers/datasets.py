@@ -43,6 +43,7 @@ from promptpotter.infrastructure.store.dataset_access import (
     dataset_pipeline_path,
     list_readable_datasets,
     readable_dataset_dir,
+    readable_dataset_rows,
 )
 from promptpotter.infrastructure.store.io import read_json, read_yaml
 from promptpotter.infrastructure.store.layout import campaign_root_dir_for
@@ -321,21 +322,22 @@ def _resolve_or_404(store: Stores, name: str) -> Path:
         raise NotFoundError(f"Dataset '{name}' not found") from exc
 
 
-def _load_dataset_cache(dataset_dir: Path) -> tuple[dict[str, Any], dict[int, dict[str, Any]]]:
-    """Load ``cache.json`` from a resolved dataset dir; normalise sample-id keys to int.
+def _load_dataset_rows(
+    store: Stores, name: str
+) -> tuple[dict[str, Any], dict[int, dict[str, Any]]]:
+    """Resolve *name*'s rows; normalise sample-id keys to int.
 
     Sample-id key varies on disk (``id`` canonical, BBEH HF emits ``sample_id``) —
-    normalise at the read boundary. The dir is already access-checked by
-    :func:`_resolve_or_404`, so a MISSING cache is not an unknown dataset — it is a
+    normalise at the read boundary. The name is already access-checked by
+    :func:`_resolve_or_404`, so MISSING rows are not an unknown dataset — they are a
     resolvable one with no materialised sample bank (a pipeline-only / L4 meta-dataset
     such as ``promptpotter-self``, which reports ``n_samples: 0`` in the list). Return an
     empty bank so ``/preview`` + ``/measurement-series`` answer an honest empty 200 rather
     than a 404 that reads as "unknown slug" and spams the webapp console every load.
     """
-    cache_path = dataset_dir / "cache.json"
-    if not cache_path.is_file():
-        return {"name": dataset_dir.name, "items": []}, {}
-    raw = read_json(cache_path)
+    raw = readable_dataset_rows(store, name)
+    if raw is None:
+        return {"name": name, "items": []}, {}
     sample_lookup: dict[int, dict[str, Any]] = {}
     for item in raw["items"]:
         sid = int(item["sample_id"] if "sample_id" in item else item["id"])
@@ -515,7 +517,7 @@ def get_dataset_preview(
     fits, so it overcounts on its own.
     """
     dataset_dir = _resolve_or_404(store, name)
-    raw, sample_lookup = _load_dataset_cache(dataset_dir)
+    raw, sample_lookup = _load_dataset_rows(store, name)
 
     art_store, art_campaign, art_cycle = _artifact_scope_store(
         store, campaign_id, cycle_id, descend
@@ -652,7 +654,8 @@ def get_dataset_measurement_series(
     """Chronological per-sample series for the Meas heat-map column. Aligned to `/preview` order
     + limit so clients can zip by sample_id. `ord` is opaque (only used for row alignment).
     """
-    raw, sample_lookup = _load_dataset_cache(_resolve_or_404(store, name))
+    _resolve_or_404(store, name)  # 404s an unknown slug before we answer with an empty bank
+    raw, sample_lookup = _load_dataset_rows(store, name)
 
     art_store, art_campaign, art_cycle = _artifact_scope_store(
         store, campaign_id, cycle_id, descend

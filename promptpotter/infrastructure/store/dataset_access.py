@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import validate_dataset_name
@@ -53,13 +54,18 @@ def dataset_pipeline_path(dataset_dir: Path) -> Path:
 
 
 def is_dataset_dir(dataset_dir: Path) -> bool:
-    """A directory is a dataset iff it carries a cache or a pipeline overlay.
+    """A directory is a dataset iff it carries a pipeline overlay.
 
     Public because three call sites used to re-derive it with their own literal —
     the readiness probe in the origins router among them — so "is this a dataset"
     could answer differently depending on who asked.
+
+    A materialized ``cache.json`` used to count too, which made this disagree with
+    :func:`list_readable_datasets` (that one has always asked for the overlay): a
+    row bank with no definition listed nowhere yet resolved here. Rows now live
+    outside the dir entirely, so the definition is the only thing left to ask for.
     """
-    return (dataset_dir / "cache.json").is_file() or dataset_pipeline_path(dataset_dir).is_file()
+    return dataset_pipeline_path(dataset_dir).is_file()
 
 
 def readable_dataset_dir(store: Stores, name: str) -> Path:
@@ -83,6 +89,37 @@ def readable_dataset_dir(store: Stores, name: str) -> Path:
     raise DatasetAccessError(name)
 
 
+def readable_dataset_rows(store: Stores, name: str) -> dict[str, Any] | None:
+    """The materialized rows for *name*, or ``None`` — the row half of the resolver.
+
+    A dataset dir is a DEFINITION (ours under a wheel, read-only) and its rows are a
+    MEASUREMENT INPUT the operator materialized (fetched, regenerable, 6.8 MB). They
+    used to share a directory, which is the only reason the install tier ever had to
+    be writable — and writable it is not, once the definitions ship inside
+    ``site-packages``. So they are resolved separately, in the same tenant-first order
+    the dir resolver uses:
+
+    1. A committed tenant dataset's own ``cache.json`` — authored at commit time,
+       inside a dir the tenant owns outright.
+    2. This tenant's ``benchmark-rows/{name}.json`` — what
+       ``resolve_dataset_items`` persisted after fetching.
+    3. The install dir's shipped ``cache.json``. One dataset ships rows —
+       ``email-tagging``'s hand-authored demo samples — and it seeds a machine that
+       has fetched nothing. Read-only, like everything else on that tier.
+    """
+    try:
+        tenant = store.tenant_datasets.load_dataset(name)
+    except ValueError as exc:
+        raise DatasetAccessError(name) from exc
+    if tenant and tenant.get("items"):
+        return tenant
+    rows = store.tenant_datasets.load_benchmark_rows(name)
+    if rows and rows.get("items"):
+        return rows
+    shipped = read_json_tolerant(store.benchmarks_root / name / "cache.json")
+    return shipped if isinstance(shipped, dict) and shipped.get("items") else None
+
+
 def list_readable_datasets(store: Stores) -> list[DatasetRef]:
     """Every dataset this identity may pick — tenant content, then install content.
 
@@ -102,7 +139,7 @@ def list_readable_datasets(store: Stores) -> list[DatasetRef]:
         dataset_dir = store.tenant_datasets.dataset_dir(slug)
         own.add(slug)
         refs.append(
-            DatasetRef(slug, _read_title(dataset_dir), _read_n_samples(dataset_dir), "yours")
+            DatasetRef(slug, _read_title(dataset_dir), _read_n_samples(store, slug), "yours")
         )
 
     if store.benchmarks_root.is_dir():
@@ -116,7 +153,9 @@ def list_readable_datasets(store: Stores) -> list[DatasetRef]:
             except ValueError:
                 continue
             refs.append(
-                DatasetRef(entry.name, _read_title(entry), _read_n_samples(entry), "install")
+                DatasetRef(
+                    entry.name, _read_title(entry), _read_n_samples(store, entry.name), "install"
+                )
             )
     return refs
 
@@ -133,10 +172,11 @@ def _read_title(dataset_dir: Path) -> str | None:
     return None
 
 
-def _read_n_samples(dataset_dir: Path) -> int:
-    """``cache.json::row_count`` (falls back to ``items`` length); ``0`` when unmaterialized."""
-    raw = read_json_tolerant(dataset_dir / "cache.json")
-    if not isinstance(raw, dict):
+def _read_n_samples(store: Stores, name: str) -> int:
+    """``row_count`` off the resolved rows (falls back to ``items`` length); ``0`` when
+    unmaterialized — a benchmark nobody has fetched yet, or a pipeline-only L4 dataset."""
+    raw = readable_dataset_rows(store, name)
+    if raw is None:
         return 0
     row_count = raw.get("row_count")
     if isinstance(row_count, int):
@@ -152,4 +192,5 @@ __all__ = [
     "is_dataset_dir",
     "list_readable_datasets",
     "readable_dataset_dir",
+    "readable_dataset_rows",
 ]

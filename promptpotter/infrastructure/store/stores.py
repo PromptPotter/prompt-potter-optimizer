@@ -125,9 +125,12 @@ class Stores:
     the outer fitness subtracts). It is a field rather than a re-walk of ``projects_root``
     so it survives recursion: an L5 sandbox reads its parent's ``shared_root``, not its own.
 
-    ``benchmarks_root`` is the install-global ``datasets/`` dir (repo benchmarks,
-    shared across tenants). Access to it is capability-gated — go through
-    ``store/dataset_access.py``, never read this path directly from a handler.
+    ``benchmarks_root`` is the install-global benchmark DEFINITIONS dir (repo
+    benchmarks, shared across tenants) — and **read-only**: under a wheel it resolves
+    inside ``site-packages`` (``config/paths.py::benchmark_datasets_root``). Nothing
+    writes there; a benchmark's materialized rows are the operator's and land in the
+    tenant tree. Access is capability-gated — go through ``store/dataset_access.py``,
+    never read this path directly from a handler.
     """
 
     base_dir: Path
@@ -183,7 +186,7 @@ def build_stores(
         shared_root=shared,
         benchmarks_root=ds_root,
         identity=identity,
-        backends=BackendStore(tenant_dir, ds_root),
+        backends=BackendStore(tenant_dir),
         tenant_datasets=TenantDatasetStore(tenant_dir),
         sessions=SessionStore(tenant_dir),
         campaigns=CampaignStore(tenant_dir),

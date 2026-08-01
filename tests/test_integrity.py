@@ -1797,3 +1797,123 @@ def test_third_party_connectors_load_and_are_held_to_the_same_contract(
         _with([_FakeEntryPoint("acme", None, boom=ImportError("plugin is broken"))])
     with pytest.raises(RuntimeError, match=r"not a promptpotter\.connectors\.Connector"):
         _with([_FakeEntryPoint("acme", {"not": "a connector"})])
+
+
+# --- Root resolution -------------------------------------------------------
+# Where the package reads its config and writes the operator's data. Silent by
+# construction: a root that resolves to the WRONG EXISTING directory raises
+# nothing -- the package reads something, writes somewhere, the run completes.
+# Both shipped bugs were this shape. Campaigns landed in ``site-packages``,
+# which pip deletes on upgrade; and the optimizer enumerated
+# ``site-packages/datasets`` -- the HuggingFace library's own directory, a
+# declared extra of this project -- offering ``arrow_dataset.py`` as a
+# candidate dataset. The suite runs from a checkout, where all three roots
+# resolve to the repo and every branch below is dead, so these fake the
+# ABSENCE of a checkout: the installed shape, unreachable from a normal run.
+
+
+@pytest.fixture
+def unbound_roots():
+    """``source_checkout_root`` is ``lru_cache``d — without this a test that moves
+    ``PACKAGE_ROOT`` reads the previous test's answer. Not autouse: it would then
+    fire for every test in this file, which resolves roots for real."""
+    from promptpotter.config import paths
+
+    paths.source_checkout_root.cache_clear()
+    yield paths
+    paths.source_checkout_root.cache_clear()
+
+
+def _fake_install(paths: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A package dir with no ``pyproject.toml`` beside it — i.e. a wheel."""
+    package = tmp_path / "site-packages" / "promptpotter"
+    package.mkdir(parents=True)
+    monkeypatch.setattr(paths, "PACKAGE_ROOT", package)
+    paths.source_checkout_root.cache_clear()
+    return package
+
+
+def _fake_checkout(
+    paths: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, name: str
+) -> Path:
+    """A package dir whose parent carries a ``pyproject.toml`` naming *name*."""
+    root = tmp_path / "checkout"
+    package = root / "promptpotter"
+    package.mkdir(parents=True)
+    (root / "pyproject.toml").write_text(f'[project]\nname = "{name}"\n', encoding="utf-8")
+    monkeypatch.setattr(paths, "PACKAGE_ROOT", package)
+    paths.source_checkout_root.cache_clear()
+    return root
+
+
+def test_a_checkout_is_recognised_by_project_name_not_by_a_bare_marker(
+    unbound_roots: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``site-packages`` is a directory anyone may drop a ``pyproject.toml`` into, and
+    mistaking a foreign one for this repo puts user data back inside the install."""
+    paths = unbound_roots
+    root = _fake_checkout(paths, tmp_path, monkeypatch, name="promptpotter-optimizer")
+    assert paths.source_checkout_root() == root
+
+    _fake_checkout(paths, tmp_path / "other", monkeypatch, name="somebody-elses-package")
+    assert paths.source_checkout_root() is None
+
+    _fake_install(paths, tmp_path / "installed", monkeypatch)
+    assert paths.source_checkout_root() is None
+
+
+def test_user_data_root_resolves_env_then_checkout_then_app_data(
+    unbound_roots: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """All three branches. The middle one keeps an existing checkout — and
+    ``deploy-linux/``, which runs from one — writing exactly where it always has."""
+    paths = unbound_roots
+    root = _fake_checkout(paths, tmp_path, monkeypatch, name="promptpotter-optimizer")
+
+    monkeypatch.delenv("PROMPTPOTTER_HOME", raising=False)
+    assert paths.user_data_root() == root / ".promptpotter"
+
+    monkeypatch.setenv("PROMPTPOTTER_HOME", str(tmp_path / "elsewhere"))
+    assert paths.user_data_root() == (tmp_path / "elsewhere").resolve()
+
+    monkeypatch.delenv("PROMPTPOTTER_HOME")
+    _fake_install(paths, tmp_path / "installed", monkeypatch)
+    assert "site-packages" not in paths.user_data_root().parts
+
+
+def test_benchmark_root_is_install_content_and_never_the_huggingface_package(
+    unbound_roots: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A checkout reads ``datasets/``; a wheel reads its own staged assets.
+
+    The banned answer gets its own assertion because it is a REAL directory whenever
+    the ``[benchmarks]`` extra is installed — a wrong path that exists is the failure
+    mode with no symptom.
+    """
+    paths = unbound_roots
+    root = _fake_checkout(paths, tmp_path, monkeypatch, name="promptpotter-optimizer")
+    assert paths.benchmark_datasets_root() == root / "datasets"
+
+    package = _fake_install(paths, tmp_path / "installed", monkeypatch)
+    resolved = paths.benchmark_datasets_root()
+    assert resolved == package / "assets" / "benchmarks"
+    assert resolved != package.parent / "datasets"
+
+
+def test_only_the_optimizer_manifest_may_be_shadowed(
+    unbound_roots: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One FILE, not the directory: a directory-level override would silently invite a
+    hand-written ``resolved_schemas.json``, which is generated from the Pydantic models."""
+    paths = unbound_roots
+    package = _fake_install(paths, tmp_path, monkeypatch)
+    home = tmp_path / "home"
+    monkeypatch.setenv("PROMPTPOTTER_HOME", str(home))
+
+    assert paths.optimizer_pipeline_path() == package / "assets" / "optimizer" / "pipeline.yaml"
+
+    override = home / "optimizer" / "pipeline.yaml"
+    override.parent.mkdir(parents=True)
+    override.write_text("nodes: {}\n", encoding="utf-8")
+    assert paths.optimizer_pipeline_path() == override
+    assert paths.optimizer_assets_root() == package / "assets" / "optimizer"

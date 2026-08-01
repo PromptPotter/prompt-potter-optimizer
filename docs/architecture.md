@@ -164,8 +164,11 @@ world is a strict containment hierarchy:
   here as `_optimizer` / `_optimizer_meta`, which is why the listing carried an
   `_`-prefix filter; it is install content, not a target, and now lives under the
   package (`config/paths.py::optimizer_assets_root`) where it also ships in the
-  wheel. A checkout resolves benchmarks from `datasets/`; a wheel has none, and
-  the tenant tier is the only tier an installed operator uses. **One resolution
+  wheel. A checkout resolves benchmark definitions from `datasets/`; a wheel
+  ships the same definitions as install content and resolves them there. Either
+  way the tier is **read-only**, so a benchmark's materialized rows are not kept
+  in it: they are the operator's, and `readable_dataset_rows` resolves them from
+  the tenant tree (`store/dataset_access.py`). **One resolution
   seam:** `readable_dataset_dir` picks the dir (tenant slug first,
   repo benchmark second) once at bootstrap and stamps it on
   `Session.dataset_config_dir`; every downstream dataset-file loader

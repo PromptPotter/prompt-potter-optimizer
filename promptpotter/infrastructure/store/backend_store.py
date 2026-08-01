@@ -1,10 +1,9 @@
-"""Backend registration + sync + execution + dataset cache + connector profile."""
+"""Backend registration + sync + execution + connector profile."""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.infrastructure.store.io import (
@@ -13,23 +12,21 @@ from promptpotter.infrastructure.store.io import (
     validate_path_component,
     write_json,
 )
-from promptpotter.shared.clock import utcnow_iso
-
-if TYPE_CHECKING:
-    from promptpotter.domain.sample import Sample
 
 
 class BackendStore:
-    """Backend registration + synced API responses + dataset cache.
+    """Backend registration + synced API responses.
 
-    Backends: ``archive/backends/{backend_id}/``. Named datasets sit outside
-    the tenant tree at ``{datasets_root}/{name}/cache.json`` so they survive
-    ``.promptpotter/`` resets.
+    Backends: ``archive/backends/{backend_id}/``. It also held a named-dataset row
+    cache, writing ``{datasets_root}/{name}/cache.json`` outside the tenant tree —
+    which is what made the install tier have to be writable, and it is not once the
+    definitions ship inside a wheel. Rows are the operator's and now live with the
+    rest of their data (``TenantDatasetStore.save_benchmark_rows``); a HuggingFace
+    fetch was never a backend fact.
     """
 
-    def __init__(self, base_dir: Path, datasets_root: Path):
+    def __init__(self, base_dir: Path):
         self._base_dir = base_dir
-        self._datasets_root = datasets_root
 
     def _backends_root(self) -> Path:
         return self._base_dir / "archive" / "backends"
@@ -63,38 +60,6 @@ class BackendStore:
     def update(self, backend: BackendConnection) -> None:
         path = self._backend_dir(backend.id) / "backend.json"
         write_json(path, backend.model_dump())
-
-    # -- datasets (repo-adjacent, gitignored, name-keyed) ----------------------
-
-    def _dataset_cache_path(self, name: str) -> Path:
-        validate_path_component(name)
-        return self._datasets_root / name / "cache.json"
-
-    def save_dataset(
-        self,
-        name: str,
-        items: Sequence[Sample | dict[str, Any]],
-    ) -> Path:
-        """Write a named dataset to disk; ``Sample`` items serialized via ``model_dump()``.
-
-        No ``source_file``: it defaulted to "", the sole caller omitted it, and nothing ever read
-        `cache.json::source_file` back — every real `source_file` reader belongs to a different
-        store (the draft, sweep and tenant-dataset ones)."""
-        from promptpotter.domain.sample import Sample
-
-        serialized = [item.model_dump() if isinstance(item, Sample) else item for item in items]
-        data: dict[str, Any] = {
-            "name": name,
-            "created_at": utcnow_iso(),
-            "row_count": len(serialized),
-            "items": serialized,
-        }
-        path = self._dataset_cache_path(name)
-        write_json(path, data)
-        return path
-
-    def load_dataset(self, name: str) -> dict[str, Any] | None:
-        return read_json_optional(self._dataset_cache_path(name))
 
     # -- connector profile (persistent per-backend defaults) -------------------
 

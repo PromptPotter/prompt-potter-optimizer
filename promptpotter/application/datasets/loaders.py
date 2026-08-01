@@ -13,6 +13,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.sample import Sample
+from promptpotter.infrastructure.store.dataset_access import readable_dataset_rows
 from promptpotter.shared import GSM8K_ANSWER_RE
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.hashing import HASH_TRUNCATE
@@ -257,24 +258,26 @@ def resolve_dataset_items(
     *,
     status: Callable[[str], None] | None = None,
 ) -> list[dict[str, Any]]:
-    """Tenant cache → backend cache → ``DATASET_LOADERS`` fallback (fetch + persist).
+    """Resolved rows → ``DATASET_LOADERS`` fallback (fetch + persist).
 
     Returns normalized item dicts (``Sample.model_dump()`` shape); ``[]`` only when
     no cached source exists AND no loader is registered. The single materialization
     seam shared by the run-time bootstrap (``_load_dataset_into_session``) and the
     webapp ingest-from-dataset path (``draft_from_dataset``), so both reach the same
-    samples — a benchmark whose ``cache.json`` is gitignored/absent on the server is
-    fetched + re-persisted here, exactly as a fresh run would.
+    samples — a benchmark whose rows are absent on this machine is fetched +
+    persisted here, exactly as a fresh clone would.
+
+    The fetch lands in the TENANT tree, never beside the definition it materializes:
+    under a wheel that definition sits in ``site-packages``
+    (``store/dataset_access.py::readable_dataset_rows``).
     """
-    ds: dict[str, Any] | None = stores.tenant_datasets.load_dataset(dataset_name)
-    if not (ds and ds.get("items")):
-        ds = stores.backends.load_dataset(dataset_name)
+    ds: dict[str, Any] | None = readable_dataset_rows(stores, dataset_name)
     loader = dataset_loader(dataset_name)
     if not (ds and ds.get("items")) and loader is not None:
         if status:
             status(f"Loading dataset '{dataset_name}' from registry ...")
         loader_items = loader()
-        stores.backends.save_dataset(dataset_name, loader_items)
+        stores.tenant_datasets.save_benchmark_rows(dataset_name, loader_items)
         ds = {"items": [s.model_dump() for s in loader_items]}
     if not (ds and ds.get("items")):
         return []

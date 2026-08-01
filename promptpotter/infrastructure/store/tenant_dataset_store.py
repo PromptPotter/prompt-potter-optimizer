@@ -8,9 +8,11 @@ pre-commit working state (the parsed sample bank + the draft) lives under the
 owning check-in campaign (``campaigns/{id}/checkin/``, :class:`CheckinDraftStore`),
 not here — this store only owns committed datasets.
 
-Built-in benchmark datasets (`aime_2025`, `bbeh`, `gsm8k`, …) stay under
-repo ``datasets/`` and are served by :class:`BackendStore`; this store
-only touches the tenant tree.
+A built-in benchmark's DEFINITION is install content and stays out of this tree
+(`config/paths.py::benchmark_datasets_root`, read-only). Its materialized ROWS are
+not: they are fetched on the operator's machine, regenerable, and 6.8 MB, so they
+land here under ``benchmark-rows/`` — see :meth:`benchmark_rows_path`. This store
+only touches the tenant tree, and it is the only place dataset rows are written.
 """
 
 from __future__ import annotations
@@ -51,7 +53,11 @@ class TenantDatasetStore:
     # -- Slug registry --------------------------------------------------------
 
     def list_slugs(self) -> list[str]:
-        """Sorted committed slugs (excludes dotted sidetrees). Each entry has a ``cache.json``."""
+        """Sorted committed slugs (excludes dotted sidetrees).
+
+        Keyed on the same file :func:`~promptpotter.infrastructure.store.dataset_access.is_dataset_dir`
+        asks for, so this listing and the resolver cannot disagree about what a dataset is.
+        """
         root = self.datasets_root()
         if not root.is_dir():
             return []
@@ -61,7 +67,7 @@ class TenantDatasetStore:
                 continue
             if entry.name.startswith("."):
                 continue
-            if not (entry / "cache.json").is_file():
+            if not (entry / "pipeline.yaml").is_file():
                 continue
             try:
                 validate_dataset_name(entry.name)
@@ -110,6 +116,40 @@ class TenantDatasetStore:
 
     def load_dataset(self, slug: str) -> dict[str, Any] | None:
         return read_json_optional(self.dataset_dir(slug) / "cache.json")
+
+    # -- Benchmark rows -------------------------------------------------------
+
+    def benchmark_rows_path(self, name: str) -> Path:
+        """Where an install-tier benchmark's fetched rows live for this tenant.
+
+        Deliberately NOT ``datasets/{name}/cache.json``: a tenant dir carrying only
+        rows would satisfy the resolver's tenant-first rule and shadow the install
+        definition it was fetched for, leaving the overlay and prompts unreadable.
+        A flat keyed file cannot be mistaken for a dataset dir.
+        """
+        validate_dataset_name(name)
+        return self._base_dir / "benchmark-rows" / f"{name}.json"
+
+    def load_benchmark_rows(self, name: str) -> dict[str, Any] | None:
+        return read_json_optional(self.benchmark_rows_path(name))
+
+    def save_benchmark_rows(self, name: str, items: Sequence[Sample | dict[str, Any]]) -> Path:
+        """Persist a fetched benchmark's rows. The one writer of materialized rows
+        outside a committed dataset's own dir."""
+        from promptpotter.domain.sample import Sample
+
+        serialized = [item.model_dump() if isinstance(item, Sample) else item for item in items]
+        path = self.benchmark_rows_path(name)
+        write_json(
+            path,
+            {
+                "name": name,
+                "created_at": utcnow_iso(),
+                "row_count": len(serialized),
+                "items": serialized,
+            },
+        )
+        return path
 
     def task_description(self, slug: str) -> str | None:
         path = self.dataset_dir(slug) / "task_description.md"

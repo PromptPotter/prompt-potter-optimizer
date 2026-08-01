@@ -19,9 +19,10 @@ replaced by three roots that each say what they are:
 - :func:`user_data_root` — **user data.** Read-write, per machine, holds
   measurements we do not own and must never lose to a reinstall.
 - :func:`benchmark_datasets_root` — **sample content.** The repo's benchmark
-  dataset dirs. The *definitions* ship (~270 KB, staged by
-  ``scripts/build_release.py``); the per-dataset HuggingFace caches do not, since
-  they are 6.8 MB and regenerable on first use.
+  dataset *definitions*, read-only like the install content above. They ship
+  (~270 KB, staged by ``scripts/build_release.py``); the per-dataset HuggingFace
+  row caches do not, since they are 6.8 MB, regenerable on first use, and the
+  operator's rather than ours — so they are written to the user-data root.
 
 ``site-packages/datasets`` deserves its own warning: that is where the
 HuggingFace ``datasets`` library installs, and it is a declared extra of this
@@ -143,13 +144,16 @@ def optimizer_pipeline_path() -> Path:
 
 
 def benchmark_datasets_root() -> Path:
-    """The benchmark dataset dirs: the checkout's ``datasets/``, else package assets.
+    """The benchmark DEFINITIONS: the checkout's ``datasets/``, else package assets.
 
-    A wheel ships the dataset DEFINITIONS and not their caches (``scripts/
-    build_release.py`` stages the git-tracked files; ``datasets/*/cache.json`` is
-    gitignored). A benchmark arriving without its rows is an already-handled case:
-    ``application/datasets/loaders.py::resolve_dataset_items`` fetches and
-    re-persists them on first use, exactly as a fresh clone does.
+    **Read-only, on every install shape** — under a wheel it resolves inside
+    ``site-packages``, which pip deletes on upgrade and a system install refuses
+    to write. Nothing in the package may write here, and nothing needs to: a
+    benchmark's materialized rows belong to the operator, not to us, so they land
+    in the user tree instead (``store/dataset_access.py::readable_dataset_rows``).
+    A benchmark arriving without its rows is an already-handled case —
+    ``application/datasets/loaders.py::resolve_dataset_items`` fetches and persists
+    them on first use, exactly as a fresh clone does.
 
     What this must never be is ``site-packages/datasets`` — the HuggingFace
     library's own directory, and a declared extra of this project.
