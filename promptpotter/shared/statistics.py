@@ -1,4 +1,4 @@
-"""Pure statistics utilities — Wilson CI, two-proportion z-test, MDE, Bayesian PoBB.
+"""Pure statistics utilities — paired-difference posterior, t-critical, MDE, Bayesian PoBB.
 
 Leaf-level: depends only on stdlib + numpy + scipy. No domain or service imports.
 Requires ``scipy`` (``pip install -e ".[stats]"``).
@@ -9,24 +9,6 @@ from __future__ import annotations
 import math
 
 import numpy as np
-
-
-def wilson_ci(hits: int, total: int, alpha: float = 0.05) -> tuple[float, float]:
-    """Wilson score confidence interval for a binomial proportion.
-
-    Returns (lower, upper) as fractions in [0, 1].
-    """
-    if total == 0:
-        return (0.0, 0.0)
-
-    from scipy.stats import norm
-
-    z = norm.ppf(1 - alpha / 2)
-    p_hat = hits / total
-    denom = 1 + z**2 / total
-    center = (p_hat + z**2 / (2 * total)) / denom
-    margin = z * math.sqrt(p_hat * (1 - p_hat) / total + z**2 / (4 * total**2)) / denom
-    return (max(0.0, center - margin), min(1.0, center + margin))
 
 
 def t_critical(df: int, alpha: float = 0.05) -> float:
@@ -122,5 +104,4 @@ __all__ = [
     "min_detectable_effect",
     "paired_diff_posterior",
     "t_critical",
-    "wilson_ci",
 ]

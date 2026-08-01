@@ -17,7 +17,6 @@ from promptpotter.presentation.views.display import (
     fmt_ci,
 )
 from promptpotter.shared.composite import render_composite_fitness_oneliner
-from promptpotter.shared.statistics import wilson_ci
 
 
 def fmt_pp_override(pp: dict[str, Any] | None) -> str:
@@ -92,20 +91,20 @@ def individual_summary_from_dict(
         )
 
     acc = scores["accuracy"]
-    hits = scores.get("hits", 0)
     n = scores.get("total", 0)
-    ci_lo, ci_hi = wilson_ci(hits, n)
+    # The served composite interval, not a Wilson band re-derived here: this row draws
+    # the candidate's own numbers, and the CI must bracket one of them.
     delta = acc - origin_acc
-    tag = f"{acc:.1%} {fmt_ci(ci_lo, ci_hi)}"
+    tag = f"{acc:.1%} {fmt_ci(scores.get('composite_ci_lo'), scores.get('composite_ci_hi'))}"
 
     aborted = bool(scores.get("escalation_aborted"))
     if aborted:
         scored_q = scores.get("scored_samples", n)
         expected_q = scores.get("expected_samples", n)
-        hit_str = f"{hits}/{scored_q} hits {YELLOW}⚠ aborted {scored_q}/{expected_q}{RESET}"
+        n_str = f"{scored_q} samples {YELLOW}⚠ aborted {scored_q}/{expected_q}{RESET}"
     else:
-        hit_str = f"{hits}/{n} hits"
-    body_line = f"{mutations_chunk}{hit_str}  vs origin: {_fmt_delta(delta)}"
+        n_str = f"{n} samples"
+    body_line = f"{mutations_chunk}{n_str}  vs origin: {_fmt_delta(delta)}"
 
     detail_lines: list[str] = []
     elim = scores.get("elimination_context") or {}
