@@ -27,58 +27,75 @@ Self-optimization tests two beliefs:
    "PromptPotter" can be a backend in the same registry as "TermNorm",
    the abstraction holds.
 
-## The composed outer fitness
+## The outer fitness
 
-Each outer "sample" runs an inner PromptPotter cycle on a cheap proxy benchmark. The
-connector reports a **vector** of bounded, subset-invariant signals per inner cycle
-(`domain/l4/proxies.py::compute_outer_proxies`), and `campaign.yaml::scoring` composes them so a
-signal-rich campaign is never distilled to one number — **lift core × quality modulator ×
-efficiency**:
+Each outer "sample" runs an inner PromptPotter cycle on a cheap proxy benchmark. The connector
+reports **one** bounded, subset-invariant signal per inner cycle
+(`domain/l4/proxies.py::compute_outer_proxies`), and `campaign.yaml::scoring` re-anchors it into
+`[0,1]`:
 
-- **Lift core** — `final_delta` (where the inner search ENDED minus its origin) weighted with
-  `after_N_rounds_delta` (the same series averaged, so it reads how *fast* it got there and
-  held), both in LOGITS on one ability ruler over the incumbent each round ADOPTED. Re-anchored
-  and clamped so regression < no-op < improvement stay distinct. Reading the round's *proposals*
-  instead priced exploration as damage and inverted the whole metric — see
+- **`final_delta`** — where the inner search ENDED minus its origin, in LOGITS on one ability
+  ruler, over the incumbent each round ADOPTED. Reading the round's *proposals* instead priced
+  exploration as damage and inverted the whole metric — see
   `exploration.adopted_level_trajectory`. **Its definition, its bound and why it needs no
-  denominator are the type's, not this doc's — read `domain/l4/proxies.py`.** There is no
-  `target_score` any more, anywhere; see *No declared headroom*, below.
-- **Quality modulator** — `cleanliness · diversity_health`, floored at 0.6: discounts a
-  campaign with unscoreable/degraded inner samples, malformed candidate output, mode collapse,
-  or candidates that **answered one constant label** — **without** diluting the lift core (a
-  floor, not an additive term). That last term is the semantic half: every other one counts
-  plumbing, so a candidate emitting perfectly-formed constant garbage trips none of them and
-  used to score a flawless round.
-- **Efficiency** — `delta_per_dollar`, floored at 0.7: rewards cheap lift. It divides by the
-  **incurred** cost, not the bill — see *The bill is not the cost*, below.
+  denominator are the type's, not this doc's — read `domain/l4/proxies.py`.**
+
+The re-anchor is linear, so the paired estimator's reported effect times the window width IS the
+mean logit lift — a number to read, not merely to order by.
+
+**It used to compose four factors over eight emitted proxies** — lift core × sustained discovery
+× bounded quality × efficiency. The first complete 39-cell panel then measured each of them, and
+the composition did not survive contact:
+
+- `cleanliness` put **twice** as much of its variance into the SEED as into the arm (30.9% vs
+  15.4%). It was grading which data a cell drew, not which meta-prompt ran it. This spec had
+  flagged exactly that as open and left it charging pending "a run with a real meta-prompt
+  contrast"; that run happened.
+- `diversity_health` never left the top fifth of its range — no candidate gradient at all.
+- `delta_per_dollar` correlated **0.958** with the lift core and flipped no ordering: it was the
+  lift counted a second time.
+- `rounds_improved_frac` flipped nothing.
+
+Each was a *multiplier*, so each held authority over an ordering it could not justify — and
+together they roughly doubled the apparent significance of the run's conclusion by compressing
+the fitness scale (pooled paired t of −4.62 against the raw term's −2.38, on identical data).
+
+**The quality EVENTS still act; they simply act once, structurally.** A cycle whose every round
+lost its candidates to an empty optimizer response goes to the FLOOR (`floor_reason`); a
+collapsed arm is dropped from the inner election and eliminated at PoBB. Charging them a second
+time, graded, inside the fitness was a second mechanism for a job the loop already does.
 
 **No declared headroom.** The system holds **no target score, and no expectation of how much
 room a benchmark has.** It used to: `target_score` sat in `inner_tasks.yaml`, and a
 `rounds_to_N` proxy counted rounds to reach it. Both are deleted. The concept was wrong twice
 over. Mechanically it was dead weight — `rounds_to_N` carried no candidate gradient (it was the
 constant `len(levels)+1` whenever the target sat beyond round-budget reach), so it cancelled in
-the election and reached no decision; the scoring formula had already dropped it. And
-epistemically it was backwards: **a task the inner model looks bad at is a task it has not been
-tuned for yet, not a task with a low ceiling.** Declaring a target bakes a pessimistic guess
-about the ceiling into config and then measures against the guess. The default assumption is
-that the room is large; evidence has to be unambiguous to say otherwise. The lift core is the
-raw climb on the ability ruler and divides by nothing at all — so nothing was lost by deleting
-the target, and one whole class of assumption went with it.
+the election and reached no decision. And epistemically it was backwards: **a task the inner
+model looks bad at is a task it has not been tuned for yet, not a task with a low ceiling.**
+Declaring a target bakes a pessimistic guess about the ceiling into config and then measures
+against the guess. The lift term is the raw climb on the ability ruler and divides by nothing at
+all — so nothing was lost by deleting the target, and one whole class of assumption went with it.
 
 **Governing law — every term must carry a candidate gradient** (vary across the meta-prompt
-candidates being compared). Two terms were retired for lacking one: the rounds-to-target counter
-above; and a raw per-seed cost multiplier, which measured the *seed*, not the candidate.
-Efficiency's `delta_per_dollar` passes the law precisely because its numerator is
-candidate-specific — a verbose meta-prompt burns more
-for the same lift. Emitted but held out of the formula until a validation run confirms their
-gradient here: `rounds_improved_frac`, `delta_per_candidate`, and `first_round_delta` (round 1
-alone is two candidates' evidence against a signal several times smaller than one candidate's
-θ_se — mostly noise, and it degrades a blend with the lift core at every weight).
+candidates being compared). That law is what removed the four factors above, and it is why there
+is one term rather than a tidy-looking basket.
+
+**Deliberately not added: a peak / lift-and-hold reading.** `final_delta` reads the ADOPTED
+incumbent, so a peak the inner search later walked away from scores as nothing — on the banked
+panel that is 17 of 39 cells, mean gap +0.052. It is a one-line derivation, and it is out because
+it changes the ESTIMAND: under a pure peak ruler the origin loses. That is a decision to take on
+measurement, not in passing.
 
 Acceptance is empirical: the composed fitness must hold `proxy_lift_corr ≥ 0.6` — a term that
 degrades it is cut, not kept for tidiness.
 
 ## The bill is not the cost
+
+> **No fitness term divides by cost any more** — `delta_per_dollar` is gone (above). The two-cost
+> split it forced is NOT gone: `incurred_usd` and the bill are both still tracked and both still
+> reported, because they answer different operator questions. Keep this section: it is the reason
+> a cost term was never salvageable as a *measurement of a candidate*, and it is the argument any
+> future proposal to reintroduce one has to answer.
 
 There is a second law hiding behind the first, and it is easy to miss because it only shows up
 once the system has a history. **A fitness term must be blind to what we have already measured.**

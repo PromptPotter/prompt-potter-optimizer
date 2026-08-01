@@ -126,11 +126,14 @@ export const OuterVerdictPanel = memo(function OuterVerdictPanel() {
         <>
           <p className="l4-lede">
             <Badge tone={DECISION_TONE[verdict.decision] ?? "default"}>{verdict.decision}</Badge>{" "}
-            Variant lifts the optimizer <strong>{fmt(verdict.effect)}</strong> [{fmt(verdict.ci_lo)},{" "}
+            {/* Which arm this is about. A round that crowned nobody still reports its best arm,
+                and reading that as an adopted winner would overstate what the round decided. */}
+            {verdict.variant_is_winner ? "Adopted variant" : "Best arm (none adopted)"} lifts the
+            optimizer <strong>{fmt(verdict.effect)}</strong> [{fmt(verdict.ci_lo)},{" "}
             {fmt(verdict.ci_hi)}] across {verdict.n_cells} cell
             {verdict.n_cells === 1 ? "" : "s"} vs the cached round-0 origin.
             {verdict.decision === "inconclusive"
-              ? ` CI spans 0 — MDE at this cell count ≈ ${verdict.mde_remaining.toFixed(3)}.`
+              ? ` CI spans 0 — smallest effect this panel could still resolve ≈ ${verdict.mde_remaining.toFixed(3)}.`
               : ""}
           </p>
           <ForestPlot verdict={verdict} />

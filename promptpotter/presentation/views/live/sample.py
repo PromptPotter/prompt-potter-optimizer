@@ -105,27 +105,20 @@ def fmt_query_result(
         return f"{indent}{time_col} {sid_col} {tag}{step_block}{tok_col} ERR:{str(err)[:40]!r} gt:{gt!r} q:{q!r}"
 
     # An L4 outer sample is not a question with an answer — it is a whole inner campaign, and
-    # the row's `after_N_rounds_delta` is what it measured. Rendered as HIT/MISS-vs-ground-truth
-    # it reads as a total failure every time: `hit` is `fitness >= 1.0`, unreachable for a
-    # composite that maxes around 0.6, and the ground truth is a deliberate placeholder token
-    # (`inner:{task}`) that no prediction is ever compared against. So the screen said
-    # `MISS --/1 … gt:'inner:justlogic-d234/seed-0' … best 0%` for hours at a stretch while the
-    # instrument underneath was reading a real +19% inner lift, and the operator — reasonably —
-    # concluded nothing was working. Show the measurement.
-    proxy_delta = pd.get("after_N_rounds_delta")
+    # the row's `final_delta` is what it measured. Rendered as HIT/MISS-vs-ground-truth
+    # it reads as a total failure every time: the discrete tag needs `fitness >= 1.0`, which the
+    # outer formula's re-anchoring window never reaches, and the ground truth is a deliberate
+    # placeholder token (`inner:{task}`) that no prediction is ever compared against. So the
+    # screen said `MISS --/1 … gt:'inner:justlogic-d234/seed-0' … best 0%` for hours at a stretch
+    # while the instrument underneath was reading a real +19% inner lift, and the operator —
+    # reasonably — concluded nothing was working. Show the measurement.
+    proxy_delta = pd.get("final_delta")
     if isinstance(proxy_delta, int | float):
         fitness = r.get("fitness")
         fit_col = f" fit {fitness:.2f}" if isinstance(fitness, int | float) else ""
-        clean = pd.get("cleanliness")
-        div = pd.get("diversity_health")
-        quality = (
-            f" clean {clean:.2f} div {div:.2f}"
-            if isinstance(clean, int | float) and isinstance(div, int | float)
-            else ""
-        )
         return (
             f"{indent}{time_col} {sid_col} Δ{proxy_delta:+.3f}{fit_col}"
-            f"{step_block}{tok_col}{quality} q:{q!r}"
+            f"{step_block}{tok_col} q:{q!r}"
         )
 
     line = f"{indent}{time_col} {sid_col} {tag}{step_block}{tok_col} -> {pred!r} gt:{gt!r} q:{q!r}"

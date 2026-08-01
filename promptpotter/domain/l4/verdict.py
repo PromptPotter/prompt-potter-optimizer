@@ -81,7 +81,12 @@ class OuterVerdict(StrictModel):
     ci_hi: float
     n_cells: int
     decision: str  # adopt | reject | inconclusive
-    mde_remaining: float  # min detectable effect at the current cell count
+    mde_remaining: float  # smallest effect this panel could still resolve, from `se`
+    # False when the round crowned nobody and this verdict reports the BEST-SCORING arm instead.
+    # The distinction is load-bearing: `variant_id` names the subject, and a reader must be able
+    # to tell "the round adopted this and here is the evidence" from "the round adopted nothing,
+    # and here is what the closest arm actually measured".
+    variant_is_winner: bool
 
 
 def cell_fitness(rows: list[dict[str, Any]]) -> dict[str, float]:
@@ -102,14 +107,26 @@ def cell_fitness(rows: list[dict[str, Any]]) -> dict[str, float]:
     return {cell: sum(v) / len(v) for cell, v in acc.items()}
 
 
-def _pick_variant(candidates: list[CandidateInfo]) -> CandidateInfo | None:
-    """The variant the verdict scores: the round's elected winner, or nothing.
+def _pick_variant(candidates: list[CandidateInfo]) -> tuple[CandidateInfo, bool] | None:
+    """The variant the verdict scores: the round's elected winner, else its best-scoring arm.
 
-    A round that crowned nothing has no verdict — no ``max(composite_fitness)`` fallback,
-    which could read ``adopt`` for an arm the θ election declined. ``None`` is a legal
-    return.
-    """
-    return next((c for c in candidates if c.is_winner), None)
+    Returns ``(variant, is_winner)``. The fallback exists because gating the whole verdict on a
+    crowning discarded the measurement in exactly the case the operator most needs it: a round
+    that crowns nothing is a round whose answer is "inconclusive", and reporting nothing at all
+    is indistinguishable from "this round was never measured". Across the only complete pp-self
+    run, `outer_verdict` was null on all three rounds for this reason, so the CI and the
+    remaining MDE — the two numbers that say whether to buy another round — never reached the
+    operator at all.
+
+    The old concern was that a `max(composite_fitness)` fallback could read ``adopt`` for an arm
+    the θ election declined. That is answered by `variant_is_winner` riding the record rather
+    than by withholding it: the decision is the CI's, and a reader can now see which subject it
+    was computed on. ``None`` only when there are no candidates."""
+    if (winner := next((c for c in candidates if c.is_winner), None)) is not None:
+        return (winner, True)
+    if not candidates:
+        return None
+    return (max(candidates, key=lambda c: c.composite_fitness), False)
 
 
 def compute_outer_verdict(
@@ -123,9 +140,10 @@ def compute_outer_verdict(
     the origin is the control, not a verdict subject)."""
     if not origin_cells:
         return None
-    variant = _pick_variant(candidates)
-    if variant is None:
+    picked = _pick_variant(candidates)
+    if picked is None:
         return None
+    variant, variant_is_winner = picked
     var_cells = cell_fitness(all_candidate_results.get(variant.candidate_id, []))
 
     shared = sorted(c for c in var_cells if c in origin_cells)
@@ -163,7 +181,8 @@ def compute_outer_verdict(
         ci_hi=ci_hi,
         n_cells=n,
         decision=decision,
-        mde_remaining=min_detectable_effect(n),
+        mde_remaining=min_detectable_effect(se),
+        variant_is_winner=variant_is_winner,
     )
 
 

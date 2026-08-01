@@ -23,17 +23,22 @@ def t_critical(df: int, alpha: float = 0.05) -> float:
     return float(t.ppf(1 - alpha / 2, df))
 
 
-def min_detectable_effect(n: int, alpha: float = 0.05, power: float = 0.8) -> float:
-    """Uses worst-case variance (p=0.5). Returns MDE as a fraction."""
-    if n <= 0:
-        return 1.0
+def min_detectable_effect(se: float, alpha: float = 0.05, power: float = 0.8) -> float:
+    """Smallest effect detectable at *alpha* / *power*, given the estimator's OWN standard error.
+
+    Takes the SE rather than a sample count, because the caller always has it. The old form took
+    ``n`` and assumed worst-case BINOMIAL variance — ``(z_a + z_b)·sqrt(0.25/n)`` — which is the
+    right formula for a proportion and the wrong one for every caller this has: an L4 outer round
+    pairs graded composites, and the pairing is precisely what shrinks the variance below the
+    binomial worst case. Measured on the 6-cell panel it reported 0.57 where the paired MDE was
+    0.15, a 3.8x overstatement of how much headroom the panel still needed — while the correct
+    ``se`` sat three lines above the call site, already computed."""
+    if se <= 0.0:
+        return 0.0
 
     from scipy.stats import norm
 
-    z_alpha = norm.ppf(1 - alpha / 2)
-    z_beta = norm.ppf(power)
-    mde = (z_alpha + z_beta) * math.sqrt(0.25 / n)
-    return float(min(mde, 1.0))
+    return float((norm.ppf(1 - alpha / 2) + norm.ppf(power)) * se)
 
 
 # --- PoBB: Posterior-of-Being-Best (Russo 2016 / Top-Two Thompson family) ---

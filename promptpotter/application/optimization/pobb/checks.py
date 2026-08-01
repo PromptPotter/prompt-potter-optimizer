@@ -280,7 +280,7 @@ class PoBBCheck:
         # candidate that has stopped answering the question, and move on.
         #
         # The collapse is still CHARGED, not hidden — the arm keeps its rows, so
-        # ``_round_problem_rate`` bills it to `cleanliness` exactly as before.
+        # the outer loop sees it structurally, via elimination rather than a graded charge.
         if is_answer_collapsed(results):
             return _eliminate(
                 self.name,

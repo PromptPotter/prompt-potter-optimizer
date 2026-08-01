@@ -14,17 +14,14 @@ because the inner model is far from what prompting can get out of it there, so t
 inner loop has room to climb and outer candidates score differently. No target
 score is declared: the panel says what an inner cycle may SPEND, never what it is
 expected to REACH). Each inner run reports a vector of proxy
-measurements (`domain/l4/proxies.py::OuterSampleProxies`) — among them
-`after_N_rounds_delta` (the inner search's MEAN ability across its rounds minus its
-origin, in logits on one difficulty-adjusted ruler), `first_round_delta`,
-`delta_per_dollar`, and the `cleanliness` / `diversity_health` health terms.
+measurement (`domain/l4/proxies.py::OuterSampleProxies`): `final_delta`, the ability
+the inner search ENDED on minus its origin, in logits on one difficulty-adjusted ruler.
 
-The outer scoring formula in `campaign.yaml::scoring` composes a weighted subset
-(currently `after_N_rounds_delta` alone as the lift core — `first_round_delta` is held
-out as mostly noise at two candidates — gated by `cleanliness × diversity` and scaled
-by `delta_per_dollar`). Operators iterate on the formula as evidence
-accumulates — there's no single "right" weighting; the proxies serve different
-stages of the development → calibration → publication arc.
+The outer scoring formula in `campaign.yaml::scoring` re-anchors that one term into
+[0,1] and nothing else. It used to compose four factors over eight emitted proxies;
+a 39-cell panel then measured each, and only this one discriminated between
+meta-prompts — the quality terms carried more SEED variance than arm variance while
+holding authority over the ordering. The rationale lives on `OuterSampleProxies`.
 
 ## Status
 

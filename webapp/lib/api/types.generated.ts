@@ -57,6 +57,7 @@ export interface OuterVerdict {
   n_cells: number;
   decision: string;
   mde_remaining: number;
+  variant_is_winner: boolean;
 }
 
 /** Display row for `dashboard.json::rounds[]` — webapp's completed-round source. */

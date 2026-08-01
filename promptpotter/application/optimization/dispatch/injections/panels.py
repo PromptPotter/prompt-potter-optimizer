@@ -407,7 +407,7 @@ def _r_inner_narratives(b: InjectionBundle) -> str:
     plus one scalar per-seed delta — so it re-proposes mutations the inner loop already measured
     and lost, the exact "doesn't use the information" failure.
 
-    Fires ONLY on the recursion. The discriminator is ``after_N_rounds_delta`` — the outer-lift
+    Fires ONLY on the recursion. The discriminator is ``final_delta`` — the outer-lift
     proxy the ``promptpotter`` connector stamps on every inner-cycle row (``compute_outer_proxies``)
     and nothing else writes. It is NOT ``reasoning_trace``: an ordinary backend returns one of
     those on most samples (it is what ``sample_transcripts`` renders), so gating on the trace
@@ -420,7 +420,7 @@ def _r_inner_narratives(b: InjectionBundle) -> str:
         # The L4 discriminator: only the `promptpotter` connector stamps this proxy, and a
         # zero-lift seed (a flat inner run — the ones a meta-prompt edit most needs to see)
         # can round-trip as an int 0, so accept any real number, exclude bool.
-        d = (r.get("pipeline_data") or {}).get("after_N_rounds_delta")
+        d = (r.get("pipeline_data") or {}).get("final_delta")
         return float(d) if isinstance(d, int | float) and not isinstance(d, bool) else None
 
     scored = [

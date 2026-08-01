@@ -719,7 +719,7 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
         # consumer matches predicted against ground_truth (outer hit is
         # `fitness >= 1.0`), and the round-0 health gate only needs a
         # non-empty, non-NO_RESULT prediction.
-        INNER_RESULT_KEY: [f"inner:{query} D{proxies.after_N_rounds_delta:+.3f}"],
+        INNER_RESULT_KEY: [f"inner:{query} D{proxies.final_delta:+.3f}"],
         # The outer loop's raw evidence: a <=1150c narrative of what the inner
         # search tried, what steered it, and what moved — rendered as MODEL
         # REASONING in the outer sample_transcripts panel.

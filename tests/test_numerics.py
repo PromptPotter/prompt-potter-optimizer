@@ -889,222 +889,33 @@ def test_adopted_level_trajectory_is_honest_single_scale() -> None:
     assert adopted_level_trajectory(origin_theta, [1.0], {}) == (None, [])
 
 
-def test_compute_proxies_composed_fitness_discriminates() -> None:
-    # SILENT wrong-score: the outer L4 once distilled a signal-rich inner campaign to TWO
-    # endpoint deltas — a warning-riddled, mode-collapsing, or expensive campaign scored
-    # identically to a clean one at equal lift. The composed fitness must (a) keep the endpoint
-    # deltas exact, (b) normalize depth by the task's own headroom, and (c) let quality
-    # penalties DROP the score so a clean campaign outranks a dirty one at equal lift. All
-    # invisible if wrong: the run completes, the dashboard looks fine, the ranking is subtly off.
-    from promptpotter.domain.l4.proxies import compute_outer_proxies
+def test_compute_proxies_is_one_exact_delta_over_the_adopted_incumbent() -> None:
+    # SILENT wrong-score: the outer signal is ONE number, so any error in it is the whole
+    # ranking. It must be the ability the inner search ENDED on minus its origin — exact, with
+    # no denominator. A divisor of any shape reappearing here (a declared target, or the room
+    # `max(origin, 1-origin)`) fails loudly on the pin below, and so does a mean-of-the-series
+    # regression: the two differ on every trajectory that is not flat.
+    from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS, compute_outer_proxies
 
-    clean = cycle_result([0.40, 0.55], 0.30, [round_result(1), round_result(2)])
-    px = compute_outer_proxies(clean).model_dump()
-    # The lift core is the raw climb on the ability ruler — no denominator. Both levels are
-    # abilities in (0,1), so the delta is bounded with nothing to divide by. A divisor of ANY
-    # shape reappearing here (a declared target, or the room `max(origin, 1-origin)`) fails
-    # loudly on these two pins.
-    assert px["first_round_delta"] == pytest.approx(0.10)
-    # Three readings of ONE series — the incumbent each round adopted. `final_delta` is what the
-    # search DELIVERED and is the primary term; the mean is the rate reading (a fast climber
-    # holds a high mean). Collapsing them back to one number is what let a warning-riddled or
-    # slow campaign tie a clean fast one.
-    assert px["final_delta"] == pytest.approx(0.25)
-    assert px["after_N_rounds_delta"] == pytest.approx(0.175)
-    assert px["cleanliness"] == pytest.approx(1.0)
-    assert px["diversity_health"] == pytest.approx(1.0)
-    assert px["rounds_improved_frac"] == pytest.approx(1.0)
-    # Efficiency divides `final` — what you got for what you paid. Dividing the MEAN answered a
-    # different question (how fast you got there), which the formula already reads separately.
-    assert px["delta_per_dollar"] == pytest.approx(0.25 / 0.03)
+    px = compute_outer_proxies(
+        cycle_result([0.40, 0.55], 0.30, [round_result(1), round_result(2)])
+    ).model_dump()
+    assert px == {"final_delta": pytest.approx(0.25)}
+    # The emitted key set IS the dataset's declared `observation_mappings`; a field added here
+    # and not declared there is silently dropped before the formula ever sees it.
+    assert OUTER_PROXY_KEYS == ("final_delta",)
 
-    # Same lift, but round 1 is warning-riddled and round 2 mode-collapses → quality drops.
-    dirty = cycle_result(
-        [0.40, 0.55],
-        0.30,
-        [
-            round_result(1, degraded_rate=0.5, no_result=6),
-            round_result(2, no_op=1, dup=1),
-        ],
+    # A campaign that ends where it started scores exactly zero lift — not a small positive one.
+    flat = compute_outer_proxies(cycle_result([0.30], 0.30, [round_result(1)]))
+    assert flat.final_delta == pytest.approx(0.0)
+
+    # It reads the END, not the peak: a search that climbed then gave the gain back is scored on
+    # what it kept. That is the estimand, and `OuterSampleProxies` records why a peak reading is
+    # deliberately not offered beside it.
+    gave_it_back = compute_outer_proxies(
+        cycle_result([0.90, 0.35], 0.30, [round_result(1), round_result(2)])
     )
-    pd = compute_outer_proxies(dirty).model_dump()
-    assert pd["after_N_rounds_delta"] == px["after_N_rounds_delta"]  # identical lift
-    assert pd["cleanliness"] < px["cleanliness"]  # warnings register
-    assert pd["diversity_health"] < px["diversity_health"]  # collapse registers
-
-    # A meta-prompt that makes its OWN children unparseable yields a zero-candidate round.
-    # Nobody can be charged per-candidate (`candidate_scores` is empty in exactly that round),
-    # so the round must carry the failure — otherwise the worst possible outer candidate scores
-    # `problem_rate == 0.0`, i.e. cleaner than a merely degraded one, and the L4 outer loop
-    # silently steers TOWARD schema-breaking meta-prompts. The run completes; nothing errors.
-    broke = cycle_result(
-        [0.40, 0.55],
-        0.30,
-        [
-            round_result(1, parse_failure="meta_prompt_parse_failure"),
-            round_result(2),
-        ],
-    )
-    pb = compute_outer_proxies(broke).model_dump()
-    assert pb["cleanliness"] < px["cleanliness"]  # a broken round is NOT clean
-    assert pb["cleanliness"] == pytest.approx(1.0 - 1.0 / 2)  # one of two L1 rounds fully dirty
-    # Dirtier than MERE sample degradation — the comparison is against degradation alone, not
-    # against `dirty` above: that one also mode-collapses, and a collapsed variant rides
-    # `candidate_scores` with its ValidationFailure, so it is charged a second time through
-    # `_self_heal_rate`. Two dirt sources outscoring one is the formula working.
-    degraded_only = cycle_result(
-        [0.40, 0.55], 0.30, [round_result(1, degraded_rate=0.5, no_result=6), round_result(2)]
-    )
-    assert pb["cleanliness"] < compute_outer_proxies(degraded_only).model_dump()["cleanliness"]
-
-    # The whole point: the composed formula ranks the clean campaign above the dirty one.
-    from pathlib import Path
-
-    cfg = yaml.safe_load(
-        Path("datasets/promptpotter-self/campaign.yaml").read_text(encoding="utf-8")
-    )
-    score = compile_scorer(cfg["campaign_config"]["scoring"])
-    assert score({"pipeline_data": px}) > score({"pipeline_data": pd})
-
-
-def test_exploring_beats_inert_and_a_cut_arm_is_not_dirt() -> None:
-    # THE inversion this proxy vector exists to prevent, and the one it actually shipped with.
-    # Measured on promptpotter-self__d8b5be: the inner campaign that climbed 52.5% -> 82.1%
-    # (theta +0.85) scored 0.069, while one that climbed 52.5% -> 57.1% (theta +0.46) scored
-    # 0.199 — 2.9x higher for a quarter of the gain. Two independent terms charged the SAME
-    # thing (exploration), and both are pinned here because either alone re-inverts the ranking:
-    #   1. the lift core averaged the round's PROPOSALS, so every arm the search correctly
-    #      discarded pulled it down;
-    #   2. `cleanliness` denominated over every proposal, so an arm PoBB cut at 6 samples was
-    #      charged as dirt.
-    # SILENT both ways: every run completes, every number is plausible, and the outer optimizer
-    # spends real money steering toward meta-prompts that make the inner loop stop exploring.
-    from pathlib import Path
-
-    from promptpotter.domain.l4.proxies import compute_outer_proxies
-
-    # Explored hard: climbed, and spent two of its four arms per round on probes PoBB cut early.
-    explorer = cycle_result(
-        [0.40, 0.85],
-        0.30,
-        [
-            round_result(1, candidates_scored=4, cut=2),
-            round_result(2, candidates_scored=4, cut=2),
-        ],
-    )
-    # Inert: proposed two safe near-copies per round and went nowhere. Perfectly clean.
-    inert = cycle_result([0.30, 0.30], 0.30, [round_result(1, improved=False), round_result(2)])
-
-    ex = compute_outer_proxies(explorer).model_dump()
-    it = compute_outer_proxies(inert).model_dump()
-
-    assert ex["final_delta"] == pytest.approx(0.55)  # what it DELIVERED, not what it discarded
-    assert it["final_delta"] == pytest.approx(0.0)
-    # An arm cut below `elimination_n_min` is the search working — it cannot be told apart from
-    # small-n noise, so it is not charged. Charging it put the explorer on the formula's floor.
-    assert ex["cleanliness"] == pytest.approx(1.0)
-
-    cfg = yaml.safe_load(
-        Path("datasets/promptpotter-self/campaign.yaml").read_text(encoding="utf-8")
-    )
-    score = compile_scorer(cfg["campaign_config"]["scoring"])
-    assert score({"pipeline_data": ex}) > score({"pipeline_data": it})
-
-
-def test_compute_proxies_excludes_tooling_failures_from_cleanliness() -> None:
-    # SILENT wrong-score, the mirror image of the case above. `l1_parse_failure` carries a
-    # REASON, and the two reasons are opposite evidence: a MALFORMED round is the meta-prompt's
-    # fault, a TOOLING round (the optimizer LLM returned empty content) says nothing about the
-    # meta-prompt at all. Charging tooling scores provider flakiness as a bad mutation — and
-    # since an empty response is the single most common inner failure, the outer fitness becomes
-    # mostly a measurement of provider noise. Nothing errors; the ranking is just wrong.
-    from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError, compute_outer_proxies
-
-    clean = cycle_result([0.40, 0.55], 0.30, [round_result(1), round_result(2)])
-    px = compute_outer_proxies(clean).model_dump()
-
-    # One tooling round out of two → dropped, not charged. The surviving round is clean, so
-    # cleanliness stays 1.0. (Charging it would give 0.5 — the same score as a meta-prompt that
-    # genuinely broke its own children.)
-    tooling = cycle_result(
-        [0.40, 0.55],
-        0.30,
-        [
-            round_result(1, parse_failure="l1_provider_empty_response"),
-            round_result(2),
-        ],
-    )
-    pt = compute_outer_proxies(tooling).model_dump()
-    assert pt["cleanliness"] == pytest.approx(px["cleanliness"])
-    assert pt["cleanliness"] == pytest.approx(1.0)
-
-    # ...but a malformed round in the same slot IS charged. Same field, opposite handling.
-    malformed = cycle_result(
-        [0.40, 0.55],
-        0.30,
-        [
-            round_result(1, parse_failure="meta_prompt_parse_failure"),
-            round_result(2),
-        ],
-    )
-    assert compute_outer_proxies(malformed).cleanliness < 1.0
-
-    # Every L1 round tooling-failed → meta-prompt-OWNED: under the inner determinism clamp a
-    # systematic all-rounds-empty is the documented verbose-meta-prompt failure mode, not a
-    # provider blip. It scores the FLOOR (composed fitness exactly 0.0) — excluding it let a
-    # candidate that breaks its own measurement escape penalty and, at the panel's coverage
-    # floor, park as an un-crownable, un-eliminable zombie arm. `_mean([])` never runs.
-    all_tooling = cycle_result(
-        [0.40],
-        0.30,
-        [
-            round_result(1, parse_failure="l1_provider_empty_response"),
-            round_result(2, parse_failure="l1_provider_empty_response"),
-        ],
-    )
-    floor = compute_outer_proxies(all_tooling).model_dump()
-    assert floor["after_N_rounds_delta"] == -1.0  # the -1 rides the LIFT CORE
-    assert floor["cleanliness"] == 0.0
-
-    from pathlib import Path
-
-    cfg = yaml.safe_load(
-        Path("datasets/promptpotter-self/campaign.yaml").read_text(encoding="utf-8")
-    )
-    score = compile_scorer(cfg["campaign_config"]["scoring"])
-    assert score({"pipeline_data": floor}) == pytest.approx(0.0)
-    assert score({"pipeline_data": floor}) < score({"pipeline_data": px})
-
-    # ...but a FAILED cycle with the same all-empty rounds is tooling-owned → still EXCLUDED.
-    failed_tooling = cycle_result(
-        [0.40],
-        0.30,
-        [round_result(1, parse_failure="l1_provider_empty_response")],
-        stop_reason=StopReason.CRASHED,
-    )
-    with pytest.raises(InnerCycleUnscoreableError, match="did not end on its own terms"):
-        compute_outer_proxies(failed_tooling)
-
-
-def test_constant_answer_collapse_dirties_a_round_that_scored_perfectly_clean() -> None:
-    # SILENT wrong-score, and the one the health rates structurally could not see. Every other
-    # term in `_round_problem_rate` counts PLUMBING — degraded transport, unscoreable results,
-    # self-heals — so a candidate emitting perfectly-formed constant garbage trips none of them.
-    # Measured live on `justlogic-d234__c4d832` round 2: BOTH candidates answered "Uncertain" to
-    # all 8 samples with `error_category: none`, and the round scored degraded_rate 0.0 /
-    # no_result 0 / structural 0 — a flawless 1.0 cleanliness for a round in which nothing was
-    # actually answered. Nothing errors; the meta-prompt that induced the collapse simply pays
-    # nothing for it, which is how a campaign that collapsed early out-ranked one that stayed
-    # alive and accumulated real observations.
-    from promptpotter.domain.l4.proxies import compute_outer_proxies
-
-    healthy = cycle_result([0.40, 0.55], 0.30, [round_result(1), round_result(2)])
-    assert compute_outer_proxies(healthy).cleanliness == pytest.approx(1.0)
-
-    # One of round 1's two candidates collapses. The magnitude is not the contract — only that a
-    # collapsed arm can no longer be scored as a clean round.
-    collapsed = cycle_result([0.40, 0.55], 0.30, [round_result(1, collapsed=1), round_result(2)])
-    assert compute_outer_proxies(collapsed).cleanliness < 1.0
+    assert gave_it_back.final_delta == pytest.approx(0.05)
 
 
 def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
@@ -1178,74 +989,7 @@ def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
     # ...and a cycle that DID produce evidence still scores, on the same predicate.
     ok = cycle_result([0.40, 0.55], 0.30, [round_result(1), round_result(2)])
     ok_px = compute_outer_proxies(ok)
-    assert ok_px.after_N_rounds_delta == pytest.approx(0.175)
-
-
-def test_unmeasured_cost_never_scores_as_maximal_efficiency() -> None:
-    # SILENT wrong-score, and the incentive points BACKWARDS. `delta_per_dollar` divides lift by
-    # cost, and the pp-self formula reads it as `0.7 + 0.3*clamp(dpd/6)`. With `cost = 0.0` the
-    # old `max(cost, 1e-6)` floor made dpd ~250_000, pinning the efficiency factor to its MAXIMUM
-    # 1.0 — so the LESS a run recorded, the fitter it scored. Two ways to record nothing: no calls
-    # at all, and tokens under a model with no USD rate on file, where the cost is a floor rather
-    # than a total. Both must EXCLUDE, never default to zero.
-    from pathlib import Path
-
-    from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError, compute_outer_proxies
-
-    rounds = [round_result(1), round_result(2)]
-
-    broke = cycle_result([0.40, 0.55], 0.30, rounds, cost=0.0)
-    with pytest.raises(InnerCycleUnscoreableError, match="no LLM calls"):
-        compute_outer_proxies(broke)
-
-    # Partially unpriced: a real, positive cost that nonetheless understates the true total.
-    understated = cycle_result([0.40, 0.55], 0.30, rounds, cost=0.03, unpriced_tokens=4096)
-    with pytest.raises(InnerCycleUnscoreableError, match="understates what the search costs"):
-        compute_outer_proxies(understated)
-
-    # The gradient the exclusion protects: at equal lift, the CHEAPER run scores higher — and no
-    # run may reach the efficiency ceiling by reporting nothing.
-    cfg = yaml.safe_load(
-        Path("datasets/promptpotter-self/campaign.yaml").read_text(encoding="utf-8")
-    )
-    score = compile_scorer(cfg["campaign_config"]["scoring"])
-    cheap = compute_outer_proxies(cycle_result([0.40, 0.55], 0.30, rounds, cost=0.01)).model_dump()
-    dear = compute_outer_proxies(cycle_result([0.40, 0.55], 0.30, rounds, cost=0.30)).model_dump()
-    assert cheap["delta_per_dollar"] > dear["delta_per_dollar"]
-    assert score({"pipeline_data": cheap}) > score({"pipeline_data": dear})
-
-
-def test_efficiency_divides_by_incurred_cost_not_the_bill() -> None:
-    # SILENT wrong-score, and it killed a live L4 panel on cell 1 of 7. The measurement +
-    # optimizer-call caches are tenant-global and content-addressed, so an inner cycle we have run
-    # before REPLAYS: same work, same trajectory, $0 billed. Observed 2026-07-13 on seed-0 — three
-    # inner rounds in FOUR SECONDS, `used_usd: 0.0`, cell excluded.
-    #
-    # The gap is not random, which is what makes it dangerous. The ORIGIN arm is the one that
-    # replays: a variant meta-prompt writes different prompts, so its every content hash is new and
-    # it pays full freight. A bill-denominated divisor therefore hands the origin infinite
-    # efficiency on precisely the cells we have measured most — a bias toward the incumbent, not
-    # noise. So `delta_per_dollar` divides by the INCURRED cost (what the search would cost cold,
-    # cache hits priced from the tokens they recorded) and is blind to what was actually billed.
-    from promptpotter.domain.l4.proxies import compute_outer_proxies
-
-    rounds = [round_result(1), round_result(2)]
-
-    # Same search, same incurred cost. One replayed off a warm cache and billed nothing; the other
-    # paid full freight. Same measurement of the same meta-prompt ⇒ identical proxies. The bill is
-    # not an input.
-    replayed = compute_outer_proxies(
-        cycle_result([0.40, 0.55], 0.30, rounds, cost=0.03, billed=0.0)
-    ).model_dump()
-    paid = compute_outer_proxies(
-        cycle_result([0.40, 0.55], 0.30, rounds, cost=0.03, billed=0.03)
-    ).model_dump()
-    assert replayed == paid
-    assert replayed["delta_per_dollar"] == pytest.approx(0.25 / 0.03)
-
-    # And a fully-cached cycle is a MEASUREMENT, not an exclusion: it did the work, it just didn't
-    # pay. Only a cycle that made no calls at all has nothing to divide by.
-    assert replayed["after_N_rounds_delta"] == pytest.approx(0.175)
+    assert ok_px.final_delta == pytest.approx(0.25)
 
 
 def test_cached_calls_are_metered_but_not_billed(tmp_path: Path) -> None:
@@ -1298,17 +1042,12 @@ def test_cached_calls_are_metered_but_not_billed(tmp_path: Path) -> None:
     assert spend.loop.input_tokens == 1000  # billed tokens: the wire call only
 
 
-def test_pp_self_scoring_composed_and_gradient_bearing() -> None:
-    # SILENT wrong-score: the composed formula must (a) stay monotone in the lift core, (b) ignore
-    # the held-out early-speed term, (c) let quality penalties modulate DOWN — but (d) FLOOR the
-    # quality factor at 0.6 so a broken campaign is discounted, never sign-flipped into a false
-    # floor. Any of these wrong-scores every candidate subtly, with no error.
-    #
-    # Neither `rounds_to_N` nor `normalized_gain` is asserted here: both are gone from the emitted
-    # vector entirely, so an assertion that the formula ignores them would pass against any typo.
-    # What guards a divisor from coming back is the pinned raw delta in
-    # `test_compute_proxies_composed_fitness_discriminates` — a target-shaped OR room-shaped
-    # denominator fails there, loudly.
+def test_pp_self_scoring_is_monotone_and_never_clips_on_real_data() -> None:
+    # SILENT wrong-score: the formula is now a single re-anchored term, so the only ways it can
+    # be wrong are (a) losing monotonicity in that term, or (b) CLIPPING — and clipping is the
+    # dangerous one, because a clamped cell keeps scoring while carrying no gradient at all. The
+    # previous `(x + 0.5) / 1.5` window clipped the best cell ever measured (+1.405 logits) and
+    # held zero cells in its lower third; both ends are pinned here.
     from pathlib import Path
 
     cfg = yaml.safe_load(
@@ -1316,39 +1055,21 @@ def test_pp_self_scoring_composed_and_gradient_bearing() -> None:
     )
     score = compile_scorer(cfg["campaign_config"]["scoring"])
 
-    def s(**kw: float) -> float:
-        pd: dict[str, float] = {
-            "first_round_delta": 0.1,
-            "after_N_rounds_delta": 0.5,
-            "final_delta": 0.5,
-            "rounds_improved_frac": 0.5,
-            "cleanliness": 0.9,
-            "diversity_health": 0.9,
-            "delta_per_dollar": 6.0,
-        }
-        pd.update(kw)
-        return score({"pipeline_data": pd})
+    def s(final_delta: float) -> float:
+        return score({"pipeline_data": {"final_delta": final_delta}})
 
-    base = s()
-    assert s(final_delta=0.9) > base  # monotone in the PRIMARY lift term (what it delivered)
-    assert s(after_N_rounds_delta=0.9) > base  # and in the rate term beside it
-    # `final_delta` outweighs the rate term: the same 0.4 movement must buy more on what the
-    # search DELIVERED than on how quickly it got there. Equal weights would let a campaign that
-    # peaked early and regressed tie one that ended higher.
-    assert s(final_delta=0.9) > s(after_N_rounds_delta=0.9)
-    assert s(rounds_improved_frac=1.0) > base  # sustained discovery earns a bonus
-    assert s(first_round_delta=0.3) == base  # collinear early-speed term held out of formula
-    assert s(cleanliness=0.4) < base  # quality penalty modulates down
-    assert s(diversity_health=0.4) < base  # mode-collapse penalty modulates down
-    assert s(delta_per_dollar=0.5) < base  # efficiency rewards cheap lift
-    # Efficiency must still be LIVE at a real inner cell's ratio (~$0.07 for a +0.4..+0.9 logit
-    # climb => 6..13). The prior /6.0 divisor clamped every one of those to the same 1.0, so the
-    # term was constant on exactly the campaigns that worked — a flat term earning nothing.
-    assert s(delta_per_dollar=13.0) > s(delta_per_dollar=6.0)
-    # Quality floor at 0.6: a maximally broken campaign keeps 60% of the quality factor, not 0.
-    assert s(cleanliness=0.0, diversity_health=0.0) == pytest.approx(
-        s(cleanliness=1.0, diversity_health=1.0) * 0.6
-    )
+    assert s(0.9) > s(0.5) > s(0.0) > s(-0.5)  # monotone across the measured range
+    # LINEAR, which is what makes the paired estimator's effect readable as a logit lift rather
+    # than merely orderable: equal movements in the delta buy equal movements in the fitness.
+    assert (s(0.9) - s(0.5)) == pytest.approx(s(0.5) - s(0.1))
+    # The FLOOR lands exactly at 0.0, which is its contract: `_floor_proxies` assigns -1.0 to a
+    # meta-prompt that broke its own measurement, and that is the one route to a zeroed cell.
+    assert s(-1.0) == 0.0
+    # No MEASURED cell clips. The banked 39-cell panel spans [-0.189, +1.405]; both ends must sit
+    # strictly inside (0, 1) or the term stops carrying a gradient exactly where it matters.
+    assert s(-0.189) > 0.0 and s(1.405) < 1.0
+    # ...and the clamp is still there for a runaway fit beyond the plausibility rail.
+    assert s(-99.0) == 0.0 and s(99.0) == 1.0
 
 
 def _synth_2pl(

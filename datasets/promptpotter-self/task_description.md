@@ -29,18 +29,16 @@ finding the discipline; do not hard-code task answers into it.
 
 ## Fitness
 
-Composite formula in ``campaign.yaml::scoring`` — lift × quality × efficiency:
+ONE number, in ``campaign.yaml::scoring``:
 
-- ``after_N_rounds_delta`` — the lift core: the inner search's MEAN ability across
-  its rounds, minus where it started, in logits on one difficulty-adjusted ruler
-- ``cleanliness × diversity_health`` — bounded quality modulator
-- ``delta_per_dollar`` — efficiency modulator
+- ``final_delta`` — the ability the inner search ENDED on, minus where it started,
+  in logits on one difficulty-adjusted ruler. Linearly re-anchored into [0,1].
 
-Better = a whole trajectory held high, cleanly and cheaply won — not one lucky
-round. Because the core averages, sustaining a gain beats spiking to it and
-falling back, and a late collapse costs you the rounds it ruins.
-(``first_round_delta`` measures round 1 alone. Emitted, held out of the formula:
-two candidates' evidence is mostly noise at this sample budget.)
+Better = the inner optimizer adopted a stronger prompt and kept it. There is no
+quality modulator and no efficiency modulator: a campaign that breaks its own
+measurement is floored, and a collapsed arm is eliminated — both structurally,
+before scoring. So do not optimize for looking tidy or cheap; optimize for the
+inner search finishing higher than it started.
 
 ## Mutation surface
 
