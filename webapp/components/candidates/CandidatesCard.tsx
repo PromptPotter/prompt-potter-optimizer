@@ -401,6 +401,11 @@ export function CandidatesCard() {
         theta_se: sliced ? null : n.theta_se,
         compositeCiLo: sliced ? null : n.composite_ci_lo,
         compositeCiHi: sliced ? null : n.composite_ci_hi,
+        // The tree serves identity + the round-close facts it is given; the matched-origin
+        // floor is not among them, and it belongs to `dashboard.json::rounds[]` (which is
+        // where the inspector reads it). Null rather than a second derivation of it here.
+        matchedOriginAccuracy: null,
+        matchedOriginComposite: null,
         evaluators: n.evaluators,
         is_winner: n.is_winner,
         n_samples: sliced ? n.sample_set_n : (n.scored_samples ?? live?.stats?.total ?? null),

@@ -62,13 +62,9 @@ def _init_enter(d: dict[str, Any], ctx: ViewContext) -> InitEnterView:
 
     ctx.max_rounds = opt.max_rounds or 0
     ctx.patience = opt.l1_patience
-    origin_pp = session.pipeline_params
-    if not origin_pp and schema is not None:
-        origin_pp = schema.to_pipeline_params()
+    origin_pp = session.pipeline_params or schema.to_pipeline_params()
     ctx.original_sp_flat = flatten_sp_summary(origin_pp)
-    ctx.node_param_keys = (
-        {s: sorted(k) for s, k in schema.node_param_keys().items()} if schema else None
-    )
+    ctx.node_param_keys = {s: sorted(k) for s, k in schema.node_param_keys().items()}
     ctx.round_num = 0
     ctx.l1_stall_count = 0
     ctx.hearts = opt.lives.start if opt.lives is not None else None
@@ -219,7 +215,8 @@ def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
     # for round 0 / pre-gate events. Δ uses this so operator-visible Δ
     # matches the ``improved`` gate, not the full-set comparison that
     # punishes PoBB-locked winners.
-    matched_origin_acc = float(d.get("winner_matched_origin_accuracy", origin_acc))
+    raw_matched = d.get("winner_matched_origin_accuracy")
+    matched_origin_acc = origin_acc if raw_matched is None else float(raw_matched)
     matched_origin_composite = d.get("winner_matched_origin_composite")
     delta = w_acc - matched_origin_acc
     p_value: float | None = d.get("p_value")  # computed by l1_score; not recomputed here.

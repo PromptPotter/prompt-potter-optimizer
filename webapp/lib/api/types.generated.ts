@@ -18,6 +18,8 @@ export interface RoundSummaryCandidate {
   theta_se: number | null;
   composite_ci_lo: number | null;
   composite_ci_hi: number | null;
+  matched_origin_accuracy: number | null;
+  matched_origin_composite: number | null;
 }
 
 /** Context-aware degradation verdict for a round (origin included), computed */
@@ -298,8 +300,8 @@ export interface RoundResult {
   degraded_samples: number;
   deprecated: number;
   escalation_signal: unknown | null;
-  matched_origin_accuracy: number;
-  matched_origin_composite: number;
+  matched_origin_accuracy: number | null;
+  matched_origin_composite: number | null;
   cumulative_theta: number | null;
   calibration_model: '1PL' | '2PL' | null;
   prompt_fields: Record<string, unknown>;

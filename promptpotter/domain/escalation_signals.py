@@ -23,9 +23,10 @@ class ExplorationBudget(enum.StrEnum):
     """How freely ``l1_generate`` may explore, widening with L1 stall depth.
 
     The single source for the ``escalation_panel.exploration_budget`` signal the
-    l1_generate supplemental rules cite, and for the value ``review.py`` feeds
-    ``ValidatorContext`` so ``evidence_grounding_present`` can gate the
-    ``stall_exploration`` escape hatch and the PEAKED-axis rebut.
+    l1_generate supplemental rules cite, and for the value
+    ``output.py::_compute_behavior_per_round`` feeds ``ValidatorContext`` so
+    ``evidence_grounding_present`` can gate the ``stall_exploration`` escape hatch
+    and the PEAKED-axis rebut.
     """
 
     TIGHT = "tight"  # improving — exploit the parent; speculative gambles rejected
@@ -37,9 +38,10 @@ def exploration_budget(stall_count: int, l1_patience: int) -> ExplorationBudget:
     """Widen the budget with measured L1 stall depth (NOT a round-count schedule).
 
     ``0`` stall → TIGHT; a partial stall → NORMAL; at/over ``l1_patience`` (the loop
-    is about to escalate to L2) → WIDE. Pure: both the bundle build (prompt side) and
-    ``review.py`` (validator side) call this with the stall depth in effect for the
-    round, so the two consumers can never disagree on the mapping.
+    is about to escalate to L2) → WIDE. Pure: both the bundle build (prompt side,
+    ``dispatch/facade.py``) and the review writer (validator side,
+    ``output.py::_compute_behavior_per_round``) call this with the stall depth in
+    effect for the round, so the two consumers can never disagree on the mapping.
     """
     if stall_count <= 0:
         return ExplorationBudget.TIGHT

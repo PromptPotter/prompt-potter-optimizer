@@ -211,7 +211,10 @@ class RoundCompleteView:
     origin_composite_fitness: float | None
     # Origin restricted to the winner's measured samples; verdict line + Δ
     # read these so operator-facing "Δ vs origin" matches the ``l1_score`` gate.
-    matched_origin_accuracy: float = 0.0
+    # No default — the one builder resolves it (matched value, else the standing
+    # origin), and a ``0.0`` sitting here would render "was 0.0%" on any round whose
+    # payload lacked the key rather than failing where the omission happened.
+    matched_origin_accuracy: float
     matched_origin_composite: float | None = None
 
 

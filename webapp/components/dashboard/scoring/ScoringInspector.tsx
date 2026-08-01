@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { useRoundSource } from "@/lib/hooks/useRoundSource";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
-import { fmtPct1 } from "@/lib/format";
+import { fmtPct1, fmtPctSigned } from "@/lib/format";
 import type { CandidateRow, SelectedCandidate } from "@/lib/types";
 import { liveCandidate } from "@/lib/poll";
 import {
@@ -131,6 +131,20 @@ export function ScoringInspector({ selected, onClose }: Props) {
           <span className="inspector-key">accuracy</span>
           <span className="inspector-val">{fmtPct1(selected.accuracy)}</span>
         </div>
+        {typeof row?.matchedOriginAccuracy === "number" && (
+          <div className="inspector-row">
+            <span className="inspector-key">vs origin</span>
+            <span
+              className="inspector-val"
+              title="The origin re-scored on the samples THIS candidate measured — the floor the promotion gate compared it against. Under elimination a candidate may run only part of the round's samples, so the origin's full-set rate is the wrong comparison and would read as a phantom lift."
+            >
+              {fmtPct1(row.matchedOriginAccuracy)}
+              {typeof selected.accuracy === "number"
+                ? ` (${fmtPctSigned(selected.accuracy - row.matchedOriginAccuracy)})`
+                : ""}
+            </span>
+          </div>
+        )}
         {typeof row?.theta === "number" && (
           <div className="inspector-row">
             <span className="inspector-key">ability θ</span>

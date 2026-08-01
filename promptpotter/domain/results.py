@@ -411,8 +411,13 @@ class RoundResult(StrictModel):
     escalation_signal: EscalationSignal | None = None
     # Origin restricted to the winner's measured samples — apples-to-apples when PoBB locks
     # at q8/20 while origin has 20. Drives `improved`, p_value, verdict Δ.
-    matched_origin_accuracy: float = 0.0
-    matched_origin_composite: float = 0.0
+    # ``None`` when the round matched nothing — a generation-only sweep round scored no
+    # candidate, so there is no origin restricted to "the winner's samples". Nullable for the
+    # reason stated on ``ScoredCandidate``'s pair above, which this one contradicted: 0.0 is a
+    # measurement ("the origin got everything wrong"), and a round carrying it reads as a
+    # candidate that beat the origin by its entire accuracy.
+    matched_origin_accuracy: float | None = None
+    matched_origin_composite: float | None = None
     # Subset-invariant peer of this round's own `accuracy`: ability of the cumulative frontier
     # on the cycle's fixed δ ruler. None when the ruler is cold. Feeds the L4 outer proxy so a
     # drifting per-round subset can't inflate the outer fitness signal.
@@ -474,9 +479,9 @@ class RoundResult(StrictModel):
     # and review/stats/sibling-wounds read its lineage — so it is round state, not a
     # rendering detail. None only on a round that never closed.
     opt_sp: OptSearchPoint | None = None
-    # AxisIndex's peaked set at close. Persisted because `review.py`'s
-    # `evidence_grounding_present` check needs it and AxisIndex is not reconstructable
-    # from the round file alone.
+    # AxisIndex's peaked set at close. Persisted because the review writer's
+    # `evidence_grounding_present` check needs it (`output.py::_compute_behavior_per_round`)
+    # and AxisIndex is not reconstructable from the round file alone.
     axis_memory_peaked: list[str] = Field(default_factory=list)
     # "generation_only" for a sweep round (L1 variants generated, never scored — every
     # scoring scalar below is a structural zero, not a measurement); "" for a scored round.
@@ -719,6 +724,14 @@ class RoundSummaryCandidate(StrictModel):
     # candidate with ≥1 scored sample; the whisker the chart draws around `composite_fitness`.
     composite_ci_lo: float | None = None
     composite_ci_hi: float | None = None
+    # The floor this candidate was JUDGED against (`ScoredCandidate.matched_origin_*`): the
+    # origin restricted to the samples this candidate actually measured. Served because
+    # `accuracy` alone is unreadable under elimination — a PoBB-locked candidate ran 8 of 20,
+    # so what it beat is NOT the origin's full-set rate, and the terminal has always printed
+    # "was 42%" beside the verdict while the webapp printed the verdict alone. `None` outside
+    # the election fit (eliminated / under the coverage floor) — nothing matched it.
+    matched_origin_accuracy: float | None = None
+    matched_origin_composite: float | None = None
 
 
 class WarningDict(TypedDict):

@@ -95,8 +95,12 @@ class AnthropicClient(LLMClientBase):
         if system_message:
             request_params["system"] = system_message
 
+        # Reserve against the number we are ABOUT TO SEND, not the caller's raw one. With
+        # `max_tokens=None` the request asks for 8192 while the reservation asked for
+        # nothing, so the limiter under-counted every default-sized call and let the
+        # window overshoot into a 429 it exists to prevent.
         reservation = await acquire_reservation(
-            self._rate_limiter, messages, max_tokens, "Anthropic"
+            self._rate_limiter, messages, anthropic_max_tokens, "Anthropic"
         )
 
         raw = await client.messages.with_raw_response.create(**request_params)

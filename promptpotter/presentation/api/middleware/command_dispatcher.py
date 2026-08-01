@@ -60,7 +60,7 @@ from promptpotter.shared.identity import (
 
 
 class _DeleteCycleRejectedError(Exception):
-    """Internal signal: ``try_delete_stub_cycle`` returned ``(False, reason)``.
+    """Internal signal: ``cleanup_stub_fork_if_empty`` returned ``(False, reason)``.
 
     ``_record_and_apply`` translates this into a rejected ack + 409 response
     so the audit trail stays on the ledger and the caller gets the guard's

@@ -39,6 +39,13 @@ export interface CandidateRow {
   // raw normal-CLT mean CI. `null` for the in-flight round (stamped at round close, with `theta`).
   compositeCiLo: number | null;
   compositeCiHi: number | null;
+  // The floor this candidate was JUDGED against — the origin restricted to the samples
+  // this candidate actually measured. Under elimination a candidate may have run 8 of 20,
+  // so its `accuracy` is NOT comparable to the origin's full-set rate; this is the number
+  // the promotion gate used. `null` for the in-flight round (stamped at round close) and
+  // for candidates outside the election fit — nothing matched them.
+  matchedOriginAccuracy: number | null;
+  matchedOriginComposite: number | null;
   evaluators: Record<string, number>;
   is_winner: boolean;
   // Samples scored so far for this candidate; null when unknown.

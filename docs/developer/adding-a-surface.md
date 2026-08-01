@@ -126,10 +126,22 @@ reader of that file, because the model IS the document (`save_round_file` persis
 mirror it into — the one that existed hand-wrote 24 of the model's fields and silently
 dropped the other twelve.
 
-**But the webapp does not read round files** — it reads `dashboard.json`. To land a round
-field there too, mirror it onto `RoundSummary` and add the one line to
-`projections/live_dashboard/round_summary.py`. Two models, one projection line; the round
-document alone reaches disk, not the browser.
+**But the webapp does not read round files** — it reads `dashboard.json`. Which model you
+mirror onto decides the cost, so ask first *whose* fact it is:
+
+- **Per-CANDIDATE** (it already lives on `ScoredCandidate`) → add it to
+  `RoundSummaryCandidate` and stop. The projection's include-set is derived from
+  `model_fields`, so the copy flows with **zero** edits to `round_summary.py`; it lands on
+  `dash.rounds[].candidates[]`, and the webapp seam is `CandidateRow`
+  (`lib/types/candidate.ts` + `lib/derivations/round-candidates.ts`, which has two arms —
+  historical and in-flight; the in-flight one is `null` for anything stamped at round close).
+- **Per-ROUND** → mirror onto `RoundSummary` *and* hand-write the line in
+  `projections/live_dashboard/round_summary.py`.
+
+Reach for the round-level route only when the fact genuinely isn't a candidate's. Note that
+`RoundSummary.improved` / `electable_count` are served and rendered by nothing — a
+round-level field with no panel is dead served surface, which is this page's own warning
+pointed the other way.
 
 **Guard:** the two-factories-onto-one-View correctness invariant — the live
 builder and the disk builder must produce an equal `RoundCompleteView`. No

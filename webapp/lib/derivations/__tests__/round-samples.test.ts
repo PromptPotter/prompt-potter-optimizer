@@ -24,6 +24,8 @@ function row(source: CandidateRow["source"]): CandidateRow {
     theta_se: null,
     compositeCiLo: null,
     compositeCiHi: null,
+    matchedOriginAccuracy: null,
+    matchedOriginComposite: null,
     evaluators: {},
     is_winner: false,
     n_samples: null,

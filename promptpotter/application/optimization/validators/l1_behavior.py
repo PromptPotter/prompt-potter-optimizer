@@ -92,7 +92,7 @@ class ValidatorContext:
     # ``evidence_grounding_present`` to reject variants that cite
     # ``axis_memory`` to justify mutating a peaked axis without naming a
     # rebut (the critique naming that axis, or exploration_budget=wide).
-    # Populated by ``review.py`` from each round dict's
+    # Populated by ``output.py::_compute_behavior_per_round`` from each round's
     # ``axis_memory_peaked`` field, stashed by ``persist_round``.
     peaked_axes: frozenset[str] = field(default_factory=frozenset)
 
@@ -102,9 +102,9 @@ CheckFn = Callable[[dict[str, Any], ValidatorContext], CheckResult]
 
 # --- helpers ---------------------------------------------------------------
 
-# Phrase-seed tokens: alphabetic-start, 3+ chars (distinct from the word-set
-# tokenizer in ``l2_output.py`` — this one excludes digits and underscore-first
-# tokens because it seeds noun-phrase substring matches, not set overlap).
+# Phrase-seed tokens: alphabetic-start, 3+ chars. Excludes digits and
+# underscore-first tokens because it seeds noun-phrase substring matches, not set
+# overlap.
 _PHRASE_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z_\-]{2,}")
 
 

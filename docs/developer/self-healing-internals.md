@@ -35,7 +35,7 @@ owner-grouped signals** (`l1_wounds` = validation + runtime; `guard_breaches` = 
 |---|---|---|---|---|
 | **Producer → Nurse** (owner-keyed, not producer-keyed) | L1 → **L1** | L1 → **L1 / OPERATOR** | L2 → L3 | L2 → L3 |
 | **Owner source** | structural (L1's own output) | `RuntimeFailure.owner`: `L1` (rate) · `OPERATOR` (fatal) | (patience event) | structural (guard stream → L3) |
-| **Detector** | `L1_SCHEMA_COMPLIANCE` validator | `DegradationCheck` (mid-eval) | `escalate_l2` patience | `L2_*` validators (post-parse) |
+| **Detector** | `L1_SCHEMA_COMPLIANCE` validator | `DegradationCheck` (mid-eval) | `escalate_l2` patience | `validate_l1_layout` (post-parse) |
 | **Failure record class** | `ValidationFailure` | `RuntimeFailure` | (patience event, no record) | `ValidatorOutcome` |
 | **OSP storage** | `validation_failures` | `runtime_failures` | `escalation.l2.stall_count` | `l2_guard_breaches` |
 | **Outer-memory mirror** | none (L2 reads `candidate_scores`) | cumulative on `cycle.opt_sp.wounds.runtime_failures` | none | per-round on the OSP itself |
@@ -101,16 +101,9 @@ L3 writes a new `plan` (and optionally `pipeline_params`). Lands on `OptSearchPo
 
 ## Wound 4 — L3 tends L2's parsed-output failure
 
-`L2_OUTPUT_VALIDATORS` registry (`application/optimization/validators/l2_output.py`) — two validators; a guard-breach `ValidatorOutcome` routes to L3 (replan) via the non-empty-stream → `escalate_l2` trigger **unless every breach is a soft-reject** (`_L2_SOFT_REJECT_VALIDATOR_IDS` in `escalation/firing.py`), so none carries an owner field:
+`cycle.opt_sp.wounds.l2_guard_breaches` holds HARD `validate_l1_layout` failures — mandatory placeholder missing, unknown name, duplicate within a slot — written by `apply_side_effects` off `TransitionResult.l2_guard_breaches`. **Any** breach after L2 runs makes `escalate_l2` invoke `L3ModifyPlan` *immediately*, bypassing `l2_patience` and `l3_patience`: broken L2 output is not "wait and see". The trigger is deterministic from L2's output (already on the round file), so resume reproduces it without a separate decision record.
 
-| Validator id | Detects |
-|---|---|
-| `l2_task_context_stale_repeat` | proposed `task_context` landed no semantic delta — evidence `mode` names the shade: `verbatim` (no-op merge) or `paraphrase` (per-field word-set Jaccard ≥ 0.5 vs prior framing). Soft-reject: alone it skips the L3 force-trigger |
-| `l2_duplicate_insert` | proposed `task_context` re-asserts ≥3 lines already in prior framing — the real exhausted-surface signal, stays HARD (a sole breach forces L3) |
-
-Validators run inside `L2RefineStrategy.build_result()` between LLM-output parse and `TransitionResult` construction. Outcomes ride on `TransitionResult.l2_guard_breaches` and are written by `apply_side_effects` to `cycle.opt_sp.wounds.l2_guard_breaches`.
-
-When `cycle.opt_sp.wounds.l2_guard_breaches` holds a non-soft-reject breach after L2 runs, `escalate_l2` invokes `L3ModifyPlan` *immediately* — bypassing `l2_patience` and `l3_patience`. Broken L2 output is not "wait and see" — but a breach set that is *all* soft-reject (stale-repeat / dangling-trigger — self-correcting, already discarded) skips the force-trigger and lets L1 continue. Trigger is deterministic from L2's output (already on the round file), so resume reproduces it without a separate decision record.
+There is **no `L2_OUTPUT_VALIDATORS` registry, no `validators/l2_output.py`, and no soft-reject tier.** This section described all three — plus `l2_task_context_stale_repeat` and `_L2_SOFT_REJECT_VALIDATOR_IDS` — and none has ever existed in the tree as written. The shape they belonged to left with the framing-rewrite surface: `task_context` framing is now frozen for the run (`TaskDecomposition.merge` refuses it), so a stale repeat is unrepresentable and there is no inert breach left to except. `escalation/firing.py` is an unconditional `if breaches:`. Same correction as [`l2-internals.md`](l2-internals.md) § Wound 4, which this page used to contradict.
 
 ## Validators are Evaluator-shaped
 
@@ -187,6 +180,6 @@ record type — you never wire a nurse by hand:
 - New gen-time check on L1's output → **Wound 1**. Add a validator next to `L1_SCHEMA_COMPLIANCE`; owner is L1 structurally (its own malformed output).
 - New runtime measurement pointing at a candidate config region → **Wound 2**. Add a check that emits `RuntimeFailure` from `score_population`; stamp `owner=NurseOwner.L1` when L1 can retune it, `owner=NurseOwner.OPERATOR` when only the operator can (a locked schema/model the in-loop layer can't reach).
 - New strategic-stall trigger → **Wound 3** isn't a registry; it's the patience timer.
-- New post-parse check on L2/L3's output → **Wound 4**. Add a validator to `L2_OUTPUT_VALIDATORS` / `L3_OUTPUT_VALIDATORS`; owner is L3 structurally (guard-breach stream → `escalate_l2`).
+- New post-parse check on L2/L3's output → **Wound 4**. L3's side has a registry (`L3_OUTPUT_VALIDATORS`, `validators/l3_output.py`); L2's is the layout check itself (`domain/l1_layout.py::validate_l1_layout`) — there is no `L2_OUTPUT_VALIDATORS` to append to, and a new L2 check means either extending that validator or standing a registry up. Owner is L3 structurally either way (guard-breach stream → `escalate_l2`).
 
 For each: declare `LLMOutputValidator` with a stable id, write the `check` callable, append to the appropriate registry. Prompt-section render and persistence path are already wired — they iterate the registry, not a hard-coded list. Only add a `NurseOwner` member when a producer actually stamps it (today only `RuntimeFailure` does, with `L1`/`OPERATOR`).

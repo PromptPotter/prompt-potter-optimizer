@@ -31,6 +31,11 @@ export interface RoundDoc {
   hits: number;
   total: number;
   origin_accuracy?: number;
+  // The origin restricted to the winner's OWN measured samples — the floor `improved`
+  // was decided against. Preferred over `origin_accuracy` below: under elimination the
+  // winner may have run 8 of 20 samples, and quoting the full-set rate beside its
+  // subset accuracy renders a lift that was never measured.
+  matched_origin_accuracy?: number | null;
   improved?: boolean;
   p_value?: number;
   scoreboard?: ScoreboardEntry[];
@@ -46,6 +51,11 @@ export function RoundFileView({ doc, raw }: Props) {
   const [showRaw, setShowRaw] = useState(false);
   const results = doc.results ?? [];
   const scoreboard = doc.scoreboard ?? [];
+  // Matched first, full-set only as the fallback, and the label says which — an
+  // unlabelled "(origin 18%)" beside a subset accuracy of 58% is a lift nothing measured.
+  const matched = typeof doc.matched_origin_accuracy === "number" ? doc.matched_origin_accuracy : null;
+  const originShown = matched ?? (typeof doc.origin_accuracy === "number" ? doc.origin_accuracy : null);
+  const originLabel = matched != null ? "matched origin" : "origin, full set";
 
   return (
     <RotatePrompt surfaceName="The round file view">
@@ -53,7 +63,7 @@ export function RoundFileView({ doc, raw }: Props) {
       <div className="round-file-summary">
         <div className="round-file-summary-row">
           <Badge>round {doc.round ?? "—"}</Badge>
-          <span>accuracy {fmtPct1(doc.accuracy)} {typeof doc.origin_accuracy === "number" && (<span style={{ color: "var(--color-text-tertiary)" }}>(origin {fmtPct1(doc.origin_accuracy)})</span>)}</span>
+          <span>accuracy {fmtPct1(doc.accuracy)} {originShown != null && (<span style={{ color: "var(--color-text-tertiary)" }} title={matched != null ? "The origin re-scored on the samples this round's winner measured — the floor the promotion gate used." : "The origin's full-set rate. This round carries no matched floor, so it is not directly comparable to a partially-scored winner."}>({originLabel} {fmtPct1(originShown)})</span>)}</span>
           <span>composite {fmtNum(doc.composite_fitness)}</span>
           <span>{doc.hits}/{doc.total} hits</span>
           {typeof doc.p_value === "number" && <span>p {fmtNum(doc.p_value, 3)}</span>}

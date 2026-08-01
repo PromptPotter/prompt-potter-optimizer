@@ -95,6 +95,8 @@ export function roundCandidates(dash: DashboardSnapshot | null): CandidateRow[] 
         theta_se: c.theta_se,
         compositeCiLo: c.composite_ci_lo,
         compositeCiHi: c.composite_ci_hi,
+        matchedOriginAccuracy: c.matched_origin_accuracy,
+        matchedOriginComposite: c.matched_origin_composite,
         evaluators: c.evaluators,
         is_winner: c.is_winner,
         n_samples: c.scored_samples,
@@ -130,9 +132,12 @@ export function roundCandidates(dash: DashboardSnapshot | null): CandidateRow[] 
         // θ is an end-of-round election fit; the in-flight round has none yet.
         theta: null,
         theta_se: null,
-        // Composite CI is stamped at the same round-close seam as θ — none yet either.
+        // Composite CI and the matched-origin floor are stamped at the same round-close
+        // seam as θ — the in-flight round has none of them yet.
         compositeCiLo: null,
         compositeCiHi: null,
+        matchedOriginAccuracy: null,
+        matchedOriginComposite: null,
         evaluators,
         is_winner: false,
         n_samples: c.samples?.length ?? null,

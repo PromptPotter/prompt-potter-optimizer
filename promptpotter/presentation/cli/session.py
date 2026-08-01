@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, benchmark_datasets_root
-from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 
 if TYPE_CHECKING:
@@ -103,11 +102,14 @@ def load_session(args: argparse.Namespace) -> SessionCtx:
         active_pointer_exists,
         read_active_pointer,
     )
+    from promptpotter.presentation.cli.commands._shared import identity_from_args
 
-    # Same resolver as `identity_from_args` — explicit --tenant > registered
-    # developer (claim marker) > anonymous default. Must match, else resume
-    # reads one tenant's pointer but looks for the session in another's tree.
-    identity = registered_or_default_identity(getattr(args, "tenant", None))
+    # THE resolver, not a copy of it — a comment asserting "same resolver as
+    # `identity_from_args`" sat here instead, and a copy that must match is a copy that
+    # can stop matching: resume would then read one tenant's pointer and look for the
+    # session in another's tree. Imported here, not at module scope, because `_shared`
+    # imports `SessionCtx` from this module.
+    identity = identity_from_args(args)
     store = build_stores(identity, projects_root=DEFAULT_PROJECTS_ROOT)
     if not active_pointer_exists(store.base_dir):
         raise SystemExit(

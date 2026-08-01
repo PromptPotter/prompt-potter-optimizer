@@ -23,14 +23,13 @@ from promptpotter.application.optimization.resume_and_fork.fork_siblings import 
 )
 from promptpotter.application.views.render import render_sweep_summary
 from promptpotter.application.views.view_models import SweepPayloadRow, SweepSummaryView
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.results import PayloadOutcome, SweepBatchResult
 from promptpotter.domain.run_records import ForkSpec, ForkTrigger, OperatorSweepFile
 from promptpotter.infrastructure.store.io import read_yaml
 from promptpotter.infrastructure.store.layout import root_cycle_id
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
-from promptpotter.infrastructure.store.stores import Stores, build_stores
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
@@ -103,15 +102,15 @@ async def run_sweep_batch(
     from promptpotter.application.config import configure_and_apply_pipeline
     from promptpotter.application.runner.entry import RunMode
     from promptpotter.application.runner.entry import run_optimization as _orch_run_optimization
-    from promptpotter.infrastructure.identity.migration import registered_or_default_identity
     from promptpotter.presentation.cli.session import load_session
 
-    # Same resolution as `new`/`resume`: explicit --tenant > registered
-    # developer (default-claim marker) > anonymous default, so sweep runs join
-    # the one workspace instead of orphaning under `projects/default/`.
-    identity = registered_or_default_identity(getattr(args, "tenant", None))
+    # The parent context already resolved both — re-resolving them here was a third copy
+    # of the `--tenant > registered developer > anonymous default` ladder, free to disagree
+    # with the very session this batch forks off. `Stores.identity` is the sole source of
+    # tenant scope; the store is the same object `load_session` built.
+    store = root_ctx.store
+    identity = store.identity
     tenant_id = identity.tenant_id
-    store = build_stores(identity, projects_root=DEFAULT_PROJECTS_ROOT)
     parent_cycle_id = root_ctx.cycle_id
     campaign_id = root_ctx.campaign_id
     existing = existing_fork_source_files(store, campaign_id, parent_cycle_id)
