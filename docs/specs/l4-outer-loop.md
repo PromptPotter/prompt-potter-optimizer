@@ -73,7 +73,7 @@ Role split: the operator is the developer/user (UX); the agent owns everything e
 2. **`l1_critique`** — input carries the evidence (at the inner level: SAMPLE TRANSCRIPTS +
    MODEL REASONING present?); output `priority_fix`/`failure_highlights` quote CONCRETE evidence
    (a reasoning step, a premise), not recycled labels or scoring artifacts.
-3. **Scoring** — per-candidate `candidate_scores` (accuracy, θ, θ_se, ci_lo), the
+3. **Scoring** — per-candidate `candidate_scores` (accuracy, θ, θ_se, `composite_ci_lo`), the
    **matched-origin** comparison (NEVER the cross-subset round-0 origin — subset drift reads as
    lift), PoBB stream (`p_best` moving off 0.5?), `decisions` (cuts firing, and on the right arm?).
 4. **`l2_context` / `l3_plan` when fired** — validator failures (`paraphrase_repeat`,
@@ -215,6 +215,23 @@ The inner optimizer's **model** is NOT part of the mutation surface: `model`/`pr
 operator-owned axes the optimizer never searches. The inner model is pinned by the inner
 dataset's `pipeline.yaml` (or `inner_tasks.yaml::inner_model`); an operator may override it on
 a fork via the seed overlay, but that is a cap-gated babysit edit, not a searchpoint.
+
+**The mutation surface is `pipeline_params` and NOTHING ELSE — structurally, not by request.**
+Three things used to be offered and then forbidden in prose, which is the shape that produced a
+generator obeying the prose and a validator failing it for obeying:
+
+- `prompt_fields_override` / `task_context_override` write the OUTER searchpoint, whose render
+  reaches the wire only through `prompt_node_names()[0]`. `datasets/promptpotter-self/pipeline.yaml`
+  declares no `prompt_info` on any node — none of them takes a rendered target prompt — so there
+  is no such node and `build_l1_response_schema` omits both slots. The LLM cannot emit a key the
+  schema never declares, the same lock `model`/`provider` ride.
+- `problem_description` / `answer_format` carry the injection slots and the output contract, so
+  they are absent from every node's `optimizer.param_keys`. Same lock, one layer up.
+
+What remains is four fields × four inner nodes, plus `layout` (information flow) and
+`output_schema_field_names`. Their CURRENT text reaches the generator through `rendered_prompt`
+(§ dispatch-hub.md), which is what makes "write a COMPLETE replacement" an informed instruction
+rather than a blind one.
 
 ## 4. Outer composite fitness — per-sample core SHIPPED; cross-sample terms open
 

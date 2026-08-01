@@ -12,6 +12,9 @@ from promptpotter.application.optimization.dispatch.bundle import (
     InjectionKind,
     signal,
 )
+from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+    effective_meta_prompts,
+)
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM
 from promptpotter.domain.rendering import format_l1_critique_for_prompt
 
@@ -48,22 +51,50 @@ def _r_l3_to_l2_note(b: InjectionBundle) -> str:
     return f"L3 NOTE TO L2:\n{note}" if note else ""
 
 
+_META_PROMPT_HEADER = (
+    "CURRENT INNER META-PROMPTS — the text an override REPLACES, field by field.\n"
+    "A `{{token}}` is an injection slot the inner loop fills; a replacement that drops "
+    "one severs that channel and is rejected."
+)
+
+
 @signal(
     "rendered_prompt",
     kind=InjectionKind.TRACE,
     # The cap is a runaway backstop, NOT a budget knob — this is the exact prompt
-    # L1 is editing, so it must never arrive truncated (a cut-off prompt makes L1
-    # mis-edit or hallucinate the missing tail). Sized above a fully-evolved
-    # complex prompt (the 8-field scheme + situational rules for a hard task like
-    # entity-linking, which overran the old 2500 at 2766); only true runaway trips.
-    char_cap=8000,
+    # under edit, so it must never arrive truncated (a cut-off prompt makes the
+    # generator mis-edit or hallucinate the missing tail, and every mutation here is
+    # a WHOLE-field replacement). Sized above the recursion's own bundle, which is an
+    # order of magnitude past a single evolved target prompt: the sixteen editable
+    # meta-prompt fields measure ~10k at the origin. Only true runaway trips.
+    char_cap=16000,
     # The prompt under edit is the SUBJECT of a mutation, never its evidence.
     citable=False,
 )
 def _r_rendered_prompt(b: InjectionBundle) -> str:
-    """Current best searchpoint's compiled prompt body."""
-    body = b.opt_sp.render()
-    return f"CURRENT PROMPT:\n---\n{body}\n---" if body else ""
+    """The artifact under edit — a target prompt, inner meta-prompts, or both.
+
+    Two halves, each empty where it is not the mutation surface, so there is no branch
+    and no second panel. A normal campaign evolves the ``OptSearchPoint`` and renders
+    its body; an L4 cycle's outer point is inert (its fields reach no node) while the
+    real levers ride ``pipeline_params`` — which is what left this MANDATORY panel
+    rendering nothing at all on the recursion, and the generator rewriting fields it
+    had never been shown.
+    """
+    sections: list[str] = []
+    if body := b.opt_sp.render():
+        sections.append(f"CURRENT PROMPT:\n---\n{body}\n---")
+    meta = effective_meta_prompts(b.pipeline_schema, b.cycle_slice.pipeline_params)
+    if meta:
+        sections.append(_META_PROMPT_HEADER)
+        # One section per node·field: the cap's truncation drops whole tail sections,
+        # so a runaway costs whole fields rather than slicing one mid-contract.
+        sections.extend(
+            f"[{node}.{field}]\n{text or '(empty — nothing to carry forward)'}"
+            for node, fields in meta.items()
+            for field, text in fields.items()
+        )
+    return "\n\n".join(sections)
 
 
 @signal(

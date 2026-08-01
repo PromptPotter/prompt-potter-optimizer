@@ -239,6 +239,16 @@ def build_l1_response_schema(
       :data:`TASK_CONTEXT_OVERRIDES`, each ``{"type": "string"}``;
       ``additionalProperties: false``.
 
+    **The last two are DROPPED where no node bears the target prompt.** Both write the
+    evolved ``OptSearchPoint`` — ``prompt_fields_override`` its six fields,
+    ``task_context_override`` the two strings spliced around ``problem_description`` —
+    and ``to_job_search_point`` puts that render on the wire only through
+    ``prompt_node_names()[0]``. With no such node (L4: the mutation surface is the inner
+    meta-prompts, carried as ``pipeline_params``) the render lands nowhere, so a variant
+    spending itself on either slot mutates nothing. Same lock as model/provider — the LLM
+    cannot emit a key the schema never declares — which is why the meta prompt no longer
+    has to ASK for them to be left empty.
+
     Returns the BARE JSON Schema. ``chat()``'s ``response_schema`` *is* the wire
     schema (``llm/base.py``); the client owns the ``{name, schema, strict}`` provider
     envelope. Returning an envelope here nests the real schema one level down, where
@@ -306,17 +316,22 @@ def build_l1_response_schema(
             "additionalProperties": False,
         }
 
-    # 2. prompt_fields_override — top-level prompt-template fields.
-    pf_override = variant_props["prompt_fields_override"]
-    pf_override["properties"] = {field: {"type": "string"} for field in PROMPT_STRING_FIELDS}
-    pf_override["additionalProperties"] = False
+    # 2 + 3. The two OptSearchPoint slots — emitted only where the evolved prompt has a
+    # node to land on. `to_job_search_point` gates its whole render on the same
+    # `prompt_node_names()`, so with none the slots would be write-only.
+    if pipeline_schema.prompt_node_names():
+        pf_override = variant_props["prompt_fields_override"]
+        pf_override["properties"] = {field: {"type": "string"} for field in PROMPT_STRING_FIELDS}
+        pf_override["additionalProperties"] = False
 
-    # 3. task_context_override — pipeline-context strings.
-    tc_override = variant_props["task_context_override"]
-    tc_override["properties"] = {
-        field: {"type": "string"} for field in sorted(TASK_CONTEXT_OVERRIDES)
-    }
-    tc_override["additionalProperties"] = False
+        tc_override = variant_props["task_context_override"]
+        tc_override["properties"] = {
+            field: {"type": "string"} for field in sorted(TASK_CONTEXT_OVERRIDES)
+        }
+        tc_override["additionalProperties"] = False
+    else:
+        del variant_props["prompt_fields_override"]
+        del variant_props["task_context_override"]
 
     # 4. evidence_grounding.field — the panels THIS round's prompt renders. The optional
     # slot inlines as `anyOf: [<object>, null]`, so find the object arm.

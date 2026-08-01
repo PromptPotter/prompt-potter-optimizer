@@ -469,6 +469,28 @@ def candidate_delta(
     return pf, pp
 
 
+def variant_prose_written(variant: dict[str, Any]) -> dict[str, str]:
+    """The ``PromptTemplate``-field text one L1 variant wrote, from BOTH carriers.
+
+    A prose mutation rides ``prompt_fields_override`` where the campaign evolves a target
+    prompt and ``pipeline_params_override[node][field]`` where it evolves a node's own
+    template (L4's whole surface, and any backend advertising a decomposition field in
+    ``param_keys``). Same edit, different carrier — so a check that reads one carrier
+    answers "was this a prose mutation" correctly on one kind of campaign and inverted on
+    the other. Keyed ``field`` / ``node.field``; the pair with :func:`candidate_delta`,
+    which answers the same question against a parent.
+    """
+    written: dict[str, str] = {}
+    for f, v in (variant.get("prompt_fields_override") or {}).items():
+        if f in PROMPT_STRING_FIELDS:
+            written[f] = str(v or "")
+    for n, cfg in node_config_items(variant.get("pipeline_params_override")):
+        for p, v in cfg.items():
+            if p in PROMPT_STRING_FIELDS:
+                written[f"{n}.{p}"] = str(v or "")
+    return written
+
+
 # --- the IDEA a delta carries ----------------------------------------------
 #
 # `candidate_delta` answers "what changed". This answers "is that the same thing we already
@@ -709,4 +731,5 @@ __all__ = [
     "node_config_items",
     "overlay_is_locked_axis_only",
     "overlay_sets_model_outside_allowed",
+    "variant_prose_written",
 ]

@@ -69,15 +69,15 @@ upcoming sample order before each candidate is evaluated.**
 `PoBBCheck` no longer holds `priors: dict[cid → list[float]]`. It holds:
 
 ```python
-priors_by_sample: dict[str, dict[str, bool]]    # cid → sample_id → hit
+priors_by_sample: dict[str, dict[str, float]]   # cid → sample_id → graded fitness
 prior_sps:        dict[str, JobSearchPoint]      # cid → the SP that produced those outcomes
 ```
 
 `register_completed(results, candidate_id, sp)` ingests full
-`QueryMeasurement`s (which carry `sample_id` and `hit`), builds the
-sample-keyed **hit** map (the θ fit is over binary outcomes; error/deprecated
+`QueryMeasurement`s, builds the sample-keyed **grade** map (error/deprecated
 samples are excluded), and remembers the prior's `JobSearchPoint` so its
-measurements can be extended later.
+measurements can be extended later. The counting gates derive their binary
+from `grade >= 1.0` at the point of use — see § *Graded, never binarized*.
 
 ### 2. Reactive per-sample backfill
 

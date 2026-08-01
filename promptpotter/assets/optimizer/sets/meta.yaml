@@ -16,28 +16,36 @@ l1_generate:
     levers: the inner nodes and their editable fields.
   instruction: >-
     Emit every change in `pipeline_params_override` as {inner_node: {field: text}}, keyed by a node +
-    field from the catalogue above. Leave `prompt_fields_override` and `task_context_override` EMPTY —
-    they tune THIS optimizer, not the inner loop you score, and waste the candidate. Spread candidates
-    across different hypotheses, not paraphrases.
+    field from the catalogue above. Spread candidates across different hypotheses, not paraphrases.
 
 
-    The inner loop optimizes prompts for a deductive task (answer TRUE/FALSE/Uncertain; note ground-truth
-    labels include genuine 'Uncertain' cases). Read the INNER RUN NARRATIVES first — one story per seed
-    of what that inner loop tried, the steer each round acted on, its winning edit, and where it stalled
-    (the critique and failure_highlights are a compression of that same evidence). Ground each candidate
-    in a specific narrative observation — which inner tier produced weak output, which round stalled and
-    why — and name the inner deficiency it attacks. Do not bake an assumed task-level bias into a meta-prompt:
-    an edit that suppresses one answer class trades one error class for another.
+    Read the INNER RUN NARRATIVES first — one story per seed of what that inner loop tried, the steer
+    each round acted on, its winning edit, and where it stalled (the critique and failure_highlights are
+    a compression of that same evidence). Ground each candidate in a specific narrative observation —
+    which inner tier produced weak output, which round stalled and why — and name the inner deficiency
+    it attacks.
 
 
-    Edit only self-contained fields — persona, thinking_style, instruction, task_intent — and write a
-    COMPLETE replacement (it replaces that field; you can't see its current text). The replacement must
-    instruct the inner node's OPTIMIZER job (how to generate, critique, or frame PROMPT CANDIDATES) —
-    text that answers or formats the TASK itself (e.g. 'Answer TRUE, FALSE, or Uncertain…') belongs in
-    the prompts the inner loop evolves, never in a meta-prompt field; such a candidate is wasted (measured:
-    -2.2%). Never touch the inner problem_description or answer_format (they hold injection slots and
-    the output contract). Your score is inner improvement, not a label; ignore any 'node fails 100%' or
-    'parsing error' note — it is a scoring artifact.
+    CURRENT INNER META-PROMPTS below is the text you are rewriting. Your override REPLACES that field
+    whole, so carry every contract in the current text forward unless your hypothesis is that the
+    contract is the problem — and when you drop one, say in `changes_description` WHAT you removed and
+    WHY. A `{{token}}` is an injection slot the inner loop fills; drop one and the channel is severed,
+    which rolls the candidate back. The replacement must instruct the inner node's OPTIMIZER job (how
+    to generate, critique, or frame PROMPT CANDIDATES) — text that answers or formats the inner
+    BENCHMARK TASK belongs in the prompts the inner loop evolves, never in a meta-prompt field; such a
+    candidate is wasted (measured: -2.2%).
+
+
+    Write for ANY inner benchmark. You are shown one instrument's run, but the meta-prompt you edit is
+    the optimizer's, and it runs on every task it is ever pointed at: naming that benchmark's subject
+    vocabulary, answer labels or failure taxonomy overfits the edit to the instrument and it does not
+    survive a second one. Stay at your own level, too — a seed IS one whole inner run, so an inner node
+    can no more reason 'per seed' than you can reason per token. Write `changes_description` in English:
+    it is the audit trail an operator reads, and the loop's only record of what you intended.
+
+
+    Your score is inner improvement, not a label; ignore any 'node fails 100%' or 'parsing error' note
+    — it is a scoring artifact.
 
 
     SECOND LEVER - information flow (l1_critique/l2_context/l3_plan only): a `layout` edit reshapes WHICH
@@ -49,7 +57,6 @@ l1_generate:
     Return JSON: {"variants": [...]}. Each variant, IN THIS ORDER:
       - "evidence_grounding": {field, citation} — field is EXACTLY one of {{citable_fields}} (any other value, e.g. 'failure', is invalid); citation quotes the panel entry.
       - "pipeline_params_override": {inner_node: {field: "complete replacement text"}} — inner_node one of l1_generate/l1_critique/l2_context/l3_plan; field one of persona/task_intent/instruction/thinking_style. MUST be non-empty: a variant that overrides nothing mutates nothing and is rejected.
-      - "prompt_fields_override": {} (leave empty). "task_context_override": {} (leave empty).
       - Instead of a prose field, a variant may edit information flow: "pipeline_params_override": {inner_node: {"layout": {"problem_description": ["signal", ...]}}} — inner_node one of l1_critique/l2_context/l3_plan; signals from that node's `layout` enum.
       - "changes_description": which inner node-field you edited and the expected effect ("make inner critique reward TRUE/FALSE commitment") — REQUIRED, never empty. It REPORTS the override above; it never substitutes for one.
 

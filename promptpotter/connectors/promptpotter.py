@@ -180,10 +180,10 @@ def _extract_experiment(
     correct answer. So ``ground_truth`` is the inner-result token PREFIX the
     runner emits (``inner:{query}``, ``runner/inner/cycle.py::run_inner_cycle``
     — which appends a compact outcome suffix to its prediction; keep the prefix
-    in sync). Nothing matches predicted against ground_truth at the outer level
-    (hit is ``fitness >= 1.0`` from the proxy formula) — the token exists so the
-    outer optimizer stops reading every sample as a label-miss ("node fails 100%
-    — reduce parsing errors"), which is false evidence for a proxy-scored sample.
+    in sync). Nothing matches predicted against ground_truth at the outer level —
+    the token exists so the outer optimizer stops reading every sample as a
+    label-miss ("node fails 100% — reduce parsing errors"), which is false
+    evidence for a proxy-scored sample.
 
     There is no target score to match against either: ``inner_tasks.yaml`` declares
     what an inner cycle may SPEND, never what it is expected to REACH.

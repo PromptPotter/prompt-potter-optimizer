@@ -25,6 +25,7 @@ from promptpotter.application.optimization.dispatch.injections.registry import (
 )
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.l1_layout import coerce_l1_layout
+from promptpotter.domain.opt_search_point import variant_prose_written
 from promptpotter.domain.search_point import PARAM_SCOPE_KEYS
 
 # Rounds before this one keep param-scope locked so prompt-field exploration
@@ -108,10 +109,15 @@ _PHRASE_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z_\-]{2,}")
 
 
 def _variant_text_blob(variant: dict[str, Any]) -> str:
-    """All free-form variant text checks may scan against."""
+    """All free-form variant text checks may scan against.
+
+    The prose reaches ``variant_prose_written`` so BOTH carriers count. Reading
+    ``prompt_fields_override`` alone left an L4 variant's blob as its
+    ``changes_description`` and nothing else — a one-sentence summary against which one
+    measured "pass" was the substring ``prompt`` inside a Chinese sentence.
+    """
     parts = [str(variant.get("changes_description") or "")]
-    for value in (variant.get("prompt_fields_override") or {}).values():
-        parts.append(str(value or ""))
+    parts.extend(variant_prose_written(variant).values())
     for value in (variant.get("task_context_override") or {}).values():
         parts.append(str(value or ""))
     return "\n".join(parts).lower()
@@ -258,13 +264,18 @@ def _check_evidence_grounding_present(
 def _check_not_only_param_variants(
     round_dict: dict[str, Any], ctx: ValidatorContext
 ) -> CheckResult:
-    """≥1 variant per round must mutate a prompt-field axis (``prompt_fields_override``)."""
+    """≥1 variant per round must mutate a prompt-field axis, WHEREVER it rides.
+
+    Asking for ``prompt_fields_override`` specifically read the carrier, not the axis:
+    on a cycle whose prose levers are node params (L4) that slot is structurally absent,
+    so the check failed every round in which the generator did exactly what it was told.
+    """
     variants = extract_l1_variants(round_dict)
     if not variants:
         return CheckResult("not_only_param_variants", True, "no variants emitted")
 
     for v in variants:
-        if v.get("prompt_fields_override"):
+        if variant_prose_written(v):
             return CheckResult(
                 "not_only_param_variants",
                 True,
@@ -277,6 +288,41 @@ def _check_not_only_param_variants(
     )
 
 
+def _check_changes_description_english(
+    round_dict: dict[str, Any], ctx: ValidatorContext
+) -> CheckResult:
+    """``changes_description`` must stay in the language its meta-prompt is written in.
+
+    It is the loop's ONLY record of what a candidate intended — every downstream reader
+    (``review.md``, the ALREADY TRIED panel, an operator triaging a round) is a reader of
+    this string. A live round returned it entirely in Chinese: the payload was still valid
+    English, every gate passed, and only the audit trail went dark. Majority non-ASCII
+    letters, so a quoted foreign term costs nothing and a wholesale flip is caught. A
+    behaviour check, not a rejection — an unreadable note is a bad record, not a bad edit.
+    """
+    variants = extract_l1_variants(round_dict)
+    if not variants:
+        return CheckResult("changes_description_english", True, "no variants emitted")
+
+    offenders: list[str] = []
+    for i, v in enumerate(variants):
+        letters = [c for c in str(v.get("changes_description") or "") if c.isalpha()]
+        if letters and sum(1 for c in letters if not c.isascii()) * 2 > len(letters):
+            offenders.append(f"C{i + 1}")
+    if offenders:
+        return CheckResult(
+            "changes_description_english",
+            False,
+            f"{len(offenders)}/{len(variants)} descriptions are majority non-ASCII: "
+            f"{offenders[:3]}",
+        )
+    return CheckResult(
+        "changes_description_english",
+        True,
+        f"{len(variants)}/{len(variants)} descriptions readable",
+    )
+
+
 # --- registry --------------------------------------------------------------
 
 CHECK_REGISTRY: dict[str, CheckFn] = {
@@ -284,6 +330,7 @@ CHECK_REGISTRY: dict[str, CheckFn] = {
     "param_scope_discipline": _check_param_scope_discipline,
     "not_only_param_variants": _check_not_only_param_variants,
     "evidence_grounding_present": _check_evidence_grounding_present,
+    "changes_description_english": _check_changes_description_english,
 }
 
 
@@ -422,7 +469,8 @@ def _stale_prompt_field(ctx: ValidatorContext) -> str | None:
     mutated_fields: set[str] = set()
     for r in recent_two:
         for v in extract_l1_variants(r):
-            mutated_fields.update((v.get("prompt_fields_override") or {}).keys())
+            # Leaf of `field` / `node.field` — same axis either carrier wrote it through.
+            mutated_fields.update(k.rpartition(".")[2] for k in variant_prose_written(v))
     for field_name in PROMPT_STRING_FIELDS:
         if field_name not in mutated_fields:
             return field_name

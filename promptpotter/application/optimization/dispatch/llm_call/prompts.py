@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from promptpotter.config.paths import optimizer_assets_root, optimizer_pipeline_path
+from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.l1_layout import (
     L1_LAYOUT_SLOTS,
     NODE_LAYOUTS,
@@ -42,6 +43,7 @@ __all__ = [
     "base_optimizer_template",
     "combined_optimizer_prompt_hash",
     "compute_optimizer_prompt_hashes",
+    "effective_meta_prompts",
     "get_optimizer_config_overrides",
     "get_optimizer_schema",
     "list_optimizer_prompts",
@@ -272,6 +274,43 @@ def base_optimizer_template(name: str) -> PromptTemplate:
             f"(check nodes.{name}.config.prompt_family/version)."
         )
     return PromptTemplate(**body)
+
+
+def effective_meta_prompts(
+    schema: PipelineSchema | None,
+    pipeline_params: dict[str, Any] | None,
+) -> dict[str, dict[str, str]]:
+    """Every inner meta-prompt field an outer cycle may rewrite, with its CURRENT text.
+
+    On the recursion the artifact under edit is not the ``OptSearchPoint`` — it is the
+    inner optimizer's own templates, carried per node as ``pipeline_params``. So the
+    current text is the manifest base for that node with whatever the incumbent already
+    adopted laid over it, exactly what the next override REPLACES.
+
+    Returns ``{}`` off the recursion: a node qualifies only if it names an optimizer
+    prompt we hold the base for AND advertises ``PromptTemplate`` fields in
+    ``param_keys``. A normal campaign's nodes do neither, so ``rendered_prompt`` stays
+    its target prompt alone with no second concept in the way.
+    """
+    if schema is None:
+        return {}
+    owned = set(list_optimizer_prompts())
+    keys_by_node = schema.node_param_keys()
+    params = pipeline_params or {}
+    out: dict[str, dict[str, str]] = {}
+    for node_name in schema.active_steps:
+        if node_name not in owned:
+            continue
+        fields = [f for f in PROMPT_STRING_FIELDS if f in keys_by_node.get(node_name, set())]
+        if not fields:
+            continue
+        base = base_optimizer_template(node_name)
+        node_params = params.get(node_name)
+        override = node_params if isinstance(node_params, dict) else {}
+        out[node_name] = {
+            f: str(override[f] if f in override else getattr(base, f)) for f in fields
+        }
+    return out
 
 
 def load_optimizer_prompt(name: str) -> PromptTemplate:
