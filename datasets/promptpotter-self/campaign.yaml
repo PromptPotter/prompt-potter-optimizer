@@ -1,6 +1,13 @@
 campaign_config:
   dataset_name: promptpotter-self
+  # What an operator may steer the inner optimizer TO on a babysat fork. It listed only
+  # gpt-oss-120b while `assets/optimizer/pipeline.yaml` ran deepseek-v4-flash:nitro on all
+  # four nodes — so the model actually in use was outside its own campaign's allow-list, and
+  # every run silently sat in the taints-the-branch case the gate exists to mark. The list
+  # now names what runs; gpt-oss-120b stays because `pipeline.yaml::available_models` still
+  # offers it as a sanctioned alternative.
   allowed_models:
+    - deepseek/deepseek-v4-flash:nitro
     - openai/gpt-oss-120b
   # ONE measurand: what the inner search DELIVERED — a theta-logit delta over the ADOPTED
   # incumbent, so exploring costs nothing. The four-factor composite this replaces is described
@@ -39,5 +46,12 @@ campaign_config:
     l2_patience: 2
     l3_patience: 1
     elimination_n_min: 4
+    # Per-campaign, NOT the global default (0.15, whose false-cut curve was measured on the
+    # general round corpus). Here one candidate-cell is a whole inner campaign, so the two
+    # errors are priced very differently: a false cut loses one arm of a 3-variant round,
+    # while a false survival spends the rest of a 6-cell panel on an arm already losing.
+    # Racing at the global epsilon captured about a quarter of the headroom its own p_best
+    # stream offered on `promptpotter-self__af6252`.
+    pobb_epsilon: 0.30
     spend_budget_usd: 5.0
     token_budget: null

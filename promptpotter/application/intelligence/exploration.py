@@ -229,7 +229,7 @@ class RaschPosterior:
 def _map_fit(
     rows: np.ndarray,
     cols: np.ndarray,
-    hits: np.ndarray,
+    responses: np.ndarray,
     n_c: int,
     n_s: int,
     sigma_theta: float,
@@ -257,7 +257,7 @@ def _map_fit(
         w = p * (1.0 - p)
 
         # Theta Newton step (prior N(0, σ_θ²)).
-        grad_theta = np.bincount(rows, weights=hits - p, minlength=n_c) - inv_var_theta * theta
+        grad_theta = np.bincount(rows, weights=responses - p, minlength=n_c) - inv_var_theta * theta
         info_theta = np.bincount(rows, weights=w, minlength=n_c) + inv_var_theta
         theta = theta + grad_theta / np.maximum(info_theta, 1e-9)
 
@@ -266,7 +266,7 @@ def _map_fit(
         w = p * (1.0 - p)
 
         # Delta Newton step (prior N(μ_δ, σ_δ²); sign flipped — likelihood is θ_c − δ_s).
-        grad_delta = -np.bincount(cols, weights=hits - p, minlength=n_s) - inv_var_delta * (
+        grad_delta = -np.bincount(cols, weights=responses - p, minlength=n_s) - inv_var_delta * (
             delta - mu_delta
         )
         info_delta = np.bincount(cols, weights=w, minlength=n_s) + inv_var_delta
@@ -317,7 +317,7 @@ def fit_rasch(
 
     rows = np.fromiter((c_idx[o.candidate_id] for o in observations), dtype=np.int64)
     cols = np.fromiter((s_idx[o.sample_id] for o in observations), dtype=np.int64)
-    hits = np.fromiter((o.response for o in observations), dtype=np.float64)
+    responses = np.fromiter((o.response for o in observations), dtype=np.float64)
 
     sigma_theta, sigma_delta, mu_delta = _INIT_SIGMA_THETA, _INIT_SIGMA_DELTA, 0.0
     theta = delta = se_theta = se_delta = np.empty(0)
@@ -325,7 +325,7 @@ def fit_rasch(
     converged = False
     for _ in range(eb_max_iter):
         theta, delta, se_theta, se_delta, iteration, converged = _map_fit(
-            rows, cols, hits, n_c, n_s, sigma_theta, sigma_delta, mu_delta, max_iter, tol
+            rows, cols, responses, n_c, n_s, sigma_theta, sigma_delta, mu_delta, max_iter, tol
         )
         # EM M-step on Gaussian variance — posterior 2nd moment + hyperprior reg.
         new_mu_delta = float(delta.mean())
@@ -350,7 +350,7 @@ def fit_rasch(
 
     # Final inner fit at converged hyperparameters.
     theta, delta, se_theta, se_delta, iteration, converged = _map_fit(
-        rows, cols, hits, n_c, n_s, sigma_theta, sigma_delta, mu_delta, max_iter, tol
+        rows, cols, responses, n_c, n_s, sigma_theta, sigma_delta, mu_delta, max_iter, tol
     )
 
     n_obs_c = dict(
@@ -456,7 +456,7 @@ def fit_theta_given_delta(
 # Prior on log-discrimination (2PL): log(aₛ) ~ N(0, σ_a²) shrinks aₛ → 1, so the
 # 2PL collapses to 1PL absent evidence and the scale (a vs θ/δ spread) is identified.
 _SIGMA_LOG_A = 0.5
-# Clip log(a) so a stays in ≈[0.05, 20] — guards a runaway sample with separable hits.
+# Clip log(a) so a stays in ≈[0.05, 20] — guards a runaway sample with separable responses.
 _LOG_A_CLIP = 3.0
 
 
@@ -490,7 +490,7 @@ def fit_rasch_2pl(
 
     rows = np.fromiter((c_idx[o.candidate_id] for o in observations), dtype=np.int64)
     cols = np.fromiter((s_idx[o.sample_id] for o in observations), dtype=np.int64)
-    hits = np.fromiter((o.response for o in observations), dtype=np.float64)
+    responses = np.fromiter((o.response for o in observations), dtype=np.float64)
 
     theta = np.array([base.theta[cid] for cid in candidate_ids], dtype=np.float64)
     delta = np.array([base.delta[sid] for sid in sample_ids], dtype=np.float64)
@@ -510,7 +510,8 @@ def fit_rasch_2pl(
         # θ step — ∂η/∂θ = aₛ.
         p = 1.0 / (1.0 + np.exp(-np.clip(a[cols] * (theta[rows] - delta[cols]), -50, 50)))
         grad_t = (
-            np.bincount(rows, weights=a[cols] * (hits - p), minlength=n_c) - inv_var_theta * theta
+            np.bincount(rows, weights=a[cols] * (responses - p), minlength=n_c)
+            - inv_var_theta * theta
         )
         info_t = (
             np.bincount(rows, weights=a[cols] ** 2 * p * (1 - p), minlength=n_c) + inv_var_theta
@@ -519,9 +520,9 @@ def fit_rasch_2pl(
 
         # δ step — ∂η/∂δ = −aₛ.
         p = 1.0 / (1.0 + np.exp(-np.clip(a[cols] * (theta[rows] - delta[cols]), -50, 50)))
-        grad_d = -np.bincount(cols, weights=a[cols] * (hits - p), minlength=n_s) - inv_var_delta * (
-            delta - mu_delta
-        )
+        grad_d = -np.bincount(
+            cols, weights=a[cols] * (responses - p), minlength=n_s
+        ) - inv_var_delta * (delta - mu_delta)
         info_d = (
             np.bincount(cols, weights=a[cols] ** 2 * p * (1 - p), minlength=n_s) + inv_var_delta
         )
@@ -530,7 +531,9 @@ def fit_rasch_2pl(
         # log-a step — η = aₛ(θ−δ), ∂η/∂log a = η; Gauss-Newton info ≈ Σ w·η².
         eta = a[cols] * (theta[rows] - delta[cols])
         p = 1.0 / (1.0 + np.exp(-np.clip(eta, -50, 50)))
-        grad_la = np.bincount(cols, weights=(hits - p) * eta, minlength=n_s) - inv_var_a * log_a
+        grad_la = (
+            np.bincount(cols, weights=(responses - p) * eta, minlength=n_s) - inv_var_a * log_a
+        )
         info_la = np.bincount(cols, weights=p * (1 - p) * eta * eta, minlength=n_s) + inv_var_a
         log_a = np.clip(log_a + grad_la / np.maximum(info_la, 1e-9), -_LOG_A_CLIP, _LOG_A_CLIP)
 
@@ -807,7 +810,7 @@ def select_round_subset(
     "it passed" and "it failed". Selecting the contested band off that ruler then means "give me
     everything the incumbent got wrong", which is not the most-informative subset, it is the
     incumbent's own worst 28. Measured on all four ``justlogic-d234`` inner campaigns of
-    2026-07-27: round 1 dropped 12 samples versus round 0 and **all 12 were C0 hits, zero were
+    2026-07-27: round 1 dropped 12 samples versus round 0 and **all 12 were C0 responses, zero were
     misses**, in every campaign — C0's own rate on the round-1 panel fell 0.525 → 0.321. Every
     one of those campaigns then read round 1 as a regression. So one arm falls back to the
     bank prefix, alongside the no-observation cold start it is a special case of.

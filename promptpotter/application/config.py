@@ -750,8 +750,38 @@ def run_preflight_checks(
         warnings.append(w)
     if (w := _check_optimizer_below_target(target_models)) is not None:
         warnings.append(w)
+    if (w := _check_lives_have_headroom(config)) is not None:
+        warnings.append(w)
     warnings.extend(_check_config_couplings(config))
     return warnings
+
+
+def _check_lives_have_headroom(config: CampaignConfig) -> PreflightWarning | None:
+    """``lives`` that cannot run out before ``max_rounds`` is an inert brake.
+
+    Hearts are the measurement-driven twin of the calendar cap: they exist so a stalling
+    run stops EARLY. Starting with at least as many as there are rounds means the stall
+    counter can never reach zero first, so the knob buys nothing — and worse, when the two
+    coincide the run stops with ``lives_exhausted`` on the same round ``max_rounds`` would
+    have ended it, so the stop reason no longer says which fact stopped it. Observed on
+    `promptpotter-self__af6252`: `lives.start` and `max_rounds` both 2, stopped
+    `lives_exhausted`, and nothing in the record distinguishes that from the calendar."""
+    lives = config.optimization.lives
+    max_rounds = config.optimization.max_rounds
+    # `max_rounds=None` is the unbounded case — there is no calendar for hearts to race.
+    if lives is None or max_rounds is None or lives.start < max_rounds:
+        return None
+    return PreflightWarning(
+        code="config.lives_no_headroom",
+        title="the stall brake cannot fire before the calendar cap",
+        detail=(
+            f"optimization.lives.start={lives.start} >= max_rounds="
+            f"{max_rounds}, so hearts can never run out first: the run "
+            "stops on the calendar and reports `lives_exhausted` for it. Lower lives.start "
+            "to brake a stalling run early, or raise max_rounds to give it room — leaving "
+            "both equal makes the stop reason unreadable."
+        ),
+    )
 
 
 def check_model_reasoning_floors(

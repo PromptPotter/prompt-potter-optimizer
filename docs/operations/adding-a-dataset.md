@@ -31,4 +31,4 @@ The cut + protocol decision is operator-directed once the canonical protocol is 
 
 ## 4. Then wire
 
-Only after steps 1–3: write the loader, the scorer, and the `datasets/{name}/` config tree (`pipeline.yaml`, `campaign.json`, `task_description.md`, `prompts/{node}.yaml`, `dataset.md`). See [`docs/operations/dataset-selection-rationale.md`](dataset-selection-rationale.md) for selection criteria and [`docs/operations/dataset-reasoning-matrix.md`](dataset-reasoning-matrix.md) for per-dataset model defaults once the candidate graduates from shortlist to wired.
+Only after steps 1–3: write the loader, the scorer, and the `datasets/{name}/` config tree (`pipeline.yaml`, `campaign.yaml`, `task_description.md`, `prompts/{node}.yaml`, `dataset.md`). See [`docs/operations/dataset-selection-rationale.md`](dataset-selection-rationale.md) for selection criteria and [`docs/operations/dataset-reasoning-matrix.md`](dataset-reasoning-matrix.md) for per-dataset model defaults once the candidate graduates from shortlist to wired.

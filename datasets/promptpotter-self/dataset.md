@@ -35,7 +35,7 @@ Knob values live in the files, not here — read them there.
 
 - `pipeline.yaml` — meta-prompt node schema (`l1_generate` / `l1_critique` /
   `l2_context` / `l3_plan`) + the outer optimizer's model/provider.
-- `campaign.json` — outer campaign config: the composite scoring formula,
+- `campaign.yaml` — outer campaign config: the composite scoring formula,
   `optimizer_set: "meta"`, the USD budget (`token_budget` is `null` on purpose —
   see Cost shape).
 - `inner_tasks.yaml` — the outer "samples": the seed-pinned `justlogic` bank +
@@ -65,7 +65,7 @@ inner campaigns/round = (1 origin + n_variants) × n_inner_tasks
 inner rounds/campaign ≤ max_inner_rounds   (the lives brake may stop sooner)
 ```
 
-(plug in the current values from `campaign.json` + `inner_tasks.yaml`). The
+(plug in the current values from `campaign.yaml` + `inner_tasks.yaml`). The
 origin is measured once and cached across outer rounds, so steady state after
 round 0 is `n_variants × n_inner_tasks` fresh inner campaigns/round, and PoBB
 elimination prunes trailing candidates before all tasks complete — actual <

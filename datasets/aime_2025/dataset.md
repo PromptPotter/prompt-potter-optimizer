@@ -12,14 +12,14 @@ node enabled.
 --backend-url http://127.0.0.1:8000
 --backend-id aime_2025
 --dataset-name aime_2025
---config datasets/aime_2025/campaign.json
+--config datasets/aime_2025/campaign.yaml
 ```
 
 ## Data
 
 - Source: HuggingFace `MathArena/aime_2025` (30 problems from AIME I and II 2025)
 - Format: competition math problem → integer answer in [0, 999]
-- `campaign.json` uses `sp_budget_ttest: 20` (20 of 30 problems per eval round)
+- `campaign.yaml` uses `sp_budget_ttest: 20` (20 of 30 problems per eval round)
 
 ## Scoring
 

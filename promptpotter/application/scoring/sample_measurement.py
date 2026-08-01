@@ -53,12 +53,13 @@ cached deprecated answer instead of re-evaluating."""
 # there, never here.
 _TEMPLATE_VAR_RE = re.compile(r"\{\{(\w+)\}\}")
 
-# Fields that must never be interpolated into prompts (answer leakage).
+# Fields that must never be interpolated into prompts (answer leakage). It listed `hit` and
+# `score` — one deleted, the other renamed — and so had stopped naming the field that actually
+# carries how well a row was answered.
 _EXCLUDED_FIELDS: frozenset[str] = frozenset(
     {
         "ground_truth",
-        "hit",
-        "score",
+        "fitness",
         "error",
         "source_sheet",
     }

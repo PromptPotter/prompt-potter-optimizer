@@ -14,12 +14,12 @@
 ```
 --backend-url http://127.0.0.1:8000
 --backend-id local
---config datasets/lca-termnorm/campaign.json
+--config datasets/lca-termnorm/campaign.yaml
 ```
 
 Init is pure prep — no scoring. The optimizer evaluates origin as phase 0 on the `sp_budget_ttest` slice before round 1.
 
-`dataset_name` is set in `campaign.json` (`"train"` — 984 items). The `--dataset-name` CLI flag is optional; if provided it overrides the config value.
+`dataset_name` is set in `campaign.yaml` (`"train"` — 984 items). The `--dataset-name` CLI flag is optional; if provided it overrides the config value.
 
 ## Data
 

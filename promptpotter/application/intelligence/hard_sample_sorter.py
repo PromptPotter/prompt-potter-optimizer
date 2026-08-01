@@ -28,7 +28,7 @@ __all__ = [
 ARTIFACT_SCHEMA_VERSION = 5
 
 
-def _candidate_hit_rates(observations: list[Observation]) -> dict[str, float]:
+def _candidate_mean_response(observations: list[Observation]) -> dict[str, float]:
     """Mean graded response per candidate; θ_c tie-breaker (= hit rate on binary data)."""
     totals: dict[str, int] = {}
     resp: dict[str, float] = {}
@@ -38,7 +38,7 @@ def _candidate_hit_rates(observations: list[Observation]) -> dict[str, float]:
     return {cid: resp.get(cid, 0.0) / n for cid, n in totals.items() if n > 0}
 
 
-def _sample_miss_rates(observations: list[Observation]) -> dict[int, float]:
+def _sample_mean_miss(observations: list[Observation]) -> dict[int, float]:
     """Mean graded miss (1 − response) per sample; δ_s tie-breaker (= miss rate on binary data)."""
     totals: dict[int, int] = {}
     misses: dict[int, float] = {}
@@ -68,23 +68,23 @@ def _pick_score_under_prior(
 
 def _resolve_candidate_order(
     posterior: RaschPosterior,
-    hit_rates: dict[str, float],
+    mean_response: dict[str, float],
 ) -> list[str]:
     """Y-axis: desc θ_c; tie → desc mean hit rate; final tie → cid lex ascending."""
     return sorted(
         posterior.theta.keys(),
-        key=lambda cid: (-posterior.theta[cid], -hit_rates[cid], cid),
+        key=lambda cid: (-posterior.theta[cid], -mean_response[cid], cid),
     )
 
 
 def _resolve_sample_order(
     posterior: RaschPosterior,
-    miss_rates: dict[int, float],
+    mean_miss: dict[int, float],
 ) -> list[int]:
     """X-axis: desc δ_s (hardest left); tie → desc miss rate; final tie → sid asc."""
     return sorted(
         posterior.delta.keys(),
-        key=lambda sid: (-posterior.delta[sid], -miss_rates[sid], sid),
+        key=lambda sid: (-posterior.delta[sid], -mean_miss[sid], sid),
     )
 
 
@@ -158,8 +158,8 @@ def build_hard_samples_artifact_from_observations(
         return empty_artifact(cycle_id=cycle_id)
 
     posterior = fit_rasch(observations)
-    hit_rates = _candidate_hit_rates(observations)
-    miss_rates = _sample_miss_rates(observations)
+    mean_response = _candidate_mean_response(observations)
+    mean_miss = _sample_mean_miss(observations)
     best_cid: str | None = None
     if posterior.theta:
         best_cid = max(posterior.theta, key=lambda cid: posterior.theta[cid])
@@ -175,8 +175,8 @@ def build_hard_samples_artifact_from_observations(
         seed_var,
     )
 
-    full_candidate_order = _resolve_candidate_order(posterior, hit_rates)
-    full_sample_order = _resolve_sample_order(posterior, miss_rates)
+    full_candidate_order = _resolve_candidate_order(posterior, mean_response)
+    full_sample_order = _resolve_sample_order(posterior, mean_miss)
     full_pick_order = _resolve_round_order(observations, posterior, best_cid)
 
     total_candidates = len(full_candidate_order)

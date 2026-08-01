@@ -18,7 +18,7 @@ against a running TermNorm backend that exposes the `llm_only` pipeline.
 ```
 --backend-url http://127.0.0.1:8000
 --dataset-name bbeh
---config datasets/bbeh/campaign.json
+--config datasets/bbeh/campaign.yaml
 ```
 
 Requires a TermNorm instance with the `llm_only` node enabled.

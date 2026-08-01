@@ -22,14 +22,14 @@ Everything else (prompt variants, scoring framework) is shared.
 ```
 --backend-url http://127.0.0.1:8000
 --backend-id hotpotqa
---config datasets/hotpotqa/campaign.json
+--config datasets/hotpotqa/campaign.yaml
 ```
 
 ## Data
 
 - Source: HotPotQA distractor setting (~113K questions, 10 passages each)
 - Format: question + 10 context passages -> short answer
-- campaign.json uses `sp_budget_ttest: 200` (subset for optimization)
+- campaign.yaml uses `sp_budget_ttest: 200` (subset for optimization)
 
 ## Pipeline Notes
 

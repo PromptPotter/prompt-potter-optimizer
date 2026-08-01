@@ -5,9 +5,14 @@ inner_benchmark: justlogic-d234
 # what keeps the wider panel from costing proportionally more, since a dud is cut at 4 cells.
 #
 # The cell itself is trimmed to pay for that width: 4 rounds x 3 variants instead of 5 x 4 is
-# ~40% off a cell (~11 min / ~$0.045 at the measured rate). Both observed peaks landed by inner
-# round 3 (promptpotter-self__d8b5be: seed-0 at r2, seed-3 at r3), and `inner_lives` stopped
-# seed-0 on its own at 4 — so the cap that was cut was headroom nothing reached.
+# ~40% off a cell (~11 min / ~$0.045 at the measured rate).
+#
+# `max_inner_rounds` IS BINDING, and this comment used to claim the opposite ("headroom nothing
+# reached", read off two peaks in one campaign). Counted across every banked inner cell that
+# recorded a stop, a majority terminated ON the cap rather than on `inner_lives`, and most used
+# every round. So a cell's measured lift is a lift-under-a-cap, not a converged one, and raising
+# the cap is a live question about what the outer loop is measuring — not a spend detail. Until
+# it is answered with real spend, read every proxy delta as censored from above.
 inner_benchmark_config:
   n_samples_per_inner_round: 28
   n_samples_origin: 40
