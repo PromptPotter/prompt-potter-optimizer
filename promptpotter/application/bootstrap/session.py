@@ -16,6 +16,7 @@ from promptpotter.infrastructure.store.io import validate_path_component
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.session_pointer import mint_session_id, save_active_pointer
 from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.identity import IdentityContext, default_identity
 
 if TYPE_CHECKING:
@@ -178,8 +179,6 @@ def auto_mint_session(
     label: str = "",
 ) -> tuple[str, str, str]:
     """Mint fresh campaign + session + root cycle; claim the active pointer."""
-    from datetime import UTC, datetime
-
     from promptpotter.application.config import freeze_campaign_config
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         combined_optimizer_prompt_hash,
@@ -190,7 +189,7 @@ def auto_mint_session(
     target_hash = cycle_id.removeprefix("cycle_")
     validate_path_component(target_hash)
     session_id = mint_session_id()
-    now = datetime.now(UTC)
+    now = utcnow_iso()
     # Precedence matches configure_and_apply_pipeline: the persisted campaign
     # snapshot is authoritative, the live session is the fallback.
     dataset_name = campaign_config.dataset_name or session.dataset_name or ""
@@ -220,14 +219,14 @@ def auto_mint_session(
             campaign_id=campaign_id,
             dataset_name=dataset_name,
             label=label,
-            created_at=now.isoformat(),
+            created_at=now,
             root_cycle_id=root_cycle,
             root_content_hash=target_hash,
             optimizer_prompt_hash=optimizer_hash,
             backend_id=session.backend_id,
             owner_user_id=str(session.identity.user_id),
             lifecycle_status="active",
-            lifecycle_changed_at=now.isoformat(),
+            lifecycle_changed_at=now,
             config=freeze_campaign_config(campaign_config),
         )
     )
@@ -284,13 +283,11 @@ def mint_checkin_skeleton(stores: Stores, *, slug: str) -> tuple[str, str, str]:
     claims the pointer when it flips this to ``active`` at Start. The draft
     working-state + sample bank are written separately by the caller through
     :class:`CheckinDraftStore`. Returns ``(session_id, campaign_id, cycle_id)``."""
-    from datetime import UTC, datetime
-
     from promptpotter.application.runner.identity import mint_campaign_id, mint_checkin_cycle_id
     from promptpotter.config.settings import APP_VERSION
     from promptpotter.domain.campaign import Campaign
 
-    now = datetime.now(UTC).isoformat()
+    now = utcnow_iso()
     campaign_id = mint_campaign_id(slug)
     cycle_id = mint_checkin_cycle_id()
     session_id = mint_session_id()
@@ -352,14 +349,12 @@ def finalize_checkin_to_active(
     cycle id stays the provisional ``cycle_chk_*`` (option 2b — drift reads
     ``root_content_hash``, not the parsed id). Unlike ``auto_mint_session`` this
     mints nothing new; the caller binds the session + detaches the run."""
-    from datetime import UTC, datetime
-
     from promptpotter.application.config import freeze_campaign_config
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         combined_optimizer_prompt_hash,
     )
 
-    now = datetime.now(UTC).isoformat()
+    now = utcnow_iso()
     target_hash = cycle_plan.cycle_id.removeprefix("cycle_")
     plan_origin_fields = cycle_plan.origin.prompt_field_dict()
 

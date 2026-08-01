@@ -32,18 +32,30 @@ from promptpotter.infrastructure.store.io import validate_path_component
 
 _SIBLING_SEP_RE = re.compile(r"_(fork|diag|sweep)_")
 _SIBLING_LAST_SEP_RE = re.compile(r"_(fork|diag|sweep)_(?!.*_(fork|diag|sweep)_)")
-_DATASET_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+_DATASET_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 
 def validate_dataset_name(name: str) -> str:
-    """Stricter than :func:`validate_path_component` — dataset names don't carry dots.
+    """**The** dataset-name rule — every entry point asks here, wire included.
+
+    Stricter than :func:`validate_path_component` (no dots) and lowercase-only,
+    because a dataset name IS a directory name and the two filesystems this ships
+    on are case-insensitive: ``Foo`` and ``foo`` would be one directory while
+    :meth:`~...TenantDatasetStore.slug_exists` reported two. Ingest already
+    lowercases, so nothing legal is lost.
+
+    A leading digit is allowed on purpose — ``2024-sales.csv`` is an ordinary upload,
+    and the wire used to reject the slug its own ingest had just minted, so a dataset
+    could be created and never minted against. That was two rules for one field
+    (``_DATASET_NAME_PATTERN`` in the commands router), which is why they could
+    disagree at all.
 
     Raises ``ValueError`` on invalid; returns *name* unchanged otherwise.
     """
     if not name or not _DATASET_NAME_RE.match(name):
         raise ValueError(
-            f"Invalid dataset name: {name!r}. "
-            "Only alphanumerics, hyphens, and underscores are allowed."
+            f"Invalid dataset name: {name!r}. Lowercase alphanumerics, hyphens and "
+            "underscores only, starting with a letter or digit."
         )
     return name
 

@@ -32,7 +32,9 @@ from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.infrastructure.store.io import _YamlDumper, read_yaml, write_yaml
+from promptpotter.infrastructure.store.layout import validate_dataset_name
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
+from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.hashing import content_hash
 
 
@@ -1917,6 +1919,56 @@ def test_only_the_optimizer_manifest_may_be_shadowed(
     override.write_text("nodes: {}\n", encoding="utf-8")
     assert paths.optimizer_pipeline_path() == override
     assert paths.optimizer_assets_root() == package / "assets" / "optimizer"
+
+
+def test_one_dataset_name_rule_reaches_every_entry_point() -> None:
+    """A slug ingest mints must be a slug the wire will mint a campaign against.
+
+    They were two patterns — ``_DATASET_NAME_PATTERN`` in the commands router and
+    ``validate_dataset_name`` in the store — and they disagreed on a leading digit,
+    so ``2024-sales.csv`` uploaded fine and then 400'd at mint. Silent because each
+    surface looked correct alone.
+
+    The rule is also lowercase-only, which is the half that never fired: a dataset
+    name IS a directory name, and on Windows/macOS ``Foo`` and ``foo`` are one
+    directory while ``slug_exists`` would answer for two.
+    """
+    from promptpotter.application.datasets.draft_campaign import default_slug_from_filename
+    from promptpotter.presentation.api.routers.commands import _require_dataset_name
+
+    for filename in ("2024-sales.csv", "Q3_report.csv", "customers.csv"):
+        slug = default_slug_from_filename(filename)
+        validate_dataset_name(slug)  # the ingest path's gate
+        assert _require_dataset_name({"dataset_name": slug}) == slug  # the wire's
+
+    for bad in ("Foo", "UPPER", "-leading", "_leading", "has space", "has.dot", ""):
+        with pytest.raises(ValueError):
+            validate_dataset_name(bad)
+
+
+def test_every_persisted_timestamp_is_canonical_utc() -> None:
+    """``+00:00`` and ``Z`` are the same instant and sort in opposite orders.
+
+    ``created_at`` is compared as a STRING in six places, one of which
+    (``routers/origins.py``) uses ``min()`` to elect an origin group's canonical
+    campaign — so a campaign minted through a path that skipped ``utcnow_iso``
+    silently outranked one minted a second earlier. Nothing errors; the wrong
+    campaign is simply named canonical.
+    """
+    assert utcnow_iso().endswith("Z")
+    same_instant = ("2026-08-01T10:00:00+00:00", "2026-08-01T10:00:00Z")
+    assert min(same_instant) != max(same_instant), "the two spellings do not sort equal"
+
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "promptpotter"
+        / "application"
+        / "bootstrap"
+        / "session.py"
+    ).read_text(encoding="utf-8")
+    assert "datetime.now(" not in source, (
+        "bootstrap/session.py mints a timestamp outside shared/clock.py::utcnow_iso"
+    )
 
 
 def _tree_bytes(root: Path) -> dict[str, bytes]:

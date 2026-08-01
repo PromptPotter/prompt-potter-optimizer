@@ -39,6 +39,7 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.connectors import BackendUnreachableError
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.store.layout import validate_dataset_name
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.middleware.command_dispatcher import (
@@ -119,16 +120,22 @@ def _require_slug(payload: dict[str, Any], key: str, *, max_len: int) -> str:
     return raw
 
 
-_DATASET_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_-]*$")
-
-
 def _require_dataset_name(payload: dict[str, Any], key: str = "dataset_name") -> str:
     """A dataset name under whichever key the wire gives it — ``dataset_name`` or,
-    for ``replace-dataset``, ``slug``. One pattern, one message."""
+    for ``replace-dataset``, ``slug``.
+
+    Extracting the field is this function's job; deciding what a dataset name IS
+    belongs to :func:`validate_dataset_name`, which every other entry point already
+    asked. This carried its own pattern until 2026-08-01, and the two disagreed:
+    ``POST /datasets/ingest`` mints a slug straight off the filename, so an upload
+    named ``2024-sales.csv`` produced a dataset that this rule then refused to mint
+    a campaign against.
+    """
     raw = _require_string(payload, key, max_len=64)
-    if not _DATASET_NAME_PATTERN.fullmatch(raw):
-        raise PayloadInvalidError(f"payload.{key} must match ^[a-z][a-z0-9_-]*$")
-    return raw
+    try:
+        return validate_dataset_name(raw)
+    except ValueError as exc:
+        raise PayloadInvalidError(f"payload.{key}: {exc}") from exc
 
 
 def _optional_bounded_float(
