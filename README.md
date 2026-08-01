@@ -149,6 +149,6 @@ Short version: [`docs/README.md`](docs/README.md) § Status & roadmap. Full deve
   title  = {PromptPotter: LLM-Driven Evolution of Prompts and Pipelines},
   author = {Streuli, David},
   year   = {2026},
-  url    = {https://github.com/runfish5/prompt-potter-optimizer}
+  url    = {https://github.com/PromptPotter/prompt-potter-optimizer}
 }
 ```

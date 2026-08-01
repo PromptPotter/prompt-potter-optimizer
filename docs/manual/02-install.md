@@ -11,7 +11,7 @@ OpenRouter is the default optimizer LLM provider — the optimizer meta-prompt i
 ## 2. Clone the repo
 
 ```bash
-git clone https://github.com/runfish5/prompt-potter-optimizer.git
+git clone https://github.com/PromptPotter/prompt-potter-optimizer.git
 cd prompt-potter-optimizer
 ```
 

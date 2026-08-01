@@ -17,7 +17,7 @@ import { connectorReachability, isSelfOptimization } from "@/lib/derivations";
 import type { ConnectorView } from "@/lib/types";
 
 const SECURITY_DOC_URL =
-  "https://github.com/runfish5/prompt-potter-optimizer/blob/main/docs/operations/backend-integration.md#connection-security";
+  "https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/operations/backend-integration.md#connection-security";
 
 interface Props {
   view: ConnectorView;

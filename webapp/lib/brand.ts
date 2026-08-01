@@ -47,7 +47,7 @@ export const BRAND = {
   // NEXT_PUBLIC_SUPPORT_URL so their users never land on our tracker.
   supportUrl:
     process.env.NEXT_PUBLIC_SUPPORT_URL ||
-    "https://github.com/runfish5/prompt-potter-optimizer/issues",
+    "https://github.com/PromptPotter/prompt-potter-optimizer/issues",
   legalUrl: process.env.NEXT_PUBLIC_LEGAL_URL || "https://promptpotter.dev/legal",
   license: process.env.NEXT_PUBLIC_LICENSE || "https://promptpotter.dev/legal/license",
   // Mirrors the dark-theme body background in app/styles/foundation/themes.css + layout's

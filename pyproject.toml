@@ -78,7 +78,7 @@ dev = [
 ]
 
 [project.urls]
-Repository = "https://github.com/runfish5/prompt-potter-optimizer"
+Repository = "https://github.com/PromptPotter/prompt-potter-optimizer"
 
 [project.scripts]
 promptpotter = "promptpotter.presentation.cli.campaign_runner:main"

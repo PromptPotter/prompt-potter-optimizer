@@ -79,7 +79,7 @@ def main() -> None:
                 "  promptpotter verify          re-score a candidate on more samples\n"
                 "  promptpotter ab              re-derive the active cycle's decisions under the current engine\n\n"
                 "Run `promptpotter <verb> --help` for per-verb options.\n"
-                "Docs: https://github.com/runfish5/prompt-potter-optimizer"
+                "Docs: https://github.com/PromptPotter/prompt-potter-optimizer"
             )
             return
         args = parser.parse_args([*sys.argv[1:], "resume"])
