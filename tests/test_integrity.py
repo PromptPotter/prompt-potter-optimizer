@@ -670,7 +670,7 @@ def test_schema_description_axis_reaches_the_target_and_cannot_rename_a_field() 
             "output_schema_descriptions": {"answer": "ANSWER FIRST.", "made_up": "dropped"},
         }
     }
-    fold_schema_descriptions(pp)
+    fold_schema_descriptions(pp, schema)
     props = pp["llm_only"]["output_schema"]["properties"]
     assert props["answer"]["description"] == "ANSWER FIRST."
     assert "made_up" not in props
@@ -678,7 +678,7 @@ def test_schema_description_axis_reaches_the_target_and_cannot_rename_a_field() 
 
     untouched = {"llm_only": dict(base_cfg)}
     before = json.dumps(untouched, sort_keys=True)
-    fold_schema_descriptions(untouched)
+    fold_schema_descriptions(untouched, schema)
     assert json.dumps(untouched, sort_keys=True) == before  # no override → byte-identical wire
 
     # The raw schema stays locked — the `description` prose is the ONLY unlocked schema surface.

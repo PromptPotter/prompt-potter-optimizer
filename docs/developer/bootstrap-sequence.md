@@ -78,13 +78,18 @@ restart — visible immediately); no standing test, see
 
 ## When the chain breaks
 
+- **`init_services` raises `pipeline_config_invalid` (422)** → the dataset's
+  `pipeline.yaml` declares no `backend_type`, or neither it nor the backend
+  yields a parseable schema. Typed rather than bare because every measurement is
+  keyed on that schema, so there is no degraded run to fall through to — and a
+  500 here reads as `transient` to the webapp, which would retry a config only
+  the operator can fix.
 - **`populate_session_scoring` raises** → bad scoring formula in
   `campaign.json`. Diagnostic is in the exception; check the formula DSL
   at [`/developer/stable-api.md`](stable-api.md) §2.
 - **`bootstrap_cycle` returns `(None, 1)`** → silent fallback when
   `session.backend_id` is empty. Means the runner runs without
-  per-cycle persistence (useful for `compare` dry-runs; surprising in
-  `new` / `resume`).
+  per-cycle persistence — surprising in `new` / `resume`.
 - **`init_optimization_loop` fails origin scoring** → the backend
   doesn't accept the origin pipeline_params. Check
   `datasets/{name}/pipeline.yaml::nodes.{name}.config`.

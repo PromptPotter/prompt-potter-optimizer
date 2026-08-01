@@ -378,7 +378,7 @@ class Cycle:
         origin_report: ScoredCandidate,
         *,
         task_context: TaskDecomposition,
-        schema: PipelineSchema | None,
+        schema: PipelineSchema,
         origin_results: list[dict[str, Any]] | None = None,
         session: Session,
         config: CampaignConfig,

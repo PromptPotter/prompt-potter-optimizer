@@ -51,6 +51,7 @@ __all__ = [
     "knob_label",
     "load_campaign_config",
     "resolve_pipeline_config_params",
+    "resolved_dataset_name",
     "run_preflight_checks",
 ]
 
@@ -875,7 +876,7 @@ def resolve_pipeline_config_params(
     active: list[str],
     pipeline_overrides: Mapping[str, Any],
     dataset_dir: Path | None,
-    schema: PipelineSchema | None,
+    schema: PipelineSchema,
 ) -> dict[str, Any]:
     """The dataset→effective node-config merge, pure: the sparse ``{"steps": active}``
     base layered with the per-dataset overlay (``pipeline.yaml::nodes.{name}.config``) and
@@ -969,11 +970,11 @@ def missing_template_vars(rendered: str, declared: list[str]) -> list[str]:
 
 
 def _resolve_active_schema(
-    pipeline_schema: PipelineSchema | None,
+    pipeline_schema: PipelineSchema,
     *,
     exclude: list[str],
     narrowing: dict[str, NodeSearchNarrowing],
-) -> tuple[list[str], PipelineSchema | None]:
+) -> tuple[list[str], PipelineSchema]:
     """Resolve the active node list + the exclude-filtered, campaign-narrowed schema.
 
     ``steps`` is two shapes under one word. Here it is the BACKEND's
@@ -982,15 +983,15 @@ def _resolve_active_schema(
     names (``RESERVED_PIPELINE_PARAM_KEYS``). Hence the ``s["name"]`` below.
     """
 
-    active = pipeline_schema.active_steps_excluding(exclude) if pipeline_schema else []
+    active = pipeline_schema.active_steps_excluding(exclude)
 
     filtered = pipeline_schema
-    if pipeline_schema and exclude:
+    if exclude:
         filtered = pipeline_schema.filter_to_steps(active)
     # Campaign search-space narrowing — the per-node param-lock + allowed-values
     # subset, peer to exclude (above). The dataset declares the max; the campaign
     # snapshot may only narrow it.
-    if filtered and narrowing:
+    if narrowing:
         filtered = filtered.narrow(narrowing)
     return active, filtered
 
@@ -1061,7 +1062,7 @@ def _apply_starting_prompts(
 def _validate_model_ownership(
     pipeline_params: dict[str, Any],
     *,
-    filtered: PipelineSchema | None,
+    filtered: PipelineSchema,
     active: list[str],
     dataset_name: str,
 ) -> None:
@@ -1087,6 +1088,19 @@ def _validate_model_ownership(
             )
 
 
+def resolved_dataset_name(session: Session, campaign_config: CampaignConfig) -> str:
+    """Which dataset this run is against — the persisted campaign snapshot is
+    authoritative, the live session is the fallback.
+
+    One rule, one place. It was written out twice, here and at the mint seam that
+    stamps ``Campaign.dataset_name``, with a comment in the second asserting it matched
+    the first. The two feed the same identity (`mint_campaign_id` → `{dataset}__{rand6}`
+    and the archive's `dataset_name` key), so a divergence renames campaigns and files
+    their measurements under a name nothing else looks up.
+    """
+    return campaign_config.dataset_name or session.dataset_name or ""
+
+
 def configure_and_apply_pipeline(
     session: Session,
     campaign_config: CampaignConfig,
@@ -1103,7 +1117,7 @@ def configure_and_apply_pipeline(
         narrowing=campaign_config.optimizer_narrowing,
     )
 
-    dataset_name = campaign_config.dataset_name or session.dataset_name or ""
+    dataset_name = resolved_dataset_name(session, campaign_config)
     dataset_dir = session.dataset_config_dir
 
     # The dataset→effective node-config merge (sparse `{steps}` base + dataset overlay +
@@ -1117,7 +1131,7 @@ def configure_and_apply_pipeline(
     )
 
     # Starting prompts from `{dataset_dir}/prompts/[<node>|default].yaml`, per prompt-bearing node.
-    if dataset_dir is not None and filtered and has_dataset_prompts(dataset_dir):
+    if dataset_dir is not None and has_dataset_prompts(dataset_dir):
         _apply_starting_prompts(
             pipeline_params,
             filtered=filtered,
@@ -1131,8 +1145,7 @@ def configure_and_apply_pipeline(
         pipeline_params, filtered=filtered, active=active, dataset_name=dataset_name
     )
 
-    if filtered is not None:
-        session.pipeline_schema = filtered
+    session.pipeline_schema = filtered
     session.pipeline_params = pipeline_params
 
     nodes_str = ", ".join(active)

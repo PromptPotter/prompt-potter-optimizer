@@ -234,7 +234,7 @@ def _verify_outer_observation_contract(session: Session, dataset_dir: Path) -> N
     (loud, but a run in) or, worse, the observation quietly never lands in the archive and
     the what-if panel scores a term nobody measured. Fail at arm time instead."""
     schema = session.pipeline_schema
-    if schema is None or not inner_tasks_path(dataset_dir).is_file():
+    if not inner_tasks_path(dataset_dir).is_file():
         return
     declared = {key for node in schema.nodes for key in node.output_keys}
     missing = [k for k in (INNER_RESULT_KEY, *OUTER_PROXY_KEYS) if k not in declared]

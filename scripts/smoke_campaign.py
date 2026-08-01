@@ -116,7 +116,7 @@ async def _run(args: argparse.Namespace) -> int:
     )
 
     schema = session.pipeline_schema
-    if schema is None or not schema.available_models:
+    if not schema.available_models:
         print(
             f"[smoke] ERROR: pipeline schema for {args.dataset!r} declares no "
             f"available_models. Add an `available_models: [...]` list to "

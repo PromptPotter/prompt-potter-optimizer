@@ -160,8 +160,6 @@ async def verify_candidate(
     )
 
     schema = session.pipeline_schema
-    if schema is None:
-        raise VerifyError("pipeline schema unavailable; cannot resolve candidate config.")
     effective_pipeline_params = merge_pipeline_params(pipeline_params, pp_override, schema) or {}
     jsp = opt_sp.to_job_search_point(effective_pipeline_params, schema=schema)
     node_configs = schema.node_configs(effective_pipeline_params)

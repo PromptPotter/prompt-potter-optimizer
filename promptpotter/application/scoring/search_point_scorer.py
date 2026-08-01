@@ -322,7 +322,6 @@ async def score_search_point(
     backend_id = session.backend_id
     pipeline_schema = session.pipeline_schema
     source = source or session.source
-    assert pipeline_schema is not None, "pipeline_schema required for scoring"
 
     content_hash = search_point.content_hash(dataset)
     safe_label = label.lower().replace(" ", "_")

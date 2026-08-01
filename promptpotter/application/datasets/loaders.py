@@ -294,12 +294,15 @@ def build_dataset_run_data(
     *,
     dataset_name: str | None,
     source: str = "",
-    pipeline_schema: PipelineSchema | None = None,
+    pipeline_schema: PipelineSchema,
     human_intervened: bool = False,
 ) -> dict[str, Any]:
     """Measurement-batch dict ready for ``Stores.archive.save()``.
     ``dataset_name`` is required (keyword-only); ``None`` permitted only for forensic writes.
-    ``human_intervened`` marks a babysat cycle's run non-clean (grade ``C``)."""
+    ``human_intervened`` marks a babysat cycle's run non-clean (grade ``C``).
+    ``pipeline_schema`` is required: it picks the ``sp_hash`` algorithm behind
+    ``prompt_fields_id`` and supplies ``node_configs``, so a batch written without one
+    is filed under a second identity for the same searchpoint."""
     from promptpotter.domain.measurement_provenance import grade_run
 
     rendered_prompt = search_point.render()
@@ -322,7 +325,7 @@ def build_dataset_run_data(
         "created_at": utcnow_iso(),
         "measurements": measurements,
     }
-    if pipeline_schema and search_point.pipeline_params:
+    if search_point.pipeline_params:
         data["node_configs"] = pipeline_schema.node_configs(search_point.pipeline_params)
     if search_point.pipeline_params:
         data["pipeline_params"] = search_point.pipeline_params

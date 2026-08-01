@@ -68,7 +68,11 @@ class Session:
     store: Stores
     backend_id: str
     backend_client: BackendClient
-    pipeline_schema: PipelineSchema | None
+    # Non-optional: the schema decides what a measurement MEANS (which node carries the
+    # prompt, which configs are hashed into the identity), so a session without one is
+    # not a degraded session, it is a session that cannot measure. `_resolve_pipeline_schema`
+    # raises instead of handing back a `None` for ~40 readers to each mis-handle quietly.
+    pipeline_schema: PipelineSchema
     samples: list[Sample] = field(default_factory=list)
     index_terms: list[str] = field(default_factory=list)
     identity: IdentityContext = field(default_factory=default_identity)
@@ -99,9 +103,9 @@ class Session:
         seed / model pin.
 
         Derived from the pipeline schema, never a literal. Raises rather than
-        guessing — a missing schema means the caller ran before bootstrap.
+        guessing — a dataset declaring no prompt node cannot carry an override.
         """
-        names = self.pipeline_schema.prompt_node_names() if self.pipeline_schema else []
+        names = self.pipeline_schema.prompt_node_names()
         if not names:
             raise ValueError(
                 f"dataset {self.dataset_name!r} declares no prompt-bearing node — "
@@ -151,8 +155,7 @@ def new_session_state(
 def _build_index_header(session: Session, dataset_size: int) -> dict[str, Any]:
     from promptpotter.config.settings import APP_VERSION
 
-    schema = session.pipeline_schema
-    nodes = list(schema.nodes) if schema else []
+    nodes = list(session.pipeline_schema.nodes)
     return {
         "tool": "promptpotter",
         "version": APP_VERSION,
@@ -179,7 +182,7 @@ def auto_mint_session(
     label: str = "",
 ) -> tuple[str, str, str]:
     """Mint fresh campaign + session + root cycle; claim the active pointer."""
-    from promptpotter.application.config import freeze_campaign_config
+    from promptpotter.application.config import freeze_campaign_config, resolved_dataset_name
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         combined_optimizer_prompt_hash,
     )
@@ -190,9 +193,7 @@ def auto_mint_session(
     validate_path_component(target_hash)
     session_id = mint_session_id()
     now = utcnow_iso()
-    # Precedence matches configure_and_apply_pipeline: the persisted campaign
-    # snapshot is authoritative, the live session is the fallback.
-    dataset_name = campaign_config.dataset_name or session.dataset_name or ""
+    dataset_name = resolved_dataset_name(session, campaign_config)
     optimizer_hash = combined_optimizer_prompt_hash()
     campaign_id = mint_campaign_id(dataset_name)
     root_cycle = cycle_id

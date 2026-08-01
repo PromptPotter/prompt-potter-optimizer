@@ -245,15 +245,21 @@ class OptSearchPoint(PromptTemplate):
         self,
         base_pipeline_params: dict[str, Any] | None = None,
         *,
-        schema: PipelineSchema | None = None,
+        schema: PipelineSchema,
     ) -> JobSearchPoint:
         """Render → inject into pipeline_params → frozen JobSearchPoint. Pipeline
-        composition reads *schema*, never inferred from ``base_pipeline_params``."""
+        composition reads *schema*, never inferred from ``base_pipeline_params``.
+
+        *schema* is REQUIRED. Without one this silently produced a structurally valid
+        point carrying NEITHER the rendered prompt (no schema ⇒ no prompt node to inject
+        it into) NOR ``steps`` — and that point is then scored, content-hashed, and
+        written to the archive like any other. Nothing raised; the run just measured a
+        prompt nobody wrote."""
         from promptpotter.domain.search_point import JobSearchPoint
 
         pp = copy.deepcopy(base_pipeline_params or {})
-        active_steps = schema.active_steps if schema else ()
-        prompt_nodes = schema.prompt_node_names() if schema else []
+        active_steps = schema.active_steps
+        prompt_nodes = schema.prompt_node_names()
         prompt_node = prompt_nodes[0] if prompt_nodes else ""
         if active_steps:
             pp["steps"] = list(active_steps)
@@ -360,9 +366,7 @@ def overlay_sets_model_outside_allowed(
     return False
 
 
-def fold_schema_descriptions(
-    pp: dict[str, Any] | None, schema: PipelineSchema | None = None
-) -> None:
+def fold_schema_descriptions(pp: dict[str, Any] | None, schema: PipelineSchema) -> None:
     """Fold each node's virtual ``output_schema_descriptions`` into its wire
     ``output_schema`` prose, in place, then remove the virtual key.
 
@@ -379,7 +383,8 @@ def fold_schema_descriptions(
 
     A node may declare its schema INLINE (``config.output_schema``) or by REGISTRY
     IDENTITY (``config.schema_family`` — TermNorm's ``entity_profiling`` / ``llm_ranking``).
-    In the registry case the config carries no schema to write on, so *schema* supplies the
+    In the registry case the config carries no schema to write on, so *schema* — required,
+    because omitting it silently reinstates the drop described below — supplies the
     resolved one (``PipelineNode.output_schema.json_schema``, parsed from the same
     ``GET /pipeline`` payload) and the fold materializes it inline. Without this the
     descriptions were popped and dropped: two opposite steers produced a byte-identical wire
@@ -398,7 +403,7 @@ def fold_schema_descriptions(
             continue
         out_schema = cfg.get("output_schema")
         if not isinstance(out_schema, dict):
-            resolved = schema.get_node(node) if schema else None
+            resolved = schema.get_node(node)
             out_schema = (
                 copy.deepcopy(resolved.output_schema.json_schema)
                 if resolved and resolved.output_schema

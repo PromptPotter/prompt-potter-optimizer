@@ -78,18 +78,21 @@ class JobSearchPoint(SearchPoint):
             for node, cfg in pp.items()
         }
 
-    def sp_hash(self, pipeline_schema: PipelineSchema | None = None) -> str:
-        """SearchPoint identity hash; falls back to flat ``pipeline_params`` hash without schema.
+    def sp_hash(self, pipeline_schema: PipelineSchema) -> str:
+        """SearchPoint identity hash, over the schema-resolved node configs.
+
+        The schema is REQUIRED because it selects the algorithm. It used to default to
+        ``None`` and hash the raw ``pipeline_params`` dict instead — two different hashes
+        behind one name, and this value persists as ``prompt_fields_id`` on every
+        measurement batch. One searchpoint reached the archive under two identities
+        depending on whether its caller happened to have a schema in scope, and
+        cross-run grouping split with no error anywhere.
 
         Role split (the codebase has TWO hashes — don't conflate): ``sp_hash`` is the
         optimizer/prompt-side dedup over the node-config structure; ``content_hash``
         (below) is the **measurement-archive key**. "Will this re-score?" is answered by
         ``content_hash`` / ``node_configs``, not this one."""
-        if pipeline_schema is not None:
-            return pipeline_schema.sp_hash(self.pipeline_params or {})
-        from promptpotter.domain.pipeline_schema import stable_hash
-
-        return stable_hash(self.pipeline_params or {})
+        return pipeline_schema.sp_hash(self.pipeline_params or {})
 
     def content_hash(self, dataset: list[Any]) -> str:
         """Content-addressed hash for measurement deduplication — the ``archive/
@@ -168,10 +171,11 @@ class TaskDecomposition:
       conceptually to the composite-fitness formula but is not its
       verbatim text.
     - ``key_challenges`` — the failure patterns L1 should defend
-      against next round. L2's primary refinement surface;
-      accumulative, merged on each L2 fire. The
-      `l2_task_context_stale_repeat` validator fires here when L2
-      restates without delta.
+      against next round. Operator-authored and frozen like its four
+      framing peers (see :data:`FRAMING_FIELDS` and ``merge``); it was
+      L2's refinement surface, and the measurement that closed that is
+      recorded above. A round's own findings reach L1 through
+      ``critique`` / ``axis_memory`` / ``mutation_memory`` instead.
     - ``upstream_context`` — task-framing prepended around
       ``problem_description`` at render time (see
       ``OptSearchPoint._field_value``).

@@ -89,7 +89,7 @@ def resolve_cycle_plan(
     schema = session.pipeline_schema
     pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=log or _noop_log)
     origin = resolve_origin_opt_search_point(
-        prompt_node_names=schema.prompt_node_names() if schema else [],
+        prompt_node_names=schema.prompt_node_names(),
         dataset_dir=session.dataset_config_dir,
         seed=_campaign_origin_seed(origin_override),
     )

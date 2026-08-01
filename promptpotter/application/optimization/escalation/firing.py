@@ -341,7 +341,7 @@ async def _run_transition(
     transition: LayerStrategy,
     cycle: Cycle,
     config: CampaignConfig,
-    pipeline_schema: PipelineSchema | None,
+    pipeline_schema: PipelineSchema,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None,
     *,
@@ -569,7 +569,7 @@ def _trigger_payload(
 async def escalate_l2(
     cycle: Cycle,
     config: CampaignConfig,
-    pipeline_schema: PipelineSchema | None,
+    pipeline_schema: PipelineSchema,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None = None,
     obs: ObservabilityBridge | None = None,

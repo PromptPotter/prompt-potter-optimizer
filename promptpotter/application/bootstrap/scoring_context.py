@@ -184,9 +184,7 @@ def _build_cycle_and_bootstrap(
     )
 
     # session.pipeline_params (overlay-merged) makes origin JSP + cycle-id sensitive to overlay edits.
-    base_pp = session.pipeline_params or (
-        session.pipeline_schema.to_pipeline_params() if session.pipeline_schema else {}
-    )
+    base_pp = session.pipeline_params or session.pipeline_schema.to_pipeline_params()
     origin_jsp = resolved_origin.to_job_search_point(
         base_pipeline_params=base_pp, schema=session.pipeline_schema
     )

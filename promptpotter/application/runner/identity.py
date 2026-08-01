@@ -55,7 +55,7 @@ def mint_checkin_cycle_id() -> str:
 
 def build_origin_cycle_id(
     opt_sp: OptSearchPoint,
-    schema: PipelineSchema | None,
+    schema: PipelineSchema,
     dataset: list[Sample],
     base_pipeline_params: dict[str, Any] | None = None,
 ) -> str:
@@ -66,11 +66,14 @@ def build_origin_cycle_id(
     reflects the connector config and AGREES with the measurement key (``content_hash``
     over the same merged params). A connector-config edit (e.g. model 120B→20B) therefore
     yields a DISTINCT origin. Falls back to the sparse ``to_pipeline_params()`` only when
-    no merged params are in scope."""
+    no merged params are in scope.
+
+    The schema is REQUIRED — it had a third fallback rung (``{}``) below that one, and
+    this function's output is the ORIGIN CYCLE ID. Two callers reaching it with the
+    schema in different states stamped two different ids for a single origin, which is
+    the one value that must not depend on who is asking."""
     base_pp = (
-        base_pipeline_params
-        if base_pipeline_params is not None
-        else (schema.to_pipeline_params() if schema else {})
+        base_pipeline_params if base_pipeline_params is not None else schema.to_pipeline_params()
     )
     jsp = opt_sp.to_job_search_point(base_pipeline_params=base_pp, schema=schema)
     return cycle_config_identity(jsp, dataset)

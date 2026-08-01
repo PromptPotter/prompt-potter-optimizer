@@ -342,9 +342,7 @@ async def establish_campaign_origin(
     shared by both branches (inherit a no-edit fork's recorded C0 vs score), which return
     the same ``CampaignOrigin`` shape."""
     resolved_origin = resolve_origin_opt_search_point(
-        prompt_node_names=(
-            session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
-        ),
+        prompt_node_names=session.pipeline_schema.prompt_node_names(),
         dataset_dir=session.dataset_config_dir,
         seed=seed,
     )
@@ -370,7 +368,7 @@ async def prepare_scoring_context(
     campaign_config: CampaignConfig | None = None,
     *,
     pipeline_params: dict[str, Any] | None = None,
-    pipeline_schema: PipelineSchema | None = None,
+    pipeline_schema: PipelineSchema,
     svc: Any = None,
     listener: Any | None = None,
     obs: Any | None = None,
@@ -382,7 +380,7 @@ async def prepare_scoring_context(
     from promptpotter.application.datasets.loaders import sample_dataset
 
     if resolved_origin is None:
-        prompt_nodes = pipeline_schema.prompt_node_names() if pipeline_schema else []
+        prompt_nodes = pipeline_schema.prompt_node_names()
         resolved_origin = resolve_origin_opt_search_point(
             prompt_node_names=prompt_nodes,
             dataset_dir=getattr(svc, "dataset_config_dir", None),
@@ -445,8 +443,7 @@ async def prepare_scoring_context(
     )
     # populate_session_scoring overwrites scoring/source; loop repopulates before round 1.
     prior_schema = session.pipeline_schema
-    if pipeline_schema is not None:
-        session.pipeline_schema = pipeline_schema
+    session.pipeline_schema = pipeline_schema
     populate_session_scoring(
         session,
         obs=obs,

@@ -115,8 +115,6 @@ async def measure_noise_floor(
     )
 
     schema = session.pipeline_schema
-    if schema is None:
-        raise NoiseFloorError("pipeline schema unavailable; cannot resolve the origin config.")
     jsp = opt_sp.to_job_search_point(pipeline_params, schema=schema)
     scoring_set = [s for s in session.samples if s.id in sample_ids]
     if not scoring_set:

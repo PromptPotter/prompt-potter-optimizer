@@ -35,6 +35,7 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.io import read_yaml_optional
 from promptpotter.infrastructure.store.stores import Stores, build_stores
+from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.identity import IdentityContext, default_identity
 
 logger = logging.getLogger(__name__)
@@ -115,7 +116,7 @@ async def _resolve_pipeline_schema(
     status: Callable[[str], None],
     *,
     in_process: bool = False,
-) -> PipelineSchema | None:
+) -> PipelineSchema:
     """Backend ``GET /pipeline`` is authoritative for runtime defaults; local
     ``{dataset_config_dir}/pipeline.yaml`` is the operator overlay. Merged
     here before parsing — backend underneath, dataset on top. Backend
@@ -124,7 +125,16 @@ async def _resolve_pipeline_schema(
     An ``in_process`` connector (``promptpotter``) has NO remote backend, so the
     local ``pipeline.yaml`` IS the whole schema — skip the fetch entirely
     (otherwise it would hit ``backend_url`` and merge an unrelated backend's
-    nodes, e.g. TermNorm's, under the dataset overlay)."""
+    nodes, e.g. TermNorm's, under the dataset overlay).
+
+    **Raises rather than returning ``None``.** Neither branch is optional in practice:
+    ``_read_backend_type`` has already read this same file and raised unless it parses
+    and declares a ``backend_type``, so the only way to arrive with nothing is a
+    pipeline.yaml that no longer parses — a setup error, not a mode. Returning ``None``
+    for it made the schema optional on ``Session`` and therefore optional at the ~40
+    readers downstream, where a missing schema does not fail: it drops the rendered
+    prompt from the searchpoint, picks the other ``sp_hash`` algorithm, and stamps a
+    different origin cycle id. The run completes and the numbers are wrong."""
     backend_resp: dict[str, Any] | None = None
     if in_process:
         pass  # no remote backend — local pipeline.yaml is authoritative
@@ -160,17 +170,37 @@ async def _resolve_pipeline_schema(
             logger.warning("Failed to parse offline pipeline.yaml: %s", exc)
 
     status("Pipeline: unavailable")
-    return None
+    raise PayloadInvalidError(
+        f"could not resolve a pipeline schema for {dataset_config_dir}. The backend "
+        f"returned nothing usable and the dataset's own pipeline.yaml did not parse "
+        f"(see the warnings above). Every measurement is keyed on this schema, so there "
+        f"is no run without it — fix the file, or point --backend-url at a reachable backend.",
+        code="pipeline_config_invalid",
+        details={"dataset_config_dir": str(dataset_config_dir)},
+    )
 
 
 def _read_backend_type(dataset_config_dir: Path | None, dataset_name: str | None) -> str:
-    """Resolve backend_type from ``{dataset_config_dir}/pipeline.yaml``. Required field."""
+    """Resolve backend_type from ``{dataset_config_dir}/pipeline.yaml``. Required field.
+
+    Typed for the same reason its sibling :func:`_resolve_pipeline_schema` is: both fail
+    on an unusable ``pipeline.yaml``, both fire on the web Start path, and a bare
+    ``ValueError`` reaches the API's catch-all as a 500 — which the webapp classifies
+    ``transient`` and retries forever against a config only the operator can fix.
+    """
     if not dataset_name or dataset_config_dir is None:
-        raise ValueError("dataset_name required to resolve backend_type for connector lookup")
+        raise PayloadInvalidError(
+            "dataset_name required to resolve backend_type for connector lookup",
+            code="pipeline_config_invalid",
+        )
     raw = read_yaml_optional(dataset_pipeline_path(dataset_config_dir))
     bt = (raw or {}).get("backend_type")
     if not isinstance(bt, str) or not bt:
-        raise ValueError(f"backend_type missing or empty in {dataset_config_dir}/pipeline.yaml")
+        raise PayloadInvalidError(
+            f"backend_type missing or empty in {dataset_config_dir}/pipeline.yaml",
+            code="pipeline_config_invalid",
+            details={"dataset_config_dir": str(dataset_config_dir)},
+        )
     return bt.lower()
 
 
@@ -339,7 +369,7 @@ async def init_services(
         store.backends.register(
             BackendConnection(
                 id=backend_id,
-                name=pipeline_schema.name if pipeline_schema else "Unknown",
+                name=pipeline_schema.name,
                 backend_type=backend_type,
                 base_url=backend_url,
             )

@@ -370,10 +370,6 @@ async def measure_sample(
     ground_truth = sample.ground_truth
 
     pipeline_schema = session.pipeline_schema
-    if pipeline_schema is None:
-        from promptpotter.domain.pipeline_schema import PipelineSchema
-
-        pipeline_schema = PipelineSchema()
 
     try:
         wire_params = interpolate_pipeline_params(pipeline_params or {}, sample.model_dump())
@@ -669,11 +665,7 @@ async def execute_stale_data_protocol(
                 return result, "rerun"
 
         elif step == "samplescan":
-            probe_params = (
-                session.pipeline_schema.to_pipeline_params()
-                if session.pipeline_schema is not None
-                else {}
-            )
+            probe_params = session.pipeline_schema.to_pipeline_params()
             result = dict(await measure_sample(sample, session, pipeline_params=probe_params))
             result["samplescan_resolved"] = True
             if not has_pipeline_warnings(result):
