@@ -16,6 +16,7 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable, Mapping, Sequence
 
+from promptpotter.domain.scoring import is_hit
 from promptpotter.shared import sigmoid
 
 __all__ = [
@@ -188,8 +189,7 @@ def build_round_order(
     miss_stratum: list[int] = []
     hit_stratum: list[int] = []
     for sid in sample_ids:
-        grade = seed_grades.get(sid)
-        (hit_stratum if grade is not None and grade >= 1.0 else miss_stratum).append(sid)
+        (hit_stratum if is_hit(seed_grades.get(sid)) else miss_stratum).append(sid)
 
     def _delta(sid: int) -> float:
         entry = delta_ruler.get(sid)

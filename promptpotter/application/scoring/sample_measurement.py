@@ -16,7 +16,7 @@ from promptpotter.application.scoring.metrics import find_rank
 from promptpotter.config.settings import NO_RESULT
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import QueryMeasurement
+from promptpotter.domain.scoring import QueryMeasurement, is_hit
 from promptpotter.infrastructure.llm.models import emit_token_usage
 from promptpotter.shared.errors import ErrorCategory, has_pipeline_warnings
 
@@ -538,8 +538,8 @@ def find_gt_rank(result: Mapping[str, Any]) -> int | None:
 def compare_rerun(
     cached_result: Mapping[str, Any], rerun_result: Mapping[str, Any]
 ) -> dict[str, Any]:
-    cached_hit = cached_result.get("hit", False)
-    rerun_hit = rerun_result.get("hit", False)
+    cached_hit = is_hit(cached_result.get("fitness"))
+    rerun_hit = is_hit(rerun_result.get("fitness"))
     hit_change = f"{'HIT' if cached_hit else 'MISS'}->{'HIT' if rerun_hit else 'MISS'}"
 
     cached_rank = find_gt_rank(cached_result)

@@ -26,7 +26,7 @@ from promptpotter.application.scoring.sample_measurement import (
 )
 from promptpotter.domain.escalation_signals import EscalationSignal
 from promptpotter.domain.phases import RunPhase, StopLoop
-from promptpotter.domain.scoring import QueryMeasurement, Scorer
+from promptpotter.domain.scoring import QueryMeasurement, Scorer, is_hit
 from promptpotter.domain.validators import StopRule
 from promptpotter.shared.errors import (
     ErrorCategory,
@@ -84,14 +84,19 @@ def _materialize_cached(
     scorer_formula: str | None,
 ) -> QueryMeasurement:
     """Mark prior as cached + rescored; warn on hit/no-hit drift unless explained by bold-strip."""
-    archived_hit = item.get("hit")
+    # Deliberately BINARY, on the archived vs rescored verdict rather than on the graded
+    # fitness: a float comparison fires on every formula tweak, per sample, and this
+    # warning is calibrated for a specific known-benign cause (the bold-wrapper strip).
+    # ``fitness is None`` is the never-scored case — distinct from a scored 0.0.
+    archived_fitness = item.get("fitness")
     r: dict[str, Any] = {**item, "cached": True}
     pd = r.get("pipeline_data")
     if isinstance(pd, dict):
         r["pipeline_data"] = {**pd, "total_time": 0.0}
     rescore_results([r], scorer, scorer_id, scorer_formula)
-    rescored_hit = r.get("hit", False)
-    if archived_hit is not None and bool(archived_hit) != bool(rescored_hit):
+    archived_hit = is_hit(archived_fitness)
+    rescored_hit = is_hit(r.get("fitness"))
+    if archived_fitness is not None and archived_hit != rescored_hit:
         predicted = r.get("predicted") or ""
         if not _BOLD_MARKER_RE.search(predicted):
             logger.warning(

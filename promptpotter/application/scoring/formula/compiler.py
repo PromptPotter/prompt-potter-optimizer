@@ -141,8 +141,11 @@ def _build_namespace(result: dict[str, Any]) -> dict[str, Any]:
             input_tokens += int(entry.get("input", 0))
             output_tokens += int(entry.get("output", 0))
 
+    # No ``hit`` here: it is written by ``rescore_results`` AFTER this scorer runs, so a
+    # formula naming it read 0 on every fresh row and the PREVIOUS scorer's value on a
+    # rescore — order-dependent, and silently so. Ask the matchers instead; they are the
+    # arm that decides a label.
     ns: dict[str, Any] = {
-        "hit": int(result.get("hit", False)),
         "ground_truth_rank": result.get("ground_truth_rank"),
         "n_candidates": result.get("n_candidates", 0),
         "error": result.get("error"),
@@ -168,8 +171,8 @@ def compile_scorer(formula: str | None) -> Callable[[dict[str, Any]], float]:
         raise ValueError(
             "compile_scorer: scoring formula is required. "
             "Set ``campaign_config.scoring`` (e.g. "
-            '"exact_match(predicted, ground_truth)") — otherwise every '
-            "query scores 0 because fresh traces carry no ``hit`` field."
+            '"exact_match(predicted, ground_truth)") — a trace carries a prediction '
+            "and a ground truth, never a verdict; the formula IS the verdict."
         )
 
     tree = ast.parse(formula, "<scoring>", "eval")

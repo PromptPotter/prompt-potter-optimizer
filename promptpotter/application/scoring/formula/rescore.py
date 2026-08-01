@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from promptpotter.domain.scoring import Scorer
+from promptpotter.domain.scoring import Scorer, is_hit
 
 
 def rescore_results(
@@ -24,7 +24,7 @@ def rescore_results(
             fitness, hit = 0.0, False
         else:
             fitness = scorer(r)
-            hit = fitness >= 1.0
+            hit = is_hit(fitness)
         scored = r.setdefault("scored", {})
         scored[scorer_id] = {"fitness": fitness, "hit": hit, "formula": formula}
         r["fitness"] = fitness

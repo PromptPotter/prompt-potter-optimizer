@@ -21,6 +21,7 @@ from typing import Any
 from promptpotter.config.settings import DEFAULT_CONNECTOR_TYPE
 from promptpotter.domain.measurement_provenance import entry_grade, meets_grade
 from promptpotter.domain.sample import Measurement
+from promptpotter.domain.scoring import is_hit
 from promptpotter.infrastructure.store.io import write_jsonl
 from promptpotter.infrastructure.store.read_model import (
     append_row,
@@ -618,7 +619,7 @@ def _to_measurement(
         query=item.get("query", ""),
         ground_truth=item.get("ground_truth", ""),
         predicted=item.get("predicted", ""),
-        hit=bool(item.get("hit", False)),
+        hit=is_hit(item.get("fitness")),
         fitness=float(fitness) if fitness is not None else None,
         node_configs=node_configs,
         pipeline_data=item.get("pipeline_data") or {},

@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from promptpotter.domain.scoring import is_hit
 from promptpotter.infrastructure.projections.live_state import top_n_p_best
 
 
@@ -97,7 +98,7 @@ class RoundBuffer:
                 "qi": qi,
                 "qt": qt,
                 "sample_id": result.get("sample_id"),
-                "hit": bool(result.get("hit")),
+                "hit": is_hit(result.get("fitness")),
                 "cached": bool(result.get("cached", False)),
                 "query": result.get("query") or "",
                 # Scored result dicts carry the field as ``predicted`` (past

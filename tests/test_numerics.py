@@ -2356,7 +2356,7 @@ async def test_paired_pobb_breaks_lucky_prefix_leader_trap():
         # Leader misses 4/5 hard samples; only #13 is hit. Mirrors origin's
         # behavior on the same samples in the real cycle.
         truth = {9: False, 12: False, 13: True, 14: False, 8: False}
-        return [{"sample_id": s.id, "hit": truth[s.id]} for s in samples]
+        return [{"sample_id": s.id, "fitness": 1.0 if truth[s.id] else 0.0} for s in samples]
 
     check_paired = PoBBCheck(
         PoBBConfig(n_min=4, epsilon=0.05), n_samples=20, delta_scale={}, backfill_fn=_stub_backfill
@@ -2917,7 +2917,7 @@ def _round_result(round_num: int, accuracy: float, results: list[dict]) -> Round
         label=f"round_{round_num}",
         accuracy=accuracy,
         composite_fitness=accuracy,
-        hits=sum(1 for r in results if r.get("hit")),
+        hits=sum(1 for r in results if r.get("fitness") == 1.0),
         total=len(results),
         improved=False,
         prompt_fields={},
@@ -2927,11 +2927,11 @@ def _round_result(round_num: int, accuracy: float, results: list[dict]) -> Round
 
 
 def _hit(query: str, gt: str) -> dict:
-    return {"query": query, "ground_truth": gt, "hit": True, "predicted": gt}
+    return {"query": query, "ground_truth": gt, "fitness": 1.0, "predicted": gt}
 
 
 def _miss(query: str, gt: str) -> dict:
-    return {"query": query, "ground_truth": gt, "hit": False, "predicted": "?"}
+    return {"query": query, "ground_truth": gt, "fitness": 0.0, "predicted": "?"}
 
 
 def test_diag_rank_lookup_no_schema_lands_everything_not_found():

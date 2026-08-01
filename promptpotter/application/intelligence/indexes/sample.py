@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from promptpotter.domain.sample import Sample
+from promptpotter.domain.scoring import is_hit
 from promptpotter.shared.errors import is_error_result
 
 
@@ -80,7 +81,7 @@ class SampleIndex:
                 gt = item.get("ground_truth", "")
                 self.register(Sample(id=sid, query=query, ground_truth=gt))
 
-            hit = bool(item.get("hit"))
+            hit = is_hit(item.get("fitness"))
             self._hits[sid].append(hit)
             if hit and run_id:
                 self._hit_run_ids[sid].append(run_id)
@@ -111,14 +112,14 @@ class SampleIndex:
         for r in prev_results:
             sid = r.get("sample_id")
             if sid is not None:
-                prev_hits[sid] = bool(r.get("hit"))
+                prev_hits[sid] = is_hit(r.get("fitness"))
 
         count = 0
         for r in new_results:
             sid = r.get("sample_id")
             if sid is None or sid not in prev_hits:
                 continue
-            new_hit = bool(r.get("hit"))
+            new_hit = is_hit(r.get("fitness"))
             old_hit = prev_hits[sid]
             if new_hit != old_hit:
                 self._flips.append(

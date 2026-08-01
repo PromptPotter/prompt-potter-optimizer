@@ -43,7 +43,7 @@ from promptpotter.domain.opt_search_point import (
 )
 from promptpotter.domain.results import CritiqueReadout, ScoredCandidate
 from promptpotter.domain.results_health import EVIDENCE_STARVED_RATE
-from promptpotter.domain.scoring import enumerable_truth_labels
+from promptpotter.domain.scoring import enumerable_truth_labels, is_hit
 from promptpotter.shared.errors import is_error_result
 
 
@@ -453,7 +453,9 @@ def _misses(b: InjectionBundle) -> list[dict[str, Any]]:
     reads as a winnable failure carrying a difficulty, and the generator invents a task-level
     deficiency to attack it with — measured: an infra-dead round put 4 of 6 outer candidates
     onto an output-format edit the meta-prompt explicitly forbids and prices at -2.2%."""
-    return [r for r in b.trajectory_results if not r.get("hit") and not is_error_result(r)]
+    return [
+        r for r in b.trajectory_results if not is_hit(r.get("fitness")) and not is_error_result(r)
+    ]
 
 
 def _errored(b: InjectionBundle) -> list[dict[str, Any]]:
@@ -501,7 +503,7 @@ def _r_answer_distribution(b: InjectionBundle) -> str:
 
     top_label, top_n = truth.most_common(1)[0]
     constant = top_n / n
-    scored = sum(1 for r in rows if r.get("hit"))
+    scored = sum(1 for r in rows if is_hit(r.get("fitness")))
 
     lines = [
         f"ANSWER DISTRIBUTION (over the {n} samples scored so far):",
@@ -751,7 +753,7 @@ def _r_origin_strengths(b: InjectionBundle) -> str:
     rows = b.origin_per_sample
     if not rows:
         return ""
-    hits = [r for r in rows if r.get("hit")]
+    hits = [r for r in rows if is_hit(r.get("fitness"))]
     if not hits:
         return ""
     return (

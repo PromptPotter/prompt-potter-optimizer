@@ -27,7 +27,7 @@ from promptpotter.application.scoring.formula import (
     extract_item_label,
 )
 from promptpotter.domain.pipeline_schema import NodeType
-from promptpotter.domain.scoring import RoundScorer
+from promptpotter.domain.scoring import RoundScorer, is_hit
 from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
 
 if TYPE_CHECKING:
@@ -86,7 +86,7 @@ def _compute_accuracy(results: list[QueryMeasurement]) -> dict[str, Any]:
     errors = sum(1 for r in valid if is_error_result(r))
     scoreable = [r for r in valid if not is_error_result(r)]
     total = len(scoreable)
-    hits = sum(1 for r in scoreable if r.get("hit"))
+    hits = sum(1 for r in scoreable if is_hit(r.get("fitness")))
     # Single source for the mean-fitness-over-scoreable formula.
     accuracy = compute_accuracy(results=results)
     return {

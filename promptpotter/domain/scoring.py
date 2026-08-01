@@ -76,6 +76,26 @@ RoundScorer = Callable[[dict[str, float]], float]
 
 DEFAULT_SCORER_ID = "default_hit"
 
+HIT_THRESHOLD = 1.0
+
+
+def is_hit(fitness: float | None) -> bool:
+    """Did this measurement max out the active scorer? The ONE definition of that threshold.
+
+    It says nothing about ability and is never evidence. On a graded formula (a bounded
+    product, ``rr``, ``sigmoid``) the ceiling is unreachable, so this reads ``False``
+    forever; on a binary one the mean of these bools is *exactly* ``accuracy`` (mean
+    fitness), which is what every aggregate already reports. Either way it adds no
+    information to the ``fitness`` sitting beside it.
+
+    So the only honest uses are **per-sample display** and **stratification** — never a
+    rate, a confidence interval, or a candidate comparison. θ, PoBB and the round election
+    all read graded ``fitness`` directly (``intelligence/exploration.py::graded_response``).
+
+    ``None`` — never measured — is not a hit.
+    """
+    return fitness is not None and fitness >= HIT_THRESHOLD
+
 
 class ScoringSpec(NamedTuple):
     """Parsed ``campaign.json::scoring`` block — ``(per_sample, per_round, scorer_id)``."""
@@ -124,6 +144,7 @@ def is_answer_collapsed(rows: Sequence[Mapping[str, Any]]) -> bool:
 
 __all__ = [
     "DEFAULT_SCORER_ID",
+    "HIT_THRESHOLD",
     "PipelineData",
     "QueryMeasurement",
     "RoundScorer",
@@ -131,4 +152,5 @@ __all__ = [
     "ScoringSpec",
     "enumerable_truth_labels",
     "is_answer_collapsed",
+    "is_hit",
 ]

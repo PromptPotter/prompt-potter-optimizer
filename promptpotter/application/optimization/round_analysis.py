@@ -25,6 +25,7 @@ from promptpotter.domain.round_diagnostics import (
     SampleDiag,
     TrajectoryClass,
 )
+from promptpotter.domain.scoring import is_hit
 from promptpotter.shared.errors import is_error_result
 
 __all__ = ["compute_round_diagnostics"]
@@ -255,7 +256,9 @@ def _cross_candidate_diff(round_result: RoundResult) -> list[str]:
         return []
 
     winner_misses: set[str] = {
-        r.get("query", "") for r in winner_results if not r.get("hit") and r.get("query")
+        r.get("query", "")
+        for r in winner_results
+        if not is_hit(r.get("fitness")) and r.get("query")
     }
     if not winner_misses:
         return []
@@ -269,7 +272,7 @@ def _cross_candidate_diff(round_result: RoundResult) -> list[str]:
                 break
         for r in results:
             q = r.get("query", "")
-            if q in winner_misses and r.get("hit"):
+            if q in winner_misses and is_hit(r.get("fitness")):
                 missed_by.setdefault(q, []).append(desc)
 
     if not missed_by:
@@ -307,7 +310,7 @@ def _sample_diagnostics(
                 gt_in_source=(sd or {}).get("gt_in_source"),
                 gt_in_ranked=(sd or {}).get("gt_in_ranked"),
                 warnings=[_warning_str(w) for w in (diag.get("warnings") or ())],
-                hit=bool(r.get("hit")),
+                hit=is_hit(r.get("fitness")),
             )
         )
     return out

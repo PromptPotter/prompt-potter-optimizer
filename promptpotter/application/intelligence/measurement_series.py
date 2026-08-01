@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.domain.scoring import is_hit
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.shared.errors import is_error_result
@@ -59,9 +60,12 @@ def cycle_measurement_series(
                 if not isinstance(item, dict):
                     continue
                 sid = item.get("sample_id")
-                hit = item.get("hit")
-                if not isinstance(sid, int) or not isinstance(hit, bool):
+                fitness = item.get("fitness")
+                # An unscored row carries no verdict — skipped, as before. The guard reads
+                # ``fitness`` because that is the field a scored row is guaranteed to have.
+                if not isinstance(sid, int) or not isinstance(fitness, int | float):
                     continue
+                hit = is_hit(fitness)
                 if sid not in sample_ids:
                     continue
                 if is_error_result(item):

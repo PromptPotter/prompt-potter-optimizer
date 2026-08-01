@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from promptpotter.domain.rendering import classify_result, extract_display_answer
+from promptpotter.domain.scoring import is_hit
 from promptpotter.presentation.views.display import (
     DIM,
     DISPLAY_TAGS,
@@ -54,7 +55,7 @@ def fmt_query_result(
 
     if classify_result(r).is_fatal:
         tag = "DEPR"
-    elif r.get("hit"):
+    elif is_hit(r.get("fitness")):
         tag = "HIT"
     else:
         # Read the rank + candidate count stamped at scoring time
