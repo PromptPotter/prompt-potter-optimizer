@@ -673,14 +673,14 @@ export interface CampaignListResponse {
 }
 
 /** One environment cell's paired (candidate − origin) effect for a state. */
-export interface ChampionCellEffect {
+export interface CellEffect {
   cell: string;
   mean_d: number;
   n: number;
 }
 
 /** Where one occurrence of a candidate state was measured on disk. */
-export interface ChampionProvenance {
+export interface EffectProvenance {
   campaign_id: string;
   cycle_id: string;
   round: number;
@@ -688,12 +688,12 @@ export interface ChampionProvenance {
 }
 
 /** One unique meta-prompt state, aggregated across every occurrence in the corpus. */
-export interface ChampionCandidate {
+export interface RankedOptimizerPrompt {
   state_hash: string;
   label: string;
   prompt_state: Record<string, Record<string, string>>;
-  provenance: ChampionProvenance[];
-  per_cell_effects: ChampionCellEffect[];
+  provenance: EffectProvenance[];
+  per_cell_effects: CellEffect[];
   anchor_effect: number;
   ci_lo: number;
   ci_hi: number;
@@ -701,11 +701,11 @@ export interface ChampionCandidate {
   n_measurements: number;
 }
 
-/** The ranked champion table — recomputed from disk on every read, never persisted. */
-export interface ChampionRegistry {
+/** The ranking — recomputed from disk on every read, never persisted. */
+export interface OptimizerPromptRanking {
   generated_at: string;
   n_cycles_scanned: number;
-  candidates: ChampionCandidate[];
+  candidates: RankedOptimizerPrompt[];
 }
 
 export interface FileEntry {

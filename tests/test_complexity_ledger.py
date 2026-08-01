@@ -21,7 +21,7 @@ name does not say it, and which members are a deliberate FLOOR rather than debt.
 from promptpotter.diagnostics import compute_ledger
 
 LEDGER_BASELINE = {
-    "modules": 295,
+    "modules": 296,
     "init_files": 47,
     # A FLOOR, not debt. The 5 survivors are not shims and emptying them breaks the app:
     #   * ``connectors`` — IS the connector registry (import-time guards).

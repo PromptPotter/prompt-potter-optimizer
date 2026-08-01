@@ -53,7 +53,7 @@ def _add_global_args(parser: argparse.ArgumentParser) -> None:
 def _add_runtime_halts(p: argparse.ArgumentParser) -> None:
     """Shared --halt-at / --spend-budget flags (new + resume).
 
-    ``--spend-budget`` overrides ``campaign.json::optimization.spend_budget_usd``
+    ``--spend-budget`` overrides ``campaign.yaml::optimization.spend_budget_usd``
     when supplied; either source halts the cycle at the next round boundary
     once cumulative spend (optimizer + backend) crosses the threshold."""
     p.add_argument(
@@ -85,14 +85,14 @@ def _add_new_args(p_new: argparse.ArgumentParser) -> None:
     mint). Residual gaps are answered with repeatable ``--set field=value``
     (operator-stated, applied before the resolver so they seed it), or printed so
     you can re-run — no silent default ever reaches mint. Explicit ``--config``
-    overrides ``datasets/<name>/campaign.json``.
+    overrides ``datasets/<name>/campaign.yaml``.
     """
     p_new.add_argument(
         "dataset",
         nargs="?",
         default=None,
         help="Dataset name under ./datasets/ OR a path to a raw file (CSV). "
-        "A name reads datasets/<name>/{pipeline,campaign}.json; a file is "
+        "A name reads datasets/<name>/{pipeline,campaign}.yaml; a file is "
         "ingested → origin-resolved → committed as a tenant dataset → run. "
         "Omit (name form) only if you pass --dataset-name explicitly.",
     )
@@ -105,7 +105,7 @@ def _add_new_args(p_new: argparse.ArgumentParser) -> None:
     p_new.add_argument(
         "--config",
         default=None,
-        help="Campaign config JSON override (defaults to datasets/<name>/campaign.json).",
+        help="Campaign config JSON override (defaults to datasets/<name>/campaign.yaml).",
     )
     p_new.add_argument(
         "--task-file", default=None, help="Override datasets/<name>/task_description.md"
@@ -139,7 +139,7 @@ def _add_new_args(p_new: argparse.ArgumentParser) -> None:
         "--sweep-batch",
         dest="sweep",
         action="store_true",
-        help="Multi-fork batch from datasets/<name>/sweep/*.json: mint "
+        help="Multi-fork batch from datasets/<name>/sweep/*.yaml: mint "
         "one sweep fork per payload, run each.",
     )
     mode_group.add_argument(
@@ -389,6 +389,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Rebuild the measurement index (measurements/index.jsonl) from the detail "
         "files and GC orphaned runs. The index is derived, so this loses nothing — use "
         "after a crash mid-append or to reclaim orphaned bytes. Pure disk work, zero spend.",
+    )
+
+    p_rank_l4 = sub.add_parser(
+        "rank-optimizer-prompts",
+        help="Rank every L4 meta-prompt state on disk by its paired candidate-minus-origin "
+        "effect, pooling every cell past runs already paid for. Read-only, zero spend, "
+        "no LLM calls; naming a winner, never adopting one.",
+    )
+    p_rank_l4.add_argument(
+        "--top",
+        dest="top",
+        type=int,
+        default=10,
+        help="Rows to print (default 10). The full ranking is always in --json.",
     )
 
     _add_noise_floor_args(

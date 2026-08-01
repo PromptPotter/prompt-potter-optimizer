@@ -274,7 +274,7 @@ class LangfuseSink:
                 "parent_id": event.parent_id,
             },
             output={
-                "family": "optimizer_prompt",
+                "family": "target_prompt",
                 "version": event.prompt_fields_id[:8] if event.prompt_fields_id else "unknown",
             },
             metadata={"layer1_fields": event.layer1_fields},

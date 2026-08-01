@@ -32,7 +32,7 @@ _CANDIDATE_INFO_INCLUDE = set(CandidateInfo.model_fields) - {"is_winner"}
 def origin_cells_from_disk(cycle_dir: Path) -> dict[str, float]:
     """The round-0 (origin) per-cell composite off the cached ``rounds/round_0000.json`` —
     the un-edited-meta-prompt control every later round's outer verdict pairs against. The
-    sole reader of this file for this purpose; ``application/meta_champion.py``
+    sole reader of this file for this purpose; ``application/optimizer_prompt_ranking.py``
     reuses it instead of keeping its own copy."""
     doc = read_json_tolerant(CycleLayout(Path(cycle_dir)).round_file(0))
     if not isinstance(doc, dict):

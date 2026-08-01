@@ -177,7 +177,7 @@ def backend_type_of_dataset(store: Stores, dataset_name: str) -> str:
     """Connector kind of *dataset_name*, or ``""`` when it cannot be resolved.
 
     THE predicate for "which connector does this dataset use?" for every read-side caller —
-    the sidebar's self-optimization test and the meta-champion reducer's corpus filter both
+    the sidebar's self-optimization test and the L4 prompt ranking's corpus filter both
     ask it, so neither hand-maintains a list of dataset NAMES (a name allowlist silently skips
     an arm, a fork, or a renamed dataset instead of loudly rejecting it).
 

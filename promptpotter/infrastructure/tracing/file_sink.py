@@ -393,7 +393,12 @@ class FileSink:
         self._log_event(log_entry)
 
     def on_prompt_version(self, event: PromptVersion) -> None:
-        family = "optimizer_prompt"
+        # The prompt the optimizer PRODUCED for the user's task — not one of the prompts the
+        # optimizer itself runs on. This family was called "optimizer_prompt", the same words
+        # `load_optimizer_prompt` uses for the opposite population, so the one word named both
+        # sides of the loop. Write-only (no reader in the package), so the rename orphans some
+        # directories and breaks nothing.
+        family = "target_prompt"
         version = event.prompt_fields_id[:8] if event.prompt_fields_id else "unknown"
         prompt_dir = self._scope_dir() / "prompts" / family / version
         write_text(prompt_dir / "prompt.txt", event.rendered_prompt)

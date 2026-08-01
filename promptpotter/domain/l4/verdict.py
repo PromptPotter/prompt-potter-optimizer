@@ -96,7 +96,7 @@ def cell_fitness(rows: list[dict[str, Any]]) -> dict[str, float]:
 
     The one shared pure extraction — callers reading a fresh round (``compute_outer_verdict``
     below) and callers reading an archived round doc off disk
-    (``application/meta_champion.py``) both walk the same row shape.
+    (``application/optimizer_prompt_ranking.py``) both walk the same row shape.
     """
     acc: dict[str, list[float]] = {}
     for r in rows:

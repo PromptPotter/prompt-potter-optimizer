@@ -1,8 +1,8 @@
-"""Meta-champion — reduce the on-disk pp-self corpus to one ranked champion table.
+"""Rank every L4 meta-prompt state on disk by how much it beat the origin.
 
 Zero LLM calls, every number re-derived from the on-disk round files, recomputed per read
-— no persisted registry, no reigning-champion pointer, and naming a winner is where this
-stops (graduating one is a hand-edit, not a verb). It ranks by the **anchor-to-origin**
+— nothing is persisted, nothing is crowned, and naming a leader is where this stops
+(graduating one is a hand-edit, not a verb). It ranks by the **anchor-to-origin**
 paired effect: the per-cell ``candidate − origin`` composite diff, paired on the shared
 cells that candidate was measured on. Absolute scores across runs are not comparable and
 only these paired effects are, which is the whole reason the metric looks like this.
@@ -34,7 +34,7 @@ _PP_SELF_BACKEND_TYPE = "promptpotter"
 _ORIGIN_HASH = "origin"
 
 
-class ChampionCellEffect(StrictModel):
+class CellEffect(StrictModel):
     """One environment cell's paired (candidate − origin) effect for a state."""
 
     cell: str
@@ -42,7 +42,7 @@ class ChampionCellEffect(StrictModel):
     n: int
 
 
-class ChampionProvenance(StrictModel):
+class EffectProvenance(StrictModel):
     """Where one occurrence of a candidate state was measured on disk."""
 
     campaign_id: str
@@ -51,14 +51,14 @@ class ChampionProvenance(StrictModel):
     candidate_id: str
 
 
-class ChampionCandidate(StrictModel):
+class RankedOptimizerPrompt(StrictModel):
     """One unique meta-prompt state, aggregated across every occurrence in the corpus."""
 
     state_hash: str
     label: str
     prompt_state: dict[str, dict[str, str]]  # {node: {field: text}} — the meta-prompt edit
-    provenance: list[ChampionProvenance]
-    per_cell_effects: list[ChampionCellEffect]
+    provenance: list[EffectProvenance]
+    per_cell_effects: list[CellEffect]
     anchor_effect: float  # mean of the PER-CELL paired diffs — one point per cell, not per
     # occurrence, so an over-measured cell cannot outweigh uniform goodness (see _finalize)
     ci_lo: float
@@ -67,12 +67,12 @@ class ChampionCandidate(StrictModel):
     n_measurements: int
 
 
-class ChampionRegistry(StrictModel):
-    """The ranked champion table — recomputed from disk on every read, never persisted."""
+class OptimizerPromptRanking(StrictModel):
+    """The ranking — recomputed from disk on every read, never persisted."""
 
     generated_at: str
     n_cycles_scanned: int
-    candidates: list[ChampionCandidate]  # ranked desc by anchor_effect
+    candidates: list[RankedOptimizerPrompt]  # ranked desc by anchor_effect
 
 
 def _state_hash(prompt_state: dict[str, dict[str, str]]) -> str:
@@ -100,7 +100,7 @@ class _Accum:
     def __init__(self, prompt_state: dict[str, dict[str, str]], label: str) -> None:
         self.prompt_state = prompt_state
         self.label = label
-        self.provenance: list[ChampionProvenance] = []
+        self.provenance: list[EffectProvenance] = []
         # cell -> paired (candidate_fit, origin_fit) lists across occurrences
         self.cand_by_cell: dict[str, list[float]] = {}
         self.orig_by_cell: dict[str, list[float]] = {}
@@ -130,7 +130,7 @@ def _pp_self_campaign_dirs(store: Stores) -> list[Path]:
     return dirs
 
 
-def reduce_corpus(store: Stores) -> ChampionRegistry:
+def rank_optimizer_prompts(store: Stores) -> OptimizerPromptRanking:
     accums: dict[str, _Accum] = {}
     n_cycles = 0
 
@@ -159,7 +159,7 @@ def reduce_corpus(store: Stores) -> ChampionRegistry:
 
     rows = [_finalize(state_hash, acc) for state_hash, acc in accums.items()]
     rows.sort(key=lambda r: r.anchor_effect, reverse=True)
-    return ChampionRegistry(
+    return OptimizerPromptRanking(
         generated_at=datetime.now(UTC).isoformat(timespec="seconds"),
         n_cycles_scanned=n_cycles,
         candidates=rows,
@@ -191,7 +191,7 @@ def _accumulate_round(
             acc = _Accum(prompt_state, str(cand.get("label") or state_hash))
             accums[state_hash] = acc
         acc.provenance.append(
-            ChampionProvenance(
+            EffectProvenance(
                 campaign_id=campaign_id, cycle_id=cycle_id, round=round_num, candidate_id=cand_id
             )
         )
@@ -211,7 +211,7 @@ def _coerce_state(raw: Any) -> dict[str, dict[str, str]]:
     return out
 
 
-def _finalize(state_hash: str, acc: _Accum) -> ChampionCandidate:
+def _finalize(state_hash: str, acc: _Accum) -> RankedOptimizerPrompt:
     """Aggregate one meta-prompt state's measurements into its ranked row.
 
     **Aggregation is PER CELL, then across cells** — the same two-stage shape
@@ -222,7 +222,7 @@ def _finalize(state_hash: str, acc: _Accum) -> ChampionCandidate:
     meta-prompt into ``promptpotter/assets/optimizer/``, so an overstated CI misleads a person
     making an irreversible edit.
     """
-    per_cell: list[ChampionCellEffect] = []
+    per_cell: list[CellEffect] = []
     cell_cand: list[float] = []
     cell_orig: list[float] = []
     n_meas = 0
@@ -230,7 +230,7 @@ def _finalize(state_hash: str, acc: _Accum) -> ChampionCandidate:
         cand_vals = acc.cand_by_cell[cell]
         orig_vals = acc.orig_by_cell[cell]
         mean_d, _se_d, n = paired_diff_posterior(cand_vals, orig_vals)
-        per_cell.append(ChampionCellEffect(cell=cell, mean_d=mean_d, n=n))
+        per_cell.append(CellEffect(cell=cell, mean_d=mean_d, n=n))
         n_meas += n
         # ONE paired point per cell — the cell's own mean level. Equal-length lists make
         # the elementwise paired mean identical to the difference of means, so this is
@@ -242,7 +242,7 @@ def _finalize(state_hash: str, acc: _Accum) -> ChampionCandidate:
     # Student-t on the CELL count, not z: the SE is estimated from the same handful of
     # cells it widens (≈7 cells → 2.45, not 1.96). Matches `compute_outer_verdict`.
     crit = t_critical(max(n_cells - 1, 1))
-    return ChampionCandidate(
+    return RankedOptimizerPrompt(
         state_hash=state_hash,
         label=acc.label,
         prompt_state=acc.prompt_state,

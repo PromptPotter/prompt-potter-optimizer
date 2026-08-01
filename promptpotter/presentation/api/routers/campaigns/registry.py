@@ -22,7 +22,10 @@ from promptpotter.application.knobs import (
     check_couplings,
     resolve_knob_states,
 )
-from promptpotter.application.meta_champion import ChampionRegistry, reduce_corpus
+from promptpotter.application.optimizer_prompt_ranking import (
+    OptimizerPromptRanking,
+    rank_optimizer_prompts,
+)
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.stores import Stores, descend_store
@@ -391,10 +394,10 @@ def get_campaign_config_map(store: StoreDep, campaign_id: str) -> ConfigMapRespo
 # viewing their own self-optimizing campaign — so the read is self-gating on data. No
 # capability gate: whitelabeled users never run a pp-self campaign, so it returns empty
 # for them, and there is nothing to hide.
-@campaigns_router.get("/champion-registry", response_model=ChampionRegistry)
-def get_champion_registry(store: StoreDep) -> ChampionRegistry:
-    """The L4 champion table — every candidate meta-prompt state on disk, ranked by
+@campaigns_router.get("/optimizer-prompt-ranking", response_model=OptimizerPromptRanking)
+def get_optimizer_prompt_ranking(store: StoreDep) -> OptimizerPromptRanking:
+    """The L4 prompt ranking — every candidate meta-prompt state on disk, ranked by
     anchor-to-origin effect. Reduced fresh from the tenant's pp-self cycles on each
     fetch (on-demand, not the 2 s poll); zero LLM. Tenant-scoped; empty for a tenant
     with no pp-self cycles."""
-    return reduce_corpus(store)
+    return rank_optimizer_prompts(store)

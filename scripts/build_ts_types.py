@@ -17,11 +17,11 @@ from pydantic.fields import ComputedFieldInfo, FieldInfo
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO))
 
-from promptpotter.application.meta_champion import (
-    ChampionCandidate,
-    ChampionCellEffect,
-    ChampionProvenance,
-    ChampionRegistry,
+from promptpotter.application.optimizer_prompt_ranking import (
+    CellEffect,
+    EffectProvenance,
+    OptimizerPromptRanking,
+    RankedOptimizerPrompt,
 )
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
@@ -141,11 +141,11 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     # --- campaigns/registry router ---
     CampaignSummary,
     CampaignListResponse,
-    # --- the champion table (application/meta_champion) — nested types first ---
-    ChampionCellEffect,
-    ChampionProvenance,
-    ChampionCandidate,
-    ChampionRegistry,
+    # --- the optimizer-prompt ranking (application/optimizer_prompt_ranking) — nested types first ---
+    CellEffect,
+    EffectProvenance,
+    RankedOptimizerPrompt,
+    OptimizerPromptRanking,
     # --- campaigns/files router ---
     FileEntry,
     FilesResponse,

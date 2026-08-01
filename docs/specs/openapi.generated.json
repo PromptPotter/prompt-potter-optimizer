@@ -551,79 +551,7 @@
         "title": "CampaignSummary",
         "type": "object"
       },
-      "ChampionCandidate": {
-        "additionalProperties": false,
-        "description": "One unique meta-prompt state, aggregated across every occurrence in the corpus.",
-        "properties": {
-          "anchor_effect": {
-            "title": "Anchor Effect",
-            "type": "number"
-          },
-          "ci_hi": {
-            "title": "Ci Hi",
-            "type": "number"
-          },
-          "ci_lo": {
-            "title": "Ci Lo",
-            "type": "number"
-          },
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "n_cells": {
-            "title": "N Cells",
-            "type": "integer"
-          },
-          "n_measurements": {
-            "title": "N Measurements",
-            "type": "integer"
-          },
-          "per_cell_effects": {
-            "items": {
-              "$ref": "#/components/schemas/ChampionCellEffect"
-            },
-            "title": "Per Cell Effects",
-            "type": "array"
-          },
-          "prompt_state": {
-            "additionalProperties": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "type": "object"
-            },
-            "title": "Prompt State",
-            "type": "object"
-          },
-          "provenance": {
-            "items": {
-              "$ref": "#/components/schemas/ChampionProvenance"
-            },
-            "title": "Provenance",
-            "type": "array"
-          },
-          "state_hash": {
-            "title": "State Hash",
-            "type": "string"
-          }
-        },
-        "required": [
-          "state_hash",
-          "label",
-          "prompt_state",
-          "provenance",
-          "per_cell_effects",
-          "anchor_effect",
-          "ci_lo",
-          "ci_hi",
-          "n_cells",
-          "n_measurements"
-        ],
-        "title": "ChampionCandidate",
-        "type": "object"
-      },
-      "ChampionCellEffect": {
+      "CellEffect": {
         "additionalProperties": false,
         "description": "One environment cell's paired (candidate − origin) effect for a state.",
         "properties": {
@@ -645,65 +573,7 @@
           "mean_d",
           "n"
         ],
-        "title": "ChampionCellEffect",
-        "type": "object"
-      },
-      "ChampionProvenance": {
-        "additionalProperties": false,
-        "description": "Where one occurrence of a candidate state was measured on disk.",
-        "properties": {
-          "campaign_id": {
-            "title": "Campaign Id",
-            "type": "string"
-          },
-          "candidate_id": {
-            "title": "Candidate Id",
-            "type": "string"
-          },
-          "cycle_id": {
-            "title": "Cycle Id",
-            "type": "string"
-          },
-          "round": {
-            "title": "Round",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "campaign_id",
-          "cycle_id",
-          "round",
-          "candidate_id"
-        ],
-        "title": "ChampionProvenance",
-        "type": "object"
-      },
-      "ChampionRegistry": {
-        "additionalProperties": false,
-        "description": "The ranked champion table — recomputed from disk on every read, never persisted.",
-        "properties": {
-          "candidates": {
-            "items": {
-              "$ref": "#/components/schemas/ChampionCandidate"
-            },
-            "title": "Candidates",
-            "type": "array"
-          },
-          "generated_at": {
-            "title": "Generated At",
-            "type": "string"
-          },
-          "n_cycles_scanned": {
-            "title": "N Cycles Scanned",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "generated_at",
-          "n_cycles_scanned",
-          "candidates"
-        ],
-        "title": "ChampionRegistry",
+        "title": "CellEffect",
         "type": "object"
       },
       "CommandAcceptedBody": {
@@ -1657,6 +1527,36 @@
         "title": "DiagnosticRunRecord",
         "type": "object"
       },
+      "EffectProvenance": {
+        "additionalProperties": false,
+        "description": "Where one occurrence of a candidate state was measured on disk.",
+        "properties": {
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "candidate_id": {
+            "title": "Candidate Id",
+            "type": "string"
+          },
+          "cycle_id": {
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "round": {
+            "title": "Round",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "cycle_id",
+          "round",
+          "candidate_id"
+        ],
+        "title": "EffectProvenance",
+        "type": "object"
+      },
       "FileContentResponse": {
         "additionalProperties": false,
         "properties": {
@@ -2573,6 +2473,34 @@
         "title": "NodeOutputSchema",
         "type": "object"
       },
+      "OptimizerPromptRanking": {
+        "additionalProperties": false,
+        "description": "The ranking — recomputed from disk on every read, never persisted.",
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/RankedOptimizerPrompt"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "generated_at": {
+            "title": "Generated At",
+            "type": "string"
+          },
+          "n_cycles_scanned": {
+            "title": "N Cycles Scanned",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "generated_at",
+          "n_cycles_scanned",
+          "candidates"
+        ],
+        "title": "OptimizerPromptRanking",
+        "type": "object"
+      },
       "OriginEntry": {
         "additionalProperties": false,
         "properties": {
@@ -2705,6 +2633,78 @@
           "max_campaigns_per_day"
         ],
         "title": "QuotaStatus",
+        "type": "object"
+      },
+      "RankedOptimizerPrompt": {
+        "additionalProperties": false,
+        "description": "One unique meta-prompt state, aggregated across every occurrence in the corpus.",
+        "properties": {
+          "anchor_effect": {
+            "title": "Anchor Effect",
+            "type": "number"
+          },
+          "ci_hi": {
+            "title": "Ci Hi",
+            "type": "number"
+          },
+          "ci_lo": {
+            "title": "Ci Lo",
+            "type": "number"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "n_cells": {
+            "title": "N Cells",
+            "type": "integer"
+          },
+          "n_measurements": {
+            "title": "N Measurements",
+            "type": "integer"
+          },
+          "per_cell_effects": {
+            "items": {
+              "$ref": "#/components/schemas/CellEffect"
+            },
+            "title": "Per Cell Effects",
+            "type": "array"
+          },
+          "prompt_state": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Prompt State",
+            "type": "object"
+          },
+          "provenance": {
+            "items": {
+              "$ref": "#/components/schemas/EffectProvenance"
+            },
+            "title": "Provenance",
+            "type": "array"
+          },
+          "state_hash": {
+            "title": "State Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state_hash",
+          "label",
+          "prompt_state",
+          "provenance",
+          "per_cell_effects",
+          "anchor_effect",
+          "ci_lo",
+          "ci_hi",
+          "n_cells",
+          "n_measurements"
+        ],
+        "title": "RankedOptimizerPrompt",
         "type": "object"
       },
       "RayItem": {
@@ -4255,28 +4255,6 @@
         ]
       }
     },
-    "/api/v1/champion-registry": {
-      "get": {
-        "description": "The L4 champion table — every candidate meta-prompt state on disk, ranked by\nanchor-to-origin effect. Reduced fresh from the tenant's pp-self cycles on each\nfetch (on-demand, not the 2 s poll); zero LLM. Tenant-scoped; empty for a tenant\nwith no pp-self cycles.",
-        "operationId": "get_champion_registry_api_v1_champion_registry_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ChampionRegistry"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Get Champion Registry",
-        "tags": [
-          "Campaigns"
-        ]
-      }
-    },
     "/api/v1/commands/edit-draft-campaign": {
       "post": {
         "description": "Sparse-patch a `DraftCampaign`. Returns the post-mutation full shape.\n\nPer ``docs/specs/m12-api-openapi.yaml::editDraftCampaign``. The mutation rides\n`CommandDispatcher` (architecture.md §0: sole writer of `CommandRecord`); only\nthe response shape differs from the generic 202 verbs, never the ingress.",
@@ -5333,7 +5311,7 @@
     },
     "/api/v1/optimizer-pipeline": {
       "get": {
-        "description": "Bundled ``promptpotter/assets/optimizer/pipeline.yaml`` + its generated\n``resolved_schemas.json`` sibling — nodes + pipelines + ``view``\ntopology, plus the per-node typed config surface (``node_config_schema`` /\n``node_output_schema``) so the canvas node-detail renders the optimizer's own\nknobs (model / provider / reasoning_effort / temperature / …) through the same\ncanonical config element the steer panel uses, not a hand-rolled chip + JSON\ndump. Read-only: the install-global ``_optimizer`` pipeline is operator-owned — a\nhand-edit, never a fork and never a write path from here (the ``champion`` verb that\nused to graduate a winner into it was deleted 2026-07-17); model/provider are always\noptimizer-locked.",
+        "description": "Bundled ``promptpotter/assets/optimizer/pipeline.yaml`` + its generated\n``resolved_schemas.json`` sibling — nodes + pipelines + ``view``\ntopology, plus the per-node typed config surface (``node_config_schema`` /\n``node_output_schema``) so the canvas node-detail renders the optimizer's own\nknobs (model / provider / reasoning_effort / temperature / …) through the same\ncanonical config element the steer panel uses, not a hand-rolled chip + JSON\ndump. Read-only: the install-global ``_optimizer`` pipeline is operator-owned — a\nhand-edit, never a fork and never a write path from here (a verb that\nused to graduate a winner into it was deleted 2026-07-17; today's\n``rank-optimizer-prompts`` only reads); model/provider are always\noptimizer-locked.",
         "operationId": "get_optimizer_pipeline_api_v1_optimizer_pipeline_get",
         "responses": {
           "200": {
@@ -5352,6 +5330,28 @@
         "summary": "Get Optimizer Pipeline",
         "tags": [
           "Optimizer"
+        ]
+      }
+    },
+    "/api/v1/optimizer-prompt-ranking": {
+      "get": {
+        "description": "The L4 prompt ranking — every candidate meta-prompt state on disk, ranked by\nanchor-to-origin effect. Reduced fresh from the tenant's pp-self cycles on each\nfetch (on-demand, not the 2 s poll); zero LLM. Tenant-scoped; empty for a tenant\nwith no pp-self cycles.",
+        "operationId": "get_optimizer_prompt_ranking_api_v1_optimizer_prompt_ranking_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptimizerPromptRanking"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Optimizer Prompt Ranking",
+        "tags": [
+          "Campaigns"
         ]
       }
     },

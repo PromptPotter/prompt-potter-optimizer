@@ -1,16 +1,16 @@
 "use client";
-// Champion Console — the ranked table of candidate meta-prompt states, the
+// The ranked table of edits to the optimizer's OWN prompts — the
 // developer answer to "which meta-prompt is overall best?". Ranks by the
 // anchor-to-origin paired effect. Reads the server-reduced registry; no recompute.
 // Renders only for the outer pp-self loop (DashboardTab's isOuterSelfOpt gate).
 // Ranking is the whole surface: nothing here crowns a winner or graduates one into
 // promptpotter/assets/optimizer — that is a deliberate hand-edit.
 
-import type { ChampionCandidate, ChampionRegistry } from "@/lib/api";
+import type { RankedOptimizerPrompt, OptimizerPromptRanking } from "@/lib/api";
 import { CardFrame } from "@/components/ui";
 import { cx } from "@/lib/cx";
 
-function effectClass(row: ChampionCandidate): string {
+function effectClass(row: RankedOptimizerPrompt): string {
   // Colour the sign, but the number + CI carry the meaning (color is never alone).
   if (row.ci_lo > 0) return "l4-eff-pos";
   if (row.ci_hi < 0) return "l4-eff-neg";
@@ -21,11 +21,11 @@ function fmt(n: number): string {
   return (n >= 0 ? "+" : "") + n.toFixed(4);
 }
 
-function ChampionRow({
+function RankedPromptRow({
   row,
   rank,
 }: {
-  row: ChampionCandidate;
+  row: RankedOptimizerPrompt;
   rank: number;
 }) {
   return (
@@ -52,11 +52,11 @@ function ChampionRow({
   );
 }
 
-export function ChampionConsole({ registry }: { registry: ChampionRegistry }) {
+export function OptimizerPromptRankingPanel({ registry }: { registry: OptimizerPromptRanking }) {
   const rows = registry.candidates;
   return (
     <CardFrame
-      title="Champion table"
+      title="Optimizer-prompt ranking"
       headingTag="h2"
       actions={
         <span className="l4-subtle">
@@ -89,7 +89,7 @@ export function ChampionConsole({ registry }: { registry: ChampionRegistry }) {
             </thead>
             <tbody>
               {rows.map((row, i) => (
-                <ChampionRow key={row.state_hash} row={row} rank={i + 1} />
+                <RankedPromptRow key={row.state_hash} row={row} rank={i + 1} />
               ))}
             </tbody>
           </table>

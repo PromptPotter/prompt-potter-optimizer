@@ -1,5 +1,5 @@
 "use client";
-// L4 champion registry — the ranked table of candidate meta-prompt states,
+// The ranked table of edits to the optimizer's own prompts,
 // reduced fresh server-side from the tenant's on-disk pp-self cycles. One-shot
 // fetch (not the 2 s poll): it feeds the outer-loop dashboard boxes on demand.
 //
@@ -8,15 +8,15 @@
 // hits the route.
 
 import { useFetch } from "@/lib/hooks/useFetch";
-import { fetchChampionRegistry, type ChampionRegistry } from "@/lib/api";
+import { fetchOptimizerPromptRanking, type OptimizerPromptRanking } from "@/lib/api";
 
-export function useChampionRegistry(enabled: boolean): {
-  registry: ChampionRegistry | null;
+export function useOptimizerPromptRanking(enabled: boolean): {
+  registry: OptimizerPromptRanking | null;
   loading: boolean;
   error: string | null;
 } {
-  const { data, loading, error } = useFetch<ChampionRegistry>(
-    enabled ? (signal) => fetchChampionRegistry(signal) : null,
+  const { data, loading, error } = useFetch<OptimizerPromptRanking>(
+    enabled ? (signal) => fetchOptimizerPromptRanking(signal) : null,
     [enabled],
   );
   return { registry: data, loading, error };

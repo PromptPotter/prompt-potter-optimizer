@@ -4,7 +4,7 @@ import { fetchPipeline } from "@/lib/api";
 import type { PipelineDoc } from "@/components/workflow";
 import { useWorkspace } from "@/lib/workspace";
 import { isSelfOptimization } from "@/lib/derivations";
-import { useChampionRegistry } from "@/lib/hooks/useChampionRegistry";
+import { useOptimizerPromptRanking } from "@/lib/hooks/useOptimizerPromptRanking";
 import { DashSpine } from "./DashSpine";
 import { CyclePicker } from "@/components/shell/CyclePicker";
 import { RunErrorBanner } from "./RunErrorBanner";
@@ -14,7 +14,7 @@ import { NowTriad } from "./NowTriad";
 import { Lane } from "./Lane";
 import { LiveStateCard } from "@/components/dashboard/scoring/LiveStateCard";
 import { OuterVerdictPanel } from "@/components/dashboard/scoring/OuterVerdictPanel";
-import { ChampionConsole } from "@/components/dashboard/scoring/ChampionConsole";
+import { OptimizerPromptRankingPanel } from "@/components/dashboard/scoring/OptimizerPromptRanking";
 import { MechanismsPanel } from "@/components/dashboard/control/MechanismsPanel";
 import { AllowedModelsPanel } from "@/components/dashboard/control/AllowedModelsPanel";
 import { ConfigMapPanel } from "@/components/dashboard/control/ConfigMapPanel";
@@ -33,7 +33,7 @@ export function DashboardTab() {
   );
 
   // The outer L4 loop earns extra boxes: the per-round outer verdict + the
-  // cross-cycle champion/capability surfaces. `campaignId` is the ROOT hop, so
+  // cross-cycle ranking / capability surfaces. `campaignId` is the ROOT hop, so
   // this reads the outer campaign's backend_type; depth 1 == viewing the outer
   // (not a drilled-in inner). Drilling into `↻ inner` → 2-hop path → gate false
   // → the plain dashboard, which is what an inner run should show. No fallback for
@@ -42,7 +42,7 @@ export function DashboardTab() {
   const rootBackendType = campaigns.find((c) => c.campaign_id === campaignId)?.backend_type;
   const isOuterSelfOpt = viewedPath?.length === 1 && isSelfOptimization(rootBackendType);
   // Fetch fires only when gated in (one-shot, not the 2 s poll).
-  const { registry } = useChampionRegistry(isOuterSelfOpt);
+  const { registry } = useOptimizerPromptRanking(isOuterSelfOpt);
 
   return (
     <div className="content" id="content-dashboard">
@@ -116,14 +116,14 @@ export function DashboardTab() {
         <Lane
           id="l4-lab"
           title="L4 lab"
-          subtitle="Champion ranking — outer meta-optimization (dev surface)"
+          subtitle="Every edit to the optimizer's own prompts, ranked against the unedited original"
           defaultOpen={false}
         >
           <DashSpine>
             {registry ? (
-              <ChampionConsole registry={registry} />
+              <OptimizerPromptRankingPanel registry={registry} />
             ) : (
-              <p className="l4-empty">Loading champion registry…</p>
+              <p className="l4-empty">Loading the ranking…</p>
             )}
           </DashSpine>
         </Lane>

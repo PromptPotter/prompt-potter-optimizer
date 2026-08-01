@@ -5,7 +5,7 @@ import { encodeCyclePath, encodeDescend, pathRoot, type CyclePath } from "../ids
 import type {
   ActiveSessionResponse,
   CampaignListResponse,
-  ChampionRegistry,
+  OptimizerPromptRanking,
   CyclesResponse,
   DatasetPreviewResponse,
   DiagnosticRunListResponse,
@@ -581,18 +581,18 @@ export function fetchConfigMap(
   );
 }
 
-// --- L4 champion registry (outer-loop dashboard box) --------------------------
+// --- Optimizer-prompt ranking (outer-loop dashboard box) --------------------------
 // The ranked table of candidate meta-prompt states, reduced fresh from the
 // tenant's on-disk pp-self cycles. Empty (n_cycles_scanned=0) for every tenant
 // with no pp-self campaigns — i.e. every whitelabeled end-user; the dashboard
 // renders the box only when viewing the outer pp-self loop, so the read is
 // self-gating on data.
-// The four shapes are GENERATED from the Pydantic source (`ChampionRegistry` &c in
-// `application/meta_champion/reducer.py`) — they were hand-mirrored here and bypassed
+// The four shapes are GENERATED from the Pydantic source (`OptimizerPromptRanking` &c in
+// `application/optimizer_prompt_ranking/reducer.py`) — they were hand-mirrored here and bypassed
 // `build_ts_types.py` entirely, the same setup that let the resource-matrix types drift
 // two fields behind their model before that arc was retired.
-export function fetchChampionRegistry(signal?: AbortSignal): Promise<ChampionRegistry> {
-  return jget<ChampionRegistry>(`${API}/champion-registry`, signal);
+export function fetchOptimizerPromptRanking(signal?: AbortSignal): Promise<OptimizerPromptRanking> {
+  return jget<OptimizerPromptRanking>(`${API}/optimizer-prompt-ranking`, signal);
 }
 
 // THE lineage read — one recursive tree rooted at a COURSE, nodes alternating

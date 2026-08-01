@@ -6,7 +6,7 @@
 #
 # THIS FILE IS NOT THE SERVED SURFACE, and never was. It owns the command
 # contract plus six reads; the app serves ~35 more endpoints (all of /auth,
-# /backends, /champion-registry, /optimizer-pipeline, /workspace/storage*, the
+# /backends, /optimizer-prompt-ranking, /optimizer-pipeline, /workspace/storage*, the
 # SSE stream, the file reads). Those are described by the generated companion
 # `openapi.generated.json` — reality, emitted from the FastAPI app by
 # `scripts/build_openapi.py` and gated in CI. Read that one to learn what the
