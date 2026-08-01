@@ -1,5 +1,6 @@
 "use client";
 import { COLUMNS, type ColId } from "./columns";
+import { isHit } from "@/lib/fitness";
 
 // Full-text popover for a clipped left-aligned cell — opened by clicking an
 // expandable cell, dismissed by backdrop click or Escape (the Escape handler
@@ -30,18 +31,24 @@ export function HardSamplesPopover({
 }
 
 // One shared hover read-out for the History heat-map — follows the cursor,
-// shows HIT/MISS plus the measurement ordinal.
+// shows the graded score plus the measurement ordinal. A binary scorer reads
+// HIT/MISS; a graded one reads its actual value rather than a flat "MISS".
 export function HardSamplesHeatTip({
   tip,
 }: {
-  tip: { ord: string; hit: boolean | null; x: number; y: number };
+  tip: { ord: string; fitness: number | null; x: number; y: number };
 }) {
   return (
     <div
       className="hs-heat-tip"
       style={{ left: `${tip.x + 14}px`, top: `${tip.y + 14}px` }}
     >
-      {tip.hit == null ? "—" : tip.hit ? "HIT" : "MISS"} · {tip.ord}
+      {tip.fitness == null
+        ? "—"
+        : isHit(tip.fitness)
+          ? "HIT"
+          : `${tip.fitness.toFixed(2)}`}{" "}
+      · {tip.ord}
     </div>
   );
 }

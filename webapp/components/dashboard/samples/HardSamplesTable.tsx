@@ -291,7 +291,7 @@ export function HardSamplesTable({
                               onSelectOrd={(ord) =>
                                 setSelectedOrd((cur) => (cur === ord ? null : ord))
                               }
-                              onHover={(ord, hit, x, y) => setHoverTip({ ord, hit, x, y })}
+                              onHover={(ord, fitness, x, y) => setHoverTip({ ord, fitness, x, y })}
                               onHoverEnd={() => setHoverTip(null)}
                             />
                           )

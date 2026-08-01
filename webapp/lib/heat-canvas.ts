@@ -4,10 +4,10 @@
 // Discrete cells never grow past this; beyond it the strip wastes space.
 const MAX_CELL_PX = 8;
 
-// One measurement: an ordinal slot and whether the sample hit it.
+// One measurement: an ordinal slot and the graded score the sample earned there.
 export interface HeatDot {
   ord: string;
-  hit: boolean;
+  fitness: number;
 }
 
 interface HeatLayout {
@@ -40,7 +40,8 @@ export function heatLayout(len: number, widthPx: number): HeatLayout {
 }
 
 interface RowBucket {
-  hits: number;
+  // Sum of graded fitness, not a hit count — the mean is what the colour blends.
+  sum: number;
   total: number;
 }
 
@@ -63,11 +64,11 @@ export function bucketRow(
         : Math.min(layout.count - 1, Math.floor((idx / layout.len) * layout.count));
     let b = out[col];
     if (!b) {
-      b = { hits: 0, total: 0 };
+      b = { sum: 0, total: 0 };
       out[col] = b;
     }
     b.total += 1;
-    if (dot.hit) b.hits += 1;
+    b.sum += dot.fitness;
   }
   return out;
 }
@@ -108,8 +109,10 @@ export function parseRgbTriple(s: string, fallback: Rgb): Rgb {
   return [r, g, b];
 }
 
-// Hit ratio → colour: 0 = miss (danger), 1 = hit (success), blended between.
-export function mixHitColor(ratio: number, success: Rgb, danger: Rgb): string {
+// Mean fitness → colour: 0 = worst (danger), 1 = best (success), blended between.
+// A blend, not a threshold — that is what lets a graded scorer read as a gradient
+// instead of a uniform wall of "miss".
+export function mixScoreColor(ratio: number, success: Rgb, danger: Rgb): string {
   const t = Math.max(0, Math.min(1, ratio));
   const r = Math.round(danger[0] + (success[0] - danger[0]) * t);
   const g = Math.round(danger[1] + (success[1] - danger[1]) * t);

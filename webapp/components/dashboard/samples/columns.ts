@@ -5,6 +5,7 @@
 import { type CSSProperties } from "react";
 import { type DatasetItem } from "@/lib/api";
 import { fmtPct0, fmtPct1 } from "@/lib/format";
+import { isHit } from "@/lib/fitness";
 
 export const STORAGE_KEY = "hs-grid:v1";
 export const FOLDED_WIDTH = 28;
@@ -25,7 +26,7 @@ const MAX_AUTO_CH = 50;
 // hard enough that one file had to import BOTH and alias one (`as ArchiveDot`) to compile
 // — the collision the pre-flight gate's "names: distinct + self-describing" rule forbids.
 export interface HeatDot {
-  hit: boolean;
+  fitness: number;
   // Composite lex-sortable key. Equal ``ord`` values across rows share
   // a roster column so the Meas heat-map aligns vertically.
   ord: string;
@@ -142,12 +143,12 @@ export function cellFor(
       // always-miss, grey in between.
       const n = meas.length;
       if (n === 0) return { text: "—", raw: null };
-      const hits = meas.reduce((k, m) => k + (m.hit ? 1 : 0), 0);
-      const rate = hits / n;
+      const hits = meas.reduce((k, m) => k + (isHit(m.fitness) ? 1 : 0), 0);
+      const rate = meas.reduce((k, m) => k + m.fitness, 0) / n;
       return {
         text: `${hits}/${n}`,
         raw: rate,
-        title: `${hits} hit of ${n} measurements — ${fmtPct0(rate)}`,
+        title: `${hits} hit of ${n} measurements — mean fitness ${fmtPct0(rate)}`,
         style: hitRateStyle(rate),
       };
     }

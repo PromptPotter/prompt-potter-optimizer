@@ -21,6 +21,7 @@ from promptpotter.application.scoring.search_point_scorer import (
 )
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import CycleSeed
+from promptpotter.domain.scoring import is_hit
 from promptpotter.infrastructure.store.stores import Stores
 
 # Every cycle lives inside a campaign; the foundation factory's default id.
@@ -28,7 +29,7 @@ _CAMPAIGN = "testds__20260101-000000"
 
 
 def _r(score: float) -> dict:
-    return {"query": "q", "predicted": "p", "ground_truth": "g", "fitness": score, "hit": False}
+    return {"query": "q", "predicted": "p", "ground_truth": "g", "fitness": score}
 
 
 def _round(**kw: Any) -> RoundResult:
@@ -61,12 +62,11 @@ def _prior(sample_id: int, predicted: str = "p", gt: str = "g") -> dict:
 
 
 def test_rescore_results_accumulates_and_projects_active() -> None:
-    """Two scorers accumulate side-by-side; top-level score/hit follow the latest call."""
+    """Two scorers accumulate side-by-side; top-level fitness follows the latest call."""
     result = {
         "query": "q",
         "predicted": "**42**",
         "ground_truth": "42",
-        "hit": False,
         "fitness": 0.0,
         "error": None,
         "pipeline_data": None,
@@ -76,12 +76,12 @@ def test_rescore_results_accumulates_and_projects_active() -> None:
     rescore_results([result], compile_scorer(formula_a), scorer_id="a", formula=formula_a)
     rescore_results([result], compile_scorer(formula_a), scorer_id="a", formula=formula_a)
     assert list(result["scored"]) == ["a"]  # idempotent
-    assert result["fitness"] == 1.0 and result["hit"] is True
+    assert result["fitness"] == 1.0 and is_hit(result["fitness"])
 
     formula_b = "1 - exact_match(predicted, ground_truth)"
     rescore_results([result], compile_scorer(formula_b), scorer_id="b", formula=formula_b)
     assert set(result["scored"]) == {"a", "b"}
-    assert result["fitness"] == 0.0 and result["hit"] is False
+    assert result["fitness"] == 0.0 and not is_hit(result["fitness"])
 
 
 def test_round_winner_replay_uses_rescored_origin() -> None:
@@ -93,7 +93,7 @@ def test_round_winner_replay_uses_rescored_origin() -> None:
     the recorded path with no error."""
 
     def _m(sid: int, hit: bool) -> dict:
-        return {**_r(1.0 if hit else 0.0), "sample_id": sid, "hit": hit}
+        return {**_r(1.0 if hit else 0.0), "sample_id": sid}
 
     round_data = _round(
         round=0,

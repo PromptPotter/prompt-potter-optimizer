@@ -1,4 +1,4 @@
-"""Hard-sample-sorter — ``(candidate, sample, hit)`` → θ_c-ranked × δ_s-ranked matrix.
+"""Hard-sample-sorter — ``(candidate, sample, fitness)`` → θ_c-ranked × δ_s-ranked matrix.
 
 Spec: ``git log``.
 """
@@ -12,7 +12,6 @@ from promptpotter.application.intelligence.adaptive_queue_mechanism import (
     pick_value,
 )
 from promptpotter.application.intelligence.exploration import build_observations, fit_rasch
-from promptpotter.domain.scoring import is_hit
 from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
@@ -26,7 +25,7 @@ __all__ = [
     "empty_artifact",
 ]
 
-ARTIFACT_SCHEMA_VERSION = 4
+ARTIFACT_SCHEMA_VERSION = 5
 
 
 def _candidate_hit_rates(observations: list[Observation]) -> dict[str, float]:
@@ -195,7 +194,7 @@ def build_hard_samples_artifact_from_observations(
     samp_set = set(sample_order)
 
     cells = [
-        {"c": o.candidate_id, "s": int(o.sample_id), "hit": is_hit(o.response)}
+        {"c": o.candidate_id, "s": int(o.sample_id), "f": float(o.response)}
         for o in observations
         if o.candidate_id in cand_set and o.sample_id in samp_set
     ]

@@ -60,7 +60,6 @@ def _archive_measurement_to_qm(m: Measurement) -> QueryMeasurement:
             "query": m.query,
             "ground_truth": m.ground_truth,
             "predicted": m.predicted,
-            "hit": m.hit,
             "fitness": m.fitness,
             "error": None,
             "pipeline_data": m.pipeline_data or {},

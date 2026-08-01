@@ -56,7 +56,6 @@ class Measurement:
     query: str
     ground_truth: str
     predicted: str
-    hit: bool
     fitness: float | None
     node_configs: list[tuple[str, dict[str, Any]]]
     pipeline_data: dict[str, Any]

@@ -11,6 +11,7 @@ import logging
 from collections import Counter
 from typing import Any
 
+from promptpotter.application.intelligence.exploration import graded_response
 from promptpotter.application.optimization.pobb.classification import (
     get_ranked_items,
     ranked_item_keys_from_schema,
@@ -310,7 +311,7 @@ def _sample_diagnostics(
                 gt_in_source=(sd or {}).get("gt_in_source"),
                 gt_in_ranked=(sd or {}).get("gt_in_ranked"),
                 warnings=[_warning_str(w) for w in (diag.get("warnings") or ())],
-                hit=is_hit(r.get("fitness")),
+                fitness=graded_response(r),
             )
         )
     return out

@@ -65,7 +65,7 @@ export function useHardSamplesTableModel({
   const [selectedOrd, setSelectedOrd] = useState<string | null>(null);
   // Heat-map hover read-out — one shared tooltip, not a title per cell.
   const [hoverTip, setHoverTip] = useState<
-    { ord: string; hit: boolean | null; x: number; y: number } | null
+    { ord: string; fitness: number | null; x: number; y: number } | null
   >(null);
 
   useEffect(() => {

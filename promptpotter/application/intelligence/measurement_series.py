@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.scoring import is_hit
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.shared.errors import is_error_result
@@ -65,7 +64,6 @@ def cycle_measurement_series(
                 # ``fitness`` because that is the field a scored row is guaranteed to have.
                 if not isinstance(sid, int) or not isinstance(fitness, int | float):
                     continue
-                hit = is_hit(fitness)
                 if sid not in sample_ids:
                     continue
                 if is_error_result(item):
@@ -73,7 +71,7 @@ def cycle_measurement_series(
                 out[sid].append(
                     {
                         "ord": f"{round_no:04d}/{ci:02d}",
-                        "hit": hit,
+                        "fitness": float(fitness),
                         "label": f"R{round_no} cand {ci}",
                     }
                 )
@@ -99,7 +97,7 @@ def campaign_measurement_series(
                 out[sid].append(
                     {
                         "ord": f"{cid}/{d['ord']}",
-                        "hit": d["hit"],
+                        "fitness": d["fitness"],
                         "label": d["label"],
                     }
                 )

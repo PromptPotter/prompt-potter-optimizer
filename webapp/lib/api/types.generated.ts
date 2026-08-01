@@ -500,7 +500,9 @@ export interface DatasetPreviewResponse {
 export interface MeasurementDot {
   /** Opaque ordinal for lex sort + uniqueness (encodes ts/run/idx or round/cand). */
   ord: string;
-  hit: boolean;
+  /** Graded per-sample score in [0,1] under the active scorer. Binary scorers emit
+   * exactly 0.0 or 1.0; render a shade, not a HIT/MISS boolean. */
+  fitness: number;
   /** Short human label, e.g. 'R3 cand 2'. */
   label: string;
 }

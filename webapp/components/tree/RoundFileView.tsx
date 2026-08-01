@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Badge, CardFrame } from "@/components/ui";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
 import { fmtNum, fmtPct1 } from "@/lib/format";
+import { isHit } from "@/lib/fitness";
 
 interface ScoreboardEntry {
   rank?: number;
@@ -20,7 +21,7 @@ interface ResultRow {
   query?: string;
   predicted?: string;
   ground_truth?: string;
-  hit?: boolean;
+  fitness?: number;
 }
 
 export interface RoundDoc {
@@ -116,7 +117,7 @@ export function RoundFileView({ doc, raw }: Props) {
               </thead>
               <tbody>
                 {results.map((r, i) => {
-                  const hit = r.hit ?? false;
+                  const hit = isHit(r.fitness);
                   const id = r.sample_id ?? i;
                   return (
                     <tr key={String(id)}>

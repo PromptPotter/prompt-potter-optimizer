@@ -4,7 +4,7 @@ import {
   bucketRow,
   colX,
   heatLayout,
-  mixHitColor,
+  mixScoreColor,
   parseRgbTriple,
   xToOrdIndex,
   type HeatDot,
@@ -32,7 +32,7 @@ interface Props {
   // True for the sample being scored right now — draws a pending marker.
   isRunning: boolean;
   onSelectOrd: (ord: string) => void;
-  onHover: (ord: string, hit: boolean | null, clientX: number, clientY: number) => void;
+  onHover: (ord: string, fitness: number | null, clientX: number, clientY: number) => void;
   onHoverEnd: () => void;
 }
 
@@ -110,7 +110,7 @@ export function MeasHeatCell({
         if (nice && col === hoverIdx) continue; // drawn enlarged, on top
         const span = colX(layout, col);
         const cw = Math.max(1, span.w - gap);
-        ctx.fillStyle = mixHitColor(b.hits / b.total, success, danger);
+        ctx.fillStyle = mixScoreColor(b.sum / b.total, success, danger);
         if (nice) fillRoundRect(ctx, span.x, y, cw, CELL_H, cw * 0.28);
         else ctx.fillRect(span.x, y, cw, CELL_H);
       }
@@ -123,7 +123,7 @@ export function MeasHeatCell({
           const cw = Math.max(1, span.w - gap);
           const sw = cw * HOVER_SCALE;
           const sh = CELL_H * HOVER_SCALE;
-          ctx.fillStyle = mixHitColor(b.hits / b.total, success, danger);
+          ctx.fillStyle = mixScoreColor(b.sum / b.total, success, danger);
           fillRoundRect(
             ctx,
             span.x + cw / 2 - sw / 2,
@@ -202,7 +202,7 @@ export function MeasHeatCell({
         }
         setHoverIdx(hit.discrete ? hit.idx : null);
         const m = byOrd.get(ord);
-        onHover(ord, m ? m.hit : null, e.clientX, e.clientY);
+        onHover(ord, m ? m.fitness : null, e.clientX, e.clientY);
       }}
       onPointerLeave={() => {
         setHoverIdx(null);

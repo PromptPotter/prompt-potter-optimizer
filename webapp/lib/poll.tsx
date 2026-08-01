@@ -57,7 +57,7 @@ function isWarming(d: unknown): d is WarmingSnapshot {
 // narrows once so the call sites don't repeat the `as Record<...>` cast.
 export interface LiveSample {
   sample_id?: number;
-  hit?: boolean;
+  fitness?: number;
   prediction?: string;
   cached?: boolean;
   time_s?: number;

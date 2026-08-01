@@ -5,15 +5,24 @@ from __future__ import annotations
 
 from typing import Any
 
-_HIT = "█"
-_MISS = "▒"
+# Graded shade, densest = best. A binary ▓/▒ split would re-impose the `fitness >= 1.0`
+# threshold this projection exists to avoid: on a graded scorer every cell sits strictly
+# inside (0,1), so a threshold renders the whole grid identically and the matrix carries
+# no information at all.
+_SHADES = ("░", "▒", "▓", "█")
 _UNMEASURED = "·"
 _HEATMAP_LABEL_W = 10
 _HEATMAP_CELL_W = 2
 
 
-def _cell_index(artifact: dict[str, Any]) -> dict[tuple[str, int], bool]:
-    return {(c["c"], int(c["s"])): bool(c["hit"]) for c in artifact.get("cells", [])}
+def _shade(fitness: float) -> str:
+    """Bucket a [0,1] fitness onto ``_SHADES``. 1.0 lands in the top bucket."""
+    idx = min(int(fitness * len(_SHADES)), len(_SHADES) - 1)
+    return _SHADES[idx]
+
+
+def _cell_index(artifact: dict[str, Any]) -> dict[tuple[str, int], float]:
+    return {(c["c"], int(c["s"])): float(c["f"]) for c in artifact.get("cells", [])}
 
 
 def render_hard_sample_heatmap(
@@ -53,7 +62,7 @@ def render_hard_sample_heatmap(
         f"  individuals : {cand_str}",
         f"  samples     : {samp_str}",
         f"  observed cells : {artifact['n_observations']}",
-        f"  legend : {_HIT} hit   {_MISS} miss   {_UNMEASURED} not measured",
+        f"  legend : fitness {_SHADES[0]} low → {_SHADES[-1]} high   {_UNMEASURED} not measured",
     ]
 
     header_pad = " " * (label_w + 3)
@@ -65,13 +74,8 @@ def render_hard_sample_heatmap(
     for cid in candidate_order:
         row_cells = []
         for sid in sample_order:
-            hit = cells.get((cid, sid))
-            if hit is None:
-                row_cells.append(_UNMEASURED * cell_w)
-            elif hit:
-                row_cells.append(_HIT * cell_w)
-            else:
-                row_cells.append(_MISS * cell_w)
+            fitness = cells.get((cid, sid))
+            row_cells.append(_UNMEASURED * cell_w if fitness is None else _shade(fitness) * cell_w)
         t = theta.get(cid)
         theta_str = f"{t:>+5.2f}" if isinstance(t, (int, float)) else "  ?  "
         label = cid[: label_w - 1].ljust(label_w)

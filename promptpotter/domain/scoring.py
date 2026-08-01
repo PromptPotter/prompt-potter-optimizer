@@ -45,10 +45,10 @@ class QueryMeasurement(TypedDict):
     """Per-sample measurement.
 
     Raw trace fields (query/ground_truth/predicted/error/pipeline_data) populated
-    at measurement time. ``hit``/``fitness`` are the active-scorer projection,
-    written exclusively by ``rescore_results`` (which also populates the
-    ``scored`` audit map: ``{scorer_id: {fitness, hit, formula}}``). ``NotRequired``
-    because a freshly measured trace hasn't been scored yet.
+    at measurement time. ``fitness`` is the active-scorer projection, written
+    exclusively by ``rescore_results`` (which also populates the ``scored`` audit
+    map: ``{scorer_id: {fitness, formula}}``). ``NotRequired`` because a freshly
+    measured trace hasn't been scored yet. There is no ``hit`` — see :func:`is_hit`.
 
     ``sample_id`` = foreign key to ``Sample.id``, stable across campaigns.
     """
@@ -57,7 +57,6 @@ class QueryMeasurement(TypedDict):
     query: str
     ground_truth: str
     predicted: str
-    hit: NotRequired[bool]
     fitness: NotRequired[float]
     # True when this measurement was reused from a prior identical searchpoint
     # instead of a fresh backend call. Stamped ``False`` at measurement time,

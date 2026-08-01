@@ -141,7 +141,7 @@ def _r_diagnostics(b: InjectionBundle) -> str:
     if d.anomalies:
         parts.append("ANOMALIES:\n  " + "\n  ".join(d.anomalies))
 
-    miss_samples = [s for s in d.samples if not s.hit][:SAMPLE_RENDER_CAP]
+    miss_samples = [s for s in d.samples if not is_hit(s.fitness)][:SAMPLE_RENDER_CAP]
     if miss_samples:
         s_lines = [f"SAMPLE DIAGNOSTICS ({len(miss_samples)}/{len(d.samples)} misses shown):"]
         for s in miss_samples:

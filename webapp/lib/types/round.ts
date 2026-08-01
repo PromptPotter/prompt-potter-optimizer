@@ -25,7 +25,6 @@ export interface RawResultRow {
   predicted?: string;
   ground_truth?: string;
   query?: string;
-  hit?: boolean;
   fitness?: number;
 }
 

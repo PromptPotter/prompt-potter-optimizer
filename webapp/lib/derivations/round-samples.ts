@@ -16,6 +16,7 @@ import {
 import { parseSampleLine } from "@/lib/sample-line";
 import type { CandidateRow, SampleRow } from "@/lib/types";
 import type { RoundResult } from "@/lib/types";
+import { isHit } from "@/lib/fitness";
 
 // Live-mode samples for one candidate in the in-flight round. Reads
 // from `dashboard.json::current_round.nodes.l1_score.output.candidates`
@@ -51,7 +52,7 @@ function liveSamplesFor(
     } else if (raw && typeof raw === "object") {
       const sid = typeof raw.sample_id === "number" ? raw.sample_id : null;
       const status =
-        typeof raw.hit === "boolean" ? (raw.hit ? "HIT" : "MISS") : null;
+        typeof raw.fitness === "number" ? (isHit(raw.fitness) ? "HIT" : "MISS") : null;
       out.push({
         key: `${round}|${candidate_id}|${sid ?? `o${ord}`}`,
         round,
@@ -76,7 +77,7 @@ interface RawHistoricalSample {
   query?: string;
   predicted?: string;
   ground_truth?: string;
-  hit?: boolean;
+  fitness?: number;
   cached?: boolean;
   scorer?: string;
   elapsed_s?: number;
@@ -104,7 +105,7 @@ function historicalSamplesFor(
     const s = sample as RawHistoricalSample;
     const sid = typeof s.sample_id === "number" ? s.sample_id : null;
     const status =
-      typeof s.hit === "boolean" ? (s.hit ? "HIT" : "MISS") : null;
+      typeof s.fitness === "number" ? (isHit(s.fitness) ? "HIT" : "MISS") : null;
     const elapsed =
       typeof s.elapsed_s === "number"
         ? s.elapsed_s

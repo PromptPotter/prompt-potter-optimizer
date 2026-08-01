@@ -76,7 +76,7 @@ Configured per dataset via `campaign.yaml::scoring`:
 
 Constants, name lookups, arithmetic operators (`+ - * / % **`) addressable. **Calls outside the registry are rejected at compile time** (enforced, not convention).
 
-Two stable signals every measurement carries: **`hit`** (boolean, rank-1 exact — feeds SampleIndex / cohort analysis) · **`score`** (continuous, formula-driven — feeds the optimizer).
+One stable signal every measurement carries: **`fitness`** — continuous, formula-driven, `[0,1]`, written only by `rescore_results`. It feeds the optimizer, SampleIndex and every cohort read. There is no companion `hit` boolean: it was only ever `fitness >= 1.0`, so it carried nothing the number beside it did not, and on a graded formula it was constantly false. Where a surface needs the discrete word, it derives one (`domain/scoring.py::is_hit`).
 
 ---
 

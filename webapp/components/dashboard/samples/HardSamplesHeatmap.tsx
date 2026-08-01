@@ -13,6 +13,7 @@ import { SampleTrajectory, SampleTrajectoryMiniButton } from "./SampleTrajectory
 import { type HeatDot } from "./columns";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
 import { compareHardSamples } from "./hard-sample-order";
+import { isHit } from "@/lib/fitness";
 
 interface Props {
   datasetName: string | null;
@@ -47,26 +48,29 @@ function liveMeasurements(
   liveL1Candidates(dash).forEach((c, ci) => {
     for (const s of c.samples ?? []) {
       let sid: number | null = null;
-      let hit: boolean | null = null;
+      let fitness: number | null = null;
       if (typeof s === "string") {
+        // The live tape is TEXT, so it carries only the HIT/MISS mark the terminal
+        // renders — the grade itself never survives the line. Reconstruct the two
+        // endpoints; the dict branch below has the real number.
         const p = parseSampleLine(s);
         if (p.sampleId != null && p.status) {
           sid = p.sampleId;
-          hit = p.status === "HIT";
+          fitness = p.status === "HIT" ? 1 : 0;
         }
       } else if (s && typeof s === "object") {
-        if (typeof s.sample_id === "number" && typeof s.hit === "boolean") {
+        if (typeof s.sample_id === "number" && typeof s.fitness === "number") {
           sid = s.sample_id;
-          hit = s.hit;
+          fitness = s.fitness;
         }
       }
-      if (sid == null || hit == null) continue;
+      if (sid == null || fitness == null) continue;
       // ``live/…`` prefix sorts after every archive ord (timestamps + 04d
       // round numbers start with digits) so in-flight cells land at the
       // right edge of the roster.
       const ord = `live/${round.toString().padStart(4, "0")}/${ci.toString().padStart(2, "0")}`;
       if (!out.has(sid)) out.set(sid, []);
-      out.get(sid)!.push({ hit, ord });
+      out.get(sid)!.push({ fitness, ord });
     }
   });
   return out;
@@ -96,14 +100,14 @@ export function HardSamplesHeatmap({
   const [bankExpanded, setBankExpanded] = useState(false);
 
   // Merge archive series (scope-aware, server-sourced) with the live
-  // mid-round samples (client-only, current cycle). De-dupe on (ord, hit)
+  // mid-round samples (client-only, current cycle). De-dupe on (ord, fitness)
   // in case a live measurement has already landed in the archive.
   const perSample = useMemo(() => {
     const out = new Map<number, HeatDot[]>();
     for (const [sid, ms] of archivePerSample) {
       out.set(
         sid,
-        ms.map((m) => ({ hit: m.hit, ord: m.ord })),
+        ms.map((m) => ({ fitness: m.fitness, ord: m.ord })),
       );
     }
     const live = liveMeasurements(dash, dashRound);
@@ -116,7 +120,7 @@ export function HardSamplesHeatmap({
       const seen = new Set<string>();
       let w = 0;
       for (const m of ms) {
-        const k = `${m.ord}:${m.hit ? 1 : 0}`;
+        const k = `${m.ord}:${m.fitness}`;
         if (seen.has(k)) continue;
         seen.add(k);
         ms[w++] = m;
@@ -160,7 +164,7 @@ export function HardSamplesHeatmap({
   }
 
   const totalHits = [...perSample.values()].reduce(
-    (n, ms) => n + ms.filter((m) => m.hit).length,
+    (n, ms) => n + ms.filter((m) => isHit(m.fitness)).length,
     0,
   );
   const totalMeas = [...perSample.values()].reduce((n, ms) => n + ms.length, 0);
@@ -185,8 +189,9 @@ export function HardSamplesHeatmap({
               const ms = perSample.get(it.sample_id);
               let cls: "hit" | "miss" | "none" = "none";
               if (ms && ms.length > 0) {
-                const hits = ms.filter((m) => m.hit).length;
-                cls = hits * 2 >= ms.length ? "hit" : "miss";
+                const mean =
+                  ms.reduce((k, m) => k + m.fitness, 0) / ms.length;
+                cls = mean >= 0.5 ? "hit" : "miss";
               }
               return (
                 <span

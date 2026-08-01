@@ -2357,9 +2357,10 @@
       "MeasurementDot": {
         "additionalProperties": false,
         "properties": {
-          "hit": {
-            "title": "Hit",
-            "type": "boolean"
+          "fitness": {
+            "description": "Graded per-sample score in [0,1] under the active scorer. Binary scorers emit exactly 0.0 or 1.0; render a shade, not a HIT/MISS boolean.",
+            "title": "Fitness",
+            "type": "number"
           },
           "label": {
             "description": "Short human label, e.g. 'R3 cand 2'.",
@@ -2374,7 +2375,7 @@
         },
         "required": [
           "ord",
-          "hit",
+          "fitness",
           "label"
         ],
         "title": "MeasurementDot",

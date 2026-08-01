@@ -3044,7 +3044,7 @@ def test_pick_score_artifact_ranks_contested_above_settled() -> None:
         Observation(candidate_id="d", sample_id=2, response=0.0),
     ]
     artifact = build_hard_samples_artifact_from_observations(obs)
-    assert artifact["schema_version"] == ARTIFACT_SCHEMA_VERSION == 4
+    assert artifact["schema_version"] == ARTIFACT_SCHEMA_VERSION == 5
 
     per_sample = artifact["pick_score"]["per_sample"]
     assert per_sample["2"] > per_sample["1"]

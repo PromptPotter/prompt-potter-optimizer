@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.results import candidate_label
+from promptpotter.domain.scoring import is_hit
 from promptpotter.shared.composite import inline_short_formula_values
 
 if TYPE_CHECKING:
@@ -37,13 +38,13 @@ def _trim(text: str, n: int) -> str:
     return t if len(t) <= n else t[: n - 1] + "…"
 
 
-def _partial_hit_rate(samples: list[dict[str, Any]]) -> float | None:
-    """Running hit-rate over scored-so-far samples (hits/total), or None when none scored.
+def _partial_mean_fitness(samples: list[dict[str, Any]]) -> float | None:
+    """Running mean fitness over scored-so-far samples, or None when none scored.
     Bridges the gap before a candidate's final ``accuracy`` lands so the dashboard shows
-    in-flight progress."""
+    in-flight progress — and ``accuracy`` IS mean fitness, so this converges on it."""
     if not samples:
         return None
-    return sum(1 for s in samples if s.get("hit")) / len(samples)
+    return sum(float(s.get("fitness") or 0.0) for s in samples) / len(samples)
 
 
 def fmt_sample_line(s: dict[str, Any]) -> str:
@@ -54,7 +55,9 @@ def fmt_sample_line(s: dict[str, Any]) -> str:
     qi = int(s.get("qi", 0))
     sid = s.get("sample_id")
     sid_seg = f" sid:{int(sid):03d}" if sid is not None else ""
-    hit = bool(s.get("hit"))
+    # The `HIT `/`MISS` mark is a PARSED CONTRACT with `webapp/lib/sample-line.ts`, which
+    # regexes this tape to drive the live heatmap. It is derived here, never stored.
+    hit = is_hit(s.get("fitness"))
     cached = bool(s.get("cached"))
     time_s = float(s.get("time_s") or 0.0)
     badge = _NODE_BADGES.get(s.get("terminated_at") or "", (s.get("terminated_at") or "?")[:2])
@@ -130,10 +133,10 @@ def build_l1_score_block(
         served_accuracy = served.get("accuracy")
         stats: dict[str, Any] = {
             # Never null mid-scoring: the running fitness carries accuracy; the
-            # bare hit-rate is the safety net before the first sample lands.
+            # partial mean over samples-so-far is the safety net before it lands.
             "accuracy": served_accuracy
             if served_accuracy is not None
-            else _partial_hit_rate(samples),
+            else _partial_mean_fitness(samples),
             "composite_fitness": served.get("composite_fitness"),
             "composite_fitness_formula": active_formula,
             # Per-candidate value-inlined short formula. The legend for short

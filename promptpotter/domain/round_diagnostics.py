@@ -52,7 +52,7 @@ class SampleDiag:
     gt_in_source: bool | None
     gt_in_ranked: bool | None
     warnings: list[str]
-    hit: bool
+    fitness: float
 
 
 @dataclass(frozen=True)

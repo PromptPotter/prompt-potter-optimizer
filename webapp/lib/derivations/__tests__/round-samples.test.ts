@@ -36,13 +36,13 @@ const liveDash = {
   current_round: {
     round: 1,
     nodes: {
-      l1_score: { output: { candidates: [{ idx: 0, samples: [{ sample_id: 2, hit: false }] }] } },
+      l1_score: { output: { candidates: [{ idx: 0, samples: [{ sample_id: 2, fitness: 0 }] }] } },
     },
   },
 } as unknown as DashboardSnapshot;
 
 const historicalDoc = {
-  all_candidate_results: { r1_0: [{ sample_id: 1, hit: true }] },
+  all_candidate_results: { r1_0: [{ sample_id: 1, fitness: 1 }] },
 } as unknown as RoundResult;
 
 describe("samplesForRow — source routing", () => {

@@ -17,7 +17,6 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Iterator
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.scoring import is_hit
 from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.instrument import instrument_mode
 
@@ -132,9 +131,9 @@ def measurement_series_for_samples(
             out[sid].append(
                 {
                     "ord": f"{created_at}/{run_id}/{idx:04d}",
-                    "hit": is_hit(item.get("fitness")),
+                    "fitness": float(item.get("fitness") or 0.0),
                     # Emitted HERE so all three scopes of the measurement-series endpoint
-                    # hand back the same `{ord, hit, label}` dot. The router used to
+                    # hand back the same `{ord, fitness, label}` dot. The router used to
                     # re-map this arm alone to synthesize the label the round-file arms
                     # emit natively — one wire shape with two authors, and the odd one
                     # out lived in a presentation-layer dict comprehension.

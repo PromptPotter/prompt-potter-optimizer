@@ -113,7 +113,7 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
                 gt_in_source=None,
                 gt_in_ranked=None,
                 warnings=[],
-                hit=False,
+                fitness=0.0,
             )
         ],
     )

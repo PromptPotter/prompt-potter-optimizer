@@ -577,7 +577,10 @@ class MeasurementDot(StrictModel):
     ord: str = Field(
         description="Opaque ordinal for lex sort + uniqueness (encodes ts/run/idx or round/cand).",
     )
-    hit: bool
+    fitness: float = Field(
+        description="Graded per-sample score in [0,1] under the active scorer. Binary "
+        "scorers emit exactly 0.0 or 1.0; render a shade, not a HIT/MISS boolean.",
+    )
     label: str = Field(description="Short human label, e.g. 'R3 cand 2'.")
 
 
@@ -661,7 +664,7 @@ def get_dataset_measurement_series(
         # scopes, three sources, ONE dot shape — each producer emits `{ord, hit, label}`
         # itself, so there is no re-map here.
         series = {
-            sid: [{"ord": m["ord"], "hit": m["hit"], "label": m["label"]} for m in ms]
+            sid: [{"ord": m["ord"], "fitness": m["fitness"], "label": m["label"]} for m in ms]
             for sid, ms in measurement_series_for_samples(
                 art_store, selected, dataset_name=name
             ).items()
