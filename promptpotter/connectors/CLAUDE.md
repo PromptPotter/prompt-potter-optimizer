@@ -25,25 +25,32 @@ nodes.{name}.config`, never in the backend's repo.
 
 ## What the second connector taught the boundary
 
-Adding `promptpotter` exercised the abstraction; the protocol held without
-modification. Three observations the next connector should heed:
+Adding `promptpotter` exercised the abstraction and the protocol held unmodified. Three
+things the next connector should heed. **Wire payload shape is connector-specific** — each
+decides its own outer key (`termnorm` flattens `pipeline_params` into `node_config`,
+`promptpotter` nests under `optimizer_prompt_overrides`) and the protocol just carries the
+dict through. **The session contract works for in-process backends via a noop**
+(`PromptPotterSession` no-ops `set_terms`/`recover`), at the cost of the HTTP shape leaking
+into the rest of `BackendClient`. And **`extract_experiment` is the impedance-match seam**:
+both connectors yield `(queries, index_terms)` from very different bodies, so **a new
+connector shapes its `experiment_data` to fit the loader, never the reverse**.
 
-1. **Wire payload shape is connector-specific.** `termnorm` flattens
-   `pipeline_params` into a `node_config` block; `promptpotter` keeps the
-   nested-by-node shape under `optimizer_prompt_overrides`. The protocol
-   carries the dict through; each connector decides its own outer key.
-2. **Session contract works for in-process backends with a noop.**
-   `PromptPotterSession` no-ops `set_terms`/`recover` so non-HTTP
-   connectors can fully implement the protocol without a transport
-   layer — but they pay the cost of the HTTP shape leaking into the
-   rest of `BackendClient`.
-3. **`extract_experiment` is the impedance-match seam.** TermNorm reads
-   `mappings` + `runs[0].evaluation_results`; PromptPotter-self reads a
-   simple `tasks` list. Both produce `(queries, index_terms)` for the
-   downstream pipeline. New connectors design their `experiment_data`
-   shape to fit the loader, not the other way around.
+## TermNorm is not a third party
 
-## Execution mode (declared) + inner-cycle run (Lane C3)
+**A structural bug whose cause sits in TermNorm's code gets fixed in TermNorm — never
+papered over on this side.** It lives at `C:\Users\dsacc\OfficeAddinApps\TermNorm-excel`
+(backend under `backend-api/`), the same project as PromptPotter, split into a separate
+repo for security reasons only; folding it back in is the goal. That makes it the
+exception to "backends are read-only" — and to nothing else: per-dataset config still
+rides the overlay, backend *behaviour* still earns a TermNorm root-fix, and which one
+you have is decided by which side actually holds the cause. **Cross-repo edits are
+authorized:** edit the local repo directly (runfish5 authors it); if unavailable,
+coordinate with **runfish5 on GitHub**. The PP↔TermNorm highway is a shape contract —
+touch one side, fix both. Debugging war-stories →
+[`../../docs/operations/backend-integration.md`](../../docs/operations/backend-integration.md)
+§ Debugging the highway.
+
+## Execution mode — declared, never name-branched
 
 A connector declares **how its backend runs** via `Connector.execution`
 (`ConnectorExecution`): `remote_http` (default — posts to a live `/matches`)
@@ -79,15 +86,28 @@ the same shape the scorer parses from an HTTP `/matches` body. The registry guar
   hosted/multi-tenant worker mode: a new `execution` value, dispatched on
   uniformly, with no core-loop edit.
 
+## Registering a connector
+
+**Declare a built-in as a data row in the `_BUILTIN` dict in `__init__.py` — never a
+`register()` call, and never an append to `CONNECTORS`.** `CONNECTORS` is not that dict:
+it is what `_load()` returns after merging `_BUILTIN` with the `promptpotter.connectors`
+entry points and running `_validate` over both. Appending to it post-import registers a
+connector that was never validated, which is the one thing the module exists to prevent.
+A connector shipped from **another** package declares the entry point instead and touches
+nothing here ([`stable-api.md`](../../docs/developer/stable-api.md) §1).
+
+## The credential rides the connector
+
+**`Connector.auth_token() -> str | None` is the ONLY route by which a bearer token reaches
+the wire, and `build_backend_client(connector, base_url)` (`infrastructure/backend.py`) is
+the ONLY place a `BackendClient` is constructed** — it reads the token off the connector it
+was handed. Never name a credential at a construction site: four sites once passed
+`settings.TERMNORM_TOKEN` to whatever connector had been resolved, so a second `remote_http`
+backend would have had TermNorm's secret POSTed to its host. An `in_process` connector has
+no wire, so declaring a token on one fails the registry guard at import.
+
 ## Conventions
 
-- Declare a built-in as a data row in the `_BUILTIN` dict in `__init__.py` — no
-  `register()` call. `CONNECTORS` is not that dict: it is what `_load()` returns
-  after merging `_BUILTIN` with the `promptpotter.connectors` entry points and
-  running `_validate` over both. Appending to it post-import registers a connector
-  that was never validated, which is the one thing the module exists to prevent.
-  A connector shipped from **another** package declares the entry point instead
-  and touches nothing here ([`stable-api.md`](../../docs/developer/stable-api.md) §1).
 - Wire adapters are pure functions: `(query, pipeline_params) -> dict`.
   No I/O, no logging beyond debug-level drops.
 - `extract_experiment` returns `(queries, index_terms)` — the index_terms
@@ -98,16 +118,7 @@ the same shape the scorer parses from an HTTP `/matches` body. The registry guar
   hook reading the backend's self-reported revision. Bootstrap
   (`application/bootstrap/wiring.py::_verify_connector_revision`)
   WARNs on drift; no-op when either field is `None`. Pattern motive:
-  pre-flight gate Q6 extended to debug state — cross-repo dependency
+  the pre-flight gate's debug-state bullet, reaching across a repo
+  boundary — cross-repo dependency
   drift becomes visible at session start, not weeks later in spend
   accounting. The same shape works for any future connector.
-- **The credential rides the connector.** `Connector.auth_token() -> str | None`
-  is the ONLY route by which a bearer token reaches the wire, and
-  `build_backend_client(connector, base_url)`
-  (`infrastructure/backend.py`) is the ONLY place a `BackendClient` is
-  constructed — it reads the token off the connector it was handed. Never name a
-  credential at a construction site: four sites once passed
-  `settings.TERMNORM_TOKEN` to whatever connector had been resolved, so a second
-  `remote_http` backend would have had TermNorm's secret POSTed to its host. An
-  `in_process` connector has no wire, so declaring a token on one fails the
-  registry guard at import.

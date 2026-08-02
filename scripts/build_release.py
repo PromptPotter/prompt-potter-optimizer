@@ -85,6 +85,15 @@ def stage_datasets() -> int:
         src = _REPO / rel
         if not src.is_file():  # tracked but deleted in the working tree
             continue
+        # `datasets/CLAUDE.md` is a CONTRACT for whoever edits this repo, not dataset content.
+        # Copied in, it becomes a second on-disk `CLAUDE.md` stating the same rules — and one
+        # that no git-based tool can see, because the staged tree is gitignored, while every
+        # tool an agent actually uses (Glob/Grep/Read) finds it immediately. Its links are
+        # repo-relative, so from `promptpotter/assets/benchmarks/` all ten resolve into
+        # directories that do not exist. An installed user gains nothing; a reader gains a
+        # duplicate of the one thing this repo most often gets wrong (one fact, many copies).
+        if src.name == "CLAUDE.md":
+            continue
         dst = _DATASETS_DST / Path(rel).relative_to("datasets")
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)

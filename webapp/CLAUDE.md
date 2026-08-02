@@ -2,12 +2,24 @@
 
 Next.js 16.2.7 + React 19.2.4 + TypeScript, static export at `out/` mounted at the domain root by FastAPI (the app owns `/`; the API is the carved-out `/api/v1` namespace). Read-only dashboard: polls `dashboard.json` every 2 s, lazy-fetches `round_NNNN.json` on drill-in.
 
+## Load-bearing
+
+The rules a change here breaks most often. Each names a section below; the section states it.
+
+- Never compute a score, ordering or mask → § Scoring authority
+- One source per data class → § Display-data sources
+- One address, `viewedPath` → § Viewed identity — one address (CyclePath)
+- `dashboard.json` IS the dashboard → § Folder-UI file contract (load-bearing — do not regress)
+- Classify a failure, never bucket it → § Failure handling — classify, don't bucket
+- No hand-rolled primitive → § Component conventions
+- Barrel order IS the cascade → § Stylesheet organization (cascade order is load-bearing)
+
 ## Surface behavior contract
 
 What each user-facing control **must do**, per auth/data state, lives in
 [`../docs/specs/frontend-surface-contract.md`](../docs/specs/frontend-surface-contract.md).
 This file owns *implementation* invariants; that one owns *behavior* — read it
-before changing any control's states. Its **seven** invariants — `I1_state_complete`,
+before changing any control's states. Its invariants — `I1_state_complete`,
 `I2_no_raw_transport`, `I3_affordance_honest`, `I4_auth_coherent`,
 `I5_no_anon_noise` (anon fires no auth-gated request — don't fire it, not merely
 "keep the console clean"), `I6_run_state_server_owned` (`run_phase` has ONE
@@ -17,36 +29,44 @@ server-owned answer; `IN_FLIGHT_PHASES` in `lib/run-phase.ts`),
 two-harness recipe in § Testing posture below (anon = `:8001`; authed+live =
 `PROMPTPOTTER_AUTH=off`).
 
+## Scoring authority
+
+**Every number this app renders was computed by the backend. The webapp never computes, re-derives, re-sorts, or defaults one.** Fitness is formula-relative (active / what-if / lens / replay) and mode-relative (`measured` subset vs `all`), so a locally-computed figure is not a stale version of the served one — it answers a *different question* in the same slot, with nothing on screen to tell the operator which. That asymmetry is why this is absolute rather than a performance preference. Served, and served only: `composite_fitness`, `accuracy`, `theta` / `cumulative_theta`, the hard-sample ordering, every lens / what-if / sample-set value, and the `is_winner` crown. Resolution chain: [`../docs/architecture.md`](../docs/architecture.md) §0.5.
+
+Three shapes it bans, each of which arrives looking reasonable:
+
+- **A local re-sort.** An ordering *is* a score. `hard_samples.json` is a served ranking, not a list to `.sort()` on whichever field is in hand.
+- **A recomputed mask.** A lens / what-if / sample-set value comes down as a served overlay; deriving one client-side re-answers the question under the client's guess at the formula.
+- **A fabricated default.** `noUncheckedIndexedAccess` is ON, so an index access (`arr[i]`, `rec[k]`, `match[n]`) types as possibly-`undefined` — **never `?? <default>` to silence it.** `edits[key] ?? r.value` is not `edits[key] !== undefined ? … : …` the moment an operator clears a field to `""`. Handle the miss (skip / early-return); `!` only where the line above proves presence. Without the flag a *correct* guard read as dead code (`sample-line.ts` guards regex group 3, which the pattern makes optional) while a *missing* one read as fine — the type system lied in both directions at once.
+
+The pure helpers in `lib/derivations/*` are not an exception: they group, lay out and format served data, and introduce no number that was not already on the wire.
+
 ## Design — single source of truth
 
-**Visual identity (palette, theme framing) lives in [`../BRAND.md`](../BRAND.md); copy register lives in [`../VOICE.md`](../VOICE.md).** Read them before touching styles, brand assets, or any user-visible copy. They are the spec; `app/styles/foundation/tokens.css` + `app/styles/foundation/themes.css` are the canonical token implementation (dark `:root` defaults + the `[data-theme="light"]` block); every component reads `var(--…)`. Do not introduce a parallel design spec, design-tokens file, or theme-decision doc — extend `BRAND.md`/`VOICE.md` in place if direction changes.
+**Visual identity lives in [`../BRAND.md`](../BRAND.md), copy register in [`../VOICE.md`](../VOICE.md) — never introduce a parallel design spec, tokens doc or theme-decision file.** Extend those two in place if direction changes. They are the spec; `app/styles/foundation/{tokens,themes}.css` is the implementation, and every component reads `var(--…)`.
 
-The central register is **light / editorial-cobalt** (cobalt `#090C9B` accent, oxblood `#55251D` depth, taupe `#C5AFA4` tint, olive `#696047` muted, warm-bone `#F5F1EA` paper — no orange). The webapp loads in light by default (`app/layout.tsx` pre-paint script, `var t = s || 'light'`). Dark is **DOOM/lava**, opt-in for deep operator work — a distinct register, not a recolor; orange lives only there. Theme change swaps palette + density + framing together via `[data-theme="…"]` on `<html>`.
+**Theme is audience, not a recolor.** Light / editorial-cobalt is the central register and the default; dark is DOOM/lava, opt-in for deep operator work, and swaps palette *and* density *and* framing together via `[data-theme="…"]` on `<html>`.
 
 ## Stylesheet organization (cascade order is load-bearing)
 
-All CSS lives under `app/styles/`, imported by the ordered barrel `app/styles/index.css` (the only stylesheet `app/layout.tsx` imports). Lightning CSS inlines the `@import`s at build into one sheet **in barrel order** — so the barrel order *is* the cascade. There is no `globals.css`; do not reintroduce one.
+All CSS lives under `app/styles/`, imported by the ordered barrel `app/styles/index.css` — the only stylesheet `app/layout.tsx` imports. Lightning CSS inlines those `@import`s into one sheet **in barrel order**, so **the barrel order IS the cascade**: moving rules between files only stays correct if you preserve their relative order in it. There is no `globals.css`; do not reintroduce one. `foundation/` (whitelabel-safe skeleton) imports first, `domains/` (one file per feature, each with its co-located `@media`) after, and the two cross-cutting tail files last so their overrides win.
 
-- **`foundation/`** — the portable, whitelabel-safe skeleton, imported first: `tokens.css` (all `--color-*` / `--font-*` / `--bp-*` / radius / touch / safe-area vars), `themes.css` (dark `:root` + `[data-theme="light"]`), `base.css` (reset, `box-sizing`, `:focus-visible`, body type). Plus two cross-cutting tail files imported last so their overrides win: `reduced-motion.css` and `responsive.css` (the `≤640`/`≤380` blocks, sidebar drawer, `pointer:coarse` 44px floor, rotate prompt).
-- **`domains/`** — one file per feature (`shell`, `dashboard`, `chat`, `workflow`, `hard-samples`, `account`, …), each carrying its own co-located `@media`. `glass.css` is the operator-vetoed glassmorphism — preserved verbatim, never restyled.
-
-**Editing rules.** Component-specific rules belong in their domain file (or, once a component is refactored, its co-located `*.module.css` — that is the migration endgame). Adding a new `@media` breakpoint trips `lib/__tests__/css-breakpoints.test.ts` unless the value is canonical — reuse a `--bp-*` token or update the allowlist deliberately. When you move rules between files, the cascade only stays correct if you preserve their relative order in the barrel.
+Component-specific rules belong in their domain file, or a co-located `*.module.css` once the component is refactored — that is the migration endgame. A new `@media` breakpoint trips `lib/__tests__/css-breakpoints.test.ts` unless the value is canonical: reuse a `--bp-*` token or update the allowlist deliberately. `glass.css` is operator-vetoed glassmorphism, preserved verbatim and never restyled.
 
 State-class composition uses `cx()` (`lib/cx.ts`), not template strings: `cx("hs-cell", folded && "folded")`, never `` `hs-cell${folded ? " folded" : ""}` ``.
 
 ## Component conventions
 
-- **Layout is three tiers, decided top-down.** Every file answers exactly one of: is it a **primitive** (`ui/`, `forms/` — kind-named by design), a piece of cross-surface **chrome** (`shell/` — Topbar, Sidebar, Console-adjacent, `AppShell`, `CriticalAlertBanner`, `CyclePicker`: anything that renders on more than one tab), or part of **one surface** (`chat/`, `dashboard/`, `verify/`, `tree/`=Files, `ingest/`)? A file that answers two — a dashboard view that's also the app root, a banner filed under `dashboard/` but shown on every tab — is mis-filed; that overload is what this layer was untangled from. Shared app state is a context in `lib/` (`SelectionContext`, `auth-context`, `workspace`, `poll`), never a component. `app/page.tsx` mounts `components/shell/AppShell.tsx` (the composition root — owns the `Tab` type and mounts every pane).
-- **Inside a surface, organize by domain region — one axis, never by widget kind.** `dashboard/` is `samples/` · `scoring/` · `pipeline/` · `control/` · `layout/` — the §0 primitives the operator observes, so the names stay stable as milestones add views (M11 viz → `scoring/`, M12 multi-connector → `pipeline/`). Do **not** add kind-buckets (`charts/`, `detail/`); they collide with the region axis and rot. Cross-surface domain widgets that aren't owned by one pane stay as their own feature folders (`candidates/`, `eval/`, `workflow/`) — `candidates/` is the one card the Dashboard and the Chat job dropdown both mount, which is why it is not filed under `dashboard/`.
-- **Anatomy: fetch lives in a hook, not a component.** A component that fetches *and* renders *and* owns selection/scroll state is the prototype smell this layer is moving off of. Put data access in a `lib/hooks/use*.ts` hook (peers: `useRoundFile`, `useDatasetPreview`, `useDashboard`); keep components presentational where possible. Reuse the pure `lib/derivations/*` for data→data shaping rather than re-deriving inline.
-- **Primitive-first.** Do not hand-roll another modal / popover / dropdown / button / **toggle-chip / segmented control / toolbar**. Reach for `components/ui/*`; if the primitive doesn't exist yet, add it there (with a `*.module.css` and an RTL test) so the next caller inherits it. The toggle shapes are named explicitly because they were the ones that got missed: three surfaces each hand-rolled the same segmented control and had silently drifted apart on radius, divider weight and the active fill before `SegmentedControl` / `Chip` existed. A one-off toggle is how a design system rots.
-- **A card header is ONE row.** `Toolbar` + `ToolbarSep` + `ToolbarSpacer`, with icon-sized controls (`Chip icon`, `SegmentedControl` with icon labels) named by `title` + `ariaLabel`. Controls are `flex: 0 0 auto` — a toolbar that shrinks its buttons to fit is lying about how much room it has. Only what's read on every glance stays in the header; **rare controls fold into the `Menu` primitive behind a `⋯`** (light the trigger while any of them is active, so nothing runs silently), and **a control that drives one region belongs beside that region, not in the header** — the forest toggle sits with the dendrogram, not in the toolbar. The labelled-button version of that header ran to four rows, taller than the chart it drove.
-- **Two surfaces that share no axis do not share a box.** The candidates card's whole geometry exists to hold the dendrogram on its bars, so anything nested in it is bound to the chart's width. The lineage forest is a cladogram of *cycles* — no shared axis — so it is its own card (`ForestCard`), opened by a toggle rather than swapped in. Nesting it stretched the card from 363→946px and dragged the bars with it.
-- **Accessibility is positioning, not compliance** (`BRAND.md`). Every interactive element — including SVG `<g>`/nodes — needs keyboard operability + `role`; dialogs trap focus + restore on close + close on ESC; state pairs color with a label or icon (HIT/MISS, pass/fail, live/stale), never color alone; focus rings stay visible (the `:focus-visible` accent outline); honor `prefers-reduced-motion` on the 2 s poll. Operator data (IDs, hashes, payloads) stays selectable — never inject hidden characters.
+- **Layout is three tiers, decided top-down.** Every file is exactly one of: a **primitive** (`ui/`, `forms/`), cross-surface **chrome** (`shell/` — anything rendering on more than one tab), or part of **one surface** (`chat/`, `dashboard/`, `verify/`, `tree/`=Files, `ingest/`). A file answering two is mis-filed; that overload is what this layer was untangled from. Shared app state is a context in `lib/`, never a component; `app/page.tsx` mounts `shell/AppShell.tsx`, the composition root.
+- **Inside a surface, organize by domain region — one axis, never by widget kind.** `dashboard/` is `samples/` · `scoring/` · `pipeline/` · `control/` · `layout/`: the §0 primitives the operator observes, so the names survive new views. Kind-buckets (`charts/`, `detail/`) collide with that axis and rot. A domain widget no single pane owns gets its own folder (`candidates/`, `eval/`, `workflow/`).
+- **Never hand-roll a second modal / popover / dropdown / toggle-chip / segmented control / toolbar.** Reach for `components/ui/*`, or add it there with a `*.module.css` and an RTL test. Three surfaces each hand-rolled the same segmented control and had silently drifted on radius, divider weight and active fill before `SegmentedControl` existed.
+- **A card header is ONE row** — `Toolbar` + `ToolbarSep` + `ToolbarSpacer`, controls `flex: 0 0 auto`, because a toolbar that shrinks its buttons to fit is lying about how much room it has. Rare controls fold into `Menu` behind a `⋯`, lit while any is active; **a control driving one region belongs beside that region**, not in the header. The labelled-button version ran four rows, taller than the chart it drove.
+- **Two surfaces sharing no axis do not share a box.** The candidates card's geometry exists to hold the dendrogram on its bars; the lineage forest is a cladogram of *cycles* with no shared axis, so it is its own `ForestCard`. Nesting it stretched the card 363→946px and dragged the bars with it.
+- **Operator data (IDs, hashes, payloads) stays selectable — never inject hidden characters**, and pair every state with a label or icon rather than color alone (HIT/MISS, pass/fail, live/stale). Accessibility here is positioning, not compliance (`BRAND.md`), so SVG `<g>`/nodes earn keyboard operability and `role` like any other control, and the 2 s poll honors `prefers-reduced-motion`.
 
 ## Brand identity / "About this unit"
 
-`lib/brand.ts` is the single source of brand identity (name, publisher vs. provider, URLs), each `NEXT_PUBLIC_*`-overridable for whitelabel. It feeds three real surfaces — the Web App Manifest (`app/manifest.ts`), the schema.org `SoftwareApplication` JSON-LD in `<head>` (`app/layout.tsx`), and the Account → "About this unit" pane (`components/account/AboutUnit.tsx`). **`publisher`** = the distributing host (overridable); **`provider`** = PromptPotter (fixed — it's the provenance fact). The app **version** is not duplicated here: it's server-owned (`APP_VERSION`) and read live from `/api/v1/health`. Provenance is `self-declared` until a signed credential lands — never render a "verified" state while `BRAND.verification` says otherwise.
+`lib/brand.ts` is the single source of brand identity, each field `NEXT_PUBLIC_*`-overridable for whitelabel, feeding the Web App Manifest, the schema.org JSON-LD, and the Account → "About this unit" pane. **`publisher`** = the distributing host (overridable); **`provider`** = PromptPotter (fixed — it is the provenance fact). Version is not duplicated here: it is server-owned (`APP_VERSION`), read live from `/api/v1/health`. **Never render a "verified" state while `BRAND.verification` says `self-declared`.**
 
 ## Stack-drift warning
 
@@ -54,15 +74,13 @@ Next.js 16 has breaking changes from prior versions — APIs, file conventions, 
 
 ## Folder-UI file contract (load-bearing — do not regress)
 
-`dashboard.json` and `round_NNNN.json` are the canonical UI surface of PromptPotter. They are not a cache, not a perf optimization, not "also written for debugging" — **they ARE the dashboard.** An operator can open `.promptpotter/campaigns/*/cycles/*/dashboard.json` and `rounds/round_NNNN.json` in any text editor at any moment and see the current state of the run. The browser UI is one consumer; the file tree is another, equal consumer.
+`dashboard.json` and `round_NNNN.json` are not a cache, not a perf optimization, not "also written for debugging" — **they ARE the dashboard.** An operator opens them in a text editor mid-run and sees the current state; the browser is one consumer, the file tree an equal one. Three writer-side guarantees:
 
-Three guarantees the writer side MUST hold:
+1. **Always on disk, always atomic-swap** (tmp + rename — never a partial write or torn read). `dashboard.json` exists after any ledger event in a cycle; sole writer `LiveDashboardView`. Sole writer of `rounds/round_NNNN.json` is `CampaignStore.save_round_file`, persisting `RoundResult.model_dump()` — the model **is** the round document. Its *audit twin* under `.runtime/cache/rounds/` shares the basename, is written by `AuditTrailView`, and the webapp does not fetch it.
+2. **Settles within `_DASHBOARD_DEBOUNCE_S` of the last event.** The writer coalesces high-frequency bursts (sample-scored, token-usage, LLM-call progress) but converges behind real-time by no more than that constant. Plumbing: `view.py::_schedule_persist`.
+3. **Immediate — no debounce — at round boundaries.** `PhaseRecord("round"|"origin", "complete"|"exit")` and `mark_stopped` flush synchronously via `view.py::_flush_pending_persist`, so a round's file is current before the next begins. **Do not remove these flushes, relax atomic-swap, or add a path that lets `dashboard.json` lag past a completed round.**
 
-1. **Always on disk.** `dashboard.json` exists after any ledger event in a cycle. Sole writer: `LiveDashboardView` (`promptpotter/infrastructure/projections/live_dashboard/view.py`). Sole writer of `rounds/round_NNNN.json`: `CampaignStore.save_round_file`, which persists `RoundResult.model_dump()` — the model **is** the round document. (The `.runtime/cache/rounds/round_NNNN.json` *audit twin* is a different file with the same basename, written by `AuditTrailView`; the webapp does not fetch it.) All use atomic-swap (tmp + rename) — never partial-write, never torn read.
-2. **Settles within `_DASHBOARD_DEBOUNCE_S` (0.25 s) of the last event.** The writer debounces high-frequency events (sample-scored, token-usage, LLM-call progress) to coalesce bursts, but converges to current state at most 250 ms behind real-time. Constant `_DASHBOARD_DEBOUNCE_S`; flush plumbing at `view.py::_schedule_persist`.
-3. **Immediate (no debounce) at round boundaries.** `PhaseRecord("round"|"origin", "complete"|"exit")` and `mark_stopped` flush synchronously via `view.py::_flush_pending_persist`. When a round ends, its file is current before the next round begins. **Do not remove these flushes.** Do not relax atomic-swap. Do not introduce a path that lets `dashboard.json` lag past a completed round.
-
-If a future change wants to defer or skip a write, the question to answer first is: *can an operator who alt-tabs to the file tree right now still see the truth?* If no, the change is wrong.
+Before deferring or skipping any write, answer: *can an operator who alt-tabs to the file tree right now still see the truth?* If no, the change is wrong.
 
 **The rule above is the writer side; the recipe is [`../docs/developer/adding-a-surface.md`](../docs/developer/adding-a-surface.md) § 3** (a dashboard / view field: `view_models.py` → `ingress.py` → renderers). A field on the ROUND document is nearly free — declare it on `RoundResult` and it reaches disk and every reader of the round file — but the webapp reads `dashboard.json`, not round files, so reaching a panel means mirroring it too. **Per-candidate facts go on `RoundSummaryCandidate` and cost nothing further** (the projection's include-set is derived from `model_fields`); only a genuinely per-ROUND fact needs `RoundSummary` + a hand-written line in `round_summary.py`. Surfacing a new value in the webapp starts there, not in a component — a panel reading a field no writer sets is the half-wiring this contract exists to prevent, and its mirror image is just as real: `RoundSummary.improved` / `electable_count` are served today and rendered by nothing.
 
@@ -71,12 +89,10 @@ If a future change wants to defer or skip a write, the question to answer first 
 Two on-disk surfaces back the dashboard. Read from the right one:
 
 - **`dashboard.json`** (polled every 2 s by `lib/poll.tsx` → `useCycleStream()`) — in-flight `current_round` and the `rounds[]` array of completed-round summaries (**round 0 = origin**, a one-candidate round labelled "C0"; there is no separate origin block). **Sole source** for the FitnessChart, TrendChart, TopStrip sparkline. Don't stitch in `round_NNNN.json` for chart data.
-- **The `ForestCard` and the sidebar are NOT `dashboard.json` — they render `/tree`, THE served genealogy.** One recursive shape, `course → candidate → course`, alternating at any depth: an L4 inner run is a course hanging off the candidate it measured, so L5+ needs no new tier. Rooted at a COURSE, not a campaign. Owner: `store/lineage_views.py`; read by **one** client seam, `lib/lineage.tsx` — `useViewedLineage()` for the viewed campaign (carrying the what-if / lens / sample-set masks) and `useLineageTree(path, enabled)` for any other, both served from one keyed store with ref-counted subscriptions and one poll per live key. It walks the one `derivations/lineage-candidates.ts`. **The webapp derives no lineage.** Identity (`id`, `label`) is minted on the ledger and served; the round-CLOSE facts (`is_winner`, `theta`, `cumulative_theta`) come from `dashboard.json::rounds[]`, which is the only place they exist. A round that never closed has no entry there, so its candidates get no crown — which is why `pickWinner` has no first-candidate fallback. A HELD round and one that never closed are **not** distinguished today: both read `is_winner: false`, and nothing draws the difference. If that distinction should be visible, it returns WITH the surface that draws it.
-  - **A fork is not a node.** Its candidates sit on the parent's ONE timeline, renumbered there (`C{round}.{n}` is a course's private counter — every course mints a `C1.1`), wearing the ⑂ stamp and the fork's own `path`. Its `C0` is a replay and merges into the candidate it was cut from.
-  - **The address is `(path, candidateId)` — `nodeAt`, read off the node.** Never a bare cycle_id (inner ids collide across sandboxes), never a label. Because a fork-contributed candidate carries the fork's `path`, selecting it re-roots the dashboard / samples / inspector onto that fork for free.
-  - **Two axes, and keeping them apart is load-bearing:** NAVIGATION is `workspace::viewedPath` + `viewedCandidateId` ("whose children do the bars plot"), written ONLY by the sidebar; INSPECTION is `SelectionContext.candidate` ("which bar is lit"), written by a bar click. One slot for both made the chart its own input — it re-plotted under the cursor that clicked it. **A bar click never navigates.**
-  - **The bars are the children of the viewed node**, straight off the tree. `dash` keeps exactly one job here: the candidate being scored right now (the ledger mints before it measures, so a mid-scoring bar is not in the tree). One source per data class.
-  - **Separate cards on purpose:** everything in the candidates card is bound to the chart's box (that's what keeps the dendrogram on its bars); the forest shares no axis with it.
+- **The `ForestCard` and the sidebar are NOT `dashboard.json` — they render `/tree`, THE served genealogy, and the webapp derives no lineage.** One recursive shape, `course → candidate → course`, alternating at any depth, rooted at a COURSE: an L4 inner run is a course hanging off the candidate it measured, so L5+ needs no new tier. Owner `store/lineage_views.py`, read through **one** client seam (`lib/lineage.tsx`) over one keyed store. Identity (`id`, `label`) is minted on the ledger and served; the round-CLOSE facts (`is_winner`, `theta`, `cumulative_theta`) exist only in `dashboard.json::rounds[]`, so a round that never closed crowns nobody — which is why `pickWinner` has no first-candidate fallback. A HELD round and one that never closed both read `is_winner: false` and are **not** distinguished today; that distinction returns WITH the surface that draws it.
+  - **A fork is not a node.** Its candidates sit on the parent's ONE timeline, renumbered there (`C{round}.{n}` is a course's private counter — every course mints a `C1.1`), wearing the ⑂ stamp and the fork's own `path`. Its `C0` is a replay and merges into the candidate it was cut from. Reach a node with `nodeAt` / `candidatesAtPath`, never a bare cycle_id (inner ids collide across sandboxes) and never a label.
+  - **Two axes, kept apart:** NAVIGATION is `workspace::viewedPath` + `viewedCandidateId` ("whose children do the bars plot"), written ONLY by the sidebar; INSPECTION is `SelectionContext.candidate` ("which bar is lit"), written by a bar click. **A bar click never navigates** — one slot for both made the chart its own input, re-plotting under the cursor that clicked it.
+  - **The bars are the children of the viewed node**, straight off the tree. `dash` keeps exactly one job here: the candidate being scored right now (the ledger mints before it measures, so a mid-scoring bar is not yet in the tree).
 - **`rounds/round_NNNN.json`** (lazy, fetched via `lib/hooks/useRoundFile.ts`) — the round document, i.e. a serialized `RoundResult`: per-sample `results`, `all_candidate_results`, `candidate_scores`, the derived `scoreboard`, and the closing `opt_search_point` / `health`. Reach for it only when the operator drills into a specific round (FreqChart distribution, ScoringInspector composite/hits).
 - **The AUDIT TWIN, `.runtime/cache/rounds/round_NNNN.json`** (lazy, via `useRoundAudit`) — same basename, different tree, written by `AuditTrailView`. The per-node LLM I/O lives ONLY here; the round document carries no `nodes` block at all. `lib/hooks/useRoundNodes.ts` is the single resolver that picks between it and the live `dashboard.json::current_round.nodes`, and both the optimizer canvas and its node detail read through it — splitting that switch is what let them disagree about which round they were showing.
 
@@ -84,54 +100,50 @@ If you find yourself adding a "merge in-flight with historical" or "fall back to
 
 ## Viewed identity — one address (CyclePath)
 
-"What am I looking at?" has ONE answer: `viewedPath`, a **`CyclePath`** (`lib/ids.ts`) — the chain of `(campaign, cycle)` hops from the top-level root to the leaf. A top-level cycle is a 1-hop path; an L4 inner loop is a 2-hop path `[outer, inner]`; L5+ nests deeper (this mirrors the engine's re-entrant `.inner/<cycle_id>` sandbox). `lib/workspace.tsx` owns it: state is `pinnedPath` + `following`; `viewedPath` is derived (`following ? [active 1-hop] : pinnedPath`). Everything that DISPLAYS what you're looking at re-roots to the **LEAF hop** — the dashboard stream, the connector/pipeline hero, the hard-samples panes, the chat live activity feed (`useCycleEvents` + its gate-decision control, which is derived from the leaf `dash`), AND the selection axes (`SelectionProvider` is keyed on `leafCycleId`; it scopes the inspector / samples / `round_NNNN.json`, which all read the leaf). Drilling into an inner loop shows THAT inner cycle's telemetry everywhere, coherently. Only the operator's **conversation identity** stays on the **ROOT hop** — the `sessionId`, the ingest/compose-new-campaign flow, and Files (the `campaignId`/`cycleId` exports remain the root) — so drilling in never mints a new thread or moves ingest off the outer conversation. The leaf ids are derived from `viewedPath` at the consumer (`pathLeaf`), never a second identity variable. The connector/samples read the leaf's dataset (and the ETA chip the leaf's start time) via `useLeafCycleIndex`; the hard-samples slice + the feed both ride `?descend=` into the inner sandbox. There is no separate inner-focus axis; drilling in = `drillInto(campaignId, cycleId)` (the workspace appends the hop to `viewedPath` — a cell bar, an L4 panel row and the hard-samples pointer all name a run and mean "descend into it"; none of them builds the address), backing out = `backToOuter()`. `leafIsL4` is likewise the workspace's — the leaf campaign's `backend_type` decides whether a course's samples are inner campaigns, and the surfaces branch on that one answer rather than each re-running the lookup. Deep-link carries the WHOLE address — `?path=` (encoded CyclePath) **plus `?cand=`** (the parked candidate); malformed → falls back to following. Both halves, because the address is `(path, candidateId)`: encoding only the path made a reload drop the node the tree was parked on, which for a FORK turns a valid address into one that names nothing (a fork is not a node) and left the bars blank. For the same reason, DESELECTING a candidate row returns to the course whose TIMELINE it renders on, never to its own path with a null candidate. Don't reintroduce a second identity variable or a per-surface "unit" — every surface derives from `viewedPath`.
+**"What am I looking at?" has ONE answer — `viewedPath`, and no surface may keep a second.** It is a **`CyclePath`** (`lib/ids.ts`): the chain of `(campaign, cycle)` hops from top-level root to leaf, mirroring the engine's re-entrant `.inner/` sandbox — 1 hop for a top-level cycle, 2 for an L4 inner loop, deeper for L5+. `lib/workspace.tsx` owns it as `pinnedPath` + `following`, with `viewedPath` derived. Drilling in is `drillInto(campaignId, cycleId)` (the workspace appends the hop; a cell bar, an L4 panel row and the hard-samples pointer all just name a run), backing out `backToOuter()`.
+
+**Everything that DISPLAYS re-roots to the LEAF hop; only conversation identity stays on the ROOT.** Leaf: the dashboard stream, connector/pipeline hero, hard-samples panes, chat activity feed, and the selection axes (`SelectionProvider` keyed on `leafCycleId`). Root: `sessionId`, ingest/compose-new-campaign, and Files — so drilling in never mints a thread or moves ingest off the outer conversation. Leaf ids derive at the consumer (`pathLeaf`); `leafIsL4` is likewise the workspace's single answer rather than a per-surface lookup.
+
+**Deep-link carries the WHOLE address — `?path=` plus `?cand=`** (malformed → falls back to following). Both halves, because the address is `(path, candidateId)`: encoding only the path made a reload drop the parked node, which for a FORK names nothing at all (a fork is not a node) and left the bars blank. Same reason DESELECTING a candidate returns to the course whose TIMELINE it renders on, never to its own path with a null candidate.
 
 ## Polling shape
 
 - `GET /api/campaigns/{id}/cycles/{cid}/dashboard` supports `If-Modified-Since` → `304 Not Modified`. Client (`lib/poll.tsx`, `lastModifiedRef`) tracks the latest `Last-Modified` per `unitKey` (the encoded `CyclePath`) and skips `setState` on 304. One fetch (`fetchDashboardByPath`) serves any depth: an inner descendant rides a `?descend=<hops>` query the server walks into each hop's `.inner/` sandbox; at depth 1 the URL is byte-identical to a plain per-cycle read, so 304 semantics are unchanged.
 - When `dashboard.json` does not yet exist (fresh campaign before origin completes), the route returns `{ warming_up: true, campaign_id, cycle_id, phase_hint: "origin" }` with HTTP 200 and `Last-Modified` from the session dir mtime. Client recognises `warming_up === true` and renders a friendly placeholder ("Origin running") rather than treating the cycle as offline.
 - `unitKey` change (any hop of the path) resets `lastModifiedRef` in the render-phase guard. Required — without it, switching campaigns (or drilling into/out of an inner loop) leaves stale `If-Modified-Since` on the wire.
-- **A campaign's tree is `/tree`, fetched ONCE** (`lib/lineage.tsx`), conditional on a weak **ETag** per query key. The validator covers the `lens`/`samples` mask as well as the subtree mtime, which is what lets a MASKED read 304 — `Last-Modified` cannot express query-dependence, so masked reads used to be carved out of the fast path and rebuilt on every poll. There is no second genealogy read: the sandbox's `/campaigns`+`/cycles` pair used to answer "which inner run measured this cell" beside the tree, and the two disagreed — a fork's runs are stamped with the fork's private counter (`C1.1`) while the timeline renumbers them (`C1.4`), which only the tree can do. Ask the tree.
-- **ONE tree per campaign, addressed — not one fetch per scope.** The viewed campaign's tree is rooted at `rootCycleId`, and the server's recursion reaches every fork and inner run below it, so a leaf surface ADDRESSES into it (`nodeAt` for a node, `candidatesAtPath` for a course's timeline) rather than fetching its own. Two things used to force a second read, and neither survives:
-  - *"the sidebar must be mask-free."* A masked body is a strict **superset**: the server's overlay writes only `divergence` / `divergent` / `lens_value` / `sample_set_accuracy` / `sample_set_n`, and never touches `accuracy`, `composite_fitness`, `is_winner`, `theta`, `best_accuracy`, `origin_accuracy` or `run_phase` — everything the sidebar reads. The property came from the field set, not from a second request.
-  - *"the labels would not join."* A surface whose rows come from the LEAF's `dashboard.json` joins on **`course_label`** — the position the MINTING course gave the candidate, carried through the timeline renumber for exactly this. `label` is its renumbered position on the campaign's one sequence; the two differ precisely for a fork's contributions, which is the case the join exists for.
-- **A fork is not a node, so `nodeAt(tree, forkPath)` is `undefined` by construction.** Its contributed attempts — carrying the fork's own `path` — are its only trace in the tree. Reach them with `candidatesAtPath`; never scan for a bare cycle_id (inner ids repeat across sibling `.inner/` sandboxes).
-- **`/ray` is the CHRONOLOGY, and it is not a second tree.** `lib/hooks/useTimeRay.ts`, 5 s, ETag. The tree answers *what descends from what* (a fork sits beside its parent); the ray answers *what happened when* (a fork's records interleave with its parent's, which is the only way to see it ran concurrently). Server-side they share one family walk, so they cannot disagree about which cycles a campaign holds. Two windows, one validator: the HEAD is polled; an OLDER window is fetched once and held in memory, and revalidates like any window (`If-None-Match` against the family's mtimes — the server does not claim deep windows immutable).
-- **The ray has no SSE join, and the tail has no `since=`.** Those are two halves of one rule: there is exactly one live channel (`useCycleEvents`) and exactly one history channel (`/ray`). A second `EventSource` on the same URL, or a replay parameter on the tail, would each be a redundant mechanism; the ledger mtime bumps on every append, so the conditional poll surfaces a new event within one tick anyway.
+- **ONE tree per campaign, fetched ONCE and ADDRESSED into — never a second genealogy read.** `/tree` (`lib/lineage.tsx`) is conditional on a weak **ETag** whose validator covers the `lens`/`samples` mask as well as subtree mtime, which is what lets a MASKED read 304 (`Last-Modified` cannot express query-dependence, so masked reads used to be rebuilt on every poll). The server's recursion already reaches every fork and inner run, so a leaf surface uses `nodeAt` / `candidatesAtPath` rather than fetching its own. Two objections used to force a second read and neither survives: a masked body is a strict **superset** (the overlay writes only `divergence` / `divergent` / `lens_value` / `sample_set_*` and never touches what the sidebar reads), and labels DO join — on **`course_label`**, the minting course's position, which is carried through the timeline renumber for exactly this. The sandbox's old `/campaigns`+`/cycles` pair disagreed with the tree about a fork's runs (`C1.1` vs the renumbered `C1.4`); only the tree can do that renumber. Ask the tree.
+- **`/ray` is the CHRONOLOGY, not a second tree** (`lib/hooks/useTimeRay.ts`, ETag). The tree answers *what descends from what*; the ray answers *what happened when* — a fork's records interleave with its parent's, the only way to see it ran concurrently. Server-side they share one family walk, so they cannot disagree about which cycles a campaign holds. The HEAD window is polled, an OLDER one fetched once and revalidated like any other; the server does not claim deep windows immutable.
+- **Exactly one live channel (`useCycleEvents`) and one history channel (`/ray`).** So the ray gets no SSE join and the tail no `since=` — either would be a redundant mechanism, and the ledger mtime bumps on every append, so the conditional poll surfaces a new event within one tick anyway.
 - **`llm_call_progress` rides the ray on purpose.** The client uses a bare heartbeat to prove the process was alive across a silent stretch and then drops it from the rendered steps (`projectionToActivity` already returns null for one). Stop sending them and every heartbeated 120 s backend query grows a spurious gap marker. The coupling is commented at `format.ts::fmtGap`, `derivations/time-ray.ts` and `store/family_ray_views.py`.
 
 ## Failure handling — classify, don't bucket
 
-**A bare `catch` is the bug.** Every read-path failure is classified once at the
-transport seam by `failureKind(err)` (`lib/api/client.ts`) into
-`transient | auth | gone | denied | invalid`, and callers branch on that rather than on a
-status literal. `transient` is the safe default — 5xx, network and parse errors all land
-there — because the failure directions are asymmetric: mistaking transient for `gone`
-destroys the operator's view, mistaking `gone` for transient costs one retry.
+**A bare `catch` is the bug.** Every read-path failure is classified once at the transport
+seam by `failureKind(err)` (`lib/api/client.ts`) into `transient | auth | gone | denied |
+invalid`, and callers branch on that, never on a status literal. `transient` is the safe
+default — 5xx, network and parse errors all land there — because the directions are
+asymmetric: mistaking transient for `gone` destroys the operator's view, the reverse costs
+one retry.
 
-**`gone` (404) is terminal and must stop the poll.** The server answered; the address does
-not exist. This is ordinary, not exotic: `delete-campaign` removes the campaign you are
-looking at (root `CLAUDE.md` calls that the ordinary case), the reaper deletes an
-`.inner/` sandbox with no user action at all, and a store reset invalidates every
-bookmark. One owner acts on it — `workspace.tsx::reportAddressGone` unpins and resumes
-following — and **only the address's own authoritative read may report it**: an L4 inner
-hop is absent from `/cycles` and an archived campaign is absent from the `active` filter,
-so list membership would kill two live addresses. **Archived is not gone.**
+**`gone` (404) is terminal and must stop the poll**, and it is ordinary rather than exotic:
+`delete-campaign` removes the campaign you are looking at, the reaper deletes an `.inner/`
+sandbox with no user action at all, a store reset invalidates every bookmark. One owner
+acts — `workspace.tsx::reportAddressGone` unpins and resumes following — and **only the
+address's own authoritative read may report it**, because an L4 inner hop is absent from
+`/cycles` and an archived campaign from the `active` filter, so list membership would kill
+two live addresses. **Archived is not gone.**
 
-The detector is the dashboard poll, because it is the one read that speaks for the address:
-its route answers `warming_up` at 200 while a cycle exists without a dashboard, so a 404
-there means the cycle dir itself is gone. It confirms over `GONE_CONFIRM_LIMIT` consecutive
-misses (a single 404 is a mint race) before unpinning. Everyone else reacts locally without
-voting: `lineage-registry::markGone` retires the key from `live()`, `useTimeRay` latches
-`gone` and stops, and `useCycleEvents` — whose `EventSource` **cannot see a status**, so it
-would auto-reconnect a 404 forever — subscribes only while the address is live.
+The detector is the dashboard poll, the one read that speaks for the address: its route
+answers `warming_up` at 200 while a cycle exists without a dashboard, so a 404 there means
+the cycle dir itself is gone. It confirms over `GONE_CONFIRM_LIMIT` consecutive misses (a
+single 404 is a mint race). Everyone else reacts locally without voting — notably
+`useCycleEvents`, whose `EventSource` **cannot see a status** and would auto-reconnect a
+404 forever, so it subscribes only while the address is live.
 
-**Every failure is reportable.** `lib/diagnostics.ts` records each one with the `error_id`
-the API stamps on its envelope, bounded and localStorage-backed so it survives the reload
-the bug provokes. Ids, codes and paths only — **never** measurements or prompt text, the
-same rule `view-memory.tsx` states. Account → *Copy diagnostics* emits it as markdown for a
-bug report; each `error_id` greps the server log. Shipping that anywhere is a deployment
-concern (ADR-0004), never the app's.
+**Every failure is reportable, and carries ids only.** `lib/diagnostics.ts` records each
+with the `error_id` the API stamps on its envelope, localStorage-backed so it survives the
+reload the bug provokes; each `error_id` greps the server log. **Never** measurements or
+prompt text — the same rule `view-memory.tsx` states.
 
 ## State reset on prop change
 
@@ -145,40 +157,32 @@ if (key !== prevKey) {
 }
 ```
 
-It runs **during render**, so the reset and the re-render commit together — no stale frame. A `useEffect` reset runs after paint and flashes one frame of the prior unit's data; do not use it for this.
+It runs **during render**, so the reset and the re-render commit together — no stale frame. **A `useEffect` reset runs after paint and flashes one frame of the prior unit's data; never use it for this.** A hook owning a single state object may instead derive freshness purely: stamp the loaded data with the key it was fetched for and return `EMPTY` until the key matches. Also stale-frame-free.
 
-Canonical sites: `lib/poll.tsx` (`unitKeyRef`, the `useRef` variant), `lib/SelectionContext.tsx`.
+**A reset may SEED from view memory instead of clearing** — `lib/view-memory.tsx`, one localStorage record per campaign with TTL and LRU applied in the codec so no caller can forget them. It is `useSyncExternalStore`-backed, so the record is readable *during* render and a restore rides the same render-phase reset rather than a post-paint effect.
 
-A hook that owns a single state object may instead derive freshness purely — stamp the loaded data with the key it was fetched for and return `EMPTY` until the key matches (`lib/hooks/useDatasetPreview.ts`, `lib/hooks/useRoundFile.ts`). Also stale-frame-free.
-
-**A reset may SEED from view memory instead of clearing** — `lib/view-memory.tsx`, one localStorage record per campaign (14-day TTL, 24-campaign LRU, both applied in the codec so no caller can forget). It is `useSyncExternalStore`-backed, so the record is readable *during* render and a restore rides the same render-phase reset above rather than a post-paint effect. Canonical sites: `components/candidates/useLineage.ts` (the expanded lane set), `components/shell/Sidebar.tsx` (expand/collapse, via `useNodeToggle`), `components/shell/AppShell.tsx` (the viewed path + candidate).
-
-**Nothing in that record is a measurement, and that is a hard rule** — only ids, flags and UI keys. It is why the INSPECTION axis (`SelectionContext.candidate`) is NOT remembered: it carries `accuracy` and `is_winner`, and `ScoringInspector` renders `is_winner`, so a restored value would claim a candidate won a round it may since have lost. The NAVIGATION axis (`viewedPath` + `viewedCandidateId`) is remembered instead — it parks the tree on the same node and re-plots the same bars, and every field in it is an id. A lens / what-if / sample-set mask is excluded for the same reason: restoring one silently means the operator reads masked numbers as the record.
+**Nothing in that record is a measurement, and that is a hard rule** — ids, flags and UI keys only. It is why the INSPECTION axis (`SelectionContext.candidate`) is NOT remembered: it carries `accuracy` and `is_winner`, so a restored value would claim a candidate won a round it may since have lost. The NAVIGATION axis (`viewedPath` + `viewedCandidateId`) is remembered instead — every field in it is an id, and it merely re-parks the tree. A lens / what-if / sample-set mask is excluded for the same reason: restoring one silently means the operator reads masked numbers as the record.
 
 ## Render-cost guards (do not regress)
 
-Per-poll re-renders cascade through the chart tree by default. The following guards exist to stop that and must stay:
+Per-poll re-renders cascade through the chart tree by default. **Any chart consuming `dash` is `React.memo`-wrapped with its `useMemo`s keyed on the narrowest stable derivation** (`dash?.rounds`), never on `dash` itself. Two consequences worth stating:
 
-- `React.memo` on `FitnessChart` + `DendrogramStrip` (`components/candidates/`), `TrendChart` (`components/eval/TrendChart.tsx`), `TopStrip` (`components/dashboard/layout/TopStrip.tsx`).
-- The forest geometry (`components/candidates/forest-layout.ts`) runs inside `Forest`'s `useMemo`, keyed on the served `tree` + the `expanded` set, **not** on `dash` identity. The tree changes identity only when a refetch lands (the overlay provider fetches on the dashboard change-signal, and a 304 keeps the prior object), so re-renders from unrelated `dash` mutations don't recompute it. **The per-candidate value overlays (`valueByKey` / `thetaByKey`) ride OUTSIDE that memo on purpose** — a per-sample value tick repaints node text without re-flowing the geometry. Don't fold a live value into the structure. The dendrogram geometry (`components/candidates/dendrogram.ts`) follows the same rule, keyed on the stabilized structural rows + the published `centers`.
-- Chart `useMemo`s key on narrow stable derivations (e.g. `dash?.rounds`), not on `dash`.
-- **Anything riding the chart's `options` memo must be a stable identity.** `onSelect` / `onGeometry` are `useCallback`s: an inline arrow there defeats `FitnessChart`'s memo *and* forces a `chart.update()` on every 2 s poll tick — which the `xBridge` geometry publisher now rides.
-
-Any new chart that consumes `dash` follows the same pattern: `React.memo` wrap, `useMemo` keyed on the narrowest stable input.
+- **Geometry keys on STRUCTURE, live values ride outside it.** The forest and dendrogram layouts memo on the served `tree` + `expanded` set, not `dash` identity — the tree only changes identity when a refetch lands, so unrelated `dash` mutations cannot re-flow it. The per-candidate overlays (`valueByKey` / `thetaByKey`) sit deliberately outside that memo, so a per-sample tick repaints node text without re-flowing geometry. Don't fold a live value into the structure.
+- **Anything riding the chart's `options` memo must be a stable identity.** `onSelect` / `onGeometry` are `useCallback`s: an inline arrow there defeats the memo *and* forces a `chart.update()` on every poll tick.
 
 ## Testing posture
 
 The webapp gate is **compile-time + smoke + a small Vitest scope**, enforced by CI (`.github/workflows/ci.yml`, `webapp` job):
 
 - `npm run lint` — ESLint.
-- `npx tsc --noEmit` — full strict typecheck (`next build` alone does not hard-fail on every type error, so this line is what makes `strict` real). **`noUncheckedIndexedAccess` is ON**: an index access (`arr[i]`, `rec[k]`, `match[n]`) can miss, so it types as possibly-`undefined`. Without it a *correct* guard reads as dead code (`sample-line.ts` guards regex group 3, which the pattern makes optional) while a *missing* one reads as fine — the type system lied in both directions at once, and "is this `??` redundant?" had no answer. Handle the miss (skip / early-return); `!` only where the line above proves presence; **never `?? <default>` to silence it** — a fabricated number rendered as a measurement is the one thing this app must never do, and `edits[key] ?? r.value` is not `edits[key] !== undefined ? … : …` when the operator clears a field to `""`.
+- `npx tsc --noEmit` — full strict typecheck (`next build` alone does not hard-fail on every type error, so this line is what makes `strict` real). `noUncheckedIndexedAccess` is ON; what you may do with the possibly-`undefined` it surfaces is § Scoring authority.
 - `npm run test` — Vitest, scoped to `lib/**/__tests__/` + `components/**/__tests__/` per `webapp/vitest.config.ts`. Reader-side derivations only (pure data → data helpers); display components stay covered by smoke. Cycle fixtures live at `tests/fixtures/cycles/` — recipe at [`docs/developer/cycle-fixtures.md`](../docs/developer/cycle-fixtures.md).
 - `npm run build` — the static export must succeed.
 - Manual smoke at `http://localhost:8001/` after a behavioural change. Two states, two harnesses:
   - **anon** — open `:8001` as-is (no flag); drives the public-preview surface.
-  - **authed + live** — relaunch the server with `PROMPTPOTTER_AUTH=off`: `deps.py::resolve_identity` short-circuits to `registered_or_default_identity` (the CLI's resolver), so `/auth/me` returns 200 and every auth-gated read resolves to your **real on-disk campaigns** (zero spend, pure reads). This is the cheap way to exercise the contract's `live`/`warming` clauses — no Docker, no fixtures, and no second flag: repo `datasets/{name}/` is **install content** (tracked in git, so it ships with every clone) and needs no capability to read. Reserve the Dex harness ([`dev/oidc-local/`](../dev/oidc-local/), [`docs/developer/local-oidc.md`](../docs/developer/local-oidc.md)) for the one thing this can't reach: the real Google OIDC login round-trip.
+  - **authed + live** — relaunch with `PROMPTPOTTER_AUTH=off`: `deps.py::resolve_identity` short-circuits to the CLI's resolver, so `/auth/me` returns 200 and every auth-gated read resolves to your **real on-disk campaigns** (zero spend, pure reads). The cheap way to exercise the contract's `live`/`warming` clauses — no Docker, no fixtures. Reserve the Dex harness ([`dev/oidc-local/`](../dev/oidc-local/), [`docs/developer/local-oidc.md`](../docs/developer/local-oidc.md)) for the one thing it cannot reach: the real Google OIDC login round-trip.
 
-When to reach for a component-render test (`@testing-library/react`): pick a regression class that compile + smoke + the derivation tests can't catch — today's bug classes are reader-side and ride the existing Vitest scope.
+Reach for a component-render test only for a regression class compile + smoke + the derivation tests cannot catch; today's bug classes are reader-side and ride the existing Vitest scope.
 
 ## Build + run
 
@@ -190,6 +194,6 @@ npm run lint
 npx tsc --noEmit
 ```
 
-**Two build modes — `next build` has two audiences (`next.config.ts`).** `npm run build` is the operator's fast rebuild→reload preview loop: it compiles only. The React Compiler pass and full-bundle source maps are deploy-artifact concerns gated behind `DEPLOY_BUILD=1`, exposed as **`npm run build:deploy`** — the artifact CI validates and the deploy box (`deploy-linux/{bootstrap,update}.sh`) ships. Type-check and lint never run inside *either* build: they're owned by the dedicated CI gates above (`npx tsc --noEmit`, `npm run lint`), so re-running them in `next build` is duplication. The `build:deploy` script uses bash inline-env, so it runs in CI and on the deploy box; to preview compiler-on behaviour from Windows, set the var in-shell instead: `$env:DEPLOY_BUILD=1; npm run build`.
+**Two build modes (`next.config.ts`).** `npm run build` is the operator's fast rebuild→reload preview: compile only. The React Compiler pass and full-bundle source maps are deploy-artifact concerns behind `DEPLOY_BUILD=1`, exposed as **`npm run build:deploy`** — what CI validates and the deploy box ships. Type-check and lint run inside *neither*; they are the dedicated CI gates above, so repeating them in `next build` is duplication. `build:deploy` uses bash inline-env; to preview compiler-on behaviour from Windows use `$env:DEPLOY_BUILD=1; npm run build`.
 
 `out/` is the route mounted by FastAPI (`StaticFiles(html=True)` at `/`). After any source change, rebuild and hard-reload the browser. Dev mode (`npm run dev`) proxies `/api/*` to `http://127.0.0.1:8001` via `next.config.ts::rewrites` — production has no proxy (same FastAPI origin).

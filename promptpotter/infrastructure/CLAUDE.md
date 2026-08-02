@@ -13,15 +13,13 @@ typed event constructor over `CycleEventLog.append`. Orchestration uses
 `RunCallbacks`; the ledger is the only thing that touches disk for the
 campaign event stream.
 
-Per-call telemetry that fires from deep inside the dispatch chain (today:
-`TokenUsageRecord` from both the optimizer LLM-call site and the backend
-per-step site in `application/scoring/sample_measurement.py`) uses the
-`emit_*` shape instead of `RunCallbacks`: a kwargs-only helper in
-`infrastructure/llm/models.py` reads the active ledger from a per-cycle
-`ContextVar` (`_CYCLE_LEDGER`, set by `build_run_observers`, reset by
-`drain_all`) and appends a typed `*Record`. Same canonical ledger, no
-process global, no sink-installation indirection. New per-call surfaces
-follow the same pattern.
+Per-call telemetry firing from deep inside the dispatch chain uses the `emit_*`
+shape instead: a kwargs-only helper in `infrastructure/llm/models.py` reads the
+active ledger off the per-cycle `_CYCLE_LEDGER` ContextVar (set by
+`build_run_observers`, reset by `drain_all`) and appends a typed `*Record` — same
+canonical ledger, no process global, no sink-installation indirection. **Which
+shape a new surface takes, and the full add-a-surface recipe** — owned by
+[`../application/CLAUDE.md`](../application/CLAUDE.md) § Conventions.
 
 **Newtype-guarded projections** under `projections/`:
 
@@ -31,27 +29,21 @@ follow the same pattern.
 | `AuditTrailView` | per cycle / fork | `.runtime/cache/rounds/round_NNNN.json` | **Deep audit** — full LLM I/O, per-sample results, scoreboard with `per_sample`. Fetched lazily by the webapp (`useRoundFile`) only when an operator drills into a specific round. |
 | `PoBBStreamView` | per cycle | `.runtime/streams/round_NNNN_p_best.jsonl` | Per-sample P(best) trajectory for post-hoc posterior analysis. Operator-tailable; webapp does not consume it. |
 
-The **Profile A outbound SSE highway is NOT a projection/subscriber** — it is
-served by *tailing* the on-disk ledger (`projections/event_stream.py::CycleLedgerTail`)
-over `GET /campaigns/{c}/cycles/{cy}/events:subscribe`, **cross-process**: any
-reader (the API server, the CLI, a future MCP client) tails the cycle's
-`.runtime/ledger.jsonl` directly, so the stream no longer depends on the run
-living in the reader's own process. Snapshot-then-tail (leading `stream_snapshot`
-from `dashboard.json`, read as-is) + 15 s heartbeat; the ledger line index is the
-`ProjectionEnvelope.sequence`. The route 404s only for an unknown cycle. Certified
-contract: [`docs/developer/event-stream.md`](../../docs/developer/event-stream.md).
+The **outbound SSE highway is NOT a projection/subscriber** — it *tails* the on-disk
+ledger (`projections/event_stream.py::CycleLedgerTail`), **cross-process**: any reader
+(API server, CLI, a future MCP client) tails the cycle's `.runtime/ledger.jsonl`
+directly, so the stream does not depend on the run living in the reader's own process.
+Snapshot-then-tail plus a heartbeat; the ledger line index IS the
+`ProjectionEnvelope.sequence`. Certified contract:
+[`docs/developer/event-stream.md`](../../docs/developer/event-stream.md).
 
-`LiveDashboardView` writes into the **cycle's own dir**
-(`cycles/{cycle_id}/dashboard.json`) — every cycle (root, fork, sweep, diag)
-owns its live stream, stamped with its own `cycle_id`. A fork's view can't
-surface the parent's id; a fork seeds its prior trajectory from the parent's
-on-disk `dashboard.json` (via `for_session(seed_from_cycle_id=…)`). The write
-target is the `CycleDir` newtype (`domain/cycle_paths.py`); the read sites
-(the per-cycle `dashboard` route, the SSE ledger-tail's snapshot frame) serve
-the viewed cycle's own file — no `root_cycle_id` collapse. Run-state rides
-`dashboard.json::run_phase` (declared by the runner, projected by
-`LiveDashboardView`); the old non-cached `/runstate` probe is gone — its
-freshness-based "running" was the symptom that run-state was never owned state.
+**Every cycle — root, fork, sweep, diag — owns its live stream** at
+`cycles/{cycle_id}/dashboard.json`, stamped with its own id; a fork's view can never
+surface the parent's, though it seeds its prior trajectory from the parent's file.
+Write target is the `CycleDir` newtype, and the read sites serve the viewed cycle's own
+file — no `root_cycle_id` collapse. Run-state rides `dashboard.json::run_phase`, declared
+by the runner: the old `/runstate` probe inferred "running" from freshness, which was the
+symptom that run-state had never been owned state.
 
 `DerivedView.on_record` (`projections/base.py`) owns the
 `isinstance(record, …)` dispatch; subclasses override hooks. There's no
@@ -102,6 +94,17 @@ under `datasets/`, whose block-scalar emitter lives beside them. There is
 deliberately no `read_yaml_tolerant` — a corrupt config that degrades to "not
 there" attributes a measurement to the wrong fingerprint.
 
+## One deleter — `rmtree_robust`
+
+**Route every recursive delete through `store/io.py::rmtree_robust`** (or
+`unlink_robust`, its by-arity sibling); **a bare `shutil.rmtree` in this package is a
+bug.** It cannot remove the trees this package writes, and with `ignore_errors=True` it
+fails *silently* — leaving a half-deleted cycle that later reads as a real one. The
+function's docstring carries the measurement and the failure mode; do not restate them
+here.
+
+## Picking a JSON reader is a decision
+
 **`read_json_optional` vs `read_json_tolerant` is a decision, not a preference.**
 Tolerant collapses *absent* and *corrupt* into one answer; optional lets corrupt
 raise. Use **tolerant** for a cross-cycle SURVEY — walking siblings, building the
@@ -114,6 +117,8 @@ and malformed are opposite security answers (`check_allowlist` allows on absent
 and denies on malformed — collapsing them would fail OPEN). Hand-rolling
 `json.loads(path.read_text())` in a `try` is the bug; picking the stricter helper
 on purpose is not.
+
+## Stores — the rest of the layout
 
 Path helpers in
 `store/layout.py`; the per-tenant

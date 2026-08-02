@@ -31,16 +31,21 @@ for any test is not "does this guard a contract?" — almost everything does —
 That is the suite — **six files**. No structural / wire / persistence / identity /
 quota / lifecycle / event-stream / display / shape tests — all of those fail loud.
 
-**One sanctioned repo-wide scan**, and the reasoning matters because it looks like the
-thing the line above bans. `test_integrity.py::test_no_raw_nul_bytes_in_tracked_text_files`
-walks `git ls-files`. It earns its place on this file's own bar: a raw NUL byte makes
-ripgrep skip the whole file **silently** while `tsc`/eslint/`next build`/`pytest` all stay
-green — so nothing fails loud, and every later audit reads a codebase with that file
-missing. It is also self-concealing (searching `\0` skips exactly the files containing one),
-so no amount of re-grepping finds it. It cannot be an import-time assert either: no
-production module owns the repo's file bytes. Two such files existed on 2026-07-17 and had
-manufactured false dead-code findings twice. A scan that catches a tool lying about the
-codebase is not a shape test.
+**Two sanctioned repo-wide scans** — and the reasoning matters, because both look like the
+thing the line above bans. Each catches a tool or a reader being lied to, which no other
+run reveals; each test's docstring carries the detail.
+
+- `test_no_raw_nul_bytes_in_tracked_text_files` — a raw NUL makes ripgrep skip the whole
+  file **silently** while `tsc`/eslint/`next build`/`pytest` all stay green, so every later
+  audit reads a codebase with that file missing. Self-concealing, too: searching `\0` skips
+  exactly the files containing one. Two such files manufactured false dead-code findings twice.
+- `test_claude_md_claims_resolve` — **nothing but an agent reads a `CLAUDE.md`, and an agent
+  following a dead pointer does not raise.** It reads a rule that is not there, or misses one
+  that is, and edits the code accordingly with every gate green throughout. A claim scan, not
+  a shape scan: it asserts nothing about how the tree is organized, only that what the files
+  already claim still resolves.
+
+Neither can be an import-time assert: no production module owns the repo's file bytes.
 
 ## Structural invariants live in production, not tests
 
@@ -57,8 +62,8 @@ validate, never as a repo-wide structure scan.
 
 Before writing one, answer: *if this broke in production, would I see it?* If
 yes, do not write the test — let it break and fix it then. If genuinely no (it
-corrupts a number or leaks something with no symptom), it rides one of the three
-files above by adding a function — never a new file.
+corrupts a number or leaks something with no symptom), it rides one of the files
+above by adding a function — never a new file.
 
 ## Mock strategy
 

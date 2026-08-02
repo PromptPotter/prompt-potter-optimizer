@@ -5,11 +5,17 @@ The use-case layer between `domain/` (pure types, frozen models) and
 `runner/` — coordinates everything; subpackages each own a coherent
 slice of orchestration.
 
-## Layer rule (fails loud at import; see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md))
+## Layer rule
 
-`application/intelligence/` MUST NOT import from `application/optimization/`.
+**`application/intelligence/` MUST NOT import from `application/optimization/`.**
 The optional sensitivity scan and the optimization loop both *consume*
-intelligence; intelligence does not depend on either.
+intelligence; intelligence depends on neither. It carries no test because a
+**module-level** back-import raises on the spot — `optimization/` imports
+`intelligence/` at module level throughout, so the cycle closes at import time
+([`../../tests/CLAUDE.md`](../../tests/CLAUDE.md) § Structural invariants). A
+**function-local** import does not raise, and that is precisely what a circular-import
+error tempts you into: moving an import inside a function to make the error go away
+does not fix the cycle, it hides this rule.
 
 ## Subpackages
 
@@ -26,7 +32,7 @@ intelligence; intelligence does not depend on either.
 ## Top-level modules
 
 - `runner/` — master orchestrator; the optimize-loop entry point (`identity`, `round`, `sweep`, `loop`, `entry`). `runner/inner/` is the L4 recursion: `tasks.py` (the panel a dataset declares in `inner_tasks.yaml` — the type is the validator, `extra="forbid"`) + `cycle.py` (spawn context, the sandboxed re-entrant task, the narrative). The law that SCORES the result is one layer down, in `domain/l4/` — keep it there.
-- `config.py` — `CampaignConfig` model + LLM factory. **Every knob declares itself on its own field** — `Annotated[T, Knob(scope, *estimands)]` says what it shapes (`Scope.POLICY` = resume keeps the data trace; `Scope.DATA` = resume runs divergence detection) and which `Estimand`(s) it moves. Adding a knob without one fails at import.
+- `config.py` — **renaming a `CampaignConfig` / `Campaign` field is a data migration, not a code change.** `extra="forbid"`, and the config rides **two** on-disk surfaces: the minted manifest `campaigns/{id}/campaign.json::config` and the dataset template `datasets/{slug}/campaign.yaml::campaign_config`. A rename makes `load_campaign_config` raise `extra_forbidden` on every file still naming it — `resume`/`ab`/`verify`/L4 die at load, the dataset reads 500. It has fired three times. Read the rule narrowly, because reading it wider is the usual error: **we may break our own code freely; we may not silently break measurements a paying tenant owns** — so on an empty dev store it costs nothing (count first, per root § STOP). Both surfaces already persist only the **delta from defaults** (`freeze_campaign_config`), so renaming a knob nobody set is free; one the operator *did* set still breaks, which the fixtures pin through the real reader. Never `extra="allow"`, an alias, or a migration shim. **Every knob declares itself on its own field** — `Annotated[T, Knob(scope, *estimands)]` says what it shapes (`Scope.POLICY` = resume keeps the data trace; `Scope.DATA` = resume runs divergence detection) and which `Estimand`(s) it moves. Adding a knob without one fails at import.
 - `output.py` — operator-facing artifact writers (`write_log_md`, `write_review_md`, `write_hard_samples_artifacts`) + disk-side view reconstruction (`from_disk_log`). Computes artifacts and writes disk (orchestration), so it lives here — not in `presentation/`. Renders through `application/views` (`to_markdown` + typed view models).
 - `knobs.py` — `KNOBS`, walked off those declarations: the ONE config-leaf taxonomy. Two facets read it — `classify_config_diff` (resume: does this edit fork the data trace?) and `COUPLINGS`/`resolve_knob_states` (which knobs collide, what overwrites what → preflight + the webapp config-map panel). One-way import: `knobs` → `config`, never the reverse.
 - `optimizer_prompt_ranking.py` — ranks optimizer prompt states by anchor-to-origin paired effect, recomputed from disk per read (`GET /optimizer-prompt-ranking`). **Read-only, and deliberately so** — it names a leader; graduating one into `promptpotter/assets/optimizer/pipeline.yaml` is a hand-edit. The CLI verb `rank-optimizer-prompts` reads it and writes nothing; an earlier verb of the same shape that DID write that file was deleted, so treat that manifest as operator-owned. It also serves `OuterSnr` — whether the ranking can be believed at all (L4 finish-line item 7), pooled from the same walk: repeat readings of one (state, cell) are the noise series, the spread of `anchor_effect` across states the signal. `None` rather than a number wherever the corpus cannot support one; a leader from a panel that cannot resolve arms is noise wearing an ordering.
@@ -43,6 +49,10 @@ intelligence; intelligence does not depend on either.
 - Escalation flows via return value (`QueryLoopResult.escalation_signal`),
   not exception.
 - New optimizer state MUST flow through `OptSearchPoint` — no sidecar state.
+- **An await that can outlast `RUN_FRESH_S` and writes nothing MUST heartbeat**
+  (`optimization/dispatch/llm_call/heartbeat.py`) — silence is how this package
+  says "dead", so a long quiet await reads as a vanished producer and gets reaped
+  out from under itself. Obligates every long await here, not just the LLM calls.
 - Backend tunables ride the per-dataset overlay
   (`datasets/{name}/pipeline.yaml::nodes.{name}.config`) merged by
   `configure_and_apply_pipeline()` (`config.py`). See **Backend overlay** below for the merge contract.
@@ -60,10 +70,10 @@ intelligence; intelligence does not depend on either.
 
 ## Backend overlay
 
-`nodes.{name}.config` in the dataset's `pipeline.yaml` is a sparse overlay merged onto each wire payload by `load_dataset_node_overlay` → `configure_and_apply_pipeline()` (`config.py`). It's the sole route for changing a backend tunable — model, provider, temperature, anything in the node's `optimizer.param_keys`. **The dataset OWNS its task model**: every LLM node must carry `config.model` (benchmarks pin theirs, e.g. AIME → OpenRouter+Mistral; a fresh drop inherits the connector's `default_node_config` seed, written into its own committed file). A missing model is a loud setup error in `configure_and_apply_pipeline`, never a silent fall-through to the backend's hidden `GET /pipeline` default.
+**This layer MERGES the overlay; it never authors one.** `nodes.{name}.config` in the dataset's `pipeline.yaml` is a sparse overlay laid onto each wire payload by `load_dataset_node_overlay` → `configure_and_apply_pipeline()` (`config.py`). A node arriving with no `config.model` is a loud setup error raised right there — never a silent fall-through to the backend's hidden `GET /pipeline` default, because a silent one attributes a measurement to a model nobody chose.
 
 **Resolution is tenant-first.** "The dataset's `pipeline.yaml`" means the file under the dir `readable_dataset_dir` chose — a tenant upload at `projects/{tenant}/datasets/{slug}/` before install content at `datasets/{name}/`. The loaders (`load_dataset_node_overlay`, `load_node_prompt`, …) take that resolved dir (carried on `Session.dataset_config_dir`), never a bare name — so an ingested dataset's overlay + starting prompts load identically to a benchmark's.
 
-**Per-dataset tunable switches ride the overlay, never a backend edit.** A model/provider/temperature change for one dataset belongs in `nodes.{name}.config` (extend the overlay, not the backend) — pipeline-agnostic is a §0 commitment, and a truly third-party/read-only backend you can't edit anyway. **TermNorm is the exception to "read-only backend," not to this rule:** it's co-owned/same-project, so a genuine *structural* root cause living in TermNorm's code should be fixed there (coordinate explicitly), keeping both sides as simple as possible — don't patch PromptPotter to paper over a TermNorm-root bug. The line: per-dataset config → overlay; backend behaviour/bug → TermNorm root-fix.
+**Sole route for a tunable change** — owned by [`../../datasets/CLAUDE.md`](../../datasets/CLAUDE.md) § Sole route. This layer only merges what that route produced; it never reads a tunable from anywhere else. **Where a change belongs when the cause is in TermNorm's own code** — owned by [`../connectors/CLAUDE.md`](../connectors/CLAUDE.md) § TermNorm is not a third party.
 
 **Cycle-seed overlay (seeded cycles — steered forks + campaign-from-origin).** A seed's `pipeline_overlay` (read from the cycle's `CycleSeedRecord` on the ledger) is layered ON TOP of the resolved `session.pipeline_params` (which already holds dataset-overlay + campaign-overrides), so the effective precedence is **seed > campaign-override > dataset > backend default** — for that cycle only, the dataset file stays immutable. The merge is read-once and applied at the single runner seam (`runner/entry.py::run_optimization` via `_read_cycle_seed`), keyed by the known `cycle_id` — not threaded through each launcher or `configure_and_apply_pipeline` caller.

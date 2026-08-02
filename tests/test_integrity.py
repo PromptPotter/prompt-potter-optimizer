@@ -1695,6 +1695,114 @@ def test_no_raw_nul_bytes_in_tracked_text_files() -> None:
     )
 
 
+_CLAUDE_LINK = re.compile(r"\]\(([^)\s]*?)(?:#([^)]*))?\)")
+# A "§ Name" that FOLLOWS a link on the same line, i.e. a claim about the linked file.
+# The name ends at the first punctuation a heading cannot contain. Deliberately not greedy:
+# an over-wide capture is worse than no check, because a scan that cries wolf gets xfailed
+# and then the entire claim surface goes unchecked — the exact failure this guards.
+_CLAUDE_SECTION = re.compile(
+    r"\]\(([^)\s]*?)(?:#[^)]*)?\)[^.\n]{0,40}?§\s*([A-Za-z][^.,;`|)\n\[]{2,60}?)"
+    r"(?=\s+[—+·]|\s*$|\s*\(|,|\.\s|\s*\*\*|$)",
+    re.M,
+)
+_CLAUDE_HEADING = re.compile(r"^#{1,6}\s+(.*?)\s*$", re.M)
+_CLAUDE_CARD = re.compile(r"^##\s+Load-bearing\s*$(.*?)(?=^##\s|\Z)", re.M | re.S)
+_CLAUDE_CARD_TARGET = re.compile(r"→\s*§\s*(.+?)\s*$", re.M)
+# Each entry is a shape that reads as a fact but silently decays into a false one.
+_CLAUDE_BANNED = {
+    "line-number reference": re.compile(r"\.(?:py|ts|tsx):\d+"),
+    "R-NN rule tag": re.compile(r"(?<![A-Z])R-\d\d\b"),
+}
+
+
+def _claude_headings(path: Path) -> set[str]:
+    if not path.is_file():
+        return set()
+    text = path.read_text(encoding="utf-8")
+    return {re.sub(r"[`*]", "", h).strip() for h in _CLAUDE_HEADING.findall(text)}
+
+
+def test_claude_md_claims_resolve() -> None:
+    """A CLAUDE.md pointing at a section, file or anchor that does not exist.
+
+    Silent by construction, and in the one direction that matters: nothing reads these
+    files but an agent, and an agent that follows a dead pointer does not raise — it
+    reads a rule that is not there, or fails to find one that is, and then edits the
+    code accordingly. Every gate stays green throughout. The same reasoning that put
+    `test_every_test_named_by_the_package_exists` in this file: a claim like this is
+    false exactly the way "covered" reads when nothing ran.
+
+    Four assertions, each a shape that decayed in practice:
+
+    1. `§ Name` after a link resolves to a heading in the file that link named. Two had
+       gone dead (a `structured-output.md` section renamed out from under its reference,
+       and a pre-flight-gate bullet that lost its letter) while two more that LOOK dead
+       resolve fine — so this must be resolve-or-fail, never a ban on the syntax.
+    2. Every `](path)` and `](path#anchor)` resolves on disk.
+    3. Every `## Load-bearing` right-hand side is a heading in the SAME file. This is what
+       stops the card becoming a second owner of the rule it indexes: the only content it
+       may carry is a string that also exists as a heading.
+    4. No banned token. A `file.py:120` reference rots on the next edit to that file and
+       cannot be checked by reading it; an `R-NN` tag cites a rule registry this repo has
+       never had (`potter-debt-sweep/SKILL.md` says so itself).
+
+    What it cannot catch, so nobody reads a green as more than it is: a count that is
+    simply wrong, semantic drift in a claim about behaviour, two plausible owners for one
+    rule, and — self-concealingly — an UNTRACKED CLAUDE.md, since `git ls-files` cannot
+    see one. That last gap is the same shape as the NUL scan's above, and it is why a
+    gitignored copy of `datasets/CLAUDE.md` shipped in the wheel unnoticed: fully visible
+    to every tool an agent uses, invisible to every tool built on git.
+    """
+    root = Path(__file__).resolve().parents[1]
+    tracked = subprocess.run(
+        ["git", "ls-files"], cwd=root, capture_output=True, text=True, check=True
+    ).stdout.split("\n")
+
+    def slug(heading: str) -> str:
+        return re.sub(r"[^a-z0-9\- ]", "", heading.lower()).replace(" ", "-")
+
+    broken: list[str] = []
+    for rel in (p for p in tracked if p.endswith("CLAUDE.md")):
+        path = root / rel
+        text = path.read_text(encoding="utf-8")
+
+        for target, anchor in _CLAUDE_LINK.findall(text):
+            if target.startswith(("http", "mailto")):
+                continue
+            dest = path if not target else (path.parent / target).resolve()
+            if not dest.exists():
+                broken.append(f"{rel}: link -> {target}")
+            elif (
+                anchor
+                and dest.is_file()
+                and slug(anchor) not in {slug(h) for h in _claude_headings(dest)}
+            ):
+                broken.append(f"{rel}: anchor -> {target or '(self)'}#{anchor}")
+
+        for target, name in _CLAUDE_SECTION.findall(text):
+            name = name.strip().rstrip("*_ ")
+            dest = path if not target else (path.parent / target).resolve()
+            if not dest.is_file():
+                continue
+            if not any(h.lower().startswith(name.lower()) for h in _claude_headings(dest)):
+                broken.append(f"{rel}: § {name!r} is not a heading in {target or '(self)'}")
+
+        own = _claude_headings(path)
+        for card in _CLAUDE_CARD.findall(text):
+            for entry in _CLAUDE_CARD_TARGET.findall(card):
+                if re.sub(r"[`*]", "", entry).strip() not in own:
+                    broken.append(f"{rel}: Load-bearing -> § {entry!r} is not a heading here")
+
+        for label, pattern in _CLAUDE_BANNED.items():
+            broken += [f"{rel}: {label} {hit!r}" for hit in pattern.findall(text)]
+
+    assert not broken, (
+        "CLAUDE.md claim(s) that do not resolve:\n  " + "\n  ".join(sorted(broken)) + "\n"
+        "An agent following one of these reads a rule that is not there, silently. Fix the "
+        "pointer, or delete the claim — never relax the check."
+    )
+
+
 def test_every_test_named_by_the_package_exists() -> None:
     """A docstring that names an enforcement test which was never written.
 

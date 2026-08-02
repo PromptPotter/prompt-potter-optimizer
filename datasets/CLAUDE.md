@@ -38,6 +38,10 @@ The roster is the directory listing; each dataset's connector is read off its ow
 - **`justlogic-d234`** — the L4 inner benchmark (an iid mix of depths 2-4; `justlogic` (d6-7) and `justlogic-d23` are dead cuts kept only so their banked measurements stay addressable); **`promptpotter-self`** (`promptpotter` connector) — the one L4 dataset ([§ L4 below](#l4--promptpotter-self)).
 - **The optimizer's own prompt homes are not in this directory.** They sat here as `_optimizer/` + `_optimizer_meta/` until 2026-07-30 — which is why the listing once needed an `_`-prefix filter — and moved under the package as install content: `promptpotter/assets/optimizer/pipeline.yaml` + `sets/*.yaml`, shipped in the wheel. Which prompts live where → [`../docs/glossary.md`](../docs/glossary.md) **Prompt homes**. Still **operator-owned files** — nothing writes them. `optimizer_prompt_ranking.py` ranks optimizer-prompt states; graduating a winner into `assets/optimizer/pipeline.yaml` is a deliberate hand-edit, and an installed operator shadows that one file via `config/paths.py::optimizer_pipeline_path`.
 
+## Re-cutting a dataset needs a NEW name
+
+**A `sample_id` identifies a sample only *within* a `dataset_name` — the row's text is not in the key.** So changing which rows a dataset holds, or what a row says, while keeping the name serves the OLD measurement for the new sample, silently and with no error anywhere. Cut the new version under a new `datasets/{name}/` and leave the old directory in place; that is why the dead `justlogic` (d6-7) and `justlogic-d23` cuts above still exist. Key + the requirement that scopes it: `infrastructure/store/archive_views.py::reusable_results`.
+
 ## L4 — `promptpotter-self`
 
 `datasets/promptpotter-self/` is the **recursive case**: the outer cycle's mutation surface is the inner cycle's optimizer prompt template fields (`l1_generate` / `l1_critique` / `l2_context` / `l3_plan`), exposed via `pipeline.yaml::nodes.{node}.optimizer.param_keys`.
@@ -54,10 +58,23 @@ Source of truth for wire / reject rationale, projection-bias findings, per-datas
 - **Why X is / isn't wired, trialed-and-rejected list** → [`../docs/operations/dataset-selection-rationale.md`](../docs/operations/dataset-selection-rationale.md). Check first when asked "why didn't we use Y?" or "have we trialed Z?".
 - **Per-dataset model + `reasoning_effort` + `max_tokens`, BBEH output-ceiling traps, Groq daily-volume swap protocol** → [`../docs/operations/dataset-reasoning-matrix.md`](../docs/operations/dataset-reasoning-matrix.md). This — not self-optimizing campaign NOTES.md — is the canonical source for model recommendations.
 
+## `cache.json` is the item bank, not a score cache
+
+**Don't hand-edit it, and don't reason about origin cost from it.** It holds
+`{name, created_at, source_file, row_count, items}`, read into `session.samples` at wiring.
+A file *here* is the SHIPPED bank (only `email-tagging` has one); a fetched one is the
+operator's, written to `.promptpotter/{tenant}/benchmark-rows/{name}.json` by
+`resolve_dataset_items` → `TenantDatasetStore.save_benchmark_rows`, since this tier is
+read-only under a wheel. Both resolve through `readable_dataset_rows`. It is **not** an
+origin score cache, though this file described it as one for a long time: measurements
+live in the tenant-global content-addressed `measurements/` archive
+(`infrastructure/store/archive_views.py`), which is what replays origin rows across
+cycles, forks and resumes. `sp_budget_origin` breadth is cheap *because* of that archive,
+never because of this file.
+
 ## Conventions
 
-- **Origin = conservative floor** — the overlay starts at each tunable's floor; contract in [`../promptpotter/application/optimization/CLAUDE.md`](../promptpotter/application/optimization/CLAUDE.md).
-- **Don't hand-edit `cache.json`.** It is the **item bank** — `{name, created_at, source_file, row_count, items}`, read into `session.samples` at wiring. A file here is the SHIPPED bank (only `email-tagging` has one); a fetched one is the operator's and is written to `.promptpotter/{tenant}/benchmark-rows/{name}.json` by `resolve_dataset_items` → `TenantDatasetStore.save_benchmark_rows`, since this tier is read-only under a wheel. Both are resolved by `readable_dataset_rows`. It is NOT an origin score cache, though it was described as one here for a long time: measurements live in the tenant-global content-addressed `measurements/` archive (`infrastructure/store/archive_views.py`), which is what replays origin rows across cycles, forks and resumes. The distinction matters when reasoning about origin cost — `sp_budget_origin` breadth is cheap *because* of the archive, not because of this file.
+- **Origin = conservative floor** — owned by [`../promptpotter/application/optimization/CLAUDE.md`](../promptpotter/application/optimization/CLAUDE.md) § Origin = conservative floor. Every tunable in this directory's overlay starts at its floor.
 - **`task_description.md` is L1's framing input** — written for the LLM that will generate candidates, not for human readers (though it should be readable).
 - **`task_context.yaml` is that description DECOMPOSED, and it is optional here.** An ingested dataset gets one at commit from its check-in; a benchmark may ship one (six of ten do). When it is absent, the first run decomposes `task_description.md` once — and writes the result to `.promptpotter/{tenant}/task-context/{name}.yaml`, **not** back into this directory, which is read-only under a wheel. Same definition-vs-derived split as `cache.json` above, and for the same reason. Resolved tenant-then-install by `readable_task_context`; hand-editing either tier's copy is supported (the run reads whichever wins).
 - **`dataset.md` is operator-facing** — describes source, split, sample shape; cite the canonical evaluation protocol.

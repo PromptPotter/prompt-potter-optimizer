@@ -30,24 +30,18 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 | Question | Read first |
 |---|---|
 | Where does concept X live? | [`developer/concept-map.md`](developer/concept-map.md) |
-| What is the shape of this project? | [`architecture.md`](architecture.md) §0 |
-| What is the load-bearing surface? | [`architecture.md`](architecture.md) §0.5 |
-| What does this domain word mean? | [`glossary.md`](glossary.md) |
 | What is the origin? When is it a *parent* instead? | [`architecture.md`](architecture.md) §0.5 (the start-definitions bullet) |
 | Under which fitness formula? active / what-if / lens / replay, `composite_fitness` vs `accuracy` | [`architecture.md`](architecture.md) §0.5 (Composite-fitness resolution chain) + [`concepts/scoring-and-memory.md`](concepts/scoring-and-memory.md) |
 | The situational reasoning doctrines (simplify-the-problem / surface-ledger / reach-the-operator)? | [`developer/conventions.md`](developer/conventions.md) § Reasoning doctrine (the two universal gates stay in root [`CLAUDE.md`](../CLAUDE.md)) |
 | Debugging the PP↔TermNorm highway (async hygiene, `--reload` session wipe, latency)? | [`operations/backend-integration.md`](operations/backend-integration.md) § Debugging the highway |
 | Why does a schema's field order / `description=` change what the model says? | [`concepts/structured-output.md`](concepts/structured-output.md) (the schema is a second prompt) |
-| How does information flow through L1 / L2 / L3? | [`developer/dispatch-hub.md`](developer/dispatch-hub.md) |
+| How does information flow through L1 / L2 / L3? How is L1's evidence surface built? | [`developer/dispatch-hub.md`](developer/dispatch-hub.md) (§ L1 layout for the latter) |
 | How do I add a record / injection / view-field / connector without half-wiring it? | [`developer/adding-a-surface.md`](developer/adding-a-surface.md) (recipe + the CI guard per surface) |
 | How does a layer heal a failure? | [`developer/self-healing-internals.md`](developer/self-healing-internals.md) |
-| How is L1's evidence surface built? | [`developer/dispatch-hub.md`](developer/dispatch-hub.md) § L1 layout |
-| **What is L4 / how does PromptPotter optimize itself?** | [`concepts/optimizer-of-the-optimizer.md`](concepts/optimizer-of-the-optimizer.md) + [`specs/roadmap.md`](specs/roadmap.md) |
 | What datasets do we use? Why didn't we use Y? | [`operations/dataset-selection-rationale.md`](operations/dataset-selection-rationale.md) |
 | What model + `reasoning_effort` for this dataset? | [`operations/dataset-reasoning-matrix.md`](operations/dataset-reasoning-matrix.md) (canonical — NOT self-optimizing campaign NOTES.md) |
 | What's the canonical split for this benchmark? | [`operations/adding-a-dataset.md`](operations/adding-a-dataset.md) |
-| How do I run the auth-on dashboard locally? | [`developer/local-oidc.md`](developer/local-oidc.md) (Dex harness at `dev/oidc-local/`) — only needed for the real OIDC login round-trip |
-| How do I drive the authed/live UI surface (no OIDC, no spend)? | Relaunch with `PROMPTPOTTER_AUTH=off` → reads your real on-disk campaigns. Recipe + the per-control behavior bar: [`../webapp/CLAUDE.md`](../webapp/CLAUDE.md) § Testing posture + [`specs/frontend-surface-contract.md`](specs/frontend-surface-contract.md) |
+| How do I drive the authed/live UI locally (no OIDC, no spend)? | Relaunch with `PROMPTPOTTER_AUTH=off` → reads your real on-disk campaigns. Recipe: [`../webapp/CLAUDE.md`](../webapp/CLAUDE.md) § Testing posture. Only the real OIDC round-trip needs the Dex harness, [`developer/local-oidc.md`](developer/local-oidc.md) |
 | What's the full access/security model — tiers, boundaries, enforcement, deploy checklist? | [`operations/access-model.md`](operations/access-model.md) |
 | How do I manage the sign-in allowlist / host securely? | [`operations/secure-hosting.md`](operations/secure-hosting.md) + [`adr/0004-operator-admin-channels.md`](adr/0004-operator-admin-channels.md) |
 | How do I freeze a buggy cycle as a test fixture? | [`developer/cycle-fixtures.md`](developer/cycle-fixtures.md) (`tests/fixtures/cycles/`) |
@@ -62,8 +56,21 @@ L4 (PromptPotter optimizing its own optimizer prompts) **recursion is SHIPPED & 
 
 The dataset side: [`../datasets/CLAUDE.md`](../datasets/CLAUDE.md) § L4 — `promptpotter-self`.
 
-## Out-of-bounds
+## Editing a doc
 
-- Documentation does **not** define behavior — code does. When a doc and the code disagree, the code wins and the doc gets updated. (Exception: `architecture.md` § 0 / 0.5, which IS a contract — code that disagrees gets fixed.)
-- Specs in `specs/` are forward-looking. Past-tense facts about how the system works belong in `concepts/` / `developer/` / `operations/`; `specs/` describes direction of travel.
-- Per-layer CLAUDE.md files in `promptpotter/*/` are the **per-package contracts** — keep this index honest about which doc holds which fact; don't duplicate.
+**One fact, one owner. If two files both claim it, that is two facts — split it before you pick.** Name the artifact the rule constrains; the doc governing that artifact owns it. Where it genuinely will not split, the deepest directory wins and everyone else writes an **obligation line**: the rule's name in bold, an em dash, "owned by" plus a link to the owning file, then one clause naming only what THIS layer must do. No rationale, no second filename, no number. The deletion test decides whether you wrote one: remove the link, and the line must read as *broken*, not merely unsourced. If it still teaches the rule, it is a copy, and copies are what drift.
+
+**The Recompute Test — docs hold rules, not state.** Could a reader six months from now recompute this line from the repo and get a *different* answer? Then it is state: it will go wrong and nothing will say so. Same answer? The doc is quoting code — name the symbol instead. Not recomputable at all? It is a decision or a war story, and it belongs.
+
+Write instead of — line numbers → `file.py::symbol` · a count of a code-owned set → the enumerator's name · a value that lives in config → the knob's name · a status word (`SHIPPED`, `gating`, `in flight`, `slice N`) → one link to the single status owner · a count of on-disk data → the command that counts it · an un-anchored `§ Name` → a heading that exists verbatim in the file just linked · a post-mortem of closed work → its standing rule, leaving the narrative in `git log`. A commit SHA or an event date may stay when all three hold: it is *provenance* (delete it and the rule still reads), *immutable*, and *subordinate* to the rule's own sentence.
+
+**The shape a `CLAUDE.md` takes.** A title naming what the file owns, orientation carrying
+links but no rules, then one section per owned concept — each **leading with its rule as the
+first clause**, with the war story subordinate to that sentence rather than its own paragraph.
+`## Conventions` holds house-style leftovers only: anything with a *why* is a concept and
+earns a heading, because **the headings are the index**. Rules another file owns go last under
+`## Owned elsewhere`, as obligation lines. A file whose heading list has stopped being
+skimmable adds a `## Load-bearing` card of rule NAMES, each pointing at a verbatim heading in
+that same file and holding nothing else — which is what stops the card becoming a second owner.
+
+**Documentation does not define behavior — code does.** Where a doc and the code disagree, the code wins and the doc gets updated. The one exception is [`architecture.md`](architecture.md) §0 / §0.5, which IS a contract: code disagreeing with it gets fixed instead. And the per-layer `CLAUDE.md` files under `promptpotter/*/` are per-package *contracts*, not docs — this index says which one holds which fact and never restates the fact itself.

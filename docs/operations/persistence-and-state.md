@@ -28,6 +28,8 @@ A **Session** is one `new` invocation; a campaign holds one. `resume` extends it
 
 Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [options]`. Loop-mint verbs: `new`, `resume`. Lifecycle verbs: `archive`, `delete`, `unarchive`, `reset`. Diagnostic verbs: `verify`, `ab`, `reindex`, `noise-floor`, `seed-screen`. Reads happen by opening the on-disk artifact tree — there is no read CLI.
 
+**The diagnostics are fenced — none is wired into the loop, and none may become so.** `ab` is a deterministic A/B replay: re-derive a recorded cycle's decisions under the current engine/scorer, zero LLM calls. `noise-floor` re-scores a campaign's cached origin `--k` times with `force_fresh`, reading the backend's run-to-run noise. `seed-screen` scores a candidate inner-bank draw against the dataset origin over repeated passes and rejects any whose constant-answer floor EXCEEDS it by more than the measurement's own error bar — such a bank pays a candidate for collapsing to a single label, which is the degeneracy the instrument exists to catch. Cheap L1 A/B sweeps ride `new --sweep-batch`, not a verb of their own.
+
 ## Layout
 
 ```
@@ -216,6 +218,15 @@ score?"* Three facts answer it; together they're why editing a file can feel ine
    and the webapp keys its unit map by the pair (`poll.tsx` `unitKey = \`${campaignId} ${cycleId}\``),
    so two same-dataset campaigns render distinctly. Any **new** read/write surface MUST
    carry the campaign id too; a lookup by bare `cycle_id` would cross-wire siblings.
+
+4. **On L4 the identity inputs are NOT frozen — editing one mid-campaign re-measures the
+   origin.** `connectors/promptpotter.py::_identity_config` fingerprints the optimizer
+   manifest (`promptpotter/assets/optimizer/pipeline.yaml`), the per-node information-flow
+   layouts, `APP_VERSION`, and the dataset's whole `inner_tasks.yaml`. Fact 2 does not cover
+   these — they are read live, not snapshotted into `campaign.json` — so an edit lands on the
+   *running* campaign: the banked outer origin stops joining and the next round pays to score
+   it again. The function's docstring carries why a stale join would be the worse outcome.
+   **Land config fixes before an origin is measured, never between its rounds.**
 
 ## Steering composite scoring between rounds
 
