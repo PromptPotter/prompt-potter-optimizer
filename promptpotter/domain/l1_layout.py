@@ -192,6 +192,13 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
     # query + the model's own reasoning) — `diagnostics` alone shows truncated stems,
     # which starved the critique into unverifiable steers. Optional search space adds
     # the cross-run panels.
+    # WHICH raw source depends on the level, so both sit on the floor and each renders
+    # only where it means something: a miss selects `sample_transcripts`, and one level up
+    # a miss is a placeholder-label artifact the outer critique is told to ignore — there
+    # the raw source is `inner_narratives`, the same stories ordered by lift and paired
+    # against the origin's delta on that seed. The critique used to see neither (it was not
+    # even in this node's search space, so L4 could not add it) and prescribed a steer the
+    # inner loops had already measured and lost.
     "l1_critique": NodeLayoutSpec(
         editor="l4",
         possible=frozenset(
@@ -199,6 +206,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "evidence_health",
                 "diagnostics",
                 "sample_transcripts",
+                "inner_narratives",
                 "l1_wounds",
                 "rare_hit_samples",
                 "axis_memory",
@@ -212,6 +220,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "evidence_health",
                 "diagnostics",
                 "sample_transcripts",
+                "inner_narratives",
                 "l1_wounds",
                 "rare_hit_samples",
             ],

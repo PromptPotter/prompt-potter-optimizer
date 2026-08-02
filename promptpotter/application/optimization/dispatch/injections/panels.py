@@ -365,7 +365,18 @@ def _r_sample_transcripts(b: InjectionBundle) -> str:
 
     Each transcript is its own fenced ``\\n\\n`` section, so the façade's section-aware
     truncation drops a whole trailing transcript — never mid-premise, never a severed fence.
+
+    **Silent on the recursion** — the mirror of ``inner_narratives``, which is silent off it.
+    A miss is what selects these rows, and one level up a miss is a scoring artifact of running
+    inner cycles against a placeholder label: the outer critique is told three times to ignore
+    HIT/MISS, then handed its richest panel chosen by exactly that. It picked three inner runs
+    arbitrarily with respect to lift and prescribed a steer the inner loops had already measured
+    and lost. ``inner_narratives`` carries the same traces ordered by lift and paired against the
+    origin's own delta on that seed, so this panel has nothing left to add there — only a second,
+    worse-ordered copy of the bytes it is already reading.
     """
+    if _inner_narrated(b):
+        return ""
     rows = _misses(b)
     if not rows:
         return ""
@@ -402,6 +413,22 @@ def _proxy_lift(r: dict[str, Any]) -> float | None:
     """
     d = (r.get("pipeline_data") or {}).get("mean_round_delta")
     return float(d) if isinstance(d, int | float) and not isinstance(d, bool) else None
+
+
+def _inner_narrated(b: InjectionBundle) -> list[tuple[float, dict[str, Any]]]:
+    """The rows that ARE inner campaigns telling their own story — lift beside narrative.
+
+    The one place the recursion split is spelled, because two panels divide on it in opposite
+    directions: ``inner_narratives`` renders exactly these rows, ``sample_transcripts`` renders
+    only when there are none. Non-empty is the fact "this bundle describes inner runs, and their
+    stories are readable" — both halves, so the pair can never leave a node with neither panel.
+    """
+    return [
+        (lift, r)
+        for r in b.trajectory_results
+        if (lift := _proxy_lift(r)) is not None
+        and (r.get("pipeline_data") or {}).get("reasoning_trace")
+    ]
 
 
 @signal(
@@ -449,12 +476,7 @@ def _r_inner_narratives(b: InjectionBundle) -> str:
         for r in b.origin_per_sample
         if (sid := r.get("sample_id")) is not None and (lift := _proxy_lift(r)) is not None
     }
-    scored: list[tuple[float, dict[str, Any]]] = [
-        (lift, r)
-        for r in b.trajectory_results
-        if (lift := _proxy_lift(r)) is not None
-        and (r.get("pipeline_data") or {}).get("reasoning_trace")
-    ]
+    scored = _inner_narrated(b)
     if not scored:
         return ""
     scored.sort(key=lambda t: t[0])

@@ -70,9 +70,16 @@ Role split: the operator is the developer/user (UX); the agent owns everything e
    quote text that EXISTS in the rendered input? hypotheses distinct (not one idea relocated)?
    `changes_description` actually REPORTS the override emitted beside it (not a change the variant
    never made)? Any hallucinated node/param (validation drops)?
-2. **`l1_critique`** — input carries the evidence (at the inner level: SAMPLE TRANSCRIPTS +
-   MODEL REASONING present?); output `priority_fix`/`failure_highlights` quote CONCRETE evidence
-   (a reasoning step, a premise), not recycled labels or scoring artifacts.
+2. **`l1_critique`** — input carries the evidence, and WHICH panel is the evidence depends on the
+   level: inner reads SAMPLE TRANSCRIPTS + MODEL REASONING, outer reads INNER RUN NARRATIVES. The
+   two are a matched pair, each silent where the other fires (`panels.py::_inner_narrated`), because
+   transcripts are selected by a MISS and one level up a miss is a placeholder-label artifact the
+   outer critique is told to ignore. Output `priority_fix`/`failure_highlights` quote CONCRETE
+   evidence (a reasoning step, a premise), not recycled labels or scoring artifacts — and
+   `priority_fix` must name a steer the generator is ALLOWED to make: an edit to the inner
+   optimizer's own job, never one naming the benchmark's vocabulary or answer labels. It once
+   prescribed the `justlogic-d234` modus-tollens idea, which is both forbidden there and already
+   measured and lost, and the generator spent all three candidates rebutting it.
 3. **Scoring** — per-candidate `candidate_scores` (accuracy, θ, θ_se, `composite_ci_lo`), the
    **matched-origin** comparison (NEVER the cross-subset round-0 origin — subset drift reads as
    lift), PoBB stream (`p_best` moving off 0.5?), `decisions` (cuts firing, and on the right arm?).

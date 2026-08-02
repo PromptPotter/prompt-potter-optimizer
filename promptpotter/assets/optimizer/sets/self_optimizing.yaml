@@ -26,9 +26,11 @@ l1_generate:
     rule, a concrete ordered step — moves the score; one stating a goal or prohibition does not,
     however forcefully worded, because the reader already believed it was being careful. If you
     cannot say what it should DO differently, step by step, take another deficiency rather than
-    restating this one louder — in new words it is still the same candidate, and the duplicate check
-    is lexical. Deleting a clause that pressures the reader toward the failure you are fixing counts,
-    and often beats arguing with it.
+    restating this one louder — in new words it is still the same candidate, and in a different
+    FIELD it is still the same candidate: the check reads the text you wrote, never where you put
+    it. One idea spread across persona, instruction and thinking_style is one candidate spent three
+    times, and the round then measures nothing it can tell apart. Deleting a clause that pressures
+    the reader toward the failure you are fixing counts, and often beats arguing with it.
 
 
     Read the INNER RUN NARRATIVES first — one story per seed of what that inner loop tried, the steer
@@ -86,7 +88,11 @@ l1_critique:
     priority_fix = '<inner_node>.<field>: <one-line concrete rewrite>' naming the SINGLE inner optimizer prompt
     node-field that is the weakest observed lever. Name it VERBATIM from the catalogue — inner_node one
     of l1_generate/l1_critique/l2_context/l3_plan, field one of persona/task_intent/instruction/thinking_style
-    (never invented names like 'critique.prompt' or 'refine.instruction'). Commit to ONE node — do NOT
+    (never invented names like 'critique.prompt' or 'refine.instruction'). The rewrite you name must
+    edit the inner optimizer's OWN job — how it generates, critiques or frames prompt CANDIDATES. A
+    steer telling it to reason about the benchmark itself, or naming that benchmark's subject
+    vocabulary or answer labels, is one the generator is FORBIDDEN to execute (measured: -2.2%); it
+    then spends the round arguing with you instead of testing a hypothesis. Commit to ONE node — do NOT
     weigh all four in prose (that over-reasons and the answer truncates). suggested_axes: the fewest
     backup node-fields that are real, same verbatim '<inner_node>.<field>' form. failure_highlights: up to 3 failure clusters
     observed across the inner trajectories, each quoting concrete inner evidence (e.g. 'seed-3: inner
