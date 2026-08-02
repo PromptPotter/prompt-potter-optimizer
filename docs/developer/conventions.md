@@ -95,9 +95,19 @@ collects everything else.
 
 ## Reasoning doctrine
 
-Three situational guardrails against recurring AI blind spots — unlike the
+Four situational guardrails against recurring AI blind spots — unlike the
 universal gates in root `CLAUDE.md` (see the top of this page), each fires
 only in the specific situation named before it.
+
+**When the operator bounds any budget axis → `<one-budget>`:**
+
+<one-budget>
+**The AI blind spot this guards against:** told "this must not exceed X", an AI treats every axis it was *not* handed a number for as free, and proposes an increase there — priced in the cheap axis and presented as costless. A run capped by patience came back with "only ~$0.50 more"; a per-cell measurement came back as "only ~12 extra calls, +3%". Both are budget increases the operator never agreed to, wearing the units they care least about.
+
+**A limit stated on ONE axis binds ALL of them by default — wall-clock, dollars, tokens, calls, rounds, cells, samples — and the implication runs in every direction.** "Don't spend more" bounds the clock; "we don't have five hours" bounds the dollars. This is the ground assumption, not a reading to be argued out of, and it does not need restating per request.
+
+So: **price a proposal in the axis the operator named AND in the ones they didn't**, in the same breath — the units they'd feel, not the flattering ones (an inner cell costs ~11 minutes *and* ~$0.05; quote both). Trading one axis for another is an increase and is asked for explicitly. And when the budget genuinely binds, the move is to get more out of the measurements already being paid for — a better estimator, a signal already recorded and thrown away, a larger effect to detect — never a bigger N in whichever unit currently looks cheap.
+</one-budget>
 
 **When an LLM call is slow / costly / token-heavy → `<simplify-the-problem>`:**
 

@@ -7,12 +7,15 @@ inner_benchmark: justlogic-d234
 # The cell itself is trimmed to pay for that width: 4 rounds x 3 variants instead of 5 x 4 is
 # ~40% off a cell (~11 min / ~$0.045 at the measured rate).
 #
-# `max_inner_rounds` IS BINDING, and this comment used to claim the opposite ("headroom nothing
-# reached", read off two peaks in one campaign). Counted across every banked inner cell that
-# recorded a stop, a majority terminated ON the cap rather than on `inner_lives`, and most used
-# every round. So a cell's measured lift is a lift-under-a-cap, not a converged one, and raising
-# the cap is a live question about what the outer loop is measuring — not a spend detail. Until
-# it is answered with real spend, read every proxy delta as censored from above.
+# `max_inner_rounds` IS BINDING — counted across every banked inner cell that recorded a stop, a
+# majority terminated ON the cap rather than on `inner_lives`, and most used every round. That is
+# not a defect: the cap IS the estimand. Every arm on the panel is graded on what it delivered
+# over this one budget, and `mean_round_delta` now divides by the budget rather than by the rounds
+# a cell happened to run (`domain/l4/proxies.py::held_levels`) — so a cell `inner_lives` stopped
+# early is measured on the same denominator as one that ran the cap out, instead of being paid for
+# quitting. Raising it changes what the panel measures and costs proportional spend, so it is an
+# operator decision, not a tuning detail; read a delta as "lift under a 4-round budget", which is a
+# complete statement, and never as an estimate of a converged lift, which it is not.
 inner_benchmark_config:
   n_samples_per_inner_round: 28
   n_samples_origin: 40
@@ -22,16 +25,72 @@ inner_benchmark_config:
     start: 2
     cap: 3
   inner_optimizer_temperature: 0.0
+# A seed picks WHICH 40 rows a cell draws (`application/seed_screen.py::draw_bank`, the ONE
+# spelling — the runner imports it, so a screened bank and a run bank cannot diverge). These six
+# indices were 0-5 until 2026-08-02, chosen by nobody: they were simply the first six integers,
+# and THREE of them were bad in ways that cost real signal.
+#
+# RETIRED, each on the strongest evidence available for it — and NOT all on the same test.
+#   seed-1 — REWARDS COLLAPSE. Constant-answer floor 0.550 (exact) against origin reads of 0.525
+#     and 0.500: below on both, so a candidate that stops reasoning and answers a single label
+#     outscores the incumbent, every round.
+#   seed-5 — 11 of its 40 rows carried NO information (7 that nothing solved across 44-69
+#     measurements apiece, 4 that everything solved): a 16-row instrument at a 40-row price. And
+#     dropping it took the outer panel's residual from 0.134 to 0.100, where no other seed's
+#     removal helped. ⚠️ It was ALSO reported as rewarding collapse (floor 0.450 vs origin 0.425)
+#     and that reading DID NOT HOLD — a second independent read returned 0.525, so the two
+#     straddle the floor at a mean of +0.025 ABOVE it. Do not cite the collapse verdict for
+#     seed-5; the two grounds above are what retire it.
+#   seed-4 — margin +0.021 over 6 settled passes: about ONE row in 40 of credit for reasoning
+#     over hedging. Not a collapse case at all (its floor is 0.425 and its origin sits above it),
+#     and retired on the better criterion — a bank that pays one row for thinking is not
+#     measuring thinking, whichever side of its floor it lands on.
+#
+# THE LESSON THAT COST THE MOST: the floor is EXACT, the origin is MEASURED at ~0.08 SE per
+# 40-row pass, and only the measured side decides. Every verdict here from a SINGLE pass is a
+# coin toss wearing three decimals — which is why `seed-screen` now defaults to 3 passes and
+# refuses to REJECT a bank whose margin sits inside its own error bar. Compare banks on the GAP
+# (`reasoning_margin`), never on floor or accuracy alone, and treat a thin positive margin as
+# disqualifying rather than passing.
+#
+# CHOSEN, on `seed-screen` over 10 floor-passing candidates. Margins marked (1p) rest on a
+# SINGLE pass and are the weakest evidence on this list — see the lesson above:
+#   seed-20 — origin 0.610, floor 0.350, margin +0.260 +/-0.023 over 5 passes, SETTLED. The best
+#     margin measured with repeats anywhere, and it took seed-4's seat.
+#   seed-6  — origin 0.625, floor 0.350, margin +0.275 (1p). Holds the EASY end, which the
+#     retired panel had nothing at.
+#   seed-25 — origin 0.500, floor 0.350, margin +0.150 (1p). Holds the hard end CONSERVATIVELY.
+#
+# seed-7 is EXCLUDED from the candidate pool (operator, 2026-08-02). It measured the lowest origin
+# (0.475) and is not degenerate, but "lowest measured origin" is exactly how seed-5 got a seat: on
+# a bank with no measurement history, hard and impossible look identical, and the screen cannot
+# separate them for a fresh seed (see `seed_screen.py`). Do not re-propose it.
+#
+# KEPT on measurement, not on inertia:
+#   seed-3  — margin +0.150 +/-0.018 over 5 passes, SETTLED. It was the thinnest survivor on the
+#     archive's single read (+0.125) and the obvious next suspect after seed-4; repeats put it
+#     level with seed-25 instead. The thin-credit problem was seed-4's, not the benchmark's.
+#   seed-0 / seed-2 — single-pass margins (+0.175, +0.225) but the longest measurement history on
+#     the panel (dead-row counts 6 and 0 of 40, from 40-90 measurements per row). More evidence
+#     behind them than any screen pass buys.
+#
+# The origin ladder now spans 0.500 / 0.525 / 0.550 / 0.575 / 0.610 / 0.625 — a real range, where
+# before the swap five of six sat at 0.525-0.575 and the sixth held the low end through seven
+# impossible rows. Duplicated difficulty buys nothing, which is why the spread is the target.
+#
+# Changing this list changes `_identity_config`, so every banked outer cell voids: any swap costs
+# a full C0 panel re-measure (~1 h, ~$0.31). That is why seats move in one batch, never one at a
+# time.
 tasks:
   - id: justlogic-d234/seed-0
     inner_dataset_seed: 0
-  - id: justlogic-d234/seed-1
-    inner_dataset_seed: 1
   - id: justlogic-d234/seed-2
     inner_dataset_seed: 2
   - id: justlogic-d234/seed-3
     inner_dataset_seed: 3
-  - id: justlogic-d234/seed-4
-    inner_dataset_seed: 4
-  - id: justlogic-d234/seed-5
-    inner_dataset_seed: 5
+  - id: justlogic-d234/seed-6
+    inner_dataset_seed: 6
+  - id: justlogic-d234/seed-20
+    inner_dataset_seed: 20
+  - id: justlogic-d234/seed-25
+    inner_dataset_seed: 25

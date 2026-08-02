@@ -269,6 +269,41 @@ def _add_verify_args(p_verify: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_seed_screen_args(p: argparse.ArgumentParser) -> None:
+    """Dataset + the candidate seeds to measure, for ``seed-screen``."""
+    p.add_argument(
+        "dataset",
+        help="Inner benchmark whose bank draws are being screened (e.g. 'justlogic-d234').",
+    )
+    p.add_argument(
+        "--seeds",
+        dest="seeds",
+        type=int,
+        nargs="+",
+        required=True,
+        help="Candidate seed indices to measure (e.g. --seeds 0 1 2 3 4 5).",
+    )
+    p.add_argument(
+        "--n-samples",
+        dest="n_samples",
+        type=int,
+        default=40,
+        help="Rows per bank (default 40) — match the panel's `n_samples_origin`, or the "
+        "screen measures a bank nobody will run.",
+    )
+    p.add_argument(
+        "--repeat",
+        dest="repeat",
+        type=int,
+        default=3,
+        help="Independent origin passes per bank (default 3). They run force_fresh — "
+        "the archive is content-addressed, so replays would report a spread of exactly zero. "
+        "NOT 1: the verdict compares an exact floor against an origin carrying ~0.08 SE at 40 "
+        "rows, so one pass cannot settle a bank near its line. Costs repeat x --n-samples "
+        "calls; raise it further for any bank reported UNSETTLED.",
+    )
+
+
 def _add_noise_floor_args(p_noise_floor: argparse.ArgumentParser) -> None:
     """Campaign selector + replicate count for ``noise-floor``."""
     p_noise_floor.add_argument(
@@ -414,6 +449,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=10,
         help="Rows to print (default 10). The full ranking is always in --json.",
+    )
+
+    _add_seed_screen_args(
+        sub.add_parser(
+            "seed-screen",
+            help="Debug diagnostic (NOT a loop feature): score each candidate seed's bank "
+            "with the dataset origin and report its constant-answer floor, its reasoning "
+            "margin (origin - floor) and the disqualifier — a bank whose floor EXCEEDS "
+            "its origin pays a candidate for collapsing to one label. Real spend: "
+            "--n-samples target calls per seed, no optimizer calls. Never invoked by "
+            "the loop itself.",
+        )
     )
 
     _add_noise_floor_args(

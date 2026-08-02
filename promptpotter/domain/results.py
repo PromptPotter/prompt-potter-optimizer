@@ -636,6 +636,15 @@ class CycleResult(StrictModel):
     # improvement over nothing. Absent ⇒ the cycle is excluded.
     origin_level: float | None = None
     round_adopted_levels: list[float] = Field(default_factory=list)
+    # The ROUND BUDGET this cycle was given — ``optimization.max_rounds``, the ceiling every
+    # arm on an L4 panel shares. It is the denominator the L4 law averages over, and it has to
+    # come from the config rather than from ``len(round_adopted_levels)``: a cycle stopped early
+    # by ``lives`` adopted fewer levels than one that ran the budget out, so a mean over "rounds
+    # that happened" is a mean over a DIFFERENT number of slots per cell — two estimands, then
+    # compared. Worse, it points the wrong way: ``lives`` stops a STALLING cycle, so dividing by
+    # the shorter series pays a cell for quitting once it had lifted. 0 = never declared, and the
+    # law then falls back to the series length (see ``domain/l4/proxies.py``).
+    round_budget: int = 0
     # The cycle's `optimization.elimination_n_min` — the one min-samples floor PoBB, the ruler
     # and the election all read. The L4 law needs it to tell an arm that earned a verdict from
     # one cut early (`domain/l4/proxies.py::_judged`), and it belongs on the result rather than

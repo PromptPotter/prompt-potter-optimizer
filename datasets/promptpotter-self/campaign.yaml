@@ -21,7 +21,14 @@ campaign_config:
   # from the banked corpus with headroom at both ends so nothing clips; the previous
   # `(x + 0.5) / 1.5` window clipped the best cell ever measured (+1.405) and held zero cells in
   # its lower third.
-  scoring: max(0.0, min(1.0, (final_delta + 1.0) / 3.0))
+  #
+  # RE-CHECKED on all 50 banked cells after the measurand became `mean_round_delta` (the window
+  # was fitted under the old one, so it was owed a re-fit): lift spans -0.072 to +1.140, landing
+  # at fitness 0.309-0.713 — 40% of the window used, ZERO clipped at either end. It survives the
+  # change; leave it. Narrowing to use more of the range is what the previous window did, and 5
+  # of these 50 cells clear the +1.0 where it clipped. Re-check here, not by intuition, if the
+  # measurand moves again.
+  scoring: max(0.0, min(1.0, (mean_round_delta + 1.0) / 3.0))
   headline_metric: ability
   # = the panel size in inner_tasks.yaml. Above it the engine warns and the adaptive queue is
   # inert (there is nothing to select from); below it a variant is judged on a subset of cells.
@@ -33,6 +40,9 @@ campaign_config:
     prompt_block_catalogue: 'off'
     replicate_survivors: 0
     l1_patience: 2
+    # Deliberately short, and NOT the thing to raise first: nothing has yet shown the outer loop
+    # improving across even one round. Raise it when there is something to extend, and re-add
+    # `lives` with real headroom in the same breath (see the deleted block below).
     max_rounds: 2
     # No `lives` block, and its absence is deliberate rather than an omission. It read
     # `start: 2` against `max_rounds: 2`, so the bank could not reach zero before the
@@ -43,10 +53,17 @@ campaign_config:
     # headroom (`start` well under `max_rounds`) when the outer loop runs long enough for
     # a measurement-driven brake to mean something — `run_preflight_checks` warns
     # (`config.lives_no_headroom`) if it goes back in without it.
+    # Affordable rather than merely tolerable, and the inner cycles are why: PoBB cut an arm in
+    # 14 of 17 inner rounds, so a 3-variant round runs ~2 arms to completion and the third is
+    # mostly refunded. That is `elimination_n_min` earning its keep.
     n_variants: 3
     # On the fitness scale, so it moves with the re-anchor above: the window widened from 1.5 to
     # 3.0, which halves the fitness distance a given logit lift covers. Carrying the old value
-    # across would have silently doubled the bar.
+    # across would have silently doubled the bar. Calibration for what it must NOT reject, from
+    # the inner cycles: a WINNING inner round buys 1-4 rows in 28 (+0.036 / +0.071 / +0.107 /
+    # +0.143 are the only positive values ever recorded) and 10 of 17 rounds bought exactly zero.
+    # Improvement here is granular and infrequent by nature; a bar that rejects a 1-row win
+    # rejects most real wins.
     improvement_threshold: 0.01
     degradation_threshold: 0.4
     l2_patience: 2

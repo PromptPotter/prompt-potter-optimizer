@@ -21,7 +21,16 @@ name does not say it, and which members are a deliberate FLOOR rather than debt.
 from promptpotter.diagnostics import compute_ledger
 
 LEDGER_BASELINE = {
-    "modules": 298,
+    # 298 -> 300 (2026-08-02): the `seed-screen` diagnostic — `application/seed_screen.py` +
+    # its CLI shell. A deliberate raise, and the reason is that the choice it makes was
+    # previously being made by nobody: the L4 panel's six seed indices were the first six
+    # integers, and one of them (seed-5) drew a bank whose 40 rows contained 7 nothing could
+    # solve and 4 everything could, leaving a 16-row instrument that carried ~2x the panel's
+    # residual noise. Screening a bank BEFORE spending eleven minutes per cell on it is a
+    # capability, not a relocation — and it is fenced exactly like `noise-floor`, so the loop
+    # never learns it exists. The alternative was a scratchpad script, which would have left
+    # the panel's composition unreproducible.
+    "modules": 300,
     "init_files": 47,
     # A FLOOR, not debt. The 5 survivors are not shims and emptying them breaks the app:
     #   * ``connectors`` — IS the connector registry (import-time guards).

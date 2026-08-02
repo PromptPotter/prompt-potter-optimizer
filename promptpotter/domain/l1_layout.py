@@ -94,10 +94,14 @@ class L1Layout(StrictModel):
 class NodeLayoutSpec(StrictModel):
     """Per-node information-flow spec — one optimizer node's searchable injection axis.
 
-    * ``editor`` — who may mutate this node's layout: ``l2_l4`` (L2 in-campaign +
-      L4 across the recursion — only ``l1_generate``), ``l4`` (L4 only — the other
-      optimizer prompt nodes, since nothing sits above them in a normal campaign), or
-      ``static`` (never edited).
+    * ``editor`` — who may mutate this node's layout, and it is READ, not decoration:
+      ``resolve_node_layout`` refuses a node that is not ``l4``. ``l2`` is ``l1_generate``
+      alone, whose layout lives on ``opt_sp.memory.l1_layout`` and is L2's in-campaign
+      attention surface — **no code path applies an L4 layout override to it**, so an outer
+      edit aimed there would have been accepted and silently done nothing. It read ``l2_l4``
+      until 2026-08-02, which claimed a second editor that does not exist. ``l4`` is every
+      other optimizer node (nothing sits above them in a normal campaign), and those are the
+      three ``resolve_node_layout`` serves.
     * ``possible`` — the full add/excise vocabulary (⊇ ``mandatory`` and ⊇ ``floor``).
     * ``mandatory`` — the GUARD RAIL: placeholders an edit may never excise; the
       validator rolls back an edit that drops one, so the search stays "creative
@@ -108,7 +112,7 @@ class NodeLayoutSpec(StrictModel):
 
     model_config = ConfigDict(frozen=True)
 
-    editor: Literal["l2_l4", "l4"]
+    editor: Literal["l2", "l4"]
     possible: frozenset[str]
     mandatory: frozenset[str]
     floor: L1Layout
@@ -161,7 +165,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
     # and L4 can search it back in. Raw `diagnostics` and the cross-run panels stay off the
     # floor for the same reason; L2 adds them on stall via its layout edit, L4 optimises that.
     "l1_generate": NodeLayoutSpec(
-        editor="l2_l4",
+        editor="l2",
         possible=L1_POSSIBLE,
         mandatory=L1_MANDATORY,
         floor=L1Layout(

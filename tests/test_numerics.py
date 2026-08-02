@@ -889,33 +889,58 @@ def test_adopted_level_trajectory_is_honest_single_scale() -> None:
     assert adopted_level_trajectory(origin_theta, [1.0], {}) == (None, [])
 
 
-def test_compute_proxies_is_one_exact_delta_over_the_adopted_incumbent() -> None:
+def test_compute_proxies_is_one_exact_mean_over_the_adopted_incumbents() -> None:
     # SILENT wrong-score: the outer signal is ONE number, so any error in it is the whole
-    # ranking. It must be the ability the inner search ENDED on minus its origin — exact, with
-    # no denominator. A divisor of any shape reappearing here (a declared target, or the room
-    # `max(origin, 1-origin)`) fails loudly on the pin below, and so does a mean-of-the-series
-    # regression: the two differ on every trajectory that is not flat.
+    # ranking. It must be the mean of the adopted levels minus the origin, over the cycle's
+    # ROUND BUDGET. A divisor of any OTHER shape reappearing here (a declared target, or the
+    # room `max(origin, 1-origin)`) fails loudly on the pins below, and so does a regression to
+    # reading the series' last element: the two differ on every trajectory that is not flat.
     from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS, compute_outer_proxies
 
     px = compute_outer_proxies(
         cycle_result([0.40, 0.55], 0.30, [round_result(1), round_result(2)])
     ).model_dump()
-    assert px == {"final_delta": pytest.approx(0.25)}
+    assert px == {"mean_round_delta": pytest.approx(0.175)}  # endpoint would read 0.25
     # The emitted key set IS the dataset's declared `observation_mappings`; a field added here
     # and not declared there is silently dropped before the formula ever sees it.
-    assert OUTER_PROXY_KEYS == ("final_delta",)
+    assert OUTER_PROXY_KEYS == ("mean_round_delta",)
 
     # A campaign that ends where it started scores exactly zero lift — not a small positive one.
     flat = compute_outer_proxies(cycle_result([0.30], 0.30, [round_result(1)]))
-    assert flat.final_delta == pytest.approx(0.0)
+    assert flat.mean_round_delta == pytest.approx(0.0)
 
-    # It reads the END, not the peak: a search that climbed then gave the gain back is scored on
-    # what it kept. That is the estimand, and `OuterSampleProxies` records why a peak reading is
-    # deliberately not offered beside it.
-    gave_it_back = compute_outer_proxies(
+    # WHEN the lift lands is part of the score, and that is the point of the mean. These two
+    # trajectories END in the same place; the one that climbed in round 1 and gave some back
+    # scores well above the one that crawled. The endpoint read cannot separate them at all
+    # (both 0.05), and on the banked 39-cell panel the mean measured a 26% smaller residual
+    # while ranking the same arms — so this is a precision gain, not a change of subject.
+    early = compute_outer_proxies(
         cycle_result([0.90, 0.35], 0.30, [round_result(1), round_result(2)])
     )
-    assert gave_it_back.final_delta == pytest.approx(0.05)
+    late = compute_outer_proxies(
+        cycle_result([0.05, 0.35], 0.30, [round_result(1), round_result(2)])
+    )
+    assert early.mean_round_delta == pytest.approx(0.325)
+    assert late.mean_round_delta == pytest.approx(-0.10)
+    assert early.mean_round_delta > late.mean_round_delta
+
+    # THE DENOMINATOR IS THE BUDGET, NOT THE SERIES LENGTH — and getting this wrong is silent
+    # in the worst direction. `lives` stops a STALLING cycle, so dividing by the rounds that ran
+    # pays a cell for quitting: this trajectory lifted in round 2 and stopped, and over its own
+    # 3 rounds it reads +0.30 — better than the identical search that sat through a 4th flat
+    # round. Held forward to the declared budget both read +0.225, which is the same cell twice.
+    quit_early = cycle_result(
+        [0.30, 0.60, 0.60], 0.30, [round_result(i) for i in (1, 2, 3)], round_budget=4
+    )
+    ran_out = cycle_result(
+        [0.30, 0.60, 0.60, 0.60], 0.30, [round_result(i) for i in (1, 2, 3, 4)], round_budget=4
+    )
+    assert compute_outer_proxies(quit_early).mean_round_delta == pytest.approx(0.225)
+    assert compute_outer_proxies(ran_out).mean_round_delta == pytest.approx(0.225)
+    # An undeclared budget falls back to the series length rather than dividing by zero.
+    assert compute_outer_proxies(
+        cycle_result([0.30, 0.60, 0.60], 0.30, [round_result(i) for i in (1, 2, 3)])
+    ).mean_round_delta == pytest.approx(0.20)
 
 
 def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
@@ -989,7 +1014,7 @@ def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
     # ...and a cycle that DID produce evidence still scores, on the same predicate.
     ok = cycle_result([0.40, 0.55], 0.30, [round_result(1), round_result(2)])
     ok_px = compute_outer_proxies(ok)
-    assert ok_px.final_delta == pytest.approx(0.25)
+    assert ok_px.mean_round_delta == pytest.approx(0.175)
 
 
 def test_cached_calls_are_metered_but_not_billed(tmp_path: Path) -> None:
@@ -1055,8 +1080,8 @@ def test_pp_self_scoring_is_monotone_and_never_clips_on_real_data() -> None:
     )
     score = compile_scorer(cfg["campaign_config"]["scoring"])
 
-    def s(final_delta: float) -> float:
-        return score({"pipeline_data": {"final_delta": final_delta}})
+    def s(mean_round_delta: float) -> float:
+        return score({"pipeline_data": {"mean_round_delta": mean_round_delta}})
 
     assert s(0.9) > s(0.5) > s(0.0) > s(-0.5)  # monotone across the measured range
     # LINEAR, which is what makes the paired estimator's effect readable as a logit lift rather

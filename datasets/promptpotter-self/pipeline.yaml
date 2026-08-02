@@ -63,7 +63,7 @@ nodes:
       observation_name: l1_critique
       observation_mappings:
         - pipeline_key: final_ranking
-        - pipeline_key: final_delta
+        - pipeline_key: mean_round_delta
       langfuse_type: generation
   l2_context:
     type: optimizer_prompt

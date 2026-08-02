@@ -606,7 +606,24 @@ IDEA_MATCH_REJECT = 0.70
 
 
 def idea_fingerprint(values: Iterable[str]) -> frozenset[str]:
-    """Content-word set of the VALUES a candidate wrote — its idea, independent of field."""
+    """Content-word set of the VALUES a candidate wrote — its WORDING, independent of field.
+
+    **It catches a re-proposal that reuses vocabulary. It cannot catch one that does not, and a
+    zero repeat count is therefore not evidence the generator is exploring.** Measured on the ten
+    inner edits that all asked the target model to reason further before answering — one
+    hypothesis, ten wordings, every one scoring +0.000: this catches **0 of their 15 pairs**, at
+    overlaps of 0.09-0.44 against :data:`IDEA_MATCH_REJECT`. Nor is the threshold the problem —
+    convicting a 0.11 pair means a threshold near 0.10, which convicts every candidate of
+    duplicating every other. Lexical comparison has no operating point that separates "same idea,
+    new words" from "different idea".
+
+    Left lexical deliberately. The alternatives are an embedding dependency (this project spends
+    dependencies reluctantly) or an LLM call per candidate (spend, on the loop's hot path), and
+    both buy little: the repeat gate only DROPS a candidate, never improves one, and by contract
+    a round where everything repeats rejects nothing. The generator producing a mechanism edit
+    instead is worth more than any detector — which is why that instruction lives in
+    ``assets/optimizer/sets/self_optimizing.yaml`` rather than here.
+    """
     words = re.findall(r"[a-z]+", " ".join(values).lower())
     return frozenset(w for w in words if len(w) >= IDEA_MIN_TOKEN_CHARS and w not in IDEA_STOPWORDS)
 

@@ -31,14 +31,18 @@ finding the discipline; do not hard-code task answers into it.
 
 ONE number, in ``campaign.yaml::scoring``:
 
-- ``final_delta`` — the ability the inner search ENDED on, minus where it started,
-  in logits on one difficulty-adjusted ruler. Linearly re-anchored into [0,1].
+- ``mean_round_delta`` — the mean, over the inner rounds, of the ability the
+  incumbent that round ADOPTED, minus where the search started; in logits on one
+  difficulty-adjusted ruler. Linearly re-anchored into [0,1].
 
-Better = the inner optimizer adopted a stronger prompt and kept it. There is no
-quality modulator and no efficiency modulator: a campaign that breaks its own
-measurement is floored, and a collapsed arm is eliminated — both structurally,
-before scoring. So do not optimize for looking tidy or cheap; optimize for the
-inner search finishing higher than it started.
+Better = the inner optimizer adopted a stronger prompt EARLY and kept it. The mean
+rewards the shape a healthy search has — most cells lift in round 1, about half again
+in round 2, the stragglers land in round 3, thinning as they saturate — so a search
+that flatlines for three rounds then jumps scores below one that climbed steadily to
+the same place. There is no quality modulator and no efficiency modulator: a campaign
+that breaks its own measurement is floored, and a collapsed arm is eliminated — both
+structurally, before scoring. So do not optimize for looking tidy or cheap; optimize
+for the inner search climbing sooner.
 
 ## Mutation surface
 

@@ -411,6 +411,16 @@ def resolve_node_layout(node: str) -> L1Layout:
     non-L4 cycle) → the floor unchanged (:class:`ResolvedNodeOverride`'s peer for the
     structural, not-a-``PromptTemplate``-field, half of a per-node edit)."""
     spec = NODE_LAYOUTS[node]
+    # The `editor` field is a contract, so it is asked rather than assumed. `l1_generate`'s
+    # layout is L2's in-campaign surface (`opt_sp.memory.l1_layout`) and nothing here applies
+    # to it — reaching this with that node means a caller believes in an L4 lever that has no
+    # code path, and silence would let the belief survive.
+    if spec.editor != "l4":
+        raise ValueError(
+            f"resolve_node_layout({node!r}): this node's layout is edited by {spec.editor!r}, "
+            "not L4. Only `editor='l4'` nodes resolve a layout through the per-node override "
+            "channel; l1_generate's rides opt_sp.memory.l1_layout instead."
+        )
     raw = _node_override(node).get("layout")
     if not isinstance(raw, dict) or not raw:
         return spec.floor
@@ -459,8 +469,13 @@ def compute_optimizer_prompt_hashes() -> dict[str, str]:
     for name in list_optimizer_prompts():
         tpl = load_optimizer_prompt(name)
         blob = tpl.model_dump_json()
-        if name in NODE_LAYOUTS:
-            blob += resolve_node_layout(name).model_dump_json()
+        if (spec := NODE_LAYOUTS.get(name)) is not None:
+            # Only an `editor == "l4"` node can have its layout moved by the override channel
+            # this hash exists to notice. `l1_generate` is edited by L2, in-campaign, through
+            # `opt_sp.memory.l1_layout` — per-cycle state that has no business in a manifest
+            # hash — so it contributes its floor, which is exactly what an L4 edit leaves it at.
+            layout = resolve_node_layout(name) if spec.editor == "l4" else spec.floor
+            blob += layout.model_dump_json()
         out[name] = hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
     return out
 

@@ -180,7 +180,9 @@ def _calibrate_delta_ruler(
     ``Cycle._maybe_warm_ruler``) from the **grade-A** archive (the operator's pick: cleanest reference, same
     de-biasing the AxisIndex digest applies) plus the origin's own per-sample outcomes
     (so the origin's samples are always on the ruler). The origin rides under
-    ``ORIGIN_ABILITY_ID``, so the calibration fit yields θ_C0 directly. Cold start —
+    ``ORIGIN_ABILITY_ID``, which is how the fit sees it as one arm; **θ_C0 is then read back
+    off the finished ruler by the same conditional estimator every other level uses**, never
+    off the joint fit (see the comment at the return). Cold start —
     fewer than ``n_min`` calibrated samples (a fresh dataset's first cycle) — returns a
     **FLAT ruler** ``{}`` (δ≡0) and the origin's θ on it (logit-accuracy), so the gates
     still compare in θ (one ruler, θ always) rather than a separate accuracy floor.
@@ -219,9 +221,9 @@ def _calibrate_delta_ruler(
     obs = dedup_observations(archive_obs, origin_obs)
     if not obs:
         return {}, None, None
-    # Two warmth conditions, both knowable without fitting — below either, the fit would be
-    # discarded unread (the cold branch reads only ``origin_obs``), so skip it entirely rather
-    # than pay a 1PL + 2PL + 5-fold-CV storm per round to throw the result away.
+    # Two warmth conditions, both knowable without fitting — below either the ruler stays flat
+    # and the fit would be discarded unread, so skip it entirely rather than pay a
+    # 1PL + 2PL + 5-fold-CV storm per round to throw the result away.
     #
     # DISTINCT SAMPLES ≥ n_min: both fits key δ on ``sorted({o.sample_id})``.
     #
@@ -237,17 +239,31 @@ def _calibrate_delta_ruler(
     # stamped `improved=False` on it, and both campaigns died of the lives that cost them).
     # One arm therefore stays FLAT and re-attempts next round, by which time the round's own
     # candidates are banked grade-A and the fit has arms to compare.
-    if len({o.sample_id for o in obs}) < n_min or len({o.candidate_id for o in obs}) < 2:
-        origin_row = fit_theta_given_delta(origin_obs, {}).get(ORIGIN_ABILITY_ID)
-        return {}, (origin_row[0] if origin_row is not None else None), None
-    model, post = graduate_ruler_model(obs, enable=enable_2pl)
-    if len(post.delta) >= n_min:
-        if model == "2PL":
-            logger.info("δ ruler graduated to 2PL (%d samples discrimination-fit)", len(post.delta))
-        return post.ruler(), post.theta.get(ORIGIN_ABILITY_ID), model
-    # Cold: too few banked samples to trust a fitted ruler → flat ruler; origin θ = logit-accuracy.
-    origin_row = fit_theta_given_delta(origin_obs, {}).get(ORIGIN_ABILITY_ID)
-    return {}, (origin_row[0] if origin_row is not None else None), None
+    ruler: dict[int, RulerEntry] = {}
+    model: CalibrationModel | None = None
+    if len({o.sample_id for o in obs}) >= n_min and len({o.candidate_id for o in obs}) >= 2:
+        fitted, post = graduate_ruler_model(obs, enable=enable_2pl)
+        # Cold below the floor: too few banked samples to trust a fitted ruler → stay flat.
+        if len(post.delta) >= n_min:
+            ruler, model = post.ruler(), fitted
+            if model == "2PL":
+                logger.info("δ ruler graduated to 2PL (%d samples fit)", len(post.delta))
+    # θ_C0 THROUGH THE SAME ESTIMATOR EVERY OTHER LEVEL USES — the whole point of this line.
+    # The warm branch used to hand back ``post.theta[ORIGIN_ABILITY_ID]``, the JOINT fit's
+    # ability, while every round level is a ``fit_theta_given_delta`` MAP at the locked ruler
+    # (``_cumulative_theta``). ``fit_theta_given_delta``'s own docstring disqualifies the joint
+    # θ for exactly this: ``fit_rasch`` re-anchors ``mean(θ)==0`` and re-estimates σ_θ by EB on
+    # every call, so its scale is set by whichever arms happened to be in the pool. The L4 law
+    # then differenced two abilities from two estimators — one shrunk toward a pool mean with a
+    # data-dependent σ_θ, the other toward 0 with a fixed one — and the anchor's bias moved with
+    # the arm measuring it. Measured on the 50 banked cells: the ruler's shift is ~87% common-mode
+    # and does cancel in the difference (r=+0.75 within seed), so this is worth ~2% of the delta's
+    # variance — but the residual is a BIAS channel, not noise, and bias does not average out over
+    # a panel. It also makes the cold and warm branches agree: one expression, one estimator.
+    # ``obs``, not ``origin_obs``: the deduped set carries every origin row the archive holds too.
+    origin_obs_all = [o for o in obs if o.candidate_id == ORIGIN_ABILITY_ID]
+    origin_row = fit_theta_given_delta(origin_obs_all, ruler).get(ORIGIN_ABILITY_ID)
+    return ruler, (origin_row[0] if origin_row is not None else None), model
 
 
 _FRONTIER_ABILITY_ID = "_frontier"
@@ -591,7 +607,7 @@ class Cycle:
                 origin_sp_hash=self.origin_sp_hash,
             ),
         )
-        if delta_scale:  # warmed — lock the ruler + re-read origin θ on it
+        if delta_scale:  # warmed — lock the ruler + re-read every θ already taken on it
             self.delta_scale = delta_scale
             self.calibration_model = calibration_model
             # Round 0 carries θ twice — its own frontier and C0's row — and a warm fit
@@ -601,6 +617,19 @@ class Cycle:
                 c.model_copy(update={"theta": origin_theta})
                 for c in self.origin_round.candidate_scores
             ]
+            # …and every L1 round that already closed, which is the same argument one line up
+            # and used to be skipped. A round that closed while the ruler was flat had its θ
+            # fit at δ≡0, where ``fit_theta_given_delta`` degenerates to logit-accuracy on that
+            # round's own subset — a DIFFERENT scale from the one every later round lands on.
+            # Left unrestamped they sit side by side in ``round_adopted_levels``, and the L4 law
+            # averages the mixture and differences it against a warm-ruler origin. Free to fix:
+            # the rows are all in hand, and this is the walk ``_bind_rounds`` already does.
+            frontier: list[dict[str, Any]] = []
+            for rr in self.rounds:
+                frontier = _merge_known_outcomes(frontier, list(rr.results))
+                if rr.round > 0:
+                    rr.cumulative_theta = _cumulative_theta(frontier, delta_scale)
+                    rr.calibration_model = calibration_model
 
     def adopt(self, new_incumbent: OptSearchPoint, *, advanced: dict[str, Any]) -> None:
         """Make ``new_incumbent`` the cycle's searchpoint — the ONE adoption seam for

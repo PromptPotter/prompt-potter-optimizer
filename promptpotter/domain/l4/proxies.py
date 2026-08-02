@@ -50,7 +50,34 @@ class OuterSampleProxies(StrictModel):
     delivers is what it crowns, and the arms it discarded are the price of finding that. The full
     argument, and the measurement that forced it, sit on ``exploration.adopted_level_trajectory``.
 
-    **It needs no denominator.** Every level is an ability θ in LOGITS on the cycle's fixed δ
+    **It averages that series rather than reading its last element, and the reason is
+    signal-to-noise measured on the banked corpus.** Over the 39 cells of
+    ``promptpotter-self__af6252``, refitting ``fd[arm,seed] = μ + α + β + ε`` under each read:
+    the endpoint gives arm SD 0.077 against residual 0.182; the mean over adopted rounds gives
+    0.064 against **0.134** — a 26% quieter instrument for the same spend, agreeing with the
+    endpoint's arm effects at r = +0.941 (19 of 21 pairwise orderings), so it ranks the same
+    thing more precisely rather than ranking something else. Peak (0.446) and per-round slope
+    (0.405) were measured alongside and beat neither.
+
+    It also happens to be the read that matches what a healthy inner search looks like: a cell
+    that lifts early and holds scores above one that arrives at the same place in its last
+    round. The endpoint cannot tell those apart.
+
+    **The mean is over the round BUDGET, not over the rounds that ran** — the levels are held
+    forward across any the cycle never reached (:func:`held_levels`). Dividing by the series
+    length made the denominator a per-cell quantity: a cell ``lives`` stopped at round 2 was
+    averaged over 2 slots and one that ran the budget out over 4, so the panel compared two
+    estimands. It also had the sign backwards. ``lives`` stops a STALLING cycle, so a cell that
+    lifted early and then went quiet was DIVIDED BY ITS OWN BRAKE — 3 rounds at (0, +1, +1)
+    scored 0.67 against 0.50 for the identical trajectory that sat through a fourth flat round.
+    Holding forward is the same rule the trajectory already applies inside a run (a round whose
+    frontier could not be fit carries the prior level — ``adopted_level_trajectory``): the
+    incumbent persists, and nothing says it moved. What the cap then bounds is honest and
+    uniform — every arm is graded on what it delivered over ONE fixed budget, which is the
+    estimand, not a censoring of some other one.
+
+    **It needs no DIFFICULTY denominator** — distinct from the round-count one above, which is
+    just how a mean is taken. Every level is an ability θ in LOGITS on the cycle's fixed δ
     ruler, and the delta is one level minus another — a difference on one interval scale, which is
     the property that makes it comparable across seeds of different origin strength. It is NOT
     bounded by construction: the projection back through ``ruler_expected_accuracy`` that once
@@ -79,11 +106,12 @@ class OuterSampleProxies(StrictModel):
     no candidate gradient and is wrong to make: a task the inner model looks bad at is a task it
     has not been tuned for yet, not a task with no headroom.
 
-    Also deliberately absent: a ``peak_delta`` / lift-and-hold reading. ``final_delta`` reads the
-    ADOPTED incumbent, so a peak the inner search later walked away from scores as nothing — on
-    the 39-cell panel that is 17 cells, mean gap +0.052. It is a one-line derivation from
-    ``round_adopted_levels``, and it is left out because it changes the ESTIMAND: under a pure
-    peak ruler the origin loses. That is a decision to take on measurement, not in passing.
+    Also deliberately absent: a ``peak_delta`` / lift-and-hold reading. A peak the inner search
+    later walked away from is not what the cell delivered — on the 39-cell panel that is 17
+    cells, mean gap +0.052. It is a one-line derivation from ``round_adopted_levels``, and it is
+    left out because it changes the ESTIMAND: under a pure peak ruler the origin loses. That is
+    a decision to take on measurement, not in passing — and it was: peak measured a worse
+    signal-to-noise ratio than the mean above.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -93,12 +121,29 @@ class OuterSampleProxies(StrictModel):
     # abilities in LOGITS, where ±1 is a value a strongly-regressing inner cycle really can
     # exceed — and `extra="forbid"` + `Field` would then raise mid-run and kill the outer sample
     # rather than record the regression. ±4 spans well past the ruler's own reach, so it never
-    # binds on live data while still stopping a runaway fit at the scoring clamp.
-    final_delta: float = Field(ge=-4.0, le=4.0)
+    # binds on live data while still stopping a runaway fit at the scoring clamp. A mean over
+    # the adopted levels is a convex combination of them, so it cannot leave the range the
+    # endpoint could reach and the rail is unchanged by the switch.
+    mean_round_delta: float = Field(ge=-4.0, le=4.0)
 
 
 # The observation keys one outer sample emits — DERIVED from the model, never hand-listed.
 OUTER_PROXY_KEYS: tuple[str, ...] = tuple(OuterSampleProxies.model_fields)
+
+
+def held_levels(result: CycleResult) -> list[float]:
+    """The adopted-level series stretched to the cycle's ROUND BUDGET, holding the last level.
+
+    One denominator for every cell on a panel. See :class:`OuterSampleProxies` for why the
+    series length is the wrong one. A cycle that declared no budget (``round_budget == 0``,
+    reachable only off a hand-built result) falls back to its own length, which is what the
+    law computed before the budget was recorded. Empty in, empty out — a cycle that adopted
+    no level has no incumbent to hold, and ``no_evidence_reason`` has already excluded it."""
+    levels = result.round_adopted_levels
+    if not levels:
+        return []
+    n = max(result.round_budget, len(levels))
+    return levels + [levels[-1]] * (n - len(levels))
 
 
 def _is_evidential(rnd: RoundResult) -> bool:
@@ -166,15 +211,11 @@ def floor_reason(result: CycleResult) -> str | None:
 def _floor_proxies() -> OuterSampleProxies:
     """The worst measurable verdict — ASSIGNED (not measured) to an optimizer prompt-owned failure.
 
-    ``final_delta = -1`` sits exactly at the bottom of the scoring formula's re-anchoring window,
-    so the composed fitness is exactly 0.0 — and this is the ONLY route to a zeroed cell. A
-    measured cycle reaches -1 logit only by collapsing the inner ability outright, so a zero means
-    "the optimizer prompt broke its own measurement", never "this seed drew a strong origin".
-
-    This is the ONLY route to a zeroed cell: a *measured* cycle reaches −1 only by collapsing the
-    inner ability to nothing, so a zero means "the optimizer prompt broke its own measurement", never
-    "this seed drew a strong origin"."""
-    return OuterSampleProxies(final_delta=-1.0)
+    ``mean_round_delta = -1`` sits exactly at the bottom of the scoring formula's re-anchoring
+    window, so the composed fitness is exactly 0.0 — and this is the ONLY route to a zeroed cell.
+    A *measured* cycle reaches −1 only by collapsing the inner ability to nothing, so a zero means
+    "the optimizer prompt broke its own measurement", never "this seed drew a strong origin"."""
+    return OuterSampleProxies(mean_round_delta=-1.0)
 
 
 def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
@@ -183,12 +224,17 @@ def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
 
     ONE reading of ONE series: the ability of the incumbent each round adopted, in LOGITS on the
     cycle's locked ruler (``origin_level`` / ``round_adopted_levels``, built upstream in
-    ``adopted_level_trajectory``). ``final_delta`` is where the search ENDED minus its origin —
-    what the optimizer prompt actually delivered. One estimator, one interval scale, so the delta is
-    not compressed by where its origin happened to sit.
+    ``adopted_level_trajectory``). ``mean_round_delta`` is the average height of that staircase
+    above its origin, over the cycle's whole ROUND BUDGET (:func:`held_levels`) — what the
+    optimizer prompt held for the budget it was given, rather than where it happened to stand at
+    the end. **One estimator at both ends**: the origin's level is read off the locked ruler by
+    the same conditional fit every round level uses (``cycle.py::_calibrate_delta_ruler``), so a
+    ruler that sits high or low cancels in the subtraction instead of biasing it.
 
-    Why the other seven readings are gone is the type's own docstring; the short version is that
-    a 39-cell panel measured each of them and none discriminated between optimizer prompts.
+    Why the other seven readings are gone is the type's own docstring, as is why this averages
+    the series rather than reading its last element; the short version is that a 39-cell panel
+    measured each of them, none of the seven discriminated between optimizer prompts, and among
+    the reads of the surviving series the mean is the quietest by a measured 26%.
 
     The delta may be negative on a regressing optimizer prompt — levels are not floored at origin —
     and the scoring formula re-anchors it into [0,1].
@@ -208,9 +254,12 @@ def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
     assert result.origin_level is not None  # guaranteed by no_evidence_reason
     # Every level is an ability in LOGITS on the fixed ruler, so a delta is a difference of two
     # unbounded quantities — plausibly within a couple of logits, structurally within none. The
-    # field's +/-4 rail is what states that (see `OuterSampleProxies`); there is still nothing to
-    # divide by.
-    return OuterSampleProxies(final_delta=result.round_adopted_levels[-1] - result.origin_level)
+    # field's +/-4 rail is what states that (see `OuterSampleProxies`). The only divisor is the
+    # round budget the mean is taken over; nothing normalizes for difficulty.
+    levels = held_levels(result)
+    return OuterSampleProxies(
+        mean_round_delta=sum(levels) / len(levels) - result.origin_level,
+    )
 
 
 __all__ = [
@@ -219,5 +268,6 @@ __all__ = [
     "OuterSampleProxies",
     "compute_outer_proxies",
     "floor_reason",
+    "held_levels",
     "no_evidence_reason",
 ]

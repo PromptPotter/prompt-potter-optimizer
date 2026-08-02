@@ -34,11 +34,20 @@ reports **one** bounded, subset-invariant signal per inner cycle
 (`domain/l4/proxies.py::compute_outer_proxies`), and `campaign.yaml::scoring` re-anchors it into
 `[0,1]`:
 
-- **`final_delta`** — where the inner search ENDED minus its origin, in LOGITS on one ability
-  ruler, over the incumbent each round ADOPTED. Reading the round's *proposals* instead priced
-  exploration as damage and inverted the whole metric — see
+- **`mean_round_delta`** — the MEAN, over the inner rounds, of the incumbent each round
+  ADOPTED, minus the origin, in LOGITS on one ability ruler. Reading the round's *proposals*
+  instead priced exploration as damage and inverted the whole metric — see
   `exploration.adopted_level_trajectory`. **Its definition, its bound and why it needs no
   denominator are the type's, not this doc's — read `domain/l4/proxies.py`.**
+
+**Why the mean and not the last step.** Measured on the 39 banked cells of
+`promptpotter-self__af6252`, refitting `fd[arm,seed] = μ + α + β + ε` under each read: the
+endpoint gives arm SD 0.077 against residual 0.182; the mean gives 0.064 against **0.134** — a
+26% quieter instrument for the same spend, agreeing with the endpoint's arm effects at
+**r = +0.941** (19 of 21 pairwise orderings). Peak (ratio 0.446) and per-round slope (0.405)
+were measured alongside and beat neither. It is also the read that matches what a healthy
+search looks like: a cell that lifts early and holds scores above one that reaches the same
+place in its final round, which the endpoint cannot separate at all.
 
 The re-anchor is linear, so the paired estimator's reported effect times the window width IS the
 mean logit lift — a number to read, not merely to order by.
@@ -80,7 +89,7 @@ all — so nothing was lost by deleting the target, and one whole class of assum
 candidates being compared). That law is what removed the four factors above, and it is why there
 is one term rather than a tidy-looking basket.
 
-**Deliberately not added: a peak / lift-and-hold reading.** `final_delta` reads the ADOPTED
+**Deliberately not added: a peak / lift-and-hold reading.** `mean_round_delta` reads the ADOPTED
 incumbent, so a peak the inner search later walked away from scores as nothing — on the banked
 panel that is 17 of 39 cells, mean gap +0.052. It is a one-line derivation, and it is out because
 it changes the ESTIMAND: under a pure peak ruler the origin loses. That is a decision to take on

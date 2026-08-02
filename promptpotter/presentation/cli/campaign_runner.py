@@ -35,6 +35,7 @@ from promptpotter.presentation.cli.commands.reindex import cmd_reindex
 from promptpotter.presentation.cli.commands.reset import cmd_reset
 from promptpotter.presentation.cli.commands.restamp import cmd_restamp
 from promptpotter.presentation.cli.commands.resume_command import cmd_resume
+from promptpotter.presentation.cli.commands.seed_screen import cmd_seed_screen
 from promptpotter.presentation.cli.commands.verify import cmd_verify
 from promptpotter.presentation.cli.parsers import build_parser, parser_verbs
 
@@ -50,6 +51,7 @@ COMMANDS = {
     "restamp": cmd_restamp,
     "verify": cmd_verify,
     "noise-floor": cmd_noise_floor,
+    "seed-screen": cmd_seed_screen,
     "rank-optimizer-prompts": cmd_rank_optimizer_prompts,
     "archive": cmd_archive,
     "delete": cmd_delete,

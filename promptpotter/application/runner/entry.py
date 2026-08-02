@@ -417,6 +417,7 @@ def _build_cycle_result(
         ),
         origin_level=origin_level,
         round_adopted_levels=round_levels,
+        round_budget=(cycle.config.optimization.max_rounds if cycle is not None else 0),
         elimination_n_min=(cycle.config.optimization.elimination_n_min if cycle is not None else 0),
         winner_prompt_fields=(best_sp.prompt_fields or {}) if best_sp else {},
         winner_pipeline_params=best_sp.pipeline_params if best_sp else None,

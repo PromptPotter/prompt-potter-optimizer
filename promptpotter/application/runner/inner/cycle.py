@@ -32,7 +32,6 @@ import asyncio
 import contextlib
 import contextvars
 import logging
-import random
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,11 +43,13 @@ from promptpotter.application.runner.inner.tasks import (
     inner_tasks_path,
     resolve_inner_task,
 )
+from promptpotter.application.seed_screen import draw_bank
 from promptpotter.domain.l4.proxies import (
     OUTER_PROXY_KEYS,
     InnerCycleUnscoreableError,
     compute_outer_proxies,
     floor_reason,
+    held_levels,
 )
 from promptpotter.infrastructure.store.io import read_json_optional, write_json
 from promptpotter.infrastructure.store.layout import (
@@ -255,6 +256,31 @@ def _clip(text: str, cap: int) -> str:
     return text[: cap - 1].rsplit(" ", 1)[0] + "…"
 
 
+def _lift_shape(result: CycleResult) -> str:
+    """Which rounds LIFTED — the cell's search shape, one line.
+
+    A healthy inner search has a shape, not just a total: most cells lift in round 1 (the
+    easiest round on the board — most headroom, cleanest evidence), about half again in round
+    2, the ones that missed round 2 land in round 3, and lifts thin out as the cell saturates.
+    A cell that lifts once and flatlines, or never lifts at all, is a DIFFERENT failure from
+    one that climbs steadily to the same total — and the scored scalar cannot tell them apart.
+
+    Read from ``RoundResult.improved``, which is a within-round paired verdict against the
+    matched origin on the same samples. That is what makes this line worth its characters: it
+    never touches the per-cycle θ anchor, and both sides of its pair see the same re-drawn
+    subset, so it carries neither of the noise terms the scalar does. A panel of 6 cells over 4
+    rounds is ~24 of these verdicts against 6 scalars — the shape is legible at a panel size
+    where a 0.077-logit contrast is not.
+    """
+    marks = " ".join(
+        f"r{rr.round}{'+' if rr.improved else '.'}" for rr in result.rounds if rr.round > 0
+    )
+    if not marks:
+        return "lifts: none — no L1 round closed."
+    n = sum(1 for rr in result.rounds if rr.round > 0 and rr.improved)
+    return f"lifts: {marks} ({n}/{result.n_l1_rounds}; target: early and often, thinning late)"
+
+
 def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
     """Human-grade digest of one inner campaign — the outer loop's MODEL REASONING.
 
@@ -279,17 +305,20 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
     assert result.origin_level is not None
     origin = result.origin_level
     levels = result.round_adopted_levels
-    # Lead with where the search ENDED — `final_delta`, the primary term the outer formula
-    # scores. Showing the generator a headline it is not graded on teaches the wrong lesson:
-    # this line led with the mean while the mean was the scored lift, and must move with it.
-    # The mean rides along as the rate reading (a fast climber holds a high mean), and the peak
-    # beside it, because "ended well below peak" is exactly the collapse worth reading.
-    mean = sum(levels) / len(levels)
+    # Lead with `mean_round_delta`, the term the outer formula scores. Showing the generator a
+    # headline it is not graded on teaches the wrong lesson, so this line moves whenever the
+    # measurand does — it has now led with the mean, then the endpoint, then the mean again.
+    # The endpoint rides along, and the peak beside it, because "ended well below peak" is
+    # exactly the collapse worth reading. `held_levels`, not `levels`: the law averages over the
+    # round BUDGET, and a headline dividing by the rounds that ran would disagree with the score.
+    held = held_levels(result)
+    mean = sum(held) / len(held)
     lines = [
         f"INNER {spec.inner_dataset} seed-{spec.seed}: origin {origin:+.2f}"
-        f" -> ended {levels[-1]:+.2f} (D{levels[-1] - origin:+.3f}, the scored lift)"
-        f", mean-over-rounds D{mean - origin:+.3f}, peak {max(levels):+.2f}"
-        f" over {result.n_l1_rounds} rounds; stop={result.stop_reason}."
+        f" -> mean-over-rounds D{mean - origin:+.3f} (the scored lift)"
+        f", ended {levels[-1]:+.2f} (D{levels[-1] - origin:+.3f}), peak {max(levels):+.2f}"
+        f" over {result.n_l1_rounds} of {len(held)} rounds; stop={result.stop_reason}.",
+        _lift_shape(result),
     ]
     by_round = {rnd.round: rnd for rnd in result.rounds}
     highlight = next(
@@ -363,7 +392,8 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
     # Enforce the authored budget: on a deep inner run, drop the EARLIEST round
     # lines first (the trajectory's tail is the informative end) rather than
     # letting the panel's head-keep clip silently cut the latest rounds.
-    n_head = 2 if highlight else 1
+    # Headline + lift shape are always kept; the highlight when there is one.
+    n_head = 3 if highlight else 2
     head_lines, round_lines = lines[:n_head], lines[n_head:]
     elided = False
     while len(round_lines) > (2 if elided else 1) and (
@@ -489,7 +519,9 @@ async def _run_inner_campaign(
     if not all_samples:
         raise ValueError(f"inner dataset {spec.inner_dataset!r} loaded zero samples")
     n = min(max(spec.n_samples, spec.n_samples_origin or 0), len(all_samples))
-    train_data = random.Random(spec.seed).sample(all_samples, n)
+    # The draw is spelled once, in the screen that CHOOSES seeds — a runner that drew
+    # differently would run a bank nobody screened, and nothing would report the divergence.
+    train_data = draw_bank(all_samples, n, spec.seed)
 
     file_config: dict[str, Any] = {}
     if session.dataset_config_dir is not None:
@@ -745,7 +777,7 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
         # consumer matches predicted against ground_truth (outer hit is
         # `fitness >= 1.0`), and the round-0 health gate only needs a
         # non-empty, non-NO_RESULT prediction.
-        INNER_RESULT_KEY: [f"inner:{query} D{proxies.final_delta:+.3f}"],
+        INNER_RESULT_KEY: [f"inner:{query} D{proxies.mean_round_delta:+.3f}"],
         # The outer loop's raw evidence: a <=1150c narrative of what the inner
         # search tried, what steered it, and what moved — rendered as MODEL
         # REASONING in the outer sample_transcripts panel.

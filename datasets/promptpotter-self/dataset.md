@@ -14,8 +14,11 @@ because the inner model is far from what prompting can get out of it there, so t
 inner loop has room to climb and outer candidates score differently. No target
 score is declared: the panel says what an inner cycle may SPEND, never what it is
 expected to REACH). Each inner run reports a vector of proxy
-measurement (`domain/l4/proxies.py::OuterSampleProxies`): `final_delta`, the ability
-the inner search ENDED on minus its origin, in logits on one difficulty-adjusted ruler.
+measurement (`domain/l4/proxies.py::OuterSampleProxies`): `mean_round_delta`, the mean
+over rounds of the ability the inner search ADOPTED, minus its origin, in logits on one
+difficulty-adjusted ruler. It averages that staircase rather than reading its last step
+because the mean measured a 26% quieter instrument on the banked 39-cell panel while
+ranking the same arms (r = +0.941) — and because it rewards lifting early.
 
 The outer scoring formula in `campaign.yaml::scoring` re-anchors that one term into
 [0,1] and nothing else. It used to compose four factors over eight emitted proxies;

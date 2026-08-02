@@ -8,10 +8,11 @@ data_characteristics: >-
   fields, and fitness is noisy numeric deltas from a small inner panel, so edits move the score but improvement
   is real and infrequent.
 optimization_goals: >-
-  Maximize final_delta (the ability the inner search ENDED on, minus its origin, in logits on a
-  difficulty-adjusted ruler) on the inner benchmark. That is the whole score: what the inner
-  optimizer adopted and kept. Winning edits make the inner optimizer diagnose its own observed
-  failures faster, reading from its critique and transcripts, not an assumed bias.
+  Maximize mean_round_delta (the MEAN, over inner rounds, of the ability the incumbent that
+  round ADOPTED, minus its origin, in logits) on the inner benchmark. That is the whole score,
+  and it averages the staircase rather than reading its last step: a lift bought in round 1 is
+  worth more than the same lift bought in round 4. So winning edits make the inner optimizer
+  diagnose its own observed failures FASTER, reading from its critique and transcripts.
 key_challenges: >-
   Outer candidates drift into a single recycled hypothesis instead of grounding each edit in the specific
   inner failure the critique and transcripts show; noisy fitness from a small inner panel makes that drift
@@ -56,14 +57,18 @@ raw_description: |
 
   ONE number, in ``campaign.yaml::scoring``:
 
-  - ``final_delta`` — the ability the inner search ENDED on, minus where it started,
-    in logits on one difficulty-adjusted ruler. Linearly re-anchored into [0,1].
+  - ``mean_round_delta`` — the mean, over the inner rounds, of the ability the
+    incumbent that round ADOPTED, minus where the search started; in logits on one
+    difficulty-adjusted ruler. Linearly re-anchored into [0,1].
 
-  Better = the inner optimizer adopted a stronger prompt and kept it. There is no
-  quality modulator and no efficiency modulator: a campaign that breaks its own
-  measurement is floored, and a collapsed arm is eliminated — both structurally,
-  before scoring. So do not optimize for looking tidy or cheap; optimize for the
-  inner search finishing higher than it started.
+  Better = the inner optimizer adopted a stronger prompt EARLY and kept it. The mean
+  rewards the shape a healthy search has — most cells lift in round 1, about half
+  again in round 2, the stragglers land in round 3, thinning as they saturate — and a
+  search that flatlines for three rounds then jumps scores below one that climbed
+  steadily to the same place. There is no quality modulator and no efficiency
+  modulator: a campaign that breaks its own measurement is floored, and a collapsed
+  arm is eliminated — both structurally, before scoring. So do not optimize for
+  looking tidy or cheap; optimize for the inner search climbing sooner.
 
   ## Mutation surface
 

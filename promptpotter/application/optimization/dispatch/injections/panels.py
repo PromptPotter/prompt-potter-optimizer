@@ -400,7 +400,7 @@ def _proxy_lift(r: dict[str, Any]) -> float | None:
     zero-lift seed (a flat inner run — the ones an optimizer prompt edit most needs to see)
     can round-trip as an int 0, so accept any real number, exclude bool.
     """
-    d = (r.get("pipeline_data") or {}).get("final_delta")
+    d = (r.get("pipeline_data") or {}).get("mean_round_delta")
     return float(d) if isinstance(d, int | float) and not isinstance(d, bool) else None
 
 
@@ -420,7 +420,7 @@ def _r_inner_narratives(b: InjectionBundle) -> str:
     plus one scalar per-seed delta — so it re-proposes mutations the inner loop already measured
     and lost, the exact "doesn't use the information" failure.
 
-    Fires ONLY on the recursion, on ``final_delta``. NOT on ``reasoning_trace``: an ordinary
+    Fires ONLY on the recursion, on ``mean_round_delta``. NOT on ``reasoning_trace``: an ordinary
     backend returns one of those on most samples (it is what ``sample_transcripts`` renders),
     so gating on the trace alone flooded every non-L4 generator with its own task transcripts.
 
