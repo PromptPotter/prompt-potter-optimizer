@@ -149,7 +149,7 @@ def _render_candidates_generated(v: CandidatesGeneratedView) -> str:
 def _render_round_complete(v: RoundCompleteView) -> str:
     out: list[str] = []
     if len(v.scores) > 3:
-        if board := _scoreboard(v.scores, v.winner_label, v.origin_acc):
+        if board := _scoreboard(v.scores, v.winner_label):
             out.append(board)
     elif v.scores:
         parts = [
@@ -172,18 +172,22 @@ def _render_round_complete(v: RoundCompleteView) -> str:
         else ""
     )
 
-    # The verdict line displays the comparison the gate actually used —
-    # matched-pair origin (origin restricted to the winner's measured samples).
-    # When the winner ran the full set, ``matched_origin_accuracy == origin_acc``
-    # and the displayed value is unchanged. PoBB-locked winners get a fair
-    # subset origin floor instead of being compared against origin's full 20.
-    matched_origin = v.matched_origin_accuracy
+    # The verdict line displays the comparison the gate actually used — matched-pair origin
+    # (origin restricted to the winner's measured samples). When the winner ran the full set
+    # that IS the round's origin, so the displayed value is unchanged. A winner that stopped
+    # short has no such floor and gets no "(was …)" clause: the full-set origin is a different
+    # sample basis, and subtracting it from a prefix accuracy publishes lift nobody measured.
+    versus = (
+        f"was {v.matched_origin_accuracy:.1%}, {_fmt_delta(v.delta)}"
+        if v.matched_origin_accuracy is not None and v.delta is not None
+        else "no matched origin — winner stopped before covering the panel"
+    )
 
     if v.improved:
         sig_tag = f"  {fmt_pvalue(v.p_value)}" if v.p_value is not None else ""
         out.append(
             f"  {GREEN}{BOLD}✓ IMPROVED{RESET}  {v.winner_accuracy:.1%}"
-            f" (was {matched_origin:.1%}, {_fmt_delta(v.delta)}){comp_tag}{sig_tag}"
+            f" ({versus}){comp_tag}{sig_tag}"
             f"  ->  next: {v.next_action}"
         )
     elif v.improved_reason:
@@ -192,7 +196,7 @@ def _render_round_complete(v: RoundCompleteView) -> str:
         # didn't graduate.
         out.append(
             f"  {YELLOW}{BOLD}✗ NOT PROMOTED{RESET}  {v.winner_accuracy:.1%}"
-            f" (was {matched_origin:.1%}, {_fmt_delta(v.delta)}, n={v.winner_total})"
+            f" ({versus}, n={v.winner_total})"
             f"  reason: {v.improved_reason}{comp_tag}"
         )
     else:

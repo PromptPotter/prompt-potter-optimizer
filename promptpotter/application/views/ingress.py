@@ -211,14 +211,15 @@ def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
     w_acc = float(d["winner_accuracy"])
     improved = bool(d["improved"])
     origin_acc = ctx.origin_accuracy
-    # Matched-pair origin (winner-measured samples); fallback ``origin_acc``
-    # for round 0 / pre-gate events. Δ uses this so operator-visible Δ
-    # matches the ``improved`` gate, not the full-set comparison that
-    # punishes PoBB-locked winners.
+    # Matched-pair origin (winner-measured samples). Δ uses this so operator-visible Δ
+    # matches the ``improved`` gate, not the full-set comparison that punishes PoBB-locked
+    # winners. Absent when the winner did not cover the origin's panel, and it stays absent:
+    # this used to fall back to the standing ``origin_acc``, which would publish a prefix
+    # accuracy minus a full-panel rate as the round's headline lift.
     raw_matched = d.get("winner_matched_origin_accuracy")
-    matched_origin_acc = origin_acc if raw_matched is None else float(raw_matched)
+    matched_origin_acc = None if raw_matched is None else float(raw_matched)
     matched_origin_composite = d.get("winner_matched_origin_composite")
-    delta = w_acc - matched_origin_acc
+    delta = None if matched_origin_acc is None else w_acc - matched_origin_acc
     p_value: float | None = d.get("p_value")  # computed by l1_score; not recomputed here.
     if improved:
         ctx.origin_accuracy = w_acc

@@ -196,10 +196,12 @@ class ScoredCandidate(StrictModel):
     runtime_failures: list[RuntimeFailure] = Field(default_factory=list)
     elimination_context: EliminationContext = Field(default_factory=EliminationContext)
     degradation_context: DegradationContext = Field(default_factory=DegradationContext)
-    # Origin restricted to this candidate's measured samples — apples-to-apples when PoBB locks
-    # mid-budget; equals full-set origin when fully scored. ``None`` for candidates outside the
-    # election fit (eliminated / under the coverage floor) — the same population ``theta`` is
-    # ``None`` for, and for the same reason: nothing matched them, so there is no comparison.
+    # The origin as this candidate's comparison floor — ``None`` unless the candidate covered
+    # the origin's whole panel. This is NOT the population ``theta`` is ``None`` for: a cut
+    # candidate is usually still in the election fit and keeps its θ, because θ on the fixed δ
+    # ruler is subset-invariant and an accuracy is not. The round order is stratified on the
+    # incumbent's own grades, so on a prefix the origin's rate is ``⌊n/4⌋/n`` — see
+    # ``scoring/metrics.py::matched_origin_stats`` for the measurement.
     # These MUST NOT default to 0.0. An unstamped 0.0 is indistinguishable from a real origin
     # that scored nothing, and it reads as "this candidate beat the origin by its whole accuracy"
     # — which is what the inner narrative told the outer optimizer, on every eliminated arm.
@@ -278,9 +280,9 @@ class ScoreboardRow(StrictModel):
     composite_fitness: float
     total: int
     escalation_aborted: bool
-    # ``None`` for a row nothing was matched to (eliminated / under the coverage floor) — see
-    # ``ScoredCandidate``. The round file carries the absence rather than a 0.0 that reads as a
-    # verdict the origin never gave.
+    # ``None`` for a row that did not cover the origin's panel — see ``ScoredCandidate``. The
+    # round file carries the absence rather than a 0.0 that reads as a verdict the origin never
+    # gave, or a prefix rate that reads as one the origin never earned.
     matched_origin_accuracy: float | None
     matched_origin_composite: float | None
     composite_ci_lo: float | None
@@ -745,8 +747,8 @@ class RoundSummaryCandidate(StrictModel):
     # origin restricted to the samples this candidate actually measured. Served because
     # `accuracy` alone is unreadable under elimination — a PoBB-locked candidate ran 8 of 20,
     # so what it beat is NOT the origin's full-set rate, and the terminal has always printed
-    # "was 42%" beside the verdict while the webapp printed the verdict alone. `None` outside
-    # the election fit (eliminated / under the coverage floor) — nothing matched it.
+    # "was 42%" beside the verdict while the webapp printed the verdict alone. `None` unless the
+    # candidate covered the origin's panel — a prefix rate is set by where PoBB stopped it.
     matched_origin_accuracy: float | None = None
     matched_origin_composite: float | None = None
 

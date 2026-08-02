@@ -189,8 +189,8 @@ async def l1_score(
     best_results: list[QueryMeasurement] = list(cast("list[QueryMeasurement]", parent.results))
     best_label = parent.report.label
     best_scores: dict[str, float] = dict(parent.report.evaluators)
-    best_matched_origin_acc = parent.report.accuracy
-    best_matched_origin_composite = parent.report.composite_fitness
+    best_matched_origin_acc: float | None = parent.report.accuracy
+    best_matched_origin_composite: float | None = parent.report.composite_fitness
     # Elect by confident improvement over MATCHED origin (origin on the candidate's own measured
     # samples), NOT raw accuracy vs origin's full-set rate. Candidates share ONE round order but
     # elimination truncates them at different depths, so each ends up measured on a different
@@ -206,15 +206,17 @@ async def l1_score(
     # (`score_search_point` received each candidate's OSP) and ride on its `ScoredCandidate`.
     # Here we only add the matched-origin floor (origin restricted to the candidate's samples).
     cs_by_id = {cs.candidate_id: i for i, cs in enumerate(candidate_scores)}
-    matched_by_id: dict[str, dict[str, Any]] = {}
+    matched_by_id: dict[str, dict[str, Any] | None] = {}
     electable: list[str] = []
     for ind in scored:
         cs_idx = cs_by_id.get(ind.lineage.id)
         if cs_idx is None:
             continue
         cand_results = all_candidate_results[ind.lineage.id]
-        # PoBB-locked candidates may have only run q8/20 — comparing their 8-sample accuracy to
-        # origin's full-set rate punishes early-stop. Restrict origin to the candidate's measured set.
+        # ``None`` unless this candidate covered the origin's whole panel. The round order is
+        # stratified on the incumbent's own grades, so the origin's rate on a truncated
+        # candidate's prefix is decided by where PoBB stopped it, not by the data — see
+        # ``matched_origin_stats``. A cut candidate's standing is its θ, which it keeps below.
         matched = matched_origin_stats(
             cast("list[QueryMeasurement]", parent.results),
             cand_results,
@@ -224,8 +226,8 @@ async def l1_score(
         matched_by_id[ind.lineage.id] = matched
         candidate_scores[cs_idx] = candidate_scores[cs_idx].model_copy(
             update={
-                "matched_origin_accuracy": matched["accuracy"],
-                "matched_origin_composite": matched["composite_fitness"],
+                "matched_origin_accuracy": matched["accuracy"] if matched else None,
+                "matched_origin_composite": matched["composite_fitness"] if matched else None,
             }
         )
         # A candidate that answered ONE label to every sample is not a weak candidate — it carries
@@ -325,8 +327,8 @@ async def l1_score(
         best_results = list(all_candidate_results[winner_id])
         best_label = winner_ind.lineage.changes_description or winner_ind.lineage.id[:12]
         best_scores = dict(winner_cs.evaluators)
-        best_matched_origin_acc = matched["accuracy"]
-        best_matched_origin_composite = matched["composite_fitness"]
+        best_matched_origin_acc = matched["accuracy"] if matched else None
+        best_matched_origin_composite = matched["composite_fitness"] if matched else None
 
     base = _compute_accuracy(best_results)
     # The headline sample count rides the winner's ScoredCandidate row — the replication
@@ -362,6 +364,16 @@ async def l1_score(
     # accuracy stops being comparable. (``per_round_resubset`` defaults ON —
     # ``config.py::SelectionMechanisms`` — so subsets also drift BETWEEN rounds; the fixed ruler
     # is what keeps θ comparable across them.)
+    # Linearize at the ORIGIN's own operating point on this round's panel — a full-panel
+    # measurement, and a property of the origin rather than of whichever candidate won. It used
+    # to read the winner's ``matched_origin_accuracy``; for a leader-locked winner that is the
+    # origin's rate on a prefix of an incumbent-stratified order (``⌊n/4⌋/n``), so the bar the
+    # winner had to clear moved with wherever PoBB happened to stop it — up to ~1.8x on a
+    # six-sample prefix. No banked round has yet elected a truncated winner, so this closes a
+    # latent hole rather than a fired one.
+    slope = max(parent.report.accuracy * (1.0 - parent.report.accuracy), _GATE_SLOPE_FLOOR)
+    gate_bar = improvement_threshold / slope
+    theta_lift: float | None = None
     delta_ok = False
     if winner_id:
         from promptpotter.application.intelligence.exploration import theta_lift_over_origin
@@ -374,8 +386,7 @@ async def l1_score(
         # the same policy ``c0_ok`` states below; both read one helper so they cannot drift apart
         # (they had, and this branch was the one inventing a coin-flip origin).
         theta_lift = theta_lift_over_origin(abilities, winner_id)
-        slope = max(best_matched_origin_acc * (1.0 - best_matched_origin_acc), _GATE_SLOPE_FLOOR)
-        delta_ok = theta_lift is not None and theta_lift > improvement_threshold / slope
+        delta_ok = theta_lift is not None and theta_lift > gate_bar
     # There is deliberately NO second sample-count gate here. ``coverage_floor`` (above) is the
     # ONE under-probing guard, and ``delta_ok`` requires a winner — so by this line the election
     # has already refused to crown anything below it. A re-check against the UNCLAMPED
@@ -407,11 +418,24 @@ async def l1_score(
     # many. The lineage's standing against C0 stays RECORDED, not gated: ``origin_accuracy`` and
     # the ``matched_origin_*`` triple ride every round.
     improved = delta_ok
-    improved_reason: str | None = (
-        None
-        if improved
-        else f"no winner cleared the matched parent by {improvement_threshold} accuracy"
-    )
+    # Name the estimator that actually decided, and separate the two ways a round holds. One
+    # string used to cover both — "no winner cleared the matched parent by {t} accuracy" — and
+    # it was wrong twice over: the comparison has run in θ-logits since the election moved to
+    # the fixed ruler, and it read as "somebody was crowned and fell short" on rounds where the
+    # election crowned nobody. Fifteen of the banked rounds carry that sentence, which is where
+    # the belief that this gate reads accuracy came from; the L4 narrative and the outer L1
+    # critique both quote it, so the outer loop was being taught the wrong lever.
+    if improved:
+        improved_reason: str | None = None
+    elif not winner_id:
+        improved_reason = "no candidate's ability exceeded the parent's on the round's δ ruler"
+    elif theta_lift is None:
+        improved_reason = "the parent's ability could not be fit, so there was no floor to clear"
+    else:
+        improved_reason = (
+            f"winner's ability lift {theta_lift:+.3f} logits did not clear {gate_bar:.3f} "
+            f"({improvement_threshold} accuracy at the parent's {parent.report.accuracy:.0%} rate)"
+        )
     round_result = RoundResult(
         round=round_num,
         label=best_label,

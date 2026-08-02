@@ -381,14 +381,17 @@ async def _run_sweep_batch(
     train_data: list[Sample],
     sweep_payloads: list[tuple[Path, Any]],
 ) -> CommandResult:
-    """Thin shim → ``application.sweep.run_sweep_batch``; binds observer factory to CLI args + campaign_config."""
+    """Thin shim → ``application.sweep.run_sweep_batch``; binds the observer factory AND the
+    active-pointer reload to CLI args, so the application layer needs neither `argparse` nor
+    `presentation.cli`."""
     from promptpotter.application.sweep import run_sweep_batch
+    from promptpotter.presentation.cli.session import load_session
 
     def observer_factory(session: Session, origin_acc: float) -> RunObservers:
         return build_observers(args, session, campaign_config, train_data, origin_acc)
 
     result = await run_sweep_batch(
-        args,
+        lambda: load_session(args),
         root_ctx,
         campaign_config,
         train_data,

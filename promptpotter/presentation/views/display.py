@@ -210,14 +210,14 @@ def _round_rule(label: str, label_right: str = "", width: int = _NW) -> str:
 def _scoreboard(
     candidate_scores: Sequence[ScoreEntry],
     winner_label: str,
-    origin_accuracy: float,
 ) -> str:
     """Format ranked candidate scoreboard as a box with 95% CI.
 
-    Reads the frozen ``ScoreEntry`` rows directly. When a row carries a non-zero
-    ``matched_origin_accuracy`` (PoBB-locked candidates only ran a subset), the Δ
-    column compares against origin on that same subset; otherwise the full-set
-    ``origin_accuracy`` fallback applies. Returns multi-line string ready to print.
+    Reads the frozen ``ScoreEntry`` rows directly. The Δ column compares each row against
+    ``matched_origin_accuracy`` — origin on the samples that row actually ran — and is blank
+    where the row has none. The round's full-set origin used to be passed in as the fallback
+    for those rows; it is not a fallback, it is a different sample basis, so the parameter is
+    gone rather than left unread. Returns multi-line string ready to print.
     """
     # Filter synthetic-zeroed variants (no_op / duplicate) — they did not burn an LLM call
     # and ranking them as 0.0% delta distorts the verdict. The set is imported, never
@@ -245,16 +245,15 @@ def _scoreboard(
         label = (s.label or "")[:8]
         acc = s.accuracy
         ci_str = fmt_ci(s.composite_ci_lo, s.composite_ci_hi)
-        # Per-row matched-pair origin: compares this candidate's accuracy against origin on
-        # the *same samples this candidate ran* (PoBB-locked rows). ``None`` for rows nothing
-        # was matched to (eliminated / under the coverage floor) — those fall back to the
-        # full-set origin. A row whose matched origin genuinely scored 0.0 keeps its 0.0;
-        # the old `or` could not tell the two apart and silently understated its lift.
-        row_origin = (
-            s.matched_origin_accuracy if s.matched_origin_accuracy is not None else origin_accuracy
-        )
-        delta = acc - row_origin
-        delta_str = f"{delta:+.1%}" if abs(delta) >= 0.001 else "---"
+        # Per-row matched-pair origin: this candidate's accuracy against origin on the *same
+        # samples it ran*. ``None`` for a row that did not cover the origin's panel, and there
+        # the column stays EMPTY rather than falling back to the full-set origin — a prefix
+        # accuracy measured against a full-panel rate is the mismatch the matched floor exists
+        # to prevent, pointed the other way. A row whose matched origin genuinely scored 0.0
+        # keeps its 0.0; the old `or` could not tell that from absence.
+        row_origin = s.matched_origin_accuracy
+        delta = acc - row_origin if row_origin is not None else None
+        delta_str = f"{delta:+.1%}" if delta is not None and abs(delta) >= 0.001 else "---"
         aborted = s.escalation_aborted
         if aborted:
             winner_mark = f"  {YELLOW}(aborted){RESET}"

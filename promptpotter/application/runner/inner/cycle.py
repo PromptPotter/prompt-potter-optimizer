@@ -355,9 +355,11 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
         scored = [c for c in rnd.candidate_scores if not c.invalid]
         if scored:
             # Rank by lift over the MATCHED origin where there is one, and never invent the
-            # comparison where there is not: an eliminated arm carries no matched origin, so
-            # `accuracy - 0.0` would have handed it its whole accuracy as lift and floated it
-            # to the top of exactly the sentence the outer optimizer learns from.
+            # comparison where there is not: an arm that did not cover the origin's panel
+            # carries no matched origin, so `accuracy - 0.0` would have handed it its whole
+            # accuracy as lift and floated it to the top of exactly the sentence the outer
+            # optimizer learns from. `-inf` keeps the story on an arm that ran the panel — the
+            # ones with the shortest prefixes are the ones a prefix rate flatters most.
             top = max(
                 scored,
                 key=lambda c: (
@@ -375,7 +377,7 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
             versus = (
                 f" vs matched-origin {top.matched_origin_accuracy:.3f}"
                 if top.matched_origin_accuracy is not None
-                else " (eliminated before the origin could be matched to its samples)"
+                else " (stopped before it covered the origin's samples, so nothing to compare)"
             )
             parts.append(
                 f"tried {top.label} (acc {top.accuracy:.3f}{versus}{theta}): "

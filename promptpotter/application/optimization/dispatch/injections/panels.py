@@ -691,10 +691,11 @@ def _candidate_mutation(
 def _candidate_fate(cand: ScoredCandidate) -> str:
     """How this candidate ended — the recorded outcome, not the prose.
 
-    An eliminated candidate has no ``matched_origin_accuracy`` (it left the election fit), so
-    its raw partial accuracy is unpaired and must never be quoted as a comparison — that is
-    precisely the reading that told the outer optimizer a cut candidate had crushed the
-    origin. So a stop reports WHERE it stopped and that it stopped, never a standing.
+    A candidate PoBB cut early has no ``matched_origin_accuracy``: it ran a prefix of an order
+    stratified on the incumbent's own grades, so both halves of that comparison are set by
+    where it stopped rather than by what it did — precisely the reading that told the outer
+    optimizer a cut candidate had crushed the origin. So a stop reports WHERE it stopped and
+    that it stopped, never a standing; its subset-invariant standing is the θ beside it.
     Not keyed on ``partial_reason``: its documented ``"pobb"`` arm is dead — nothing writes
     it — so every eliminated candidate on disk carries the empty string.
     """
@@ -731,10 +732,10 @@ def _r_mutation_memory(b: InjectionBundle) -> str:
     every retained round fits and the record stays COMPLETE. The record's job is
     recognition, not reproduction, so a short stem per field is enough.
 
-    An accuracy is only quoted against ``matched_origin_accuracy``, the origin restricted to
-    the samples that candidate actually saw. An eliminated candidate has none (it is `None`,
-    deliberately, and must never read 0.0 — that reads as "beat the origin by its whole
-    accuracy"), so its row reports where it was cut instead of inventing a comparison.
+    An accuracy is only quoted against ``matched_origin_accuracy``, which exists only where the
+    candidate covered the origin's whole panel. A candidate PoBB cut early has none — its prefix
+    is the incumbent's own miss list, so a rate read off it says how far the candidate got, not
+    how well it did — so its row reports where it was cut instead of inventing a comparison.
 
     Rows whose mutation carries an idea ALREADY tried in an earlier retained round are marked
     ``↺ same idea as r{N} (Mx)`` — matched on idea vocabulary, never field+stem, because the

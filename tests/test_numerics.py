@@ -413,46 +413,46 @@ def test_composite_fitness_matches_default_formula():
     assert scored["composite_fitness"] == pytest.approx(0.5, abs=1e-4)
 
 
-def test_matched_origin_stats_restricts_to_candidate_subset():
-    """Guards the round-winner gate: when PoBB leader-locks a candidate on a
-    subset of samples, the comparison must use origin's stats on the SAME
-    subset — not origin's full-set rate extrapolated onto the subset. The
-    bug we're guarding: the AIME C1.4 case where a candidate scored 3/8 on
-    the hardest samples (where origin scored 0/8) was being compared to
-    origin's full 10/20 and dismissed as "no improvement"."""
+def test_matched_origin_stats_refuses_a_prefix_it_cannot_measure():
+    """A wrong number carried forward with no error — this file's own bar.
+
+    ``build_round_order`` stratifies the round on the INCUMBENT's grades: every 4th slot is
+    a cell it passed, the rest are cells it missed. So origin's rate on a truncated
+    candidate's prefix is ``⌊n/4⌋/n`` — set by where PoBB stopped, not by the data — and
+    both halves of the comparison are conditioned on the outcome that chose the subset, so
+    a candidate of identical ability outscores origin there by regression to the mean.
+    Measured over the 32 truncated rows banked on disk, that prediction held exactly 28
+    times; the 19 candidates cut at six samples every one reported 0.1667.
+
+    Nothing raises when it is wrong: the value renders into the scoreboard, the
+    ``mutation_memory`` panel L1 reasons from, and the L4 narrative's top-arm pick.
+    """
     schema = _single_node_schema()
     # Origin scored 20 samples: 10 hits (samples 0-9 hit, 10-19 miss).
     origin_results = [
         {**_eval_result(hit=i < 10, score=1.0 if i < 10 else 0.0), "sample_id": i}
         for i in range(20)
     ]
-    # Candidate measured only 8 of the *hardest* samples (origin's misses,
-    # sample_ids 10..17) and hit 3 of them.
-    candidate_results = [
+    # Candidate stopped after 8 of the *hardest* samples (origin's misses, ids 10..17).
+    # Origin reads 0/8 there — but it reads 0/8 for ANY candidate cut at that depth, which
+    # is what makes it unusable rather than merely harsh.
+    truncated = [
         {**_eval_result(hit=i < 13, score=1.0 if i < 13 else 0.0), "sample_id": i}
         for i in range(10, 18)
     ]
-    matched = matched_origin_stats(origin_results, candidate_results, schema)
-    # Origin scored ZERO on samples 10-17. The faked extrapolation
-    # (origin.accuracy * 8 = 0.5 * 8) would have invented lift the origin never earned.
-    assert matched["total"] == 8
-    assert matched["accuracy"] == 0.0
-    # Degenerate case: candidate measured all 20 → matches full-set stats.
+    assert matched_origin_stats(origin_results, truncated, schema) is None
+    # Covered the whole panel → a real comparison, on the origin's own measured set.
     full = matched_origin_stats(origin_results, origin_results, schema)
+    assert full is not None
     assert full["total"] == 20
-    assert full["accuracy"] == 0.5
     assert full["accuracy"] == pytest.approx(0.5)
-    # DISJOINT subset (per_round_resubset can hand a candidate samples the origin never
-    # measured): restricting yields [], which scores no `accuracy` term. This must NOT crash
-    # the campaign (round scorer refuses an empty set) and must NOT invent a fake 0.0 floor
-    # (which would credit improvement over an unmeasured floor). It falls back to origin's
-    # FULL measured floor — a real number.
+    # DISJOINT (per_round_resubset can hand a candidate samples the origin never measured):
+    # no shared basis at all, so no comparison. This previously fell back to origin's full
+    # rate, publishing a floor measured on cells the candidate never ran.
     disjoint_candidate = [
         {**_eval_result(hit=True, score=1.0), "sample_id": i} for i in range(100, 108)
     ]
-    disjoint = matched_origin_stats(origin_results, disjoint_candidate, schema)
-    assert disjoint["total"] == 20
-    assert disjoint["accuracy"] == pytest.approx(0.5)
+    assert matched_origin_stats(origin_results, disjoint_candidate, schema) is None
 
 
 def test_value_with_mask_applied_reproduces_the_retired_client_whatif_math():

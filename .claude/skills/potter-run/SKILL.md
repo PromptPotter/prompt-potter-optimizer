@@ -151,21 +151,30 @@ first (ascending δ) and slots seed-HIT regression probes every 4th position, so
 late run is the bank, not momentum, and paired against an incumbent that also wins those rows it
 carries no information.
 
-**But the promotion gate and the PoBB posterior are DIFFERENT estimators and they disagree.**
+**The promotion gate and the PoBB posterior disagree — but they are asking different questions.**
 Same round, same 28 paired samples: `paired_breakdown.p_better` = **0.842** against the incumbent,
-while the election wrote *"no winner cleared the matched parent by 0.02 accuracy"* and held —
-because raw counts tied at 15/28. The posterior is paired and difficulty-weighted on the cycle's
-locked δ ruler (winning a hard row outweighs losing an easy one); `matched_origin_accuracy` is an
-unpaired count that is blind to δ. The campaign declares `headline_metric: ability` (θ) and the
-gate reads accuracy — so a candidate can be better by the metric the campaign names and still lose
-the round.
+while the election held. It is tempting to read that as two estimators of one quantity, and the
+earlier version of this note did: it claimed the gate reads accuracy while the campaign declares
+`headline_metric: ability`. **That was wrong** — the gate has compared θ on the locked δ ruler
+since `a4753a23`, and `headline_metric` is DISPLAY config by design (`config.py` says so: "the
+gate is always difficulty-adjusted ability θ"). What actually misled every reader was the gate's
+own *explanation string*, which still said "cleared the matched parent by 0.02 accuracy" — fifteen
+banked rounds carry that sentence. Fixed: the reason now names the θ lift, the θ-space bar, and
+distinguishes "the election crowned nobody" from "a winner was crowned and fell short".
 
-**A truncated `matched_origin_accuracy` is an artifact of the order, not a measurement.** Both
-strata are defined by the *incumbent's own* grades, so on any prefix the incumbent's score is
-fixed by construction: positions 1-6 hold exactly one HIT-stratum slot (position 4), so a
-candidate cut at `n_min` reports `matched_origin_accuracy` = 1/6 whatever the data says. Two
-different candidates eliminated in the same round both read `0.16666…` — identical because it was
-never measured. Do not quote it, and do not compare it across arms.
+What remains true is that `p_better` is a **stopping** posterior (is more measurement worth
+buying?) and `improved` is a **promotion effect-size** gate (is the lift big enough to adopt?).
+Those can legitimately disagree without either being broken. Read both, name both.
+
+**A truncated `matched_origin_accuracy` was an artifact of the order — FIXED 2026-08-02, and the
+diagnostic is still worth knowing.** Both strata are defined by the *incumbent's own* grades, so
+on any prefix its score was fixed by construction: positions 1-6 hold exactly one HIT-stratum slot
+(position 4), so a candidate cut at six reported `1/6` whatever the data said — measured over the
+32 truncated rows on disk, `⌊n/4⌋/n` predicted the banked value exactly 28 times. The writer now
+refuses it (`scoring/metrics.py::matched_origin_stats` returns `None` unless the candidate covered
+the origin's panel), so a cut arm reports where it stopped plus its θ, and never a standing. **If
+you see a `matched_origin_accuracy` on a row whose `scored_samples < expected_samples`, that round
+predates the fix — do not quote it, and do not compare it across arms.**
 
 What the ordering does **not** do is starve the posterior: measured over 6 arms, `p_best` moved on
 46-79% of the budget, so the stratification is not why ε fails to fire. Arms that end close are
@@ -176,9 +185,10 @@ So: **when a round reports `improved: false`, open
 it.** A held round whose `p_better` sits far off 0.5 is a promotion the gate refused, not a
 candidate that failed. Report it as an instrument disagreement, and name both numbers.
 
-Do **not** answer this by retuning `improvement_threshold` / `pobb_epsilon` — the two estimators
-would still disagree, just at a different crossover. The root fix is one estimator at the gate:
-promotion reads what the campaign's `headline_metric` declares. Open finding, 2026-08-02.
+Do **not** answer this by retuning `improvement_threshold` / `pobb_epsilon`, and do **not** route
+promotion through `headline_metric` — that knob is display-only on purpose, and the gate is
+already θ. If a held round still looks wrong after reading both numbers, the question to ask is
+whether the *threshold* is right for this benchmark, not which estimator the gate should use.
 
 ## Configs are the source of truth
 

@@ -52,7 +52,7 @@ from promptpotter.domain.pipeline_schema import (
     PipelineNode,
     PipelineSchema,
 )
-from promptpotter.domain.results import CandidateProposal
+from promptpotter.domain.results import CandidateProposal, is_leader_eligible
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 from promptpotter.domain.validators import LLMOutputValidator, ValidatorOutcome
 
@@ -745,25 +745,41 @@ class L1YieldStats:
 def lost_ideas(prior_rounds: Sequence[Any]) -> list[tuple[int, frozenset[str]]]:
     """``(round, idea fingerprint)`` for every prior candidate that was MEASURED and LOST.
 
-    The evidence base for ``repeat_variant``. Two filters, and both are load-bearing:
+    The evidence base for ``repeat_variant``. Three filters, and each is load-bearing:
 
     * **Measured** (``total > 0``). A candidate that scored no samples carries
       ``accuracy == 0.0`` only because the field is a non-optional float — it is the absence
       of evidence, not a defeat. Rejecting a live proposal because an unmeasured one "already
       failed" would be the loop punishing an idea nobody ever ran. (Probe rounds manufactured
       exactly these wholesale before the lever was removed.)
-    * **Lost.** An idea that BEAT its matched origin is not a dead end — refining a winner is
-      the search working. Only ideas measured against a matched origin and found no better
-      become grounds for rejection.
+    * **Trustworthy** (``is_leader_eligible``). The shapes whose measurement cannot be read at
+      all — escalation-aborted outside PoBB, degradation-cut — say nothing either way.
+    * **Lost.** An idea that BEAT its origin is not a dead end; refining a winner is the search
+      working. How that is known depends on how the candidate ended, and the two ways are
+      recorded facts, not a guess. A candidate that covered the origin's panel is compared to
+      its matched origin. A candidate PoBB **ε-eliminated** has no matched origin and needs
+      none: elimination IS the measurement — its P(best) fell below ε against the round's
+      leader. A **lock-in** stop is the opposite fact (it stopped because it was winning) and
+      is never evidence of a loss; ``elimination_context.leader_locked`` tells them apart, the
+      same bit ``mask/load.py::_abort_contributor`` reads.
+
+    That last split is why this cannot go back to reading a cut candidate's accuracy against a
+    prefix origin rate: the prefix is the incumbent's own miss list, so the comparison exempted
+    two ideas from the gate as winners whose θ sat well BELOW origin.
     """
     out: list[tuple[int, frozenset[str]]] = []
     for i, rr in enumerate(prior_rounds):
         parent = rr.prompt_fields
         parent_pp = prior_rounds[i - 1].pipeline_params if i > 0 else None
         for cand in rr.candidate_scores:
-            if not cand.total or cand.matched_origin_accuracy is None:
+            if not cand.total or not is_leader_eligible(cand):
                 continue
-            if cand.accuracy > cand.matched_origin_accuracy:
+            if cand.elimination_stopped:
+                if cand.elimination_context.get("leader_locked"):
+                    continue
+            elif cand.matched_origin_accuracy is None or (
+                cand.accuracy > cand.matched_origin_accuracy
+            ):
                 continue
             if fp := candidate_idea(
                 cand.prompt_fields, parent, cand.pipeline_params_override, parent_pp

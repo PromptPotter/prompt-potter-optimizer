@@ -1,6 +1,6 @@
 # Fitness comparability — collapse the θ/accuracy boundary
 
-> **Status:** slices 1–3 SHIPPED (θ gates on one fixed ruler; resubset ON; 2PL graduation live). Slice 4 is shipped except the cross-round headline surfaces + the lineage `/N` badge (below); the calibration model is now served and read. Open: feeding graduated discrimination into selection (slice 3 nuance). **Prerequisite to [`l4-outer-loop.md`](l4-outer-loop.md)** — the L4 outer fitness reads inner-campaign improvement, which is only comparable because this shipped.
+> **Status:** slices 1–3 SHIPPED (θ gates on one fixed ruler; resubset ON; 2PL graduation live). Slice 4 is shipped except the cross-round headline surfaces + the lineage `/N` badge (below) — those are now **decided and unblocked**, not blocked (§ The accumulated cross-round number); the calibration model is served and read. Open: feeding graduated discrimination into selection (slice 3 nuance). **Prerequisite to [`l4-outer-loop.md`](l4-outer-loop.md)** — the L4 outer fitness reads inner-campaign improvement, which is only comparable because this shipped.
 
 ## Why — one quality number, accidentally split into two
 
@@ -52,7 +52,40 @@ Per-round resubset can turn back **ON** once fitness is θ, because θ makes the
    - **The default is `CampaignConfig.headline_metric`, NOT `OptSearchPoint`.** It is *display* config (how fitness is shown), not optimizer *search* state (what mutates per candidate) — so it doesn't ride `OptSearchPoint` (that would be the sidecar the rules forbid). It lands beside the scoring formula on `CampaignConfig`, declaring itself `Knob(Scope.POLICY, Estimand.DISPLAY)` (display-only, no data fork), stamped onto `LiveDashboardState` at INIT:exit (beside `run_limits`, so a fork carries its own default) and served at `dashboard.json::headline_metric` — the same state→dump path `composite_fitness_formula` rides. The webapp seeds the toggle from that served default (`dash.headline_metric`); a manual pick overrides for the session.
    - **Surface = the candidates card** (the named "visible failure": the θ-winner glyph beside a *higher-accuracy* losing sibling). ONE multi-select Metric control (Acc / Comp / θ) drives the whole card — the bar series AND the node values in both the dendrogram and the forest, so the two halves cannot disagree about which number is being read. Accuracy/composite render as a percent; θ is a logit (`θ 0.41`), so it rides its own right-hand bar axis and stays strictly sparse (a missing θ is never coerced to 0 — 0 is a real ability). `composite_fitness` is served per candidate on the tree — `GET /campaigns/{c}/cycles/{cy}/tree`, verbatim from the dashboard round summary — so settled forks honor the composite selection on the same basis as the active cycle; the webapp never re-selects composite-vs-accuracy (the TS `displayFitness` re-implementation is deleted — `domain/rendering.py::display_fitness` is the sole owner of the rule). **The winner glyph keeps its always-on θ tooltip line** regardless of the selected headline (true after (i)) so "won on harder samples" never disappears.
    - **`mode: measured` vs `all` — reuse, don't add.** The subset basis the number was measured over is **already served**: `scored_samples`/`expected_samples` on `RoundSummaryCandidate` (dashboard) and `n_samples`/`n_expected` on the webapp `CandidateRow`. No new enum field (it would raise the ledger for a fact already on the wire — surface-ledger rule). `LineageNode` now serves `scored_samples`/`expected_samples` too; badging them as a `/N` on the node is the unbuilt half.
-   - **Remainder (documented, not built):** (a) extend the toggle to the **cross-round** surfaces (the "Best" tile, the TopStrip sparkline, the sidebar `best_accuracy`), which compute a cross-round aggregate; their θ readout **waits on slice 2's stable δ bank** (until then a cross-round θ compares different per-round anchors), so they stay subset-relative composite/accuracy with an annotation rather than claim a cross-round θ — the accuracy↔composite half could apply there sooner. (b) the lineage subset `/N` badge.
+   - **Remainder (documented, not built):** (a) extend the toggle to the **cross-round** surfaces (the "Best" tile, the TopStrip sparkline, the sidebar `best_accuracy`), which compute a cross-round aggregate — **decided below, and the blocker this line used to name is stale**: slice 2 shipped, so the "different per-round anchors" objection no longer holds. (b) the lineage subset `/N` badge.
+
+## The accumulated cross-round number — DECIDED (2026-08-02)
+
+The operator asked for an **accumulated one-to-one comparable number**: every candidate ever
+measured on one scale against a common reference, not just within-round pairing. Two candidates
+were on the table, they give different numbers, and only one can headline.
+
+**It is θ on the cycle's locked δ ruler, re-projected to accuracy units for the human.**
+Subset-invariance is not a property θ approximates — it is what the Rasch model is *for*, so
+"comparable across rounds that drew different samples" is satisfied by construction rather than
+by an accumulation step. It is already computed (`cumulative_theta` rides every round summary on
+every banked cycle, with `calibration_model` stamped beside it), already the gate, already the
+election's rank key. The jargon objection that kept θ off the text surfaces is answered without a
+new mechanism: `ruler_expected_accuracy(θ, δ_ruler)` re-projects the ability onto the ruler's one
+fixed reference set, giving a percentage that is still subset-invariant. It already ships — it is
+what `theta_accuracy_ci` draws the candidate whisker from.
+
+**The alternative — an accumulated paired-vs-origin accuracy over the union of shared samples — is
+refused, on a measurement.** That union is not a neutral sample of the dataset: `build_round_order`
+partitions each round on the *incumbent's own grades* (every 4th slot a cell it passed, the rest
+cells it missed) and `select_round_subset` chases information gain, so the union is assembled by
+conditioning on outcomes. An accuracy accumulated over it inherits exactly the pathology measured
+in `scoring/metrics.py::matched_origin_stats` — where the origin's rate on such a set is `⌊n/4⌋/n`,
+a function of how far a candidate got — only at larger `n`, which makes it look *more* trustworthy
+rather than less. It also cannot be computed without new spend: the origin is re-scored per round
+on that round's panel, so it holds no measurement on late-round cells at all.
+
+**Honest absence, not a fallback.** A cold ruler makes θ collapse to that round's logit-accuracy
+(`adopted_level_trajectory` states this), so the accumulated number is **absent** there — never
+silently substituted with raw accuracy, which is the subset-relative quantity this whole spec
+exists to stop headlining.
+
+Unbuilt: pointing the three cross-round surfaces at it.
 
    **(iii) Teach θ / 1PL / 2PL — SHIPPED.** `docs/glossary.md` θ/δ/1PL/2PL/specific-objectivity entries (AI/dev corpus) + `webapp/components/candidates/AbilityInfo.tsx::AbilityHelp` ("why a lower-accuracy candidate can win" + calibration model), revealed inside the candidates card's `⋯` menu — read-once teach copy, so it owns no permanent control. `_calibrate_delta_ruler` returns the fitted model, which rides the `cumulative_theta` path (`RoundResult` → `RoundSummary` → `dashboard.json`) to it.
 
@@ -65,7 +98,7 @@ Per-round resubset can turn back **ON** once fitness is θ, because θ makes the
 | Concern | File |
 |---|---|
 | Feed aₛ into selection (slice 3 follow-up) | `exploration.py::select_round_subset` + `hard_sample_sorter.py` — still fit 1PL for the selection/heatmap δ; the acquisition term should weight by the graduated discrimination |
-| Selectable headline metric — cross-round remainder | the "Best" tile, TopStrip sparkline, sidebar `best_accuracy` follow the toggle; their θ readout waits on a *stable cross-cycle* δ bank (annotate as subset-relative meanwhile). Plus the lineage subset `/N` badge (`scored_samples` — now served on `LineageNode`; the badge itself is unbuilt) |
+| Selectable headline metric — cross-round remainder | the "Best" tile, TopStrip sparkline, sidebar `best_accuracy` follow the toggle. **No longer blocked** — the number they read is decided (§ The accumulated cross-round number): `ruler_expected_accuracy(cumulative_theta, δ_ruler)`, absent where the ruler is cold. Plus the lineage subset `/N` badge (`scored_samples` — now served on `LineageNode`; the badge itself is unbuilt) |
 
 ## Non-goals + validation
 

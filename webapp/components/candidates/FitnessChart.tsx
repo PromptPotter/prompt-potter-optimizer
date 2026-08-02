@@ -110,17 +110,11 @@ const compositeCiWhiskerPlugin: Plugin<
     if (dsIndex < 0) dsIndex = chart.data.datasets.findIndex((ds) => ds.label === "accuracy");
     if (dsIndex < 0) return;
     const meta = chart.getDatasetMeta(dsIndex);
-    const { ctx, chartArea } = chart;
+    const { ctx } = chart;
     ctx.save();
     ctx.strokeStyle = getCss("--color-ci");
     ctx.lineWidth = 1.5;
     const capHalf = 4;
-    // The normal-CLT CI (`mean_ci`) can spill past [0,1] near the boundary — a
-    // real case is ci_lo < 0 on a low-composite candidate. The y-axis is fixed
-    // [0,1], so an unclamped pixel lands OUTSIDE the plot (a whisker hanging below
-    // the axis reads as a stray bar). Clamp both ends to the plot's own pixel span.
-    const clampY = (px: number) =>
-      Math.min(chartArea.bottom, Math.max(chartArea.top, px));
     for (let i = 0; i < ciLo.length; i++) {
       const lo = ciLo[i];
       const hi = ciHi[i];
@@ -130,8 +124,12 @@ const compositeCiWhiskerPlugin: Plugin<
         | undefined;
       const x = el?.getProps?.(["x"], true)?.x;
       if (typeof x !== "number") continue;
-      const yLo = clampY(yScale.getPixelForValue(lo));
-      const yHi = clampY(yScale.getPixelForValue(hi));
+      // Both band sources are bounded to [0,1] by the server — the composite CI is clipped
+      // to its support in `scoring/metrics.py::composite_ci`, and the θ band is a mean of
+      // sigmoids — so the pixel always lands inside the fixed axis. This used to clamp to
+      // the plot area, compensating here for an interval that claimed negative accuracy.
+      const yLo = yScale.getPixelForValue(lo);
+      const yHi = yScale.getPixelForValue(hi);
       ctx.beginPath();
       ctx.moveTo(x, yLo);
       ctx.lineTo(x, yHi);

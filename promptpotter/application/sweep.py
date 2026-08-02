@@ -9,7 +9,6 @@ second, hand-rolled harness for the same job is gone, and this is what survived 
 
 from __future__ import annotations
 
-import argparse
 import logging
 import secrets
 from collections.abc import Callable
@@ -88,7 +87,7 @@ def existing_fork_source_files(
 
 
 async def run_sweep_batch(
-    args: argparse.Namespace,
+    reload_ctx: Callable[[], SessionCtx],
     root_ctx: SessionCtx,
     campaign_config: CampaignConfig,
     train_data: list[Sample],
@@ -97,12 +96,21 @@ async def run_sweep_batch(
     observer_factory: Callable[..., Any],
     verbose: bool,
 ) -> SweepBatchResult:
-    """Mint one fork per ``OperatorSweepFile`` off ``root_ctx.cycle_id``; restore active pointer on exit."""
+    """Mint one fork per ``OperatorSweepFile`` off ``root_ctx.cycle_id``; restore active pointer on exit.
+
+    ``reload_ctx`` re-reads the active pointer AFTER ``_mint_fork`` retargets it, so each fork
+    binds its own session. It is injected rather than called directly because the only
+    implementation lives in ``presentation/cli`` — an application-layer function importing that
+    at runtime (and taking an ``argparse.Namespace``) inverted the layer direction. The debt
+    entry proposed passing one pre-resolved ``Session`` instead; that cannot work, since the
+    pointer moves once per payload and a single resolved session would bind every fork to the
+    first. A callable is the shape that survives the loop — the same injection
+    ``observer_factory`` beside it already uses.
+    """
     from promptpotter.application.bootstrap.wiring import init_services
     from promptpotter.application.config import configure_and_apply_pipeline
     from promptpotter.application.runner.entry import RunMode
     from promptpotter.application.runner.entry import run_optimization as _orch_run_optimization
-    from promptpotter.presentation.cli.session import load_session
 
     # The parent context already resolved both — re-resolving them here was a third copy
     # of the `--tenant > registered developer > anonymous default` ladder, free to disagree
@@ -169,7 +177,7 @@ async def run_sweep_batch(
         fork_result = None
         try:
             # Active pointer already retargeted; reload + bind a fresh session.
-            fork_ctx = load_session(args)
+            fork_ctx = reload_ctx()
             fork_session = await init_services(
                 **fork_ctx.init_params,
                 identity=identity,

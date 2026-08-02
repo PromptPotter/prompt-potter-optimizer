@@ -24,10 +24,6 @@ from promptpotter.application.datasets.ingest import (
     ingest_draft,
 )
 from promptpotter.application.intelligence.adaptive_queue_mechanism import marginal_hit_probability
-from promptpotter.application.intelligence.measurement_series import (
-    campaign_measurement_series,
-    cycle_measurement_series,
-)
 from promptpotter.application.jobs.launcher.checkin import load_checkin_draft
 from promptpotter.application.jobs.launcher.draft_build import draft_wire_with_locks
 from promptpotter.domain.cycle_paths import CycleHop
@@ -35,6 +31,8 @@ from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import NodeConfigParam, NodeOutputSchema
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.archive_views import (
+    campaign_measurement_series,
+    cycle_measurement_series,
     measurement_series_for_samples,
 )
 from promptpotter.infrastructure.store.dataset_access import (

@@ -181,9 +181,9 @@ class ScoreEntry:
     # First-validation-failure reason for synthetic-zeroed variants (e.g. ``no_op_variant``);
     # scoreboard suppresses these rows so ranking reflects mutated candidates only.
     invalid_reason: str | None = None
-    # Origin restricted to this row's measured samples — apples-to-apples Δ when PoBB
-    # leader-locked early; equals full-set origin when fully scored. ``None`` when nothing
-    # was matched (eliminated / under the coverage floor), which is NOT the same as 0.0.
+    # The origin as this row's comparison floor. ``None`` unless the row covered the origin's
+    # whole panel — a prefix rate is decided by where PoBB stopped the candidate, not by its
+    # answers (`scoring/metrics.py::matched_origin_stats`) — which is NOT the same as 0.0.
     matched_origin_accuracy: float | None = None
     matched_origin_composite: float | None = None
 
@@ -201,7 +201,8 @@ class RoundCompleteView:
     winner_evaluators: dict[str, float]
     winner_total: int
     improved: bool
-    delta: float
+    # ``None`` alongside ``matched_origin_accuracy`` — there is no Δ without a floor.
+    delta: float | None
     p_value: float | None
     improved_reason: str | None
     next_action: str
@@ -209,12 +210,14 @@ class RoundCompleteView:
     composite_fitness_formula: str | None
     composite_fitness_formula_short: str | None
     origin_composite_fitness: float | None
-    # Origin restricted to the winner's measured samples; verdict line + Δ
-    # read these so operator-facing "Δ vs origin" matches the ``l1_score`` gate.
-    # No default — the one builder resolves it (matched value, else the standing
-    # origin), and a ``0.0`` sitting here would render "was 0.0%" on any round whose
-    # payload lacked the key rather than failing where the omission happened.
-    matched_origin_accuracy: float
+    # Origin restricted to the winner's measured samples; verdict line + Δ read these so
+    # operator-facing "Δ vs origin" matches the ``l1_score`` gate. ``None`` when the winner
+    # did not cover the origin's panel — the verdict then states the winner's own rate and
+    # drops the "(was …)" clause rather than quoting the full-set origin, which is a
+    # different sample basis and would read as lift the winner never earned.
+    # No default: the one builder resolves it, and a ``0.0`` sitting here would render
+    # "was 0.0%" on any round whose payload lacked the key.
+    matched_origin_accuracy: float | None
     matched_origin_composite: float | None = None
 
 

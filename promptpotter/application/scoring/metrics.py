@@ -124,7 +124,13 @@ def composite_ci(results: list[QueryMeasurement]) -> tuple[float | None, float |
     if not per_cell:
         return (None, None)
     _, ci_lo, ci_hi = mean_ci(per_cell)
-    return (ci_lo, ci_hi)
+    # Clipped to the metric's own support. ``mean_ci`` is a normal-CLT band carrying PoBB's
+    # ``1/(4n)`` SE floor, so a candidate whose cells all scored 0.0 came out at ±0.0817 on six
+    # samples — an interval claiming negative accuracy, which the webapp then clamped at paint
+    # time to keep the whisker inside its own axis. The band stays deliberately optimistic at
+    # the boundary (it is the posterior PoBB eliminated on, drawn as the loop believed it), but
+    # it may not claim support the quantity does not have.
+    return (min(max(ci_lo, 0.0), 1.0), min(max(ci_hi, 0.0), 1.0))
 
 
 def count_degraded_samples(results: Sequence[Mapping[str, Any]]) -> int:
@@ -283,7 +289,17 @@ def compute_composite_fitness(
       is what a paired floor or a cross-searchpoint pool needs. Same rule, same reason as
       the gateway's (``score_search_point``).
     - ``l1_diversity`` is the round-level fraction of valid (non-no-op,
-      non-duplicate) L1 variants; defaults to 1.0 for non-L1 calls.
+      non-duplicate) L1 variants. **A pass no L1 batch produced leaves it at the 1.0
+      default — the vacuous value, exactly like ``opt_sp=None`` above, and for the same
+      reason.** Three such passes (the ``round_parent`` floor, the PoBB backfill, the
+      replicate draw) used to hand it ``0.0`` instead. Both readings are sayable —
+      "no batch produced this" vs "vacuously perfect" — but they cannot both be right,
+      and ``0.0`` breaks the pairing the sites beside it are establishing: the parent
+      floor would carry the term at zero while every candidate it is differenced against
+      carries its real yield, so a formula naming ``l1_diversity`` scored the two halves
+      of one delta on different bases. ``matched_origin_stats`` — the other paired floor
+      — already passes 1.0 beside ``opt_sp=None``; this is that rule, applied evenly.
+      (Free to settle today: no shipped dataset formula references the term.)
 
     The composite_fitness is **recorded, not gating**: the round-winner
     election compares candidates on difficulty-adjusted ability (``theta`` from
@@ -345,32 +361,37 @@ def matched_origin_stats(
     pipeline_schema: PipelineSchema,
     *,
     round_scorer: RoundScorer | str | None = None,
-) -> dict[str, Any]:
-    """Origin's accuracy/composite restricted to the candidate's measured samples.
+) -> dict[str, Any] | None:
+    """The origin's accuracy/composite as this candidate's comparison floor — or ``None``.
 
-    When PoBB leader-locks a candidate at q8/20, returns origin's stats on
-    only those 8 samples — the apples-to-apples comparison PoBB's matched-pair
-    posterior is built on. Degenerates to full origin stats when the candidate
-    measured every sample. ``opt_sp=None`` for the origin composite so
-    opt_sp-aware evaluators (e.g. ``prompt_compactness``) take their vacuous
-    fallback in both numerator and denominator of the delta.
+    ``None`` unless the candidate measured every cell the origin did. A candidate PoBB cut
+    early ran a PREFIX of ``build_round_order``, and that order is stratified on the
+    incumbent's own grades: every 4th slot is a cell the incumbent passed, all the rest are
+    cells it missed. So the origin's rate on a prefix is ``⌊n/4⌋/n`` — a function of where
+    the candidate stopped, not of the data. Over the truncated rows banked on disk that
+    prediction held exactly for 28 of 32; the 19 candidates cut at six samples each reported
+    the identical value.
+
+    Pairing does not rescue it, which is why there is no partial answer to return here. The
+    shared cells ARE the incumbent's failures, so a candidate of *identical* ability outscores
+    the origin on them by regression to the mean — both halves of the comparison are
+    conditioned on the outcome that selected the subset. What survives truncation is θ on the
+    cycle's fixed δ ruler, which every candidate in the election fit already carries; a cut
+    candidate reports where it stopped, never a standing.
+
+    Where it IS a measurement the restriction is vacuous — the candidate covered the panel —
+    so this returns the origin's own stats. ``opt_sp=None`` keeps opt_sp-aware evaluators
+    (e.g. ``prompt_compactness``) on their vacuous fallback in both numerator and denominator
+    of the delta, which is the one way it differs from ``parent.report``.
     """
-    candidate_sids = {r.get("sample_id") for r in candidate_results}
-    matched = [r for r in origin_results if r.get("sample_id") in candidate_sids]
-    # A candidate's per-round subset can be DISJOINT from the origin's measured set
-    # (``per_round_resubset`` re-picks the scored subset per candidate). Restricting then
-    # yields [] — fall back to the origin's full measured floor: a real number, not the fake
-    # 0.0 an empty set implies (which would credit the candidate with improvement over a floor
-    # the origin never measured — the bug ``score_incumbent_on_round`` documents). An empty
-    # restriction that still OVERLAPS (origin genuinely 0/N on the subset) keeps its real 0.0 —
-    # only a truly disjoint set falls back. A doubly-empty ``usable`` is handled by the gateway
-    # (``compute_composite_fitness`` scores an empty round to the 0.0 floor, not a crash).
-    usable = matched or origin_results
-    # `compute_composite_fitness` already spreads `_compute_accuracy(usable)` into its result —
+    origin_sids = {r.get("sample_id") for r in origin_results}
+    if not origin_sids or not origin_sids <= {r.get("sample_id") for r in candidate_results}:
+        return None
+    # `compute_composite_fitness` already spreads `_compute_accuracy` into its result —
     # calling it again here was a second `is_deprecated` walk over the same rows for the same
     # numbers, and a second place for the two to disagree.
     composite = compute_composite_fitness(
-        usable,
+        origin_results,
         pipeline_schema,
         opt_sp=None,
         round_scorer=round_scorer,

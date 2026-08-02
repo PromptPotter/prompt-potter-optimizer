@@ -81,12 +81,12 @@ async def rescore_parent(
         label="round_parent",
         # The parent is one half of a PAIRED diff; the candidates it is differenced against
         # are scored with their own. Both sides must sit on the same vacuous fallback or the
-        # delta reads a prompt-length difference as a behaviour difference.
+        # delta reads a prompt-length difference as a behaviour difference. `l1_diversity`
+        # is not passed for that same reason — it keeps the 1.0 vacuous default.
         opt_sp=None,
         degradation_checks=None,
         n_total_candidates=0,
         axes=cycle.axes,
-        l1_diversity=0.0,
         on_sample_scored=None,
         on_sample_starting=None,
         force_fresh=force_fresh,

@@ -77,7 +77,6 @@ async def score_population(
             degradation_checks=None,
             n_total_candidates=0,
             axes=cycle.axes,
-            l1_diversity=0.0,
             on_sample_scored=None,
             on_sample_starting=None,
         )
@@ -226,7 +225,6 @@ async def replicate_survivors_pass(
                 degradation_checks=None,
                 n_total_candidates=0,
                 axes=cycle.axes,
-                l1_diversity=0.0,
                 opt_sp=opt_sp_c,
                 on_sample_scored=None,
                 on_sample_starting=None,
