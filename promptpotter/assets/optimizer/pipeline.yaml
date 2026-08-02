@@ -252,8 +252,9 @@ resolved_prompts:
       Analyze the measurements below and produce a structured critique for the next optimization round.
     problem_description: ''
     instruction: >-
-      Read the measurements above. Extract the dominant failure cluster, name the L1 axis that targets
-      it, and write the concrete change.
+      Read the measurements above. Extract the DISTINCT failure clusters — different root causes, not
+      different examples of one — name the L1 axis that targets the largest, and write the concrete
+      change.
 
 
       priority_fix: follow the answer_format template. <axis> MUST be EXACTLY one of the real pipeline
@@ -270,12 +271,14 @@ resolved_prompts:
       — the claim at stake, the model's broken reasoning step (verbatim), and predicted vs ground truth.
       Diagnose the mechanism: WHY the model landed wrong, not just that it did. Before claiming a bias
       (e.g. "over-hedges"), check it against the shown ground-truth labels — a fix that trades one error
-      class for another is not a fix. Prefix shared-root-cause entries with a cluster label, e.g. "Coordinate
-      geometry (3/N): ...". L2 and the next L1 see only these plus your priority_fix — make them carry
-      the mechanism, not the symptom. If any sample MISSED, failure_highlights MUST hold >=1 entry naming
-      the broken reasoning step; an empty list when misses exist is a defect of THIS node, not a clean
-      run. When no single cluster dominates, quote the most-decisive individual miss rather than returning
-      nothing.
+      class for another is not a fix. ONE ENTRY PER CLUSTER — a DIFFERENT root cause each, largest first,
+      labelled with its share of the misses ("Coordinate geometry (4 of 9): ..."). Three quotes from one
+      cluster is ONE highlight: the next L1 gives each candidate a different failure mode, so naming one
+      mode three times spends its whole round on one idea. 3 is a CEILING, not a quota — name a small
+      second cluster, but where the misses truly share one root emit ONE entry and let the count say so.
+      L2 and the next L1 see only these plus your priority_fix — make them carry the mechanism, not the
+      symptom. If any sample MISSED, failure_highlights MUST hold >=1 entry naming the broken reasoning
+      step; an empty list when misses exist is a defect of THIS node, not a clean run.
 
 
       suggested_axes: up to 4 real pipeline axes for L2 to consider.

@@ -3,22 +3,3 @@ reason: >-
   per reasoning step (new gene). The 94 'unknown' misses correlate with the model abandoning the rule
   system before deriving a contradiction. Forcing rule-citation in each step makes 'unknown' an outcome
   of explicit rule-trace exhaustion rather than a fallback after free-form narration loses its way.
-brief: >-
-  Crossover: D002's tight 3-step answer_format + new rule-trace constraint. BBEH problems explicitly state
-  Rule1, Rule2, ... Rule20+ in the question prose. Variants MUST instruct the model to CITE A SPECIFIC
-  RULE OR FACT in each of its 3 reasoning steps (e.g., 'Step 2: by Rule12, X follows from Y because Y
-  was established in step 1'). If the model cannot cite a rule for a given step, that step should not
-  be taken. Operational outcome: 'unknown' becomes the verdict ONLY when the model has explicitly enumerated
-  the applicable rules and none derive the asked statement — not a give-up valve after long free-form
-  reasoning. EVERY variant must compose the 3-step format gene + the rule-trace constraint. The conjecture
-  under test: forcing explicit rule-citation reduces the dominant 'unknown'-cop-out failure (50% of family
-  miss mass) by making the cost of saying 'unknown' visible (the model has to admit it found zero applicable
-  rules).
-l1_section_overrides_text:
-  task_context: >-
-    BBEH miss-pattern intelligence (n=298 measurements): 94 of 189 misses (50% of miss mass) are pred='unknown'
-    when gt is proved/disproved. The model retreats to 'unknown' when free-form reasoning gets long —
-    typical chain-of-thought outputs on misses are 1500-2500 tokens of narrative ending in 'we cannot
-    conclude... therefore unknown'. BBEH is rule-heavy (questions enumerate Rule1...Rule20+ explicitly),
-    so 'cite a rule per step' is operationally feasible and tractable. Hypothesis: anchoring each reasoning
-    step to a named rule converts 'unknown' from a give-up valve into a derived outcome of explicit rule-exhaustion.

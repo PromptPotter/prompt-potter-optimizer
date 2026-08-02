@@ -289,7 +289,23 @@ async def l1_score(
     # fit the election just ran (no second fit) — the subset-invariant metric the winner was
     # elected on, so the dashboard can show *why* a lower-accuracy candidate won. Left ``None``
     # for candidates outside the election fit (eliminated / under the coverage floor).
-    for cid in electable:
+    #
+    # …and left ``None`` for EVERY candidate when the ruler is still cold, which is the whole
+    # of the guard below. On a flat ruler ``fit_theta_given_delta`` places every sample at δ=0
+    # and θ degenerates to logit-accuracy over the candidate's OWN subset — monotone in the
+    # number sitting next to it, so it explains nothing the accuracy does not already say, and
+    # it is not on the shared scale the name θ promises. A fresh campaign is cold for its first
+    # round or two (``Cycle.start`` sees only C0, which cannot identify δ), the ruler then warms
+    # inside ``absorb_round`` — AFTER this stamp — and ``_maybe_warm_ruler`` re-fits the round's
+    # ``cumulative_theta`` and re-stamps its ``calibration_model``, but not these rows. So the
+    # round file used to carry a warm round-θ and a "1PL" stamp over cold candidate-θ, and the
+    # lineage tree rendered those cold values under the same θ toggle as every later round's
+    # warm ones. Absent is the honest answer; ``accuracy`` still carries what was measured.
+    #
+    # Guarded here rather than by emptying ``electable``: that list is also the resume
+    # decision's ``candidate_ids`` and the round's ``electable_count``, and the ELECTION is
+    # still valid on a cold ruler (it ranks the arms it has). Only the stamp is suppressed.
+    for cid in electable if cycle.delta_scale else ():
         theta_c = abilities.theta.get(cid)
         if theta_c is None:
             continue

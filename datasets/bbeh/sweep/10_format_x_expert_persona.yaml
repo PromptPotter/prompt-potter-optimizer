@@ -3,24 +3,3 @@ reason: >-
   persona (face-value +50pp at n=7, currently collapsing under topup but not yet ruled out as a genuine
   compositional contributor). True 2-gene crossover of the family's two top-prior-lift attributes. If
   both genes contribute independently, this should land above D002's 0.667 ceiling.
-brief: >-
-  Crossover: the two highest-prior-lift attributes measured on this family are (a) D002's tight 3-step
-  answer_format ('1. reasoning max 3 steps, 2. final answer **bold** on last line, 3. no trailing text')
-  and (b) D001's persona = 'You are an expert problem solver with a strong background in logical reasoning
-  and puzzle-solving'. Generate variants in which BOTH attributes appear together — this is a controlled
-  2-gene crossover, not single-axis search. Each variant MUST: (1) set persona to a domain-expert framing
-  emphasizing logical reasoning, deductive proof, and puzzle solving, AND (2) constrain answer_format
-  to a 3-step structure with the final answer bolded on its own last line. Do NOT generate variants that
-  touch only one of these axes; the experimental contrast we want is composition-vs-singletons. Light
-  variation across persona phrasings is welcome (e.g., 'expert logical reasoner', 'competition-grade puzzle
-  solver', 'professional problem-solving specialist') — variation within both genes simultaneously, not
-  collapse to one.
-l1_section_overrides_text:
-  task_context: >-
-    BBEH crossover trial. Two attributes have apparent positive signal on this family: persona='expert
-    problem solver' (D001, n=7 sample fluke at 0.75; collapsing under topup but the persona gene is the
-    only persona-axis touch with non-trivial prior signal) and structured 3-step answer_format (D002,
-    n=20 confirmed at 0.667 = +21pp over the 0.45 stable origin). The conjecture under test is that the
-    two compose: the format gene anchors the output, the persona gene primes the reasoning style. Note:
-    94 of 189 family misses are 'unknown' cop-outs — an expert-framed reasoner is hypothesized to retreat
-    to 'unknown' less often than a default reasoner.

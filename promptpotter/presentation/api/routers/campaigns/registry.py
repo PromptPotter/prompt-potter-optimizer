@@ -38,7 +38,12 @@ class CampaignSummary(StrictModel):
     campaign_id: str = Field(description="Campaign id ({dataset}__{rand6}) — one RUN of an origin")
     dataset_name: str = Field(description="Dataset this campaign optimizes")
     label: str = Field(default="", description="Operator-supplied campaign label")
-    status: str = Field(description="Status of the campaign's run (its root cycle)")
+    # There is deliberately NO `status` here. It served `index.json::status` on both the list
+    # and the detail, no webapp surface ever read it (the sidebar derives everything from
+    # `node.run_phase`), and it was the wrong quantity anyway: `index.json::status` is not
+    # maintained across a pause or a gate, both of which `derive_run_phase` derives. Dead and
+    # wrong at once — so a future consumer wiring it up would have inherited the bug rather
+    # than a field. Run-state has ONE server-owned answer and it is `run_phase`.
     created_at: str = Field(description="ISO 8601 creation timestamp")
     root_cycle_id: str = Field(
         description=(
@@ -95,12 +100,11 @@ def _backend_type(store: Stores, dataset_name: str, memo: dict[str, str]) -> str
     return memo[dataset_name]
 
 
-def _campaign_summary(campaign: Campaign, status: str, backend_type: str) -> CampaignSummary:
+def _campaign_summary(campaign: Campaign, backend_type: str) -> CampaignSummary:
     return CampaignSummary(
         campaign_id=campaign.campaign_id,
         dataset_name=campaign.dataset_name,
         label=campaign.label,
-        status=status,
         created_at=campaign.created_at,
         root_cycle_id=campaign.root_cycle_id,
         backend_id=campaign.backend_id,
@@ -222,12 +226,7 @@ def list_campaigns(
     memo: dict[str, str] = {}
     return CampaignListResponse(
         campaigns=[
-            _campaign_summary(
-                c,
-                leaf.campaigns.run_status(c.campaign_id, c.root_cycle_id),
-                _backend_type(leaf, c.dataset_name, memo),
-            )
-            for c in campaigns
+            _campaign_summary(c, _backend_type(leaf, c.dataset_name, memo)) for c in campaigns
         ],
         total=len(campaigns),
     )
@@ -274,7 +273,6 @@ def get_campaign(store: StoreDep, campaign_id: str) -> CampaignDetailResponse:
         campaign_id=campaign.campaign_id,
         dataset_name=campaign.dataset_name,
         label=campaign.label,
-        status=store.campaigns.run_status(campaign_id, campaign.root_cycle_id),
         created_at=campaign.created_at,
         root_cycle_id=campaign.root_cycle_id,
         backend_id=campaign.backend_id,

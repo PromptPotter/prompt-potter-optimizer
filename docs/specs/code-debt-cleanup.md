@@ -23,16 +23,20 @@ shape was the old bloat source; readiness buckets replaced it.
 
 ## Ready — no blocker, pick up cold
 
-- **`new bbeh --sweep-batch` cannot load a single payload.** All 12
-  `datasets/bbeh/sweep/*.yaml` carry a `brief` key; `OperatorSweepFile` declares only
-  `reason` + `l1_layout` and is `extra="forbid"`, so every one raises. `brief` left the
-  model in `d8fe4e3c` ("drop l2_directive — task_context becomes broadcast channel") and
-  the payloads were never updated, so the verb has been dead since. Predates the
-  JSON→YAML migration (the identical parse fails on the pre-migration JSON) — surfaced by
-  loading every shipped dataset through its real reader. Action is a product call, not a
-  mechanical one: either `brief` is a lever worth restoring to the model, or it is archival
-  prose that should leave the 12 files. Don't delete operator-authored text to make a
-  parser happy without deciding which.
+- **`datasets/bbeh/sweep/*.yaml` now PARSE but would mint 12 identical no-op forks.** The
+  filed entry said the blocker was a stale `brief` key; that was one of three, and fixing it
+  does not revive the verb. All 12 also carried `l1_section_overrides` / `_text`, and **none
+  of the 12 carries `l1_layout`** — the only lever `OperatorSweepFile` still has. So a
+  `--sweep-batch` run over them mints twelve forks identical to their parent and pays full
+  measurement for zero contrast. The three dead keys were stripped (operator-approved) so the
+  reader no longer raises; the payloads' `reason` fields are untouched and still carry the
+  measurement narratives that make them worth keeping (D001's +50pp persona, D002's +21pp
+  answer_format). Two of the removed levers are gone for structural reasons, not drift:
+  `l1_section_overrides` named sections (`axes_l1`) that are no longer panel names — the
+  modern lever IS `l1_layout` — and `l1_section_overrides_text` wrote `task_context`, which
+  is now frozen (`TaskDecomposition.merge` refuses it). **Action before anyone runs the verb:
+  author a real `l1_layout` per arm, or the batch measures nothing.** The mechanism itself is
+  sound and was exercised through the real reader (12/12).
 
 **Ray / lineage follow-ups** (named during the 2026-07-26 time-ray landing; none blocks the feature):
 
@@ -55,7 +59,6 @@ shape was the old bloat source; readiness buckets replaced it.
 - **A salvaged Groq response reports ZERO tokens — the third seam that forgot to meter.** `infrastructure/llm/json_parse.py::try_groq_json_validate_repair` rebuilds an `LLMResponse` after re-parsing `failed_generation` out of a `json_validate_failed` 400, hardcoding `usage={"prompt_tokens": 0, "completion_tokens": 0}`. That call **already reached the wire and was billed** — the model burned tokens producing the malformed JSON — but `call.py` meters from `response.usage.get("prompt_tokens", 0)`, so it lands in the ledger as free. Forty lines up, the cache-hit arm states the opposite doctrine verbatim: *"A hit spends nothing but the search still MADE this call … Meter it — flagged — so the search's incurred cost stays invariant."* This is exactly the repeat the spend-accounting item above predicts ("a third cache would repeat it"). **Why it is not a one-line fix:** Groq's 400 body carries no `usage`, so the true counts are unrecoverable, and `unpriced_tokens` is the WRONG home — it means *billed tokens with no USD rate* (count known, price unknown), whereas here the **count itself** is unknown. There is no "tokens unknown" representation on `TokenUsageRecord`, and adding one is the 18-file/6-layer edit the PRIORITY item describes. Do NOT estimate from content length — a fabricated number rendered as a measurement is the one thing this must never do. **Currently dormant** (`json_validate_failed` is Groq-only; every configured provider is `openrouter`), so it is a correctness landmine, not a live leak — it fires the day anyone repoints a node at Groq. Fix it WITH the spend-accounting consolidation, not before. Blocker: needs the unknown-count dimension.
 - **Post-flip copilot — deferred on purpose, not forgotten.** The `checkin` node consulting in run mode and raising `pause-cycle` / `change-spend-budget` / `fork-cycle` instead of draft patches. `RaisedCommand` (`datasets/origin_resolve.py`) is already general enough to carry it. Not debt and not now: it is a **new feature**, and the closing-phase directive is no new features until `promptpotter-self` is distributable. Lands with L4, so it belongs to [`l4-outer-loop.md`](l4-outer-loop.md) when it does.
 - **`l1_diversity` takes two different values across passes that are the same kind of thing.** The parent-floor re-score and the PoBB backfill pass `0.0`; the origin, `noise-floor` and `verify` take the `1.0` default. Both readings are defensible in isolation (`0.0` = "no L1 batch produced this"; `1.0` = "vacuously perfect") but they cannot both be right, and the value lands in the stored evaluator namespace, so a round formula referencing `l1_diversity` scores the origin and the floor it is differenced against on different bases. Not a mechanical fix: picking one CHANGES a measured number for any campaign whose formula reads it, so it is the operator's call, not a sweep's. Related: `opt_sp` was the same defect shape and is now a required keyword on both `score_search_point` and `compute_composite_fitness` (rule in [`conventions.md`](../developer/conventions.md) § Code shape); `l1_diversity` was deliberately left alone because its default is a real derivation, only its *choice* across sites is inconsistent. Action: decide the one reading, state it at each site, delete the default if the answer turns out to differ per site.
-- **`CampaignSummary.status` is served but read by nobody, and it is the wrong quantity anyway.** `presentation/api/routers/campaigns/registry.py:41` serves `run_status()` = the raw `index.json::status` on both the campaign list and detail; `git grep` finds no webapp consumer (the sidebar derives everything from `node.run_phase`, correctly). It is also the one surface that would disagree if it ever were rendered: `index.json::status` is not maintained across a pause or a gate, both of which `derive_run_phase` derives. Action: drop it from the response model, or serve `run_phase` beside it — but it is declared OpenAPI contract, so the call is the operator's, not a sweep's. Found 2026-08-02.
 - **`webapp/components/dashboard/samples/hard-sample-order.ts::compareHardSamples`** — implements the hard-sample sort in TypeScript (`pick_score` + `measuredIn` predicate → ordering), which `CLAUDE.md` names as backend-served. Root fix: backend serves a pre-computed `hard_sample_rank` integer on `DatasetItem` so the sort is a consumer of a served value. HOLD pending backend change — two consumers: `HardSamplesHeatmap.tsx:136` and `useHardSamplesTableModel.ts:156`.
 - **`webapp/components/candidates/FitnessRankSummary.tsx::ranks()`** — computes 1-based ordinal rank positions and rank-shift comparisons from served `composite`/`whatif` scores; R-36 prohibits ordering computed in TypeScript. Root fix: backend serves `lens_rank` alongside `lens_value` (and `composite_rank` from existing ordering). HOLD pending backend change.
 

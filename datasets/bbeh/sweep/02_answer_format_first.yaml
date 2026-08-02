@@ -1,7 +1,3 @@
 reason: >-
   Answer-format-first — make answer_format the load-bearing section. Targets wrong-span extraction and
   budget-exhaustion failures.
-brief: >-
-  The dominant BBEH failure modes are wrong-span extraction (bold inside reasoning) and reasoning-budget
-  exhaustion (no visible answer at all). Variants must front-load the answer-format constraint: emit the
-  bolded final answer first or commit early when budget is tight, never use bold inside reasoning steps.

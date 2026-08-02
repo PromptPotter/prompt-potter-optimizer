@@ -2,9 +2,3 @@ reason: >-
   V3 — Win-axis diversification. cycle_2e758cd9442f round 2 won +5pp on a task_intent rewrite; round 3
   reverted to param variants and hit 0%. Force the population to exploit a freshly-winning axis before
   exploring elsewhere.
-brief: >-
-  Round-over-round axis policy: inspect round_history. If the last round's best candidate beat its parent
-  by mutating axis X (e.g., persona, task_intent, instruction, a specific node param), at least 50% of
-  this round's variants must mutate axis X — each in a distinct direction (different persona framings,
-  different task_intent phrasings, etc.). The remaining variants may explore unrelated axes. Do not abandon
-  a winning axis with one round's worth of evidence.

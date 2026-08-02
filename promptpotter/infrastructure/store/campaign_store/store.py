@@ -412,14 +412,6 @@ class CampaignStore:
             out.append(campaign)
         return out
 
-    def run_status(self, campaign_id: str, root_cycle_id: str) -> str:
-        """Status of the campaign's run, read off its root cycle's ``index.json`` —
-        run state is owned per-cycle; ``campaign.json`` carries identity/config +
-        lifecycle intent only. ``"active"`` when the cycle has no index yet
-        (check-in). A campaign mints exactly one root cycle, so this is *the* run."""
-        index = self.load(campaign_id, root_cycle_id) or {}
-        return str(index.get("status") or "active")
-
     def _live_cycle_ids(self, campaign_id: str) -> list[str]:
         """Cycles of *campaign_id* with a producer attached RIGHT NOW.
 

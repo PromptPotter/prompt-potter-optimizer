@@ -655,8 +655,6 @@ export interface CampaignSummary {
   dataset_name: string;
   /** Operator-supplied campaign label */
   label: string;
-  /** Status of the campaign's run (its root cycle) */
-  status: string;
   /** ISO 8601 creation timestamp */
   created_at: string;
   /** The campaign's root cycle id — `cycle_<root_content_hash>`, so it IS the

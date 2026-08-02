@@ -632,6 +632,13 @@ class Cycle:
             # and used to be skipped. A round that closed while the ruler was flat had its θ
             # fit at δ≡0, where ``fit_theta_given_delta`` degenerates to logit-accuracy on that
             # round's own subset — a DIFFERENT scale from the one every later round lands on.
+            #
+            # This walk restamps the ROUND's frontier θ, and ``calibration_model`` beside it
+            # describes exactly that series. It does not reach those rounds' per-candidate θ,
+            # and does not need to: ``l1_score`` no longer stamps one on a cold ruler, for the
+            # same reason stated here — so there is no cold candidate value left to contradict
+            # the warm stamp. That pairing was the defect; the round file claimed 1PL over rows
+            # whose θ was logit-accuracy.
             # Left unrestamped they sit side by side in ``round_adopted_levels``, and the L4 law
             # averages the mixture and differences it against a warm-ruler origin. Free to fix:
             # the rows are all in hand, and this is the walk ``_bind_rounds`` already does.

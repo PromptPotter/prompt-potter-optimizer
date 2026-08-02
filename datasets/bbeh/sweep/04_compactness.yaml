@@ -1,8 +1,3 @@
 reason: >-
   Compactness — the default scorer already penalizes prompts past 4000 chars. Test whether explicitly
   directing L1 toward terseness improves both fitness and prompt-length budget.
-brief: >-
-  Prompts past 4000 characters are penalized linearly by the composite scorer. Variants must be terse:
-  every section earns its place by changing model behavior on at least one BBEH failure mode (wrong-span,
-  budget exhaustion, hedging, invented tokens). Drop ornamental guidance; keep only what shifts model
-  output.

@@ -1503,7 +1503,6 @@ _CONFIG_TIER_BOOLEANS = frozenset(
         "aime_2025/campaign::campaign_config.optimization.seed_heatmap_from_archive",
         "aime_2025/pipeline::nodes.llm_only.optimizer.observation_mappings[0].is_llm",
         "bbeh/pipeline::nodes.llm_only.optimizer.observation_mappings[0].is_llm",
-        "bbeh/sweep/03_no_axes_focused_task::l1_section_overrides.axes_l1",
         "email-tagging/pipeline::nodes.llm_only.optimizer.observation_mappings[0].is_llm",
         "gsm8k/pipeline::nodes.llm_only.optimizer.observation_mappings[0].is_llm",
         "justlogic-d23/pipeline::nodes.llm_only.config.output_schema.additionalProperties",
