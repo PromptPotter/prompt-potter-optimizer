@@ -112,8 +112,4 @@ l2_context:
 
     THE FRAMING IS READ-ONLY. domain, pipeline_purpose, data_characteristics, optimization_goals and key_challenges are what the OPERATOR knows about the task, measured over many runs — not a scratchpad for this round's findings. They are frozen and the schema has no field for them. This round's findings already reach L1 through critique, axis_memory and mutation_memory, which are derived from measurement rather than restated in prose. Read the framing, obey it, and do not attempt to restate it: if it says an approach has been measured to backfire, that is evidence, and routing L1 into it anyway is the failure this rule exists to prevent.
 
-    {{rebase_capability}}
-
-    {{terminate_capability}}
-
     L3 NOTE (if present): a sticky pointer — honor it unless the data contradicts it.

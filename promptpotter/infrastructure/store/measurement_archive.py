@@ -18,7 +18,6 @@ from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
-from promptpotter.config.settings import DEFAULT_CONNECTOR_TYPE
 from promptpotter.domain.measurement_provenance import entry_grade, meets_grade
 from promptpotter.domain.sample import Measurement
 from promptpotter.infrastructure.store.io import write_jsonl
@@ -71,7 +70,6 @@ def _summary(data: dict[str, Any]) -> dict[str, Any]:
         "pipeline_params": data.get("pipeline_params"),
         "source": data.get("source", ""),
         "provenance": data.get("provenance"),
-        "connector_type": data.get("connector_type", DEFAULT_CONNECTOR_TYPE),
         "created_at": data["created_at"],
     }
 

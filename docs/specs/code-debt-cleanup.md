@@ -89,6 +89,21 @@ shape was the old bloat source; readiness buckets replaced it.
 
 ## Standing — long-lived design holds
 
+- **`idea_fingerprint` cannot see a SEMANTIC re-proposal, and the gate built on it is the only
+  cross-round one.** `domain/opt_search_point.py::idea_fingerprint` matches content-word overlap
+  between mutated VALUES, so it catches a re-proposal only when the wording survives. Measured on
+  the banked corpus: **0 of 15 real re-proposal pairs caught** — including the `justlogic-d234`
+  case the gate was written for, one idea ("exhaust modus tollens before answering Uncertain")
+  walking `instruction` → `thinking_style` → `output_schema_descriptions.reasoning` →
+  `task_intent` across 8 rounds. So `repeat_variant` rejects a copy-paste and nothing else, and
+  the generator can restate one hypothesis indefinitely while `l1_n_repeat` reads 0 — which is
+  worse than no counter, because a 0 reads as hygiene. The docstring now says this (`d1d792b0`);
+  the mechanism does not. **HELD, not deferred by accident:** every fix is a new mechanism
+  (embeddings, or an LLM judge per pair), and the closing phase does not open new features. Its
+  cheaper twin is already the plan — make candidates differ MORE (`l1_generate` semantic
+  widening), which attacks the same failure from the generator side and is owed anyway for the
+  panel's arm-resolution problem. Revisit only if widening lands and repeats persist.
+
 - **Optimizer model repair-rate on heavy L2/L3 structured output — unmeasured.** The old entry named `openrouter/gpt-oss-120b`; every optimizer node now runs `deepseek/deepseek-v4-flash:nitro` (`209eaa42`), swapped for exactly this reason (speed + schema obedience together). What is still owed is the measurement: a live cycle reaching L3 to read the repair-retry rate under the *current* model. Verified 2026-07-16 — the swap is real (`promptpotter/assets/optimizer/pipeline.yaml`), so don't re-file this against the 120b.
 
 ## Considered, not debt — don't re-open

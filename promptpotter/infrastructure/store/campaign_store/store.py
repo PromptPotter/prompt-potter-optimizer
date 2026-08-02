@@ -17,7 +17,6 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from promptpotter.config.settings import DEFAULT_CONNECTOR_TYPE
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
 from promptpotter.domain.phases import RunPhase, StopReason
@@ -123,7 +122,6 @@ def fresh_sibling_index_blob(
     """
     return {
         "type": parent_index.get("type", "optimization_loop"),
-        "connector_type": parent_index.get("connector_type", ""),
         "header": parent_index.get("header", {}),
         "parent_cycle_id": parent_cycle_id,
         "parent_session_id": parent_index.get("parent_session_id", ""),
@@ -597,7 +595,6 @@ class CampaignStore:
             "updated_at": now,
             "status": "active",
             "type": "optimization_loop",
-            "connector_type": metadata.get("connector_type", DEFAULT_CONNECTOR_TYPE),
             "parent_session_id": existing.get("parent_session_id", ""),
             "parent_cycle_id": None,
             "sibling_kind": sibling_kind(cycle_id),

@@ -98,8 +98,6 @@ WELL_KNOWN_PARAM_TYPES: dict[str, str] = {
 }
 
 
-DEFAULT_CONNECTOR_TYPE = "default"
-
 # Optimizer-call reliability + size visibility.
 #
 # OPTIMIZER_CALL_DEADLINE_S — wall-clock ceiling on a single optimizer LLM
@@ -243,7 +241,6 @@ __all__ = [
     "DATASET_NAME",
     "DEFAULT_BACKEND_ID",
     "DEFAULT_BACKEND_URL",
-    "DEFAULT_CONNECTOR_TYPE",
     "DEFAULT_ORIGIN_BUDGET",
     "LOCK_TIMEOUT",
     "NO_RESULT",
