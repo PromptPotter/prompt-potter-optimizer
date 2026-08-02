@@ -141,6 +141,45 @@ Finished cycle: `campaigns/<id>/log.md` (campaign digest, heatmap, final winner)
 `cycles/<id>/index.json` (`best_accuracy`, `best_round`, `origin_accuracy`, `final.winner_*`,
 `final.stop_reason` → [reference/troubleshooting.md](reference/troubleshooting.md)).
 
+### A held round is not proof the candidate failed — check the other estimator
+
+**The hit sequence is difficulty-ordered, so a tail of 1s is the ORDER, never a surge.**
+`build_round_order` (`intelligence/adaptive_queue_mechanism.py`) puts seed-MISS win-opportunities
+first (ascending δ) and slots seed-HIT regression probes every 4th position, so every arm ends
+`…1111111` and opens near zero. Four arms on `justlogic-d234` (2026-08-02) ran
+`0011000100101011111101111111` / `0001000110001011110111111101` / two more the same shape — the
+late run is the bank, not momentum, and paired against an incumbent that also wins those rows it
+carries no information.
+
+**But the promotion gate and the PoBB posterior are DIFFERENT estimators and they disagree.**
+Same round, same 28 paired samples: `paired_breakdown.p_better` = **0.842** against the incumbent,
+while the election wrote *"no winner cleared the matched parent by 0.02 accuracy"* and held —
+because raw counts tied at 15/28. The posterior is paired and difficulty-weighted on the cycle's
+locked δ ruler (winning a hard row outweighs losing an easy one); `matched_origin_accuracy` is an
+unpaired count that is blind to δ. The campaign declares `headline_metric: ability` (θ) and the
+gate reads accuracy — so a candidate can be better by the metric the campaign names and still lose
+the round.
+
+**A truncated `matched_origin_accuracy` is an artifact of the order, not a measurement.** Both
+strata are defined by the *incumbent's own* grades, so on any prefix the incumbent's score is
+fixed by construction: positions 1-6 hold exactly one HIT-stratum slot (position 4), so a
+candidate cut at `n_min` reports `matched_origin_accuracy` = 1/6 whatever the data says. Two
+different candidates eliminated in the same round both read `0.16666…` — identical because it was
+never measured. Do not quote it, and do not compare it across arms.
+
+What the ordering does **not** do is starve the posterior: measured over 6 arms, `p_best` moved on
+46-79% of the budget, so the stratification is not why ε fails to fire. Arms that end close are
+close. Checked and refuted 2026-08-02 — don't re-run this hypothesis.
+
+So: **when a round reports `improved: false`, open
+`.runtime/streams/round_NNNN_p_best.jsonl` and read the final `paired_breakdown` before accepting
+it.** A held round whose `p_better` sits far off 0.5 is a promotion the gate refused, not a
+candidate that failed. Report it as an instrument disagreement, and name both numbers.
+
+Do **not** answer this by retuning `improvement_threshold` / `pobb_epsilon` — the two estimators
+would still disagree, just at a different crossover. The root fix is one estimator at the gate:
+promotion reads what the campaign's `headline_metric` declares. Open finding, 2026-08-02.
+
 ## Configs are the source of truth
 
 The skill carries no parallel default-ladder. `dataset.md` (entry point, init flags) ·

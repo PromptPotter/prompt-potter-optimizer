@@ -136,6 +136,21 @@ export const OuterVerdictPanel = memo(function OuterVerdictPanel() {
               ? ` CI spans 0 — smallest effect this panel could still resolve ≈ ${verdict.mde_remaining.toFixed(3)}.`
               : ""}
           </p>
+          {/* Which lever the spread above actually calls for. `se` alone cannot separate cells
+              that each measured themselves badly from cells that genuinely disagree, and those
+              take opposite next steps — sharpen the instrument, or widen the panel/candidates.
+              Silent when the round could not split it (one shared cell, or arms with no
+              per-cell precision): an absent split is honest, a fabricated one picks the lever. */}
+          {verdict.variance ? (
+            <p className="l4-lede">
+              {Math.round(verdict.variance.estimation_share * 100)}% of that cell-to-cell spread is
+              measurement noise (±{verdict.variance.estimation_sd.toFixed(3)} logits per cell
+              against ±{verdict.variance.observed_sd.toFixed(3)} observed).{" "}
+              {verdict.variance.estimation_share > 0.5
+                ? "The panel is mostly re-reading itself — sharpen the cells before buying more of them."
+                : "The cells genuinely differ — that spread is signal about where this optimizer prompt works."}
+            </p>
+          ) : null}
           <ForestPlot verdict={verdict} />
         </>
       )}

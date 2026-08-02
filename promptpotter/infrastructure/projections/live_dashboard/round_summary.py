@@ -12,7 +12,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from promptpotter.domain.l4.verdict import CandidateInfo, cell_fitness, compute_outer_verdict
+from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS
+from promptpotter.domain.l4.verdict import CandidateInfo, compute_outer_verdict
 from promptpotter.domain.results import (
     RoundResult,
     RoundSummary,
@@ -29,19 +30,25 @@ _SUMMARY_INCLUDE = set(RoundSummaryCandidate.model_fields) - {"is_winner"}
 _CANDIDATE_INFO_INCLUDE = set(CandidateInfo.model_fields) - {"is_winner"}
 
 
-def origin_cells_from_disk(cycle_dir: Path) -> dict[str, float]:
-    """The round-0 (origin) per-cell composite off the cached ``rounds/round_0000.json`` —
-    the un-edited-optimizer prompt control every later round's outer verdict pairs against. The
-    sole reader of this file for this purpose; ``application/optimizer_prompt_ranking.py``
-    reuses it instead of keeping its own copy."""
+def origin_rows_from_disk(cycle_dir: Path) -> list[dict[str, Any]]:
+    """The round-0 (origin) per-cell ROWS off the cached ``rounds/round_0000.json`` — the
+    un-edited-optimizer prompt control every later round's outer verdict pairs against. The sole
+    reader of this file for this purpose; ``application/optimizer_prompt_ranking.py`` reuses it
+    instead of keeping its own copy.
+
+    Rows, not a pre-extracted fitness map: the verdict takes two different readings of them (the
+    fitness it pairs on, the measurand + precision its variance split reads), and pre-digesting
+    here would have meant a second disk read or a projection that knew which projections the
+    domain law wanted next."""
     doc = read_json_tolerant(CycleLayout(Path(cycle_dir)).round_file(0))
     if not isinstance(doc, dict):
-        return {}
+        return []
     acr = doc.get("all_candidate_results") or {}
     if not acr:
-        return {}
+        return []
     origin_id = next(iter(acr))  # round 0 is the single origin arm
-    return cell_fitness(acr.get(origin_id) or [])
+    rows = acr.get(origin_id) or []
+    return list(rows) if isinstance(rows, list) else []
 
 
 def _measurement_order(acr: dict[str, list[dict[str, Any]]]) -> list[int]:
@@ -67,7 +74,7 @@ def _measurement_order(acr: dict[str, list[dict[str, Any]]]) -> list[int]:
     return out
 
 
-def build_round_summary(rr: RoundResult, origin_cells: dict[str, float]) -> RoundSummary:
+def build_round_summary(rr: RoundResult, origin_rows: list[dict[str, Any]]) -> RoundSummary:
     """One :class:`RoundSummary` from a closed-round :class:`RoundResult`.
 
     Winner detection rides the shared ``is_round_winner`` rule (also used by
@@ -79,9 +86,8 @@ def build_round_summary(rr: RoundResult, origin_cells: dict[str, float]) -> Roun
     by ``compute_round_health``) — the projection renders the served verdict, it
     does not recompute it (R-36).
 
-    *origin_cells* is the cached round-0 origin's per-cell composite (``{}`` off an
-    L4 round, or when summarizing round 0 itself — the origin is the control, never a
-    verdict subject).
+    *origin_rows* is the cached round-0 origin's per-cell rows (``[]`` off an L4 round, or
+    when summarizing round 0 itself — the origin is the control, never a verdict subject).
     """
     # Both display models are strict name-subsets of ``ScoredCandidate`` plus a derived
     # ``is_winner`` — so each is a ``model_dump(include=…)`` projection, not a hand-copy.
@@ -108,7 +114,8 @@ def build_round_summary(rr: RoundResult, origin_cells: dict[str, float]) -> Roun
                 )
                 for c in rr.candidate_scores
             ],
-            origin_cells,
+            origin_rows,
+            measurand_key=OUTER_PROXY_KEYS[0] if OUTER_PROXY_KEYS else "",
         )
     )
     return RoundSummary(
@@ -126,4 +133,4 @@ def build_round_summary(rr: RoundResult, origin_cells: dict[str, float]) -> Roun
     )
 
 
-__all__ = ["build_round_summary", "origin_cells_from_disk"]
+__all__ = ["build_round_summary", "origin_rows_from_disk"]

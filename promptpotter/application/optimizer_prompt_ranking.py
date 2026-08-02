@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -19,12 +20,16 @@ from promptpotter.application.bootstrap.wiring import backend_type_of_dataset
 from promptpotter.domain.l4.verdict import cell_fitness
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.projections.live_dashboard.round_summary import (
-    origin_cells_from_disk,
+    origin_rows_from_disk,
 )
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.statistics import paired_diff_posterior, t_critical
+from promptpotter.shared.statistics import (
+    min_detectable_effect,
+    paired_diff_posterior,
+    t_critical,
+)
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
@@ -67,12 +72,43 @@ class RankedOptimizerPrompt(StrictModel):
     n_measurements: int
 
 
+class OuterSnr(StrictModel):
+    """Can the panel resolve one optimizer prompt from another yet — and if not, by how much.
+
+    Finish-line item 7's "two series, not one ratio", derived from the corpus this module
+    already walks rather than bought with re-runs. Both series fall out of the same
+    accumulators: a state measured more than once on the SAME cell gives the NOISE (the panel
+    re-reading one arm), and the spread of ``anchor_effect`` across states gives the SIGNAL
+    (arms genuinely differing).
+
+    Until this existed the ratio was hand-computed off a corpus snapshot and written into prose
+    — which is how the spec came to state two different answers for the same question (§4's
+    "~35 cells" against item 7's own ``(2.8·σ/d)²``, which gives roughly half that). A number
+    the loop recomputes on every read cannot drift from the disk it was derived from.
+
+    Every field is ``None`` when the corpus cannot support it: fewer than two states, or no
+    cell measured twice under one state. Absent is the honest answer — a fabricated 0 noise
+    reads as a panel that can resolve anything.
+    """
+
+    # Pooled SD of repeated readings of the SAME (state, cell) — measurement noise, σ.
+    within_sd: float | None = None
+    within_n_groups: int = 0  # (state, cell) pairs with ≥2 readings behind `within_sd`
+    # SD of `anchor_effect` across distinct states — how far apart the arms actually are, d.
+    between_sd: float | None = None
+    between_n_states: int = 0
+    # (2.8·σ/d)² — cells a verdict needs at the current noise and contrast. `2.8` is
+    # `min_detectable_effect`'s z(0.975)+z(0.8). Compare against the panel you actually run.
+    n_cells_to_verdict: int | None = None
+
+
 class OptimizerPromptRanking(StrictModel):
     """The ranking — recomputed from disk on every read, never persisted."""
 
     generated_at: str
     n_cycles_scanned: int
     candidates: list[RankedOptimizerPrompt]  # ranked desc by anchor_effect
+    snr: OuterSnr
 
 
 def _state_hash(prompt_state: dict[str, dict[str, str]]) -> str:
@@ -142,7 +178,7 @@ def rank_optimizer_prompts(store: Stores) -> OptimizerPromptRanking:
             rounds_dir = CycleLayout(cycle_dir).rounds
             if not rounds_dir.is_dir():
                 continue
-            origin_cells = origin_cells_from_disk(cycle_dir)
+            origin_cells = cell_fitness(origin_rows_from_disk(cycle_dir))
             if not origin_cells:
                 continue
             n_cycles += 1
@@ -163,6 +199,50 @@ def rank_optimizer_prompts(store: Stores) -> OptimizerPromptRanking:
         generated_at=utcnow_iso(),
         n_cycles_scanned=n_cycles,
         candidates=rows,
+        snr=_outer_snr(accums, rows),
+    )
+
+
+def _sample_sd(xs: list[float]) -> float | None:
+    """Sample SD (n−1). ``None`` below two points — one reading has no spread, and reporting
+    0.0 for it would claim perfect precision from a single measurement."""
+    if len(xs) < 2:
+        return None
+    mean = sum(xs) / len(xs)
+    return float((sum((x - mean) ** 2 for x in xs) / (len(xs) - 1)) ** 0.5)
+
+
+def _outer_snr(accums: dict[str, _Accum], rows: list[RankedOptimizerPrompt]) -> OuterSnr:
+    """Split the corpus into the noise series and the signal series (see :class:`OuterSnr`).
+
+    Noise is POOLED across (state, cell) groups rather than averaged over their SDs: a group of
+    2 readings and a group of 9 say different amounts about σ, and averaging their SDs would
+    weight them equally. Pooling on (n−1) degrees of freedom is the standard way to say so.
+    """
+    ss, df = 0.0, 0
+    groups = 0
+    for acc in accums.values():
+        for vals in acc.cand_by_cell.values():
+            if len(vals) < 2:
+                continue
+            mean = sum(vals) / len(vals)
+            ss += sum((v - mean) ** 2 for v in vals)
+            df += len(vals) - 1
+            groups += 1
+    within = (ss / df) ** 0.5 if df > 0 else None
+    between = _sample_sd([r.anchor_effect for r in rows])
+    n_needed: int | None = None
+    if within is not None and between is not None and between > 0.0:
+        # `min_detectable_effect(σ)` IS `2.8·σ` — call it rather than re-typing the constant,
+        # so the alpha/power this planning number assumes can never drift from the alpha/power
+        # the verdict's own `mde_remaining` reports.
+        n_needed = math.ceil((min_detectable_effect(within) / between) ** 2)
+    return OuterSnr(
+        within_sd=within,
+        within_n_groups=groups,
+        between_sd=between,
+        between_n_states=len(rows),
+        n_cells_to_verdict=n_needed,
     )
 
 

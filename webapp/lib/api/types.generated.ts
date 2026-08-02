@@ -47,6 +47,14 @@ export interface OuterCellEffect {
   diff: number;
 }
 
+/** Where the panel's spread comes from — estimation noise, or real between-cell difference. */
+export interface OuterVariance {
+  estimation_sd: number;
+  observed_sd: number;
+  estimation_share: number;
+  n_cells: number;
+}
+
 /** The pooled blocked-paired verdict for a round's target variant. */
 export interface OuterVerdict {
   variant_id: string;
@@ -60,6 +68,7 @@ export interface OuterVerdict {
   decision: string;
   mde_remaining: number;
   variant_is_winner: boolean;
+  variance: OuterVariance | null;
 }
 
 /** Display row for `dashboard.json::rounds[]` — webapp's completed-round source. */
@@ -303,6 +312,7 @@ export interface RoundResult {
   matched_origin_accuracy: number | null;
   matched_origin_composite: number | null;
   cumulative_theta: number | null;
+  cumulative_theta_se: number | null;
   calibration_model: '1PL' | '2PL' | null;
   prompt_fields: Record<string, unknown>;
   pipeline_params: Record<string, unknown> | null;
@@ -696,6 +706,15 @@ export interface EffectProvenance {
   candidate_id: string;
 }
 
+/** Can the panel resolve one optimizer prompt from another yet — and if not, by how much. */
+export interface OuterSnr {
+  within_sd: number | null;
+  within_n_groups: number;
+  between_sd: number | null;
+  between_n_states: number;
+  n_cells_to_verdict: number | null;
+}
+
 /** One unique optimizer prompt state, aggregated across every occurrence in the corpus. */
 export interface RankedOptimizerPrompt {
   state_hash: string;
@@ -715,6 +734,7 @@ export interface OptimizerPromptRanking {
   generated_at: string;
   n_cycles_scanned: number;
   candidates: RankedOptimizerPrompt[];
+  snr: OuterSnr;
 }
 
 export interface FileEntry {

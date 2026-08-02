@@ -128,13 +128,20 @@ def theta_accuracy_ci(
 
 
 def adopted_level_trajectory(
-    origin_theta: float | None,
-    incumbent_thetas: Sequence[float | None],
+    origin: tuple[float, float] | None,
+    incumbents: Sequence[tuple[float, float] | None],
     delta_scale: Ruler | None,
-) -> tuple[float | None, list[float]]:
+) -> tuple[tuple[float, float] | None, list[tuple[float, float]]]:
     """Origin ability + the per-round ability of the **incumbent the search adopted** — the
     single-scale signal an outer L4 cycle grades inner search quality by. Every level is a θ in
     LOGITS on the cycle's locked δ ruler, the one estimator that is subset-invariant.
+
+    A level is the ``(θ, θ_se)`` pair ``fit_theta_given_delta`` returns, carried whole. The SE is
+    the level's own precision — how sharply THIS cell measured the incumbent — and it is what
+    lets the outer panel tell estimation noise from between-cell heterogeneity instead of
+    estimating both from the spread of six scalars. It rides here rather than in a parallel
+    series because the carry-forward below must be the same decision for both halves: a round
+    that could not be fit did not move the incumbent, so it did not sharpen the reading either.
 
     **Why the incumbent, and not the round's proposals.** A round's value to the search is what
     it *crowns*; the arms it discards are the price of finding that. Averaging proposals prices
@@ -145,11 +152,13 @@ def adopted_level_trajectory(
     let PoBB kill a dud at 6 samples (θ −1.84) recorded a level of −0.79 — a 0.88-logit
     *regression* stamped on a round the loop itself marked ``improved: True``.
 
-    This is not the max-order-statistic the mean was chosen to avoid. ``cumulative_theta`` is a
-    re-fit over the adopted frontier's own measured rows (``optimization/cycle.py``), and it moves
-    only when the election adopts — a θ-LCB gate that already needs two arms. The winner's-curse
-    discount is applied there, pooled over the whole panel; re-applying a per-candidate haircut
-    here would double-count it, and discount-then-pool destroys what pool-then-discount keeps.
+    It is not the max-order-statistic the mean was chosen to avoid — but it is not free of
+    selection either, and the earlier claim here that "the winner's-curse discount is applied
+    there" was false: ``elect_round_winner`` ranks on the POINT estimate with no SE margin
+    (``scoring/metrics.py``, which says so), and ``_cumulative_theta`` applies no discount. What
+    actually bounds it is dilution — the frontier re-fit pools the winner's electing rows with
+    carried rows it did not select, and the L4 law then averages the whole series rather than
+    reading its endpoint. The residual is what ``theta_se`` above is for: measured, not assumed.
 
     **Why logits, and not expected accuracy.** θ and the ruler's δ share one *interval* scale —
     that is the point of fitting a Rasch model at all: equal Δθ is equal difficulty of gain
@@ -168,15 +177,15 @@ def adopted_level_trajectory(
     logit-accuracy and stops being subset-invariant, and differencing across rounds would compare
     two different scales. ``(None, [])`` there and when the origin was never fit; the caller
     excludes the cycle (``no_evidence_reason``)."""
-    if origin_theta is None or not delta_scale:
+    if origin is None or not delta_scale:
         return None, []
-    prev = origin_theta
-    out: list[float] = []
-    for theta in incumbent_thetas:
-        if theta is not None:
-            prev = theta
+    prev = origin
+    out: list[tuple[float, float]] = []
+    for level in incumbents:
+        if level is not None:
+            prev = level
         out.append(prev)
-    return origin_theta, out
+    return origin, out
 
 
 # Floor on the quasi-likelihood dispersion φ (`fit_theta_given_delta`). A response with no

@@ -99,11 +99,13 @@ def _producer_fresh(cycle_dir: Path, *, fresh_s: float) -> bool:
 def _declared_phase(cycle_dir: Path) -> str:
     """The phase the RUNNER declared, read off ``dashboard.json::run_phase``.
 
-    ``paused`` gets a ``.runtime/`` flag because the OPERATOR writes it; ``gate`` has
-    no flag because only the runner can know it, and it declares it onto the ledger →
-    this field. Consulted for that one phase (see :func:`derive_run_phase`), never as
-    a general second opinion: everything else here is derived, and reading a declared
-    value where a derived one exists is how two vocabularies start disagreeing.
+    ``gate`` has no flag because only the runner can know it. ``paused`` has TWO
+    writers: the OPERATOR asks via ``.runtime/pause.flag``, and the runner declares
+    it — both when it honours that flag at a checkpoint and when a Ctrl+C unwinds it
+    out of a long phase, which writes no flag at all. Consulted for those two phases
+    (see :func:`derive_run_phase`), never as a general second opinion: everything
+    else here is derived, and reading a declared value where a derived one exists is
+    how two vocabularies start disagreeing.
     """
     data = read_json_tolerant(CycleLayout(cycle_dir).dashboard)
     return str(data.get("run_phase", "")) if isinstance(data, dict) else ""
@@ -121,7 +123,13 @@ def derive_run_phase(
        every other branch: a check-in cycle has no ``dashboard.json`` and no
        ``finished_at``, so without this it would derive ``detached``.
     1. terminal — the cycle finished (a terminal record / ``finished_at`` exists).
-    2. paused   — ``pause.flag`` present (operator interrupt; resumable).
+    2. paused   — ``pause.flag`` present OR the runner declared ``paused``
+       (operator interrupt; resumable). Both writers count: a Ctrl+C out of a
+       long phase declares without ever writing the flag, and reading only the
+       flag stamped those cycles ``detached`` and let the reaper terminate a
+       run that had shut down cleanly. Deliberately NOT freshness-gated — the
+       exact opposite of ``gate`` below, because a paused producer has EXITED,
+       so requiring freshness would read every pause as ``detached``.
     3. gate     — fresh AND the runner declared ``gate`` (held at the round-0
        origin gate, awaiting an operator decision; ``gate`` is declared, never
        flagged). Freshness is required so a cycle that DIED while gated still
@@ -145,10 +153,11 @@ def derive_run_phase(
         return RunPhase.CHECKIN
     if is_terminal:
         return RunPhase.TERMINAL
-    if is_paused(cycle_dir):
+    declared = _declared_phase(cycle_dir)
+    if is_paused(cycle_dir) or declared == RunPhase.PAUSED:
         return RunPhase.PAUSED
     fresh = _producer_fresh(cycle_dir, fresh_s=fresh_s)
-    if fresh and _declared_phase(cycle_dir) == RunPhase.GATE:
+    if fresh and declared == RunPhase.GATE:
         return RunPhase.GATE
     if fresh:
         return RunPhase.RUNNING

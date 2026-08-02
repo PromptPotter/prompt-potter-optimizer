@@ -834,17 +834,24 @@ def test_adopted_level_trajectory_is_honest_single_scale() -> None:
     # class: a completed inner run reports a plausible number and the outer optimizes on it,
     # so a mis-built level is invisible — the run looks fine and the outer fitness is wrong.
     ruler = {1: -1.0, 2: 0.0, 3: 1.0}
-    origin_theta = 0.0
+    origin_theta = (0.0, 0.30)
+
+    def thetas(levels: list[tuple[float, float]]) -> list[float]:
+        return [t for t, _ in levels]
 
     # LOGITS, not expected accuracy. θ and the ruler's δ share one INTERVAL scale — the point of
     # fitting Rasch at all — so an identical Δθ must read as an identical gain wherever the origin
     # sits. Projecting each θ back through the ruler's sigmoid before differencing compressed the
     # gain near the ceiling, so the strong-origin arm scored less for the same ability climb.
     # SILENT: the outer ranks optimizer prompts partly by which seed happened to draw an easy origin.
-    low_o, low = adopted_level_trajectory(-1.0, [-0.5], ruler)
-    high_o, high = adopted_level_trajectory(1.5, [2.0], ruler)
+    low_o, low = adopted_level_trajectory((-1.0, 0.2), [(-0.5, 0.2)], ruler)
+    high_o, high = adopted_level_trajectory((1.5, 0.2), [(2.0, 0.2)], ruler)
     assert low_o is not None and high_o is not None
-    assert low[0] - low_o == pytest.approx(high[0] - high_o) == pytest.approx(0.5)
+    assert (
+        thetas(low)[0] - low_o[0]
+        == pytest.approx(thetas(high)[0] - high_o[0])
+        == pytest.approx(0.5)
+    )
 
     # THE INCUMBENT THE ROUND ADOPTED — never a statistic over the round's proposals. A round's
     # value to the search is what it CROWNS; the arms it discards are the price of finding that,
@@ -856,37 +863,41 @@ def test_adopted_level_trajectory_is_honest_single_scale() -> None:
     # of -0.79 — a 0.88-logit REGRESSION stamped on a round the loop marked improved=True. Over
     # the campaign the seed that gained 30 accuracy points scored 2.9x WORSE than one that gained
     # 4.6. SILENT throughout: every run completed and every number looked plausible.
-    o_lvl, levels = adopted_level_trajectory(origin_theta, [0.2702], ruler)
+    o_lvl, levels = adopted_level_trajectory(origin_theta, [(0.2702, 0.21)], ruler)
     assert o_lvl == origin_theta
-    assert levels == [pytest.approx(0.2702)]
+    assert levels == [(pytest.approx(0.2702), pytest.approx(0.21))]
 
     # A peak followed by a collapse must read LOWER than a sustained peak. Under a running max
     # the two are byte-identical, so an optimizer prompt that destroys the inner loop after one good
     # round scored as its best round forever.
-    _, spike = adopted_level_trajectory(origin_theta, [1.2, -2.0], ruler)
-    _, held = adopted_level_trajectory(origin_theta, [1.2, 1.2], ruler)
-    assert spike[1] < spike[0] and sum(spike) < sum(held)
+    _, spike = adopted_level_trajectory(origin_theta, [(1.2, 0.2), (-2.0, 0.2)], ruler)
+    _, held = adopted_level_trajectory(origin_theta, [(1.2, 0.2), (1.2, 0.2)], ruler)
+    assert thetas(spike)[1] < thetas(spike)[0] and sum(thetas(spike)) < sum(thetas(held))
 
     # A round whose frontier could not be fit (every row errored) carries the PRIOR level: the
     # incumbent persists, and nothing says it moved. SILENT otherwise: a phantom negative, or a
     # dropped round that shortens the series the mean divides by.
+    #
+    # It carries BOTH HALVES of that level, and the SE half is the one that can go wrong quietly:
+    # a carried θ paired with a fresh round's SE would report the panel a precision no measurement
+    # bought, and an inverse-variance pool then weights the cell that measured nothing the highest.
     o2, lv2 = adopted_level_trajectory(origin_theta, [None], ruler)
     assert o2 is not None and lv2 == [o2]
-    _, carried = adopted_level_trajectory(origin_theta, [1.0, None], ruler)
-    assert carried == [pytest.approx(1.0), pytest.approx(1.0)]
+    _, carried = adopted_level_trajectory(origin_theta, [(1.0, 0.11), None], ruler)
+    assert carried == [(1.0, 0.11), (1.0, 0.11)]
 
     # Regression preserved: an incumbent below origin yields a level BELOW origin (the negative
     # delta the outer steers away from), NOT floored at origin.
-    o3, lv3 = adopted_level_trajectory(origin_theta, [-2.0], ruler)
-    assert o3 is not None and lv3[0] < o3
+    o3, lv3 = adopted_level_trajectory(origin_theta, [(-2.0, 0.2)], ruler)
+    assert o3 is not None and thetas(lv3)[0] < o3[0]
 
     # An origin that was never fit, or a COLD ruler, yields `(None, [])` so the caller EXCLUDES
     # the cycle (`no_evidence_reason`). Cold matters on its own: `fit_theta_given_delta` puts
     # every sample at δ=0 there, so θ collapses to that round's logit-accuracy and stops being
     # subset-invariant — differencing it across rounds compares two different scales.
     # SILENT: a dead inner campaign differenced against an invented floor reads as a huge lift.
-    assert adopted_level_trajectory(None, [1.0], ruler) == (None, [])
-    assert adopted_level_trajectory(origin_theta, [1.0], {}) == (None, [])
+    assert adopted_level_trajectory(None, [(1.0, 0.2)], ruler) == (None, [])
+    assert adopted_level_trajectory(origin_theta, [(1.0, 0.2)], {}) == (None, [])
 
 
 def test_compute_proxies_is_one_exact_mean_over_the_adopted_incumbents() -> None:
@@ -895,7 +906,11 @@ def test_compute_proxies_is_one_exact_mean_over_the_adopted_incumbents() -> None
     # ROUND BUDGET. A divisor of any OTHER shape reappearing here (a declared target, or the
     # room `max(origin, 1-origin)`) fails loudly on the pins below, and so does a regression to
     # reading the series' last element: the two differ on every trajectory that is not flat.
-    from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS, compute_outer_proxies
+    from promptpotter.domain.l4.proxies import (
+        OUTER_PROXY_KEYS,
+        compute_outer_proxies,
+        mean_round_delta_se,
+    )
 
     px = compute_outer_proxies(
         cycle_result([0.40, 0.55], 0.30, [round_result(1), round_result(2)])
@@ -935,6 +950,29 @@ def test_compute_proxies_is_one_exact_mean_over_the_adopted_incumbents() -> None
     ran_out = cycle_result(
         [0.30, 0.60, 0.60, 0.60], 0.30, [round_result(i) for i in (1, 2, 3, 4)], round_budget=4
     )
+    # THE PADDING MUST NOT REACH THE PRECISION. `held_levels` stretches a short series by
+    # repeating its last value; those slots carry no measurement. If they entered the cell's SE
+    # as if they did, a cell that quit after 2 of 4 rounds would report itself SHARPER than one
+    # that ran the budget out, and an inverse-variance pool would weight the cell that measured
+    # LEAST the most. SILENT: the panel would report a tighter CI it never earned, and buy its
+    # confidence from the arms that did the least work.
+    se_kw = {"origin_level_se": 0.20, "round_adopted_level_ses": [0.30, 0.40]}
+    padded = cycle_result(
+        [0.30, 0.60], 0.30, [round_result(i) for i in (1, 2)], round_budget=4, **se_kw
+    )
+    unpadded = cycle_result(
+        [0.30, 0.60], 0.30, [round_result(i) for i in (1, 2)], round_budget=2, **se_kw
+    )
+    assert mean_round_delta_se(padded) == pytest.approx(mean_round_delta_se(unpadded))
+    # mean(0.30, 0.40) against the origin's own 0.20, in quadrature — never sigma/sqrt(n), which
+    # would divide correlated, NESTED frontier fits as if they were independent draws.
+    assert mean_round_delta_se(padded) == pytest.approx((0.35**2 + 0.20**2) ** 0.5)
+    assert mean_round_delta_se(padded) > 0.35 / 2
+
+    # No SE at all yields None — the same answer as "this cell was never fit". A fabricated 0.0
+    # reads as an infinitely sharp cell and would dominate every weighting it entered.
+    assert mean_round_delta_se(cycle_result([0.30], 0.30, [round_result(1)])) is None
+
     assert compute_outer_proxies(quit_early).mean_round_delta == pytest.approx(0.225)
     assert compute_outer_proxies(ran_out).mean_round_delta == pytest.approx(0.225)
     # An undeclared budget falls back to the series length rather than dividing by zero.
@@ -2992,3 +3030,126 @@ def test_headline_best_is_always_a_number_something_measured():
     # A round with no accuracy doesn't back the headline (vs `or 0.0`, which could crown it).
     assert best_round_by_measured_accuracy([{"round": 1, "accuracy": None}]) == (0.0, None)
     assert best_round_by_measured_accuracy([]) == (0.0, None)
+
+
+def test_outer_variance_split_names_the_lever_the_panel_needs() -> None:
+    # The panel's `se` is computed from the spread of the per-cell diffs and nothing else, so it
+    # cannot distinguish two opposite problems: cells that each measured themselves badly, versus
+    # cells that genuinely disagree. They take opposite levers — sharpen the instrument, or widen
+    # the panel/candidates — and the operator picks from this number. SILENT: every wrong value
+    # here is a plausible-looking fraction that sends the next spend at the wrong problem.
+    from promptpotter.domain.l4.verdict import CandidateInfo, compute_outer_verdict
+
+    def rows(cells: dict[str, tuple[float, float]]) -> list[dict]:
+        return [
+            {
+                "query": c,
+                "fitness": (v + 1.0) / 3.0,
+                "pipeline_data": {"mean_round_delta": v, "mean_round_delta_se": se},
+            }
+            for c, (v, se) in cells.items()
+        ]
+
+    cand = [
+        CandidateInfo(
+            candidate_id="v1",
+            label="C1.1",
+            changes_description="x",
+            composite_fitness=0.5,
+            is_winner=True,
+        )
+    ]
+
+    def split(variant: dict, origin: dict):
+        v = compute_outer_verdict(
+            {"v1": rows(variant)}, cand, rows(origin), measurand_key="mean_round_delta"
+        )
+        assert v is not None
+        return v.variance
+
+    flat_origin = dict.fromkeys("abc", (0.0, 0.02))
+
+    # Cells that AGREE (diffs .50/.52/.48) but each measured itself poorly: the panel is reading
+    # its own noise, and buying more cells like these buys nothing. Share saturates at 1.
+    noisy = split({"a": (0.50, 0.40), "b": (0.52, 0.40), "c": (0.48, 0.40)}, flat_origin)
+    assert noisy is not None and noisy.estimation_share == 1.0
+    assert noisy.estimation_sd > noisy.observed_sd
+
+    # Cells that genuinely DIFFER (.10/.90/.50) while each is measured sharply: the spread is
+    # signal about where this optimizer prompt works, not instrument noise.
+    real = split({"a": (0.10, 0.02), "b": (0.90, 0.02), "c": (0.50, 0.02)}, flat_origin)
+    assert real is not None and real.estimation_share < 0.05
+    assert real.observed_sd == pytest.approx(0.4)  # SAMPLE sd (n-1), not the population one
+
+    # BOTH ARMS' errors enter, in quadrature. The variant and the origin are separate inner
+    # campaigns on the same cell, so counting only the variant's understates the diff's error by
+    # sqrt(2) — which makes a noise-dominated panel read as half signal.
+    assert real.estimation_sd == pytest.approx((2 * 0.02**2) ** 0.5)
+    assert real.n_cells == 3
+
+    # One shared cell has no spread to decompose: None, never a fabricated 0.0 (which reads as
+    # "all signal" and would argue for spending on more cells at the exact moment it cannot know).
+    assert split({"a": (0.5, 0.02)}, {"a": (0.0, 0.02)}) is None
+    # A cell whose rows carry no SE is dropped rather than guessed at.
+    bare = compute_outer_verdict(
+        {"v1": [{"query": "a", "fitness": 0.5, "pipeline_data": {"mean_round_delta": 0.5}}]},
+        cand,
+        [{"query": "a", "fitness": 0.3, "pipeline_data": {"mean_round_delta": 0.0}}],
+        measurand_key="mean_round_delta",
+    )
+    assert bare is not None and bare.variance is None
+
+
+def test_outer_snr_pools_noise_and_refuses_to_guess_it() -> None:
+    # Turns the hand-computed "the panel needs ~N cells" into a number derived from disk. It
+    # reads UNKNOWN on today's corpus (no state has ever been measured twice on one cell), so a
+    # wrong formula here stays invisible until the first repeat lands and then quietly sets the
+    # spend. SILENT both ways: too small an N says a coin-flip panel can crown a winner; too
+    # large says a working panel cannot.
+    from promptpotter.application.optimizer_prompt_ranking import (
+        RankedOptimizerPrompt,
+        _Accum,
+        _outer_snr,
+    )
+
+    def state(cells: dict[str, list[float]]) -> _Accum:
+        a = _Accum({}, "s")
+        a.cand_by_cell = dict(cells)
+        return a
+
+    def ranked(effect: float) -> RankedOptimizerPrompt:
+        return RankedOptimizerPrompt(
+            state_hash=f"h{effect}",
+            label="C1.1",
+            prompt_state={},
+            provenance=[],
+            per_cell_effects=[],
+            anchor_effect=effect,
+            ci_lo=effect,
+            ci_hi=effect,
+            n_cells=1,
+            n_measurements=1,
+        )
+
+    # Two groups with the SAME spread pool to that spread — not to something between it and 0.
+    snr = _outer_snr({"a": state({"c1": [0.0, 2.0], "c2": [1.0, 3.0]})}, [ranked(0.0), ranked(2.0)])
+    assert snr.within_n_groups == 2 and snr.within_sd == pytest.approx(2**0.5)
+    assert snr.between_sd == pytest.approx(2**0.5) and snr.between_n_states == 2
+    # Equal noise and contrast ⇒ (2.8·σ/d)² ≈ 7.8 cells, rounded UP: a fractional cell cannot be
+    # run, and rounding down would report a panel as sufficient one cell before it is.
+    assert snr.n_cells_to_verdict == 8
+
+    # A bigger group must carry more weight than a small one — pooling is on (n−1) df, never a
+    # mean over per-group SDs, which would let one noisy pair outvote nine clean readings.
+    lopsided = _outer_snr(
+        {"a": state({"c1": [0.0, 0.0, 0.0, 0.0, 0.0], "c2": [0.0, 4.0]})},
+        [ranked(0.0), ranked(1.0)],
+    )
+    assert lopsided.within_sd is not None
+    assert lopsided.within_sd == pytest.approx((8.0 / 5) ** 0.5)  # ss=8, df=4+1
+
+    # NEVER guessed. One reading of one cell has no spread; one state has no contrast. A 0.0 in
+    # either slot reads as a perfectly sharp instrument and would argue for crowning a winner.
+    lone = _outer_snr({"a": state({"c1": [0.5]})}, [ranked(0.0)])
+    assert lone.within_sd is None and lone.between_sd is None
+    assert lone.n_cells_to_verdict is None and lone.within_n_groups == 0

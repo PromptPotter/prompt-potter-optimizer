@@ -812,6 +812,13 @@ class CampaignStore:
         producer, and both reaper paths defer to these invariants here (not just
         the sweep's staleness gate).
 
+        Pause is checked through BOTH its writers — the operator's flag and the
+        runner's declaration — because they are not the same event. A Ctrl+C out
+        of a long phase declares ``paused`` and exits without ever writing a flag
+        (``runner/entry.py``'s prep guard), so a flag-only check reaped exactly the
+        runs the operator had stopped by hand: the ledger said ``control/paused``,
+        and fifteen minutes later the index said ``producer_vanished``.
+
         The gate invariant is the newest and was bought with a real bug: the gate's
         unbounded wait wrote nothing, so the cycle went stale in 30 s and was reaped
         TERMINAL 15 minutes later while alive and still polling — and a decision
@@ -824,7 +831,7 @@ class CampaignStore:
         if layout.pause_flag.is_file() or is_checkin(cycle_dir):
             return False
         dash = read_json_optional(layout.dashboard)
-        if isinstance(dash, dict) and dash.get("run_phase") == RunPhase.GATE:
+        if isinstance(dash, dict) and dash.get("run_phase") in (RunPhase.GATE, RunPhase.PAUSED):
             return False
         index_path = self._index_path(campaign_id, cycle_id)
         data = read_json_optional(index_path)

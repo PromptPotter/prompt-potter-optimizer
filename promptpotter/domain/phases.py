@@ -98,9 +98,12 @@ class RunPhase(enum.StrEnum):
     - ``RUNNING`` — a process is attached and driving the active cycle.
     - ``PAUSED`` — operator paused (the pause button or Ctrl+C); the worker
       exits cleanly at the next checkpoint but the cycle stays **active and
-      resumable** (no ``finished_at``). Derived off ``.runtime/pause.flag``;
-      the play action relaunches via ``start-run``/``resume``. The single
-      operator-interrupt phase — there is no separate "stopping".
+      resumable** (no ``finished_at``). Derived off ``.runtime/pause.flag``
+      OR the runner's own declaration — Ctrl+C writes no flag, so reading
+      only the flag reported a cleanly-paused run as ``detached`` and let the
+      reaper stamp it ``PRODUCER_VANISHED``. The play action relaunches via
+      ``start-run``/``resume``. The single operator-interrupt phase — there
+      is no separate "stopping".
     - ``GATE`` — alive, holding at the round-0 origin gate awaiting an
       operator decision (rescore / proceed / abort) because the origin
       verdict was not ``healthy``. Reversible (``origin-gate-decision``).

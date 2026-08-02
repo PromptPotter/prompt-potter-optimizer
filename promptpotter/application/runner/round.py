@@ -191,6 +191,7 @@ def persist_round(
                     # crown was `dashboard.json`, and a served view had to open another
                     # projection's output to find them.
                     "cumulative_theta": round_result.cumulative_theta,
+                    "cumulative_theta_se": round_result.cumulative_theta_se,
                     **_round_close_facts(round_result),
                 },
             )

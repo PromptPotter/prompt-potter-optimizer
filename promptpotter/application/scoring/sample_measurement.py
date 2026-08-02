@@ -129,6 +129,10 @@ _INFRA_KEYS: frozenset[str] = frozenset(
         "pipeline_params",
         "diagnostics",
         "reasoning_trace",
+        # L4: the outer sample's own within-cell precision (`domain/l4/proxies.py`). It rides
+        # here rather than as a declared observation because the panel reads it and the scoring
+        # formula must not — see the emit site in `runner/inner/cycle.py`.
+        "mean_round_delta_se",
     }
 )
 

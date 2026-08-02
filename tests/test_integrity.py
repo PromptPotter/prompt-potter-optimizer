@@ -18,6 +18,7 @@ import json
 import logging
 import re
 import subprocess
+import types
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -1587,14 +1588,45 @@ def test_the_l4_dataset_is_recognized_as_one() -> None:
     ``runner/inner/cycle.py`` decides whether to verify the outer observation contract
     by probing for the inner-task spec. Miss it and the check is skipped, undeclared
     inner keys are dropped, and the outer formula scores a measurement nobody took.
+
+    The panel it loads must also measure in ONE UNIT, which is the second half here. Under
+    1PL the δ ruler pins θ's scale through the logistic link; under 2PL it carries a
+    discrimination ``a`` and θ becomes units of ``1/a``. Each inner cycle decides graduation
+    from its own held-out CV, so WHICH cells graduate is a property of the draw rather than of
+    the optimizer prompt under test — and the panel would then average and t-test a mixture of
+    scales. Silent in the worst way: every cell completes, every number is plausible, and the
+    pooled verdict is wrong with no symptom.
     """
-    from promptpotter.application.runner.inner.tasks import load_inner_tasks
+    from promptpotter.application.config import load_campaign_config
+    from promptpotter.application.runner.inner.tasks import (
+        inner_instrument_config,
+        load_inner_tasks,
+        resolve_inner_task,
+    )
     from promptpotter.connectors import CONNECTORS
+    from promptpotter.infrastructure.store.io import read_yaml
 
     d = Path(__file__).resolve().parents[1] / "datasets" / "promptpotter-self"
     spec = d / CONNECTORS["promptpotter"].experiment_file
     assert spec.is_file(), f"the L4 probe would read {d.name} as a plain dataset ({spec})"
-    assert load_inner_tasks(spec).tasks
+    panel = load_inner_tasks(spec)
+    assert panel.tasks
+
+    # The SHIPPED config, not a hand-built one — the question is what the panel runs under.
+    base = load_campaign_config(read_yaml(d / "campaign.yaml")["campaign_config"])
+    ctx = types.SimpleNamespace(dataset_config_dir=d)
+    for task in panel.tasks:
+        derived = inner_instrument_config(
+            resolve_inner_task(ctx, task.id),
+            base,
+            llm_node="llm_only",
+            n_scored=40,
+        )
+        assert derived.optimization.enable_2pl_graduation is False, (
+            f"cell {task.id} may graduate its ruler to 2PL — its theta would then be in "
+            "units of 1/a while the rest of the panel is in logits, and the outer verdict "
+            "pools them anyway"
+        )
 
 
 def test_shipped_config_booleans_match_the_pinned_census() -> None:

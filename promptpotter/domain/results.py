@@ -427,6 +427,13 @@ class RoundResult(StrictModel):
     # a plain mean over the same rows is not — it silently attributes one configuration's
     # score to another. See `cycle.py::_merge_known_outcomes`.
     cumulative_theta: float | None = None
+    # That θ's own standard error, dispersion-corrected, straight off the same fit. It is how
+    # sharply THIS round measured the frontier — a precision, never a penalty: the spec forbids
+    # it in the election rank key or as a `mean - λ·se` haircut (that discards good candidates on
+    # wide posteriors), and the panel's `λ·std` slot is cross-seed OUTCOME dispersion, not this.
+    # Its consumer is the L4 panel, which without it must estimate estimation noise and
+    # between-cell heterogeneity from one spread of six scalars and cannot separate them.
+    cumulative_theta_se: float | None = None
     # Which IRT model the δ ruler above was fitted under ("1PL" | "2PL"), so the operator
     # reads the model the engine chose. None = the ruler is cold (flat δ) and θ is plain
     # logit-accuracy — neither model, and the state a hardcoded "1PL" used to misreport.
@@ -636,6 +643,14 @@ class CycleResult(StrictModel):
     # improvement over nothing. Absent ⇒ the cycle is excluded.
     origin_level: float | None = None
     round_adopted_levels: list[float] = Field(default_factory=list)
+    # Each level's own standard error, index-aligned with the two above and written by the same
+    # carry-forward (`exploration.adopted_level_trajectory`) — a round that did not move the
+    # incumbent did not sharpen the reading of it either. This is the WITHIN-cell precision an
+    # L4 panel needs: without it the outer verdict must infer estimation noise and between-cell
+    # heterogeneity from a single spread of six scalars, and cannot tell them apart. Precision
+    # only — never a penalty term (see `RoundResult.cumulative_theta_se`).
+    origin_level_se: float | None = None
+    round_adopted_level_ses: list[float] = Field(default_factory=list)
     # The ROUND BUDGET this cycle was given — ``optimization.max_rounds``, the ceiling every
     # arm on an L4 panel shares. It is the denominator the L4 law averages over, and it has to
     # come from the config rather than from ``len(round_adopted_levels)``: a cycle stopped early
@@ -645,13 +660,6 @@ class CycleResult(StrictModel):
     # the shorter series pays a cell for quitting once it had lifted. 0 = never declared, and the
     # law then falls back to the series length (see ``domain/l4/proxies.py``).
     round_budget: int = 0
-    # The cycle's `optimization.elimination_n_min` — the one min-samples floor PoBB, the ruler
-    # and the election all read. The L4 law needs it to tell an arm that earned a verdict from
-    # one cut early (`domain/l4/proxies.py::_judged`), and it belongs on the result rather than
-    # as a second argument: the law is pure over ONE input, and "how many samples counted as
-    # evidence" is a fact about the finished cycle. 0 = no floor, reachable only on a cycle with
-    # no rounds — which `no_evidence_reason` has already excluded before the law reads this.
-    elimination_n_min: int = 0
     winner_prompt_fields: dict[str, Any]
     winner_pipeline_params: dict[str, Any] | None = None
     stop_reason: StopReason

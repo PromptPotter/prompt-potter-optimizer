@@ -61,6 +61,20 @@ inner_benchmark_config:
 #     retired panel had nothing at.
 #   seed-25 — origin 0.500, floor 0.350, margin +0.150 (1p). Holds the hard end CONSERVATIVELY.
 #
+# TWO OPEN ITEMS ON THIS LIST, recorded so they are not mistaken for settled (2026-08-02):
+#   1. Run `seed-screen` on seeds 6 and 25 with repeats before their margins are cited as
+#      evidence. Both were seated on a SINGLE pass, which the lesson above calls a coin toss.
+#      seed-25 is the one to check first: on its own numbers (1 pass, origin 0.500, n=40) the
+#      screen's binomial fallback gives SE 0.079, so 2 SE = 0.158 against a margin of +0.150 —
+#      the tool would print UNSETTLED for a seat it took. It is not flagged today because
+#      `verdict_settled` gates only the COLLAPSE branch; an unsettled POSITIVE margin passes
+#      silently. Re-screening costs 3 passes/seed (~3 min, ~$0.02) and voids nothing.
+#   2. The thin-positive-margin rule that actually retired seed-4 (+0.021) is written here and
+#      nowhere in code: `seed_screen.py`'s only coded disqualifier is `class_floor > origin`, so
+#      seed-4 would print `ok` today. The runtime now WARNS when a seat's floor meets its origin
+#      (`runner/inner/cycle.py`), which catches the collapse case on the seats that actually ran
+#      — it does not catch the thin-margin case, which needs a numeric threshold nobody has set.
+#
 # seed-7 is EXCLUDED from the candidate pool (operator, 2026-08-02). It measured the lowest origin
 # (0.475) and is not degenerate, but "lowest measured origin" is exactly how seed-5 got a seat: on
 # a bank with no measurement history, hard and impossible look identical, and the screen cannot

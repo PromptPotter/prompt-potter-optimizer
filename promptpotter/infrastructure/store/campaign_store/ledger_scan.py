@@ -176,6 +176,7 @@ def scan_ledger_round_closes(ledger_path: Path) -> dict[int, LedgerRoundClose]:
                 round=rnd,
                 winner_label=payload.get("winner_label") or "",
                 cumulative_theta=payload.get("cumulative_theta"),
+                cumulative_theta_se=payload.get("cumulative_theta_se"),
                 abilities=payload.get("abilities") or {},
             )
         except ValidationError:

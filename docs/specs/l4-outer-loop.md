@@ -39,6 +39,9 @@
    - **The pivot is a sample count, not a yes/no.** At current (d, σ) a verdict needs ≈ `(2.8·σ/d)²` outer runs. Pivot to *loop-driven* tuning the moment that N drops inside the run budget. Until then, drive with **operator-controlled levers** — variance reduction (more seeds/samples, or a low-variance *one-step / fixed-inner* proxy in place of the high-variance full-trajectory measurement) and deliberately diverse hand-authored optimizer prompts — because a noise-blind loop cannot grow the signal by itself (the chicken-and-egg: the loop can't select what it can't distinguish).
    - **Cadence = per material change (≈3–4 day floor), run as a control chart.** An unchanged system re-measures to the same SNR (wasted K-reruns); the trigger is a *batch of optimizer prompt / instrument / benchmark changes*. As a control chart it doubles as a **regression guard** — it catches a change that *raised* noise (an instrument that got worse), otherwise invisible.
    - **Built on the existing `noise-floor` verb** (the K-rerun core) — wrap it into a repeatable *outer SNR report* (within / between / N-to-verdict, appended to an on-disk series) so one command yields both today's verdict-cost and the trend. Complements item 5's `proxy_lift_corr` (does the cheap proxy *predict* lift?) by asking the prior question: is *any* lift *detectable* yet? This is what turns "the tool finds a good base L1/L2/L3 config" from faith into measurement.
+   - **SHIPPED as a derivation, not a re-run — and it landed somewhere better than planned.** Both series were already on disk: `rank_optimizer_prompts` walks every pp-self round file and accumulates, per optimizer-prompt state, a list of readings per cell. Repeated readings of one (state, cell) ARE the within series; the spread of `anchor_effect` across states IS the between series. So `OuterSnr` (`application/optimizer_prompt_ranking.py`) pools them and serves `within_sd` / `between_sd` / `n_cells_to_verdict`, recomputed on every read at **zero spend and zero new walk** — reachable through `python -m promptpotter rank-optimizer-prompts` and `GET /optimizer-prompt-ranking`. Wrapping `noise-floor` would have bought K re-runs to measure what the corpus already held.
+   - **First reading, 2026-08-02: `UNKNOWN`.** Across 3 campaigns and 6 optimizer-prompt states, **no state has ever been measured twice on the same cell**, so the within series is empty and the ratio has no denominator. That is the finding: every "1.9× / 1.7×" figure quoted below came from the *panel's own SE*, which is a different quantity from re-run noise and cannot substitute for it. The cheapest way to make the number real is not a new mechanism — it is to run one arm twice.
+   - **Its round-level peer ships too.** `OuterVariance` on every `outer_verdict` splits ONE round's cell-to-cell spread into estimation noise (from the per-cell `theta_se`, newly carried end-to-end) versus real between-cell difference. Same question, per round instead of per corpus, and it names the lever directly: a high `estimation_share` means more cells will not help.
 
 ## Running & supervising a live `promptpotter-self`
 
@@ -261,10 +264,20 @@ One thing this does NOT fix, and it is the open one:
 
 - **The panel still cannot resolve one optimizer prompt from another.** At 6 cells the SE is
   0.055 against a typical arm contrast of ~0.09 — the smallest difference it can call is 1.7×
-  larger than a difference between arms, down from 1.9×. Closing that needs either ~35 cells
-  (wall-clock we do not have) or **candidates that differ more than they currently do**, which
-  is the cheaper lever and the untried one. Until then the panel is a behavioural diagnostic,
-  not a selector; crowning a winner between near-identical arms here is reading noise.
+  larger than a difference between arms, down from 1.9×. Closing that needs more cells or
+  **candidates that differ more than they currently do**, which is the cheaper lever and the
+  untried one. Until then the panel is a behavioural diagnostic, not a selector; crowning a
+  winner between near-identical arms here is reading noise.
+  - **Two caveats, both worth knowing before this ratio is quoted again.** (1) The cell count
+    was stated here as "~35 (wall-clock we do not have)", and that does not follow from the
+    spec's own arithmetic: `se ∝ 1/√n`, so reaching 1.0 needs `6 × 1.7² ≈ 18` cells — which is
+    also what item 7's `(2.8·σ/d)²` gives. Two sections stated two answers, and the larger one
+    was the stated reason for not buying cells; at 18 that is a different conversation.
+    (2) The 1.7 mixes corpora — the 0.09 contrast comes off the 39-cell `af6252`, the 0.055 SE
+    off the current 6-cell panel — and its σ is the **panel's own SE, not re-run noise**, which
+    nothing on disk has ever measured (item 7's first reading is `UNKNOWN` for exactly that
+    reason). Read `n_cells_to_verdict` off `rank-optimizer-prompts` instead of re-deriving it in
+    prose; it is served now, and a served number cannot drift from the disk it came from.
 
 **RESOLVED, and the earlier entry here overstated it — the anchor wander does not survive the
 subtraction.** θ_C0 is re-read on a ruler each cycle fits from its own candidates, and this spec

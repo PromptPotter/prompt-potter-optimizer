@@ -166,9 +166,6 @@ def cycle_result(
     ``cost`` is the INCURRED cost: what the search would cost cold, and the only divisor the
     proxies read. ``billed`` (defaults to the same) is deliberately independent — the two
     diverge exactly when a cycle replays the tenant-global cache.
-
-    ``elimination_n_min`` matches :func:`round_result`'s 4-row full arms, so an uncut
-    candidate earns a verdict and a ``cut`` one does not.
     """
     return CycleResult(
         rounds=rounds,
@@ -178,7 +175,6 @@ def cycle_result(
         origin_accuracy=origin or 0.0,
         origin_level=origin,
         round_adopted_levels=levels,
-        elimination_n_min=len(_TRUTH),
         winner_prompt_fields={},
         stop_reason=stop_reason,
         started_at="2026-01-01T00:00:00Z",

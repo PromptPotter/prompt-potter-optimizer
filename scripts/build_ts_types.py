@@ -21,12 +21,13 @@ from promptpotter.application.optimizer_prompt_ranking import (
     CellEffect,
     EffectProvenance,
     OptimizerPromptRanking,
+    OuterSnr,
     RankedOptimizerPrompt,
 )
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
 from promptpotter.domain.l1_layout import L1Layout
-from promptpotter.domain.l4.verdict import OuterCellEffect, OuterVerdict
+from promptpotter.domain.l4.verdict import OuterCellEffect, OuterVariance, OuterVerdict
 from promptpotter.domain.opt_search_point import (
     EvidenceGrounding,
     FewShotExample,
@@ -94,6 +95,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     RoundSummaryCandidate,
     DegradationHealth,
     OuterCellEffect,
+    OuterVariance,
     OuterVerdict,
     RoundSummary,
     DiagnosticRunRecord,
@@ -144,6 +146,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     # --- the optimizer-prompt ranking (application/optimizer_prompt_ranking) — nested types first ---
     CellEffect,
     EffectProvenance,
+    OuterSnr,
     RankedOptimizerPrompt,
     OptimizerPromptRanking,
     # --- campaigns/files router ---

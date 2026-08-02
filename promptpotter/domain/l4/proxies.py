@@ -146,6 +146,34 @@ def held_levels(result: CycleResult) -> list[float]:
     return levels + [levels[-1]] * (n - len(levels))
 
 
+def mean_round_delta_se(result: CycleResult) -> float | None:
+    """How sharply THIS cell measured its own ``mean_round_delta`` — the within-cell precision.
+
+    ``None`` when any level was fit without an SE, which is the same condition that excludes the
+    cell. It is a PRECISION and never a penalty: the panel uses it to tell estimation noise from
+    between-cell heterogeneity, never as a ``mean - λ·se`` haircut (that discards good candidates
+    on wide posteriors) and never in an election rank key.
+
+    **Why the mean of the SEs and not the root-mean-square over n.** ``σ/√n`` is the variance of a
+    mean of INDEPENDENT terms, and these are the opposite of independent: each level is a fit over
+    a frontier that NESTS the previous round's rows, and ``held_levels`` then pads a short series
+    by repeating its last value outright. Dividing by n there would manufacture precision — a cell
+    that stopped after one round would report itself the sharpest on the panel, and an
+    inverse-variance pool would weight the cell that measured least the most. So this takes the
+    perfectly-correlated bound, ``SE(mean) <= mean(SE_i)``, over the DISTINCT levels only: it needs
+    no covariance model, it is conservative in the one direction that matters, and it cannot invent
+    power. The origin's own SE enters in quadrature because the delta subtracts it, and it is a
+    genuinely separate measurement (round 0, its own sample budget).
+    """
+    ses = result.round_adopted_level_ses
+    if not ses or result.origin_level_se is None:
+        return None
+    # The DISTINCT levels — the padding `held_levels` adds carries no measurement, so it must not
+    # enter the average as if it did. A 2-of-4-round cell contributes the precision of 2 rounds.
+    within = sum(ses) / len(ses)
+    return float((within**2 + result.origin_level_se**2) ** 0.5)
+
+
 def _is_evidential(rnd: RoundResult) -> bool:
     """False when the round says nothing about the optimizer prompt under test.
 
@@ -269,5 +297,6 @@ __all__ = [
     "compute_outer_proxies",
     "floor_reason",
     "held_levels",
+    "mean_round_delta_se",
     "no_evidence_reason",
 ]

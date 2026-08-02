@@ -41,7 +41,7 @@ from promptpotter.application.scoring.evaluators import resolve_round_formula
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.domain.opt_search_point import overlay_sets_model_outside_allowed
 from promptpotter.domain.phases import STOP_REASON_INFO, RunPhase, StopOutcome, StopReason
-from promptpotter.domain.results import CycleResult, CycleSpend
+from promptpotter.domain.results import CycleResult, CycleSpend, RoundResult
 from promptpotter.domain.run_records import (
     ConfigOverrides,
     CycleSeed,
@@ -363,6 +363,17 @@ def _cycle_spend(observers: RunObservers) -> CycleSpend:
     )
 
 
+def _level_of(rr: RoundResult) -> tuple[float, float] | None:
+    """A round's frontier level as the ``(θ, θ_se)`` pair, or ``None`` if it was never fit.
+
+    The two halves are written together by ``absorb_round`` and are only ever read together;
+    one present without the other would be a level with no precision, which is the state this
+    whole channel exists to end."""
+    if rr.cumulative_theta is None or rr.cumulative_theta_se is None:
+        return None
+    return rr.cumulative_theta, rr.cumulative_theta_se
+
+
 def _build_cycle_result(
     cycle: Cycle | None,
     origin: CampaignOrigin,
@@ -398,12 +409,12 @@ def _build_cycle_result(
     # outer loop with the floor it started from.
     cycle_rounds = [rr for rr in cycle.rounds if rr.round > 0] if cycle is not None else []
     ds = cycle.delta_scale if cycle is not None else None
-    origin_level: float | None = None
-    round_levels: list[float] = []
+    origin_lv: tuple[float, float] | None = None
+    levels: list[tuple[float, float]] = []
     if cycle is not None:
-        origin_level, round_levels = adopted_level_trajectory(
-            cycle.origin_round.cumulative_theta,
-            [rr.cumulative_theta for rr in cycle_rounds],
+        origin_lv, levels = adopted_level_trajectory(
+            _level_of(cycle.origin_round),
+            [_level_of(rr) for rr in cycle_rounds],
             ds,
         )
     return CycleResult(
@@ -415,10 +426,11 @@ def _build_cycle_result(
         origin_composite_fitness=(
             cycle.origin_round.composite_fitness if cycle is not None else 0.0
         ),
-        origin_level=origin_level,
-        round_adopted_levels=round_levels,
+        origin_level=origin_lv[0] if origin_lv is not None else None,
+        origin_level_se=origin_lv[1] if origin_lv is not None else None,
+        round_adopted_levels=[t for t, _ in levels],
+        round_adopted_level_ses=[se for _, se in levels],
         round_budget=(cycle.config.optimization.max_rounds if cycle is not None else 0),
-        elimination_n_min=(cycle.config.optimization.elimination_n_min if cycle is not None else 0),
         winner_prompt_fields=(best_sp.prompt_fields or {}) if best_sp else {},
         winner_pipeline_params=best_sp.pipeline_params if best_sp else None,
         stop_reason=stop_reason,

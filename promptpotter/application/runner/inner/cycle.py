@@ -43,13 +43,14 @@ from promptpotter.application.runner.inner.tasks import (
     inner_tasks_path,
     resolve_inner_task,
 )
-from promptpotter.application.seed_screen import draw_bank
+from promptpotter.application.seed_screen import class_floor, draw_bank
 from promptpotter.domain.l4.proxies import (
     OUTER_PROXY_KEYS,
     InnerCycleUnscoreableError,
     compute_outer_proxies,
     floor_reason,
     held_levels,
+    mean_round_delta_se,
 )
 from promptpotter.infrastructure.store.io import read_json_optional, write_json
 from promptpotter.infrastructure.store.layout import (
@@ -271,14 +272,22 @@ def _lift_shape(result: CycleResult) -> str:
     subset, so it carries neither of the noise terms the scalar does. A panel of 6 cells over 4
     rounds is ~24 of these verdicts against 6 scalars — the shape is legible at a panel size
     where a 0.077-logit contrast is not.
+
+    The denominator is the ROUND BUDGET, the same one the scored scalar divides by
+    (``held_levels``). It read the rounds that RAN, which put two different denominators one line
+    apart in a narrative the outer generator reads whole: a cell that stopped at 2 of 4 showed
+    "1/2" beside a scalar averaged over 4, so the same search looked half as productive or twice
+    as productive depending on which line was believed. A short cell has unlifted rounds, and
+    saying so is the point — ``lives`` stops a STALLING cell, so the rounds it never ran are
+    exactly the ones it was not going to lift in.
     """
-    marks = " ".join(
-        f"r{rr.round}{'+' if rr.improved else '.'}" for rr in result.rounds if rr.round > 0
-    )
+    l1 = [rr for rr in result.rounds if rr.round > 0]
+    marks = " ".join(f"r{rr.round}{'+' if rr.improved else '.'}" for rr in l1)
     if not marks:
         return "lifts: none — no L1 round closed."
-    n = sum(1 for rr in result.rounds if rr.round > 0 and rr.improved)
-    return f"lifts: {marks} ({n}/{result.n_l1_rounds}; target: early and often, thinning late)"
+    n = sum(1 for rr in l1 if rr.improved)
+    budget = max(result.round_budget, len(l1))
+    return f"lifts: {marks} ({n}/{budget}; target: early and often, thinning late)"
 
 
 def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
@@ -522,6 +531,15 @@ async def _run_inner_campaign(
     # The draw is spelled once, in the screen that CHOOSES seeds — a runner that drew
     # differently would run a bank nobody screened, and nothing would report the divergence.
     train_data = draw_bank(all_samples, n, spec.seed)
+    # The constant-answer floor of the bank about to run. Free (no measurement — it is the
+    # majority-class share of the ground truths) and computed HERE because this is the first
+    # moment the drawn rows exist. `seed-screen` defines the disqualifier — a bank whose floor
+    # exceeds its origin pays more for giving up than for reasoning — but it is a diagnostic the
+    # operator runs by hand, so nothing recomputed it for the seats actually seated, and a
+    # re-cut could re-admit a collapse-rewarding bank in silence. Reported, never enforced: one
+    # origin pass is ~0.08 SE on 40 rows, and rejecting a seat on it is the single-pass error the
+    # screen itself stopped making.
+    bank_floor = class_floor(train_data)
 
     file_config: dict[str, Any] = {}
     if session.dataset_config_dir is not None:
@@ -599,6 +617,23 @@ async def _run_inner_campaign(
         if session.langfuse is not None:
             with contextlib.suppress(Exception):
                 session.langfuse.reset()
+    # A bank that pays MORE for answering one label than for reasoning cannot measure an
+    # optimizer prompt — the whole gradient of that cell points at collapse. `seed-screen`
+    # defines this disqualifier, but it is a hand-run diagnostic, so nothing ever recomputed it
+    # for the seats that actually ran and a re-cut could re-admit such a bank in silence.
+    # REPORTED, never enforced: one origin pass is ~0.08 SE on 40 rows, so rejecting a seat on a
+    # single read is precisely the single-pass error the screen itself stopped making.
+    if bank_floor >= result.origin_accuracy:
+        logger.warning(
+            "inner cell %s/seed-%d MAY REWARD COLLAPSE: constant-answer floor %.3f >= this "
+            "run's origin %.3f over %d rows. One pass sits inside its own error bar — re-screen "
+            "the seat (`python -m promptpotter seed-screen`) before trusting the panel.",
+            spec.inner_dataset,
+            spec.seed,
+            bank_floor,
+            result.origin_accuracy,
+            len(train_data),
+        )
     return result
 
 
@@ -783,6 +818,13 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
         # REASONING in the outer sample_transcripts panel.
         "reasoning_trace": _inner_narrative(result, spec),
         **proxies.model_dump(),
+        # The cell's own precision on the scalar above, so the panel can tell estimation noise
+        # from between-cell heterogeneity instead of inferring both from one spread of six
+        # numbers. An INFRA key, deliberately not an `OuterSampleProxies` field: those are
+        # derived into `OUTER_PROXY_KEYS` and reach the scoring formula's namespace, and a
+        # standard error inside the formula is one keystroke from the `mean - λ·se` haircut the
+        # spec forbids. Precision travels beside the measurement; it never grades it.
+        "mean_round_delta_se": mean_round_delta_se(result),
         # terminated_at is the archive's reuse contract: a named node means "the
         # sample's outcome depends on config only UP TO that node", and prefix-
         # matched rows replay when they terminated inside the trusted prefix

@@ -263,9 +263,11 @@ reader-side computation is `derive_run_phase`
 (`infrastructure/runtime_flags.py`), used by both the cycle list and
 the reaper's staleness check (`_is_dead` — no second "is it running?"
 derivation), which composes lifecycle (terminal, from
-`index.json::finished_at`) with the control flags and consults
-`dashboard.json` freshness (falling back to `index.json`'s mtime only
-while no dashboard has been written yet, e.g. a just-minted cycle)
+`index.json::finished_at`) with the control flags, the runner's own
+declaration (`paused` / `gate` — a Ctrl+C declares `paused` without ever
+writing a flag), and `dashboard.json` freshness (falling back to
+`index.json`'s mtime only while no dashboard has been written yet, e.g. a
+just-minted cycle)
 *only* to split `running` from `detached`. Two liveness invariants back that
 split: **every producer await that can exceed `RUN_FRESH_S` rides
 the in-flight heartbeat** (`dispatch/llm_call/heartbeat.py` —

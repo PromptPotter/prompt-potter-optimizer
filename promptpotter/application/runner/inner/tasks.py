@@ -207,6 +207,15 @@ def inner_instrument_config(
         # trajectory or an `InnerCycleUnscoreableError`, which is exactly the measurement the
         # outer loop is there to take.
         "origin_gate": "off",
+        # ONE RULER UNIT ACROSS THE PANEL. Under 1PL the ruler is δ alone and the unit is pinned
+        # by the logistic link, so every cell's θ — and therefore every `mean_round_delta` — is
+        # in the same logits. Under 2PL the ruler also carries discrimination `a`, and θ is then
+        # in units of 1/a: a cell that graduates measures on a different scale from one that did
+        # not, and the panel averages the mixture and t-tests it. Each inner cycle decides
+        # graduation from its OWN held-out CV, so which cells graduate is a property of the draw,
+        # not of the optimizer prompt under test — noise entering as a units change. Off here
+        # only; a top-level campaign keeps the graduation, which is where it earns its keep.
+        "enable_2pl_graduation": False,
     }
     if spec.n_variants is not None:
         opt_update["n_variants"] = spec.n_variants

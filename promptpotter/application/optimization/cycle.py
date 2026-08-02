@@ -78,7 +78,7 @@ def _origin_round(
     *,
     report: ScoredCandidate,
     results: list[dict[str, Any]],
-    theta: float | None,
+    theta: tuple[float, float] | None,
     calibration_model: CalibrationModel | None,
 ) -> RoundResult:
     """Round 0 as an ordinary ``RoundResult`` — one candidate, C0, no rivals.
@@ -96,7 +96,8 @@ def _origin_round(
     deprecated = _compute_accuracy(cast("list[QueryMeasurement]", results))["deprecated"]
     row = report.model_copy(
         update={
-            "theta": theta,
+            "theta": theta[0] if theta is not None else None,
+            "theta_se": theta[1] if theta is not None else None,
             "prompt_fields": prompt_fields,
             "resolved_pipeline_params": sp.config_params,
             "matched_origin_accuracy": report.accuracy,
@@ -123,7 +124,8 @@ def _origin_round(
         # Round 0's frontier θ is the origin's θ — the subset-invariant peer of the round's
         # own `accuracy`, so the trend line starts on the θ scale too, and the one place θ
         # is read from.
-        cumulative_theta=theta,
+        cumulative_theta=theta[0] if theta is not None else None,
+        cumulative_theta_se=theta[1] if theta is not None else None,
         calibration_model=calibration_model,
         evaluators=dict(row.evaluators),
         opt_sp=opt_sp,
@@ -169,8 +171,8 @@ def _calibrate_delta_ruler(
     *,
     enable_2pl: bool,
     archive_obs: list[Observation],
-) -> tuple[dict[int, RulerEntry], float | None, CalibrationModel | None]:
-    """Calibrate the per-cycle FIXED difficulty ruler + read the origin's θ on it.
+) -> tuple[dict[int, RulerEntry], tuple[float, float] | None, CalibrationModel | None]:
+    """Calibrate the per-cycle FIXED difficulty ruler + read the origin's ``(θ, θ_se)`` on it.
 
     The cross-round comparability anchor (slice 2 of fitness-comparability). Every
     later θ readout in this cycle (round winners for ``c0_ok``, the stall ladder) is
@@ -262,8 +264,7 @@ def _calibrate_delta_ruler(
     # a panel. It also makes the cold and warm branches agree: one expression, one estimator.
     # ``obs``, not ``origin_obs``: the deduped set carries every origin row the archive holds too.
     origin_obs_all = [o for o in obs if o.candidate_id == ORIGIN_ABILITY_ID]
-    origin_row = fit_theta_given_delta(origin_obs_all, ruler).get(ORIGIN_ABILITY_ID)
-    return ruler, (origin_row[0] if origin_row is not None else None), model
+    return ruler, fit_theta_given_delta(origin_obs_all, ruler).get(ORIGIN_ABILITY_ID), model
 
 
 _FRONTIER_ABILITY_ID = "_frontier"
@@ -271,13 +272,17 @@ _FRONTIER_ABILITY_ID = "_frontier"
 
 def _cumulative_theta(
     results: list[dict[str, Any]], delta_scale: dict[int, RulerEntry] | None
-) -> float | None:
-    """Ability θ of the cumulative frontier ``results`` on the fixed ruler ``delta_scale``.
+) -> tuple[float, float] | None:
+    """Ability ``(θ, θ_se)`` of the cumulative frontier ``results`` on the fixed ``delta_scale``.
 
     The θ-space peer of the cumulative composite — what the stall ladder compares
     round-over-round. One virtual candidate (the frontier) fit against the fixed δ (flat
     where the ruler is cold), so successive rounds land on one scale even once per-round
-    subsets drift. ``None`` only when no non-error result remains to fit."""
+    subsets drift. ``None`` only when no non-error result remains to fit.
+
+    The SE comes back with it because the fit already computed it (dispersion-corrected) and
+    dropping it left every downstream consumer — the stall ladder, the L4 panel — to re-derive
+    precision from the spread of point estimates it did not have enough of."""
     from promptpotter.application.intelligence.exploration import (
         Observation,
         fit_theta_given_delta,
@@ -290,9 +295,7 @@ def _cumulative_theta(
         for r in results
         if (sid := r.get("sample_id")) is not None and not is_error_result(r)
     ]
-    fit = fit_theta_given_delta(obs, delta_scale or {})
-    row = fit.get(_FRONTIER_ABILITY_ID)
-    return row[0] if row is not None else None
+    return fit_theta_given_delta(obs, delta_scale or {}).get(_FRONTIER_ABILITY_ID)
 
 
 def _inherit_sibling_runtime_failures(opt_sp: OptSearchPoint, session: Session) -> None:
@@ -469,7 +472,7 @@ class Cycle:
                 best_accuracy=origin_accuracy,
                 best_composite_fitness=origin_report.composite_fitness,
                 best_sp=sp,
-                best_theta=origin_theta,
+                best_theta=origin_theta[0] if origin_theta is not None else None,
             ),
             opt_sp=opt_sp,
             archive_observations=archive_obs,
@@ -491,12 +494,18 @@ class Cycle:
         leave one of its fields (evaluators, the CI whisker, the verdict) reading
         from the run before the fix. θ is carried, not re-fit: the ruler is locked."""
         assert self.tracking.current_sp is not None
+        prior = self.origin_round
+        carried = (
+            None
+            if prior.cumulative_theta is None or prior.cumulative_theta_se is None
+            else (prior.cumulative_theta, prior.cumulative_theta_se)
+        )
         self.rounds[0] = _origin_round(
             self.opt_sp,
             self.tracking.current_sp,
             report=parent.report,
             results=list(parent.results),
-            theta=self.origin_round.cumulative_theta,
+            theta=carried,
             calibration_model=self.calibration_model,
         )
 
@@ -562,9 +571,9 @@ class Cycle:
             # best_theta is a running max over the same cumulative frontier as
             # best_composite — re-maxed here so a resumed cycle reconstructs exactly
             # what fresh absorb_round held (seeded from origin_theta by Cycle.start).
-            cum_theta = _cumulative_theta(acc_cum, self.delta_scale)
-            if cum_theta is not None and (tr.best_theta is None or cum_theta > tr.best_theta):
-                tr.best_theta = cum_theta
+            cum = _cumulative_theta(acc_cum, self.delta_scale)
+            if cum is not None and (tr.best_theta is None or cum[0] > tr.best_theta):
+                tr.best_theta = cum[0]
         tr.current_results = acc_cum
         # Mirrors `absorb_round`: "current" is the last round's OWN measurement.
         tr.current_accuracy = last_rr.accuracy
@@ -612,9 +621,11 @@ class Cycle:
             self.calibration_model = calibration_model
             # Round 0 carries θ twice — its own frontier and C0's row — and a warm fit
             # must move both, or the round file reports the origin at two abilities.
-            self.origin_round.cumulative_theta = origin_theta
+            o_theta, o_se = origin_theta if origin_theta is not None else (None, None)
+            self.origin_round.cumulative_theta = o_theta
+            self.origin_round.cumulative_theta_se = o_se
             self.origin_round.candidate_scores = [
-                c.model_copy(update={"theta": origin_theta})
+                c.model_copy(update={"theta": o_theta, "theta_se": o_se})
                 for c in self.origin_round.candidate_scores
             ]
             # …and every L1 round that already closed, which is the same argument one line up
@@ -628,7 +639,10 @@ class Cycle:
             for rr in self.rounds:
                 frontier = _merge_known_outcomes(frontier, list(rr.results))
                 if rr.round > 0:
-                    rr.cumulative_theta = _cumulative_theta(frontier, delta_scale)
+                    restamped = _cumulative_theta(frontier, delta_scale)
+                    rr.cumulative_theta, rr.cumulative_theta_se = (
+                        restamped if restamped is not None else (None, None)
+                    )
                     rr.calibration_model = calibration_model
 
     def adopt(self, new_incumbent: OptSearchPoint, *, advanced: dict[str, Any]) -> None:
@@ -694,11 +708,11 @@ class Cycle:
             tr.best_accuracy = tr.current_accuracy
             tr.best_round = round_num
             tr.best_sp = tr.current_sp
-        cur_theta = _cumulative_theta(tr.current_results, self.delta_scale)
-        if cur_theta is not None and (tr.best_theta is None or cur_theta > tr.best_theta):
-            tr.best_theta = cur_theta
+        cur = _cumulative_theta(tr.current_results, self.delta_scale)
+        if cur is not None and (tr.best_theta is None or cur[0] > tr.best_theta):
+            tr.best_theta = cur[0]
 
-        rr.cumulative_theta = cur_theta
+        rr.cumulative_theta, rr.cumulative_theta_se = cur if cur is not None else (None, None)
         rr.calibration_model = self.calibration_model
         rr.opt_sp = self.opt_sp
         return rr

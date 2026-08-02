@@ -536,6 +536,7 @@ class LedgerRoundClose(StrictModel):
     round: int
     winner_label: str = ""
     cumulative_theta: float | None = None
+    cumulative_theta_se: float | None = None
     abilities: dict[str, dict[str, float]] = Field(default_factory=dict)
 
 
