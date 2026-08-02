@@ -33,8 +33,11 @@ WorkspaceDir = NewType("WorkspaceDir", Path)
 class CycleHop(StrictModel):
     """One ``(campaign, cycle)`` step of a :data:`CyclePath`.
 
-    The campaign component is carried to name the leaf and for symmetry with the
-    webapp; it plays no part in descent — a sandbox is keyed on the cycle id alone.
+    BOTH components are load-bearing, in descent as well as at the leaf: a cycle_id is
+    content-addressed on the origin, so every campaign minted from one declaration shares
+    it and a sandbox keyed on the cycle alone serves another campaign's inner fan-out
+    (``stores.py::inner_sandbox_store``). Anything indexing nodes of a served tree keys on
+    the pair for the same reason.
 
     A model rather than a tuple so it serializes as ``{campaign_id, cycle_id}``: a
     served path is read by a client that already speaks this shape, and a positional

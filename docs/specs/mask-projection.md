@@ -88,7 +88,12 @@ behind the gateway / archive and is served; the webapp renders, never recomputes
 never a fabricated score); the API-edge selector is `_resolve_verdict(lens)` in
 `presentation/api/routers/campaigns/cycles.py`, which serves the tree (**one** `lens`
 query param: `score:<formula>` | `abort:<variant>`; `samples=` composes with a `score:`
-lens; the assembly rules live in `store/lineage_views.py`); the webapp reads one fetch
+lens; the assembly rules live in `store/lineage_views.py`). **A record is campaign-scoped
+and the tree is not** — one is loaded per campaign the tree spans, and every index keys on
+`(campaign, cycle, …)`: an inner run is its own campaign in its own `.inner/` sandbox, and a
+cycle_id is content-addressed on the origin so it repeats across them. A single root-scoped
+read leaves every inner candidate null, which reads as "the lens says nothing here" and is
+really a read nobody made. The webapp reads one fetch
 via `LineageProvider`
 (`webapp/lib/lineage.tsx`), rendered, never recomputed. Two verdicts are
 live: **scoring** (re-elected leader under a swapped formula ≠ `is_winner`; the

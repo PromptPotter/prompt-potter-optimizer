@@ -372,8 +372,19 @@ export function CandidatesCard() {
     [inflightCandidates],
   );
 
+  // The mask re-scores a candidate's measured ROWS. A course is a run, not a scored row, so
+  // a view whose bars are courses (an L4 candidate's inner cells) has nothing to slice — the
+  // server decorates candidates only. Reading `sample_set_accuracy` off a course yielded null,
+  // which `started` then rendered as "never ran": the one lie this card must not tell. Bars
+  // stay on their own measured value here and the control below says why. Children strictly
+  // alternate, so this is all-or-nothing and the basis never mixes within one chart.
+  const barsAreCourses = useMemo(
+    () => (viewedNode?.children ?? []).some((n) => n.kind === "course"),
+    [viewedNode],
+  );
+
   const views = useMemo<CandidateView[]>(() => {
-    const sliced = sampleSet != null;
+    const sliced = sampleSet != null && !barsAreCourses;
     // Which rounds have CLOSED — the one signal that separates "not elected" from
     // "no election has run yet". The election is a round-scoped fit, so a bar in an
     // open round has nothing to have lost to, and must not read as though it did.
@@ -418,7 +429,7 @@ export function CandidatesCard() {
         diag: diagView(diagByLabel.get(label)),
       };
     });
-  }, [viewedNode, inflightByLabel, sampleSet, diagByLabel, dash]);
+  }, [viewedNode, inflightByLabel, sampleSet, barsAreCourses, diagByLabel, dash]);
 
   // A fork's attempt is a course under the hood — the ⑂ marks lead there.
   const forkKeys = useMemo(
@@ -624,7 +635,7 @@ export function CandidatesCard() {
             renderTrigger={({ open, toggle }) => (
               <Chip
                 icon
-                on={open || lensActive || showWhatIf || sampleSet != null}
+                on={open || lensActive || showWhatIf || (sampleSet != null && !barsAreCourses)}
                 ariaLabel="More candidate options"
                 title="Lens, What-If, sample set, and the θ explainer"
                 onClick={toggle}
@@ -658,12 +669,16 @@ export function CandidatesCard() {
                   What-If ablation
                 </MenuCheck>
                 <MenuCheck
-                  on={sampleSet != null}
-                  disabled={sampleUniverse.length === 0}
+                  on={sampleSet != null && !barsAreCourses}
+                  disabled={sampleUniverse.length === 0 || barsAreCourses}
                   onClick={() => setSelectionForSampleSet(sampleSet ? null : sampleUniverse)}
-                  title="Recompute every bar over one fixed set of samples so candidates compare on the same basis."
+                  title={
+                    barsAreCourses
+                      ? "These bars are runs, not scored samples — pick a run to slice its candidates."
+                      : "Recompute every bar over one fixed set of samples so candidates compare on the same basis."
+                  }
                 >
-                  Fixed sample set{sampleSet ? ` · ${sampleSet.length}` : ""}
+                  Fixed sample set{sampleSet && !barsAreCourses ? ` · ${sampleSet.length}` : ""}
                 </MenuCheck>
                 <MenuSep />
                 {/* The θ explainer — read once, then never again, so it lives here
@@ -687,7 +702,7 @@ export function CandidatesCard() {
       }
     >
       <div className="fitness-body">
-        {sampleSet && <SampleSetControl rounds={history} />}
+        {sampleSet && !barsAreCourses && <SampleSetControl rounds={history} />}
         {/* Legend + chart + genealogy wrapped so they share one width — the
             dendrogram's x-alignment depends on sitting in the same box as the
             canvas it hangs under. */}

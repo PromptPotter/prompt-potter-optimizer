@@ -27,7 +27,7 @@ from promptpotter.infrastructure.store.lineage_views import (
     LineageNode,
     build_lineage_tree,
 )
-from promptpotter.infrastructure.store.stores import resolve_cycle_path
+from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
 from promptpotter.presentation.api.deps import (
     StoreDep,
     decode_descend,
@@ -180,47 +180,81 @@ def _parse_samples(samples: str | None) -> frozenset[int] | None:
     return ids or None
 
 
-class _Overlay:
-    """The lens folded over one campaign's record, indexed for the tree walk.
+def _mask_records(
+    store: Stores, tree: LineageNode, samples: frozenset[int] | None
+) -> dict[str, MaskRecord]:
+    """One :class:`MaskRecord` per CAMPAIGN the tree spans, keyed by campaign id.
 
-    The record is campaign-scoped, so this decorates the nodes of the courses it covers and
-    leaves an inner run's own courses untouched — an inner campaign is a different campaign
-    and the lens says nothing about it. Silence there is honest; fabricating it would not be.
+    A record is campaign-scoped and the tree is not: an inner run is its own campaign in its
+    own ``.inner/`` sandbox, so reading a single record at the root leaves every inner
+    candidate unmasked. That is not the lens declining to speak — it is a read nobody made,
+    and the webapp fetches ONE tree per campaign rooted at the campaign root
+    (``lib/lineage.tsx``), so an operator drilled into an inner cycle sees exactly that hole:
+    the chip strip offers the inner cycle's own samples and every bar answers null.
+
+    Resolved from each COURSE node's own ``path`` — THE address, already on the node — so this
+    walks no second family and cannot disagree with the tree about who belongs to it. A fork
+    needs no entry: it is not a node, it lives in its parent's campaign dir, and the parent's
+    record enumerates its cycles.
+    """
+    out: dict[str, MaskRecord] = {}
+
+    def visit(node: LineageNode) -> None:
+        if node.kind == "course" and node.path and node.path[-1].campaign_id not in out:
+            stores, leaf = resolve_cycle_path(store, tuple(node.path))
+            out[leaf.campaign_id] = load_mask_record(stores, leaf.campaign_id, samples)
+        for kid in node.children:
+            visit(kid)
+
+    visit(tree)
+    return out
+
+
+class _Overlay:
+    """The lens folded over the tree's records, indexed for the tree walk.
+
+    Every index is keyed by ``(campaign_id, cycle_id, …)``, never the cycle alone: a cycle_id
+    is content-addressed on the origin, so every campaign minted from one declaration shares
+    it, and inside a single ``.inner/`` sandbox every candidate that ran the same benchmark
+    cell mints it again. ``lineage_views._Reads.seen`` states the same rule for the walk that
+    produced these nodes.
     """
 
-    def __init__(self, record: MaskRecord, lens: str | None, sample_ids: frozenset[int] | None):
-        result = find_divergences(record, _resolve_verdict(lens))
-        self.diverged: dict[tuple[str, int], LineageDivergence] = {
-            (d.cycle_id, d.round): LineageDivergence(
-                alternative_candidate_id=d.alternative_candidate_id
-            )
-            for d in result.divergences
-        }
-        # `node_key` is the mask's own `{cycle_id}::r{round}` key — consumed here and never
-        # served: the tree carries the fact on the node instead.
-        self.dimmed: frozenset[tuple[str, int]] = frozenset(
-            (cyc.cycle_id, rnd.round)
-            for cyc in record.cycles
-            for rnd in cyc.rounds
-            if f"{cyc.cycle_id}::r{rnd.round}" in set(result.divergent)
-        )
+    def __init__(
+        self,
+        records: dict[str, MaskRecord],
+        lens: str | None,
+        sample_ids: frozenset[int] | None,
+    ):
+        verdict = _resolve_verdict(lens)
+        self.diverged: dict[tuple[str, str, int], LineageDivergence] = {}
+        self.subset: dict[tuple[str, str, str], tuple[float | None, int]] = {}
+        dimmed: set[tuple[str, str, int]] = set()
+        for campaign_id, record in records.items():
+            result = find_divergences(record, verdict)
+            for d in result.divergences:
+                self.diverged[(campaign_id, d.cycle_id, d.round)] = LineageDivergence(
+                    alternative_candidate_id=d.alternative_candidate_id
+                )
+            # `node_key` is the mask's own `{cycle_id}::r{round}` key — consumed here and
+            # never served: the tree carries the fact on the node instead.
+            divergent = set(result.divergent)
+            for cyc in record.cycles:
+                for rnd in cyc.rounds:
+                    if f"{cyc.cycle_id}::r{rnd.round}" in divergent:
+                        dimmed.add((campaign_id, cyc.cycle_id, rnd.round))
+                    if not sample_ids:
+                        continue
+                    for cand in rnd.candidates:
+                        self.subset[(campaign_id, cyc.cycle_id, cand.candidate_id)] = (
+                            cand.accuracy if cand.n_scored > 0 else None,
+                            cand.n_scored,
+                        )
+        self.dimmed: frozenset[tuple[str, str, int]] = frozenset(dimmed)
         self.criterion = (
             compile_round_scorer(lens.removeprefix("score:"))
             if lens and lens.startswith("score:")
             else None
-        )
-        self.subset: dict[tuple[str, str], tuple[float | None, int]] = (
-            {
-                (cyc.cycle_id, cand.candidate_id): (
-                    cand.accuracy if cand.n_scored > 0 else None,
-                    cand.n_scored,
-                )
-                for cyc in record.cycles
-                for rnd in cyc.rounds
-                for cand in rnd.candidates
-            }
-            if sample_ids
-            else {}
         )
 
     def apply(self, node: LineageNode) -> LineageNode:
@@ -228,8 +262,9 @@ class _Overlay:
         kids = [self.apply(k) for k in node.children]
         if node.kind != "candidate" or node.round is None or not node.path:
             return node.model_copy(update={"children": kids})
-        key = (node.path[-1].cycle_id, node.round)
-        subset = self.subset.get((node.path[-1].cycle_id, node.id))
+        hop = node.path[-1]
+        key = (hop.campaign_id, hop.cycle_id, node.round)
+        subset = self.subset.get((hop.campaign_id, hop.cycle_id, node.id))
         return node.model_copy(
             update={
                 "children": kids,
@@ -295,10 +330,10 @@ def get_lineage_tree(
     tree = build_lineage_tree(store, path)
     sample_ids = _parse_samples(samples)
     if lens or sample_ids:
-        # One record read: an `abort:` lens reads the firing log rather than evaluators, so it
-        # loads the full set. The same record feeds the divergence fold AND the subset
-        # re-score — no double-score.
+        # One record read per campaign: an `abort:` lens reads the firing log rather than
+        # evaluators, so it loads the full set. The same records feed the divergence fold AND
+        # the subset re-score — no double-score.
         is_abort = bool(lens and lens.startswith("abort:"))
-        record = load_mask_record(stores, leaf.campaign_id, sample_ids if not is_abort else None)
-        tree = _Overlay(record, lens, sample_ids if not is_abort else None).apply(tree)
+        masked = sample_ids if not is_abort else None
+        tree = _Overlay(_mask_records(store, tree, masked), lens, masked).apply(tree)
     return JSONResponse(tree.model_dump(mode="json"), headers=headers)
